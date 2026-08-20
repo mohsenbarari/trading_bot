@@ -10,7 +10,14 @@
       
       <!-- Avatar + User Info (when in chat and not searching) -->
       <template v-if="selectedUserId && !isSearchActive">
-        <div class="header-identity" :class="{ 'direct-header-identity': selectedRoomKind === 'direct' }">
+        <button
+          type="button"
+          class="header-identity"
+          :class="{ 'direct-header-identity': selectedRoomKind === 'direct' }"
+          :disabled="isManagementRoom"
+          :aria-label="selectedRoomKind === 'direct' ? `نمایش پروفایل ${selectedUserName}` : `مدیریت ${selectedUserName}`"
+          @click="handleTitleClick"
+        >
           <div
             class="header-avatar"
             :class="{
@@ -18,7 +25,6 @@
               'channel-avatar': selectedRoomKind === 'channel',
               'group-avatar': selectedRoomKind === 'group',
             }"
-            @click="handleTitleClick"
           >
             <img v-if="headerAvatarUrl" :src="headerAvatarUrl" :alt="selectedUserName" class="header-avatar-image" />
             <Shield v-else-if="isManagementRoom" :size="21" />
@@ -26,7 +32,7 @@
             <UsersRound v-else-if="selectedRoomKind === 'group'" :size="21" />
             <template v-else>{{ getAvatarInitial(selectedUserName) }}</template>
           </div>
-          <div class="header-user-info" @click="handleTitleClick">
+          <div class="header-user-info">
             <div class="header-title-row">
               <div class="header-name-meta">
                 <span
@@ -71,7 +77,7 @@
               </template>
             </span>
           </div>
-        </div>
+        </button>
       </template>
       
       <!-- Title (for conversation list) -->
@@ -93,6 +99,7 @@
             id="search-input"
             v-model="internalSearchQuery" 
             @input="onSearchInput" 
+            aria-label="جستجو در پیام‌ها"
             placeholder="جستجو..." 
             class="header-search-input full-width-search"
          />
@@ -103,59 +110,91 @@
       
       <!-- Action Buttons (only in chat view) -->
       <template v-if="selectedUserId && !isSearchActive && selectedRoomKind === 'direct'">
-        <button class="header-btn" v-ripple @click="$emit('call')">
+        <button class="header-btn" type="button" aria-label="شروع تماس" v-ripple @click="$emit('call')">
           <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
           </svg>
         </button>
         <!-- Three-dot Menu -->
         <div class="header-menu-container">
-            <button class="header-btn" v-ripple @click.stop="toggleMenu">
+            <button
+              ref="menuTriggerRef"
+              class="header-btn"
+              type="button"
+              aria-label="گزینه‌های گفتگو"
+              aria-controls="chat-header-menu"
+              :aria-expanded="isMenuOpen"
+              v-ripple
+              @click.stop="toggleMenu"
+            >
               <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="12" r="1"></circle>
                 <circle cx="12" cy="5" r="1"></circle>
                 <circle cx="12" cy="19" r="1"></circle>
               </svg>
             </button>
-            <div v-if="isMenuOpen" class="header-dropdown-menu" v-click-outside="closeMenu">
+            <div
+              v-if="isMenuOpen"
+              id="chat-header-menu"
+              class="header-dropdown-menu"
+              role="menu"
+              v-click-outside="closeMenuAndRestoreFocus"
+              @keydown.esc.stop.prevent="closeMenuAndRestoreFocus"
+            >
               <div class="header-menu-section-label">اقدام اصلی</div>
-              <div class="header-menu-item" @click="handleMenuViewProfile">
+              <button type="button" role="menuitem" class="header-menu-item" @click="handleMenuViewProfile">
                 <span>اطلاعات فرد</span>
-              </div>
+              </button>
               <div class="header-menu-divider"></div>
               <div class="header-menu-section-label">ارتباط</div>
-              <div class="header-menu-item" @click="handleMenuSearch">
+              <button type="button" role="menuitem" class="header-menu-item" @click="handleMenuSearch">
                 <span>جستجو</span>
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
                   <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
                 </svg>
-              </div>
+              </button>
             </div>
-            <div v-if="isMenuOpen" class="menu-overlay" @click="closeMenu"></div>
+            <div v-if="isMenuOpen" class="menu-overlay" aria-hidden="true" @click="closeMenuAndRestoreFocus"></div>
         </div>
       </template>
 
       <template v-else-if="selectedUserId && !isSearchActive && selectedRoomKind !== 'direct'">
         <div class="header-menu-container">
-          <button class="header-btn" v-ripple @click.stop="toggleMenu">
+          <button
+            ref="menuTriggerRef"
+            class="header-btn"
+            type="button"
+            aria-label="گزینه‌های اتاق"
+            aria-controls="chat-header-menu"
+            :aria-expanded="isMenuOpen"
+            v-ripple
+            @click.stop="toggleMenu"
+          >
             <MoreVertical :size="22" />
           </button>
-          <div v-if="isMenuOpen" class="header-dropdown-menu" v-click-outside="closeMenu">
+          <div
+            v-if="isMenuOpen"
+            id="chat-header-menu"
+            class="header-dropdown-menu"
+            role="menu"
+            v-click-outside="closeMenuAndRestoreFocus"
+            @keydown.esc.stop.prevent="closeMenuAndRestoreFocus"
+          >
             <div class="header-menu-section-label">ارتباط</div>
-            <div class="header-menu-item" @click="handleMenuSearch">
+            <button type="button" role="menuitem" class="header-menu-item" @click="handleMenuSearch">
               <span>جستجو</span>
               <Search :size="18" />
-            </div>
+            </button>
             <template v-if="!isManagementRoom">
               <div class="header-menu-divider"></div>
               <div class="header-menu-section-label">مدیریت اتاق</div>
             </template>
-            <div v-if="!isManagementRoom" class="header-menu-item" @click="handleMenuManageRoom">
+            <button v-if="!isManagementRoom" type="button" role="menuitem" class="header-menu-item" @click="handleMenuManageRoom">
               <span>{{ selectedRoomManageLabel }}</span>
               <UsersRound :size="18" />
-            </div>
+            </button>
           </div>
-          <div v-if="isMenuOpen" class="menu-overlay" @click="closeMenu"></div>
+          <div v-if="isMenuOpen" class="menu-overlay" aria-hidden="true" @click="closeMenuAndRestoreFocus"></div>
         </div>
       </template>
       
@@ -168,44 +207,60 @@
           </svg>
         </button>
         <div class="header-menu-container">
-          <button class="header-btn" type="button" aria-label="گزینه‌های بیشتر" v-ripple @click.stop="toggleMenu">
+          <button
+            ref="menuTriggerRef"
+            class="header-btn"
+            type="button"
+            aria-label="گزینه‌های بیشتر"
+            aria-controls="chat-header-menu"
+            :aria-expanded="isMenuOpen"
+            v-ripple
+            @click.stop="toggleMenu"
+          >
             <MoreVertical :size="22" />
           </button>
-          <div v-if="isMenuOpen" class="header-dropdown-menu" v-click-outside="closeMenu">
+          <div
+            v-if="isMenuOpen"
+            id="chat-header-menu"
+            class="header-dropdown-menu"
+            role="menu"
+            v-click-outside="closeMenuAndRestoreFocus"
+            @keydown.esc.stop.prevent="closeMenuAndRestoreFocus"
+          >
             <div class="header-menu-section-label">اقدام اصلی</div>
-            <div class="header-menu-item" @click="handleMenuViewProfile">
+            <button type="button" role="menuitem" class="header-menu-item" @click="handleMenuViewProfile">
               <span>پروفایل عمومی من</span>
               <UsersRound :size="18" />
-            </div>
+            </button>
             <template v-if="canCreateGroup || canCreateChannel">
               <div class="header-menu-divider"></div>
               <div class="header-menu-section-label">مدیریت پیام‌رسان</div>
             </template>
-            <div v-if="canCreateGroup" class="header-menu-item" @click="handleMenuCreateGroup">
+            <button v-if="canCreateGroup" type="button" role="menuitem" class="header-menu-item" @click="handleMenuCreateGroup">
               <span>ساخت گروه جدید</span>
               <UsersRound :size="18" />
-            </div>
-            <div v-if="canCreateChannel" class="header-menu-item" @click="handleMenuCreateChannel">
+            </button>
+            <button v-if="canCreateChannel" type="button" role="menuitem" class="header-menu-item" @click="handleMenuCreateChannel">
               <span>ساخت کانال</span>
               <Megaphone :size="18" />
-            </div>
+            </button>
             <template v-if="canSendAdminBroadcast">
               <div class="header-menu-divider"></div>
               <div class="header-menu-section-label">مدیریت سیستم</div>
             </template>
-            <div v-if="canSendAdminBroadcast" class="header-menu-item" @click="handleMenuAdminBroadcast">
+            <button v-if="canSendAdminBroadcast" type="button" role="menuitem" class="header-menu-item" @click="handleMenuAdminBroadcast">
               <span>ارسال پیام مدیریت</span>
               <Shield :size="18" />
-            </div>
+            </button>
           </div>
-          <div v-if="isMenuOpen" class="menu-overlay" @click="closeMenu"></div>
+          <div v-if="isMenuOpen" class="menu-overlay" aria-hidden="true" @click="closeMenuAndRestoreFocus"></div>
         </div>
       </template>
     </template>
     
     <!-- Selection Mode Header -->
     <template v-else>
-      <button class="header-btn" v-ripple @click="$emit('clear-selection')">
+      <button class="header-btn" type="button" aria-label="لغو انتخاب پیام‌ها" v-ripple @click="$emit('clear-selection')">
         <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" y1="6" x2="6" y2="18"></line>
           <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -219,7 +274,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { Megaphone, MoreVertical, Search, Shield, UsersRound } from 'lucide-vue-next'
 import AppBackButton from '../ui/AppBackButton.vue'
 import { discardBackState, popBackState, pushBackState } from '../../composables/useBackButton'
@@ -271,6 +326,7 @@ const emit = defineEmits<{
 }>()
 
 const isMenuOpen = ref(false)
+const menuTriggerRef = ref<HTMLButtonElement | null>(null)
 const internalSearchQuery = ref(props.searchQuery)
 const menuBackStateActive = ref(false)
 let closingMenuFromBack = false
@@ -316,6 +372,11 @@ const toggleMenu = () => {
 
 const closeMenu = () => {
   isMenuOpen.value = false
+}
+
+const closeMenuAndRestoreFocus = () => {
+  closeMenu()
+  void nextTick(() => menuTriggerRef.value?.focus())
 }
 
 const closeMenuForAction = () => {
@@ -455,13 +516,31 @@ function formatDateForSeparator(dateString: string) {
 .header-btn svg { width: 24px; height: 24px; }
 .header-btn:hover { background: var(--messenger-action-hover-bg, rgba(15, 23, 42, 0.05)); }
 .header-btn:active { background: rgba(15, 23, 42, 0.1); }
+.header-btn:focus-visible,
+.header-identity:focus-visible,
+.header-menu-item:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--messenger-accent, #f59e0b) 42%, transparent);
+  outline-offset: 2px;
+}
 
 .header-identity {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: var(--messenger-touch-target, 48px);
   min-width: 0;
   flex: 1;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+}
+
+.header-identity:disabled {
+  opacity: 1;
+  cursor: default;
 }
 
 .header-avatar {
@@ -723,6 +802,7 @@ function formatDateForSeparator(dateString: string) {
   -webkit-backdrop-filter: blur(18px);
 }
 .header-menu-item {
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -734,8 +814,13 @@ function formatDateForSeparator(dateString: string) {
   color: var(--messenger-text-strong, #1f2937);
   font-size: 14px;
   font-weight: 700;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  text-align: right;
 }
-.header-menu-item:hover { background: var(--messenger-action-hover-bg, rgba(15, 23, 42, 0.05)); }
+.header-menu-item:hover,
+.header-menu-item:focus-visible { background: var(--messenger-action-hover-bg, rgba(15, 23, 42, 0.05)); }
 .header-menu-item svg { color: var(--messenger-text-muted, #64748b); }
 
 .header-menu-divider {

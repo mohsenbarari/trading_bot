@@ -26,9 +26,11 @@ function getReplyPreviewText(messageType: string, content: string) {
 </script>
 
 <template>
-  <div
+  <button
+    type="button"
     class="reply-context"
     :class="{ 'is-sent': isSent }"
+    :aria-label="`رفتن به پیام نقل‌شده از ${reply.sender_id === currentUserId ? 'شما' : selectedUserName}`"
     @click.stop="$emit('scroll-to', reply.id)"
   >
     <div class="reply-content">
@@ -39,11 +41,18 @@ function getReplyPreviewText(messageType: string, content: string) {
         {{ getReplyPreviewText(reply.message_type, reply.content) }}
       </span>
     </div>
-  </div>
+  </button>
 </template>
 
 <style scoped>
 .reply-context {
+  width: 100%;
+  border-top: 0;
+  border-bottom: 0;
+  border-left: 0;
+  color: inherit;
+  font: inherit;
+  text-align: right;
   border-right: 2px solid var(--messenger-chat-link, #f59e0b);
   background: rgba(245, 158, 11, 0.08);
   border-radius: 4px;
@@ -54,6 +63,11 @@ function getReplyPreviewText(messageType: string, content: string) {
   flex-direction: column;
   max-width: 100%;
   overflow: hidden;
+}
+
+.reply-context:focus-visible {
+  outline: 3px solid rgba(180, 83, 9, 0.42);
+  outline-offset: 2px;
 }
 
 .reply-context.is-sent {
@@ -87,4 +101,3 @@ function getReplyPreviewText(messageType: string, content: string) {
   max-width: 100%;
 }
 </style>
-

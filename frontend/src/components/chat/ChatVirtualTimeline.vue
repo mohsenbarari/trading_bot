@@ -186,9 +186,13 @@ defineExpose({
     >
       <template v-if="rows[virtualRow.index]?.type === 'date'">
         <div class="date-separator sticky-date virtual-date-row">
-          <span @click="handlers.scrollToTimelineGroup((rows[virtualRow.index] as VirtualDateRow).group)">
+          <button
+            type="button"
+            :aria-label="`رفتن به پیام‌های ${(rows[virtualRow.index] as VirtualDateRow).group.label}`"
+            @click="handlers.scrollToTimelineGroup((rows[virtualRow.index] as VirtualDateRow).group)"
+          >
             {{ (rows[virtualRow.index] as VirtualDateRow).group.label }}
-          </span>
+          </button>
         </div>
       </template>
 
@@ -256,5 +260,22 @@ defineExpose({
 .virtual-date-row {
   position: relative;
   top: auto;
+}
+
+.virtual-date-row button {
+  border: 0;
+  border-radius: 999px;
+  padding: 4px 12px;
+  background: rgba(15, 23, 42, 0.52);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+
+.virtual-date-row button:focus-visible {
+  outline: 3px solid rgba(180, 83, 9, 0.48);
+  outline-offset: 2px;
 }
 </style>

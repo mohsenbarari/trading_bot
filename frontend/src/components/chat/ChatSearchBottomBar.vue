@@ -16,14 +16,14 @@ const emit = defineEmits<{
 <template>
   <div class="search-bottom-bar" dir="rtl">
     <!-- Left side: Calendar (Optional feature placeholder) -->
-    <button class="nav-btn" v-if="!showInChatSearchList">
+    <span class="nav-btn nav-btn--placeholder" v-if="!showInChatSearchList" aria-hidden="true">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
         <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
         <line x1="16" y1="2" x2="16" y2="6"></line>
         <line x1="8" y1="2" x2="8" y2="6"></line>
         <line x1="3" y1="10" x2="21" y2="10"></line>
       </svg>
-    </button>
+    </span>
     <div v-else></div> <!-- Layout Spacer -->
     
     <!-- Count -->
@@ -33,17 +33,17 @@ const emit = defineEmits<{
 
     <!-- Right side: Navigation & List Toggle -->
     <div class="right-navs">
-       <button class="nav-btn" v-ripple @click="$emit('prev')" v-if="!showInChatSearchList">
+       <button v-if="!showInChatSearchList" type="button" class="nav-btn" aria-label="نتیجهٔ قبلی" v-ripple @click="$emit('prev')">
          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
            <polyline points="18 15 12 9 6 15"></polyline>
          </svg>
        </button>
-       <button class="nav-btn" v-ripple @click="$emit('next')" v-if="!showInChatSearchList">
+       <button v-if="!showInChatSearchList" type="button" class="nav-btn" aria-label="نتیجهٔ بعدی" v-ripple @click="$emit('next')">
          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
            <polyline points="6 9 12 15 18 9"></polyline>
          </svg>
        </button>
-       <button class="nav-btn toggle-list-btn" v-ripple @click="$emit('toggle-list')">
+       <button type="button" class="nav-btn toggle-list-btn" :aria-label="showInChatSearchList ? 'بازگشت به گفتگو' : 'نمایش فهرست نتایج'" v-ripple @click="$emit('toggle-list')">
          <!-- Chat Icon -> Return to chat, List Icon -> Show list -->
          <svg v-if="showInChatSearchList" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
@@ -113,6 +113,16 @@ const emit = defineEmits<{
 .nav-btn:active {
   background: rgba(0, 0, 0, 0.1);
   color: var(--messenger-accent, #f59e0b);
+}
+
+.nav-btn:focus-visible {
+  outline: 3px solid rgba(180, 83, 9, 0.42);
+  outline-offset: 2px;
+}
+
+.nav-btn--placeholder {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .toggle-list-btn {

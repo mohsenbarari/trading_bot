@@ -53,12 +53,12 @@ function openExternalMap() {
           <div class="location-header">
             <span class="location-title" style="flex:1">موقعیت مکانی</span>
             
-            <button class="header-btn" title="باز کردن در برنامه‌ی دیگر" @click="openExternalMap" style="margin-left: 8px;">
+            <button type="button" class="header-btn" aria-label="باز کردن در برنامهٔ نقشه" title="باز کردن در برنامه‌ی دیگر" @click="openExternalMap" style="margin-left: 8px;">
                <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line>
                </svg>
             </button>
-            <button class="header-btn" @click="emit('close')">
+            <button type="button" class="header-btn" aria-label="بستن نقشه" @click="emit('close')">
               <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
           </div>

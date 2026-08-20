@@ -1206,6 +1206,22 @@
     border-color: var(--ds-danger-200);
   }
 
+  /* Market A+C freeze: shared primitives retain their pre-native geometry and
+   * elevation only inside the frozen Market route. */
+  .app-route-scroll--market-frozen .ui-icon-button {
+    width: 44px;
+    height: 44px;
+    border: 1px solid var(--ds-border-medium);
+    border-radius: var(--ds-radius-md);
+    box-shadow: var(--ds-shadow-sm);
+    transition: all 0.18s ease;
+  }
+
+  .app-route-scroll--market-frozen .ui-icon-button--sm {
+    width: 40px;
+    height: 40px;
+  }
+
   .ui-card,
   .ui-disclosure,
   .ui-metric-card,
@@ -1630,6 +1646,11 @@
     padding: 0 0.9rem;
     cursor: pointer;
     white-space: nowrap;
+  }
+
+  .app-route-scroll--market-frozen .ui-tabs__tab,
+  .app-route-scroll--market-frozen .ui-filter-chip {
+    min-height: 40px;
   }
 
   .ui-tabs__tab.is-active {

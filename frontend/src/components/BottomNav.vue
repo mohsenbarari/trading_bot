@@ -681,6 +681,11 @@ const fabButtonLabel = computed(() => (isExpanded.value ? 'بستن ناوبری
   -webkit-tap-highlight-color: transparent;
   touch-action: none;
 }
+
+.fab-container--market .fab-btn {
+  width: 44px;
+  height: 44px;
+}
 .fab-btn:active {
   transform: scale(0.9);
 }

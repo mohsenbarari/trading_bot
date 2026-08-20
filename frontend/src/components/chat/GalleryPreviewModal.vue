@@ -122,7 +122,7 @@ function cancelAll() {
   <teleport to="body">
     <div class="gallery-preview-overlay" role="dialog" aria-modal="true">
       <div class="gp-top-bar">
-        <button class="gp-top-btn" @click="cancelAll" aria-label="انصراف">
+        <button type="button" class="gp-top-btn" @click="cancelAll" aria-label="انصراف">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M6 18L18 6"/></svg>
         </button>
         <div class="gp-title">{{ items.length }} مورد</div>
@@ -166,6 +166,16 @@ function cancelAll() {
             </span>
 
             <button
+              v-if="item.isEditable"
+              class="gp-edit-control"
+              type="button"
+              aria-label="ویرایش تصویر"
+              @click.stop="editItem(item)"
+            >
+              ویرایش
+            </button>
+
+            <button
               class="gp-remove"
               type="button"
               aria-label="حذف"
@@ -176,7 +186,7 @@ function cancelAll() {
       </div>
 
       <div class="gp-actions">
-        <button class="gp-send" @click="sendAll" :disabled="items.length === 0">
+        <button type="button" class="gp-send" @click="sendAll" :disabled="items.length === 0">
           ارسال {{ items.length }} مورد
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;">
             <line x1="22" y1="2" x2="11" y2="13"></line>
@@ -312,6 +322,24 @@ function cancelAll() {
   justify-content: center;
   color: #fff;
   pointer-events: none;
+}
+
+.gp-edit-control {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: transparent;
+  color: transparent;
+  cursor: pointer;
+}
+
+.gp-edit-control:focus-visible {
+  outline: 3px solid rgba(251, 191, 36, 0.92);
+  outline-offset: -3px;
+}
+
+.gp-remove {
+  z-index: 2;
 }
 
 .gp-video-badge {

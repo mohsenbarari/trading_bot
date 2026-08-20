@@ -216,7 +216,10 @@ watch(
     <!-- Page Content Container -->
     <div
       class="app-route-scroll flex-1 relative overflow-y-auto overflow-x-hidden min-h-0 bg-transparent"
-      :class="{ 'app-route-scroll--no-daily-nav': !shouldReserveDailyNavigation }"
+      :class="{
+        'app-route-scroll--no-daily-nav': !shouldReserveDailyNavigation,
+        'app-route-scroll--market-frozen': route.name === 'market',
+      }"
     >
       <!-- Full-screen spinner shown while the first route's JS chunk loads from
            the network (only visible on first incognito/cold load). Without this,
@@ -270,6 +273,13 @@ watch(
   background: var(--ds-app-background);
 }
 
+/* Market A+C is an owner-frozen surface. Native-app variables and shared
+ * controls remain available to every other route, while this route keeps the
+ * exact legacy shell and primitive geometry that was accepted on main. */
+.app-route-scroll--market-frozen {
+  background: linear-gradient(160deg, #fefce8 0%, #ffffff 40%, #fffbeb 100%);
+}
+
 /* Bound to each route vnode so concurrent leave/enter fades retain the old
  * typography on protected routes. Mono and LTR descendants retain their own
  * explicit font/direction declarations. */
@@ -280,6 +290,8 @@ watch(
 
 .app-route-v2-scope {
   min-height: 100%;
+  box-sizing: border-box;
+  padding-block-end: 2rem;
 }
 
 .app-authenticated-shell-v2 {

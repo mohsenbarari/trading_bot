@@ -4063,22 +4063,25 @@ defineExpose({
     <div
       v-if="selectedUserId && pinnedMessage"
       class="pinned-message-banner"
-      role="button"
-      tabindex="0"
-      @click="handlePinnedBannerClick"
-      @keydown.enter.prevent="handlePinnedBannerClick"
-      @keydown.space.prevent="handlePinnedBannerClick"
     >
-      <span class="pinned-message-accent" aria-hidden="true"></span>
-      <div class="pinned-message-copy">
-        <span class="pinned-message-label">پیام سنجاق‌شده</span>
-        <span class="pinned-message-meta">{{ pinnedMessageMetaText }}</span>
-        <span class="pinned-message-preview">{{ getPinnedMessagePreview(pinnedMessage) }}</span>
-      </div>
+      <button
+        type="button"
+        class="pinned-message-open"
+        aria-label="نمایش پیام سنجاق‌شده"
+        @click="handlePinnedBannerClick"
+      >
+        <span class="pinned-message-accent" aria-hidden="true"></span>
+        <span class="pinned-message-copy">
+          <span class="pinned-message-label">پیام سنجاق‌شده</span>
+          <span class="pinned-message-meta">{{ pinnedMessageMetaText }}</span>
+          <span class="pinned-message-preview">{{ getPinnedMessagePreview(pinnedMessage) }}</span>
+        </span>
+      </button>
       <button
         v-if="canManagePinnedMessages"
         class="pinned-message-dismiss"
         type="button"
+        aria-label="برداشتن پیام سنجاق‌شده"
         @click.stop="handlePinnedBannerUnpin"
       >
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -4100,7 +4103,7 @@ defineExpose({
     <!-- Error -->
     <div v-else-if="error" class="error-state">
       <p>{{ error }}</p>
-      <button @click="error = ''; loadConversations()">تلاش مجدد</button>
+      <button type="button" @click="error = ''; loadConversations()">تلاش مجدد</button>
     </div>
 
     <ConversationListContainer
@@ -4232,7 +4235,6 @@ defineExpose({
   z-index: 980;
   display: flex;
   align-items: center;
-  gap: 12px;
   padding: 10px 12px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 18px;
@@ -4240,6 +4242,28 @@ defineExpose({
   box-shadow: 0 12px 24px rgba(15, 23, 42, 0.1);
   backdrop-filter: blur(18px);
   text-align: right;
+}
+
+.pinned-message-open {
+  min-width: 0;
+  min-height: 48px;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: right;
+  cursor: pointer;
+}
+
+.pinned-message-open:focus-visible,
+.pinned-message-dismiss:focus-visible {
+  outline: 3px solid rgba(180, 83, 9, 0.44);
+  outline-offset: 2px;
 }
 
 .pinned-message-accent {
@@ -4279,8 +4303,9 @@ defineExpose({
 }
 
 .pinned-message-dismiss {
-  width: 34px;
-  height: 34px;
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
   border: 0;
   border-radius: 50%;
   display: inline-flex;

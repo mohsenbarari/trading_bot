@@ -168,9 +168,11 @@
               </button>
 
               <button
+                type="button"
                 class="camera-shutter-btn"
                 :class="{ recording: isRecording, video: cameraMode === 'video' }"
                 :disabled="!isCameraReady"
+                :aria-label="cameraMode === 'video' ? (isRecording ? 'توقف ضبط ویدئو' : 'شروع ضبط ویدئو') : 'گرفتن عکس'"
                 @click="handlePrimaryCameraAction"
               >
                 <span class="camera-shutter-core"></span>

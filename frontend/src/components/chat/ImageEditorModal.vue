@@ -709,8 +709,10 @@ function cancel() {
         <button
           v-for="s in BRUSH_SIZES"
           :key="s"
+          type="button"
           class="size-chip"
           :class="{ active: brushSize === s }"
+          :aria-label="`اندازهٔ قلم ${s}`"
           @click="pickBrushSize(s)"
         >
           <span class="size-dot" :style="{ width: s + 'px', height: s + 'px', background: brushColor }"></span>

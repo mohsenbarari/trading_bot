@@ -69,9 +69,11 @@ function highlightText(text: string | undefined) {
       <p>نتیجه‌ای یافت نشد</p>
     </div>
     
-    <div 
+    <button
       v-for="msg in searchResults" 
       :key="msg.id"
+      type="button"
+      :aria-label="`نمایش پیام از ${getOtherUserInfo(msg).name}`"
       class="conversation-item search-result-item"
       v-ripple
       @click="emit('select-result', msg)"
@@ -97,7 +99,7 @@ function highlightText(text: string | undefined) {
         <div class="conv-preview" v-html="highlightText(msg.content)">
         </div>
       </div>
-    </div>
+    </button>
   </div>
 </template>
 
@@ -108,9 +110,10 @@ function highlightText(text: string | undefined) {
 }
 
 .conversation-item {
-  display: flex; padding: 12px 16px; align-items: center; border-bottom: 1px solid #f0f0f0; cursor: pointer; background: white; transition: background-color 0.2s;
+  display: flex; width: 100%; padding: 12px 16px; align-items: center; border: 0; border-bottom: 1px solid #f0f0f0; cursor: pointer; background: white; color: inherit; font: inherit; text-align: right; transition: background-color 0.2s;
 }
 .conversation-item:hover { background: #f4f4f5; }
+.conversation-item:focus-visible { outline: 3px solid rgba(180, 83, 9, 0.42); outline-offset: -3px; }
 
 .conv-avatar {
   width: 50px; height: 50px; min-width: 50px; border-radius: 50%;

@@ -12,7 +12,7 @@
             <span class="reply-banner-author">ویرایش پیام</span>
             <span class="reply-banner-text">{{ editingBannerText }}</span>
         </div>
-        <button class="close-reply" v-ripple @click="$emit('cancel-edit')">
+        <button type="button" class="close-reply" aria-label="لغو ویرایش پیام" v-ripple @click="$emit('cancel-edit')">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
           </svg>
@@ -31,7 +31,7 @@
             <span class="reply-banner-author">{{ replyingToMessage.sender_id === currentUserId ? 'شما' : selectedUserName }}</span>
             <span class="reply-banner-text">{{ replyBannerText }}</span>
         </div>
-        <button class="close-reply" v-ripple @click="$emit('cancel-reply')">
+        <button type="button" class="close-reply" aria-label="لغو پاسخ" v-ripple @click="$emit('cancel-reply')">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
           </svg>
@@ -40,27 +40,27 @@
 
     <!-- Selection Mode Bottom Bar -->
     <div v-if="composerSurface.mode === 'selection'" class="selection-bottom-bar">
-      <button v-if="composerSurface.showDeleteAction" class="selection-action-btn delete" v-ripple @click="$emit('delete-selected')">
+      <button v-if="composerSurface.showDeleteAction" type="button" class="selection-action-btn delete" v-ripple @click="$emit('delete-selected')">
         <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="3 6 5 6 21 6"></polyline>
           <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
         </svg>
         <span>حذف</span>
       </button>
-      <button v-if="composerSurface.showReplyAction" class="selection-action-btn" v-ripple @click="$emit('reply-selected')">
+      <button v-if="composerSurface.showReplyAction" type="button" class="selection-action-btn" v-ripple @click="$emit('reply-selected')">
         <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path>
         </svg>
         <span>پاسخ</span>
       </button>
-      <button v-if="composerSurface.showCopyAction" class="selection-action-btn" v-ripple @click="$emit('copy-selected')">
+      <button v-if="composerSurface.showCopyAction" type="button" class="selection-action-btn" v-ripple @click="$emit('copy-selected')">
         <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
           <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
         </svg>
         <span>کپی</span>
       </button>
-      <button class="selection-action-btn" v-ripple @click="$emit('forward-selected')">
+      <button type="button" class="selection-action-btn" v-ripple @click="$emit('forward-selected')">
         <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="15 14 20 9 15 4"></polyline>
           <path d="M4 20v-7a4 4 0 0 1 4-4h12"></path>
@@ -81,8 +81,10 @@
       <template v-if="composerSurface.mode === 'recording'">
         <!-- Send Button on the right -->
         <button 
+          type="button"
           v-ripple
           class="send-btn-inline" 
+          aria-label="ارسال پیام صوتی"
           @click="stopVoiceRecording" 
         >
           <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(45deg); margin-left: -4px;">
@@ -99,8 +101,10 @@
 
         <!-- Cancel Button on the left -->
         <button 
+          type="button"
           v-ripple
           class="cancel-voice-btn" 
+          aria-label="لغو ضبط پیام صوتی"
           @click="cancelVoiceRecording"
         >
           <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -113,8 +117,10 @@
       <!-- Left side buttons (Only if not recording) -->
       <button 
         v-if="composerSurface.showVoiceButton"
+        type="button"
         v-ripple 
         class="voice-btn"
+        aria-label="ضبط پیام صوتی"
         @click="startVoiceRecording"
       >
         <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#8e8e93" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -125,7 +131,7 @@
         </svg>
       </button>
 
-      <button v-if="composerSurface.showAttachmentButton" v-ripple class="attach-btn" @click="handleToggleAttachment">
+      <button v-if="composerSurface.showAttachmentButton" type="button" aria-label="افزودن پیوست" v-ripple class="attach-btn" @click="handleToggleAttachment">
         <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#8e8e93" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
         </svg>
@@ -134,9 +140,11 @@
       <!-- Send Button -->
       <button 
         v-if="composerSurface.showSendButton"
+        type="button"
         v-ripple
         class="send-btn-inline"
         :class="{ 'edit-mode': !!editingMessage }"
+        :aria-label="editingMessage ? 'ثبت ویرایش پیام' : 'ارسال پیام'"
         @click="sendMessage" 
         @mousedown.prevent
         @touchstart.prevent="sendMessage"
@@ -157,6 +165,7 @@
         ref="messageInputRef"
         v-model="messageInput"
         rows="1"
+        aria-label="متن پیام"
         :placeholder="editingMessage ? 'ویرایش پیام...' : 'پیام...'"
         @input="handleInput"
         @keydown.enter="handleEnter"
@@ -171,6 +180,7 @@
       <!-- Emoji/Sticker Toggle -->
       <button
         v-if="composerSurface.showEmojiButton"
+        type="button"
         class="emoji-btn"
         :class="{ 'is-active': isStickerPickerOpen }"
         v-ripple

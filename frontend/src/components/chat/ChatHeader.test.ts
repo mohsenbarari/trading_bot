@@ -795,4 +795,67 @@ describe('ChatHeader.vue', () => {
     await flushPromises()
     expect(directWrapper.emitted('create-group')).toBeUndefined()
   })
+
+  it('keeps header identity, icon controls, and menus keyboard-accessible', async () => {
+    const ChatHeader = (await import('./ChatHeader.vue')).default
+    const wrapper = mount(ChatHeader, {
+      attachTo: document.body,
+      props: {
+        isSelectionMode: false,
+        selectedUserId: 12,
+        selectedUserName: 'علی',
+        selectedAvatarFileId: null,
+        selectedRoomKind: 'direct',
+        apiBaseUrl: '',
+        targetUserStatus: 'آنلاین',
+        isTyping: false,
+        totalUnread: 0,
+        isSearchActive: false,
+        searchQuery: '',
+        searchResults: [],
+        currentSearchIndex: 0,
+        selectedMessagesCount: 0,
+        isDeleted: false,
+        roomMemberCount: null,
+        isRoomMandatory: false,
+        isRoomSystem: false,
+        canCreateGroup: true,
+        canCreateChannel: true,
+      },
+      global: {
+        directives: {
+          ripple: {},
+          'click-outside': {},
+        },
+      },
+    })
+
+    const identity = wrapper.get('button.header-identity')
+    expect(identity.attributes('aria-label')).toBe('نمایش پروفایل علی')
+    await identity.trigger('keydown', { key: 'Enter' })
+    await identity.trigger('click')
+    expect(wrapper.emitted('view-profile')).toHaveLength(1)
+
+    expect(wrapper.get('button[aria-label="شروع تماس"]').attributes('type')).toBe('button')
+    const trigger = wrapper.get('button[aria-label="گزینه‌های گفتگو"]')
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    expect(trigger.attributes('aria-controls')).toBe('chat-header-menu')
+
+    await trigger.trigger('click')
+    await flushPromises()
+    expect(trigger.attributes('aria-expanded')).toBe('true')
+    const menu = wrapper.get('#chat-header-menu[role="menu"]')
+    const menuItems = menu.findAll('button[role="menuitem"]')
+    expect(menuItems).toHaveLength(2)
+    expect(menu.find('div.header-menu-item').exists()).toBe(false)
+
+    await menu.trigger('keydown', { key: 'Escape' })
+    await flushPromises()
+    expect(wrapper.find('#chat-header-menu').exists()).toBe(false)
+    expect(document.activeElement).toBe(trigger.element)
+
+    await wrapper.setProps({ isSelectionMode: true })
+    expect(wrapper.get('button[aria-label="لغو انتخاب پیام‌ها"]').attributes('type')).toBe('button')
+    wrapper.unmount()
+  })
 })

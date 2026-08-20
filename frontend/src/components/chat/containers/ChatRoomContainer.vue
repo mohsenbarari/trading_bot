@@ -70,7 +70,7 @@ const useVirtualTimeline = computed(() => {
           <strong>دریافت گفتگو انجام نشد</strong>
           <p>{{ state.messagePanelError }}</p>
         </div>
-        <button @click="handlers.retryLoadMessages">تلاش مجدد</button>
+        <button type="button" @click="handlers.retryLoadMessages">تلاش مجدد</button>
       </div>
 
       <div v-else-if="state.messages.length === 0" class="empty-state">
@@ -95,7 +95,13 @@ const useVirtualTimeline = computed(() => {
         v-memo="[group, state.searchQuery, state.isSelectionMode, state.activeAlbumSelectionId, state.selectionMemoKey]"
       >
         <div class="date-separator sticky-date">
-          <span @click="handlers.scrollToTimelineGroup(group)">{{ group.label }}</span>
+          <button
+            type="button"
+            :aria-label="`رفتن به پیام‌های ${group.label}`"
+            @click="handlers.scrollToTimelineGroup(group)"
+          >
+            {{ group.label }}
+          </button>
         </div>
 
         <template v-for="item in group.items" :key="item.id">
@@ -167,7 +173,7 @@ const useVirtualTimeline = computed(() => {
   />
 
   <div v-else-if="state.selectedUserId && state.isAlbumDownloadSelectionMode" class="album-download-selection-bar">
-    <button class="selection-action-btn" @click="handlers.clearSelection">
+    <button type="button" class="selection-action-btn" @click="handlers.clearSelection">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <line x1="18" y1="6" x2="6" y2="18"></line>
         <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -177,7 +183,7 @@ const useVirtualTimeline = computed(() => {
     <div class="album-download-selection-summary">
       {{ state.selectedMessages.length }} مدیا برای دانلود انتخاب شده
     </div>
-    <button class="selection-action-btn primary" @click="handlers.handleDownloadSelectedAlbumMessages">
+    <button type="button" class="selection-action-btn primary" @click="handlers.handleDownloadSelectedAlbumMessages">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
         <polyline points="7 10 12 15 17 10"></polyline>
@@ -188,7 +194,7 @@ const useVirtualTimeline = computed(() => {
   </div>
 
   <div v-else-if="state.selectedUserId && state.isAlbumForwardSelectionMode" class="album-download-selection-bar">
-    <button class="selection-action-btn" @click="handlers.clearSelection">
+    <button type="button" class="selection-action-btn" @click="handlers.clearSelection">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <line x1="18" y1="6" x2="6" y2="18"></line>
         <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -198,7 +204,7 @@ const useVirtualTimeline = computed(() => {
     <div class="album-download-selection-summary">
       {{ state.selectedMessages.length }} مدیا برای هدایت انتخاب شده
     </div>
-    <button class="selection-action-btn primary" :disabled="state.selectedMessages.length === 0" @click="handlers.handleForwardSelectedAlbumMessages">
+    <button type="button" class="selection-action-btn primary" :disabled="state.selectedMessages.length === 0" @click="handlers.handleForwardSelectedAlbumMessages">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="15 14 20 9 15 4"></polyline>
         <path d="M4 20v-7a4 4 0 0 1 4-4h12"></path>
@@ -208,7 +214,7 @@ const useVirtualTimeline = computed(() => {
   </div>
 
   <div v-else-if="state.selectedUserId && state.isAlbumShareSelectionMode" class="album-download-selection-bar">
-    <button class="selection-action-btn" @click="handlers.clearSelection">
+    <button type="button" class="selection-action-btn" @click="handlers.clearSelection">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <line x1="18" y1="6" x2="6" y2="18"></line>
         <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -218,7 +224,7 @@ const useVirtualTimeline = computed(() => {
     <div class="album-download-selection-summary">
       {{ state.selectedMessages.length }} مدیا برای اشتراک‌گذاری انتخاب شده
     </div>
-    <button class="selection-action-btn primary" :disabled="state.selectedMessages.length === 0" @click="handlers.handleShareSelectedAlbumMessages">
+    <button type="button" class="selection-action-btn primary" :disabled="state.selectedMessages.length === 0" @click="handlers.handleShareSelectedAlbumMessages">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="18" cy="5" r="3"></circle>
         <circle cx="6" cy="12" r="3"></circle>
@@ -409,7 +415,9 @@ const useVirtualTimeline = computed(() => {
   top: 10px;
 }
 
-.date-separator span {
+.date-separator button {
+  border: 0;
+  font-family: inherit;
   background-color: rgba(0, 0, 0, 0.15);
   color: #fff;
   padding: 4px 12px;
@@ -421,8 +429,13 @@ const useVirtualTimeline = computed(() => {
   user-select: none;
 }
 
+.date-separator button:focus-visible {
+  outline: 3px solid rgba(180, 83, 9, 0.42);
+  outline-offset: 2px;
+}
+
 @media (prefers-color-scheme: light) {
-  .date-separator span {
+  .date-separator button {
     background-color: rgba(0, 0, 0, 0.2);
     color: #fff;
     text-shadow: none;

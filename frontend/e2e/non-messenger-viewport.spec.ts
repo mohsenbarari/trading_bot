@@ -26,7 +26,7 @@ const ROUTES = [
   { path: '/account/security', label: 'security', expectedText: 'امنیت حساب' },
   { path: '/account/notifications', label: 'notifications', expectedText: 'هیچ اعلانی یافت نشد' },
   { path: '/market', label: 'market', expectedText: 'هیچ لفظ فعالی یافت نشد' },
-  { path: '/admin', label: 'admin', expectedText: 'پنل مدیریت' },
+  { path: '/admin', label: 'admin', expectedText: 'مرکز مدیریت' },
 ]
 
 const CURRENT_USER = {
@@ -36,6 +36,7 @@ const CURRENT_USER = {
   role: 'مدیر ارشد',
   account_status: 'active',
   is_accountant: false,
+  is_customer: false,
   customer_tier: null,
   has_bot_access: true,
 }
@@ -112,6 +113,12 @@ async function installApiMocks(page: Page) {
     }
     if (path === '/api/trades/my') {
       return json([])
+    }
+    if (path === '/api/trades/my/page') {
+      return json({ items: [], next_cursor: null, has_more: false })
+    }
+    if (/^\/api\/users-public\/\d+\/project-users$/.test(path)) {
+      return json({ items: [], total: 0, limit: 25, offset: 0 })
     }
     if (path === '/api/auth/switchable-users') {
       return json([])

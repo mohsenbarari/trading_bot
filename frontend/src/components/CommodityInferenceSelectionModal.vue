@@ -122,13 +122,13 @@ function selectCandidate(candidate: Candidate) {
 .commodity-inference-heading button { width: 2rem; height: 2rem; border: 1px solid var(--ds-border-light, #e2e8f0); border-radius: 50%; background: transparent; font-size: 1.2rem; }
 .commodity-inference-copy { margin: 1rem 0; color: var(--ds-text-secondary, #475569); font-size: .9rem; line-height: 1.8; }
 .commodity-inference-hint { display: block; margin-top: .3rem; font-size: .8rem; }
-.commodity-inference-suggestion { display: grid; place-items: center; min-height: 5rem; padding: 1rem; border: 1px solid var(--ds-primary, #f59e0b); border-radius: .9rem; background: var(--ds-primary-50, #fffbeb); color: var(--ds-text-primary, #0f172a); }
+.commodity-inference-suggestion { display: grid; place-items: center; min-height: 5rem; padding: 1rem; border: 1px solid var(--ds-primary, #2563eb); border-radius: .9rem; background: var(--ds-primary-50, #eff6ff); color: var(--ds-text-primary, #0f172a); }
 .commodity-inference-suggestion strong { font-size: 1.15rem; }
 .commodity-inference-options { display: grid; gap: .65rem; }
 .commodity-inference-option { display: grid; gap: .25rem; width: 100%; min-height: 2.75rem; padding: .7rem .9rem; border: 1px solid var(--ds-border-light, #e2e8f0); border-radius: .8rem; background: var(--ds-bg-page, #f8fafc); text-align: right; color: var(--ds-text-primary, #0f172a); cursor: pointer; }
-.commodity-inference-option:hover { border-color: var(--ds-primary, #f59e0b); background: var(--ds-primary-50, #fffbeb); }
+.commodity-inference-option:hover { border-color: var(--ds-primary, #2563eb); background: var(--ds-primary-50, #eff6ff); }
 .commodity-inference-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .65rem; margin-top: 1.15rem; }
 .commodity-inference-actions button { min-height: 2.75rem; padding: .6rem .9rem; border: 1px solid var(--ds-border-light, #e2e8f0); border-radius: .65rem; background: transparent; color: var(--ds-text-secondary, #475569); }
-.commodity-inference-actions .commodity-inference-confirm { border-color: var(--ds-primary, #f59e0b); background: var(--ds-primary, #f59e0b); color: #fff; }
-.commodity-inference-actions .commodity-inference-edit { border-color: var(--ds-primary, #f59e0b); color: var(--ds-primary, #f59e0b); }
+.commodity-inference-actions .commodity-inference-confirm { border-color: var(--ds-primary, #2563eb); background: var(--ds-primary, #2563eb); color: #fff; }
+.commodity-inference-actions .commodity-inference-edit { border-color: var(--ds-primary, #2563eb); color: var(--ds-primary, #2563eb); }
 </style>

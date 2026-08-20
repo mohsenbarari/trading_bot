@@ -901,10 +901,12 @@ function handleTouchEnd(event: TouchEvent) {
               <button
                 v-for="(item, index) in lightboxMedia.items"
                 :key="item.msgId"
+                type="button"
                 class="lightbox-thumb"
                 :class="{ active: index === lightboxMedia.currentIndex }"
                 :style="getThumbStyle(index)"
                 :aria-current="index === lightboxMedia.currentIndex ? 'true' : 'false'"
+                :aria-label="`نمایش رسانه ${index + 1}`"
                 @click.stop="handleThumbClick(index)"
               >
                 <img :src="getStripThumbSrc(item, index)" alt="thumbnail" class="lightbox-thumb-image" />

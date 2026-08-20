@@ -104,9 +104,14 @@
 
       <!-- Media (Image/Video) -->
       <template v-else-if="msg.message_type === 'image' || msg.message_type === 'video'">
-        <div class="msg-media-link"
-             :style="mediaStyle"
-             @click.stop="$emit('media-click', msg)">
+        <div class="msg-media-link" :style="mediaStyle">
+          <button
+            v-if="mediaRenderUrl && !mediaTransferState.isSendingBusy"
+            type="button"
+            class="media-open-surface"
+            :aria-label="msg.message_type === 'video' ? 'نمایش ویدئو' : 'نمایش تصویر'"
+            @click.stop="$emit('media-click', msg)"
+          ></button>
           <button
             v-if="showMediaShare"
             type="button"
@@ -141,7 +146,7 @@
               </div>
               
               <!-- Overlay for uploading state -->
-              <div v-if="mediaTransferState.isSendingBusy" class="msg-media-overlay cancelable-overlay is-clickable" @click.stop="$emit('cancel-send', msg)">
+              <button v-if="mediaTransferState.isSendingBusy" type="button" aria-label="لغو ارسال رسانه" class="msg-media-overlay cancelable-overlay is-clickable" @click.stop="$emit('cancel-send', msg)">
                 <div v-if="mediaUploadStatusText" class="telegram-size-badge" :style="{ direction: mediaTransferState.isProcessing ? 'rtl' : 'ltr' }">
                   <span>{{ mediaUploadStatusText }}</span>
                 </div>
@@ -152,21 +157,21 @@
                   </svg>
                   <div class="progress-cancel-icon">✕</div>
                 </div>
-              </div>
+              </button>
             </div>
           </template>
           
           <!-- 2. Needs Download State -->
           <template v-else>
             <div class="w-full h-full absolute inset-0 msg-media-overlay z-10" @click.stop>
-              <div v-if="mediaTransferState.isDownloadingBusy" class="progress-container cancelable" @click.stop="$emit('cancel-download', msg)">
+              <button v-if="mediaTransferState.isDownloadingBusy" type="button" aria-label="لغو دریافت رسانه" class="progress-container cancelable progress-cancel-button" @click.stop="$emit('cancel-download', msg)">
                 <svg class="progress-ring" viewBox="0 0 36 36">
                   <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
                   <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${mediaTransferState.progress}, 100`"></circle>
                 </svg>
                 <div class="progress-cancel-icon">✕</div>
-              </div>
-              <button v-else class="download-btn" @click.stop="$emit('download', msg)">
+              </button>
+              <button v-else type="button" class="download-btn" aria-label="دریافت رسانه" @click.stop="$emit('download', msg)">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                   <polyline points="7 10 12 15 17 10"></polyline>
@@ -186,7 +191,13 @@
       <!-- Voice Message -->
       <template v-else-if="msg.message_type === 'voice'">
         <div class="msg-voice" :class="{ 'is-sent': isSent, 'is-loading': isVoiceLoading, 'is-error': isVoiceErrored }">
-          <button class="voice-play-btn" :class="{ 'is-active': isPlaying }" @click.stop="toggleVoice">
+          <button
+            type="button"
+            class="voice-play-btn"
+            :class="{ 'is-active': isPlaying }"
+            :aria-label="isPlaying ? 'توقف پیام صوتی' : 'پخش پیام صوتی'"
+            @click.stop="toggleVoice"
+          >
             <svg v-if="!isPlaying" viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
               <path d="M8 5v14l11-7z"/>
             </svg>
@@ -200,7 +211,15 @@
               ref="waveformRef"
               class="voice-waveform"
               :class="{ 'is-interactive': Boolean(audioUrl) }"
+              role="slider"
+              tabindex="0"
+              aria-label="موقعیت پخش پیام صوتی"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              :aria-valuenow="Math.round(voiceProgress * 100)"
               @click.stop="handleVoiceWaveformClick"
+              @keydown.left.stop.prevent="seekVoiceBy(-0.05)"
+              @keydown.right.stop.prevent="seekVoiceBy(0.05)"
             >
               <div class="voice-wave-bars" aria-hidden="true">
                 <span
@@ -219,7 +238,7 @@
             </div>
           </div>
           
-          <div v-if="mediaTransferState.isSendingBusy" class="msg-voice-uploading" @click.stop="$emit('cancel-send', msg)">
+          <button v-if="mediaTransferState.isSendingBusy" type="button" aria-label="لغو ارسال پیام صوتی" class="msg-voice-uploading" @click.stop="$emit('cancel-send', msg)">
             <span
               v-if="voiceUploadStatusText"
               class="voice-upload-status"
@@ -231,7 +250,7 @@
               <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${mediaTransferState.progress}, 100`"></circle>
             </svg>
             <div class="voice-cancel-icon">✕</div>
-          </div>
+          </button>
           <button
             v-if="showMediaShare && !mediaTransferState.isSendingBusy"
             type="button"
@@ -257,7 +276,7 @@
 
       <!-- Location -->
       <template v-else-if="msg.message_type === 'location'">
-        <div class="msg-location" @click="$emit('location-click', msg)">
+        <button type="button" class="msg-location" aria-label="نمایش موقعیت مکانی" @click="$emit('location-click', msg)">
           <div v-if="mapSnapshotUrl" class="location-snapshot" :style="{ backgroundImage: `url(${mapSnapshotUrl})` }">
             <div class="location-pin">
               <svg viewBox="0 0 24 24" width="32" height="32" fill="#E53935">
@@ -272,7 +291,7 @@
             </svg>
             <span class="location-label">📍 موقعیت مکانی</span>
           </div>
-        </div>
+        </button>
       </template>
 
       <!-- Document/File Message -->
@@ -283,14 +302,21 @@
           @pointerdown.capture="handleDocumentPointerDown"
           @click.stop="handleDocumentOpenClick"
         >
-          <div v-if="isDocumentBusy" class="doc-icon doc-uploading" @click.stop="handleDocumentBusyClick">
+          <button v-if="isDocumentBusy" type="button" aria-label="لغو انتقال فایل" class="doc-icon doc-uploading" @click.stop="handleDocumentBusyClick">
             <svg class="progress-ring-small" viewBox="0 0 36 36" style="width:36px;height:36px;">
               <circle class="ring-bg" cx="18" cy="18" r="16" stroke="rgba(255,255,255,0.3)" stroke-width="3" fill="none"></circle>
               <circle class="ring-fg" cx="18" cy="18" r="16" stroke="#fff" stroke-width="3" fill="none" :stroke-dasharray="`${docTransferProgress}, 100`" transform="rotate(-90 18 18)"></circle>
             </svg>
             <div class="doc-cancel-icon">✕</div>
-          </div>
-          <div v-else class="doc-icon" :class="docIconClass">
+          </button>
+          <button
+            v-else
+            type="button"
+            class="doc-open-surface"
+            :aria-label="isDocumentCached ? 'باز کردن فایل' : 'دریافت فایل'"
+            @click.stop="handleDocumentOpenClick"
+          ></button>
+          <div v-if="!isDocumentBusy" class="doc-icon" :class="docIconClass">
             <svg v-if="docExt === 'pdf'" viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8.5 7.5c0 .83-.67 1.5-1.5 1.5H9v2H7.5V7H10c.83 0 1.5.67 1.5 1.5v1zm5 2c0 .83-.67 1.5-1.5 1.5h-2.5V7H15c.83 0 1.5.67 1.5 1.5v3zm4-3H19v1h1.5V11H19v2h-1.5V7h3v1.5zM9 9.5h1v-1H9v1zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm10 5.5h1v-3h-1v3z"/></svg>
             <svg v-else-if="docExt === 'zip' || docExt === 'rar'" viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-6 10h-4v-1h4v1zm0-2h-4v-1h4v1zm0-2h-4V9h4v3z"/></svg>
             <svg v-else viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
@@ -333,7 +359,7 @@
         <span v-if="isSent" class="msg-status">
           <!-- Sending -->
           <div v-if="isSending" class="sending-status-wrapper">
-             <span v-if="!props.isAlbum" class="cancel-text-btn" @click.stop="$emit('cancel-send', msg)" title="لغو ارسال">✕</span>
+             <button v-if="!props.isAlbum" type="button" class="cancel-text-btn" aria-label="لغو ارسال" @click.stop="$emit('cancel-send', msg)">✕</button>
              <svg viewBox="0 0 24 24" class="icon-clock" width="16" height="16" style="color: #aaa;">
                  <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm4.2 14.2L11 13V7h1.5v5.2l4.5 2.7-.8 1.3z" fill="currentColor"/>
              </svg>
@@ -1305,6 +1331,21 @@ function handleVoiceWaveformClick(event: MouseEvent) {
   }
 }
 
+function seekVoiceBy(deltaRatio: number) {
+  const audio = ensureVoiceAudio()
+  if (!audio || !voiceDuration.value) {
+    void toggleVoice()
+    return
+  }
+  const nextTime = clampNumber(
+    voiceCurrentTime.value + voiceDuration.value * deltaRatio,
+    0,
+    voiceDuration.value,
+  )
+  audio.currentTime = nextTime
+  voiceCurrentTime.value = nextTime
+}
+
 function escapeHtml(unsafe: string) {
   return (unsafe || '').replace(/[&<"'>]/g, function (m) {
     switch (m) {
@@ -1936,6 +1977,24 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   max-width: 100%;
   border-radius: var(--messenger-radius-media, 10px);
 }
+
+.media-open-surface,
+.doc-open-surface {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.media-open-surface:focus-visible,
+.doc-open-surface:focus-visible {
+  outline: 3px solid rgba(251, 191, 36, 0.92);
+  outline-offset: -3px;
+}
 .media-caption {
   margin-top: 8px;
   font-size: 14px;
@@ -1987,9 +2046,9 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 
 .reaction-chip.is-own {
   background: linear-gradient(180deg, rgba(245, 158, 11, 0.18), rgba(245, 158, 11, 0.12));
-  color: #1d4ed8;
+  color: var(--messenger-accent-strong, #b45309);
   border-color: rgba(245, 158, 11, 0.26);
-  box-shadow: 0 3px 10px rgba(37, 99, 235, 0.14);
+  box-shadow: 0 3px 10px rgba(245, 158, 11, 0.16);
   transform: translateY(-1px);
 }
 
@@ -2052,6 +2111,11 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   padding: 2px;
   width: min(var(--messenger-message-media-width, 320px), calc(100vw - 88px));
   max-width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
 }
 .location-snapshot {
   position: relative;
@@ -2101,6 +2165,7 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 
 /* Document Message */
 .msg-document {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -2184,6 +2249,8 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   flex-shrink: 0;
 }
 .doc-share-btn {
+  position: relative;
+  z-index: 3;
   flex-shrink: 0;
   background: transparent;
   border: none;
@@ -2259,6 +2326,19 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 .msg-media-overlay {
   position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: color-mix(in srgb, var(--messenger-overlay-strong, rgba(0,0,0,0.6)) 67%, transparent); backdrop-filter: blur(5px);
   display: flex; align-items: center; justify-content: center;
+}
+.msg-media-overlay:is(button),
+.progress-cancel-button,
+.msg-voice-uploading:is(button),
+.doc-uploading:is(button) {
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+}
+
+.progress-cancel-button {
+  background: transparent;
 }
 .progress-container { position: relative; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; }
 .media-upload-progress {
@@ -2460,7 +2540,7 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 }
 .msg-voice.is-sent {
   --voice-accent: #f59e0b;
-  --voice-accent-top: #9fd0ff;
+  --voice-accent-top: #fcd34d;
   --voice-track-bottom: rgba(245, 158, 11, 0.2);
   --voice-track-top: rgba(255, 255, 255, 0.62);
 }
@@ -2476,14 +2556,14 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
-  box-shadow: 0 10px 24px rgba(32, 92, 160, 0.22);
+  box-shadow: 0 10px 24px rgba(245, 158, 11, 0.2);
   transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
 }
 .voice-play-btn:hover {
   transform: translateY(-1px);
 }
 .voice-play-btn.is-active {
-  box-shadow: 0 12px 28px rgba(32, 92, 160, 0.3);
+  box-shadow: 0 12px 28px rgba(245, 158, 11, 0.28);
 }
 .msg-voice.is-loading .voice-play-btn {
   filter: saturate(0.92);

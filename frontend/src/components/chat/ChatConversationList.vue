@@ -547,9 +547,11 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="conversation-items" v-auto-animate>
-            <div
+            <button
               v-for="row in conversationRows"
               :key="row.conv.id"
+              type="button"
+              :aria-label="`باز کردن گفتگوی ${row.conv.other_user_name}`"
               v-memo="[
                 row.conv.id,
                 row.conv.other_user_id,
@@ -655,7 +657,7 @@ onBeforeUnmount(() => {
                   <Pin :size="14" />
                 </div>
               </div>
-            </div>
+            </button>
             <button
               v-if="conversationWindow.hasMore"
               type="button"
@@ -870,6 +872,11 @@ onBeforeUnmount(() => {
 }
 
 .conversation-card {
+  border: 0;
+  width: 100%;
+  color: inherit;
+  font: inherit;
+  text-align: right;
   position: relative;
   display: flex;
   align-items: center;

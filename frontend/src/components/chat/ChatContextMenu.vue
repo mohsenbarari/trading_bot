@@ -56,9 +56,10 @@
           <div class="menu-section-label" :class="{ 'is-danger': section.tone === 'danger' }">
             {{ section.label }}
           </div>
-          <div
+          <button
             v-for="item in section.items"
             :key="item.key"
+            type="button"
             class="menu-item"
             :class="{
               'is-warning': item.tone === 'warning',
@@ -70,7 +71,7 @@
           >
             <span class="menu-item-icon" aria-hidden="true" v-html="ACTION_ICON_SVG[item.key]"></span>
             <span class="menu-item-label">{{ item.label }}</span>
-          </div>
+          </button>
         </template>
       </div>
     </div>
@@ -307,6 +308,8 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
 }
 
 .menu-item {
+  border: 0;
+  background: transparent;
   padding: 10px 16px;
   min-height: var(--messenger-touch-target, 48px);
   width: 100%;
@@ -316,8 +319,15 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
   align-items: center;
   gap: 12px;
   font-size: 14px;
+  font-family: inherit;
+  text-align: right;
   color: var(--messenger-text-strong, #111827);
   transition: background 0.1s;
+}
+
+.menu-item:focus-visible {
+  outline: 3px solid var(--messenger-focus-ring, rgba(180, 83, 9, 0.45));
+  outline-offset: -3px;
 }
 
 .menu-item-icon {

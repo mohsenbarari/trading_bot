@@ -90,6 +90,13 @@ function shouldShowInlineDownload(item: AlbumItem) {
   return item.type === 'video' && !item.hasResolvedMedia
 }
 
+function isCellKeyboardTarget(item: AlbumItem) {
+  const transferState = getItemTransferState(item)
+  if (transferState.isSendingBusy || transferState.isDownloadBusy) return false
+  if (shouldShowInlineDownload(item)) return false
+  return props.isDownloadSelectionMode || item.hasResolvedMedia
+}
+
 function shouldShowDownloadProgress(item: AlbumItem) {
   if (props.isDownloadSelectionMode) return false
   const transferState = getItemTransferState(item)
@@ -311,7 +318,12 @@ const layout = computed(() => buildLayout(props.items))
           'download-unselected': props.isDownloadSelectionMode && !isItemSelected(cell.item.msg.id)
         }"
         :style="{ width: `${cell.width}px`, height: `${cell.height}px`, aspectRatio: `${extractAspectRatio(cell.item)}` }"
+        :role="isCellKeyboardTarget(cell.item) ? 'button' : undefined"
+        :tabindex="isCellKeyboardTarget(cell.item) ? 0 : undefined"
+        :aria-label="isCellKeyboardTarget(cell.item) ? (props.isDownloadSelectionMode ? 'انتخاب رسانه' : 'نمایش رسانه') : undefined"
         @click.stop="handleCellClick(cell.item.msg)"
+        @keydown.enter.stop.prevent="isCellKeyboardTarget(cell.item) && handleCellClick(cell.item.msg)"
+        @keydown.space.stop.prevent="isCellKeyboardTarget(cell.item) && handleCellClick(cell.item.msg)"
       >
         <img
           v-if="cell.item.type === 'image'"
@@ -438,6 +450,11 @@ const layout = computed(() => buildLayout(props.items))
   overflow: hidden;
   flex: none;
   background: var(--messenger-overlay-muted, rgba(0, 0, 0, 0.06));
+}
+
+.album-item[role='button']:focus-visible {
+  outline: 3px solid rgba(251, 191, 36, 0.92);
+  outline-offset: -3px;
 }
 
 .album-item.download-selection-mode {

@@ -1,14 +1,14 @@
 <template>
   <div v-if="modelValue" class="location-viewer-overlay">
     <div class="location-header">
-      <button class="back-btn" @click="close">
+      <button type="button" class="back-btn" aria-label="بستن نقشه" @click="close">
         <svg viewBox="0 0 24 24" fill="currentColor">
           <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"></path>
         </svg>
       </button>
       <span class="header-title">موقعیت مکانی</span>
       <div class="header-actions">
-        <button class="external-btn" title="باز کردن در برنامه نقشه" @click="openExternal">
+        <button type="button" class="external-btn" aria-label="باز کردن در برنامهٔ نقشه" title="باز کردن در برنامه نقشه" @click="openExternal">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
             <polyline points="15 3 21 3 21 9"></polyline>

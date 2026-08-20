@@ -1,7 +1,10 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
+import { mkdir } from 'node:fs/promises'
+import path from 'node:path'
 
 const shouldRunBaseline = process.env.UI_UX_BASELINE === '1'
 const shouldRunA11ySmoke = process.env.UI_UX_A11Y === '1'
+const externalArtifactDir = process.env.UI_UX_ARTIFACT_DIR?.trim() || ''
 const fixedNow = '2026-07-07T08:30:00.000Z'
 
 type ViewportCase = {
@@ -28,12 +31,12 @@ const ROUTES: RouteCase[] = [
   { path: '/operations', label: 'operations', authenticated: true, readyText: 'عملیات' },
   { path: '/operations/customers', label: 'customers', authenticated: true, readyText: 'مشتریان' },
   { path: '/operations/accountants', label: 'accountants', authenticated: true, readyText: 'حسابداران' },
-  { path: '/account', label: 'account', authenticated: true, readyText: 'پروفایل و تنظیمات' },
+  { path: '/account', label: 'account', authenticated: true, readyText: 'حساب' },
   { path: '/profile', label: 'profile', authenticated: true, readyText: 'اطلاعات شخصی' },
   { path: '/account/notifications', label: 'notifications', authenticated: true, readyText: 'هیچ اعلانی یافت نشد' },
   { path: '/admin/users', label: 'admin-users', authenticated: true, readyText: 'مدیریت کاربران' },
   { path: '/admin/commodities', label: 'admin-commodities', authenticated: true, readyText: 'مدیریت کالاها' },
-  { path: '/login', label: 'login', authenticated: false, readyText: 'ورود به بازار' },
+  { path: '/login', label: 'login', authenticated: false, readyText: 'ورود به سامانه' },
   { path: '/register', label: 'register', authenticated: false, readyText: 'تکمیل ثبت‌نام' },
   { path: '/i/uiux-baseline', label: 'invite-landing', authenticated: false, readyText: 'دعوت‌نامه اختصاصی' },
 ]
@@ -45,6 +48,7 @@ const CURRENT_USER = {
   role: 'مدیر ارشد',
   account_status: 'active',
   is_accountant: false,
+  is_customer: false,
   customer_tier: null,
   has_bot_access: true,
 }
@@ -201,6 +205,12 @@ async function installApiMocks(page: Page) {
     if (path === '/api/trades/my') {
       return json([])
     }
+    if (path === '/api/trades/my/page') {
+      return json({ items: [], next_cursor: null, has_more: false })
+    }
+    if (/^\/api\/users-public\/\d+\/project-users$/.test(path)) {
+      return json([])
+    }
     if (path === '/api/auth/switchable-users') {
       return json([])
     }
@@ -290,12 +300,25 @@ async function expectCriticalA11yBasics(page: Page, label: string) {
         && rect.height > 0
     }
 
-    const nameFor = (element: HTMLElement) =>
-      [
+    const nameFor = (element: HTMLElement) => {
+      const labelledBy = (element.getAttribute('aria-labelledby') || '')
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((id) => document.getElementById(id)?.textContent || '')
+        .join(' ')
+      const nativeLabels = 'labels' in element
+        ? Array.from((element as HTMLInputElement).labels || [])
+            .map((item) => item.textContent || '')
+            .join(' ')
+        : ''
+      return [
         element.getAttribute('aria-label'),
+        labelledBy,
+        nativeLabels,
         element.getAttribute('title'),
         element.textContent,
       ].join(' ').trim()
+    }
 
     return Array.from(document.querySelectorAll<HTMLElement>('button, a[href], input, textarea, select'))
       .filter(isVisible)
@@ -338,6 +361,15 @@ test.describe('Non-messenger visual baseline harness', () => {
 
         if (shouldRunA11ySmoke) {
           await expectCriticalA11yBasics(page, `${viewport.label}:${route.label}`)
+        }
+
+        if (externalArtifactDir) {
+          await mkdir(externalArtifactDir, { recursive: true })
+          await page.screenshot({
+            path: path.join(externalArtifactDir, `${route.label}-${viewport.label}.png`),
+            animations: 'disabled',
+            fullPage: true,
+          })
         }
 
         await expect(page).toHaveScreenshot(`${route.label}-${viewport.label}.png`, {

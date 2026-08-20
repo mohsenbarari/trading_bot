@@ -779,7 +779,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
               <h3>{{ pageTitle }}</h3>
               <span>{{ pageSubtitle }}</span>
             </div>
-            <button type="button" class="header-icon-btn" @click="requestClose()">
+            <button type="button" class="header-icon-btn" aria-label="بستن مدیریت اتاق" @click="requestClose()">
               <X :size="20" />
             </button>
           </header>
