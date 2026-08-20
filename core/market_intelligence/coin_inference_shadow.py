@@ -17,13 +17,20 @@ from typing import Mapping
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.pack_commodities import PACK_COMMODITY_CODE_TO_BASE_RATE_CODE
+
 from .coin_catalog import (
     CatalogCoinCommodityEditCandidate,
     CatalogCoinCommodityInference,
     resolve_coin_inference_against_catalog,
     resolve_coin_inference_edit_candidates,
 )
-from .coin_inference import CoinCommodityInference, infer_coin_commodity
+from .coin_inference import (
+    COIN_INFERENCE_CANDIDATE_SCOPE_PACK_ONLY,
+    CoinCommodityInference,
+    infer_coin_commodity,
+    normalize_coin_inference_candidate_scope,
+)
 from .coin_inference_audit import CoinInferenceAuditCommand, append_coin_inference_audit
 from .market_snapshot import AtomicMarketSnapshotProvider, MarketSnapshotUnavailable
 
@@ -53,13 +60,14 @@ def _snapshot_market_context(snapshot: object, ranker_result: object) -> tuple[s
     candidates = getattr(ranker_result, "candidates", ()) or ()
     if candidates:
         code = str(getattr(candidates[0], "commodity_code", "")).upper()
+        rate_code = PACK_COMMODITY_CODE_TO_BASE_RATE_CODE.get(code, code)
         settlement = str(getattr(ranker_result, "settlement_term", "")).upper()
         rates = snapshot.get("rates")
         if isinstance(rates, dict):
             for item in rates.get("items") or ():
                 if (
                     isinstance(item, dict)
-                    and str(item.get("commodity_code") or "").upper() == code
+                    and str(item.get("commodity_code") or "").upper() == rate_code
                     and str(item.get("settlement_term") or "").upper() == settlement
                 ):
                     rate_item = item
@@ -172,6 +180,8 @@ async def observe_coin_inference_shadow(
         force_confirmation
         and len(presentation_decision.candidates) == 1
         and isinstance(snapshot, Mapping)
+        and normalize_coin_inference_candidate_scope(candidate_scope)
+        != COIN_INFERENCE_CANDIDATE_SCOPE_PACK_ONLY
     ):
         edit_candidates = await resolve_coin_inference_edit_candidates(
             db,

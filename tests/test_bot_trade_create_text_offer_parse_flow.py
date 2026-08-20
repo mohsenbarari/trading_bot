@@ -278,6 +278,39 @@ class BotTradeCreateTextOfferParseFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(observe.await_args.kwargs["force_confirmation"])
         session.commit.assert_awaited_once()
 
+    async def test_bot_pack_selector_uses_only_base_derived_pack_candidates(self):
+        parsed = SimpleNamespace(
+            settlement_type="tomorrow",
+            low_date_hint=False,
+            pack_hint=True,
+            price=100_600,
+        )
+        session = SimpleNamespace(commit=AsyncMock())
+        observation = SimpleNamespace()
+        with (
+            patch(
+                "bot.handlers.trade_create.settings",
+                SimpleNamespace(
+                    coin_intelligence_inference_selection_enabled=True,
+                    coin_intelligence_inference_snapshot_path="/safe/snapshot.json",
+                    coin_intelligence_inference_auto_selection_enabled=True,
+                ),
+            ),
+            patch(
+                "bot.handlers.trade_create.AsyncSessionLocal",
+                return_value=FakeSessionContext(session),
+            ),
+            patch(
+                "bot.handlers.trade_create.observe_coin_inference_shadow",
+                new=AsyncMock(return_value=observation),
+            ) as observe,
+        ):
+            result = await _text_offer_selection_observation(parsed)
+
+        self.assertIs(result, observation)
+        self.assertEqual(observe.await_args.kwargs["candidate_scope"], "PACK_ONLY")
+        self.assertFalse(observe.await_args.kwargs["force_confirmation"])
+
     async def test_ambiguous_selector_accepts_only_the_candidate_stored_in_fsm(self):
         state = SimpleNamespace(
             get_data=AsyncMock(return_value={

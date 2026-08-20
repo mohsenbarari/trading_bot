@@ -296,6 +296,49 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result.commodity_name)
         self.assertEqual(result.commodity_resolution, "OMITTED")
 
+    async def test_pack_marker_uses_fixed_indivisible_shape_and_price_inference(self):
+        result, error = await offer_parser.parse_offer_text("خ ف پک 100600")
+
+        self.assertIsNone(error)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.trade_type, "buy")
+        self.assertEqual(result.settlement_type, "tomorrow")
+        self.assertEqual(result.commodity_resolution, "PACK_HINT")
+        self.assertTrue(result.pack_hint)
+        self.assertIsNone(result.commodity_id)
+        self.assertIsNone(result.commodity_name)
+        self.assertEqual(result.quantity, 100)
+        self.assertTrue(result.is_wholesale)
+        self.assertIsNone(result.lot_sizes)
+
+        explicit_count, explicit_error = await offer_parser.parse_offer_text(
+            "ف پک نیم 100 عدد 100600"
+        )
+        self.assertIsNone(explicit_error)
+        self.assertEqual(explicit_count.commodity_resolution, "PACK_HINT")
+        self.assertEqual(explicit_count.quantity, 100)
+
+    async def test_pack_marker_rejects_other_quantities_lots_and_low_date_hint(self):
+        for sample in (
+            "خ پک 50تا 100600",
+            "خ پک 100تا 100600 50 50",
+            "خ پک 100600 100",
+        ):
+            with self.subTest(sample=sample):
+                result, error = await offer_parser.parse_offer_text(sample)
+                self.assertIsNone(result)
+                self.assertEqual(error.message, "آفر پک فقط یکجا و با تعداد ۱۰۰ ثبت می‌شود.")
+
+        result, error = await offer_parser.parse_offer_text("خ پک پ 100600")
+        self.assertIsNone(result)
+        self.assertEqual(error.message, "❌ نشانگر تاریخ پایین برای آفر پک مجاز نیست")
+
+    async def test_pack_marker_is_mandatory_for_pack_inference_shape(self):
+        result, error = await offer_parser.parse_offer_text("خ ف 100600")
+        self.assertIsNone(result)
+        self.assertIsNotNone(error)
+        self.assertIn("تعداد کالا یافت نشد", error.message)
+
     async def test_text_offer_rejects_invalid_manual_format(self):
         invalid_samples = [
             "خ امام 51تا 75800",

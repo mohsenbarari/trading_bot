@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from core.market_intelligence.coin_catalog import (
     CatalogCoinCommodityCandidate,
@@ -121,6 +121,48 @@ class CoinInferenceSelectionRevalidationTests(unittest.IsolatedAsyncioTestCase):
                     settlement_term="CASH",
                     source_surface="WEBAPP",
                 )
+
+    async def test_pack_receipt_revalidates_only_against_pack_scope(self) -> None:
+        pack_candidate = CatalogCoinCommodityCandidate(
+            commodity_id=81,
+            commodity_code="PACK_HALF",
+            commodity_name="پک نیم",
+            center_project_price=100_000,
+            lower_project_price=99_400,
+            upper_project_price=101_000,
+            confidence="HIGH",
+            distance_to_center_relative=0.006,
+        )
+        pack_receipt = receipt(selected_commodity_id=81)
+        pack_receipt.candidate_scope = "PACK_ONLY"
+        pack_receipt.submitted_project_price = 100_600
+        infer = Mock(return_value=object())
+        with (
+            patch(
+                "core.market_intelligence.coin_inference_selection.load_coin_inference_audit",
+                new=AsyncMock(return_value=pack_receipt),
+            ),
+            patch(
+                "core.market_intelligence.coin_inference_selection.infer_coin_commodity_from_published_snapshot",
+                infer,
+            ),
+            patch(
+                "core.market_intelligence.coin_inference_selection.resolve_coin_inference_against_catalog",
+                new=AsyncMock(return_value=decision(pack_candidate)),
+            ),
+        ):
+            result = await revalidate_coin_inference_selection(
+                SimpleNamespace(),
+                snapshot_path="/safe/snapshot.json",
+                decision_key="a" * 64,
+                selected_commodity_id=81,
+                submitted_project_price=100_600,
+                settlement_term="CASH",
+                source_surface="WEBAPP",
+            )
+
+        self.assertEqual(result.candidate.commodity_name, "پک نیم")
+        self.assertEqual(infer.call_args.kwargs["candidate_scope"], "PACK_ONLY")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,11 @@
 import unittest
 
 from bot.callbacks import QuantityCallback, TradeActionCallback
-from bot.handlers.trade_utils import get_confirm_keyboard, get_quantity_keyboard
+from bot.handlers.trade_utils import (
+    get_confirm_keyboard,
+    get_quantity_keyboard,
+    get_wizard_edit_keyboard,
+)
 
 
 class BotTradeUtilsQuantityConfirmKeyboardTests(unittest.TestCase):
@@ -36,6 +40,16 @@ class BotTradeUtilsQuantityConfirmKeyboardTests(unittest.TestCase):
             keyboard.inline_keyboard[1][0].callback_data,
             TradeActionCallback(action="cancel").pack(),
         )
+
+    def test_pack_wizard_never_offers_quantity_or_lot_editing(self):
+        keyboard = get_wizard_edit_keyboard(is_wholesale=True, is_pack=True)
+        labels = [button.text for row in keyboard.inline_keyboard for button in row]
+
+        self.assertIn("کالا", labels)
+        self.assertIn("قیمت", labels)
+        self.assertNotIn("تعداد", labels)
+        self.assertNotIn("یکجا / خُرد", labels)
+        self.assertNotIn("ترکیب بخش‌بندی", labels)
 
 
 if __name__ == "__main__":

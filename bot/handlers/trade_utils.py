@@ -193,21 +193,35 @@ def get_wizard_review_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def get_wizard_edit_keyboard(*, is_wholesale: bool) -> InlineKeyboardMarkup:
+def get_wizard_edit_keyboard(*, is_wholesale: bool, is_pack: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [
             InlineKeyboardButton(text="خرید / فروش", callback_data=TradeWizardEditCallback(field="trade_type").pack()),
             InlineKeyboardButton(text="نقدی / فردایی", callback_data=TradeWizardEditCallback(field="settlement_type").pack()),
         ],
-        [
-            InlineKeyboardButton(text="کالا", callback_data=TradeWizardEditCallback(field="commodity").pack()),
-            InlineKeyboardButton(text="تعداد", callback_data=TradeWizardEditCallback(field="quantity").pack()),
-        ],
-        [
-            InlineKeyboardButton(text="یکجا / خُرد", callback_data=TradeWizardEditCallback(field="lot_type").pack()),
-            InlineKeyboardButton(text="قیمت", callback_data=TradeWizardEditCallback(field="price").pack()),
-        ],
     ]
+    if is_pack:
+        rows.extend(
+            [
+                [
+                    InlineKeyboardButton(text="کالا", callback_data=TradeWizardEditCallback(field="commodity").pack()),
+                    InlineKeyboardButton(text="قیمت", callback_data=TradeWizardEditCallback(field="price").pack()),
+                ]
+            ]
+        )
+    else:
+        rows.extend(
+            [
+                [
+                    InlineKeyboardButton(text="کالا", callback_data=TradeWizardEditCallback(field="commodity").pack()),
+                    InlineKeyboardButton(text="تعداد", callback_data=TradeWizardEditCallback(field="quantity").pack()),
+                ],
+                [
+                    InlineKeyboardButton(text="یکجا / خُرد", callback_data=TradeWizardEditCallback(field="lot_type").pack()),
+                    InlineKeyboardButton(text="قیمت", callback_data=TradeWizardEditCallback(field="price").pack()),
+                ],
+            ]
+        )
     if not is_wholesale:
         rows.append([
             InlineKeyboardButton(text="ترکیب بخش‌بندی", callback_data=TradeWizardEditCallback(field="lot_sizes").pack()),

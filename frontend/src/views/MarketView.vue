@@ -33,8 +33,9 @@ interface ParsedOfferPreview {
   settlement_type: SettlementType
   commodity_id: number | null
   commodity_name: string | null
-  commodity_resolution?: 'EXPLICIT' | 'INFERRED' | 'OMITTED' | 'UNRESOLVED' | 'LOW_DATE_HINT' | 'UNKNOWN'
+  commodity_resolution?: 'EXPLICIT' | 'INFERRED' | 'OMITTED' | 'UNRESOLVED' | 'LOW_DATE_HINT' | 'PACK_HINT' | 'UNKNOWN'
   low_date_hint?: boolean
+  pack_hint?: boolean
   quantity: number
   price: number
   is_wholesale: boolean
@@ -943,7 +944,9 @@ function parseAndSubmitTextOffer() {
             return null
           }
           if (!Number.isInteger(parsed.commodity_id) || Number(parsed.commodity_id) <= 0) {
-            parseError.value = parsed.low_date_hint
+            parseError.value = parsed.pack_hint
+              ? 'نوع پک از روی قیمت به نتیجهٔ قابل اتکا نرسید؛ قیمت را بررسی کنید.'
+              : parsed.low_date_hint
               ? 'کالای تاریخ پایین هنوز از روی قیمت به انتخاب قطعی نرسیده است؛ فعلاً نام کالا را نیز وارد کنید.'
               : 'نام کالا از روی قیمت هنوز به انتخاب قطعی نرسیده است؛ فعلاً نام کالا را وارد کنید.'
             return null
@@ -1224,6 +1227,7 @@ onUnmounted(() => {
       :candidates="pendingCommodityInference.commodity_inference.candidates"
       :edit-candidates="pendingCommodityInference.commodity_inference.edit_candidates"
       :low-date-hint="pendingCommodityInference.low_date_hint"
+      :pack-hint="pendingCommodityInference.pack_hint"
       :start-editing="Number.isInteger(pendingCommodityInference.commodity_id) && Number(pendingCommodityInference.commodity_id) > 0"
       @select="selectInferredCommodity"
       @cancel="cancelOfferPreview"

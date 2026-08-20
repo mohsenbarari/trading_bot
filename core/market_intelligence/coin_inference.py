@@ -9,12 +9,17 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from core.pack_commodities import (
+    PACK_BASE_RATE_CODE_TO_COMMODITY_CODE,
+    PACK_COMMODITY_NAME_BY_CODE,
+)
+
 from .coin_rate_engine import COIN_RATE_ENGINE_VERSION, COIN_SPECS
 from .market_contracts import normalize_utc
 from .market_snapshot import AtomicMarketSnapshotProvider, MarketSnapshotUnavailable, validate_market_snapshot
 
 
-COIN_INFERENCE_VERSION = "coin-inference-v3"
+COIN_INFERENCE_VERSION = "coin-inference-v4"
 COIN_INFERENCE_NEARBY_PRICE_RANGE_PERCENT = 10
 CANONICAL_COMMODITY_NAMES = {
     "IMAM": "امام",
@@ -24,6 +29,7 @@ CANONICAL_COMMODITY_NAMES = {
     "HALF_LOW_DATE": "نیم تاریخ پایین",
     "QUARTER_LOW_DATE": "ربع تاریخ پایین",
     "ONE_GRAM": "یک گرمی",
+    **PACK_COMMODITY_NAME_BY_CODE,
 }
 
 # A price can be uncertain between date variants of the *same denomination*,
@@ -38,6 +44,9 @@ COIN_CANDIDATE_FAMILY_BY_CODE = {
     "QUARTER_BAHAR": "QUARTER",
     "QUARTER_LOW_DATE": "QUARTER",
     "ONE_GRAM": "ONE_GRAM",
+    "PACK_FULL": "PACK",
+    "PACK_HALF": "PACK",
+    "PACK_QUARTER": "PACK",
 }
 
 # A standalone optional ``پ`` in an offer is a user-provided hint that the
@@ -46,10 +55,12 @@ COIN_CANDIDATE_FAMILY_BY_CODE = {
 # with the audit decision and applied again at final offer submission.
 COIN_INFERENCE_CANDIDATE_SCOPE_ALL = "ALL"
 COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY = "LOW_DATE_ONLY"
+COIN_INFERENCE_CANDIDATE_SCOPE_PACK_ONLY = "PACK_ONLY"
 COIN_INFERENCE_CANDIDATE_SCOPES = frozenset(
     {
         COIN_INFERENCE_CANDIDATE_SCOPE_ALL,
         COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY,
+        COIN_INFERENCE_CANDIDATE_SCOPE_PACK_ONLY,
     }
 )
 COIN_LOW_DATE_COMMODITY_CODES = frozenset({"BAHAR", "HALF_LOW_DATE", "QUARTER_LOW_DATE"})
@@ -149,11 +160,20 @@ def infer_coin_commodity(
     for item in rates.get("items") or []:
         if not isinstance(item, Mapping) or item.get("status") != "ESTIMATED":
             continue
-        code = str(item.get("commodity_code") or "")
-        if code not in COIN_SPECS or str(item.get("settlement_term") or "") != settlement:
+        rate_code = str(item.get("commodity_code") or "")
+        if rate_code not in COIN_SPECS or str(item.get("settlement_term") or "") != settlement:
             continue
-        if scope == COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY and code not in COIN_LOW_DATE_COMMODITY_CODES:
+        if (
+            scope == COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY
+            and rate_code not in COIN_LOW_DATE_COMMODITY_CODES
+        ):
             continue
+        if scope == COIN_INFERENCE_CANDIDATE_SCOPE_PACK_ONLY:
+            code = PACK_BASE_RATE_CODE_TO_COMMODITY_CODE.get(rate_code)
+            if code is None:
+                continue
+        else:
+            code = rate_code
         center = item.get("estimated_project_price")
         lower = item.get("lower_project_price")
         upper = item.get("upper_project_price")

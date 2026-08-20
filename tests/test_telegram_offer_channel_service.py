@@ -97,6 +97,36 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
     def test_zero_remaining_quantity_never_builds_trade_buttons(self):
         self.assertIsNone(channel_service.build_offer_channel_reply_markup(make_offer()))
 
+    def test_pack_offer_exposes_only_the_indivisible_hundred_coin_button(self):
+        markup = channel_service.build_offer_channel_reply_markup(
+            make_offer(
+                status=OfferStatus.ACTIVE,
+                commodity=SimpleNamespace(name="پک نیم"),
+                quantity=100,
+                remaining_quantity=100,
+                is_wholesale=True,
+                lot_sizes=None,
+            )
+        )
+
+        self.assertEqual(len(markup["inline_keyboard"]), 1)
+        self.assertEqual(
+            [button["text"] for button in markup["inline_keyboard"][0]],
+            ["100 عدد"],
+        )
+        self.assertIsNone(
+            channel_service.build_offer_channel_reply_markup(
+                make_offer(
+                    status=OfferStatus.ACTIVE,
+                    commodity=SimpleNamespace(name="پک نیم"),
+                    quantity=100,
+                    remaining_quantity=50,
+                    is_wholesale=True,
+                    lot_sizes=None,
+                )
+            )
+        )
+
     def test_history_tag_contract(self):
         self.assertEqual(
             channel_service.get_offer_channel_history_tag(make_offer(status=OfferStatus.COMPLETED)),

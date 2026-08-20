@@ -9,11 +9,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.commodity import Commodity
+from core.pack_commodities import PACK_BASE_RATE_CODE_TO_COMMODITY_CODE
 
 from .coin_inference import (
     CANONICAL_COMMODITY_NAMES,
     COIN_CANDIDATE_FAMILY_BY_CODE,
     COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY,
+    COIN_INFERENCE_CANDIDATE_SCOPE_PACK_ONLY,
     COIN_INFERENCE_NEARBY_PRICE_RANGE_PERCENT,
     COIN_LOW_DATE_COMMODITY_CODES,
     CoinCommodityCandidate,
@@ -22,7 +24,7 @@ from .coin_inference import (
 )
 
 
-COIN_CATALOG_RESOLUTION_VERSION = "coin-catalog-resolution-v1"
+COIN_CATALOG_RESOLUTION_VERSION = "coin-catalog-resolution-v2"
 COIN_INFERENCE_EDIT_PRICE_RANGE_PERCENT = COIN_INFERENCE_NEARBY_PRICE_RANGE_PERCENT
 
 
@@ -183,7 +185,12 @@ async def resolve_coin_inference_edit_candidates(
     for item in rates.get("items") or ():
         if not isinstance(item, Mapping) or item.get("status") != "ESTIMATED":
             continue
-        code = str(item.get("commodity_code") or "")
+        rate_code = str(item.get("commodity_code") or "")
+        code = (
+            PACK_BASE_RATE_CODE_TO_COMMODITY_CODE.get(rate_code, "")
+            if scope == COIN_INFERENCE_CANDIDATE_SCOPE_PACK_ONLY
+            else rate_code
+        )
         if (
             code not in CANONICAL_COMMODITY_NAMES
             or COIN_CANDIDATE_FAMILY_BY_CODE.get(code) != family

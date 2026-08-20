@@ -166,6 +166,59 @@ class CoinInferenceTests(unittest.TestCase):
             ("AUTO_SELECT", ["BAHAR"]),
         )
 
+    def test_pack_scope_derives_half_pack_from_base_rates_without_pack_rates(self) -> None:
+        value = snapshot()
+        set_rate(value, "IMAM", "TOMORROW", 198_000, 197_000, 199_000)
+        set_rate(value, "HALF_BAHAR", "TOMORROW", 100_000, 99_400, 101_000)
+        set_rate(value, "QUARTER_BAHAR", "TOMORROW", 51_000, 50_500, 51_500)
+
+        result = infer_coin_commodity(
+            value,
+            price_project_thousand_toman=100_600,
+            settlement_term="TOMORROW",
+            now_utc="2026-08-04T10:00:30Z",
+            candidate_scope="PACK_ONLY",
+        )
+
+        self.assertEqual(
+            (
+                result.status,
+                result.candidates[0].commodity_code,
+                result.candidates[0].commodity_name,
+            ),
+            ("AUTO_SELECT", "PACK_HALF", "پک نیم"),
+        )
+        self.assertFalse(
+            any(str(item["commodity_code"]).startswith("PACK_") for item in value["rates"]["items"])
+        )
+
+    def test_pack_premium_uses_nearest_base_range_and_requires_confirmation(self) -> None:
+        value = snapshot()
+        set_rate(value, "IMAM", "CASH", 198_000, 197_000, 199_000)
+        set_rate(value, "HALF_BAHAR", "CASH", 100_000, 99_400, 100_200)
+        set_rate(value, "QUARTER_BAHAR", "CASH", 51_000, 50_500, 51_500)
+
+        result = infer_coin_commodity(
+            value,
+            price_project_thousand_toman=100_600,
+            settlement_term="CASH",
+            now_utc="2026-08-04T10:00:30Z",
+            candidate_scope="PACK_ONLY",
+        )
+
+        self.assertEqual(
+            (
+                result.status,
+                result.reason,
+                [item.commodity_code for item in result.candidates],
+            ),
+            (
+                "CONFIRM",
+                "NEAREST_CENTER_FALLBACK_REQUIRES_CONFIRMATION",
+                ["PACK_HALF"],
+            ),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

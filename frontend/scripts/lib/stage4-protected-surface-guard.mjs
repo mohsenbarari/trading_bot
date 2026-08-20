@@ -459,6 +459,31 @@ export const MARKET_HISTORY_COMPACT_SEPARATION_EVIDENCE = Object.freeze({
   sha256: '55ebb7e27f40240eaf3e69eb88439b0349d2696e567ec86f6181e9b7232736d3',
 })
 
+// Product-requested pack-offer successor. It extends only the existing
+// inference surface with a typed PACK_HINT and a concise pack note; every
+// Market layout, history, trade, lifecycle and confirmation contract remains
+// inherited from the prior frozen dispositions.
+export const MARKET_PACK_INFERENCE_KIND = 'market-pack-price-inference'
+
+export const MARKET_PACK_INFERENCE_ALLOWED_PATHS = Object.freeze([
+  'frontend/src/components/CommodityInferenceSelectionModal.vue',
+  'frontend/src/views/MarketView.vue',
+])
+
+export const MARKET_PACK_INFERENCE_ALLOWED_FILE_SHA256 = Object.freeze({
+  'frontend/src/components/CommodityInferenceSelectionModal.vue':
+    'cbdd96f657b6839fa92ee637b789bc0ff4ce3e9cf112a52f68f0db239996ace3',
+  'frontend/src/views/MarketView.vue':
+    '4e47eb6103fb2f4a084b844d8138d03a9199d62f3f172fa4108744b63944efd1',
+})
+
+export const MARKET_PACK_INFERENCE_EVIDENCE = Object.freeze({
+  count: 20,
+  contentBytes: 178370,
+  pathSetSha256: '6035c31eab716d0061c81427da214fbe9765571ba0d370e218b11edab27678f2',
+  sha256: '79b72f4776ce5feef1416ee4f7cf02b9d37259a9f5e87180eb2b423881e41dc5',
+})
+
 export const MESSENGER_RUNTIME_BASELINE = Object.freeze({
   count: 85,
   contentBytes: 1312405,
@@ -1460,6 +1485,61 @@ export function assertMarketHistoryCompactSeparationDisposition(entries) {
   )
 }
 
+export function assertMarketPackInferenceSemantics(entries) {
+  assertMarketHistoryCompactSeparationSemantics(entries)
+  const market = sourceByPath(entries, 'frontend/src/views/MarketView.vue')
+  const modal = sourceByPath(
+    entries,
+    'frontend/src/components/CommodityInferenceSelectionModal.vue',
+  )
+  const requiredMarketFragments = [
+    "'PACK_HINT'",
+    'pack_hint?: boolean',
+    'parsed.pack_hint',
+    ':pack-hint="pendingCommodityInference.pack_hint"',
+  ]
+  for (const fragment of requiredMarketFragments) {
+    if (!market.includes(fragment)) {
+      throw new Error(`Market pack inference lost typed preview contract: ${fragment}`)
+    }
+  }
+  const requiredModalFragments = [
+    'packHint?: boolean',
+    'v-if="packHint"',
+    'نوع پک از روی قیمت تشخیص داده می‌شود؛ مقدار همواره ۱۰۰ است.',
+  ]
+  for (const fragment of requiredModalFragments) {
+    if (!modal.includes(fragment)) {
+      throw new Error(`Market pack inference lost selector guidance: ${fragment}`)
+    }
+  }
+}
+
+function assertMarketPackInferenceAllowedFiles(entries) {
+  const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]))
+  for (const repoPath of MARKET_PACK_INFERENCE_ALLOWED_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) throw new Error(`Market pack inference allowed file is missing: ${repoPath}`)
+    const actualSha256 = fileSha256(entry.content)
+    const expectedSha256 = MARKET_PACK_INFERENCE_ALLOWED_FILE_SHA256[repoPath]
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `Market pack inference allowed file drift: ${repoPath} ${expectedSha256} -> ${actualSha256}`,
+      )
+    }
+  }
+}
+
+export function assertMarketPackInferenceDisposition(entries) {
+  assertMarketPackInferenceAllowedFiles(entries)
+  assertMarketPackInferenceSemantics(entries)
+  return assertProtectedFileSetEvidence(
+    'Market pack inference disposition',
+    protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT),
+    MARKET_PACK_INFERENCE_EVIDENCE,
+  )
+}
+
 export function resolveMarketRuntimeDisposition(entries) {
   const actual = protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT)
   try {
@@ -1556,26 +1636,34 @@ export function resolveMarketRuntimeDisposition(entries) {
                                   evidence: assertMarketHistoryCompactSeparationDisposition(entries),
                                 }
                               } catch (historySeparationError) {
-                                const messages = [
-                                  baselineError,
-                                  integrationError,
-                                  aPlusCError,
-                                  lifecycleError,
-                                  perimeterError,
-                                  linearMeterError,
-                                  compactConfirmError,
-                                  feedHeadingError,
-                                  terminalVisualError,
-                                  customerHistoryError,
-                                  requesterAckError,
-                                  lotSuggestionError,
-                                  inferenceUxError,
-                                  historyCompactError,
-                                  historySeparationError,
-                                ].map((error) => error instanceof Error ? error.message : String(error))
-                                throw new Error(
-                                  `Market runtime rejected after Stage 4 baseline drift (${messages[0]}); main/UIUX integration disposition rejected (${messages[1]}); Market A+C disposition rejected (${messages[2]}); Market A+C lifecycle-clarity disposition rejected (${messages[3]}); Market A+C perimeter-deadline disposition rejected (${messages[4]}); Market A+C linear-meter disposition rejected (${messages[5]}); Market compact-confirm disposition rejected (${messages[6]}); Market feed-heading removal disposition rejected (${messages[7]}); Market terminal-history visual disposition rejected (${messages[8]}); Market customer-history access disposition rejected (${messages[9]}); Market overtime requester acknowledgement disposition rejected (${messages[10]}); Market cross-server lot suggestion identity disposition rejected (${messages[11]}); Market inference confirmation UX disposition rejected (${messages[12]}); Market history compact summary disposition rejected (${messages[13]}); Market history compact separation disposition rejected (${messages[14]})`,
-                                )
+                                try {
+                                  return {
+                                    kind: MARKET_PACK_INFERENCE_KIND,
+                                    evidence: assertMarketPackInferenceDisposition(entries),
+                                  }
+                                } catch (packInferenceError) {
+                                  const messages = [
+                                    baselineError,
+                                    integrationError,
+                                    aPlusCError,
+                                    lifecycleError,
+                                    perimeterError,
+                                    linearMeterError,
+                                    compactConfirmError,
+                                    feedHeadingError,
+                                    terminalVisualError,
+                                    customerHistoryError,
+                                    requesterAckError,
+                                    lotSuggestionError,
+                                    inferenceUxError,
+                                    historyCompactError,
+                                    historySeparationError,
+                                    packInferenceError,
+                                  ].map((error) => error instanceof Error ? error.message : String(error))
+                                  throw new Error(
+                                    `Market runtime rejected after Stage 4 baseline drift (${messages[0]}); main/UIUX integration disposition rejected (${messages[1]}); Market A+C disposition rejected (${messages[2]}); Market A+C lifecycle-clarity disposition rejected (${messages[3]}); Market A+C perimeter-deadline disposition rejected (${messages[4]}); Market A+C linear-meter disposition rejected (${messages[5]}); Market compact-confirm disposition rejected (${messages[6]}); Market feed-heading removal disposition rejected (${messages[7]}); Market terminal-history visual disposition rejected (${messages[8]}); Market customer-history access disposition rejected (${messages[9]}); Market overtime requester acknowledgement disposition rejected (${messages[10]}); Market cross-server lot suggestion identity disposition rejected (${messages[11]}); Market inference confirmation UX disposition rejected (${messages[12]}); Market history compact summary disposition rejected (${messages[13]}); Market history compact separation disposition rejected (${messages[14]}); Market pack inference disposition rejected (${messages[15]})`,
+                                  )
+                                }
                               }
                             }
                           }

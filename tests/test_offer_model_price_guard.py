@@ -152,6 +152,15 @@ class OfferModelPriceSnapshotTests(unittest.TestCase):
             now_utc=NOW,
             market_opened_at=None,
         )
+        pack = evaluate_offer_model_price_snapshot(
+            snapshot_for("IMAM"),
+            commodity_name="پک تمام",
+            settlement_type="cash",
+            offer_type="sell",
+            proposed_price=999_999,
+            now_utc=NOW,
+            market_opened_at=None,
+        )
         missing = evaluate_offer_model_price_snapshot(
             snapshot_for("IMAM", settlement="TOMORROW"),
             commodity_name="امام",
@@ -165,8 +174,9 @@ class OfferModelPriceSnapshotTests(unittest.TestCase):
         self.assertEqual(stale.status, "ABSTAINED")
         self.assertEqual(future.status, "ABSTAINED")
         self.assertEqual(unsupported.reason, "COMMODITY_UNSUPPORTED")
+        self.assertEqual(pack.reason, "COMMODITY_UNSUPPORTED")
         self.assertEqual(missing.reason, "MODEL_RANGE_UNAVAILABLE")
-        self.assertTrue(all(item.allowed for item in (stale, future, unsupported, missing)))
+        self.assertTrue(all(item.allowed for item in (stale, future, unsupported, pack, missing)))
 
 
 class OfferModelPriceGuardLoadingTests(unittest.IsolatedAsyncioTestCase):

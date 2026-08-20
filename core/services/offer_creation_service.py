@@ -15,6 +15,7 @@ from core.enums import SettlementType
 from core.offer_identity import generate_offer_public_id
 from core.offer_settlement import normalize_settlement_type
 from core.offer_source import OfferSourceSurface, normalize_offer_source_surface, offer_home_server_for_source
+from core.pack_commodities import is_pack_commodity_name, validate_pack_offer_shape
 from core.services.market_transition_service import acquire_market_offer_admission_fence
 from models.offer import Offer, OfferStatus, OfferType
 from models.user import User
@@ -61,6 +62,9 @@ class OfferCreationCommand:
     commodity_id: int
     quantity: int
     price: int
+    # Server-resolved catalog context.  It is deliberately excluded from the
+    # idempotency fingerprint because ``commodity_id`` is the economic identity.
+    commodity_name: str | None = None
     settlement_type: SettlementType | str = SettlementType.CASH
     is_wholesale: bool = True
     lot_sizes: Sequence[int] | None = None
@@ -233,15 +237,26 @@ async def validate_offer_creation_command(db: AsyncSession, command: OfferCreati
 
     from core.services import trade_service
 
-    is_valid_qty, err_qty = trade_service.validate_quantity(command.quantity)
-    if not is_valid_qty:
-        raise OfferCreationValidationError(err_qty)
+    pack_offer = is_pack_commodity_name(command.commodity_name)
+    pack_shape_valid, pack_shape_error = validate_pack_offer_shape(
+        commodity_name=command.commodity_name,
+        quantity=command.quantity,
+        is_wholesale=command.is_wholesale,
+        lot_sizes=command.lot_sizes,
+    )
+    if not pack_shape_valid:
+        raise OfferCreationValidationError(pack_shape_error)
+
+    if not pack_offer:
+        is_valid_qty, err_qty = trade_service.validate_quantity(command.quantity)
+        if not is_valid_qty:
+            raise OfferCreationValidationError(err_qty)
 
     is_valid_price, err_price = trade_service.validate_price(command.price)
     if not is_valid_price:
         raise OfferCreationValidationError(err_price)
 
-    if not command.is_wholesale:
+    if not pack_offer and not command.is_wholesale:
         if not command.lot_sizes:
             raise OfferCreationValidationError("برای آفر خُرد باید لات‌ها مشخص شوند.")
         is_valid_lots, err_lots, _suggested_lots = trade_service.validate_lot_sizes(command.quantity, command.lot_sizes)

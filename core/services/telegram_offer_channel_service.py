@@ -10,6 +10,11 @@ from typing import Any, Optional
 from core import telegram_gateway
 from core.config import settings
 from core.offer_settlement import build_offer_summary_text
+from core.pack_commodities import (
+    PACK_QUANTITY,
+    is_pack_commodity_name,
+    validate_pack_offer_shape,
+)
 from core.server_routing import SERVER_FOREIGN, current_server
 from core.services.telegram_offer_publication_service import telegram_publication_message_id
 from core.services.telegram_offer_publication_service import (
@@ -385,7 +390,21 @@ def build_offer_channel_reply_markup(
     raw_lot_sizes = getattr(offer, "lot_sizes", None)
     lot_sizes = sorted(raw_lot_sizes, reverse=True) if raw_lot_sizes else None
 
-    if is_wholesale or not lot_sizes:
+    commodity = getattr(offer, "commodity", None)
+    commodity_name = getattr(commodity, "name", None) or getattr(offer, "commodity_name", None)
+    if is_pack_commodity_name(commodity_name):
+        valid_pack, _error = validate_pack_offer_shape(
+            commodity_name=commodity_name,
+            quantity=quantity,
+            is_wholesale=is_wholesale,
+            lot_sizes=lot_sizes,
+        )
+        # A pack is indivisible. A corrupt/partially-filled active projection
+        # must never expose a smaller Telegram trade button.
+        if not valid_pack or remaining != PACK_QUANTITY:
+            return None
+        amounts = [PACK_QUANTITY]
+    elif is_wholesale or not lot_sizes:
         amounts = [remaining]
     else:
         amounts = get_available_trade_amounts(

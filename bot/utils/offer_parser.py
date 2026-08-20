@@ -10,6 +10,7 @@ from models.commodity import Commodity, CommodityAlias
 from core.db import AsyncSessionLocal
 from core.services.trade_service import validate_price
 from core.trading_settings import get_trading_settings
+from core.pack_commodities import PACK_OFFER_SHAPE_ERROR, PACK_QUANTITY
 
 
 @dataclass
@@ -30,6 +31,9 @@ class ParsedOffer:
     # A standalone optional «پ» asks the inference layer to consider only
     # low-date candidates. It does not itself select a catalog commodity.
     low_date_hint: bool = False
+    # A standalone «پک» is mandatory for pack offers.  The parser fixes the
+    # indivisible shape, while the estimator resolves full/half/quarter by price.
+    pack_hint: bool = False
 
 
 @dataclass 
@@ -72,6 +76,7 @@ RESIDUAL_SETTLEMENT_PATTERN = re.compile(
     r'(?<!\S)(?:نقد|فردا|فردایی|ن)(?=\s|$)'
 )
 LOW_DATE_MARKER_PATTERN = re.compile(r'(?<![\u0600-\u06FF])پ(?![\u0600-\u06FF])')
+PACK_MARKER_PATTERN = re.compile(r'(?<![\u0600-\u06FF])پک(?![\u0600-\u06FF])')
 
 
 def normalize_digits(text: str) -> str:
@@ -163,6 +168,15 @@ def extract_low_date_hint(text: str) -> tuple[str, bool, str | None]:
     marker = matches[0]
     stripped = f"{text[:marker.start()]} {text[marker.end():]}"
     return _normalize_commodity_phrase(stripped), True, None
+
+
+def extract_pack_hint(text: str) -> tuple[bool, str | None]:
+    """Expose one explicit pack marker without inferring its denomination."""
+
+    matches = list(PACK_MARKER_PATTERN.finditer(text))
+    if len(matches) > 1:
+        return False, "❌ عبارت «پک» فقط یک بار در لفظ مجاز است"
+    return bool(matches), None
 
 
 def extract_trade_type(text: str) -> Tuple[Optional[str], Optional[str]]:
@@ -328,6 +342,14 @@ def extract_lot_sizes(text: str, quantity: int, price: int) -> Tuple[Optional[Li
     return lot_candidates, False, None
 
 
+def _pack_has_extra_numeric_parts(text: str, price: int) -> bool:
+    """Reject any numeric structure beyond the optional 100 count and price."""
+
+    residual = re.sub(r'\d+\s*(?:تا|عدد)', ' ', text, count=1)
+    residual = re.sub(rf'(?<!\d){re.escape(str(price))}(?!\d)', ' ', residual, count=1)
+    return re.search(r'\d+', residual) is not None
+
+
 async def find_commodity(
     text: str,
     *,
@@ -433,17 +455,28 @@ async def parse_offer_text(
 
     clean_text = clean_text or ""
     
-    # استخراج تعداد
+    pack_hint, pack_marker_error = extract_pack_hint(clean_text)
+    if pack_marker_error:
+        return None, ParseError(pack_marker_error)
+
+    # Pack quantity is a product invariant.  It may be omitted from compact
+    # text, but any explicit value must be exactly 100.
     quantity, error = extract_quantity(clean_text)
+    if pack_hint and error and "تعداد کالا یافت نشد" in error:
+        quantity, error = PACK_QUANTITY, None
     if error:
         return None, ParseError(error)
-    
-    # اعتبارسنجی تعداد
-    ts = get_trading_settings()
-    if quantity < ts.offer_min_quantity:
-        return None, ParseError(f"❌ حداقل تعداد باید {ts.offer_min_quantity} باشد")
-    if quantity > ts.offer_max_quantity:
-        return None, ParseError(f"❌ حداکثر تعداد می‌تواند {ts.offer_max_quantity} باشد")
+
+    if pack_hint:
+        if quantity != PACK_QUANTITY:
+            return None, ParseError(PACK_OFFER_SHAPE_ERROR)
+    else:
+        # Ordinary coin offers retain the configurable quantity policy.
+        ts = get_trading_settings()
+        if quantity < ts.offer_min_quantity:
+            return None, ParseError(f"❌ حداقل تعداد باید {ts.offer_min_quantity} باشد")
+        if quantity > ts.offer_max_quantity:
+            return None, ParseError(f"❌ حداکثر تعداد می‌تواند {ts.offer_max_quantity} باشد")
     
     # استخراج قیمت
     price, error = extract_price(clean_text)
@@ -451,9 +484,14 @@ async def parse_offer_text(
         return None, ParseError(error)
     
     # استخراج ترکیب خُرد
-    lot_sizes, is_wholesale, error = extract_lot_sizes(clean_text, quantity, price)
-    if error:
-        return None, ParseError(error)
+    if pack_hint:
+        if _pack_has_extra_numeric_parts(clean_text, price):
+            return None, ParseError(PACK_OFFER_SHAPE_ERROR)
+        lot_sizes, is_wholesale = None, True
+    else:
+        lot_sizes, is_wholesale, error = extract_lot_sizes(clean_text, quantity, price)
+        if error:
+            return None, ParseError(error)
     
     # «پ» اختیاری است و فقط intent تاریخ پایین را به لایهٔ inference منتقل
     # می‌کند. parser به‌خاطر نبود نام کالا هیچ کالایی، از جمله امام، انتخاب
@@ -461,16 +499,23 @@ async def parse_offer_text(
     commodity_text, low_date_hint, marker_error = extract_low_date_hint(clean_text)
     if marker_error:
         return None, ParseError(marker_error)
+    if pack_hint and low_date_hint:
+        return None, ParseError("❌ نشانگر تاریخ پایین برای آفر پک مجاز نیست")
 
     # Resolution metadata is always retained.  ``capture_commodity_resolution``
     # remains in the public signature for callers from the earlier shadow
     # rollout, but omission is never allowed to silently turn into Imam.
     del capture_commodity_resolution
-    commodity_id, commodity_name, commodity_resolution = await find_commodity(
-        commodity_text,
-        include_resolution=True,
-    )
-    if low_date_hint:
+    if pack_hint:
+        # Even an explicit phrase such as «پک نیم» is re-resolved from the
+        # submitted price. This prevents text and estimator denomination drift.
+        commodity_id, commodity_name, commodity_resolution = None, None, "PACK_HINT"
+    else:
+        commodity_id, commodity_name, commodity_resolution = await find_commodity(
+            commodity_text,
+            include_resolution=True,
+        )
+    if low_date_hint and not pack_hint:
         # Preserve a pre-existing explicit low-date alias such as «ربع پ» or
         # «ت پ».  If removing the marker changed the resolved commodity (or
         # left it unresolved), the original phrase was a catalog-level choice
@@ -506,4 +551,5 @@ async def parse_offer_text(
         settlement_type=settlement_type or SettlementType.CASH.value,
         commodity_resolution=commodity_resolution,
         low_date_hint=low_date_hint,
+        pack_hint=pack_hint,
     ), None
