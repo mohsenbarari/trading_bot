@@ -924,8 +924,8 @@
  * classes, layout, motion, and visual behavior. */
 [data-ui-system='v2'][data-ui-system='v2'] .ui-v2-bottom-nav.ui-v2-bottom-nav,
 [data-ui-system='v2-portal'][data-ui-system='v2-portal'] .ui-v2-bottom-nav.ui-v2-bottom-nav {
-  padding-inline: var(--ui-v2-spacing-12);
-  padding-block-end: calc(var(--ui-v2-spacing-12) + env(safe-area-inset-bottom, 0px));
+  padding-inline: 0;
+  padding-block-end: 0;
 }
 
 [data-ui-system='v2'][data-ui-system='v2'] .ui-v2-bottom-nav-bar.ui-v2-bottom-nav-bar,
@@ -933,8 +933,8 @@
   .ui-v2-bottom-nav-bar.ui-v2-bottom-nav-bar {
   min-height: var(--ui-v2-size-bottom-nav);
   gap: var(--ui-v2-spacing-4);
-  padding: var(--ui-v2-spacing-8) var(--ui-v2-spacing-4);
-  border-radius: var(--ui-v2-radius-panel);
+  padding: var(--ui-v2-spacing-4) var(--ui-v2-spacing-4) calc(var(--ui-v2-spacing-4) + env(safe-area-inset-bottom, 0px));
+  border-radius: 0;
 }
 
 [data-ui-system='v2'][data-ui-system='v2'] .ui-v2-bottom-nav-item.ui-v2-bottom-nav-item,

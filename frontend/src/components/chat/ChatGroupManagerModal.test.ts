@@ -142,7 +142,7 @@ describe('ChatGroupManagerModal.vue', () => {
     await profileButton!.trigger('click')
     expect(wrapper.emitted('open-public-profile')?.[0]).toEqual([{ id: 2, account_name: 'member2' }])
 
-    await wrapper.find('.manager-header .header-icon-btn').trigger('click')
+    await wrapper.find('.manager-header .ui-back-button').trigger('click')
     await flushPromises()
 
     const leaveButton = wrapper.findAll('.telegram-row').find((row) => row.text().includes('خروج از گروه'))
@@ -575,9 +575,7 @@ describe('ChatGroupManagerModal.vue', () => {
     expect(currentMembers.find((member) => member.user_id === 2)?.role).toBe('member')
     expect(wrapper.emitted('updated')).toHaveLength(3)
 
-    const headerButtons = wrapper.findAll('.manager-header .header-icon-btn')
-    expect(headerButtons[0]).toBeTruthy()
-    await headerButtons[0]!.trigger('click')
+    await wrapper.find('.manager-header .ui-back-button').trigger('click')
     await flushPromises()
 
     const addMembersEntry = wrapper.findAll('.telegram-row').find((row) => row.text().includes('افزودن عضو'))

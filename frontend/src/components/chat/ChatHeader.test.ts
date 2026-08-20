@@ -270,7 +270,9 @@ describe('ChatHeader.vue', () => {
       },
     })
 
+    expect(wrapper.get('.chat-header').attributes('dir')).toBe('rtl')
     expect(wrapper.get('.header-btn.back-btn').attributes('aria-label')).toBe('بازگشت')
+    expect(wrapper.get('.header-btn.back-btn').classes()).toContain('ui-back-button')
     expect(wrapper.get('button.header-btn[aria-label="جستجو"]').attributes('aria-label')).toBe('جستجو')
     expect(wrapper.get('.header-menu-container .header-btn').attributes('aria-label')).toBe('گزینه‌های بیشتر')
 

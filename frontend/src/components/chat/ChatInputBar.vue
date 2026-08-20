@@ -1335,7 +1335,8 @@ const sendMessage = () => {
   background: var(--messenger-surface-panel, #ffffff);
   gap: 0;
   border-top: none;
-  box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.05);
+  box-shadow: none;
+  border-top: 1px solid var(--messenger-border-subtle, rgba(60, 60, 67, 0.18));
   position: relative;
   z-index: 60;
   contain: layout paint;
@@ -1347,10 +1348,8 @@ const sendMessage = () => {
 
 .picker-transition-spacer {
   margin: 0 -12px 0;
-  background:
-    radial-gradient(circle at top right, rgba(51, 144, 236, 0.12), transparent 34%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 247, 251, 0.98));
-  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  background: var(--messenger-surface-muted, #f2f2f7);
+  border-top: 1px solid var(--messenger-border-subtle, rgba(60, 60, 67, 0.18));
   contain: layout paint;
 }
 
@@ -1434,11 +1433,11 @@ const sendMessage = () => {
   min-height: 24px; line-height: 24px; max-height: 200px; font-family: inherit; direction: rtl; text-align: right;
 }
 .input-container textarea::selection {
-  background: rgba(51, 144, 236, 0.28);
+  background: rgba(245, 158, 11, 0.28);
   color: #000000;
 }
 .input-container textarea::-moz-selection {
-  background: rgba(51, 144, 236, 0.28);
+  background: rgba(245, 158, 11, 0.28);
   color: #000000;
 }
 .input-container textarea::placeholder { color: #8E8E93; }

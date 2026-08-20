@@ -44,8 +44,8 @@ function getReplyPreviewText(messageType: string, content: string) {
 
 <style scoped>
 .reply-context {
-  border-right: 2px solid var(--messenger-chat-link, #3390ec);
-  background: rgba(51, 144, 236, 0.08);
+  border-right: 2px solid var(--messenger-chat-link, #f59e0b);
+  background: rgba(245, 158, 11, 0.08);
   border-radius: 4px;
   padding: 4px 8px;
   margin-bottom: 6px;
@@ -70,7 +70,7 @@ function getReplyPreviewText(messageType: string, content: string) {
 .reply-author {
   font-size: 13px;
   font-weight: 500;
-  color: var(--messenger-chat-link, #3390ec);
+  color: var(--messenger-chat-link, #f59e0b);
 }
 
 .reply-context.is-sent .reply-author {

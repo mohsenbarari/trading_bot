@@ -446,12 +446,12 @@ function onCanvasMouseDown(opts: any) {
     strokeWidth: 1,
     padding: 12,
     // Visible, finger-friendly corner/rotation controls.
-    cornerColor: '#3390ec',
+    cornerColor: '#f59e0b',
     cornerStrokeColor: '#ffffff',
     cornerSize: 22,
     cornerStyle: 'circle',
     transparentCorners: false,
-    borderColor: '#3390ec',
+    borderColor: '#f59e0b',
     borderScaleFactor: 2,
     borderDashArray: [6, 4],
     rotatingPointOffset: 36,
@@ -860,7 +860,7 @@ function cancel() {
 .stage :deep(.cropper-point) {
   width: 8px;
   height: 8px;
-  background-color: #3390ec;
+  background-color: #f59e0b;
   opacity: 1;
 }
 .stage :deep(.cropper-point::before) {
@@ -872,7 +872,7 @@ function cancel() {
 }
 .stage :deep(.cropper-line) {
   /* Edge lines also need a generous touch zone. */
-  background-color: #3390ec;
+  background-color: #f59e0b;
   opacity: 0.5;
 }
 .stage :deep(.cropper-line.line-n),
@@ -927,7 +927,7 @@ function cancel() {
   cursor: pointer;
   white-space: nowrap;
 }
-.ratio-chip.active { background: #3390ec; border-color: #3390ec; }
+.ratio-chip.active { background: #f59e0b; border-color: #f59e0b; }
 
 .color-dot {
   flex-shrink: 0;
@@ -941,7 +941,7 @@ function cancel() {
 .color-dot.active {
   border-color: #fff;
   transform: scale(1.1);
-  box-shadow: 0 0 0 2px rgba(51, 144, 236, 0.7);
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.7);
 }
 
 .size-group {
@@ -1018,17 +1018,17 @@ function cancel() {
   font-size: 13px;
 }
 .mode-tab.active {
-  background: rgba(51, 144, 236, 0.18);
+  background: rgba(245, 158, 11, 0.18);
   color: #fff;
 }
 .mode-tab.armed {
-  background: #3390ec;
+  background: #f59e0b;
   color: #fff;
   animation: tab-pulse 1.4s ease-in-out infinite;
 }
 @keyframes tab-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(51, 144, 236, 0.55); }
-  50% { box-shadow: 0 0 0 6px rgba(51, 144, 236, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.55); }
+  50% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
 }
 .mode-tab.disabled,
 .mode-tab:disabled {
@@ -1058,7 +1058,7 @@ function cancel() {
 .action-secondary { background: rgba(255, 255, 255, 0.12); color: #fff; }
 .action-secondary:active { background: rgba(255, 255, 255, 0.18); }
 
-.action-primary { background: #3390ec; color: #fff; }
+.action-primary { background: #f59e0b; color: #fff; }
 .action-primary:disabled { opacity: 0.6; cursor: default; }
 .action-primary:active:not(:disabled) { background: #2a7fd4; }
 </style>

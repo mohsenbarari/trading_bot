@@ -177,7 +177,7 @@
     --ds-transition-normal: 0.24s;
 
     /* App shell */
-    --ds-app-background: linear-gradient(160deg, #fefce8 0%, #ffffff 40%, #fffbeb 100%);
+    --ds-app-background: var(--ds-native-grouped-bg);
 
     /* Trade/status semantics */
     --ds-trade-buy-bg: rgba(22, 163, 74, 0.12);

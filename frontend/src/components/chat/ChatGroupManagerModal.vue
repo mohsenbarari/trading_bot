@@ -1332,8 +1332,8 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 
 .selection-banner {
   justify-content: space-between;
-  background: linear-gradient(135deg, rgba(51, 144, 236, 0.16), rgba(14, 165, 233, 0.08));
-  border: 1px solid rgba(51, 144, 236, 0.16);
+  background: var(--ds-primary-50, #fffbeb);
+  border: 1px solid var(--ds-primary-200, #fde68a);
   color: #0f172a;
   font-weight: 800;
 }
@@ -1406,7 +1406,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
   border-radius: var(--messenger-radius-sheet, 28px);
   background: rgba(255, 255, 255, 0.88);
   border: 1px solid rgba(148, 163, 184, 0.14);
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+  box-shadow: none;
 }
 
 .hero-card {
@@ -1553,15 +1553,16 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 .telegram-row {
   width: 100%;
   border: 0;
-  border-radius: var(--messenger-radius-panel, 18px);
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(148, 163, 184, 0.12);
-  padding: 12px 14px;
+  border-radius: 0;
+  background: var(--messenger-surface-panel, #ffffff);
+  border-bottom: 1px solid var(--messenger-border-subtle, rgba(60, 60, 67, 0.18));
+  padding: 12px 16px;
   display: flex;
   align-items: center;
   gap: 12px;
   text-align: right;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+  box-shadow: none;
+  min-height: var(--messenger-list-row-min-height, 64px);
 }
 
 .telegram-row.selectable,
@@ -1570,8 +1571,8 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 }
 
 .telegram-row.selectable.selected {
-  border-color: rgba(51, 144, 236, 0.28);
-  background: rgba(240, 248, 255, 0.96);
+  border-color: transparent;
+  background: var(--ds-primary-50, #fffbeb);
 }
 
 .row-copy {
@@ -1642,8 +1643,8 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 }
 
 .row-icon.blue {
-  background: rgba(51, 144, 236, 0.14);
-  color: #0369a1;
+  background: rgba(245, 158, 11, 0.14);
+  color: var(--ds-primary-700, #b45309);
 }
 
 .row-icon.muted {
@@ -1677,7 +1678,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 
 .manager-action-group {
   padding: 14px;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
+  box-shadow: none;
 }
 
 .manager-action-group.danger-zone {
@@ -1740,8 +1741,8 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 }
 
 .ghost-action.primary {
-  background: rgba(51, 144, 236, 0.12);
-  color: #0369a1;
+  background: var(--ds-primary-50, #fffbeb);
+  color: var(--ds-primary-700, #b45309);
 }
 
 .ghost-action.danger,

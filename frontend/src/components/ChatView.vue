@@ -4290,22 +4290,21 @@ defineExpose({
   background: rgba(241, 245, 249, 0.92);
 }
 
-/* Header - Telegram Style Glass */
 .chat-header {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  height: 56px;
+  height: var(--messenger-header-height, 56px);
   z-index: 1000;
   display: flex;
   align-items: center;
   padding: 0 8px;
-  background: #ffffff; /* Solid white Telegram header */
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-  border-bottom: none;
+  background: rgba(242, 242, 247, 0.92);
+  box-shadow: none;
+  border-bottom: 1px solid var(--messenger-border-subtle, rgba(60, 60, 67, 0.18));
   gap: 8px;
-  direction: ltr; /* Force LTR layout as requested */
+  direction: rtl;
 }
 
 /* Header Buttons */
@@ -4355,7 +4354,6 @@ defineExpose({
   cursor: pointer;
 }
 
-/* Header User Info */
 .header-user-info {
   display: flex;
   flex-direction: column;
@@ -4363,36 +4361,36 @@ defineExpose({
   margin: 0;
   min-width: 0;
   flex: 1;
-  align-items: flex-start; /* Align Left */
-  padding-left: 4px; /* Padding on left for LTR */
+  align-items: flex-start;
+  padding-inline-start: 4px;
   cursor: pointer;
 }
 
 .header-name {
   font-size: 16px;
   font-weight: 600;
-  color: #000000;
+  color: var(--messenger-text-strong, #1c1c1e);
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   width: 100%;
-  text-align: left; /* Align Left */
+  text-align: start;
 }
 
 .header-status {
   font-size: 13px;
-  color: #8E8E93;
+  color: var(--messenger-text-muted, #8e8e93);
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   width: 100%;
-  text-align: left; /* Align Left */
+  text-align: start;
 }
 
 .header-status.online {
-  color: #f59e0b; /* Telegram blue for online status */
+  color: var(--messenger-accent, #f59e0b);
 }
 
 /* Header Spacer */
@@ -4710,7 +4708,7 @@ defineExpose({
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #f59e0b, #3390ec);
+  background: linear-gradient(135deg, #f59e0b, #f59e0b);
   animation: history-loading-pulse calc(var(--messenger-motion-standard, 180ms) * 7) ease-in-out infinite;
 }
 
@@ -5315,8 +5313,8 @@ defineExpose({
 
 /* Reply Styles */
 .reply-context {
-  border-right: 2px solid #3390ec;
-  background: rgba(51, 144, 236, 0.08); /* light blue */
+  border-right: 2px solid #f59e0b;
+  background: rgba(245, 158, 11, 0.08); /* light blue */
   border-radius: 4px;
   padding: 4px 8px;
   margin-bottom: 6px;
@@ -5335,7 +5333,7 @@ defineExpose({
 .reply-author {
   font-size: 13px;
   font-weight: 500;
-  color: #3390ec;
+  color: #f59e0b;
 }
 
 .message-bubble.sent .reply-author {
@@ -5374,14 +5372,14 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #3390ec;
+  color: #f59e0b;
 }
 
 .reply-banner-content {
   flex: 1;
   display: flex;
   flex-direction: column;
-  border-right: 2px solid #3390ec;
+  border-right: 2px solid #f59e0b;
   padding-right: 8px;
   justify-content: center;
   overflow: hidden;
@@ -5390,7 +5388,7 @@ defineExpose({
 .reply-banner-author {
   font-size: 14px;
   font-weight: 500;
-  color: #3390ec;
+  color: #f59e0b;
   line-height: 1.2;
   margin-bottom: 2px;
 }
@@ -5604,7 +5602,7 @@ defineExpose({
   content: '';
   position: absolute;
   top: -4px; right: -16px; bottom: -4px; left: -16px;
-  background-color: rgba(51, 144, 236, 0.15); /* Universal Telegram Select Overlay */
+  background-color: rgba(245, 158, 11, 0.15); /* Universal Telegram Select Overlay */
   pointer-events: none;
   z-index: -1; /* Behind the bubble but over the background */
   border-radius: 6px;
@@ -5619,7 +5617,7 @@ defineExpose({
   cursor: pointer;
 }
 .forward-icon {
-  color: #3390ec;
+  color: #f59e0b;
 }
 .message-bubble.sent .forward-icon {
   color: #43A047;
@@ -5631,7 +5629,7 @@ defineExpose({
 .forward-title {
   font-size: 13px;
   font-weight: 500;
-  color: #3390ec;
+  color: #f59e0b;
   line-height: 1.2;
 }
 .message-bubble.sent .forward-title {
@@ -5689,11 +5687,11 @@ defineExpose({
 }
 
 .selection-action-btn.primary {
-  color: #3390ec;
+  color: #f59e0b;
 }
 
 .selection-action-btn.primary:hover {
-  background: rgba(51, 144, 236, 0.1);
+  background: rgba(245, 158, 11, 0.1);
   color: #1d6fc2;
 }
 

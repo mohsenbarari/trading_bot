@@ -127,7 +127,7 @@ function highlightText(text: string | undefined) {
 
 /* The highlighted text */
 :deep(.s-highlight) {
-  color: #3390ec;
+  color: #f59e0b;
   font-weight: 500;
 }
 

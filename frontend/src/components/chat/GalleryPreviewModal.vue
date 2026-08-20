@@ -335,7 +335,7 @@ function cancelAll() {
   width: 100%;
   padding: 13px 16px;
   border-radius: 12px;
-  background: #3390ec;
+  background: #f59e0b;
   color: #fff;
   border: none;
   font-size: 14px;

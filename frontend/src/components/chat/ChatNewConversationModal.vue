@@ -2,6 +2,7 @@
 import { ref, onMounted, watch } from 'vue'
 import LoadingSkeleton from '../LoadingSkeleton.vue'
 import ChatUserListRow from './ChatUserListRow.vue'
+import AppBackButton from '../ui/AppBackButton.vue'
 import { UsersRound } from 'lucide-vue-next'
 import { apiFetchJson } from '../../utils/auth'
 import { getAccountantOwnerBadge, getChatRoleBadge } from '../../utils/chatRoleBadges'
@@ -140,12 +141,7 @@ function handleUserClick(user: SearchUser) {
       
       <!-- Header -->
       <div class="new-chat-header">
-        <button class="icon-btn back-btn" v-ripple @click="$emit('close')">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="19" y1="12" x2="5" y2="12"></line>
-            <polyline points="12 19 5 12 12 5"></polyline>
-          </svg>
-        </button>
+        <AppBackButton class="icon-btn back-btn" aria-label="بازگشت" @click="$emit('close')" />
         <span class="header-title">شروع مکالمه جدید</span>
       </div>
 
@@ -208,7 +204,7 @@ function handleUserClick(user: SearchUser) {
   left: 0;
   right: 0;
   bottom: 0;
-  background: white;
+  background: var(--messenger-surface-page, #f2f2f7);
   z-index: 1000;
   display: flex;
   flex-direction: column;
@@ -231,10 +227,11 @@ function handleUserClick(user: SearchUser) {
 .new-chat-header {
   display: flex;
   align-items: center;
-  height: 56px;
+  height: var(--messenger-header-height, 56px);
   padding: 0 8px;
-  background: white;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  background: rgba(242, 242, 247, 0.92);
+  box-shadow: none;
+  border-bottom: 1px solid var(--messenger-border-subtle, rgba(60, 60, 67, 0.18));
   flex-shrink: 0;
 }
 
@@ -262,7 +259,7 @@ function handleUserClick(user: SearchUser) {
 
 .search-area {
   padding: 12px 16px;
-  background: white;
+  background: var(--messenger-surface-page, #f2f2f7);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -277,8 +274,8 @@ function handleUserClick(user: SearchUser) {
   height: var(--ds-native-row-min-height, 48px);
   border: 0;
   border-radius: 12px;
-  background: rgba(51, 144, 236, 0.08);
-  color: #2586e8;
+  background: var(--ds-primary-50, #fffbeb);
+  color: var(--ds-primary-700, #b45309);
   font: inherit;
   font-weight: 700;
   cursor: pointer;
@@ -287,7 +284,7 @@ function handleUserClick(user: SearchUser) {
 }
 
 .new-group-action:hover {
-  background: rgba(51, 144, 236, 0.14);
+  background: var(--ds-primary-100, #fef3c7);
 }
 
 .new-chat-user-subtitle {
@@ -340,7 +337,7 @@ function handleUserClick(user: SearchUser) {
   touch-action: pan-y;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  background: white;
+  background: var(--messenger-surface-panel, #ffffff);
 }
 
 .empty-state {

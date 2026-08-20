@@ -1840,8 +1840,8 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 }
 .swipe-reply-icon.visible { opacity: 1; }
 .swipe-reply-icon.armed {
-  color: #3390ec;
-  box-shadow: 0 12px 28px rgba(51, 144, 236, 0.22);
+  color: #f59e0b;
+  box-shadow: 0 12px 28px rgba(245, 158, 11, 0.22);
 }
 .reply-icon-wrapper { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 .swipe-reply-icon.sent-side { right: 12px; }
@@ -1915,7 +1915,7 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   padding: 0;
   border: 0;
   background: transparent;
-  color: #3390ec;
+  color: #f59e0b;
   font: inherit;
   font-size: 12px;
   font-weight: 800;
@@ -1986,9 +1986,9 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 }
 
 .reaction-chip.is-own {
-  background: linear-gradient(180deg, rgba(51, 144, 236, 0.18), rgba(51, 144, 236, 0.12));
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.18), rgba(245, 158, 11, 0.12));
   color: #1d4ed8;
-  border-color: rgba(51, 144, 236, 0.26);
+  border-color: rgba(245, 158, 11, 0.26);
   box-shadow: 0 3px 10px rgba(37, 99, 235, 0.14);
   transform: translateY(-1px);
 }
@@ -2133,7 +2133,7 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 .doc-icon.doc-word { background: linear-gradient(135deg, #1e88e5, #1565c0); }
 .doc-icon.doc-generic { background: linear-gradient(135deg, #78909c, #546e7a); }
 .doc-icon.doc-uploading {
-  background: var(--messenger-chat-link, #3390ec);
+  background: var(--messenger-chat-link, #f59e0b);
   position: relative;
 }
 .doc-cancel-icon {
@@ -2180,14 +2180,14 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   margin-top: 2px;
 }
 .doc-download-icon {
-  color: var(--messenger-chat-link, #3390ec);
+  color: var(--messenger-chat-link, #f59e0b);
   flex-shrink: 0;
 }
 .doc-share-btn {
   flex-shrink: 0;
   background: transparent;
   border: none;
-  color: var(--messenger-chat-link, #3390ec);
+  color: var(--messenger-chat-link, #f59e0b);
   width: 32px;
   height: 32px;
   border-radius: var(--messenger-radius-control, 8px);
@@ -2198,8 +2198,8 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   transition: background-color 0.15s ease;
   margin-inline-start: 4px;
 }
-.doc-share-btn:hover { background-color: rgba(51, 144, 236, 0.12); }
-.doc-share-btn:active { background-color: rgba(51, 144, 236, 0.22); }
+.doc-share-btn:hover { background-color: rgba(245, 158, 11, 0.12); }
+.doc-share-btn:active { background-color: rgba(245, 158, 11, 0.22); }
 
 /* Inline share button overlay for image/video bubbles */
 .media-share-btn {
@@ -2250,7 +2250,7 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 .selected-message { position: relative; z-index: 10; }
 .selected-message::before {
   content: ''; position: absolute; top: -4px; right: -16px; bottom: -4px; left: -16px;
-  background-color: rgba(51, 144, 236, 0.15); pointer-events: none; z-index: -1; border-radius: var(--messenger-radius-control, 8px);
+  background-color: rgba(245, 158, 11, 0.15); pointer-events: none; z-index: -1; border-radius: var(--messenger-radius-control, 8px);
 }
 
 /* Base Media Styles */
@@ -2315,7 +2315,7 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 }
 
 :deep(.message-mention) {
-  color: var(--messenger-chat-link, #3390ec);
+  color: var(--messenger-chat-link, #f59e0b);
   font-weight: 700;
   text-decoration: none;
   cursor: pointer;
@@ -2459,9 +2459,9 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   direction: ltr; /* Force LTR for audio player */
 }
 .msg-voice.is-sent {
-  --voice-accent: #3390ec;
+  --voice-accent: #f59e0b;
   --voice-accent-top: #9fd0ff;
-  --voice-track-bottom: rgba(51, 144, 236, 0.2);
+  --voice-track-bottom: rgba(245, 158, 11, 0.2);
   --voice-track-top: rgba(255, 255, 255, 0.62);
 }
 .voice-play-btn {

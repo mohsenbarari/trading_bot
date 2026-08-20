@@ -14,7 +14,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div class="search-bottom-bar" dir="ltr">
+  <div class="search-bottom-bar" dir="rtl">
     <!-- Left side: Calendar (Optional feature placeholder) -->
     <button class="nav-btn" v-if="!showInChatSearchList">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
@@ -69,10 +69,10 @@ const emit = defineEmits<{
   height: 56px;
   background: white;
   padding: 0 12px;
-  border-top: 1px solid #e0e0e0;
+  border-top: 1px solid var(--messenger-border-subtle, rgba(60, 60, 67, 0.18));
   width: 100%;
   flex-shrink: 0;
-  direction: ltr; /* Ensure layout remains exactly as expected */
+  direction: rtl;
 }
 
 .search-count-badge {
@@ -112,7 +112,7 @@ const emit = defineEmits<{
 
 .nav-btn:active {
   background: rgba(0, 0, 0, 0.1);
-  color: #3390ec;
+  color: var(--messenger-accent, #f59e0b);
 }
 
 .toggle-list-btn {

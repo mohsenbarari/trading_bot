@@ -245,7 +245,7 @@ watch(() => props.currentUserId, () => {
   border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: 24px 24px 0 0;
   background:
-    radial-gradient(circle at top right, rgba(51, 144, 236, 0.12), transparent 34%),
+    radial-gradient(circle at top right, rgba(245, 158, 11, 0.12), transparent 34%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 247, 251, 0.98));
   box-shadow: 0 -10px 28px rgba(15, 23, 42, 0.12);
   backdrop-filter: blur(18px);
@@ -334,7 +334,7 @@ watch(() => props.currentUserId, () => {
 
 .emoji-cell:active,
 .emoji-cell:hover {
-  background: rgba(51, 144, 236, 0.12);
+  background: rgba(245, 158, 11, 0.12);
   transform: translateY(-1px);
 }
 
@@ -368,8 +368,8 @@ watch(() => props.currentUserId, () => {
 
 .picker-backspace:hover,
 .picker-backspace:active {
-  background: rgba(51, 144, 236, 0.14);
-  color: #3390ec;
+  background: rgba(245, 158, 11, 0.14);
+  color: #f59e0b;
   transform: translateY(-1px);
 }
 
@@ -395,8 +395,8 @@ watch(() => props.currentUserId, () => {
 
 .picker-tab.active {
   background: #ffffff;
-  color: #3390ec;
-  box-shadow: 0 8px 16px rgba(51, 144, 236, 0.16);
+  color: #f59e0b;
+  box-shadow: 0 8px 16px rgba(245, 158, 11, 0.16);
 }
 
 .picker-tab:active,

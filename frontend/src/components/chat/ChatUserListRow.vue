@@ -109,16 +109,17 @@ function handleClick(event: MouseEvent) {
 .chat-user-row {
   width: 100%;
   border: 0;
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(148, 163, 184, 0.12);
-  padding: 12px 14px;
+  border-radius: 0;
+  background: var(--messenger-surface-panel, #ffffff);
+  border-bottom: 1px solid var(--messenger-border-subtle, rgba(60, 60, 67, 0.18));
+  padding: 12px 16px;
   display: flex;
   align-items: center;
   gap: 12px;
   text-align: right;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
-  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: none;
+  min-height: var(--messenger-list-row-min-height, 64px);
+  transition: background-color 0.2s ease;
 }
 
 .chat-user-row.is-interactive {
@@ -126,11 +127,11 @@ function handleClick(event: MouseEvent) {
 }
 
 .chat-user-row.is-interactive:hover {
-  background: rgba(248, 250, 252, 0.98);
+  background: var(--messenger-action-hover-bg, rgba(60, 60, 67, 0.08));
 }
 
 .chat-user-row.is-selected {
-  border-color: var(--ds-primary-200, #fde68a);
+  border-color: transparent;
   background: var(--ds-primary-50, #fffbeb);
 }
 
@@ -227,8 +228,8 @@ function handleClick(event: MouseEvent) {
 }
 
 .chat-user-row__badge.target {
-  background: rgba(51, 144, 236, 0.12);
-  color: #0369a1;
+  background: rgba(245, 158, 11, 0.14);
+  color: var(--ds-primary-700, #b45309);
 }
 
 .chat-user-row__badge.danger {
@@ -237,8 +238,8 @@ function handleClick(event: MouseEvent) {
 }
 
 .chat-user-row__badge.info {
-  background: rgba(59, 130, 246, 0.12);
-  color: #1d4ed8;
+  background: rgba(245, 158, 11, 0.14);
+  color: var(--ds-primary-700, #b45309);
 }
 
 .chat-user-row__trailing {
@@ -280,8 +281,8 @@ function handleClick(event: MouseEvent) {
 }
 
 :deep(.chat-user-row__action-btn--primary) {
-  background: rgba(219, 234, 254, 0.96);
-  color: #1d4ed8;
+  background: var(--ds-primary-100, #fef3c7);
+  color: var(--ds-primary-700, #b45309);
 }
 
 :deep(.chat-user-row__action-btn--danger) {

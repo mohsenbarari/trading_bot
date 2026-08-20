@@ -50,7 +50,7 @@ defineEmits<{
 }
 
 .forward-icon {
-  color: var(--messenger-chat-link, #3390ec);
+  color: var(--messenger-chat-link, #f59e0b);
 }
 
 .forwarded-banner.is-sent .forward-icon {
@@ -65,7 +65,7 @@ defineEmits<{
 .forward-title {
   font-size: 13px;
   font-weight: 500;
-  color: var(--messenger-chat-link, #3390ec);
+  color: var(--messenger-chat-link, #f59e0b);
   line-height: 1.2;
 }
 

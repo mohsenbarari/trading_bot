@@ -65,9 +65,7 @@ const chatRows = [
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background:
-    radial-gradient(circle at top left, rgba(255, 255, 255, 0.78), transparent 34%),
-    linear-gradient(180deg, #edf3f5 0%, #e4ecef 100%);
+  background: var(--messenger-surface-page, #f2f2f7);
 }
 
 .loader-ambient {
@@ -91,7 +89,7 @@ const chatRows = [
   height: 260px;
   bottom: -110px;
   left: -78px;
-  background: radial-gradient(circle, rgba(51, 144, 236, 0.18), rgba(51, 144, 236, 0));
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.16), rgba(245, 158, 11, 0));
   animation-delay: -4s;
 }
 
@@ -141,13 +139,13 @@ const chatRows = [
   height: 10px;
   margin-left: -5px;
   border-radius: 50%;
-  background: linear-gradient(135deg, rgba(28, 118, 204, 0.95), rgba(97, 178, 252, 0.85));
-  box-shadow: 0 0 14px rgba(51, 144, 236, 0.26);
+  background: var(--messenger-accent, #f59e0b);
+  box-shadow: none;
 }
 
 .core-ring-inner {
   inset: 12px;
-  border-color: rgba(18, 84, 145, 0.08);
+  border-color: rgba(180, 83, 9, 0.12);
   background: rgba(255, 255, 255, 0.42);
   animation: reverse-spin 6s linear infinite;
 }
@@ -158,8 +156,8 @@ const chatRows = [
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #c8913b, #3390ec);
-  box-shadow: 0 0 22px rgba(51, 144, 236, 0.2);
+  background: var(--messenger-accent, #f59e0b);
+  box-shadow: none;
   animation: breathe 1.8s ease-in-out infinite;
 }
 

@@ -812,15 +812,15 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   padding: 0 0 112px;
   scrollbar-width: thin;
-  scrollbar-color: rgba(0, 122, 255, 0.24) transparent;
+  scrollbar-color: rgba(60, 60, 67, 0.18) transparent;
 }
 
 .conversations-list::-webkit-scrollbar {
-  width: 6px;
+  width: 4px;
 }
 
 .conversations-list::-webkit-scrollbar-thumb {
-  background: rgba(51, 144, 236, 0.24);
+  background: rgba(60, 60, 67, 0.18);
   border-radius: 999px;
 }
 
@@ -898,13 +898,13 @@ onBeforeUnmount(() => {
 .conversation-window-more {
   width: 100%;
   min-height: var(--ds-native-row-min-height, 48px);
-  border: 1px solid rgba(51, 144, 236, 0.18);
-  border-radius: var(--messenger-radius-panel, 18px);
-  background: rgba(255, 255, 255, 0.78);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--accent);
   font: inherit;
   font-size: 0.82rem;
-  font-weight: 900;
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -1079,9 +1079,9 @@ onBeforeUnmount(() => {
 }
 
 .conv-role-badge.role-accountant {
-  border-color: rgba(51, 144, 236, 0.24);
-  background: rgba(51, 144, 236, 0.1);
-  color: #1d4ed8;
+  border-color: rgba(245, 158, 11, 0.24);
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--ds-primary-700, #b45309);
 }
 
 .conv-role-badge.role-customer {

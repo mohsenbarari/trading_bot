@@ -313,10 +313,10 @@
                   v-if="detectedLocationLatLng && detectedLocationAccuracyM"
                   :lat-lng="detectedLocationLatLng"
                   :radius="detectedLocationAccuracyM"
-                  :color="'#3390ec'"
+                  :color="'#f59e0b'"
                   :weight="1"
                   :opacity="0.35"
-                  :fill-color="'#3390ec'"
+                  :fill-color="'#f59e0b'"
                   :fill-opacity="0.14"
                 />
                 <l-circle-marker
@@ -2523,7 +2523,7 @@ onBeforeUnmount(() => {
   border: none;
   border-radius: 999px;
   padding: 10px 16px;
-  background: #3390ec;
+  background: #f59e0b;
   color: white;
   font-size: 14px;
   font-weight: 600;
@@ -2960,8 +2960,8 @@ onBeforeUnmount(() => {
   transition: color var(--messenger-motion-standard, 180ms), border-color var(--messenger-motion-standard, 180ms);
 }
 .tab-btn.active {
-  color: #3390ec;
-  border-bottom-color: #3390ec;
+  color: #f59e0b;
+  border-bottom-color: #f59e0b;
 }
 .tab-icon { display: flex; align-items: center; }
 
@@ -3052,7 +3052,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #3390ec;
+  color: #f59e0b;
   box-shadow: 0 2px 8px rgba(0,0,0,0.15);
   cursor: pointer;
   transition: all 0.2s;
@@ -3222,7 +3222,7 @@ onBeforeUnmount(() => {
   gap: 8px;
   width: 100%;
   padding: 12px;
-  background: #3390ec;
+  background: #f59e0b;
   color: white;
   border: none;
   border-radius: 12px;

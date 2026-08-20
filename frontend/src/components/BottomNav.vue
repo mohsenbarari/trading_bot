@@ -472,24 +472,25 @@ const fabButtonLabel = computed(() => (isExpanded.value ? 'بستن ناوبری
   left: 0;
   right: 0;
   z-index: 50;
-  padding: 0 0.75rem calc(0.75rem + var(--ds-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
+  padding: 0;
   pointer-events: none;
 }
 
 .bottom-nav-bar {
-  max-width: var(--ds-page-max-width);
-  margin: 0 auto;
-  min-height: 60px;
+  max-width: none;
+  margin: 0;
+  min-height: 56px;
   display: flex;
   align-items: center;
   justify-content: space-around;
-  padding: 0.5rem 0.25rem;
-  border-radius: var(--ds-radius-xl);
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+  padding: 0.25rem 0.25rem calc(0.25rem + var(--ds-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
+  border-radius: 0;
+  background: rgba(249, 249, 249, 0.94);
+  backdrop-filter: saturate(180%) blur(16px);
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
+  border: 0;
+  border-top: 1px solid var(--ds-native-hairline, rgba(60, 60, 67, 0.18));
+  box-shadow: none;
   pointer-events: auto;
 }
 
@@ -566,7 +567,7 @@ const fabButtonLabel = computed(() => (isExpanded.value ? 'بستن ناوبری
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #3b82f6;
+  background: var(--ds-primary-500, #f59e0b);
 }
 
 /* ═══ Unread Badges ═══ */

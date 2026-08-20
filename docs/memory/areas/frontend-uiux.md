@@ -4,6 +4,7 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Decisions
 
+- 2026-08-20 | Messenger chrome joined the native language: RTL header + shared back, amber instead of Telegram blue, inset list rows, edge-to-edge tab bar, flat grouped page background. Market feed and Telegram-connect brand stay frozen.
 - 2026-08-20 | Page back is one control: 48px ghost, chevron right, leading/right of the header. Parent name may sit beside it. Market stays frozen.
 - 2026-08-20 | Buttons share one role map: primary filled CTA at the bottom, secondary/cancel beside or above, ghost for inline/header, danger filled only in confirm. Form reset is a text danger under save. Market trade buttons stay frozen.
 - 2026-08-20 | Deep scan found leftover 44px profile header and Telegram-blue messenger chrome. Identity header is 48px; messenger accent/link/sent map to product amber. Market feed stays frozen.

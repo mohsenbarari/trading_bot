@@ -1520,8 +1520,8 @@ onBeforeUnmount(() => {
 
 .selection-banner {
   justify-content: space-between;
-  background: linear-gradient(135deg, rgba(51, 144, 236, 0.16), rgba(14, 165, 233, 0.08));
-  border: 1px solid rgba(51, 144, 236, 0.16);
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.16), rgba(14, 165, 233, 0.08));
+  border: 1px solid rgba(245, 158, 11, 0.16);
   color: #0f172a;
   font-weight: 800;
 }
@@ -1553,8 +1553,8 @@ onBeforeUnmount(() => {
 }
 
 .select-all-toggle.active {
-  border-color: rgba(51, 144, 236, 0.24);
-  box-shadow: 0 0 0 4px rgba(51, 144, 236, 0.08);
+  border-color: rgba(245, 158, 11, 0.24);
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.08);
 }
 
 .primary-chip {
@@ -1786,8 +1786,8 @@ onBeforeUnmount(() => {
 }
 
 .row-check.active {
-  border-color: #3390ec;
-  background: #3390ec;
+  border-color: #f59e0b;
+  background: #f59e0b;
 }
 
 .row-icon {
@@ -1811,7 +1811,7 @@ onBeforeUnmount(() => {
 }
 
 .row-icon.blue {
-  background: rgba(51, 144, 236, 0.14);
+  background: rgba(245, 158, 11, 0.14);
   color: #0369a1;
 }
 

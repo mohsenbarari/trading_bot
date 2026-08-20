@@ -419,8 +419,8 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
 
 .reaction-dropdown-toggle:active,
 .reaction-dropdown-toggle:hover {
-  background: rgba(51, 144, 236, 0.1);
-  color: #2563eb;
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--ds-primary-700, #b45309);
 }
 
 .reaction-btn {
@@ -444,8 +444,8 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
 }
 
 .reaction-btn.is-active {
-  background: linear-gradient(180deg, rgba(51, 144, 236, 0.18), rgba(51, 144, 236, 0.12));
-  border-color: rgba(51, 144, 236, 0.25);
+  background: var(--ds-primary-50, #fffbeb);
+  border-color: var(--ds-primary-200, #fde68a);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
 }
 
@@ -455,7 +455,7 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
 
 .reaction-btn:active {
   transform: scale(0.94);
-  background: rgba(51, 144, 236, 0.14);
+  background: rgba(245, 158, 11, 0.14);
 }
 
 .reaction-dropdown-enter-active,

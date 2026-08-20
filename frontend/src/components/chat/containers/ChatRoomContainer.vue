@@ -374,7 +374,7 @@ const useVirtualTimeline = computed(() => {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #f59e0b, #3390ec);
+  background: linear-gradient(135deg, #f59e0b, #f59e0b);
   animation: history-loading-pulse calc(var(--messenger-motion-standard, 180ms) * 7) ease-in-out infinite;
 }
 
@@ -588,11 +588,11 @@ const useVirtualTimeline = computed(() => {
 }
 
 .selection-action-btn.primary {
-  color: #3390ec;
+  color: #f59e0b;
 }
 
 .selection-action-btn.primary:hover {
-  background: rgba(51, 144, 236, 0.1);
+  background: rgba(245, 158, 11, 0.1);
   color: #1d6fc2;
 }
 

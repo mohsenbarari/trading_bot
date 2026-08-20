@@ -1,12 +1,12 @@
 <template>
-  <div class="chat-header">
+  <div class="chat-header" dir="rtl">
     <template v-if="!isSelectionMode">
-      <!-- Back Button -->
-      <button class="header-btn back-btn" type="button" aria-label="بازگشت" v-ripple @click="$emit('back')" v-if="!isSearchActive">
-        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M19 12H5M12 19l-7-7 7-7"/>
-        </svg>
-      </button>
+      <AppBackButton
+        v-if="!isSearchActive"
+        class="header-btn back-btn"
+        aria-label="بازگشت"
+        @click="$emit('back')"
+      />
       
       <!-- Avatar + User Info (when in chat and not searching) -->
       <template v-if="selectedUserId && !isSearchActive">
@@ -84,12 +84,11 @@
       
       <!-- Search Bar Overlay -->
       <div v-if="isSearchActive" class="search-bar-container">
-         <button class="header-btn mobile-back-btn" v-ripple @click="$emit('toggle-search')">
-           <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-             <line x1="19" y1="12" x2="5" y2="12"></line>
-             <polyline points="12 19 5 12 12 5"></polyline>
-           </svg>
-         </button>
+         <AppBackButton
+           class="header-btn mobile-back-btn"
+           aria-label="بازگشت"
+           @click="$emit('toggle-search')"
+         />
          <input 
             id="search-input"
             v-model="internalSearchQuery" 
@@ -222,6 +221,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { Megaphone, MoreVertical, Search, Shield, UsersRound } from 'lucide-vue-next'
+import AppBackButton from '../ui/AppBackButton.vue'
 import { discardBackState, popBackState, pushBackState } from '../../composables/useBackButton'
 import { buildChatFileUrl, getAvatarInitial } from '../../utils/chatFiles'
 import { formatIranDateTime } from '../../utils/iranTime'
@@ -433,7 +433,7 @@ function formatDateForSeparator(dateString: string) {
   box-shadow: none;
   border-bottom: 1px solid var(--messenger-border-subtle, rgba(60, 60, 67, 0.18));
   gap: 8px;
-  direction: ltr; /* Force LTR layout */
+  direction: rtl;
 }
 
 .header-btn {
@@ -464,16 +464,12 @@ function formatDateForSeparator(dateString: string) {
   flex: 1;
 }
 
-.header-identity.direct-header-identity {
-  flex-direction: row-reverse;
-}
-
 .header-avatar {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #fbbf24, var(--messenger-accent, #f59e0b));
-  color: white;
+  background: var(--messenger-accent, #f59e0b);
+  color: var(--ds-on-primary, #111827);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -514,8 +510,8 @@ function formatDateForSeparator(dateString: string) {
   justify-content: center;
   min-width: 0;
   flex: 1 1 auto;
-  align-items: flex-end;
-  padding-right: 4px;
+  align-items: flex-start;
+  padding-inline-start: 4px;
   cursor: pointer;
 }
 
@@ -524,6 +520,7 @@ function formatDateForSeparator(dateString: string) {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  direction: ltr;
   width: 100%;
   justify-content: flex-end;
 }
@@ -577,7 +574,7 @@ function formatDateForSeparator(dateString: string) {
 
 .badge {
   background: var(--messenger-accent, #f59e0b);
-  color: white;
+  color: var(--ds-on-primary, #111827);
   border-radius: var(--messenger-radius-control, 8px);
   padding: 2px 8px;
   font-size: 12px;
@@ -613,8 +610,8 @@ function formatDateForSeparator(dateString: string) {
 }
 
 .room-badge-small.group {
-  background: rgba(37, 99, 235, 0.12);
-  color: #2563eb;
+  background: rgba(245, 158, 11, 0.14);
+  color: var(--messenger-accent-strong, #b45309);
 }
 
 .room-badge-small.system {
@@ -628,8 +625,8 @@ function formatDateForSeparator(dateString: string) {
 }
 
 .room-badge-small.direct-role.role-accountant {
-  background: rgba(51, 144, 236, 0.12);
-  color: #1d4ed8;
+  background: rgba(245, 158, 11, 0.14);
+  color: var(--messenger-accent-strong, #b45309);
 }
 
 .room-badge-small.direct-role.role-customer {
@@ -713,7 +710,7 @@ function formatDateForSeparator(dateString: string) {
 .header-dropdown-menu {
   position: absolute;
   top: 100%;
-  right: 0;
+  inset-inline-end: 0;
   background: var(--messenger-surface-panel, rgba(255, 255, 255, 0.96));
   border-radius: var(--messenger-radius-control, 8px);
   border: 1px solid var(--messenger-border-subtle, rgba(148, 163, 184, 0.32));

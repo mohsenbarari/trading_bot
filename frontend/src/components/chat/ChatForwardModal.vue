@@ -769,8 +769,8 @@ function confirmForward() {
 }
 
 .target-chip.role-accountant {
-  background: rgba(51, 144, 236, 0.12);
-  color: #1d4ed8;
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--ds-primary-700, #b45309);
 }
 
 .target-chip.role-customer {

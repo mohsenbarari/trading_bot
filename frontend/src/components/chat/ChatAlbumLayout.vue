@@ -454,7 +454,7 @@ const layout = computed(() => buildLayout(props.items))
 }
 
 .album-item.download-selected::before {
-  background: color-mix(in srgb, var(--messenger-chat-link, #3390ec) 22%, transparent);
+  background: color-mix(in srgb, var(--messenger-chat-link, #f59e0b) 22%, transparent);
 }
 
 .album-item.download-unselected::before {
@@ -606,7 +606,7 @@ const layout = computed(() => buildLayout(props.items))
 }
 
 .album-selection-circle.selected {
-  background: var(--messenger-chat-link, #3390ec);
+  background: var(--messenger-chat-link, #f59e0b);
   border-color: var(--messenger-overlay-text, #ffffff);
 }
 
