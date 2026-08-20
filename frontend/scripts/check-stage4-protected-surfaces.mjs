@@ -40,6 +40,8 @@ import {
   STAGE8_MESSENGER_UNNAMED_CONTROL_ALLOWED_PATHS,
   STAGE8_MESSENGER_UNNAMED_CONTROL_KIND,
   NATIVE_APP_MESSENGER_VISUAL_KIND,
+  NATIVE_APP_ADMIN_MESSAGES_VISUAL_KIND,
+  NATIVE_APP_TRADING_SETTINGS_VISUAL_KIND,
   STAGE4_BASE_COMMIT,
   STAGE4_BASE_TREE,
   STAGE4_ROUTE_CONTRACT_PATH,
@@ -48,6 +50,7 @@ import {
   STAGE6_TRADING_SETTINGS_RESET_DIALOG_KIND,
   TRADING_SETTINGS_PATH,
   TRADING_SETTINGS_SHA256,
+  resolveAdminMessagesDisposition,
   resolveTradingSettingsDisposition,
   assertStage4RouteProtection,
   assertStage4RuntimeRouteProtection,
@@ -95,11 +98,7 @@ try {
     )
   }
 
-  const adminMessages = assertWholeFile(
-    'AdminMessagesView',
-    ADMIN_MESSAGES_PATH,
-    ADMIN_MESSAGES_SHA256,
-  )
+  const adminMessages = resolveAdminMessagesDisposition(readRepoFile(ADMIN_MESSAGES_PATH))
   const tradingSettings = resolveTradingSettingsDisposition(readRepoFile(TRADING_SETTINGS_PATH))
   const scopeManifest = JSON.parse(readRepoFile(STAGE4_SCOPE_MANIFEST_PATH, 'utf8'))
   const manifestRoutes = assertStage4RouteProtection(scopeManifest.routes)
@@ -205,13 +204,24 @@ try {
   console.log(
     `PASS Stage 4 Home market interior (${dashboard.sections.length} sections, ${dashboard.bytes} bytes, ${dashboard.sha256})`,
   )
-  if (tradingSettings.kind === 'stage4-baseline') {
+  if (adminMessages.kind === 'stage4-baseline') {
+    console.log(`PASS Stage 4 AdminMessagesView (${adminMessages.sha256})`)
+  } else if (adminMessages.kind === NATIVE_APP_ADMIN_MESSAGES_VISUAL_KIND) {
     console.log(
-      `PASS Stage 4 admin protected files (AdminMessages ${adminMessages}, TradingSettings ${tradingSettings.sha256})`,
+      `PASS native-app-admin-messages-visual-v1 (${adminMessages.sha256}; Stage 4 baseline ${ADMIN_MESSAGES_SHA256} retained)`,
     )
+  } else {
+    throw new Error(`unsupported AdminMessages disposition: ${String(adminMessages.kind)}`)
+  }
+  if (tradingSettings.kind === 'stage4-baseline') {
+    console.log(`PASS Stage 4 TradingSettings (${tradingSettings.sha256})`)
   } else if (tradingSettings.kind === STAGE6_TRADING_SETTINGS_RESET_DIALOG_KIND) {
     console.log(
-      `PASS Stage 4 admin protected files (AdminMessages ${adminMessages}; TradingSettings Stage 6 reset-dialog disposition ${tradingSettings.sha256}; Stage 4 baseline ${TRADING_SETTINGS_SHA256} retained)`,
+      `PASS TradingSettings Stage 6 reset-dialog disposition (${tradingSettings.sha256}; Stage 4 baseline ${TRADING_SETTINGS_SHA256} retained)`,
+    )
+  } else if (tradingSettings.kind === NATIVE_APP_TRADING_SETTINGS_VISUAL_KIND) {
+    console.log(
+      `PASS native-app-trading-settings-visual-v1 (${tradingSettings.sha256}; Stage 4 baseline ${TRADING_SETTINGS_SHA256} retained)`,
     )
   } else {
     throw new Error(`unsupported TradingSettings disposition: ${String(tradingSettings.kind)}`)

@@ -357,26 +357,26 @@ watch(isOpen, async (opened) => {
 
 .jalali-date-trigger {
   width: 100%;
-  min-height: 44px;
+  min-height: var(--ds-control-min-height, 48px);
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) 24px;
   align-items: center;
   gap: 8px;
-  padding: 9px 12px;
-  border: 1px solid #d6deea;
-  border-radius: 8px;
-  background: linear-gradient(180deg, #fffdf8 0%, #f7fbff 100%);
-  color: #213044;
+  padding: 9px var(--ds-control-padding-inline, 0.875rem);
+  border: 1.5px solid var(--ds-control-border, #e5e7eb);
+  border-radius: var(--ds-control-radius, 12px);
+  background: var(--ds-control-bg, #f8fafc);
+  color: var(--ds-text-primary, #213044);
   font-size: 14px;
   text-align: right;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
-  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  box-shadow: none;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .jalali-date-trigger:not(:disabled):hover,
 .jalali-date-trigger:not(:disabled):focus-visible {
-  border-color: #d69a26;
-  box-shadow: 0 0 0 3px rgba(214, 154, 38, 0.18);
+  border-color: var(--ds-primary-500, #f59e0b);
+  box-shadow: var(--ds-focus-ring, 0 0 0 4px rgba(245, 158, 11, 0.18));
   outline: none;
 }
 
@@ -396,8 +396,8 @@ watch(isOpen, async (opened) => {
   align-items: center;
   justify-content: center;
   border-radius: 8px;
-  background: #113f45;
-  color: #f8c15a;
+  background: var(--ds-primary-100, #fef3c7);
+  color: var(--ds-primary-700, #b45309);
   font-size: 15px;
 }
 
@@ -422,15 +422,13 @@ watch(isOpen, async (opened) => {
 }
 
 .jalali-calendar-panel {
-  width: min(100%, 328px);
-  border: 1px solid rgba(31, 67, 75, 0.16);
-  border-radius: 8px;
-  background:
-    linear-gradient(135deg, rgba(255, 249, 235, 0.96), rgba(245, 250, 255, 0.98)),
-    #ffffff;
-  box-shadow: 0 18px 42px rgba(17, 48, 69, 0.18);
+  width: min(100%, 360px);
+  border: 1px solid var(--ds-native-hairline, rgba(60, 60, 67, 0.14));
+  border-radius: 12px;
+  background: var(--ds-bg-card, #ffffff);
+  box-shadow: none;
   padding: 12px;
-  color: #172033;
+  color: var(--ds-text-primary, #172033);
   z-index: 50;
 }
 
@@ -449,7 +447,7 @@ watch(isOpen, async (opened) => {
 
 .jalali-calendar-header {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  grid-template-columns: var(--ds-native-row-min-height, 48px) minmax(0, 1fr) var(--ds-native-row-min-height, 48px);
   align-items: center;
   gap: 8px;
   margin-bottom: 12px;
@@ -466,25 +464,26 @@ watch(isOpen, async (opened) => {
 .jalali-calendar-select {
   min-width: 0;
   width: 100%;
-  height: 36px;
-  border: 1px solid rgba(17, 63, 69, 0.14);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.78);
-  color: #123f46;
+  min-height: var(--ds-control-min-height, 48px);
+  height: var(--ds-control-min-height, 48px);
+  border: 1.5px solid var(--ds-control-border, #e5e7eb);
+  border-radius: var(--ds-control-radius, 12px);
+  background: var(--ds-control-bg, #f8fafc);
+  color: var(--ds-text-primary, #123f46);
   font: inherit;
-  font-weight: 800;
+  font-weight: 700;
   font-size: 13px;
   text-align: center;
   text-align-last: center;
   padding: 0 8px;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+  box-shadow: none;
 }
 
 .jalali-calendar-select:hover,
 .jalali-calendar-select:focus-visible {
-  border-color: #d69a26;
+  border-color: var(--ds-primary-500, #f59e0b);
   outline: none;
-  box-shadow: 0 0 0 3px rgba(214, 154, 38, 0.16);
+  box-shadow: var(--ds-focus-ring, 0 0 0 4px rgba(245, 158, 11, 0.18));
 }
 
 .jalali-calendar-select.year-select {
@@ -492,20 +491,20 @@ watch(isOpen, async (opened) => {
 }
 
 .jalali-calendar-nav {
-  width: 40px;
-  height: 36px;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
   border: 0;
-  border-radius: 8px;
-  background: rgba(17, 63, 69, 0.09);
-  color: #113f45;
+  border-radius: var(--ds-radius-full, 999px);
+  background: var(--ds-bg-inset, #f8fafc);
+  color: var(--ds-text-primary, #113f45);
   font-size: 24px;
   line-height: 1;
 }
 
 .jalali-calendar-nav:hover,
 .jalali-calendar-nav:focus-visible {
-  background: #113f45;
-  color: #ffffff;
+  background: var(--ds-primary-50, #fffbeb);
+  color: var(--ds-primary-700, #b45309);
   outline: none;
 }
 
@@ -527,32 +526,31 @@ watch(isOpen, async (opened) => {
 .jalali-calendar-day {
   aspect-ratio: 1;
   min-width: 0;
+  min-height: 40px;
   border: 0;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.74);
-  color: #243447;
+  background: var(--ds-bg-inset, #f8fafc);
+  color: var(--ds-text-primary, #243447);
   font-weight: 700;
   font-size: 13px;
-  box-shadow: inset 0 0 0 1px rgba(115, 130, 154, 0.12);
-  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: none;
 }
 
 .jalali-calendar-day:not(:disabled):hover,
 .jalali-calendar-day:not(:disabled):focus-visible {
-  background: #f5c767;
-  color: #102a34;
+  background: var(--ds-primary-50, #fffbeb);
+  color: var(--ds-primary-800, #92400e);
   outline: none;
-  transform: translateY(-1px);
 }
 
 .jalali-calendar-day.is-today {
-  box-shadow: inset 0 0 0 2px #0f766e;
+  box-shadow: inset 0 0 0 2px var(--ds-primary-500, #f59e0b);
 }
 
 .jalali-calendar-day.is-selected {
-  background: #113f45;
+  background: var(--ds-primary-500, #f59e0b);
   color: #ffffff;
-  box-shadow: 0 8px 18px rgba(17, 63, 69, 0.24);
+  box-shadow: none;
 }
 
 .jalali-calendar-day.is-empty {
@@ -571,24 +569,25 @@ watch(isOpen, async (opened) => {
 
 .jalali-calendar-link {
   border: 0;
-  border-radius: 8px;
-  background: rgba(17, 63, 69, 0.1);
-  color: #113f45;
-  padding: 8px 11px;
+  border-radius: 12px;
+  background: var(--ds-bg-inset, #f8fafc);
+  color: var(--ds-text-primary, #113f45);
+  min-height: var(--ds-native-row-min-height, 48px);
+  padding: 8px 14px;
   font-weight: 800;
   font-size: 13px;
 }
 
 .jalali-calendar-link.muted {
-  background: rgba(100, 116, 139, 0.11);
-  color: #64748b;
+  background: var(--ds-bg-hover, #f3f4f6);
+  color: var(--ds-text-muted, #64748b);
 }
 
 .jalali-calendar-link:hover,
 .jalali-calendar-link:focus-visible {
   outline: none;
-  background: #113f45;
-  color: #ffffff;
+  background: var(--ds-primary-50, #fffbeb);
+  color: var(--ds-primary-700, #b45309);
 }
 
 @media (max-width: 420px) {

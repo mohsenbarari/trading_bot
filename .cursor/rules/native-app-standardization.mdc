@@ -8,7 +8,7 @@ alwaysApply: true
 - Branch: `candidate/webapp-native-controls-v1`
 - Goal: native iOS/Android feel for the whole PWA except Market
 - Messenger frontend restyle is fully allowed
-- Do not edit `/market`, `home-market-widget`, `trading-settings-market-controls`, or `admin-messages-market-delivery`
+- Do not edit `/market` or `home-market-widget`. Chrome of AdminMessages/TradingSettings/Jalali may restyle; keep calendar confirm and market interiors.
 - Fields: `--ds-control-*` or `AppInput` / `AppSelect` / `AppTextarea` / `AppSearchField`
 - Touch target: 48px; lists: inset grouped rows; no `--ui-v2-*` in new product CSS
 - Messenger behavior stays legacy-default; albums only via `album_id` + `album_index`

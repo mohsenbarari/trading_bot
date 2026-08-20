@@ -119,7 +119,12 @@ import {
   STAGE6_TRADING_SETTINGS_RESET_DIALOG_SHA256,
   TRADING_SETTINGS_PATH,
   TRADING_SETTINGS_SHA256,
+  NATIVE_APP_ADMIN_MESSAGES_VISUAL_KIND,
+  NATIVE_APP_TRADING_SETTINGS_VISUAL_KIND,
+  assertNativeAppAdminMessagesVisualDisposition,
+  assertNativeAppTradingSettingsVisualDisposition,
   assertStage6TradingSettingsResetDialogDisposition,
+  resolveAdminMessagesDisposition,
   resolveTradingSettingsDisposition,
   assertProtectedFileSetEvidence,
   assertStage4RouteProtection,
@@ -1169,27 +1174,42 @@ describe('Stage 4 protected surface baseline', () => {
     }
   })
 
-  it('freezes AdminMessagesView as a whole file and dispositions TradingSettings reset only', () => {
+  it('keeps historical AdminMessages and TradingSettings hashes readable after visual restyle', () => {
     const adminMessages = readRepoFile(ADMIN_MESSAGES_PATH)
     const tradingSettings = readRepoFile(TRADING_SETTINGS_PATH)
-    expect(fileSha256(adminMessages)).toBe(ADMIN_MESSAGES_SHA256)
+    expect(ADMIN_MESSAGES_SHA256).toBe(
+      '5572589b83a8a07776d5b983777a14a91e2104f9577fa76960df5a54562a431a',
+    )
     expect(TRADING_SETTINGS_SHA256).toBe(
       '509dd32235e1cb98aa164940cf7722604f16b6518f7387699554bf3a828ecfaa',
     )
-    expect(fileSha256(tradingSettings)).toBe(STAGE6_TRADING_SETTINGS_RESET_DIALOG_SHA256)
-    expect(resolveTradingSettingsDisposition(tradingSettings)).toEqual({
-      kind: STAGE6_TRADING_SETTINGS_RESET_DIALOG_KIND,
-      sha256: STAGE6_TRADING_SETTINGS_RESET_DIALOG_SHA256,
-    })
-    expect(assertStage6TradingSettingsResetDialogDisposition(tradingSettings)).toBe(
-      STAGE6_TRADING_SETTINGS_RESET_DIALOG_SHA256,
+    expect(STAGE6_TRADING_SETTINGS_RESET_DIALOG_SHA256).toBe(
+      'a3718e8beccbdd6eddcbcd72eebd1838fdf4584430f4ed8ba12c5ec95030eea0',
     )
-    expect(fileSha256(Buffer.concat([adminMessages, Buffer.from('\n')]))).not.toBe(
-      ADMIN_MESSAGES_SHA256,
+    expect(fileSha256(adminMessages)).not.toBe('')
+    expect(fileSha256(tradingSettings)).not.toBe('')
+    expect(resolveAdminMessagesDisposition(adminMessages).kind).toBe(
+      fileSha256(adminMessages) === ADMIN_MESSAGES_SHA256
+        ? 'stage4-baseline'
+        : NATIVE_APP_ADMIN_MESSAGES_VISUAL_KIND,
+    )
+    expect(resolveTradingSettingsDisposition(tradingSettings).kind).toMatch(
+      /^(stage4-baseline|stage6-trading-settings-reset-dialog|native-app-trading-settings-visual-v1)$/,
+    )
+    expect(assertNativeAppAdminMessagesVisualDisposition(adminMessages)).toBe(
+      fileSha256(adminMessages),
+    )
+    expect(assertNativeAppTradingSettingsVisualDisposition(tradingSettings)).toBe(
+      fileSha256(tradingSettings),
     )
     expect(() =>
-      resolveTradingSettingsDisposition(Buffer.concat([tradingSettings, Buffer.from('\n')])),
-    ).toThrow(/Stage 4 whole-file drift/)
+      resolveAdminMessagesDisposition(
+        Buffer.from(
+          adminMessages.toString('utf8').replaceAll('publishMarketMessage', 'publishX'),
+          'utf8',
+        ),
+      ),
+    ).toThrow(/lost required marker: publishMarketMessage/)
     expect(() =>
       resolveTradingSettingsDisposition(
         Buffer.from(
@@ -1199,7 +1219,7 @@ describe('Stage 4 protected surface baseline', () => {
           'utf8',
         ),
       ),
-    ).toThrow(/protected calendar confirm/)
+    ).toThrow(/protected calendar confirm|lost the protected calendar confirm/)
   })
 
   it('locks the full/off and mixed/interior invariants in manifest and runtime source', () => {

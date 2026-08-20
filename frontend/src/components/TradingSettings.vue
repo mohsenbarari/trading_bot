@@ -927,8 +927,8 @@ onBeforeUnmount(() => {
   font-size: 0.88rem;
   font-weight: 850;
   line-height: 1.8;
-  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.24);
-  backdrop-filter: blur(12px);
+  box-shadow: none;
+  border: 1px solid var(--ds-native-hairline);
 }
 
 .settings-viewport-toast--success {
@@ -947,12 +947,24 @@ onBeforeUnmount(() => {
   color: var(--ds-primary-500);
 }
 
+.settings-section {
+  background: var(--ds-bg-card);
+  border: 1px solid var(--ds-native-hairline);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
 .settings-section__header {
   width: 100%;
-  padding: 0.85rem 0.95rem;
-  border-radius: var(--ds-radius-lg);
+  min-height: var(--ds-native-row-min-height, 48px);
+  padding: 0.7rem 1rem;
+  border-radius: 0;
   text-align: right;
-  box-shadow: none;
+  box-shadow: inset 0 -1px 0 var(--ds-native-hairline);
+}
+
+.settings-section__body {
+  padding: 0.75rem 1rem 1rem;
 }
 
 .settings-section__header :deep(.ui-button__label) {
@@ -1027,6 +1039,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
+  min-height: var(--ds-native-row-min-height, 48px);
   padding: 0.85rem;
 }
 
@@ -1072,9 +1085,10 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  min-height: var(--ds-native-row-min-height, 48px);
   padding: 0.85rem 0.9rem;
-  border: 1px solid var(--ds-border-light);
-  border-radius: var(--ds-radius-lg);
+  border: 1px solid var(--ds-native-hairline);
+  border-radius: 12px;
   background: var(--ds-bg-card);
   margin-bottom: 1rem;
   font-weight: 700;
@@ -1090,9 +1104,10 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.55rem 0.75rem;
+  min-height: var(--ds-native-row-min-height, 48px);
+  padding: 0.55rem 0.85rem;
   border-radius: 999px;
-  border: 1px solid var(--ds-border-light);
+  border: 1px solid var(--ds-native-hairline);
   background: var(--ds-bg-card);
   cursor: pointer;
   font-size: 0.78rem;
@@ -1180,11 +1195,12 @@ onBeforeUnmount(() => {
 }
 
 .mini-footer-control {
-  border: 1px solid var(--ds-border-light);
+  border: 1px solid var(--ds-native-hairline);
   background: var(--ds-bg-card);
   color: var(--ds-text-primary);
   border-radius: var(--ds-radius-md);
-  padding: 0.45rem 0.7rem;
+  min-height: var(--ds-native-row-min-height, 48px);
+  padding: 0.45rem 0.85rem;
   font-size: 0.76rem;
   font-weight: 700;
 }

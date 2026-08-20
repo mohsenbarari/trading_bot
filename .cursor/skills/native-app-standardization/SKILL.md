@@ -14,9 +14,9 @@ Make every live webapp surface except Market feel like a standard iOS/Android ap
 - Work on `candidate/webapp-native-controls-v1`
 - Touch target 48px; fields use `--ds-control-*` or `App*`
 - Product CSS uses `--ds-*` only; no `--ui-v2-*` unless the file is already catalog V2
-- Keep Market route and market interiors frozen
+- Keep Market route and market feed frozen
 - Keep messenger behavior: legacy default, rollback, `album_id` + `album_index`
-- Keep calendar confirm in TradingSettings
+- Restyle AdminMessages, TradingSettings, and Jalali to the same 48px language; keep calendar confirm and historical hashes readable
 - Do not change backend, auth, or business logic
 - Do not push, merge, or deploy unless the user asks
 

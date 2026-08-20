@@ -25,6 +25,21 @@ export const STAGE6_TRADING_SETTINGS_PROTECTED_CALENDAR_CONFIRM =
 export const STAGE6_TRADING_SETTINGS_REMOVED_RESET_CONFIRM =
   "if (!confirm('آیا از بازنشانی تنظیمات به مقادیر پیش‌فرض مطمئن هستید؟'))"
 
+export const NATIVE_APP_ADMIN_MESSAGES_VISUAL_KIND = 'native-app-admin-messages-visual-v1'
+export const NATIVE_APP_ADMIN_MESSAGES_REQUIRED_MARKERS = Object.freeze([
+  'message-mode-button--market',
+  'message-mode-button--chat',
+  'data-test="active-market-message"',
+  'data-test="market-history-list"',
+  'data-test="market-composer-card"',
+  'data-test="broadcast-panel"',
+  'publishMarketMessage',
+  'publishBroadcastMessage',
+  'history-item--compact',
+])
+
+export const NATIVE_APP_TRADING_SETTINGS_VISUAL_KIND = 'native-app-trading-settings-visual-v1'
+
 export const STAGE4_SHARED_DEPENDENCY_ISOLATION_PATHS = Object.freeze([
   'frontend/src/App.vue',
   'frontend/src/assets/main.css',
@@ -2005,9 +2020,69 @@ export function assertStage6TradingSettingsResetDialogDisposition(source) {
   return actualSha256
 }
 
+export function assertNativeAppAdminMessagesVisualDisposition(source) {
+  const text = tradingSettingsSourceText(source)
+  for (const marker of NATIVE_APP_ADMIN_MESSAGES_REQUIRED_MARKERS) {
+    if (!text.includes(marker)) {
+      throw new Error(`native-app-admin-messages-visual-v1 lost required marker: ${marker}`)
+    }
+  }
+  if (text.includes('--ui-v2-') || text.includes('data-ui-system')) {
+    throw new Error('native-app-admin-messages-visual-v1 must not introduce V2 catalog markers')
+  }
+  return fileSha256(source)
+}
+
+export function resolveAdminMessagesDisposition(source) {
+  const actualSha256 = fileSha256(source)
+  if (actualSha256 === ADMIN_MESSAGES_SHA256) {
+    return {
+      kind: 'stage4-baseline',
+      sha256: actualSha256,
+    }
+  }
+  try {
+    return {
+      kind: NATIVE_APP_ADMIN_MESSAGES_VISUAL_KIND,
+      sha256: assertNativeAppAdminMessagesVisualDisposition(source),
+    }
+  } catch (visualError) {
+    const visualMessage = visualError instanceof Error ? visualError.message : String(visualError)
+    throw new Error(
+      `AdminMessagesView rejected after Stage 4 whole-file drift (${ADMIN_MESSAGES_SHA256} -> ${actualSha256}); native-app-admin-messages-visual-v1 rejected (${visualMessage})`,
+    )
+  }
+}
+
+export function assertNativeAppTradingSettingsVisualDisposition(source) {
+  const text = tradingSettingsSourceText(source)
+  if (!text.includes(STAGE6_TRADING_SETTINGS_PROTECTED_CALENDAR_CONFIRM)) {
+    throw new Error('native-app-trading-settings-visual-v1 lost the protected calendar confirm')
+  }
+  if (text.includes(STAGE6_TRADING_SETTINGS_REMOVED_RESET_CONFIRM)) {
+    throw new Error('native-app-trading-settings-visual-v1 must not keep the native reset confirm')
+  }
+  if (!text.includes('<AppConfirmDialog') || !text.includes('requestResetConfirmation')) {
+    throw new Error('native-app-trading-settings-visual-v1 is missing the shared reset dialog')
+  }
+  if (text.includes('arrow-key-navigation')) {
+    throw new Error('native-app-trading-settings-visual-v1 must not opt in Jalali arrows')
+  }
+  if (text.includes('--ui-v2-') || text.includes('data-ui-system')) {
+    throw new Error('native-app-trading-settings-visual-v1 must not introduce V2 catalog markers')
+  }
+  if (
+    !text.includes('trading-settings-market-schedule-header') ||
+    !text.includes('trading-settings-market-calendar-header')
+  ) {
+    throw new Error('native-app-trading-settings-visual-v1 lost market settings interiors')
+  }
+  return fileSha256(source)
+}
+
 /**
  * Stage 4 remains the immutable whole-file baseline. If it no longer matches,
- * only the exact Stage 6 reset-dialog disposition may accept TradingSettings.
+ * Stage 6 reset-dialog is tried next, then native-app visual restyle.
  */
 export function resolveTradingSettingsDisposition(source) {
   const actualSha256 = fileSha256(source)
@@ -2023,10 +2098,18 @@ export function resolveTradingSettingsDisposition(source) {
       sha256: assertStage6TradingSettingsResetDialogDisposition(source),
     }
   } catch (stage6Error) {
-    const stage6Message = stage6Error instanceof Error ? stage6Error.message : String(stage6Error)
-    throw new Error(
-      `TradingSettings rejected after Stage 4 whole-file drift (${TRADING_SETTINGS_SHA256} -> ${actualSha256}); Stage 6 reset-dialog disposition rejected (${stage6Message})`,
-    )
+    try {
+      return {
+        kind: NATIVE_APP_TRADING_SETTINGS_VISUAL_KIND,
+        sha256: assertNativeAppTradingSettingsVisualDisposition(source),
+      }
+    } catch (visualError) {
+      const stage6Message = stage6Error instanceof Error ? stage6Error.message : String(stage6Error)
+      const visualMessage = visualError instanceof Error ? visualError.message : String(visualError)
+      throw new Error(
+        `TradingSettings rejected after Stage 4 whole-file drift (${TRADING_SETTINGS_SHA256} -> ${actualSha256}); Stage 6 reset-dialog disposition rejected (${stage6Message}); native-app-trading-settings-visual-v1 rejected (${visualMessage})`,
+      )
+    }
   }
 }
 

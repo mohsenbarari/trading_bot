@@ -541,30 +541,26 @@ onMounted(loadDashboard)
   align-items: center;
   justify-content: center;
   gap: 0.55rem;
-  min-height: 54px;
-  border: 1px solid transparent;
-  border-radius: 18px;
-  color: #1f2937;
+  min-height: var(--ds-native-row-min-height, 48px);
+  border: 1px solid var(--ds-native-hairline);
+  border-radius: 12px;
+  color: var(--ds-text-primary);
   font: inherit;
-  font-weight: 900;
+  font-weight: 800;
   cursor: pointer;
-  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08);
-  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, color 0.2s ease;
+  background: var(--ds-bg-card);
+  box-shadow: none;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
 }
 
-.message-mode-button--market {
-  border-color: rgba(217, 119, 6, 0.16);
-  background: linear-gradient(135deg, rgba(251, 191, 36, 0.18), rgba(255, 247, 237, 0.98));
-}
-
+.message-mode-button--market,
 .message-mode-button--chat {
-  border-color: rgba(13, 148, 136, 0.18);
-  background: linear-gradient(135deg, rgba(45, 212, 191, 0.16), rgba(240, 253, 250, 0.98));
+  border-color: var(--ds-native-hairline);
+  background: var(--ds-bg-card);
 }
 
 .message-mode-button:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.11);
+  background: var(--ds-bg-inset);
 }
 
 .message-mode-button:focus-visible,
@@ -578,26 +574,13 @@ onMounted(loadDashboard)
   outline-offset: 3px;
 }
 
-.message-mode-button--active {
-  color: #0f766e;
-  border-color: rgba(15, 118, 110, 0.22);
-  background: linear-gradient(135deg, rgba(15, 118, 110, 0.1), rgba(255, 255, 255, 0.96));
-  box-shadow: 0 14px 28px rgba(15, 118, 110, 0.1);
-  transform: translateY(-1px);
-}
-
-.message-mode-button--market.message-mode-button--active {
-  color: #9a3412;
-  border-color: rgba(194, 65, 12, 0.24);
-  background: linear-gradient(135deg, rgba(251, 191, 36, 0.28), rgba(255, 237, 213, 0.98));
-  box-shadow: 0 16px 32px rgba(194, 65, 12, 0.14);
-}
-
+.message-mode-button--active,
+.message-mode-button--market.message-mode-button--active,
 .message-mode-button--chat.message-mode-button--active {
-  color: #0f766e;
-  border-color: rgba(13, 148, 136, 0.24);
-  background: linear-gradient(135deg, rgba(45, 212, 191, 0.24), rgba(240, 253, 250, 0.98));
-  box-shadow: 0 16px 32px rgba(13, 148, 136, 0.14);
+  color: var(--ds-primary-700);
+  border-color: var(--ds-primary-500);
+  background: var(--ds-primary-50);
+  box-shadow: none;
 }
 
 .message-workspace {
@@ -607,19 +590,16 @@ onMounted(loadDashboard)
 .message-panel {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  padding: 1rem;
-  border-radius: 24px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.07);
+  gap: 0.75rem;
+  padding: 0;
+  border-radius: 0;
+  border: 0;
+  box-shadow: none;
 }
 
-.message-panel--market {
-  background: linear-gradient(180deg, rgba(255, 251, 235, 0.98), rgba(255, 255, 255, 0.92));
-}
-
+.message-panel--market,
 .message-panel--chat {
-  background: linear-gradient(180deg, rgba(236, 253, 245, 0.98), rgba(255, 255, 255, 0.92));
+  background: transparent;
 }
 
 .market-pin-card,
@@ -627,10 +607,10 @@ onMounted(loadDashboard)
 .composer-card,
 .history-card,
 .audience-panel {
-  border-radius: 20px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+  border-radius: 12px;
+  border: 1px solid var(--ds-native-hairline);
+  background: var(--ds-bg-card);
+  box-shadow: none;
 }
 
 .market-pin-card,
@@ -651,7 +631,7 @@ onMounted(loadDashboard)
 }
 
 .market-pin-card {
-  background: linear-gradient(135deg, rgba(255, 247, 237, 0.98), rgba(255, 255, 255, 0.94));
+  background: var(--ds-bg-card);
 }
 
 .market-pin-card-header,
@@ -717,9 +697,9 @@ onMounted(loadDashboard)
 
 .admin-market-preview {
   margin-top: 0.95rem;
-  border-radius: 18px;
-  border: 1px solid rgba(245, 158, 11, 0.18);
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(255, 247, 237, 0.9));
+  border-radius: 12px;
+  border: 1px solid var(--ds-native-hairline);
+  background: var(--ds-bg-inset);
   padding: 0.9rem 0.95rem;
 }
 
@@ -763,19 +743,17 @@ onMounted(loadDashboard)
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.15rem;
-  height: 2.15rem;
-  border: 1px solid rgba(15, 118, 110, 0.12);
-  border-radius: 14px;
-  background: rgba(240, 253, 250, 0.92);
-  color: #0f766e;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
+  border: 0;
+  border-radius: var(--ds-radius-full);
+  background: var(--ds-bg-inset);
+  color: var(--ds-text-secondary);
   cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
 .history-toggle-button:hover {
-  border-color: rgba(15, 118, 110, 0.28);
-  box-shadow: 0 8px 16px rgba(15, 118, 110, 0.12);
+  background: var(--ds-bg-hover);
 }
 
 .history-toggle-icon {
@@ -822,7 +800,7 @@ onMounted(loadDashboard)
   color: #0f4c48;
   font-size: var(--ds-font-helper);
   line-height: 1.8;
-  box-shadow: 0 10px 20px rgba(15, 118, 110, 0.08);
+  box-shadow: none;
 }
 
 .history-accordion-body {
@@ -834,9 +812,9 @@ onMounted(loadDashboard)
 
 .history-item--compact {
   padding: 0.9rem;
-  border-radius: 18px;
-  border: 1px solid rgba(15, 23, 42, 0.07);
-  background: rgba(248, 250, 252, 0.92);
+  border-radius: 12px;
+  border: 1px solid var(--ds-native-hairline);
+  background: var(--ds-bg-inset);
 }
 
 .history-item-top {
@@ -850,12 +828,12 @@ onMounted(loadDashboard)
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2rem;
-  height: 2rem;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
   border: 0;
-  border-radius: 999px;
-  background: rgba(15, 118, 110, 0.12);
-  color: #0f766e;
+  border-radius: var(--ds-radius-full);
+  background: var(--ds-bg-inset);
+  color: var(--ds-text-secondary);
   cursor: pointer;
 }
 
@@ -915,20 +893,19 @@ onMounted(loadDashboard)
   min-height: 168px;
   resize: vertical;
   margin-top: 0.85rem;
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  border-radius: 18px;
-  padding: 0.95rem 1rem;
-  background: #fff;
-  color: #0f172a;
+  border: 1.5px solid var(--ds-control-border);
+  border-radius: var(--ds-control-radius);
+  padding: 0.95rem var(--ds-control-padding-inline);
+  background: var(--ds-control-bg);
+  color: var(--ds-text-primary);
   font: inherit;
   line-height: 1.9;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .message-textarea:focus {
   outline: none;
-  border-color: rgba(15, 118, 110, 0.35);
-  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.08);
+  border-color: var(--ds-primary-500);
+  box-shadow: var(--ds-focus-ring);
 }
 
 .audience-panel {
@@ -948,23 +925,22 @@ onMounted(loadDashboard)
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 3rem;
+  min-height: var(--ds-native-row-min-height, 48px);
   padding: 0.75rem 0.9rem;
-  border-radius: 16px;
-  border: 1px solid rgba(15, 118, 110, 0.12);
-  background: rgba(248, 250, 252, 0.92);
-  color: #0f172a;
-  font-weight: 850;
+  border-radius: 12px;
+  border: 1px solid var(--ds-native-hairline);
+  background: var(--ds-bg-inset);
+  color: var(--ds-text-primary);
+  font-weight: 750;
   text-align: center;
   cursor: pointer;
-  transition: all 0.2s ease;
 }
 
 .target-option--active {
-  background: linear-gradient(135deg, rgba(15, 118, 110, 0.12), rgba(20, 184, 166, 0.1));
-  border-color: rgba(15, 118, 110, 0.32);
-  color: #0f766e;
-  box-shadow: inset 0 0 0 1px rgba(15, 118, 110, 0.12);
+  background: var(--ds-primary-50);
+  border-color: var(--ds-primary-500);
+  color: var(--ds-primary-700);
+  box-shadow: none;
 }
 
 .target-option-input {
@@ -1024,15 +1000,15 @@ onMounted(loadDashboard)
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
-  min-height: 46px;
+  min-height: var(--ds-native-row-min-height, 48px);
   padding: 0 1.1rem;
   border-radius: 999px;
 }
 
 .primary-action {
-  background: linear-gradient(135deg, #0f766e, #f59e0b);
+  background: var(--ds-primary-500);
   color: #fff;
-  box-shadow: 0 16px 32px rgba(15, 118, 110, 0.2);
+  box-shadow: none;
 }
 
 .secondary-action {
@@ -1046,9 +1022,9 @@ onMounted(loadDashboard)
 }
 
 .ghost-link {
-  padding: 0;
-  min-height: auto;
-  border-radius: 0;
+  padding: 0 0.75rem;
+  min-height: var(--ds-native-row-min-height, 48px);
+  border-radius: 12px;
   box-shadow: none;
   background: transparent;
   color: #0f766e;
