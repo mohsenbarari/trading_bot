@@ -401,11 +401,11 @@ function normalizeMobile(mobile: string): string {
       <AppFormField class="form-group" id="role" label="نقش">
         <AppSelect v-model="invite.role" id="role" :options="availableRoles" />
       </AppFormField>
-      <div class="form-actions">
-        <AppButton type="submit" :loading="isLoading" :disabled="pendingDeleteId !== null">
+      <div class="form-actions ds-native-actions ds-native-actions--stack">
+        <AppButton type="submit" block :loading="isLoading" :disabled="pendingDeleteId !== null">
           {{ isLoading ? 'در حال ساخت...' : 'ارسال لینک دعوت' }}
         </AppButton>
-        <AppButton type="button" class="secondary" variant="secondary" :disabled="isLoading || pendingDeleteId !== null" @click="resetForm">
+        <AppButton type="button" class="secondary" variant="secondary" block :disabled="isLoading || pendingDeleteId !== null" @click="resetForm">
           بازنشانی
         </AppButton>
       </div>
@@ -496,8 +496,8 @@ function normalizeMobile(mobile: string): string {
           </div>
           <AppButton
             type="button"
-            class="delete-pending-btn"
-            variant="danger"
+            class="delete-pending-btn ds-native-danger"
+            variant="ghost"
             :loading="pendingDeleteId === pending.id"
             :disabled="pendingDeleteId !== null || pendingDeleteCandidate !== null"
             @click="requestPendingInvitationDelete(pending, $event)"
@@ -541,19 +541,10 @@ function normalizeMobile(mobile: string): string {
 
 .form-group { margin: 0; }
 
-.form-actions,
 .copy-container {
   display: flex;
   flex-wrap: wrap;
   gap: var(--ds-section-gap);
-}
-
-.form-actions .ui-button:first-child {
-  flex: 1 1 12rem;
-}
-
-.form-actions .secondary {
-  flex: 0 1 auto;
 }
 
 .result-box.error,
@@ -718,7 +709,6 @@ function normalizeMobile(mobile: string): string {
 }
 
 @media (max-width: 540px) {
-  .form-actions,
   .pending-header {
     flex-direction: column;
     align-items: stretch;
@@ -726,13 +716,10 @@ function normalizeMobile(mobile: string): string {
 
   .pending-row { grid-template-columns: 1fr; }
 
-  .form-actions .ui-button,
   .pending-refresh-btn,
   .delete-pending-btn {
     width: 100%;
   }
-
-  .form-actions .ui-button:first-child { flex: 0 0 auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {

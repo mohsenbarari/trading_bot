@@ -1,4 +1,5 @@
 export { default as AppActionCard } from './AppActionCard.vue'
+export { default as AppBackButton } from './AppBackButton.vue'
 export { default as AppBottomSheet } from './AppBottomSheet.vue'
 export { default as AppButton } from './AppButton.vue'
 export { default as AppCard } from './AppCard.vue'

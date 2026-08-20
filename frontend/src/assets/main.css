@@ -96,6 +96,8 @@
     --ds-text-disabled:  #9ca3af;
     --ds-text-faint:     #d1d5db;
     --ds-text-strong: var(--ds-text-primary);
+    --ds-on-primary: #111827;
+    --ds-on-danger: #fff;
 
     /* Backgrounds */
     --ds-bg-page:    #f9fafb;
@@ -506,22 +508,7 @@
   }
 
   .ds-workspace-back {
-    width: var(--ds-native-row-min-height);
-    height: var(--ds-native-row-min-height);
-    border: 0;
-    border-radius: var(--ds-radius-full);
-    background: var(--ds-bg-card);
-    color: var(--ds-text-secondary);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: background 0.2s ease;
-  }
-
-  .ds-workspace-back span {
-    font-size: 1.7rem;
-    line-height: 1;
+    justify-self: start;
   }
 
   .ds-workspace-back:hover,
@@ -915,6 +902,17 @@
     gap: 1rem;
   }
 
+  .ui-page-header.ui-page-header--has-back {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .ui-page-header__back {
+    display: inline-flex;
+    align-items: center;
+    min-width: var(--ds-native-row-min-height);
+  }
+
   .ui-page-header__copy {
     min-width: 0;
   }
@@ -1005,16 +1003,17 @@
   .ui-button {
     min-height: var(--ds-touch-target, 48px);
     border: 1px solid transparent;
-    border-radius: var(--ds-radius-md);
+    border-radius: var(--ds-control-radius, 12px);
     padding: 0 1rem;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
     font-size: var(--ds-font-md);
-    font-weight: 850;
+    font-weight: 750;
     cursor: pointer;
-    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+    box-shadow: none;
+    transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
     white-space: nowrap;
   }
 
@@ -1035,33 +1034,61 @@
   }
 
   .ui-button--primary {
-    background: var(--ds-gradient-primary);
-    color: white;
-    box-shadow: 0 8px 18px rgba(217, 119, 6, 0.22);
+    background: var(--ds-primary-500);
+    color: var(--ds-on-primary);
+    box-shadow: none;
   }
 
   .ui-button--secondary {
-    background: var(--ds-bg-card);
-    border-color: var(--ds-border-medium);
+    background: var(--ds-bg-inset);
+    border-color: var(--ds-native-hairline);
     color: var(--ds-text-primary);
-    box-shadow: var(--ds-shadow-sm);
+    box-shadow: none;
   }
 
   .ui-button--ghost {
     background: transparent;
     border-color: transparent;
-    color: var(--ds-text-secondary);
+    color: var(--ds-primary-700);
   }
 
   .ui-button--danger {
     background: var(--ds-danger-500);
-    color: white;
-    box-shadow: 0 8px 18px rgba(239, 68, 68, 0.2);
+    color: var(--ds-on-danger);
+    box-shadow: none;
   }
 
-  .ui-button:hover:not(:disabled),
-  .ui-icon-button:hover:not(:disabled) {
-    transform: translateY(-1px);
+  .ds-native-actions {
+    display: flex;
+    align-items: stretch;
+    gap: 0.75rem;
+    margin-top: 1.25rem;
+  }
+
+  .ds-native-actions--split > .ui-button,
+  .ui-confirm-dialog__actions > .ui-button,
+  .ui-bottom-sheet__actions > .ui-button,
+  .ui-responsive-dialog__actions > .ui-button {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .ds-native-actions--stack {
+    flex-direction: column;
+  }
+
+  .ds-native-actions--row {
+    margin-top: 0;
+    justify-content: flex-end;
+    gap: 0.25rem;
+  }
+
+  .ds-native-actions--stack > .ui-button--danger,
+  .ds-native-actions--row > .ui-button--danger,
+  .ui-button--ghost.ds-native-danger {
+    background: transparent;
+    color: var(--ds-danger-700);
+    border-color: transparent;
   }
 
   .ui-action-card:hover:not(:disabled) {
@@ -1069,12 +1096,14 @@
   }
 
   .ui-button:active:not(:disabled),
+  .ui-back-button:active:not(:disabled),
   .ui-icon-button:active:not(:disabled),
   .ui-action-card:active:not(:disabled) {
     transform: scale(0.98);
   }
 
   .ui-button:focus-visible,
+  .ui-back-button:focus-visible,
   .ui-icon-button:focus-visible,
   .ui-action-card:focus-visible,
   .ui-filter-chip:focus-visible,
@@ -1088,6 +1117,7 @@
   }
 
   .ui-button:disabled,
+  .ui-back-button:disabled,
   .ui-icon-button:disabled,
   .ui-action-card:disabled {
     cursor: not-allowed;
@@ -1110,6 +1140,31 @@
     border-top-color: transparent;
     border-radius: 999px;
     animation: ds-spin 0.8s linear infinite;
+  }
+
+  .ui-back-button {
+    box-sizing: border-box;
+    min-width: var(--ds-native-row-min-height);
+    min-height: var(--ds-native-row-min-height);
+    padding: 0 0.35rem;
+    border: 0;
+    border-radius: var(--ds-control-radius, 12px);
+    background: transparent;
+    color: var(--ds-primary-700);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15rem;
+    font: inherit;
+    font-size: var(--ds-font-md);
+    font-weight: 750;
+    cursor: pointer;
+    box-shadow: none;
+  }
+
+  .ui-back-button__text {
+    min-width: 0;
+    line-height: 1.2;
   }
 
   .ui-icon-button {
@@ -2007,10 +2062,10 @@
 
   .ui-bottom-sheet__actions,
   .ui-responsive-dialog__actions {
-    border-top: 1px solid var(--ds-border-light);
-    align-items: center;
-    justify-content: flex-end;
-    flex-wrap: wrap;
+    border-top: 1px solid var(--ds-native-hairline);
+    align-items: stretch;
+    justify-content: stretch;
+    flex-wrap: nowrap;
     padding-bottom: calc(1rem + var(--ds-safe-area-bottom));
   }
 
@@ -2056,16 +2111,18 @@
   }
 
   .ui-confirm-dialog__actions {
-    padding: 1rem;
+    padding: 0.85rem 1rem 1rem;
     display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 0.65rem;
-    flex-wrap: wrap;
+    align-items: stretch;
+    justify-content: stretch;
+    gap: 0.75rem;
+    flex-wrap: nowrap;
+    border-top: 1px solid var(--ds-native-hairline);
   }
 
   @media (prefers-reduced-motion: reduce) {
     .ui-button,
+    .ui-back-button,
     .ui-icon-button,
     .ui-action-card,
     .ui-tabs__tab,
@@ -2096,8 +2153,16 @@
   }
 
   @media (max-width: 767px) {
-    .ui-page-header {
+    .ui-page-header:not(.ui-page-header--has-back) {
       grid-template-columns: minmax(0, 1fr);
+    }
+
+    .ui-page-header.ui-page-header--has-back {
+      grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .ui-page-header.ui-page-header--has-back .ui-page-header__actions {
+      grid-column: 1 / -1;
     }
 
     .ui-page-header__actions,

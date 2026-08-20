@@ -293,8 +293,8 @@ onMounted(loadDashboard)
             <div class="market-pin-card-actions">
               <AppButton
                 type="button"
-                class="secondary-action secondary-action--danger"
-                variant="danger"
+                class="ds-native-danger"
+                variant="ghost"
                 data-test="clear-market-pin"
                 :disabled="isClearingMarketPin"
                 @click="clearMarketPin"
@@ -412,7 +412,7 @@ onMounted(loadDashboard)
           <div v-if="marketError" class="alert error">{{ marketError }}</div>
           <div v-if="marketSuccess" class="alert success">{{ marketSuccess }}</div>
           <div class="composer-actions composer-actions--market">
-            <AppButton type="button" class="primary-action" :disabled="!marketContent.trim() || isPublishingMarket" @click="publishMarketMessage">
+            <AppButton type="button" class="primary-action" block :disabled="!marketContent.trim() || isPublishingMarket" @click="publishMarketMessage">
               <Pin :size="16" />
               <span>{{ isPublishingMarket ? 'در حال ثبت...' : 'انتشار در بازار' }}</span>
             </AppButton>
@@ -481,8 +481,7 @@ onMounted(loadDashboard)
           <div v-if="broadcastSuccess" class="alert success">{{ broadcastSuccess }}</div>
 
           <div class="composer-actions">
-            <span></span>
-            <AppButton type="button" class="primary-action" :disabled="!broadcastContent.trim() || broadcastTargets.length === 0 || isPublishingBroadcast" @click="publishBroadcastMessage">
+            <AppButton type="button" class="primary-action" block :disabled="!broadcastContent.trim() || broadcastTargets.length === 0 || isPublishingBroadcast" @click="publishBroadcastMessage">
               <Megaphone :size="16" />
               <span>{{ isPublishingBroadcast ? 'در حال ارسال...' : 'ارسال در چت' }}</span>
             </AppButton>
@@ -970,11 +969,13 @@ onMounted(loadDashboard)
 
 .composer-actions {
   margin-top: 0.95rem;
-  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
 }
 
 .composer-actions--market {
-  justify-content: flex-end;
+  justify-content: stretch;
 }
 
 .composer-hint {
@@ -996,38 +997,11 @@ onMounted(loadDashboard)
 
 .primary-action,
 .secondary-action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.45rem;
-  min-height: var(--ds-native-row-min-height, 48px);
-  padding: 0 1.1rem;
-  border-radius: 999px;
-}
-
-.primary-action {
-  background: var(--ds-primary-500);
-  color: #fff;
-  box-shadow: none;
-}
-
-.secondary-action {
-  background: rgba(15, 23, 42, 0.04);
-  color: #0f172a;
-}
-
-.secondary-action--danger {
-  background: rgba(185, 28, 28, 0.08);
-  color: #b91c1c;
+  width: 100%;
 }
 
 .ghost-link {
   padding: 0 0.75rem;
-  min-height: var(--ds-native-row-min-height, 48px);
-  border-radius: 12px;
-  box-shadow: none;
-  background: transparent;
-  color: #0f766e;
 }
 
 .primary-action:disabled,

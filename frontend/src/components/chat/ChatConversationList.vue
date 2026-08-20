@@ -721,9 +721,9 @@ onBeforeUnmount(() => {
   --line-soft: var(--messenger-border-subtle, rgba(60, 60, 67, 0.18));
   --text-strong: var(--messenger-text-strong, #1c1c1e);
   --text-muted: var(--messenger-text-muted, #8e8e93);
-  --accent: var(--messenger-accent, #007aff);
+  --accent: var(--messenger-accent, #f59e0b);
   --teal: #34c759;
-  --blue: #007aff;
+  --blue: var(--messenger-accent, #f59e0b);
   --danger: var(--messenger-danger, #ff3b30);
   --warning: var(--messenger-warning, #ff9f0a);
   flex: 1;
@@ -1204,9 +1204,9 @@ onBeforeUnmount(() => {
 }
 
 .unread-badge {
-  background: linear-gradient(135deg, #3390ec, #2563eb);
+  background: var(--messenger-accent, #f59e0b);
   color: #fff;
-  box-shadow: 0 10px 18px rgba(37, 99, 235, 0.2);
+  box-shadow: none;
 }
 
 .mention-badge {
@@ -1272,12 +1272,12 @@ onBeforeUnmount(() => {
   height: 58px;
   border: none;
   border-radius: var(--messenger-radius-panel, 18px);
-  background: linear-gradient(135deg, #3390ec, #2563eb);
-  color: #fff;
+  background: var(--messenger-accent, #f59e0b);
+  color: #111827;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 18px 30px rgba(37, 99, 235, 0.28);
+  box-shadow: none;
   transition: transform var(--messenger-motion-standard, 180ms) ease, box-shadow var(--messenger-motion-standard, 180ms) ease;
 }
 

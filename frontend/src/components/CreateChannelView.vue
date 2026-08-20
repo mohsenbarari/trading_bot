@@ -5,6 +5,7 @@ import ChatUserListRow from './chat/ChatUserListRow.vue'
 import HelpPopover from './HelpPopover.vue'
 import {
   AppActionCard,
+  AppBackButton,
   AppButton,
   AppCheckbox,
   AppEmptyState,
@@ -32,8 +33,6 @@ import {
 } from '../services/chat/chatManagerCache'
 import {
   Check,
-  ChevronLeft,
-  ChevronRight,
   Info,
   Loader2,
   LogOut,
@@ -977,9 +976,7 @@ onBeforeUnmount(() => {
   <section class="channel-admin-shell">
     <input ref="avatarInput" type="file" accept="image/*" class="hidden-avatar-input" @change="handleAvatarSelected" />
     <header class="channel-admin-header">
-      <AppIconButton label="بازگشت" size="md" :disabled="!canGoBack" @click="handleManagerBack()">
-        <ChevronRight :size="22" />
-      </AppIconButton>
+      <AppBackButton label="بازگشت" :disabled="!canGoBack" @click="handleManagerBack()" />
       <div class="header-copy">
         <h2>{{ pageTitle }}</h2>
         <span>{{ pageSubtitle }}</span>
@@ -1067,7 +1064,7 @@ onBeforeUnmount(() => {
             </template>
           </AppFormField>
 
-          <AppButton type="button" :loading="isSaving" :disabled="!canSaveDetails || isSaving" @click="createChannel">
+          <AppButton type="button" block :loading="isSaving" :disabled="!canSaveDetails || isSaving" @click="createChannel">
             <template #icon>
               <Check v-if="!isSaving" :size="18" />
             </template>
@@ -1244,15 +1241,15 @@ onBeforeUnmount(() => {
                 <AppButton
                   type="button"
                   class="channel-member-action"
-                  variant="secondary"
+                  variant="ghost"
                   @click.stop="openMemberProfile(member)"
                 >
                   پروفایل
                 </AppButton>
                 <AppButton
                   type="button"
-                  class="channel-member-action channel-member-action--primary"
-                  variant="primary"
+                  class="channel-member-action"
+                  variant="secondary"
                   :disabled="mutatingUserId === member.user_id"
                   @click.stop="promoteMember(member)"
                 >
@@ -1338,7 +1335,7 @@ onBeforeUnmount(() => {
             </template>
           </AppFormField>
 
-          <AppButton type="button" :loading="isSaving" :disabled="!canSaveDetails || isSaving" @click="updateChannelDetails">
+          <AppButton type="button" block :loading="isSaving" :disabled="!canSaveDetails || isSaving" @click="updateChannelDetails">
             <template #icon>
               <Check v-if="!isSaving" :size="18" />
             </template>
@@ -1517,8 +1514,8 @@ onBeforeUnmount(() => {
   padding: 0 18px;
 }
 .search-input:focus {
-  border-color: #3390ec;
-  box-shadow: 0 0 0 4px rgba(51, 144, 236, 0.12);
+  border-color: var(--ds-primary-500, #f59e0b);
+  box-shadow: var(--ds-focus-ring, 0 0 0 4px rgba(245, 158, 11, 0.18));
 }
 
 .selection-banner {
@@ -1562,7 +1559,7 @@ onBeforeUnmount(() => {
 
 .primary-chip {
   border: 0;
-  border-radius: var(--messenger-radius-panel, 18px);
+  border-radius: var(--ds-control-radius, 12px);
   font: inherit;
   font-weight: 800;
   cursor: pointer;
@@ -1575,8 +1572,8 @@ onBeforeUnmount(() => {
 .primary-chip {
   min-height: var(--ds-native-row-min-height, 48px);
   padding: 0 16px;
-  background: #3390ec;
-  color: #fff;
+  background: var(--ds-primary-500, #f59e0b);
+  color: #111827;
 }
 
 .primary-chip:disabled,
@@ -1604,7 +1601,8 @@ onBeforeUnmount(() => {
 
 .manager-avatar,
 .row-avatar {
-  background: linear-gradient(135deg, #3390ec, #0ea5e9 58%, #f59e0b 100%);
+  background: var(--ds-primary-100, #fef3c7);
+  color: var(--ds-primary-700, #b45309);
   color: #fff;
   display: inline-flex;
   align-items: center;

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, useId } from 'vue'
+import AppBackButton from '../ui/AppBackButton.vue'
 import AppDesignSystemScope from '../ui/AppDesignSystemScope.vue'
 import AppWorkspace from '../ui/AppWorkspace.vue'
 
@@ -50,16 +51,13 @@ const workspaceRootProps = computed(() => (
       class="ds-workspace-header"
       :class="{ 'ui-v2-workspace-adapter__header': v2Scope }"
     >
-      <button
+      <AppBackButton
         v-if="showBack"
-        type="button"
         class="ds-workspace-back"
         :class="{ 'ui-v2-workspace-adapter__back': v2Scope }"
-        :aria-label="backLabel"
+        :label="backLabel"
         @click="$emit('back')"
-      >
-        <span aria-hidden="true">‹</span>
-      </button>
+      />
 
       <div
         class="ds-workspace-heading"

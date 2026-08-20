@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { X } from 'lucide-vue-next'
 import { apiFetch } from '../utils/auth'
-import { AppTextarea } from './ui'
+import { AppButton, AppIconButton, AppTextarea } from './ui'
 
 const emit = defineEmits<{
   (e: 'close'): void
@@ -59,9 +59,9 @@ async function submitBroadcast() {
             <h2 id="broadcast-modal-title">ارسال پیام مدیریت</h2>
             <p>این پیام مستقل از کانال‌ها برای گیرندگان انتخاب‌شده در پیام‌رسان ارسال می‌شود.</p>
           </div>
-          <button type="button" class="broadcast-close-control" aria-label="بستن" @click="emit('close')">
+          <AppIconButton label="بستن" class="broadcast-close-control" @click="emit('close')">
             <X :size="20" />
-          </button>
+          </AppIconButton>
         </header>
 
         <AppTextarea v-model="content" class="broadcast-textarea" rows="6" placeholder="متن پیام مدیریت..." />
@@ -76,11 +76,11 @@ async function submitBroadcast() {
         <div v-if="error" class="form-alert error">{{ error }}</div>
         <div v-if="success" class="form-alert success">{{ success }}</div>
 
-        <footer class="broadcast-actions">
-          <button type="button" class="broadcast-dismiss-button" @click="emit('close')">بستن</button>
-          <button type="button" class="broadcast-submit-button" :disabled="!canSubmit" @click="submitBroadcast">
-            {{ isSubmitting ? 'در حال ارسال...' : 'ارسال' }}
-          </button>
+        <footer class="broadcast-actions ds-native-actions ds-native-actions--split">
+          <AppButton type="button" variant="secondary" @click="emit('close')">بستن</AppButton>
+          <AppButton type="button" :disabled="!canSubmit" :loading="isSubmitting" @click="submitBroadcast">
+            ارسال
+          </AppButton>
         </footer>
       </section>
     </div>
@@ -133,22 +133,8 @@ async function submitBroadcast() {
   color: #64748b;
 }
 
-.broadcast-close-control,
-.broadcast-dismiss-button,
-.broadcast-submit-button {
-  border: 0;
-  font: inherit;
-  cursor: pointer;
-}
-
 .broadcast-close-control {
-  display: grid;
-  place-items: center;
-  width: var(--ds-native-row-min-height, 48px);
-  height: var(--ds-native-row-min-height, 48px);
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.06);
-  color: #0f172a;
+  flex: 0 0 auto;
 }
 
 .broadcast-textarea {
@@ -202,33 +188,7 @@ async function submitBroadcast() {
 }
 
 .broadcast-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.65rem;
   margin-top: 1rem;
-}
-
-.broadcast-dismiss-button,
-.broadcast-submit-button {
-  min-height: var(--ds-native-row-min-height, 48px);
-  padding: 0 1rem;
-  border-radius: 999px;
-  font-weight: 900;
-}
-
-.broadcast-dismiss-button {
-  background: rgba(15, 23, 42, 0.06);
-  color: #334155;
-}
-
-.broadcast-submit-button {
-  background: var(--ds-primary-500);
-  color: #fff;
-}
-
-.broadcast-submit-button:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
 }
 
 @media (min-width: 640px) {

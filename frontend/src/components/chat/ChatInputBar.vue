@@ -22,7 +22,7 @@
     <!-- Reply Banner -->
     <div v-else-if="replyingToMessage" class="reply-banner">
         <div class="reply-banner-icon">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#3390ec" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="9 14 4 9 9 4"></polyline>
             <path d="M20 20v-7a4 4 0 0 0-4-4H4"></path>
           </svg>
@@ -85,7 +85,7 @@
           class="send-btn-inline" 
           @click="stopVoiceRecording" 
         >
-          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#3390ec" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(45deg); margin-left: -4px;">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(45deg); margin-left: -4px;">
             <line x1="22" y1="2" x2="11" y2="13"></line>
             <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
           </svg>
@@ -94,7 +94,7 @@
         <div class="recording-state">
           <div class="mic-active-pulse"></div>
           <span class="recording-time">{{ recordingDisplay }}</span>
-          <span class="recording-hint animate-pulse" style="color: #3390ec;">درحال ضبط...</span>
+          <span class="recording-hint animate-pulse" style="color: var(--messenger-accent, #f59e0b);">درحال ضبط...</span>
         </div>
 
         <!-- Cancel Button on the left -->
@@ -142,10 +142,10 @@
         @touchstart.prevent="sendMessage"
         :disabled="isSending || !composerSurface.canSubmit"
       >
-        <svg v-if="editingMessage" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#3390ec" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+        <svg v-if="editingMessage" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#f59e0b" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="20 6 9 17 4 12"></polyline>
         </svg>
-        <svg v-else viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#3390ec" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(45deg); margin-left: -4px;">
+        <svg v-else viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(45deg); margin-left: -4px;">
           <line x1="22" y1="2" x2="11" y2="13"></line>
           <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
         </svg>
@@ -185,7 +185,7 @@
           width="26"
           height="26"
           fill="none"
-          stroke="#3390ec"
+          stroke="#f59e0b"
           stroke-width="2"
           stroke-linecap="round"
           stroke-linejoin="round"
@@ -1324,7 +1324,7 @@ const sendMessage = () => {
 .voice-btn:active svg {
   transform: scale(1.2);
   transition: transform var(--messenger-motion-fast, 120ms);
-  stroke: #3390ec;
+  stroke: var(--messenger-accent, #f59e0b);
 }
 
 .input-area {
@@ -1464,7 +1464,7 @@ const sendMessage = () => {
 }
 .emoji-btn svg, .attach-btn svg, .voice-btn svg, .cancel-voice-btn svg { width: 28px; height: 28px; }
 .emoji-btn { margin-left: 4px; }
-.emoji-btn.is-active svg { stroke: #3390ec; }
+.emoji-btn.is-active svg { stroke: var(--messenger-accent, #f59e0b); }
 .attach-btn, .voice-btn { margin-right: 4px; }
 .cancel-voice-btn { margin-left: 4px; }
 
@@ -1484,11 +1484,11 @@ const sendMessage = () => {
   contain: layout paint;
 }
 @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-.reply-banner-icon { display: flex; align-items: center; justify-content: center; color: #3390ec; }
-.reply-banner-content { flex: 1; display: flex; flex-direction: column; border-right: 2px solid #3390ec; padding-right: 8px; justify-content: center; overflow: hidden; }
-.reply-banner-author { font-size: 14px; font-weight: 500; color: #3390ec; line-height: 1.2; margin-bottom: 2px; }
+.reply-banner-icon { display: flex; align-items: center; justify-content: center; color: var(--messenger-accent, #f59e0b); }
+.reply-banner-content { flex: 1; display: flex; flex-direction: column; border-right: 2px solid var(--messenger-accent, #f59e0b); padding-right: 8px; justify-content: center; overflow: hidden; }
+.reply-banner-author { font-size: 14px; font-weight: 500; color: var(--messenger-accent, #f59e0b); line-height: 1.2; margin-bottom: 2px; }
 .reply-banner-text { font-size: 13px; color: #8e8e93; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.edit-banner-icon { color: #3390ec; }
+.edit-banner-icon { color: var(--messenger-accent, #f59e0b); }
 .close-reply { background: none; border: none; color: #8E8E93; cursor: pointer; padding: 4px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: background var(--messenger-motion-standard, 180ms); }
 .close-reply:hover { background: rgba(0, 0, 0, 0.05); color: #000; }
 

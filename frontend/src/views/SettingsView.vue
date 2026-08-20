@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { ChevronLeft, LogOut, Smartphone, Trash2 } from 'lucide-vue-next'
+import { LogOut, Smartphone, Trash2 } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import OfferOvertimePreferencePanel from '../components/OfferOvertimePreferencePanel.vue'
 import {
@@ -9,6 +9,7 @@ import {
   reloadAfterStorageCacheClear,
 } from '../composables/useStorageCacheMetrics'
 import {
+  AppBackButton,
   AppButton,
   AppCard,
   AppConfirmDialog,
@@ -604,18 +605,13 @@ watch(
   <div ref="settingsPageRoot" class="ds-page settings-page ui-v2-daily-page ui-v2-settings-page">
     <AppPage narrow>
       <AppPageHeader eyebrow="حساب" :title="pageTitle" :description="pageDescription">
-        <template #actions>
-          <AppButton
+        <template #back>
+          <AppBackButton
             class="settings-return-control"
-            variant="ghost"
-            size="sm"
+            label="بازگشت به حساب"
+            text="حساب"
             @click="returnToAccount"
-          >
-            <template #icon>
-              <ChevronLeft :size="18" />
-            </template>
-            حساب
-          </AppButton>
+          />
         </template>
       </AppPageHeader>
 

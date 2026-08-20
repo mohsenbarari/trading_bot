@@ -492,7 +492,8 @@ function formatDateForSeparator(dateString: string) {
 }
 
 .header-avatar.group-avatar {
-  background: linear-gradient(135deg, #2563eb, #06b6d4);
+  background: var(--ds-primary-100, #fef3c7);
+  color: var(--ds-primary-700, #b45309);
   cursor: pointer;
 }
 

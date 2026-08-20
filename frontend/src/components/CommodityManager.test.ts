@@ -203,7 +203,7 @@ describe('CommodityManager.vue', () => {
 
     expect(wrapper.text()).toContain('امامی')
     expect(wrapper.text()).toContain('سکه جدید')
-    expect(wrapper.get('.commodity-back-control').classes()).toContain('ui-icon-button')
+    expect(wrapper.get('.commodity-back-control').classes()).toContain('ui-back-button')
 
     await wrapper.find('.commodity-back-control').trigger('click')
     await flushPromises()

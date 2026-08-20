@@ -1965,9 +1965,9 @@ function handleHistoryPresetChipChange(value: string) {
                     </template>
                   </AppFormField>
                   <p v-if="addressError" class="error-text address-error-text">{{ addressError }}</p>
-                  <div class="address-edit-actions">
-                    <AppButton type="submit" size="sm" :loading="addressBusy">ذخیره آدرس</AppButton>
+                  <div class="address-edit-actions ds-native-actions ds-native-actions--split">
                     <AppButton type="button" variant="secondary" size="sm" :disabled="addressBusy" @click.stop="cancelAddressEdit">انصراف</AppButton>
+                    <AppButton type="submit" size="sm" :loading="addressBusy">ذخیره آدرس</AppButton>
                   </div>
                 </form>
               </div>
@@ -2479,37 +2479,12 @@ function handleHistoryPresetChipChange(value: string) {
 }
 
 .profile-nav-back {
-  justify-self: end;
+  justify-self: start;
   box-sizing: border-box;
   inline-size: 3rem;
   block-size: 3rem;
   min-inline-size: 3rem;
   min-block-size: 3rem;
-  border: 1px solid var(--ds-native-hairline);
-  border-radius: var(--ds-radius-full);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--ds-bg-card);
-  color: var(--ds-text-primary);
-  box-shadow: none;
-  cursor: pointer;
-  transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
-}
-
-.profile-nav-back:hover {
-  background: var(--ds-bg-hover);
-  border-color: var(--ds-primary-200);
-  box-shadow: none;
-}
-
-.profile-nav-back:active {
-  transform: translateY(1px);
-}
-
-.profile-nav-back:focus-visible {
-  outline: 3px solid rgba(245, 158, 11, 0.34);
-  outline-offset: 2px;
 }
 
 .profile-avatar-stack {
@@ -2535,8 +2510,8 @@ function handleHistoryPresetChipChange(value: string) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, var(--ds-telegram-500), var(--ds-info-500) 58%, var(--ds-primary-500) 100%);
-  color: var(--ds-bg-card);
+  background: var(--ds-primary-100);
+  color: var(--ds-primary-700);
   font-size: 2rem;
   font-weight: 900;
   flex-shrink: 0;
@@ -2560,7 +2535,7 @@ function handleHistoryPresetChipChange(value: string) {
 }
 
 .profile-avatar-button--editable {
-  box-shadow: var(--ds-shadow-lg);
+  box-shadow: none;
 }
 
 .profile-avatar--readonly {
@@ -2856,9 +2831,7 @@ function handleHistoryPresetChipChange(value: string) {
 }
 
 .address-edit-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  margin-top: 0.75rem;
 }
 
 .address-error-text {

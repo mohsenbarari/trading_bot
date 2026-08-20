@@ -497,9 +497,8 @@ describe('CreateChannelView.vue', () => {
     expect(wrapper.emitted('refresh-conversations')).toHaveLength(3)
     expect(currentMembers.find((member) => member.user_id === 2)?.role).toBe('member')
 
-    const headerButtons = wrapper.findAll('.ui-icon-button')
-    expect(headerButtons[0]).toBeTruthy()
-    await headerButtons[0]!.trigger('click')
+    const headerBack = wrapper.get('.ui-back-button')
+    await headerBack.trigger('click')
     await flushPromises()
 
     const deleteChannelButton = wrapper.findAll('button').find((button) => button.text().includes('حذف کانال'))

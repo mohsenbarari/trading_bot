@@ -7,7 +7,10 @@ defineProps<{
 </script>
 
 <template>
-  <header class="ui-page-header">
+  <header class="ui-page-header" :class="{ 'ui-page-header--has-back': $slots.back }">
+    <div v-if="$slots.back" class="ui-page-header__back">
+      <slot name="back" />
+    </div>
     <div class="ui-page-header__copy">
       <p v-if="eyebrow" class="ui-page-header__eyebrow">{{ eyebrow }}</p>
       <h1>{{ title }}</h1>

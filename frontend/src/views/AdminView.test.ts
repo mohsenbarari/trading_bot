@@ -183,7 +183,7 @@ describe('AdminView.vue', () => {
     expect(adminViewMocks.routerPushMock).toHaveBeenCalledWith({ name: 'admin-invitations' })
     expect(wrapper.text()).toContain('ارسال دعوت‌نامه')
     expect(wrapper.find('.admin-subview-card.ui-section-card').exists()).toBe(true)
-    expect(wrapper.get('.admin-subview-return').classes()).toContain('ui-icon-button')
+    expect(wrapper.get('.admin-subview-return').classes()).toContain('ui-back-button')
     expect(wrapper.get('.admin-subview-return').attributes('aria-label')).toBe(
       'بازگشت به پنل مدیریت',
     )

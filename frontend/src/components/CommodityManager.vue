@@ -10,6 +10,7 @@ import {
 } from 'lucide-vue-next'
 import { routeRequest, routeRequestJson } from '../utils/routeRequest'
 import { useActionState } from '../composables/useActionState'
+import AppBackButton from './ui/AppBackButton.vue'
 import AppButton from './ui/AppButton.vue'
 import AppConfirmDialog from './ui/AppConfirmDialog.vue'
 import AppEmptyState from './ui/AppEmptyState.vue'
@@ -676,17 +677,19 @@ onUnmounted(() => {
     </AppSectionCard>
 
     <template v-if="viewMode === 'aliases' && selectedCommodity">
+      <div class="commodity-subview-nav">
+        <AppBackButton
+          class="commodity-back-control"
+          label="بازگشت به فهرست کالاها"
+          @click="returnToList"
+        />
+      </div>
       <AppSectionCard
         :title="selectedCommodity.name"
         description="لیست نام‌های مستعار این کالا و اقدامات مرتبط با آن را از اینجا مدیریت کنید."
       >
         <template #actions>
-          <div class="aliases-header-actions">
-            <AppStatusBadge tone="info">{{ aliasCountLabel(selectedCommodityAliasCount) }}</AppStatusBadge>
-            <AppIconButton @click="returnToList" class="commodity-back-control" label="بازگشت به فهرست کالاها">
-              <ArrowRight :size="16" />
-            </AppIconButton>
-          </div>
+          <AppStatusBadge tone="info">{{ aliasCountLabel(selectedCommodityAliasCount) }}</AppStatusBadge>
         </template>
 
         <AppEmptyState
@@ -974,13 +977,13 @@ onUnmounted(() => {
   color: var(--ds-text-muted);
 }
 
-.aliases-header-actions {
-  display: inline-flex;
+.commodity-subview-nav {
+  display: flex;
   align-items: center;
-  gap: 0.55rem;
+  min-height: var(--ds-native-row-min-height, 48px);
+  margin-bottom: 0.75rem;
 }
 
-.commodity-back-control,
 .commodity-icon-control {
   width: 2.25rem;
   height: 2.25rem;
@@ -995,7 +998,6 @@ onUnmounted(() => {
   transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
 }
 
-.commodity-back-control:hover,
 .commodity-icon-control:hover {
   border-color: var(--ds-primary-300);
   background: var(--ds-primary-50);

@@ -838,7 +838,7 @@ const portalProofOpen = ref(false)
   border: var(--ui-v2-stroke-standard) solid transparent;
   border-radius: var(--ui-v2-radius-control);
   background: var(--ui-v2-color-action-primary);
-  color: var(--ui-v2-color-text-on-action);
+  color: var(--ui-v2-color-text-strong);
   font: inherit;
   font-size: var(--ui-v2-type-action-medium-size);
   font-weight: var(--ui-v2-font-weight-semibold);
@@ -848,10 +848,15 @@ const portalProofOpen = ref(false)
   transition-duration: var(--ui-v2-motion-micro);
 }
 
-:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-button--secondary,
-:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-button--ghost {
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-button--secondary {
   border-color: var(--ui-v2-color-border-default);
   background: var(--ui-v2-color-action-secondary);
+  color: var(--ui-v2-color-text-action);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-button--ghost {
+  border-color: transparent;
+  background: transparent;
   color: var(--ui-v2-color-text-action);
 }
 

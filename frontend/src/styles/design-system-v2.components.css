@@ -232,12 +232,13 @@
   border: var(--ui-v2-stroke-standard) solid transparent;
   border-radius: var(--ui-v2-radius-control);
   background: var(--ui-v2-color-action-primary);
-  color: var(--ui-v2-color-text-on-action);
+  color: var(--ui-v2-color-text-strong);
   font: inherit;
   font-size: var(--ui-v2-type-action-medium-size);
   font-weight: var(--ui-v2-font-weight-semibold);
   line-height: var(--ui-v2-type-action-medium-line);
   cursor: pointer;
+  box-shadow: none;
   transition-property: color, background-color, border-color, opacity;
   transition-duration: var(--ui-v2-motion-micro);
 }
@@ -248,14 +249,23 @@
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-auth-flow
-  :where(.ui-button--secondary, .ui-button--ghost) {
+  .ui-button--secondary {
   border-color: var(--ui-v2-color-border-default);
   background: var(--ui-v2-color-action-secondary);
   color: var(--ui-v2-color-text-action);
 }
 
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-auth-flow
+  .ui-button--ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ui-v2-color-text-action);
+}
+
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow .ui-button--danger {
   background: var(--ui-v2-color-action-danger);
+  color: var(--ui-v2-color-text-on-action);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-flow .ui-button:disabled {
@@ -883,7 +893,7 @@
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-session-action--primary {
   background: var(--ui-v2-color-action-primary);
-  color: var(--ui-v2-color-text-on-action);
+  color: var(--ui-v2-color-text-strong);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-session-action--secondary {
@@ -1072,7 +1082,7 @@
   border: var(--ui-v2-stroke-standard) solid transparent;
   border-radius: var(--ui-v2-radius-control);
   background: var(--ui-v2-color-action-primary);
-  color: var(--ui-v2-color-text-on-action);
+  color: var(--ui-v2-color-text-strong);
   font: inherit;
   font-size: var(--ui-v2-type-action-medium-size);
   font-weight: var(--ui-v2-font-weight-semibold);
@@ -1081,9 +1091,17 @@
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-pwa-actions
-  :where(.ui-button--secondary, .ui-button--ghost) {
+  .ui-button--secondary {
   border-color: var(--ui-v2-color-border-default);
   background: var(--ui-v2-color-action-secondary);
+  color: var(--ui-v2-color-text-action);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-v2-pwa-actions
+  .ui-button--ghost {
+  border-color: transparent;
+  background: transparent;
   color: var(--ui-v2-color-text-action);
 }
 
@@ -1130,6 +1148,12 @@
   align-items: start;
   gap: var(--ui-v2-spacing-16);
   padding-block-end: var(--ui-v2-spacing-8);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+  .ui-page-header.ui-page-header--has-back {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-page-header__copy {
@@ -1321,7 +1345,7 @@
   border: var(--ui-v2-stroke-standard) solid transparent;
   border-radius: var(--ui-v2-radius-control);
   background: var(--ui-v2-color-action-primary);
-  color: var(--ui-v2-color-text-on-action);
+  color: var(--ui-v2-color-text-strong);
   font-family: var(--ui-v2-font-family);
   font-size: var(--ui-v2-type-action-medium-size);
   font-weight: var(--ui-v2-font-weight-semibold);
@@ -1329,10 +1353,15 @@
   transition-duration: var(--ui-v2-motion-micro);
 }
 
-:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
-  :where(.ui-button--secondary, .ui-button--ghost) {
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-button--secondary {
   border-color: var(--ui-v2-color-border-default);
   background: var(--ui-v2-color-action-secondary);
+  color: var(--ui-v2-color-text-action);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-button--ghost {
+  border-color: transparent;
+  background: transparent;
   color: var(--ui-v2-color-text-action);
 }
 
@@ -1446,9 +1475,9 @@
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-adapter__back {
   min-width: var(--ui-v2-size-target-min);
   min-height: var(--ui-v2-size-target-min);
-  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  border: 0;
   border-radius: var(--ui-v2-radius-control);
-  background: var(--ui-v2-color-surface-card);
+  background: transparent;
   color: var(--ui-v2-color-text-action);
 }
 
@@ -1617,9 +1646,21 @@
     padding-inline: var(--ui-v2-spacing-12);
   }
 
-  :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-page-header {
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-page-header:not(.ui-page-header--has-back) {
     grid-template-columns: minmax(0, 1fr);
     gap: var(--ui-v2-spacing-8);
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-page-header.ui-page-header--has-back {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--ui-v2-spacing-8);
+  }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
+    .ui-page-header.ui-page-header--has-back
+    .ui-page-header__actions {
+    grid-column: 1 / -1;
   }
 
   :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-page-header__actions {

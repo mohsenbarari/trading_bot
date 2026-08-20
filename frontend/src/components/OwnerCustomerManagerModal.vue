@@ -36,7 +36,7 @@ import { invitationRelationLink, invitationSmsStatusMessage } from '../utils/inv
 import { tradeSettlementLabel } from '../utils/settlementType'
 import CustomerNameWithBadge from './CustomerNameWithBadge.vue'
 import HelpPopover from './HelpPopover.vue'
-import { AppInput, AppTextarea } from './ui'
+import { AppBackButton, AppInput, AppTextarea } from './ui'
 
 
 const props = withDefaults(
@@ -856,14 +856,11 @@ onBeforeUnmount(() => {
         :class="{ 'customer-manager-shell--workspace': isWorkspace }"
       >
         <div v-if="!isWorkspace" class="customer-owner-header">
-          <button
-            type="button"
+          <AppBackButton
             class="customer-manager-back"
-            aria-label="بازگشت"
+            label="بازگشت"
             @click="closeManager"
-          >
-            <ChevronLeft :size="24" />
-          </button>
+          />
           <div class="customer-manager-title">
             <h3>مشتریان</h3>
           </div>
@@ -1815,7 +1812,6 @@ onBeforeUnmount(() => {
   color: #111827;
 }
 
-.customer-manager-back,
 .ghost-btn,
 .customer-primary-control,
 .customer-secondary-control,
@@ -1829,17 +1825,8 @@ onBeforeUnmount(() => {
 }
 
 .customer-manager-back {
-  width: var(--ds-native-row-min-height, 48px);
-  height: var(--ds-native-row-min-height, 48px);
-  min-height: var(--ds-native-row-min-height, 48px);
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--ds-radius-full);
-  background: var(--ds-bg-card);
-  color: var(--ds-text-secondary);
-  border: 0;
+  background: transparent;
+  color: inherit;
   box-shadow: none;
 }
 

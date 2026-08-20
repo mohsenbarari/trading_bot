@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import ChatUserListRow from './ChatUserListRow.vue'
+import { AppBackButton } from '../ui'
 import { apiFetch, apiFetchJson } from '../../utils/auth'
 import { getAccountantOwnerBadge, getChatRoleBadge } from '../../utils/chatRoleBadges'
 import type { ChatUserListRowBadge } from './ChatUserListRow.vue'
@@ -773,9 +774,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
         <section class="group-manager-shell" @click.stop>
           <input ref="avatarInput" type="file" accept="image/*" class="hidden-avatar-input" @change="handleAvatarSelected" />
           <header class="manager-header">
-            <button type="button" class="header-icon-btn" @click="handleBack()">
-              <ChevronRight :size="22" />
-            </button>
+            <AppBackButton label="بازگشت" @click="handleBack()" />
             <div class="header-copy">
               <h3>{{ pageTitle }}</h3>
               <span>{{ pageSubtitle }}</span>
@@ -1191,7 +1190,14 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 .manager-footer {
   border-top: 1px solid rgba(148, 163, 184, 0.14);
   border-bottom: 0;
-  justify-content: space-between;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+.manager-footer > .secondary-btn,
+.manager-footer > .primary-btn {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .header-icon-btn {
@@ -1320,8 +1326,8 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 .search-input:focus,
 .editor-input:focus,
 .editor-textarea:focus {
-  border-color: #3390ec;
-  box-shadow: 0 0 0 4px rgba(51, 144, 236, 0.12);
+  border-color: var(--ds-primary-500, #f59e0b);
+  box-shadow: var(--ds-focus-ring, 0 0 0 4px rgba(245, 158, 11, 0.18));
 }
 
 .selection-banner {
@@ -1351,7 +1357,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 .secondary-btn,
 .ghost-action {
   border: 0;
-  border-radius: var(--messenger-radius-panel, 18px);
+  border-radius: var(--ds-control-radius, 12px);
   font: inherit;
   font-weight: 800;
   cursor: pointer;
@@ -1364,8 +1370,8 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 .primary-chip {
   min-height: var(--ds-native-row-min-height, 48px);
   padding: 0 16px;
-  background: #3390ec;
-  color: #fff;
+  background: var(--ds-primary-500, #f59e0b);
+  color: #111827;
 }
 
 .primary-btn,
@@ -1375,9 +1381,9 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 }
 
 .primary-btn {
-  background: #3390ec;
-  color: #fff;
-  box-shadow: 0 12px 28px rgba(51, 144, 236, 0.24);
+  background: var(--ds-primary-500, #f59e0b);
+  color: #111827;
+  box-shadow: none;
 }
 
 .secondary-btn {
@@ -1418,8 +1424,8 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 
 .hero-avatar,
 .row-avatar {
-  background: linear-gradient(135deg, #3390ec, #0ea5e9 58%, #22c55e 100%);
-  color: #fff;
+  background: var(--ds-primary-100, #fef3c7);
+  color: var(--ds-primary-700, #b45309);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1611,8 +1617,8 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 }
 
 .row-check.active {
-  border-color: #3390ec;
-  background: #3390ec;
+  border-color: var(--ds-primary-500, #f59e0b);
+  background: var(--ds-primary-500, #f59e0b);
 }
 
 .row-icon {

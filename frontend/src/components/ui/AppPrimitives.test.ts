@@ -31,6 +31,7 @@ import {
   AppOfferSideBadge,
   AppOfferTradeErrorToast,
   AppPage,
+  AppBackButton,
   AppPageHeader,
   AppResponsiveDialog,
   AppSearchField,
@@ -527,10 +528,22 @@ describe('ui primitives', () => {
         title: 'مشتریان',
         description: 'مدیریت روابط مشتریان',
       },
-      slots: { actions: '<button>افزودن</button>' },
+      slots: {
+        back: '<button class="test-back">بازگشت</button>',
+        actions: '<button>افزودن</button>',
+      },
     })
     expect(header.text()).toContain('مدیریت روابط مشتریان')
+    expect(header.classes()).toContain('ui-page-header--has-back')
+    expect(header.find('.ui-page-header__back').exists()).toBe(true)
     expect(header.find('.ui-page-header__actions').exists()).toBe(true)
+
+    const backButton = mount(AppBackButton, {
+      props: { label: 'بازگشت به حساب', text: 'حساب' },
+    })
+    expect(backButton.classes()).toContain('ui-back-button')
+    expect(backButton.attributes('aria-label')).toBe('بازگشت به حساب')
+    expect(backButton.text()).toContain('حساب')
 
     const masterDetail = mount(AppMasterDetail, {
       slots: {

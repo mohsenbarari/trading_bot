@@ -306,7 +306,7 @@ function handleUserClick(user: SearchUser) {
   width: 30px;
   height: 30px;
   border-radius: 50%;
-  background: #3390ec;
+  background: var(--ds-primary-500, #f59e0b);
   color: white;
   display: inline-flex;
   align-items: center;

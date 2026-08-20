@@ -2,12 +2,12 @@
 import { computed, onMounted, ref } from 'vue'
 import type { Component } from 'vue'
 import { useRouter } from 'vue-router'
-import { Bell, ChevronLeft, Database, Settings, Smartphone, UserRound } from 'lucide-vue-next'
+import { Bell, Database, Settings, Smartphone, UserRound } from 'lucide-vue-next'
 import {
   AppActionCard,
+  AppBackButton,
   AppButton,
   AppErrorState,
-  AppIconButton,
   AppLoadingState,
   AppPage,
   AppSectionCard,
@@ -230,15 +230,11 @@ onMounted(refreshIdentity)
           >
         </WorkspaceNotice>
         <header class="account-compact-header ui-v2-account-header" aria-label="حساب کاربری">
-          <AppIconButton
-            type="button"
+          <AppBackButton
             class="account-return-control"
             label="بازگشت"
-            size="sm"
             @click="router.back()"
-          >
-            <ChevronLeft :size="18" />
-          </AppIconButton>
+          />
           <div class="account-identity ui-v2-account-header__identity">
             <div class="account-identity-name-row">
               <span

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ChevronLeft } from 'lucide-vue-next'
+import { AppBackButton } from '../components/ui'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 import { routeRequestJson } from '../utils/routeRequest'
 import { isAppHttpError } from '../utils/httpErrorPolicy'
@@ -13,7 +13,6 @@ import AdminMessagesView from '../components/AdminMessagesView.vue'
 import CreateInvitationView from '../components/CreateInvitationView.vue'
 import CreateChannelView from '../components/CreateChannelView.vue'
 import UserProfile from '../components/UserProfile.vue'
-import AppIconButton from '../components/ui/AppIconButton.vue'
 import AppButton from '../components/ui/AppButton.vue'
 import AppErrorState from '../components/ui/AppErrorState.vue'
 import AppLoadingState from '../components/ui/AppLoadingState.vue'
@@ -808,20 +807,18 @@ onUnmounted(() => {
 
       <template v-else>
         <section class="admin-subview-shell">
+          <div class="admin-subview-nav">
+            <AppBackButton
+              class="admin-subview-return"
+              :label="adminSubviewReturnLabel"
+              @click="handleAdminSubviewReturn"
+            />
+          </div>
           <AppSectionCard
             class="admin-subview-card"
             :title="currentSectionMeta.title"
             :description="currentSectionMeta.description"
           >
-            <template #actions>
-              <AppIconButton
-                class="admin-subview-return"
-                :label="adminSubviewReturnLabel"
-                @click="handleAdminSubviewReturn"
-              >
-                <ChevronLeft :size="20" />
-              </AppIconButton>
-            </template>
 
             <transition name="fade" mode="out-in">
               <CreateInvitationView
@@ -915,24 +912,10 @@ onUnmounted(() => {
   min-width: 0;
 }
 
-.admin-subview-return {
-  width: var(--ds-native-row-min-height, 48px);
-  height: var(--ds-native-row-min-height, 48px);
-  display: inline-flex;
+.admin-subview-nav {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  border: 1px solid var(--ds-border-light);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-bg-inset);
-  color: var(--ds-text-primary);
-  cursor: pointer;
-  transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
-}
-
-.admin-subview-return:hover {
-  border-color: var(--ds-primary-300);
-  background: var(--ds-primary-50);
-  color: var(--ds-primary-700);
+  min-height: var(--ds-native-row-min-height, 48px);
 }
 
 .fade-enter-active,

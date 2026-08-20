@@ -1375,11 +1375,11 @@ async function confirmPendingAction() {
           <AppSelect :id="id" v-model="selectedRole" class="form-select" :options="roles" :disabled="isUserMutationBusy" />
         </AppFormField>
         <p v-if="roleError" class="user-action-feedback user-action-feedback--error" role="alert">{{ roleError }}</p>
-        <div class="action-buttons">
+        <div class="action-buttons ds-native-actions ds-native-actions--split">
+            <AppButton class="cancel-btn" variant="secondary" :disabled="isUserMutationBusy" @click="isEditingRole = false">انصراف</AppButton>
             <AppButton class="save-btn" variant="primary" :disabled="isUserMutationBusy" :loading="isActionBusy('role')" @click="saveRole">
               ذخیره
             </AppButton>
-            <AppButton class="cancel-btn" variant="secondary" :disabled="isUserMutationBusy" @click="isEditingRole = false">انصراف</AppButton>
         </div>
       </div>
 
@@ -1549,10 +1549,10 @@ async function confirmPendingAction() {
       <p v-if="blockError" class="user-action-feedback user-action-feedback--error" role="alert">{{ blockError }}</p>
       <template #actions>
         <template v-if="showCustomDateInput">
+          <AppButton class="cancel-btn" variant="secondary" :disabled="isUserMutationBusy" @click="showCustomDateInput = false">بازگشت</AppButton>
           <AppButton class="save-btn" variant="primary" :disabled="isUserMutationBusy" :loading="isActionBusy('block')" @click="blockUserCustom">
             تایید نهایی
           </AppButton>
-          <AppButton class="cancel-btn" variant="secondary" :disabled="isUserMutationBusy" @click="showCustomDateInput = false">بازگشت</AppButton>
         </template>
         <AppButton
           v-else
@@ -1612,10 +1612,10 @@ async function confirmPendingAction() {
 
       <p v-if="limitationsError" class="user-action-feedback user-action-feedback--error" role="alert">{{ limitationsError }}</p>
       <template #actions>
+        <AppButton class="cancel-btn" variant="secondary" :disabled="isUserMutationBusy" @click="closeLimitationsModal">انصراف</AppButton>
         <AppButton class="save-btn" variant="primary" :disabled="isUserMutationBusy" :loading="isActionBusy('limitations')" @click="saveLimitations">
           ذخیره
         </AppButton>
-        <AppButton class="cancel-btn" variant="secondary" :disabled="isUserMutationBusy" @click="closeLimitationsModal">انصراف</AppButton>
       </template>
     </AppResponsiveDialog>
 
@@ -1684,7 +1684,7 @@ async function confirmPendingAction() {
         </div>
       </div>
       <!-- Footer moved outside wrapper to ensure visibility -->
-      <div class="integrated-footer">
+      <div class="integrated-footer ds-native-actions ds-native-actions--split">
         <AppButton class="integrated-cancel-btn cancel-btn" variant="secondary" @click="showBlockDateModal = false">انصراف</AppButton>
         <AppButton v-if="pickerStep === 1" class="integrated-save-btn save-btn" variant="primary" @click="handleNextStep">ادامه</AppButton>
         <AppButton v-if="pickerStep === 2" class="integrated-save-btn save-btn" variant="primary" @click="handleFinalSubmit">تایید نهایی</AppButton>
@@ -1727,7 +1727,7 @@ async function confirmPendingAction() {
         </div>
       </div>
       <!-- Footer moved outside wrapper to ensure visibility -->
-      <div class="integrated-footer">
+      <div class="integrated-footer ds-native-actions ds-native-actions--split">
         <AppButton class="integrated-cancel-btn cancel-btn" variant="secondary" @click="showLimitDateModal = false">انصراف</AppButton>
         <AppButton v-if="pickerStep === 1" class="integrated-save-btn save-btn" variant="primary" @click="handleNextStep">ادامه</AppButton>
         <AppButton v-if="pickerStep === 2" class="integrated-save-btn save-btn" variant="primary" @click="handleFinalSubmit">تایید نهایی</AppButton>
@@ -1970,7 +1970,7 @@ async function confirmPendingAction() {
   max-width: none;
 }
 .profile-nav-back {
-  justify-self: end;
+  justify-self: start;
 }
 h2 {
   margin: 0;
@@ -2043,14 +2043,7 @@ input[type="number"].form-input::-webkit-inner-spin-button {
 }
 
 .action-buttons {
-  display: flex;
-  gap: 0.625rem;
-}
-.save-btn,
-.cancel-btn {
-  flex: 1;
-  min-width: 0;
-  transition: all 0.2s;
+  margin-top: 0.75rem;
 }
 
 .profile-menu-card {

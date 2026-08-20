@@ -130,8 +130,8 @@ function handleClick(event: MouseEvent) {
 }
 
 .chat-user-row.is-selected {
-  border-color: rgba(51, 144, 236, 0.28);
-  background: rgba(240, 248, 255, 0.96);
+  border-color: var(--ds-primary-200, #fde68a);
+  background: var(--ds-primary-50, #fffbeb);
 }
 
 .chat-user-row.is-disabled {
@@ -144,8 +144,8 @@ function handleClick(event: MouseEvent) {
   height: 48px;
   border-radius: 50%;
   overflow: hidden;
-  background: linear-gradient(135deg, #3390ec, #0ea5e9 58%, #f59e0b 100%);
-  color: #fff;
+  background: var(--ds-primary-100, #fef3c7);
+  color: var(--ds-primary-700, #b45309);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -258,7 +258,7 @@ function handleClick(event: MouseEvent) {
 
 :deep(.chat-user-row__action-btn) {
   min-width: 82px;
-  min-height: 32px;
+  min-height: var(--ds-native-row-min-height, 48px);
   padding: 0 12px;
   border: 0;
   border-radius: 12px;

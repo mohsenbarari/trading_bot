@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ChevronLeft, Pencil } from 'lucide-vue-next'
-import { AppIconButton } from '../ui'
+import { Pencil } from 'lucide-vue-next'
+import { AppBackButton } from '../ui'
 import ProfilePresence from './ProfilePresence.vue'
 
 withDefaults(defineProps<{
@@ -36,6 +36,22 @@ const emit = defineEmits<{
 
 <template>
   <div class="header-row profile-header-row" data-test="profile-identity-header">
+    <AppBackButton
+      v-if="!hideBackButton"
+      class="profile-nav-back"
+      :label="backLabel"
+      @click="emit('back')"
+    />
+    <div v-else class="header-back-spacer" aria-hidden="true"></div>
+    <div class="header-title">
+      <h2 v-if="displayName">
+        <slot name="title">{{ displayName }}</slot>
+      </h2>
+      <h2 v-else-if="loading" class="skeleton-text-header">
+        <div class="skeleton-box" style="width: 120px; height: 24px;"></div>
+      </h2>
+      <h2 v-else>پروفایل</h2>
+    </div>
     <div class="header-spacer">
       <div v-if="displayName || avatarUrl || editable || loading" class="profile-avatar-stack profile-avatar-stack--header">
         <button
@@ -66,23 +82,6 @@ const emit = defineEmits<{
         />
       </div>
     </div>
-    <div class="header-title">
-      <h2 v-if="displayName">
-        <slot name="title">{{ displayName }}</slot>
-      </h2>
-      <h2 v-else-if="loading" class="skeleton-text-header">
-        <div class="skeleton-box" style="width: 120px; height: 24px;"></div>
-      </h2>
-      <h2 v-else>پروفایل</h2>
-    </div>
-    <AppIconButton
-      v-if="!hideBackButton"
-      class="profile-nav-back"
-      :label="backLabel"
-      @click="emit('back')"
-    >
-      <ChevronLeft :size="20" />
-    </AppIconButton>
   </div>
 </template>
 
@@ -93,7 +92,7 @@ const emit = defineEmits<{
    * minimum, so a long account name could widen the whole route at 360px and
    * push the back control outside the viewport.
    */
-  grid-template-columns: minmax(4rem, 5.5rem) minmax(0, 1fr) minmax(2.75rem, 5.5rem);
+  grid-template-columns: 3rem minmax(0, 1fr) minmax(4rem, 5.5rem);
   align-items: center;
   min-width: 0;
   padding-bottom: 24px;
@@ -113,38 +112,18 @@ const emit = defineEmits<{
   word-break: break-word;
 }
 
+.header-back-spacer {
+  width: 3rem;
+  height: 3rem;
+}
+
 .profile-nav-back {
-  justify-self: end;
+  justify-self: start;
   box-sizing: border-box;
-  inline-size: 2.75rem;
-  block-size: 2.75rem;
-  min-inline-size: 2.75rem;
-  min-block-size: 2.75rem;
-  border: 1px solid var(--ds-border-medium);
-  border-radius: var(--ds-radius-full);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--ds-bg-card);
-  color: var(--ds-text-primary);
-  box-shadow: var(--ds-shadow-sm);
-  cursor: pointer;
-  transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
-}
-
-.profile-nav-back:hover {
-  background: var(--ds-bg-hover);
-  border-color: var(--ds-primary-200);
-  box-shadow: var(--ds-shadow-md);
-}
-
-.profile-nav-back:active {
-  transform: translateY(1px);
-}
-
-.profile-nav-back:focus-visible {
-  outline: 3px solid rgba(51, 144, 236, 0.22);
-  outline-offset: 2px;
+  inline-size: 3rem;
+  block-size: 3rem;
+  min-inline-size: 3rem;
+  min-block-size: 3rem;
 }
 
 .profile-avatar-stack {
@@ -170,8 +149,8 @@ const emit = defineEmits<{
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, var(--ds-telegram-500), var(--ds-info-500) 58%, var(--ds-primary-500) 100%);
-  color: var(--ds-bg-card);
+  background: var(--ds-primary-100);
+  color: var(--ds-primary-700);
   font-size: 2rem;
   font-weight: 900;
   flex-shrink: 0;
@@ -195,7 +174,7 @@ const emit = defineEmits<{
 }
 
 .profile-avatar-button--editable {
-  box-shadow: var(--ds-shadow-lg);
+  box-shadow: none;
 }
 
 .profile-avatar--readonly {

@@ -62,7 +62,7 @@
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   :where(.ui-v2-workspace-overlay-actions, .ui-v2-workspace-confirm-backdrop > section > footer) {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--ui-v2-spacing-8);
   padding: var(--ui-v2-spacing-16);
   border-block-start: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);

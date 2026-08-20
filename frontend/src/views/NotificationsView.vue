@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Bell, BellRing, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-vue-next'
+import { Bell, BellRing, ChevronLeft, RefreshCw } from 'lucide-vue-next'
 import {
+  AppBackButton,
   AppButton,
   AppEmptyState,
   AppFilterChips,
@@ -255,19 +256,13 @@ onMounted(async () => {
   <AppPage narrow class="ui-v2-daily-page ui-v2-notifications-page">
     <div class="notifications-view ui-v2-daily-page__content">
       <AppPageHeader eyebrow="حساب" title="اعلان‌ها" description="آخرین اعلان‌های دریافت‌شده در این حساب">
-        <template #actions>
-          <AppButton
-            type="button"
+        <template #back>
+          <AppBackButton
             class="notifications-return"
-            variant="ghost"
-            size="sm"
+            label="بازگشت به حساب"
+            text="حساب"
             @click="goBack"
-          >
-            <template #icon>
-              <ChevronRight :size="18" />
-            </template>
-            بازگشت به حساب
-          </AppButton>
+          />
         </template>
       </AppPageHeader>
 
@@ -296,6 +291,7 @@ onMounted(async () => {
             <AppButton
               v-if="canEnablePush"
               class="push-enable-btn"
+              block
               :loading="isPushBusy"
               @click="enablePush"
             >

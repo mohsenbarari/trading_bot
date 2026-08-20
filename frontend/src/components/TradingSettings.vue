@@ -861,9 +861,9 @@ onBeforeUnmount(() => {
                 </div>
                 <div v-if="item.note" class="override-note">{{ item.note }}</div>
               </div>
-              <div class="override-card__actions">
-                <AppButton type="button" :data-testid="`override-edit-${item.id}`" class="mini-footer-control" variant="secondary" @click="startEditingOverride(item)">ویرایش</AppButton>
-                <AppButton type="button" :data-testid="`override-delete-${item.id}`" class="mini-footer-control danger" variant="danger" @click="deleteOverride(item.id)" :disabled="overrideDeletingId === item.id">
+              <div class="override-card__actions ds-native-actions ds-native-actions--row">
+                <AppButton type="button" :data-testid="`override-edit-${item.id}`" variant="ghost" @click="startEditingOverride(item)">ویرایش</AppButton>
+                <AppButton type="button" :data-testid="`override-delete-${item.id}`" class="ds-native-danger" variant="ghost" @click="deleteOverride(item.id)" :disabled="overrideDeletingId === item.id">
                   {{ overrideDeletingId === item.id ? 'در حال حذف...' : 'حذف' }}
                 </AppButton>
               </div>
@@ -873,7 +873,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- دکمه‌ها -->
-      <div class="footer-actions">
+      <div class="footer-actions ds-native-actions ds-native-actions--stack">
         <AppButton type="button" class="settings-button settings-button--primary footer-control" @click="saveSettings" :disabled="saving">
           <Loader2 v-if="saving" class="animate-spin" :size="18" />
           <Save v-else :size="18" />
@@ -1026,11 +1026,9 @@ onBeforeUnmount(() => {
 }
 
 .footer-actions {
-  display: flex;
-  gap: 0.75rem;
   margin-top: 1.5rem;
   padding-top: 1rem;
-  border-top: 1px solid var(--ds-border-light);
+  border-top: 1px solid var(--ds-native-hairline);
 }
 
 .footer-control {
@@ -1188,25 +1186,8 @@ onBeforeUnmount(() => {
 }
 
 .override-card__actions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  align-items: flex-end;
-}
-
-.mini-footer-control {
-  border: 1px solid var(--ds-native-hairline);
-  background: var(--ds-bg-card);
-  color: var(--ds-text-primary);
-  border-radius: var(--ds-radius-md);
-  min-height: var(--ds-native-row-min-height, 48px);
-  padding: 0.45rem 0.85rem;
-  font-size: 0.76rem;
-  font-weight: 700;
-}
-
-.mini-footer-control.danger {
-  color: var(--ds-danger-700);
+  margin-top: 0.75rem;
+  justify-content: flex-end;
 }
 
 @media (max-width: 720px) {

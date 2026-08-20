@@ -143,7 +143,7 @@
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-account-deletion-dialog__actions {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--ui-v2-spacing-8);
   border-block-start: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
   background: var(--ui-v2-color-surface-card);

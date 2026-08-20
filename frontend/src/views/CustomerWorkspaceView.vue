@@ -1526,7 +1526,7 @@ onBeforeUnmount(() => {
       @back="handleBack"
     >
       <template #actions>
-        <AppButton variant="primary" class="customer-workspace-create" @click="openCreatePanel">
+        <AppButton variant="ghost" class="customer-workspace-create" @click="openCreatePanel">
           <template #icon>
             <UserPlus :size="16" />
           </template>

@@ -124,9 +124,7 @@ describe('CreateInvitationView.vue', () => {
     expect(createInvitationViewSource).toMatch(/<AppEmptyState[\s\S]*?role="status"/)
     expect(createInvitationViewSource).toContain('class="copy-btn web"')
     expect(createInvitationViewSource).not.toMatch(/(?:background|box-shadow):\s*linear-gradient\(/)
-    expect(createInvitationViewSource).toMatch(
-      /@media \(max-width: 540px\) \{[\s\S]*?\.form-actions \.ui-button:first-child \{ flex: 0 0 auto; \}/,
-    )
+    expect(createInvitationViewSource).toContain('form-actions ds-native-actions ds-native-actions--stack')
     expect(createInvitationViewSource).toMatch(
       /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.invitation-manager :deep\(\.ui-button__spinner\),[\s\S]*?\.invitation-manager :deep\(\.ui-loading-state__spinner\)[\s\S]*?animation-duration: 0\.01ms !important;[\s\S]*?animation-iteration-count: 1 !important;/,
     )

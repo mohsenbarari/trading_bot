@@ -207,11 +207,11 @@ describe('PublicProfile.vue', () => {
       /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.mini-trade-card\s*\{\s*transition:\s*none;\s*\}\s*\}/,
     )?.[0]
 
-    expect(backRule).toContain('transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;')
+    expect(backRule).toContain('justify-self: start;')
     expect(addressEditRule).toContain('transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;')
     expect(actionCardRule).toContain('transition: all 0.2s;')
     expect(miniTradeRule?.[1]).toContain('transition: transform 0.15s;')
-    expect(publicProfileSource).toMatch(/\.profile-nav-back:active\s*\{\s*transform:\s*translateY\(1px\);/)
+    expect(publicProfileSource).toMatch(/\.profile-nav-back\s*\{[\s\S]*?min-block-size:\s*3rem;/)
     expect(publicProfileSource).toMatch(/\.profile-action-card:active\s*\{\s*transform:\s*scale\(0\.98\);/)
     expect(publicProfileSource).toMatch(/\.mini-trade-card:active\s*\{\s*transform:\s*scale\(0\.98\);/)
     expect(publicProfileSource).toMatch(
@@ -225,15 +225,15 @@ describe('PublicProfile.vue', () => {
 
   it('renders remaining public-profile chrome with shared icon and button primitives', () => {
     expect(publicProfileFileSource).toMatch(/<ProfileIdentityHeader/)
-    expect(publicProfileSource).toMatch(/<AppIconButton[\s\S]*?class="profile-nav-back"/)
+    expect(publicProfileSource).toMatch(/<AppBackButton[\s\S]*?class="profile-nav-back"/)
     expect(publicProfileSource).toMatch(/<AppButton class="retry-btn"/)
     expect(publicProfileSource).toMatch(/<AppIconButton\s+v-if="isOwnProfile"\s+class="address-edit-trigger"/)
     expect(publicProfileSource).toMatch(/data-test="profile-avatar-trigger"/)
     expect(publicProfileSource).toMatch(/<button\s+v-if="editable"[\s\S]*?class="profile-avatar profile-avatar-button profile-avatar-button--editable"/)
     expect(publicProfileSource).toMatch(/\.profile-link-btn\s*\{[\s\S]*?color:\s*var\(--ds-success-700\)/)
     expect(publicProfileSource).toMatch(/\.trade-counterparty \.profile-link-btn\s*\{[\s\S]*?color:\s*var\(--ds-success-700\)/)
-    expect(publicProfileSource).toMatch(/background:\s*linear-gradient\(135deg,\s*var\(--ds-telegram-500\),\s*var\(--ds-info-500\) 58%,\s*var\(--ds-primary-500\) 100%\)/)
-    expect(publicProfileSource).toMatch(/\.profile-avatar-button--editable\s*\{[\s\S]*?box-shadow:\s*var\(--ds-shadow-lg\)/)
+    expect(publicProfileSource).toMatch(/background:\s*var\(--ds-primary-100\)/)
+    expect(publicProfileSource).toMatch(/\.profile-avatar-button--editable\s*\{[\s\S]*?box-shadow:\s*none/)
     expect(publicProfileSource).toMatch(/\.settings-btn\s*\{[\s\S]*?var\(--ds-primary-50\)/)
     expect(publicProfileSource).toMatch(/\.block-btn\s*\{[\s\S]*?var\(--ds-danger-50\)/)
     expect(publicProfileSource).toMatch(/\.unblock-btn\s*\{[\s\S]*?var\(--ds-success-50\)/)
@@ -3035,7 +3035,7 @@ describe('PublicProfile.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('دریافت پروفایل ناموفق بود')
-    expect(wrapper.get('.profile-nav-back').classes()).toContain('ui-icon-button')
+    expect(wrapper.get('.profile-nav-back').classes()).toContain('ui-back-button')
     await wrapper.get('.profile-nav-back').trigger('click')
     expect(wrapper.emitted('navigate')?.[0]).toEqual(['home'])
   })

@@ -18,7 +18,7 @@ import type { RelationStatus } from '../composables/useOwnerCustomers'
 import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
 import { invitationRelationLink, invitationSmsStatusMessage } from '../utils/invitationContract'
 import HelpPopover from './HelpPopover.vue'
-import { AppInput, AppTextarea } from './ui'
+import { AppBackButton, AppInput, AppTextarea } from './ui'
 
 
 const props = withDefaults(
@@ -545,14 +545,11 @@ onBeforeUnmount(() => {
         :class="{ 'accountant-manager-shell--workspace': isWorkspace }"
       >
         <div v-if="!isWorkspace" class="accountant-owner-header">
-          <button
-            type="button"
+          <AppBackButton
             class="accountant-manager-back"
-            aria-label="بازگشت"
+            label="بازگشت"
             @click="closeManager"
-          >
-            <ChevronLeft :size="24" />
-          </button>
+          />
           <div class="accountant-manager-title">
             <h3>حسابداران</h3>
           </div>
@@ -1629,19 +1626,7 @@ onBeforeUnmount(() => {
 }
 
 .accountant-manager-back {
-  width: var(--ds-native-row-min-height, 48px);
-  height: var(--ds-native-row-min-height, 48px);
-  min-height: var(--ds-native-row-min-height, 48px);
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: var(--ds-radius-full);
-  background: var(--ds-bg-card);
-  color: var(--ds-text-secondary);
-  box-shadow: none;
-  cursor: pointer;
+  background: transparent;
 }
 
 .accountant-owner-header-spacer {

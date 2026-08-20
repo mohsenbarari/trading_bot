@@ -4,7 +4,9 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Decisions
 
-- 2026-08-20 | Owner required one native language on all webapp pages. V2 target is 48px and brand maps to the same amber as `--ds-primary-*`. Auth/profile/directory leftover 44px chrome joined. Market feed stays frozen.
+- 2026-08-20 | Page back is one control: 48px ghost, chevron right, leading/right of the header. Parent name may sit beside it. Market stays frozen.
+- 2026-08-20 | Buttons share one role map: primary filled CTA at the bottom, secondary/cancel beside or above, ghost for inline/header, danger filled only in confirm. Form reset is a text danger under save. Market trade buttons stay frozen.
+- 2026-08-20 | Deep scan found leftover 44px profile header and Telegram-blue messenger chrome. Identity header is 48px; messenger accent/link/sent map to product amber. Market feed stays frozen.
 - 2026-08-20 | Owner required AdminMessages, TradingSettings, and Jalali to join the same native 48px language. Historical Stage 4/6 hashes stay readable via `native-app-admin-messages-visual-v1` and `native-app-trading-settings-visual-v1`. Calendar confirm and Market feed stay frozen.
 - 2026-08-20 | Integrity pass unified leftover non-Market chrome to 48px native rows/`AppInput`. Live messenger stays on `native-app-messenger-visual-v1`.
 - 2026-08-20 | Native App Standardization on `candidate/webapp-native-controls-v1` covers every live webapp surface except Market. Messenger frontend is fully free; Stage 8 hashes stay read-only via `native-app-messenger-visual-v1`. Legacy default and rollback stay. First control commit: `c8239d6c`.
