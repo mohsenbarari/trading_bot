@@ -4,6 +4,7 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Decisions
 
+- 2026-08-21 | A second page-by-page pass flattened leftover profile cards, admin wrapper padding, login recovery picker on narrow screens, and the Home account menu on phone. Home today-trades stays a horizontal table because its test locks that scroller. Market stays frozen.
 - 2026-08-21 | Non-Market hubs, profile stats, admin subviews, customer stats, and mobile confirms now use grouped rows / bottom sheets. Messenger leftover teal maps to product amber. Market feed, calendar confirm, and Telegram-connect blue stay frozen.
 - 2026-08-20 | Public auth is the same installed-app language: inset fields, grouped invite rows, and a bottom primary action. OTP behavior and developer login stay unchanged. Market stays frozen.
 - 2026-08-20 | Installed PWA is the native target, not a store app. Splash, theme, and account hub rows follow the grouped language so Home Screen launch reads as one app. Market stays frozen.

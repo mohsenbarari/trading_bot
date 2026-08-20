@@ -909,6 +909,10 @@ onUnmounted(() => {
   min-width: 0;
 }
 
+.admin-subview-card :deep(.ui-section-card__body) {
+  padding: 0;
+}
+
 .admin-subview-nav {
   display: flex;
   align-items: center;

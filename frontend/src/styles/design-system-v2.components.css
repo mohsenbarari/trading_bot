@@ -1739,6 +1739,10 @@
   :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-page-header__actions {
     justify-content: flex-start;
   }
+
+  :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-auth-login-picker-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (min-width: 900px) {

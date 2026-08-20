@@ -568,6 +568,22 @@ onUnmounted(() => {
   opacity: 0.62;
 }
 
+@media (max-width: 767px) {
+  .dashboard-account-menu__panel {
+    position: fixed;
+    inset-inline: 0;
+    inset-block-end: 0;
+    inset-block-start: auto;
+    z-index: 80;
+    width: 100%;
+    max-width: none;
+    padding: 0.5rem 0 calc(0.5rem + var(--ds-safe-area-bottom));
+    border: 0;
+    border-block-start: 1px solid var(--ds-native-hairline);
+    border-radius: 24px 24px 0 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dashboard-account-menu__chevron {
     transition-duration: 1ms;

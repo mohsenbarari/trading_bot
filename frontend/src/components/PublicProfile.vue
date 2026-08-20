@@ -1897,7 +1897,7 @@ function handleHistoryPresetChipChange(value: string) {
     <div v-if="isLoading" class="loading-state-skeleton">
        <LoadingSkeleton :count="1" :height="100" /> <!-- Info Section -->
        <div style="margin-top: 12px;"></div>
-       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+       <div class="loading-state-skeleton__rows">
          <LoadingSkeleton :count="1" :height="80" />
          <LoadingSkeleton :count="1" :height="80" />
        </div>
@@ -2437,6 +2437,12 @@ function handleHistoryPresetChipChange(value: string) {
   color: var(--ds-text-secondary);
 }
 
+.loading-state-skeleton__rows {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
 .profile-content {
   display: flex;
   flex-direction: column;
@@ -2867,8 +2873,8 @@ function handleHistoryPresetChipChange(value: string) {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
   width: 100%;
 }
 
@@ -3240,7 +3246,7 @@ function handleHistoryPresetChipChange(value: string) {
 .public-customer-list {
   display: flex;
   flex-direction: column;
-  gap: var(--ds-section-gap);
+  gap: 0;
 }
 
 .profile-relation-card,
@@ -3248,11 +3254,12 @@ function handleHistoryPresetChipChange(value: string) {
 .public-customer-card {
   position: relative;
   overflow: hidden;
-  padding: 0.85rem;
-  border-radius: var(--ds-radius-md);
-  border: 1px solid var(--ds-border-accent);
+  padding: 0.85rem 0;
+  border-radius: 0;
+  border: 0;
+  border-block-end: 1px solid var(--ds-native-hairline);
   background: var(--ds-bg-card);
-  box-shadow: var(--ds-shadow-sm);
+  box-shadow: none;
 }
 
 .public-accountant-card-head,

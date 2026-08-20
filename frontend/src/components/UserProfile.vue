@@ -1993,8 +1993,11 @@ h2 {
 }
 .profile-details {
   display: grid;
-  gap: 0.625rem;
+  gap: 0;
   min-width: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--ds-bg-card);
 }
 .detail-item {
   display: flex;
@@ -2002,10 +2005,15 @@ h2 {
   align-items: center;
   gap: 0.75rem;
   min-width: 0;
+  min-height: var(--ds-native-row-min-height, 48px);
   padding: 0.75rem 0.875rem;
   background: var(--ds-bg-card);
-  border: 1px solid var(--ds-border-light);
-  border-radius: var(--ds-radius-md);
+  border: 0;
+  border-block-end: 1px solid var(--ds-native-hairline);
+  border-radius: 0;
+}
+.detail-item:last-child {
+  border-block-end: 0;
 }
 .label {
   font-weight: 700;
