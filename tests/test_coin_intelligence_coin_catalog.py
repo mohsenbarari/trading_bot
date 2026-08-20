@@ -83,6 +83,18 @@ class CoinCatalogResolutionTests(unittest.IsolatedAsyncioTestCase):
         result = await resolve_coin_inference_against_catalog(db, inference())
         self.assertEqual((result.status, result.candidates[0].commodity_id, result.candidates[0].commodity_name), ("AUTO_SELECT", 71, "امام"))
 
+    async def test_pack_candidate_maps_to_exact_pack_catalog_name(self) -> None:
+        db = _CatalogDB({"پک نیم": [SimpleNamespace(id=81, name="پک نیم")]})
+        result = await resolve_coin_inference_against_catalog(
+            db,
+            inference("AUTO_SELECT", candidate("PACK_HALF", "پک نیم")),
+        )
+
+        self.assertEqual(
+            (result.status, result.candidates[0].commodity_id, result.candidates[0].commodity_name),
+            ("AUTO_SELECT", 81, "پک نیم"),
+        )
+
     async def test_confirm_requires_every_candidate_to_be_available_by_exact_name(self) -> None:
         db = _CatalogDB({"امام": [SimpleNamespace(id=71, name="امام")]})
         result = await resolve_coin_inference_against_catalog(

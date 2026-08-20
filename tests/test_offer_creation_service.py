@@ -260,6 +260,33 @@ class FakeDB:
 
 
 class OfferCreationServiceAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_pack_offer_is_exactly_one_indivisible_hundred_coin_pack(self):
+        valid = OfferCreationCommand(
+            source_surface=OfferSourceSurface.WEBAPP,
+            owner_user_id=1,
+            actor_user_id=1,
+            offer_type="buy",
+            commodity_id=81,
+            commodity_name="پک نیم",
+            quantity=100,
+            price=100_600,
+            is_wholesale=True,
+        )
+        with patch("core.config.settings.offer_model_price_guard_enabled", True):
+            await validate_offer_creation_command(FakeDB(), valid)
+
+            for invalid in (
+                replace(valid, quantity=99),
+                replace(valid, is_wholesale=False, lot_sizes=[50, 50]),
+                replace(valid, lot_sizes=[100]),
+            ):
+                with self.subTest(command=invalid):
+                    with self.assertRaisesRegex(
+                        OfferCreationValidationError,
+                        "آفر پک فقط یکجا",
+                    ):
+                        await validate_offer_creation_command(FakeDB(), invalid)
+
     async def test_model_guard_activation_disables_legacy_competitive_rejection(self):
         command = OfferCreationCommand(
             source_surface=OfferSourceSurface.WEBAPP,

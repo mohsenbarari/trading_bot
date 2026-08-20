@@ -14,6 +14,7 @@ const props = defineProps<{
   candidates: Candidate[]
   editCandidates?: Candidate[]
   lowDateHint?: boolean
+  packHint?: boolean
   startEditing?: boolean
 }>()
 
@@ -66,6 +67,7 @@ function selectCandidate(candidate: Candidate) {
         <template v-else-if="isSingleSuggestion">مدل این کالا را پیشنهاد می‌دهد. درستی آن را تأیید کنید.</template>
         <template v-else>یکی از کالاهای پیشنهادی را انتخاب کنید.</template>
         <span v-if="lowDateHint" class="commodity-inference-hint">فقط کالاهای تاریخ پایین نمایش داده شده‌اند.</span>
+        <span v-if="packHint" class="commodity-inference-hint">نوع پک از روی قیمت تشخیص داده می‌شود؛ مقدار همواره ۱۰۰ است.</span>
       </p>
       <div
         v-if="isSingleSuggestion"

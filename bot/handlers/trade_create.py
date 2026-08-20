@@ -22,6 +22,12 @@ from core.config import settings
 from core.enums import SettlementType, UserRole
 from core.db import AsyncSessionLocal
 from core.offer_source import OfferSourceSurface
+from core.pack_commodities import (
+    PACK_OFFER_SHAPE_ERROR,
+    PACK_QUANTITY,
+    is_pack_commodity_name,
+    validate_pack_offer_shape,
+)
 from core.services.offer_creation_service import (
     OfferCreationAdmissionError,
     OfferCreationCommand,
@@ -55,7 +61,7 @@ from core.services.offer_cancel_all_service import (
 )
 from core.services.trade_service import (
     validate_lot_sizes,
-    validate_price,
+    normalize_offer_price_input,
     get_available_trade_amounts,
 )
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
@@ -131,7 +137,10 @@ from core.market_intelligence.coin_inference_outcome import (
     CoinInferenceAcceptedSelection,
     append_coin_inference_accepted_selection,
 )
-from core.market_intelligence.coin_inference import COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY
+from core.market_intelligence.coin_inference import (
+    COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY,
+    COIN_INFERENCE_CANDIDATE_SCOPE_PACK_ONLY,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -282,7 +291,9 @@ async def _text_offer_selection_observation(result: object):
         else "CASH"
     )
     candidate_scope = (
-        COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY
+        COIN_INFERENCE_CANDIDATE_SCOPE_PACK_ONLY
+        if bool(getattr(result, "pack_hint", False))
+        else COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY
         if bool(getattr(result, "low_date_hint", False))
         else "ALL"
     )
@@ -413,10 +424,14 @@ async def _show_price_prompt(
     data = await state.get_data()
     return_to_review = bool(data.get("wizard_return_to_review"))
     markup = _wizard_navigation_keyboard(
-        back_action="back_to_lot_type",
+        back_action=(
+            "back_to_commodity"
+            if is_pack_commodity_name(data.get("commodity_name"))
+            else "back_to_lot_type"
+        ),
         return_to_review=return_to_review,
     )
-    text = "💰 قیمت را وارد کنید (5 یا 6 رقم):"
+    text = "💰 قیمت را وارد کنید؛ کامل بنویسید یا سه صفر آخر را حذف کنید (مثال: 197 یعنی 197000):"
     if edit:
         await edit_known_message_via_runtime(
             message,
@@ -446,6 +461,19 @@ async def _show_lot_sizes_prompt(
     user: Optional[User] = None,
 ) -> None:
     data = await state.get_data()
+    if is_pack_commodity_name(data.get("commodity_name")):
+        await state.update_data(
+            quantity=PACK_QUANTITY,
+            is_wholesale=True,
+            lot_sizes=None,
+        )
+        # A stale callback must not expose the lot editor for an indivisible
+        # pack. Return to the nearest valid step instead.
+        if data.get("wizard_return_to_review"):
+            await _show_wizard_review(message_or_callback, state, edit=edit, user=user)
+        else:
+            await _show_price_prompt(message_or_callback, state, edit=edit, user=user)
+        return
     quantity = int(data.get("quantity") or 0)
     return_to_review = bool(data.get("wizard_return_to_review"))
     markup = _wizard_navigation_keyboard(
@@ -539,6 +567,13 @@ async def _show_wizard_review(
     from core.offer_settlement import build_offer_draft_text
 
     data = await state.get_data()
+    if is_pack_commodity_name(data.get("commodity_name")):
+        await state.update_data(
+            quantity=PACK_QUANTITY,
+            is_wholesale=True,
+            lot_sizes=None,
+        )
+        data = {**data, "quantity": PACK_QUANTITY, "is_wholesale": True, "lot_sizes": None}
     draft_text = build_offer_draft_text(
         offer_type=data.get("trade_type"),
         settlement_type=data.get("settlement_type"),
@@ -583,6 +618,14 @@ def _wizard_data_is_complete(data: dict) -> bool:
     if data.get("is_wholesale") is None:
         return False
     if data.get("is_wholesale") is False and not data.get("lot_sizes"):
+        return False
+    pack_valid, _pack_error = validate_pack_offer_shape(
+        commodity_name=data.get("commodity_name"),
+        quantity=data.get("quantity"),
+        is_wholesale=data.get("is_wholesale"),
+        lot_sizes=data.get("lot_sizes"),
+    )
+    if not pack_valid:
         return False
     return True
 
@@ -778,9 +821,22 @@ async def handle_commodity_selection(
 
     data = await state.get_data()
     return_to_review = bool(data.get("wizard_return_to_review"))
-    await state.update_data(commodity_id=commodity.id, commodity_name=commodity.name)
+    pack_offer = is_pack_commodity_name(commodity.name)
+    await state.update_data(
+        commodity_id=commodity.id,
+        commodity_name=commodity.name,
+        **(
+            {"quantity": PACK_QUANTITY, "is_wholesale": True, "lot_sizes": None}
+            if pack_offer
+            else {}
+        ),
+    )
     if return_to_review:
         await _show_wizard_review(callback.message, state, edit=True, user=user)
+        await answer_callback_query_via_runtime(callback)
+        return
+    if pack_offer:
+        await _show_price_prompt(callback.message, state, edit=True, user=user)
         await answer_callback_query_via_runtime(callback)
         return
     await edit_callback_message_via_runtime(callback, user,
@@ -1058,8 +1114,8 @@ async def handle_price_input(message: types.Message, state: FSMContext, user: Op
     from bot.utils.offer_parser import normalize_digits
 
     price_text = normalize_digits((message.text or "").strip())
-    is_valid, price_error = validate_price(price_text)
-    if not is_valid:
+    normalized_price, price_error = normalize_offer_price_input(price_text)
+    if normalized_price is None:
         await answer_incoming_message_via_runtime(
             message,
             user,
@@ -1070,7 +1126,7 @@ async def handle_price_input(message: types.Message, state: FSMContext, user: Op
         return
 
     data = await state.get_data()
-    await state.update_data(price=int(price_text))
+    await state.update_data(price=normalized_price)
     if data.get("wizard_return_to_review"):
         await _show_wizard_review(message, state, edit=False, user=user)
     else:
@@ -1177,7 +1233,10 @@ async def handle_wizard_edit(
     data = await state.get_data()
     await edit_callback_message_via_runtime(callback, user,
         "کدام بخش آفر را می‌خواهید اصلاح کنید؟",
-        reply_markup=get_wizard_edit_keyboard(is_wholesale=bool(data.get("is_wholesale", True))),
+        reply_markup=get_wizard_edit_keyboard(
+            is_wholesale=bool(data.get("is_wholesale", True)),
+            is_pack=is_pack_commodity_name(data.get("commodity_name")),
+        ),
     )
     await state.set_state(Trade.awaiting_wizard_edit)
     await answer_callback_query_via_runtime(callback)
@@ -1210,6 +1269,16 @@ async def handle_wizard_edit_field(
         return
 
     data = await state.get_data()
+    if (
+        is_pack_commodity_name(data.get("commodity_name"))
+        and field in {"quantity", "lot_type", "lot_sizes"}
+    ):
+        await answer_callback_query_via_runtime(
+            callback,
+            PACK_OFFER_SHAPE_ERROR,
+            show_alert=True,
+        )
+        return
     if field == "lot_sizes" and data.get("is_wholesale") is not False:
         await answer_callback_query_via_runtime(callback, "برای آفر یکجا بخش‌بندی وجود ندارد.", show_alert=True)
         return
@@ -1499,6 +1568,31 @@ async def _handle_trade_confirm_core(
         await answer_callback_query_via_runtime(callback)
         return
 
+    pack_shape_valid, pack_shape_error = validate_pack_offer_shape(
+        commodity_name=commodity_name,
+        quantity=quantity,
+        is_wholesale=is_wholesale,
+        lot_sizes=lot_sizes,
+    )
+    if not pack_shape_valid:
+        await edit_callback_message_via_runtime(callback, user, f"❌ {pack_shape_error}")
+        await state.clear()
+        await answer_callback_query_via_runtime(callback)
+        return
+    if (
+        is_pack_commodity_name(commodity_name)
+        and inference_revalidation is None
+        and not republish_source_public_id
+    ):
+        await edit_callback_message_via_runtime(
+            callback,
+            user,
+            "❌ برای ثبت آفر پک، عبارت «پک» را در لفظ بنویسید.",
+        )
+        await state.clear()
+        await answer_callback_query_via_runtime(callback)
+        return
+
     price_warning = None
     async with AsyncSessionLocal() as session:
         model_price_decision = await evaluate_offer_model_price_guard(
@@ -1598,6 +1692,7 @@ async def _handle_trade_confirm_core(
                     offer_type=OfferType.BUY if trade_type == "buy" else OfferType.SELL,
                     settlement_type=settlement_type,
                     commodity_id=commodity_id,
+                    commodity_name=commodity_name,
                     quantity=quantity,
                     price=price,
                     exclude_from_competitive_price=bool(price_warning),
@@ -2161,10 +2256,10 @@ def _get_offer_suggestion(original_text: str, error_message: str) -> str:
 
     elif "قیمت" in error_message:
         if "چندین" in error_message:
-            hint += "📌 فقط یک عدد 5 یا 6 رقمی (قیمت) مجاز است\n"
+            hint += "📌 فقط یک قیمت مجاز است\n"
         else:
-            hint += "📌 قیمت باید 5 یا 6 رقم باشد\n"
-        hint += "مثال: `75800` یا `758000`\n"
+            hint += "📌 قیمت را کامل بنویسید یا دقیقاً سه صفر آخر را حذف کنید\n"
+        hint += "مثال: `197` یعنی `197000` و `59` یعنی `59000`؛ `1876` معتبر نیست\n"
 
     elif any(
         marker in error_message
@@ -2676,7 +2771,7 @@ async def _prepare_text_offer(
     if getattr(result, "commodity_id", None) is None:
         resolution = getattr(result, "commodity_resolution", "UNRESOLVED")
         observation = None
-        if resolution in {"OMITTED", "LOW_DATE_HINT"}:
+        if resolution in {"OMITTED", "LOW_DATE_HINT", "PACK_HINT"}:
             observation = await _text_offer_selection_observation(result)
         if observation is not None and observation.decision.status == "AUTO_SELECT":
             selected = observation.decision.candidates[0]
@@ -2692,8 +2787,10 @@ async def _prepare_text_offer(
             if not candidates:
                 observation = None
             else:
-                edit_candidates = list(
-                    getattr(observation, "edit_candidates", ()) or candidates
+                edit_candidates = (
+                    []
+                    if bool(getattr(result, "pack_hint", False))
+                    else list(getattr(observation, "edit_candidates", ()) or candidates)
                 )
                 await state.update_data(
                     text_offer_inference_draft={
@@ -2704,6 +2801,7 @@ async def _prepare_text_offer(
                         "is_wholesale": result.is_wholesale,
                         "lot_sizes": result.lot_sizes,
                         "notes": result.notes,
+                        "pack_hint": bool(getattr(result, "pack_hint", False)),
                     },
                     text_offer_inference_decision_key=observation.decision_key,
                     text_offer_inference_candidates=[
@@ -2756,7 +2854,11 @@ async def _prepare_text_offer(
                             )
                         ],
                     ])
-                    prompt = "کالای آفر را انتخاب کنید."
+                    prompt = (
+                        "نوع پک را انتخاب کنید."
+                        if resolution == "PACK_HINT"
+                        else "کالای آفر را انتخاب کنید."
+                    )
                 selection_message = await _text_offer_response(
                     message,
                     user,
@@ -2782,6 +2884,11 @@ async def _prepare_text_offer(
             commodity_message = (
                 "نام کالا در لفظ نیامده و مدل برای این قیمت گزینهٔ امنی ندارد. "
                 "نام کالا را اضافه کنید."
+            )
+        elif resolution == "PACK_HINT":
+            commodity_message = (
+                "نوع پک از روی قیمت به نتیجهٔ قابل اتکا نرسید. "
+                "قیمت را بررسی کنید."
             )
         else:
             commodity_message = (

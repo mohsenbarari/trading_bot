@@ -105,6 +105,7 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
                 "commodity_name": "Gold",
                 "commodity_resolution": "UNKNOWN",
                 "low_date_hint": False,
+                "pack_hint": False,
                 "quantity": 10,
                 "price": 123456,
                 "is_wholesale": False,
@@ -321,6 +322,72 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
         self.assertTrue(observe.await_args.kwargs["force_confirmation"])
+
+    async def test_parse_pack_offer_uses_pack_only_scope_and_fixed_shape(self):
+        context = self.make_context(owner_id=5)
+        db = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
+        parsed = SimpleNamespace(
+            trade_type="buy",
+            settlement_type="tomorrow",
+            commodity_id=None,
+            commodity_name=None,
+            commodity_resolution="PACK_HINT",
+            low_date_hint=False,
+            pack_hint=True,
+            quantity=100,
+            price=100_600,
+            is_wholesale=True,
+            lot_sizes=None,
+            notes=None,
+        )
+        decision = CatalogCoinCommodityInference(
+            status="AUTO_SELECT",
+            settlement_term="TOMORROW",
+            candidates=(
+                CatalogCoinCommodityCandidate(
+                    commodity_id=81,
+                    commodity_code="PACK_HALF",
+                    commodity_name="پک نیم",
+                    center_project_price=100_000,
+                    lower_project_price=99_400,
+                    upper_project_price=101_000,
+                    confidence="HIGH",
+                    distance_to_center_relative=0.006,
+                ),
+            ),
+            snapshot_generated_at_utc="2026-08-04T10:00:00Z",
+            snapshot_receipt="b" * 64,
+            reason=None,
+        )
+        with (
+            patch("api.routers.offers.settings.coin_intelligence_inference_preview_enabled", False),
+            patch("api.routers.offers.settings.coin_intelligence_inference_selection_enabled", True),
+            patch("api.routers.offers.settings.coin_intelligence_inference_auto_selection_enabled", True),
+            patch("api.routers.offers.settings.coin_intelligence_inference_snapshot_path", "/safe/snapshot.json"),
+            patch("bot.utils.offer_parser.parse_offer_text", new=AsyncMock(return_value=(parsed, None))),
+            patch(
+                "api.routers.offers.observe_coin_inference_shadow",
+                new=AsyncMock(return_value=CoinInferenceShadowObservation("a" * 64, decision)),
+            ) as observe,
+        ):
+            result = await parse_offer_text(
+                ParseOfferRequest(text="خ ف پک 100600"),
+                context=context,
+                db=db,
+            )
+
+        self.assertEqual(
+            (
+                result.data["commodity_id"],
+                result.data["commodity_name"],
+                result.data["quantity"],
+                result.data["is_wholesale"],
+                result.data["lot_sizes"],
+                result.data["pack_hint"],
+            ),
+            (81, "پک نیم", 100, True, None, True),
+        )
+        self.assertEqual(observe.await_args.kwargs["candidate_scope"], "PACK_ONLY")
 
     async def test_offer_read_options_only_load_owner_when_identity_is_required(self):
         self.assertEqual(len(build_offer_read_options(include_owner_identity=False)), 1)

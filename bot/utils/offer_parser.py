@@ -8,8 +8,9 @@ from sqlalchemy import select
 from core.enums import SettlementType
 from models.commodity import Commodity, CommodityAlias
 from core.db import AsyncSessionLocal
-from core.services.trade_service import validate_price
+from core.services.trade_service import normalize_offer_price_input, validate_price
 from core.trading_settings import get_trading_settings
+from core.pack_commodities import PACK_OFFER_SHAPE_ERROR, PACK_QUANTITY
 
 
 @dataclass
@@ -30,12 +31,23 @@ class ParsedOffer:
     # A standalone optional «پ» asks the inference layer to consider only
     # low-date candidates. It does not itself select a catalog commodity.
     low_date_hint: bool = False
+    # A standalone «پک» is mandatory for pack offers.  The parser fixes the
+    # indivisible shape, while the estimator resolves full/half/quarter by price.
+    pack_hint: bool = False
 
 
 @dataclass 
 class ParseError:
     """خطای پارس"""
     message: str
+
+
+@dataclass(frozen=True)
+class _PriceToken:
+    raw: str
+    normalized: int
+    start: int
+    end: int
 
 
 # جدول تبدیل اعداد فارسی/عربی به انگلیسی
@@ -72,6 +84,7 @@ RESIDUAL_SETTLEMENT_PATTERN = re.compile(
     r'(?<!\S)(?:نقد|فردا|فردایی|ن)(?=\s|$)'
 )
 LOW_DATE_MARKER_PATTERN = re.compile(r'(?<![\u0600-\u06FF])پ(?![\u0600-\u06FF])')
+PACK_MARKER_PATTERN = re.compile(r'(?<![\u0600-\u06FF])پک(?![\u0600-\u06FF])')
 
 
 def normalize_digits(text: str) -> str:
@@ -163,6 +176,15 @@ def extract_low_date_hint(text: str) -> tuple[str, bool, str | None]:
     marker = matches[0]
     stripped = f"{text[:marker.start()]} {text[marker.end():]}"
     return _normalize_commodity_phrase(stripped), True, None
+
+
+def extract_pack_hint(text: str) -> tuple[bool, str | None]:
+    """Expose one explicit pack marker without inferring its denomination."""
+
+    matches = list(PACK_MARKER_PATTERN.finditer(text))
+    if len(matches) > 1:
+        return False, "❌ عبارت «پک» فقط یک بار در لفظ مجاز است"
+    return bool(matches), None
 
 
 def extract_trade_type(text: str) -> Tuple[Optional[str], Optional[str]]:
@@ -271,44 +293,161 @@ def extract_quantity(text: str) -> Tuple[Optional[int], Optional[str]]:
     return int(matches[0]), None
 
 
-def extract_price(text: str) -> Tuple[Optional[int], Optional[str]]:
-    """
-    استخراج قیمت (عدد 5 یا 6 رقمی)
-    Returns: (price, error_message)
-    """
-    all_numbers = re.findall(r'\d+', text)
-    price_candidates = [n for n in all_numbers if validate_price(n)[0]]
-    
-    if not price_candidates:
-        return None, "❌ قیمت یافت نشد (باید عدد 5 یا 6 رقمی باشد)"
-    
-    if len(price_candidates) > 1:
-        return None, "❌ چندین قیمت در لفظ وجود دارد (فقط یک عدد 5 یا 6 رقمی مجاز است)"
-    
-    return int(price_candidates[0]), None
+def _quantity_number_spans(text: str) -> set[tuple[int, int]]:
+    return {
+        match.span(1)
+        for match in re.finditer(r'(\d+)\s*(?:تا|عدد)', text)
+    }
 
 
-def extract_lot_sizes(text: str, quantity: int, price: int) -> Tuple[Optional[List[int]], bool, Optional[str]]:
+def _remaining_tokens_form_valid_lot_shape(
+    tokens: list[re.Match],
+    *,
+    candidate_index: int,
+    quantity: Optional[int],
+    pack_hint: bool,
+) -> bool:
+    remaining = [
+        match.group(0)
+        for index, match in enumerate(tokens)
+        if index != candidate_index
+    ]
+    if pack_hint or quantity is None:
+        return not remaining
+    if not remaining:
+        return True
+    if any(len(value) not in (1, 2) for value in remaining):
+        return False
+
+    settings = get_trading_settings()
+    lots = [int(value) for value in remaining]
+    return (
+        len(lots) <= settings.lot_max_count
+        and all(lot >= settings.lot_min_size for lot in lots)
+        and sum(lots) == quantity
+    )
+
+
+def _extract_price_token(
+    text: str,
+    *,
+    quantity: Optional[int] = None,
+    pack_hint: bool = False,
+) -> tuple[Optional[_PriceToken], Optional[str]]:
+    quantity_spans = _quantity_number_spans(text)
+    tokens = [
+        match
+        for match in re.finditer(r'\d+', text)
+        if match.span() not in quantity_spans
+    ]
+
+    full_price_tokens = [
+        _PriceToken(
+            raw=match.group(0),
+            normalized=int(match.group(0)),
+            start=match.start(),
+            end=match.end(),
+        )
+        for match in tokens
+        if validate_price(match.group(0))[0]
+    ]
+    if len(full_price_tokens) > 1:
+        return None, "❌ چندین قیمت در لفظ وجود دارد (فقط یک قیمت مجاز است)"
+    if full_price_tokens:
+        return full_price_tokens[0], None
+
+    short_candidates: list[_PriceToken] = []
+    for index, match in enumerate(tokens):
+        raw = match.group(0)
+        if len(raw) > 3:
+            continue
+        normalized, error = normalize_offer_price_input(raw)
+        if error or normalized is None:
+            continue
+        if not _remaining_tokens_form_valid_lot_shape(
+            tokens,
+            candidate_index=index,
+            quantity=quantity,
+            pack_hint=pack_hint,
+        ):
+            continue
+        short_candidates.append(
+            _PriceToken(
+                raw=raw,
+                normalized=normalized,
+                start=match.start(),
+                end=match.end(),
+            )
+        )
+
+    distinct_short_prices = {candidate.normalized for candidate in short_candidates}
+    if len(distinct_short_prices) > 1:
+        return None, "❌ چندین قیمت کوتاه معتبر در لفظ وجود دارد؛ قیمت را کامل بنویسید"
+    if short_candidates:
+        return short_candidates[0], None
+
+    if any(len(match.group(0)) == 4 for match in tokens):
+        return None, (
+            "❌ قیمت چهاررقمی کوتاه‌شده معتبر نیست؛ قیمت کامل را وارد کنید "
+            "(مثال: 187600)."
+        )
+    return None, (
+        "❌ قیمت یافت نشد؛ قیمت را کامل (۵ یا ۶ رقم) یا با حذف سه صفر "
+        "(حداکثر ۳ رقم) بنویسید"
+    )
+
+
+def extract_price(
+    text: str,
+    *,
+    quantity: Optional[int] = None,
+    pack_hint: bool = False,
+) -> Tuple[Optional[int], Optional[str]]:
+    """Extract a canonical price, including the explicit ×1,000 shorthand."""
+
+    token, error = _extract_price_token(
+        text,
+        quantity=quantity,
+        pack_hint=pack_hint,
+    )
+    return (token.normalized if token else None), error
+
+
+def extract_lot_sizes(
+    text: str,
+    quantity: int,
+    price: int,
+    *,
+    price_token: Optional[_PriceToken] = None,
+) -> Tuple[Optional[List[int]], bool, Optional[str]]:
     """
     استخراج ترکیب خُرد (اعداد 1-2 رقمی غیر از تعداد)
     Returns: (lot_sizes, is_wholesale, error_message)
     """
     ts = get_trading_settings()
     
-    all_numbers = re.findall(r'\d+', text)
-    quantity_str = str(quantity)
-    
+    quantity_spans = _quantity_number_spans(text)
     lot_candidates = []
-    quantity_found = False
-    
-    for n in all_numbers:
-        if len(n) in [5, 6]:
+    inferred_short_token = (
+        str(price // 1_000)
+        if price % 1_000 == 0 and len(str(price // 1_000)) <= 3
+        else None
+    )
+    price_found = False
+
+    for match in re.finditer(r'\d+', text):
+        n = match.group(0)
+        if match.span() in quantity_spans:
             continue
-        
-        if n == quantity_str and not quantity_found:
-            quantity_found = True
+        if price_token and match.span() == (price_token.start, price_token.end):
+            price_found = True
             continue
-        
+        if not price_found and (
+            (len(n) in (5, 6) and int(n) == price)
+            or (inferred_short_token is not None and n == inferred_short_token)
+        ):
+            price_found = True
+            continue
         if len(n) in [1, 2]:
             lot_candidates.append(int(n))
     
@@ -326,6 +465,17 @@ def extract_lot_sizes(text: str, quantity: int, price: int) -> Tuple[Optional[Li
         return None, False, f"❌ جمع بخش‌ها ({sum(lot_candidates)}) با تعداد کل ({quantity}) برابر نیست"
     
     return lot_candidates, False, None
+
+
+def _pack_has_extra_numeric_parts(text: str, price_token: _PriceToken) -> bool:
+    """Reject any numeric structure beyond the optional 100 count and price."""
+
+    quantity_spans = _quantity_number_spans(text)
+    return any(
+        match.span() not in quantity_spans
+        and match.span() != (price_token.start, price_token.end)
+        for match in re.finditer(r'\d+', text)
+    )
 
 
 async def find_commodity(
@@ -433,27 +583,55 @@ async def parse_offer_text(
 
     clean_text = clean_text or ""
     
-    # استخراج تعداد
+    pack_hint, pack_marker_error = extract_pack_hint(clean_text)
+    if pack_marker_error:
+        return None, ParseError(pack_marker_error)
+
+    # Pack quantity is a product invariant.  It may be omitted from compact
+    # text, but any explicit value must be exactly 100.
     quantity, error = extract_quantity(clean_text)
+    if pack_hint and error and "تعداد کالا یافت نشد" in error:
+        quantity, error = PACK_QUANTITY, None
     if error:
         return None, ParseError(error)
-    
-    # اعتبارسنجی تعداد
-    ts = get_trading_settings()
-    if quantity < ts.offer_min_quantity:
-        return None, ParseError(f"❌ حداقل تعداد باید {ts.offer_min_quantity} باشد")
-    if quantity > ts.offer_max_quantity:
-        return None, ParseError(f"❌ حداکثر تعداد می‌تواند {ts.offer_max_quantity} باشد")
+
+    if pack_hint:
+        if quantity != PACK_QUANTITY:
+            return None, ParseError(PACK_OFFER_SHAPE_ERROR)
+    else:
+        # Ordinary coin offers retain the configurable quantity policy.
+        ts = get_trading_settings()
+        if quantity < ts.offer_min_quantity:
+            return None, ParseError(f"❌ حداقل تعداد باید {ts.offer_min_quantity} باشد")
+        if quantity > ts.offer_max_quantity:
+            return None, ParseError(f"❌ حداکثر تعداد می‌تواند {ts.offer_max_quantity} باشد")
     
     # استخراج قیمت
-    price, error = extract_price(clean_text)
+    price_token, error = _extract_price_token(
+        clean_text,
+        quantity=quantity,
+        pack_hint=pack_hint,
+    )
     if error:
         return None, ParseError(error)
+    if price_token is None:
+        return None, ParseError("❌ قیمت یافت نشد")
+    price = price_token.normalized
     
     # استخراج ترکیب خُرد
-    lot_sizes, is_wholesale, error = extract_lot_sizes(clean_text, quantity, price)
-    if error:
-        return None, ParseError(error)
+    if pack_hint:
+        if _pack_has_extra_numeric_parts(clean_text, price_token):
+            return None, ParseError(PACK_OFFER_SHAPE_ERROR)
+        lot_sizes, is_wholesale = None, True
+    else:
+        lot_sizes, is_wholesale, error = extract_lot_sizes(
+            clean_text,
+            quantity,
+            price,
+            price_token=price_token,
+        )
+        if error:
+            return None, ParseError(error)
     
     # «پ» اختیاری است و فقط intent تاریخ پایین را به لایهٔ inference منتقل
     # می‌کند. parser به‌خاطر نبود نام کالا هیچ کالایی، از جمله امام، انتخاب
@@ -461,16 +639,23 @@ async def parse_offer_text(
     commodity_text, low_date_hint, marker_error = extract_low_date_hint(clean_text)
     if marker_error:
         return None, ParseError(marker_error)
+    if pack_hint and low_date_hint:
+        return None, ParseError("❌ نشانگر تاریخ پایین برای آفر پک مجاز نیست")
 
     # Resolution metadata is always retained.  ``capture_commodity_resolution``
     # remains in the public signature for callers from the earlier shadow
     # rollout, but omission is never allowed to silently turn into Imam.
     del capture_commodity_resolution
-    commodity_id, commodity_name, commodity_resolution = await find_commodity(
-        commodity_text,
-        include_resolution=True,
-    )
-    if low_date_hint:
+    if pack_hint:
+        # Even an explicit phrase such as «پک نیم» is re-resolved from the
+        # submitted price. This prevents text and estimator denomination drift.
+        commodity_id, commodity_name, commodity_resolution = None, None, "PACK_HINT"
+    else:
+        commodity_id, commodity_name, commodity_resolution = await find_commodity(
+            commodity_text,
+            include_resolution=True,
+        )
+    if low_date_hint and not pack_hint:
         # Preserve a pre-existing explicit low-date alias such as «ربع پ» or
         # «ت پ».  If removing the marker changed the resolved commodity (or
         # left it unresolved), the original phrase was a catalog-level choice
@@ -506,4 +691,5 @@ async def parse_offer_text(
         settlement_type=settlement_type or SettlementType.CASH.value,
         commodity_resolution=commodity_resolution,
         low_date_hint=low_date_hint,
+        pack_hint=pack_hint,
     ), None

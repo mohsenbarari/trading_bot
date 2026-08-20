@@ -62,7 +62,7 @@ class Trade(StatesGroup):
     awaiting_quantity = State()  # منتظر تعداد کالا
     awaiting_lot_type = State()  # منتظر انتخاب یکجا/خُرد
     awaiting_lot_sizes = State() # منتظر ترکیب بخش‌ها
-    awaiting_price = State()     # منتظر قیمت (5 یا 6 رقمی)
+    awaiting_price = State()     # قیمت کامل یا کوتاه‌شده با حذف سه صفر آخر
     awaiting_notes = State()     # منتظر توضیحات (اختیاری)
     awaiting_wizard_review = State()  # منتظر ادامه، اصلاح یا لغو متن تولیدشده
     awaiting_wizard_edit = State()  # منتظر انتخاب فیلد برای اصلاح

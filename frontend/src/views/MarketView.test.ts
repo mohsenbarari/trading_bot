@@ -1011,6 +1011,72 @@ describe('MarketView.vue', () => {
     wrapper.unmount()
   })
 
+  it('keeps an inferred pack indivisible and submits its audited denomination', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+    marketViewMocks.apiFetchMock.mockClear()
+    marketViewMocks.apiFetchJsonMock.mockResolvedValueOnce({
+      success: true,
+      data: {
+        trade_type: 'buy',
+        settlement_type: 'tomorrow',
+        commodity_id: null,
+        commodity_name: null,
+        commodity_resolution: 'PACK_HINT',
+        low_date_hint: false,
+        pack_hint: true,
+        quantity: 100,
+        price: 100600,
+        is_wholesale: true,
+        lot_sizes: null,
+        notes: null,
+        commodity_inference: {
+          mode: 'SELECTABLE',
+          status: 'CONFIRM',
+          decision_key: '9'.repeat(64),
+          snapshot_generated_at_utc: '2026-08-20T12:00:00+00:00',
+          snapshot_receipt: '8'.repeat(64),
+          reason: 'AUTO_SELECTION_REQUIRES_CONFIRMATION',
+          candidates: [{
+            commodity_id: 82,
+            commodity_code: 'PACK_HALF',
+            commodity_name: 'پک نیم',
+            center_project_price: 100000,
+            lower_project_price: 99000,
+            upper_project_price: 101000,
+            confidence: 'HIGH',
+            distance_to_center_relative: 0.006,
+          }],
+          edit_candidates: [],
+        },
+      },
+    })
+
+    await wrapper.find('.text-offer-input').setValue('خ ف پک 100600')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.offer-preview-card').text()).toContain('پک نیم')
+    expect(wrapper.get('.offer-preview-card').text()).toContain('100')
+    await wrapper.find('.offer-preview-confirm').trigger('click')
+    await flushPromises()
+
+    const postCall = marketViewMocks.apiFetchMock.mock.calls.find(
+      ([path, options]) => path === '/api/offers/' && options?.method === 'POST',
+    )
+    expect(JSON.parse(String(postCall![1].body))).toEqual(expect.objectContaining({
+      commodity_id: 82,
+      quantity: 100,
+      is_wholesale: true,
+      lot_sizes: null,
+      commodity_inference: {
+        decision_key: '9'.repeat(64),
+        selected_commodity_id: 82,
+      },
+    }))
+    wrapper.unmount()
+  })
+
   it('treats a same-family edit choice as an explicit commodity without an inference receipt', async () => {
     const wrapper = await mountMarketView()
     await flushPromises()

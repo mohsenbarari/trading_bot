@@ -23,7 +23,15 @@ class BotTradeCreatePriceInputTests(unittest.IsolatedAsyncioTestCase):
 
         message = SimpleNamespace(text="1234", answer=AsyncMock())
         await handle_price_input(message, state, user=SimpleNamespace(id=1), bot=SimpleNamespace())
-        self.assertIn("5 یا 6 رقم", message.answer.await_args.args[0])
+        self.assertIn("چهاررقمی", message.answer.await_args.args[0])
+
+        message = SimpleNamespace(text="۱۹۷", answer=AsyncMock())
+        await handle_price_input(message, state, user=SimpleNamespace(id=1), bot=SimpleNamespace())
+        state.update_data.assert_awaited_once_with(price=197000)
+        state.set_state.assert_awaited_once_with(Trade.awaiting_notes)
+
+        state.update_data.reset_mock()
+        state.set_state.reset_mock()
 
         message = SimpleNamespace(text="12345", answer=AsyncMock())
         await handle_price_input(message, state, user=SimpleNamespace(id=1), bot=SimpleNamespace())

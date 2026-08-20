@@ -21,6 +21,7 @@ __all__ = [
     "rebind_lot_unavailable_suggestion_payload",
     "validate_quantity",
     "validate_price",
+    "normalize_offer_price_input",
     "parse_lot_sizes_text",
     "validate_competitive_price",
     "detect_offer_price_warning",
@@ -460,6 +461,40 @@ def validate_price(price: Union[int, float, str]) -> Tuple[bool, str]:
         return False, "❌ قیمت باید 5 یا 6 رقم باشد (مثال: 75800 یا 758000)"
     
     return True, ""
+
+
+def normalize_offer_price_input(
+    price: Union[int, float, str],
+) -> Tuple[Optional[int], str]:
+    """Normalize a user-entered offer price into the canonical project unit.
+
+    Users may omit exactly the three trailing zeroes from a price. Therefore
+    one-to-three digit inputs are multiplied by 1,000, while a four-digit input
+    is never guessed (``1876`` must be entered explicitly as ``187600``).
+    Canonical five/six-digit prices pass through unchanged.
+    """
+
+    try:
+        normalized = _ensure_int(price, "price")
+    except TypeError as exc:
+        return None, f"❌ {str(exc)}"
+
+    if normalized <= 0:
+        return None, "❌ قیمت باید بزرگ‌تر از صفر باشد."
+
+    digit_count = len(str(normalized))
+    if digit_count <= 3:
+        normalized *= 1_000
+    elif digit_count == 4:
+        return None, (
+            "❌ قیمت چهاررقمی کوتاه‌شده معتبر نیست؛ قیمت کامل را وارد کنید "
+            "(مثال: 187600)."
+        )
+
+    is_valid, error = validate_price(normalized)
+    if not is_valid:
+        return None, error
+    return normalized, ""
 
 
 # ===== TEXT PARSING =====

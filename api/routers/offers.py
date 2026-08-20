@@ -66,6 +66,10 @@ from core.offer_expiry_contracts import (
 from core.offer_identity import build_offer_public_link, ensure_offer_public_id, is_offer_public_id_shape
 from core.offer_quantity import coalesce_offer_remaining_quantity
 from core.offer_settlement import settlement_type_value
+from core.pack_commodities import (
+    is_pack_commodity_name,
+    validate_pack_offer_shape,
+)
 from core.offer_request_policy import (
     OfferRequestVisibility,
     map_legacy_expire_reason,
@@ -123,7 +127,10 @@ from core.market_intelligence.coin_inference_outcome import (
     CoinInferenceAcceptedSelection,
     append_coin_inference_accepted_selection,
 )
-from core.market_intelligence.coin_inference import COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY
+from core.market_intelligence.coin_inference import (
+    COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY,
+    COIN_INFERENCE_CANDIDATE_SCOPE_PACK_ONLY,
+)
 from core import telegram_gateway
 from core.trade_forwarding import verify_internal_signature
 from core.trading_observability import log_trading_event
@@ -446,6 +453,7 @@ async def _selection_inference_for_missing_commodity(
     price: int,
     settlement_type: str,
     low_date_hint: bool,
+    pack_hint: bool = False,
 ) -> dict[str, object]:
     """Create a selectable, audited decision without creating an Offer."""
 
@@ -462,7 +470,11 @@ async def _selection_inference_for_missing_commodity(
         }
     settlement = "CASH" if settlement_type == "cash" else "TOMORROW"
     candidate_scope = (
-        COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY if low_date_hint else "ALL"
+        COIN_INFERENCE_CANDIDATE_SCOPE_PACK_ONLY
+        if pack_hint
+        else COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY
+        if low_date_hint
+        else "ALL"
     )
     try:
         observation = await observe_coin_inference_shadow(
@@ -591,6 +603,7 @@ def _build_webapp_offer_creation_command(
     idempotency_key: str | None,
     republish_source_public_id: str | None,
     price_warning: dict[str, Any] | None = None,
+    commodity_name: str | None = None,
 ) -> OfferCreationCommand:
     return OfferCreationCommand(
         source_surface=OfferSourceSurface.WEBAPP,
@@ -599,6 +612,7 @@ def _build_webapp_offer_creation_command(
         offer_type=OfferType.BUY if offer_data.offer_type == "buy" else OfferType.SELL,
         settlement_type=offer_data.settlement_type,
         commodity_id=offer_data.commodity_id,
+        commodity_name=commodity_name,
         quantity=offer_data.quantity,
         price=offer_data.price,
         exclude_from_competitive_price=bool(price_warning),
@@ -1764,6 +1778,25 @@ async def create_offer(
     if not commodity:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="کالا یافت نشد.")
 
+    commodity_name = str(getattr(commodity, "name", "") or "").strip()
+    pack_offer = is_pack_commodity_name(commodity_name)
+    pack_shape_valid, pack_shape_error = validate_pack_offer_shape(
+        commodity_name=commodity_name,
+        quantity=offer_data.quantity,
+        is_wholesale=offer_data.is_wholesale,
+        lot_sizes=offer_data.lot_sizes,
+    )
+    if not pack_shape_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=pack_shape_error,
+        )
+    if pack_offer and inference_revalidation is None and not republish_requested:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="برای ثبت آفر پک، عبارت «پک» را در لفظ بنویسید.",
+        )
+
     # ===== اعتبارسنجی‌های مشترک (Shared Service) =====
     from core.services.trade_service import (
         detect_offer_price_warning,
@@ -1773,9 +1806,10 @@ async def create_offer(
     )
     
     # 1. اعتبارسنجی تعداد
-    is_valid_qty, err_qty = validate_quantity(offer_data.quantity)
-    if not is_valid_qty:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_qty)
+    if not pack_offer:
+        is_valid_qty, err_qty = validate_quantity(offer_data.quantity)
+        if not is_valid_qty:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_qty)
 
     # 2. اعتبارسنجی قیمت
     is_valid_price, err_price = validate_price(offer_data.price)
@@ -1783,7 +1817,7 @@ async def create_offer(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_price)
     
     # 3. اعتبارسنجی لات‌ها
-    if not offer_data.is_wholesale:
+    if not pack_offer and not offer_data.is_wholesale:
         if not offer_data.lot_sizes:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="برای آفر خُرد باید لات‌ها مشخص شوند.")
         is_valid_lots, err_lots, suggested_lots = validate_lot_sizes(offer_data.quantity, offer_data.lot_sizes)
@@ -1894,6 +1928,7 @@ async def create_offer(
             idempotency_key=idempotency_key,
             republish_source_public_id=republish_source_public_id,
             price_warning=price_warning,
+            commodity_name=commodity_name or None,
         )
         creation_outcome = await create_authoritative_offer_with_outcome(
             db,
@@ -3157,6 +3192,7 @@ async def parse_offer_text(
         "commodity_name": result.commodity_name,
         "commodity_resolution": getattr(result, "commodity_resolution", "UNKNOWN"),
         "low_date_hint": bool(getattr(result, "low_date_hint", False)),
+        "pack_hint": bool(getattr(result, "pack_hint", False)),
         "quantity": result.quantity,
         "price": result.price,
         "is_wholesale": result.is_wholesale,
@@ -3166,6 +3202,7 @@ async def parse_offer_text(
     missing_commodity = getattr(result, "commodity_resolution", None) in {
         "OMITTED",
         "LOW_DATE_HINT",
+        "PACK_HINT",
     }
     if missing_commodity and settings.coin_intelligence_inference_selection_enabled:
         selection = await _selection_inference_for_missing_commodity(
@@ -3173,6 +3210,7 @@ async def parse_offer_text(
             price=result.price,
             settlement_type=parsed_data["settlement_type"],
             low_date_hint=bool(getattr(result, "low_date_hint", False)),
+            pack_hint=bool(getattr(result, "pack_hint", False)),
         )
         parsed_data["commodity_inference"] = selection
         candidates = selection.get("candidates") or []

@@ -142,6 +142,9 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "queue_execution": 1,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
+    "363e94a7cecda8b38ed49e4197bbaa8bbd552b6f0c4431e2a9c45c7ebc18427a"
+)
+PRE_PACK_PRICE_INFERENCE_RUNTIME_INVENTORY_SHA256 = (
     "76b85cd00e923dd9a4b213d9782b671ec8bfa552108cb20afd940cf3fca47f25"
 )
 PRE_QUEUE_LATENCY_TUNING_RUNTIME_INVENTORY_SHA256 = (
@@ -183,6 +186,10 @@ OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256 = (
 REVIEWED_RUNTIME_INVENTORY_SHA256 = frozenset(
     {
         EXPECTED_RUNTIME_INVENTORY_SHA256,
+        # Pack price inference adds no Telegram delivery boundary. Parser,
+        # wizard and confirmation guards only move existing trade_create
+        # identities; all 103 dispositions and their owners remain exact.
+        PRE_PACK_PRICE_INFERENCE_RUNTIME_INVENTORY_SHA256,
         # Queue latency tuning changes idle polling only. It moves the one
         # queue-execution identity below the new lane cadence branch without
         # adding, removing, or reclassifying any of the 103 callsites.
