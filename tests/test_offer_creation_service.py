@@ -16,6 +16,7 @@ from core.services.offer_creation_service import (
     create_authoritative_offer,
     ensure_offer_idempotency_replay_matches,
     offer_creation_fingerprint,
+    validate_offer_creation_command,
 )
 from core.services.market_transition_service import (
     MarketOfferAdmissionClosedError,
@@ -259,6 +260,28 @@ class FakeDB:
 
 
 class OfferCreationServiceAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_model_guard_activation_disables_legacy_competitive_rejection(self):
+        command = OfferCreationCommand(
+            source_surface=OfferSourceSurface.WEBAPP,
+            owner_user_id=1,
+            actor_user_id=1,
+            offer_type="sell",
+            commodity_id=7,
+            quantity=10,
+            price=100_000,
+            is_wholesale=True,
+        )
+        with patch(
+            "core.config.settings.offer_model_price_guard_enabled",
+            True,
+        ), patch(
+            "core.services.trade_service.validate_competitive_price",
+            new=AsyncMock(return_value=(False, "legacy rejection")),
+        ) as legacy_guard:
+            await validate_offer_creation_command(FakeDB(), command)
+
+        legacy_guard.assert_not_awaited()
+
     async def test_create_authoritative_offer_validates_before_add(self):
         db = FakeDB()
         command = OfferCreationCommand(

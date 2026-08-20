@@ -248,17 +248,20 @@ async def validate_offer_creation_command(db: AsyncSession, command: OfferCreati
         if not is_valid_lots:
             raise OfferCreationValidationError(err_lots)
 
-    is_valid_comp, err_comp = await trade_service.validate_competitive_price(
-        db=db,
-        offer_type=_normalize_offer_type(command.offer_type).value,
-        settlement_type=normalize_settlement_type(command.settlement_type),
-        commodity_id=command.commodity_id,
-        quantity=command.quantity,
-        proposed_price=command.price,
-        user_id=command.owner_user_id,
-    )
-    if not is_valid_comp:
-        raise OfferCreationValidationError(err_comp)
+    from core.config import settings
+
+    if not bool(getattr(settings, "offer_model_price_guard_enabled", False)):
+        is_valid_comp, err_comp = await trade_service.validate_competitive_price(
+            db=db,
+            offer_type=_normalize_offer_type(command.offer_type).value,
+            settlement_type=normalize_settlement_type(command.settlement_type),
+            commodity_id=command.commodity_id,
+            quantity=command.quantity,
+            proposed_price=command.price,
+            user_id=command.owner_user_id,
+        )
+        if not is_valid_comp:
+            raise OfferCreationValidationError(err_comp)
 
 
 def build_authoritative_offer(command: OfferCreationCommand) -> Offer:

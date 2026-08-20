@@ -24,13 +24,13 @@ class FakeSessionContext:
         return False
 
 
-class BotTradeCreateConfirmCompetitiveGuardTests(unittest.IsolatedAsyncioTestCase):
+class BotTradeCreateConfirmPriceGuardTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.market_patcher = patch("bot.handlers.trade_create._bot_market_is_open", new=AsyncMock(return_value=True))
         self.market_patcher.start()
         self.addCleanup(self.market_patcher.stop)
 
-    async def test_handle_trade_confirm_blocks_on_noncompetitive_price(self):
+    async def test_handle_trade_confirm_blocks_on_model_price_outlier(self):
         callback = SimpleNamespace(message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
         state = SimpleNamespace(
             get_data=AsyncMock(
@@ -54,10 +54,25 @@ class BotTradeCreateConfirmCompetitiveGuardTests(unittest.IsolatedAsyncioTestCas
         ), patch(
             "bot.handlers.trade_create.AsyncSessionLocal",
             side_effect=[FakeSessionContext(FakeSession([0])), FakeSessionContext(FakeSession([]))],
-        ), patch("core.services.trade_service.validate_competitive_price", new=AsyncMock(return_value=(False, "قیمت رقابتی نیست"))):
+        ), patch(
+            "bot.handlers.trade_create.evaluate_offer_model_price_guard",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    allowed=False,
+                    message="قیمت خرید شما پایین است؛ قیمت بهتری در بازار وجود دارد.",
+                )
+            ),
+        ) as model_guard, patch(
+            "core.services.trade_service.validate_competitive_price",
+            new=AsyncMock(return_value=(True, "")),
+        ) as legacy_guard:
             await handle_trade_confirm(callback, state, user=user, bot=SimpleNamespace())
 
-        callback.message.edit_text.assert_awaited_once_with("قیمت رقابتی نیست", parse_mode="Markdown")
+        callback.message.edit_text.assert_awaited_once_with(
+            "قیمت خرید شما پایین است؛ قیمت بهتری در بازار وجود دارد."
+        )
+        model_guard.assert_awaited_once()
+        legacy_guard.assert_not_awaited()
         state.clear.assert_awaited_once()
         callback.answer.assert_awaited_once_with()
 

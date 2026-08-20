@@ -197,6 +197,63 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
             "شما حداکثر 5 لفظ فعال دارید. لطفاً ابتدا یکی را منقضی کنید.",
         )
 
+    async def test_create_offer_rejects_model_price_outlier_before_legacy_price_checks(self):
+        current_user = make_user()
+        db = FakeDB(
+            scalar_result=0,
+            get_result=SimpleNamespace(id=1, name="امام"),
+            execute_scalar_result=None,
+        )
+        runtime_settings = SimpleNamespace(
+            max_active_offers=5,
+            offer_min_quantity=5,
+            offer_max_quantity=50,
+            lot_min_size=5,
+            lot_max_count=3,
+        )
+
+        with patch(
+            "api.routers.offers.check_user_limits",
+            side_effect=[(True, None), (True, None)],
+        ), patch(
+            "api.routers.offers.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.offers.get_trading_settings",
+            return_value=runtime_settings,
+        ), patch(
+            "core.services.trade_service.get_trading_settings",
+            return_value=runtime_settings,
+        ), patch(
+            "core.cache.get_active_offer_count",
+            new=AsyncMock(return_value=0),
+        ), patch(
+            "api.routers.offers.evaluate_offer_model_price_guard",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    allowed=False,
+                    message="قیمت فروش شما بالاست؛ قیمت بهتری در بازار وجود دارد.",
+                )
+            ),
+        ) as model_guard, patch(
+            "core.services.trade_service.validate_competitive_price",
+            new=AsyncMock(return_value=(True, "")),
+        ) as legacy_guard:
+            with self.assertRaises(HTTPException) as exc_info:
+                await create_offer(
+                    make_offer(offer_type="sell", price=199999),
+                    db=db,
+                    context=make_context(current_user),
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(
+            exc_info.exception.detail,
+            "قیمت فروش شما بالاست؛ قیمت بهتری در بازار وجود دارد.",
+        )
+        model_guard.assert_awaited_once()
+        legacy_guard.assert_not_awaited()
+
     async def test_republish_is_an_independent_offer_for_active_quota(self):
         current_user = make_user()
         db = FakeDB(scalar_result=5)

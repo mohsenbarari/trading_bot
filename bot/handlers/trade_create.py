@@ -41,6 +41,7 @@ from core.services.offer_republish_service import (
     ensure_republish_payload_matches_source,
     lock_repeatable_offer,
 )
+from core.services.offer_model_price_guard import evaluate_offer_model_price_guard
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.services.offer_expiry_service import (
     OfferExpiryCommand,
@@ -1500,15 +1501,33 @@ async def _handle_trade_confirm_core(
 
     price_warning = None
     async with AsyncSessionLocal() as session:
-        is_valid_comp, err_comp = await validate_competitive_price(
-            db=session,
-            offer_type=trade_type,
-            settlement_type=settlement_type,
+        model_price_decision = await evaluate_offer_model_price_guard(
+            session,
             commodity_id=commodity_id,
-            quantity=quantity,
+            settlement_type=settlement_type,
+            offer_type=trade_type,
             proposed_price=price,
-            user_id=user.id,
         )
+        if not model_price_decision.allowed:
+            await edit_callback_message_via_runtime(
+                callback,
+                user,
+                model_price_decision.message,
+            )
+            await state.clear()
+            await answer_callback_query_via_runtime(callback)
+            return
+        is_valid_comp, err_comp = True, ""
+        if not bool(getattr(settings, "offer_model_price_guard_enabled", False)):
+            is_valid_comp, err_comp = await validate_competitive_price(
+                db=session,
+                offer_type=trade_type,
+                settlement_type=settlement_type,
+                commodity_id=commodity_id,
+                quantity=quantity,
+                proposed_price=price,
+                user_id=user.id,
+            )
         if is_valid_comp:
             price_warning = await detect_offer_price_warning(
                 db=session,

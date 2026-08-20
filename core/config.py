@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     # promotes eligible cells.  This must never default to automatic choice.
     coin_intelligence_inference_auto_selection_enabled: bool = False
     coin_intelligence_inference_snapshot_path: str | None = None
+    # Hard guard for only clearly outlying coin-offer prices.  It consumes the
+    # same atomic estimator Snapshot but is independent from commodity and
+    # condition-model selection.  Missing/stale evidence always fails open.
+    offer_model_price_guard_enabled: bool = False
+    offer_model_price_guard_max_snapshot_age_seconds: int = 120
     log_level: str = "INFO"
     log_format: str = "json"
     error_tracking_dsn: str | None = None

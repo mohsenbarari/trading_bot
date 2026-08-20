@@ -113,6 +113,7 @@ from core.services.offer_republish_service import (
     list_repeatable_offers,
     lock_repeatable_offer,
 )
+from core.services.offer_model_price_guard import evaluate_offer_model_price_guard
 from core.market_intelligence.coin_inference_shadow import observe_coin_inference_shadow
 from core.market_intelligence.coin_inference_selection import (
     CoinInferenceSelectionRejected,
@@ -1793,20 +1794,38 @@ async def create_offer(
                 # اینجا می‌توانیم پیشنهاد را در قالب خاصی بفرستیم، اما فعلاً در متن خطا می‌گذاریم
                 pass 
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail_msg)
-    
-    # 4. اعتبارسنجی قیمت رقابتی
-    from core.services.trade_service import validate_competitive_price
-    is_valid_comp, err_comp = await validate_competitive_price(
-        db=db,
-        offer_type=offer_data.offer_type,
-        settlement_type=offer_data.settlement_type,
+
+    model_price_decision = await evaluate_offer_model_price_guard(
+        db,
         commodity_id=offer_data.commodity_id,
-        quantity=offer_data.quantity,
+        settlement_type=offer_data.settlement_type,
+        offer_type=offer_data.offer_type,
         proposed_price=offer_data.price,
-        user_id=owner_user.id
+        market_evaluation=market_evaluation,
     )
-    if not is_valid_comp:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_comp)
+    if not model_price_decision.allowed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=model_price_decision.message,
+        )
+
+    # The legacy mean/0.4% competitive-price rule rejects ordinary high sells
+    # and low buys.  Once the estimator-range guard is explicitly active it is
+    # the only hard price gate; the legacy path remains only for rollback.
+    if not bool(getattr(settings, "offer_model_price_guard_enabled", False)):
+        from core.services.trade_service import validate_competitive_price
+
+        is_valid_comp, err_comp = await validate_competitive_price(
+            db=db,
+            offer_type=offer_data.offer_type,
+            settlement_type=offer_data.settlement_type,
+            commodity_id=offer_data.commodity_id,
+            quantity=offer_data.quantity,
+            proposed_price=offer_data.price,
+            user_id=owner_user.id,
+        )
+        if not is_valid_comp:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_comp)
 
     price_warning = await detect_offer_price_warning(
         db=db,

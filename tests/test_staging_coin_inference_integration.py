@@ -134,6 +134,20 @@ class StagingSnapshotRelayContractTests(TestCase):
         )
         self.assertEqual(
             compose.count(
+                "OFFER_MODEL_PRICE_GUARD_ENABLED: "
+                "${STAGING_OFFER_MODEL_PRICE_GUARD_ENABLED:-true}"
+            ),
+            3,
+        )
+        self.assertEqual(
+            compose.count(
+                "OFFER_MODEL_PRICE_GUARD_MAX_SNAPSHOT_AGE_SECONDS: "
+                "${STAGING_COIN_INFERENCE_MAXIMUM_AGE_SECONDS:-120}"
+            ),
+            3,
+        )
+        self.assertEqual(
+            compose.count(
                 "source: ${STAGING_COIN_INFERENCE_SNAPSHOT_HOST_DIR:-"
                 "/srv/trading-bot/staging-data/coin-intelligence}"
             ),
@@ -161,6 +175,10 @@ class StagingSnapshotRelayContractTests(TestCase):
         )
         self.assertIn(
             "STAGING_COIN_INFERENCE_AUTO_SELECTION_ENABLED:-false",
+            deploy,
+        )
+        self.assertIn(
+            "STAGING_OFFER_MODEL_PRICE_GUARD_ENABLED:-true",
             deploy,
         )
         self.assertIn("publish_coin_intelligence_snapshot.py\" check", deploy)
