@@ -1,18 +1,18 @@
 # Coin Market Intelligence
 
-- USD/Herat leading digits need 3 same-book/source facts/15m; no constants/future replay.
-- `خ ن ف`/`ف ن ف`, `خ ف`/`ف ف`, or no marker mean tomorrow; `خ ن`/`ف ن`/`نق` mean cash. Future wins; exclude registration.
-- Prices accept project-thousand, full-Toman /1,000 or bounded zeros; reject quantities/scripts/years. `رب` is quarter; `پ`/`ت پ`/`پایین` mean low-date.
-- Named offers need no anchors. Unnamed use unit-safe `MAIN_ONLINE` bands plus 2h same-book anchors; contradictions fail, overlaps need margin. Bootstrap needs 3 messages/2 senders/30m/1.5% spread and one fact; no context default.
-- Trades require isolated replies, oldest root and reciprocal offerer; cancellation/rejection gates fills. Only explicit reciprocal first fill amends quantity; ambiguous/overfills are audit-only.
-- Feedback hashes root-to-confirmation; mismatches cannot rewrite roots. With 3 causal same-instrument/5m offers, >max(5%, 6 robust deviations) is audit-only. Prefer same settlement; cross-settlement is fallback.
-- Term structure cannot override <=30m evidence (trade, 3 offers, or <=1% two-sided book); cap unsupported cash.
-- Reconciliation rejects invalid reply graphs; facts keep first availability. Projection drops absent/rejected facts; pending/conditional/>5m-late are audit-only. Models use `available_at_utc`; reports source time.
-- Reject malformed envelopes; inverted time cannot advance checkpoints. Separate heartbeat/event/eligible health.
-- Private text stays in authenticated review; Store/projection stay opaque. Live jobs use `main`.
-- Estimator: `estimator-live`; home CASH/TOMORROW; `/shadow` shadow/realised. Web UI displays recorded parser/model facts and never recomputes.
-- Canonical regime priority: private minute gold, Herat, then XAU and resolved Group 1/2 coin books. Direction/volatility and CASH/TOMORROW stay separate; low evidence abstains, live changes use hold-down. Public inputs are unconfigured fallback only.
-- Staging catalog mirrors Iran; Snapshot is read-only. v3 uses exact bands, else confirms one nearest same-family center within ±10%; ties require choice. Edits reuse scope, omit receipt, never auto-select; bot enters choice before buttons and answers stale taps.
-- Bridge/collectors share writer `flock`; ordering bridge `After=` recurring collectors starves it and stales Snapshots.
-- Reviews use opaque digests, never raw identity/text. Revisions correct facts; anchors never alter prior input.
-- Index anchors by book/time; never rescan per message. Fetch deltas newest-first then sort; oldest-first backlog preserves checkpoints.
+- USD/Herat leading digits: 3 same-book/source facts/15m; ban constants/future replay.
+- خ ن ف/ف ن ف, خ ف/ف ف, or none: tomorrow; خ ن/ف ن/نق: cash. Future wins; ignore registration.
+- Prices: project-thousand, full-Toman /1,000, bounded zeros; reject quantities/scripts/years. `رب`=quarter; `پ`/`ت پ`/`پایین`=low-date.
+- Named: no anchors. Unnamed: unit-safe `MAIN_ONLINE` + 2h same-book anchors; contradictions fail, overlaps need margin. Bootstrap: 3 messages/2 senders/30m/1.5% spread + one fact; no context default.
+- Trades: isolated replies, oldest root, reciprocal offerer; cancellation/rejection gate fills. Only explicit reciprocal first fill changes quantity; ambiguous/overfills audit-only.
+- Root-to-confirmation hashes; mismatches never rewrite roots. Three causal same-instrument offers/5m make >max(5%, 6 robust deviations) audit-only. Same-settlement preferred; cross-settlement fallback.
+- Term structure yields to <=30m trade, 3 offers, or <=1% two-sided book; cap unsupported cash.
+- Reconcile: reject bad reply graphs; keep first fact availability. Projection drops absent/rejected; pending/conditional/>5m-late audit-only. Models: `available_at_utc`; reports: source time.
+- Malformed envelopes fail; inverted time cannot advance checkpoints; heartbeat/event/eligible health stay separate.
+- Private text: authenticated review only; Store/projection opaque. Live jobs: `main`.
+- Estimator: `estimator-live`; home CASH/TOMORROW; `/shadow` shadow/realised. Web displays stored parser/model facts, never recomputes.
+- Regime order: private minute gold, Herat, XAU, resolved Group 1/2 books. Keep direction/volatility and CASH/TOMORROW separate; abstain on low evidence; live changes use hold-down. Public inputs: unconfigured fallback only.
+- Staging catalog mirrors Iran; Snapshot read-only. v3 exact bands; else nearest same-family center within ±10% needs confirmation; ties require choice. Edits reuse scope, omit receipt, never auto-select; bot shows choice before buttons, answers stale taps.
+- Bridge/collectors share writer `flock`; bridge `After=` recurring collectors starves it and stales Snapshots.
+- Condition research: pinned Persian encoder spans/families; deterministic settlement/form, Tehran phase, deadline horizon. Regex weak-labels only; reviews/artifacts raw-free/opaque. No tolerance before owner-reviewed truth, calibration, CPU shadow; revisions correct facts, keep anchors.
+- Index book/time anchors; no per-message scan. Fetch deltas newest-first then sort; oldest-first backlog preserves checkpoints.
