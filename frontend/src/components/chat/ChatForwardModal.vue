@@ -514,14 +514,17 @@ function confirmForward() {
 
 .forward-search-input {
   width: 100%;
-  height: 44px;
-  border: 1px solid #e5e7eb;
-  border-radius: 999px;
-  padding: 0 16px;
+  min-height: var(--ds-control-min-height, 48px);
+  height: var(--ds-control-min-height, 48px);
+  border: 1.5px solid var(--ds-control-border, #e5e7eb);
+  border-radius: 12px;
+  padding: 0 var(--ds-control-padding-inline, 0.875rem);
   font: inherit;
-  background: #f8fafc;
+  background: var(--ds-control-bg, #f2f2f7);
   color: #111827;
   outline: none;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
 .forward-search-input:focus {

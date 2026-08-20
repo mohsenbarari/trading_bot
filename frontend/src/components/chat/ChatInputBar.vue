@@ -1420,11 +1420,11 @@ const sendMessage = () => {
   flex: 1;
   display: flex;
   align-items: flex-end;
-  background: var(--messenger-bubble-received, #ffffff);
+  background: var(--messenger-surface-muted, #f2f2f7);
   border: none;
   border-radius: 20px;
-  padding: 8px 4px;
-  min-height: var(--messenger-touch-target, 44px);
+  padding: 8px 6px;
+  min-height: var(--messenger-touch-target, 48px);
   transition: background var(--messenger-motion-standard, 180ms);
 }
 .input-container:focus-within { background: var(--messenger-bubble-received, #ffffff); }
@@ -1460,7 +1460,7 @@ const sendMessage = () => {
 
 .emoji-btn, .attach-btn, .voice-btn, .cancel-voice-btn {
   background: none; border: none; padding: 0; margin: 0; cursor: pointer; display: flex;
-  align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px;
+  align-items: center; justify-content: center; flex-shrink: 0; width: 48px; height: 48px;
 }
 .emoji-btn svg, .attach-btn svg, .voice-btn svg, .cancel-voice-btn svg { width: 28px; height: 28px; }
 .emoji-btn { margin-left: 4px; }
@@ -1470,7 +1470,7 @@ const sendMessage = () => {
 
 .send-btn-inline {
   background: none; border: none; padding: 0; margin: 0; cursor: pointer; display: flex;
-  align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; margin-right: 4px;
+  align-items: center; justify-content: center; flex-shrink: 0; width: 48px; height: 48px; margin-right: 4px;
 }
 .send-btn-inline svg { width: 28px; height: 28px; }
 .send-btn-inline.edit-mode svg { width: 24px; height: 24px; }

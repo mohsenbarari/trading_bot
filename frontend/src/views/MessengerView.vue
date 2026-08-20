@@ -194,10 +194,11 @@ function handleBack() {
 
 <style scoped>
 .messenger-page {
-  /* Messenger takes up the full screen height (or what's left behind the nav) */
   height: 100dvh;
   width: 100%;
-  background-color: var(--messenger-surface-page, #fceceb); /* Match chat background or app background */
+  padding-top: var(--ds-safe-area-top, env(safe-area-inset-top, 0px));
+  background-color: var(--messenger-surface-page, #f2f2f7);
+  color: var(--messenger-text-strong, #1c1c1e);
 }
 
 .loading-container {

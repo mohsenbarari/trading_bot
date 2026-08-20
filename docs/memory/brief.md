@@ -6,7 +6,7 @@ Purpose:
 
 Current direction:
 - Preserve production safety while evolving the Telegram bot, FastAPI backend, Vue PWA, and cross-server sync/observability workflows.
-- Evolve the Vue PWA through staged, mobile-first UI/UX work toward a native iOS/Android feel; keep Market protected. Messenger visual work is allowed only on the native-standardization track after a new disposition; behavior, album rules, and legacy-default rollout stay frozen and reversible.
+- Evolve the Vue PWA toward a native iOS/Android feel; keep Market protected. Messenger frontend restyle is fully free on the native-standardization track; behavior, album rules, and legacy-default rollout stay frozen and reversible.
 - Treat the repository's current code and approved roadmaps/runbooks as authoritative; verify behavior with focused tests and diffs before release work.
 
 System shape:

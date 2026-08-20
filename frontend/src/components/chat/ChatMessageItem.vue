@@ -1884,8 +1884,8 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 .message-bubble.type-text {
   min-width: var(--messenger-message-min-width, 58px);
 }
-.message-bubble.sent { align-self: flex-start; background: var(--messenger-bubble-sent, #eeffde); color: var(--messenger-text-strong, #1f2937); border-radius: var(--messenger-radius-bubble, 12px) var(--messenger-radius-bubble, 12px) var(--messenger-radius-bubble-tail, 5px) var(--messenger-radius-bubble, 12px); box-shadow: var(--messenger-message-surface-shadow, 0 1px 2px rgba(15, 23, 42, 0.15)); }
-.message-bubble.received { align-self: flex-end; background: var(--messenger-bubble-received, #ffffff); color: var(--messenger-text-strong, #1f2937); border-radius: var(--messenger-radius-bubble, 12px) var(--messenger-radius-bubble, 12px) var(--messenger-radius-bubble, 12px) var(--messenger-radius-bubble-tail, 5px); box-shadow: var(--messenger-message-surface-shadow, 0 1px 2px rgba(15, 23, 42, 0.15)); }
+.message-bubble.sent { align-self: flex-start; background: var(--messenger-bubble-sent, #007aff); color: #ffffff; border-radius: var(--messenger-radius-bubble, 18px) var(--messenger-radius-bubble, 18px) var(--messenger-radius-bubble-tail, 5px) var(--messenger-radius-bubble, 18px); box-shadow: none; }
+.message-bubble.received { align-self: flex-end; background: var(--messenger-bubble-received, #e9e9eb); color: var(--messenger-text-strong, #1c1c1e); border-radius: var(--messenger-radius-bubble, 18px) var(--messenger-radius-bubble, 18px) var(--messenger-radius-bubble, 18px) var(--messenger-radius-bubble-tail, 5px); box-shadow: none; }
 .message-bubble.full-width-bubble { width: 100%; max-width: 100%; }
 .message-bubble.full-width-bubble.sent,
 .message-bubble.full-width-bubble.received { align-self: stretch; }
@@ -2034,7 +2034,9 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 }
 
 .msg-time { font-size: 11px; color: rgba(0, 0, 0, 0.4); }
-.message-bubble.received .msg-time { color: var(--messenger-text-muted, #64748b); }
+.message-bubble.sent .msg-time { color: rgba(255, 255, 255, 0.78); }
+.message-bubble.received .msg-time { color: var(--messenger-text-muted, #8e8e93); }
+.message-bubble.sent .icon-unread { fill: rgba(255, 255, 255, 0.7); }
 .msg-meta { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 4px; min-width: 50px; }
 .message-bubble.type-voice .msg-meta,
 .message-bubble.type-image .msg-meta,

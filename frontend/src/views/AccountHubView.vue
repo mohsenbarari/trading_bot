@@ -347,11 +347,11 @@ onMounted(refreshIdentity)
 
 .account-compact-header {
   display: grid;
-  grid-template-columns: 2.25rem minmax(0, 1fr) 2.25rem;
+  grid-template-columns: 3rem minmax(0, 1fr) 3rem;
   align-items: center;
   gap: 0.75rem;
   margin-bottom: 0.9rem;
-  min-height: 2.25rem;
+  min-height: 3rem;
 }
 
 .account-return-control {
@@ -416,8 +416,8 @@ onMounted(refreshIdentity)
 }
 
 .account-header-spacer {
-  width: 2.25rem;
-  height: 2.25rem;
+  width: 3rem;
+  height: 3rem;
 }
 
 .account-section-card + .account-section-card {
@@ -426,8 +426,8 @@ onMounted(refreshIdentity)
 
 .account-action-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
 }
 
 .account-action-grid--single {

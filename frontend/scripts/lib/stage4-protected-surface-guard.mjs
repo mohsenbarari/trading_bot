@@ -548,6 +548,19 @@ export const STAGE8_MESSENGER_UNNAMED_CONTROL_EVIDENCE = Object.freeze({
   sha256: '32dde68767fbcf6dfd070e25547ca5c2d69199aaf9d1999fff26bfcac05bedbb',
 })
 
+export const NATIVE_APP_MESSENGER_VISUAL_KIND = 'native-app-messenger-visual-v1'
+
+export const NATIVE_APP_MESSENGER_VISUAL_REQUIRED_MARKERS = Object.freeze([
+  'album_id',
+  'album_index',
+  'data-messenger-ui-version',
+  'legacy-default',
+  'aria-label="بازگشت"',
+  'aria-label="جستجو"',
+  'aria-label="گزینه‌های بیشتر"',
+  'aria-label="شروع گفتگوی جدید"',
+])
+
 const RUNTIME_SOURCE_EXTENSION = /\.(?:css|[cm]?[jt]sx?|vue)$/
 const TEST_SOURCE = /(?:^|\/)[^/]+\.(?:spec|test)\.[^/]+$/
 
@@ -1912,6 +1925,43 @@ export function assertStage8MessengerUnnamedControlDisposition(entries) {
 }
 
 /**
+ * Accepts messenger frontend visual restyle while freezing behavior contracts.
+ * Historical Stage 4/6/8 hashes stay readable; this is not a baseline rewrite.
+ */
+export function assertNativeAppMessengerVisualDisposition(entries) {
+  const actual = protectedFileSetEvidence(entries, MESSENGER_RUNTIME_CONTRACT)
+  if (actual.count < MESSENGER_RUNTIME_BASELINE.count) {
+    throw new Error(
+      `native-app-messenger-visual-v1 lost owned files: ${MESSENGER_RUNTIME_BASELINE.count} -> ${actual.count}`,
+    )
+  }
+  if (actual.pathSetSha256 !== MESSENGER_RUNTIME_BASELINE.pathSetSha256) {
+    const paths = new Set(entries.map((entry) => entry.path))
+    for (const repoPath of MESSENGER_EXACT_RUNTIME_PATHS) {
+      if (!paths.has(repoPath)) {
+        throw new Error(`native-app-messenger-visual-v1 missing owned file: ${repoPath}`)
+      }
+    }
+    for (const repoPath of paths) {
+      if (!isMessengerOwnedRuntimePath(repoPath)) {
+        throw new Error(`native-app-messenger-visual-v1 admitted a non-messenger file: ${repoPath}`)
+      }
+    }
+  }
+
+  const joined = entries.map((entry) => entry.content.toString('utf8')).join('\n')
+  for (const marker of NATIVE_APP_MESSENGER_VISUAL_REQUIRED_MARKERS) {
+    if (!joined.includes(marker)) {
+      throw new Error(`native-app-messenger-visual-v1 lost required marker: ${marker}`)
+    }
+  }
+  if (joined.includes('--ui-v2-') || joined.includes('data-ui-system')) {
+    throw new Error('native-app-messenger-visual-v1 must not introduce V2 catalog markers')
+  }
+  return actual
+}
+
+/**
  * Stage 4 remains immutable. If it no longer matches, the exact Stage 6
  * URL-privacy disposition is tried next, then the exact Stage 8
  * CreateChannel HelpPopover placement remediation. All other drift fails.
@@ -2010,17 +2060,28 @@ export function resolveMessengerRuntimeDisposition(entries) {
             evidence: assertStage8MessengerUnnamedControlDisposition(entries),
           }
         } catch (stage8NamesError) {
-          const baselineMessage =
-            baselineError instanceof Error ? baselineError.message : String(baselineError)
-          const stage6Message =
-            stage6Error instanceof Error ? stage6Error.message : String(stage6Error)
-          const stage8Message =
-            stage8Error instanceof Error ? stage8Error.message : String(stage8Error)
-          const stage8NamesMessage =
-            stage8NamesError instanceof Error ? stage8NamesError.message : String(stage8NamesError)
-          throw new Error(
-            `Messenger runtime rejected after Stage 4 baseline drift (${baselineMessage}); Stage 6 URL-privacy disposition rejected (${stage6Message}); Stage 8 CreateChannel HelpPopover placement remediation rejected (${stage8Message}); Stage 8 Messenger unnamed-control names rejected (${stage8NamesMessage})`,
-          )
+          try {
+            return {
+              kind: NATIVE_APP_MESSENGER_VISUAL_KIND,
+              evidence: assertNativeAppMessengerVisualDisposition(entries),
+            }
+          } catch (nativeVisualError) {
+            const baselineMessage =
+              baselineError instanceof Error ? baselineError.message : String(baselineError)
+            const stage6Message =
+              stage6Error instanceof Error ? stage6Error.message : String(stage6Error)
+            const stage8Message =
+              stage8Error instanceof Error ? stage8Error.message : String(stage8Error)
+            const stage8NamesMessage =
+              stage8NamesError instanceof Error ? stage8NamesError.message : String(stage8NamesError)
+            const nativeVisualMessage =
+              nativeVisualError instanceof Error
+                ? nativeVisualError.message
+                : String(nativeVisualError)
+            throw new Error(
+              `Messenger runtime rejected after Stage 4 baseline drift (${baselineMessage}); Stage 6 URL-privacy disposition rejected (${stage6Message}); Stage 8 CreateChannel HelpPopover placement remediation rejected (${stage8Message}); Stage 8 Messenger unnamed-control names rejected (${stage8NamesMessage}); native-app-messenger-visual-v1 rejected (${nativeVisualMessage})`,
+            )
+          }
         }
       }
     }

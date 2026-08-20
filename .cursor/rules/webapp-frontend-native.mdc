@@ -1,0 +1,19 @@
+---
+description: Native geometry for Vue and CSS product surfaces
+globs: frontend/src/**/*.{vue,css}
+alwaysApply: false
+---
+
+# Frontend native controls
+
+```vue
+<!-- BAD -->
+<input class="custom-field" style="height: 42px" />
+
+<!-- GOOD -->
+<AppInput v-model="name" class="customer-input" />
+```
+
+- Reuse `--ds-control-*` for leftover classes
+- Messenger inputs may stay raw if they match the same 48px inset geometry
+- Do not restyle Market offer cards, meters, or hourglasses

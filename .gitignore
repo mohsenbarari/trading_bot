@@ -66,7 +66,11 @@ docs/uiux-native-standardization/*
 # Environments
 frontend/node_modules/
 .idea/
-.cursor/
+.cursor/*
+!.cursor/skills/
+!.cursor/skills/**
+!.cursor/rules/
+!.cursor/rules/**
 # IDE specific files
 mini_app_dist/
 mini_app_dist_staging/

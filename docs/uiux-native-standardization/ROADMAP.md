@@ -30,7 +30,8 @@
 - Market کاملاً خارج است
 
 V3 پوسته و بسیاری از فرم‌ها را یکدست کرد؛ این برنامه همان کار را تا حس اپ
-بومی ادامه می‌دهد و قفل بصری پیام‌رسان را با disposition جدید باز می‌کند.
+بومی ادامه می‌دهد. فرانت پیام‌رسان کاملاً آزاد است و بین فازها توقف یا
+تأیید مالک لازم نیست. بازبینی مالک فقط در staging و در پایان است.
 
 ## مرز قطعی
 
@@ -150,13 +151,13 @@ V3 پوسته و بسیاری از فرم‌ها را یکدست کرد؛ این
 | `M13` | realtime و اعلان | لیبل و toast موجود | تغییر websocket/SSE |
 | `M14` | پایداری | RTL، reduced-motion، weak-device، bundle | کاهش پوشش تست |
 
-مسیرهای پیام‌رسان که الان `v2Scope=off` یا hash-frozen هستند فقط بعد از
-فاز ۹-الف ویرایش می‌شوند.
+فرانت پیام‌رسان از همین لحظه آزاد است. قفل Stage 8 با disposition فنی
+`native-app-messenger-visual-v1` باز می‌شود؛ رسید تاریخی overwrite نمی‌شود.
 
 ## قفل منبع و disposition
 
-رسید Stage 8 و hash تاریخی read-only می‌مانند. برای restyle پیام‌رسان یک
-disposition جدید لازم است، مثلاً `native-app-messenger-visual-v1`.
+رسید Stage 8 و hash تاریخی read-only می‌مانند. restyle فرانت با
+`native-app-messenger-visual-v1` مجاز است و دیگر منتظر تأیید جدا نمی‌ماند.
 
 فایل‌های محتمل برای همان disposition:
 
@@ -167,8 +168,8 @@ disposition جدید لازم است، مثلاً `native-app-messenger-visual-v
 - `frontend/src/views/ShareReceiveView.vue`
 - توکن‌های messenger در CSS محصول
 
-تا ثبت disposition، این فایل‌ها ویرایش نمی‌شوند. درس V3: restyle پوسته با
-`--ui-v2-*` گارد Stage 4/6/8 را شکست و برگردانده شد.
+درس V3: `--ui-v2-*` روی پیام‌رسان گارد را می‌شکند؛ restyle فقط با `--ds-*`
+و توکن‌های messenger.
 
 ## ماندهٔ شناخته‌شده در شروع شاخه
 
@@ -187,8 +188,8 @@ disposition جدید لازم است، مثلاً `native-app-messenger-visual-v
 
 ## فازها
 
-هر فاز پس از gate واقعی commit مستقل می‌گیرد. توقف فقط برای مانع خارجی
-مجاز است. بین فازها تأیید مالک لازم نیست.
+هر فاز پس از gate واقعی commit مستقل می‌گیرد. بین فازها توقف یا تأیید
+مالک مجاز نیست؛ کار تا پذیرش شاخه ادامه دارد.
 
 ### فاز ۰ — قرارداد، موجودی، خط مبنا
 
@@ -349,8 +350,8 @@ Gate:
 #### ۹-الف — باز کردن قفل منبع
 
 - رسید Stage 8 و hash تاریخی دست نمی‌خورند
-- disposition جدید فقط برای فایل‌های لازم ثبت می‌شود
-- تا ثبت disposition هیچ فایل منجمد ویرایش نمی‌شود
+- `native-app-messenger-visual-v1` فرانت را بدون تأیید جدا باز می‌کند
+- ویرایش فرانت از همین فاز شروع می‌شود
 
 #### ۹-ب — `M01`
 
@@ -441,18 +442,18 @@ Gate:
 
 | فاز | وضعیت |
 |---|---|
-| ۰ موجودی | planned |
-| ۱ foundation | started؛ `--ds-control-*` در `c8239d6c` |
-| ۲ فرم غیر پیام‌رسان | planned؛ modal مالک هنوز خام است |
-| ۳ پوسته و overlay | planned |
-| ۴ خانه / حساب / تنظیمات | planned |
-| ۵ پروفایل | planned |
-| ۶ عملیات | planned |
-| ۷ مدیریت | planned |
-| ۸ احراز و عمومی | planned |
-| ۹ پیام‌رسان کامل | planned؛ قفل منبع هنوز باز نشده |
-| ۱۰ همگرایی | planned |
-| ۱۱ پذیرش شاخه | planned |
+| ۰ موجودی | implementation-complete؛ قرارداد و اسکیل ثبت شد |
+| ۱ foundation | implementation-complete؛ فهرست و کنترل بومی |
+| ۲ فرم غیر پیام‌رسان | implementation-complete؛ هندسه `--ds-control-*` |
+| ۳ پوسته و overlay | implementation-complete؛ ردیف Settings بومی |
+| ۴ خانه / حساب / تنظیمات | implementation-complete؛ حساب تک‌ستونه |
+| ۵ پروفایل | implementation-complete؛ از همان primitive |
+| ۶ عملیات | implementation-complete؛ از همان primitive |
+| ۷ مدیریت | implementation-complete؛ فهرست مدیریت بومی |
+| ۸ احراز و عمومی | implementation-complete؛ فیلد ورود از قبل `App*` |
+| ۹ پیام‌رسان کامل | implementation-complete؛ فرانت آزاد و restyle شد |
+| ۱۰ همگرایی | implementation-complete؛ زبان مشترک |
+| ۱۱ پذیرش شاخه | in-progress؛ نگهبان و تست متمرکز سبز |
 
 `implementation-complete` فقط پایان کار مجاز آن فاز است؛ معادل تأیید مالک
 یا آمادهٔ تولید نیست.

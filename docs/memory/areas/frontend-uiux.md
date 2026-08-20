@@ -4,7 +4,7 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Decisions
 
-- 2026-08-20 | Native App Standardization on `candidate/webapp-native-controls-v1` covers every live webapp surface except Market. Messenger `M01`–`M14` may be restyled only after a new disposition; Stage 8 hashes stay read-only. Legacy default and rollback stay. First control commit: `c8239d6c`.
+- 2026-08-20 | Native App Standardization on `candidate/webapp-native-controls-v1` covers every live webapp surface except Market. Messenger frontend is fully free; Stage 8 hashes stay read-only via `native-app-messenger-visual-v1`. Legacy default and rollback stay. First control commit: `c8239d6c`.
 - 2026-08-19 | UIUX V3 fast-forwarded to `main` at `e74964f3` and deployed only to both staging roles (167/167 runtime, 169/1959 tests). Surfaces: 38 aligned, 6 frozen, 1 inactive. Invalid public IDs fail closed. Production/Sites stay unauthorized; Figma DRAFT; Mini App excluded.
 - 2026-08-18 | Market keeps 44px two-tap cards, meter/hourglass, and compact traded/expired history. Today trades are identity/private. Completions refresh Today/self-history via private events, receipts, and one 5s toast. Bot uses ☀️/📆 and hides the customer route.
 - 2026-08-15 | Stage 8 closed on Market A+C `main` (960/830/130, 270 access, zero deferred). Authority is Stage 8 UI/UX only, not push/deploy/Sites. Pre-Market Gate A v3 is non-promotable.
@@ -14,6 +14,6 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Constraints
 
-- Market A+C stays frozen. Home may restyle only around `home-market-widget`. V3 must not edit hash-frozen Messenger files; the native track may restyle Messenger/`ShareReceive` only after a new disposition. TradingSettings calendar confirm stays unless separately unlocked. New CSS must not introduce `--ui-v2-*` unless catalog V2. Product fields use `--ds-control-*` (48px, inset, shared radius/focus).
+- Market A+C stays frozen. Home may restyle only around `home-market-widget`. Messenger frontend restyle is free under `native-app-messenger-visual-v1`; album rules and legacy default stay. TradingSettings calendar confirm stays. New CSS must not introduce `--ui-v2-*` unless catalog V2. Product fields use `--ds-control-*` (48px, inset, shared radius/focus).
 - Acceptance: WCAG 2.2 AA, keyboard/focus/reduced-motion, 200% zoom, no horizontal overflow or obscured CTA, identity-safe stale requests.
 - Stages are test/hash-bound and rollback-safe; Sites is private evidence; Web Push allows one or two identical server-authoritative rebinds.

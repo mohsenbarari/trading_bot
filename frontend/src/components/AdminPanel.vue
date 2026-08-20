@@ -139,7 +139,7 @@ const actions = computed<AdminAction[]>(() => {
 .admin-action-list {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 0.65rem;
+  gap: 0;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -151,12 +151,12 @@ const actions = computed<AdminAction[]>(() => {
 
 .admin-panel-action {
   width: 100%;
-  min-height: 72px;
+  min-height: var(--ds-native-row-min-height, 48px);
 }
 
 @media (min-width: 720px) {
   .admin-action-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
   }
 }
 </style>

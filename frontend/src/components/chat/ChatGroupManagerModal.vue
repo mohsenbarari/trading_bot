@@ -1291,21 +1291,23 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 .editor-input,
 .editor-textarea {
   width: 100%;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: var(--messenger-radius-panel, 18px);
-  background: var(--messenger-panel-glass-bg, rgba(255, 255, 255, 0.92));
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
-  color: #0f172a;
+  border: 1.5px solid var(--ds-control-border, rgba(60, 60, 67, 0.18));
+  border-radius: var(--ds-control-radius, 12px);
+  background: var(--ds-control-bg, #f2f2f7);
+  box-shadow: none;
+  color: var(--messenger-text-strong, #1c1c1e);
   font: inherit;
-  font-size: 0.98rem;
+  font-size: 1rem;
   outline: none;
+  appearance: none;
+  -webkit-appearance: none;
   transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
 }
 
 .search-input,
 .editor-input {
-  min-height: 56px;
-  padding: 0 18px;
+  min-height: var(--ds-control-min-height, 48px);
+  padding: 0 var(--ds-control-padding-inline, 0.875rem);
 }
 
 .editor-textarea {

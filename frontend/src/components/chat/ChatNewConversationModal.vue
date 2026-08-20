@@ -315,14 +315,17 @@ function handleUserClick(user: SearchUser) {
 
 .new-chat-search-input {
   width: 100%;
-  height: 40px;
-  background: #f1f2f6;
+  min-height: var(--ds-control-min-height, 48px);
+  height: var(--ds-control-min-height, 48px);
+  background: var(--ds-control-bg, #f2f2f7);
   border: none;
-  border-radius: 20px;
-  padding: 0 16px;
-  font-size: 15px;
+  border-radius: 12px;
+  padding: 0 var(--ds-control-padding-inline, 0.875rem);
+  font-size: 16px;
   font-family: inherit;
   outline: none;
+  appearance: none;
+  -webkit-appearance: none;
   transition: background 0.2s;
 }
 

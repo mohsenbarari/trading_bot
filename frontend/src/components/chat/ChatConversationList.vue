@@ -717,21 +717,21 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .conversation-list-wrapper {
-  --surface: var(--messenger-surface-panel, rgba(255, 255, 255, 0.76));
-  --line-soft: var(--messenger-border-subtle, rgba(203, 213, 225, 0.82));
-  --text-strong: var(--messenger-text-strong, #0f172a);
-  --text-muted: var(--messenger-text-muted, #64748b);
-  --accent: var(--messenger-accent, #3390ec);
-  --teal: #0f766e;
-  --blue: #2563eb;
-  --danger: var(--messenger-danger, #dc2626);
-  --warning: var(--messenger-warning, #c2410c);
+  --surface: var(--messenger-surface-panel, #ffffff);
+  --line-soft: var(--messenger-border-subtle, rgba(60, 60, 67, 0.18));
+  --text-strong: var(--messenger-text-strong, #1c1c1e);
+  --text-muted: var(--messenger-text-muted, #8e8e93);
+  --accent: var(--messenger-accent, #007aff);
+  --teal: #34c759;
+  --blue: #007aff;
+  --danger: var(--messenger-danger, #ff3b30);
+  --warning: var(--messenger-warning, #ff9f0a);
   flex: 1;
   position: relative;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: linear-gradient(180deg, #edf2f7 0%, #f8fafc 54%, #eef4f8 100%);
+  background: var(--messenger-surface-page, #f2f2f7);
 }
 
 .conversation-panel {
@@ -740,16 +740,12 @@ onBeforeUnmount(() => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  margin: 10px 12px 0;
+  margin: 0;
   overflow: hidden;
-  border-radius: var(--messenger-radius-sheet, 28px) var(--messenger-radius-sheet, 28px) 0 0;
-  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 0;
+  border: 0;
   background: var(--surface);
-  box-shadow:
-    0 12px 28px rgba(15, 23, 42, 0.07),
-    inset 0 1px 0 rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  box-shadow: none;
 }
 
 .conversation-summary-strip {
@@ -814,9 +810,9 @@ onBeforeUnmount(() => {
 .conversations-list {
   flex: 1;
   overflow-y: auto;
-  padding: 10px 12px 112px;
+  padding: 0 0 112px;
   scrollbar-width: thin;
-  scrollbar-color: rgba(51, 144, 236, 0.24) transparent;
+  scrollbar-color: rgba(0, 122, 255, 0.24) transparent;
 }
 
 .conversations-list::-webkit-scrollbar {
@@ -870,7 +866,7 @@ onBeforeUnmount(() => {
 .section-items {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
 }
 
 .conversation-card {
@@ -879,13 +875,14 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 12px;
   min-height: var(--messenger-list-row-min-height, 64px);
-  padding: 12px 14px;
-  border-radius: var(--messenger-radius-panel, 18px);
-  border: 1px solid var(--line-soft);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.94));
+  padding: 10px 16px;
+  border-radius: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--surface);
   cursor: pointer;
-  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.055), 0 1px 0 rgba(255, 255, 255, 0.72) inset;
-  transition: transform var(--messenger-motion-standard, 180ms) ease, box-shadow var(--messenger-motion-standard, 180ms) ease, border-color var(--messenger-motion-standard, 180ms) ease;
+  box-shadow: none;
+  transition: background var(--messenger-motion-standard, 180ms) ease;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
@@ -918,23 +915,24 @@ onBeforeUnmount(() => {
 }
 
 .conversation-card:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 16px 30px rgba(15, 23, 42, 0.09), 0 1px 0 rgba(255, 255, 255, 0.8) inset;
+  transform: none;
+  background: var(--messenger-action-hover-bg, rgba(60, 60, 67, 0.08));
+  box-shadow: none;
 }
 
 .conversation-card--pinned {
-  border-color: rgba(245, 158, 11, 0.22);
-  background: linear-gradient(180deg, rgba(255, 251, 235, 0.98), rgba(255, 255, 255, 0.96));
+  border-color: transparent;
+  background: var(--surface);
 }
 
 .conversation-card--mandatory {
-  border-color: rgba(245, 158, 11, 0.28);
-  box-shadow: 0 16px 32px rgba(180, 83, 9, 0.11), 0 1px 0 rgba(255, 255, 255, 0.74) inset;
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .conversation-card--management {
-  border-color: rgba(15, 118, 110, 0.24);
-  background: linear-gradient(135deg, rgba(236, 253, 245, 0.98), rgba(255, 251, 235, 0.94));
+  border-color: transparent;
+  background: var(--surface);
 }
 
 .conversation-card--management .conv-name {
@@ -942,9 +940,9 @@ onBeforeUnmount(() => {
 }
 
 .conversation-card--active {
-  background: linear-gradient(135deg, #3390ec, #2563eb);
-  border-color: rgba(255, 255, 255, 0.28);
-  box-shadow: 0 18px 34px rgba(37, 99, 235, 0.22);
+  background: rgba(0, 122, 255, 0.12);
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .conversation-card--active .conv-name,
@@ -955,7 +953,7 @@ onBeforeUnmount(() => {
 .conversation-card--active .member-count-list,
 .conversation-card--active .deleted-badge-list,
 .conversation-card--active .pin-chip {
-  color: #fff;
+  color: inherit;
 }
 
 .conversation-card--active .room-badge-list,
@@ -968,32 +966,28 @@ onBeforeUnmount(() => {
 }
 
 .conversation-card--active .conv-role-badge {
-  color: #fff;
+  color: inherit;
 }
 
 .conversation-card-glow {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(circle at top right, rgba(255, 255, 255, 0.22), transparent 36%);
-  pointer-events: none;
+  display: none;
 }
 
 .conv-avatar {
   position: relative;
   z-index: 1;
-  width: 54px;
-  height: 54px;
-  min-width: 54px;
-  border-radius: 20px;
-  background: linear-gradient(135deg, #10b981, #059669);
+  width: 52px;
+  height: 52px;
+  min-width: 52px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #34c759, #30d158);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 1.1rem;
   font-weight: 800;
-  box-shadow: 0 10px 22px rgba(15, 118, 110, 0.14);
+  box-shadow: none;
 }
 
 .conv-avatar.channel-avatar {

@@ -427,9 +427,11 @@ function formatDateForSeparator(dateString: string) {
   display: flex;
   align-items: center;
   padding: 0 8px;
-  background: var(--messenger-surface-panel, #ffffff);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
-  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+  background: rgba(242, 242, 247, 0.92);
+  backdrop-filter: saturate(180%) blur(16px);
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
+  box-shadow: none;
+  border-bottom: 1px solid var(--messenger-border-subtle, rgba(60, 60, 67, 0.18));
   gap: 8px;
   direction: ltr; /* Force LTR layout */
 }
@@ -665,16 +667,19 @@ function formatDateForSeparator(dateString: string) {
 
 .header-search-input {
   flex: 1;
-  height: 38px;
-  background: var(--messenger-surface-muted, #f8fafc);
+  min-height: var(--ds-control-min-height, 48px);
+  height: var(--ds-control-min-height, 48px);
+  background: var(--ds-control-bg, #f2f2f7);
   border: none;
-  border-radius: var(--messenger-radius-panel, 18px);
-  padding: 0 16px;
-  font-size: 15px;
+  border-radius: 12px;
+  padding: 0 var(--ds-control-padding-inline, 0.875rem);
+  font-size: 16px;
   font-family: inherit;
   outline: none;
+  appearance: none;
+  -webkit-appearance: none;
   width: 100%;
-  direction: rtl; /* User inputs persian generally */
+  direction: rtl;
 }
 
 .search-results-dropdown {
