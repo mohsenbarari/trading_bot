@@ -4,26 +4,15 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Decisions
 
-- 2026-08-21 | A second page-by-page pass flattened leftover profile cards, admin wrapper padding, login recovery picker on narrow screens, and the Home account menu on phone. Home today-trades stays a horizontal table because its test locks that scroller. Market stays frozen.
-- 2026-08-21 | Non-Market hubs, profile stats, admin subviews, customer stats, and mobile confirms now use grouped rows / bottom sheets. Messenger leftover teal maps to product amber. Market feed, calendar confirm, and Telegram-connect blue stay frozen.
-- 2026-08-20 | Public auth is the same installed-app language: inset fields, grouped invite rows, and a bottom primary action. OTP behavior and developer login stay unchanged. Market stays frozen.
-- 2026-08-20 | Installed PWA is the native target, not a store app. Splash, theme, and account hub rows follow the grouped language so Home Screen launch reads as one app. Market stays frozen.
-- 2026-08-20 | Messenger chrome joined the native language: RTL header + shared back, amber instead of Telegram blue, inset list rows, edge-to-edge tab bar, flat grouped page background. Market feed and Telegram-connect brand stay frozen.
-- 2026-08-20 | Page back is one control: 48px ghost, chevron right, leading/right of the header. Parent name may sit beside it. Market stays frozen.
-- 2026-08-20 | Buttons share one role map: primary filled CTA at the bottom, secondary/cancel beside or above, ghost for inline/header, danger filled only in confirm. Form reset is a text danger under save. Market trade buttons stay frozen.
-- 2026-08-20 | Deep scan found leftover 44px profile header and Telegram-blue messenger chrome. Identity header is 48px; messenger accent/link/sent map to product amber. Market feed stays frozen.
-- 2026-08-20 | Owner required AdminMessages, TradingSettings, and Jalali to join the same native 48px language. Historical Stage 4/6 hashes stay readable via `native-app-admin-messages-visual-v1` and `native-app-trading-settings-visual-v1`. Calendar confirm and Market feed stay frozen.
-- 2026-08-20 | Integrity pass unified leftover non-Market chrome to 48px native rows/`AppInput`. Live messenger stays on `native-app-messenger-visual-v1`.
-- 2026-08-20 | Native App Standardization on `candidate/webapp-native-controls-v1` covers every live webapp surface except Market. Messenger frontend is fully free; Stage 8 hashes stay read-only via `native-app-messenger-visual-v1`. Legacy default and rollback stay. First control commit: `c8239d6c`.
-- 2026-08-19 | UIUX V3 fast-forwarded to `main` at `e74964f3` and deployed only to both staging roles (167/167 runtime, 169/1959 tests). Surfaces: 38 aligned, 6 frozen, 1 inactive. Invalid public IDs fail closed. Production/Sites stay unauthorized; Figma DRAFT; Mini App excluded.
-- 2026-08-18 | Market keeps 44px two-tap cards, meter/hourglass, and compact traded/expired history. Today trades are identity/private. Completions refresh Today/self-history via private events, receipts, and one 5s toast. Bot uses ☀️/📆 and hides the customer route.
-- 2026-08-15 | Stage 8 closed on Market A+C `main` (960/830/130, 270 access, zero deferred). Authority is Stage 8 UI/UX only, not push/deploy/Sites. Pre-Market Gate A v3 is non-promotable.
-- 2026-08-14 | Invitation stays `410`; pre-auth Telegram uses shared runtime; overtime lives at `/settings`; Market/Telegram inventories use exact overlays. Stage 7 closed NONE-only copy/keyboard/live-region/reduced-motion; protected routes keep 200ms; cross-boundary 12/12. Stage 6: server-authoritative admin/profile; shared dialogs; PII server-side; cancel/Escape never mutate.
-- 2026-08-11 | Owner-relation DELETE locks `expected_action`; Customer/Accountant query changes keep one root and scroll owner.
-- 2026-08-09 | Current-user authority is token-bound; owner-only routes use guards, not visibility.
+- 2026-08-21 | `candidate/webapp-native-controls-v1` aligns all 29 non-Market routes and Messenger M01–M14: RTL/Vazirmatn, 48px controls, grouped lists, safe-area and shared focus/dialog/sheet UX. Exact visual guards fail closed. Evidence: 167/167 routes, 13/13 Messenger, 8/8 boundary viewports and 169/1962 tests. It is not owner/deploy authority.
+- 2026-08-21 | Market is owner-frozen: direct source matches `main` and 390/1440 production captures are pixel-identical. Shared chrome needs explicit Market compatibility scope; Market feed/actions/meter/overtime/history, calendar confirm and delivery interiors retain accepted behavior.
+- 2026-08-20 | Native means installed PWA: one 48px back control, bottom primary CTA, shared destructive dialog, keyboard-safe forms and grouped account/profile/operations/admin/auth surfaces. Today trades remains a horizontal row.
+- 2026-08-15 | Stage 8 closed for UI/UX only (Market A+C: 960/830/130; access 270; zero deferred). It is not merge/deploy/Sites authority.
+- 2026-08-14 | Invitation is `410`; Telegram Mini App is retired. Overtime preference lives at `/settings`. Stage 6/7 preserve server-authoritative roles/PII, shared dialogs, cancellation without mutation, reduced motion, and protected-region hashes.
 
 ## Constraints
 
-- Market A+C stays frozen. Home may restyle only around `home-market-widget`. Messenger frontend restyle is free under `native-app-messenger-visual-v1`; album rules and legacy default stay. TradingSettings calendar confirm stays. New CSS must not introduce `--ui-v2-*` unless catalog V2. Product fields use `--ds-control-*` (48px, inset, shared radius/focus).
-- Acceptance: WCAG 2.2 AA, keyboard/focus/reduced-motion, 200% zoom, no horizontal overflow or obscured CTA, identity-safe stale requests.
-- Stages are test/hash-bound and rollback-safe; Sites is private evidence; Web Push allows one or two identical server-authoritative rebinds.
+- Messenger restyle may not change schema/WebSocket/upload/cache, `album_id + album_index`, permissions, legacy default or rollback. Generic chrome uses amber; Telegram-connect may remain blue.
+- Current-user authority is token-bound; owner routes use guards. Owner-relation DELETE locks `expected_action`.
+- New CSS uses `--ds-*`; `--ui-v2-*` only belongs to catalog V2. Product inputs use `--ds-control-*`.
+- Acceptance requires WCAG 2.2 AA, keyboard/focus/Escape return, reduced motion, 200% zoom, no horizontal overflow/unnamed or nested controls/obscured CTA, stable async geometry, identity-safe stale requests, source hashes, and production-build browser evidence.

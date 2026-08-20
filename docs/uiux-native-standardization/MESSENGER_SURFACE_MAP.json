@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "track": "native-app-standardization-v1",
+  "surfaceCount": 14,
+  "visualDisposition": "native-app-messenger-visual-v1",
+  "defaultRollout": "legacy",
+  "surfaces": [
+    {"id":"M01","label":"shell-bootstrap-navigation","sources":["frontend/src/views/MessengerView.vue","frontend/src/components/ChatView.vue"],"status":"aligned-native"},
+    {"id":"M02","label":"conversation-list-search","sources":["frontend/src/components/chat/ChatConversationList.vue","frontend/src/components/chat/ChatSearchGlobalList.vue"],"status":"aligned-native"},
+    {"id":"M03","label":"direct-room","sources":["frontend/src/components/chat/ChatHeader.vue","frontend/src/components/chat/ChatMessageItem.vue"],"status":"aligned-native"},
+    {"id":"M04","label":"group-room","sources":["frontend/src/components/chat/ChatHeader.vue","frontend/src/components/chat/ChatGroupManagerModal.vue"],"status":"aligned-native"},
+    {"id":"M05","label":"channel-room","sources":["frontend/src/components/CreateChannelView.vue","frontend/src/components/chat/ChatHeader.vue"],"status":"aligned-native"},
+    {"id":"M06","label":"composer-overlays","sources":["frontend/src/components/chat/ChatInputBar.vue","frontend/src/components/chat/AttachmentMenu.vue"],"status":"aligned-native"},
+    {"id":"M07","label":"message-media-album-rendering","sources":["frontend/src/components/chat/ChatMessageItem.vue","frontend/src/components/chat/ChatAlbumLayout.vue"],"status":"aligned-native-functional-contract-unchanged"},
+    {"id":"M08","label":"context-and-multi-select-actions","sources":["frontend/src/components/chat/ChatContextMenu.vue","frontend/src/components/ChatView.vue"],"status":"aligned-native"},
+    {"id":"M09","label":"search-viewers-lightbox","sources":["frontend/src/components/chat/ChatSearchBottomBar.vue","frontend/src/components/chat/ChatLightbox.vue","frontend/src/components/chat/LocationViewerModal.vue"],"status":"aligned-native"},
+    {"id":"M10","label":"upload-download-cache-progress","sources":["frontend/src/components/chat/GalleryPreviewModal.vue","frontend/src/components/chat/ChatMessageItem.vue"],"status":"aligned-native-runtime-contract-unchanged"},
+    {"id":"M11","label":"room-management-profile-share","sources":["frontend/src/components/CreateChannelView.vue","frontend/src/components/chat/ChatGroupManagerModal.vue","frontend/src/views/ShareReceiveView.vue"],"status":"aligned-native"},
+    {"id":"M12","label":"identity-permission-visibility","sources":["frontend/src/components/chat/ChatHeader.vue","frontend/src/components/chat/ChatConversationList.vue"],"status":"aligned-native-server-authority-unchanged"},
+    {"id":"M13","label":"realtime-notifications","sources":["frontend/src/components/ChatView.vue"],"status":"visual-only-runtime-contract-unchanged"},
+    {"id":"M14","label":"rtl-motion-browser-resilience","sources":["frontend/src/styles/messenger-design-tokens.css","frontend/e2e/native-app-messenger-visual.spec.ts"],"status":"aligned-native-verified"}
+  ],
+  "frozenBehavior": [
+    "album grouping remains album_id plus album_index",
+    "message schema and websocket/upload/cache contracts are unchanged",
+    "legacy rollout and rollback path remain available",
+    "permissions continue to follow server authority"
+  ],
+  "coverage": {
+    "missingSurfaceIds": [],
+    "unknownSurfaceIds": [],
+    "allFourteenMapped": true
+  }
+}

@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "track": "native-app-standardization-v1",
+  "status": "implementation-complete-independent-review-pending",
+  "routeContract": {
+    "totalRoutes": 30,
+    "nativeTrackRoutes": 29,
+    "unknownRoutes": 0,
+    "marketExcludedRoutes": 1,
+    "protection": {
+      "none": 23,
+      "mixed": 3,
+      "full": 4
+    },
+    "v2Scope": {
+      "route": 10,
+      "section": 16,
+      "off": 4
+    }
+  },
+  "families": [
+    {
+      "id": "home",
+      "routes": ["/"],
+      "status": "aligned-native-with-frozen-interior",
+      "protectedInteriors": ["home-market-widget"]
+    },
+    {
+      "id": "public-auth-recovery",
+      "routes": ["/login", "/setup-password", "/i/:code", "/register", "/:pathMatch(.*)*"],
+      "status": "aligned-native",
+      "protectedInteriors": []
+    },
+    {
+      "id": "operations",
+      "routes": [
+        "/operations",
+        "/operations/customers",
+        "/operations/customers/:relationId",
+        "/operations/accountants",
+        "/operations/accountants/:relationId"
+      ],
+      "status": "aligned-native",
+      "protectedInteriors": []
+    },
+    {
+      "id": "account-settings",
+      "routes": [
+        "/account",
+        "/account/security",
+        "/account/storage",
+        "/account/notifications",
+        "/notifications",
+        "/settings"
+      ],
+      "status": "aligned-native",
+      "protectedInteriors": []
+    },
+    {
+      "id": "profiles",
+      "routes": ["/profile", "/users/:id", "/admin/users/:id"],
+      "status": "aligned-native",
+      "protectedInteriors": []
+    },
+    {
+      "id": "administration",
+      "routes": [
+        "/admin",
+        "/admin/invitations",
+        "/admin/users",
+        "/admin/commodities",
+        "/admin/messages",
+        "/admin/system"
+      ],
+      "status": "aligned-native-with-frozen-market-contracts",
+      "protectedInteriors": [
+        "admin-messages-market-delivery",
+        "trading-settings-market-controls"
+      ]
+    },
+    {
+      "id": "messenger",
+      "routes": ["/chat", "/admin/channels", "/share-receive"],
+      "status": "aligned-native-visual-behavior-preserved",
+      "protectedInteriors": []
+    },
+    {
+      "id": "market",
+      "routes": ["/market"],
+      "status": "excluded-owner-locked-byte-and-pixel-equivalent-to-main",
+      "protectedInteriors": ["entire-route"]
+    }
+  ],
+  "coverage": {
+    "allContractRoutesClassified": true,
+    "allNativeTrackRoutesHaveAnOwner": true,
+    "allMessengerSurfacesMapped": true,
+    "marketIsExcludedNotUnknown": true,
+    "telegramMiniAppIncluded": false
+  },
+  "claimBoundary": {
+    "ownerApproved": false,
+    "mergeAuthorized": false,
+    "pushAuthorized": false,
+    "deploymentAuthorized": false,
+    "productionReady": false
+  }
+}

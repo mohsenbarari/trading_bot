@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "track": "native-app-standardization-v1",
+  "status": "passed-independent-native-ui-review-candidate-not-owner-approved",
+  "branch": "candidate/webapp-native-controls-v1",
+  "implementation": {
+    "sourceSnapshot": {
+      "commit": "5ebc0808b8d5f88483e7356e3f347a7174dc2e43",
+      "tree": "b8489815919e0f828f9ef62ed4bf54038ffe9d2e",
+      "parent": "01bf5ba0e0781eced9102e049f89658eda9c1b02"
+    },
+    "runtimeSnapshot": {
+      "commit": "01bf5ba0e0781eced9102e049f89658eda9c1b02",
+      "tree": "a38a5d3e1b08807590a2de92dda0c1ab8190716b",
+      "cleanBeforeRun": true,
+      "cleanAfterRun": true,
+      "laterChangeIsBrowserHarnessOnly": true
+    },
+    "sourceManifestSha256": {
+      "frontend/src/App.vue": "03c1a690a46c9cf462728a52b691c9dbf1dc524ed4032e6bf7608d1ff95c90db",
+      "frontend/src/assets/main.css": "44cd93997e3c83a9e30adc786d880d9d2645bf182bbe68d15742cf4ebaff2c2b",
+      "frontend/src/components/BottomNav.vue": "ab6da3745b19e6b991805ed65b818dff2f2c81a217359f86a0e2e17feaecf246",
+      "frontend/src/components/CommodityInferenceSelectionModal.vue": "cbdd96f657b6839fa92ee637b789bc0ff4ce3e9cf112a52f68f0db239996ace3",
+      "frontend/src/components/ChatView.vue": "b1f1cf3b6d262317e3f6dc917439cd5aa0f121b23f100e6ac0bb6d04727747db",
+      "frontend/src/components/chat/ChatHeader.vue": "1800ccb42ac72264a7f889b1cd2dbaa18ad9514c1f54a161695cd070db2e6c54",
+      "frontend/src/components/chat/ChatMessageItem.vue": "246740cb6e836ac8408b2fc4dcaa8fea110d809062418c6425ef3ce357424fc1",
+      "frontend/src/components/chat/ChatInputBar.vue": "44b83f3d18c19419a4506faa96b3de4d1eb1e2cd5a87895bf0ef45acf53641fd",
+      "frontend/scripts/lib/stage4-protected-surface-guard.mjs": "a92b1798a230998de7cd4201885b06db7630d9ee5695540a731a77b49a478074",
+      "frontend/e2e/native-app-messenger-visual.spec.ts": "145cf6efceb5d1eaf12c02403f590c0738274066fcbb18e59cd3fac884eedff9",
+      "frontend/e2e/non-messenger-viewport.spec.ts": "66a377ad520447625d74e58cf148d5a617a0f78f2322ebc39188d4524eae5fe2"
+    }
+  },
+  "inventory": {
+    "contractRouteCount": 30,
+    "nativeTrackRouteCount": 29,
+    "marketExcludedRouteCount": 1,
+    "messengerSurfaceCount": 14,
+    "unknownRouteCount": 0,
+    "unmappedMessengerSurfaceCount": 0
+  },
+  "browserReceipt": {
+    "runId": "uiux-v3-phase11-20260820T234133111Z",
+    "reportSha256": "abd099727bb08fd75f6af798cd923d3562b5bc1a252c7ccc9ca8f0c393f90ac0",
+    "dist": {
+      "fileCount": 171,
+      "sha256": "3fca1e7bb576fdd082ecdf45111ec7945f9782814e934bb90039b57ac55f4bc7"
+    },
+    "scenarios": {
+      "declared": 167,
+      "unique": 167,
+      "passed": 167,
+      "failed": 0,
+      "notApplicableStates": 42
+    },
+    "engines": {"chromium":143,"firefox":12,"webkit":12},
+    "states": {"normal":119,"loading":19,"empty":9,"error":20},
+    "interactionAndEnvironment": {
+      "requestedStateEvidence": 48,
+      "loadingPostReleaseSettlement": 19,
+      "keyboard": 5,
+      "reducedMotion": 3,
+      "zoom200Percent": 6,
+      "pwaSimulation": 3
+    },
+    "diagnostics": {
+      "failed": 0,
+      "falsePositiveFindings": 0,
+      "unknownApiRequests": 0,
+      "mutatingApiRequests": 0,
+      "pageErrors": 0,
+      "externalRequests": 0,
+      "documentOverflowCases": 0,
+      "appOverflowCases": 0,
+      "unnamedInteractiveTotal": 0,
+      "nestedInteractiveTotal": 0,
+      "obscuredFinalCtaCases": 0
+    },
+    "screenshots": {
+      "count": 167,
+      "aggregateSha256": "e3c8ebe16180e3ae07839f13541e31a8630580c8affcda218174f1f8cdbc72bc",
+      "committed": false
+    }
+  },
+  "supplementalBrowserReceipts": {
+    "messenger": {
+      "reportSha256": "9fb0c6a934af14389c7244e8c12c04f7278722073b341f33a38302d26e666231",
+      "passed": 13,
+      "expectedEngineSkips": 2,
+      "failed": 0,
+      "engines": ["chromium", "firefox", "webkit"],
+      "includesChromiumPageZoom200Percent": true,
+      "reducedMotionAppliedToEveryExecutedCase": true
+    },
+    "viewportBoundary": {
+      "reportSha256": "7ddc65e5b0155ac866497e9364a61293611d2ed409f292429f0f561f76add8c5",
+      "passed": 8,
+      "failed": 0,
+      "widths": [360, 375, 390, 414, 430, 768, 1024, 1440],
+      "stableLayoutRequiredBeforeGeometry": true
+    },
+    "marketLock": {
+      "mainAndCandidatePixelIdentical": true,
+      "mobile390Sha256": "219628f472b4efe72f6b3635024bec9358193ec6017b4e390c9b510407f04e99",
+      "desktop1440Sha256": "4c13187635a46283a940e2f884fb685290dd27ef520a23c53960be56b88216f8",
+      "rawScreenshotsCommitted": false
+    }
+  },
+  "regression": {
+    "vitest": {"files":169,"tests":1962,"status":"passed"},
+    "vueTscNoEmit": "passed",
+    "productionBuild": "passed",
+    "uiGuard": "passed",
+    "diffCheck": "passed"
+  },
+  "protectedEvidence": {
+    "marketRuntimeSha256": "79b72f4776ce5feef1416ee4f7cf02b9d37259a9f5e87180eb2b423881e41dc5",
+    "messengerRuntimeSha256": "30a77441e8062aee4a9c6f8824d56944c4829ef7f1445008dd230848627d0ce1",
+    "adminMessagesSha256": "8390e80b3615b7d35244c0652a872fd178a973275573ddf96f57969784807746",
+    "tradingSettingsSha256": "47a47075ff0373899f576f891896421b33940f13f563d2e62f40e086bcafee0b",
+    "guardsFailClosedForArbitraryContentDrift": true
+  },
+  "claimBoundary": {
+    "ownerApproved": false,
+    "productionReady": false,
+    "mergeAuthorized": false,
+    "pushAuthorized": false,
+    "deploymentAuthorized": false,
+    "stage8Modified": false,
+    "fullCartesianAcceptanceClaimed": false,
+    "telegramMiniAppIncluded": false
+  },
+  "retention": {
+    "rawBrowserReportsCommitted": false,
+    "rawScreenshotsCommitted": false,
+    "onlyRedactedCountsAndDigestsCommitted": true,
+    "rawLocalPathsUrlsPayloadsCredentialsOrPiiRetained": false
+  }
+}

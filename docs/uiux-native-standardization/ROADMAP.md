@@ -8,7 +8,8 @@
 - نام: Native App Standardization
 - شاخه: `candidate/webapp-native-controls-v1`
 - worktree: `/root/trading-bot/webapp-native-controls-v1`
-- مبنای `origin/main`: `7485f730`
+- مبنای اولیه: `7485f730`؛ همگام‌سازی نهایی با `origin/main`: merge commit
+  `0dae62c7`
 - کنترل بومی اولیه: `c8239d6c` — توکن `--ds-control-*` و هندسهٔ فیلد leftover
 - مرجع رفتار پیام‌رسان: `docs/MESSENGER_REFACTORING_ROADMAP.md` و
   `docs/messenger-surface-manifest.json`
@@ -457,10 +458,15 @@ Gate:
 | ۸ احراز و عمومی | implementation-complete؛ فیلد ورود از قبل `App*` |
 | ۹ پیام‌رسان کامل | implementation-complete؛ فرانت آزاد و restyle شد |
 | ۱۰ همگرایی | implementation-complete؛ زبان مشترک |
-| ۱۱ پذیرش شاخه | in-progress؛ نگهبان و تست متمرکز سبز |
+| ۱۱ پذیرش شاخه | complete؛ شواهد clean-bound و مرور مستقل آماده است |
 
 `implementation-complete` فقط پایان کار مجاز آن فاز است؛ معادل تأیید مالک
 یا آمادهٔ تولید نیست.
+
+خروجی نهایی فاز ۱۱ در `FINAL_REVIEW_RECEIPT.json` ثبت شده است: ۳۰ مسیر،
+۱۶۷/۱۶۷ سناریوی اصلی، ۱۳/۱۳ سناریوی مکمل پیام‌رسان و ۸/۸ viewport مرزی.
+Market در ۳۹۰ و ۱۴۴۰ با build فعلی main تطابق پیکسلی کامل دارد. حکم track
+`READY FOR INDEPENDENT NATIVE UI REVIEW` است، نه owner-approved یا مجوز انتشار.
 
 ## ماتریس پذیرش
 

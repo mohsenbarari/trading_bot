@@ -45,6 +45,11 @@ docs/uiux-unification/*
 !docs/uiux-native-standardization/
 docs/uiux-native-standardization/*
 !docs/uiux-native-standardization/ROADMAP.md
+!docs/uiux-native-standardization/SURFACE_INVENTORY.json
+!docs/uiux-native-standardization/MESSENGER_SURFACE_MAP.json
+!docs/uiux-native-standardization/EXCLUSIONS.md
+!docs/uiux-native-standardization/EXECUTION_REPORT.md
+!docs/uiux-native-standardization/FINAL_REVIEW_RECEIPT.json
 !docs/AUTOMATED_TEST_CHECKLIST.md
 !docs/COIN_OFFER_CONDITION_ANNOTATION_GUIDE.md
 !docs/COIN_OFFER_CONDITION_CALIBRATION_REPORT_20260820.md
