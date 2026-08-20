@@ -85,6 +85,7 @@ import {
   STAGE8_MESSENGER_UNNAMED_CONTROL_LOCKED_STAGE6_PATHS,
   STAGE8_MESSENGER_UNNAMED_CONTROL_LOCKED_STAGE8_PATHS,
   NATIVE_APP_MESSENGER_VISUAL_KIND,
+  NATIVE_APP_MESSENGER_VISUAL_EVIDENCE,
   assertNativeAppMessengerVisualDisposition,
   assertStage8CreateChannelHelpPopoverPlacementDisposition,
   assertStage8MessengerUnnamedControlDisposition,
@@ -126,7 +127,9 @@ import {
   TRADING_SETTINGS_PATH,
   TRADING_SETTINGS_SHA256,
   NATIVE_APP_ADMIN_MESSAGES_VISUAL_KIND,
+  NATIVE_APP_ADMIN_MESSAGES_VISUAL_SHA256,
   NATIVE_APP_TRADING_SETTINGS_VISUAL_KIND,
+  NATIVE_APP_TRADING_SETTINGS_VISUAL_SHA256,
   assertNativeAppAdminMessagesVisualDisposition,
   assertNativeAppTradingSettingsVisualDisposition,
   assertStage6TradingSettingsResetDialogDisposition,
@@ -1102,6 +1105,8 @@ describe('Stage 4 protected surface baseline', () => {
     expect(assertNativeAppMessengerVisualDisposition(entries)).toMatchObject({
       sha256: actual.sha256,
     })
+    expect(actual).toMatchObject(NATIVE_APP_MESSENGER_VISUAL_EVIDENCE)
+    expect(Object.isFrozen(NATIVE_APP_MESSENGER_VISUAL_EVIDENCE)).toBe(true)
   })
 
   it('fails closed for protected runtime content and path-set drift', () => {
@@ -1128,7 +1133,7 @@ describe('Stage 4 protected surface baseline', () => {
     ).toThrow(/duplicates/)
   })
 
-  it('keeps messenger frontend visual drift on native-app-messenger-visual-v1', () => {
+  it('fails closed for messenger frontend visual drift after native-app review', () => {
     const entries = readFileEntries(repoRoot, ownedPaths.messenger)
     const mutatedChatView = entries.map((entry) =>
       entry.path === 'frontend/src/components/ChatView.vue'
@@ -1141,11 +1146,11 @@ describe('Stage 4 protected surface baseline', () => {
         : entry,
     )
 
-    expect(resolveMessengerRuntimeDisposition(mutatedChatView).kind).toBe(
-      NATIVE_APP_MESSENGER_VISUAL_KIND,
+    expect(() => resolveMessengerRuntimeDisposition(mutatedChatView)).toThrow(
+      /native-app-messenger-visual-v1 rejected.*content(?:Bytes)? drift/,
     )
-    expect(resolveMessengerRuntimeDisposition(mutatedHeader).kind).toBe(
-      NATIVE_APP_MESSENGER_VISUAL_KIND,
+    expect(() => resolveMessengerRuntimeDisposition(mutatedHeader)).toThrow(
+      /native-app-messenger-visual-v1 rejected.*content(?:Bytes)? drift/,
     )
   })
 
@@ -1186,7 +1191,9 @@ describe('Stage 4 protected surface baseline', () => {
     expect(() => assertStage8CreateChannelHelpPopoverPlacementDisposition(mutated)).toThrow(
       /Stage 8 CreateChannel HelpPopover placement allowed file drift: frontend\/src\/components\/CreateChannelView\.vue/,
     )
-    expect(resolveMessengerRuntimeDisposition(mutated).kind).toBe(NATIVE_APP_MESSENGER_VISUAL_KIND)
+    expect(() => resolveMessengerRuntimeDisposition(mutated)).toThrow(
+      /native-app-messenger-visual-v1 rejected.*content(?:Bytes)? drift/,
+    )
   })
 
   it('discovers new owned files while leaving unrelated Stage 4 files outside the full freeze', () => {
@@ -1246,10 +1253,10 @@ describe('Stage 4 protected surface baseline', () => {
       /^(stage4-baseline|stage6-trading-settings-reset-dialog|native-app-trading-settings-visual-v1)$/,
     )
     expect(assertNativeAppAdminMessagesVisualDisposition(adminMessages)).toBe(
-      fileSha256(adminMessages),
+      NATIVE_APP_ADMIN_MESSAGES_VISUAL_SHA256,
     )
     expect(assertNativeAppTradingSettingsVisualDisposition(tradingSettings)).toBe(
-      fileSha256(tradingSettings),
+      NATIVE_APP_TRADING_SETTINGS_VISUAL_SHA256,
     )
     expect(() =>
       resolveAdminMessagesDisposition(
@@ -1269,6 +1276,12 @@ describe('Stage 4 protected surface baseline', () => {
         ),
       ),
     ).toThrow(/protected calendar confirm|lost the protected calendar confirm/)
+    expect(() =>
+      resolveAdminMessagesDisposition(Buffer.concat([adminMessages, Buffer.from('\n// drift')])),
+    ).toThrow(/native-app-admin-messages-visual-v1.*allowed file drift/)
+    expect(() =>
+      resolveTradingSettingsDisposition(Buffer.concat([tradingSettings, Buffer.from('\n// drift')])),
+    ).toThrow(/native-app-trading-settings-visual-v1.*allowed file drift/)
   })
 
   it('locks the full/off and mixed/interior invariants in manifest and runtime source', () => {

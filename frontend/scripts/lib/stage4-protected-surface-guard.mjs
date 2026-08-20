@@ -37,8 +37,12 @@ export const NATIVE_APP_ADMIN_MESSAGES_REQUIRED_MARKERS = Object.freeze([
   'publishBroadcastMessage',
   'history-item--compact',
 ])
+export const NATIVE_APP_ADMIN_MESSAGES_VISUAL_SHA256 =
+  '8390e80b3615b7d35244c0652a872fd178a973275573ddf96f57969784807746'
 
 export const NATIVE_APP_TRADING_SETTINGS_VISUAL_KIND = 'native-app-trading-settings-visual-v1'
+export const NATIVE_APP_TRADING_SETTINGS_VISUAL_SHA256 =
+  '47a47075ff0373899f576f891896421b33940f13f563d2e62f40e086bcafee0b'
 
 export const STAGE4_SHARED_DEPENDENCY_ISOLATION_PATHS = Object.freeze([
   'frontend/src/App.vue',
@@ -600,6 +604,13 @@ export const NATIVE_APP_MESSENGER_VISUAL_REQUIRED_MARKERS = Object.freeze([
   'aria-label="گزینه‌های بیشتر"',
   'aria-label="شروع گفتگوی جدید"',
 ])
+
+export const NATIVE_APP_MESSENGER_VISUAL_EVIDENCE = Object.freeze({
+  count: 85,
+  contentBytes: 1323790,
+  pathSetSha256: 'f6af1f961e45d785ba9c752ee670643571086c6a946843807fe6f581d11aea58',
+  sha256: '30a77441e8062aee4a9c6f8824d56944c4829ef7f1445008dd230848627d0ce1',
+})
 
 const RUNTIME_SOURCE_EXTENSION = /\.(?:css|[cm]?[jt]sx?|vue)$/
 const TEST_SOURCE = /(?:^|\/)[^/]+\.(?:spec|test)\.[^/]+$/
@@ -2061,7 +2072,11 @@ export function assertNativeAppMessengerVisualDisposition(entries) {
   if (joined.includes('--ui-v2-') || joined.includes('data-ui-system')) {
     throw new Error('native-app-messenger-visual-v1 must not introduce V2 catalog markers')
   }
-  return actual
+  return assertProtectedFileSetEvidence(
+    'native-app-messenger-visual-v1',
+    actual,
+    NATIVE_APP_MESSENGER_VISUAL_EVIDENCE,
+  )
 }
 
 /**
@@ -2118,7 +2133,13 @@ export function assertNativeAppAdminMessagesVisualDisposition(source) {
   if (text.includes('--ui-v2-') || text.includes('data-ui-system')) {
     throw new Error('native-app-admin-messages-visual-v1 must not introduce V2 catalog markers')
   }
-  return fileSha256(source)
+  const actualSha256 = fileSha256(source)
+  if (actualSha256 !== NATIVE_APP_ADMIN_MESSAGES_VISUAL_SHA256) {
+    throw new Error(
+      `native-app-admin-messages-visual-v1 allowed file drift: ${NATIVE_APP_ADMIN_MESSAGES_VISUAL_SHA256} -> ${actualSha256}`,
+    )
+  }
+  return actualSha256
 }
 
 export function resolveAdminMessagesDisposition(source) {
@@ -2165,7 +2186,13 @@ export function assertNativeAppTradingSettingsVisualDisposition(source) {
   ) {
     throw new Error('native-app-trading-settings-visual-v1 lost market settings interiors')
   }
-  return fileSha256(source)
+  const actualSha256 = fileSha256(source)
+  if (actualSha256 !== NATIVE_APP_TRADING_SETTINGS_VISUAL_SHA256) {
+    throw new Error(
+      `native-app-trading-settings-visual-v1 allowed file drift: ${NATIVE_APP_TRADING_SETTINGS_VISUAL_SHA256} -> ${actualSha256}`,
+    )
+  }
+  return actualSha256
 }
 
 /**
