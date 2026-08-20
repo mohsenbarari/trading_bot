@@ -95,10 +95,10 @@ class BotTradeCreateRemainingGuardTests(unittest.IsolatedAsyncioTestCase):
 class BotTradeCreateSuggestionHelperTests(unittest.TestCase):
     def test_get_offer_suggestion_covers_remaining_contextual_hint_branches(self):
         multiple_price_hint = _get_offer_suggestion("خ ربع 30تا 75800 75900", "چندین قیمت وارد شده است")
-        self.assertIn("فقط یک عدد 5 یا 6 رقمی", multiple_price_hint)
+        self.assertIn("فقط یک قیمت", multiple_price_hint)
 
         single_price_hint = _get_offer_suggestion("خ ربع 30تا 1234", "قیمت نامعتبر است")
-        self.assertIn("قیمت باید 5 یا 6 رقم باشد", single_price_hint)
+        self.assertIn("1876", single_price_hint)
 
         trade_indicator_hint = _get_offer_suggestion("خرید فروش ربع 30تا 75800", "خرید و فروش همزمان مجاز نیست")
         self.assertIn("نوع معامله و تسویه باید یک بلوک کامل و فقط یک بار باشند", trade_indicator_hint)

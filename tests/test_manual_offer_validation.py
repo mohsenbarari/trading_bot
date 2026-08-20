@@ -8,6 +8,7 @@ from core.offer_settlement import build_offer_draft_text
 from core.services.trade_service import (
     build_lot_unavailable_suggestion_payload,
     get_available_trade_amounts,
+    normalize_offer_price_input,
     validate_offer_trade_amount,
     validate_price,
     validate_quantity,
@@ -72,6 +73,16 @@ class ManualOfferValidationTests(unittest.TestCase):
         self.assertTrue(validate_price(10000)[0])
         self.assertTrue(validate_price(999999)[0])
         self.assertFalse(validate_price(1000000)[0])
+
+    def test_user_price_input_expands_only_one_to_three_digit_shorthand(self):
+        self.assertEqual(normalize_offer_price_input(197), (197000, ""))
+        self.assertEqual(normalize_offer_price_input("59"), (59000, ""))
+        self.assertEqual(normalize_offer_price_input("۵۹"), (59000, ""))
+        self.assertEqual(normalize_offer_price_input(187600), (187600, ""))
+        normalized, error = normalize_offer_price_input(1876)
+        self.assertIsNone(normalized)
+        self.assertIn("چهاررقمی", error)
+        self.assertIn("187600", error)
 
     def test_quantity_uses_admin_configured_system_maximum(self):
         custom_settings = SimpleNamespace(offer_min_quantity=5, offer_max_quantity=75)
@@ -206,12 +217,15 @@ class ManualOfferValidationTests(unittest.TestCase):
         )
         self.assertEqual(
             offer_parser.extract_price("75800 85900"),
-            (None, "❌ چندین قیمت در لفظ وجود دارد (فقط یک عدد 5 یا 6 رقمی مجاز است)"),
+            (None, "❌ چندین قیمت در لفظ وجود دارد (فقط یک قیمت مجاز است)"),
         )
         with patch("bot.utils.offer_parser.validate_price", return_value=(False, "boom")) as validate_price_mock:
             self.assertEqual(
                 offer_parser.extract_price("75800"),
-                (None, "❌ قیمت یافت نشد (باید عدد 5 یا 6 رقمی باشد)"),
+                (
+                    None,
+                    "❌ قیمت یافت نشد؛ قیمت را کامل (۵ یا ۶ رقم) یا با حذف سه صفر (حداکثر ۳ رقم) بنویسید",
+                ),
             )
             validate_price_mock.assert_called_once_with("75800")
 
@@ -272,6 +286,40 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.price, 75800)
         self.assertEqual(result.lot_sizes, [15, 15])
         self.assertEqual(result.notes, "فقط نقدی")
+
+    async def test_text_offer_expands_short_price_without_confusing_quantity_or_lots(self):
+        cases = (
+            ("خ امام 30تا 197", 197000, None),
+            ("خ ربع 30تا 59 15 15", 59000, [15, 15]),
+            ("خ ربع 30تا 15 15 59", 59000, [15, 15]),
+            ("خ ربع 30تا ۵۹ ۱۵ ۱۵", 59000, [15, 15]),
+        )
+        for sample, expected_price, expected_lots in cases:
+            with self.subTest(sample=sample):
+                result, error = await offer_parser.parse_offer_text(sample)
+                self.assertIsNone(error)
+                self.assertIsNotNone(result)
+                self.assertEqual(result.price, expected_price)
+                self.assertEqual(result.lot_sizes, expected_lots)
+                self.assertEqual(result.is_wholesale, expected_lots is None)
+
+    async def test_text_offer_rejects_four_digit_short_price(self):
+        result, error = await offer_parser.parse_offer_text("خ امام 30تا 1876")
+
+        self.assertIsNone(result)
+        self.assertIsNotNone(error)
+        self.assertIn("چهاررقمی", error.message)
+        self.assertIn("187600", error.message)
+
+    async def test_pack_offer_supports_the_same_short_price_contract(self):
+        result, error = await offer_parser.parse_offer_text("خ ف پک 101")
+
+        self.assertIsNone(error)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.price, 101000)
+        self.assertEqual(result.quantity, 100)
+        self.assertTrue(result.is_wholesale)
+        self.assertIsNone(result.lot_sizes)
 
     async def test_text_offer_quantity_limit_follows_system_settings(self):
         offer_parser.get_trading_settings = lambda: SimpleNamespace(

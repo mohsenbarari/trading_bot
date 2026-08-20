@@ -61,7 +61,7 @@ from core.services.offer_cancel_all_service import (
 )
 from core.services.trade_service import (
     validate_lot_sizes,
-    validate_price,
+    normalize_offer_price_input,
     get_available_trade_amounts,
 )
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
@@ -431,7 +431,7 @@ async def _show_price_prompt(
         ),
         return_to_review=return_to_review,
     )
-    text = "💰 قیمت را وارد کنید (5 یا 6 رقم):"
+    text = "💰 قیمت را وارد کنید؛ کامل بنویسید یا سه صفر آخر را حذف کنید (مثال: 197 یعنی 197000):"
     if edit:
         await edit_known_message_via_runtime(
             message,
@@ -1114,8 +1114,8 @@ async def handle_price_input(message: types.Message, state: FSMContext, user: Op
     from bot.utils.offer_parser import normalize_digits
 
     price_text = normalize_digits((message.text or "").strip())
-    is_valid, price_error = validate_price(price_text)
-    if not is_valid:
+    normalized_price, price_error = normalize_offer_price_input(price_text)
+    if normalized_price is None:
         await answer_incoming_message_via_runtime(
             message,
             user,
@@ -1126,7 +1126,7 @@ async def handle_price_input(message: types.Message, state: FSMContext, user: Op
         return
 
     data = await state.get_data()
-    await state.update_data(price=int(price_text))
+    await state.update_data(price=normalized_price)
     if data.get("wizard_return_to_review"):
         await _show_wizard_review(message, state, edit=False, user=user)
     else:
@@ -2256,10 +2256,10 @@ def _get_offer_suggestion(original_text: str, error_message: str) -> str:
 
     elif "قیمت" in error_message:
         if "چندین" in error_message:
-            hint += "📌 فقط یک عدد 5 یا 6 رقمی (قیمت) مجاز است\n"
+            hint += "📌 فقط یک قیمت مجاز است\n"
         else:
-            hint += "📌 قیمت باید 5 یا 6 رقم باشد\n"
-        hint += "مثال: `75800` یا `758000`\n"
+            hint += "📌 قیمت را کامل بنویسید یا دقیقاً سه صفر آخر را حذف کنید\n"
+        hint += "مثال: `197` یعنی `197000` و `59` یعنی `59000`؛ `1876` معتبر نیست\n"
 
     elif any(
         marker in error_message

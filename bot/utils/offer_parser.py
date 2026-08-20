@@ -8,7 +8,7 @@ from sqlalchemy import select
 from core.enums import SettlementType
 from models.commodity import Commodity, CommodityAlias
 from core.db import AsyncSessionLocal
-from core.services.trade_service import validate_price
+from core.services.trade_service import normalize_offer_price_input, validate_price
 from core.trading_settings import get_trading_settings
 from core.pack_commodities import PACK_OFFER_SHAPE_ERROR, PACK_QUANTITY
 
@@ -40,6 +40,14 @@ class ParsedOffer:
 class ParseError:
     """خطای پارس"""
     message: str
+
+
+@dataclass(frozen=True)
+class _PriceToken:
+    raw: str
+    normalized: int
+    start: int
+    end: int
 
 
 # جدول تبدیل اعداد فارسی/عربی به انگلیسی
@@ -285,44 +293,161 @@ def extract_quantity(text: str) -> Tuple[Optional[int], Optional[str]]:
     return int(matches[0]), None
 
 
-def extract_price(text: str) -> Tuple[Optional[int], Optional[str]]:
-    """
-    استخراج قیمت (عدد 5 یا 6 رقمی)
-    Returns: (price, error_message)
-    """
-    all_numbers = re.findall(r'\d+', text)
-    price_candidates = [n for n in all_numbers if validate_price(n)[0]]
-    
-    if not price_candidates:
-        return None, "❌ قیمت یافت نشد (باید عدد 5 یا 6 رقمی باشد)"
-    
-    if len(price_candidates) > 1:
-        return None, "❌ چندین قیمت در لفظ وجود دارد (فقط یک عدد 5 یا 6 رقمی مجاز است)"
-    
-    return int(price_candidates[0]), None
+def _quantity_number_spans(text: str) -> set[tuple[int, int]]:
+    return {
+        match.span(1)
+        for match in re.finditer(r'(\d+)\s*(?:تا|عدد)', text)
+    }
 
 
-def extract_lot_sizes(text: str, quantity: int, price: int) -> Tuple[Optional[List[int]], bool, Optional[str]]:
+def _remaining_tokens_form_valid_lot_shape(
+    tokens: list[re.Match],
+    *,
+    candidate_index: int,
+    quantity: Optional[int],
+    pack_hint: bool,
+) -> bool:
+    remaining = [
+        match.group(0)
+        for index, match in enumerate(tokens)
+        if index != candidate_index
+    ]
+    if pack_hint or quantity is None:
+        return not remaining
+    if not remaining:
+        return True
+    if any(len(value) not in (1, 2) for value in remaining):
+        return False
+
+    settings = get_trading_settings()
+    lots = [int(value) for value in remaining]
+    return (
+        len(lots) <= settings.lot_max_count
+        and all(lot >= settings.lot_min_size for lot in lots)
+        and sum(lots) == quantity
+    )
+
+
+def _extract_price_token(
+    text: str,
+    *,
+    quantity: Optional[int] = None,
+    pack_hint: bool = False,
+) -> tuple[Optional[_PriceToken], Optional[str]]:
+    quantity_spans = _quantity_number_spans(text)
+    tokens = [
+        match
+        for match in re.finditer(r'\d+', text)
+        if match.span() not in quantity_spans
+    ]
+
+    full_price_tokens = [
+        _PriceToken(
+            raw=match.group(0),
+            normalized=int(match.group(0)),
+            start=match.start(),
+            end=match.end(),
+        )
+        for match in tokens
+        if validate_price(match.group(0))[0]
+    ]
+    if len(full_price_tokens) > 1:
+        return None, "❌ چندین قیمت در لفظ وجود دارد (فقط یک قیمت مجاز است)"
+    if full_price_tokens:
+        return full_price_tokens[0], None
+
+    short_candidates: list[_PriceToken] = []
+    for index, match in enumerate(tokens):
+        raw = match.group(0)
+        if len(raw) > 3:
+            continue
+        normalized, error = normalize_offer_price_input(raw)
+        if error or normalized is None:
+            continue
+        if not _remaining_tokens_form_valid_lot_shape(
+            tokens,
+            candidate_index=index,
+            quantity=quantity,
+            pack_hint=pack_hint,
+        ):
+            continue
+        short_candidates.append(
+            _PriceToken(
+                raw=raw,
+                normalized=normalized,
+                start=match.start(),
+                end=match.end(),
+            )
+        )
+
+    distinct_short_prices = {candidate.normalized for candidate in short_candidates}
+    if len(distinct_short_prices) > 1:
+        return None, "❌ چندین قیمت کوتاه معتبر در لفظ وجود دارد؛ قیمت را کامل بنویسید"
+    if short_candidates:
+        return short_candidates[0], None
+
+    if any(len(match.group(0)) == 4 for match in tokens):
+        return None, (
+            "❌ قیمت چهاررقمی کوتاه‌شده معتبر نیست؛ قیمت کامل را وارد کنید "
+            "(مثال: 187600)."
+        )
+    return None, (
+        "❌ قیمت یافت نشد؛ قیمت را کامل (۵ یا ۶ رقم) یا با حذف سه صفر "
+        "(حداکثر ۳ رقم) بنویسید"
+    )
+
+
+def extract_price(
+    text: str,
+    *,
+    quantity: Optional[int] = None,
+    pack_hint: bool = False,
+) -> Tuple[Optional[int], Optional[str]]:
+    """Extract a canonical price, including the explicit ×1,000 shorthand."""
+
+    token, error = _extract_price_token(
+        text,
+        quantity=quantity,
+        pack_hint=pack_hint,
+    )
+    return (token.normalized if token else None), error
+
+
+def extract_lot_sizes(
+    text: str,
+    quantity: int,
+    price: int,
+    *,
+    price_token: Optional[_PriceToken] = None,
+) -> Tuple[Optional[List[int]], bool, Optional[str]]:
     """
     استخراج ترکیب خُرد (اعداد 1-2 رقمی غیر از تعداد)
     Returns: (lot_sizes, is_wholesale, error_message)
     """
     ts = get_trading_settings()
     
-    all_numbers = re.findall(r'\d+', text)
-    quantity_str = str(quantity)
-    
+    quantity_spans = _quantity_number_spans(text)
     lot_candidates = []
-    quantity_found = False
-    
-    for n in all_numbers:
-        if len(n) in [5, 6]:
+    inferred_short_token = (
+        str(price // 1_000)
+        if price % 1_000 == 0 and len(str(price // 1_000)) <= 3
+        else None
+    )
+    price_found = False
+
+    for match in re.finditer(r'\d+', text):
+        n = match.group(0)
+        if match.span() in quantity_spans:
             continue
-        
-        if n == quantity_str and not quantity_found:
-            quantity_found = True
+        if price_token and match.span() == (price_token.start, price_token.end):
+            price_found = True
             continue
-        
+        if not price_found and (
+            (len(n) in (5, 6) and int(n) == price)
+            or (inferred_short_token is not None and n == inferred_short_token)
+        ):
+            price_found = True
+            continue
         if len(n) in [1, 2]:
             lot_candidates.append(int(n))
     
@@ -342,12 +467,15 @@ def extract_lot_sizes(text: str, quantity: int, price: int) -> Tuple[Optional[Li
     return lot_candidates, False, None
 
 
-def _pack_has_extra_numeric_parts(text: str, price: int) -> bool:
+def _pack_has_extra_numeric_parts(text: str, price_token: _PriceToken) -> bool:
     """Reject any numeric structure beyond the optional 100 count and price."""
 
-    residual = re.sub(r'\d+\s*(?:تا|عدد)', ' ', text, count=1)
-    residual = re.sub(rf'(?<!\d){re.escape(str(price))}(?!\d)', ' ', residual, count=1)
-    return re.search(r'\d+', residual) is not None
+    quantity_spans = _quantity_number_spans(text)
+    return any(
+        match.span() not in quantity_spans
+        and match.span() != (price_token.start, price_token.end)
+        for match in re.finditer(r'\d+', text)
+    )
 
 
 async def find_commodity(
@@ -479,17 +607,29 @@ async def parse_offer_text(
             return None, ParseError(f"❌ حداکثر تعداد می‌تواند {ts.offer_max_quantity} باشد")
     
     # استخراج قیمت
-    price, error = extract_price(clean_text)
+    price_token, error = _extract_price_token(
+        clean_text,
+        quantity=quantity,
+        pack_hint=pack_hint,
+    )
     if error:
         return None, ParseError(error)
+    if price_token is None:
+        return None, ParseError("❌ قیمت یافت نشد")
+    price = price_token.normalized
     
     # استخراج ترکیب خُرد
     if pack_hint:
-        if _pack_has_extra_numeric_parts(clean_text, price):
+        if _pack_has_extra_numeric_parts(clean_text, price_token):
             return None, ParseError(PACK_OFFER_SHAPE_ERROR)
         lot_sizes, is_wholesale = None, True
     else:
-        lot_sizes, is_wholesale, error = extract_lot_sizes(clean_text, quantity, price)
+        lot_sizes, is_wholesale, error = extract_lot_sizes(
+            clean_text,
+            quantity,
+            price,
+            price_token=price_token,
+        )
         if error:
             return None, ParseError(error)
     
