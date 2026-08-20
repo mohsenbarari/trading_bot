@@ -1331,14 +1331,14 @@ onBeforeUnmount(() => {
 .field-block {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0.45rem;
 }
 
 .field-block span,
 .meta-label {
-  font-size: 0.84rem;
-  font-weight: 700;
-  color: #475569;
+  font-size: var(--ds-font-sm);
+  font-weight: 850;
+  color: var(--ds-text-secondary);
 }
 
 .field-block.full-width {
@@ -1347,19 +1347,30 @@ onBeforeUnmount(() => {
 
 .accountant-input {
   width: 100%;
-  border-radius: 16px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  background: rgba(255, 255, 255, 0.96);
-  min-height: 46px;
-  padding: 0 14px;
+  min-height: var(--ds-control-min-height, 48px);
+  border-radius: var(--ds-control-radius, 12px);
+  border: 1.5px solid var(--ds-control-border, var(--ds-border-medium));
+  background: var(--ds-control-bg, var(--ds-bg-subtle));
+  padding: 0 var(--ds-control-padding-inline, 0.875rem);
   font: inherit;
-  color: #0f172a;
+  font-size: var(--ds-font-md);
+  font-weight: 650;
+  color: var(--ds-text-primary);
+  outline: 0;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.accountant-input:focus-visible {
+  border-color: var(--ds-primary-500);
+  box-shadow: var(--ds-focus-ring);
 }
 
 .accountant-textarea {
-  min-height: 104px;
-  padding: 12px 14px;
+  min-height: 112px;
+  padding-block: 0.75rem;
   resize: vertical;
+  line-height: 1.8;
 }
 
 .panel-actions,

@@ -332,7 +332,7 @@ onUnmounted(() => {
 .user-search-form {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: stretch;
   gap: 0.5rem;
   margin-bottom: 1rem;
 }

@@ -1675,10 +1675,11 @@ async function confirmPendingAction() {
         <!-- Step 2: Time - Using native HTML5 input for reliability -->
         <div v-if="pickerStep === 2" class="native-time-picker">
           <label>ساعت مورد نظر:</label>
-          <input
+          <AppInput
             type="time"
             v-model="tempTimePart"
             class="time-input"
+            aria-label="ساعت مورد نظر"
           />
         </div>
       </div>
@@ -1717,10 +1718,11 @@ async function confirmPendingAction() {
         <!-- Step 2: Time - Using native HTML5 input for reliability -->
         <div v-if="pickerStep === 2" class="native-time-picker">
           <label>ساعت مورد نظر:</label>
-          <input
+          <AppInput
             type="time"
             v-model="tempTimePart"
             class="time-input"
+            aria-label="ساعت مورد نظر"
           />
         </div>
       </div>
@@ -1790,18 +1792,19 @@ async function confirmPendingAction() {
 }
 
 .native-time-picker .time-input {
-    font-size: 2rem;
-    padding: 0.875rem 1.5rem;
-    border: 1px solid var(--ds-border-medium);
-    border-radius: var(--ds-radius-md);
+    font-size: 1.5rem;
+    min-height: 3.5rem;
+    padding: 0.875rem 1.25rem;
+    border: 1.5px solid var(--ds-control-border, var(--ds-border-medium));
+    border-radius: var(--ds-control-radius, 12px);
     text-align: center;
-    background: var(--ds-bg-card);
+    background: var(--ds-control-bg, var(--ds-bg-subtle));
     color: var(--ds-text-primary);
     width: auto;
-    min-width: 150px;
+    min-width: 10rem;
 }
 
-.native-time-picker .time-input:focus {
+.native-time-picker .time-input:focus-visible {
     outline: none;
     border-color: var(--ds-primary-500);
     box-shadow: var(--ds-focus-ring);
@@ -2020,6 +2023,7 @@ h2 {
 .form-select,
 .form-input {
   width: 100%;
+  min-height: var(--ds-control-min-height, 48px);
   box-sizing: border-box;
   transition: all 0.2s;
 }
@@ -2256,7 +2260,8 @@ input[type="number"].form-input::-webkit-inner-spin-button {
   min-width: 4.5rem;
 }
 .form-input-sm {
-  width: 4.5rem;
+  width: 5.5rem;
+  min-height: var(--ds-control-min-height, 48px);
   text-align: center;
 }
 .inline-control.is-disabled {

@@ -2661,26 +2661,15 @@ function handleHistoryPresetChipChange(value: string) {
 
 .project-users-search {
   display: flex;
-  gap: 10px;
+  align-items: stretch;
+  gap: 0.5rem;
   flex-wrap: wrap;
-  margin-bottom: 14px;
+  margin-bottom: 0.75rem;
 }
 
 .project-users-search-input {
   flex: 1 1 220px;
-  min-height: 42px;
-  border-radius: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  background: rgba(255, 255, 255, 0.9);
-  padding: 0 14px;
-  font-size: 0.92rem;
-  color: var(--ds-text-primary);
-}
-
-.project-users-search-input:focus {
-  outline: none;
-  border-color: color-mix(in srgb, var(--ds-primary-500) 48%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ds-primary-500) 16%, transparent);
+  min-width: 0;
 }
 
 .project-users-list {

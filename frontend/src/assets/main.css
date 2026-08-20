@@ -132,6 +132,11 @@
     --ds-page-padding: 16px;
     --ds-card-padding: 1rem;
     --ds-section-gap:  0.75rem;
+    --ds-control-min-height: var(--ds-touch-target, 48px);
+    --ds-control-radius: var(--ds-radius-md);
+    --ds-control-padding-inline: 0.875rem;
+    --ds-control-bg: var(--ds-bg-subtle);
+    --ds-control-border: var(--ds-border-medium);
 
     /* Font Sizes */
     --ds-font-xs:   0.7rem;
@@ -1587,16 +1592,18 @@
 
   .ui-input {
     width: 100%;
-    min-height: 48px;
-    border: 1.5px solid var(--ds-border-medium);
-    border-radius: var(--ds-radius-md);
-    background: var(--ds-bg-card);
+    min-height: var(--ds-control-min-height);
+    border: 1.5px solid var(--ds-control-border);
+    border-radius: var(--ds-control-radius);
+    background: var(--ds-control-bg);
     color: var(--ds-text-primary);
     font: inherit;
     font-size: var(--ds-font-md);
     font-weight: 650;
-    padding: 0 0.875rem;
+    padding: 0 var(--ds-control-padding-inline);
     outline: 0;
+    appearance: none;
+    -webkit-appearance: none;
     transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
   }
 
@@ -1622,10 +1629,10 @@
   }
 
   .ui-number-stepper {
-    min-height: 48px;
-    border: 1.5px solid var(--ds-border-medium);
-    border-radius: var(--ds-radius-md);
-    background: var(--ds-bg-card);
+    min-height: var(--ds-control-min-height);
+    border: 1.5px solid var(--ds-control-border);
+    border-radius: var(--ds-control-radius);
+    background: var(--ds-control-bg);
     display: grid;
     grid-template-columns: 44px minmax(0, 1fr) 44px;
     align-items: stretch;

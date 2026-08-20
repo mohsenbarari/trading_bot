@@ -15,6 +15,6 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Constraints
 
-- Protected Market/Messenger/Home changes need source/behavior/visual guards. Market A+C is visual/interaction only; overtime stays under Account/Settings. UIUX V3 must not edit hash-frozen Messenger runtime (including ShareReceive) or the TradingSettings calendar confirm; new CSS must not introduce `--ui-v2-*` markers unless it is catalog V2.
+- Protected Market/Messenger/Home changes need source/behavior/visual guards. Market A+C is visual/interaction only; overtime stays under Account/Settings. UIUX V3 must not edit hash-frozen Messenger runtime (including ShareReceive) or the TradingSettings calendar confirm; new CSS must not introduce `--ui-v2-*` markers unless it is catalog V2. Product text fields use `--ds-control-*` (48px, inset fill, shared radius/focus); leftover owner-modal classes must match that geometry.
 - Acceptance requires WCAG 2.2 AA, keyboard/focus/reduced-motion, 200% zoom, no horizontal overflow/obscured CTA and identity-safe stale-request handling.
 - Stages are test/hash-bound and rollback-safe; Sites is private evidence, not deployment; Web Push permits only one or two identical server-authoritative rebinds.
