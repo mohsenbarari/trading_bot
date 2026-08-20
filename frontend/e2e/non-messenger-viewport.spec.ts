@@ -194,6 +194,46 @@ async function gotoRouteWithNavigationRetry(page: Page, path: string) {
   throw lastError
 }
 
+async function waitForStableRouteLayout(page: Page) {
+  await page.evaluate(async () => {
+    await document.fonts?.ready
+    const sleep = (duration: number) => new Promise((resolve) => window.setTimeout(resolve, duration))
+    const visible = (element: Element) => {
+      if (!(element instanceof HTMLElement)) return false
+      const style = getComputedStyle(element)
+      const rect = element.getBoundingClientRect()
+      return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) > 0
+        && rect.width > 0 && rect.height > 0
+    }
+    let previous = ''
+    let stableSamples = 0
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const routeScroll = document.querySelector<HTMLElement>('.app-route-scroll')
+      const transitionCount = document.querySelectorAll('.fade-enter-active, .fade-leave-active').length
+      const loadingCount = Array.from(document.querySelectorAll(
+        '[aria-busy="true"], .ui-loading-state, .ds-loading-state, [role="progressbar"]',
+      )).filter(visible).length
+      const visibleControlCount = Array.from(document.querySelectorAll(
+        'button, a[href], input, textarea, select, [role="button"], [tabindex]',
+      )).filter(visible).length
+      const fingerprint = [
+        routeScroll?.scrollHeight || 0,
+        routeScroll?.clientHeight || 0,
+        visibleControlCount,
+        transitionCount,
+        loadingCount,
+      ].join(':')
+      stableSamples = fingerprint === previous && transitionCount === 0 && loadingCount === 0
+        ? stableSamples + 1
+        : 0
+      if (stableSamples >= 2) return
+      previous = fingerprint
+      await sleep(100)
+    }
+    throw new Error('route layout did not settle before viewport geometry audit')
+  })
+}
+
 async function expectNoHorizontalOverflow(page: Page, label: string) {
   const metrics = await page.evaluate(() => {
     const doc = document.documentElement
@@ -362,6 +402,7 @@ test.describe('Non-messenger responsive viewport matrix', () => {
       for (const route of ROUTES) {
         await gotoRouteWithNavigationRetry(page, route.path)
         await expect(page.getByText(route.expectedText).first()).toBeVisible({ timeout: 10_000 })
+        await waitForStableRouteLayout(page)
         await expectNoHorizontalOverflow(page, `${viewport.label}:${route.label}`)
         if (viewport.width <= 430) {
           await expectLastControlClearOfBottomChrome(page, `${viewport.label}:${route.label}`)
