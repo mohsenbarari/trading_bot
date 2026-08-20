@@ -23,7 +23,6 @@ import {
   AppInput,
   AppListItem,
   AppLoadingState,
-  AppMetricCard,
   AppNumberStepper,
   AppResponsiveDialog,
   AppSearchField,
@@ -1718,55 +1717,34 @@ onBeforeUnmount(() => {
               v-if="activeRelation.status !== 'pending' && detailTab === 'profile'"
               class="customer-detail-grid ui-v2-workspace-customer-detail-grid"
             >
-              <AppCard>
-                <span class="customer-meta-label ui-v2-workspace-customer-meta-label"
-                  >نام مدیریتی</span
-                >
-                <strong>
+              <AppListItem title="نام مدیریتی">
+                <template #trailing>
                   <CustomerNameWithBadge
                     v-if="activeRelation.management_name"
                     :name="activeRelation.management_name"
                     compact
                   />
-                  <template v-else>ثبت نشده</template>
-                </strong>
-              </AppCard>
-              <AppCard>
-                <span class="customer-meta-label ui-v2-workspace-customer-meta-label"
-                  >شماره موبایل</span
-                >
-                <strong>{{ activeRelation.mobile_number || 'ثبت نشده' }}</strong>
-              </AppCard>
-              <AppCard>
-                <span class="customer-meta-label ui-v2-workspace-customer-meta-label"
-                  >وضعیت ثبت‌نام</span
-                >
-                <strong>{{
-                  activeRelation.customer_user_id ? 'تکمیل شده' : 'در انتظار ثبت‌نام'
-                }}</strong>
-              </AppCard>
-              <AppCard>
-                <span class="customer-meta-label ui-v2-workspace-customer-meta-label"
-                  >نرخ کمیسیون</span
-                >
-                <strong>{{
+                  <span v-else>ثبت نشده</span>
+                </template>
+              </AppListItem>
+              <AppListItem
+                title="شماره موبایل"
+                :meta="activeRelation.mobile_number || 'ثبت نشده'"
+              />
+              <AppListItem
+                title="وضعیت ثبت‌نام"
+                :meta="activeRelation.customer_user_id ? 'تکمیل شده' : 'در انتظار ثبت‌نام'"
+              />
+              <AppListItem
+                title="نرخ کمیسیون"
+                :meta="
                   activeRelation.customer_tier === 'tier2'
                     ? formatPercent(activeRelation.commission_rate)
                     : 'ندارد'
-                }}</strong>
-              </AppCard>
-              <AppCard>
-                <span class="customer-meta-label ui-v2-workspace-customer-meta-label"
-                  >فعال‌سازی</span
-                >
-                <strong>{{ formatDate(activeRelation.activated_at) }}</strong>
-              </AppCard>
-              <AppCard>
-                <span class="customer-meta-label ui-v2-workspace-customer-meta-label"
-                  >ایجاد رابطه</span
-                >
-                <strong>{{ formatDate(activeRelation.created_at) }}</strong>
-              </AppCard>
+                "
+              />
+              <AppListItem title="فعال‌سازی" :meta="formatDate(activeRelation.activated_at)" />
+              <AppListItem title="ایجاد رابطه" :meta="formatDate(activeRelation.created_at)" />
             </div>
 
             <div
@@ -2049,14 +2027,13 @@ onBeforeUnmount(() => {
                 v-if="detailStats"
                 class="customer-stats-grid ui-v2-workspace-customer-stats-grid"
               >
-                <AppMetricCard label="تعداد معاملات" :value="detailStats.trade_count" />
-                <AppMetricCard label="حجم کل" :value="detailStats.total_quantity" tone="primary" />
-                <AppMetricCard
-                  label="سود کمیسیون"
-                  :value="formatToman(detailStats.commission_profit_toman)"
-                  tone="success"
+                <AppListItem title="تعداد معاملات" :meta="String(detailStats.trade_count)" />
+                <AppListItem title="حجم کل" :meta="String(detailStats.total_quantity)" />
+                <AppListItem
+                  title="سود کمیسیون"
+                  :meta="formatToman(detailStats.commission_profit_toman)"
                 />
-                <AppCard
+                <div
                   class="customer-stats-commodities ui-v2-workspace-customer-stats-commodities"
                 >
                   <span class="customer-meta-label ui-v2-workspace-customer-meta-label"
@@ -2070,7 +2047,7 @@ onBeforeUnmount(() => {
                       }}</strong>
                     </li>
                   </ul>
-                </AppCard>
+                </div>
               </div>
               <WorkspaceNotice
                 v-if="!detailStatsLoading && !detailStatsError && !detailStats"

@@ -294,7 +294,7 @@ function handleUserClick(user: SearchUser) {
 }
 
 .new-chat-user-context {
-  color: #0f766e;
+  color: var(--ds-primary-700, #b45309);
   font-size: 0.72rem;
   font-weight: 700;
 }

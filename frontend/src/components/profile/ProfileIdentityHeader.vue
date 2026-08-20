@@ -178,7 +178,7 @@ const emit = defineEmits<{
 }
 
 .profile-avatar--readonly {
-  box-shadow: var(--ds-shadow-md);
+  box-shadow: none;
 }
 
 .profile-avatar-edit-indicator {

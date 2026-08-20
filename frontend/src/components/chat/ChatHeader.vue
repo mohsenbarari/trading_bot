@@ -484,7 +484,8 @@ function formatDateForSeparator(dateString: string) {
 }
 
 .header-avatar.channel-avatar {
-  background: linear-gradient(135deg, #0f766e, #0ea5a4);
+  background: var(--ds-primary-100, #fef3c7);
+  color: var(--ds-primary-700, #b45309);
 }
 
 .header-avatar.group-avatar {
@@ -605,8 +606,8 @@ function formatDateForSeparator(dateString: string) {
 }
 
 .room-badge-small.channel {
-  background: rgba(15, 118, 110, 0.12);
-  color: #0f766e;
+  background: rgba(245, 158, 11, 0.14);
+  color: var(--messenger-accent-strong, #b45309);
 }
 
 .room-badge-small.group {
@@ -630,8 +631,8 @@ function formatDateForSeparator(dateString: string) {
 }
 
 .room-badge-small.direct-role.role-customer {
-  background: rgba(15, 118, 110, 0.12);
-  color: #0f766e;
+  background: rgba(245, 158, 11, 0.14);
+  color: var(--messenger-accent-strong, #b45309);
 }
 
 .room-badge-small.accountant-owner {

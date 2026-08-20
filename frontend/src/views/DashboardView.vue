@@ -531,7 +531,7 @@ onUnmounted(() => {
   border: 1px solid var(--ds-border-medium);
   border-radius: var(--ds-radius-lg);
   background: var(--ds-bg-card);
-  box-shadow: var(--ds-shadow-lg);
+  box-shadow: none;
 }
 
 .dashboard-account-menu__panel button {

@@ -1210,10 +1210,10 @@
   .ui-disclosure,
   .ui-metric-card,
   .ui-danger-zone {
-    border: 1px solid var(--ds-border-medium);
+    border: 1px solid var(--ds-native-hairline);
     border-radius: var(--ds-radius-lg);
     background: var(--ds-bg-card);
-    box-shadow: var(--ds-shadow-sm);
+    box-shadow: none;
   }
 
   .ui-section-card {
@@ -2001,9 +2001,9 @@
   .ui-bottom-sheet,
   .ui-responsive-dialog {
     width: min(100%, 560px);
-    border: 1px solid var(--ds-border-medium);
+    border: 1px solid var(--ds-native-hairline);
     background: var(--ds-bg-card);
-    box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+    box-shadow: none;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -2078,10 +2078,10 @@
 
   .ui-confirm-dialog {
     width: min(100%, 420px);
-    border: 1px solid var(--ds-border-medium);
+    border: 1px solid var(--ds-native-hairline);
     border-radius: var(--ds-radius-lg);
     background: var(--ds-bg-card);
-    box-shadow: 0 24px 70px rgba(15, 23, 42, 0.2);
+    box-shadow: none;
     overflow: hidden;
   }
 
@@ -2185,6 +2185,24 @@
 
     .ui-master-detail {
       grid-template-columns: minmax(0, 1fr);
+    }
+
+    .ui-dialog-backdrop,
+    .ui-responsive-dialog-backdrop {
+      align-items: flex-end;
+      justify-content: center;
+      padding: 0;
+      padding-block-start: var(--ds-safe-area-top);
+    }
+
+    .ui-confirm-dialog,
+    .ui-responsive-dialog {
+      width: 100%;
+      max-width: none;
+      border-radius: 24px 24px 0 0;
+      border-inline: 0;
+      border-block-end: 0;
+      max-height: calc(100dvh - var(--ds-safe-area-top) - 1rem);
     }
   }
 }

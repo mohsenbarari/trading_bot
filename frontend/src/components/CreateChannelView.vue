@@ -4,7 +4,6 @@ import { useRouter } from 'vue-router'
 import ChatUserListRow from './chat/ChatUserListRow.vue'
 import HelpPopover from './HelpPopover.vue'
 import {
-  AppActionCard,
   AppBackButton,
   AppButton,
   AppCheckbox,
@@ -12,6 +11,7 @@ import {
   AppFormField,
   AppIconButton,
   AppInput,
+  AppListItem,
   AppLoadingState,
   AppSectionCard,
   AppStatusBadge,
@@ -33,6 +33,7 @@ import {
 } from '../services/chat/chatManagerCache'
 import {
   Check,
+  ChevronLeft,
   Info,
   Loader2,
   LogOut,
@@ -1002,26 +1003,34 @@ onBeforeUnmount(() => {
               text="کانال اختیاری را بسازید، اعضا را دعوت کنید و نقش ادمین‌ها را از همین بخش مدیریت کنید."
             />
           </template>
-          <AppActionCard title="کانال جدید" description="ساخت کانال و ورود به فرم تنظیمات اولیه" tone="primary" @select="openCreatePage">
-            <template #icon>
+          <AppListItem title="کانال جدید" description="ساخت کانال و ورود به فرم تنظیمات اولیه" interactive @select="openCreatePage">
+            <template #leading>
               <UsersRound :size="18" />
             </template>
-          </AppActionCard>
+            <template #trailing>
+              <ChevronLeft :size="18" aria-hidden="true" />
+            </template>
+          </AppListItem>
         </AppSectionCard>
 
         <AppSectionCard class="manager-section-card" title="کانال‌های موجود" description="یک کانال را برای مشاهده اعضا، ادمین‌ها و تنظیمات انتخاب کنید.">
           <AppLoadingState v-if="isLoadingChannels" label="در حال دریافت کانال‌ها" />
           <AppEmptyState v-else-if="existingChannels.length === 0" title="هنوز کانالی ساخته نشده است" message="بعد از ساخت اولین کانال، فهرست مدیریت آن در همین بخش نمایش داده می‌شود." />
           <div v-else class="manager-action-list">
-            <AppActionCard
+            <AppListItem
               v-for="channel in existingChannels"
               :key="channel.id"
               :title="channel.title"
               :description="channel.description || `${channel.member_count.toLocaleString('fa-IR')} عضو`"
-              :badge="getChannelKindLabel(channel)"
-              tone="neutral"
+              :meta="getChannelKindLabel(channel)"
+              interactive
               @select="openChannel(channel)"
-            />
+            >
+              <template #trailing>
+                <span>{{ getChannelKindLabel(channel) }}</span>
+                <ChevronLeft :size="18" aria-hidden="true" />
+              </template>
+            </AppListItem>
           </div>
         </AppSectionCard>
       </template>
@@ -1111,31 +1120,48 @@ onBeforeUnmount(() => {
 
         <AppSectionCard class="manager-section-card" title="اعضا و دسترسی‌ها" description="فهرست اعضا، ادمین‌ها و دعوت افراد جدید از این بخش انجام می‌شود.">
           <div class="manager-action-list">
-            <AppActionCard title="اعضای کانال" description="فهرست کامل اعضا و نقش‌ها" :badge="activeChannel.member_count.toLocaleString('fa-IR')" @select="setPage('members')">
-              <template #icon><UsersRound :size="18" /></template>
-            </AppActionCard>
-            <AppActionCard v-if="!isMembershipManagementLocked" title="مدیریت ادمین‌ها" description="تعیین و تغییر ادمین‌های کانال" :badge="activeAdminCount.toLocaleString('fa-IR')" tone="warning" @select="setPage('admins')">
-              <template #icon><Shield :size="18" /></template>
-            </AppActionCard>
-            <AppActionCard v-if="!isMembershipManagementLocked" title="افزودن عضو" description="دعوت اعضای جدید به کانال" tone="info" @select="setPage('add-members')">
-              <template #icon><UserPlus :size="18" /></template>
-            </AppActionCard>
+            <AppListItem title="اعضای کانال" description="فهرست کامل اعضا و نقش‌ها" :meta="activeChannel.member_count.toLocaleString('fa-IR')" interactive @select="setPage('members')">
+              <template #leading><UsersRound :size="18" /></template>
+              <template #trailing>
+                <span>{{ activeChannel.member_count.toLocaleString('fa-IR') }}</span>
+                <ChevronLeft :size="18" aria-hidden="true" />
+              </template>
+            </AppListItem>
+            <AppListItem v-if="!isMembershipManagementLocked" title="مدیریت ادمین‌ها" description="تعیین و تغییر ادمین‌های کانال" :meta="activeAdminCount.toLocaleString('fa-IR')" interactive @select="setPage('admins')">
+              <template #leading><Shield :size="18" /></template>
+              <template #trailing>
+                <span>{{ activeAdminCount.toLocaleString('fa-IR') }}</span>
+                <ChevronLeft :size="18" aria-hidden="true" />
+              </template>
+            </AppListItem>
+            <AppListItem v-if="!isMembershipManagementLocked" title="افزودن عضو" description="دعوت اعضای جدید به کانال" interactive @select="setPage('add-members')">
+              <template #leading><UserPlus :size="18" /></template>
+              <template #trailing>
+                <ChevronLeft :size="18" aria-hidden="true" />
+              </template>
+            </AppListItem>
           </div>
         </AppSectionCard>
 
         <AppSectionCard class="manager-section-card" title="تنظیمات" description="نام، توضیح و تصویر کانال را در این بخش ویرایش کنید.">
           <div class="manager-action-list">
-            <AppActionCard title="تنظیمات کانال" description="ویرایش نام، توضیح و تصویر کانال" @select="setPage('edit')">
-              <template #icon><PencilLine :size="18" /></template>
-            </AppActionCard>
+            <AppListItem title="تنظیمات کانال" description="ویرایش نام، توضیح و تصویر کانال" interactive @select="setPage('edit')">
+              <template #leading><PencilLine :size="18" /></template>
+              <template #trailing>
+                <ChevronLeft :size="18" aria-hidden="true" />
+              </template>
+            </AppListItem>
           </div>
         </AppSectionCard>
 
         <AppSectionCard v-if="currentUserMembership && !isMembershipManagementLocked" class="manager-section-card" title="خروج و حذف" :description="currentChannelExitSubtitle" tone="danger">
           <div class="manager-action-list">
-            <AppActionCard :title="currentChannelExitLabel" :description="currentChannelExitSubtitle" tone="danger" :disabled="isSaving" @select="unfollowCurrentChannel">
-              <template #icon><LogOut :size="18" /></template>
-            </AppActionCard>
+            <AppListItem :title="currentChannelExitLabel" :description="currentChannelExitSubtitle" interactive :disabled="isSaving" @select="unfollowCurrentChannel">
+              <template #leading><LogOut :size="18" /></template>
+              <template #trailing>
+                <ChevronLeft :size="18" aria-hidden="true" />
+              </template>
+            </AppListItem>
           </div>
         </AppSectionCard>
       </template>
@@ -1740,7 +1766,14 @@ onBeforeUnmount(() => {
 .manager-action-list {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0;
+}
+
+.manager-action-list :deep(.ui-list-item) {
+  border: 0;
+  border-radius: 0;
+  background: var(--ds-bg-card);
+  box-shadow: inset 0 -1px 0 var(--ds-native-hairline, rgba(60, 60, 67, 0.18));
 }
 
 .row-copy {

@@ -117,7 +117,7 @@
   .ui-v2-workspace-accountant-detail-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: var(--ui-v2-spacing-8);
+  gap: 0;
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-accountant-meta-label {
@@ -257,7 +257,8 @@
 
   :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
     .ui-v2-workspace-accountant-detail-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
   }
 
   :where([data-ui-system='v2'], [data-ui-system='v2-portal'])

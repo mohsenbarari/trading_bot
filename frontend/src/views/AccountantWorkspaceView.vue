@@ -1303,46 +1303,28 @@ onBeforeUnmount(() => {
               v-if="detailTab === 'profile'"
               class="accountant-detail-grid ui-v2-workspace-accountant-detail-grid"
             >
-              <AppCard>
-                <span class="accountant-meta-label ui-v2-workspace-accountant-meta-label"
-                  >نام نمایشی</span
-                >
-                <strong>{{ activeRelation.relation_display_name || 'ثبت نشده' }}</strong>
-              </AppCard>
-              <AppCard>
-                <span class="accountant-meta-label ui-v2-workspace-accountant-meta-label"
-                  >شماره موبایل</span
-                >
-                <strong>{{ activeRelation.mobile_number || 'ثبت نشده' }}</strong>
-              </AppCard>
-              <AppCard>
-                <span class="accountant-meta-label ui-v2-workspace-accountant-meta-label"
-                  >حساب کاربری</span
-                >
-                <strong>{{
+              <AppListItem
+                title="نام نمایشی"
+                :meta="activeRelation.relation_display_name || 'ثبت نشده'"
+              />
+              <AppListItem
+                title="شماره موبایل"
+                :meta="activeRelation.mobile_number || 'ثبت نشده'"
+              />
+              <AppListItem
+                title="حساب کاربری"
+                :meta="
                   activeRelation.accountant_account_name ||
                   activeRelation.global_account_name ||
                   'در انتظار ثبت‌نام'
-                }}</strong>
-              </AppCard>
-              <AppCard>
-                <span class="accountant-meta-label ui-v2-workspace-accountant-meta-label"
-                  >نام کاربری جهانی</span
-                >
-                <strong>@{{ activeRelation.global_account_name || 'ثبت نشده' }}</strong>
-              </AppCard>
-              <AppCard>
-                <span class="accountant-meta-label ui-v2-workspace-accountant-meta-label"
-                  >فعال‌سازی</span
-                >
-                <strong>{{ formatDate(activeRelation.activated_at) }}</strong>
-              </AppCard>
-              <AppCard>
-                <span class="accountant-meta-label ui-v2-workspace-accountant-meta-label"
-                  >ایجاد رابطه</span
-                >
-                <strong>{{ formatDate(activeRelation.created_at) }}</strong>
-              </AppCard>
+                "
+              />
+              <AppListItem
+                title="نام کاربری جهانی"
+                :meta="`@${activeRelation.global_account_name || 'ثبت نشده'}`"
+              />
+              <AppListItem title="فعال‌سازی" :meta="formatDate(activeRelation.activated_at)" />
+              <AppListItem title="ایجاد رابطه" :meta="formatDate(activeRelation.created_at)" />
             </div>
 
             <div

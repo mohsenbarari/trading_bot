@@ -2613,10 +2613,10 @@ function handleHistoryPresetChipChange(value: string) {
   max-width: min(100%, 520px);
   margin: 0 auto;
   padding: 12px 14px;
-  border-radius: 16px;
-  border: 1px solid rgba(59, 130, 246, 0.22);
-  background: linear-gradient(135deg, rgba(239, 246, 255, 0.98), rgba(224, 242, 254, 0.98));
-  box-shadow: 0 10px 28px rgba(59, 130, 246, 0.10);
+  border-radius: 12px;
+  border: 1px solid var(--ds-native-hairline);
+  background: var(--ds-bg-card);
+  box-shadow: none;
   text-align: right;
 }
 
@@ -2624,14 +2624,14 @@ function handleHistoryPresetChipChange(value: string) {
   margin-bottom: 6px;
   font-size: 0.94rem;
   font-weight: 800;
-  color: #1d4ed8;
+  color: var(--ds-text-primary);
 }
 
 .customer-context-copy {
   margin: 0;
   font-size: 0.86rem;
   line-height: 1.7;
-  color: #1e3a8a;
+  color: var(--ds-text-secondary);
 }
 
 .project-users-search {
@@ -2669,9 +2669,10 @@ function handleHistoryPresetChipChange(value: string) {
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
-  border-radius: 16px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96));
+  border-radius: 0;
+  border: 0;
+  border-block-end: 1px solid var(--ds-native-hairline);
+  background: var(--ds-bg-card);
 }
 
 .project-user-link-btn {
@@ -2723,11 +2724,10 @@ function handleHistoryPresetChipChange(value: string) {
   inset: 0;
   z-index: 3000;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: center;
-  padding: 14px;
-  background: rgba(15, 23, 42, 0.45);
-  backdrop-filter: blur(10px);
+  padding: 0;
+  background: rgba(15, 23, 42, 0.4);
 }
 
 .admin-user-modal {
@@ -2736,9 +2736,9 @@ function handleHistoryPresetChipChange(value: string) {
   max-height: min(92vh, 860px);
   overflow: hidden;
   -webkit-overflow-scrolling: touch;
-  border-radius: 22px;
+  border-radius: 24px 24px 0 0;
   background: var(--ds-bg-card, #fff);
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
+  box-shadow: none;
 }
 
 .admin-user-modal-body {
@@ -2904,8 +2904,8 @@ function handleHistoryPresetChipChange(value: string) {
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  border: 1px solid var(--ds-border-light);
-  box-shadow: var(--ds-shadow-sm);
+  border: 1px solid var(--ds-native-hairline);
+  box-shadow: none;
 }
 
 .stat-icon {
@@ -2921,15 +2921,15 @@ function handleHistoryPresetChipChange(value: string) {
 
 .profile-menu-card {
   position: relative;
-  padding: 1rem;
+  padding: 0;
   padding-left: 3.8rem;
-  border: 1px solid rgba(15, 23, 42, 0.06);
-  border-radius: 1.25rem;
-  background: linear-gradient(135deg, rgba(255, 251, 235, 0.72), rgba(255, 255, 255, 0.96));
-  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+  border: 0;
+  border-radius: 12px;
+  background: var(--ds-bg-card);
+  box-shadow: none;
   display: flex;
   flex-direction: column;
-  gap: 0.625rem;
+  gap: 0;
 }
 
 .profile-menu-heading {
@@ -3020,7 +3020,7 @@ function handleHistoryPresetChipChange(value: string) {
 }
 
 .message-menu-btn {
-  background: linear-gradient(135deg, var(--ds-info-50), color-mix(in srgb, var(--ds-info-50) 98%, var(--ds-info-500))) !important;
+  background: var(--ds-info-50) !important;
   color: var(--ds-info-700) !important;
   border-color: color-mix(in srgb, var(--ds-info-500) 22%, transparent) !important;
 }
@@ -3031,7 +3031,7 @@ function handleHistoryPresetChipChange(value: string) {
 }
 
 .settings-btn {
-  background: linear-gradient(135deg, var(--ds-primary-50), var(--ds-primary-100)) !important;
+  background: var(--ds-primary-50) !important;
   color: var(--ds-primary-800) !important;
   border-color: color-mix(in srgb, var(--ds-primary-500) 20%, transparent) !important;
 }
@@ -3063,13 +3063,13 @@ function handleHistoryPresetChipChange(value: string) {
 }
 
 :deep(.message-menu-btn) {
-  background: linear-gradient(135deg, var(--ds-info-50), color-mix(in srgb, var(--ds-info-50) 98%, var(--ds-info-500))) !important;
+  background: var(--ds-info-50) !important;
   color: var(--ds-info-700) !important;
   border-color: color-mix(in srgb, var(--ds-info-500) 22%, transparent) !important;
 }
 
 :deep(.settings-btn) {
-  background: linear-gradient(135deg, var(--ds-primary-50), var(--ds-primary-100)) !important;
+  background: var(--ds-primary-50) !important;
   color: var(--ds-primary-800) !important;
   border-color: color-mix(in srgb, var(--ds-primary-500) 20%, transparent) !important;
 }
@@ -3108,9 +3108,9 @@ function handleHistoryPresetChipChange(value: string) {
   gap: 12px;
   padding: 14px;
   margin-bottom: 14px;
-  border-radius: 18px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
+  border-radius: 12px;
+  border: 1px solid var(--ds-native-hairline);
+  background: var(--ds-bg-card);
 }
 
 .history-presets {
@@ -3131,14 +3131,14 @@ function handleHistoryPresetChipChange(value: string) {
 }
 
 .history-chip.active {
-  background: linear-gradient(135deg, #f59e0b, #d97706);
+  background: var(--ds-primary-500);
   color: white;
   border-color: transparent;
 }
 
 .history-filter-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
 }
 

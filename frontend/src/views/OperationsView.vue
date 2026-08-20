@@ -249,8 +249,10 @@ onMounted(refreshIdentity)
 .action-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 0.65rem;
-  padding-bottom: 0.9rem;
+  gap: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--ds-bg-card);
 }
 
 .operations-action-tile {
@@ -259,12 +261,6 @@ onMounted(refreshIdentity)
 
 .operations-empty-state {
   margin: 0;
-}
-
-@media (min-width: 720px) {
-  .action-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 767px) {

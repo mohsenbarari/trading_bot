@@ -1094,22 +1094,32 @@ onBeforeUnmount(() => {
 
 .weekday-grid {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--ds-bg-card);
 }
 
 .weekday-chip {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
+  width: 100%;
   min-height: var(--ds-native-row-min-height, 48px);
   padding: 0.55rem 0.85rem;
-  border-radius: 999px;
-  border: 1px solid var(--ds-native-hairline);
+  border-radius: 0;
+  border: 0;
+  border-block-end: 1px solid var(--ds-native-hairline);
   background: var(--ds-bg-card);
   cursor: pointer;
   font-size: 0.78rem;
   font-weight: 700;
+}
+
+.weekday-chip:last-child {
+  border-block-end: 0;
 }
 
 .weekday-chip.active {

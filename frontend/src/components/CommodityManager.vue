@@ -926,7 +926,7 @@ onUnmounted(() => {
   padding: 0.9rem 1rem;
   border: 1px solid transparent;
   border-radius: var(--ds-radius-lg);
-  box-shadow: var(--ds-shadow-sm);
+  box-shadow: none;
 }
 
 .commodity-feedback strong {

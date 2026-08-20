@@ -455,22 +455,21 @@ function confirmForward() {
   inset: 0;
   background: rgba(15, 23, 42, 0.42);
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: center;
-  padding: 16px;
+  padding: 0;
   z-index: 200;
-  backdrop-filter: blur(10px);
 }
 
 .forward-modal {
   background: #ffffff;
   width: min(100%, 460px);
   max-height: min(86vh, 760px);
-  border-radius: 24px;
+  border-radius: 24px 24px 0 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 26px 60px rgba(15, 23, 42, 0.2);
+  box-shadow: none;
 }
 
 .forward-modal-header {
@@ -528,7 +527,7 @@ function confirmForward() {
 }
 
 .forward-search-input:focus {
-  border-color: #10b981;
+  border-color: #f59e0b;
   background: #ffffff;
 }
 
@@ -554,7 +553,7 @@ function confirmForward() {
 .retry-btn {
   border: none;
   border-radius: 999px;
-  background: #10b981;
+  background: #f59e0b;
   color: white;
   padding: 10px 18px;
   font: inherit;
@@ -611,8 +610,8 @@ function confirmForward() {
 }
 
 .select-indicator.checked {
-  background: #10b981;
-  border-color: #10b981;
+  background: #f59e0b;
+  border-color: #f59e0b;
   transform: scale(1.05);
 }
 
@@ -634,7 +633,7 @@ function confirmForward() {
   gap: 6px;
   padding: 6px 10px;
   border-radius: 999px;
-  border: 1px solid #10b981;
+  border: 1px solid #f59e0b;
   background: #ecfdf5;
   color: #065f46;
   font-size: 12px;
@@ -683,7 +682,7 @@ function confirmForward() {
   height: 48px;
   border: none;
   border-radius: 999px;
-  background: linear-gradient(135deg, #0f766e, #10b981);
+  background: var(--ds-primary-500, #f59e0b);
   color: white;
   font: inherit;
   font-weight: 700;
@@ -715,7 +714,7 @@ function confirmForward() {
   height: 46px;
   min-width: 46px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #0f766e, #10b981);
+  background: var(--ds-primary-500, #f59e0b);
   color: white;
   display: flex;
   align-items: center;
@@ -725,7 +724,7 @@ function confirmForward() {
 }
 
 .target-avatar.conversation {
-  background: linear-gradient(135deg, #2563eb, #0ea5e9);
+  background: var(--ds-primary-600, #d97706);
 }
 
 .target-copy {
@@ -774,8 +773,8 @@ function confirmForward() {
 }
 
 .target-chip.role-customer {
-  background: rgba(15, 118, 110, 0.12);
-  color: #0f766e;
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--ds-primary-700, #b45309);
 }
 
 .target-chip.role-colleague {
@@ -815,13 +814,13 @@ function confirmForward() {
 
 @media (max-width: 640px) {
   .forward-modal-overlay {
-    padding: 10px;
+    padding: 0;
   }
 
   .forward-modal {
     width: 100%;
     max-height: 92vh;
-    border-radius: 20px;
+    border-radius: 24px 24px 0 0;
   }
 }
 </style>

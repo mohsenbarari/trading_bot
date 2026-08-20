@@ -293,38 +293,40 @@ function goToTelegramRegister() {
         <span v-if="expiresAt">تا {{ formatIranDateTime(expiresAt) }}</span>
       </div>
 
-      <button
-        v-if="botAvailable && botUsername"
-        type="button"
-        class="ui-v2-auth-invite-route ui-v2-auth-invite-route--telegram"
-        aria-label="ثبت‌نام با تلگرام"
-        @click="goToTelegramRegister"
-      >
-        <span class="ui-v2-auth-invite-route__icon" aria-hidden="true">
-          <Send :size="20" />
-        </span>
-        <span class="ui-v2-auth-invite-route__copy">
-          <strong>ثبت‌نام با تلگرام</strong>
-          <small>ورود مستقیم به ربات و ادامه ثبت‌نام</small>
-        </span>
-      </button>
+      <div class="ui-v2-auth-invite-routes">
+        <button
+          v-if="botAvailable && botUsername"
+          type="button"
+          class="ui-v2-auth-invite-route ui-v2-auth-invite-route--telegram"
+          aria-label="ثبت‌نام با تلگرام"
+          @click="goToTelegramRegister"
+        >
+          <span class="ui-v2-auth-invite-route__icon" aria-hidden="true">
+            <Send :size="20" />
+          </span>
+          <span class="ui-v2-auth-invite-route__copy">
+            <strong>ثبت‌نام با تلگرام</strong>
+            <small>ورود مستقیم به ربات و ادامه ثبت‌نام</small>
+          </span>
+        </button>
 
-      <button
-        v-if="webAvailable"
-        type="button"
-        class="ui-v2-auth-invite-route"
-        :class="{ 'ui-v2-auth-invite-route--only': !botAvailable }"
-        :aria-label="botAvailable ? 'ثبت‌نام از طریق وب' : 'ادامه ثبت‌نام در وب‌اپ'"
-        @click="goToWebRegister"
-      >
-        <span class="ui-v2-auth-invite-route__icon" aria-hidden="true">
-          <Globe2 :size="20" />
-        </span>
-        <span class="ui-v2-auth-invite-route__copy">
-          <strong>{{ botAvailable ? 'ثبت‌نام از طریق وب' : 'ادامه ثبت‌نام' }}</strong>
-          <small v-if="botAvailable">تأیید موبایل و تکمیل اطلاعات در وب‌اپ</small>
-        </span>
-      </button>
+        <button
+          v-if="webAvailable"
+          type="button"
+          class="ui-v2-auth-invite-route"
+          :class="{ 'ui-v2-auth-invite-route--only': !botAvailable }"
+          :aria-label="botAvailable ? 'ثبت‌نام از طریق وب' : 'ادامه ثبت‌نام در وب‌اپ'"
+          @click="goToWebRegister"
+        >
+          <span class="ui-v2-auth-invite-route__icon" aria-hidden="true">
+            <Globe2 :size="20" />
+          </span>
+          <span class="ui-v2-auth-invite-route__copy">
+            <strong>{{ botAvailable ? 'ثبت‌نام از طریق وب' : 'ادامه ثبت‌نام' }}</strong>
+            <small v-if="botAvailable">تأیید موبایل و تکمیل اطلاعات در وب‌اپ</small>
+          </span>
+        </button>
+      </div>
 
       <p class="ui-v2-auth-invite-privacy">
         این لینک اختصاصی است؛ آن را با دیگران به اشتراک نگذارید.

@@ -1373,75 +1373,84 @@ function goBackToMobile() {
         class="ui-v2-auth-login-step"
         aria-live="polite"
       >
-        <div
-          v-if="completedRegistrationNotice"
-          class="ui-v2-auth-login-note ui-v2-auth-login-note--success"
-          role="status"
-        >
-          <strong>ثبت‌نام قبلاً تکمیل شده است</strong>
-          <span>برای ورود به وب‌اپ، کد تأیید دریافت کنید.</span>
+        <div class="ui-v2-auth-login-body">
+          <div
+            v-if="completedRegistrationNotice"
+            class="ui-v2-auth-login-note ui-v2-auth-login-note--success"
+            role="status"
+          >
+            <strong>ثبت‌نام قبلاً تکمیل شده است</strong>
+            <span>برای ورود به وب‌اپ، کد تأیید دریافت کنید.</span>
+          </div>
+
+          <div
+            v-if="localLogoutNotice"
+            class="ui-v2-auth-login-note"
+            :class="{
+              'ui-v2-auth-login-note--success': localLogoutNotice === 'server-confirmed',
+            }"
+            role="status"
+            data-local-logout-notice
+          >
+            <strong>
+              {{
+                localLogoutNotice === 'server-confirmed'
+                  ? 'خروج این دستگاه ثبت شد'
+                  : 'اطلاعات ورود این دستگاه پاک شد'
+              }}
+            </strong>
+            <span>
+              {{
+                localLogoutNotice === 'server-confirmed'
+                  ? 'نشست این دستگاه روی سرور پایان یافت.'
+                  : 'تأیید سرور دریافت نشد؛ اطلاعات ورود فقط از این دستگاه پاک شد.'
+              }}
+            </span>
+          </div>
+
+          <AppFormField label="شماره موبایل" :error="mobileFieldError">
+            <template #default="{ id, describedby, invalid }">
+              <AppInput
+                :id="id"
+                ref="mobileInput"
+                v-model="form.mobile"
+                class="ui-v2-auth-login-input--ltr"
+                type="tel"
+                inputmode="tel"
+                dir="ltr"
+                placeholder="0912 345 6789"
+                autocomplete="tel"
+                :aria-describedby="describedby"
+                :invalid="invalid"
+                autofocus
+              />
+            </template>
+          </AppFormField>
+
+          <div v-if="countdown > 0" class="ui-v2-auth-login-timer" role="status">
+            <Clock :size="16" aria-hidden="true" />
+            <bdi>{{ formattedTimer }}</bdi>
+          </div>
+
+          <p class="ui-v2-auth-login-guidance">
+            کد ابتدا در تلگرام و در صورت نیاز با پیامک می‌آید.
+          </p>
+
+          <button
+            v-if="isDevMode"
+            type="button"
+            class="ui-v2-auth-login-link"
+            @click="startDevLogin"
+          >
+            ورود سریع ۱ ساله
+          </button>
         </div>
 
-        <div
-          v-if="localLogoutNotice"
-          class="ui-v2-auth-login-note"
-          :class="{
-            'ui-v2-auth-login-note--success': localLogoutNotice === 'server-confirmed',
-          }"
-          role="status"
-          data-local-logout-notice
-        >
-          <strong>
-            {{
-              localLogoutNotice === 'server-confirmed'
-                ? 'خروج این دستگاه ثبت شد'
-                : 'اطلاعات ورود این دستگاه پاک شد'
-            }}
-          </strong>
-          <span>
-            {{
-              localLogoutNotice === 'server-confirmed'
-                ? 'نشست این دستگاه روی سرور پایان یافت.'
-                : 'تأیید سرور دریافت نشد؛ اطلاعات ورود فقط از این دستگاه پاک شد.'
-            }}
-          </span>
+        <div class="ui-v2-auth-login-actions">
+          <AppButton block :loading="loading" @click="requestOtp">
+            {{ countdown > 0 ? 'وارد کردن کد' : 'دریافت کد تأیید' }}
+          </AppButton>
         </div>
-
-        <AppFormField label="شماره موبایل" :error="mobileFieldError">
-          <template #default="{ id, describedby, invalid }">
-            <AppInput
-              :id="id"
-              ref="mobileInput"
-              v-model="form.mobile"
-              class="ui-v2-auth-login-input--ltr"
-              type="tel"
-              inputmode="tel"
-              dir="ltr"
-              placeholder="0912 345 6789"
-              autocomplete="tel"
-              :aria-describedby="describedby"
-              :invalid="invalid"
-              autofocus
-            />
-          </template>
-        </AppFormField>
-
-        <AppButton block :loading="loading" @click="requestOtp">
-          {{ countdown > 0 ? 'وارد کردن کد' : 'دریافت کد تأیید' }}
-        </AppButton>
-
-        <div v-if="countdown > 0" class="ui-v2-auth-login-timer" role="status">
-          <Clock :size="16" aria-hidden="true" />
-          <bdi>{{ formattedTimer }}</bdi>
-        </div>
-
-        <p class="ui-v2-auth-login-guidance">
-          کد ابتدا در تلگرام و در صورت نیاز با پیامک می‌آید.
-        </p>
-
-        <AppButton v-if="isDevMode" block size="sm" variant="secondary" @click="startDevLogin">
-          ورود سریع ۱ ساله
-        </AppButton>
       </section>
 
       <section
@@ -1450,63 +1459,67 @@ function goBackToMobile() {
         class="ui-v2-auth-login-step"
         aria-live="polite"
       >
-        <div class="ui-v2-auth-login-meta">
-          <bdi v-if="maskedMobileForDisplay" dir="ltr">{{ maskedMobileForDisplay }}</bdi>
-          <span v-else>تلاش فعال ورود</span>
+        <div class="ui-v2-auth-login-body">
+          <div class="ui-v2-auth-login-meta">
+            <bdi v-if="maskedMobileForDisplay" dir="ltr">{{ maskedMobileForDisplay }}</bdi>
+            <span v-else>تلاش فعال ورود</span>
+            <button
+              type="button"
+              class="ui-v2-auth-login-link"
+              :disabled="Boolean(pendingAuthenticatedLogin)"
+              @click="goBackToMobile"
+            >
+              ویرایش شماره
+            </button>
+          </div>
+
+          <AppFormField label="کد تأیید" :error="otpFieldError">
+            <template #default="{ id, describedby, invalid }">
+              <AppInput
+                :id="id"
+                ref="otpInput"
+                v-model="form.code"
+                class="ui-v2-auth-login-input--code"
+                type="text"
+                inputmode="numeric"
+                pattern="[0-9]*"
+                maxlength="5"
+                dir="ltr"
+                autocomplete="one-time-code"
+                placeholder="_____"
+                :aria-describedby="describedby"
+                :invalid="invalid"
+                :disabled="Boolean(pendingAuthenticatedLogin)"
+                autofocus
+              />
+            </template>
+          </AppFormField>
+
+          <div
+            v-if="countdown > 0 || automaticSmsFallback"
+            class="ui-v2-auth-login-delivery"
+            role="status"
+            aria-live="polite"
+          >
+            <Clock :size="16" aria-hidden="true" />
+            <span>{{ otpDeliveryStatus }}</span>
+          </div>
           <button
+            v-else
             type="button"
             class="ui-v2-auth-login-link"
             :disabled="Boolean(pendingAuthenticatedLogin)"
-            @click="goBackToMobile"
+            @click="handleResend"
           >
-            ویرایش شماره
+            ارسال مجدد کد
           </button>
         </div>
 
-        <AppFormField label="کد تأیید" :error="otpFieldError">
-          <template #default="{ id, describedby, invalid }">
-            <AppInput
-              :id="id"
-              ref="otpInput"
-              v-model="form.code"
-              class="ui-v2-auth-login-input--code"
-              type="text"
-              inputmode="numeric"
-              pattern="[0-9]*"
-              maxlength="5"
-              dir="ltr"
-              autocomplete="one-time-code"
-              placeholder="_____"
-              :aria-describedby="describedby"
-              :invalid="invalid"
-              :disabled="Boolean(pendingAuthenticatedLogin)"
-              autofocus
-            />
-          </template>
-        </AppFormField>
-
-        <div
-          v-if="countdown > 0 || automaticSmsFallback"
-          class="ui-v2-auth-login-delivery"
-          role="status"
-          aria-live="polite"
-        >
-          <Clock :size="16" aria-hidden="true" />
-          <span>{{ otpDeliveryStatus }}</span>
+        <div class="ui-v2-auth-login-actions">
+          <AppButton block :loading="loading" @click="verifyOtp">
+            {{ pendingAuthenticatedLogin ? 'ادامه ورود' : 'تأیید و ادامه' }}
+          </AppButton>
         </div>
-        <button
-          v-else
-          type="button"
-          class="ui-v2-auth-login-link"
-          :disabled="Boolean(pendingAuthenticatedLogin)"
-          @click="handleResend"
-        >
-          ارسال مجدد کد
-        </button>
-
-        <AppButton block :loading="loading" @click="verifyOtp">
-          {{ pendingAuthenticatedLogin ? 'ادامه ورود' : 'تأیید و ادامه' }}
-        </AppButton>
       </section>
 
       <section
@@ -1518,27 +1531,31 @@ function goBackToMobile() {
         tabindex="-1"
         aria-live="polite"
       >
-        <Loader2 class="ui-v2-auth-login-spinner" :size="28" aria-hidden="true" />
-        <div v-if="approvalCountdown > 0" class="ui-v2-auth-login-countdown">
-          <strong>{{ formattedApprovalTimer }}</strong>
-          <span>مهلت باقی‌مانده برای تأیید</span>
+        <div class="ui-v2-auth-login-body">
+          <Loader2 class="ui-v2-auth-login-spinner" :size="28" aria-hidden="true" />
+          <div v-if="approvalCountdown > 0" class="ui-v2-auth-login-countdown">
+            <strong>{{ formattedApprovalTimer }}</strong>
+            <span>مهلت باقی‌مانده برای تأیید</span>
+          </div>
         </div>
-        <AppButton
-          block
-          variant="secondary"
-          :disabled="loading || Boolean(pendingAuthenticatedLogin)"
-          @click="startRecoveryFlow"
-        >
-          به دستگاه قبلی دسترسی ندارم
-        </AppButton>
-        <button
-          type="button"
-          class="ui-v2-auth-login-link"
-          :disabled="Boolean(pendingAuthenticatedLogin)"
-          @click="returnToOtpFromApproval"
-        >
-          بازگشت به مرحله کد تأیید
-        </button>
+        <div class="ui-v2-auth-login-actions">
+          <AppButton
+            block
+            variant="secondary"
+            :disabled="loading || Boolean(pendingAuthenticatedLogin)"
+            @click="startRecoveryFlow"
+          >
+            به دستگاه قبلی دسترسی ندارم
+          </AppButton>
+          <button
+            type="button"
+            class="ui-v2-auth-login-link"
+            :disabled="Boolean(pendingAuthenticatedLogin)"
+            @click="returnToOtpFromApproval"
+          >
+            بازگشت به مرحله کد تأیید
+          </button>
+        </div>
       </section>
 
       <section
@@ -1550,18 +1567,22 @@ function goBackToMobile() {
         tabindex="-1"
         aria-live="polite"
       >
-        <Loader2 class="ui-v2-auth-login-spinner" :size="28" aria-hidden="true" />
-        <div v-if="recoveryCountdown > 0" class="ui-v2-auth-login-countdown">
-          <strong>{{ formattedRecoveryTimer }}</strong>
-          <span>مهلت بررسی این درخواست</span>
+        <div class="ui-v2-auth-login-body">
+          <Loader2 class="ui-v2-auth-login-spinner" :size="28" aria-hidden="true" />
+          <div v-if="recoveryCountdown > 0" class="ui-v2-auth-login-countdown">
+            <strong>{{ formattedRecoveryTimer }}</strong>
+            <span>مهلت بررسی این درخواست</span>
+          </div>
         </div>
-        <button
-          type="button"
-          class="ui-v2-auth-login-link ui-v2-auth-login-link--danger"
-          @click="cancelRecoveryFlow"
-        >
-          انصراف از درخواست بازیابی
-        </button>
+        <div class="ui-v2-auth-login-actions">
+          <button
+            type="button"
+            class="ui-v2-auth-login-link ui-v2-auth-login-link--danger"
+            @click="cancelRecoveryFlow"
+          >
+            انصراف از درخواست بازیابی
+          </button>
+        </div>
       </section>
 
       <section
@@ -1573,49 +1594,53 @@ function goBackToMobile() {
         tabindex="-1"
         aria-live="polite"
       >
-        <div v-if="recoveryCountdown > 0" class="ui-v2-auth-login-meta">
-          <span>مهلت ارسال مدرک</span>
-          <strong>{{ formattedRecoveryTimer }}</strong>
+        <div class="ui-v2-auth-login-body">
+          <div v-if="recoveryCountdown > 0" class="ui-v2-auth-login-meta">
+            <span>مهلت ارسال مدرک</span>
+            <strong>{{ formattedRecoveryTimer }}</strong>
+          </div>
+
+          <div class="ui-v2-auth-login-picker-grid" aria-label="انتخاب منبع مدرک">
+            <AppButton variant="secondary" @click="openRecoveryPicker('gallery')">گالری</AppButton>
+            <AppButton variant="secondary" @click="openRecoveryPicker('camera')">دوربین</AppButton>
+            <AppButton variant="secondary" @click="openRecoveryPicker('file')">فایل</AppButton>
+          </div>
+
+          <div class="ui-v2-auth-login-upload" role="status">
+            <FileCheck2 :size="20" aria-hidden="true" />
+            <span v-if="selectedRecoveryFileName">{{ selectedRecoveryFileName }}</span>
+            <span v-else>هنوز فایلی انتخاب نشده است</span>
+          </div>
+
+          <AppFormField label="توضیح اختیاری">
+            <template #default="{ id, describedby }">
+              <AppTextarea
+                :id="id"
+                v-model="recoveryCaption"
+                rows="3"
+                placeholder="توضیح اختیاری"
+                :aria-describedby="describedby"
+              />
+            </template>
+          </AppFormField>
+
+          <p class="ui-v2-auth-login-privacy">
+            مدرک برای بررسی این درخواست در اختیار بررسی‌کنندگان مجاز بازیابی قرار می‌گیرد.
+          </p>
         </div>
 
-        <div class="ui-v2-auth-login-picker-grid" aria-label="انتخاب منبع مدرک">
-          <AppButton variant="secondary" @click="openRecoveryPicker('gallery')">گالری</AppButton>
-          <AppButton variant="secondary" @click="openRecoveryPicker('camera')">دوربین</AppButton>
-          <AppButton variant="secondary" @click="openRecoveryPicker('file')">فایل</AppButton>
+        <div class="ui-v2-auth-login-actions">
+          <AppButton block :loading="loading" @click="submitRecoveryIdentity">
+            ارسال مدرک برای بررسی
+          </AppButton>
+          <button
+            type="button"
+            class="ui-v2-auth-login-link ui-v2-auth-login-link--danger"
+            @click="cancelRecoveryFlow"
+          >
+            انصراف از درخواست بازیابی
+          </button>
         </div>
-
-        <div class="ui-v2-auth-login-upload" role="status">
-          <FileCheck2 :size="20" aria-hidden="true" />
-          <span v-if="selectedRecoveryFileName">{{ selectedRecoveryFileName }}</span>
-          <span v-else>هنوز فایلی انتخاب نشده است</span>
-        </div>
-
-        <AppFormField label="توضیح اختیاری">
-          <template #default="{ id, describedby }">
-            <AppTextarea
-              :id="id"
-              v-model="recoveryCaption"
-              rows="3"
-              placeholder="توضیح اختیاری"
-              :aria-describedby="describedby"
-            />
-          </template>
-        </AppFormField>
-
-        <p class="ui-v2-auth-login-privacy">
-          مدرک برای بررسی این درخواست در اختیار بررسی‌کنندگان مجاز بازیابی قرار می‌گیرد.
-        </p>
-
-        <AppButton block :loading="loading" @click="submitRecoveryIdentity">
-          ارسال مدرک برای بررسی
-        </AppButton>
-        <button
-          type="button"
-          class="ui-v2-auth-login-link ui-v2-auth-login-link--danger"
-          @click="cancelRecoveryFlow"
-        >
-          انصراف از درخواست بازیابی
-        </button>
       </section>
 
       <section
@@ -1627,10 +1652,12 @@ function goBackToMobile() {
         tabindex="-1"
         aria-live="polite"
       >
-        <FileCheck2 :size="32" aria-hidden="true" />
-        <div v-if="recoveryCountdown > 0" class="ui-v2-auth-login-countdown">
-          <strong>{{ formattedRecoveryTimer }}</strong>
-          <span>مهلت بررسی این درخواست</span>
+        <div class="ui-v2-auth-login-body">
+          <FileCheck2 :size="32" aria-hidden="true" />
+          <div v-if="recoveryCountdown > 0" class="ui-v2-auth-login-countdown">
+            <strong>{{ formattedRecoveryTimer }}</strong>
+            <span>مهلت بررسی این درخواست</span>
+          </div>
         </div>
       </section>
 
@@ -1643,10 +1670,14 @@ function goBackToMobile() {
         tabindex="-1"
         aria-live="polite"
       >
-        <FileCheck2 :size="32" aria-hidden="true" />
-        <AppButton block :loading="loading" @click="enterWithApprovedRecovery">
-          ورود به سامانه
-        </AppButton>
+        <div class="ui-v2-auth-login-body">
+          <FileCheck2 :size="32" aria-hidden="true" />
+        </div>
+        <div class="ui-v2-auth-login-actions">
+          <AppButton block :loading="loading" @click="enterWithApprovedRecovery">
+            ورود به سامانه
+          </AppButton>
+        </div>
       </section>
 
       <section
@@ -1658,7 +1689,9 @@ function goBackToMobile() {
         tabindex="-1"
         aria-live="polite"
       >
-        <AppButton block @click="restartLoginFlow">شروع دوباره</AppButton>
+        <div class="ui-v2-auth-login-actions">
+          <AppButton block @click="restartLoginFlow">شروع دوباره</AppButton>
+        </div>
       </section>
 
       <section
@@ -1670,8 +1703,12 @@ function goBackToMobile() {
         tabindex="-1"
         aria-live="polite"
       >
-        <Clock :size="32" aria-hidden="true" />
-        <AppButton block @click="restartLoginFlow">شروع دوباره</AppButton>
+        <div class="ui-v2-auth-login-body">
+          <Clock :size="32" aria-hidden="true" />
+        </div>
+        <div class="ui-v2-auth-login-actions">
+          <AppButton block @click="restartLoginFlow">شروع دوباره</AppButton>
+        </div>
       </section>
     </transition>
 

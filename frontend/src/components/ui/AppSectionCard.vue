@@ -1,6 +1,6 @@
 <script setup lang="ts">
 withDefaults(defineProps<{
-  title: string
+  title?: string
   description?: string
   tone?: 'neutral' | 'primary' | 'success' | 'warning' | 'danger' | 'info'
 }>(), {
@@ -10,9 +10,9 @@ withDefaults(defineProps<{
 
 <template>
   <section class="ui-section-card" :class="`ui-section-card--${tone}`">
-    <header class="ui-section-card__header">
+    <header v-if="title || $slots.actions" class="ui-section-card__header">
       <div class="ui-section-card__copy">
-        <h2>{{ title }}</h2>
+        <h2 v-if="title">{{ title }}</h2>
         <p v-if="description">{{ description }}</p>
       </div>
       <div v-if="$slots.actions" class="ui-section-card__actions">

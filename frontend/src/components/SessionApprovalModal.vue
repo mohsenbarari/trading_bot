@@ -180,8 +180,8 @@ onBeforeUnmount(() => {
         v-if="showModal"
         :class="
           v2Portal
-            ? 'ui-v2-session-layer fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm'
-            : 'fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm'
+            ? 'ui-v2-session-layer fixed inset-0 z-[10000] flex items-end justify-center p-0 bg-black/40 backdrop-blur-sm'
+            : 'fixed inset-0 z-[9999] flex items-end justify-center p-0 bg-black/40 backdrop-blur-sm'
         "
         :data-ui-system="portalScopeValue"
         :data-ui-v2-motion="v2Portal ? 'essential' : undefined"
@@ -192,8 +192,8 @@ onBeforeUnmount(() => {
           ref="dialogRef"
           :class="
             v2Portal
-              ? 'ui-v2-session-card bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden'
-              : 'bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-scale-in'
+              ? 'ui-v2-session-card bg-white w-full max-w-md overflow-hidden rounded-t-2xl'
+              : 'bg-white w-full max-w-md overflow-hidden rounded-t-2xl animate-scale-in'
           "
           :role="v2Portal ? 'dialog' : undefined"
           :aria-modal="v2Portal ? 'true' : undefined"

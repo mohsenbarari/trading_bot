@@ -760,18 +760,14 @@ onUnmounted(() => {
         role="status"
       />
       <div v-else-if="commodities.length" class="dashboard-commodity-list">
-        <article v-for="commodity in commodities" :key="commodity.id" class="dashboard-commodity">
-          <header>
-            <strong>{{ commodity.name }}</strong>
-            <AppStatusBadge tone="neutral">
-              {{ formatNumber(commodity.aliases.length) }} نام مستعار
-            </AppStatusBadge>
-          </header>
-          <div v-if="commodity.aliases.length" class="dashboard-commodity__aliases">
-            <span v-for="alias in commodity.aliases" :key="`${commodity.id}-${alias}`">{{ alias }}</span>
-          </div>
-          <p v-else>نام مستعار دیگری ثبت نشده است.</p>
-        </article>
+        <AppListItem
+          v-for="commodity in commodities"
+          :key="commodity.id"
+          class="dashboard-commodity"
+          :title="commodity.name"
+          :description="commodity.aliases.length ? commodity.aliases.join('، ') : 'نام مستعار دیگری ثبت نشده است.'"
+          :meta="`${formatNumber(commodity.aliases.length)} نام مستعار`"
+        />
       </div>
     </AppDisclosure>
   </div>
@@ -877,24 +873,6 @@ onUnmounted(() => {
   font-size: inherit;
 }
 
-.dashboard-commodity strong {
-  color: var(--ds-text-primary);
-  overflow-wrap: anywhere;
-}
-
-.dashboard-commodity p {
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-xs);
-  line-height: 1.6;
-}
-
-.dashboard-commodity header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
 .dashboard-disclosure-chevron {
   flex: none;
   transition: transform 0.18s ease;
@@ -925,40 +903,14 @@ onUnmounted(() => {
 .dashboard-coworker-list,
 .dashboard-commodity-list {
   display: grid;
-  gap: 0.5rem;
+  gap: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--ds-bg-card);
 }
 
 .dashboard-commodity {
   min-width: 0;
-  padding: 0.75rem;
-  border: 1px solid var(--ds-border-medium);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-bg-inset);
-}
-
-.dashboard-commodity header {
-  align-items: center;
-}
-
-.dashboard-commodity__aliases {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-  margin-block-start: 0.5rem;
-}
-
-.dashboard-commodity__aliases span {
-  max-width: 100%;
-  padding: 0.25rem 0.5rem;
-  border-radius: 999px;
-  background: var(--ds-bg-card);
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-xs);
-  overflow-wrap: anywhere;
-}
-
-.dashboard-commodity p {
-  margin: 0.5rem 0 0;
 }
 
 @media (max-width: 540px) {

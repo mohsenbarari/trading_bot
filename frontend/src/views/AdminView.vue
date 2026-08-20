@@ -813,12 +813,9 @@ onUnmounted(() => {
               :label="adminSubviewReturnLabel"
               @click="handleAdminSubviewReturn"
             />
+            <h2 class="admin-subview-title">{{ currentSectionMeta.title }}</h2>
           </div>
-          <AppSectionCard
-            class="admin-subview-card"
-            :title="currentSectionMeta.title"
-            :description="currentSectionMeta.description"
-          >
+          <AppSectionCard class="admin-subview-card">
 
             <transition name="fade" mode="out-in">
               <CreateInvitationView
@@ -915,7 +912,17 @@ onUnmounted(() => {
 .admin-subview-nav {
   display: flex;
   align-items: center;
+  gap: 0.5rem;
   min-height: var(--ds-native-row-min-height, 48px);
+}
+
+.admin-subview-title {
+  margin: 0;
+  min-width: 0;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-lg);
+  font-weight: 800;
+  line-height: 1.4;
 }
 
 .fade-enter-active,

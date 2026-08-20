@@ -147,7 +147,7 @@ async function save() {
 
 .overtime-pref__current {
   margin-top: 0.45rem !important;
-  color: #0f766e !important;
+  color: var(--ds-primary-700) !important;
   font-weight: 600;
 }
 

@@ -109,6 +109,17 @@ describe('LoginView.vue', () => {
     Object.defineProperty(window, 'location', { configurable: true, value: originalWindowLocation })
   })
 
+  it('keeps the primary action below the form so login reads as an installed app', async () => {
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView, { attachTo: document.body })
+
+    expect(wrapper.get('.ui-v2-auth-login-body').text()).toContain(
+      'کد ابتدا در تلگرام و در صورت نیاز با پیامک می‌آید.',
+    )
+    expect(wrapper.get('.ui-v2-auth-login-actions').text()).toContain('دریافت کد تأیید')
+    expect(wrapper.get('.ui-v2-public-header').text()).toContain('سامانه معاملات')
+  })
+
   it('moves to the OTP step after a successful OTP request', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeJsonResponse({ method: 'telegram' }) as any)

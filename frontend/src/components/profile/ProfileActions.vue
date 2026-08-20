@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { AppActionCard, AppSectionCard } from '../ui'
+import { ChevronLeft } from 'lucide-vue-next'
+import { AppListItem, AppSectionCard } from '../ui'
 import type { ProfileActionItem } from './types'
 
 withDefaults(defineProps<{
@@ -26,23 +27,26 @@ const emit = defineEmits<{
         <slot name="actions" />
       </template>
       <div class="profile-action-grid">
-        <AppActionCard
+        <AppListItem
           v-for="action in actions"
           :key="action.key"
           class="profile-action-card"
           :class="[action.className, { 'profile-action-card--disabled': Boolean(action.disabled) }]"
+          interactive
           :title="loading ? 'در حال بارگذاری...' : action.label"
           :description="action.description || undefined"
           :disabled="Boolean(action.disabled) || loading"
-          :tone="action.tone || 'warning'"
           @select="emit('select', action)"
         >
-          <template v-if="action.icon" #icon>
+          <template v-if="action.icon" #leading>
             <span class="profile-action-card__icon" aria-hidden="true">
               <component :is="action.icon" :size="18" />
             </span>
           </template>
-        </AppActionCard>
+          <template #trailing>
+            <ChevronLeft :size="18" aria-hidden="true" />
+          </template>
+        </AppListItem>
       </div>
       <slot />
     </AppSectionCard>
@@ -53,17 +57,22 @@ const emit = defineEmits<{
 .profile-action-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 0.75rem;
+  gap: 0;
   width: 100%;
 }
 
 .profile-action-card {
   width: 100%;
-  transition: all 0.2s;
+  min-height: var(--ds-native-row-min-height, 48px);
+  border: 0;
+  border-radius: 0;
+  background: var(--ds-bg-card);
+  box-shadow: inset 0 -1px 0 var(--ds-native-hairline);
+  transition: background-color 0.2s;
 }
 
 .profile-action-card:active {
-  transform: scale(0.98);
+  transform: none;
 }
 
 .profile-action-card--disabled {

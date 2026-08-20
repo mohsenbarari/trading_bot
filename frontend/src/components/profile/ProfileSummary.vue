@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AppMetricCard } from '../ui'
+import { AppListItem } from '../ui'
 import type { ProfileCustomerContext, ProfileStatItem } from './types'
 
 withDefaults(defineProps<{
@@ -25,12 +25,11 @@ withDefaults(defineProps<{
     </div>
 
     <section v-if="stats.length > 0" class="profile-stats-grid" aria-label="خلاصه وضعیت پروفایل">
-      <AppMetricCard
+      <AppListItem
         v-for="stat in stats"
         :key="stat.key"
-        :label="stat.label"
-        :value="stat.value"
-        tone="neutral"
+        :title="stat.label"
+        :meta="stat.value"
       />
     </section>
 
@@ -49,10 +48,13 @@ withDefaults(defineProps<{
 
 .profile-stats-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
   width: 100%;
   max-width: var(--ds-page-max-width);
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--ds-bg-card);
 }
 
 .customer-context-banner {
@@ -60,8 +62,8 @@ withDefaults(defineProps<{
   max-width: min(100%, 520px);
   margin: 0 auto;
   padding: 12px 14px;
-  border-radius: var(--ds-radius-lg);
-  border: 1px solid var(--ds-primary-200);
+  border-radius: 12px;
+  border: 1px solid var(--ds-native-hairline);
   background: var(--ds-bg-card);
   text-align: right;
 }

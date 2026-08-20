@@ -936,11 +936,11 @@ onBeforeUnmount(() => {
 }
 
 .conversation-card--management .conv-name {
-  color: #0f766e;
+  color: var(--ds-primary-700, #b45309);
 }
 
 .conversation-card--active {
-  background: rgba(0, 122, 255, 0.12);
+  background: rgba(245, 158, 11, 0.12);
   border-color: transparent;
   box-shadow: none;
 }
@@ -991,15 +991,15 @@ onBeforeUnmount(() => {
 }
 
 .conv-avatar.channel-avatar {
-  background: linear-gradient(135deg, #0f766e, #14b8a6);
+  background: var(--ds-primary-500, #f59e0b);
 }
 
 .conv-avatar.group-avatar {
-  background: linear-gradient(135deg, #2563eb, #38bdf8);
+  background: var(--ds-primary-600, #d97706);
 }
 
 .conv-avatar.management-avatar {
-  background: linear-gradient(135deg, #0f766e, #f59e0b);
+  background: var(--ds-primary-700, #b45309);
 }
 
 .conv-avatar-image {
@@ -1085,9 +1085,9 @@ onBeforeUnmount(() => {
 }
 
 .conv-role-badge.role-customer {
-  border-color: rgba(15, 118, 110, 0.22);
-  background: rgba(15, 118, 110, 0.1);
-  color: #0f766e;
+  border-color: rgba(245, 158, 11, 0.22);
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--ds-primary-700, #b45309);
 }
 
 .conv-role-badge.role-owner {

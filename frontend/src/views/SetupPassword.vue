@@ -223,14 +223,16 @@ async function submitPassword() {
         {{ error }}
       </div>
 
-      <AppButton
-        type="submit"
-        block
-        :loading="loading"
-        :disabled="loading || (!setupSucceeded && (!isPasswordValid || Boolean(confirmError)))"
-      >
-        {{ setupSucceeded ? 'تلاش دوباره برای ورود' : 'ثبت و ورود' }}
-      </AppButton>
+      <div class="ui-v2-auth-password-actions">
+        <AppButton
+          type="submit"
+          block
+          :loading="loading"
+          :disabled="loading || (!setupSucceeded && (!isPasswordValid || Boolean(confirmError)))"
+        >
+          {{ setupSucceeded ? 'تلاش دوباره برای ورود' : 'ثبت و ورود' }}
+        </AppButton>
+      </div>
     </form>
   </AuthFlowShell>
 </template>

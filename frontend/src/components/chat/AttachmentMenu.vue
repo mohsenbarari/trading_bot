@@ -3232,11 +3232,11 @@ onBeforeUnmount(() => {
   transition: background 0.2s;
 }
 .send-location-btn:active {
-  background: #2563eb;
+  background: #d97706;
 }
 
 .send-location-btn:disabled {
-  background: #93c5fd;
+  background: #fcd34d;
   cursor: not-allowed;
 }
 

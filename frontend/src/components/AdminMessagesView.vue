@@ -785,18 +785,18 @@ onMounted(loadDashboard)
 }
 
 .help-trigger:hover {
-  color: #0f766e;
-  border-color: rgba(15, 118, 110, 0.24);
-  background: rgba(240, 253, 250, 0.95);
+  color: var(--ds-primary-700);
+  border-color: rgba(245, 158, 11, 0.28);
+  background: var(--ds-primary-50);
 }
 
 .inline-help-note {
   margin-top: 0.7rem;
   padding: 0.72rem 0.85rem;
   border-radius: 14px;
-  border: 1px solid rgba(15, 118, 110, 0.12);
-  background: rgba(240, 253, 250, 0.92);
-  color: #0f4c48;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  background: var(--ds-primary-50);
+  color: var(--ds-primary-800);
   font-size: var(--ds-font-helper);
   line-height: 1.8;
   box-shadow: none;
@@ -866,8 +866,8 @@ onMounted(loadDashboard)
 
 .status-pill--info,
 .history-badge {
-  background: rgba(15, 118, 110, 0.1);
-  color: #0f766e;
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--ds-primary-700);
 }
 
 .status-copy {
@@ -914,25 +914,33 @@ onMounted(loadDashboard)
 
 .target-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.65rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
   margin-top: 0.85rem;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--ds-bg-card);
 }
 
 .target-option {
   position: relative;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   min-height: var(--ds-native-row-min-height, 48px);
   padding: 0.75rem 0.9rem;
-  border-radius: 12px;
-  border: 1px solid var(--ds-native-hairline);
-  background: var(--ds-bg-inset);
+  border-radius: 0;
+  border: 0;
+  border-block-end: 1px solid var(--ds-native-hairline);
+  background: var(--ds-bg-card);
   color: var(--ds-text-primary);
   font-weight: 750;
-  text-align: center;
+  text-align: start;
   cursor: pointer;
+}
+
+.target-option:last-child {
+  border-block-end: 0;
 }
 
 .target-option--active {

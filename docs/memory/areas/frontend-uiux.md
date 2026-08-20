@@ -4,6 +4,8 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Decisions
 
+- 2026-08-21 | Non-Market hubs, profile stats, admin subviews, customer stats, and mobile confirms now use grouped rows / bottom sheets. Messenger leftover teal maps to product amber. Market feed, calendar confirm, and Telegram-connect blue stay frozen.
+- 2026-08-20 | Public auth is the same installed-app language: inset fields, grouped invite rows, and a bottom primary action. OTP behavior and developer login stay unchanged. Market stays frozen.
 - 2026-08-20 | Installed PWA is the native target, not a store app. Splash, theme, and account hub rows follow the grouped language so Home Screen launch reads as one app. Market stays frozen.
 - 2026-08-20 | Messenger chrome joined the native language: RTL header + shared back, amber instead of Telegram blue, inset list rows, edge-to-edge tab bar, flat grouped page background. Market feed and Telegram-connect brand stay frozen.
 - 2026-08-20 | Page back is one control: 48px ghost, chevron right, leading/right of the header. Parent name may sit beside it. Market stays frozen.

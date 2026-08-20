@@ -27,11 +27,11 @@ import HelpPopover from './HelpPopover.vue';
 import JalaliDatePicker from './JalaliDatePicker.vue';
 import { ProfileIdentityHeader } from './profile';
 import {
-  AppActionCard,
   AppButton,
   AppConfirmDialog,
   AppFormField,
   AppInput,
+  AppListItem,
   AppResponsiveDialog,
   AppSelect,
 } from './ui';
@@ -1397,34 +1397,36 @@ async function confirmPendingAction() {
                 : 'اطلاعات این حساب برای مشاهده نمایش داده می‌شود؛ عملیات حساس مدیریتی از این مسیر مجاز نیست.'"
             />
             <template v-if="canPerformSensitiveAdminActions">
-              <AppActionCard
+              <AppListItem
                 class="profile-control settings-btn"
                 title="تنظیمات کاربر"
                 description="وضعیت، نقش، محدودیت و مسدودیت"
-                tone="primary"
+                interactive
                 @select="showSettings = true"
               >
-                <template #icon><Settings :size="20" /></template>
-              </AppActionCard>
-              <AppActionCard
+                <template #leading><Settings :size="20" /></template>
+                <template #trailing><ChevronLeft :size="18" aria-hidden="true" /></template>
+              </AppListItem>
+              <AppListItem
                 class="profile-control delete-btn"
                 title="حذف کاربر"
                 description="قطع دسترسی وب و پیام‌رسان"
-                tone="danger"
+                interactive
                 :disabled="isUserMutationBusy"
                 @select="deleteUser"
               >
-                <template #icon><Trash2 :size="20" /></template>
-              </AppActionCard>
+                <template #leading><Trash2 :size="20" /></template>
+                <template #trailing><ChevronLeft :size="18" aria-hidden="true" /></template>
+              </AppListItem>
             </template>
-            <AppActionCard
+            <AppListItem
               class="profile-control back-btn"
               title="بازگشت به لیست"
-              tone="neutral"
+              interactive
               @select="$emit('navigate', 'manage_users')"
             >
-              <template #icon><ChevronLeft :size="20" /></template>
-            </AppActionCard>
+              <template #leading><ChevronLeft :size="20" /></template>
+            </AppListItem>
         </div>
 
         <div v-else-if="canPerformSensitiveAdminActions" class="settings-menu profile-menu-card card-with-help">
@@ -1436,75 +1438,83 @@ async function confirmPendingAction() {
             label="راهنمای زیرمنوی تنظیمات کاربر"
             text="این زیرمنو برای تغییر وضعیت حساب، نقش، محدودیت و مسدودیت کاربر است. گزینه‌های حذف یا بازگشت در منوی قبلی قرار دارند."
           />
-          <AppActionCard
+          <AppListItem
             class="profile-control"
             :title="`تغییر وضعیت حساب (${isAccountInactive ? 'غیرفعال' : 'فعال'})`"
-            tone="warning"
+            interactive
             :disabled="isUserMutationBusy"
             @select="toggleAccountStatus"
           >
-            <template #icon><RotateCcw :size="20" /></template>
-          </AppActionCard>
-            <AppActionCard
+            <template #leading><RotateCcw :size="20" /></template>
+            <template #trailing><ChevronLeft :size="18" aria-hidden="true" /></template>
+          </AppListItem>
+            <AppListItem
               v-if="canEditRole"
               class="profile-control"
               title="ویرایش نقش"
+              interactive
               :disabled="isUserMutationBusy"
               @select="roleError = ''; isEditingRole = true"
             >
-              <template #icon><Pencil :size="20" /></template>
-            </AppActionCard>
+              <template #leading><Pencil :size="20" /></template>
+              <template #trailing><ChevronLeft :size="18" aria-hidden="true" /></template>
+            </AppListItem>
 
-            <AppActionCard
+            <AppListItem
               v-if="!hasLimitations"
               class="profile-control"
               title="اعمال محدودیت"
-              tone="warning"
+              interactive
               :disabled="isUserMutationBusy"
               @select="openLimitationsModal"
             >
-              <template #icon><AlertTriangle :size="20" /></template>
-            </AppActionCard>
-            <AppActionCard
+              <template #leading><AlertTriangle :size="20" /></template>
+              <template #trailing><ChevronLeft :size="18" aria-hidden="true" /></template>
+            </AppListItem>
+            <AppListItem
               v-else
               class="profile-control unlimit-btn"
               title="رفع محدودیت"
-              tone="success"
+              interactive
               :disabled="isUserMutationBusy"
               @select="removeLimitations"
             >
-              <template #icon><Check :size="20" /></template>
-            </AppActionCard>
+              <template #leading><Check :size="20" /></template>
+              <template #trailing><ChevronLeft :size="18" aria-hidden="true" /></template>
+            </AppListItem>
 
-            <AppActionCard
+            <AppListItem
               v-if="!isRestricted"
               class="profile-control block-btn"
               title="مسدود کردن"
-              tone="danger"
+              interactive
               :disabled="isUserMutationBusy"
               @select="openBlockModal"
             >
-              <template #icon><Ban :size="20" /></template>
-            </AppActionCard>
-            <AppActionCard
+              <template #leading><Ban :size="20" /></template>
+              <template #trailing><ChevronLeft :size="18" aria-hidden="true" /></template>
+            </AppListItem>
+            <AppListItem
               v-else
               class="profile-control unblock-btn"
               title="رفع مسدودیت"
-              tone="success"
+              interactive
               :disabled="isUserMutationBusy"
               @select="unblockUser"
             >
-              <template #icon><Undo2 :size="20" /></template>
-            </AppActionCard>
+              <template #leading><Undo2 :size="20" /></template>
+              <template #trailing><ChevronLeft :size="18" aria-hidden="true" /></template>
+            </AppListItem>
 
-            <AppActionCard
+            <AppListItem
               class="profile-control back-btn"
               title="بازگشت"
+              interactive
               :disabled="isUserMutationBusy"
               @select="showSettings = false"
             >
-              <template #icon><ChevronLeft :size="20" /></template>
-            </AppActionCard>
+              <template #leading><ChevronLeft :size="20" /></template>
+            </AppListItem>
         </div>
       </template>
     </div>
@@ -1629,22 +1639,25 @@ async function confirmPendingAction() {
           label="راهنمای پنل کاربری"
           text="از این بخش به پیام‌های سیستمی و تنظیمات مجاز همین حساب دسترسی داری. گزینه‌های مدیریتی فقط برای ادمین‌ها نمایش داده می‌شود."
         />
-        <AppActionCard
+        <AppListItem
           class="profile-control notification-btn"
           title="صندوق پیام‌ها"
+          interactive
           @select="emit('navigate', 'notifications')"
         >
-          <template #icon><Bell :size="20" /></template>
-        </AppActionCard>
-        <AppActionCard
+          <template #leading><Bell :size="20" /></template>
+          <template #trailing><ChevronLeft :size="18" aria-hidden="true" /></template>
+        </AppListItem>
+        <AppListItem
           v-if="user.role !== 'عادی'"
           class="profile-control settings-btn"
           title="تنظیمات"
-          tone="primary"
+          interactive
           @select="emit('navigate', 'user_settings')"
         >
-          <template #icon><Settings :size="20" /></template>
-        </AppActionCard>
+          <template #leading><Settings :size="20" /></template>
+          <template #trailing><ChevronLeft :size="18" aria-hidden="true" /></template>
+        </AppListItem>
       </div>
     </template>
 
@@ -1954,7 +1967,7 @@ async function confirmPendingAction() {
   border: 1px solid var(--ds-border-medium);
   border-radius: var(--ds-radius-xl);
   padding: var(--ds-card-padding);
-  box-shadow: var(--ds-shadow-md);
+  box-shadow: none;
   min-width: 0;
 }
 .admin-user-profile {
@@ -2049,15 +2062,16 @@ input[type="number"].form-input::-webkit-inner-spin-button {
 .profile-menu-card {
   position: relative;
   margin-top: 0.25rem;
-  padding: 1rem;
+  padding: 0;
   padding-left: 3.8rem;
-  border: 1px solid var(--ds-border-medium);
-  border-radius: var(--ds-radius-xl);
+  border: 0;
+  border-radius: 12px;
   background: var(--ds-bg-card);
-  box-shadow: var(--ds-shadow-md);
+  box-shadow: none;
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 0;
+  overflow: hidden;
   min-width: 0;
 }
 
@@ -2067,6 +2081,11 @@ input[type="number"].form-input::-webkit-inner-spin-button {
 
 .profile-control {
   width: 100%;
+  min-height: var(--ds-native-row-min-height, 48px);
+  border: 0;
+  border-radius: 0;
+  background: var(--ds-bg-card);
+  box-shadow: inset 0 -1px 0 var(--ds-native-hairline);
   transition: all 0.2s;
 }
 
@@ -2077,7 +2096,7 @@ input[type="number"].form-input::-webkit-inner-spin-button {
 }
 .duration-list {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.5rem;
   margin-bottom: 0.25rem;
 }

@@ -650,135 +650,151 @@ async function skipTelegramConnect() {
     </AppErrorState>
 
     <section v-else class="ui-v2-auth-register-step" aria-live="polite">
-      <div v-if="inviteInfo" class="ui-v2-auth-register-context">
-        <p>
-          <span>نام حساب</span><strong>{{ inviteInfo.account_name }}</strong>
-        </p>
-        <p>
-          <span>موبایل</span><strong dir="ltr">{{ inviteInfo.mobile_number }}</strong>
-        </p>
-        <p>
-          <span>نقش</span><strong>{{ inviteInfo.role }}</strong>
-        </p>
-        <p v-if="inviteExpiry">
-          <span>مهلت ثبت‌نام</span><strong>{{ inviteExpiry }}</strong>
-        </p>
+      <div class="ui-v2-auth-register-body">
+        <div v-if="inviteInfo" class="ui-v2-auth-register-context">
+          <p>
+            <span>نام حساب</span><strong>{{ inviteInfo.account_name }}</strong>
+          </p>
+          <p>
+            <span>موبایل</span><strong dir="ltr">{{ inviteInfo.mobile_number }}</strong>
+          </p>
+          <p>
+            <span>نقش</span><strong>{{ inviteInfo.role }}</strong>
+          </p>
+          <p v-if="inviteExpiry">
+            <span>مهلت ثبت‌نام</span><strong>{{ inviteExpiry }}</strong>
+          </p>
+        </div>
+
+        <div v-if="error" class="ui-v2-auth-error" role="alert">
+          <span>{{ error }}</span>
+          <AppButton
+            v-if="retryAvailable"
+            variant="secondary"
+            size="sm"
+            :loading="loading"
+            @click="retryFailedOperation"
+          >
+            تلاش مجدد
+          </AppButton>
+          <button v-else type="button" class="ui-v2-auth-register-link" @click="returnToForm">
+            بازگشت به فرم
+          </button>
+        </div>
+
+        <template v-if="step === 1">
+          <p class="ui-v2-auth-register-guidance">
+            کد تأیید برای موبایل ثبت‌شده در دعوت‌نامه ارسال می‌شود.
+          </p>
+        </template>
+
+        <template v-else-if="step === 2">
+          <AppFormField label="کد تأیید پنج‌رقمی">
+            <template #default="{ id, describedby }">
+              <AppInput
+                :id="id"
+                ref="otpInput"
+                v-model="otpCode"
+                class="ui-v2-auth-register-code"
+                :aria-describedby="describedby"
+                type="text"
+                inputmode="numeric"
+                pattern="[0-9]*"
+                maxlength="5"
+                dir="ltr"
+                autocomplete="one-time-code"
+                placeholder="_____"
+                autofocus
+              />
+            </template>
+          </AppFormField>
+        </template>
+
+        <template v-else-if="step === 3">
+          <AppFormField
+            label="نشانی دقیق پستی"
+            hint="استان، شهر، خیابان، پلاک و توضیح لازم را کامل وارد کنید."
+          >
+            <template #default="{ id, describedby }">
+              <AppTextarea
+                :id="id"
+                ref="addressInput"
+                v-model="address"
+                class="ui-v2-auth-register-address"
+                :aria-describedby="describedby"
+                rows="4"
+                autocomplete="street-address"
+                placeholder="استان، شهر، خیابان، پلاک…"
+                autofocus
+              />
+            </template>
+          </AppFormField>
+          <p class="ui-v2-auth-register-privacy">نشانی در پروفایل عمومی نمایش داده نمی‌شود.</p>
+        </template>
+
+        <template v-else>
+          <div
+            ref="completionStatus"
+            class="ui-v2-auth-register-guidance"
+            role="status"
+            tabindex="-1"
+            aria-labelledby="registration-complete-title"
+          >
+            <strong id="registration-complete-title">اتصال تلگرام</strong>
+            <p>این اتصال اختیاری است و دسترسی وب شما را محدود نمی‌کند.</p>
+          </div>
+          <div v-if="telegramLinkError" class="ui-v2-auth-error" role="alert">
+            {{ telegramLinkError }}
+          </div>
+        </template>
       </div>
 
-      <div v-if="error" class="ui-v2-auth-error" role="alert">
-        <span>{{ error }}</span>
-        <AppButton
-          v-if="retryAvailable"
-          variant="secondary"
-          size="sm"
-          :loading="loading"
-          @click="retryFailedOperation"
-        >
-          تلاش مجدد
-        </AppButton>
-        <button v-else type="button" class="ui-v2-auth-register-link" @click="returnToForm">
-          بازگشت به فرم
-        </button>
+      <div class="ui-v2-auth-register-actions">
+        <template v-if="step === 1">
+          <AppButton block :loading="loading" @click="requestOtp">دریافت کد تأیید</AppButton>
+        </template>
+
+        <template v-else-if="step === 2">
+          <AppButton block :disabled="!otpCodeValid" :loading="loading" @click="verifyOtp">
+            تأیید و ادامه
+          </AppButton>
+          <button type="button" class="ui-v2-auth-register-link" @click="goBackOneStep">
+            بازگشت به بررسی دعوت‌نامه
+          </button>
+        </template>
+
+        <template v-else-if="step === 3">
+          <AppButton
+            block
+            :disabled="address.length < 10"
+            :loading="loading"
+            @click="submitRegistration"
+          >
+            تکمیل ثبت‌نام
+          </AppButton>
+          <button
+            v-if="contextKind === 'invitation'"
+            type="button"
+            class="ui-v2-auth-register-link"
+            @click="goBackOneStep"
+          >
+            بازگشت به کد تأیید
+          </button>
+        </template>
+
+        <template v-else>
+          <AppButton block :loading="telegramLinkBusy" @click="connectTelegram">
+            اتصال به ربات تلگرام
+          </AppButton>
+          <AppButton
+            block
+            variant="secondary"
+            :disabled="telegramLinkBusy"
+            @click="skipTelegramConnect"
+            >فعلاً رد می‌کنم</AppButton
+          >
+        </template>
       </div>
-
-      <template v-if="step === 1">
-        <p class="ui-v2-auth-register-guidance">
-          کد تأیید برای موبایل ثبت‌شده در دعوت‌نامه ارسال می‌شود.
-        </p>
-        <AppButton block :loading="loading" @click="requestOtp">دریافت کد تأیید</AppButton>
-      </template>
-
-      <template v-else-if="step === 2">
-        <AppFormField label="کد تأیید پنج‌رقمی">
-          <template #default="{ id, describedby }">
-            <AppInput
-              :id="id"
-              ref="otpInput"
-              v-model="otpCode"
-              class="ui-v2-auth-register-code"
-              :aria-describedby="describedby"
-              type="text"
-              inputmode="numeric"
-              pattern="[0-9]*"
-              maxlength="5"
-              dir="ltr"
-              autocomplete="one-time-code"
-              placeholder="_____"
-              autofocus
-            />
-          </template>
-        </AppFormField>
-        <AppButton block :disabled="!otpCodeValid" :loading="loading" @click="verifyOtp">
-          تأیید و ادامه
-        </AppButton>
-        <button type="button" class="ui-v2-auth-register-link" @click="goBackOneStep">
-          بازگشت به بررسی دعوت‌نامه
-        </button>
-      </template>
-
-      <template v-else-if="step === 3">
-        <AppFormField
-          label="نشانی دقیق پستی"
-          hint="استان، شهر، خیابان، پلاک و توضیح لازم را کامل وارد کنید."
-        >
-          <template #default="{ id, describedby }">
-            <AppTextarea
-              :id="id"
-              ref="addressInput"
-              v-model="address"
-              class="ui-v2-auth-register-address"
-              :aria-describedby="describedby"
-              rows="4"
-              autocomplete="street-address"
-              placeholder="استان، شهر، خیابان، پلاک…"
-              autofocus
-            />
-          </template>
-        </AppFormField>
-        <p class="ui-v2-auth-register-privacy">نشانی در پروفایل عمومی نمایش داده نمی‌شود.</p>
-        <AppButton
-          block
-          :disabled="address.length < 10"
-          :loading="loading"
-          @click="submitRegistration"
-        >
-          تکمیل ثبت‌نام
-        </AppButton>
-        <button
-          v-if="contextKind === 'invitation'"
-          type="button"
-          class="ui-v2-auth-register-link"
-          @click="goBackOneStep"
-        >
-          بازگشت به کد تأیید
-        </button>
-      </template>
-
-      <template v-else>
-        <div
-          ref="completionStatus"
-          class="ui-v2-auth-register-guidance"
-          role="status"
-          tabindex="-1"
-          aria-labelledby="registration-complete-title"
-        >
-          <strong id="registration-complete-title">اتصال تلگرام</strong>
-          <p>این اتصال اختیاری است و دسترسی وب شما را محدود نمی‌کند.</p>
-        </div>
-        <div v-if="telegramLinkError" class="ui-v2-auth-error" role="alert">
-          {{ telegramLinkError }}
-        </div>
-        <AppButton block :loading="telegramLinkBusy" @click="connectTelegram">
-          اتصال به ربات تلگرام
-        </AppButton>
-        <AppButton
-          block
-          variant="secondary"
-          :disabled="telegramLinkBusy"
-          @click="skipTelegramConnect"
-          >فعلاً رد می‌کنم</AppButton
-        >
-      </template>
     </section>
   </AuthFlowShell>
 </template>

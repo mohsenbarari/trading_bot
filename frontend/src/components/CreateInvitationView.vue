@@ -679,7 +679,7 @@ function normalizeMobile(mobile: string): string {
 
 .pending-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--ds-section-gap);
   align-items: start;
   padding: 1rem;

@@ -1884,7 +1884,7 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 .message-bubble.type-text {
   min-width: var(--messenger-message-min-width, 58px);
 }
-.message-bubble.sent { align-self: flex-start; background: var(--messenger-bubble-sent, #007aff); color: #ffffff; border-radius: var(--messenger-radius-bubble, 18px) var(--messenger-radius-bubble, 18px) var(--messenger-radius-bubble-tail, 5px) var(--messenger-radius-bubble, 18px); box-shadow: none; }
+.message-bubble.sent { align-self: flex-start; background: var(--messenger-bubble-sent, #f59e0b); color: #ffffff; border-radius: var(--messenger-radius-bubble, 18px) var(--messenger-radius-bubble, 18px) var(--messenger-radius-bubble-tail, 5px) var(--messenger-radius-bubble, 18px); box-shadow: none; }
 .message-bubble.received { align-self: flex-end; background: var(--messenger-bubble-received, #e9e9eb); color: var(--messenger-text-strong, #1c1c1e); border-radius: var(--messenger-radius-bubble, 18px) var(--messenger-radius-bubble, 18px) var(--messenger-radius-bubble, 18px) var(--messenger-radius-bubble-tail, 5px); box-shadow: none; }
 .message-bubble.full-width-bubble { width: 100%; max-width: 100%; }
 .message-bubble.full-width-bubble.sent,
@@ -1903,7 +1903,7 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   content: 'پیام مدیریت';
   display: block;
   margin-bottom: 6px;
-  color: #0f766e;
+  color: var(--ds-primary-700, #b45309);
   font-size: 0.76rem;
   font-weight: 950;
 }

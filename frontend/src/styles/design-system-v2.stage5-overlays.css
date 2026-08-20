@@ -21,7 +21,7 @@
   border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
   border-radius: var(--ui-v2-radius-panel);
   background: var(--ui-v2-color-surface-card);
-  box-shadow: var(--ui-v2-effect-overlay);
+  box-shadow: none;
   color: var(--ui-v2-color-text-primary);
   font-family: var(--ui-v2-font-family);
 }

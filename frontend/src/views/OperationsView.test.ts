@@ -46,7 +46,7 @@ function findAction(wrapper: ReturnType<typeof mount>, label: string) {
 function actionTitles(wrapper: ReturnType<typeof mount>) {
   return wrapper
     .findAll('.operations-action-tile')
-    .map((action) => action.get('.ui-action-card__title-row strong').text())
+    .map((action) => action.get('.ui-list-item__copy strong').text())
 }
 
 describe('OperationsView.vue', () => {

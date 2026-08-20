@@ -49,9 +49,9 @@ const displayName = computed(() => {
   min-height: 20px;
   padding: 2px 8px;
   border-radius: 999px;
-  border: 1px solid rgba(15, 118, 110, 0.22);
-  background: rgba(15, 118, 110, 0.1);
-  color: #0f766e;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--ds-primary-700);
   font-size: 0.66rem;
   font-weight: 900;
   line-height: 1;

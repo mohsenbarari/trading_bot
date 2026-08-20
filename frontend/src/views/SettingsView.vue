@@ -11,7 +11,6 @@ import {
 import {
   AppBackButton,
   AppButton,
-  AppCard,
   AppConfirmDialog,
   AppEmptyState,
   AppErrorState,
@@ -762,7 +761,7 @@ watch(
             />
 
             <div v-if="sessions.length > 0" class="sessions-list">
-              <AppCard v-for="session in sessions" :key="session.id" class="session-card">
+              <article v-for="session in sessions" :key="session.id" class="session-card">
                 <div class="session-card__main">
                   <div class="session-card__identity">
                     <div
@@ -811,7 +810,7 @@ watch(
                   :title="sessionActionFeedback.title"
                   :message="sessionActionFeedback.message"
                 />
-              </AppCard>
+              </article>
             </div>
           </AppSectionCard>
 
@@ -877,7 +876,7 @@ watch(
           description="فقط نسخه‌های محلی فایل‌های دریافت‌شده حذف می‌شوند؛ پیام‌ها، تنظیمات حساب و فایل‌های روی سرور تغییر نمی‌کنند."
           tone="primary"
         >
-          <AppCard class="storage-card">
+          <div class="storage-card">
             <div class="storage-info">
               <div>
                 <span class="storage-label">فضای فایل‌های محلی پیام‌رسان</span>
@@ -926,7 +925,7 @@ watch(
               </template>
               پاک‌کردن فایل‌های محلی
             </AppButton>
-          </AppCard>
+          </div>
         </AppSectionCard>
       </template>
     </AppPage>
@@ -989,7 +988,16 @@ watch(
 
 .sessions-list {
   display: grid;
-  gap: 0.75rem;
+  gap: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--ds-bg-card);
+}
+
+.session-card {
+  padding: 0.85rem 1rem;
+  background: transparent;
+  box-shadow: inset 0 -1px 0 var(--ds-native-hairline);
 }
 
 .session-card__main,
@@ -1007,8 +1015,8 @@ watch(
 }
 
 .session-icon {
-  width: 38px;
-  height: 38px;
+  width: 48px;
+  height: 48px;
   border-radius: var(--ds-radius-sm);
   display: flex;
   align-items: center;

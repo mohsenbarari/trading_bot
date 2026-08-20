@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { Megaphone, Package, PlusCircle, Settings, Users } from 'lucide-vue-next'
+import { ChevronLeft, Megaphone, Package, PlusCircle, Settings, Users } from 'lucide-vue-next'
 import { computed } from 'vue'
 import type { Component } from 'vue'
 import { isCachedMiddleManager, isCachedSuperAdmin } from '../utils/adminAccess'
-import AppActionCard from './ui/AppActionCard.vue'
+import AppListItem from './ui/AppListItem.vue'
 
 defineEmits(['navigate'])
 
@@ -112,18 +112,21 @@ const actions = computed<AdminAction[]>(() => {
   <nav class="admin-panel-container" aria-label="ابزارهای مدیریت">
     <ul class="admin-action-list">
       <li v-for="action in actions" :key="action.key" class="admin-action-list__item">
-        <AppActionCard
+        <AppListItem
           class="admin-panel-action hub-action"
           :class="action.variant"
+          interactive
           :title="action.label"
           :description="action.description"
-          :tone="action.variant === 'primary' ? 'primary' : 'neutral'"
           @select="$emit('navigate', action.key)"
         >
-          <template #icon>
+          <template #leading>
             <component :is="action.icon" :size="20" />
           </template>
-        </AppActionCard>
+          <template #trailing>
+            <ChevronLeft :size="18" aria-hidden="true" />
+          </template>
+        </AppListItem>
       </li>
     </ul>
   </nav>
@@ -152,6 +155,10 @@ const actions = computed<AdminAction[]>(() => {
 .admin-panel-action {
   width: 100%;
   min-height: var(--ds-native-row-min-height, 48px);
+  border: 0;
+  border-radius: 0;
+  background: var(--ds-bg-card);
+  box-shadow: inset 0 -1px 0 var(--ds-native-hairline);
 }
 
 @media (min-width: 720px) {

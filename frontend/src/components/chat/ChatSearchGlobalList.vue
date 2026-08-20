@@ -114,7 +114,7 @@ function highlightText(text: string | undefined) {
 
 .conv-avatar {
   width: 50px; height: 50px; min-width: 50px; border-radius: 50%;
-  background: linear-gradient(135deg, #3b82f6, #2563eb); /* Search results often blueish or default gradient */
+  background: var(--ds-primary-500, #f59e0b);
   color: white; display: flex; align-items: center; justify-content: center;
   font-size: 20px; font-weight: 500; margin-left: 12px;
 }

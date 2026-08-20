@@ -747,8 +747,8 @@ onMounted(async () => {
 
 .notif-lines.is-trade-lines {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.35rem 0.45rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.35rem;
   align-items: start;
 }
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import AppActionCard from '../ui/AppActionCard.vue'
+import { ChevronLeft } from 'lucide-vue-next'
+import AppListItem from '../ui/AppListItem.vue'
 import { getUiDesignSystemScopeAttributes } from '../ui/uiDesignSystemScope'
 
 type WorkspaceTone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger'
@@ -20,17 +21,22 @@ const props = withDefaults(defineProps<{
   v2Scope: false,
 })
 
-defineEmits<{
+const emit = defineEmits<{
   select: []
 }>()
 
 const scopeAttributes = computed(() => (
   props.v2Scope ? getUiDesignSystemScopeAttributes() : {}
 ))
+
+function handleSelect() {
+  if (props.disabled) return
+  emit('select')
+}
 </script>
 
 <template>
-  <AppActionCard
+  <AppListItem
     v-bind="scopeAttributes"
     class="ds-action-tile"
     :class="[
@@ -41,18 +47,47 @@ const scopeAttributes = computed(() => (
         'ui-v2-workspace-action-adapter': v2Scope,
       },
     ]"
+    interactive
     :title="title"
     :description="description"
-    :badge="badge"
     :disabled="disabled"
-    :active="active"
-    :tone="tone"
-    @select="$emit('select')"
+    @select="handleSelect"
   >
-    <template v-if="$slots.icon" #icon>
+    <template v-if="$slots.icon" #leading>
       <span class="ds-action-tile-icon">
         <slot name="icon" />
       </span>
     </template>
-  </AppActionCard>
+    <template #trailing>
+      <span v-if="badge" class="ds-action-tile-badge">{{ badge }}</span>
+      <ChevronLeft :size="18" aria-hidden="true" />
+    </template>
+  </AppListItem>
 </template>
+
+<style scoped>
+.ds-action-tile {
+  width: 100%;
+  min-height: var(--ds-native-row-min-height, 48px);
+  border: 0;
+  border-radius: 0;
+  background: var(--ds-bg-card);
+  box-shadow: inset 0 -1px 0 var(--ds-native-hairline);
+}
+
+.ds-action-tile.is-active {
+  background: var(--ds-primary-50, #fffbeb);
+}
+
+.ds-action-tile :deep(.ui-list-item__trailing) {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--ds-text-muted);
+}
+
+.ds-action-tile-badge {
+  color: var(--ds-text-secondary);
+  font-size: 0.78rem;
+}
+</style>

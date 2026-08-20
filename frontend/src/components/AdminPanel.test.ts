@@ -30,7 +30,7 @@ describe('AdminPanel.vue', () => {
       /\.admin-panel-container\s*\{[\s\S]*?min-width:\s*0;[\s\S]*?font-family:\s*Vazirmatn,\s*Tahoma,\s*Arial,\s*sans-serif;[\s\S]*?font-synthesis:\s*none;/,
     )
     expect(adminPanelSource).toMatch(
-      /<nav class="admin-panel-container" aria-label="ابزارهای مدیریت">\s*<ul class="admin-action-list">\s*<li v-for="action in actions" :key="action.key" class="admin-action-list__item">\s*<AppActionCard[\s\S]*?class="admin-panel-action hub-action"/,
+      /<nav class="admin-panel-container" aria-label="ابزارهای مدیریت">\s*<ul class="admin-action-list">\s*<li v-for="action in actions" :key="action.key" class="admin-action-list__item">\s*<AppListItem[\s\S]*?class="admin-panel-action hub-action"/,
     )
   })
 

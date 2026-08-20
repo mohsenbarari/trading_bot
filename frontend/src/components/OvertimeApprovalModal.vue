@@ -41,7 +41,7 @@ const {
         <div class="overtime-owner-card">
           <div class="overtime-owner-header">
             <div class="overtime-owner-icon" aria-hidden="true">
-              <Hourglass class="w-7 h-7 text-white" />
+              <Hourglass class="w-7 h-7" />
             </div>
             <h3>{{ M35_OWNER_TITLE }}</h3>
           </div>
@@ -116,26 +116,26 @@ const {
   inset: 0;
   z-index: 9997;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: center;
-  padding: 1rem;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
+  padding: 0;
+  background: rgba(0, 0, 0, 0.4);
 }
 
 .overtime-owner-card {
   width: 100%;
-  max-width: 24rem;
+  max-width: 28rem;
   overflow: hidden;
-  border-radius: 1rem;
-  background: #fff;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.18);
+  border-radius: 1rem 1rem 0 0;
+  background: var(--ds-bg-card, #ffffff);
+  box-shadow: none;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .overtime-owner-header {
   padding: 1.25rem;
   text-align: center;
-  background: linear-gradient(90deg, #0f766e, #0d9488);
+  background: var(--ds-primary-50, #fffbeb);
 }
 
 .overtime-owner-icon {
@@ -146,12 +146,13 @@ const {
   align-items: center;
   justify-content: center;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--ds-primary-100, #fef3c7);
+  color: var(--ds-primary-700, #b45309);
 }
 
 .overtime-owner-header h3 {
   margin: 0;
-  color: #fff;
+  color: var(--ds-text-primary, #111827);
   font-size: 1.05rem;
   font-weight: 700;
 }
@@ -179,7 +180,7 @@ const {
   margin: 0;
   text-align: center;
   font-size: 0.9rem;
-  color: #0f766e;
+  color: var(--ds-primary-700, #b45309);
   font-weight: 600;
 }
 
@@ -216,8 +217,8 @@ const {
 }
 
 .overtime-btn--approve {
-  background: #10b981;
-  color: #fff;
+  background: var(--ds-primary-500, #f59e0b);
+  color: var(--ds-on-primary, #111827);
 }
 
 .overtime-btn--reject {

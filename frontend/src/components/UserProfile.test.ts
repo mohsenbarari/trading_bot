@@ -265,11 +265,11 @@ describe('UserProfile.vue authoritative admin actions', () => {
   it('renders admin chrome with shared ui action cards and form primitives', async () => {
     const wrapper = await mountProfile(makeUser())
     expect(wrapper.text()).toContain('بازار تهران، پلاک ۱۲')
-    expect(wrapper.get('.settings-btn').classes()).toContain('ui-action-card')
-    expect(wrapper.get('.delete-btn').classes()).toContain('ui-action-card')
+    expect(wrapper.get('.settings-btn').classes()).toContain('ui-list-item')
+    expect(wrapper.get('.delete-btn').classes()).toContain('ui-list-item')
 
     await openSettings(wrapper)
-    expect(wrapper.get('.block-btn').classes()).toContain('ui-action-card')
+    expect(wrapper.get('.block-btn').classes()).toContain('ui-list-item')
     await findButtonByText(wrapper, 'اعمال محدودیت').trigger('click')
 
     expect(wrapper.get('.modal-content .form-input').classes()).toContain('ui-input')

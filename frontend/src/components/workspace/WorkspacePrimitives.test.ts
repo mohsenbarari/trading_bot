@@ -177,8 +177,8 @@ describe('workspace primitives', () => {
     })
 
     expect(wrapper.classes()).toContain('ds-action-tile--primary')
-    expect(wrapper.classes()).toContain('ui-action-card')
-    expect(wrapper.classes()).toContain('ui-action-card--primary')
+    expect(wrapper.classes()).toContain('ui-list-item')
+    expect(wrapper.classes()).toContain('ui-list-item--interactive')
     expect(wrapper.classes()).toContain('is-active')
     expect(wrapper.attributes('data-ui-system')).toBeUndefined()
     expect(wrapper.text()).toContain('مدیریت مشتریان')

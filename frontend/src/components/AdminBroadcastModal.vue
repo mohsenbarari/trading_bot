@@ -104,10 +104,10 @@ async function submitBroadcast() {
   width: min(100%, 560px);
   max-height: min(88dvh, 720px);
   overflow-y: auto;
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.98);
-  border: 1px solid rgba(15, 118, 110, 0.16);
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
+  border-radius: 24px 24px 0 0;
+  background: var(--ds-bg-card);
+  border: 1px solid var(--ds-native-hairline);
+  box-shadow: none;
   padding: 1rem;
 }
 
@@ -123,7 +123,7 @@ async function submitBroadcast() {
   margin: 0 0 0.25rem;
   font-size: 1.05rem;
   font-weight: 950;
-  color: #0f766e;
+  color: var(--ds-primary-700);
 }
 
 .broadcast-modal-header p {
@@ -141,7 +141,7 @@ async function submitBroadcast() {
   width: 100%;
   resize: vertical;
   min-height: 140px;
-  border: 1.5px solid var(--ds-control-border, rgba(15, 118, 110, 0.2));
+  border: 1.5px solid var(--ds-control-border);
   border-radius: var(--ds-control-radius, 12px);
   background: var(--ds-control-bg, #fff);
   padding: 0.85rem;
@@ -152,19 +152,24 @@ async function submitBroadcast() {
 
 .target-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.6rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
   margin: 0.85rem 0;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--ds-bg-card);
 }
 
 .target-option {
   display: flex;
   align-items: center;
   gap: 0.55rem;
+  min-height: var(--ds-native-row-min-height, 48px);
   padding: 0.7rem 0.75rem;
-  border-radius: 14px;
-  background: rgba(236, 253, 245, 0.72);
-  border: 1px solid rgba(15, 118, 110, 0.14);
+  border-radius: 0;
+  background: var(--ds-bg-card);
+  border: 0;
+  border-block-end: 1px solid var(--ds-native-hairline);
   font-size: 0.86rem;
   font-weight: 800;
 }
