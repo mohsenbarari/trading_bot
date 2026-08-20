@@ -94,8 +94,8 @@ function openExternal() {
 .back-btn, .external-btn {
   background: none;
   border: none;
-  width: 40px;
-  height: 40px;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
   display: flex;
   align-items: center;
   justify-content: center;

@@ -1446,7 +1446,7 @@ const sendMessage = () => {
 .disabled-banner {
   justify-content: center;
   align-items: center;
-  min-height: var(--messenger-touch-target, 44px);
+  min-height: var(--messenger-touch-target, 48px);
   border: 1px solid var(--messenger-border-subtle, rgba(148, 163, 184, 0.32));
   background: var(--messenger-surface-muted, #f8fafc);
   border-radius: var(--messenger-radius-bubble, 12px);

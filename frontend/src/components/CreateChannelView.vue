@@ -1374,8 +1374,8 @@ onBeforeUnmount(() => {
 }
 
 .channel-admin-header-btn {
-  width: var(--messenger-touch-target, 44px);
-  height: var(--messenger-touch-target, 44px);
+  width: var(--messenger-touch-target, 48px);
+  height: var(--messenger-touch-target, 48px);
   border: 0;
   border-radius: var(--messenger-radius-control, 8px);
   background: rgba(226, 232, 240, 0.72);
@@ -1408,8 +1408,8 @@ onBeforeUnmount(() => {
 }
 
 .header-spacer {
-  width: 40px;
-  height: 40px;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
   flex-shrink: 0;
 }
 
@@ -1573,7 +1573,7 @@ onBeforeUnmount(() => {
 }
 
 .primary-chip {
-  min-height: 38px;
+  min-height: var(--ds-native-row-min-height, 48px);
   padding: 0 16px;
   background: #3390ec;
   color: #fff;
@@ -1895,7 +1895,7 @@ onBeforeUnmount(() => {
 }
 
 .channel-member-action {
-  min-height: 36px;
+  min-height: var(--ds-native-row-min-height, 48px);
   padding: 0.45rem 0.8rem;
   border: 1px solid rgba(148, 163, 184, 0.24);
   border-radius: 999px;

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { X } from 'lucide-vue-next'
 import { apiFetch } from '../utils/auth'
+import { AppTextarea } from './ui'
 
 const emit = defineEmits<{
   (e: 'close'): void
@@ -63,7 +64,7 @@ async function submitBroadcast() {
           </button>
         </header>
 
-        <textarea v-model="content" class="broadcast-textarea" rows="6" placeholder="متن پیام مدیریت..."></textarea>
+        <AppTextarea v-model="content" class="broadcast-textarea" rows="6" placeholder="متن پیام مدیریت..." />
 
         <div class="target-grid" aria-label="گروه‌های هدف">
           <label v-for="option in targetOptions" :key="option.key" class="target-option">
@@ -143,8 +144,8 @@ async function submitBroadcast() {
 .broadcast-close-control {
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.06);
   color: #0f172a;
@@ -154,13 +155,13 @@ async function submitBroadcast() {
   width: 100%;
   resize: vertical;
   min-height: 140px;
-  border: 1px solid rgba(15, 118, 110, 0.2);
-  border-radius: 16px;
+  border: 1.5px solid var(--ds-control-border, rgba(15, 118, 110, 0.2));
+  border-radius: var(--ds-control-radius, 12px);
+  background: var(--ds-control-bg, #fff);
   padding: 0.85rem;
   font: inherit;
   line-height: 1.8;
   color: #0f172a;
-  background: #fff;
 }
 
 .target-grid {
@@ -209,7 +210,7 @@ async function submitBroadcast() {
 
 .broadcast-dismiss-button,
 .broadcast-submit-button {
-  min-height: 42px;
+  min-height: var(--ds-native-row-min-height, 48px);
   padding: 0 1rem;
   border-radius: 999px;
   font-weight: 900;
@@ -221,7 +222,7 @@ async function submitBroadcast() {
 }
 
 .broadcast-submit-button {
-  background: linear-gradient(135deg, #0f766e, #f59e0b);
+  background: var(--ds-primary-500);
   color: #fff;
 }
 

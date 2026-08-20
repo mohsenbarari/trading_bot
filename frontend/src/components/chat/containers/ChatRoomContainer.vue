@@ -497,8 +497,8 @@ const useVirtualTimeline = computed(() => {
   position: absolute;
   bottom: 80px;
   right: 20px;
-  width: 40px;
-  height: 40px;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
   border-radius: 50%;
   background: #fff;
   border: none;

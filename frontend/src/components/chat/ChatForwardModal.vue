@@ -496,8 +496,8 @@ function confirmForward() {
 }
 
 .close-btn {
-  width: 40px;
-  height: 40px;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
   border: none;
   border-radius: 50%;
   background: #f3f4f6;

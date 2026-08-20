@@ -54,28 +54,26 @@ const emit = defineEmits<{
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.9rem;
-  padding: 0.95rem;
-  border: 1px solid var(--telegram-blue-border);
-  border-radius: var(--ds-radius-lg);
-  color: #ffffff;
+  min-height: var(--ds-native-row-min-height, 48px);
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--ds-native-hairline);
+  border-radius: 12px;
+  color: var(--ds-text-primary);
   font: inherit;
   text-align: right;
   cursor: pointer;
-  background:
-    radial-gradient(circle at 12% 18%, rgba(255, 255, 255, 0.26), transparent 29%),
-    linear-gradient(135deg, var(--telegram-blue-light), var(--telegram-blue) 48%, var(--telegram-blue-dark));
-  box-shadow: 0 14px 32px var(--ds-telegram-shadow);
-  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+  background: var(--ds-bg-card);
+  box-shadow: none;
+  transition: background 0.18s ease;
   -webkit-tap-highlight-color: transparent;
 }
 
 .telegram-connect-panel:hover:not(:disabled) {
-  box-shadow: 0 18px 40px var(--ds-telegram-shadow-strong);
-  filter: saturate(1.08);
+  background: var(--ds-bg-inset);
 }
 
 .telegram-connect-panel:active:not(:disabled) {
-  transform: scale(0.985);
+  background: var(--ds-bg-hover);
 }
 
 .telegram-connect-panel:focus-visible {
@@ -92,7 +90,6 @@ const emit = defineEmits<{
   --telegram-blue-dark: var(--ds-trade-buy-text);
   --telegram-blue-light: #34d399;
   --telegram-blue-border: rgba(22, 101, 52, 0.22);
-  box-shadow: 0 12px 28px rgba(22, 163, 74, 0.2);
 }
 
 .telegram-connect-panel.is-loading {
@@ -100,16 +97,16 @@ const emit = defineEmits<{
 }
 
 .telegram-connect-panel__mark {
-  width: 46px;
-  height: 46px;
+  width: 32px;
+  height: 32px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
+  border-radius: 8px;
   color: #ffffff;
-  background: rgba(255, 255, 255, 0.18);
-  border: 1px solid rgba(255, 255, 255, 0.32);
-  box-shadow: 0 10px 22px rgba(8, 126, 184, 0.24);
+  background: var(--telegram-blue);
+  border: 0;
+  box-shadow: none;
   flex-shrink: 0;
 }
 
@@ -120,22 +117,22 @@ const emit = defineEmits<{
 }
 
 .telegram-connect-panel__copy strong {
-  color: #ffffff;
-  font-size: var(--ds-font-sm);
-  font-weight: 900;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-md);
+  font-weight: 700;
   line-height: 1.55;
 }
 
 .telegram-connect-panel__copy span,
 .telegram-connect-panel__error {
   margin: 0;
-  color: rgba(255, 255, 255, 0.88);
-  font-size: var(--ds-font-xs);
+  color: var(--ds-text-muted);
+  font-size: var(--ds-font-sm);
   line-height: 1.8;
 }
 
 .telegram-connect-panel__error {
-  color: #fee2e2;
+  color: var(--ds-danger-700);
   font-weight: 700;
 }
 
@@ -147,11 +144,11 @@ const emit = defineEmits<{
   min-height: 2rem;
   padding: 0.24rem 0.72rem;
   border-radius: var(--ds-radius-full);
-  border: 1px solid rgba(255, 255, 255, 0.34);
-  background: rgba(255, 255, 255, 0.18);
-  color: #ffffff;
+  border: 1px solid var(--ds-native-hairline);
+  background: var(--ds-bg-inset);
+  color: var(--telegram-blue);
   font-size: var(--ds-font-xs);
-  font-weight: 900;
+  font-weight: 800;
   white-space: nowrap;
 }
 
@@ -159,8 +156,8 @@ const emit = defineEmits<{
   width: 1rem;
   height: 1rem;
   border-radius: 999px;
-  border: 2px solid rgba(255, 255, 255, 0.45);
-  border-top-color: #ffffff;
+  border: 2px solid rgba(22, 155, 215, 0.28);
+  border-top-color: var(--telegram-blue);
   animation: telegram-connect-spin 0.8s linear infinite;
 }
 

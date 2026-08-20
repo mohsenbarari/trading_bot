@@ -241,8 +241,8 @@ function handleUserClick(user: SearchUser) {
 .icon-btn {
   background: transparent;
   border: none;
-  width: 40px;
-  height: 40px;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -274,7 +274,7 @@ function handleUserClick(user: SearchUser) {
   align-items: center;
   gap: 12px;
   width: 100%;
-  height: 44px;
+  height: var(--ds-native-row-min-height, 48px);
   border: 0;
   border-radius: 12px;
   background: rgba(51, 144, 236, 0.08);

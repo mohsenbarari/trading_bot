@@ -1195,8 +1195,8 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 }
 
 .header-icon-btn {
-  width: var(--messenger-touch-target, 44px);
-  height: var(--messenger-touch-target, 44px);
+  width: var(--messenger-touch-target, 48px);
+  height: var(--messenger-touch-target, 48px);
   border: 0;
   border-radius: var(--messenger-radius-control, 8px);
   background: rgba(226, 232, 240, 0.72);
@@ -1362,7 +1362,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 }
 
 .primary-chip {
-  min-height: 38px;
+  min-height: var(--ds-native-row-min-height, 48px);
   padding: 0 16px;
   background: #3390ec;
   color: #fff;
@@ -1727,7 +1727,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 }
 
 .ghost-action {
-  min-height: 36px;
+  min-height: var(--ds-native-row-min-height, 48px);
   padding: 0 12px;
   background: rgba(241, 245, 249, 0.96);
   color: #334155;

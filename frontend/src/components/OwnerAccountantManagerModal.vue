@@ -18,6 +18,8 @@ import type { RelationStatus } from '../composables/useOwnerCustomers'
 import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
 import { invitationRelationLink, invitationSmsStatusMessage } from '../utils/invitationContract'
 import HelpPopover from './HelpPopover.vue'
+import { AppInput, AppTextarea } from './ui'
+
 
 const props = withDefaults(
   defineProps<{
@@ -594,7 +596,7 @@ onBeforeUnmount(() => {
                   <div class="accountant-form-grid">
                     <label class="field-block">
                       <span>نام کاربری جهانی</span>
-                      <input
+                      <AppInput
                         v-model.trim="createForm.account_name"
                         class="accountant-input create-account-name"
                         type="text"
@@ -603,7 +605,7 @@ onBeforeUnmount(() => {
                     </label>
                     <label class="field-block">
                       <span>نام نمایشی رابطه</span>
-                      <input
+                      <AppInput
                         v-model.trim="createForm.relation_display_name"
                         class="accountant-input create-display-name"
                         type="text"
@@ -612,7 +614,7 @@ onBeforeUnmount(() => {
                     </label>
                     <label class="field-block">
                       <span>شماره موبایل</span>
-                      <input
+                      <AppInput
                         v-model.trim="createForm.mobile_number"
                         class="accountant-input create-mobile-number"
                         type="tel"
@@ -644,12 +646,12 @@ onBeforeUnmount(() => {
                     <div v-show="openSections.createDuty" class="accountant-accordion-body-shell">
                       <label class="field-block">
                         <span>شرح وظیفه</span>
-                        <textarea
+                        <AppTextarea
                           v-model="createForm.duty_description"
                           class="accountant-input accountant-textarea create-duty-description"
                           rows="3"
                           placeholder="مثلاً پیگیری پیشنهادها و ثبت معاملات روزانه"
-                        ></textarea>
+                         />
                       </label>
                     </div>
                   </div>
@@ -789,7 +791,7 @@ onBeforeUnmount(() => {
                       </div>
                       <label class="field-block">
                         <span>شرح وظیفه</span>
-                        <textarea
+                        <AppTextarea
                           v-model="editForm.duty_description"
                           class="accountant-input accountant-textarea edit-duty-description"
                           rows="3"
@@ -797,7 +799,7 @@ onBeforeUnmount(() => {
                             selectedRelation.duty_description ||
                             'مثلاً پیگیری پیشنهادها و ثبت معاملات روزانه'
                           "
-                        ></textarea>
+                         />
                       </label>
                       <div class="panel-actions compact">
                         <button
@@ -1163,7 +1165,7 @@ onBeforeUnmount(() => {
 .danger-btn {
   border: 0;
   border-radius: 999px;
-  min-height: 40px;
+  min-height: var(--ds-native-row-min-height, 48px);
   padding: 0 16px;
   font-weight: 700;
   cursor: pointer;
@@ -1176,9 +1178,9 @@ onBeforeUnmount(() => {
 }
 
 .accountant-primary-control {
-  background: linear-gradient(135deg, #f59e0b, #f97316);
+  background: var(--ds-primary-500);
   color: #fff;
-  box-shadow: 0 10px 24px rgba(249, 115, 22, 0.24);
+  box-shadow: none;
 }
 
 .danger-btn {
@@ -1383,7 +1385,7 @@ onBeforeUnmount(() => {
 }
 
 .ghost-btn--inline {
-  min-height: 34px;
+  min-height: var(--ds-native-row-min-height, 48px);
   padding: 0 12px;
 }
 
@@ -1614,7 +1616,7 @@ onBeforeUnmount(() => {
 
 .accountant-owner-header {
   display: grid;
-  grid-template-columns: 44px 1fr 44px;
+  grid-template-columns: var(--ds-native-row-min-height, 48px) 1fr var(--ds-native-row-min-height, 48px);
   align-items: center;
   min-height: 74px;
   gap: 12px;
@@ -1627,25 +1629,24 @@ onBeforeUnmount(() => {
 }
 
 .accountant-manager-back {
-  width: 44px;
-  height: 44px;
-  min-height: 44px;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
+  min-height: var(--ds-native-row-min-height, 48px);
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.92);
-  color: #334155;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  border-radius: var(--ds-radius-full);
+  background: var(--ds-bg-card);
+  color: var(--ds-text-secondary);
+  box-shadow: none;
   cursor: pointer;
 }
 
 .accountant-owner-header-spacer {
-  width: 44px;
-  height: 44px;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
 }
 
 .accountant-viewport-toast {

@@ -36,6 +36,8 @@ import { invitationRelationLink, invitationSmsStatusMessage } from '../utils/inv
 import { tradeSettlementLabel } from '../utils/settlementType'
 import CustomerNameWithBadge from './CustomerNameWithBadge.vue'
 import HelpPopover from './HelpPopover.vue'
+import { AppInput, AppTextarea } from './ui'
+
 
 const props = withDefaults(
   defineProps<{
@@ -904,7 +906,7 @@ onBeforeUnmount(() => {
                   <div class="customer-form-grid create-main-grid">
                     <label class="field-block">
                       <span>نام مشتری</span>
-                      <input
+                      <AppInput
                         v-model.trim="createForm.management_name"
                         class="customer-input create-management-name"
                         type="text"
@@ -913,7 +915,7 @@ onBeforeUnmount(() => {
                     </label>
                     <label class="field-block">
                       <span>شماره موبایل</span>
-                      <input
+                      <AppInput
                         v-model.trim="createForm.mobile_number"
                         class="customer-input create-mobile-number"
                         type="tel"
@@ -949,7 +951,7 @@ onBeforeUnmount(() => {
                         >
                           -
                         </button>
-                        <input
+                        <AppInput
                           v-model.trim="createForm.commission_rate"
                           class="customer-input create-commission-rate commission-input"
                           type="number"
@@ -998,7 +1000,7 @@ onBeforeUnmount(() => {
                       <div class="customer-form-grid">
                         <label class="field-block">
                           <span>حداقل مقدار معامله</span>
-                          <input
+                          <AppInput
                             v-model.trim="createForm.min_trade_quantity"
                             class="customer-input create-min-trade"
                             type="number"
@@ -1006,11 +1008,11 @@ onBeforeUnmount(() => {
                             step="1"
                             placeholder="اختیاری"
                           />
-                          <small>کمترین تعداد قابل معامله برای این مشتری در هر معامله.</small>
+                        <small>کمترین تعداد قابل معامله برای این مشتری در هر معامله.</small>
                         </label>
                         <label class="field-block">
                           <span>حداکثر مقدار معامله</span>
-                          <input
+                          <AppInput
                             v-model.trim="createForm.max_trade_quantity"
                             class="customer-input create-max-trade"
                             type="number"
@@ -1018,11 +1020,11 @@ onBeforeUnmount(() => {
                             step="1"
                             placeholder="اختیاری"
                           />
-                          <small>بیشترین تعداد مجاز در هر معامله تکی.</small>
+                        <small>بیشترین تعداد مجاز در هر معامله تکی.</small>
                         </label>
                         <label class="field-block">
                           <span>سقف معاملات روزانه</span>
-                          <input
+                          <AppInput
                             v-model.trim="createForm.max_daily_trades"
                             class="customer-input create-max-daily-trades"
                             type="number"
@@ -1030,13 +1032,13 @@ onBeforeUnmount(() => {
                             step="1"
                             placeholder="اختیاری"
                           />
-                          <small
+                        <small
                             >حداکثر تعداد معامله‌ای که مشتری در یک روز می‌تواند انجام دهد.</small
                           >
                         </label>
                         <label class="field-block">
                           <span>سقف حجم روزانه</span>
-                          <input
+                          <AppInput
                             v-model.trim="createForm.max_daily_commodity_volume"
                             class="customer-input create-max-daily-volume"
                             type="number"
@@ -1044,7 +1046,7 @@ onBeforeUnmount(() => {
                             step="1"
                             placeholder="اختیاری"
                           />
-                          <small>حداکثر مجموع تعداد کالا در معاملات روزانه مشتری.</small>
+                        <small>حداکثر مجموع تعداد کالا در معاملات روزانه مشتری.</small>
                         </label>
                       </div>
                     </div>
@@ -1178,7 +1180,7 @@ onBeforeUnmount(() => {
                             >
                               -
                             </button>
-                            <input
+                            <AppInput
                               v-model.trim="detailEditForm.commission_rate"
                               class="customer-input edit-commission-rate commission-input"
                               type="number"
@@ -1188,7 +1190,7 @@ onBeforeUnmount(() => {
                               inputmode="decimal"
                               :placeholder="getCommissionPlaceholder(selectedRelation)"
                             />
-                            <button
+                        <button
                               type="button"
                               class="commission-step-btn"
                               @pointerdown.prevent="startCommissionHold(0.01, 'detail')"
@@ -1210,7 +1212,7 @@ onBeforeUnmount(() => {
                         </label>
                         <label class="field-block">
                           <span>حداقل مقدار معامله</span>
-                          <input
+                          <AppInput
                             v-model.trim="detailEditForm.min_trade_quantity"
                             class="customer-input edit-min-trade"
                             type="number"
@@ -1218,10 +1220,10 @@ onBeforeUnmount(() => {
                             step="1"
                             :placeholder="getLimitPlaceholder(selectedRelation.min_trade_quantity)"
                           />
-                        </label>
+                    </label>
                         <label class="field-block">
                           <span>حداکثر مقدار معامله</span>
-                          <input
+                          <AppInput
                             v-model.trim="detailEditForm.max_trade_quantity"
                             class="customer-input edit-max-trade"
                             type="number"
@@ -1229,10 +1231,10 @@ onBeforeUnmount(() => {
                             step="1"
                             :placeholder="getLimitPlaceholder(selectedRelation.max_trade_quantity)"
                           />
-                        </label>
+                    </label>
                         <label class="field-block">
                           <span>سقف معاملات روزانه</span>
-                          <input
+                          <AppInput
                             v-model.trim="detailEditForm.max_daily_trades"
                             class="customer-input edit-max-daily-trades"
                             type="number"
@@ -1240,10 +1242,10 @@ onBeforeUnmount(() => {
                             step="1"
                             :placeholder="getLimitPlaceholder(selectedRelation.max_daily_trades)"
                           />
-                        </label>
+                    </label>
                         <label class="field-block">
                           <span>سقف حجم روزانه</span>
-                          <input
+                          <AppInput
                             v-model.trim="detailEditForm.max_daily_commodity_volume"
                             class="customer-input edit-max-daily-volume"
                             type="number"
@@ -1253,7 +1255,7 @@ onBeforeUnmount(() => {
                               getLimitPlaceholder(selectedRelation.max_daily_commodity_volume)
                             "
                           />
-                        </label>
+                    </label>
                       </div>
                       <div class="panel-actions compact">
                         <button
@@ -1788,7 +1790,7 @@ onBeforeUnmount(() => {
 
 .customer-owner-header {
   display: grid;
-  grid-template-columns: 44px 1fr 44px;
+  grid-template-columns: var(--ds-native-row-min-height, 48px) 1fr var(--ds-native-row-min-height, 48px);
   align-items: center;
   min-height: 74px;
   gap: 12px;
@@ -1820,30 +1822,30 @@ onBeforeUnmount(() => {
 .danger-btn {
   border: 0;
   border-radius: 999px;
-  min-height: 40px;
+  min-height: var(--ds-native-row-min-height, 48px);
   padding: 0 16px;
   font-weight: 700;
   cursor: pointer;
 }
 
 .customer-manager-back {
-  width: 44px;
-  height: 44px;
-  min-height: 44px;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
+  min-height: var(--ds-native-row-min-height, 48px);
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.92);
-  color: #334155;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  border-radius: var(--ds-radius-full);
+  background: var(--ds-bg-card);
+  color: var(--ds-text-secondary);
+  border: 0;
+  box-shadow: none;
 }
 
 .customer-owner-header-spacer {
-  width: 44px;
-  height: 44px;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
 }
 
 .ghost-btn,
@@ -1853,9 +1855,9 @@ onBeforeUnmount(() => {
 }
 
 .customer-primary-control {
-  background: linear-gradient(135deg, #f59e0b, #f97316);
+  background: var(--ds-primary-500);
   color: #fff;
-  box-shadow: 0 10px 24px rgba(249, 115, 22, 0.24);
+  box-shadow: none;
 }
 
 .danger-btn {
@@ -2678,7 +2680,7 @@ onBeforeUnmount(() => {
 }
 
 .ghost-btn--inline {
-  min-height: 34px;
+  min-height: var(--ds-native-row-min-height, 48px);
   padding: 0 12px;
 }
 

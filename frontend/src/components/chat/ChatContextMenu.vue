@@ -308,7 +308,7 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
 
 .menu-item {
   padding: 10px 16px;
-  min-height: var(--messenger-touch-target, 44px);
+  min-height: var(--messenger-touch-target, 48px);
   width: 100%;
   box-sizing: border-box;
   cursor: pointer;
@@ -394,7 +394,7 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
 .reaction-dropdown-toggle {
   margin-top: 10px;
   width: 100%;
-  min-height: 34px;
+  min-height: var(--ds-native-row-min-height, 48px);
   border: none;
   border-radius: var(--messenger-radius-bubble, 12px);
   background: var(--messenger-surface-muted, #f8fafc);
@@ -429,7 +429,7 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
   border-radius: var(--messenger-radius-bubble, 12px);
   min-width: 0;
   width: 100%;
-  height: 40px;
+  height: var(--ds-native-row-min-height, 48px);
   display: flex;
   align-items: center;
   justify-content: center;

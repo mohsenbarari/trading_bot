@@ -807,8 +807,8 @@ function cancel() {
   background: transparent;
   border: none;
   color: #fff;
-  width: 40px;
-  height: 40px;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
   display: flex;
   align-items: center;
   justify-content: center;

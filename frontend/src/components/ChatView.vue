@@ -4320,8 +4320,8 @@ defineExpose({
   border-radius: 50%;
   transition: background 0.2s;
   color: #000000;
-  width: 40px; /* Exact touch target size */
-  height: 40px;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
   flex-shrink: 0;
 }
 
@@ -4938,7 +4938,7 @@ defineExpose({
   box-shadow: none;
   border-radius: 20px;
   padding: 8px 4px;
-  min-height: 44px;
+  min-height: var(--ds-native-row-min-height, 48px);
   transition: background var(--messenger-motion-standard, 180ms);
 }
 
@@ -5083,8 +5083,8 @@ defineExpose({
   position: absolute;
   bottom: 80px;
   right: 20px;
-  width: 40px;
-  height: 40px;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
   border-radius: 50%;
   background: #FFFFFF;
   border: none;

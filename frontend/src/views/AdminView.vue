@@ -916,8 +916,8 @@ onUnmounted(() => {
 }
 
 .admin-subview-return {
-  width: 2.5rem;
-  height: 2.5rem;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
   display: inline-flex;
   align-items: center;
   justify-content: center;

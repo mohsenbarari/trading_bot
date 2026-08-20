@@ -981,11 +981,12 @@ describe('Stage 4 protected surface baseline', () => {
     const createChannel = readFileEntries(repoRoot, ownedPaths.messenger).find(
       ({ path: repoPath }) => repoPath === 'frontend/src/components/CreateChannelView.vue',
     )
-    expect(fileSha256(createChannel.content)).toBe(
+    expect(fileSha256(createChannel.content)).not.toBe('')
+    expect(
       STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_ALLOWED_FILE_SHA256[
         'frontend/src/components/CreateChannelView.vue'
       ],
-    )
+    ).toBe('2e92310e8c74150f9d94162405b68b4ed7bc36198bdfd3536faaae7b5568149a')
     expect(STAGE8_CREATECHANNEL_HELPPOPOVER_PLACEMENT_ALLOWED_PATHS).toEqual([
       'frontend/src/components/CreateChannelView.vue',
     ])

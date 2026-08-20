@@ -126,7 +126,7 @@ function cancelAll() {
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M6 18L18 6"/></svg>
         </button>
         <div class="gp-title">{{ items.length }} مورد</div>
-        <div style="width: 40px;"></div>
+        <div style="width: 48px;"></div>
       </div>
 
       <div class="gp-stage">
@@ -233,8 +233,8 @@ function cancelAll() {
   background: transparent;
   border: none;
   color: #fff;
-  width: 40px;
-  height: 40px;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
   display: flex;
   align-items: center;
   justify-content: center;

@@ -538,7 +538,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 0.65rem;
-  min-height: 44px;
+  min-height: var(--ds-native-row-min-height, 48px);
   padding: 0.65rem 0.75rem;
   border: 0;
   border-radius: var(--ds-radius-md);

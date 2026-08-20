@@ -1039,8 +1039,8 @@ function handleTouchEnd(event: TouchEvent) {
   border: none;
   color: white;
   cursor: pointer;
-  width: 42px;
-  height: 42px;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -1656,8 +1656,8 @@ function handleTouchEnd(event: TouchEvent) {
   }
 
   .lightbox-btn {
-    width: 40px;
-    height: 40px;
+    width: var(--ds-native-row-min-height, 48px);
+    height: var(--ds-native-row-min-height, 48px);
   }
 
   .lightbox-btn-labeled {
@@ -1676,8 +1676,8 @@ function handleTouchEnd(event: TouchEvent) {
   }
 
   .lightbox-btn-mobile-icon-only {
-    min-width: 40px;
-    width: 40px;
+    min-width: var(--ds-native-row-min-height, 48px);
+    width: var(--ds-native-row-min-height, 48px);
     padding-inline: 0;
     font-size: 0;
     border-radius: 50%;

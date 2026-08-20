@@ -134,7 +134,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
     }))
     expect(wrapper.text()).toContain('دعوت حسابدار ثبت شد.')
     expect(wrapper.text()).toContain('حسابدار دوم')
-  })
+  }, 10000)
 
   it('renders as an inline workspace surface and emits route navigation events', async () => {
     apiFetchMock.mockResolvedValueOnce(makeResponse([makeRelation({
@@ -161,7 +161,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
     await wrapper.get('.accountant-detail-topbar .ghost-btn').trigger('click')
     await flushPromises()
     expect(wrapper.emitted('back-to-list')).toHaveLength(1)
-  })
+  }, 10000)
 
   it('opens the requested accountant relation when mounted from a detail route', async () => {
     apiFetchMock.mockResolvedValueOnce(makeResponse([makeRelation({

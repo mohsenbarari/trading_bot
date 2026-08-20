@@ -132,6 +132,8 @@ function openExternalMap() {
   color: #4b5563;
   cursor: pointer;
   padding: 6px;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
   display: flex;
   align-items: center;
   justify-content: center;

@@ -102,8 +102,8 @@ const emit = defineEmits<{
   border-radius: 50%;
   transition: background 0.2s;
   color: #707579;
-  width: 40px;
-  height: 40px;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
 }
 
 .nav-btn:hover {

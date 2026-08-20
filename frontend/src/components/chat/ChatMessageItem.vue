@@ -2262,8 +2262,8 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 }
 .progress-container { position: relative; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; }
 .media-upload-progress {
-  width: var(--messenger-touch-target, 44px);
-  height: var(--messenger-touch-target, 44px);
+  width: var(--messenger-touch-target, 48px);
+  height: var(--messenger-touch-target, 48px);
   padding: 8px;
   border-radius: 50%;
   background: color-mix(in srgb, var(--messenger-overlay-strong, rgba(0, 0, 0, 0.6)) 84%, transparent);

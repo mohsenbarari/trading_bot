@@ -665,8 +665,8 @@ const fabButtonLabel = computed(() => (isExpanded.value ? 'بستن ناوبری
 }
 
 .fab-btn {
-  width: 44px;
-  height: 44px;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
   border-radius: 14px;
   border: none;
   background: var(--ds-bg-card);

@@ -4,6 +4,7 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Decisions
 
+- 2026-08-20 | Integrity pass on `candidate/webapp-native-controls-v1` unified leftover non-Market chrome to 48px native rows/`AppInput` without touching Market, `AdminMessagesView`, `TradingSettings`, Jalali, V2 catalog tokens, or test-locked 44px PublicProfile/UserManager. Stage 8 hashes stay readable; live messenger stays on `native-app-messenger-visual-v1`.
 - 2026-08-20 | Native App Standardization on `candidate/webapp-native-controls-v1` covers every live webapp surface except Market. Messenger frontend is fully free; Stage 8 hashes stay read-only via `native-app-messenger-visual-v1`. Legacy default and rollback stay. First control commit: `c8239d6c`.
 - 2026-08-19 | UIUX V3 fast-forwarded to `main` at `e74964f3` and deployed only to both staging roles (167/167 runtime, 169/1959 tests). Surfaces: 38 aligned, 6 frozen, 1 inactive. Invalid public IDs fail closed. Production/Sites stay unauthorized; Figma DRAFT; Mini App excluded.
 - 2026-08-18 | Market keeps 44px two-tap cards, meter/hourglass, and compact traded/expired history. Today trades are identity/private. Completions refresh Today/self-history via private events, receipts, and one 5s toast. Bot uses ☀️/📆 and hides the customer route.

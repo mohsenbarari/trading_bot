@@ -897,7 +897,7 @@ onBeforeUnmount(() => {
 
 .conversation-window-more {
   width: 100%;
-  min-height: 44px;
+  min-height: var(--ds-native-row-min-height, 48px);
   border: 1px solid rgba(51, 144, 236, 0.18);
   border-radius: var(--messenger-radius-panel, 18px);
   background: rgba(255, 255, 255, 0.78);
@@ -1329,7 +1329,7 @@ onBeforeUnmount(() => {
   gap: 12px;
   width: 100%;
   padding: 10px 16px;
-  min-height: var(--messenger-touch-target, 44px);
+  min-height: var(--messenger-touch-target, 48px);
   box-sizing: border-box;
   border: 0;
   background: transparent;

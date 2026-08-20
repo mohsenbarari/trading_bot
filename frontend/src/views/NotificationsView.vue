@@ -602,8 +602,12 @@ onMounted(async () => {
 .notifications-list {
   display: flex;
   flex-direction: column;
-  gap: 0.7rem;
+  gap: 0;
   padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 4rem);
+  background: var(--ds-bg-card);
+  border: 1px solid var(--ds-native-hairline);
+  border-radius: 12px;
+  overflow: hidden;
 }
 
 .notif-item {
@@ -612,13 +616,13 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
-  padding: 0.9rem;
-  background: var(--ds-bg-card);
-  border-radius: var(--ds-radius-lg);
-  border: 1px solid var(--ds-border-light);
-  border-right: 4px solid var(--ds-border-strong);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: var(--ds-shadow-xs);
+  min-height: var(--ds-native-row-min-height, 48px);
+  padding: 0.85rem 1rem;
+  background: transparent;
+  border-radius: 0;
+  border: 0;
+  border-right: 3px solid var(--ds-border-strong);
+  box-shadow: inset 0 -1px 0 var(--ds-native-hairline);
   color: inherit;
   font: inherit;
   text-align: start;
@@ -630,8 +634,6 @@ onMounted(async () => {
 
 .notif-item.is-unread {
   background: color-mix(in srgb, var(--ds-primary-50) 40%, var(--ds-bg-card) 60%);
-  border-color: var(--ds-primary-100);
-  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.05);
 }
 
 .notif-item.type-info { border-right-color: var(--ds-info-500); }

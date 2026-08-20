@@ -447,8 +447,8 @@ function formatDateForSeparator(dateString: string) {
   border-radius: var(--messenger-radius-control, 8px);
   transition: background var(--messenger-motion-standard, 180ms);
   color: var(--messenger-text-strong, #1f2937);
-  width: var(--messenger-touch-target, 44px);
-  height: var(--messenger-touch-target, 44px);
+  width: var(--messenger-touch-target, 48px);
+  height: var(--messenger-touch-target, 48px);
   flex-shrink: 0;
 }
 
@@ -728,7 +728,7 @@ function formatDateForSeparator(dateString: string) {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: var(--messenger-touch-target, 44px);
+  min-height: var(--messenger-touch-target, 48px);
   padding: 10px 14px;
   border-radius: var(--messenger-radius-control, 8px);
   cursor: pointer;

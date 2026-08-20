@@ -2425,8 +2425,8 @@ onBeforeUnmount(() => {
 }
 
 .camera-icon-btn {
-  width: var(--messenger-touch-target, 44px);
-  height: var(--messenger-touch-target, 44px);
+  width: var(--messenger-touch-target, 48px);
+  height: var(--messenger-touch-target, 48px);
   border-radius: 999px;
   border: none;
   display: flex;
@@ -2460,7 +2460,7 @@ onBeforeUnmount(() => {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  min-height: 34px;
+  min-height: var(--ds-native-row-min-height, 48px);
 }
 
 .camera-mode-btn.active {
@@ -2768,7 +2768,7 @@ onBeforeUnmount(() => {
 }
 
 .camera-queue-action {
-  min-height: var(--messenger-touch-target, 44px);
+  min-height: var(--messenger-touch-target, 48px);
   border: none;
   border-radius: 999px;
   display: inline-flex;
@@ -2956,7 +2956,7 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 500;
   border-bottom: 2px solid transparent;
-  min-height: var(--messenger-touch-target, 44px);
+  min-height: var(--messenger-touch-target, 48px);
   transition: color var(--messenger-motion-standard, 180ms), border-color var(--messenger-motion-standard, 180ms);
 }
 .tab-btn.active {
