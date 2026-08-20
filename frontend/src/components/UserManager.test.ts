@@ -162,7 +162,7 @@ describe('UserManager.vue', () => {
       /\.users-list\s*\{[\s\S]*?container:\s*user-directory\s*\/\s*inline-size;/,
     )
     expect(userManagerSource).toMatch(
-      /@container user-directory \(max-width:\s*34rem\)\s*\{[\s\S]*?grid-template-columns:\s*44px minmax\(0, 1fr\);[\s\S]*?grid-template-areas:\s*'leading copy'\s*'leading trailing';/,
+      /@container user-directory \(max-width:\s*34rem\)\s*\{[\s\S]*?grid-template-columns:\s*var\(--ds-native-row-min-height, 48px\) minmax\(0, 1fr\);[\s\S]*?grid-template-areas:\s*'leading copy'\s*'leading trailing';/,
     )
     expect(userManagerSource).toMatch(
       /@supports not \(container-type:\s*inline-size\)\s*\{[\s\S]*?@media \(max-width:\s*480px\)\s*\{[\s\S]*?grid-template-areas:\s*'leading copy'\s*'leading trailing';/,

@@ -682,10 +682,9 @@ async function skipTelegramConnect() {
       </div>
 
       <template v-if="step === 1">
-        <div class="ui-v2-auth-register-guidance">
-          <strong>تأیید موبایل</strong>
-          <p>کد تأیید برای موبایل ثبت‌شده در دعوت‌نامه ارسال می‌شود.</p>
-        </div>
+        <p class="ui-v2-auth-register-guidance">
+          کد تأیید برای موبایل ثبت‌شده در دعوت‌نامه ارسال می‌شود.
+        </p>
         <AppButton block :loading="loading" @click="requestOtp">دریافت کد تأیید</AppButton>
       </template>
 

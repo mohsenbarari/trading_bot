@@ -23,7 +23,7 @@ afterEach(() => {
 })
 
 describe('HelpPopover.vue', () => {
-  it('keeps the 32px default target while exposing an opt-in 44px target rule', () => {
+  it('keeps the 48px default target and the same comfortable-target rule', () => {
     const wrapper = mount(HelpPopover, {
       props: { text: 'راهنمای کوتاه', label: 'راهنمای آزمایشی' },
     })
@@ -35,13 +35,13 @@ describe('HelpPopover.vue', () => {
 
     expect(wrapper.get('.help-popover').classes()).not.toContain('help-popover--comfortable-target')
     expect(trigger.attributes('aria-label')).toBe('راهنمای آزمایشی')
-    expect(defaultRule).toContain('width: 2rem;')
-    expect(defaultRule).toContain('height: 2rem;')
+    expect(defaultRule).toContain('width: 3rem;')
+    expect(defaultRule).toContain('height: 3rem;')
     expect(comfortableRule).toContain('box-sizing: border-box;')
-    expect(comfortableRule).toContain('inline-size: 2.75rem;')
-    expect(comfortableRule).toContain('block-size: 2.75rem;')
-    expect(comfortableRule).toContain('min-inline-size: 2.75rem;')
-    expect(comfortableRule).toContain('min-block-size: 2.75rem;')
+    expect(comfortableRule).toContain('inline-size: 3rem;')
+    expect(comfortableRule).toContain('block-size: 3rem;')
+    expect(comfortableRule).toContain('min-inline-size: 3rem;')
+    expect(comfortableRule).toContain('min-block-size: 3rem;')
   })
 
   it('adds the comfortable-target modifier only when requested', () => {

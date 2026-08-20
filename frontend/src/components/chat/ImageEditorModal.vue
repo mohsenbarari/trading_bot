@@ -866,8 +866,8 @@ function cancel() {
 .stage :deep(.cropper-point::before) {
   content: '';
   position: absolute;
-  inset: -18px;
-  /* Transparent but interactive: gives ~44px finger target. */
+  inset: -20px;
+  /* Transparent but interactive: gives ~48px finger target. */
   background: transparent;
 }
 .stage :deep(.cropper-line) {

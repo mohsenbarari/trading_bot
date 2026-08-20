@@ -1435,10 +1435,9 @@ function goBackToMobile() {
           <bdi>{{ formattedTimer }}</bdi>
         </div>
 
-        <div class="ui-v2-auth-login-guidance">
-          <strong>دریافت کد</strong>
-          <p>کد ابتدا در تلگرام و در صورت نیاز به‌صورت خودکار با پیامک ارسال می‌شود.</p>
-        </div>
+        <p class="ui-v2-auth-login-guidance">
+          کد ابتدا در تلگرام و در صورت نیاز با پیامک می‌آید.
+        </p>
 
         <AppButton v-if="isDevMode" block size="sm" variant="secondary" @click="startDevLogin">
           ورود سریع ۱ ساله

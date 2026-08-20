@@ -2468,7 +2468,7 @@ function handleHistoryPresetChipChange(value: string) {
    * minimum, so a long account name could widen the whole route at 360px and
    * push the back control outside the viewport.
    */
-  grid-template-columns: minmax(4rem, 5.5rem) minmax(0, 1fr) minmax(2.75rem, 5.5rem);
+  grid-template-columns: minmax(4rem, 5.5rem) minmax(0, 1fr) minmax(3rem, 5.5rem);
   align-items: center;
   min-width: 0;
   padding-bottom: 24px;
@@ -2481,18 +2481,18 @@ function handleHistoryPresetChipChange(value: string) {
 .profile-nav-back {
   justify-self: end;
   box-sizing: border-box;
-  inline-size: 2.75rem;
-  block-size: 2.75rem;
-  min-inline-size: 2.75rem;
-  min-block-size: 2.75rem;
-  border: 1px solid var(--ds-border-medium);
+  inline-size: 3rem;
+  block-size: 3rem;
+  min-inline-size: 3rem;
+  min-block-size: 3rem;
+  border: 1px solid var(--ds-native-hairline);
   border-radius: var(--ds-radius-full);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: var(--ds-bg-card);
   color: var(--ds-text-primary);
-  box-shadow: var(--ds-shadow-sm);
+  box-shadow: none;
   cursor: pointer;
   transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
 }
@@ -2500,7 +2500,7 @@ function handleHistoryPresetChipChange(value: string) {
 .profile-nav-back:hover {
   background: var(--ds-bg-hover);
   border-color: var(--ds-primary-200);
-  box-shadow: var(--ds-shadow-md);
+  box-shadow: none;
 }
 
 .profile-nav-back:active {
@@ -2508,7 +2508,7 @@ function handleHistoryPresetChipChange(value: string) {
 }
 
 .profile-nav-back:focus-visible {
-  outline: 3px solid rgba(51, 144, 236, 0.22);
+  outline: 3px solid rgba(245, 158, 11, 0.34);
   outline-offset: 2px;
 }
 
@@ -2792,11 +2792,11 @@ function handleHistoryPresetChipChange(value: string) {
 .address-display-frame {
   position: relative;
   width: 100%;
-  min-height: 44px;
+  min-height: var(--ds-control-min-height, 48px);
   display: flex;
   align-items: center;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 14px;
+  border: 1px solid var(--ds-native-hairline);
+  border-radius: 12px;
   background: rgba(248, 250, 252, 0.78);
   padding: 10px 12px;
 }
@@ -2810,10 +2810,10 @@ function handleHistoryPresetChipChange(value: string) {
   left: 8px;
   top: 50%;
   transform: translateY(-50%);
-  width: 32px;
-  height: 32px;
-  min-width: 32px;
-  min-height: 32px;
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
+  min-width: var(--ds-native-row-min-height, 48px);
+  min-height: var(--ds-native-row-min-height, 48px);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3114,7 +3114,7 @@ function handleHistoryPresetChipChange(value: string) {
 }
 
 .retry-btn {
-  min-height: 2.75rem;
+  min-height: var(--ds-native-row-min-height, 48px);
 }
 
 
@@ -3192,7 +3192,7 @@ function handleHistoryPresetChipChange(value: string) {
 }
 
 .history-filter-field select {
-  min-height: 44px;
+  min-height: var(--ds-control-min-height, 48px);
   cursor: pointer;
 }
 
@@ -3223,7 +3223,7 @@ function handleHistoryPresetChipChange(value: string) {
 }
 
 .history-control.primary {
-  background: linear-gradient(135deg, #f59e0b, #d97706);
+  background: var(--ds-primary-500);
   border-color: transparent;
   color: white;
 }
@@ -3249,7 +3249,7 @@ function handleHistoryPresetChipChange(value: string) {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  min-height: 44px;
+  min-height: var(--ds-native-row-min-height, 48px);
 }
 
 .history-pagination-error {

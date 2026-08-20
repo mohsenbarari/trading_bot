@@ -5,7 +5,7 @@ import postcss from 'postcss'
 import ts from 'typescript'
 
 const FROZEN_TOKEN_CONTRACT_FILE_SHA256 =
-  'a0c3f3560acaa8c4fddc123ec042657d7db73d0599698e49eb172f647227cf66'
+  'bda35726a47b45b892c75ce4c71d2515d3f8fee13ee08e0c9187bbe9ad192a98'
 const frozenTokenContractSource = readFileSync(
   path.resolve(process.cwd(), 'src/design-system-v2/canonical-token-contract.json'),
   'utf8',

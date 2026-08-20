@@ -1663,7 +1663,7 @@ onBeforeUnmount(() => {
   font-size: 0.88rem;
   font-weight: 850;
   line-height: 1.8;
-  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.24);
+  box-shadow: none;
   backdrop-filter: blur(12px);
 }
 

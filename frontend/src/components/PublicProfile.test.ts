@@ -169,7 +169,7 @@ describe('PublicProfile.vue', () => {
     const headerRule = publicProfileSource.match(/\.profile-header-row\s*\{([\s\S]*?)\n\}/)?.[1]
 
     expect(headerRule).toContain(
-      'grid-template-columns: minmax(4rem, 5.5rem) minmax(0, 1fr) minmax(2.75rem, 5.5rem);',
+      'grid-template-columns: minmax(4rem, 5.5rem) minmax(0, 1fr) minmax(3rem, 5.5rem);',
     )
     expect(headerRule).toContain('min-width: 0;')
     expect(publicProfileSource).toMatch(/\.profile-header-row\s*>\s*\*\s*\{\s*min-width:\s*0;/)
@@ -186,14 +186,14 @@ describe('PublicProfile.vue', () => {
     )
   })
 
-  it('reserves a visible 44px back-navigation target', () => {
+  it('reserves a visible 48px back-navigation target', () => {
     const backRule = publicProfileSource.match(/\.profile-nav-back\s*\{([\s\S]*?)\n\}/)?.[1]
 
     expect(backRule).toContain('box-sizing: border-box;')
-    expect(backRule).toContain('inline-size: 2.75rem;')
-    expect(backRule).toContain('block-size: 2.75rem;')
-    expect(backRule).toContain('min-inline-size: 2.75rem;')
-    expect(backRule).toContain('min-block-size: 2.75rem;')
+    expect(backRule).toContain('inline-size: 3rem;')
+    expect(backRule).toContain('block-size: 3rem;')
+    expect(backRule).toContain('min-inline-size: 3rem;')
+    expect(backRule).toContain('min-block-size: 3rem;')
   })
 
   it('preserves ordinary profile-control motion while disabling every local control transition for reduced motion', () => {

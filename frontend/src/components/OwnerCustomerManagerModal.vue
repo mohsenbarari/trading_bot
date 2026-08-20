@@ -1901,7 +1901,7 @@ onBeforeUnmount(() => {
   font-size: 0.88rem;
   font-weight: 850;
   line-height: 1.8;
-  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.24);
+  box-shadow: none;
   backdrop-filter: blur(12px);
 }
 
@@ -2029,7 +2029,7 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(245, 158, 11, 0.18);
   background: linear-gradient(135deg, #fffbeb, #fef3c7);
   overflow: hidden;
-  box-shadow: 0 10px 28px rgba(245, 158, 11, 0.08);
+  box-shadow: none;
 }
 
 .customer-panel--accordion .customer-accordion-header {

@@ -406,10 +406,10 @@ onUnmounted(() => {
 }
 
 .user-item :deep(.ui-list-item__leading) {
-  width: 44px;
-  height: 44px;
-  background: var(--ds-gradient-primary);
-  color: var(--ds-bg-card);
+  width: var(--ds-native-row-min-height, 48px);
+  height: var(--ds-native-row-min-height, 48px);
+  background: var(--ds-primary-100);
+  color: var(--ds-primary-700);
   font-size: 1.2rem;
   font-weight: 800;
 }
@@ -505,7 +505,7 @@ onUnmounted(() => {
 
 @container user-directory (max-width: 34rem) {
   .user-item {
-    grid-template-columns: 44px minmax(0, 1fr);
+    grid-template-columns: var(--ds-native-row-min-height, 48px) minmax(0, 1fr);
     grid-template-areas:
       'leading copy'
       'leading trailing';
@@ -565,7 +565,7 @@ onUnmounted(() => {
 @supports not (container-type: inline-size) {
   @media (max-width: 480px) {
     .user-item {
-      grid-template-columns: 44px minmax(0, 1fr);
+      grid-template-columns: var(--ds-native-row-min-height, 48px) minmax(0, 1fr);
       grid-template-areas:
         'leading copy'
         'leading trailing';

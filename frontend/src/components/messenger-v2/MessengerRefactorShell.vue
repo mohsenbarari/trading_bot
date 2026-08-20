@@ -132,10 +132,10 @@ dd {
 
 .shell-back {
   width: 100%;
-  min-height: 44px;
+  min-height: var(--ds-native-row-min-height, 48px);
   border: 0;
-  border-radius: 8px;
-  background: #f59e0b;
+  border-radius: 12px;
+  background: var(--ds-primary-500, #f59e0b);
   color: #111827;
   font-weight: 900;
   cursor: pointer;

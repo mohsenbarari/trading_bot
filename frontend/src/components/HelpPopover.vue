@@ -82,30 +82,33 @@ onUnmounted(clearTimer)
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-sizing: border-box;
+  width: 3rem;
+  height: 3rem;
+  min-width: 3rem;
+  min-height: 3rem;
+  border: 1px solid var(--ds-native-hairline, rgba(60, 60, 67, 0.14));
   border-radius: 999px;
-  background: rgba(248, 250, 252, 0.94);
-  color: #475569;
+  background: var(--ds-bg-inset, #f8fafc);
+  color: var(--ds-text-secondary, #475569);
   cursor: pointer;
   transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
 
 .help-popover--comfortable-target .help-popover-trigger {
   box-sizing: border-box;
-  inline-size: 2.75rem;
-  block-size: 2.75rem;
-  min-inline-size: 2.75rem;
-  min-block-size: 2.75rem;
+  inline-size: 3rem;
+  block-size: 3rem;
+  min-inline-size: 3rem;
+  min-block-size: 3rem;
 }
 
 .help-popover-trigger:hover,
 .help-popover-trigger:focus-visible {
-  color: #0f766e;
-  border-color: rgba(15, 118, 110, 0.24);
-  background: rgba(240, 253, 250, 0.95);
-  box-shadow: 0 8px 18px rgba(15, 118, 110, 0.1);
+  color: var(--ds-primary-700, #b45309);
+  border-color: var(--ds-primary-200, #fde68a);
+  background: var(--ds-primary-50, #fffbeb);
+  box-shadow: none;
   outline: none;
 }
 
@@ -115,15 +118,15 @@ onUnmounted(clearTimer)
   left: 0;
   width: min(17rem, calc(100vw - 2rem));
   padding: 0.72rem 0.85rem;
-  border-radius: 14px;
-  border: 1px solid rgba(15, 118, 110, 0.12);
-  background: rgba(240, 253, 250, 0.98);
-  color: #0f4c48;
+  border-radius: 12px;
+  border: 1px solid var(--ds-native-hairline, rgba(60, 60, 67, 0.14));
+  background: var(--ds-bg-card, #ffffff);
+  color: var(--ds-text-primary, #0f172a);
   font-size: 0.78rem;
   font-weight: 700;
   line-height: 1.8;
   text-align: right;
-  box-shadow: 0 14px 30px rgba(15, 118, 110, 0.14);
+  box-shadow: none;
   white-space: normal;
   z-index: 20;
 }
@@ -136,8 +139,8 @@ onUnmounted(clearTimer)
   width: 12px;
   height: 12px;
   background: inherit;
-  border-left: 1px solid rgba(15, 118, 110, 0.12);
-  border-top: 1px solid rgba(15, 118, 110, 0.12);
+  border-left: 1px solid var(--ds-native-hairline, rgba(60, 60, 67, 0.14));
+  border-top: 1px solid var(--ds-native-hairline, rgba(60, 60, 67, 0.14));
   transform: rotate(45deg);
 }
 </style>
