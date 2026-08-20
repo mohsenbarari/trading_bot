@@ -77,7 +77,13 @@ class CoinOfferConditionTests(unittest.TestCase):
 
         self.assertEqual(
             set(result.condition_families),
-            {"PAYMENT_DEADLINE", "PAYMENT_RAIL", "SETTLEMENT_PROCESS", "QUANTITY_EXECUTION"},
+            {
+                "PAYMENT_ACCOUNT",
+                "PAYMENT_DEADLINE",
+                "PAYMENT_RAIL",
+                "SETTLEMENT_PROCESS",
+                "QUANTITY_EXECUTION",
+            },
         )
         self.assertEqual(result.deadline_clock_minute, 14 * 60 + 30)
 
@@ -92,6 +98,179 @@ class CoinOfferConditionTests(unittest.TestCase):
         self.assertNotIn("PAYMENT_DEADLINE", result.condition_families)
         self.assertIn("SETTLEMENT_PROCESS", result.condition_families)
         self.assertEqual(result.deadline_horizon_bucket, "NO_DEADLINE")
+
+    def test_payment_account_and_fast_receipt_are_separate_fields(self) -> None:
+        result = extract_offer_conditions(
+            "20 تا نقدی تک حساب فیش زود",
+            event_time_utc="2026-08-19T08:00:00Z",
+            settlement_term="CASH",
+            trade_form="PHYSICAL",
+        )
+
+        self.assertIn("PAYMENT_ACCOUNT", result.condition_families)
+        self.assertIn("IMMEDIATE", result.condition_families)
+        self.assertNotIn("PAYMENT_DEADLINE", result.condition_families)
+
+    def test_word_clock_is_a_payment_deadline(self) -> None:
+        result = extract_offer_conditions(
+            "ف امام 190000 فیش تا دو",
+            event_time_utc="2026-08-19T08:00:00Z",
+            settlement_term="TOMORROW",
+            trade_form="PHYSICAL",
+        )
+
+        self.assertIn("PAYMENT_DEADLINE", result.condition_families)
+        self.assertEqual(result.deadline_clock_minute, 14 * 60)
+
+    def test_relative_receipt_deadline_uses_offer_time(self) -> None:
+        result = extract_offer_conditions(
+            "20 تا نقدی فیش یه ساعته",
+            event_time_utc="2026-08-19T08:00:00Z",  # 11:30 Tehran
+            settlement_term="CASH",
+            trade_form="PHYSICAL",
+        )
+
+        self.assertIn("PAYMENT_DEADLINE", result.condition_families)
+        self.assertEqual(result.deadline_horizon_minutes, 60)
+        self.assertEqual(result.deadline_clock_minute, 12 * 60 + 30)
+
+    def test_offer_price_after_receipt_word_is_not_a_deadline(self) -> None:
+        result = extract_offer_conditions(
+            "فیش 190000 امام فروش",
+            event_time_utc="2026-08-19T08:00:00Z",
+            settlement_term="TOMORROW",
+            trade_form="PHYSICAL",
+        )
+
+        self.assertNotIn("PAYMENT_DEADLINE", result.condition_families)
+        self.assertIsNone(result.deadline_clock_minute)
+
+    def test_short_settlement_abbreviation_does_not_match_inside_words(self) -> None:
+        result = extract_offer_conditions(
+            "فیش حتما راس 190000",
+            event_time_utc="2026-08-19T08:00:00Z",
+            settlement_term="TOMORROW",
+            trade_form="PHYSICAL",
+        )
+
+        self.assertNotIn("SETTLEMENT_PROCESS", result.condition_families)
+
+    def test_bundle_and_packaging_conditions_are_distinct(self) -> None:
+        result = extract_offer_conditions(
+            "ربع وکیوم تمیز 20 تا باهم",
+            event_time_utc="2026-08-19T08:00:00Z",
+            settlement_term="TOMORROW",
+            trade_form="PHYSICAL",
+        )
+
+        self.assertIn("QUANTITY_EXECUTION", result.condition_families)
+        self.assertIn("ITEM_QUALITY_PACKAGING", result.condition_families)
+
+    def test_goods_ready_is_delivery_not_generic_cash_settlement(self) -> None:
+        result = extract_offer_conditions(
+            "ربع نقدی جنس حاضر",
+            event_time_utc="2026-08-19T08:00:00Z",
+            settlement_term="CASH",
+            trade_form="PHYSICAL",
+        )
+
+        self.assertIn("DELIVERY_HANDOFF", result.condition_families)
+
+    def test_bank_and_account_count_constraints_are_payment_account(self) -> None:
+        for text in (
+            "با ملت",
+            "دوتا حساب",
+            "حساب 500 تومنی",
+            "فیش یه قلم",
+            "فیش. خوب",
+            "تک خساب",
+            "فیش میدم",
+            "فیش",
+            "ملتی",
+            "ملی زود",
+            "چنتا حساب",
+            "با دو تا حساب",
+            "ح خیلی درشت",
+            "حساب رود",
+            "فیش بالا",
+            "3 تا حساب",
+            "حساب 500",
+            "ح 500 تومنی",
+            "حساب میخوام",
+            "کم حساب",
+            "حساب الان",
+            "ملت",
+            "سرمایه ب سرمایه",
+        ):
+            with self.subTest(text=text):
+                result = extract_offer_conditions(
+                    f"20 تا نقدی {text}",
+                    event_time_utc="2026-08-19T08:00:00Z",
+                    settlement_term="CASH",
+                    trade_form="PHYSICAL",
+                )
+                self.assertIn("PAYMENT_ACCOUNT", result.condition_families)
+
+    def test_receipt_until_clock_with_explicit_hour_word_is_deadline(self) -> None:
+        result = extract_offer_conditions(
+            "10 تا نیم نقد فیش تا ساعت 13",
+            event_time_utc="2026-08-19T08:00:00Z",
+            settlement_term="CASH",
+            trade_form="PHYSICAL",
+        )
+
+        self.assertIn("PAYMENT_DEADLINE", result.condition_families)
+        self.assertIn("PAYMENT_ACCOUNT", result.condition_families)
+        self.assertEqual(result.deadline_clock_minute, 13 * 60)
+
+    def test_reverse_night_account_abbreviation_is_settlement_process(self) -> None:
+        for text in ("ش ح", "ح شب", "ح ش", "شح", "شب خساب", "حساب امشب"):
+            with self.subTest(text=text):
+                result = extract_offer_conditions(
+                    f"20 تا فردایی {text}",
+                    event_time_utc="2026-08-19T08:00:00Z",
+                    settlement_term="TOMORROW",
+                    trade_form="PHYSICAL",
+                )
+                self.assertIn("SETTLEMENT_PROCESS", result.condition_families)
+
+    def test_forward_night_account_abbreviation_keeps_raw_condition_span(self) -> None:
+        result = extract_offer_conditions(
+            "95500 خ نیم ده تا ش ح",
+            event_time_utc="2026-08-20T10:00:00Z",
+            settlement_term="CASH",
+            trade_form="PHYSICAL",
+        )
+
+        self.assertEqual(result.condition_families, ("SETTLEMENT_PROCESS",))
+        self.assertEqual(result.condition_text, "ش ح")
+        self.assertEqual(result.offer_core_text, "95500 خ نیم ده تا")
+
+    def test_single_and_night_account_abbreviations_keep_distinct_spans(self) -> None:
+        result = extract_offer_conditions(
+            "15 تا خ تک ح 190200 شب ح",
+            event_time_utc="2026-08-20T10:00:00Z",
+            settlement_term="CASH",
+            trade_form="PHYSICAL",
+        )
+
+        self.assertEqual(
+            result.condition_families,
+            ("PAYMENT_ACCOUNT", "SETTLEMENT_PROCESS"),
+        )
+        self.assertEqual(result.condition_text, "تک ح | شب ح")
+        self.assertEqual(result.condition_spans, ((8, 12), (20, 24)))
+        self.assertEqual(result.offer_core_text, "15 تا خ 190200")
+
+    def test_joined_one_place_does_not_consume_following_word(self) -> None:
+        result = extract_offer_conditions(
+            "20 تا نیم یجاشنبه",
+            event_time_utc="2026-08-19T08:00:00Z",
+            settlement_term="TOMORROW",
+            trade_form="PHYSICAL",
+        )
+
+        self.assertNotIn("QUANTITY_EXECUTION", result.condition_families)
 
     def test_masked_model_text_does_not_retain_numbers(self) -> None:
         masked = masked_condition_model_text("فیش تا ۱۴:۳۰ برای 20 عدد")

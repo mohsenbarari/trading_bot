@@ -1,7 +1,11 @@
 [Unit]
 Description=Coin rate estimator operator dashboard
 Wants=network-online.target
-After=network-online.target coin-public-market-telegram.service coin-group-event-telegram.service
+# The private-group collector is a recurring oneshot. Ordering the dashboard
+# after it can starve a manual start/restart while its timer keeps scheduling
+# fresh runs. The dashboard is read-only and reports missing/stale inputs via
+# health state, so it must not wait for that collector to complete.
+After=network-online.target coin-public-market-telegram.service
 
 [Service]
 Type=simple

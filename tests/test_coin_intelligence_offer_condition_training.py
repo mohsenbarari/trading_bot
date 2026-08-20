@@ -47,21 +47,28 @@ def test_three_way_split_is_ordered_and_non_overlapping() -> None:
     )
 
 
-def test_threshold_is_selected_on_calibration_not_evaluation() -> None:
-    training = [_row(i, group="group_1", condition=i % 2 == 0) for i in range(8)]
-    calibration = [_row(i + 8, group="group_1", condition=i % 2 == 0) for i in range(4)]
-    evaluation = [_row(i + 12, group="group_1", condition=i == 0) for i in range(5)]
+def test_abstention_policy_is_selected_on_calibration_not_evaluation() -> None:
+    training = [_row(i, group="group_1", condition=i % 2 == 0) for i in range(40)]
+    calibration = [
+        _row(i + 40, group="group_1", condition=i < 10)
+        for i in range(30)
+    ]
+    evaluation = [_row(i + 70, group="group_1", condition=i == 0) for i in range(5)]
     selected_support: list[tuple[int, int]] = []
 
-    def select_threshold(target, probability):
+    def select_policy(target, probability):
         selected_support.append((len(target), int(target.sum())))
-        return 0.5, {"threshold": 0.5, "precision": 1.0, "recall": 1.0, "f1": 1.0}
+        return {
+            "status": "READY",
+            "positive_threshold": 0.7,
+            "negative_threshold": 0.3,
+        }
 
     with patch(
-        "scripts.train_coin_offer_condition_classifier._select_threshold",
-        side_effect=select_threshold,
+        "scripts.train_coin_offer_condition_classifier.select_abstention_thresholds",
+        side_effect=select_policy,
     ):
-        _, _, metrics = _fit_split(
+        _, _, _, _, metrics = _fit_split(
             training,
             calibration,
             evaluation,
@@ -69,10 +76,10 @@ def test_threshold_is_selected_on_calibration_not_evaluation() -> None:
             min_label_support=2,
         )
 
-    assert selected_support == [(len(calibration), 2)]
+    assert selected_support == [(len(calibration), 10)]
     assert metrics["HAS_CONDITION"]["support_positive"] == 1
     assert metrics["HAS_CONDITION"]["support_negative"] == 4
-    assert metrics["HAS_CONDITION"]["calibration_positive"] == 2
+    assert metrics["HAS_CONDITION"]["calibration_positive"] == 10
 
 
 def test_cross_group_transfer_never_calibrates_on_target_group() -> None:
@@ -83,7 +90,7 @@ def test_cross_group_transfer_never_calibrates_on_target_group() -> None:
 
     with patch(
         "scripts.train_coin_offer_condition_classifier._fit_split",
-        return_value=({}, {}, {}),
+        return_value=({}, {}, {}, {}, {}),
     ) as fit:
         result = _evaluate_group_transfer(
             rows,

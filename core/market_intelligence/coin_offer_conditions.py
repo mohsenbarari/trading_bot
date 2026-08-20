@@ -16,18 +16,20 @@ from typing import Iterable
 from zoneinfo import ZoneInfo
 
 
-CONDITION_TAXONOMY_VERSION = "coin-offer-condition-taxonomy-v1"
+CONDITION_TAXONOMY_VERSION = "coin-offer-condition-taxonomy-v2"
 DEFAULT_MARKET_OPEN_MINUTE = 10 * 60
 DEFAULT_MARKET_CLOSE_MINUTE = 15 * 60
 
 CONDITION_FAMILIES = (
     "PAYMENT_DEADLINE",
     "PAYMENT_RAIL",
+    "PAYMENT_ACCOUNT",
     "SETTLEMENT_PROCESS",
     "CREDIT_CHEQUE",
     "DELIVERY_HANDOFF",
     "IDENTITY_ACCOUNT",
     "QUANTITY_EXECUTION",
+    "ITEM_QUALITY_PACKAGING",
     "IMMEDIATE",
     "OTHER_EXPLICIT",
 )
@@ -35,25 +37,81 @@ CONDITION_FAMILIES = (
 _DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 _ARABIC_LETTERS = str.maketrans({"ي": "ی", "ى": "ی", "ك": "ک"})
 
-_CLOCK = r"(?P<hour>[0-2]?\d)(?::(?P<minute>[0-5]\d))?"
+_HOUR_WORDS = {
+    "یک": 1,
+    "دو": 2,
+    "سه": 3,
+    "چهار": 4,
+    "پنج": 5,
+    "شش": 6,
+    "هفت": 7,
+    "هشت": 8,
+    "نه": 9,
+    "ده": 10,
+    "یازده": 11,
+    "دوازده": 12,
+}
+_CLOCK = (
+    r"(?:(?<!\d)(?P<hour>[01]?\d|2[0-3])"
+    r"(?::(?P<minute>[0-5]\d))?(?![:\d])|"
+    r"(?P<hour_word>یک|دو|سه|چهار|پنج|شش|هفت|هشت|نه|ده|یازده|دوازده))"
+)
 _DAYPART = r"(?P<daypart>صبح|ظهر|عصر|شب)?"
 _DEADLINE_RE = re.compile(
-    rf"(?:فیش|واریز|پرداخت|تسویه|مهلت)\s*(?:تا|ساعت)?\s*{_CLOCK}\s*{_DAYPART}"
+    rf"(?:(?:فیش|واریز|پرداخت|تسویه|مهلت)\s*(?:(?:تا\s*)?(?:ساعت|راس)?\s*)?|"
+    rf"راس\s*){_CLOCK}\s*{_DAYPART}"
 )
+_RELATIVE_DEADLINE_RE = re.compile(
+    r"(?:فیش|واریز|پرداخت|تسویه|مهلت)\s*(?:تا\s*)?"
+    r"(?:(?P<relative_hour>\d+)|"
+    r"(?P<relative_word>یه|یک|دو|سه|چهار|پنج|شش|هفت|هشت))\s*"
+    r"(?:ساعت|ساعته)"
+)
+_BANK_NAMES = r"ملت|ملی|سامان|تجارت|صادرات|پاسارگاد|پارسیان|رفاه|آینده|شهر|مرکزی"
+_PHRASE_GAP = r"[\s.،,:؛]*"
+_SINGLE_ACCOUNT_PATTERN = r"تک\s*(?:حساب|خساب|ح(?!\S)|فیش|ملت)"
+_SINGLE_ACCOUNT_RE = re.compile(_SINGLE_ACCOUNT_PATTERN)
+_NIGHT_ACCOUNT_PATTERN = (
+    r"(?:شب\s*(?:ح(?:ساب)?|خساب)|"
+    r"(?<!\S)(?:ش\s*ح(?:ساب)?|شح|ح\s*شب|ح\s*ش)(?!\S)|"
+    r"(?:حساب|خساب)\s*(?:شب|امشب|آخر\s*وقت))"
+)
+_NIGHT_ACCOUNT_RE = re.compile(_NIGHT_ACCOUNT_PATTERN)
 
 _FAMILY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    (
-        "PAYMENT_DEADLINE",
-        _DEADLINE_RE,
-    ),
     (
         "PAYMENT_RAIL",
         re.compile(r"ساتنا|پایا|شبا|کارت\s*به\s*کارت|حواله|واریز"),
     ),
     (
+        "PAYMENT_ACCOUNT",
+        re.compile(
+            rf"{_SINGLE_ACCOUNT_PATTERN}|"
+            r"(?:دو|سه|چند|چنتا)\s*(?:حساب|خساب)|"
+            r"(?:دو\s*تا|دوتا|سه\s*تا|چندتا|چنتا)\s*(?:حساب|خساب)|"
+            r"\d+\s*تا\s*(?:حساب|خساب)|"
+            r"(?:با\s*)?(?:دو|سه|چند)\s*تا\s*(?:حساب|خساب)|"
+            r"(?:با\s*)?(?:حساب|خساب)\s*\d+(?:\s*(?:تومنی|تمنی|میلیونی))?|"
+            r"(?<!\S)ح\s*\d+\s*(?:تومنی|تمنی|میلیونی)(?!\S)|"
+            r"(?:با\s*)?(?:حساب|خساب)\s*(?:\d+\s*)?"
+            r"(?:زود|رود|سریع|فوری|درشت|آماده|پونصدی|میلیونی|تومنی|تمنی|شرکت)|"
+            r"(?:حساب|خساب)\s*(?:کم|الان|درشت|(?:می\s*)?(?:خوام|خام))|کم\s*(?:حساب|خساب)|"
+            rf"فیش{_PHRASE_GAP}(?:زود|فوری|درشت|خوب|راس|حتما|"
+            r"بالا|(?:یه|یک)\s*قلم|(?:می\s*)?(?:خوام|خام|دم))|"
+            r"(?<!\S)فیش(?!\S)|"
+            r"(?<!\S)ح\s*(?:خیلی\s*)?(?:زود|فوری|درشت|آماده|ملتی|تومنی|تمنی)(?!\S)|"
+            r"(?<!\S)(?:ملت|ملتی|ملی\s*زود)(?!\S)|سرمایه\s*(?:به|ب)\s*سرمایه|"
+            rf"(?:با|از|به|فقط)\s*(?:بانک\s*)?(?:{_BANK_NAMES})|"
+            rf"(?:نقد|نقدی|حاضر)\s*(?:{_BANK_NAMES})|"
+            rf"(?:حساب|(?<!\S)ح)\s*(?:{_BANK_NAMES})(?!\S)|"
+            r"ملی\s*(?:به|و|یا)\s*(?:ملی|ملت)|"
+            r"ملت\s*(?:به|و|یا)\s*(?:ملت|ملی)|به\s*شرط\s*بانکی"
+        ),
+    ),
+    (
         "SETTLEMENT_PROCESS",
         re.compile(
-            r"تسویه|شب\s*ح(?:ساب)?|ش\s*ح(?:ساب)?|حساب\s*(?:شب|آخر\s*وقت)|"
+            rf"تسویه|{_NIGHT_ACCOUNT_PATTERN}|"
             r"پای\s*حساب|تراز"
         ),
     ),
@@ -63,7 +121,11 @@ _FAMILY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
     (
         "DELIVERY_HANDOFF",
-        re.compile(r"تحویل|ارسال|باربری|درب\s*(?:مغازه|محل)|حضوری"),
+        re.compile(
+            r"تحویل|ارسال|باربری|درب\s*(?:مغازه|محل)|حضوری|جنس\s*حاضر|"
+            r"(?:امروز|فردا)\s*جنس\s*(?:می\s*)?(?:گیرم|میگیرم)|"
+            r"جنس\s*(?:امروز|فردا)"
+        ),
     ),
     (
         "IDENTITY_ACCOUNT",
@@ -74,13 +136,26 @@ _FAMILY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "QUANTITY_EXECUTION",
         re.compile(
-            r"یکجا|همه\s*(?:با\s*هم)?|کامل|بدون\s*تک|تک\s*نمی|"
-            r"حداقل\s*\d+|بخشی|پله(?:ای)?"
+            r"یک\s*جا|یکجا|بکجا|(?<!\S)یه\s*جا(?=\s|\d|$)|"
+            r"(?<!\S)ی\s*جا(?=\s|\d|$)|"
+            r"(?<!\S)یجا(?=\s|\d|$)|تا\s*یجا(?=\s|\d|$)|"
+            r"همه\s*(?:با\s*هم)?|"
+            r"با\s*هم|باهم|کامل|بدون\s*تک|تک\s*نمی|"
+            r"حداقل\s*\d+|بخشی|پله(?:ای)?|پول\s*جا\s*ب?جا\s*نشه"
+        ),
+    ),
+    (
+        "ITEM_QUALITY_PACKAGING",
+        re.compile(
+            r"وکیوم|کارتی|تمیز|تمبز|سالم|یک\s*دست|یکدست|پک(?!\S)"
         ),
     ),
     (
         "IMMEDIATE",
-        re.compile(r"فوری|همین\s*الان|لحظه(?:ای)?|آنی"),
+        re.compile(
+            r"فوری|همین\s*الان|لحظه(?:ای)?|آنی|"
+            rf"(?:فیش|حساب|پول){_PHRASE_GAP}(?:زود|سریع)"
+        ),
     ),
     (
         "OTHER_EXPLICIT",
@@ -90,6 +165,9 @@ _FAMILY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 _MODEL_NUMBER_RE = re.compile(r"\d+(?::\d+)?")
 _MODEL_SPACE_RE = re.compile(r"\s+")
+_REVIEW_FORMAT_CONTROL_RE = re.compile(
+    "[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +207,50 @@ def masked_condition_model_text(value: str) -> str:
 
     normalized = normalize_offer_text(value)[:512]
     return _MODEL_SPACE_RE.sub(" ", _MODEL_NUMBER_RE.sub("<NUM>", normalized)).strip()
+
+
+def semantic_condition_alias_spans(
+    text: str,
+    phrase: str,
+    *,
+    allowed_families: Iterable[str] = (),
+) -> tuple[tuple[int, int], ...]:
+    """Resolve a canonical review phrase to high-precision raw abbreviations.
+
+    The returned offsets always point into normalized source text.  This is
+    deliberately a closed alias contract rather than fuzzy matching: owner
+    review may write the semantic phrase ``شب حساب`` while the offer contains
+    ``ش ح``, but no unrelated paraphrase is allowed to manufacture a span.
+    """
+
+    normalized_phrase = normalize_offer_text(
+        _REVIEW_FORMAT_CONTROL_RE.sub("", str(phrase or ""))
+    )
+    compact_phrase = normalized_phrase.replace(" ", "")
+    aliases: dict[str, tuple[str, re.Pattern[str]]] = {
+        "تک حساب": ("PAYMENT_ACCOUNT", _SINGLE_ACCOUNT_RE),
+        "تک خساب": ("PAYMENT_ACCOUNT", _SINGLE_ACCOUNT_RE),
+        "شب حساب": ("SETTLEMENT_PROCESS", _NIGHT_ACCOUNT_RE),
+        "شبخساب": ("SETTLEMENT_PROCESS", _NIGHT_ACCOUNT_RE),
+        "حساب شب": ("SETTLEMENT_PROCESS", _NIGHT_ACCOUNT_RE),
+        "حساب امشب": ("SETTLEMENT_PROCESS", _NIGHT_ACCOUNT_RE),
+    }
+    alias = aliases.get(normalized_phrase)
+    compact_aliases = {
+        "تکحساب": aliases["تک حساب"],
+        "تکخساب": aliases["تک خساب"],
+        "شبحساب": aliases["شب حساب"],
+    }
+    if alias is None:
+        alias = compact_aliases.get(compact_phrase)
+    if alias is None:
+        return ()
+    family, pattern = alias
+    allowed = {str(item).strip().upper() for item in allowed_families}
+    if allowed and family not in allowed:
+        return ()
+    normalized_text = normalize_offer_text(text)[:512]
+    return tuple(match.span() for match in pattern.finditer(normalized_text))
 
 
 def _merge_spans(spans: Iterable[tuple[int, int]]) -> tuple[tuple[int, int], ...]:
@@ -192,7 +314,11 @@ def market_session_phase(
 
 
 def _canonical_deadline_minute(match: re.Match[str]) -> int | None:
-    hour = int(match.group("hour"))
+    hour_text = match.group("hour")
+    hour_word = str(match.group("hour_word") or "")
+    hour = int(hour_text) if hour_text is not None else _HOUR_WORDS.get(hour_word)
+    if hour is None:
+        return None
     minute = int(match.group("minute") or 0)
     daypart = str(match.group("daypart") or "")
     if hour > 23:
@@ -213,13 +339,33 @@ def _deadline_features(
     event_time_utc: datetime | str,
 ) -> tuple[int | None, int | None, str, tuple[tuple[int, int], ...]]:
     matches = list(_DEADLINE_RE.finditer(text))
-    if not matches:
+    relative_matches = list(_RELATIVE_DEADLINE_RE.finditer(text))
+    if not matches and not relative_matches:
         return None, None, "NO_DEADLINE", ()
+    local = _tehran_time(event_time_utc)
+    event_minute = local.hour * 60 + local.minute
+    if relative_matches and (
+        not matches or relative_matches[0].start() < matches[0].start()
+    ):
+        match = relative_matches[0]
+        relative_text = match.group("relative_hour")
+        relative_word = str(match.group("relative_word") or "")
+        hours = (
+            int(relative_text)
+            if relative_text is not None
+            else 1
+            if relative_word == "یه"
+            else _HOUR_WORDS.get(relative_word)
+        )
+        if hours is None or not 1 <= hours <= 8:
+            return None, None, "AMBIGUOUS", (match.span(),)
+        horizon = hours * 60
+        deadline = (event_minute + horizon) % (24 * 60)
+        bucket = "LE_60_MIN" if horizon <= 60 else "BETWEEN_61_AND_180_MIN" if horizon <= 180 else "GT_180_MIN"
+        return deadline, horizon, bucket, (match.span(),)
     deadline = _canonical_deadline_minute(matches[0])
     if deadline is None:
         return None, None, "AMBIGUOUS", tuple(match.span() for match in matches)
-    local = _tehran_time(event_time_utc)
-    event_minute = local.hour * 60 + local.minute
     horizon = deadline - event_minute
     if horizon < 0:
         bucket = "PAST_OR_AMBIGUOUS"
@@ -256,6 +402,8 @@ def extract_offer_conditions(
         normalized,
         event_time_utc,
     )
+    if deadline_spans:
+        families.append("PAYMENT_DEADLINE")
     spans.extend(deadline_spans)
     merged_spans = _merge_spans(spans)
     ordered_families = tuple(family for family in CONDITION_FAMILIES if family in families)
@@ -310,4 +458,5 @@ __all__ = [
     "market_session_phase",
     "masked_condition_model_text",
     "normalize_offer_text",
+    "semantic_condition_alias_spans",
 ]

@@ -351,6 +351,66 @@ change the runtime model or shadow artifact unless the operator supplies the
 corresponding explicit `--stage-runtime-artifact` or
 `--stage-runtime-artifacts` flag. No research result is promoted automatically.
 
+### Authenticated condition-review workspace
+
+The estimator navigation includes **بازبینی شروط**. It combines three private
+operator queues without changing the offer or price-estimator pipelines:
+
+- the fixed 240-row sealed owner set; model output stays hidden until the owner
+  saves an independent decision for that row;
+- recent live/recent group offers with classic-model shadow analysis and an
+  explicit abstention state;
+- already reviewed rows for correction and revision history.
+
+Current product decision (2026-08-20): keep this classifier and its workspace
+available for shadow observation and future owner labeling, but do not start a
+training/promotion cycle or connect its output to offers, pricing, warnings,
+tolerances, or trading decisions. Resuming training or considering any runtime
+effect requires a separate explicit owner decision plus a fresh offline
+evaluation; accumulated web reviews alone are not promotion authority.
+
+The shared private `review_decisions.sqlite3` contains only opaque 20-byte row
+digests, structured decisions, condition character spans, a hashed reviewer and
+immutable revisions. It does **not** store offer text, Telegram identifiers or
+sender identity. Exact private text is resolved only for an authenticated,
+`no-store` response from the protected owner pack or read-only source database.
+The web page never exposes sealed predictions before review and never sends raw
+text to query strings or logs.
+
+Review assets are external mutable runtime files:
+
+```bash
+PYTHONPATH=. python3 scripts/install_coin_condition_review_assets.py \
+  --owner-pack /protected/research/coin-offer-condition-owner-review.json \
+  --model /protected/research/coin-offer-condition-model.joblib \
+  --runtime-dir "$COIN_RATE_ESTIMATOR_RUNTIME_DIR/condition-review" \
+  --runtime-staging
+```
+
+The installer validates the exact 240 rows, taxonomy, research-only artifact
+status and private file modes. The default paths can be overridden with
+`COIN_CONDITION_OWNER_PACK` and `COIN_CONDITION_RESEARCH_MODEL`. Missing or
+invalid model dependencies degrade the page to an explicit rule-only state;
+they do not affect the estimator.
+
+The live queue defaults to the newest three days and at most 1,000 unique
+offers. `COIN_CONDITION_LIVE_REVIEW_DAYS` (1..30) and
+`COIN_CONDITION_LIVE_REVIEW_LIMIT` (100..5000) can change only this review
+window; they do not change model input windows.
+
+To export raw-text-free owner labels for an offline evaluation run:
+
+```bash
+PYTHONPATH=. python3 scripts/export_coin_condition_owner_reviews.py \
+  --review-db "$COIN_REVIEW_DECISIONS_DB" \
+  --owner-pack "$COIN_CONDITION_OWNER_PACK" \
+  --output /protected/research/owner-annotations-v2.json
+```
+
+The 240-row sealed set and rolling live corrections are separate datasets.
+Live corrections may later join a new training pool, but may never be folded
+into the sealed score or tune its thresholds.
+
 Start the configured live service:
 
 ```bash

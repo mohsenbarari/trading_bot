@@ -39,3 +39,18 @@ def test_estimator_runtime_surfaces_do_not_reference_retired_data_plane() -> Non
         content = path.read_text(encoding="utf-8")
         for retired_path in retired_paths:
             assert retired_path not in content, f"{path} references {retired_path}"
+
+
+def test_estimator_dashboard_does_not_wait_for_recurring_group_collector() -> None:
+    service = (
+        SYSTEMD_ROOT / "coin-rate-estimator-dashboard.service.template"
+    ).read_text(encoding="utf-8")
+
+    assert (
+        "After=network-online.target coin-public-market-telegram.service\n" in service
+    )
+    assert (
+        "After=network-online.target coin-public-market-telegram.service "
+        "coin-group-event-telegram.service"
+        not in service
+    )

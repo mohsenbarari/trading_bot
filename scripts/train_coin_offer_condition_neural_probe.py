@@ -44,10 +44,17 @@ from scripts.train_coin_offer_condition_classifier import (
     chronological_train_calibration_split,
     load_training_rows,
 )
+from scripts.coin_offer_condition_calibration import (
+    PlattCalibrator,
+    calibration_metrics,
+    evaluate_abstention_policy,
+    fit_oof_platt_calibrator,
+    select_abstention_thresholds,
+)
 
 
-TRAINER_VERSION = "coin-offer-condition-neural-probe-v2"
-ARTIFACT_VERSION = "coin-offer-condition-neural-probe-artifact-v2"
+TRAINER_VERSION = "coin-offer-condition-neural-probe-v3"
+ARTIFACT_VERSION = "coin-offer-condition-neural-probe-artifact-v3"
 DEFAULT_MODEL_ID = "HooshvareLab/distilbert-fa-zwnj-base"
 DEFAULT_MODEL_REVISION = "e8b934b8c81b17c5e4a1a90325f5f25ced94e8d6"
 
@@ -179,7 +186,13 @@ def _fit_binary(
     y_eval: np.ndarray,
     *,
     minimum_support: int,
-) -> tuple[LogisticRegression | None, float | None, dict[str, Any]]:
+) -> tuple[
+    LogisticRegression | None,
+    PlattCalibrator | None,
+    dict[str, Any] | None,
+    float | None,
+    dict[str, Any],
+]:
     positive = int(y_train.sum())
     negative = int(len(y_train) - positive)
     calibration_positive = int(y_calibration.sum())
@@ -191,7 +204,7 @@ def _fit_binary(
         or calibration_negative < 1
         or not len(y_eval)
     ):
-        return None, None, {
+        return None, None, None, None, {
             "status": "INSUFFICIENT_SUPPORT",
             "train_positive": positive,
             "train_negative": negative,
@@ -207,28 +220,55 @@ def _fit_binary(
         solver="liblinear",
     )
     model.fit(x_train, y_train)
-    calibration_probability = model.predict_proba(x_calibration)[:, 1]
-    threshold, calibration_metric = _select_threshold(
-        y_calibration, calibration_probability
+    raw_calibration_probability = model.predict_proba(x_calibration)[:, 1]
+    calibrator, oof_probability, calibration_report = fit_oof_platt_calibrator(
+        y_calibration, raw_calibration_probability
     )
-    evaluation_probability = model.predict_proba(x_eval)[:, 1]
-    metric = _metric(y_eval, evaluation_probability, threshold)
+    if calibrator is None or oof_probability is None:
+        return None, None, None, None, {
+            "status": "RULE_ONLY_INSUFFICIENT_CALIBRATION_SUPPORT",
+            "train_positive": positive,
+            "train_negative": negative,
+            "calibration_positive": calibration_positive,
+            "calibration_negative": calibration_negative,
+            "evaluation_positive": int(y_eval.sum()),
+            "calibration": calibration_report,
+        }
+    policy = select_abstention_thresholds(y_calibration, oof_probability)
+    raw_evaluation_probability = model.predict_proba(x_eval)[:, 1]
+    evaluation_probability = calibrator.predict(raw_evaluation_probability)
+    threshold = policy.get("positive_threshold")
+    metric = _metric(
+        y_eval,
+        evaluation_probability,
+        float(threshold) if threshold is not None else 1.0001,
+    )
     metric.update(
         {
-            "status": "TRAINED"
-            if int(y_eval.sum()) > 0 and int(len(y_eval) - y_eval.sum()) > 0
-            else "TRAINED_EVALUATION_SUPPORT_LIMITED",
+            "status": "CALIBRATED"
+            if policy["status"] == "READY"
+            else "CALIBRATED_ABSTAIN_ONLY",
             "precision_gate_passed": bool(
-                metric["precision"] >= 0.90 and int(y_eval.sum()) > 0
+                policy["status"] == "READY"
+                and metric["precision"] >= 0.90
+                and int(y_eval.sum()) > 0
             ),
             "train_positive": positive,
             "train_negative": negative,
             "calibration_positive": calibration_positive,
             "calibration_negative": calibration_negative,
-            "calibration_metrics": calibration_metric,
+            "calibration": calibration_report,
+            "abstention_policy": policy,
+            "evaluation_abstention": evaluate_abstention_policy(
+                y_eval, evaluation_probability, policy
+            ),
+            "evaluation_probability_calibration": {
+                "raw": calibration_metrics(y_eval, raw_evaluation_probability),
+                "calibrated": calibration_metrics(y_eval, evaluation_probability),
+            },
         }
     )
-    return model, threshold, metric
+    return model, calibrator, policy, float(threshold) if threshold is not None else None, metric
 
 
 def _span_metric(
@@ -336,8 +376,16 @@ def _fit_family_heads(
     eval_rows: Sequence[int],
     *,
     minimum_support: int,
-) -> tuple[dict[str, LogisticRegression], dict[str, float], dict[str, Any]]:
+) -> tuple[
+    dict[str, LogisticRegression],
+    dict[str, PlattCalibrator],
+    dict[str, dict[str, Any]],
+    dict[str, float],
+    dict[str, Any],
+]:
     models: dict[str, LogisticRegression] = {}
+    calibrators: dict[str, PlattCalibrator] = {}
+    policies: dict[str, dict[str, Any]] = {}
     thresholds: dict[str, float] = {}
     metrics: dict[str, Any] = {}
     train_index = np.asarray(train_rows, dtype=np.int64)
@@ -345,7 +393,7 @@ def _fit_family_heads(
     eval_index = np.asarray(eval_rows, dtype=np.int64)
     for label in ("HAS_CONDITION", *CONDITION_FAMILIES):
         target = _family_target(rows, label)
-        model, threshold, metric = _fit_binary(
+        model, calibrator, policy, threshold, metric = _fit_binary(
             vectors[train_index],
             target[train_index],
             vectors[calibration_index],
@@ -355,14 +403,21 @@ def _fit_family_heads(
             minimum_support=minimum_support,
         )
         metrics[label] = metric
-        if model is not None and threshold is not None:
+        if model is not None and calibrator is not None and policy is not None:
             models[label] = model
-            thresholds[label] = threshold
-    return models, thresholds, metrics
+            calibrators[label] = calibrator
+            policies[label] = policy
+            if threshold is not None:
+                thresholds[label] = threshold
+    return models, calibrators, policies, thresholds, metrics
 
 
 def _aggregate(metrics: Mapping[str, Any]) -> dict[str, Any]:
-    trained = [value for value in metrics.values() if value.get("status") == "TRAINED"]
+    trained = [
+        value
+        for value in metrics.values()
+        if value.get("status") in {"CALIBRATED", "CALIBRATED_ABSTAIN_ONLY"}
+    ]
     return {
         "trained_label_count": len(trained),
         "precision_gate_passed_count": sum(bool(value["precision_gate_passed"]) for value in trained),
@@ -437,7 +492,13 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         range(training_count, training_count + calibration_count)
     )
     eval_rows = list(range(training_count + calibration_count, len(rows)))
-    family_models, family_thresholds, family_metrics = _fit_family_heads(
+    (
+        family_models,
+        family_calibrators,
+        family_policies,
+        family_thresholds,
+        family_metrics,
+    ) = _fit_family_heads(
         rows,
         sentence_vectors,
         train_rows,
@@ -465,7 +526,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         source_rows = source_indices[:source_training_count]
         source_calibration_rows = source_indices[source_training_count:]
         target_rows = [index for index, row in enumerate(rows) if row.group_code == target]
-        _, _, metrics = _fit_family_heads(
+        _, _, _, _, metrics = _fit_family_heads(
             rows,
             sentence_vectors,
             source_rows,
@@ -497,6 +558,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     model_commit = str(getattr(encoder.config, "_commit_hash", None) or args.model_revision)
     implementation_paths = (
         Path(__file__).resolve(),
+        repository_root / "scripts/coin_offer_condition_calibration.py",
         repository_root / "scripts/train_coin_offer_condition_classifier.py",
         repository_root / "core/market_intelligence/coin_offer_conditions.py",
         repository_root / "apps/coin_rate_estimator/requirements-condition-research.txt",
@@ -518,7 +580,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     quality_passed = sorted(
         label
         for label, metric in family_metrics.items()
-        if metric.get("status") == "TRAINED" and metric.get("precision_gate_passed")
+        if metric.get("status") == "CALIBRATED" and metric.get("precision_gate_passed")
     )
     artifact = {
         "artifact_version": ARTIFACT_VERSION,
@@ -535,6 +597,8 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             "fine_tuned": False,
         },
         "family_heads": family_models,
+        "family_probability_calibrators": family_calibrators,
+        "family_abstention_policies": family_policies,
         "family_thresholds": family_thresholds,
         "condition_span_head": span_model,
         "condition_span_threshold": span_threshold,
@@ -558,7 +622,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     os.chmod(artifact_path, 0o600)
     artifact_sha = sha256(artifact_path.read_bytes()).hexdigest()
     report = {
-        "schema_version": "coin-offer-condition-neural-probe-report-v2",
+        "schema_version": "coin-offer-condition-neural-probe-report-v3",
         "created_at_utc": created_at,
         "status": "RESEARCH_ONLY_NOT_PROMOTED",
         "trainer_version": TRAINER_VERSION,
@@ -583,7 +647,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             "unique_composite_class_count": len({row.composite_class for row in rows}),
         },
         "evaluation": {
-            "label_source": "WEAK_SUPERVISION_NOT_HUMAN_GROUND_TRUTH",
+            "label_source": "AGENT_RULE_AUDITED_SILVER_NOT_OWNER_GROUND_TRUTH",
             "threshold_selection_partition": "calibration",
             "evaluation_threshold_locked": True,
             "cross_group_target_used_for_threshold_selection": False,
@@ -613,6 +677,8 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "limitations": [
             "Encoder is frozen; only linear heads are trained in this first neural baseline.",
             "Weak labels and spans are not owner-reviewed ground truth.",
+            "Sentence-family probabilities use OOF Platt calibration and an explicit abstention interval.",
+            "Token-span boundaries retain calibration-only threshold selection; no row-leaking token OOF calibrator is claimed.",
             "Sparse families remain insufficient for a learned production decision.",
             "No runtime model, tolerance policy, live database, staging, or production was modified.",
         ],

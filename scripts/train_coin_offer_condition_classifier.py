@@ -13,13 +13,15 @@ import argparse
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from hashlib import blake2b, sha256
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
 import platform
 import re
 import sqlite3
+import statistics
+import time
 from typing import Any, Iterable, Mapping, Sequence
 
 import joblib
@@ -37,9 +39,17 @@ from core.market_intelligence.coin_offer_conditions import (
     masked_condition_model_text,
     normalize_offer_text,
 )
+from core.market_intelligence.coin_condition_review import condition_sample_digest
 from core.market_intelligence.coin_groups import (
     CoinGroupMessageInput,
     parse_coin_group_offers,
+)
+from scripts.coin_offer_condition_calibration import (
+    PlattCalibrator,
+    calibration_metrics,
+    evaluate_abstention_policy,
+    fit_oof_platt_calibrator,
+    select_abstention_thresholds,
 )
 
 
@@ -101,12 +111,13 @@ def _opaque_digest(
     trade_form: str,
     model_text: str,
 ) -> str:
-    digest = blake2b(digest_size=20, person=b"coin-cond-row-v1")
-    for value in (group_code, event_time_utc, settlement_term, trade_form, model_text):
-        encoded = value.encode("utf-8")
-        digest.update(len(encoded).to_bytes(4, "big"))
-        digest.update(encoded)
-    return digest.hexdigest()
+    return condition_sample_digest(
+        group_code=group_code,
+        event_time_utc=event_time_utc,
+        settlement_term=settlement_term,
+        trade_form=trade_form,
+        model_text=model_text,
+    )
 
 
 def _condition_token_targets(
@@ -490,13 +501,21 @@ def _fit_split(
     *,
     labels: Sequence[str],
     min_label_support: int,
-) -> tuple[dict[str, LogisticRegression], dict[str, float], dict[str, Any]]:
+) -> tuple[
+    dict[str, LogisticRegression],
+    dict[str, PlattCalibrator],
+    dict[str, float],
+    dict[str, dict[str, Any]],
+    dict[str, Any],
+]:
     vectorizer = _vectorizer()
     train_matrix = vectorizer.transform([row.model_text for row in training])
     calibration_matrix = vectorizer.transform([row.model_text for row in calibration])
     eval_matrix = vectorizer.transform([row.model_text for row in evaluation])
     models: dict[str, LogisticRegression] = {}
+    calibrators: dict[str, PlattCalibrator] = {}
     thresholds: dict[str, float] = {}
+    policies: dict[str, dict[str, Any]] = {}
     metrics: dict[str, Any] = {}
     for label in labels:
         y_train = np.asarray([_label_value(row, label) for row in training], dtype=np.int8)
@@ -531,34 +550,68 @@ def _fit_split(
             solver="liblinear",
         )
         model.fit(train_matrix, y_train)
-        calibration_probabilities = model.predict_proba(calibration_matrix)[:, 1]
-        threshold, calibration_metric = _select_threshold(
-            y_calibration, calibration_probabilities
+        raw_calibration_probability = model.predict_proba(calibration_matrix)[:, 1]
+        calibrator, oof_probability, calibration_report = fit_oof_platt_calibrator(
+            y_calibration,
+            raw_calibration_probability,
         )
-        evaluation_probabilities = model.predict_proba(eval_matrix)[:, 1]
-        metric = _metric(y_eval, evaluation_probabilities, threshold)
-        metric["status"] = (
-            "TRAINED"
-            if int(y_eval.sum()) > 0 and int(len(y_eval) - y_eval.sum()) > 0
-            else "TRAINED_EVALUATION_SUPPORT_LIMITED"
+        if calibrator is None or oof_probability is None:
+            metrics[label] = {
+                "status": "RULE_ONLY_INSUFFICIENT_CALIBRATION_SUPPORT",
+                "train_positive": positives,
+                "train_negative": negatives,
+                "calibration_positive": calibration_positive,
+                "calibration_negative": calibration_negative,
+                "evaluation_positive": int(y_eval.sum()),
+                "calibration": calibration_report,
+            }
+            continue
+        policy = select_abstention_thresholds(y_calibration, oof_probability)
+        raw_evaluation_probability = model.predict_proba(eval_matrix)[:, 1]
+        evaluation_probability = calibrator.predict(raw_evaluation_probability)
+        threshold = policy.get("positive_threshold")
+        metric = _metric(
+            y_eval,
+            evaluation_probability,
+            float(threshold) if threshold is not None else 1.0001,
         )
+        metric["status"] = "CALIBRATED" if policy["status"] == "READY" else "CALIBRATED_ABSTAIN_ONLY"
         metric["precision_gate"] = 0.90
         metric["precision_gate_passed"] = bool(
-            metric["precision"] >= 0.90 and int(y_eval.sum()) > 0
+            policy["status"] == "READY"
+            and metric["precision"] >= 0.90
+            and int(y_eval.sum()) > 0
         )
         metric["train_positive"] = positives
         metric["train_negative"] = negatives
         metric["calibration_positive"] = calibration_positive
         metric["calibration_negative"] = calibration_negative
-        metric["calibration_metrics"] = calibration_metric
+        metric["calibration"] = calibration_report
+        metric["abstention_policy"] = policy
+        metric["evaluation_abstention"] = evaluate_abstention_policy(
+            y_eval,
+            evaluation_probability,
+            policy,
+        )
+        metric["evaluation_probability_calibration"] = {
+            "raw": calibration_metrics(y_eval, raw_evaluation_probability),
+            "calibrated": calibration_metrics(y_eval, evaluation_probability),
+        }
         metrics[label] = metric
         models[label] = model
-        thresholds[label] = threshold
-    return models, thresholds, metrics
+        calibrators[label] = calibrator
+        policies[label] = policy
+        if threshold is not None:
+            thresholds[label] = float(threshold)
+    return models, calibrators, thresholds, policies, metrics
 
 
 def _aggregate_metrics(metrics: Mapping[str, Any]) -> dict[str, float | int | None]:
-    trained = [row for row in metrics.values() if row.get("status") == "TRAINED"]
+    trained = [
+        row
+        for row in metrics.values()
+        if row.get("status") in {"CALIBRATED", "CALIBRATED_ABSTAIN_ONLY", "TRAINED"}
+    ]
     if not trained:
         return {
             "trained_label_count": 0,
@@ -589,7 +642,7 @@ def _evaluate_group_transfer(
         source_rows = [row for row in rows if row.group_code == source]
         training, calibration = chronological_train_calibration_split(source_rows)
         evaluation = [row for row in rows if row.group_code == target]
-        _, _, metrics = _fit_split(
+        _, _, _, _, metrics = _fit_split(
             training,
             calibration,
             evaluation,
@@ -609,22 +662,38 @@ def _evaluate_group_transfer(
 def _review_candidates(
     rows: Sequence[TrainingRow],
     models: Mapping[str, LogisticRegression],
-    thresholds: Mapping[str, float],
+    calibrators: Mapping[str, PlattCalibrator],
+    policies: Mapping[str, Mapping[str, Any]],
     *,
     limit: int = 250,
 ) -> list[dict[str, Any]]:
     condition_model = models.get("HAS_CONDITION")
-    if condition_model is None:
+    calibrator = calibrators.get("HAS_CONDITION")
+    policy = policies.get("HAS_CONDITION")
+    if condition_model is None or calibrator is None or policy is None:
         return []
     matrix = _vectorizer().transform([row.model_text for row in rows])
-    probabilities = condition_model.predict_proba(matrix)[:, 1]
-    threshold = float(thresholds.get("HAS_CONDITION", 0.5))
+    probabilities = calibrator.predict(condition_model.predict_proba(matrix)[:, 1])
+    positive_threshold = policy.get("positive_threshold")
+    negative_threshold = policy.get("negative_threshold")
     ranked: list[tuple[float, dict[str, Any]]] = []
     for row, probability in zip(rows, probabilities):
         disagreement = (
-            (not row.has_condition and probability >= max(0.65, threshold))
-            or (row.has_condition and probability <= min(0.35, threshold))
-            or abs(float(probability) - threshold) <= 0.08
+            (
+                positive_threshold is not None
+                and not row.has_condition
+                and probability >= float(positive_threshold)
+            )
+            or (
+                negative_threshold is not None
+                and row.has_condition
+                and probability <= float(negative_threshold)
+            )
+            or (
+                negative_threshold is not None
+                and positive_threshold is not None
+                and float(negative_threshold) < probability < float(positive_threshold)
+            )
         )
         if not disagreement:
             continue
@@ -645,6 +714,34 @@ def _review_candidates(
         )
     ranked.sort(key=lambda item: (item[0], item[1]["sample_digest"]))
     return [item for _, item in ranked[:limit]]
+
+
+def _benchmark_inference(
+    rows: Sequence[TrainingRow],
+    models: Mapping[str, LogisticRegression],
+    calibrators: Mapping[str, PlattCalibrator],
+) -> dict[str, Any]:
+    samples = rows[-min(40, len(rows)) :]
+    durations: list[float] = []
+    vectorizer = _vectorizer()
+    for index, row in enumerate(samples):
+        started = time.perf_counter()
+        matrix = vectorizer.transform([row.model_text])
+        for label, model in models.items():
+            raw = model.predict_proba(matrix)[:, 1]
+            calibrators[label].predict(raw)
+        elapsed = (time.perf_counter() - started) * 1_000
+        if index >= 5:
+            durations.append(elapsed)
+    ordered = sorted(durations)
+    return {
+        "device": "cpu",
+        "warmup_count": 5,
+        "measured_count": len(durations),
+        "trained_head_count": len(models),
+        "latency_ms_p50": round(statistics.median(ordered), 3),
+        "latency_ms_p95": round(ordered[max(0, int(len(ordered) * 0.95) - 1)], 3),
+    }
 
 
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
@@ -673,7 +770,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError("condition_training_sample_count_too_small")
     training, calibration, evaluation = chronological_three_way_split(rows)
     labels = ("HAS_CONDITION", *CONDITION_FAMILIES)
-    temporal_models, thresholds, temporal_metrics = _fit_split(
+    temporal_models, calibrators, thresholds, policies, temporal_metrics = _fit_split(
         training,
         calibration,
         evaluation,
@@ -686,18 +783,19 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     quality_gate_passed_labels = sorted(
         label
         for label, metric in temporal_metrics.items()
-        if metric.get("status") == "TRAINED" and metric.get("precision_gate_passed")
+        if metric.get("status") == "CALIBRATED" and metric.get("precision_gate_passed")
     )
     quality_gate_blocked_labels = sorted(
         set(temporal_models) - set(quality_gate_passed_labels)
     )
-    candidates = _review_candidates(rows, temporal_models, thresholds)
+    candidates = _review_candidates(rows, temporal_models, calibrators, policies)
     source_digest = sha256()
     for row in rows:
         source_digest.update(bytes.fromhex(row.opaque_digest))
     created_at = _utc_now()
     implementation_paths = (
         Path(__file__).resolve(),
+        repository_root / "scripts/coin_offer_condition_calibration.py",
         repository_root / "core/market_intelligence/coin_offer_conditions.py",
         repository_root / "apps/coin_rate_estimator/requirements-research.txt",
     )
@@ -719,7 +817,9 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "status": "RESEARCH_ONLY_NOT_PROMOTED",
         "vectorizer": _vectorizer(),
         "models": temporal_models,
+        "probability_calibrators": calibrators,
         "thresholds": thresholds,
+        "abstention_policies": policies,
         "trained_labels": sorted(temporal_models),
         "quality_gate_passed_labels": quality_gate_passed_labels,
         "quality_gate_blocked_labels": quality_gate_blocked_labels,
@@ -754,7 +854,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     family_counts = Counter(family for row in rows for family in row.families)
     deadline_counts = Counter(row.deadline_bucket for row in rows)
     report = {
-        "schema_version": "coin-offer-condition-training-report-v2",
+        "schema_version": "coin-offer-condition-training-report-v3",
         "created_at_utc": created_at,
         "status": "RESEARCH_ONLY_NOT_PROMOTED",
         "trainer_version": TRAINER_VERSION,
@@ -779,7 +879,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             "unique_composite_class_count": len({row.composite_class for row in rows}),
         },
         "evaluation": {
-            "label_source": "HIGH_PRECISION_WEAK_SUPERVISION_NOT_HUMAN_GROUND_TRUTH",
+            "label_source": "AGENT_RULE_AUDITED_SILVER_NOT_OWNER_GROUND_TRUTH",
             "threshold_selection_partition": "calibration",
             "evaluation_threshold_locked": True,
             "cross_group_target_used_for_threshold_selection": False,
@@ -805,6 +905,9 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
                 "cross_group": _evaluate_span_group_transfer(rows),
             },
         },
+        "cpu_benchmark": _benchmark_inference(
+            rows, temporal_models, calibrators
+        ),
         "artifact": {
             "filename": artifact_path.name,
             "sha256": artifact_sha,

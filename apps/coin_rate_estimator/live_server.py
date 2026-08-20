@@ -91,6 +91,11 @@ from core.market_intelligence.coin_group_feedback import (  # noqa: E402
     load_coin_group_parser_feedback,
     record_coin_group_parser_feedback,
 )
+from core.market_intelligence.coin_condition_review import (  # noqa: E402
+    ConditionReviewError,
+    ConditionReviewService,
+)
+from condition_review_page import render_condition_review_page  # noqa: E402
 from core.market_intelligence.coin_groups import (  # noqa: E402
     CoinGroupMessageInput,
     parse_coin_group_offers,
@@ -168,6 +173,18 @@ DEFAULT_ML_SHADOW_STATE_PATH = Path(
 DEFAULT_WRITE_TOKEN_FILE = RUNTIME_ROOT / "manual-entry.token"
 DEFAULT_GROUP_LIVE_CONTROL = RUNTIME_ROOT / "group-live-input-control.json"
 DEFAULT_DASHBOARD_CREDENTIALS_FILE = RUNTIME_ROOT / "dashboard-credentials.json"
+DEFAULT_CONDITION_OWNER_PACK = Path(
+    os.environ.get(
+        "COIN_CONDITION_OWNER_PACK",
+        str(RUNTIME_ROOT / "condition-review" / "coin-offer-condition-owner-review.json"),
+    )
+).expanduser()
+DEFAULT_CONDITION_MODEL = Path(
+    os.environ.get(
+        "COIN_CONDITION_RESEARCH_MODEL",
+        str(RUNTIME_ROOT / "condition-review" / "coin-offer-condition-model.joblib"),
+    )
+).expanduser()
 PUBLIC_COLLECTOR_HEALTH_NAME = "public-telegram-health.json"
 EXTERNAL_MARKET_HEALTH_NAME = "external-market-health.json"
 GROUP_PROJECTION_HEALTH_NAME = "group-event-health.json"
@@ -177,6 +194,14 @@ PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "0123
 
 def _env_flag(name: str, default: str = "0") -> bool:
     return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_bounded_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)).strip())
+    except ValueError:
+        value = default
+    return max(minimum, min(maximum, value))
 
 
 def shadow_light_mode() -> bool:
@@ -5064,6 +5089,7 @@ def render_page(
     group_live_control_path: str = "/group-live-control",
     group_live_control: dict[str, Any] | None = None,
     shadow_path: str = "/shadow",
+    condition_review_path: str = "/condition-review",
 ) -> bytes:
     generated = fa_datetime(state.get("generated_at_utc"))
     window_start = fa_datetime(state.get("window_start_utc"))
@@ -5190,6 +5216,7 @@ def render_page(
         navigation = (
             f"<nav class='header-actions' aria-label='ناوبری داشبورد'>{user_badge} "
             f"<a class='nav-btn secondary' href='{html.escape(shadow_path)}'>مدل‌های سایه</a> "
+            f"<a class='nav-btn secondary' href='{html.escape(condition_review_path)}'>بازبینی شروط</a> "
             f"<a class='nav-btn secondary' href='{html.escape(analytics_path + '#parser-review-ledger')}'>بازبینی parser</a> "
             f"<a class='nav-btn' href='{html.escape(manual_path)}'>ثبت دستی آفر</a> "
             f"{logout_btn}</nav>"
@@ -6931,6 +6958,9 @@ def handler_factory(
     manual_path = normalized + "/manual-entry"
     analytics_path = normalized + "/analytics"
     parser_feedback_path = analytics_path + "/parser-feedback.json"
+    condition_review_path = normalized + "/condition-review"
+    condition_review_data_path = condition_review_path + ".json"
+    condition_review_decision_path = condition_review_path + "/decision.json"
     login_path = normalized + "/login"
     logout_path = normalized + "/logout"
     estimate_path = normalized + "/estimates.html"
@@ -6943,6 +6973,19 @@ def handler_factory(
     group_live_control_path = normalized + "/group-live-control"
     parse_offer_path = manual_path + "/parse-text"
     session_store = SessionStore(RUNTIME_ROOT / "web_sessions.sqlite3")
+    condition_review_service = ConditionReviewService(
+        conversation_db=conversation_db,
+        staging_db=coin_group_staging_db,
+        review_db=feedback_db,
+        owner_pack_path=DEFAULT_CONDITION_OWNER_PACK,
+        model_path=DEFAULT_CONDITION_MODEL,
+        live_recent_days=_env_bounded_int(
+            "COIN_CONDITION_LIVE_REVIEW_DAYS", 3, minimum=1, maximum=30
+        ),
+        live_sample_limit=_env_bounded_int(
+            "COIN_CONDITION_LIVE_REVIEW_LIMIT", 1_000, minimum=100, maximum=5_000
+        ),
+    )
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "CoinEstimator/1"
@@ -6989,6 +7032,24 @@ def handler_factory(
             except Exception:
                 pass
             return None
+
+        def _same_origin_request(self) -> bool:
+            expected_host = self.headers.get("Host", "")
+            candidates = (
+                self.headers.get("Origin"),
+                self.headers.get("Referer"),
+            )
+            present = False
+            for candidate in candidates:
+                if not candidate:
+                    continue
+                present = True
+                parsed_candidate = urlsplit(candidate)
+                if parsed_candidate.netloc != expected_host:
+                    return False
+                if parsed_candidate.scheme not in {"http", "https"}:
+                    return False
+            return present
 
         def do_GET(self) -> None:  # noqa: N802
             path = urlsplit(self.path).path.rstrip("/") or "/"
@@ -7044,8 +7105,46 @@ def handler_factory(
                     group_live_control_path=group_live_control_path,
                     group_live_control=group_live_control.get(),
                     shadow_path=shadow_path,
+                    condition_review_path=condition_review_path,
                 )
                 self._headers(HTTPStatus.OK, "text/html; charset=utf-8", len(body))
+                self.wfile.write(body)
+                return
+            if path == condition_review_path:
+                body = render_condition_review_page(
+                    home_path=normalized,
+                    data_path=condition_review_data_path,
+                    decision_path=condition_review_decision_path,
+                    logout_path=logout_path,
+                    user_session=user_session,
+                )
+                self._headers(HTTPStatus.OK, "text/html; charset=utf-8", len(body))
+                self.wfile.write(body)
+                return
+            if path == condition_review_data_path:
+                query = parse_qs(urlsplit(self.path).query)
+                try:
+                    data = condition_review_service.list_queue(
+                        queue=query.get("queue", ["SEALED"])[0],
+                        status=query.get("status", ["ALL"])[0],
+                        group=query.get("group", ["ALL"])[0],
+                        offset=query.get("offset", [0])[0],
+                        limit=query.get("limit", [20])[0],
+                    )
+                    body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+                    status = HTTPStatus.OK
+                except (
+                    ConditionReviewError,
+                    OSError,
+                    sqlite3.Error,
+                    json.JSONDecodeError,
+                ):
+                    body = json.dumps(
+                        {"error": "صف بازبینی در دسترس نیست."},
+                        ensure_ascii=False,
+                    ).encode("utf-8")
+                    status = HTTPStatus.SERVICE_UNAVAILABLE
+                self._headers(status, "application/json; charset=utf-8", len(body))
                 self.wfile.write(body)
                 return
             if path == shadow_path:
@@ -7221,6 +7320,7 @@ def handler_factory(
                     group_live_control_path=group_live_control_path,
                     group_live_control=group_live_control.get(),
                     shadow_path=shadow_path,
+                    condition_review_path=condition_review_path,
                 )
                 self._headers(HTTPStatus.OK, "text/html; charset=utf-8", len(body))
                 self.wfile.write(body)
@@ -7490,6 +7590,80 @@ def handler_factory(
                     "application/json; charset=utf-8",
                     len(body),
                 )
+                self.wfile.write(body)
+                return
+            if path == condition_review_decision_path:
+                if not self._same_origin_request():
+                    body = json.dumps(
+                        {"error": "درخواست خارج از صفحهٔ تخمین پذیرفته نیست."},
+                        ensure_ascii=False,
+                    ).encode("utf-8")
+                    self._headers(
+                        HTTPStatus.FORBIDDEN,
+                        "application/json; charset=utf-8",
+                        len(body),
+                    )
+                    self.wfile.write(body)
+                    return
+                try:
+                    content_length = int(self.headers.get("Content-Length", "0"))
+                except ValueError:
+                    content_length = 0
+                if content_length <= 0 or content_length > 8_192:
+                    body = json.dumps(
+                        {"error": "اندازهٔ درخواست بازبینی نامعتبر است."},
+                        ensure_ascii=False,
+                    ).encode("utf-8")
+                    self._headers(
+                        HTTPStatus.BAD_REQUEST,
+                        "application/json; charset=utf-8",
+                        len(body),
+                    )
+                    self.wfile.write(body)
+                    return
+                try:
+                    payload = json.loads(
+                        self.rfile.read(content_length).decode("utf-8", errors="strict")
+                    )
+                    if not isinstance(payload, dict):
+                        raise ConditionReviewError("condition_review_payload_invalid")
+                    result = condition_review_service.record(
+                        payload, reviewer=user_session
+                    )
+                    body = json.dumps(result, ensure_ascii=False).encode("utf-8")
+                    status = HTTPStatus.OK
+                except ConditionReviewError as exc:
+                    messages = {
+                        "condition_review_revision_conflict": "این نمونه در صفحهٔ دیگری اصلاح شده؛ صفحه را تازه کنید.",
+                        "condition_review_family_required": "برای آفر شرط‌دار حداقل یک خانواده انتخاب کنید.",
+                        "condition_review_family_not_allowed": "برای آفر بدون شرط یا مبهم، خانواده انتخاب نکنید.",
+                        "condition_review_span_required": "عبارت شرط یا معنای اختصار آن را وارد کنید.",
+                        "condition_review_span_not_allowed": "برای آفر بدون شرط یا مبهم، قطعهٔ شرط را خالی بگذارید.",
+                        "condition_review_alias_family_mismatch": "خانوادهٔ مرتبط با هر عبارت شرط را انتخاب کنید.",
+                        "condition_review_span_not_in_offer": "عبارت شرط یا اختصار شناخته‌شدهٔ آن در متن آفر پیدا نشد.",
+                        "condition_review_deadline_invalid": "مهلت را به‌شکل 14:00، AMBIGUOUS یا خالی وارد کنید.",
+                        "condition_review_sample_not_found": "این نمونه دیگر در منبع خصوصی در دسترس نیست.",
+                    }
+                    body = json.dumps(
+                        {
+                            "error": messages.get(
+                                str(exc), "مقادیر بازبینی معتبر نیستند."
+                            )
+                        },
+                        ensure_ascii=False,
+                    ).encode("utf-8")
+                    status = (
+                        HTTPStatus.CONFLICT
+                        if str(exc) == "condition_review_revision_conflict"
+                        else HTTPStatus.BAD_REQUEST
+                    )
+                except (UnicodeDecodeError, json.JSONDecodeError, OSError, sqlite3.Error):
+                    body = json.dumps(
+                        {"error": "ثبت بازبینی انجام نشد؛ دوباره تلاش کنید."},
+                        ensure_ascii=False,
+                    ).encode("utf-8")
+                    status = HTTPStatus.BAD_REQUEST
+                self._headers(status, "application/json; charset=utf-8", len(body))
                 self.wfile.write(body)
                 return
             if path != manual_path:
