@@ -17,15 +17,20 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import platform
 import statistics
 import time
 from typing import Any, Mapping, Sequence
 
 import joblib
 import numpy as np
+import safetensors
+import sklearn
+import sentencepiece
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import precision_recall_fscore_support
 import torch
+import transformers
 from transformers import AutoModel, AutoTokenizer
 
 from core.market_intelligence.coin_offer_conditions import (
@@ -35,12 +40,14 @@ from core.market_intelligence.coin_offer_conditions import (
 from scripts.train_coin_offer_condition_classifier import (
     TrainingRow,
     _safe_output_dir,
+    chronological_three_way_split,
+    chronological_train_calibration_split,
     load_training_rows,
 )
 
 
-TRAINER_VERSION = "coin-offer-condition-neural-probe-v1"
-ARTIFACT_VERSION = "coin-offer-condition-neural-probe-artifact-v1"
+TRAINER_VERSION = "coin-offer-condition-neural-probe-v2"
+ARTIFACT_VERSION = "coin-offer-condition-neural-probe-artifact-v2"
 DEFAULT_MODEL_ID = "HooshvareLab/distilbert-fa-zwnj-base"
 DEFAULT_MODEL_REVISION = "e8b934b8c81b17c5e4a1a90325f5f25ced94e8d6"
 
@@ -166,6 +173,8 @@ def _row_token_indices(
 def _fit_binary(
     x_train: np.ndarray,
     y_train: np.ndarray,
+    x_calibration: np.ndarray,
+    y_calibration: np.ndarray,
     x_eval: np.ndarray,
     y_eval: np.ndarray,
     *,
@@ -173,11 +182,21 @@ def _fit_binary(
 ) -> tuple[LogisticRegression | None, float | None, dict[str, Any]]:
     positive = int(y_train.sum())
     negative = int(len(y_train) - positive)
-    if positive < minimum_support or negative < minimum_support or not len(y_eval):
+    calibration_positive = int(y_calibration.sum())
+    calibration_negative = int(len(y_calibration) - calibration_positive)
+    if (
+        positive < minimum_support
+        or negative < minimum_support
+        or calibration_positive < 1
+        or calibration_negative < 1
+        or not len(y_eval)
+    ):
         return None, None, {
             "status": "INSUFFICIENT_SUPPORT",
             "train_positive": positive,
             "train_negative": negative,
+            "calibration_positive": calibration_positive,
+            "calibration_negative": calibration_negative,
             "evaluation_positive": int(y_eval.sum()),
         }
     model = LogisticRegression(
@@ -188,9 +207,27 @@ def _fit_binary(
         solver="liblinear",
     )
     model.fit(x_train, y_train)
-    probability = model.predict_proba(x_eval)[:, 1]
-    threshold, metric = _select_threshold(y_eval, probability)
-    metric.update({"status": "TRAINED", "train_positive": positive, "train_negative": negative})
+    calibration_probability = model.predict_proba(x_calibration)[:, 1]
+    threshold, calibration_metric = _select_threshold(
+        y_calibration, calibration_probability
+    )
+    evaluation_probability = model.predict_proba(x_eval)[:, 1]
+    metric = _metric(y_eval, evaluation_probability, threshold)
+    metric.update(
+        {
+            "status": "TRAINED"
+            if int(y_eval.sum()) > 0 and int(len(y_eval) - y_eval.sum()) > 0
+            else "TRAINED_EVALUATION_SUPPORT_LIMITED",
+            "precision_gate_passed": bool(
+                metric["precision"] >= 0.90 and int(y_eval.sum()) > 0
+            ),
+            "train_positive": positive,
+            "train_negative": negative,
+            "calibration_positive": calibration_positive,
+            "calibration_negative": calibration_negative,
+            "calibration_metrics": calibration_metric,
+        }
+    )
     return model, threshold, metric
 
 
@@ -221,9 +258,13 @@ def _fit_span(
     token_targets: np.ndarray,
     row_ranges: Sequence[tuple[int, int]],
     train_rows: Sequence[int],
+    calibration_rows: Sequence[int],
     eval_rows: Sequence[int],
 ) -> tuple[LogisticRegression, float, dict[str, Any]]:
     train_indices, _ = _row_token_indices(train_rows, row_ranges)
+    calibration_indices, calibration_ranges = _row_token_indices(
+        calibration_rows, row_ranges
+    )
     eval_indices, eval_ranges = _row_token_indices(eval_rows, row_ranges)
     model = LogisticRegression(
         class_weight="balanced",
@@ -233,9 +274,16 @@ def _fit_span(
         solver="liblinear",
     )
     model.fit(token_vectors[train_indices], token_targets[train_indices])
-    probability = model.predict_proba(token_vectors[eval_indices])[:, 1]
+    calibration_probability = model.predict_proba(
+        token_vectors[calibration_indices]
+    )[:, 1]
     candidates = [
-        _span_metric(token_targets[eval_indices], probability, eval_ranges, value)
+        _span_metric(
+            token_targets[calibration_indices],
+            calibration_probability,
+            calibration_ranges,
+            value,
+        )
         for value in np.arange(0.20, 0.951, 0.025)
     ]
     precision_gated = [row for row in candidates if row["precision_gate_passed"]]
@@ -243,16 +291,35 @@ def _fit_span(
         precision_gated or candidates,
         key=lambda row: (row["f1"], row["recall"], row["row_exact_match_rate"], row["threshold"]),
     )
-    best.update(
+    threshold = float(best["threshold"])
+    evaluation_probability = model.predict_proba(token_vectors[eval_indices])[:, 1]
+    metric = _span_metric(
+        token_targets[eval_indices], evaluation_probability, eval_ranges, threshold
+    )
+    metric.update(
         {
-            "status": "TRAINED",
+            "status": "TRAINED"
+            if int(token_targets[eval_indices].sum()) > 0
+            and int(len(eval_indices) - token_targets[eval_indices].sum()) > 0
+            else "TRAINED_EVALUATION_SUPPORT_LIMITED",
+            "precision_gate_passed": bool(
+                metric["precision"] >= 0.90
+                and int(token_targets[eval_indices].sum()) > 0
+            ),
             "train_positive_tokens": int(token_targets[train_indices].sum()),
             "train_negative_tokens": int(len(train_indices) - token_targets[train_indices].sum()),
+            "calibration_positive_tokens": int(
+                token_targets[calibration_indices].sum()
+            ),
+            "calibration_negative_tokens": int(
+                len(calibration_indices) - token_targets[calibration_indices].sum()
+            ),
             "evaluation_positive_tokens": int(token_targets[eval_indices].sum()),
             "evaluation_negative_tokens": int(len(eval_indices) - token_targets[eval_indices].sum()),
+            "calibration_metrics": best,
         }
     )
-    return model, float(best["threshold"]), best
+    return model, threshold, metric
 
 
 def _family_target(rows: Sequence[TrainingRow], label: str) -> np.ndarray:
@@ -265,6 +332,7 @@ def _fit_family_heads(
     rows: Sequence[TrainingRow],
     vectors: np.ndarray,
     train_rows: Sequence[int],
+    calibration_rows: Sequence[int],
     eval_rows: Sequence[int],
     *,
     minimum_support: int,
@@ -273,12 +341,15 @@ def _fit_family_heads(
     thresholds: dict[str, float] = {}
     metrics: dict[str, Any] = {}
     train_index = np.asarray(train_rows, dtype=np.int64)
+    calibration_index = np.asarray(calibration_rows, dtype=np.int64)
     eval_index = np.asarray(eval_rows, dtype=np.int64)
     for label in ("HAS_CONDITION", *CONDITION_FAMILIES):
         target = _family_target(rows, label)
         model, threshold, metric = _fit_binary(
             vectors[train_index],
             target[train_index],
+            vectors[calibration_index],
+            target[calibration_index],
             vectors[eval_index],
             target[eval_index],
             minimum_support=minimum_support,
@@ -356,13 +427,21 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         batch_size=args.batch_size,
         max_length=args.max_length,
     )
-    split = min(len(rows) - 1, max(1, int(len(rows) * 0.80)))
-    train_rows = list(range(split))
-    eval_rows = list(range(split, len(rows)))
+    training_partition, calibration_partition, evaluation_partition = (
+        chronological_three_way_split(rows)
+    )
+    training_count = len(training_partition)
+    calibration_count = len(calibration_partition)
+    train_rows = list(range(training_count))
+    calibration_rows = list(
+        range(training_count, training_count + calibration_count)
+    )
+    eval_rows = list(range(training_count + calibration_count, len(rows)))
     family_models, family_thresholds, family_metrics = _fit_family_heads(
         rows,
         sentence_vectors,
         train_rows,
+        calibration_rows,
         eval_rows,
         minimum_support=args.min_label_support,
     )
@@ -371,17 +450,26 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         token_targets,
         row_ranges,
         train_rows,
+        calibration_rows,
         eval_rows,
     )
     group_transfer: dict[str, Any] = {}
     span_transfer: dict[str, Any] = {}
     for source, target in (("group_1", "group_2"), ("group_2", "group_1")):
-        source_rows = [index for index, row in enumerate(rows) if row.group_code == source]
+        source_row_objects = [row for row in rows if row.group_code == source]
+        source_training_objects, _ = (
+            chronological_train_calibration_split(source_row_objects)
+        )
+        source_indices = [index for index, row in enumerate(rows) if row.group_code == source]
+        source_training_count = len(source_training_objects)
+        source_rows = source_indices[:source_training_count]
+        source_calibration_rows = source_indices[source_training_count:]
         target_rows = [index for index, row in enumerate(rows) if row.group_code == target]
         _, _, metrics = _fit_family_heads(
             rows,
             sentence_vectors,
             source_rows,
+            source_calibration_rows,
             target_rows,
             minimum_support=args.min_label_support,
         )
@@ -390,44 +478,43 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             token_targets,
             row_ranges,
             source_rows,
+            source_calibration_rows,
             target_rows,
         )
         group_transfer[f"{source}_to_{target}"] = {
             "training_count": len(source_rows),
+            "calibration_count": len(source_calibration_rows),
             "evaluation_count": len(target_rows),
             "labels": metrics,
             "aggregate": _aggregate(metrics),
         }
         span_transfer[f"{source}_to_{target}"] = span_metric
 
-    all_rows = list(range(len(rows)))
-    final_family_models: dict[str, LogisticRegression] = {}
-    for label in family_models:
-        target = _family_target(rows, label)
-        model = LogisticRegression(
-            class_weight="balanced",
-            C=1.0,
-            max_iter=1_000,
-            random_state=1729,
-            solver="liblinear",
-        )
-        model.fit(sentence_vectors, target)
-        final_family_models[label] = model
-    all_token_indices, _ = _row_token_indices(all_rows, row_ranges)
-    final_span_model = LogisticRegression(
-        class_weight="balanced",
-        C=1.0,
-        max_iter=1_000,
-        random_state=1729,
-        solver="liblinear",
-    )
-    final_span_model.fit(token_vectors[all_token_indices], token_targets[all_token_indices])
-
     source_digest = sha256()
     for row in rows:
         source_digest.update(bytes.fromhex(row.opaque_digest))
     created_at = _utc_now()
     model_commit = str(getattr(encoder.config, "_commit_hash", None) or args.model_revision)
+    implementation_paths = (
+        Path(__file__).resolve(),
+        repository_root / "scripts/train_coin_offer_condition_classifier.py",
+        repository_root / "core/market_intelligence/coin_offer_conditions.py",
+        repository_root / "apps/coin_rate_estimator/requirements-condition-research.txt",
+    )
+    implementation_sources = {
+        str(path.relative_to(repository_root)): sha256(path.read_bytes()).hexdigest()
+        for path in implementation_paths
+    }
+    runtime_versions = {
+        "python": platform.python_version(),
+        "numpy": np.__version__,
+        "scikit_learn": sklearn.__version__,
+        "torch": torch.__version__,
+        "transformers": transformers.__version__,
+        "sentencepiece": sentencepiece.__version__,
+        "safetensors": safetensors.__version__,
+        "joblib": joblib.__version__,
+    }
     quality_passed = sorted(
         label
         for label, metric in family_metrics.items()
@@ -447,13 +534,18 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             "weights_embedded": False,
             "fine_tuned": False,
         },
-        "family_heads": final_family_models,
+        "family_heads": family_models,
         "family_thresholds": family_thresholds,
-        "condition_span_head": final_span_model,
+        "condition_span_head": span_model,
         "condition_span_threshold": span_threshold,
+        "fit_partition": "TEMPORAL_TRAINING_ONLY",
+        "threshold_partition": "TEMPORAL_CALIBRATION_ONLY",
+        "evaluation_partition_used_for_fit_or_threshold": False,
         "quality_gate_passed_labels": quality_passed,
-        "quality_gate_blocked_labels": sorted(set(final_family_models) - set(quality_passed)),
+        "quality_gate_blocked_labels": sorted(set(family_models) - set(quality_passed)),
         "source_fingerprint": source_digest.hexdigest(),
+        "implementation_sources": implementation_sources,
+        "runtime_versions": runtime_versions,
         "privacy": {
             "raw_text_retained": False,
             "message_ids_retained": False,
@@ -466,7 +558,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     os.chmod(artifact_path, 0o600)
     artifact_sha = sha256(artifact_path.read_bytes()).hexdigest()
     report = {
-        "schema_version": "coin-offer-condition-neural-probe-report-v1",
+        "schema_version": "coin-offer-condition-neural-probe-report-v2",
         "created_at_utc": created_at,
         "status": "RESEARCH_ONLY_NOT_PROMOTED",
         "trainer_version": TRAINER_VERSION,
@@ -477,6 +569,8 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             "raw_text_retained": False,
         },
         "encoder": artifact["encoder"],
+        "implementation_sources": implementation_sources,
+        "runtime_versions": runtime_versions,
         "distribution": {
             "groups": dict(sorted(Counter(row.group_code for row in rows).items())),
             "settlements": dict(sorted(Counter(row.settlement_term for row in rows).items())),
@@ -490,11 +584,17 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         },
         "evaluation": {
             "label_source": "WEAK_SUPERVISION_NOT_HUMAN_GROUND_TRUTH",
+            "threshold_selection_partition": "calibration",
+            "evaluation_threshold_locked": True,
+            "cross_group_target_used_for_threshold_selection": False,
             "temporal_split": {
-                "training_count": split,
-                "evaluation_count": len(rows) - split,
-                "training_end_utc": rows[split - 1].event_time_utc,
-                "evaluation_start_utc": rows[split].event_time_utc,
+                "training_count": len(train_rows),
+                "calibration_count": len(calibration_rows),
+                "evaluation_count": len(eval_rows),
+                "training_end_utc": training_partition[-1].event_time_utc,
+                "calibration_start_utc": calibration_partition[0].event_time_utc,
+                "calibration_end_utc": calibration_partition[-1].event_time_utc,
+                "evaluation_start_utc": evaluation_partition[0].event_time_utc,
                 "family_labels": family_metrics,
                 "family_aggregate": _aggregate(family_metrics),
                 "condition_span": span_metrics,
@@ -508,7 +608,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             "sha256": artifact_sha,
             "encoder_weights_embedded": False,
             "quality_gate_passed_labels": quality_passed,
-            "quality_gate_blocked_labels": sorted(set(final_family_models) - set(quality_passed)),
+            "quality_gate_blocked_labels": sorted(set(family_models) - set(quality_passed)),
         },
         "limitations": [
             "Encoder is frozen; only linear heads are trained in this first neural baseline.",

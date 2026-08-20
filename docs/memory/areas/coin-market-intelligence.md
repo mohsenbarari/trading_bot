@@ -14,5 +14,5 @@
 - Regime order: private minute gold, Herat, XAU, resolved Group 1/2 books. Keep direction/volatility and CASH/TOMORROW separate; abstain on low evidence; live changes use hold-down. Public inputs: unconfigured fallback only.
 - Staging catalog mirrors Iran; Snapshot read-only. v3 exact bands; else nearest same-family center within ±10% needs confirmation; ties require choice. Edits reuse scope, omit receipt, never auto-select; bot shows choice before buttons, answers stale taps.
 - Bridge/collectors share writer `flock`; bridge `After=` recurring collectors starves it and stales Snapshots.
-- Condition research: pinned Persian encoder spans/families; deterministic settlement/form, Tehran phase, deadline horizon. Regex weak-labels only; reviews/artifacts raw-free/opaque. No tolerance before owner-reviewed truth, calibration, CPU shadow; revisions correct facts, keep anchors.
+- Condition research: pinned Persian encoder spans/families; settlement/form, Tehran phase, deadline are deterministic. Regex weak-labels; raw-free artifacts require separate calibration/eval and source-only cross-group thresholds. No tolerance before owner-reviewed truth, abstention, CPU shadow.
 - Index book/time anchors; no per-message scan. Fetch deltas newest-first then sort; oldest-first backlog preserves checkpoints.

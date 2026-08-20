@@ -17,6 +17,7 @@ from hashlib import blake2b, sha256
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import sqlite3
 from typing import Any, Iterable, Mapping, Sequence
@@ -42,8 +43,8 @@ from core.market_intelligence.coin_groups import (
 )
 
 
-TRAINER_VERSION = "coin-offer-condition-trainer-v2"
-ARTIFACT_VERSION = "coin-offer-condition-research-artifact-v2"
+TRAINER_VERSION = "coin-offer-condition-trainer-v3"
+ARTIFACT_VERSION = "coin-offer-condition-research-artifact-v3"
 _LIVE_RUNTIME_ROOT = Path("/srv/trading-bot/production-data").resolve()
 _TOKEN_RE = re.compile(r"\S+")
 
@@ -250,6 +251,45 @@ def load_training_rows(
     return sorted(deduplicated.values(), key=lambda item: (item.event_time_utc, item.opaque_digest))
 
 
+def chronological_three_way_split(
+    rows: Sequence[TrainingRow],
+    *,
+    training_fraction: float = 0.70,
+    calibration_fraction: float = 0.15,
+) -> tuple[list[TrainingRow], list[TrainingRow], list[TrainingRow]]:
+    """Return ordered train/calibration/evaluation partitions without overlap."""
+
+    if len(rows) < 3:
+        raise ValueError("condition_training_three_way_split_requires_three_rows")
+    if not 0 < training_fraction < 1 or not 0 < calibration_fraction < 1:
+        raise ValueError("condition_training_split_fraction_invalid")
+    if training_fraction + calibration_fraction >= 1:
+        raise ValueError("condition_training_split_fraction_exhausts_evaluation")
+    training_end = min(len(rows) - 2, max(1, int(len(rows) * training_fraction)))
+    calibration_size = max(1, int(len(rows) * calibration_fraction))
+    calibration_end = min(len(rows) - 1, training_end + calibration_size)
+    return (
+        list(rows[:training_end]),
+        list(rows[training_end:calibration_end]),
+        list(rows[calibration_end:]),
+    )
+
+
+def chronological_train_calibration_split(
+    rows: Sequence[TrainingRow],
+    *,
+    training_fraction: float = 0.80,
+) -> tuple[list[TrainingRow], list[TrainingRow]]:
+    """Split source-group rows before evaluating unchanged thresholds on another group."""
+
+    if len(rows) < 2:
+        raise ValueError("condition_training_calibration_split_requires_two_rows")
+    if not 0 < training_fraction < 1:
+        raise ValueError("condition_training_split_fraction_invalid")
+    training_end = min(len(rows) - 1, max(1, int(len(rows) * training_fraction)))
+    return list(rows[:training_end]), list(rows[training_end:])
+
+
 def _vectorizer() -> HashingVectorizer:
     return HashingVectorizer(
         analyzer="char_wb",
@@ -325,20 +365,33 @@ def _span_metric(
 
 def _fit_span_split(
     training: Sequence[TrainingRow],
+    calibration: Sequence[TrainingRow],
     evaluation: Sequence[TrainingRow],
 ) -> tuple[LogisticRegression | None, float | None, dict[str, Any]]:
     train_features, y_train, _ = _span_examples(training)
+    calibration_features, y_calibration, calibration_row_ranges = _span_examples(calibration)
     eval_features, y_eval, row_ranges = _span_examples(evaluation)
     positive = int(y_train.sum())
     negative = int(len(y_train) - positive)
-    if positive < 20 or negative < 20 or not len(y_eval):
+    calibration_positive = int(y_calibration.sum())
+    calibration_negative = int(len(y_calibration) - calibration_positive)
+    if (
+        positive < 20
+        or negative < 20
+        or calibration_positive < 1
+        or calibration_negative < 1
+        or not len(y_eval)
+    ):
         return None, None, {
             "status": "RULE_ONLY_INSUFFICIENT_TOKEN_SUPPORT",
             "train_positive_tokens": positive,
             "train_negative_tokens": negative,
+            "calibration_positive_tokens": calibration_positive,
+            "calibration_negative_tokens": calibration_negative,
         }
     vectorizer = _span_vectorizer()
     train_matrix = vectorizer.transform(train_features)
+    calibration_matrix = vectorizer.transform(calibration_features)
     eval_matrix = vectorizer.transform(eval_features)
     model = LogisticRegression(
         class_weight="balanced",
@@ -348,54 +401,50 @@ def _fit_span_split(
         solver="liblinear",
     )
     model.fit(train_matrix, y_train)
-    probabilities = model.predict_proba(eval_matrix)[:, 1]
+    calibration_probabilities = model.predict_proba(calibration_matrix)[:, 1]
     candidates = [
-        _span_metric(y_eval, probabilities, row_ranges, value)
-        for value in np.arange(0.20, 0.81, 0.05)
+        _span_metric(y_calibration, calibration_probabilities, calibration_row_ranges, value)
+        for value in np.arange(0.20, 0.951, 0.025)
     ]
     high_precision = [row for row in candidates if row["precision"] >= 0.90]
     best = max(
         high_precision or candidates,
         key=lambda row: (row["f1"], row["recall"], row["row_exact_match_rate"], row["threshold"]),
     )
-    best.update(
+    threshold = float(best["threshold"])
+    evaluation_probabilities = model.predict_proba(eval_matrix)[:, 1]
+    metric = _span_metric(y_eval, evaluation_probabilities, row_ranges, threshold)
+    metric.update(
         {
-            "status": "TRAINED",
+            "status": "TRAINED"
+            if int(y_eval.sum()) > 0 and int(len(y_eval) - y_eval.sum()) > 0
+            else "TRAINED_EVALUATION_SUPPORT_LIMITED",
             "precision_gate": 0.90,
-            "precision_gate_passed": bool(best["precision"] >= 0.90),
+            "precision_gate_passed": bool(
+                metric["precision"] >= 0.90 and int(y_eval.sum()) > 0
+            ),
             "train_positive_tokens": positive,
             "train_negative_tokens": negative,
+            "calibration_positive_tokens": calibration_positive,
+            "calibration_negative_tokens": calibration_negative,
             "evaluation_positive_tokens": int(y_eval.sum()),
             "evaluation_negative_tokens": int(len(y_eval) - y_eval.sum()),
+            "calibration_metrics": best,
         }
     )
-    return model, float(best["threshold"]), best
-
-
-def _fit_final_span_model(rows: Sequence[TrainingRow]) -> LogisticRegression | None:
-    features, target, _ = _span_examples(rows)
-    if int(target.sum()) < 20 or int(len(target) - target.sum()) < 20:
-        return None
-    matrix = _span_vectorizer().transform(features)
-    model = LogisticRegression(
-        class_weight="balanced",
-        C=1.5,
-        max_iter=1_000,
-        random_state=1729,
-        solver="liblinear",
-    )
-    model.fit(matrix, target)
-    return model
+    return model, threshold, metric
 
 
 def _evaluate_span_group_transfer(rows: Sequence[TrainingRow]) -> dict[str, Any]:
     output: dict[str, Any] = {}
     for source, target in (("group_1", "group_2"), ("group_2", "group_1")):
-        training = [row for row in rows if row.group_code == source]
+        source_rows = [row for row in rows if row.group_code == source]
+        training, calibration = chronological_train_calibration_split(source_rows)
         evaluation = [row for row in rows if row.group_code == target]
-        _, _, metric = _fit_span_split(training, evaluation)
+        _, _, metric = _fit_span_split(training, calibration, evaluation)
         output[f"{source}_to_{target}"] = {
             "training_count": len(training),
+            "calibration_count": len(calibration),
             "evaluation_count": len(evaluation),
             "metrics": metric,
         }
@@ -427,7 +476,7 @@ def _metric(y_true: np.ndarray, probabilities: np.ndarray, threshold: float) -> 
 
 
 def _select_threshold(y_true: np.ndarray, probabilities: np.ndarray) -> tuple[float, dict[str, Any]]:
-    candidates = [_metric(y_true, probabilities, value) for value in np.arange(0.20, 0.81, 0.05)]
+    candidates = [_metric(y_true, probabilities, value) for value in np.arange(0.20, 0.951, 0.025)]
     high_precision = [row for row in candidates if row["precision"] >= 0.90]
     pool = high_precision or candidates
     best = max(pool, key=lambda row: (row["f1"], row["recall"], row["precision"], row["threshold"]))
@@ -436,6 +485,7 @@ def _select_threshold(y_true: np.ndarray, probabilities: np.ndarray) -> tuple[fl
 
 def _fit_split(
     training: Sequence[TrainingRow],
+    calibration: Sequence[TrainingRow],
     evaluation: Sequence[TrainingRow],
     *,
     labels: Sequence[str],
@@ -443,20 +493,33 @@ def _fit_split(
 ) -> tuple[dict[str, LogisticRegression], dict[str, float], dict[str, Any]]:
     vectorizer = _vectorizer()
     train_matrix = vectorizer.transform([row.model_text for row in training])
+    calibration_matrix = vectorizer.transform([row.model_text for row in calibration])
     eval_matrix = vectorizer.transform([row.model_text for row in evaluation])
     models: dict[str, LogisticRegression] = {}
     thresholds: dict[str, float] = {}
     metrics: dict[str, Any] = {}
     for label in labels:
         y_train = np.asarray([_label_value(row, label) for row in training], dtype=np.int8)
+        y_calibration = np.asarray(
+            [_label_value(row, label) for row in calibration], dtype=np.int8
+        )
         y_eval = np.asarray([_label_value(row, label) for row in evaluation], dtype=np.int8)
         positives = int(y_train.sum())
         negatives = int(len(y_train) - positives)
-        if positives < min_label_support or negatives < min_label_support:
+        calibration_positive = int(y_calibration.sum())
+        calibration_negative = int(len(y_calibration) - calibration_positive)
+        if (
+            positives < min_label_support
+            or negatives < min_label_support
+            or calibration_positive < 1
+            or calibration_negative < 1
+        ):
             metrics[label] = {
-                "status": "RULE_ONLY_INSUFFICIENT_TRAIN_SUPPORT",
+                "status": "RULE_ONLY_INSUFFICIENT_TRAIN_OR_CALIBRATION_SUPPORT",
                 "train_positive": positives,
                 "train_negative": negatives,
+                "calibration_positive": calibration_positive,
+                "calibration_negative": calibration_negative,
                 "evaluation_positive": int(y_eval.sum()),
             }
             continue
@@ -468,13 +531,26 @@ def _fit_split(
             solver="liblinear",
         )
         model.fit(train_matrix, y_train)
-        probabilities = model.predict_proba(eval_matrix)[:, 1]
-        threshold, metric = _select_threshold(y_eval, probabilities)
-        metric["status"] = "TRAINED"
+        calibration_probabilities = model.predict_proba(calibration_matrix)[:, 1]
+        threshold, calibration_metric = _select_threshold(
+            y_calibration, calibration_probabilities
+        )
+        evaluation_probabilities = model.predict_proba(eval_matrix)[:, 1]
+        metric = _metric(y_eval, evaluation_probabilities, threshold)
+        metric["status"] = (
+            "TRAINED"
+            if int(y_eval.sum()) > 0 and int(len(y_eval) - y_eval.sum()) > 0
+            else "TRAINED_EVALUATION_SUPPORT_LIMITED"
+        )
         metric["precision_gate"] = 0.90
-        metric["precision_gate_passed"] = bool(metric["precision"] >= 0.90)
+        metric["precision_gate_passed"] = bool(
+            metric["precision"] >= 0.90 and int(y_eval.sum()) > 0
+        )
         metric["train_positive"] = positives
         metric["train_negative"] = negatives
+        metric["calibration_positive"] = calibration_positive
+        metric["calibration_negative"] = calibration_negative
+        metric["calibration_metrics"] = calibration_metric
         metrics[label] = metric
         models[label] = model
         thresholds[label] = threshold
@@ -510,47 +586,23 @@ def _evaluate_group_transfer(
 ) -> dict[str, Any]:
     output: dict[str, Any] = {}
     for source, target in (("group_1", "group_2"), ("group_2", "group_1")):
-        training = [row for row in rows if row.group_code == source]
+        source_rows = [row for row in rows if row.group_code == source]
+        training, calibration = chronological_train_calibration_split(source_rows)
         evaluation = [row for row in rows if row.group_code == target]
         _, _, metrics = _fit_split(
             training,
+            calibration,
             evaluation,
             labels=labels,
             min_label_support=min_label_support,
         )
         output[f"{source}_to_{target}"] = {
             "training_count": len(training),
+            "calibration_count": len(calibration),
             "evaluation_count": len(evaluation),
             "labels": metrics,
             "aggregate": _aggregate_metrics(metrics),
         }
-    return output
-
-
-def _fit_final_models(
-    rows: Sequence[TrainingRow],
-    *,
-    labels: Sequence[str],
-    min_label_support: int,
-    thresholds: Mapping[str, float],
-) -> dict[str, LogisticRegression]:
-    matrix = _vectorizer().transform([row.model_text for row in rows])
-    output: dict[str, LogisticRegression] = {}
-    for label in labels:
-        if label not in thresholds:
-            continue
-        target = np.asarray([_label_value(row, label) for row in rows], dtype=np.int8)
-        if int(target.sum()) < min_label_support or int(len(target) - target.sum()) < min_label_support:
-            continue
-        model = LogisticRegression(
-            class_weight="balanced",
-            C=2.0,
-            max_iter=1_000,
-            random_state=1729,
-            solver="liblinear",
-        )
-        model.fit(matrix, target)
-        output[label] = model
     return output
 
 
@@ -619,34 +671,46 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     )
     if len(rows) < 100:
         raise RuntimeError("condition_training_sample_count_too_small")
-    split_index = min(len(rows) - 1, max(1, int(len(rows) * 0.80)))
-    training, evaluation = rows[:split_index], rows[split_index:]
+    training, calibration, evaluation = chronological_three_way_split(rows)
     labels = ("HAS_CONDITION", *CONDITION_FAMILIES)
-    _, thresholds, temporal_metrics = _fit_split(
+    temporal_models, thresholds, temporal_metrics = _fit_split(
         training,
+        calibration,
         evaluation,
         labels=labels,
         min_label_support=args.min_label_support,
     )
-    final_models = _fit_final_models(
-        rows,
-        labels=labels,
-        min_label_support=args.min_label_support,
-        thresholds=thresholds,
+    temporal_span_model, span_threshold, temporal_span_metrics = _fit_span_split(
+        training, calibration, evaluation
     )
-    _, span_threshold, temporal_span_metrics = _fit_span_split(training, evaluation)
-    final_span_model = _fit_final_span_model(rows)
     quality_gate_passed_labels = sorted(
         label
         for label, metric in temporal_metrics.items()
         if metric.get("status") == "TRAINED" and metric.get("precision_gate_passed")
     )
-    quality_gate_blocked_labels = sorted(set(final_models) - set(quality_gate_passed_labels))
-    candidates = _review_candidates(rows, final_models, thresholds)
+    quality_gate_blocked_labels = sorted(
+        set(temporal_models) - set(quality_gate_passed_labels)
+    )
+    candidates = _review_candidates(rows, temporal_models, thresholds)
     source_digest = sha256()
     for row in rows:
         source_digest.update(bytes.fromhex(row.opaque_digest))
     created_at = _utc_now()
+    implementation_paths = (
+        Path(__file__).resolve(),
+        repository_root / "core/market_intelligence/coin_offer_conditions.py",
+        repository_root / "apps/coin_rate_estimator/requirements-research.txt",
+    )
+    implementation_sources = {
+        str(path.relative_to(repository_root)): sha256(path.read_bytes()).hexdigest()
+        for path in implementation_paths
+    }
+    runtime_versions = {
+        "python": platform.python_version(),
+        "numpy": np.__version__,
+        "scikit_learn": sklearn.__version__,
+        "joblib": joblib.__version__,
+    }
     artifact = {
         "artifact_version": ARTIFACT_VERSION,
         "trainer_version": TRAINER_VERSION,
@@ -654,18 +718,23 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "created_at_utc": created_at,
         "status": "RESEARCH_ONLY_NOT_PROMOTED",
         "vectorizer": _vectorizer(),
-        "models": final_models,
+        "models": temporal_models,
         "thresholds": thresholds,
-        "trained_labels": sorted(final_models),
+        "trained_labels": sorted(temporal_models),
         "quality_gate_passed_labels": quality_gate_passed_labels,
         "quality_gate_blocked_labels": quality_gate_blocked_labels,
         "condition_span_vectorizer": _span_vectorizer(),
-        "condition_span_model": final_span_model,
+        "condition_span_model": temporal_span_model,
         "condition_span_threshold": span_threshold,
-        "condition_span_status": "TRAINED" if final_span_model is not None else "RULE_ONLY",
+        "condition_span_status": "TRAINED" if temporal_span_model is not None else "RULE_ONLY",
+        "fit_partition": "TEMPORAL_TRAINING_ONLY",
+        "threshold_partition": "TEMPORAL_CALIBRATION_ONLY",
+        "evaluation_partition_used_for_fit_or_threshold": False,
         "market_open_minute": args.market_open_minute,
         "market_close_minute": args.market_close_minute,
         "source_fingerprint": source_digest.hexdigest(),
+        "implementation_sources": implementation_sources,
+        "runtime_versions": runtime_versions,
         "privacy": {
             "raw_text_retained": False,
             "message_ids_retained": False,
@@ -685,12 +754,13 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     family_counts = Counter(family for row in rows for family in row.families)
     deadline_counts = Counter(row.deadline_bucket for row in rows)
     report = {
-        "schema_version": "coin-offer-condition-training-report-v1",
+        "schema_version": "coin-offer-condition-training-report-v2",
         "created_at_utc": created_at,
         "status": "RESEARCH_ONLY_NOT_PROMOTED",
         "trainer_version": TRAINER_VERSION,
         "taxonomy_version": CONDITION_TAXONOMY_VERSION,
-        "sklearn_version": sklearn.__version__,
+        "implementation_sources": implementation_sources,
+        "runtime_versions": runtime_versions,
         "source": {
             "database_name": args.conversation_db.name,
             "row_count_after_deduplication": len(rows),
@@ -710,10 +780,16 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         },
         "evaluation": {
             "label_source": "HIGH_PRECISION_WEAK_SUPERVISION_NOT_HUMAN_GROUND_TRUTH",
+            "threshold_selection_partition": "calibration",
+            "evaluation_threshold_locked": True,
+            "cross_group_target_used_for_threshold_selection": False,
             "temporal_split": {
                 "training_count": len(training),
+                "calibration_count": len(calibration),
                 "evaluation_count": len(evaluation),
                 "training_end_utc": training[-1].event_time_utc,
+                "calibration_start_utc": calibration[0].event_time_utc,
+                "calibration_end_utc": calibration[-1].event_time_utc,
                 "evaluation_start_utc": evaluation[0].event_time_utc,
                 "labels": temporal_metrics,
                 "aggregate": _aggregate_metrics(temporal_metrics),
@@ -732,10 +808,10 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "artifact": {
             "filename": artifact_path.name,
             "sha256": artifact_sha,
-            "trained_labels": sorted(final_models),
+            "trained_labels": sorted(temporal_models),
             "quality_gate_passed_labels": quality_gate_passed_labels,
             "quality_gate_blocked_labels": quality_gate_blocked_labels,
-            "rule_only_labels": sorted(set(labels) - set(final_models)),
+            "rule_only_labels": sorted(set(labels) - set(temporal_models)),
         },
         "review_queue": {
             "filename": "coin-offer-condition-review-candidates.json",
@@ -769,7 +845,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "review_queue": str(candidates_path),
         "artifact_sha256": artifact_sha,
         "row_count": len(rows),
-        "trained_labels": sorted(final_models),
+        "trained_labels": sorted(temporal_models),
     }
 
 

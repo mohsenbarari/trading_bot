@@ -1,0 +1,7 @@
+# Offer-condition neural research only. Keep out of production images.
+-r requirements-research.txt
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1+cpu
+transformers==4.48.3
+sentencepiece==0.2.0
+safetensors==0.5.2
