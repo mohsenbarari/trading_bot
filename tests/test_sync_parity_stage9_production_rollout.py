@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -254,6 +255,149 @@ class SyncParityStage9ProductionRolloutTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(executed["status"], "passed")
         self.assertEqual(seen, [command["name"] for command in plan["local_release_gates"]["commands"]])
+
+    def test_local_gates_use_isolated_unit_test_environment_policy(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            _args, plan = self.build_plan(Path(tmp_dir), mode="local-gates")
+
+        local_commands = plan["local_release_gates"]["commands"]
+        self.assertTrue(local_commands)
+        self.assertTrue(
+            all(
+                command["environment_policy"] == stage9.ISOLATED_UNIT_TEST_ENVIRONMENT_POLICY
+                for command in local_commands
+            )
+        )
+        self.assertTrue(
+            all(
+                command["environment_policy"] == stage9.INHERITED_ENVIRONMENT_POLICY
+                for section in (
+                    "read_only_preflight",
+                    "backup_confirmation",
+                    "release_plan",
+                    "post_deploy_checks",
+                )
+                for command in plan[section]["commands"]
+            )
+        )
+
+    def test_isolated_unit_test_environment_drops_production_values(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            command = stage9.command_payload(
+                stage9.CommandSpec(
+                    name="environment_probe",
+                    args=[
+                        sys.executable,
+                        "-c",
+                        (
+                            "import os; "
+                            f"assert os.environ['APP_ENV_FILE'] == {stage9.UNIT_TEST_ENV_FILE!r}; "
+                            "assert 'DATABASE_URL' not in os.environ; "
+                            "assert 'APP_ENVIRONMENT' not in os.environ; "
+                            "assert 'TELEGRAM_BOT_TOKEN' not in os.environ"
+                        ),
+                    ],
+                    phase="local_release_gate",
+                    description="Verify production configuration cannot leak into local release gates.",
+                    stdout_path=tmp_path / "environment-probe.stdout.log",
+                    stderr_path=tmp_path / "environment-probe.stderr.log",
+                    environment_policy=stage9.ISOLATED_UNIT_TEST_ENVIRONMENT_POLICY,
+                )
+            )
+            polluted_environment = {
+                "APP_ENV_FILE": "/should/not/be-read/production.env",
+                "APP_ENVIRONMENT": "production",
+                "DATABASE_URL": "production-database-sentinel",
+                "TELEGRAM_BOT_TOKEN": "production-token-sentinel",
+                "PATH": os.defpath,
+            }
+            with patch.dict(os.environ, polluted_environment, clear=True):
+                result = stage9.run_command(command)
+
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["returncode"], 0)
+
+    def test_timeout_terminates_term_resistant_descendant_process_group(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            marker = tmp_path / "descendant-finished"
+            leader_code = (
+                "import signal, subprocess, sys, time; "
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                "child = \"import pathlib, signal, sys, time; "
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                "print('descendant-started', flush=True); "
+                "time.sleep(1.0); pathlib.Path(sys.argv[1]).write_text('survived')\"; "
+                "subprocess.Popen([sys.executable, '-c', child, sys.argv[1]]); "
+                "print('leader-started', flush=True); time.sleep(30)"
+            )
+            command = stage9.command_payload(
+                stage9.CommandSpec(
+                    name="process_group_timeout_probe",
+                    args=[sys.executable, "-c", leader_code, str(marker)],
+                    phase="local_release_gate",
+                    description="Exercise bounded process-group timeout cleanup.",
+                    timeout_seconds=0.15,
+                    stdout_path=tmp_path / "probe.stdout.log",
+                    stderr_path=tmp_path / "probe.stderr.log",
+                    environment_policy=stage9.ISOLATED_UNIT_TEST_ENVIRONMENT_POLICY,
+                )
+            )
+
+            with patch.object(stage9, "PROCESS_TERMINATION_GRACE_SECONDS", 0.1), patch.object(
+                stage9, "PROCESS_KILL_TIMEOUT_SECONDS", 0.75
+            ):
+                result = stage9.run_command(command)
+
+            time.sleep(1.1)
+            self.assertEqual(result["status"], "timeout")
+            self.assertEqual(result["returncode"], 124)
+            self.assertFalse(marker.exists())
+            self.assertIn(
+                "leader-started",
+                (tmp_path / "probe.stdout.log").read_text(encoding="utf-8"),
+            )
+
+    def test_successful_leader_with_detached_output_child_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            marker = tmp_path / "normal-return-descendant-finished"
+            leader_code = (
+                "import subprocess, sys; "
+                "child = \"import pathlib, signal, sys, time; "
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                "time.sleep(1.0); pathlib.Path(sys.argv[1]).write_text('survived')\"; "
+                "subprocess.Popen([sys.executable, '-c', child, sys.argv[1]], "
+                "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+                "print('leader-complete', flush=True)"
+            )
+            command = stage9.command_payload(
+                stage9.CommandSpec(
+                    name="normal_return_process_group_probe",
+                    args=[sys.executable, "-c", leader_code, str(marker)],
+                    phase="local_release_gate",
+                    description="Reject a successful leader that leaves a live child.",
+                    timeout_seconds=5,
+                    stdout_path=tmp_path / "normal-return.stdout.log",
+                    stderr_path=tmp_path / "normal-return.stderr.log",
+                    environment_policy=stage9.ISOLATED_UNIT_TEST_ENVIRONMENT_POLICY,
+                )
+            )
+
+            with patch.object(stage9, "PROCESS_TERMINATION_GRACE_SECONDS", 0.1), patch.object(
+                stage9, "PROCESS_KILL_TIMEOUT_SECONDS", 0.75
+            ):
+                result = stage9.run_command(command)
+
+            time.sleep(1.1)
+            self.assertEqual(result["status"], "failed")
+            self.assertEqual(result["returncode"], 125)
+            self.assertFalse(marker.exists())
+            self.assertIn(
+                "CONTAINMENT ERROR",
+                (tmp_path / "normal-return.stderr.log").read_text(encoding="utf-8"),
+            )
 
     def test_main_writes_plan_without_touching_production(self):
         with tempfile.TemporaryDirectory() as tmp_dir, patch.object(

@@ -23,7 +23,25 @@ env/
 .vscode/
 
 # Other
-.env
+# Runtime env files contain credentials.  Keep every env variant out of both
+# the legacy tar context and BuildKit sessions; examples are documentation and
+# are not required by either runtime Dockerfile.
+.env*
+**/.env*
+!.env.example
+!**/.env.example
+!**/*.env.example
+# Runtime manifests such as deploy/production/online.env do not start with a
+# dot.  Exclude both the general suffix and the canonical nested name while
+# leaving documentation fixtures such as online.env.example available.
+*.env
+**/*.env
+**/online.env
+!**/online.env.example
+/mutants/
+audit_trail/
+app_logs/
+uploads/
 frontend/
 map_data/
 tmp/

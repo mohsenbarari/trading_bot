@@ -178,6 +178,10 @@ class Settings(BaseSettings):
     telegram_delivery_queue_expected_primary_bot_id: int | None = None
     telegram_delivery_queue_expected_channel_editor_bot_id: int | None = None
     telegram_delivery_queue_expected_channel_id: int | None = None
+    # Retained as a diagnostic migration flag only. Publishers also own B2B and
+    # callback ingress, so enabling this flag is a production-cutover blocker;
+    # staging and production must use distinct central/publisher identities.
+    telegram_delivery_queue_shared_publisher_fleet_enabled: bool = False
     telegram_delivery_queue_preflight_timeout_seconds: float = 10.0
     telegram_delivery_queue_worker_interval_seconds: float = 1.0
     # Two general primary slots plus the M0-reserved slot use a bounded faster
@@ -351,6 +355,13 @@ class Settings(BaseSettings):
             value = float(getattr(self, name))
             if not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name}_must_be_finite_positive")
+        if (
+            self.telegram_delivery_queue_shared_publisher_fleet_enabled
+            and self.telegram_delivery_queue_destination_min_interval_seconds < 1.05
+        ):
+            raise ValueError(
+                "telegram_shared_publisher_destination_interval_must_be_at_least_1_05"
+            )
         safety = float(self.telegram_delivery_queue_retry_after_safety_seconds)
         if not math.isfinite(safety) or safety < 0:
             raise ValueError(

@@ -12,6 +12,8 @@ DEFAULTS = {
     "IRAN_HOST": "65.109.220.59",
     "IRAN_SSH_USER": "root",
     "IRAN_SSH_PORT": "37067",
+    "IRAN_SSH_AUTH_METHOD": "key",
+    "IRAN_SSH_PRIVATE_KEY_PATH": "",
     "IRAN_PROJECT_DIR": "/srv/trading-bot/current",
 }
 
@@ -29,6 +31,9 @@ MANIFEST_KEYS = (
     "FOREIGN_FRONTEND_URL",
     "IRAN_HEALTHCHECK_URL",
     "IRAN_CERTBOT_EMAIL",
+    "IRAN_SSH_AUTH_METHOD",
+    "IRAN_SSH_PRIVATE_KEY_PATH",
+    "IRAN_SSH_PASSWORD",
     "DB_POOL_SIZE",
     "DB_MAX_OVERFLOW",
     "IRAN_DB_POOL_SIZE",
@@ -85,7 +90,7 @@ def resolve_deploy_settings(
     manifest_path: str | None = None,
     environ: dict[str, str] | None = None,
 ) -> dict[str, str]:
-    env = dict(environ or os.environ)
+    env = dict(os.environ if environ is None else environ)
     path = Path(manifest_path or env.get("DEPLOY_MANIFEST") or DEFAULT_MANIFEST)
     file_values = parse_env_file(path)
 

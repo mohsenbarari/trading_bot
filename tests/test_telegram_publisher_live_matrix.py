@@ -11,9 +11,11 @@ from scripts.run_telegram_publisher_live_matrix import (
     MATRIX_INGRESS_MIN_INTERVAL_SECONDS,
     MATRIX_OFFER_EXPIRY_MINUTES,
     MATRIX_OVERTIME_RECEIPT_SAFETY_SECONDS,
+    SHARED_PUBLISHER_MAINTENANCE_AUTHORITY,
     compute_revalidation_offer_expiry_minutes,
     matrix_normal_lifetime_minutes,
     resolve_live_matrix_profile,
+    validate_shared_publisher_matrix_guard,
     _overtime_scheduled_at,
     MatrixRun,
     RetryableBotCallbackReceiptAbsent,
@@ -41,6 +43,34 @@ from scripts.run_telegram_publisher_live_matrix import (
 
 
 class TelegramPublisherLiveMatrixTests(unittest.TestCase):
+    def test_shared_publisher_fleet_blocks_high_volume_without_one_shot_maintenance(self):
+        authoritative = resolve_live_matrix_profile("authoritative-500")
+        revalidation = resolve_live_matrix_profile("revalidation-100")
+
+        validate_shared_publisher_matrix_guard(
+            revalidation,
+            maintenance_authority=None,
+            shared_fleet_enabled=True,
+        )
+        validate_shared_publisher_matrix_guard(
+            authoritative,
+            maintenance_authority=None,
+            shared_fleet_enabled=False,
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, "shared_publisher_high_volume_maintenance_required"
+        ):
+            validate_shared_publisher_matrix_guard(
+                authoritative,
+                maintenance_authority=None,
+                shared_fleet_enabled=True,
+            )
+        validate_shared_publisher_matrix_guard(
+            authoritative,
+            maintenance_authority=SHARED_PUBLISHER_MAINTENANCE_AUTHORITY,
+            shared_fleet_enabled=True,
+        )
+
     def test_terminal_projection_verification_requires_every_durable_stage(self):
         import scripts.run_telegram_publisher_live_matrix as matrix
 

@@ -24,6 +24,7 @@ def snapshot() -> dict:
                     "confidence": "NONE",
                     "method": "test",
                     "underlying_source": None,
+                    "underlying_age_seconds": None,
                     "anchor_age_seconds": None,
                     "market_regime": "NORMAL",
                     "reason": "test",
@@ -43,7 +44,17 @@ def snapshot() -> dict:
 
 def set_rate(target: dict, code: str, settlement: str, center: int, lower: int, upper: int, confidence: str = "HIGH") -> None:
     item = next(row for row in target["rates"]["items"] if row["commodity_code"] == code and row["settlement_term"] == settlement)
-    item.update(status="ESTIMATED", estimated_project_price=center, lower_project_price=lower, upper_project_price=upper, confidence=confidence, reason=None)
+    item.update(
+        status="ESTIMATED",
+        estimated_project_price=center,
+        lower_project_price=lower,
+        upper_project_price=upper,
+        confidence=confidence,
+        underlying_source="TEST_SOURCE",
+        underlying_age_seconds=30.0,
+        anchor_age_seconds=60.0 if confidence == "HIGH" else None,
+        reason=None,
+    )
     target["rates"]["estimated_count"] += 1
     target["rates"]["no_data_count"] -= 1
 

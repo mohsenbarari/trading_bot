@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -41,6 +42,20 @@ RELEASE_CONFIRM_VALUE = "execute-production-rollout"
 STRICT_ALERT_CONFIRM_ENV = "SYNC_PARITY_STAGE9_STRICT_ALERT_CONFIRM"
 STRICT_ALERT_CONFIRM_VALUE = "enable-strict-parity-alerts"
 SSH_STRICT_HOST_KEY_CHECKING = "accept-new"
+INHERITED_ENVIRONMENT_POLICY = "inherit"
+ISOLATED_UNIT_TEST_ENVIRONMENT_POLICY = "isolated_unit_test"
+UNIT_TEST_ENV_FILE = "config/unit-test.env.example"
+PROCESS_TERMINATION_GRACE_SECONDS = 5.0
+PROCESS_KILL_TIMEOUT_SECONDS = 5.0
+ISOLATED_ENV_ALLOWLIST = (
+    "LANG",
+    "LC_ALL",
+    "PATH",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "TZ",
+)
 
 
 @dataclass(frozen=True)
@@ -55,6 +70,7 @@ class CommandSpec:
     timeout_seconds: int = 300
     stdout_path: Path | None = None
     stderr_path: Path | None = None
+    environment_policy: str = INHERITED_ENVIRONMENT_POLICY
 
 
 def utc_stamp() -> str:
@@ -90,6 +106,7 @@ def command_payload(command: CommandSpec) -> dict[str, Any]:
         "timeout_seconds": command.timeout_seconds,
         "stdout_path": str(command.stdout_path) if command.stdout_path else None,
         "stderr_path": str(command.stderr_path) if command.stderr_path else None,
+        "environment_policy": command.environment_policy,
     }
 
 
@@ -162,6 +179,7 @@ def build_local_release_gates(args: argparse.Namespace) -> list[CommandSpec]:
             timeout_seconds=900,
             stdout_path=artifact_dir / "local-sync-guarantee-matrix.stdout.log",
             stderr_path=artifact_dir / "local-sync-guarantee-matrix.stderr.log",
+            environment_policy=ISOLATED_UNIT_TEST_ENVIRONMENT_POLICY,
         ),
         CommandSpec(
             name="local_stage8_rollout_contract",
@@ -171,6 +189,7 @@ def build_local_release_gates(args: argparse.Namespace) -> list[CommandSpec]:
             timeout_seconds=300,
             stdout_path=artifact_dir / "local-stage8-rollout-contract.stdout.log",
             stderr_path=artifact_dir / "local-stage8-rollout-contract.stderr.log",
+            environment_policy=ISOLATED_UNIT_TEST_ENVIRONMENT_POLICY,
         ),
         CommandSpec(
             name="local_stage9_rollout_contract",
@@ -180,6 +199,7 @@ def build_local_release_gates(args: argparse.Namespace) -> list[CommandSpec]:
             timeout_seconds=300,
             stdout_path=artifact_dir / "local-stage9-rollout-contract.stdout.log",
             stderr_path=artifact_dir / "local-stage9-rollout-contract.stderr.log",
+            environment_policy=ISOLATED_UNIT_TEST_ENVIRONMENT_POLICY,
         ),
     ]
 
@@ -640,6 +660,118 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def subprocess_environment(command: dict[str, Any]) -> dict[str, str] | None:
+    policy = str(command.get("environment_policy") or INHERITED_ENVIRONMENT_POLICY)
+    if policy == INHERITED_ENVIRONMENT_POLICY:
+        return None
+    if policy != ISOLATED_UNIT_TEST_ENVIRONMENT_POLICY:
+        raise ValueError(f"unsupported command environment policy: {policy}")
+
+    environment = {
+        name: os.environ[name]
+        for name in ISOLATED_ENV_ALLOWLIST
+        if os.environ.get(name)
+    }
+    environment["APP_ENV_FILE"] = UNIT_TEST_ENV_FILE
+    return environment
+
+
+def _process_group_has_live_members(process_group_id: int) -> bool:
+    """Return true only while a non-zombie member remains in the process group."""
+    proc_root = Path("/proc")
+    if proc_root.is_dir():
+        for entry in proc_root.iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                stat_fields = entry.joinpath("stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()
+                state = stat_fields[0]
+                process_group = int(stat_fields[2])
+            except (OSError, IndexError, ValueError):
+                continue
+            if process_group == int(process_group_id) and state != "Z":
+                return True
+        return False
+    try:
+        os.killpg(int(process_group_id), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _wait_for_process_group_exit(process_group_id: int, timeout: float) -> bool:
+    deadline = time.monotonic() + max(float(timeout), 0.0)
+    while _process_group_has_live_members(process_group_id):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(0.05, remaining))
+    return True
+
+
+def _close_process_pipes(process: subprocess.Popen[str]) -> None:
+    for stream in (process.stdout, process.stderr):
+        if stream is not None:
+            stream.close()
+
+
+def _stop_process_group(
+    process: subprocess.Popen[str],
+    *,
+    process_group_id: int,
+    grace_seconds: float | None = None,
+    kill_seconds: float | None = None,
+) -> tuple[str, str]:
+    grace_seconds = float(
+        PROCESS_TERMINATION_GRACE_SECONDS
+        if grace_seconds is None
+        else grace_seconds
+    )
+    kill_seconds = float(
+        PROCESS_KILL_TIMEOUT_SECONDS if kill_seconds is None else kill_seconds
+    )
+    term_deadline = time.monotonic() + max(float(grace_seconds), 0.0)
+    try:
+        os.killpg(process_group_id, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    communicate_timed_out = False
+    try:
+        stdout, stderr = process.communicate(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        communicate_timed_out = True
+        stdout = stderr = ""
+    group_stopped = _wait_for_process_group_exit(
+        process_group_id,
+        max(0.0, term_deadline - time.monotonic()),
+    )
+    if communicate_timed_out or process.poll() is None or not group_stopped:
+        kill_deadline = time.monotonic() + max(float(kill_seconds), 0.0)
+        try:
+            os.killpg(process_group_id, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        kill_communicate_timed_out = False
+        try:
+            stdout, stderr = process.communicate(timeout=kill_seconds)
+        except subprocess.TimeoutExpired:
+            kill_communicate_timed_out = True
+            _close_process_pipes(process)
+        group_stopped = _wait_for_process_group_exit(
+            process_group_id,
+            max(0.0, kill_deadline - time.monotonic()),
+        )
+        if kill_communicate_timed_out or not group_stopped:
+            raise RuntimeError(
+                "command process group did not stop within bounded cleanup"
+            ) from None
+    if process.poll() is None:
+        raise RuntimeError("command process leader did not terminate")
+    return stdout or "", stderr or ""
+
+
 def run_command(command: dict[str, Any]) -> dict[str, Any]:
     stdout_path = Path(command["stdout_path"]) if command.get("stdout_path") else None
     stderr_path = Path(command["stderr_path"]) if command.get("stderr_path") else None
@@ -648,32 +780,29 @@ def run_command(command: dict[str, Any]) -> dict[str, Any]:
     if stderr_path:
         stderr_path.parent.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
+    process = subprocess.Popen(
+        list(command["args"]),
+        cwd=REPO_ROOT,
+        env=subprocess_environment(command),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    process_group_id = process.pid
     try:
-        completed = subprocess.run(
-            list(command["args"]),
-            cwd=REPO_ROOT,
-            text=True,
-            capture_output=True,
-            timeout=int(command["timeout_seconds"]),
-            check=False,
+        stdout, stderr = process.communicate(
+            timeout=float(command["timeout_seconds"])
+        )
+    except subprocess.TimeoutExpired:
+        stdout, stderr = _stop_process_group(
+            process,
+            process_group_id=process_group_id,
         )
         if stdout_path:
-            stdout_path.write_text(completed.stdout or "", encoding="utf-8")
+            stdout_path.write_text(stdout, encoding="utf-8")
         if stderr_path:
-            stderr_path.write_text(completed.stderr or "", encoding="utf-8")
-        return {
-            "name": command["name"],
-            "status": "passed" if completed.returncode == 0 else "failed",
-            "returncode": completed.returncode,
-            "elapsed_seconds": round(time.perf_counter() - started, 3),
-            "stdout_path": str(stdout_path) if stdout_path else None,
-            "stderr_path": str(stderr_path) if stderr_path else None,
-        }
-    except subprocess.TimeoutExpired as exc:
-        if stdout_path and exc.stdout:
-            stdout_path.write_text(str(exc.stdout), encoding="utf-8")
-        if stderr_path and exc.stderr:
-            stderr_path.write_text(str(exc.stderr), encoding="utf-8")
+            stderr_path.write_text(stderr, encoding="utf-8")
         return {
             "name": command["name"],
             "status": "timeout",
@@ -682,6 +811,33 @@ def run_command(command: dict[str, Any]) -> dict[str, Any]:
             "stdout_path": str(stdout_path) if stdout_path else None,
             "stderr_path": str(stderr_path) if stderr_path else None,
         }
+    except BaseException:
+        _stop_process_group(process, process_group_id=process_group_id)
+        raise
+
+    returncode = int(process.returncode or 0)
+    if _process_group_has_live_members(process_group_id):
+        stdout, stderr = _stop_process_group(
+            process,
+            process_group_id=process_group_id,
+        )
+        returncode = 125
+        stderr = (
+            f"{stderr}\nCONTAINMENT ERROR: command leader exited while live "
+            "process-group members remained"
+        ).strip()
+    if stdout_path:
+        stdout_path.write_text(stdout or "", encoding="utf-8")
+    if stderr_path:
+        stderr_path.write_text(stderr or "", encoding="utf-8")
+    return {
+        "name": command["name"],
+        "status": "passed" if returncode == 0 else "failed",
+        "returncode": returncode,
+        "elapsed_seconds": round(time.perf_counter() - started, 3),
+        "stdout_path": str(stdout_path) if stdout_path else None,
+        "stderr_path": str(stderr_path) if stderr_path else None,
+    }
 
 
 def execute_section(plan: dict[str, Any], section_name: str) -> tuple[dict[str, Any], list[str]]:

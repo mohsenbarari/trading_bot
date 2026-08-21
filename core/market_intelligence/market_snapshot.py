@@ -16,6 +16,7 @@ import math
 import os
 from pathlib import Path
 import sqlite3
+import stat
 import tempfile
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -292,6 +293,21 @@ def build_market_snapshot(
                 freshness_seconds=900,
                 aggregation_seconds=60,
                 method="physical_events_preserved_weighted_summary_v1",
+            ),
+            _signal(
+                connection,
+                as_of=as_of,
+                # Preserve the live aggregate paper quote as an explicitly
+                # unsettled signal.  The rate engine may use it only as a
+                # LOW_PAPER_FALLBACK after all settled sources are exhausted.
+                key="MELTED_PAPER_UNSPECIFIED",
+                instrument="MELTED_GOLD_AGGREGATE",
+                settlement_term="UNKNOWN",
+                trade_form="PAPER_NORMAL",
+                expected_unit="TOMAN_PER_MESGHAL_750",
+                freshness_seconds=180,
+                aggregation_seconds=60,
+                method="unsettled_public_paper_fallback_summary_v1",
             ),
             _signal(
                 connection,
@@ -573,8 +589,21 @@ def validate_market_snapshot(snapshot: Mapping[str, Any]) -> None:
     rates = snapshot.get("rates")
     if not isinstance(rates, Mapping):
         raise MarketSnapshotError("snapshot_rates_mapping_required")
-    if rates:
-        _validate_coin_rates(rates)
+    if not rates:
+        raise MarketSnapshotError("snapshot_rates_required")
+    _validate_coin_rates(rates)
+    snapshot_status = str(snapshot.get("snapshot_status") or "")
+    if snapshot_status not in {
+        "PARTIAL_COIN_RATE_STATE",
+        "NO_DATA_COIN_RATE_STATE",
+    }:
+        raise MarketSnapshotError("snapshot_status_invalid")
+    estimated_count = int(rates.get("estimated_count") or 0)
+    no_data_count = int(rates.get("no_data_count") or 0)
+    if snapshot_status == "NO_DATA_COIN_RATE_STATE" and (
+        estimated_count != 0 or no_data_count <= 0
+    ):
+        raise MarketSnapshotError("snapshot_no_data_status_mismatch")
     _canonical_snapshot_bytes(snapshot)
 
 
@@ -587,6 +616,8 @@ def _validate_coin_rates(rates: Mapping[str, Any]) -> None:
     if not isinstance(items, list) or len(items) != len(COIN_SPECS) * 2:
         raise MarketSnapshotError("snapshot_rate_items_invalid")
     seen: set[tuple[str, str]] = set()
+    estimated_count = 0
+    no_data_count = 0
     for item in items:
         if not isinstance(item, Mapping):
             raise MarketSnapshotError("snapshot_rate_item_invalid")
@@ -599,15 +630,58 @@ def _validate_coin_rates(rates: Mapping[str, Any]) -> None:
             raise MarketSnapshotError("snapshot_rate_item_duplicate")
         seen.add((code, settlement))
         values = (item.get("estimated_project_price"), item.get("lower_project_price"), item.get("upper_project_price"))
+        confidence = str(item.get("confidence") or "")
+        underlying_source = item.get("underlying_source")
+        underlying_age = item.get("underlying_age_seconds")
+        anchor_age = item.get("anchor_age_seconds")
         if status == "NO_DATA":
+            no_data_count += 1
             if any(value is not None for value in values):
                 raise MarketSnapshotError("snapshot_no_data_rate_has_price")
+            if confidence != "NONE":
+                raise MarketSnapshotError("snapshot_no_data_confidence_invalid")
+            if (underlying_source is None) != (underlying_age is None):
+                raise MarketSnapshotError("snapshot_underlying_metadata_relation_invalid")
+            if underlying_age is not None and (
+                isinstance(underlying_age, bool)
+                or not isinstance(underlying_age, (int, float))
+                or not math.isfinite(float(underlying_age))
+                or float(underlying_age) < 0
+            ):
+                raise MarketSnapshotError("snapshot_underlying_age_invalid")
             continue
+        estimated_count += 1
         if not all(isinstance(value, int) and value > 0 for value in values):
             raise MarketSnapshotError("snapshot_estimated_rate_invalid")
         center, lower, upper = values
         if not lower <= center <= upper:
             raise MarketSnapshotError("snapshot_rate_interval_invalid")
+        if confidence not in {"HIGH", "MEDIUM", "LOW_PAPER_FALLBACK"}:
+            raise MarketSnapshotError("snapshot_rate_confidence_invalid")
+        if not isinstance(underlying_source, str) or not underlying_source.strip():
+            raise MarketSnapshotError("snapshot_underlying_source_invalid")
+        if (
+            isinstance(underlying_age, bool)
+            or not isinstance(underlying_age, (int, float))
+            or not math.isfinite(float(underlying_age))
+            or float(underlying_age) < 0
+        ):
+            raise MarketSnapshotError("snapshot_underlying_age_invalid")
+        if anchor_age is not None and (
+            isinstance(anchor_age, bool)
+            or not isinstance(anchor_age, (int, float))
+            or not math.isfinite(float(anchor_age))
+            or float(anchor_age) < 0
+        ):
+            raise MarketSnapshotError("snapshot_anchor_age_invalid")
+        if confidence == "HIGH" and anchor_age is None:
+            raise MarketSnapshotError("snapshot_high_confidence_anchor_required")
+        if confidence == "MEDIUM" and anchor_age is not None:
+            raise MarketSnapshotError("snapshot_medium_confidence_anchor_invalid")
+    if int(rates.get("estimated_count") or 0) != estimated_count:
+        raise MarketSnapshotError("snapshot_estimated_count_invalid")
+    if int(rates.get("no_data_count") or 0) != no_data_count:
+        raise MarketSnapshotError("snapshot_no_data_count_invalid")
 
 
 def publish_market_snapshot_atomically(
@@ -670,30 +744,78 @@ class AtomicMarketSnapshotProvider:
         path: Path | str,
         *,
         maximum_bytes: int = DEFAULT_MAXIMUM_SNAPSHOT_BYTES,
+        expected_sha256: str | None = None,
+        allowed_owner_uids: Iterable[int] | None = None,
     ) -> None:
         self.path = Path(path)
         self.maximum_bytes = max(1, int(maximum_bytes))
+        normalized_digest = str(expected_sha256 or "").strip().lower()
+        if normalized_digest and (
+            len(normalized_digest) != 64
+            or any(character not in "0123456789abcdef" for character in normalized_digest)
+        ):
+            raise ValueError("snapshot_expected_digest_invalid")
+        self.expected_sha256 = normalized_digest or None
+        self.allowed_owner_uids = frozenset(
+            int(item) for item in (allowed_owner_uids or {0, os.geteuid()})
+        )
 
     def load(self) -> Mapping[str, Any]:
+        flags = os.O_RDONLY
+        if hasattr(os, "O_CLOEXEC"):
+            flags |= os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
         try:
-            before = self.path.stat()
+            descriptor = os.open(self.path, flags)
         except OSError as exc:
             raise MarketSnapshotUnavailable("snapshot_file_unavailable") from exc
-        if not self.path.is_file() or before.st_size <= 0:
-            raise MarketSnapshotUnavailable("snapshot_file_invalid")
-        if before.st_size > self.maximum_bytes:
-            raise MarketSnapshotUnavailable("snapshot_file_too_large")
         try:
-            payload = self.path.read_bytes()
-            after = self.path.stat()
+            before = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or before.st_size <= 0
+                or before.st_nlink != 1
+                or before.st_uid not in self.allowed_owner_uids
+                or stat.S_IMODE(before.st_mode) & 0o022
+            ):
+                raise MarketSnapshotUnavailable("snapshot_file_invalid")
+            if before.st_size > self.maximum_bytes:
+                raise MarketSnapshotUnavailable("snapshot_file_too_large")
+            chunks: list[bytes] = []
+            remaining = before.st_size
+            while remaining:
+                block = os.read(descriptor, min(128 * 1024, remaining))
+                if not block:
+                    raise MarketSnapshotUnavailable("snapshot_read_truncated")
+                chunks.append(block)
+                remaining -= len(block)
+            if os.read(descriptor, 1):
+                raise MarketSnapshotUnavailable("snapshot_changed_during_read")
+            after = os.fstat(descriptor)
+            if (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+                before.st_mtime_ns,
+                before.st_ctime_ns,
+            ) != (
+                after.st_dev,
+                after.st_ino,
+                after.st_size,
+                after.st_mtime_ns,
+                after.st_ctime_ns,
+            ):
+                raise MarketSnapshotUnavailable("snapshot_changed_during_read")
+            payload = b"".join(chunks)
+        except MarketSnapshotUnavailable:
+            raise
         except OSError as exc:
             raise MarketSnapshotUnavailable("snapshot_read_failed") from exc
-        if (before.st_ino, before.st_size, before.st_mtime_ns) != (
-            after.st_ino,
-            after.st_size,
-            after.st_mtime_ns,
-        ):
-            raise MarketSnapshotUnavailable("snapshot_changed_during_read")
+        finally:
+            os.close(descriptor)
+        if self.expected_sha256 is not None and sha256(payload).hexdigest() != self.expected_sha256:
+            raise MarketSnapshotUnavailable("snapshot_digest_mismatch")
         try:
             decoded = json.loads(payload.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:

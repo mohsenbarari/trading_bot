@@ -269,7 +269,26 @@ async def validate_offer_creation_command(db: AsyncSession, command: OfferCreati
 
     from core.config import settings
 
-    if not bool(getattr(settings, "offer_model_price_guard_enabled", False)):
+    if bool(getattr(settings, "offer_model_price_guard_enabled", False)):
+        # This is the authoritative, shared enforcement point.  API and Bot
+        # may evaluate earlier to keep their existing UX, but neither surface
+        # nor any future direct caller may bypass the final model-range gate.
+        from core.services.offer_model_price_guard import (
+            evaluate_offer_model_price_guard,
+        )
+
+        model_price_decision = await evaluate_offer_model_price_guard(
+            db,
+            commodity_id=command.commodity_id,
+            settlement_type=command.settlement_type,
+            offer_type=_normalize_offer_type(command.offer_type).value,
+            proposed_price=command.price,
+        )
+        if not model_price_decision.allowed:
+            raise OfferCreationValidationError(
+                model_price_decision.message or "قیمت واردشده خارج از محدوده مجاز است."
+            )
+    else:
         is_valid_comp, err_comp = await trade_service.validate_competitive_price(
             db=db,
             offer_type=_normalize_offer_type(command.offer_type).value,
@@ -458,6 +477,28 @@ async def create_authoritative_offer_with_outcome(
 ) -> OfferCreationOutcome:
     if validate_market:
         await validate_offer_creation_command(db, command)
+    elif normalize_offer_source_surface(command.source_surface) != OfferSourceSurface.INTERNAL_SYNC:
+        # `validate_market=False` is retained for compatible republish flows,
+        # but it must not become an escape hatch around the active model gate.
+        from core.config import settings
+
+        if bool(getattr(settings, "offer_model_price_guard_enabled", False)):
+            from core.services.offer_model_price_guard import (
+                evaluate_offer_model_price_guard,
+            )
+
+            model_price_decision = await evaluate_offer_model_price_guard(
+                db,
+                commodity_id=command.commodity_id,
+                settlement_type=command.settlement_type,
+                offer_type=_normalize_offer_type(command.offer_type).value,
+                proposed_price=command.price,
+            )
+            if not model_price_decision.allowed:
+                raise OfferCreationValidationError(
+                    model_price_decision.message
+                    or "قیمت واردشده خارج از محدوده مجاز است."
+                )
     if enforce_market_admission:
         await acquire_market_offer_admission_fence(db)
 

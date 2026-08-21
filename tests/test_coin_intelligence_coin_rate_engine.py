@@ -49,6 +49,7 @@ class CoinRateEngineTests(unittest.TestCase):
         self.connection.commit()
         bahar = self.rate("BAHAR", "CASH")
         self.assertEqual((bahar.status, bahar.method, bahar.estimated_project_price), ("ESTIMATED", "LOW_DATE_MELTED_INTRINSIC", 180_900))
+        self.assertEqual(bahar.underlying_age_seconds, 30.0)
         self.assertLess(bahar.upper_project_price - bahar.lower_project_price, 5_000)
 
     def test_comparable_physical_condition_is_used_but_outlier_condition_is_not(self) -> None:
@@ -109,6 +110,95 @@ class CoinRateEngineTests(unittest.TestCase):
         self.assertEqual(imam.underlying_source, "PRIVATE_PAPER_TOMORROW_CASH_BRIDGE")
         self.assertEqual(imam.estimated_project_price, 188_500)
         self.assertNotEqual(imam.reason, "NO_FRESH_MELTED")
+
+    def test_unsettled_aggregate_paper_is_last_resort_low_confidence_only(self) -> None:
+        """A live aggregate quote keeps preview useful without price authority."""
+
+        self.add(
+            "cash-imam-anchor",
+            instrument="COIN_IMAM",
+            price=186_900,
+            unit="PROJECT_THOUSAND_TOMAN",
+            at="2026-08-04T10:01:00Z",
+            settlement="CASH",
+            form="PHYSICAL",
+            event_type="TRADE",
+        )
+        self.add(
+            "tomorrow-imam-anchor",
+            instrument="COIN_IMAM",
+            price=187_300,
+            unit="PROJECT_THOUSAND_TOMAN",
+            at="2026-08-04T10:01:00Z",
+            settlement="TOMORROW",
+            form="PHYSICAL",
+            event_type="TRADE",
+        )
+        self.add(
+            "unsettled-public-paper-anchor",
+            instrument="MELTED_GOLD_AGGREGATE",
+            price=80_300_000,
+            unit="TOMAN_PER_MESGHAL_750",
+            at="2026-08-04T10:00:00Z",
+            settlement="UNKNOWN",
+            form="PAPER_NORMAL",
+            source_code="MELTED_AGGREGATE",
+        )
+        self.add(
+            "unsettled-public-paper",
+            instrument="MELTED_GOLD_AGGREGATE",
+            price=81_000_000,
+            unit="TOMAN_PER_MESGHAL_750",
+            at="2026-08-04T10:09:30Z",
+            settlement="UNKNOWN",
+            form="PAPER_NORMAL",
+            source_code="MELTED_AGGREGATE",
+        )
+        self.connection.commit()
+
+        cash = self.rate("IMAM", "CASH")
+        tomorrow = self.rate("IMAM", "TOMORROW")
+
+        self.assertEqual((cash.status, cash.confidence), ("ESTIMATED", "LOW_PAPER_FALLBACK"))
+        self.assertEqual(
+            cash.underlying_source,
+            "PUBLIC_PAPER_UNSPECIFIED_CASH_BRIDGE",
+        )
+        self.assertEqual(
+            (tomorrow.status, tomorrow.confidence, tomorrow.underlying_source),
+            (
+                "ESTIMATED",
+                "LOW_PAPER_FALLBACK",
+                "PUBLIC_PAPER_UNSPECIFIED_TOMORROW_BRIDGE",
+            ),
+        )
+
+    def test_settled_flow_outranks_unsettled_aggregate_paper(self) -> None:
+        self.add(
+            "settled-flow",
+            instrument="MELTED_GOLD_FLOW",
+            price=80_700_000,
+            unit="TOMAN_PER_MESGHAL_750",
+            at="2026-08-04T10:09:20Z",
+            settlement="TOMORROW",
+            form="PAPER_NORMAL",
+            source_code="MELTED_FLOW",
+        )
+        self.add(
+            "unsettled-aggregate",
+            instrument="MELTED_GOLD_AGGREGATE",
+            price=81_000_000,
+            unit="TOMAN_PER_MESGHAL_750",
+            at="2026-08-04T10:09:30Z",
+            settlement="UNKNOWN",
+            form="PAPER_NORMAL",
+            source_code="MELTED_AGGREGATE",
+        )
+        self.connection.commit()
+
+        rate = self.rate("QUARTER_LOW_DATE", "TOMORROW")
+
+        self.assertEqual(rate.underlying_source, "PUBLIC_PAPER_TOMORROW")
 
     def test_paper_up_regime_only_widens_positive_side_with_a_bounded_interval(self) -> None:
         for index, price in enumerate((80_000_000, 80_020_000, 80_100_000, 80_400_000), start=6):

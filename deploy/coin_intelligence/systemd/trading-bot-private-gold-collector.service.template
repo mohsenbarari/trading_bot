@@ -16,4 +16,5 @@ TimeoutStopSec=20
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=read-only
-ReadWritePaths=@RUNTIME_ROOT@/market @RUNTIME_ROOT@/staging
+ProtectSystem=strict
+ReadWritePaths=@RUNTIME_ROOT@/market @RUNTIME_ROOT@/staging @RUNTIME_ROOT@/session

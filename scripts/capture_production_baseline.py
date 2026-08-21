@@ -10,7 +10,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import shlex
+import signal
+import stat
 import subprocess
 import sys
 import time
@@ -24,6 +28,8 @@ from scripts.deploy_config import resolve_deploy_settings
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ARTIFACT_ROOT = REPO_ROOT / "tmp" / "production-benchmark"
+PROCESS_TERMINATION_GRACE_SECONDS = 5.0
+PROCESS_KILL_TIMEOUT_SECONDS = 5.0
 SENSITIVE_KEY_PARTS = (
     "TOKEN",
     "SECRET",
@@ -175,6 +181,102 @@ def display_path(path: Path) -> str:
         return str(path)
 
 
+def _process_group_has_live_members(process_group_id: int) -> bool:
+    """Return true only while a non-zombie member remains in the process group."""
+    proc_root = Path("/proc")
+    if proc_root.is_dir():
+        for entry in proc_root.iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                stat_fields = entry.joinpath("stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()
+                state = stat_fields[0]
+                process_group = int(stat_fields[2])
+            except (OSError, IndexError, ValueError):
+                continue
+            if process_group == int(process_group_id) and state != "Z":
+                return True
+        return False
+    try:
+        os.killpg(int(process_group_id), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _wait_for_process_group_exit(process_group_id: int, timeout: float) -> bool:
+    deadline = time.monotonic() + max(float(timeout), 0.0)
+    while _process_group_has_live_members(process_group_id):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(0.05, remaining))
+    return True
+
+
+def _close_process_pipes(process: subprocess.Popen[str]) -> None:
+    for stream in (process.stdout, process.stderr):
+        if stream is not None:
+            stream.close()
+
+
+def _stop_process_group(
+    process: subprocess.Popen[str],
+    *,
+    process_group_id: int,
+    grace_seconds: float | None = None,
+    kill_seconds: float | None = None,
+) -> tuple[str, str]:
+    grace_seconds = float(
+        PROCESS_TERMINATION_GRACE_SECONDS
+        if grace_seconds is None
+        else grace_seconds
+    )
+    kill_seconds = float(
+        PROCESS_KILL_TIMEOUT_SECONDS if kill_seconds is None else kill_seconds
+    )
+    term_deadline = time.monotonic() + max(grace_seconds, 0.0)
+    try:
+        os.killpg(process_group_id, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    communicate_timed_out = False
+    try:
+        stdout, stderr = process.communicate(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        communicate_timed_out = True
+        stdout = stderr = ""
+    group_stopped = _wait_for_process_group_exit(
+        process_group_id,
+        max(0.0, term_deadline - time.monotonic()),
+    )
+    if communicate_timed_out or process.poll() is None or not group_stopped:
+        kill_deadline = time.monotonic() + max(kill_seconds, 0.0)
+        try:
+            os.killpg(process_group_id, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        kill_communicate_timed_out = False
+        try:
+            stdout, stderr = process.communicate(timeout=kill_seconds)
+        except subprocess.TimeoutExpired:
+            kill_communicate_timed_out = True
+            _close_process_pipes(process)
+        group_stopped = _wait_for_process_group_exit(
+            process_group_id,
+            max(0.0, kill_deadline - time.monotonic()),
+        )
+        if kill_communicate_timed_out or not group_stopped:
+            raise RuntimeError(
+                "baseline command process group did not stop within bounded cleanup"
+            ) from None
+    if process.poll() is None:
+        raise RuntimeError("baseline command process leader did not terminate")
+    return stdout or "", stderr or ""
+
+
 def run_command(
     *,
     name: str,
@@ -187,25 +289,39 @@ def run_command(
     stdout_path = logs_dir / f"{name}.stdout.log"
     stderr_path = logs_dir / f"{name}.stderr.log"
     timed_out = False
+    process = subprocess.Popen(
+        args,
+        cwd=str(cwd) if cwd else None,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    process_group_id = process.pid
     try:
-        completed = subprocess.run(
-            args,
-            cwd=str(cwd) if cwd else None,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout,
-            check=False,
-        )
-        returncode = completed.returncode
-        stdout = completed.stdout
-        stderr = completed.stderr
-    except subprocess.TimeoutExpired as exc:
+        stdout, stderr = process.communicate(timeout=float(timeout))
+        returncode = int(process.returncode or 0)
+    except subprocess.TimeoutExpired:
         timed_out = True
         returncode = 124
-        stdout = exc.stdout if isinstance(exc.stdout, str) else ""
-        stderr = exc.stderr if isinstance(exc.stderr, str) else ""
+        stdout, stderr = _stop_process_group(
+            process,
+            process_group_id=process_group_id,
+        )
         stderr = f"{stderr}\nTIMEOUT after {timeout}s".strip()
+    except BaseException:
+        _stop_process_group(process, process_group_id=process_group_id)
+        raise
+    if not timed_out and _process_group_has_live_members(process_group_id):
+        stdout, stderr = _stop_process_group(
+            process,
+            process_group_id=process_group_id,
+        )
+        returncode = 125
+        stderr = (
+            f"{stderr}\nCONTAINMENT ERROR: command leader exited while live "
+            "process-group members remained"
+        ).strip()
     elapsed = round(time.perf_counter() - started, 3)
     stdout_path.write_text(stdout, encoding="utf-8")
     stderr_path.write_text(stderr, encoding="utf-8")
@@ -220,16 +336,80 @@ def run_command(
     }
 
 
-def remote_args(settings: dict[str, str], command: str) -> list[str]:
-    return [
-        "ssh",
+def _iran_transport_contract(
+    settings: dict[str, str],
+    *,
+    require_explicit_identity: bool = False,
+) -> tuple[str, str, str | None]:
+    host = str(settings.get("IRAN_HOST") or "")
+    user = str(settings.get("IRAN_SSH_USER") or "root")
+    port = str(settings.get("IRAN_SSH_PORT") or "37067")
+    method = settings.get("IRAN_SSH_AUTH_METHOD", "key").lower()
+    if method != "key":
+        raise ValueError("production recoverability transport requires key authentication")
+    if not re.fullmatch(r"[1-9][0-9]{0,4}", port) or int(port) > 65535:
+        raise ValueError("invalid Iran SSH port")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,31}", user):
+        raise ValueError("invalid Iran SSH user")
+    if (
+        not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}", host)
+        or ".." in host
+        or "%" in host
+    ):
+        raise ValueError("invalid Iran SSH host")
+    identity_value = settings.get("IRAN_SSH_PRIVATE_KEY_PATH") or ""
+    if require_explicit_identity and not identity_value:
+        raise ValueError("production recoverability requires an explicit Iran SSH identity file")
+    if not identity_value:
+        return f"{user}@{host}", port, None
+    supplied = Path(identity_value)
+    resolved = supplied.resolve()
+    if (
+        not supplied.is_absolute()
+        or supplied != resolved
+        or supplied.is_symlink()
+        or not supplied.is_file()
+        or stat.S_IMODE(supplied.stat().st_mode) not in {0o400, 0o600}
+        or supplied.stat().st_uid not in {0, os.geteuid()}
+    ):
+        raise ValueError("invalid Iran SSH identity file")
+    return f"{user}@{host}", port, str(supplied)
+
+
+def validate_production_iran_transport(settings: dict[str, str]) -> None:
+    _iran_transport_contract(settings, require_explicit_identity=True)
+
+
+def remote_transport_args(settings: dict[str, str], *, scp: bool = False) -> list[str]:
+    target, port, identity = _iran_transport_contract(settings)
+    args = [
+        "scp" if scp else "ssh",
         "-o",
         "StrictHostKeyChecking=accept-new",
-        "-p",
-        settings.get("IRAN_SSH_PORT", "37067"),
-        f"{settings.get('IRAN_SSH_USER', 'root')}@{settings['IRAN_HOST']}",
-        command,
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "PasswordAuthentication=no",
+        "-o",
+        "KbdInteractiveAuthentication=no",
+        "-P" if scp else "-p",
+        port,
     ]
+    if identity:
+        args.extend(("-i", identity))
+    if not scp:
+        args.append(target)
+    return args
+
+
+def remote_args(settings: dict[str, str], command: str) -> list[str]:
+    return [*remote_transport_args(settings), command]
+
+
+def remote_scp_args(settings: dict[str, str], source: str, destination: str) -> list[str]:
+    return [*remote_transport_args(settings, scp=True), source, destination]
 
 
 def compose_probe_script(compose_file: str, body: str) -> str:
@@ -380,6 +560,8 @@ def main() -> int:
     logs_dir.mkdir(parents=True, exist_ok=True)
 
     settings = resolve_deploy_settings(manifest_path=args.manifest)
+    if not args.no_ssh:
+        validate_production_iran_transport(settings)
     metadata: dict[str, Any] = {
         "captured_at": utc_iso(),
         "stage": "P0",

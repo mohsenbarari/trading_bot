@@ -43,6 +43,9 @@ class SnapshotPublisherBusyError(SnapshotPublisherCommandError):
     """Another local publisher currently owns this artifact."""
 
 
+STAGING_NO_DATA_CONFIRMATION = "publish-staging-no-data-snapshot"
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -100,6 +103,23 @@ def _publish(args: argparse.Namespace) -> int:
         raise SnapshotPublisherCommandError("market_store_unavailable")
     if not snapshot_path.parent.is_dir():
         raise SnapshotPublisherCommandError("snapshot_parent_unavailable")
+    publish_no_data = bool(
+        getattr(args, "publish_staging_no_data_snapshot", False)
+    )
+    if publish_no_data:
+        if (
+            str(getattr(args, "environment", "") or "").strip().lower()
+            != "staging"
+            or str(getattr(args, "confirm", "") or "")
+            != STAGING_NO_DATA_CONFIRMATION
+            or not any(
+                "staging" in part.lower()
+                for part in snapshot_path.relative_to(root).parts
+            )
+        ):
+            raise SnapshotPublisherCommandError(
+                "staging_no_data_publish_authority_invalid"
+            )
     as_of = args.as_of_utc
     if as_of:
         normalize_utc(as_of, field_name="snapshot_publish_as_of_utc")
@@ -109,6 +129,7 @@ def _publish(args: argparse.Namespace) -> int:
             snapshot_path=snapshot_path,
             as_of_utc=as_of,
             force=bool(getattr(args, "force", False)),
+            publish_no_data_snapshot=publish_no_data,
         )
     _emit(
         command="publish",
@@ -121,7 +142,7 @@ def _publish(args: argparse.Namespace) -> int:
         no_data_rate_count=result.no_data_rate_count,
         input_watermark=result.input_watermark,
     )
-    if result.status in {"PUBLISHED", "UNCHANGED"}:
+    if result.status in {"PUBLISHED", "PUBLISHED_NO_DATA", "UNCHANGED"}:
         return 0
     return 3
 
@@ -156,7 +177,48 @@ def _check(args: argparse.Namespace) -> int:
             age_seconds=round(age_seconds, 3),
         )
         return 3
-    rates = snapshot["rates"]
+    rates = snapshot.get("rates")
+    if not isinstance(rates, dict):
+        estimated_rate_count = 0
+        no_data_rate_count = 0
+    else:
+        try:
+            estimated_rate_count = int(rates.get("estimated_count", 0))
+            no_data_rate_count = int(rates.get("no_data_count", 0))
+        except (TypeError, ValueError):
+            estimated_rate_count = 0
+            no_data_rate_count = 0
+    if estimated_rate_count <= 0:
+        if (
+            no_data_rate_count <= 0
+            or snapshot.get("snapshot_status") != "NO_DATA_COIN_RATE_STATE"
+        ):
+            _emit(
+                command="check",
+                publisher_version=SNAPSHOT_PUBLISHER_VERSION,
+                status="UNAVAILABLE",
+                reason="SNAPSHOT_NO_DATA_STATE_INVALID",
+            )
+            return 3
+        _emit(
+            command="check",
+            publisher_version=SNAPSHOT_PUBLISHER_VERSION,
+            status="FRESH_NO_DATA",
+            reason="NO_ESTIMATED_COIN_RATES",
+            generated_at_utc=generated_at.isoformat().replace("+00:00", "Z"),
+            age_seconds=round(age_seconds, 3),
+            estimated_rate_count=estimated_rate_count,
+            no_data_rate_count=no_data_rate_count,
+        )
+        return 0
+    if snapshot.get("snapshot_status") != "PARTIAL_COIN_RATE_STATE":
+        _emit(
+            command="check",
+            publisher_version=SNAPSHOT_PUBLISHER_VERSION,
+            status="UNAVAILABLE",
+            reason="SNAPSHOT_RATE_READY_STATE_INVALID",
+        )
+        return 3
     _emit(
         command="check",
         publisher_version=SNAPSHOT_PUBLISHER_VERSION,
@@ -164,8 +226,8 @@ def _check(args: argparse.Namespace) -> int:
         reason=None,
         generated_at_utc=generated_at.isoformat().replace("+00:00", "Z"),
         age_seconds=round(age_seconds, 3),
-        estimated_rate_count=int(rates["estimated_count"]),
-        no_data_rate_count=int(rates["no_data_count"]),
+        estimated_rate_count=estimated_rate_count,
+        no_data_rate_count=no_data_rate_count,
     )
     return 0
 
@@ -183,6 +245,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help="compatibility option; snapshots are always rebuilt because freshness is time-dependent",
+    )
+    publish.add_argument(
+        "--publish-staging-no-data-snapshot",
+        action="store_true",
+        help=(
+            "staging-only opt-in: atomically publish a fresh validated NO_DATA "
+            "Snapshot when no estimated rate is available"
+        ),
+    )
+    publish.add_argument("--environment", choices=("staging",))
+    publish.add_argument(
+        "--confirm",
+        default="",
+        help="exact confirmation required for the staging NO_DATA exception",
     )
     publish.set_defaults(handler=_publish)
 

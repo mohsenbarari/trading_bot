@@ -1,10 +1,18 @@
+import hashlib
 import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.render_runtime_envs import build_runtime_env, collect_runtime_values, main as render_runtime_envs_main
+from scripts.render_runtime_envs import (
+    TELEGRAM_PROVIDER_TOKEN_KEYS,
+    build_runtime_env,
+    collect_runtime_values,
+    main as render_runtime_envs_main,
+    write_env_file,
+)
 
 
 class RenderRuntimeEnvsTests(unittest.TestCase):
@@ -91,6 +99,38 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "REDIS_MAXMEMORY": "0",
             "REDIS_MAXMEMORY_POLICY": "noeviction",
         }
+
+    def queue_values(self) -> dict[str, str]:
+        values = self.sample_values()
+        values.update(
+            {
+                "TELEGRAM_DELIVERY_PRODUCER_MODE": "queue-v1",
+                "TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER": "queue-v1",
+                "TELEGRAM_DELIVERY_EXECUTION_OWNER": "queue-v1",
+                "TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED": "true",
+                "TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY": "true",
+                "TELEGRAM_MULTI_PUBLISHER_ENABLED": "true",
+                "TELEGRAM_B2B_DISPATCH_ENABLED": "true",
+                "TELEGRAM_DELIVERY_QUEUE_EXPECTED_PRIMARY_BOT_ID": "100",
+                "TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_ID": "-100123",
+                "TELEGRAM_DELIVERY_QUEUE_SHARED_PUBLISHER_FLEET_ENABLED": "true",
+                "TELEGRAM_MONITORING_BOT_TOKEN": "monitor-token",
+                "PRODUCTION_COIN_INFERENCE_PREVIEW_ENABLED": "true",
+                "PRODUCTION_COIN_INFERENCE_SELECTION_ENABLED": "true",
+                "PRODUCTION_COIN_INFERENCE_AUTO_SELECTION_ENABLED": "false",
+                "PRODUCTION_OFFER_MODEL_PRICE_GUARD_ENABLED": "true",
+            }
+        )
+        for index in range(1, 6):
+            values.update(
+                {
+                    f"TELEGRAM_PUBLISHER_{index}_ENABLED": "true",
+                    f"TELEGRAM_PUBLISHER_{index}_BOT_TOKEN": f"publisher-token-{index}",
+                    f"TELEGRAM_PUBLISHER_{index}_EXPECTED_BOT_ID": str(100 + index),
+                    f"TELEGRAM_PUBLISHER_{index}_EXPECTED_USERNAME": f"publisher_{index}_bot",
+                }
+            )
+        return values
 
     def test_build_runtime_env_switches_role_and_frontend_url(self):
         values = self.sample_values()
@@ -183,6 +223,45 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         )
 
         self.assertEqual(rendered["PUBLIC_WEBAPP_URL"], "https://webapp.example.ir")
+
+    def test_role_projection_preserves_legacy_api_token_but_queue_and_iran_are_token_free(self):
+        def render(role: str, values: dict[str, str]):
+            return build_runtime_env(
+                role=role,
+                frontend_url="https://example.invalid",
+                public_webapp_url="https://example.invalid",
+                foreign_server_url="https://foreign.invalid",
+                foreign_server_domain="foreign.invalid",
+                iran_server_url="https://iran.invalid",
+                iran_server_domain="iran.invalid",
+                metrics_backend="memory",
+                audit_trail_path="/app/audit.jsonl",
+                api_workers="2",
+                values=values,
+            )
+
+        legacy = render("foreign", self.sample_values())
+        queue = render("foreign", self.queue_values())
+        iran = render("iran", self.queue_values())
+
+        self.assertEqual(legacy["TELEGRAM_NON_BOT_DELIVERY_EXECUTION_OWNER"], "legacy")
+        self.assertEqual(legacy["TELEGRAM_NON_BOT_BOT_TOKEN"], "bot-token")
+        self.assertEqual(queue["TELEGRAM_NON_BOT_DELIVERY_EXECUTION_OWNER"], "producer-only")
+        self.assertEqual(queue["TELEGRAM_NON_BOT_BOT_TOKEN"], "")
+        self.assertEqual(
+            queue["TELEGRAM_DELIVERY_QUEUE_SHARED_PUBLISHER_FLEET_ENABLED"],
+            "true",
+        )
+        self.assertEqual(iran["TELEGRAM_DELIVERY_EXECUTION_OWNER"], "producer-only")
+        self.assertEqual(iran["TELEGRAM_NON_BOT_DELIVERY_EXECUTION_OWNER"], "producer-only")
+        self.assertEqual(iran["TELEGRAM_NON_BOT_BOT_TOKEN"], "")
+        for key in TELEGRAM_PROVIDER_TOKEN_KEYS:
+            self.assertIn(key, iran)
+            self.assertEqual(iran[key], "", key)
+        for index in range(1, 6):
+            self.assertEqual(iran[f"TELEGRAM_PUBLISHER_{index}_ENABLED"], "false")
+        self.assertEqual(iran["TELEGRAM_MULTI_PUBLISHER_ENABLED"], "true")
+        self.assertEqual(iran["TELEGRAM_B2B_DISPATCH_ENABLED"], "true")
 
     def test_main_renders_both_files_from_environment(self):
         values = self.sample_values()
@@ -284,7 +363,175 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
                 foreign_lines,
             )
 
-    def test_collect_runtime_values_reads_non_shell_safe_source_env_and_allows_overrides(self):
+    def test_repeated_source_render_is_idempotent_and_keeps_master_immutable(self):
+        values = self.sample_values()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source_path = root / "master.env"
+            foreign_path = root / "runtime" / "foreign.env"
+            iran_path = root / "runtime" / "iran.env"
+            source_path.write_text(
+                "\n".join(f"{key}={value}" for key, value in values.items()) + "\n",
+                encoding="utf-8",
+            )
+            source_before = source_path.read_bytes()
+            source_digest = hashlib.sha256(source_before).hexdigest()
+            argv = [
+                "render_runtime_envs.py",
+                "--source-env-file",
+                str(source_path),
+                "--local-output",
+                str(foreign_path),
+                "--iran-output",
+                str(iran_path),
+                "--foreign-frontend-url",
+                "https://coin.362514.ir",
+                "--iran-frontend-url",
+                "https://coin.gold-trade.ir",
+                "--foreign-server-url",
+                "https://coin.362514.ir",
+                "--foreign-server-domain",
+                "coin.362514.ir",
+                "--iran-server-url",
+                "https://coin.gold-trade.ir",
+                "--iran-server-domain",
+                "coin.gold-trade.ir",
+            ]
+
+            rendered_runs: list[tuple[bytes, bytes]] = []
+            for _ in range(2):
+                with patch.dict(os.environ, {}, clear=True), patch("sys.argv", argv):
+                    self.assertEqual(render_runtime_envs_main(), 0)
+                self.assertEqual(hashlib.sha256(source_path.read_bytes()).hexdigest(), source_digest)
+                rendered_runs.append((foreign_path.read_bytes(), iran_path.read_bytes()))
+
+            self.assertEqual(rendered_runs[0], rendered_runs[1])
+            self.assertIn(b"SMSIR_API_KEY=sms-key\n", source_before)
+            self.assertIn(b"SMSIR_API_KEY=\n", rendered_runs[-1][0])
+            self.assertNotIn(b"SMSIR_API_KEY=sms-key\n", rendered_runs[-1][0])
+            self.assertIn(b"SMSIR_API_KEY=sms-key\n", rendered_runs[-1][1])
+            self.assertEqual(stat.S_IMODE(foreign_path.stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE(iran_path.stat().st_mode), 0o600)
+
+    def test_source_output_alias_is_rejected_before_writing(self):
+        values = self.sample_values()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source_path = root / "master.env"
+            iran_path = root / "iran.env"
+            source_path.write_text(
+                "\n".join(f"{key}={value}" for key, value in values.items()) + "\n",
+                encoding="utf-8",
+            )
+            source_before = source_path.read_bytes()
+            argv = [
+                "render_runtime_envs.py",
+                "--source-env-file",
+                str(source_path),
+                "--local-output",
+                str(source_path),
+                "--iran-output",
+                str(iran_path),
+                "--foreign-frontend-url",
+                "https://coin.362514.ir",
+                "--iran-frontend-url",
+                "https://coin.gold-trade.ir",
+                "--foreign-server-url",
+                "https://coin.362514.ir",
+                "--foreign-server-domain",
+                "coin.362514.ir",
+                "--iran-server-url",
+                "https://coin.gold-trade.ir",
+                "--iran-server-domain",
+                "coin.gold-trade.ir",
+            ]
+
+            with patch.dict(os.environ, {}, clear=True), patch("sys.argv", argv):
+                with self.assertRaisesRegex(SystemExit, "source must be different"):
+                    render_runtime_envs_main()
+
+            self.assertEqual(source_path.read_bytes(), source_before)
+            self.assertFalse(iran_path.exists())
+
+    def test_source_output_symlink_alias_is_rejected(self):
+        values = self.sample_values()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source_path = root / "master.env"
+            alias_path = root / "master-alias.env"
+            iran_path = root / "iran.env"
+            source_path.write_text(
+                "\n".join(f"{key}={value}" for key, value in values.items()) + "\n",
+                encoding="utf-8",
+            )
+            alias_path.symlink_to(source_path)
+            argv = [
+                "render_runtime_envs.py",
+                "--source-env-file",
+                str(source_path),
+                "--local-output",
+                str(alias_path),
+                "--iran-output",
+                str(iran_path),
+                "--foreign-frontend-url",
+                "https://coin.362514.ir",
+                "--iran-frontend-url",
+                "https://coin.gold-trade.ir",
+                "--foreign-server-url",
+                "https://coin.362514.ir",
+                "--foreign-server-domain",
+                "coin.362514.ir",
+                "--iran-server-url",
+                "https://coin.gold-trade.ir",
+                "--iran-server-domain",
+                "coin.gold-trade.ir",
+            ]
+            with patch.dict(os.environ, {}, clear=True), patch("sys.argv", argv):
+                with self.assertRaisesRegex(SystemExit, "source must be different"):
+                    render_runtime_envs_main()
+
+            self.assertTrue(alias_path.is_symlink())
+            self.assertFalse(iran_path.exists())
+
+    def test_equal_runtime_outputs_are_rejected_before_writing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "runtime.env"
+            argv = [
+                "render_runtime_envs.py",
+                "--local-output",
+                str(output_path),
+                "--iran-output",
+                str(output_path),
+                "--foreign-frontend-url",
+                "https://coin.362514.ir",
+                "--iran-frontend-url",
+                "https://coin.gold-trade.ir",
+                "--foreign-server-url",
+                "https://coin.362514.ir",
+                "--foreign-server-domain",
+                "coin.362514.ir",
+                "--iran-server-url",
+                "https://coin.gold-trade.ir",
+                "--iran-server-domain",
+                "coin.gold-trade.ir",
+            ]
+            with patch("sys.argv", argv):
+                with self.assertRaisesRegex(SystemExit, "outputs must be different"):
+                    render_runtime_envs_main()
+            self.assertFalse(output_path.exists())
+
+    def test_atomic_write_failure_keeps_previous_runtime_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "runtime.env"
+            output_path.write_text("ORIGINAL=value\n", encoding="utf-8")
+            with patch("scripts.render_runtime_envs.os.replace", side_effect=OSError("replace failed")):
+                with self.assertRaisesRegex(OSError, "replace failed"):
+                    write_env_file(str(output_path), {"NEW": "value"})
+
+            self.assertEqual(output_path.read_text(encoding="utf-8"), "ORIGINAL=value\n")
+            self.assertEqual(list(output_path.parent.glob(".runtime.env.*.tmp")), [])
+
+    def test_collect_runtime_values_reads_non_shell_safe_source_env_and_rejects_unlisted_override(self):
         values = self.sample_values()
         values.pop("CHANNEL_INVITE_LINK")
         values.pop("ERROR_TRACKING_DSN")
@@ -313,7 +560,14 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch.dict(os.environ, {"GRAFANA_ALERT_WEBHOOK_URL": "https://override.example/alerts"}, clear=True):
+            with patch.dict(
+                os.environ,
+                {
+                    "GRAFANA_ALERT_WEBHOOK_URL": "https://override.example/alerts",
+                    "RELEASE_SHA": "allowed-release-override",
+                },
+                clear=True,
+            ):
                 collected = collect_runtime_values(str(source_path))
 
         self.assertEqual(collected["CHANNEL_INVITE_LINK"], "")
@@ -331,10 +585,84 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(collected["WEB_PUSH_TTL_SECONDS"], "3600")
         self.assertEqual(collected["WEB_PUSH_TIMEOUT_SECONDS"], "5.0")
         self.assertEqual(collected["OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED"], "false")
-        self.assertEqual(collected["RELEASE_SHA"], "")
+        self.assertEqual(collected["RELEASE_SHA"], "allowed-release-override")
         self.assertEqual(collected["GRAFANA_ALERT_DEFAULT_RECEIVER"], "Trading Bot Production Webhook")
         self.assertEqual(collected["GRAFANA_ALERT_WARNING_RECEIVER"], "Trading Bot Production Email")
-        self.assertEqual(collected["GRAFANA_ALERT_WEBHOOK_URL"], "https://override.example/alerts")
+        self.assertEqual(collected["GRAFANA_ALERT_WEBHOOK_URL"], "https://alerts.example/api")
+
+    def test_source_is_authoritative_for_queue_credentials_expected_ids_and_inference(self):
+        values = self.queue_values()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_path = Path(tmpdir) / "master.env"
+            source_path.write_text(
+                "\n".join(f"{key}={value}" for key, value in values.items()) + "\n",
+                encoding="utf-8",
+            )
+            pollution = {
+                "BOT_TOKEN": "polluted-primary",
+                "TELEGRAM_DELIVERY_PRODUCER_MODE": "legacy",
+                "TELEGRAM_PUBLISHER_1_BOT_TOKEN": "polluted-publisher",
+                "TELEGRAM_PUBLISHER_1_EXPECTED_BOT_ID": "999999",
+                "TELEGRAM_PUBLISHER_1_EXPECTED_USERNAME": "polluted_bot",
+                "TELEGRAM_DELIVERY_QUEUE_SHARED_PUBLISHER_FLEET_ENABLED": "false",
+                "IRAN_OTP_DELIVERY_STATE_SECRET": "polluted-otp-state-secret",
+                "PRODUCTION_COIN_INFERENCE_SELECTION_ENABLED": "false",
+                "PRODUCTION_COIN_INFERENCE_SNAPSHOT_CONTAINER_PATH": "/polluted/path.json",
+                "PRODUCTION_COIN_INFERENCE_SNAPSHOT_PATH": "/polluted/alias.json",
+                "DB_POOL_SIZE": "19",
+            }
+            with patch.dict(os.environ, pollution, clear=True):
+                collected = collect_runtime_values(str(source_path))
+
+        self.assertEqual(collected["BOT_TOKEN"], "bot-token")
+        self.assertEqual(collected["TELEGRAM_DELIVERY_PRODUCER_MODE"], "queue-v1")
+        self.assertEqual(
+            collected["TELEGRAM_DELIVERY_QUEUE_SHARED_PUBLISHER_FLEET_ENABLED"],
+            "true",
+        )
+        self.assertEqual(collected["TELEGRAM_PUBLISHER_1_BOT_TOKEN"], "publisher-token-1")
+        self.assertEqual(collected["TELEGRAM_PUBLISHER_1_EXPECTED_BOT_ID"], "101")
+        self.assertEqual(collected["TELEGRAM_PUBLISHER_1_EXPECTED_USERNAME"], "publisher_1_bot")
+        self.assertEqual(
+            collected["IRAN_OTP_DELIVERY_STATE_SECRET"],
+            "iran-only-otp-state-secret-0123456789abcdef",
+        )
+        self.assertEqual(collected["PRODUCTION_COIN_INFERENCE_SELECTION_ENABLED"], "true")
+        self.assertEqual(
+            collected["PRODUCTION_COIN_INFERENCE_SNAPSHOT_CONTAINER_PATH"],
+            "/app/runtime/coin-inference/coin-rates.json",
+        )
+        self.assertEqual(
+            collected["PRODUCTION_COIN_INFERENCE_SNAPSHOT_PATH"],
+            "/app/runtime/coin-inference/coin-rates.json",
+        )
+        self.assertEqual(collected["DB_POOL_SIZE"], "19")
+
+    def test_split_brain_source_profile_fails_closed(self):
+        values = self.queue_values()
+        values["TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER"] = "legacy"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_path = Path(tmpdir) / "master.env"
+            source_path.write_text(
+                "\n".join(f"{key}={value}" for key, value in values.items()) + "\n",
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {}, clear=True):
+                with self.assertRaisesRegex(SystemExit, "split-brain"):
+                    collect_runtime_values(str(source_path))
+
+    def test_production_inference_maximum_age_is_exactly_120(self):
+        values = self.queue_values()
+        values["PRODUCTION_COIN_INFERENCE_MAXIMUM_AGE_SECONDS"] = "121"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_path = Path(tmpdir) / "master.env"
+            source_path.write_text(
+                "\n".join(f"{key}={value}" for key, value in values.items()) + "\n",
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {}, clear=True):
+                with self.assertRaisesRegex(SystemExit, "must be exactly 120"):
+                    collect_runtime_values(str(source_path))
 
 
 if __name__ == "__main__":

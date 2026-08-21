@@ -21,7 +21,7 @@ from .price_magnitude_policy import RIAL_PER_TOMAN, TRUE_IRT_MESGHAL_FLOOR
 from .private_gold import filter_comparable_private_gold_physical_rows
 
 
-COIN_RATE_ENGINE_VERSION = "coin-rate-engine-v6"
+COIN_RATE_ENGINE_VERSION = "coin-rate-engine-v8"
 PROJECT_TOMAN_PER_UNIT = 1_000.0  # 1 project unit = 1,000 toman
 _MESGHAL_TOMAN_MIN = 30_000_000.0
 _MESGHAL_TOMAN_MAX = 200_000_000.0
@@ -86,6 +86,10 @@ class CoinRateEstimate:
     confidence: str
     method: str
     underlying_source: str | None
+    # Age of the newest underlying melted-gold observation at the instant the
+    # estimate was built.  Snapshot freshness alone is not sufficient: a
+    # freshly rebuilt artifact can still be based on an old market input.
+    underlying_age_seconds: float | None
     anchor_age_seconds: float | None
     market_regime: str
     reason: str | None = None
@@ -196,12 +200,19 @@ def _melted_point(connection: sqlite3.Connection, *, as_of: datetime, settlement
             # next physical offer arrives.
             ("MELTED_GOLD_PRIVATE", ("TOMORROW",), ("PAPER_NORMAL",), "PRIVATE_PAPER_TOMORROW_CASH_BRIDGE", True, 180),
             ("MELTED_GOLD_FLOW", ("TOMORROW",), ("PAPER_NORMAL",), "PUBLIC_PAPER_TOMORROW_CASH_BRIDGE", True, 180),
+            # The aggregate public feed can remain live after the explicitly
+            # settled flow/private books go quiet.  Its unqualified paper
+            # quote is useful for preview and commodity confirmation, but it
+            # must never become hard price authority.  Keep it last and mark
+            # it as a fallback so every derived rate is LOW_PAPER_FALLBACK.
+            ("MELTED_GOLD_AGGREGATE", ("UNKNOWN",), ("PAPER_NORMAL",), "PUBLIC_PAPER_UNSPECIFIED_CASH_BRIDGE", True, 180),
         )
     else:
         policies = (
             ("MELTED_GOLD_PRIVATE", ("TOMORROW",), ("PHYSICAL",), "PRIVATE_PHYSICAL_TOMORROW", False, 900),
             ("MELTED_GOLD_PRIVATE", ("TOMORROW",), ("PAPER_NORMAL",), "PRIVATE_PAPER_TOMORROW", True, 180),
             ("MELTED_GOLD_FLOW", ("TOMORROW",), ("PAPER_NORMAL",), "PUBLIC_PAPER_TOMORROW", True, 180),
+            ("MELTED_GOLD_AGGREGATE", ("UNKNOWN",), ("PAPER_NORMAL",), "PUBLIC_PAPER_UNSPECIFIED_TOMORROW_BRIDGE", True, 180),
         )
     for instrument, terms, forms, label, fallback, maximum_age in policies:
         point = _robust_project_point(
@@ -387,7 +398,7 @@ def build_coin_rate_estimates(connection: sqlite3.Connection, *, as_of_utc: date
         current = _melted_point(connection, as_of=as_of, settlement=settlement)
         for code, (coefficient, low_date) in COIN_SPECS.items():
             if current.value_project is None:
-                output.append(CoinRateEstimate(code, settlement, "NO_DATA", None, None, None, "NONE", "ABSTAIN_NO_FRESH_MELTED", None, None, regime, "NO_FRESH_MELTED"))
+                output.append(CoinRateEstimate(code, settlement, "NO_DATA", None, None, None, "NONE", "ABSTAIN_NO_FRESH_MELTED", None, None, None, regime, "NO_FRESH_MELTED"))
                 continue
             intrinsic = current.value_project * coefficient
             anchor = _coin_anchor(connection, as_of=as_of, code=code, settlement=settlement)
@@ -440,7 +451,7 @@ def build_coin_rate_estimates(connection: sqlite3.Connection, *, as_of_utc: date
                 method = "LOW_DATE_MELTED_INTRINSIC"
                 structural_only = True
             if estimate is None:
-                output.append(CoinRateEstimate(code, settlement, "NO_DATA", None, None, None, "NONE", "ABSTAIN_NO_SAFE_SAME_COMMODITY_ANCHOR", current.source_kind, None, regime, "NO_SAFE_SAME_COMMODITY_ANCHOR"))
+                output.append(CoinRateEstimate(code, settlement, "NO_DATA", None, None, None, "NONE", "ABSTAIN_NO_SAFE_SAME_COMMODITY_ANCHOR", current.source_kind, current.age_seconds, None, regime, "NO_SAFE_SAME_COMMODITY_ANCHOR"))
                 continue
             negative, positive = _tolerance(
                 point=current,
@@ -465,6 +476,7 @@ def build_coin_rate_estimates(connection: sqlite3.Connection, *, as_of_utc: date
                     confidence,
                     method,
                     current.source_kind,
+                    current.age_seconds,
                     anchor_age,
                     regime,
                     herat_source=herat_source,

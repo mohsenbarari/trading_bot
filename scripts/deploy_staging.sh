@@ -215,9 +215,10 @@ is_enabled_value() {
 }
 
 validate_staging_coin_inference() {
-    if is_enabled_value "$STAGING_COIN_INFERENCE_AUTO_SELECTION_ENABLED" && \
-       ! is_enabled_value "$STAGING_COIN_INFERENCE_SELECTION_ENABLED"; then
-        die "coin inference auto-selection requires selection"
+    [[ "$STAGING_COIN_INFERENCE_MAXIMUM_AGE_SECONDS" == "120" ]] || \
+        die "staging coin inference maximum age must remain exactly 120 seconds"
+    if is_enabled_value "$STAGING_COIN_INFERENCE_AUTO_SELECTION_ENABLED"; then
+        die "coin inference auto-selection must remain disabled in staging"
     fi
     if is_enabled_value "$STAGING_COIN_INFERENCE_SELECTION_ENABLED" && \
        ! is_enabled_value "$STAGING_COIN_INFERENCE_PREVIEW_ENABLED"; then
@@ -235,11 +236,28 @@ validate_staging_coin_inference() {
         die "staging coin inference Snapshot directory is missing"
     [[ -r "$STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH" ]] || \
         die "staging coin inference Snapshot is missing or unreadable"
-    python3 "$PROJECT_DIR/scripts/publish_coin_intelligence_snapshot.py" check \
-        --runtime-root "$(dirname "$STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH")" \
-        --snapshot "$STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH" \
-        --maximum-age-seconds "$STAGING_COIN_INFERENCE_MAXIMUM_AGE_SECONDS" \
-        >/dev/null || die "staging coin inference Snapshot is not fresh and rate-ready"
+    local snapshot_report snapshot_status
+    snapshot_report="$(
+        python3 "$PROJECT_DIR/scripts/publish_coin_intelligence_snapshot.py" check \
+            --runtime-root "$(dirname "$STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH")" \
+            --snapshot "$STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH" \
+            --maximum-age-seconds "$STAGING_COIN_INFERENCE_MAXIMUM_AGE_SECONDS"
+    )" || die "staging coin inference Snapshot is missing, stale, future, or structurally invalid"
+    snapshot_status="$(
+        printf '%s' "$snapshot_report" | python3 -c \
+            'import json, sys; print(str(json.load(sys.stdin).get("status") or ""))'
+    )" || die "staging coin inference Snapshot check output is invalid"
+    case "$snapshot_status" in
+        FRESH)
+            log "coin inference Snapshot is fresh and rate-ready; auto-selection=false"
+            ;;
+        FRESH_NO_DATA)
+            log "coin inference Snapshot is fresh SAFE_NO_DATA; inference and price rejection have no model rate authority"
+            ;;
+        *)
+            die "staging coin inference Snapshot check returned unsupported status"
+            ;;
+    esac
 }
 
 ensure_env() {
@@ -710,6 +728,66 @@ start_sync_worker() {
     compose up -d --build sync_worker
 }
 
+require_prebuilt_image() {
+    [[ "${STAGING_IMAGE_TAG:-}" =~ ^[0-9a-f]{40}$ ]] || \
+        die "STAGING_IMAGE_TAG must be the exact 40-character release SHA for a prebuilt start"
+    docker image inspect "trading_bot_staging_app:${STAGING_IMAGE_TAG}" >/dev/null 2>&1 || \
+        die "prebuilt staging image trading_bot_staging_app:${STAGING_IMAGE_TAG} is missing"
+}
+
+build_runtime_image() {
+    check
+    ensure_env
+    ensure_runtime_env_values
+    require_prebuilt_image_tag_only
+    build_frontend
+    if [[ "$STAGING_ENABLE_BOT" == "1" ]]; then
+        compose --profile staging-bot --profile staging-sync build foreign_app
+    else
+        compose build app
+    fi
+    require_prebuilt_image
+}
+
+require_prebuilt_image_tag_only() {
+    [[ "${STAGING_IMAGE_TAG:-}" =~ ^[0-9a-f]{40}$ ]] || \
+        die "STAGING_IMAGE_TAG must be the exact 40-character release SHA"
+}
+
+start_prebuilt_producers() {
+    check
+    ensure_env
+    ensure_runtime_env_values
+    build_frontend
+    require_prebuilt_image
+    remove_legacy_compose_stateless_containers
+    if [[ "$STAGING_ENABLE_BOT" == "1" && "$STAGING_FOREIGN_ONLY" == "1" ]]; then
+        compose --profile staging-bot --profile staging-sync up -d --no-build foreign_app foreign_sync_worker
+        wait_for_foreign_app_health_if_enabled
+    elif [[ "$STAGING_ENABLE_BOT" == "1" ]]; then
+        die "prebuilt producer start with a bot identity requires STAGING_FOREIGN_ONLY=1"
+    else
+        compose up -d --no-build app
+        compose --profile staging-sync up -d --no-build sync_worker
+        wait_for_app_health
+    fi
+    install_nginx
+    compose ps
+    health
+}
+
+start_prebuilt_bot() {
+    [[ "$STAGING_ENABLE_BOT" == "1" && "$STAGING_FOREIGN_ONLY" == "1" ]] || \
+        die "prebuilt bot start is permitted only on the foreign staging role"
+    check
+    ensure_env
+    ensure_runtime_env_values
+    build_frontend
+    require_prebuilt_image
+    compose --profile staging-bot --profile staging-sync up -d --no-build bot
+    compose ps
+}
+
 wait_for_foreign_app_health_if_enabled() {
     if [[ "$STAGING_ENABLE_BOT" != "1" ]]; then
         return
@@ -766,6 +844,15 @@ case "${1:-deploy}" in
     build-frontend)
         build_frontend
         ;;
+    build-image)
+        build_runtime_image
+        ;;
+    start-prebuilt-producers)
+        start_prebuilt_producers
+        ;;
+    start-prebuilt-bot)
+        start_prebuilt_bot
+        ;;
     nginx)
         install_nginx
         ;;
@@ -798,6 +885,9 @@ Commands:
   check           Validate local prerequisites and show staging settings
   ensure-env      Create .env.staging if missing
   build-frontend  Build frontend into mini_app_dist_staging
+  build-image     Build the SHA-tagged staging runtime image without starting it
+  start-prebuilt-producers  Start API/sync from an already verified SHA-tagged image
+  start-prebuilt-bot        Start the foreign bot last from the verified image
   nginx           Install/reload the staging Nginx server block
   up              Compose up -d --build
   deploy          check + ensure-env + build frontend + nginx + compose up + health

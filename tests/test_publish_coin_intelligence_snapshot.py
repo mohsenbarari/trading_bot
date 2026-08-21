@@ -141,6 +141,143 @@ class PublishCoinIntelligenceSnapshotTests(unittest.TestCase):
             )
         self.assertEqual((result, payload["status"], payload["reason"]), (3, "STALE", "SNAPSHOT_STALE_OR_FUTURE"))
 
+    def test_default_no_data_publish_preserves_last_valid_snapshot(self) -> None:
+        self._seed_rate_ready_store()
+        result, payload = self._invoke(
+            "publish",
+            "--runtime-root", str(self.root),
+            "--market-store", "market/market.sqlite3",
+            "--snapshot", "snapshots/coin-rates.json",
+            "--as-of-utc", "2026-08-04T12:00:00Z",
+        )
+        self.assertEqual((result, payload["status"]), (0, "PUBLISHED"))
+        original = self.snapshot_path.read_bytes()
+
+        self.connection.execute("DELETE FROM market_observations")
+        self.connection.commit()
+        result, payload = self._invoke(
+            "publish",
+            "--runtime-root", str(self.root),
+            "--market-store", "market/market.sqlite3",
+            "--snapshot", "snapshots/coin-rates.json",
+            "--as-of-utc", "2026-08-04T12:01:00Z",
+        )
+
+        self.assertEqual(
+            (
+                result,
+                payload["status"],
+                payload["reason"],
+                payload["estimated_rate_count"],
+            ),
+            (3, "NOT_RATE_READY", "NO_ESTIMATED_COIN_RATES", 0),
+        )
+        self.assertEqual(self.snapshot_path.read_bytes(), original)
+
+    def test_explicit_staging_no_data_publish_is_fresh_and_structurally_valid(self) -> None:
+        staging_snapshot = self.snapshot_dir / "staging" / "coin-rates.json"
+        staging_snapshot.parent.mkdir()
+        result, payload = self._invoke(
+            "publish",
+            "--runtime-root", str(self.root),
+            "--market-store", "market/market.sqlite3",
+            "--snapshot", "snapshots/staging/coin-rates.json",
+            "--as-of-utc", "2026-08-04T12:00:00Z",
+            "--publish-staging-no-data-snapshot",
+            "--environment", "staging",
+            "--confirm", "publish-staging-no-data-snapshot",
+        )
+        self.assertEqual(
+            (
+                result,
+                payload["status"],
+                payload["reason"],
+                payload["estimated_rate_count"],
+                payload["no_data_rate_count"],
+                len(str(payload["snapshot_digest"])),
+            ),
+            (
+                0,
+                "PUBLISHED_NO_DATA",
+                "NO_ESTIMATED_COIN_RATES",
+                0,
+                14,
+                64,
+            ),
+        )
+        snapshot = json.loads(staging_snapshot.read_text(encoding="utf-8"))
+        self.assertEqual(snapshot["snapshot_status"], "NO_DATA_COIN_RATE_STATE")
+        self.assertEqual(snapshot["rates"]["estimated_count"], 0)
+        self.assertTrue(
+            all(item["status"] == "NO_DATA" for item in snapshot["rates"]["items"])
+        )
+
+        with patch("scripts.publish_coin_intelligence_snapshot._utc_now", return_value=self.now):
+            result, payload = self._invoke(
+                "check",
+                "--runtime-root", str(self.root),
+                "--snapshot", "snapshots/staging/coin-rates.json",
+            )
+        self.assertEqual(
+            (result, payload["status"], payload["reason"], payload["estimated_rate_count"]),
+            (0, "FRESH_NO_DATA", "NO_ESTIMATED_COIN_RATES", 0),
+        )
+
+        snapshot["rates"] = {}
+        staging_snapshot.write_text(json.dumps(snapshot), encoding="utf-8")
+        with patch("scripts.publish_coin_intelligence_snapshot._utc_now", return_value=self.now):
+            result, payload = self._invoke(
+                "check",
+                "--runtime-root", str(self.root),
+                "--snapshot", "snapshots/staging/coin-rates.json",
+            )
+        self.assertEqual(
+            (result, payload["status"], payload["reason"]),
+            (3, "UNAVAILABLE", "snapshot_validation_failed"),
+        )
+
+    def test_check_rejects_unmarked_zero_rate_snapshot(self) -> None:
+        staging_snapshot = self.snapshot_dir / "staging" / "coin-rates.json"
+        staging_snapshot.parent.mkdir()
+        result, payload = self._invoke(
+            "publish",
+            "--runtime-root", str(self.root),
+            "--market-store", "market/market.sqlite3",
+            "--snapshot", "snapshots/staging/coin-rates.json",
+            "--as-of-utc", "2026-08-04T12:00:00Z",
+            "--publish-staging-no-data-snapshot",
+            "--environment", "staging",
+            "--confirm", "publish-staging-no-data-snapshot",
+        )
+        self.assertEqual((result, payload["status"]), (0, "PUBLISHED_NO_DATA"))
+        snapshot = json.loads(staging_snapshot.read_text(encoding="utf-8"))
+        snapshot["snapshot_status"] = "PARTIAL_COIN_RATE_STATE"
+        staging_snapshot.write_text(json.dumps(snapshot), encoding="utf-8")
+
+        with patch("scripts.publish_coin_intelligence_snapshot._utc_now", return_value=self.now):
+            result, payload = self._invoke(
+                "check",
+                "--runtime-root", str(self.root),
+                "--snapshot", "snapshots/staging/coin-rates.json",
+            )
+        self.assertEqual(
+            (result, payload["status"], payload["reason"]),
+            (3, "UNAVAILABLE", "SNAPSHOT_NO_DATA_STATE_INVALID"),
+        )
+
+    def test_staging_no_data_publish_requires_explicit_scope_and_confirmation(self) -> None:
+        result, payload = self._invoke(
+            "publish",
+            "--runtime-root", str(self.root),
+            "--market-store", "market/market.sqlite3",
+            "--snapshot", "snapshots/coin-rates.json",
+            "--publish-staging-no-data-snapshot",
+        )
+        self.assertEqual(
+            (result, payload["status"], payload["reason"]),
+            (2, "FAILED", "staging_no_data_publish_authority_invalid"),
+        )
+
     def test_documented_direct_execution_resolves_the_local_package(self) -> None:
         script = Path(__file__).resolve().parents[1] / "scripts/publish_coin_intelligence_snapshot.py"
         completed = subprocess.run(

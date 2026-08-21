@@ -9,6 +9,33 @@ x-default-logging: &default_logging
     max-size: "${DOCKER_LOG_MAX_SIZE:-20m}"
     max-file: "${DOCKER_LOG_MAX_FILE:-5}"
 
+# Iran is always producer-only for Queue-v1 and never receives Telegram
+# provider credentials.  The derived owner remains Legacy while the global
+# profile is Legacy, preventing a split-brain transition during a code-only
+# release; the production cutover switches both values together.
+x-telegram-producer-role: &telegram_producer_role
+  TELEGRAM_DELIVERY_PRODUCER_MODE: ${TELEGRAM_DELIVERY_PRODUCER_MODE:-legacy}
+  TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER: ${TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER:-legacy}
+  TELEGRAM_DELIVERY_EXECUTION_OWNER: ${TELEGRAM_NON_BOT_DELIVERY_EXECUTION_OWNER:-legacy}
+  TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED: "false"
+  TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY: "false"
+  TELEGRAM_MULTI_PUBLISHER_ENABLED: ${TELEGRAM_MULTI_PUBLISHER_ENABLED:-false}
+  TELEGRAM_B2B_DISPATCH_ENABLED: ${TELEGRAM_B2B_DISPATCH_ENABLED:-false}
+  TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_ENABLED: "false"
+  TELEGRAM_PUBLISHER_1_ENABLED: "false"
+  TELEGRAM_PUBLISHER_2_ENABLED: "false"
+  TELEGRAM_PUBLISHER_3_ENABLED: "false"
+  TELEGRAM_PUBLISHER_4_ENABLED: "false"
+  TELEGRAM_PUBLISHER_5_ENABLED: "false"
+  BOT_TOKEN: ""
+  TELEGRAM_PUBLISHER_1_BOT_TOKEN: ""
+  TELEGRAM_PUBLISHER_2_BOT_TOKEN: ""
+  TELEGRAM_PUBLISHER_3_BOT_TOKEN: ""
+  TELEGRAM_PUBLISHER_4_BOT_TOKEN: ""
+  TELEGRAM_PUBLISHER_5_BOT_TOKEN: ""
+  TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN: ""
+  TELEGRAM_MONITORING_BOT_TOKEN: ""
+
 services:
   app:
     image: trading_bot_base_iran
@@ -17,6 +44,7 @@ services:
     restart: always
     command: sh -c "exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers ${API_WORKERS:-4}"
     environment:
+      <<: *telegram_producer_role
       TZ: UTC
       TRADING_BOT_SERVICE: api
       TRADING_BOT_METRICS_BACKEND: ${TRADING_BOT_METRICS_BACKEND:-memory}
@@ -26,20 +54,19 @@ services:
       DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-4}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
       BACKGROUND_JOBS_ENABLED: ${BACKGROUND_JOBS_ENABLED:-true}
+      COIN_INTELLIGENCE_INFERENCE_PREVIEW_ENABLED: ${PRODUCTION_COIN_INFERENCE_PREVIEW_ENABLED:-false}
+      COIN_INTELLIGENCE_INFERENCE_SELECTION_ENABLED: ${PRODUCTION_COIN_INFERENCE_SELECTION_ENABLED:-false}
+      COIN_INTELLIGENCE_INFERENCE_AUTO_SELECTION_ENABLED: ${PRODUCTION_COIN_INFERENCE_AUTO_SELECTION_ENABLED:-false}
+      COIN_INTELLIGENCE_INFERENCE_SNAPSHOT_PATH: /app/runtime/coin-inference/coin-rates.json
+      OFFER_MODEL_PRICE_GUARD_ENABLED: ${PRODUCTION_OFFER_MODEL_PRICE_GUARD_ENABLED:-false}
+      OFFER_MODEL_PRICE_GUARD_MAX_SNAPSHOT_AGE_SECONDS: ${PRODUCTION_COIN_INFERENCE_MAXIMUM_AGE_SECONDS:-120}
     volumes:
-      - ./api:/app/api
-      - ./bot:/app/bot
-      - ./core:/app/core
-      - ./src:/app/src
-      - ./models:/app/models
-      - ./migrations:/app/migrations
-      - ./scripts:/app/scripts
-      - ./main.py:/app/main.py
-      - ./schemas.py:/app/schemas.py
-      - ./mini_app_dist:/app/mini_app_dist
-      - ./trading_settings.json:/app/trading_settings.json
       - uploads_data:/app/uploads
       - audit_data:/app/audit_trail
+      - type: bind
+        source: ${PRODUCTION_COIN_INFERENCE_SNAPSHOT_HOST_DIR:-/srv/trading-bot/production-data/coin-intelligence/production-runtime}
+        target: /app/runtime/coin-inference
+        read_only: true
     ports:
       - "127.0.0.1:8000:8000"
     ulimits:
@@ -80,23 +107,13 @@ services:
     restart: always
     command: python -m core.sync_worker
     environment:
+      <<: *telegram_producer_role
       TZ: UTC
       TRADING_BOT_SERVICE: sync_worker
       TRADING_BOT_METRICS_BACKEND: ${TRADING_BOT_METRICS_BACKEND:-memory}
       DB_POOL_SIZE: ${DB_POOL_SIZE:-8}
       DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-4}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
-    volumes:
-      - ./api:/app/api
-      - ./bot:/app/bot
-      - ./core:/app/core
-      - ./src:/app/src
-      - ./models:/app/models
-      - ./migrations:/app/migrations
-      - ./scripts:/app/scripts
-      - ./main.py:/app/main.py
-      - ./schemas.py:/app/schemas.py
-      - ./trading_settings.json:/app/trading_settings.json
     env_file:
       - .env
     depends_on:
@@ -114,12 +131,12 @@ services:
       - -c
       - python manage.py && python scripts/align_trade_number_sequence.py
     environment:
+      <<: *telegram_producer_role
       TZ: UTC
+      TRADING_BOT_SERVICE: migration
       DB_POOL_SIZE: ${DB_POOL_SIZE:-8}
       DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-4}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
-    volumes:
-      - .:/app
     env_file:
       - .env
     depends_on:

@@ -129,6 +129,10 @@ MATRIX_TRADE_MESSAGE_SIMULATION_EVENTS = (
     + MATRIX_DIRECT_RETAIL_TRADES
     + MATRIX_OVERTIME_APPROVED_TRADES
 )
+SHARED_PUBLISHER_HIGH_VOLUME_THRESHOLD = 100
+SHARED_PUBLISHER_MAINTENANCE_AUTHORITY = (
+    "AUTHORIZE SHARED PUBLISHER STAGING HIGH VOLUME MAINTENANCE"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,6 +237,36 @@ def resolve_live_matrix_profile(name: str | None) -> LiveMatrixProfile:
             ),
         )
     return profile
+
+
+def validate_shared_publisher_matrix_guard(
+    profile: LiveMatrixProfile,
+    *,
+    maintenance_authority: str | None,
+    shared_fleet_enabled: bool | None = None,
+) -> None:
+    """Protect a shared cross-environment publisher fleet from load overlap.
+
+    The 100-offer revalidation stays available. A larger real-channel staging
+    matrix requires a one-shot explicit maintenance authority whenever the
+    staging runtime has opted into the shared publisher fleet. The authority is
+    deliberately a CLI argument, never a persistent env switch.
+    """
+
+    enabled = (
+        bool(settings.telegram_delivery_queue_shared_publisher_fleet_enabled)
+        if shared_fleet_enabled is None
+        else bool(shared_fleet_enabled)
+    )
+    if (
+        enabled
+        and profile.total_offers > SHARED_PUBLISHER_HIGH_VOLUME_THRESHOLD
+        and str(maintenance_authority or "").strip()
+        != SHARED_PUBLISHER_MAINTENANCE_AUTHORITY
+    ):
+        raise LiveMatrixError(
+            "live_matrix_shared_publisher_high_volume_maintenance_required"
+        )
 
 _INITIAL_ACTION = TelegramDeliveryAction.OFFER_PUBLISH.value
 _EXPIRY_ACTION = TelegramDeliveryAction.EXPIRED_OFFER_EDIT.value
@@ -2696,6 +2730,13 @@ async def run_live_matrix(args: argparse.Namespace) -> dict[str, Any]:
         raise LiveMatrixError("live_matrix_run_id_invalid")
     random_seed = _workload_seed(run_id, args.random_seed)
     profile = resolve_live_matrix_profile(getattr(args, "profile", None))
+    if not args.preflight_only:
+        validate_shared_publisher_matrix_guard(
+            profile,
+            maintenance_authority=getattr(
+                args, "shared_publisher_maintenance_authority", None
+            ),
+        )
     workload = build_live_matrix_workload(
         total_offers=profile.total_offers,
         bot_offers=profile.bot_offers,
@@ -2884,6 +2925,7 @@ def _parser() -> argparse.ArgumentParser:
         default=AUTHORITATIVE_500_PROFILE.name,
     )
     parser.add_argument("--preflight-only", action="store_true")
+    parser.add_argument("--shared-publisher-maintenance-authority")
     parser.add_argument("--verify-terminal-run-id")
     parser.add_argument("--run-id")
     parser.add_argument("--total-offers", type=int, default=MATRIX_TOTAL_OFFERS)

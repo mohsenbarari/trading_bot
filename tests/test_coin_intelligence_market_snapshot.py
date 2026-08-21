@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
+import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -14,6 +17,7 @@ from core.market_intelligence.market_snapshot import (
     MarketSnapshotUnavailable,
     build_market_snapshot,
     publish_market_snapshot_atomically,
+    validate_market_snapshot,
 )
 from core.market_intelligence.market_store import (
     connect_market_store,
@@ -143,6 +147,38 @@ class MarketSnapshotTests(unittest.TestCase):
             "external_reference_not_herat_substitution_v1",
         )
 
+    def test_snapshot_exposes_unsettled_aggregate_paper_without_relabeling_it(self) -> None:
+        self._store(
+            identity="aggregate-paper-unsettled",
+            source_code="MELTED_AGGREGATE",
+            instrument="MELTED_GOLD_AGGREGATE",
+            price=80_500_000,
+            price_unit="TOMAN_PER_MESGHAL_750",
+            event_time=self.now - timedelta(seconds=20),
+            settlement="UNKNOWN",
+            trade_form="PAPER_NORMAL",
+            event_type="QUOTE",
+        )
+
+        snapshot = build_market_snapshot(self.connection, as_of_utc=self.now)
+        signal = snapshot["signals"]["MELTED_PAPER_UNSPECIFIED"]
+        physical = snapshot["signals"]["MELTED_PHYSICAL_UNSPECIFIED"]
+
+        self.assertEqual(signal["status"], "FRESH")
+        self.assertEqual(signal["latest_price"], 80_500_000.0)
+        self.assertEqual(physical["status"], "MISSING")
+        rate = next(
+            item
+            for item in snapshot["rates"]["items"]
+            if item["commodity_code"] == "BAHAR"
+            and item["settlement_term"] == "CASH"
+        )
+        self.assertEqual(rate["confidence"], "LOW_PAPER_FALLBACK")
+        self.assertEqual(
+            rate["underlying_source"],
+            "PUBLIC_PAPER_UNSPECIFIED_CASH_BRIDGE",
+        )
+
     def test_snapshot_embeds_structural_low_date_range_without_coin_offer(self) -> None:
         self._store(
             identity="private-physical",
@@ -162,6 +198,50 @@ class MarketSnapshotTests(unittest.TestCase):
             if item["commodity_code"] == "BAHAR" and item["settlement_term"] == "CASH"
         )
         self.assertEqual((snapshot["snapshot_status"], rate["status"], rate["estimated_project_price"]), ("PARTIAL_COIN_RATE_STATE", "ESTIMATED", 180_900))
+        self.assertEqual(rate["underlying_age_seconds"], 20.0)
+
+    def test_rate_schema_enforces_confidence_age_relations_and_counts(self) -> None:
+        self._store(
+            identity="private-physical-schema",
+            source_code="PRIVATE_GOLD_CHANNEL",
+            instrument="MELTED_GOLD_PRIVATE",
+            price=80_300_000,
+            price_unit="TOMAN_PER_MESGHAL_750",
+            event_time=self.now - timedelta(seconds=20),
+            settlement="TODAY",
+            trade_form="PHYSICAL",
+            event_type="QUOTE",
+        )
+        snapshot = build_market_snapshot(self.connection, as_of_utc=self.now)
+        rate = next(
+            item
+            for item in snapshot["rates"]["items"]
+            if item["commodity_code"] == "BAHAR" and item["settlement_term"] == "CASH"
+        )
+        self.assertEqual(rate["confidence"], "MEDIUM")
+        self.assertIsNone(rate["anchor_age_seconds"])
+        validate_market_snapshot(snapshot)
+
+        for field, value, reason in (
+            ("underlying_age_seconds", None, "snapshot_underlying_age_invalid"),
+            ("confidence", "LOW", "snapshot_rate_confidence_invalid"),
+            ("anchor_age_seconds", 1.0, "snapshot_medium_confidence_anchor_invalid"),
+        ):
+            with self.subTest(field=field):
+                mutated = json.loads(json.dumps(snapshot))
+                target = next(
+                    item
+                    for item in mutated["rates"]["items"]
+                    if item["commodity_code"] == "BAHAR" and item["settlement_term"] == "CASH"
+                )
+                target[field] = value
+                with self.assertRaisesRegex(MarketSnapshotError, reason):
+                    validate_market_snapshot(mutated)
+
+        mutated = json.loads(json.dumps(snapshot))
+        mutated["rates"]["estimated_count"] += 1
+        with self.assertRaisesRegex(MarketSnapshotError, "snapshot_estimated_count_invalid"):
+            validate_market_snapshot(mutated)
 
     def test_atomic_publish_preserves_valid_snapshot_on_invalid_replacement(self) -> None:
         snapshot = build_market_snapshot(self.connection, as_of_utc=self.now)
@@ -180,6 +260,38 @@ class MarketSnapshotTests(unittest.TestCase):
         )
         self.snapshot_path.write_text('{"schema_version":999}', encoding="utf-8")
         with self.assertRaises(MarketSnapshotUnavailable):
+            AtomicMarketSnapshotProvider(self.snapshot_path).load()
+
+    def test_snapshot_provider_rejects_alias_tamper_and_insecure_metadata(self) -> None:
+        snapshot = build_market_snapshot(self.connection, as_of_utc=self.now)
+        publish_market_snapshot_atomically(self.snapshot_path, snapshot)
+        payload = self.snapshot_path.read_bytes()
+        digest = sha256(payload).hexdigest()
+        loaded = AtomicMarketSnapshotProvider(
+            self.snapshot_path,
+            expected_sha256=digest,
+        ).load()
+        self.assertEqual(loaded["generated_at_utc"], "2026-08-04T10:00:00Z")
+
+        with self.assertRaisesRegex(MarketSnapshotUnavailable, "snapshot_digest_mismatch"):
+            AtomicMarketSnapshotProvider(
+                self.snapshot_path,
+                expected_sha256="0" * 64,
+            ).load()
+
+        alias = self.snapshot_path.with_name("snapshot-link.json")
+        alias.symlink_to(self.snapshot_path)
+        with self.assertRaises(MarketSnapshotUnavailable):
+            AtomicMarketSnapshotProvider(alias).load()
+
+        hardlink = self.snapshot_path.with_name("snapshot-hardlink.json")
+        os.link(self.snapshot_path, hardlink)
+        with self.assertRaisesRegex(MarketSnapshotUnavailable, "snapshot_file_invalid"):
+            AtomicMarketSnapshotProvider(self.snapshot_path).load()
+        hardlink.unlink()
+
+        self.snapshot_path.chmod(0o666)
+        with self.assertRaisesRegex(MarketSnapshotUnavailable, "snapshot_file_invalid"):
             AtomicMarketSnapshotProvider(self.snapshot_path).load()
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only Telegram queue health/shadow report for synthetic test or staging."""
+"""Read-only Telegram queue health/shadow report for guarded environments."""
 from __future__ import annotations
 
 import argparse
@@ -30,19 +30,33 @@ from scripts.scan_telegram_queue_artifacts import scan_paths
 
 DATABASE_URL_ENV = "TELEGRAM_QUEUE_OBSERVABILITY_DATABASE_URL"
 _SYNTHETIC_DATABASE = re.compile(r"^telegram_queue_stage3_[a-z0-9_]+_(?:test|scratch)$")
+PRODUCTION_READ_ONLY_AUTHORITY = "PRODUCTION TELEGRAM QUEUE HEALTH READ ONLY"
 
 
 class TelegramQueueObservabilityConfigurationError(RuntimeError):
     pass
 
 
-def validate_observability_environment(environment: str, database_name: str) -> None:
+def validate_observability_environment(
+    environment: str,
+    database_name: str,
+    *,
+    production_read_only_authority: str = "",
+) -> None:
     normalized_environment = str(environment or "").strip().lower()
     normalized_database = str(database_name or "").strip().lower()
     if normalized_environment == "production":
-        raise TelegramQueueObservabilityConfigurationError(
-            "production_environment_is_forbidden"
-        )
+        if production_read_only_authority != PRODUCTION_READ_ONLY_AUTHORITY:
+            raise TelegramQueueObservabilityConfigurationError(
+                "production_read_only_authority_required"
+            )
+        if not normalized_database or any(
+            marker in normalized_database for marker in ("staging", "test", "scratch")
+        ):
+            raise TelegramQueueObservabilityConfigurationError(
+                "production_database_name_invalid"
+            )
+        return
     if normalized_environment == "synthetic-test":
         if not _SYNTHETIC_DATABASE.fullmatch(normalized_database):
             raise TelegramQueueObservabilityConfigurationError(
@@ -62,16 +76,14 @@ def validate_observability_environment(environment: str, database_name: str) -> 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=(
-            "Generate read-only Telegram delivery health and shadow-order evidence. "
-            "Production is intentionally unsupported."
-        )
+        description="Generate transaction-read-only Telegram delivery health evidence."
     )
     parser.add_argument(
         "--environment",
         required=True,
-        choices=("synthetic-test", "staging"),
+        choices=("synthetic-test", "staging", "production"),
     )
+    parser.add_argument("--production-read-only-authority", default="")
     parser.add_argument("--expected-database-name", required=True)
     parser.add_argument("--run-id")
     parser.add_argument("--sample-window-seconds", type=float, default=60.0)
@@ -125,7 +137,15 @@ async def build_report(args: argparse.Namespace) -> dict[str, Any]:
         raise TelegramQueueObservabilityConfigurationError(
             "database_url_expected_name_mismatch"
         )
-    validate_observability_environment(args.environment, expected_database)
+    validate_observability_environment(
+        args.environment,
+        expected_database,
+        production_read_only_authority=args.production_read_only_authority,
+    )
+    if args.environment == "production" and args.publish_metrics:
+        raise TelegramQueueObservabilityConfigurationError(
+            "production_metrics_publish_forbidden"
+        )
     if target.get_backend_name() != "postgresql":
         raise TelegramQueueObservabilityConfigurationError(
             "observability_requires_postgresql"

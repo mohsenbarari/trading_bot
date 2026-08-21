@@ -17,6 +17,16 @@ API_FORBIDDEN_EXECUTION_ENV = {
     "TELEGRAM_DELIVERY_EXECUTION_OWNER": PRODUCER_ONLY,
     "TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED": "false",
     "TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY": "false",
+    # Producer-only API/sync processes must retain Queue-v1 routing semantics:
+    # an unassigned publication is later bound to one healthy publisher lane.
+    # They receive no provider tokens and execute no Telegram work themselves.
+    "TELEGRAM_MULTI_PUBLISHER_ENABLED": "true",
+    "TELEGRAM_B2B_DISPATCH_ENABLED": "true",
+    "TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_ENABLED": "false",
+    **{
+        f"TELEGRAM_PUBLISHER_{index}_ENABLED": "false"
+        for index in range(1, 6)
+    },
 }
 BOT_REQUIRED_ENV = {
     "TELEGRAM_DELIVERY_PRODUCER_MODE": QUEUE_V1,

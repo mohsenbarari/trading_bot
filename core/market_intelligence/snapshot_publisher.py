@@ -78,12 +78,18 @@ def publish_rate_ready_snapshot(
     as_of_utc: datetime | str | None = None,
     force: bool = False,
     watermark_path: Path | str | None = None,
+    publish_no_data_snapshot: bool = False,
 ) -> MarketSnapshotPublishResult:
-    """Publish only a Snapshot with at least one usable canonical rate.
+    """Publish one atomic Snapshot, preserving strict no-data behavior by default.
 
     The caller owns scheduling and error reporting. This function opens the
     Market Store read-only, never creates a store, and preserves a previous
-    valid Snapshot if upstream evidence is empty or not rate-ready.
+    valid Snapshot if upstream evidence is empty or not rate-ready.  The sole
+    exception is the explicit staging-only caller contract represented by
+    ``publish_no_data_snapshot``: it publishes a fresh, structurally valid
+    no-data artifact so staging can start safely outside market hours.  Such an
+    artifact contains no usable rate and therefore cannot become price-reject
+    authority.
 
     Snapshot content is time-dependent even when the input rows are unchanged:
     source ages, freshness states, and ``generated_at_utc`` must advance on
@@ -121,27 +127,31 @@ def publish_rate_ready_snapshot(
     estimated_count = int(rates["estimated_count"])
     no_data_count = int(rates["no_data_count"])
     if estimated_count <= 0:
-        return MarketSnapshotPublishResult(
-            status="NOT_RATE_READY",
-            snapshot_digest=None,
-            generated_at_utc=str(snapshot["generated_at_utc"]),
-            estimated_rate_count=estimated_count,
-            no_data_rate_count=no_data_count,
-            reason="NO_ESTIMATED_COIN_RATES",
-            input_watermark=watermark,
-        )
+        if not publish_no_data_snapshot:
+            return MarketSnapshotPublishResult(
+                status="NOT_RATE_READY",
+                snapshot_digest=None,
+                generated_at_utc=str(snapshot["generated_at_utc"]),
+                estimated_rate_count=estimated_count,
+                no_data_rate_count=no_data_count,
+                reason="NO_ESTIMATED_COIN_RATES",
+                input_watermark=watermark,
+            )
+        # Make the safe degraded state explicit in the artifact while keeping
+        # the canonical rate array and its validation contract unchanged.
+        snapshot["snapshot_status"] = "NO_DATA_COIN_RATE_STATE"
     try:
         digest = publish_market_snapshot_atomically(snapshot_file, snapshot)
     except MarketSnapshotError as exc:
         raise MarketSnapshotPublisherError("snapshot_publisher_atomic_publish_failed") from exc
     _save_watermark(mark_path, watermark, snapshot_digest=digest)
     return MarketSnapshotPublishResult(
-        status="PUBLISHED",
+        status=("PUBLISHED" if estimated_count > 0 else "PUBLISHED_NO_DATA"),
         snapshot_digest=digest,
         generated_at_utc=str(snapshot["generated_at_utc"]),
         estimated_rate_count=estimated_count,
         no_data_rate_count=no_data_count,
-        reason=None,
+        reason=(None if estimated_count > 0 else "NO_ESTIMATED_COIN_RATES"),
         input_watermark=watermark,
     )
 

@@ -9,6 +9,7 @@ set -e
 # ==========================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PRODUCTION_CANONICAL_CHECKOUT="/root/trading-bot/trading_bot"
 PROJECT_DIR="${PROJECT_DIR:-$SCRIPT_DIR}"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
 DIST_DIR="$PROJECT_DIR/mini_app_dist"
@@ -23,6 +24,36 @@ FOREIGN_HOST_TIMEZONE="${FOREIGN_HOST_TIMEZONE:-UTC}"
 IRAN_HOST_TIMEZONE="${IRAN_HOST_TIMEZONE:-UTC}"
 AUTO_SYNC_RECOVERY_ON_FULL_DEPLOY="${AUTO_SYNC_RECOVERY_ON_FULL_DEPLOY:-1}"
 DEPLOY_FORCE_REBUILD="${DEPLOY_FORCE_REBUILD:-${IRAN_FORCE_RELEASE_REFRESH:-0}}"
+PRODUCTION_DEFER_FOREIGN_WRITER_START="${PRODUCTION_DEFER_FOREIGN_WRITER_START:-0}"
+PRODUCTION_PREBUILD_ONLY="${PRODUCTION_PREBUILD_ONLY:-0}"
+PRODUCTION_REQUIRE_PREBUILT_FOREIGN_IMAGE="${PRODUCTION_REQUIRE_PREBUILT_FOREIGN_IMAGE:-0}"
+PRODUCTION_OFFICIAL_DEPLOY_AUTHORITY_PATH="${PRODUCTION_OFFICIAL_DEPLOY_AUTHORITY_PATH:-}"
+PRODUCTION_RELEASE_LOCK_PATH="${PRODUCTION_RELEASE_LOCK_PATH:-/var/lib/trading-bot/production-release/production-release.lock}"
+PRODUCTION_RELEASE_SHA="${PRODUCTION_RELEASE_SHA:-}"
+PRODUCTION_RELEASE_TREE="${PRODUCTION_RELEASE_TREE:-}"
+PRODUCTION_EXPECTED_FOREIGN_IMAGE_ID="${PRODUCTION_EXPECTED_FOREIGN_IMAGE_ID:-}"
+PRODUCTION_EXPECTED_FOREIGN_IMAGE_SIGNATURE="${PRODUCTION_EXPECTED_FOREIGN_IMAGE_SIGNATURE:-}"
+PRODUCTION_FOREIGN_MIGRATION_TIMEOUT_SECONDS="${PRODUCTION_FOREIGN_MIGRATION_TIMEOUT_SECONDS:-1800}"
+[[ "$PRODUCTION_DEFER_FOREIGN_WRITER_START" == "0" \
+    || "$PRODUCTION_DEFER_FOREIGN_WRITER_START" == "1" ]] || {
+    echo "PRODUCTION_DEFER_FOREIGN_WRITER_START must be 0 or 1." >&2
+    exit 1
+}
+[[ "$PRODUCTION_PREBUILD_ONLY" == "0" || "$PRODUCTION_PREBUILD_ONLY" == "1" ]] || {
+    echo "PRODUCTION_PREBUILD_ONLY must be 0 or 1." >&2
+    exit 1
+}
+[[ "$PRODUCTION_REQUIRE_PREBUILT_FOREIGN_IMAGE" == "0" \
+    || "$PRODUCTION_REQUIRE_PREBUILT_FOREIGN_IMAGE" == "1" ]] || {
+    echo "PRODUCTION_REQUIRE_PREBUILT_FOREIGN_IMAGE must be 0 or 1." >&2
+    exit 1
+}
+[[ "$PRODUCTION_FOREIGN_MIGRATION_TIMEOUT_SECONDS" =~ ^[0-9]+$ \
+    && "$PRODUCTION_FOREIGN_MIGRATION_TIMEOUT_SECONDS" -ge 60 \
+    && "$PRODUCTION_FOREIGN_MIGRATION_TIMEOUT_SECONDS" -le 3600 ]] || {
+    echo "PRODUCTION_FOREIGN_MIGRATION_TIMEOUT_SECONDS must be between 60 and 3600." >&2
+    exit 1
+}
 FOREIGN_COMPOSE_PROJECT_NAME="${FOREIGN_COMPOSE_PROJECT_NAME:-trading_bot}"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$FOREIGN_COMPOSE_PROJECT_NAME}"
 LOCAL_COMPOSE_CMD=""
@@ -75,6 +106,7 @@ IRAN_HOST="${IRAN_HOST:-}"
 IRAN_USER="${IRAN_USER:-}"
 IRAN_SSH_PORT="${IRAN_SSH_PORT:-}"
 IRAN_PROJECT_DIR="${IRAN_PROJECT_DIR:-}"
+TARGET="${1:-all}"  # all | frontend | foreign | iran
 
 load_shared_deploy_surface() {
     if [[ -f "$DEPLOY_CONFIG_SCRIPT" ]]; then
@@ -96,15 +128,142 @@ load_shared_deploy_surface() {
 
 load_shared_deploy_surface
 
+is_production_deploy_surface() {
+    # Environment variables are not sufficient evidence that a checkout is
+    # non-production: this compose stack uses fixed production container names,
+    # so a caller could otherwise spoof COMPOSE_PROJECT_NAME and still replace a
+    # live container.  Treat every checkout carrying those production markers,
+    # and the canonical production checkout itself, as an official-only surface.
+    [[ "$SCRIPT_DIR" == "$PRODUCTION_CANONICAL_CHECKOUT" \
+        || "$COMPOSE_PROJECT_NAME" == "trading_bot" ]] \
+        && return 0
+    local compose_file
+    for compose_file in "$PROJECT_DIR/docker-compose.yml" "$PROJECT_DIR/docker-compose.iran.yml"; do
+        [[ -f "$compose_file" ]] || continue
+        if grep -Eq '^[[:space:]]*container_name:[[:space:]]*trading_bot_(app|bot|sync_worker|migration|db|redis)([[:space:]]|$)' "$compose_file"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+consume_official_production_deploy_authority() {
+    [[ "$TARGET" == "foreign" ]] || {
+        echo "Production targets may only be deployed by the official two-host wrapper." >&2
+        exit 1
+    }
+    [[ -n "$PRODUCTION_OFFICIAL_DEPLOY_AUTHORITY_PATH" \
+        && -n "$PRODUCTION_RELEASE_SHA" \
+        && -n "$PRODUCTION_RELEASE_TREE" ]] || {
+        echo "Official production deploy authority is missing." >&2
+        exit 1
+    }
+    python3 - "$PRODUCTION_OFFICIAL_DEPLOY_AUTHORITY_PATH" \
+        "$PRODUCTION_RELEASE_LOCK_PATH" "$TARGET" "$PPID" \
+        "$PRODUCTION_RELEASE_SHA" "$PRODUCTION_RELEASE_TREE" "$PROJECT_DIR" <<'PY'
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import sys
+
+authority = Path(sys.argv[1])
+lock = Path(sys.argv[2])
+target, parent_pid, release_sha, release_tree = sys.argv[3:7]
+project = Path(sys.argv[7])
+production_project = Path("/root/trading-bot/trading_bot")
+canonical = Path("/var/lib/trading-bot/production-release/deploy-sh-authority.json")
+if authority != canonical or authority.is_symlink() or not authority.is_file():
+    raise SystemExit("Official production deploy authority path/type is invalid.")
+parent_st = authority.parent.stat()
+if authority.parent.is_symlink() or stat.S_IMODE(parent_st.st_mode) != 0o700 or parent_st.st_uid != os.getuid():
+    raise SystemExit("Official production deploy authority parent is invalid.")
+st = authority.stat()
+if stat.S_IMODE(st.st_mode) != 0o600 or st.st_uid != os.getuid() or st.st_nlink != 1:
+    raise SystemExit("Official production deploy authority ownership/mode is invalid.")
+if lock.is_symlink() or not lock.is_file():
+    raise SystemExit("Official production release lock is not active.")
+lock_st = lock.stat()
+if stat.S_IMODE(lock_st.st_mode) != 0o600 or lock_st.st_uid != os.getuid() or lock_st.st_nlink != 1:
+    raise SystemExit("Official production release lock ownership/mode is invalid.")
+payload = json.loads(authority.read_text(encoding="utf-8"))
+required = {
+    "schema_version", "environment", "target", "parent_pid", "release_sha",
+    "release_tree", "release_lock_device", "release_lock_inode", "secrets_disclosed",
+}
+if set(payload) != required:
+    raise SystemExit("Official production deploy authority schema is invalid.")
+if payload != {
+    "schema_version": 1,
+    "environment": "production",
+    "target": target,
+    "parent_pid": int(parent_pid),
+    "release_sha": release_sha,
+    "release_tree": release_tree,
+    "release_lock_device": lock_st.st_dev,
+    "release_lock_inode": lock_st.st_ino,
+    "secrets_disclosed": False,
+}:
+    raise SystemExit("Official production deploy authority binding is invalid.")
+if not re.fullmatch(r"[0-9a-f]{40}", release_sha) or not re.fullmatch(r"[0-9a-f]{40}", release_tree):
+    raise SystemExit("Official production Git identity is invalid.")
+if project.resolve(strict=True) != production_project:
+    raise SystemExit("Official production deploy must run from the canonical checkout.")
+actual_sha = subprocess.check_output(["git", "-C", str(project), "rev-parse", "HEAD"], text=True).strip()
+actual_tree = subprocess.check_output(["git", "-C", str(project), "rev-parse", "HEAD^{tree}"], text=True).strip()
+if (actual_sha, actual_tree) != (release_sha, release_tree):
+    raise SystemExit("Official production Git identity drifted before deploy.")
+status_output = subprocess.check_output(
+    ["git", "-C", str(project), "status", "--porcelain", "--untracked-files=all"],
+    text=True,
+)
+if status_output:
+    raise SystemExit("Official production deploy requires a clean immutable checkout.")
+upstream = subprocess.check_output(
+    ["git", "-C", str(project), "rev-parse", "@{u}"], text=True
+).strip()
+if upstream != release_sha:
+    raise SystemExit("Official production deploy requires the pushed upstream release commit.")
+before = authority.stat()
+if (before.st_dev, before.st_ino) != (st.st_dev, st.st_ino):
+    raise SystemExit("Official production deploy authority changed during verification.")
+authority.unlink()
+directory = os.open(authority.parent, os.O_RDONLY)
+try:
+    os.fsync(directory)
+finally:
+    os.close(directory)
+PY
+    PRODUCTION_OFFICIAL_DEPLOY_AUTHORIZED=1
+}
+
+PRODUCTION_OFFICIAL_DEPLOY_AUTHORIZED=0
+if is_production_deploy_surface; then
+    consume_official_production_deploy_authority
+fi
+
+verify_official_source_still_frozen() {
+    [ "$PRODUCTION_OFFICIAL_DEPLOY_AUTHORIZED" = "1" ] || return 0
+    [ "$(git -C "$PROJECT_DIR" rev-parse HEAD)" = "$PRODUCTION_RELEASE_SHA" ] \
+        && [ "$(git -C "$PROJECT_DIR" rev-parse 'HEAD^{tree}')" = "$PRODUCTION_RELEASE_TREE" ] \
+        && [ "$(git -C "$PROJECT_DIR" rev-parse '@{u}')" = "$PRODUCTION_RELEASE_SHA" ] \
+        && [ -z "$(git -C "$PROJECT_DIR" status --porcelain --untracked-files=all)" ] || {
+            echo "Official production source drifted after authority verification." >&2
+            exit 1
+        }
+}
+
 # ==========================================
 # Helper Functions
 # ==========================================
 ssh_iran() {
-    ssh -o StrictHostKeyChecking=no -p "$IRAN_SSH_PORT" "$IRAN_USER@$IRAN_HOST" "$@"
+    ssh -o StrictHostKeyChecking=accept-new -p "$IRAN_SSH_PORT" "$IRAN_USER@$IRAN_HOST" "$@"
 }
 
 scp_iran() {
-    scp -r -P "$IRAN_SSH_PORT" -o StrictHostKeyChecking=no "$@"
+    scp -r -P "$IRAN_SSH_PORT" -o StrictHostKeyChecking=accept-new "$@"
 }
 
 ensure_local_host_timezone() {
@@ -151,25 +310,64 @@ sample_memory_usage() {
     ' /proc/meminfo
 }
 
+guarded_process_is_live() {
+    local pid="$1"
+    local state
+    state="$(ps -o stat= -p "$pid" 2>/dev/null | tr -d '[:space:]')"
+    [[ -n "$state" && "$state" != Z* ]]
+}
+
+guarded_process_group_has_live_members() {
+    local process_group="$1"
+    ps -eo pgid=,stat= 2>/dev/null | awk -v expected="$process_group" '
+        $1 == expected && $2 !~ /^Z/ { found=1 }
+        END { exit(found ? 0 : 1) }
+    '
+}
+
+wait_for_guarded_process_stop() {
+    local cmd_pid="$1"
+    local process_group="$2"
+    local maximum_seconds="$3"
+    local started_seconds=$SECONDS
+    while guarded_process_is_live "$cmd_pid" \
+        || guarded_process_group_has_live_members "$process_group"; do
+        if (( SECONDS - started_seconds >= maximum_seconds )); then
+            return 1
+        fi
+        sleep 0.1
+    done
+    return 0
+}
+
 terminate_guarded_process() {
     local cmd_pid="$1"
-    pkill -TERM -P "$cmd_pid" 2>/dev/null || true
-    kill -TERM "$cmd_pid" 2>/dev/null || true
-    sleep 5
-    pkill -KILL -P "$cmd_pid" 2>/dev/null || true
-    kill -KILL "$cmd_pid" 2>/dev/null || true
+    local process_group="$2"
+    local grace_seconds="${DEPLOY_RESOURCE_GUARD_TERMINATION_GRACE_SECONDS:-5}"
+    local verification_seconds="${DEPLOY_RESOURCE_GUARD_KILL_VERIFY_SECONDS:-5}"
+    [[ "$grace_seconds" =~ ^[0-9]+$ && "$grace_seconds" -le 30 ]] || grace_seconds=5
+    [[ "$verification_seconds" =~ ^[1-9][0-9]*$ \
+        && "$verification_seconds" -le 30 ]] || verification_seconds=5
+    kill -TERM -- "-$process_group" 2>/dev/null || true
+    if ! wait_for_guarded_process_stop "$cmd_pid" "$process_group" "$grace_seconds"; then
+        kill -KILL -- "-$process_group" 2>/dev/null || true
+        kill -KILL "$cmd_pid" 2>/dev/null || true
+        if ! wait_for_guarded_process_stop "$cmd_pid" "$process_group" "$verification_seconds"; then
+            echo "Guarded process group $process_group did not stop after bounded TERM/KILL cleanup." >&2
+            return 1
+        fi
+    fi
+    # The leader is already dead or a zombie, so this reap cannot block.
+    wait "$cmd_pid" 2>/dev/null || true
+    ! guarded_process_group_has_live_members "$process_group"
 }
 
 run_with_local_resource_guard() {
     local label="$1"
     shift
 
-    if ! resource_guard_enabled; then
-        "$@"
-        return $?
-    fi
-
     local sample_seconds="${DEPLOY_RESOURCE_GUARD_SAMPLE_SECONDS:-5}"
+    local maximum_seconds="${DEPLOY_RESOURCE_GUARD_MAX_SECONDS:-7200}"
     local max_streak="${DEPLOY_RESOURCE_GUARD_MAX_STREAK:-4}"
     local max_mem_percent="${DEPLOY_RESOURCE_GUARD_MAX_MEM_PERCENT:-95}"
     local max_swap_percent="${DEPLOY_RESOURCE_GUARD_MAX_SWAP_PERCENT:-70}"
@@ -177,23 +375,90 @@ run_with_local_resource_guard() {
     local cpu_with_high_mem_percent="${DEPLOY_RESOURCE_GUARD_CPU_WITH_HIGH_MEM_PERCENT:-97}"
     local cpu_only_percent="${DEPLOY_RESOURCE_GUARD_CPU_ONLY_PERCENT:-99}"
     local cpu_only_max_streak="${DEPLOY_RESOURCE_GUARD_CPU_ONLY_MAX_STREAK:-12}"
+    local monitor_resources=0
     local sample_index=0
     local pressure_streak=0
     local cpu_only_streak=0
     local prev_total prev_idle
 
-    print_header "🛡️ Resource Guard: $label"
-    echo "   sample=${sample_seconds}s mem>=${max_mem_percent}% swap>=${max_swap_percent}% cpu>=${cpu_only_percent}%"
+    [[ "$sample_seconds" =~ ^[1-9][0-9]*$ && "$sample_seconds" -le 60 ]] || {
+        echo "DEPLOY_RESOURCE_GUARD_SAMPLE_SECONDS must be between 1 and 60." >&2
+        return 2
+    }
+    [[ "$maximum_seconds" =~ ^[1-9][0-9]*$ \
+        && "$maximum_seconds" -le 14400 ]] || {
+        echo "DEPLOY_RESOURCE_GUARD_MAX_SECONDS must be between 1 and 14400." >&2
+        return 2
+    }
+    if resource_guard_enabled; then
+        monitor_resources=1
+    fi
 
-    "$@" &
+    print_header "🛡️ Resource Guard: $label"
+    echo "   deadline=${maximum_seconds}s resource_sampling=${monitor_resources} sample=${sample_seconds}s mem>=${max_mem_percent}% swap>=${max_swap_percent}% cpu>=${cpu_only_percent}%"
+
+    command -v setsid >/dev/null 2>&1 || {
+        echo "setsid is required for guarded process-group containment." >&2
+        return 1
+    }
+    setsid --wait "$@" &
     local cmd_pid=$!
-    read -r prev_total prev_idle <<EOF
+    # A non-interactive background job is not a process-group leader, so
+    # `setsid` makes this exact PID the new session/process-group leader. Keep
+    # that identity even when a short leader exits before the first `ps`.
+    local process_group="$cmd_pid"
+    local observed_process_group
+    observed_process_group="$(ps -o pgid= -p "$cmd_pid" | tr -d '[:space:]')"
+    [[ -z "$observed_process_group" || "$observed_process_group" == "$process_group" ]] || {
+        echo "Could not isolate the guarded command in its own process group." >&2
+        kill -TERM "$cmd_pid" 2>/dev/null || true
+        sleep 0.1
+        kill -KILL "$cmd_pid" 2>/dev/null || true
+        if ! wait_for_guarded_process_stop "$cmd_pid" "$cmd_pid" 5; then
+            echo "Could not stop the non-isolated guarded command within the safety bound." >&2
+            return 1
+        fi
+        wait "$cmd_pid" 2>/dev/null || true
+        return 1
+    }
+    local started_seconds=$SECONDS
+    if [ "$monitor_resources" = "1" ]; then
+        read -r prev_total prev_idle <<EOF
 $(sample_cpu_usage)
 EOF
+    fi
 
     while kill -0 "$cmd_pid" 2>/dev/null; do
-        sleep "$sample_seconds"
+        local elapsed_seconds=$((SECONDS - started_seconds))
+        if [ "$elapsed_seconds" -ge "$maximum_seconds" ]; then
+            echo "❌ Wall-clock deadline reached for '$label' after ${maximum_seconds}s. Stopping the entire process group."
+            if ! terminate_guarded_process "$cmd_pid" "$process_group"; then
+                return 125
+            fi
+            return 124
+        fi
+        local remaining_seconds=$((maximum_seconds - elapsed_seconds))
+        local sleep_seconds="$sample_seconds"
+        if [ "$sleep_seconds" -gt "$remaining_seconds" ]; then
+            sleep_seconds="$remaining_seconds"
+        fi
+        sleep "$sleep_seconds"
         sample_index=$((sample_index + 1))
+
+        if ! kill -0 "$cmd_pid" 2>/dev/null; then
+            break
+        fi
+        elapsed_seconds=$((SECONDS - started_seconds))
+        if [ "$elapsed_seconds" -ge "$maximum_seconds" ]; then
+            echo "❌ Wall-clock deadline reached for '$label' after ${maximum_seconds}s. Stopping the entire process group."
+            if ! terminate_guarded_process "$cmd_pid" "$process_group"; then
+                return 125
+            fi
+            return 124
+        fi
+        if [ "$monitor_resources" != "1" ]; then
+            continue
+        fi
 
         local total idle total_delta idle_delta cpu_percent
         read -r total idle <<EOF
@@ -233,13 +498,23 @@ EOF
 
         if [ "$pressure_streak" -ge "$max_streak" ] || [ "$cpu_only_streak" -ge "$cpu_only_max_streak" ]; then
             echo "❌ Resource guard triggered for '$label'. Stopping the running command to protect the server."
-            terminate_guarded_process "$cmd_pid"
-            wait "$cmd_pid"
+            if ! terminate_guarded_process "$cmd_pid" "$process_group"; then
+                return 125
+            fi
             return 124
         fi
     done
 
-    wait "$cmd_pid"
+    local command_status=0
+    wait "$cmd_pid" || command_status=$?
+    if guarded_process_group_has_live_members "$process_group"; then
+        echo "❌ Guarded command '$label' exited while live process-group members remained."
+        if ! terminate_guarded_process "$cmd_pid" "$process_group"; then
+            return 125
+        fi
+        return 125
+    fi
+    return "$command_status"
 }
 
 hash_file_or_dir() {
@@ -299,6 +574,7 @@ foreign_image_signature() {
             run_bot.py \
             schemas.py \
             seed_fake_data.py \
+            trading_settings.json \
             scripts \
             mini_app_dist
         do
@@ -343,8 +619,6 @@ auto_cleanup_iran() {
 # ==========================================
 # Parse Arguments
 # ==========================================
-TARGET="${1:-all}"  # all | frontend | foreign | iran
-
 print_header "🚀 Deploy: $TARGET"
 
 # ==========================================
@@ -459,13 +733,13 @@ deploy_iran() {
         --exclude '*.pyc' \
         --exclude '.env' \
         --exclude 'node_modules' \
-        -e "ssh -o StrictHostKeyChecking=no" \
+        -e "ssh -o StrictHostKeyChecking=accept-new -p $IRAN_SSH_PORT" \
         "$PROJECT_DIR/" "$IRAN_USER@$IRAN_HOST:$IRAN_PROJECT_DIR/"
 
     # 2c. Upload built frontend assets
     echo "📤 Uploading frontend assets..."
     rsync -avz --delete \
-        -e "ssh -o StrictHostKeyChecking=no" \
+        -e "ssh -o StrictHostKeyChecking=accept-new -p $IRAN_SSH_PORT" \
         "$DIST_DIR/" "$IRAN_USER@$IRAN_HOST:$IRAN_PROJECT_DIR/mini_app_dist/"
 
     # 2d. Rebuild Docker containers on Iran
@@ -519,28 +793,83 @@ deploy_foreign() {
     local core_services=(app bot sync_worker)
 
     cd "$PROJECT_DIR"
+    verify_official_source_still_frozen
     ensure_local_host_timezone
     resolve_local_compose_cmd
 
     mkdir -p "$DEPLOY_STATE_DIR"
     local image_signature
     image_signature="$(foreign_image_signature)"
-    if [ "$DEPLOY_FORCE_REBUILD" != "1" ] && [ -f "$FOREIGN_IMAGE_SIGNATURE_FILE" ] && [ "$(cat "$FOREIGN_IMAGE_SIGNATURE_FILE")" = "$image_signature" ] && docker image inspect trading_bot_base >/dev/null 2>&1; then
+    if [ "$PRODUCTION_REQUIRE_PREBUILT_FOREIGN_IMAGE" = "1" ]; then
+        [ "$PRODUCTION_OFFICIAL_DEPLOY_AUTHORIZED" = "1" ] \
+            && [[ "$PRODUCTION_EXPECTED_FOREIGN_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]] \
+            && [[ "$PRODUCTION_EXPECTED_FOREIGN_IMAGE_SIGNATURE" =~ ^[0-9a-f]{64}$ ]] \
+            && [ -f "$FOREIGN_IMAGE_SIGNATURE_FILE" ] \
+            && [ "$(cat "$FOREIGN_IMAGE_SIGNATURE_FILE")" = "$image_signature" ] \
+            && [ "$image_signature" = "$PRODUCTION_EXPECTED_FOREIGN_IMAGE_SIGNATURE" ] \
+            && [ "$(docker image inspect --format '{{.Id}}' trading_bot_base)" = "$PRODUCTION_EXPECTED_FOREIGN_IMAGE_ID" ] \
+            && [ "$(docker image inspect --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}' trading_bot_base)" = "$PRODUCTION_RELEASE_SHA" ] \
+            && [ "$(docker image inspect --format '{{index .Config.Labels \"io.gold-trade.release.tree\"}}' trading_bot_base)" = "$PRODUCTION_RELEASE_TREE" ] \
+            && [ "$(docker image inspect --format '{{index .Config.Labels \"io.gold-trade.release.input-signature\"}}' trading_bot_base)" = "$image_signature" ] \
+            && docker image inspect trading_bot_base >/dev/null 2>&1 || {
+                echo "The official production migration requires the exact receipt-bound foreign image to be prebuilt before writer quiescence." >&2
+                exit 1
+            }
+        echo "✅ Exact prebuilt foreign Docker image verified; no post-quiesce build is allowed."
+    elif [ "$DEPLOY_FORCE_REBUILD" != "1" ] \
+        && [ -f "$FOREIGN_IMAGE_SIGNATURE_FILE" ] \
+        && [ "$(cat "$FOREIGN_IMAGE_SIGNATURE_FILE")" = "$image_signature" ] \
+        && docker image inspect trading_bot_base >/dev/null 2>&1 \
+        && { [ "$PRODUCTION_OFFICIAL_DEPLOY_AUTHORIZED" != "1" ] \
+            || { [ "$(docker image inspect --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}' trading_bot_base)" = "$PRODUCTION_RELEASE_SHA" ] \
+                && [ "$(docker image inspect --format '{{index .Config.Labels \"io.gold-trade.release.tree\"}}' trading_bot_base)" = "$PRODUCTION_RELEASE_TREE" ] \
+                && [ "$(docker image inspect --format '{{index .Config.Labels \"io.gold-trade.release.input-signature\"}}' trading_bot_base)" = "$image_signature" ]; }; }; then
         echo "✅ Foreign Docker image inputs unchanged. Skipping docker build."
     else
         echo "⏳ Building Docker image explicitly to prevent compose parallel export OOM..."
-        run_with_local_resource_guard "Foreign Docker image build" env DOCKER_BUILDKIT=1 docker build -t trading_bot_base .
+        local -a image_label_args=()
+        if [ "$PRODUCTION_OFFICIAL_DEPLOY_AUTHORIZED" = "1" ]; then
+            image_label_args=(
+                --label "org.opencontainers.image.revision=$PRODUCTION_RELEASE_SHA"
+                --label "io.gold-trade.release.tree=$PRODUCTION_RELEASE_TREE"
+                --label "io.gold-trade.release.input-signature=$image_signature"
+            )
+        fi
+        run_with_local_resource_guard "Foreign Docker image build" \
+            env DOCKER_BUILDKIT=1 docker build "${image_label_args[@]}" -t trading_bot_base .
         echo "$image_signature" > "$FOREIGN_IMAGE_SIGNATURE_FILE"
     fi
+
+    if [ "$PRODUCTION_PREBUILD_ONLY" = "1" ]; then
+        verify_official_source_still_frozen
+        [ "$(foreign_image_signature)" = "$image_signature" ] || {
+            echo "Foreign image inputs drifted during the official prebuild." >&2
+            exit 1
+        }
+        echo "✅ Foreign production image prebuild passed; no service or database was touched."
+        return 0
+    fi
+
+    verify_official_source_still_frozen
+    [ "$(foreign_image_signature)" = "$image_signature" ] || {
+        echo "Foreign image/runtime inputs drifted before Compose startup." >&2
+        exit 1
+    }
 
     echo "ℹ️ Standard foreign deploy only refreshes core services: ${core_services[*]}"
     echo "ℹ️ Optional support services (tileserver) are left untouched to avoid a cold-boot CPU spike after crashes or reboots."
     echo "⏳ Starting stateful dependencies without recreating them..."
     run_with_local_resource_guard "Foreign stateful dependencies startup" bash -lc "$LOCAL_COMPOSE_CMD up -d --no-recreate --wait --wait-timeout 180 db redis"
     echo "⏳ Running migrations and validating the trade-number sequence..."
-    run_with_local_resource_guard "Foreign database migration" bash -lc "$LOCAL_COMPOSE_CMD run --rm --no-deps migration"
-    echo "⏳ Waiting for foreign core services to become ready..."
-    run_with_local_resource_guard "Foreign core service startup" bash -lc "$LOCAL_COMPOSE_CMD up -d --wait --wait-timeout 180 ${core_services[*]}"
+    DEPLOY_RESOURCE_GUARD_MAX_SECONDS="$PRODUCTION_FOREIGN_MIGRATION_TIMEOUT_SECONDS" \
+        run_with_local_resource_guard "Foreign database migration" \
+        bash -lc "$LOCAL_COMPOSE_CMD run --rm --no-deps migration"
+    if [ "$PRODUCTION_DEFER_FOREIGN_WRITER_START" = "1" ]; then
+        echo "⏸️ Foreign writer startup is deferred until the official two-host schema gate passes."
+    else
+        echo "⏳ Waiting for foreign core services to become ready..."
+        run_with_local_resource_guard "Foreign core service startup" bash -lc "$LOCAL_COMPOSE_CMD up -d --wait --wait-timeout 180 ${core_services[*]}"
+    fi
 
     echo "✅ Foreign deployment complete!"
     bash -lc "$LOCAL_COMPOSE_CMD ps"

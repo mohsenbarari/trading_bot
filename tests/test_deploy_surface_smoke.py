@@ -53,6 +53,34 @@ def resolve_docker_compose_command() -> list[str] | None:
 
 
 class DeploySurfaceSmokeTests(unittest.TestCase):
+    def test_production_application_code_is_image_only(self):
+        foreign = (REPO_ROOT / 'docker-compose.yml').read_text(encoding='utf-8')
+        iran = (REPO_ROOT / 'docker-compose.iran.yml').read_text(encoding='utf-8')
+        forbidden_mounts = (
+            '- .:/app',
+            './api:/app/api',
+            './bot:/app/bot',
+            './core:/app/core',
+            './src:/app/src',
+            './models:/app/models',
+            './migrations:/app/migrations',
+            './scripts:/app/scripts',
+            './main.py:/app/main.py',
+            './schemas.py:/app/schemas.py',
+            './trading_settings.json:/app/trading_settings.json',
+        )
+        for compose_path, source in (
+            ('docker-compose.yml', foreign),
+            ('docker-compose.iran.yml', iran),
+        ):
+            with self.subTest(compose=compose_path):
+                for mount in forbidden_mounts:
+                    self.assertNotIn(mount, source)
+        for dockerfile in ('Dockerfile', 'Dockerfile.iran'):
+            source = (REPO_ROOT / dockerfile).read_text(encoding='utf-8')
+            with self.subTest(dockerfile=dockerfile):
+                self.assertIn('COPY trading_settings.json .', source)
+
     def test_stale_js_fallback_is_a_non_executable_410_in_every_deployable_nginx_source(self):
         config_paths = (
             'nginx.conf',
@@ -348,6 +376,79 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         result = run_checked(['bash', '-n', 'scripts/deploy_staging.sh'])
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
 
+    def test_staging_prebuilt_commands_never_rebuild_while_starting(self):
+        source = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(
+            encoding='utf-8'
+        )
+        for command in (
+            'build-image)',
+            'start-prebuilt-producers)',
+            'start-prebuilt-bot)',
+        ):
+            self.assertIn(command, source)
+        producers = source.split('start_prebuilt_producers() {', 1)[1].split(
+            '\n}', 1
+        )[0]
+        bot = source.split('start_prebuilt_bot() {', 1)[1].split('\n}', 1)[0]
+        self.assertIn('--no-build', producers)
+        self.assertIn('--no-build', bot)
+        self.assertNotIn(' --build', producers)
+        self.assertNotIn(' --build', bot)
+        self.assertIn('require_prebuilt_image', producers)
+        self.assertIn('require_prebuilt_image', bot)
+
+    def test_docker_build_context_excludes_all_runtime_env_and_host_data(self):
+        ordered_patterns = [
+            line.strip()
+            for line in (REPO_ROOT / '.dockerignore')
+            .read_text(encoding='utf-8')
+            .splitlines()
+            if line.strip() and not line.lstrip().startswith('#')
+        ]
+        patterns = set(ordered_patterns)
+        for pattern in (
+            '.env*',
+            '**/.env*',
+            '*.env',
+            '**/*.env',
+            '**/online.env',
+            '/mutants/',
+            'audit_trail/',
+            'app_logs/',
+            'uploads/',
+        ):
+            self.assertIn(pattern, patterns)
+        # Documentation examples remain available to Docker builds even though
+        # every runtime env spelling and local mutation artifact is excluded.
+        for exception in (
+            '!.env.example',
+            '!**/.env.example',
+            '!**/*.env.example',
+            '!**/online.env.example',
+        ):
+            self.assertIn(exception, patterns)
+        self.assertNotIn('online.env.example', patterns)
+        self.assertNotIn('**/online.env.example', patterns)
+        # Dockerignore is last-match-wins, so exceptions must remain below the
+        # broad exclusions they override.
+        self.assertGreater(
+            ordered_patterns.index('!.env.example'),
+            ordered_patterns.index('.env*'),
+        )
+        self.assertGreater(
+            ordered_patterns.index('!**/.env.example'),
+            ordered_patterns.index('**/.env*'),
+        )
+        self.assertGreater(
+            ordered_patterns.index('!**/online.env.example'),
+            ordered_patterns.index('**/online.env'),
+        )
+        for example_path in (
+            'config/unit-test.env.example',
+            'deploy/production/online.env.example',
+        ):
+            self.assertTrue((REPO_ROOT / example_path).is_file())
+
     def test_staging_deploy_normalizes_existing_frontend_permissions(self):
         with tempfile.TemporaryDirectory(dir=REPO_ROOT) as temp_dir:
             dist_dir = Path(temp_dir) / 'dist'
@@ -601,11 +702,15 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
 
         self.assertIn('DEPLOYMENT_SURFACE_GUARD="$PROJECT_DIR/scripts/check_deployment_surface_guard.py"', production_script)
         self.assertIn('validate_runtime_identity_files() {', production_script)
-        self.assertIn('--runtime-env "foreign=$LOCAL_ENV_SOURCE_PATH"', production_script)
-        self.assertIn('--runtime-env "iran=$IRAN_ENV_SOURCE_PATH"', production_script)
+        self.assertIn('--runtime-env "foreign=$FOREIGN_RUNTIME_ENV_PATH"', production_script)
+        self.assertIn('--runtime-env "iran=$IRAN_RUNTIME_ENV_PATH"', production_script)
         self.assertIn('guard_args+=(--allow-project-env-source)', production_script)
         self.assertIn('validate_runtime_identity_files', production_script.split('ensure_runtime_env_file() {', 1)[1])
-        self.assertIn('IRAN_ENV_SOURCE_PATH points at a project-root env file', production_script)
+        self.assertIn('RUNTIME_ENV_SOURCE_PATH points at a project-root env file', production_script)
+        self.assertIn('--source-env-file "$RUNTIME_ENV_SOURCE_PATH"', production_script)
+        self.assertIn('--local-output "$FOREIGN_RUNTIME_ENV_PATH"', production_script)
+        self.assertIn('--iran-output "$IRAN_RUNTIME_ENV_PATH"', production_script)
+        self.assertIn('RUNTIME_ENV_SOURCE_PATH must be different from both rendered runtime output paths', production_script)
 
     def test_production_release_runs_read_only_data_hygiene_guard(self):
         production_script = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text(encoding='utf-8')

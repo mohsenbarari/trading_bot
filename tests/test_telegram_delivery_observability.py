@@ -7,6 +7,7 @@ from core.services.telegram_delivery_observability_service import (
     publish_telegram_delivery_health_metrics,
 )
 from scripts.report_telegram_delivery_queue_health import (
+    PRODUCTION_READ_ONLY_AUTHORITY,
     TelegramQueueObservabilityConfigurationError,
     parse_args,
     validate_observability_environment,
@@ -39,14 +40,28 @@ class TelegramDeliveryObservabilityUnitTests(unittest.TestCase):
                 stop_oldest_ready_age_seconds=30,
             )
 
-    def test_runner_requires_explicit_non_production_environment(self):
+    def test_runner_requires_explicit_environment_and_guarded_production_authority(self):
         with self.assertRaises(SystemExit):
             parse_args([])
         with self.assertRaisesRegex(
             TelegramQueueObservabilityConfigurationError,
-            "production_environment_is_forbidden",
+            "production_read_only_authority_required",
         ):
             validate_observability_environment("production", "production")
+        validate_observability_environment(
+            "production",
+            "trading_bot_db",
+            production_read_only_authority=PRODUCTION_READ_ONLY_AUTHORITY,
+        )
+        with self.assertRaisesRegex(
+            TelegramQueueObservabilityConfigurationError,
+            "production_database_name_invalid",
+        ):
+            validate_observability_environment(
+                "production",
+                "trading_bot_staging",
+                production_read_only_authority=PRODUCTION_READ_ONLY_AUTHORITY,
+            )
         with self.assertRaisesRegex(
             TelegramQueueObservabilityConfigurationError,
             "synthetic_test_database_name_invalid",

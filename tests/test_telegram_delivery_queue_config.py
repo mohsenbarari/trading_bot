@@ -117,6 +117,23 @@ class TelegramDeliveryQueueConfigTests(unittest.TestCase):
         self.assertTrue(configured.telegram_multi_publisher_enabled)
         self.assertTrue(configured.telegram_b2b_dispatch_enabled)
 
+    def test_shared_publisher_fleet_requires_rate_safe_destination_interval(self):
+        configured = _settings(
+            telegram_delivery_queue_shared_publisher_fleet_enabled=True,
+            telegram_delivery_queue_destination_min_interval_seconds=1.05,
+        )
+        self.assertTrue(
+            configured.telegram_delivery_queue_shared_publisher_fleet_enabled
+        )
+        with self.assertRaisesRegex(
+            ValidationError,
+            "shared_publisher_destination_interval_must_be_at_least_1_05",
+        ):
+            _settings(
+                telegram_delivery_queue_shared_publisher_fleet_enabled=True,
+                telegram_delivery_queue_destination_min_interval_seconds=1.049,
+            )
+
     def test_nonfinite_negative_and_inverted_retry_config_fail_startup(self):
         invalid = (
             {"telegram_delivery_queue_primary_idle_poll_interval_seconds": 0},

@@ -28,6 +28,7 @@ COPY manage.py .
 COPY run_bot.py .
 COPY schemas.py .
 COPY seed_fake_data.py .
+COPY trading_settings.json .
 COPY scripts/ ./scripts/
 
 COPY ${FRONTEND_DIST_DIR}/ /app/mini_app_dist/

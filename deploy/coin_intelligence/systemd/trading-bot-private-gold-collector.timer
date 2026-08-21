@@ -1,0 +1,14 @@
+[Unit]
+Description=Run private gold collector 30 seconds after each completed run
+
+[Timer]
+OnBootSec=20s
+# The collector commonly needs 15-20 seconds.  Counting from inactivity keeps
+# a real 30-second idle gap, avoids overlap, and survives timer restarts.
+OnUnitInactiveSec=30s
+AccuracySec=1s
+RandomizedDelaySec=0
+Unit=trading-bot-private-gold-collector.service
+
+[Install]
+WantedBy=timers.target

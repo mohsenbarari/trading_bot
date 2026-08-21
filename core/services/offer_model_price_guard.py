@@ -11,11 +11,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
+import math
 from typing import Any, Mapping
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
+from core.metrics import registry as metrics_registry
 from core.market_intelligence.coin_inference import CANONICAL_COMMODITY_NAMES
 from core.market_intelligence.market_contracts import normalize_utc
 from core.market_intelligence.market_snapshot import (
@@ -29,9 +31,17 @@ from models.commodity import Commodity
 
 logger = logging.getLogger(__name__)
 
-OFFER_MODEL_PRICE_GUARD_VERSION = "offer-model-price-guard-v1"
+OFFER_MODEL_PRICE_GUARD_VERSION = "offer-model-price-guard-v2"
 OFFER_MODEL_PRICE_GUARD_OPENING_WINDOW_SECONDS = 15 * 60
 OFFER_MODEL_PRICE_GUARD_DEFAULT_MAXIMUM_SNAPSHOT_AGE_SECONDS = 120
+# A refreshed artifact must never make old underlying market data eligible for
+# a hard rejection.  This limit is evaluated at decision time by adding the
+# elapsed Snapshot age to the age frozen into the rate item.
+OFFER_MODEL_PRICE_GUARD_MAXIMUM_UNDERLYING_AGE_SECONDS = 120
+# Older estimates may remain useful for preview, but cannot be authoritative
+# enough to reject an offer beyond the established two-hour anchor horizon.
+OFFER_MODEL_PRICE_GUARD_MAXIMUM_ANCHOR_AGE_SECONDS = 2 * 60 * 60
+OFFER_MODEL_PRICE_GUARD_REJECTION_CONFIDENCES = frozenset({"HIGH", "MEDIUM"})
 
 # Basis points keep all boundary arithmetic integer-only and reproducible.
 OFFER_MODEL_PRICE_TOLERANCE_BPS_BY_CODE: Mapping[str, int] = {
@@ -74,6 +84,20 @@ class OfferModelPriceGuardDecision:
 
 def _abstain(reason: str, **values: Any) -> OfferModelPriceGuardDecision:
     return OfferModelPriceGuardDecision(status="ABSTAINED", reason=reason, **values)
+
+
+def _observe(decision: OfferModelPriceGuardDecision) -> OfferModelPriceGuardDecision:
+    """Expose every enabled guard outcome with bounded, non-personal labels."""
+
+    metrics_registry.counter(
+        "trading_bot_offer_model_price_guard_decisions_total",
+        "Offer model-price guard outcomes, including fail-open abstentions.",
+        status=decision.status,
+        reason=decision.reason,
+        commodity=decision.commodity_code or "unknown",
+        settlement=decision.settlement_term or "unknown",
+    )
+    return decision
 
 
 def _utc(value: datetime | str, *, field_name: str) -> datetime:
@@ -124,6 +148,8 @@ def evaluate_offer_model_price_snapshot(
     now_utc: datetime,
     market_opened_at: datetime | None,
     maximum_snapshot_age_seconds: int = OFFER_MODEL_PRICE_GUARD_DEFAULT_MAXIMUM_SNAPSHOT_AGE_SECONDS,
+    maximum_anchor_age_seconds: int = OFFER_MODEL_PRICE_GUARD_MAXIMUM_ANCHOR_AGE_SECONDS,
+    maximum_underlying_age_seconds: int = OFFER_MODEL_PRICE_GUARD_MAXIMUM_UNDERLYING_AGE_SECONDS,
 ) -> OfferModelPriceGuardDecision:
     """Evaluate one offer against the exact interval in one validated Snapshot."""
 
@@ -173,6 +199,78 @@ def evaluate_offer_model_price_snapshot(
     if rate_item is None:
         return _abstain(
             "MODEL_RANGE_UNAVAILABLE",
+            commodity_code=commodity_code,
+            settlement_term=settlement_term,
+            snapshot_generated_at_utc=str(snapshot.get("generated_at_utc") or "") or None,
+        )
+
+    confidence = str(rate_item.get("confidence") or "").strip().upper()
+    if confidence not in OFFER_MODEL_PRICE_GUARD_REJECTION_CONFIDENCES:
+        return _abstain(
+            "MODEL_EVIDENCE_CONFIDENCE_UNSAFE",
+            commodity_code=commodity_code,
+            settlement_term=settlement_term,
+            snapshot_generated_at_utc=str(snapshot.get("generated_at_utc") or "") or None,
+        )
+
+    underlying_age_raw = rate_item.get("underlying_age_seconds")
+    if (
+        isinstance(underlying_age_raw, bool)
+        or not isinstance(underlying_age_raw, (int, float))
+    ):
+        return _abstain(
+            "MODEL_UNDERLYING_AGE_UNAVAILABLE",
+            commodity_code=commodity_code,
+            settlement_term=settlement_term,
+            snapshot_generated_at_utc=str(snapshot.get("generated_at_utc") or "") or None,
+        )
+    underlying_age = float(underlying_age_raw)
+    if not math.isfinite(underlying_age) or underlying_age < 0:
+        return _abstain(
+            "MODEL_UNDERLYING_AGE_INVALID",
+            commodity_code=commodity_code,
+            settlement_term=settlement_term,
+            snapshot_generated_at_utc=str(snapshot.get("generated_at_utc") or "") or None,
+        )
+    maximum_underlying_age = max(1, int(maximum_underlying_age_seconds))
+    if underlying_age + max(0.0, snapshot_age) > maximum_underlying_age:
+        return _abstain(
+            "MODEL_UNDERLYING_STALE",
+            commodity_code=commodity_code,
+            settlement_term=settlement_term,
+            snapshot_generated_at_utc=str(snapshot.get("generated_at_utc") or "") or None,
+        )
+
+    anchor_age_raw = rate_item.get("anchor_age_seconds")
+    if anchor_age_raw is None and confidence == "MEDIUM":
+        anchor_age = None
+    elif isinstance(anchor_age_raw, bool) or not isinstance(anchor_age_raw, (int, float)):
+        return _abstain(
+            "MODEL_ANCHOR_AGE_UNAVAILABLE",
+            commodity_code=commodity_code,
+            settlement_term=settlement_term,
+            snapshot_generated_at_utc=str(snapshot.get("generated_at_utc") or "") or None,
+        )
+    else:
+        anchor_age = float(anchor_age_raw)
+    if anchor_age is not None and (not math.isfinite(anchor_age) or anchor_age < 0):
+        return _abstain(
+            "MODEL_ANCHOR_AGE_INVALID",
+            commodity_code=commodity_code,
+            settlement_term=settlement_term,
+            snapshot_generated_at_utc=str(snapshot.get("generated_at_utc") or "") or None,
+        )
+    maximum_anchor_age = max(1, int(maximum_anchor_age_seconds))
+    # anchor_age_seconds is frozen when the Snapshot is generated.  Include
+    # the artifact's own elapsed age so the rejection decision uses age now.
+    effective_anchor_age = (
+        anchor_age + max(0.0, snapshot_age)
+        if anchor_age is not None
+        else None
+    )
+    if effective_anchor_age is not None and effective_anchor_age > maximum_anchor_age:
+        return _abstain(
+            "MODEL_ANCHOR_STALE",
             commodity_code=commodity_code,
             settlement_term=settlement_term,
             snapshot_generated_at_utc=str(snapshot.get("generated_at_utc") or "") or None,
@@ -246,15 +344,15 @@ async def evaluate_offer_model_price_guard(
         getattr(settings, "coin_intelligence_inference_snapshot_path", "") or ""
     ).strip()
     if not snapshot_path:
-        return _abstain("SNAPSHOT_PATH_UNCONFIGURED")
+        return _observe(_abstain("SNAPSHOT_PATH_UNCONFIGURED"))
 
     commodity = await db.get(Commodity, int(commodity_id))
     if commodity is None:
-        return _abstain("COMMODITY_NOT_FOUND")
+        return _observe(_abstain("COMMODITY_NOT_FOUND"))
     try:
         snapshot = AtomicMarketSnapshotProvider(snapshot_path).load()
     except MarketSnapshotUnavailable:
-        return _abstain("SNAPSHOT_UNAVAILABLE")
+        return _observe(_abstain("SNAPSHOT_UNAVAILABLE"))
 
     current_time = now_utc or datetime.now(timezone.utc)
     evaluation = market_evaluation
@@ -269,7 +367,7 @@ async def evaluate_offer_model_price_guard(
                 "Offer model-price guard could not resolve the market schedule",
                 exc_info=True,
             )
-            return _abstain("MARKET_SCHEDULE_UNAVAILABLE")
+            return _observe(_abstain("MARKET_SCHEDULE_UNAVAILABLE"))
     maximum_age = int(
         getattr(
             settings,
@@ -281,22 +379,27 @@ async def evaluate_offer_model_price_guard(
     if bool(getattr(evaluation, "is_open", False)):
         market_opened_at = getattr(evaluation, "current_transition_at", None)
 
-    return evaluate_offer_model_price_snapshot(
-        snapshot,
-        commodity_name=str(getattr(commodity, "name", "") or ""),
-        settlement_type=settlement_type,
-        offer_type=offer_type,
-        proposed_price=proposed_price,
-        now_utc=current_time,
-        market_opened_at=market_opened_at,
-        maximum_snapshot_age_seconds=maximum_age,
+    return _observe(
+        evaluate_offer_model_price_snapshot(
+            snapshot,
+            commodity_name=str(getattr(commodity, "name", "") or ""),
+            settlement_type=settlement_type,
+            offer_type=offer_type,
+            proposed_price=proposed_price,
+            now_utc=current_time,
+            market_opened_at=market_opened_at,
+            maximum_snapshot_age_seconds=maximum_age,
+        )
     )
 
 
 __all__ = [
     "BUY_PRICE_OUTLIER_MESSAGE",
     "OFFER_MODEL_PRICE_GUARD_DEFAULT_MAXIMUM_SNAPSHOT_AGE_SECONDS",
+    "OFFER_MODEL_PRICE_GUARD_MAXIMUM_ANCHOR_AGE_SECONDS",
+    "OFFER_MODEL_PRICE_GUARD_MAXIMUM_UNDERLYING_AGE_SECONDS",
     "OFFER_MODEL_PRICE_GUARD_OPENING_WINDOW_SECONDS",
+    "OFFER_MODEL_PRICE_GUARD_REJECTION_CONFIDENCES",
     "OFFER_MODEL_PRICE_GUARD_VERSION",
     "OFFER_MODEL_PRICE_TOLERANCE_BPS_BY_CODE",
     "OfferModelPriceGuardDecision",

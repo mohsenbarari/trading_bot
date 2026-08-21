@@ -161,9 +161,9 @@ class ObservabilityConfigTests(unittest.TestCase):
             "remote_docker_service_guard",
             "systemctl reset-failed docker.service docker.socket",
             "systemctl enable --now docker.socket",
-            "check_local; install_sync_sampler_local; build_release; deploy_foreign; verify_sync_sampler_local",
-            "bootstrap-iran) check_local; bootstrap_iran",
-            "check_local; install_sync_sampler_remote; deploy_iran; verify_sync_sampler_remote",
+            "prepare_local_release_inputs; install_sync_sampler_local; build_release; deploy_foreign; verify_sync_sampler_local",
+            "bootstrap-iran) prepare_local_release_inputs; bootstrap_iran",
+            "prepare_local_release_inputs; install_sync_sampler_remote; deploy_iran; verify_sync_sampler_remote",
             "ensure_runtime_env_file",
             "validate_observability_release_inputs",
             "handle_iran_shared_data",
@@ -203,7 +203,7 @@ class ObservabilityConfigTests(unittest.TestCase):
             "Docker images already loaded on Iran with matching signature; skipping docker load.",
             "docker-images.loaded.signature",
             "build_image_bundle_signature",
-            "signature_scope=%s\\n' \"iran-base-image-v2\"",
+            "signature_scope=%s\\n' \"iran-immutable-runtime-image-v3\"",
             "--exclude '.env'",
             "--exclude '.deploy_count'",
             "--exclude 'docs'",
@@ -270,7 +270,9 @@ class ObservabilityConfigTests(unittest.TestCase):
         self.assertIn("audit_durable", hardening)
         self.assertIn("TRUSTED_PROXY_CIDRS", manifest_example)
         self.assertIn("OBSERVABILITY_TELEGRAM_USER_HASH_SALT", manifest_example)
-        self.assertIn("LOCAL_ENV_SOURCE_PATH=/root/secure-envs/trading-bot/.env.foreign.production", manifest_example)
+        self.assertIn("RUNTIME_ENV_SOURCE_PATH=/root/secure-envs/trading-bot/.env.foreign.production", manifest_example)
+        self.assertIn("FOREIGN_RUNTIME_ENV_PATH=/root/secure-envs/trading-bot/runtime/.env.foreign.production", manifest_example)
+        self.assertIn("IRAN_RUNTIME_ENV_PATH=/root/secure-envs/trading-bot/runtime/.env.iran.production", manifest_example)
         self.assertIn("REQUIRE_WEB_PUSH=1", manifest_example)
         self.assertIn("ALLOW_PROJECT_ENV_SOURCE=0", manifest_example)
 

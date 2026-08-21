@@ -68,8 +68,22 @@ def _validated_snapshot(path: Path, *, maximum_age_seconds: int) -> dict[str, ob
     if age < 0 or age > maximum_age_seconds:
         raise StagingSnapshotRelayError("snapshot_stale_or_future")
     rates = snapshot.get("rates")
-    if not isinstance(rates, dict) or int(rates.get("estimated_count") or 0) <= 0:
-        raise StagingSnapshotRelayError("snapshot_has_no_estimated_rates")
+    if not isinstance(rates, dict):
+        raise StagingSnapshotRelayError("snapshot_rates_invalid")
+    estimated_count = int(rates.get("estimated_count") or 0)
+    no_data_count = int(rates.get("no_data_count") or 0)
+    # A fresh, schema-valid NO_DATA artifact is an intentional staging state:
+    # it keeps deployment and binding checks live outside market hours while
+    # exposing no rate that inference or the price guard could use.  Empty or
+    # malformed rate state remains a hard failure.
+    if estimated_count < 0 or no_data_count < 0 or estimated_count + no_data_count <= 0:
+        raise StagingSnapshotRelayError("snapshot_rate_state_empty")
+    snapshot_status = str(snapshot.get("snapshot_status") or "")
+    if estimated_count == 0:
+        if snapshot_status != "NO_DATA_COIN_RATE_STATE":
+            raise StagingSnapshotRelayError("snapshot_no_data_state_invalid")
+    elif snapshot_status != "PARTIAL_COIN_RATE_STATE":
+        raise StagingSnapshotRelayError("snapshot_rate_ready_state_invalid")
     return snapshot
 
 
@@ -261,9 +275,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             json.dumps(
                 {
                     "status": "relayed",
+                    "snapshot_state": (
+                        "RATE_READY"
+                        if int(source_snapshot["rates"]["estimated_count"]) > 0
+                        else "SAFE_NO_DATA"
+                    ),
                     "snapshot_sha256": source_digest,
                     "generated_at_utc": source_snapshot.get("generated_at_utc"),
                     "estimated_rate_count": int(source_snapshot["rates"]["estimated_count"]),
+                    "no_data_rate_count": int(source_snapshot["rates"]["no_data_count"]),
                     "remote_relayed": bool(all(remote_values)),
                 },
                 sort_keys=True,

@@ -1,11 +1,14 @@
 [Unit]
-Description=Collect private coin-group events every 15 seconds
+Description=Collect private coin-group events 15 seconds after each completed run
 
 [Timer]
 OnBootSec=20s
-OnUnitActiveSec=15s
+# Schedule from deactivation, not activation.  This prevents a collector whose
+# run exceeds 15 seconds from immediately starting again and remains armed
+# after the timer itself is restarted while the oneshot is inactive.
+OnUnitInactiveSec=15s
 AccuracySec=1s
-Persistent=true
+RandomizedDelaySec=0
 Unit=coin-group-event-telegram.service
 
 [Install]

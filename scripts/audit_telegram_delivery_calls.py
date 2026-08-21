@@ -142,6 +142,9 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "queue_execution": 1,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
+    "a0e11f7efc54c823879d4a2632097dc4bc75a7b6cb69d6e92d3a228cec0c12b0"
+)
+PRE_ABBREVIATED_PRICE_AND_CUSTOMER_LIMITS_RUNTIME_INVENTORY_SHA256 = (
     "363e94a7cecda8b38ed49e4197bbaa8bbd552b6f0c4431e2a9c45c7ebc18427a"
 )
 PRE_PACK_PRICE_INFERENCE_RUNTIME_INVENTORY_SHA256 = (
@@ -186,6 +189,12 @@ OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256 = (
 REVIEWED_RUNTIME_INVENTORY_SHA256 = frozenset(
     {
         EXPECTED_RUNTIME_INVENTORY_SHA256,
+        # Abbreviated-price normalization and customer-relation admission add
+        # no Telegram boundary.  A full inventory comparison found the same
+        # 103 path/scope/callee/kind/disposition classifications; twelve
+        # identities moved only because non-delivery validation and public
+        # error presentation were inserted above their existing callsites.
+        PRE_ABBREVIATED_PRICE_AND_CUSTOMER_LIMITS_RUNTIME_INVENTORY_SHA256,
         # Pack price inference adds no Telegram delivery boundary. Parser,
         # wizard and confirmation guards only move existing trade_create
         # identities; all 103 dispositions and their owners remain exact.

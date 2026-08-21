@@ -9,6 +9,13 @@ DEPLOYMENT_SURFACE_GUARD="$PROJECT_DIR/scripts/check_deployment_surface_guard.py
 PRODUCTION_DATA_HYGIENE_SCRIPT="$PROJECT_DIR/scripts/check_production_data_hygiene.py"
 CHANGE_LOG_SOURCE_SEQUENCE_ALIGNER="$PROJECT_DIR/scripts/align_change_log_source_sequence.py"
 TRADE_NUMBER_SEQUENCE_ALIGNER="$PROJECT_DIR/scripts/align_trade_number_sequence.py"
+PRODUCTION_COIN_SNAPSHOT_RELAY_SCRIPT="$PROJECT_DIR/scripts/relay_production_coin_inference_snapshot.py"
+PRODUCTION_COIN_SNAPSHOT_RELAY_INSTALLER="$PROJECT_DIR/scripts/install_production_coin_inference_snapshot_relay.sh"
+PRODUCTION_COIN_INPUT_TIMER_INSTALLER="$PROJECT_DIR/scripts/install_coin_intelligence_input_timers.sh"
+PRODUCTION_COIN_READINESS_SCRIPT="$PROJECT_DIR/scripts/check_production_coin_inference_readiness.py"
+TELEGRAM_QUEUE_PRODUCTION_CUTOVER_SCRIPT="$PROJECT_DIR/scripts/cutover_telegram_delivery_queue_production.py"
+PRODUCTION_RELEASE_LOCK_DIR="/root/secure-envs/trading-bot/queue-cutover-artifacts"
+PRODUCTION_RELEASE_LOCK_PATH="$PRODUCTION_RELEASE_LOCK_DIR/production-release.lock"
 DEFAULT_MANIFEST="$PROJECT_DIR/deploy/production/online.env"
 MANIFEST_PATH="${DEPLOY_MANIFEST:-$DEFAULT_MANIFEST}"
 COMMAND=""
@@ -26,8 +33,64 @@ IRAN_IMAGE_PLATFORM=""
 LOCAL_COMPOSE_CMD=""
 IRAN_COMPOSE_CMD=""
 IRAN_APT_BUNDLE_MODE="same-arch"
-FOREIGN_COMPOSE_PROJECT_NAME="${FOREIGN_COMPOSE_PROJECT_NAME:-trading_bot}"
-export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$FOREIGN_COMPOSE_PROJECT_NAME}"
+PRODUCTION_FOREIGN_COMPOSE_PROJECT_NAME="trading_bot"
+FOREIGN_COMPOSE_PROJECT_NAME=""
+COMPOSE_PROJECT_NAME=""
+PRODUCTION_COIN_SNAPSHOT_RELAY_CONFIRM_TEXT="publish-production-coin-inference-snapshot"
+PRODUCTION_COIN_SNAPSHOT_RELAY_DISABLE_CONFIRM_TEXT="disable-production-coin-inference-snapshot"
+PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE="coin-intelligence-production-snapshot-relay.service"
+PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER="coin-intelligence-production-snapshot-relay.timer"
+PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE_CANONICAL="/var/lib/trading-bot/production-release/coin-snapshot-relay-state.json"
+PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE="$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE_CANONICAL"
+PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR_CANONICAL="/var/lib/trading-bot/production-release/coin-input-timer-recovery"
+PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR="$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR_CANONICAL"
+PRODUCTION_COIN_INPUT_SYSTEMD_DIR="/etc/systemd/system"
+PRODUCTION_TWO_HOST_RELEASE_STATE_FILE_CANONICAL="/var/lib/trading-bot/production-release/two-host-release-state.json"
+PRODUCTION_TWO_HOST_RELEASE_STATE_FILE="$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE_CANONICAL"
+PRODUCTION_DEPLOY_SH_AUTHORITY_PATH="/var/lib/trading-bot/production-release/deploy-sh-authority.json"
+PRODUCTION_WRITER_QUIESCE_STATE_FILE="/var/lib/trading-bot/production-release/writer-quiesce-state.json"
+PRODUCTION_COIN_SNAPSHOT_RELAY_HAD_UNIT=0
+PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ENABLED=0
+PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ACTIVE=0
+PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_ACTIVE=0
+PRODUCTION_COIN_SNAPSHOT_RELAY_RECOVERY_PENDING=0
+PRODUCTION_COIN_SNAPSHOT_RELAY_GUARD_ARMED=0
+PRODUCTION_COIN_INPUT_TIMER_GUARD_ARMED=0
+PRODUCTION_RUNTIME_ENV_PAIR_LOCKED=0
+PRODUCTION_RUNTIME_ENV_SOURCE_SHA256=""
+PRODUCTION_RUNTIME_ENV_FOREIGN_SHA256=""
+PRODUCTION_RUNTIME_ENV_IRAN_SHA256=""
+PRODUCTION_RUNTIME_ENV_FOREIGN_INSTALLED=0
+PRODUCTION_RELEASE_LOCK_OWNED=0
+PRODUCTION_SOURCE_LOCK_FD=""
+PRODUCTION_SOURCE_LOCK_PATH=""
+PRODUCTION_SOURCE_LOCK_OWNED=0
+PRODUCTION_SOURCE_LOCK_INHERITED_OBSERVED=0
+PRODUCTION_TWO_HOST_RELEASE_GUARD_ARMED=0
+PRODUCTION_TWO_HOST_RELEASE_PHASE=""
+PRODUCTION_TWO_HOST_RELEASE_RESUMING=0
+PRODUCTION_TWO_HOST_WRITERS_QUIESCED=0
+PRODUCTION_TWO_HOST_SCHEMAS_VERIFIED=0
+PRODUCTION_TWO_HOST_WRITER_RESTART_GUARD_ARMED=0
+PRODUCTION_RELEASE_TREE=""
+PRODUCTION_FOREIGN_IMAGE_ID=""
+PRODUCTION_FOREIGN_IMAGE_SIGNATURE=""
+PRODUCTION_FOREIGN_IMAGE_RECEIPT=""
+PRODUCTION_FOREIGN_IMAGE_RECEIPT_SHA256=""
+PRODUCTION_IRAN_IMAGE_ID=""
+PRODUCTION_IRAN_IMAGE_SIGNATURE=""
+PRODUCTION_IRAN_IMAGE_BUNDLE_SHA256=""
+PRODUCTION_IRAN_IMAGE_RECEIPT=""
+PRODUCTION_IRAN_IMAGE_RECEIPT_SHA256=""
+PRODUCTION_IRAN_SOURCE_PAYLOAD_MANIFEST_SHA256=""
+PRODUCTION_RELEASE_EVIDENCE_MAXIMUM_AGE_SECONDS=3600
+PRODUCTION_RELEASE_EVIDENCE_VERIFIED=0
+PRODUCTION_PRE_RELEASE_SHA=""
+PRODUCTION_BACKUP_ARTIFACT_SET_SHA256=""
+PRODUCTION_RELEASE_SCHEMA_HEAD=""
+PRODUCTION_FOREIGN_TARGET_BINDING_SHA256=""
+PRODUCTION_IRAN_TARGET_BINDING_SHA256=""
+PRODUCTION_COIN_INFERENCE_REQUESTED=0
 
 usage() {
     cat <<'EOF'
@@ -40,26 +103,42 @@ Commands:
   help                 Show this help.
   release              Run the full production flow. This is the default.
   check-local          Validate local tooling and manifest.
-  deploy-foreign       Build and deploy the foreign server locally.
+  deploy-foreign       Internal release phase; direct execution is refused.
   bootstrap-iran       Install Docker/Nginx/Certbot prerequisites on the Iran host.
   configure-nginx      Render and install the Iran Nginx config.
   issue-cert           Request/renew the SSL certificate on the Iran host.
   build-release        Build frontend locally, prepare wheel cache, and build/loadable Docker artifacts.
-  sync-project         Rsync the production payload and runtime env to the Iran host.
-  ship-images          Upload the prepared Docker image bundle to the Iran host.
-  load-images          Load the uploaded Docker image bundle on the Iran host.
-  deploy-iran          Start Docker services on the Iran host without remote build/pull.
+  prepare-release-evidence
+                       Build both exact production images and their receipts without
+                       touching services or databases; run this before backup/rehearsal.
+  sync-project         Internal release phase; direct execution is refused.
+  ship-images          Internal release phase; direct execution is refused.
+  load-images          Internal release phase; direct execution is refused.
+  verify-release-evidence
+                       Validate the exact backup, restore-smoke, migration rehearsal,
+                       source, image, schema, and target receipts without quiescing writers.
+  deploy-iran          Internal release phase; direct execution is refused.
   inspect-shared-data  Inspect Iran shared-table state and print the fresh/existing classification.
-  seed-shared-data     Apply guarded shared-table seed/reset handling for the Iran host.
+  seed-shared-data     Internal release phase; direct execution is refused.
   healthcheck          Validate local and public health endpoints.
 
 Notes:
-  - The script first deploys the foreign server locally.
-  - It then asks whether Iran currently has working internet.
-  - If the answer is "yes", it runs the Iran-online flow using shipped images/artifacts.
-  - If the answer is "no", it stops after foreign deploy because the Iran-offline flow is not implemented yet.
+  - The script determines Iran connectivity before touching either host.
+  - If Iran is online, it runs the guarded two-host flow using shipped images/artifacts.
+  - If Iran is offline, it stops before either host is changed; a one-host release is forbidden.
   - For SSH, prefer key-based auth. Password auth is supported only when sshpass is installed.
   - Release healthcheck runs a read-only production data hygiene guard on both hosts.
+  - The full release refuses to quiesce either writer plane until fresh successful
+    two-host backup/restore-smoke and migration-rehearsal receipts are verified.
+    Their paths and SHA-256 digests must be supplied by the production manifest as
+    PRODUCTION_BACKUP_RECEIPT_PATH / PRODUCTION_BACKUP_RECEIPT_SHA256 and
+    PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_PATH /
+    PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_SHA256.
+  - The production coin Snapshot relay remains off unless the manifest contains both
+    PRODUCTION_COIN_INFERENCE_RELAY_ENABLED=1 and the exact confirmation value.
+  - Setting the relay flag to 0 is an explicit disabled state. If the timer is
+    active, the separate exact disable confirmation is required before it is
+    left stopped and disabled.
 EOF
 }
 
@@ -82,7 +161,7 @@ is_truthy() {
 }
 
 canonical_path() {
-    python3 -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$1"
+    python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1"
 }
 
 need_cmd() {
@@ -354,8 +433,9 @@ ensure_manifest_file() {
     local iran_server_url=""
     local iran_server_domain=""
     local iran_certbot_email=""
-    local iran_env_source_path="/root/secure-envs/trading-bot/.env.iran.production"
-    local local_env_path="/root/secure-envs/trading-bot/.env.foreign.production"
+    local runtime_env_source_path="/root/secure-envs/trading-bot/.env.foreign.production"
+    local foreign_runtime_env_path="/root/secure-envs/trading-bot/runtime/.env.foreign.production"
+    local iran_runtime_env_path="/root/secure-envs/trading-bot/runtime/.env.iran.production"
     local foreign_frontend_url=""
     local iran_frontend_url=""
 
@@ -385,8 +465,9 @@ ensure_manifest_file() {
     prompt_value iran_server_url "Iran server URL" "https://$iran_app_domain"
     prompt_value iran_server_domain "Iran server domain" "$iran_app_domain"
     prompt_value iran_certbot_email "Certbot email"
-    prompt_value iran_env_source_path "Iran runtime env source path" "$iran_env_source_path"
-    prompt_value local_env_path "Local .env path" "$local_env_path"
+    prompt_value runtime_env_source_path "Immutable production secret source path" "$runtime_env_source_path"
+    prompt_value foreign_runtime_env_path "Foreign rendered runtime env path" "$foreign_runtime_env_path"
+    prompt_value iran_runtime_env_path "Iran rendered runtime env path" "$iran_runtime_env_path"
     prompt_value foreign_frontend_url "Foreign FRONTEND_URL" "https://$foreign_public_domain"
     prompt_value iran_frontend_url "Iran FRONTEND_URL" "https://$iran_app_domain"
 
@@ -424,8 +505,9 @@ IRAN_SERVER_ALIASES=$iran_server_domain
 IRAN_CERTBOT_EMAIL=$iran_certbot_email
 
 # --- Local / remote env files ---
-LOCAL_ENV_SOURCE_PATH=$local_env_path
-IRAN_ENV_SOURCE_PATH=$iran_env_source_path
+RUNTIME_ENV_SOURCE_PATH=$runtime_env_source_path
+FOREIGN_RUNTIME_ENV_PATH=$foreign_runtime_env_path
+IRAN_RUNTIME_ENV_PATH=$iran_runtime_env_path
 FOREIGN_FRONTEND_URL=$foreign_frontend_url
 IRAN_FRONTEND_URL=$iran_frontend_url
 PUBLIC_WEBAPP_URL=$iran_frontend_url
@@ -453,6 +535,13 @@ IRAN_SHARED_DATA_MODE=auto
 IRAN_SHARED_SEED_BATCH_SIZE=50
 IRAN_SHARED_RESET_CONFIRM=
 OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED=1
+PRODUCTION_COIN_INFERENCE_RELAY_ENABLED=0
+PRODUCTION_COIN_INFERENCE_RELAY_CONFIRM=
+PRODUCTION_COIN_INFERENCE_RELAY_DISABLE_CONFIRM=
+COIN_GROUP_EVENT_CHANNEL_ID=
+COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_OFFER_CHANNEL_ID=
+COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_TRADE_CHANNEL_ID=
+COIN_INTELLIGENCE_EXPECTED_TELEGRAM_API_ID=
 
 # --- Healthcheck ---
 IRAN_HEALTHCHECK_URL=https://$iran_app_domain/api/config
@@ -489,10 +578,25 @@ parse_args() {
     [[ -n "$COMMAND" ]] || COMMAND="release"
 }
 
+lock_production_compose_project_identity() {
+    : "${FOREIGN_COMPOSE_PROJECT_NAME:=$PRODUCTION_FOREIGN_COMPOSE_PROJECT_NAME}"
+    [[ "$FOREIGN_COMPOSE_PROJECT_NAME" == "$PRODUCTION_FOREIGN_COMPOSE_PROJECT_NAME" ]] \
+        || die "FOREIGN_COMPOSE_PROJECT_NAME must be exactly $PRODUCTION_FOREIGN_COMPOSE_PROJECT_NAME for production."
+    COMPOSE_PROJECT_NAME="$PRODUCTION_FOREIGN_COMPOSE_PROJECT_NAME"
+    export FOREIGN_COMPOSE_PROJECT_NAME COMPOSE_PROJECT_NAME
+}
+
 load_manifest() {
     local env_iran_connectivity_mode="${IRAN_CONNECTIVITY_MODE-}"
 
     [[ -f "$MANIFEST_PATH" ]] || die "Manifest not found: $MANIFEST_PATH"
+    # These identities are release-control values, not ambient process input.
+    # Clear inherited values before loading the approved manifest so a caller
+    # cannot redirect Compose to a different production project.
+    unset COMPOSE_PROJECT_NAME FOREIGN_COMPOSE_PROJECT_NAME \
+        PRODUCTION_BACKUP_RECEIPT_PATH PRODUCTION_BACKUP_RECEIPT_SHA256 \
+        PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_PATH \
+        PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_SHA256
     # shellcheck disable=SC1090
     source "$MANIFEST_PATH"
 
@@ -507,22 +611,29 @@ load_manifest() {
     : "${IRAN_SSH_USER:?IRAN_SSH_USER is required}"
     : "${IRAN_SSH_PORT:?IRAN_SSH_PORT is required}"
     : "${IRAN_SSH_AUTH_METHOD:=key}"
+    : "${IRAN_SSH_CONNECT_TIMEOUT_SECONDS:=10}"
+    : "${IRAN_SSH_SERVER_ALIVE_INTERVAL_SECONDS:=15}"
+    : "${IRAN_SSH_SERVER_ALIVE_COUNT_MAX:=3}"
+    : "${IRAN_SSH_COMMAND_TIMEOUT_SECONDS:=900}"
+    : "${IRAN_TRANSFER_TIMEOUT_SECONDS:=900}"
     : "${IRAN_PROJECT_DIR:?IRAN_PROJECT_DIR is required}"
     : "${IRAN_DEPLOY_BASE_DIR:?IRAN_DEPLOY_BASE_DIR is required}"
     : "${FOREIGN_TIMEZONE:=UTC}"
     : "${IRAN_TIMEZONE:=UTC}"
     : "${IRAN_APP_DOMAIN:?IRAN_APP_DOMAIN is required}"
     : "${IRAN_CERTBOT_EMAIL:?IRAN_CERTBOT_EMAIL is required}"
-    : "${IRAN_ENV_SOURCE_PATH:?IRAN_ENV_SOURCE_PATH is required}"
+    : "${RUNTIME_ENV_SOURCE_PATH:?RUNTIME_ENV_SOURCE_PATH is required}"
+    : "${FOREIGN_RUNTIME_ENV_PATH:?FOREIGN_RUNTIME_ENV_PATH is required}"
+    : "${IRAN_RUNTIME_ENV_PATH:?IRAN_RUNTIME_ENV_PATH is required}"
     : "${IRAN_PUBLIC_IP:?IRAN_PUBLIC_IP is required}"
     : "${IRAN_PUBLIC_DOMAIN:?IRAN_PUBLIC_DOMAIN is required}"
     : "${FOREIGN_PUBLIC_IP:?FOREIGN_PUBLIC_IP is required}"
     : "${FOREIGN_PUBLIC_DOMAIN:?FOREIGN_PUBLIC_DOMAIN is required}"
+    lock_production_compose_project_identity
     FOREIGN_SERVER_URL="${FOREIGN_SERVER_URL:-https://$FOREIGN_PUBLIC_DOMAIN}"
     FOREIGN_SERVER_DOMAIN="${FOREIGN_SERVER_DOMAIN:-$FOREIGN_PUBLIC_DOMAIN}"
     IRAN_SERVER_URL="${IRAN_SERVER_URL:-https://$IRAN_APP_DOMAIN}"
     IRAN_SERVER_DOMAIN="${IRAN_SERVER_DOMAIN:-$IRAN_APP_DOMAIN}"
-    LOCAL_ENV_SOURCE_PATH="${LOCAL_ENV_SOURCE_PATH:-$LOCAL_PROJECT_DIR/.env}"
     FOREIGN_FRONTEND_URL="${FOREIGN_FRONTEND_URL:-https://$FOREIGN_PUBLIC_DOMAIN}"
     IRAN_FRONTEND_URL="${IRAN_FRONTEND_URL:-https://$IRAN_APP_DOMAIN}"
     PUBLIC_WEBAPP_URL="${PUBLIC_WEBAPP_URL:-$IRAN_FRONTEND_URL}"
@@ -552,6 +663,20 @@ load_manifest() {
     IRAN_SHARED_DATA_MODE="${IRAN_SHARED_DATA_MODE:-auto}"
     IRAN_SHARED_SEED_BATCH_SIZE="${IRAN_SHARED_SEED_BATCH_SIZE:-50}"
     IRAN_SHARED_RESET_CONFIRM="${IRAN_SHARED_RESET_CONFIRM:-}"
+    PRODUCTION_COIN_INFERENCE_RELAY_ENABLED="${PRODUCTION_COIN_INFERENCE_RELAY_ENABLED:-0}"
+    PRODUCTION_COIN_INFERENCE_RELAY_CONFIRM="${PRODUCTION_COIN_INFERENCE_RELAY_CONFIRM:-}"
+    PRODUCTION_COIN_INFERENCE_RELAY_DISABLE_CONFIRM="${PRODUCTION_COIN_INFERENCE_RELAY_DISABLE_CONFIRM:-}"
+    PRODUCTION_COIN_INFERENCE_SOURCE_ROOT="${PRODUCTION_COIN_INFERENCE_SOURCE_ROOT:-/srv/trading-bot/production-data/coin-intelligence/private-gold-live}"
+    PRODUCTION_COIN_INFERENCE_SOURCE_STORE="${PRODUCTION_COIN_INFERENCE_SOURCE_STORE:-$PRODUCTION_COIN_INFERENCE_SOURCE_ROOT/market/market.sqlite3}"
+    PRODUCTION_COIN_INFERENCE_ESTIMATOR_ROOT="${PRODUCTION_COIN_INFERENCE_ESTIMATOR_ROOT:-/srv/trading-bot/production-data/coin-intelligence/estimator-live}"
+    COIN_GROUP_EVENT_CHANNEL_ID="${COIN_GROUP_EVENT_CHANNEL_ID:-}"
+    COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_OFFER_CHANNEL_ID="${COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_OFFER_CHANNEL_ID:-}"
+    COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_TRADE_CHANNEL_ID="${COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_TRADE_CHANNEL_ID:-}"
+    COIN_INTELLIGENCE_EXPECTED_TELEGRAM_API_ID="${COIN_INTELLIGENCE_EXPECTED_TELEGRAM_API_ID:-}"
+    PRODUCTION_BACKUP_RECEIPT_PATH="${PRODUCTION_BACKUP_RECEIPT_PATH:-}"
+    PRODUCTION_BACKUP_RECEIPT_SHA256="${PRODUCTION_BACKUP_RECEIPT_SHA256:-}"
+    PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_PATH="${PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_PATH:-}"
+    PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_SHA256="${PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_SHA256:-}"
 
     # Docker Compose interpolation needs these manifest values exported, but
     # they must not be copied into the application runtime env.
@@ -566,30 +691,7 @@ load_manifest() {
     [[ -d "$LOCAL_PROJECT_DIR" ]] || die "LOCAL_PROJECT_DIR does not exist: $LOCAL_PROJECT_DIR"
     [[ -d "$LOCAL_FRONTEND_DIR" ]] || die "LOCAL_FRONTEND_DIR does not exist: $LOCAL_FRONTEND_DIR"
 
-    IRAN_SSH_TARGET="$IRAN_SSH_USER@$IRAN_HOST"
-    case "$IRAN_SSH_AUTH_METHOD" in
-        key)
-            if [[ -n "${IRAN_SSH_PRIVATE_KEY_PATH:-}" ]]; then
-                [[ -f "$IRAN_SSH_PRIVATE_KEY_PATH" ]] || die "IRAN_SSH_PRIVATE_KEY_PATH does not exist: $IRAN_SSH_PRIVATE_KEY_PATH"
-                SSH_IRAN_CMD=(ssh -p "$IRAN_SSH_PORT" -o StrictHostKeyChecking=accept-new -i "$IRAN_SSH_PRIVATE_KEY_PATH")
-                SCP_IRAN_CMD=(scp -P "$IRAN_SSH_PORT" -o StrictHostKeyChecking=accept-new -i "$IRAN_SSH_PRIVATE_KEY_PATH")
-            else
-                log "IRAN_SSH_PRIVATE_KEY_PATH is empty; using SSH agent/default keys for Iran access."
-                SSH_IRAN_CMD=(ssh -p "$IRAN_SSH_PORT" -o StrictHostKeyChecking=accept-new)
-                SCP_IRAN_CMD=(scp -P "$IRAN_SSH_PORT" -o StrictHostKeyChecking=accept-new)
-            fi
-            ;;
-        password)
-            : "${IRAN_SSH_PASSWORD:?IRAN_SSH_PASSWORD is required for password auth}"
-            need_cmd sshpass
-            SSH_IRAN_CMD=(sshpass -p "$IRAN_SSH_PASSWORD" ssh -p "$IRAN_SSH_PORT" -o StrictHostKeyChecking=accept-new)
-            SCP_IRAN_CMD=(sshpass -p "$IRAN_SSH_PASSWORD" scp -P "$IRAN_SSH_PORT" -o StrictHostKeyChecking=accept-new)
-            ;;
-        *)
-            die "Unsupported IRAN_SSH_AUTH_METHOD: $IRAN_SSH_AUTH_METHOD"
-            ;;
-    esac
-    RSYNC_SSH="ssh -p $IRAN_SSH_PORT -o StrictHostKeyChecking=accept-new"
+    configure_iran_transport
     RELEASE_TMP_DIR="$LOCAL_PROJECT_DIR/tmp/production-release"
     RELEASE_ARTIFACT_DIR="$RELEASE_TMP_DIR/artifacts"
     REMOTE_IMAGE_BUNDLE="$IRAN_DEPLOY_BASE_DIR/releases/trading-bot-images.tar"
@@ -599,6 +701,9 @@ load_manifest() {
     LOCAL_IMAGE_BUNDLE="$RELEASE_TMP_DIR/docker-images.tar"
     LOCAL_IMAGE_SIGNATURE_FILE="$RELEASE_TMP_DIR/docker-images.signature"
     LOCAL_FRONTEND_SIGNATURE_FILE="$RELEASE_TMP_DIR/frontend-build.signature"
+    LOCAL_IRAN_SOURCE_PAYLOAD_DIR="$RELEASE_TMP_DIR/iran-source-payload"
+    LOCAL_IRAN_SOURCE_PAYLOAD_MANIFEST="$RELEASE_TMP_DIR/iran-source-payload.sha256"
+    REMOTE_IRAN_SOURCE_PAYLOAD_MANIFEST="$REMOTE_RELEASE_STATE_DIR/iran-source-payload.sha256"
 }
 
 ssh_iran() {
@@ -609,6 +714,10 @@ scp_iran() {
     "${SCP_IRAN_CMD[@]}" "$@"
 }
 
+run_iran_transfer() {
+    timeout --signal=TERM --kill-after=15s "${IRAN_TRANSFER_TIMEOUT_SECONDS}s" "$@"
+}
+
 read_env_value() {
     local env_path="$1"
     local key="$2"
@@ -617,8 +726,1722 @@ read_env_value() {
     printf '%s' "${line#*=}"
 }
 
+production_runtime_source_profile() {
+    PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 -c \
+        'import sys; from pathlib import Path; from scripts.deploy_config import parse_env_file; from scripts.plan_telegram_delivery_queue_production import source_profile; print(source_profile(parse_env_file(Path(sys.argv[1]))))' \
+        "$RUNTIME_ENV_SOURCE_PATH"
+}
+
+ensure_production_release_lock_directory() {
+    if [[ ! -e "$PRODUCTION_RELEASE_LOCK_DIR" ]]; then
+        install -d -m 700 "$PRODUCTION_RELEASE_LOCK_DIR"
+    fi
+    [[ -d "$PRODUCTION_RELEASE_LOCK_DIR" && ! -L "$PRODUCTION_RELEASE_LOCK_DIR" ]] \
+        || die "Production release lock directory is not a secure directory."
+    [[ "$(stat -c '%u' "$PRODUCTION_RELEASE_LOCK_DIR")" == "$(id -u)" ]] \
+        || die "Production release lock directory has the wrong owner."
+    [[ "$(stat -c '%a' "$PRODUCTION_RELEASE_LOCK_DIR")" == "700" ]] \
+        || die "Production release lock directory must have mode 0700."
+}
+
+release_production_operation_lock() {
+    if [[ "$PRODUCTION_RELEASE_LOCK_OWNED" == "1" ]]; then
+        [[ -f "$PRODUCTION_RELEASE_LOCK_PATH" && ! -L "$PRODUCTION_RELEASE_LOCK_PATH" ]] \
+            || die "Production release lock disappeared during the operation."
+        unlink "$PRODUCTION_RELEASE_LOCK_PATH"
+        PRODUCTION_RELEASE_LOCK_OWNED=0
+    fi
+}
+
+prepare_production_source_lock() {
+    validate_secure_runtime_env_source_file \
+        || die "Immutable production runtime env source is not secure enough to lock."
+    PRODUCTION_SOURCE_LOCK_PATH="$(dirname "$RUNTIME_ENV_SOURCE_PATH")/.production-runtime-source.lock"
+    if [[ ! -e "$PRODUCTION_SOURCE_LOCK_PATH" ]]; then
+        (set -o noclobber; umask 077; : >"$PRODUCTION_SOURCE_LOCK_PATH") 2>/dev/null || true
+    fi
+    [[ -f "$PRODUCTION_SOURCE_LOCK_PATH" && ! -L "$PRODUCTION_SOURCE_LOCK_PATH" ]] \
+        || die "Immutable production source lock is not a regular non-symlink file."
+    [[ "$(stat -c '%u' "$PRODUCTION_SOURCE_LOCK_PATH")" == "$(id -u)" \
+        && "$(stat -c '%a' "$PRODUCTION_SOURCE_LOCK_PATH")" == "600" \
+        && "$(stat -c '%h' "$PRODUCTION_SOURCE_LOCK_PATH")" == "1" ]] \
+        || die "Immutable production source lock has unsafe ownership, mode, or link count."
+}
+
+acquire_production_source_lock() {
+    command -v flock >/dev/null 2>&1 || die "Missing required command: flock"
+    prepare_production_source_lock
+    exec {PRODUCTION_SOURCE_LOCK_FD}<>"$PRODUCTION_SOURCE_LOCK_PATH"
+    if ! flock -n "$PRODUCTION_SOURCE_LOCK_FD"; then
+        exec {PRODUCTION_SOURCE_LOCK_FD}>&-
+        PRODUCTION_SOURCE_LOCK_FD=""
+        die "Another approved operation is updating the immutable production source."
+    fi
+    PRODUCTION_SOURCE_LOCK_OWNED=1
+}
+
+verify_inherited_production_source_lock() {
+    command -v flock >/dev/null 2>&1 || die "Missing required command: flock"
+    prepare_production_source_lock
+    local probe_fd
+    exec {probe_fd}<>"$PRODUCTION_SOURCE_LOCK_PATH"
+    if flock -n "$probe_fd"; then
+        flock -u "$probe_fd" >/dev/null 2>&1 || true
+        exec {probe_fd}>&-
+        die "Queue deploy authority is not backed by the cutover-held immutable source lock."
+    fi
+    exec {probe_fd}>&-
+    PRODUCTION_SOURCE_LOCK_INHERITED_OBSERVED=1
+}
+
+release_production_source_lock() {
+    if [[ "$PRODUCTION_SOURCE_LOCK_OWNED" == "1" && -n "$PRODUCTION_SOURCE_LOCK_FD" ]]; then
+        flock -u "$PRODUCTION_SOURCE_LOCK_FD"
+        exec {PRODUCTION_SOURCE_LOCK_FD}>&-
+        PRODUCTION_SOURCE_LOCK_FD=""
+        PRODUCTION_SOURCE_LOCK_OWNED=0
+    fi
+    PRODUCTION_SOURCE_LOCK_INHERITED_OBSERVED=0
+}
+
+release_production_locks() {
+    release_production_source_lock || true
+    release_production_operation_lock || true
+}
+
+acquire_production_operation_lock() {
+    ensure_production_release_lock_directory
+    if (set -o noclobber; umask 077; printf '{"environment":"production","owner":"production-deploy"}\n' > "$PRODUCTION_RELEASE_LOCK_PATH") 2>/dev/null; then
+        chmod 600 "$PRODUCTION_RELEASE_LOCK_PATH"
+        PRODUCTION_RELEASE_LOCK_OWNED=1
+        return 0
+    fi
+    die "Another production release or Queue cutover is active, or requires manual recovery review."
+}
+
+verify_queue_cutover_deploy_authority() {
+    local authority_path="${TELEGRAM_QUEUE_PRODUCTION_PHASE_RECEIPT:-}"
+    local authority_digest="${TELEGRAM_QUEUE_PRODUCTION_PHASE_RECEIPT_SHA256:-}"
+    [[ -n "$authority_path" && -n "$authority_digest" ]] \
+        || die "A guarded Queue cutover authority receipt is required."
+    [[ -f "$PRODUCTION_RELEASE_LOCK_PATH" && ! -L "$PRODUCTION_RELEASE_LOCK_PATH" ]] \
+        || die "The guarded production release lock is not active."
+    python3 "$TELEGRAM_QUEUE_PRODUCTION_CUTOVER_SCRIPT" verify-deploy-authority \
+        --manifest "$MANIFEST_PATH" \
+        --deploy-authority "$authority_path" \
+        --deploy-authority-sha256 "$authority_digest" >/dev/null \
+        || die "The guarded Queue cutover authority receipt is invalid."
+}
+
+guard_production_release_command() {
+    local mutating=0 profile=""
+    case "$COMMAND" in
+        release|prepare-release-evidence|verify-release-evidence|deploy-foreign|bootstrap-iran|configure-nginx|issue-cert|build-release|sync-project|ship-images|load-images|deploy-iran|seed-shared-data)
+            mutating=1
+            ;;
+    esac
+    [[ "$mutating" == "1" ]] || return 0
+    case "$COMMAND" in
+        deploy-foreign|deploy-iran|sync-project|ship-images|load-images|seed-shared-data)
+            die "This production mutation is internal to the full two-host release choreography and cannot run directly."
+            ;;
+    esac
+    if [[ "$COMMAND" != "release" \
+        && ( -e "$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE" \
+            || -L "$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE" ) ]]; then
+        die "An incomplete two-host production release must be reconciled by rerunning the full release command."
+    fi
+    if [[ -n "${TELEGRAM_QUEUE_PRODUCTION_PHASE_RECEIPT:-}" \
+        || -n "${TELEGRAM_QUEUE_PRODUCTION_PHASE_RECEIPT_SHA256:-}" ]]; then
+        [[ "$COMMAND" == "release" ]] \
+            || die "A guarded Queue authority may only execute the full production release."
+        [[ "${PRODUCTION_SOURCE_LOCK_INHERITED_CONFIRM:-}" == "verified-cutover-held-lock" ]] \
+            || die "Queue deploy authority must explicitly declare the cutover-held immutable source lock."
+        verify_queue_cutover_deploy_authority
+        verify_inherited_production_source_lock
+        profile="$(production_runtime_source_profile)" \
+            || die "Immutable production source has an invalid Telegram execution profile."
+        return 0
+    fi
+    acquire_production_operation_lock
+    acquire_production_source_lock
+    profile="$(production_runtime_source_profile)" \
+        || die "Immutable production source has an invalid Telegram execution profile."
+    [[ "$profile" != "queue-v1" ]] \
+        || die "Queue-v1 production deploys require the guarded cutover authority and full release command."
+}
+
 file_sha256() {
     sha256sum "$1" | awk '{print $1}'
+}
+
+directory_sha256() {
+    local directory="$1"
+    [[ -d "$directory" && ! -L "$directory" ]] \
+        || die "Release directory is missing or is a symlink: $directory"
+    (
+        cd "$directory"
+        find . -type f -print0 | LC_ALL=C sort -z | xargs -r -0 sha256sum
+    ) | sha256sum | awk '{print $1}'
+}
+
+validate_remote_shell_path() {
+    local value="$1"
+    local label="$2"
+    [[ "$value" == /* ]] || die "$label must be an absolute path."
+    [[ "$value" =~ ^/[A-Za-z0-9._/-]+$ ]] || die "$label contains unsupported shell characters."
+}
+
+render_shell_command() {
+    local rendered=""
+    printf -v rendered '%q ' "$@"
+    printf '%s' "${rendered% }"
+}
+
+configure_iran_transport() {
+    : "${IRAN_SSH_CONNECT_TIMEOUT_SECONDS:=10}"
+    : "${IRAN_SSH_SERVER_ALIVE_INTERVAL_SECONDS:=15}"
+    : "${IRAN_SSH_SERVER_ALIVE_COUNT_MAX:=3}"
+    : "${IRAN_SSH_COMMAND_TIMEOUT_SECONDS:=900}"
+    : "${IRAN_TRANSFER_TIMEOUT_SECONDS:=900}"
+    [[ "$IRAN_SSH_PORT" =~ ^[1-9][0-9]{0,4}$ ]] && (( IRAN_SSH_PORT <= 65535 )) \
+        || die "IRAN_SSH_PORT must be between 1 and 65535."
+    [[ "$IRAN_SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]{0,31}$ ]] \
+        || die "IRAN_SSH_USER contains unsupported characters."
+    [[ "$IRAN_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ \
+        && "$IRAN_HOST" != *".."* && "$IRAN_HOST" != *"%"* ]] \
+        || die "IRAN_HOST contains unsupported characters."
+    local setting
+    for setting in \
+        IRAN_SSH_CONNECT_TIMEOUT_SECONDS \
+        IRAN_SSH_SERVER_ALIVE_INTERVAL_SECONDS \
+        IRAN_SSH_SERVER_ALIVE_COUNT_MAX \
+        IRAN_SSH_COMMAND_TIMEOUT_SECONDS \
+        IRAN_TRANSFER_TIMEOUT_SECONDS
+    do
+        [[ "${!setting}" =~ ^[1-9][0-9]*$ ]] \
+            || die "$setting must be a positive integer."
+    done
+    (( IRAN_SSH_CONNECT_TIMEOUT_SECONDS <= 60 \
+        && IRAN_SSH_SERVER_ALIVE_INTERVAL_SECONDS <= 60 \
+        && IRAN_SSH_SERVER_ALIVE_COUNT_MAX <= 10 \
+        && IRAN_SSH_COMMAND_TIMEOUT_SECONDS >= 60 \
+        && IRAN_SSH_COMMAND_TIMEOUT_SECONDS <= 3600 \
+        && IRAN_TRANSFER_TIMEOUT_SECONDS >= 60 \
+        && IRAN_TRANSFER_TIMEOUT_SECONDS <= 3600 )) \
+        || die "Iran SSH timeout settings are outside the supported production bounds."
+    need_cmd timeout
+    local -a ssh_common_options=(
+        -o StrictHostKeyChecking=accept-new
+        -o "ConnectTimeout=$IRAN_SSH_CONNECT_TIMEOUT_SECONDS"
+        -o "ServerAliveInterval=$IRAN_SSH_SERVER_ALIVE_INTERVAL_SECONDS"
+        -o "ServerAliveCountMax=$IRAN_SSH_SERVER_ALIVE_COUNT_MAX"
+        -o ConnectionAttempts=1
+    )
+    IRAN_SSH_TARGET="$IRAN_SSH_USER@$IRAN_HOST"
+    case "$IRAN_SSH_AUTH_METHOD" in
+        key)
+            SSH_IRAN_CMD=(
+                timeout --signal=TERM --kill-after=15s "${IRAN_SSH_COMMAND_TIMEOUT_SECONDS}s"
+                ssh -p "$IRAN_SSH_PORT" "${ssh_common_options[@]}"
+                -o BatchMode=yes -o PasswordAuthentication=no
+                -o KbdInteractiveAuthentication=no -o IdentitiesOnly=yes
+            )
+            SCP_IRAN_CMD=(
+                timeout --signal=TERM --kill-after=15s "${IRAN_TRANSFER_TIMEOUT_SECONDS}s"
+                scp -P "$IRAN_SSH_PORT" "${ssh_common_options[@]}"
+                -o BatchMode=yes -o PasswordAuthentication=no
+                -o KbdInteractiveAuthentication=no -o IdentitiesOnly=yes
+            )
+            RSYNC_RSH_CMD=(
+                ssh -p "$IRAN_SSH_PORT" "${ssh_common_options[@]}"
+                -o BatchMode=yes -o PasswordAuthentication=no
+                -o KbdInteractiveAuthentication=no -o IdentitiesOnly=yes
+            )
+            if [[ -n "${IRAN_SSH_PRIVATE_KEY_PATH:-}" ]]; then
+                validate_remote_shell_path "$IRAN_SSH_PRIVATE_KEY_PATH" "IRAN_SSH_PRIVATE_KEY_PATH"
+                [[ -f "$IRAN_SSH_PRIVATE_KEY_PATH" && ! -L "$IRAN_SSH_PRIVATE_KEY_PATH" ]] \
+                    || die "IRAN_SSH_PRIVATE_KEY_PATH must be a regular non-symlink file."
+                [[ "$(stat -c '%u' "$IRAN_SSH_PRIVATE_KEY_PATH")" == "$(id -u)" ]] \
+                    || die "IRAN_SSH_PRIVATE_KEY_PATH must be owned by the release user."
+                case "$(stat -c '%a' "$IRAN_SSH_PRIVATE_KEY_PATH")" in
+                    400|600) ;;
+                    *) die "IRAN_SSH_PRIVATE_KEY_PATH permissions must be 0400 or 0600." ;;
+                esac
+                SSH_IRAN_CMD+=(-i "$IRAN_SSH_PRIVATE_KEY_PATH")
+                SCP_IRAN_CMD+=(-i "$IRAN_SSH_PRIVATE_KEY_PATH")
+                RSYNC_RSH_CMD+=(-i "$IRAN_SSH_PRIVATE_KEY_PATH")
+            else
+                log "IRAN_SSH_PRIVATE_KEY_PATH is empty; using SSH agent/default keys for Iran access."
+            fi
+            unset SSHPASS || true
+            ;;
+        password)
+            : "${IRAN_SSH_PASSWORD:?IRAN_SSH_PASSWORD is required for password auth}"
+            need_cmd sshpass
+            SSHPASS="$IRAN_SSH_PASSWORD"
+            export SSHPASS
+            SSH_IRAN_CMD=(
+                timeout --signal=TERM --kill-after=15s "${IRAN_SSH_COMMAND_TIMEOUT_SECONDS}s"
+                sshpass -e ssh -p "$IRAN_SSH_PORT" "${ssh_common_options[@]}"
+            )
+            SCP_IRAN_CMD=(
+                timeout --signal=TERM --kill-after=15s "${IRAN_TRANSFER_TIMEOUT_SECONDS}s"
+                sshpass -e scp -P "$IRAN_SSH_PORT" "${ssh_common_options[@]}"
+            )
+            RSYNC_RSH_CMD=(sshpass -e ssh -p "$IRAN_SSH_PORT" "${ssh_common_options[@]}")
+            ;;
+        *)
+            die "Unsupported IRAN_SSH_AUTH_METHOD: $IRAN_SSH_AUTH_METHOD"
+            ;;
+    esac
+    RSYNC_SSH="$(render_shell_command "${RSYNC_RSH_CMD[@]}")"
+}
+
+write_runtime_env_install_receipt() {
+    local role="$1"
+    local expected_sha256="$2"
+    local installed_sha256="$3"
+    local backup_sha256="$4"
+    local backup_path="$5"
+    local receipt_path="$RELEASE_ARTIFACT_DIR/runtime-env-install-${role}.json"
+
+    install -d -m 0700 -- "$RELEASE_ARTIFACT_DIR"
+    python3 - "$receipt_path" "$role" "$expected_sha256" "$installed_sha256" "$backup_sha256" "$backup_path" <<'PY'
+import json
+import os
+from pathlib import Path
+import sys
+import tempfile
+from datetime import datetime, timezone
+
+receipt_path = Path(sys.argv[1])
+payload = {
+    "schema_version": 1,
+    "role": sys.argv[2],
+    "installed_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    "expected_sha256": sys.argv[3],
+    "installed_sha256": sys.argv[4],
+    "previous_backup_sha256": None if sys.argv[5] == "none" else sys.argv[5],
+    "previous_backup_path": None if sys.argv[6] == "none" else sys.argv[6],
+    "secret_values_retained": False,
+}
+descriptor, temporary_name = tempfile.mkstemp(
+    prefix=f".{receipt_path.name}.", suffix=".tmp", dir=receipt_path.parent
+)
+temporary_path = Path(temporary_name)
+try:
+    os.fchmod(descriptor, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary_path, receipt_path)
+    directory_descriptor = os.open(receipt_path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory_descriptor)
+    finally:
+        os.close(directory_descriptor)
+finally:
+    temporary_path.unlink(missing_ok=True)
+PY
+    log "Runtime env install receipt role=$role sha256=$installed_sha256 receipt=$receipt_path"
+}
+
+fsync_file_and_parent() {
+    local path="$1"
+    python3 - "$path" <<'PY'
+import os
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+descriptor = os.open(path, os.O_RDONLY)
+try:
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+directory_descriptor = os.open(path.parent, os.O_RDONLY)
+try:
+    os.fsync(directory_descriptor)
+finally:
+    os.close(directory_descriptor)
+PY
+}
+
+atomic_promote_local_file() {
+    local candidate="$1"
+    local destination="$2"
+    python3 - "$candidate" "$destination" <<'PY'
+import os
+from pathlib import Path
+import sys
+
+candidate = Path(sys.argv[1])
+destination = Path(sys.argv[2])
+if candidate.parent.resolve() != destination.parent.resolve():
+    raise SystemExit("atomic install candidate must be beside destination")
+descriptor = os.open(candidate, os.O_RDONLY)
+try:
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+os.chmod(candidate, 0o600)
+os.replace(candidate, destination)
+directory_descriptor = os.open(destination.parent, os.O_RDONLY)
+try:
+    os.fsync(directory_descriptor)
+finally:
+    os.close(directory_descriptor)
+PY
+}
+
+atomic_install_local_runtime_env() (
+    set -euo pipefail
+    local source_path="$1"
+    local destination_path="$2"
+    local role="$3"
+    local destination_dir destination_name candidate expected_sha256 candidate_sha256
+    local backup_dir backup_path="none" backup_sha256="none" installed_sha256
+
+    [[ -f "$source_path" && ! -L "$source_path" ]] || die "Rendered $role runtime env is not a regular file."
+    destination_dir="$(dirname "$destination_path")"
+    destination_name="$(basename "$destination_path")"
+    if [[ ! -d "$destination_dir" ]]; then
+        install -d -m 0700 -- "$destination_dir"
+    fi
+    validate_secure_env_directory "$destination_dir" \
+        || die "Live runtime env destination directory is not secure."
+    expected_sha256="$(file_sha256 "$source_path")"
+
+    [[ "$(canonical_path "$source_path")" != "$(canonical_path "$destination_path")" ]] \
+        || die "Rendered $role runtime env must be separate from its live destination."
+
+    candidate="$(mktemp "$destination_dir/.${destination_name}.install.XXXXXX")"
+    trap 'rm -f -- "$candidate"' EXIT
+    install -m 0600 -- "$source_path" "$candidate"
+    candidate_sha256="$(file_sha256 "$candidate")"
+    [[ "$candidate_sha256" == "$expected_sha256" ]] || die "$role runtime env candidate digest mismatch."
+    fsync_file_and_parent "$candidate"
+
+    if [[ -e "$destination_path" ]]; then
+        [[ -f "$destination_path" && ! -L "$destination_path" ]] || die "Existing $role runtime env destination is not a regular file."
+        backup_dir="$ENV_BACKUP_DIR/live-runtime-env"
+        install -d -m 0700 -- "$backup_dir"
+        backup_path="$(mktemp "$backup_dir/${role}-before-install.XXXXXX")"
+        install -m 0600 -- "$destination_path" "$backup_path"
+        fsync_file_and_parent "$backup_path"
+        backup_sha256="$(file_sha256 "$backup_path")"
+        [[ "$backup_sha256" == "$(file_sha256 "$destination_path")" ]] || die "$role runtime env backup digest mismatch."
+    fi
+
+    atomic_promote_local_file "$candidate" "$destination_path"
+    installed_sha256="$(file_sha256 "$destination_path")"
+    [[ "$installed_sha256" == "$expected_sha256" ]] || die "$role runtime env digest mismatch after atomic install."
+    write_runtime_env_install_receipt "$role" "$expected_sha256" "$installed_sha256" "$backup_sha256" "$backup_path"
+)
+
+atomic_install_iran_runtime_env() {
+    local source_path="$IRAN_RUNTIME_ENV_PATH"
+    local destination_path="$IRAN_PROJECT_DIR/.env"
+    local destination_dir="$IRAN_PROJECT_DIR"
+    local remote_backup_dir="$IRAN_DEPLOY_BASE_DIR/secure-env-backups/runtime-env"
+    local expected_sha256 remote_candidate remote_result installed_sha256 backup_sha256 backup_path
+
+    [[ -f "$source_path" && ! -L "$source_path" ]] || die "Rendered Iran runtime env is not a regular file."
+    validate_remote_shell_path "$destination_dir" "IRAN_PROJECT_DIR"
+    validate_remote_shell_path "$remote_backup_dir" "Iran runtime env backup directory"
+    expected_sha256="$(file_sha256 "$source_path")"
+    remote_candidate="$(ssh_iran "set -euo pipefail
+if [ ! -d '$destination_dir' ]; then install -d -m 0700 -- '$destination_dir'; fi
+[ -d '$destination_dir' ] && [ ! -L '$destination_dir' ] || exit 27
+[ \"\$(stat -c '%u' '$destination_dir')\" = '0' ] || exit 28
+destination_mode=\"\$(stat -c '%a' '$destination_dir')\"
+[ \$((8#\$destination_mode & 022)) -eq 0 ] || exit 29
+umask 077
+mktemp '$destination_dir/.env.install.XXXXXX'")"
+    [[ "$remote_candidate" =~ ^${destination_dir//./\.}/\.env\.install\.[A-Za-z0-9]+$ ]] \
+        || die "Iran runtime env candidate path was not safely allocated beside the destination."
+
+    if ! scp_iran "$source_path" "$IRAN_SSH_TARGET:$remote_candidate"; then
+        ssh_iran "rm -f -- '$remote_candidate'" >/dev/null 2>&1 || true
+        die "Failed to transfer the Iran runtime env candidate."
+    fi
+
+    if ! remote_result="$(ssh_iran "set -euo pipefail
+candidate='$remote_candidate'
+destination='$destination_path'
+backup_dir='$remote_backup_dir'
+expected_sha256='$expected_sha256'
+actual_sha256=\"\$(sha256sum \"\$candidate\" | awk '{print \$1}')\"
+[ \"\$actual_sha256\" = \"\$expected_sha256\" ] || exit 31
+chmod 600 -- \"\$candidate\"
+backup_path='none'
+backup_sha256='none'
+if [ -e \"\$destination\" ]; then
+  [ -f \"\$destination\" ] && [ ! -L \"\$destination\" ] || exit 32
+  install -d -m 0700 -- \"\$backup_dir\"
+  backup_path=\"\$(mktemp \"\$backup_dir/iran-before-install.XXXXXX\")\"
+  install -m 0600 -- \"\$destination\" \"\$backup_path\"
+  backup_sha256=\"\$(sha256sum \"\$backup_path\" | awk '{print \$1}')\"
+  [ \"\$backup_sha256\" = \"\$(sha256sum \"\$destination\" | awk '{print \$1}')\" ] || exit 33
+  sync -f \"\$backup_path\"
+fi
+python3 -c 'import os,sys; candidate,destination=sys.argv[1:3]; descriptor=os.open(candidate,os.O_RDONLY); os.fsync(descriptor); os.close(descriptor); os.chmod(candidate,0o600); os.replace(candidate,destination); directory=os.open(os.path.dirname(destination),os.O_RDONLY); os.fsync(directory); os.close(directory)' \"\$candidate\" \"\$destination\"
+installed_sha256=\"\$(sha256sum \"\$destination\" | awk '{print \$1}')\"
+[ \"\$installed_sha256\" = \"\$expected_sha256\" ] || exit 34
+printf 'installed_sha256=%s\\nbackup_sha256=%s\\nbackup_path=%s\\n' \"\$installed_sha256\" \"\$backup_sha256\" \"\$backup_path\"")"; then
+        ssh_iran "rm -f -- '$remote_candidate'" >/dev/null 2>&1 || true
+        die "Iran runtime env atomic install failed."
+    fi
+
+    installed_sha256="$(printf '%s\n' "$remote_result" | sed -n 's/^installed_sha256=//p')"
+    backup_sha256="$(printf '%s\n' "$remote_result" | sed -n 's/^backup_sha256=//p')"
+    backup_path="$(printf '%s\n' "$remote_result" | sed -n 's/^backup_path=//p')"
+    [[ "$installed_sha256" == "$expected_sha256" ]] || die "Iran runtime env installed digest did not match the rendered source."
+    [[ "$backup_sha256" == "none" || "$backup_sha256" =~ ^[0-9a-f]{64}$ ]] || die "Iran runtime env backup receipt was invalid."
+    [[ "$backup_path" == "none" || "$backup_path" =~ ^${remote_backup_dir//./\.}/iran-before-install\.[A-Za-z0-9]+$ ]] \
+        || die "Iran runtime env backup path was invalid."
+    write_runtime_env_install_receipt "iran" "$expected_sha256" "$installed_sha256" "$backup_sha256" "$backup_path"
+}
+
+validate_production_coin_runtime_dir() {
+    local supplied_path="$1"
+    local role_label="$2"
+    local canonical
+
+    [[ "$supplied_path" == /* ]] || die "$role_label coin Snapshot runtime directory must be absolute."
+    [[ "$supplied_path" =~ ^/[A-Za-z0-9._/-]+$ ]] || die "$role_label coin Snapshot runtime directory contains unsupported characters."
+    if ! canonical="$(python3 - "$supplied_path" <<'PY'
+from pathlib import Path
+import sys
+
+supplied = Path(sys.argv[1])
+resolved = supplied.resolve(strict=False)
+if supplied != resolved:
+    raise SystemExit(2)
+parts = [part.lower() for part in resolved.parts]
+if resolved == Path("/") or not any("production" in part for part in parts):
+    raise SystemExit(3)
+if any("staging" in part for part in parts):
+    raise SystemExit(4)
+print(resolved)
+PY
+)"; then
+        die "$role_label coin Snapshot runtime directory must be canonical, production-scoped, and outside every staging path."
+    fi
+    printf '%s\n' "$canonical"
+}
+
+resolve_production_coin_runtime_contract() {
+    local foreign_raw iran_raw foreign_age iran_age
+    local foreign_container_dir iran_container_dir foreign_snapshot_path iran_snapshot_path
+    foreign_raw="$(read_env_value "$FOREIGN_RUNTIME_ENV_PATH" "PRODUCTION_COIN_INFERENCE_SNAPSHOT_HOST_DIR")"
+    iran_raw="$(read_env_value "$IRAN_RUNTIME_ENV_PATH" "PRODUCTION_COIN_INFERENCE_SNAPSHOT_HOST_DIR")"
+    [[ -n "$foreign_raw" && -n "$iran_raw" ]] || die "Production coin Snapshot host directory is missing from a rendered runtime env."
+    FOREIGN_COIN_SNAPSHOT_RUNTIME_DIR="$(validate_production_coin_runtime_dir "$foreign_raw" "Foreign")"
+    IRAN_COIN_SNAPSHOT_RUNTIME_DIR="$(validate_production_coin_runtime_dir "$iran_raw" "Iran")"
+
+    foreign_age="$(read_env_value "$FOREIGN_RUNTIME_ENV_PATH" "PRODUCTION_COIN_INFERENCE_MAXIMUM_AGE_SECONDS")"
+    iran_age="$(read_env_value "$IRAN_RUNTIME_ENV_PATH" "PRODUCTION_COIN_INFERENCE_MAXIMUM_AGE_SECONDS")"
+    [[ "$foreign_age" == "120" && "$iran_age" == "$foreign_age" ]] \
+        || die "Production coin Snapshot maximum age must be exactly 120 seconds on both roles."
+    PRODUCTION_COIN_SNAPSHOT_MAXIMUM_AGE_SECONDS="$foreign_age"
+    foreign_container_dir="$(read_env_value "$FOREIGN_RUNTIME_ENV_PATH" "PRODUCTION_COIN_INFERENCE_SNAPSHOT_CONTAINER_DIR")"
+    iran_container_dir="$(read_env_value "$IRAN_RUNTIME_ENV_PATH" "PRODUCTION_COIN_INFERENCE_SNAPSHOT_CONTAINER_DIR")"
+    foreign_snapshot_path="$(read_env_value "$FOREIGN_RUNTIME_ENV_PATH" "PRODUCTION_COIN_INFERENCE_SNAPSHOT_PATH")"
+    iran_snapshot_path="$(read_env_value "$IRAN_RUNTIME_ENV_PATH" "PRODUCTION_COIN_INFERENCE_SNAPSHOT_PATH")"
+    [[ "$foreign_container_dir" == "/app/runtime/coin-inference" \
+        && "$iran_container_dir" == "$foreign_container_dir" ]] \
+        || die "Production coin Snapshot container directory must be the exact canonical path on both roles."
+    [[ "$foreign_snapshot_path" == "/app/runtime/coin-inference/coin-rates.json" \
+        && "$iran_snapshot_path" == "$foreign_snapshot_path" ]] \
+        || die "Production coin Snapshot container file path must be the exact canonical path on both roles."
+    FOREIGN_COIN_SNAPSHOT_PATH="$FOREIGN_COIN_SNAPSHOT_RUNTIME_DIR/coin-rates.json"
+    IRAN_COIN_SNAPSHOT_PATH="$IRAN_COIN_SNAPSHOT_RUNTIME_DIR/coin-rates.json"
+}
+
+ensure_local_production_coin_runtime_dir() {
+    resolve_production_coin_runtime_contract
+    install -d -m 0755 -- "$FOREIGN_COIN_SNAPSHOT_RUNTIME_DIR"
+    [[ -d "$FOREIGN_COIN_SNAPSHOT_RUNTIME_DIR" && ! -L "$FOREIGN_COIN_SNAPSHOT_RUNTIME_DIR" ]] \
+        || die "Foreign production coin Snapshot runtime directory is not a regular directory."
+    [[ "$(canonical_path "$FOREIGN_COIN_SNAPSHOT_RUNTIME_DIR")" == "$FOREIGN_COIN_SNAPSHOT_RUNTIME_DIR" ]] \
+        || die "Foreign production coin Snapshot runtime directory changed identity during installation."
+}
+
+ensure_remote_production_coin_runtime_dir() {
+    local require_installed_env_match="${1:-0}"
+    local installed_runtime_dir=""
+    resolve_production_coin_runtime_contract
+    validate_remote_shell_path "$IRAN_COIN_SNAPSHOT_RUNTIME_DIR" "Iran production coin Snapshot runtime directory"
+    if [[ "$require_installed_env_match" == "1" ]]; then
+        validate_remote_shell_path "$IRAN_PROJECT_DIR" "IRAN_PROJECT_DIR"
+        installed_runtime_dir="$(ssh_iran "test -f '$IRAN_PROJECT_DIR/.env' && grep -E '^PRODUCTION_COIN_INFERENCE_SNAPSHOT_HOST_DIR=' '$IRAN_PROJECT_DIR/.env' | tail -n 1 | cut -d= -f2-")"
+        [[ "$installed_runtime_dir" == "$IRAN_COIN_SNAPSHOT_RUNTIME_DIR" ]] \
+            || die "Installed Iran runtime env does not match the validated production coin Snapshot bind directory. Run sync-project before deploy-iran."
+    fi
+    ssh_iran "set -euo pipefail
+runtime_dir='$IRAN_COIN_SNAPSHOT_RUNTIME_DIR'
+resolved=\"\$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=False))' \"\$runtime_dir\")\"
+[ \"\$resolved\" = \"\$runtime_dir\" ] || exit 41
+install -d -m 0755 -- \"\$runtime_dir\"
+[ -d \"\$runtime_dir\" ] && [ ! -L \"\$runtime_dir\" ] || exit 42
+resolved=\"\$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=False))' \"\$runtime_dir\")\"
+[ \"\$resolved\" = \"\$runtime_dir\" ] || exit 43"
+}
+
+validate_production_coin_relay_manifest() {
+    case "$PRODUCTION_COIN_INFERENCE_RELAY_ENABLED" in
+        0) return 0 ;;
+        1) ;;
+        *) die "PRODUCTION_COIN_INFERENCE_RELAY_ENABLED must be exactly 0 or 1." ;;
+    esac
+    [[ "$PRODUCTION_COIN_INFERENCE_RELAY_CONFIRM" == "$PRODUCTION_COIN_SNAPSHOT_RELAY_CONFIRM_TEXT" ]] \
+        || die "Production coin Snapshot relay enablement requires the exact manifest confirmation."
+    [[ "$IRAN_SSH_AUTH_METHOD" == "key" ]] \
+        || die "Production coin Snapshot relay requires non-interactive key authentication; password auth is not supported by systemd."
+    [[ -n "${IRAN_SSH_PRIVATE_KEY_PATH:-}" ]] \
+        || die "Production coin Snapshot relay requires an explicit identity file for unattended systemd execution."
+    validate_remote_shell_path "$IRAN_SSH_PRIVATE_KEY_PATH" "IRAN_SSH_PRIVATE_KEY_PATH"
+    [[ "$(canonical_path "$IRAN_SSH_PRIVATE_KEY_PATH")" == "$IRAN_SSH_PRIVATE_KEY_PATH" ]] \
+        || die "Production coin Snapshot relay identity file must be canonical."
+    [[ -f "$IRAN_SSH_PRIVATE_KEY_PATH" && ! -L "$IRAN_SSH_PRIVATE_KEY_PATH" ]] \
+        || die "Production coin Snapshot relay identity file must be a regular non-symlink file."
+    [[ "$(stat -c '%u' "$IRAN_SSH_PRIVATE_KEY_PATH")" == "$(id -u)" ]] \
+        || die "Production coin Snapshot relay identity file must be owned by the release user."
+    case "$(stat -c '%a' "$IRAN_SSH_PRIVATE_KEY_PATH")" in
+        400|600) ;;
+        *) die "Production coin Snapshot relay identity file permissions must be 0400 or 0600." ;;
+    esac
+    [[ -f "$PRODUCTION_COIN_SNAPSHOT_RELAY_SCRIPT" ]] || die "Production coin Snapshot relay script is missing."
+    [[ -f "$PRODUCTION_COIN_SNAPSHOT_RELAY_INSTALLER" ]] || die "Production coin Snapshot relay installer is missing."
+}
+
+validate_production_coin_inference_activation_contract() {
+    local preview selection guard auto_selection value
+    preview="$(read_env_value "$RUNTIME_ENV_SOURCE_PATH" "PRODUCTION_COIN_INFERENCE_PREVIEW_ENABLED")"
+    selection="$(read_env_value "$RUNTIME_ENV_SOURCE_PATH" "PRODUCTION_COIN_INFERENCE_SELECTION_ENABLED")"
+    guard="$(read_env_value "$RUNTIME_ENV_SOURCE_PATH" "PRODUCTION_OFFER_MODEL_PRICE_GUARD_ENABLED")"
+    auto_selection="$(read_env_value "$RUNTIME_ENV_SOURCE_PATH" "PRODUCTION_COIN_INFERENCE_AUTO_SELECTION_ENABLED")"
+    for value in "$preview" "$selection" "$guard" "$auto_selection"; do
+        [[ "$value" == "true" || "$value" == "false" ]] \
+            || die "Production coin inference flags must be explicit true/false values in the immutable source."
+    done
+    [[ "$auto_selection" == "false" ]] \
+        || die "Production coin inference automatic commodity selection remains forbidden."
+    PRODUCTION_COIN_INFERENCE_REQUESTED=0
+    if [[ "$preview" == "true" || "$selection" == "true" || "$guard" == "true" ]]; then
+        PRODUCTION_COIN_INFERENCE_REQUESTED=1
+        [[ "$preview" == "true" && "$selection" == "true" && "$guard" == "true" ]] \
+            || die "Live production coin inference requires preview, selection, and price guard to transition together."
+        [[ "$PRODUCTION_COIN_INFERENCE_RELAY_ENABLED" == "1" \
+            && "$PRODUCTION_COIN_INFERENCE_RELAY_CONFIRM" == "$PRODUCTION_COIN_SNAPSHOT_RELAY_CONFIRM_TEXT" ]] \
+            || die "Live production coin inference requires the confirmed production Snapshot relay."
+        [[ -f "$PRODUCTION_COIN_INPUT_TIMER_INSTALLER" \
+            && -f "$PRODUCTION_COIN_READINESS_SCRIPT" ]] \
+            || die "Production coin inference input/readiness tooling is missing."
+        [[ "$COIN_GROUP_EVENT_CHANNEL_ID" =~ ^-100[0-9]{8,16}$ \
+            && "$COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_OFFER_CHANNEL_ID" =~ ^-100[0-9]{8,16}$ \
+            && "$COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_TRADE_CHANNEL_ID" =~ ^-100[0-9]{8,16}$ \
+            && "$COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_OFFER_CHANNEL_ID" != "$COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_TRADE_CHANNEL_ID" \
+            && "$COIN_INTELLIGENCE_EXPECTED_TELEGRAM_API_ID" =~ ^[1-9][0-9]{0,15}$ ]] \
+            || die "Production coin inference collector identities must be explicitly bound in the manifest."
+    fi
+}
+
+validate_production_coin_relay_state_file() {
+    [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE" == "$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE_CANONICAL" ]] \
+        || die "Production coin Snapshot relay state file must use the canonical production path."
+    validate_remote_shell_path "$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE" \
+        "Production coin Snapshot relay state file"
+    local parent canonical_parent
+    parent="$(dirname "$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE")"
+    canonical_parent="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=False))' "$parent")"
+    [[ "$canonical_parent" == "$parent" ]] \
+        || die "Production coin Snapshot relay state directory must be canonical."
+    if [[ -e "$parent" ]]; then
+        [[ -d "$parent" && ! -L "$parent" \
+            && "$(stat -c '%u' "$parent")" == "$(id -u)" \
+            && "$(stat -c '%a' "$parent")" == "700" ]] \
+            || die "Production coin Snapshot relay state directory must be owner-controlled mode 0700."
+    fi
+    if [[ -e "$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE" || -L "$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE" ]]; then
+        [[ -f "$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE" \
+            && ! -L "$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE" \
+            && "$(stat -c '%u' "$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE")" == "$(id -u)" \
+            && "$(stat -c '%a' "$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE")" == "600" \
+            && "$(stat -c '%h' "$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE")" == "1" ]] \
+            || die "Production coin Snapshot relay state file is not a private regular file."
+    fi
+    local protected
+    for protected in \
+        "${RUNTIME_ENV_SOURCE_PATH:-}" \
+        "${FOREIGN_RUNTIME_ENV_PATH:-}" \
+        "${IRAN_RUNTIME_ENV_PATH:-}" \
+        "${LOCAL_PROJECT_DIR:-}/.env" \
+        "${PRODUCTION_RELEASE_LOCK_PATH:-}" \
+        "${PRODUCTION_SOURCE_LOCK_PATH:-}" \
+        "${PRODUCTION_TWO_HOST_RELEASE_STATE_FILE:-}"; do
+        [[ -z "$protected" || "$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE" != "$protected" ]] \
+            || die "Production coin Snapshot relay state file aliases a protected release path."
+    done
+}
+
+validate_two_host_release_state_file() {
+    [[ "$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE" == "$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE_CANONICAL" ]] \
+        || die "Two-host production release state must use the canonical production path."
+    validate_remote_shell_path "$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE" \
+        "Two-host production release state file"
+    local parent canonical_parent protected
+    parent="$(dirname "$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE")"
+    canonical_parent="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=False))' "$parent")"
+    [[ "$canonical_parent" == "$parent" ]] \
+        || die "Two-host production release state directory must be canonical."
+    if [[ -e "$parent" ]]; then
+        [[ -d "$parent" && ! -L "$parent" \
+            && "$(stat -c '%u' "$parent")" == "$(id -u)" \
+            && "$(stat -c '%a' "$parent")" == "700" ]] \
+            || die "Two-host production release state directory must be owner-controlled mode 0700."
+    fi
+    if [[ -e "$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE" || -L "$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE" ]]; then
+        [[ -f "$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE" \
+            && ! -L "$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE" \
+            && "$(stat -c '%u' "$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE")" == "$(id -u)" \
+            && "$(stat -c '%a' "$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE")" == "600" \
+            && "$(stat -c '%h' "$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE")" == "1" ]] \
+            || die "Two-host production release state file is not a private regular file."
+    fi
+    for protected in \
+        "${RUNTIME_ENV_SOURCE_PATH:-}" \
+        "${FOREIGN_RUNTIME_ENV_PATH:-}" \
+        "${IRAN_RUNTIME_ENV_PATH:-}" \
+        "${LOCAL_PROJECT_DIR:-}/.env" \
+        "${PRODUCTION_RELEASE_LOCK_PATH:-}" \
+        "${PRODUCTION_SOURCE_LOCK_PATH:-}" \
+        "${PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE:-}"; do
+        [[ -z "$protected" || "$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE" != "$protected" ]] \
+            || die "Two-host production release state aliases a protected release path."
+    done
+}
+
+write_two_host_release_state() {
+    local phase="$1" state_dir
+    case "$phase" in
+        prepared|foreign_committed|iran_payload_installed|iran_committed) ;;
+        *) die "Invalid two-host production release phase." ;;
+    esac
+    [[ "$PRODUCTION_RELEASE_EVIDENCE_VERIFIED" == "1" \
+        && "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ \
+        && "$PRODUCTION_RELEASE_TREE" =~ ^[0-9a-f]{40}$ \
+        && "$PRODUCTION_PRE_RELEASE_SHA" =~ ^[0-9a-f]{40}$ \
+        && "$PRODUCTION_RUNTIME_ENV_SOURCE_SHA256" =~ ^[0-9a-f]{64}$ \
+        && "$PRODUCTION_RUNTIME_ENV_FOREIGN_SHA256" =~ ^[0-9a-f]{64}$ \
+        && "$PRODUCTION_RUNTIME_ENV_IRAN_SHA256" =~ ^[0-9a-f]{64}$ \
+        && "$PRODUCTION_BACKUP_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ \
+        && "$PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ \
+        && "$PRODUCTION_BACKUP_ARTIFACT_SET_SHA256" =~ ^[0-9a-f]{64}$ \
+        && "$PRODUCTION_FOREIGN_IMAGE_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ \
+        && "$PRODUCTION_IRAN_IMAGE_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ \
+        && "$PRODUCTION_IRAN_SOURCE_PAYLOAD_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] \
+        || die "Two-host production release identity is incomplete."
+    state_dir="$(dirname "$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE")"
+    install -d -m 0700 -- "$state_dir"
+    validate_two_host_release_state_file
+    python3 - "$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE" "$phase" "$RELEASE_SHA" \
+        "$PRODUCTION_RELEASE_TREE" "$PRODUCTION_PRE_RELEASE_SHA" \
+        "$PRODUCTION_RUNTIME_ENV_SOURCE_SHA256" \
+        "$PRODUCTION_RUNTIME_ENV_FOREIGN_SHA256" \
+        "$PRODUCTION_RUNTIME_ENV_IRAN_SHA256" \
+        "$PRODUCTION_BACKUP_RECEIPT_PATH" "$PRODUCTION_BACKUP_RECEIPT_SHA256" \
+        "$PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_PATH" \
+        "$PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_SHA256" \
+        "$PRODUCTION_BACKUP_ARTIFACT_SET_SHA256" "$PRODUCTION_RELEASE_SCHEMA_HEAD" \
+        "$PRODUCTION_FOREIGN_IMAGE_ID" "$PRODUCTION_FOREIGN_IMAGE_RECEIPT_SHA256" \
+        "$PRODUCTION_IRAN_IMAGE_ID" "$PRODUCTION_IRAN_IMAGE_RECEIPT_SHA256" \
+        "$PRODUCTION_FOREIGN_TARGET_BINDING_SHA256" \
+        "$PRODUCTION_IRAN_TARGET_BINDING_SHA256" \
+        "$PRODUCTION_IRAN_SOURCE_PAYLOAD_MANIFEST_SHA256" <<'PY'
+import json
+import os
+from pathlib import Path
+import sys
+from uuid import uuid4
+
+destination = Path(sys.argv[1])
+payload = {
+    "schema_version": 3,
+    "status": "release_incomplete",
+    "phase": sys.argv[2],
+    "release_sha": sys.argv[3],
+    "release_tree": sys.argv[4],
+    "pre_release_sha": sys.argv[5],
+    "source_sha256": sys.argv[6],
+    "foreign_runtime_sha256": sys.argv[7],
+    "iran_runtime_sha256": sys.argv[8],
+    "backup_receipt_path": sys.argv[9],
+    "backup_receipt_sha256": sys.argv[10],
+    "migration_rehearsal_receipt_path": sys.argv[11],
+    "migration_rehearsal_receipt_sha256": sys.argv[12],
+    "backup_artifact_set_sha256": sys.argv[13],
+    "release_schema_head": sys.argv[14],
+    "foreign_image_id": sys.argv[15],
+    "foreign_image_receipt_sha256": sys.argv[16],
+    "iran_image_id": sys.argv[17],
+    "iran_image_receipt_sha256": sys.argv[18],
+    "foreign_target_binding_sha256": sys.argv[19],
+    "iran_target_binding_sha256": sys.argv[20],
+    "iran_source_payload_manifest_sha256": sys.argv[21],
+    "recovery_action": "rerun_exact_same_release_for_forward_reconcile",
+    "secrets_disclosed": False,
+}
+candidate = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
+flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+descriptor = os.open(candidate, flags, 0o600)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(candidate, destination)
+    directory = os.open(destination.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+finally:
+    candidate.unlink(missing_ok=True)
+PY
+    chmod 0600 "$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE"
+    PRODUCTION_TWO_HOST_RELEASE_PHASE="$phase"
+}
+
+load_two_host_release_state() {
+    validate_two_host_release_state_file
+    PRODUCTION_TWO_HOST_RELEASE_RESUMING=0
+    [[ -f "$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE" ]] || return 0
+    local loaded marker_phase marker_release marker_tree marker_pre_release marker_source marker_foreign marker_iran
+    local marker_backup_path marker_backup_digest marker_rehearsal_path marker_rehearsal_digest
+    local marker_artifact_set marker_schema marker_foreign_image marker_foreign_image_receipt
+    local marker_iran_image marker_iran_image_receipt marker_foreign_target marker_iran_target marker_iran_payload
+    loaded="$(python3 - "$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+required = {
+    "schema_version", "status", "phase", "release_sha", "release_tree", "pre_release_sha", "source_sha256",
+    "foreign_runtime_sha256", "iran_runtime_sha256", "recovery_action",
+    "backup_receipt_path", "backup_receipt_sha256",
+    "migration_rehearsal_receipt_path", "migration_rehearsal_receipt_sha256",
+    "backup_artifact_set_sha256", "release_schema_head", "foreign_image_id",
+    "foreign_image_receipt_sha256", "iran_image_id", "iran_image_receipt_sha256",
+    "foreign_target_binding_sha256", "iran_target_binding_sha256",
+    "iran_source_payload_manifest_sha256", "secrets_disclosed",
+}
+if set(payload) != required or payload["schema_version"] != 3:
+    raise SystemExit(2)
+if payload["status"] != "release_incomplete" or payload["secrets_disclosed"] is not False:
+    raise SystemExit(2)
+if payload["phase"] not in {"prepared", "foreign_committed", "iran_payload_installed", "iran_committed"}:
+    raise SystemExit(2)
+if not re.fullmatch(r"[0-9a-f]{40}", str(payload["release_sha"])) \
+        or not re.fullmatch(r"[0-9a-f]{40}", str(payload["release_tree"])) \
+        or not re.fullmatch(r"[0-9a-f]{40}", str(payload["pre_release_sha"])):
+    raise SystemExit(2)
+for field in (
+    "source_sha256", "foreign_runtime_sha256", "iran_runtime_sha256",
+    "backup_receipt_sha256", "migration_rehearsal_receipt_sha256",
+    "backup_artifact_set_sha256", "foreign_image_receipt_sha256",
+    "iran_image_receipt_sha256", "foreign_target_binding_sha256",
+    "iran_target_binding_sha256", "iran_source_payload_manifest_sha256",
+):
+    if not re.fullmatch(r"[0-9a-f]{64}", str(payload[field])):
+        raise SystemExit(2)
+for field in ("foreign_image_id", "iran_image_id"):
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", str(payload[field])):
+        raise SystemExit(2)
+if not re.fullmatch(r"[0-9a-z]{12}", str(payload["release_schema_head"])):
+    raise SystemExit(2)
+for field in ("backup_receipt_path", "migration_rehearsal_receipt_path"):
+    value = str(payload[field])
+    if not value.startswith("/") or any(character in value for character in "\t\n\r"):
+        raise SystemExit(2)
+if payload["recovery_action"] != "rerun_exact_same_release_for_forward_reconcile":
+    raise SystemExit(2)
+print("\t".join(str(payload[field]) for field in (
+    "phase", "release_sha", "release_tree", "pre_release_sha", "source_sha256",
+    "foreign_runtime_sha256", "iran_runtime_sha256", "backup_receipt_path",
+    "backup_receipt_sha256", "migration_rehearsal_receipt_path",
+    "migration_rehearsal_receipt_sha256", "backup_artifact_set_sha256",
+    "release_schema_head", "foreign_image_id", "foreign_image_receipt_sha256",
+    "iran_image_id", "iran_image_receipt_sha256", "foreign_target_binding_sha256",
+    "iran_target_binding_sha256", "iran_source_payload_manifest_sha256",
+)))
+PY
+)" || die "Two-host production release marker is invalid; manual recovery review is required."
+    IFS=$'\t' read -r marker_phase marker_release marker_tree marker_pre_release marker_source marker_foreign marker_iran \
+        marker_backup_path marker_backup_digest marker_rehearsal_path marker_rehearsal_digest \
+        marker_artifact_set marker_schema marker_foreign_image marker_foreign_image_receipt \
+        marker_iran_image marker_iran_image_receipt marker_foreign_target marker_iran_target marker_iran_payload \
+        <<<"$loaded"
+    [[ "$marker_release" == "$RELEASE_SHA" \
+        && "$marker_tree" == "$PRODUCTION_RELEASE_TREE" \
+        && "$marker_source" == "$PRODUCTION_RUNTIME_ENV_SOURCE_SHA256" \
+        && "$marker_foreign" == "$PRODUCTION_RUNTIME_ENV_FOREIGN_SHA256" \
+        && "$marker_iran" == "$PRODUCTION_RUNTIME_ENV_IRAN_SHA256" \
+        && "$marker_backup_path" == "$PRODUCTION_BACKUP_RECEIPT_PATH" \
+        && "$marker_backup_digest" == "$PRODUCTION_BACKUP_RECEIPT_SHA256" \
+        && "$marker_rehearsal_path" == "$PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_PATH" \
+        && "$marker_rehearsal_digest" == "$PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_SHA256" \
+        && "$marker_iran_payload" == "$PRODUCTION_IRAN_SOURCE_PAYLOAD_MANIFEST_SHA256" ]] \
+        || die "An incomplete two-host release is bound to different code or runtime env bytes; rerun the exact recorded release."
+    if [[ "$PRODUCTION_RELEASE_EVIDENCE_VERIFIED" == "1" ]]; then
+        [[ "$marker_pre_release" == "$PRODUCTION_PRE_RELEASE_SHA" \
+            && "$marker_artifact_set" == "$PRODUCTION_BACKUP_ARTIFACT_SET_SHA256" \
+            && "$marker_schema" == "$PRODUCTION_RELEASE_SCHEMA_HEAD" \
+            && "$marker_foreign_image" == "$PRODUCTION_FOREIGN_IMAGE_ID" \
+            && "$marker_foreign_image_receipt" == "$PRODUCTION_FOREIGN_IMAGE_RECEIPT_SHA256" \
+            && "$marker_iran_image" == "$PRODUCTION_IRAN_IMAGE_ID" \
+            && "$marker_iran_image_receipt" == "$PRODUCTION_IRAN_IMAGE_RECEIPT_SHA256" \
+            && "$marker_foreign_target" == "$PRODUCTION_FOREIGN_TARGET_BINDING_SHA256" \
+            && "$marker_iran_target" == "$PRODUCTION_IRAN_TARGET_BINDING_SHA256" ]] \
+            || die "Incomplete release evidence/image/target bindings drifted; exact forward recovery is required."
+    fi
+    PRODUCTION_TWO_HOST_RELEASE_PHASE="$marker_phase"
+    PRODUCTION_TWO_HOST_RELEASE_RESUMING=1
+}
+
+begin_two_host_release_transaction() {
+    [[ "$PRODUCTION_RELEASE_EVIDENCE_VERIFIED" == "1" ]] \
+        || die "Production release evidence must pass before the durable transaction begins."
+    verify_runtime_env_pair_lock
+    load_two_host_release_state
+    if [[ "$PRODUCTION_TWO_HOST_RELEASE_RESUMING" == "1" ]]; then
+        log "Resuming the exact incomplete two-host release from its durable recovery marker."
+    else
+        write_two_host_release_state prepared
+    fi
+    PRODUCTION_TWO_HOST_RELEASE_GUARD_ARMED=1
+}
+
+clear_two_host_release_state() {
+    validate_two_host_release_state_file
+    if [[ -f "$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE" ]]; then
+        python3 - "$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE" <<'PY'
+import os
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+path.unlink()
+directory = os.open(path.parent, os.O_RDONLY)
+try:
+    os.fsync(directory)
+finally:
+    os.close(directory)
+PY
+    fi
+    PRODUCTION_TWO_HOST_RELEASE_GUARD_ARMED=0
+    PRODUCTION_TWO_HOST_RELEASE_PHASE=""
+    PRODUCTION_TWO_HOST_RELEASE_RESUMING=0
+}
+
+two_host_release_exit_guard() {
+    local status="${1:-$?}"
+    if [[ "$status" != "0" && "$PRODUCTION_TWO_HOST_RELEASE_GUARD_ARMED" == "1" ]]; then
+        if [[ "$PRODUCTION_TWO_HOST_WRITER_RESTART_GUARD_ARMED" == "1" ]]; then
+            emergency_disable_all_foreign_writers || true
+            emergency_disable_all_iran_writers || true
+        fi
+        write_two_host_release_state "${PRODUCTION_TWO_HOST_RELEASE_PHASE:-prepared}" || true
+        printf 'production_release_status=release_incomplete two_host_reconcile_required=true recovery_action=rerun_exact_same_release_for_forward_reconcile\n' >&2
+        if [[ "$PRODUCTION_TWO_HOST_WRITERS_QUIESCED" == "1" ]]; then
+            printf 'production_writer_planes=foreign_and_iran_intentionally_stopped old_code_restart=forbidden_until_both_schemas_match_release_head\n' >&2
+        fi
+    fi
+    return "$status"
+}
+
+load_production_coin_relay_recovery_marker() {
+    PRODUCTION_COIN_SNAPSHOT_RELAY_RECOVERY_PENDING=0
+    [[ -f "$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE" ]] || return 0
+    local state
+    state="$(python3 - "$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE" <<'PY'
+import json
+import re
+import stat
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+if path.is_symlink() or not path.is_file() or stat.S_IMODE(path.stat().st_mode) != 0o600:
+    raise SystemExit(2)
+payload = json.loads(path.read_text(encoding="utf-8"))
+required = {
+    "status",
+    "relay_intentionally_stopped",
+    "previous_timer_enabled",
+    "previous_timer_active",
+    "release_sha",
+    "relay_script_sha256",
+    "recovery_action",
+}
+if set(payload) != required:
+    raise SystemExit(2)
+if payload["status"] != "release_incomplete" or payload["relay_intentionally_stopped"] is not True:
+    raise SystemExit(2)
+if not isinstance(payload["previous_timer_enabled"], bool) or not isinstance(payload["previous_timer_active"], bool):
+    raise SystemExit(2)
+if not re.fullmatch(r"[0-9a-f]{40,64}", str(payload["release_sha"])):
+    raise SystemExit(2)
+if not re.fullmatch(r"[0-9a-f]{64}", str(payload["relay_script_sha256"])):
+    raise SystemExit(2)
+if payload["recovery_action"] != "rerun_release_for_verified_reconcile":
+    raise SystemExit(2)
+print(int(payload["previous_timer_enabled"]), int(payload["previous_timer_active"]))
+PY
+)" || die "Production coin Snapshot relay recovery marker is invalid; manual review is required."
+    read -r PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ENABLED \
+        PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ACTIVE <<<"$state"
+    PRODUCTION_COIN_SNAPSHOT_RELAY_RECOVERY_PENDING=1
+}
+
+write_production_coin_relay_recovery_marker() {
+    local relay_digest state_dir
+    relay_digest="$(file_sha256 "$PRODUCTION_COIN_SNAPSHOT_RELAY_SCRIPT")"
+    [[ "$relay_digest" =~ ^[0-9a-f]{64}$ && "$RELEASE_SHA" =~ ^[0-9a-f]{40,64}$ ]] \
+        || return 1
+    state_dir="$(dirname "$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE")"
+    install -d -m 0700 -- "$state_dir"
+    validate_production_coin_relay_state_file
+    python3 - "$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE" \
+        "$PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ENABLED" \
+        "$PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ACTIVE" \
+        "$RELEASE_SHA" "$relay_digest" <<'PY'
+import json
+import os
+from pathlib import Path
+import sys
+from uuid import uuid4
+
+destination = Path(sys.argv[1])
+payload = {
+    "status": "release_incomplete",
+    "relay_intentionally_stopped": True,
+    "previous_timer_enabled": sys.argv[2] == "1",
+    "previous_timer_active": sys.argv[3] == "1",
+    "release_sha": sys.argv[4],
+    "relay_script_sha256": sys.argv[5],
+    "recovery_action": "rerun_release_for_verified_reconcile",
+}
+candidate = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
+descriptor = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(candidate, destination)
+    directory = os.open(destination.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+finally:
+    candidate.unlink(missing_ok=True)
+PY
+    chmod 0600 "$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE"
+}
+
+clear_production_coin_relay_recovery_marker() {
+    if [[ -f "$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE" ]]; then
+        rm -f -- "$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE"
+    fi
+    PRODUCTION_COIN_SNAPSHOT_RELAY_RECOVERY_PENDING=0
+}
+
+suspend_production_coin_snapshot_relay() {
+    validate_production_coin_relay_state_file
+    load_production_coin_relay_recovery_marker
+    PRODUCTION_COIN_SNAPSHOT_RELAY_HAD_UNIT=0
+    if command -v systemctl >/dev/null 2>&1 \
+        && systemctl cat "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1; then
+        PRODUCTION_COIN_SNAPSHOT_RELAY_HAD_UNIT=1
+    fi
+    if [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_RECOVERY_PENDING" != "1" ]]; then
+        PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ENABLED=0
+        PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ACTIVE=0
+        PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_ACTIVE=0
+        if [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_HAD_UNIT" == "1" ]]; then
+            if systemctl is-enabled --quiet "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER"; then
+                PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ENABLED=1
+            fi
+            if systemctl is-active --quiet "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER"; then
+                PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ACTIVE=1
+            fi
+            if systemctl is-active --quiet "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE"; then
+                PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_ACTIVE=1
+            fi
+        fi
+    fi
+    if [[ "$PRODUCTION_COIN_INFERENCE_RELAY_ENABLED" != "1" \
+        && "$PRODUCTION_COIN_SNAPSHOT_RELAY_RECOVERY_PENDING" != "1" \
+        && "$PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ACTIVE" != "1" \
+        && "$PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ENABLED" != "1" \
+        && "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_ACTIVE" != "1" ]]; then
+        return 0
+    fi
+    write_production_coin_relay_recovery_marker \
+        || die "Could not write the production coin Snapshot relay recovery marker."
+    PRODUCTION_COIN_SNAPSHOT_RELAY_GUARD_ARMED=1
+    command -v systemctl >/dev/null 2>&1 || return 0
+    systemctl stop "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1 || true
+    systemctl stop "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE" || true
+    ! systemctl is-active --quiet "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" \
+        || die "Production coin Snapshot relay timer did not stop before release."
+    ! systemctl is-active --quiet "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE" \
+        || die "Production coin Snapshot relay service did not quiesce before release."
+    if [[ "$PRODUCTION_COIN_INFERENCE_RELAY_ENABLED" == "0" \
+        && ( "$PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ACTIVE" == "1" \
+            || "$PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ENABLED" == "1" ) \
+        && "$PRODUCTION_COIN_INFERENCE_RELAY_DISABLE_CONFIRM" != "$PRODUCTION_COIN_SNAPSHOT_RELAY_DISABLE_CONFIRM_TEXT" ]]; then
+        die "Disabling an enabled or active production coin Snapshot relay requires the exact disable confirmation; the relay was left stopped."
+    fi
+    log "Suspended the production coin Snapshot relay during cross-host code synchronization."
+}
+
+production_release_relay_exit_guard() {
+    local status="${1:-$?}"
+    if [[ "$status" != "0" && "$PRODUCTION_COIN_SNAPSHOT_RELAY_GUARD_ARMED" == "1" ]]; then
+        systemctl stop "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1 || true
+        systemctl stop "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE" >/dev/null 2>&1 || true
+        if write_production_coin_relay_recovery_marker; then
+            printf 'production_release_status=release_incomplete relay_intentionally_stopped=true recovery_action=rerun_release_for_verified_reconcile\n' >&2
+        else
+            printf 'production_release_status=release_incomplete relay_intentionally_stopped=true recovery_marker=write_failed\n' >&2
+        fi
+    fi
+    return "$status"
+}
+
+validate_production_coin_input_timer_recovery_path() {
+    [[ "$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR" == "$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR_CANONICAL" ]] \
+        || die "Production coin input timer recovery must use the canonical production path."
+    validate_remote_shell_path "$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR" \
+        "Production coin input timer recovery directory"
+    local parent canonical_parent protected
+    parent="$(dirname "$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR")"
+    canonical_parent="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=False))' "$parent")"
+    [[ "$canonical_parent" == "$parent" ]] \
+        || die "Production coin input timer recovery parent must be canonical."
+    if [[ -e "$parent" ]]; then
+        [[ -d "$parent" && ! -L "$parent" \
+            && "$(stat -c '%u' "$parent")" == "$(id -u)" \
+            && "$(stat -c '%a' "$parent")" == "700" ]] \
+            || die "Production coin input timer recovery parent must be owner-controlled mode 0700."
+    fi
+    for protected in \
+        "${RUNTIME_ENV_SOURCE_PATH:-}" \
+        "${FOREIGN_RUNTIME_ENV_PATH:-}" \
+        "${IRAN_RUNTIME_ENV_PATH:-}" \
+        "${LOCAL_PROJECT_DIR:-}/.env" \
+        "${PRODUCTION_RELEASE_LOCK_PATH:-}" \
+        "${PRODUCTION_SOURCE_LOCK_PATH:-}" \
+        "${PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE:-}" \
+        "${PRODUCTION_TWO_HOST_RELEASE_STATE_FILE:-}"; do
+        [[ -z "$protected" || "$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR" != "$protected" ]] \
+            || die "Production coin input timer recovery aliases a protected release path."
+    done
+}
+
+read_production_coin_input_timer_recovery_state() {
+    validate_production_coin_input_timer_recovery_path
+    python3 - "$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR" <<'PY'
+import hashlib
+import json
+import os
+import re
+import stat
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+state_path = root / "state.json"
+units = (
+    "coin-group-event-telegram.service",
+    "coin-group-event-telegram.timer",
+    "trading-bot-private-gold-collector.service",
+    "trading-bot-private-gold-collector.timer",
+)
+timers = (
+    "coin-group-event-telegram.timer",
+    "trading-bot-private-gold-collector.timer",
+)
+if (
+    root.is_symlink()
+    or not root.is_dir()
+    or stat.S_IMODE(root.stat().st_mode) != 0o700
+    or root.stat().st_uid != os.getuid()
+):
+    raise SystemExit(2)
+if state_path.is_symlink() or not state_path.is_file():
+    raise SystemExit(2)
+state_stat = state_path.stat()
+if stat.S_IMODE(state_stat.st_mode) != 0o600 or state_stat.st_nlink != 1 or state_stat.st_uid != os.getuid():
+    raise SystemExit(2)
+payload = json.loads(state_path.read_text(encoding="utf-8"))
+if set(payload) != {"schema_version", "status", "release_sha", "units", "timers", "recovery_action"}:
+    raise SystemExit(2)
+if payload["schema_version"] != 1 or payload["status"] != "prepared":
+    raise SystemExit(2)
+if payload["recovery_action"] != "restore_prior_units_and_timer_state_on_release_failure":
+    raise SystemExit(2)
+if not re.fullmatch(r"[0-9a-f]{40}", str(payload["release_sha"])):
+    raise SystemExit(2)
+if set(payload["units"]) != set(units) or set(payload["timers"]) != set(timers):
+    raise SystemExit(2)
+print(f"release\t{payload['release_sha']}")
+expected_entries = {"state.json"}
+for unit in units:
+    record = payload["units"][unit]
+    if set(record) != {"existed", "sha256"} or not isinstance(record["existed"], bool):
+        raise SystemExit(2)
+    digest = record["sha256"]
+    if record["existed"]:
+        backup = root / unit
+        expected_entries.add(unit)
+        if backup.is_symlink() or not backup.is_file():
+            raise SystemExit(2)
+        backup_stat = backup.stat()
+        if stat.S_IMODE(backup_stat.st_mode) != 0o600 or backup_stat.st_nlink != 1 or backup_stat.st_uid != os.getuid():
+            raise SystemExit(2)
+        actual = hashlib.sha256(backup.read_bytes()).hexdigest()
+        if not re.fullmatch(r"[0-9a-f]{64}", str(digest)) or actual != digest:
+            raise SystemExit(2)
+    elif digest is not None or (root / unit).exists() or (root / unit).is_symlink():
+        raise SystemExit(2)
+    print(f"unit\t{unit}\t{int(record['existed'])}\t{digest or '-'}")
+if {entry.name for entry in root.iterdir()} != expected_entries:
+    raise SystemExit(2)
+for timer in timers:
+    record = payload["timers"][timer]
+    if set(record) != {"enabled", "active"} or not all(
+        isinstance(record[key], bool) for key in ("enabled", "active")
+    ):
+        raise SystemExit(2)
+    print(f"timer\t{timer}\t{int(record['enabled'])}\t{int(record['active'])}")
+PY
+}
+
+capture_production_coin_input_timer_recovery_state() {
+    if [[ "$PRODUCTION_COIN_INFERENCE_REQUESTED" != "1" ]]; then
+        [[ ! -e "$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR" \
+            && ! -L "$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR" ]] \
+            || die "A production coin input timer recovery state exists while inference is disabled; manual recovery is required."
+        return 0
+    fi
+    validate_production_coin_input_timer_recovery_path
+    local recovery_parent candidate state_path unit timer status
+    local -a units=(
+        coin-group-event-telegram.service
+        coin-group-event-telegram.timer
+        trading-bot-private-gold-collector.service
+        trading-bot-private-gold-collector.timer
+    )
+    local -a timers=(
+        coin-group-event-telegram.timer
+        trading-bot-private-gold-collector.timer
+    )
+    local -A existed=() digests=() enabled=() active=()
+    if [[ -e "$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR" \
+        || -L "$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR" ]]; then
+        local recovered_release
+        recovered_release="$(read_production_coin_input_timer_recovery_state | sed -n 's/^release\t//p')" \
+            || die "Production coin input timer recovery state is invalid; manual review is required."
+        [[ "$recovered_release" == "$RELEASE_SHA" ]] \
+            || die "Production coin input timer recovery belongs to a different release; manual recovery is required."
+        PRODUCTION_COIN_INPUT_TIMER_GUARD_ARMED=1
+        log "Reusing the exact prior production coin input timer recovery state for this release."
+        return 0
+    fi
+    recovery_parent="$(dirname "$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR")"
+    install -d -m 0700 -- "$recovery_parent"
+    validate_production_coin_input_timer_recovery_path
+    [[ -d "$PRODUCTION_COIN_INPUT_SYSTEMD_DIR" \
+        && ! -L "$PRODUCTION_COIN_INPUT_SYSTEMD_DIR" ]] \
+        || die "Production coin input systemd directory is invalid."
+    candidate="$(mktemp -d "$recovery_parent/.coin-input-timer-recovery.XXXXXXXX")"
+    chmod 0700 "$candidate"
+    for unit in "${units[@]}"; do
+        if [[ -L "$PRODUCTION_COIN_INPUT_SYSTEMD_DIR/$unit" ]]; then
+            rm -rf -- "$candidate"
+            die "Production coin input unit is a symlink: $unit"
+        elif [[ -f "$PRODUCTION_COIN_INPUT_SYSTEMD_DIR/$unit" ]]; then
+            existed["$unit"]=1
+            install -m 0600 -- "$PRODUCTION_COIN_INPUT_SYSTEMD_DIR/$unit" "$candidate/$unit"
+            digests["$unit"]="$(file_sha256 "$candidate/$unit")"
+        elif [[ -e "$PRODUCTION_COIN_INPUT_SYSTEMD_DIR/$unit" ]]; then
+            rm -rf -- "$candidate"
+            die "Production coin input unit has an unsupported file type: $unit"
+        else
+            existed["$unit"]=0
+            digests["$unit"]=-
+        fi
+    done
+    for timer in "${timers[@]}"; do
+        enabled["$timer"]=0
+        active["$timer"]=0
+        if [[ "${existed[$timer]}" == "1" ]]; then
+            if systemctl is-enabled --quiet "$timer" >/dev/null 2>&1; then
+                enabled["$timer"]=1
+            else
+                status=$?
+                [[ "$status" == "1" ]] || {
+                    rm -rf -- "$candidate"
+                    die "Production coin input timer enabled state is unavailable: $timer"
+                }
+            fi
+            if systemctl is-active --quiet "$timer" >/dev/null 2>&1; then
+                active["$timer"]=1
+            else
+                status=$?
+                [[ "$status" == "3" ]] || {
+                    rm -rf -- "$candidate"
+                    die "Production coin input timer active state is unavailable: $timer"
+                }
+            fi
+        fi
+    done
+    state_path="$candidate/state.json"
+    python3 - "$state_path" "$RELEASE_SHA" \
+        "${existed[${units[0]}]}" "${digests[${units[0]}]}" \
+        "${existed[${units[1]}]}" "${digests[${units[1]}]}" \
+        "${existed[${units[2]}]}" "${digests[${units[2]}]}" \
+        "${existed[${units[3]}]}" "${digests[${units[3]}]}" \
+        "${enabled[${timers[0]}]}" "${active[${timers[0]}]}" \
+        "${enabled[${timers[1]}]}" "${active[${timers[1]}]}" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+destination = Path(sys.argv[1])
+release_sha = sys.argv[2]
+units = (
+    "coin-group-event-telegram.service",
+    "coin-group-event-telegram.timer",
+    "trading-bot-private-gold-collector.service",
+    "trading-bot-private-gold-collector.timer",
+)
+timers = (
+    "coin-group-event-telegram.timer",
+    "trading-bot-private-gold-collector.timer",
+)
+values = sys.argv[3:]
+unit_values = values[:8]
+timer_values = values[8:]
+payload = {
+    "schema_version": 1,
+    "status": "prepared",
+    "release_sha": release_sha,
+    "units": {
+        unit: {
+            "existed": unit_values[index * 2] == "1",
+            "sha256": None if unit_values[index * 2 + 1] == "-" else unit_values[index * 2 + 1],
+        }
+        for index, unit in enumerate(units)
+    },
+    "timers": {
+        timer: {
+            "enabled": timer_values[index * 2] == "1",
+            "active": timer_values[index * 2 + 1] == "1",
+        }
+        for index, timer in enumerate(timers)
+    },
+    "recovery_action": "restore_prior_units_and_timer_state_on_release_failure",
+}
+descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+    json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+    stream.write("\n")
+    stream.flush()
+    os.fsync(stream.fileno())
+PY
+    chmod 0600 "$state_path"
+    python3 - "$candidate" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+for path in root.iterdir():
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+descriptor = os.open(root, os.O_RDONLY)
+try:
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+PY
+    mv -T -- "$candidate" "$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR"
+    python3 - "$recovery_parent" <<'PY'
+import os
+import sys
+descriptor = os.open(sys.argv[1], os.O_RDONLY)
+try:
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+PY
+    read_production_coin_input_timer_recovery_state >/dev/null \
+        || die "Production coin input timer recovery state failed post-write validation."
+    PRODUCTION_COIN_INPUT_TIMER_GUARD_ARMED=1
+}
+
+clear_production_coin_input_timer_recovery_state() {
+    local recovery_parent
+    [[ -e "$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR" \
+        || -L "$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR" ]] || {
+        PRODUCTION_COIN_INPUT_TIMER_GUARD_ARMED=0
+        return 0
+    }
+    ( read_production_coin_input_timer_recovery_state >/dev/null ) \
+        || return 1
+    recovery_parent="$(dirname "$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR")"
+    rm -rf -- "$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR" \
+        || return 1
+    [[ ! -e "$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR" \
+        && ! -L "$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR" ]] \
+        || return 1
+    python3 - "$recovery_parent" <<'PY' || return 1
+import os
+import sys
+descriptor = os.open(sys.argv[1], os.O_RDONLY)
+try:
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+PY
+    PRODUCTION_COIN_INPUT_TIMER_GUARD_ARMED=0
+}
+
+restore_production_coin_input_timer_recovery_state() {
+    local serialized recovered unit existed digest timer enabled active candidate status
+    local -a records=()
+    local -A prior_unit_existed=()
+    local failed=0
+    [[ -d "$PRODUCTION_COIN_INPUT_SYSTEMD_DIR" \
+        && ! -L "$PRODUCTION_COIN_INPUT_SYSTEMD_DIR" ]] \
+        || return 1
+    serialized="$(read_production_coin_input_timer_recovery_state)" \
+        || return 1
+    mapfile -t records <<<"$serialized"
+    [[ "${records[0]:-}" == $'release\t'"$RELEASE_SHA" ]] \
+        || return 1
+    for recovered in "${records[@]:1:4}"; do
+        IFS=$'\t' read -r _ unit existed digest <<<"$recovered"
+        prior_unit_existed["$unit"]="$existed"
+    done
+    set +e
+    for timer in coin-group-event-telegram.timer trading-bot-private-gold-collector.timer; do
+        if [[ -e "$PRODUCTION_COIN_INPUT_SYSTEMD_DIR/$timer" \
+            || -L "$PRODUCTION_COIN_INPUT_SYSTEMD_DIR/$timer" ]]; then
+            systemctl stop "$timer" >/dev/null 2>&1 || failed=1
+        else
+            systemctl stop "$timer" >/dev/null 2>&1 || true
+        fi
+        systemctl disable "$timer" >/dev/null 2>&1 || true
+    done
+    for recovered in "${records[@]:1:4}"; do
+        IFS=$'\t' read -r _ unit existed digest <<<"$recovered"
+        if [[ "$existed" == "1" ]]; then
+            candidate="$(mktemp "$PRODUCTION_COIN_INPUT_SYSTEMD_DIR/.${unit}.rollback.XXXXXXXX")" || {
+                failed=1
+                continue
+            }
+            install -m 0644 -- "$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR/$unit" "$candidate" \
+                || failed=1
+            [[ "$(file_sha256 "$candidate" 2>/dev/null)" == "$digest" ]] || failed=1
+            mv -fT -- "$candidate" "$PRODUCTION_COIN_INPUT_SYSTEMD_DIR/$unit" || failed=1
+            rm -f -- "$candidate"
+            [[ -f "$PRODUCTION_COIN_INPUT_SYSTEMD_DIR/$unit" \
+                && ! -L "$PRODUCTION_COIN_INPUT_SYSTEMD_DIR/$unit" \
+                && "$(file_sha256 "$PRODUCTION_COIN_INPUT_SYSTEMD_DIR/$unit" 2>/dev/null)" == "$digest" ]] \
+                || failed=1
+        else
+            rm -f -- "$PRODUCTION_COIN_INPUT_SYSTEMD_DIR/$unit" || failed=1
+            [[ ! -e "$PRODUCTION_COIN_INPUT_SYSTEMD_DIR/$unit" \
+                && ! -L "$PRODUCTION_COIN_INPUT_SYSTEMD_DIR/$unit" ]] \
+                || failed=1
+        fi
+    done
+    python3 - "$PRODUCTION_COIN_INPUT_SYSTEMD_DIR" \
+        coin-group-event-telegram.service \
+        coin-group-event-telegram.timer \
+        trading-bot-private-gold-collector.service \
+        trading-bot-private-gold-collector.timer <<'PY' || failed=1
+import os
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+for name in sys.argv[2:]:
+    path = root / name
+    if not path.exists():
+        continue
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+descriptor = os.open(root, os.O_RDONLY)
+try:
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+PY
+    systemctl daemon-reload >/dev/null 2>&1 || failed=1
+    for recovered in "${records[@]:5:2}"; do
+        IFS=$'\t' read -r _ timer enabled active <<<"$recovered"
+        if [[ "${prior_unit_existed[$timer]:-0}" != "1" ]]; then
+            continue
+        fi
+        if [[ "$enabled" == "1" ]]; then
+            systemctl enable "$timer" >/dev/null 2>&1 || failed=1
+        else
+            systemctl disable "$timer" >/dev/null 2>&1 || failed=1
+        fi
+        if [[ "$active" == "1" ]]; then
+            systemctl restart "$timer" >/dev/null 2>&1 || failed=1
+        else
+            systemctl stop "$timer" >/dev/null 2>&1 || failed=1
+        fi
+        if systemctl is-enabled --quiet "$timer" >/dev/null 2>&1; then
+            status=0
+        else
+            status=$?
+        fi
+        if [[ "$enabled" == "1" ]]; then
+            [[ "$status" == "0" ]] || failed=1
+        else
+            [[ "$status" == "1" ]] || failed=1
+        fi
+        if systemctl is-active --quiet "$timer" >/dev/null 2>&1; then
+            status=0
+        else
+            status=$?
+        fi
+        if [[ "$active" == "1" ]]; then
+            [[ "$status" == "0" ]] || failed=1
+        else
+            [[ "$status" == "3" ]] || failed=1
+        fi
+    done
+    set -e
+    [[ "$failed" == "0" ]] || return 1
+    clear_production_coin_input_timer_recovery_state
+}
+
+production_coin_input_timer_exit_guard() {
+    local status="${1:-$?}"
+    if [[ "$status" != "0" && "$PRODUCTION_COIN_INPUT_TIMER_GUARD_ARMED" == "1" ]]; then
+        if restore_production_coin_input_timer_recovery_state; then
+            printf 'production_coin_input_timers=prior_units_and_state_restored\n' >&2
+        else
+            printf 'production_coin_input_timers=rollback_incomplete recovery_state_retained=true manual_recovery_required=true\n' >&2
+        fi
+    fi
+    return "$status"
+}
+
+production_release_exit_guard() {
+    local status=$?
+    trap - EXIT
+    two_host_release_exit_guard "$status" || true
+    production_release_relay_exit_guard "$status" || true
+    production_coin_input_timer_exit_guard "$status" || true
+    release_production_locks
+    exit "$status"
+}
+
+verify_production_coin_relay_script_parity() {
+    local local_digest remote_digest remote_script="$IRAN_PROJECT_DIR/scripts/relay_production_coin_inference_snapshot.py"
+    validate_remote_shell_path "$remote_script" "Iran production coin Snapshot relay script"
+    [[ -f "$PRODUCTION_COIN_SNAPSHOT_RELAY_SCRIPT" ]] || die "Production coin Snapshot relay script is missing locally."
+    local_digest="$(file_sha256 "$PRODUCTION_COIN_SNAPSHOT_RELAY_SCRIPT")"
+    remote_digest="$(ssh_iran "test -f '$remote_script' && sha256sum '$remote_script' | awk '{print \$1}'")"
+    [[ "$remote_digest" == "$local_digest" ]] || die "Production coin Snapshot relay script differs between Foreign and Iran after sync."
+    PRODUCTION_COIN_SNAPSHOT_RELAY_SCRIPT_SHA256="$local_digest"
+}
+
+verify_production_coin_snapshot_relay() {
+    local local_digest remote_digest remote_output
+    resolve_production_coin_runtime_contract
+    [[ -f "$FOREIGN_COIN_SNAPSHOT_PATH" ]] || die "Foreign production coin Snapshot was not published."
+    local_digest="$(file_sha256 "$FOREIGN_COIN_SNAPSHOT_PATH")"
+    python3 "$PRODUCTION_COIN_SNAPSHOT_RELAY_SCRIPT" check \
+        --environment production \
+        --production-confirmation "$PRODUCTION_COIN_SNAPSHOT_RELAY_CONFIRM_TEXT" \
+        --runtime-root "$FOREIGN_COIN_SNAPSHOT_RUNTIME_DIR" \
+        --snapshot "$FOREIGN_COIN_SNAPSHOT_PATH" \
+        --expected-sha256 "$local_digest" \
+        --maximum-age-seconds "$PRODUCTION_COIN_SNAPSHOT_MAXIMUM_AGE_SECONDS" >/dev/null
+    remote_output="$(ssh_iran "python3 '$IRAN_PROJECT_DIR/scripts/relay_production_coin_inference_snapshot.py' check --environment production --production-confirmation '$PRODUCTION_COIN_SNAPSHOT_RELAY_CONFIRM_TEXT' --runtime-root '$IRAN_COIN_SNAPSHOT_RUNTIME_DIR' --snapshot '$IRAN_COIN_SNAPSHOT_PATH' --expected-sha256 '$local_digest' --maximum-age-seconds '$PRODUCTION_COIN_SNAPSHOT_MAXIMUM_AGE_SECONDS' >/dev/null && sha256sum '$IRAN_COIN_SNAPSHOT_PATH' | awk '{print \$1}'")"
+    remote_digest="$(printf '%s' "$remote_output" | tail -n 1)"
+    [[ "$remote_digest" == "$local_digest" ]] || die "Production coin Snapshot digests differ between Foreign and Iran."
+    if [[ "$PRODUCTION_COIN_INFERENCE_REQUESTED" == "1" ]]; then
+        python3 "$PRODUCTION_COIN_READINESS_SCRIPT" \
+            --environment production \
+            --production-confirmation check-production-coin-inference-readiness \
+            snapshot --snapshot "$FOREIGN_COIN_SNAPSHOT_PATH" \
+            --expected-sha256 "$local_digest" \
+            || die "Foreign production coin Snapshot failed semantic readiness."
+        ssh_iran "python3 '$IRAN_PROJECT_DIR/scripts/check_production_coin_inference_readiness.py' --environment production --production-confirmation check-production-coin-inference-readiness snapshot --snapshot '$IRAN_COIN_SNAPSHOT_PATH' --expected-sha256 '$local_digest'" \
+            || die "Iran production coin Snapshot failed semantic readiness."
+    fi
+    if [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ENABLED" == "1" ]]; then
+        systemctl is-enabled --quiet "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" \
+            || die "Production coin Snapshot relay timer did not restore its enabled state."
+    else
+        ! systemctl is-enabled --quiet "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" \
+            || die "Production coin Snapshot relay timer did not restore its disabled state."
+    fi
+    if [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ACTIVE" == "1" ]]; then
+        systemctl is-active --quiet "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" \
+            || die "Production coin Snapshot relay timer did not restore its active state."
+    else
+        ! systemctl is-active --quiet "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" \
+            || die "Production coin Snapshot relay timer did not restore its inactive state."
+    fi
+    log "Production coin Snapshot relay verified script_sha256=$PRODUCTION_COIN_SNAPSHOT_RELAY_SCRIPT_SHA256 snapshot_sha256=$local_digest"
+}
+
+run_production_coin_input_timer_installer() {
+    local check_only="$1"
+    COIN_INTELLIGENCE_INPUT_TIMERS_CONFIRM=install-coin-intelligence-input-timers \
+    COIN_INTELLIGENCE_INPUT_TIMERS_CHECK_ONLY="$check_only" \
+    COIN_INTELLIGENCE_INPUT_TIMERS_FORCE_ACTIVE=1 \
+    PROJECT_DIR="$LOCAL_PROJECT_DIR" \
+    COIN_INTELLIGENCE_MARKET_RUNTIME_ROOT="$PRODUCTION_COIN_INFERENCE_SOURCE_ROOT" \
+    COIN_INTELLIGENCE_ESTIMATOR_RUNTIME_ROOT="$PRODUCTION_COIN_INFERENCE_ESTIMATOR_ROOT" \
+    COIN_GROUP_EVENT_CHANNEL_ID="$COIN_GROUP_EVENT_CHANNEL_ID" \
+    COIN_INTELLIGENCE_EXPECTED_GROUP_EVENT_CHANNEL_ID="$COIN_GROUP_EVENT_CHANNEL_ID" \
+    COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_OFFER_CHANNEL_ID="$COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_OFFER_CHANNEL_ID" \
+    COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_TRADE_CHANNEL_ID="$COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_TRADE_CHANNEL_ID" \
+    COIN_INTELLIGENCE_EXPECTED_TELEGRAM_API_ID="$COIN_INTELLIGENCE_EXPECTED_TELEGRAM_API_ID" \
+    COIN_INTELLIGENCE_EXPECTED_GROUP_SESSION_FILE="$PRODUCTION_COIN_INFERENCE_SOURCE_ROOT/session/coin-group-event-reader.session" \
+    COIN_INTELLIGENCE_EXPECTED_PRIVATE_SESSION_FILE="$PRODUCTION_COIN_INFERENCE_SOURCE_ROOT/session/telegram-reader.session" \
+    PRODUCTION_INSTALL_LOCK_INHERITED=verified-release-held-lock \
+        bash "$PRODUCTION_COIN_INPUT_TIMER_INSTALLER"
+}
+
+install_and_verify_production_coin_inputs() {
+    [[ "$PRODUCTION_COIN_INFERENCE_REQUESTED" == "1" ]] || return 0
+    run_production_coin_input_timer_installer 0
+    local attempt
+    for attempt in $(seq 1 30); do
+        if run_production_coin_input_timer_installer 1 >/dev/null 2>&1 \
+            && python3 "$PRODUCTION_COIN_READINESS_SCRIPT" \
+                --environment production \
+                --production-confirmation check-production-coin-inference-readiness \
+                source --market-store "$PRODUCTION_COIN_INFERENCE_SOURCE_STORE" \
+                >/dev/null 2>&1; then
+            run_production_coin_input_timer_installer 1
+            python3 "$PRODUCTION_COIN_READINESS_SCRIPT" \
+                --environment production \
+                --production-confirmation check-production-coin-inference-readiness \
+                source --market-store "$PRODUCTION_COIN_INFERENCE_SOURCE_STORE"
+            log "Production coin inference upstream collectors are identity-bound, active, successful, and checkpointed; market-age diagnostics were emitted."
+            return 0
+        fi
+        sleep 5
+    done
+    die "Production coin inference upstream collectors did not reach the required fresh/readable state."
+}
+
+verify_running_production_coin_consumers() {
+    [[ "$PRODUCTION_COIN_INFERENCE_REQUESTED" == "1" ]] || return 0
+    local attempt local_digest remote_digest
+    for attempt in $(seq 1 5); do
+        local_digest="$(file_sha256 "$FOREIGN_COIN_SNAPSHOT_PATH")"
+        remote_digest="$(ssh_iran "sha256sum '$IRAN_COIN_SNAPSHOT_PATH' | awk '{print \$1}'")"
+        if [[ "$local_digest" == "$remote_digest" \
+            && "$local_digest" =~ ^[0-9a-f]{64}$ ]] \
+            && docker exec trading_bot_app python3 /app/scripts/check_production_coin_inference_readiness.py \
+                --environment production \
+                --production-confirmation check-production-coin-inference-readiness \
+                consumer --snapshot /app/runtime/coin-inference/coin-rates.json \
+                --expected-sha256 "$local_digest" --expect-enabled \
+            && docker exec trading_bot_bot python3 /app/scripts/check_production_coin_inference_readiness.py \
+                --environment production \
+                --production-confirmation check-production-coin-inference-readiness \
+                consumer --snapshot /app/runtime/coin-inference/coin-rates.json \
+                --expected-sha256 "$local_digest" --expect-enabled \
+            && ssh_iran "docker exec trading_bot_app python3 /app/scripts/check_production_coin_inference_readiness.py --environment production --production-confirmation check-production-coin-inference-readiness consumer --snapshot /app/runtime/coin-inference/coin-rates.json --expected-sha256 '$local_digest' --expect-enabled"; then
+            log "Production coin inference consumers passed same-digest, read-only-mount, enabled-flag and transport-freshness probes; hard-reject authority diagnostics were emitted and remain fail-open when degraded."
+            return 0
+        fi
+        sleep 2
+    done
+    die "Production coin inference consumers did not pass the post-deploy readiness contract."
+}
+
+reconcile_production_coin_snapshot_relay() {
+    if [[ "$PRODUCTION_COIN_INFERENCE_RELAY_ENABLED" == "0" ]]; then
+        systemctl stop "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1 || true
+        systemctl stop "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE" >/dev/null 2>&1 || true
+        systemctl disable "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1 || true
+        clear_production_coin_relay_recovery_marker
+        PRODUCTION_COIN_SNAPSHOT_RELAY_GUARD_ARMED=0
+        log "Production coin Snapshot relay is intentionally stopped and disabled."
+        return 0
+    fi
+    ensure_local_production_coin_runtime_dir
+    ensure_remote_production_coin_runtime_dir 1
+    verify_production_coin_relay_script_parity
+    PRODUCTION_COIN_INFERENCE_CONFIRM="$PRODUCTION_COIN_INFERENCE_RELAY_CONFIRM" \
+    PROJECT_DIR="$LOCAL_PROJECT_DIR" \
+    PRODUCTION_COIN_INFERENCE_SOURCE_ROOT="$PRODUCTION_COIN_INFERENCE_SOURCE_ROOT" \
+    PRODUCTION_COIN_INFERENCE_SOURCE_STORE="$PRODUCTION_COIN_INFERENCE_SOURCE_STORE" \
+    PRODUCTION_COIN_INFERENCE_RUNTIME_ROOT="$FOREIGN_COIN_SNAPSHOT_RUNTIME_DIR" \
+    PRODUCTION_COIN_INFERENCE_SNAPSHOT_HOST_PATH="$FOREIGN_COIN_SNAPSHOT_PATH" \
+    PRODUCTION_COIN_INFERENCE_REMOTE_HOST="$IRAN_SSH_TARGET" \
+    PRODUCTION_COIN_INFERENCE_REMOTE_PORT="$IRAN_SSH_PORT" \
+    PRODUCTION_COIN_INFERENCE_REMOTE_RUNTIME_ROOT="$IRAN_COIN_SNAPSHOT_RUNTIME_DIR" \
+    PRODUCTION_COIN_INFERENCE_REMOTE_SNAPSHOT="$IRAN_COIN_SNAPSHOT_PATH" \
+    PRODUCTION_COIN_INFERENCE_REMOTE_PROJECT_DIR="$IRAN_PROJECT_DIR" \
+    PRODUCTION_COIN_INFERENCE_REMOTE_IDENTITY_FILE="${IRAN_SSH_PRIVATE_KEY_PATH:-}" \
+    PRODUCTION_COIN_INFERENCE_MAXIMUM_AGE_SECONDS="$PRODUCTION_COIN_SNAPSHOT_MAXIMUM_AGE_SECONDS" \
+    PRODUCTION_INSTALL_LOCK_INHERITED=verified-release-held-lock \
+        bash "$PRODUCTION_COIN_SNAPSHOT_RELAY_INSTALLER"
+    PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ENABLED=1
+    PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ACTIVE=1
+    if [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ENABLED" == "1" ]]; then
+        systemctl enable "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1
+    else
+        systemctl disable "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1
+    fi
+    if [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ACTIVE" == "1" ]]; then
+        systemctl start "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1
+    else
+        systemctl stop "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1
+    fi
+    if ! (verify_production_coin_snapshot_relay); then
+        systemctl stop "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1 || true
+        systemctl stop "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE" >/dev/null 2>&1 || true
+        die "Production coin Snapshot relay verification failed; the relay was left stopped."
+    fi
+    clear_production_coin_relay_recovery_marker
 }
 
 require_env_value() {
@@ -643,38 +2466,105 @@ backup_runtime_env_file() {
     local role_label="$2"
     [[ -f "$env_path" ]] || return 0
 
-    local timestamp safe_name backup_path
+    local timestamp safe_name backup_path source_sha256 backup_sha256
     timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
     safe_name="$(printf '%s' "$env_path" | sed 's#^/##; s#[^A-Za-z0-9._-]#_#g')"
-    mkdir -p "$ENV_BACKUP_DIR"
-    backup_path="$ENV_BACKUP_DIR/${safe_name}.${timestamp}.bak"
-    cp -p "$env_path" "$backup_path"
-    chmod 600 "$backup_path" || true
-    log "Backed up $role_label runtime env to $backup_path"
+    install -d -m 0700 -- "$ENV_BACKUP_DIR"
+    validate_secure_env_directory "$ENV_BACKUP_DIR" \
+        || die "Runtime env backup directory is not secure."
+    backup_path="$(mktemp "$ENV_BACKUP_DIR/${safe_name}.${timestamp}.XXXXXX.bak")"
+    install -m 0600 -- "$env_path" "$backup_path"
+    fsync_file_and_parent "$backup_path"
+    source_sha256="$(file_sha256 "$env_path")"
+    backup_sha256="$(file_sha256 "$backup_path")"
+    [[ "$backup_sha256" == "$source_sha256" ]] \
+        || die "$role_label runtime env backup digest mismatch."
+    log "Backed up $role_label runtime env sha256=$backup_sha256."
 }
 
 validate_runtime_env_source_policy() {
     local project_env_path="$LOCAL_PROJECT_DIR/.env"
     local project_iran_env_path="$LOCAL_PROJECT_DIR/.env.iran"
-    local local_source iran_source project_env project_iran_env iran_output
-    local_source="$(canonical_path "$LOCAL_ENV_SOURCE_PATH")"
-    iran_source="$(canonical_path "$IRAN_ENV_SOURCE_PATH")"
+    local source foreign_output iran_output project_env project_iran_env
+    source="$(canonical_path "$RUNTIME_ENV_SOURCE_PATH")"
+    foreign_output="$(canonical_path "$FOREIGN_RUNTIME_ENV_PATH")"
+    iran_output="$(canonical_path "$IRAN_RUNTIME_ENV_PATH")"
     project_env="$(canonical_path "$project_env_path")"
     project_iran_env="$(canonical_path "$project_iran_env_path")"
-    iran_output="$(canonical_path "$IRAN_ENV_SOURCE_PATH")"
 
     if [[ "$ALLOW_PROJECT_ENV_SOURCE" != "1" ]]; then
-        if [[ "$local_source" == "$project_env" || "$local_source" == "$project_iran_env" ]]; then
-            die "LOCAL_ENV_SOURCE_PATH points at a project-root env file. Use a secure source env outside the repo, or set ALLOW_PROJECT_ENV_SOURCE=1 only for an intentional emergency release."
-        fi
-        if [[ "$iran_source" == "$project_env" || "$iran_source" == "$project_iran_env" ]]; then
-            die "IRAN_ENV_SOURCE_PATH points at a project-root env file. Use a secure source env outside the repo, or set ALLOW_PROJECT_ENV_SOURCE=1 only for an intentional emergency release."
+        if [[ "$source" == "$project_env" || "$source" == "$project_iran_env" ]]; then
+            die "RUNTIME_ENV_SOURCE_PATH points at a project-root env file. Use an immutable secure source outside the repo, or set ALLOW_PROJECT_ENV_SOURCE=1 only for an intentional emergency release."
         fi
     fi
 
-    if [[ "$local_source" == "$iran_output" ]]; then
-        die "LOCAL_ENV_SOURCE_PATH and IRAN_ENV_SOURCE_PATH must be different files so foreign and Iran runtime envs can be rendered independently."
+    [[ "$foreign_output" != "$iran_output" ]] || die "FOREIGN_RUNTIME_ENV_PATH and IRAN_RUNTIME_ENV_PATH must be different files."
+    if [[ "$source" == "$foreign_output" || "$source" == "$iran_output" ]]; then
+        die "RUNTIME_ENV_SOURCE_PATH must be different from both rendered runtime output paths."
     fi
+    if [[ "$foreign_output" == "$project_env" || "$foreign_output" == "$project_iran_env" \
+        || "$iran_output" == "$project_env" || "$iran_output" == "$project_iran_env" ]]; then
+        die "Rendered runtime env outputs must be staging-only files separate from every live project env destination."
+    fi
+    if [[ -n "${IRAN_PROJECT_DIR:-}" \
+        && "$iran_output" == "$(canonical_path "$IRAN_PROJECT_DIR/.env")" ]]; then
+        die "Rendered Iran runtime env output must be separate from the remote live env destination."
+    fi
+}
+
+validate_secure_runtime_env_source_file() {
+    python3 - "$RUNTIME_ENV_SOURCE_PATH" <<'PY'
+import os
+from pathlib import Path
+import stat
+import sys
+
+path = Path(sys.argv[1])
+metadata = path.lstat()
+allowed_owners = {0, os.geteuid()}
+if (
+    path.is_symlink()
+    or not stat.S_ISREG(metadata.st_mode)
+    or path.resolve(strict=True) != path
+    or stat.S_IMODE(metadata.st_mode) != 0o600
+    or metadata.st_uid not in allowed_owners
+):
+    raise SystemExit(2)
+parent = path.parent
+parent_metadata = parent.lstat()
+pending = parent / ".production-runtime-source.pending.json"
+if (
+    parent.is_symlink()
+    or not stat.S_ISDIR(parent_metadata.st_mode)
+    or parent.resolve(strict=True) != parent
+    or parent_metadata.st_uid not in allowed_owners
+    or stat.S_IMODE(parent_metadata.st_mode) & 0o022
+):
+    raise SystemExit(3)
+if pending.exists() or pending.is_symlink():
+    raise SystemExit(4)
+PY
+}
+
+validate_secure_env_directory() {
+    local directory="$1"
+    python3 - "$directory" <<'PY'
+import os
+from pathlib import Path
+import stat
+import sys
+
+path = Path(sys.argv[1])
+metadata = path.lstat()
+if (
+    path.is_symlink()
+    or not stat.S_ISDIR(metadata.st_mode)
+    or path.resolve(strict=True) != path
+    or metadata.st_uid not in {0, os.geteuid()}
+    or stat.S_IMODE(metadata.st_mode) & 0o022
+):
+    raise SystemExit(2)
+PY
 }
 
 validate_runtime_identity_files() {
@@ -682,21 +2572,35 @@ validate_runtime_identity_files() {
     local guard_args=(
         --repo-root "$LOCAL_PROJECT_DIR"
         --manifest-path "$MANIFEST_PATH"
-        --runtime-env "foreign=$LOCAL_ENV_SOURCE_PATH"
-        --runtime-env "iran=$IRAN_ENV_SOURCE_PATH"
+        --runtime-env "foreign=$FOREIGN_RUNTIME_ENV_PATH"
+        --runtime-env "iran=$IRAN_RUNTIME_ENV_PATH"
     )
     if [[ "$ALLOW_PROJECT_ENV_SOURCE" == "1" ]]; then
         guard_args+=(--allow-project-env-source)
     fi
     python3 "$DEPLOYMENT_SURFACE_GUARD" "${guard_args[@]}"
     validate_offer_expiry_receipt_env_files
+    validate_iran_otp_delivery_secret_projection
     validate_runtime_release_sha_files
+}
+
+validate_iran_otp_delivery_secret_projection() {
+    local foreign_secret iran_secret iran_telegram_otp
+    foreign_secret="$(read_env_value "$FOREIGN_RUNTIME_ENV_PATH" "OTP_DELIVERY_STATE_SECRET")"
+    iran_secret="$(read_env_value "$IRAN_RUNTIME_ENV_PATH" "OTP_DELIVERY_STATE_SECRET")"
+    iran_telegram_otp="$(read_env_value "$IRAN_RUNTIME_ENV_PATH" "TELEGRAM_LOGIN_OTP_ENABLED")"
+    [[ -z "$foreign_secret" ]] \
+        || die "Foreign runtime must not receive the Iran OTP delivery state secret."
+    if is_truthy "$iran_telegram_otp"; then
+        [[ ${#iran_secret} -ge 32 ]] \
+            || die "Iran Telegram OTP is enabled but the rendered OTP delivery state secret is missing or too short in the immutable source projection."
+    fi
 }
 
 validate_offer_expiry_receipt_env_files() {
     local foreign_value iran_value
-    foreign_value="$(read_env_value "$LOCAL_ENV_SOURCE_PATH" "OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED")"
-    iran_value="$(read_env_value "$IRAN_ENV_SOURCE_PATH" "OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED")"
+    foreign_value="$(read_env_value "$FOREIGN_RUNTIME_ENV_PATH" "OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED")"
+    iran_value="$(read_env_value "$IRAN_RUNTIME_ENV_PATH" "OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED")"
 
     [[ -n "$foreign_value" ]] || die "Foreign runtime env is missing OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED"
     [[ -n "$iran_value" ]] || die "Iran runtime env is missing OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED"
@@ -709,8 +2613,8 @@ validate_offer_expiry_receipt_env_files() {
 validate_runtime_release_sha_files() {
     local expected_sha foreign_sha iran_sha
     expected_sha="$(git -C "$LOCAL_PROJECT_DIR" rev-parse HEAD)"
-    foreign_sha="$(read_env_value "$LOCAL_ENV_SOURCE_PATH" "RELEASE_SHA")"
-    iran_sha="$(read_env_value "$IRAN_ENV_SOURCE_PATH" "RELEASE_SHA")"
+    foreign_sha="$(read_env_value "$FOREIGN_RUNTIME_ENV_PATH" "RELEASE_SHA")"
+    iran_sha="$(read_env_value "$IRAN_RUNTIME_ENV_PATH" "RELEASE_SHA")"
 
     [[ "$foreign_sha" == "$expected_sha" ]] || die "Foreign runtime RELEASE_SHA does not match production HEAD"
     [[ "$iran_sha" == "$expected_sha" ]] || die "Iran runtime RELEASE_SHA does not match production HEAD"
@@ -767,7 +2671,6 @@ export_runtime_renderer_overrides() {
         OTP_SMS_AUTO_FALLBACK_ENABLED
         OTP_SMS_AUTO_FALLBACK_SECONDS
         OTP_TTL_SECONDS
-        IRAN_OTP_DELIVERY_STATE_SECRET
         TELEGRAM_REGISTRATION_POST_EXPIRY_GRACE_SECONDS
         TELEGRAM_REGISTRATION_JOB_BATCH_SIZE
         TELEGRAM_REGISTRATION_JOB_CONCURRENCY
@@ -863,12 +2766,12 @@ validate_observability_env_file() {
 }
 
 validate_observability_release_inputs() {
-    validate_observability_env_file "$LOCAL_ENV_SOURCE_PATH" "Foreign"
-    validate_observability_env_file "$IRAN_ENV_SOURCE_PATH" "Iran"
-    summarize_web_push_env_file "$LOCAL_ENV_SOURCE_PATH" "Foreign"
-    validate_web_push_env_file "$LOCAL_ENV_SOURCE_PATH" "Foreign"
-    summarize_web_push_env_file "$IRAN_ENV_SOURCE_PATH" "Iran"
-    validate_web_push_env_file "$IRAN_ENV_SOURCE_PATH" "Iran"
+    validate_observability_env_file "$FOREIGN_RUNTIME_ENV_PATH" "Foreign"
+    validate_observability_env_file "$IRAN_RUNTIME_ENV_PATH" "Iran"
+    summarize_web_push_env_file "$FOREIGN_RUNTIME_ENV_PATH" "Foreign"
+    validate_web_push_env_file "$FOREIGN_RUNTIME_ENV_PATH" "Foreign"
+    summarize_web_push_env_file "$IRAN_RUNTIME_ENV_PATH" "Iran"
+    validate_web_push_env_file "$IRAN_RUNTIME_ENV_PATH" "Iran"
 }
 
 install_sync_sampler_local() {
@@ -932,11 +2835,12 @@ ensure_production_release_git_ref() {
         die "Production release must run from a Git checkout so branch identity can be verified."
     fi
 
-    local branch head_sha upstream upstream_sha
+    local branch head_sha upstream upstream_sha origin_main_sha remote_main_binding
     branch="$(git -C "$LOCAL_PROJECT_DIR" symbolic-ref --short HEAD 2>/dev/null || true)"
     head_sha="$(git -C "$LOCAL_PROJECT_DIR" rev-parse --short HEAD)"
     RELEASE_SHA="$(git -C "$LOCAL_PROJECT_DIR" rev-parse HEAD)"
-    export RELEASE_SHA
+    PRODUCTION_RELEASE_TREE="$(git -C "$LOCAL_PROJECT_DIR" rev-parse 'HEAD^{tree}')"
+    export RELEASE_SHA PRODUCTION_RELEASE_TREE
 
     if [[ "$IRAN_ALLOW_NON_MAIN_RELEASE" == "1" ]]; then
         log "IRAN_ALLOW_NON_MAIN_RELEASE=1; allowing production release from branch ${branch:-detached} at $head_sha."
@@ -945,10 +2849,8 @@ ensure_production_release_git_ref() {
     fi
 
     upstream="$(git -C "$LOCAL_PROJECT_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
-    if [[ -z "$upstream" ]]; then
-        log "No upstream configured for branch ${branch:-detached}; skipping upstream equality check."
-        return 0
-    fi
+    [[ "$upstream" == "origin/main" ]] \
+        || die "Production release branch 'main' must track origin/main exactly (current upstream: ${upstream:-missing})."
 
     upstream_sha="$(git -C "$LOCAL_PROJECT_DIR" rev-parse --short "$upstream" 2>/dev/null || true)"
     if [[ -z "$upstream_sha" ]]; then
@@ -963,6 +2865,31 @@ ensure_production_release_git_ref() {
     if [[ "$(git -C "$LOCAL_PROJECT_DIR" rev-parse HEAD)" != "$(git -C "$LOCAL_PROJECT_DIR" rev-parse "$upstream")" ]]; then
         die "Production release branch '$branch' must match upstream '$upstream' exactly (local: $head_sha, upstream: $upstream_sha). Push/pull first, or set IRAN_ALLOW_RELEASE_BRANCH_DRIFT=1 for an explicit emergency override."
     fi
+
+    origin_main_sha="$(git -C "$LOCAL_PROJECT_DIR" rev-parse --verify 'refs/remotes/origin/main^{commit}' 2>/dev/null || true)"
+    [[ "$origin_main_sha" == "$RELEASE_SHA" ]] \
+        || die "Production release HEAD must match the local origin/main tracking ref exactly. Fetch/push first."
+    remote_main_binding="$(
+        git -C "$LOCAL_PROJECT_DIR" ls-remote --exit-code origin refs/heads/main 2>/dev/null \
+            | awk 'NF { print $1 " " $2 }'
+    )" || die "Unable to verify the live origin/main binding."
+    [[ "$remote_main_binding" == "$RELEASE_SHA refs/heads/main" ]] \
+        || die "Production release HEAD must be pushed uniquely to the live origin/main ref."
+}
+
+verify_frozen_release_source() {
+    [[ -n "$RELEASE_SHA" && -n "$PRODUCTION_RELEASE_TREE" ]] \
+        || die "Release Git identity is not initialized."
+    [[ "$IRAN_ALLOW_DIRTY_RELEASE" == "0" \
+        && "$IRAN_ALLOW_NON_MAIN_RELEASE" == "0" \
+        && "$IRAN_ALLOW_RELEASE_BRANCH_DRIFT" == "0" ]] \
+        || die "Official two-host release cannot use Git safety overrides."
+    [[ "$(git -C "$LOCAL_PROJECT_DIR" rev-parse HEAD)" == "$RELEASE_SHA" \
+        && "$(git -C "$LOCAL_PROJECT_DIR" rev-parse 'HEAD^{tree}')" == "$PRODUCTION_RELEASE_TREE" \
+        && "$(git -C "$LOCAL_PROJECT_DIR" symbolic-ref --short HEAD)" == "$PRODUCTION_RELEASE_BRANCH" \
+        && "$(git -C "$LOCAL_PROJECT_DIR" rev-parse '@{u}')" == "$RELEASE_SHA" \
+        && -z "$(git -C "$LOCAL_PROJECT_DIR" status --porcelain --untracked-files=all)" ]] \
+        || die "Immutable pushed production source drifted during release."
 }
 
 local_node_version_ok() {
@@ -1073,8 +3000,7 @@ ensure_local_runtime_packages() {
 }
 
 check_local() {
-    log "Checking local prerequisites"
-    ensure_local_runtime_packages
+    log "Checking local prerequisites (read-only)"
     ensure_local_tools
     [[ "$(id -u)" -eq 0 ]] || die "This release script must be run as root so it can update /etc/hosts and manage Docker."
     ensure_clean_release_tree
@@ -1089,10 +3015,23 @@ check_local() {
     [[ -f "$CHANGE_LOG_SOURCE_SEQUENCE_ALIGNER" ]] || die "Change-log source sequence aligner missing: $CHANGE_LOG_SOURCE_SEQUENCE_ALIGNER"
     [[ -f "$TRADE_NUMBER_SEQUENCE_ALIGNER" ]] || die "Trade-number sequence aligner missing: $TRADE_NUMBER_SEQUENCE_ALIGNER"
     validate_runtime_env_source_policy
+    validate_secure_runtime_env_source_file \
+        || die "Immutable production runtime env source must be canonical, owner-controlled, non-symlink, and mode 0600."
+    validate_production_coin_inference_activation_contract
+    validate_production_coin_relay_manifest
+    log "Read-only local checks passed"
+}
+
+prepare_local_release_inputs() {
+    # This is intentionally separate from check_local: package installation,
+    # rendered env creation, and release-artifact rendering are mutations and
+    # may only run after the production operation/source locks are held.
+    ensure_local_runtime_packages
+    check_local
     ensure_runtime_env_file
     render_release_artifacts
     validate_observability_release_inputs
-    log "Local checks passed"
+    log "Mutable local release preparation passed"
 }
 
 prepare_iran_package_bundle() {
@@ -1469,26 +3408,48 @@ build_image_bundle_signature() {
     local rel_path
 
     {
-        printf 'signature_scope=%s\n' "iran-base-image-v2"
+        printf 'signature_scope=%s\n' "iran-immutable-runtime-image-v3"
         printf 'iran_image_platform=%s\n' "$IRAN_IMAGE_PLATFORM"
         printf 'iran_host_arch=%s\n' "$IRAN_HOST_ARCH"
         printf 'python_base_image=%s\n' "python:3.11-slim-bullseye"
         printf 'postgres_image=%s\n' "postgres:15-alpine"
         printf 'redis_image=%s\n' "redis:7-alpine"
-        # Iran compose bind-mounts runtime code. Refresh the heavy image bundle
-        # only when base-image dependencies or non-mounted image assets change.
+        # Production containers execute only the receipt-bound image payload.
+        # Every runtime source copied by Dockerfile.iran must be in this digest.
         for rel_path in \
             Dockerfile.iran \
             .dockerignore \
             requirements.txt \
             deploy/production/pip-bootstrap-requirements.txt \
             pip_packages \
+            api \
+            bot \
+            core \
+            src \
+            migrations \
+            models \
             fonts \
-            templates
+            templates \
+            alembic.ini \
+            main.py \
+            manage.py \
+            run_bot.py \
+            schemas.py \
+            seed_fake_data.py \
+            trading_settings.json \
+            scripts \
+            mini_app_dist
         do
             hash_context_entry "$context_dir" "$rel_path"
         done
     } | sha256sum | cut -d' ' -f1
+}
+
+iran_release_image_matches() {
+    local expected_signature="$1"
+    [[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' trading_bot_base_iran 2>/dev/null || true)" == "$RELEASE_SHA" \
+        && "$(docker image inspect --format '{{index .Config.Labels "io.gold-trade.release.tree"}}' trading_bot_base_iran 2>/dev/null || true)" == "$PRODUCTION_RELEASE_TREE" \
+        && "$(docker image inspect --format '{{index .Config.Labels "io.gold-trade.release.input-signature"}}' trading_bot_base_iran 2>/dev/null || true)" == "$expected_signature" ]]
 }
 
 frontend_build_signature() {
@@ -1582,6 +3543,7 @@ build_release() {
         --exclude 'docs' \
         --exclude 'frontend' \
         --exclude 'node_modules' \
+        --exclude 'pip_packages' \
         --exclude 'tests' \
         --exclude 'tmp' \
         --exclude 'uploads' \
@@ -1593,7 +3555,11 @@ build_release() {
 
     local image_signature
     image_signature="$(build_image_bundle_signature "$iran_context_dir")"
-    if [[ "$IRAN_FORCE_RELEASE_REFRESH" != "1" && -s "$LOCAL_IMAGE_BUNDLE" && -f "$LOCAL_IMAGE_SIGNATURE_FILE" && "$(cat "$LOCAL_IMAGE_SIGNATURE_FILE")" == "$image_signature" ]]; then
+    if [[ "$IRAN_FORCE_RELEASE_REFRESH" != "1" \
+        && -s "$LOCAL_IMAGE_BUNDLE" \
+        && -f "$LOCAL_IMAGE_SIGNATURE_FILE" \
+        && "$(cat "$LOCAL_IMAGE_SIGNATURE_FILE")" == "$image_signature" ]] \
+        && iran_release_image_matches "$image_signature"; then
         log "Docker image bundle already matches current build inputs; skipping image build/save."
         return 0
     fi
@@ -1603,188 +3569,713 @@ build_release() {
     if [[ "$LOCAL_HOST_ARCH" == "$IRAN_HOST_ARCH" ]]; then
         docker pull "postgres:15-alpine" >/dev/null
         docker pull "redis:7-alpine" >/dev/null
-        docker build -f "$iran_context_dir/Dockerfile.iran" -t trading_bot_base_iran "$iran_context_dir"
+        docker build \
+            --label "org.opencontainers.image.revision=$RELEASE_SHA" \
+            --label "io.gold-trade.release.tree=$PRODUCTION_RELEASE_TREE" \
+            --label "io.gold-trade.release.input-signature=$image_signature" \
+            -f "$iran_context_dir/Dockerfile.iran" -t trading_bot_base_iran "$iran_context_dir"
         docker save trading_bot_base_iran postgres:15-alpine redis:7-alpine -o "$LOCAL_IMAGE_BUNDLE"
     else
         docker pull --platform "$IRAN_IMAGE_PLATFORM" postgres:15-alpine >/dev/null
         docker tag postgres:15-alpine "postgres:15-alpine-iran-$IRAN_HOST_ARCH"
         docker pull --platform "$IRAN_IMAGE_PLATFORM" redis:7-alpine >/dev/null
         docker tag redis:7-alpine "redis:7-alpine-iran-$IRAN_HOST_ARCH"
-        docker buildx build --platform "$IRAN_IMAGE_PLATFORM" -f "$iran_context_dir/Dockerfile.iran" -t trading_bot_base_iran --output "type=docker,dest=$RELEASE_TMP_DIR/trading_bot_base_iran.tar" "$iran_context_dir"
+        docker buildx build --platform "$IRAN_IMAGE_PLATFORM" \
+            --label "org.opencontainers.image.revision=$RELEASE_SHA" \
+            --label "io.gold-trade.release.tree=$PRODUCTION_RELEASE_TREE" \
+            --label "io.gold-trade.release.input-signature=$image_signature" \
+            -f "$iran_context_dir/Dockerfile.iran" -t trading_bot_base_iran \
+            --output "type=docker,dest=$RELEASE_TMP_DIR/trading_bot_base_iran.tar" "$iran_context_dir"
         docker load -i "$RELEASE_TMP_DIR/trading_bot_base_iran.tar" >/dev/null
         docker save trading_bot_base_iran "postgres:15-alpine-iran-$IRAN_HOST_ARCH" "redis:7-alpine-iran-$IRAN_HOST_ARCH" -o "$LOCAL_IMAGE_BUNDLE"
     fi
+    iran_release_image_matches "$image_signature" \
+        || die "Iran release image OCI identity does not match the exact release/build signature."
     printf '%s\n' "$image_signature" > "$LOCAL_IMAGE_SIGNATURE_FILE"
     log "Local release build complete"
 }
 
-ensure_runtime_env_file() {
-    local local_env_path="$LOCAL_ENV_SOURCE_PATH"
-    local source_env_path=""
+expected_wheel_cache_signature() {
+    local target_arch="$1"
+    local bootstrap_requirements="$LOCAL_PROJECT_DIR/deploy/production/pip-bootstrap-requirements.txt"
+    {
+        md5sum "$LOCAL_PROJECT_DIR/requirements.txt"
+        md5sum "$bootstrap_requirements"
+    } | md5sum | cut -d' ' -f1 | awk -v arch="$target_arch" '{print $1 "-" arch}'
+}
 
-    if [[ -f "$local_env_path" ]]; then
-        source_env_path="$local_env_path"
-    elif [[ -f "$IRAN_ENV_SOURCE_PATH" ]]; then
-        source_env_path="$IRAN_ENV_SOURCE_PATH"
+verify_prepared_wheel_cache() {
+    local target_arch="$1" output_dir="$2" expected actual
+    expected="$(expected_wheel_cache_signature "$target_arch")"
+    [[ -d "$output_dir" && -f "$output_dir/.requirements_hash" ]] \
+        || die "Prepared wheel cache is missing for architecture $target_arch."
+    actual="$(cat "$output_dir/.requirements_hash")"
+    [[ "$actual" == "$expected" ]] \
+        || die "Prepared wheel cache does not match release requirements for architecture $target_arch."
+    find "$output_dir" -maxdepth 1 -type f \( -name '*.whl' -o -name '*.tar.gz' -o -name '*.zip' \) -print -quit | grep -q . \
+        || die "Prepared wheel cache is empty for architecture $target_arch."
+}
+
+verify_prepared_release_artifacts() {
+    [[ -f "$LOCAL_FRONTEND_SIGNATURE_FILE" \
+        && "$(cat "$LOCAL_FRONTEND_SIGNATURE_FILE")" == "$(frontend_build_signature)" ]] \
+        || die "Prepared frontend artifact does not match the exact release source."
+    verify_frontend_release_contracts "$LOCAL_DIST_DIR"
+    verify_prepared_wheel_cache "$LOCAL_HOST_ARCH" "$LOCAL_PROJECT_DIR/pip_packages"
+    verify_prepared_wheel_cache "$IRAN_HOST_ARCH" "$RELEASE_TMP_DIR/pip_packages-$IRAN_HOST_ARCH"
+    load_foreign_image_build_receipt
+    load_iran_image_build_receipt
+    verify_foreign_image_build_receipt
+    verify_iran_image_build_receipt
+    [[ -f "$LOCAL_IRAN_SOURCE_PAYLOAD_MANIFEST" \
+        && "$PRODUCTION_IRAN_SOURCE_PAYLOAD_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ \
+        && "$(file_sha256 "$LOCAL_IRAN_SOURCE_PAYLOAD_MANIFEST")" == "$PRODUCTION_IRAN_SOURCE_PAYLOAD_MANIFEST_SHA256" ]] \
+        || die "Committed Iran source payload evidence is missing or drifted."
+    log "Verified prebuilt frontend, wheel caches, and exact foreign/Iran image receipts."
+}
+
+prepare_release_evidence_artifacts() {
+    build_release
+    write_iran_image_build_receipt
+    verify_iran_image_build_receipt
+    prebuild_foreign_release_image
+    prepare_committed_iran_source_payload
+    verify_prepared_release_artifacts
+    log "Prepared release evidence artifacts without touching services or databases."
+}
+
+create_official_deploy_sh_authority() {
+    local target="$1" authority_dir
+    [[ "$target" == "foreign" ]] || die "Unsupported official deploy.sh authority target."
+    [[ -f "$PRODUCTION_RELEASE_LOCK_PATH" && ! -L "$PRODUCTION_RELEASE_LOCK_PATH" ]] \
+        || die "Official deploy.sh authority requires the active production operation lock."
+    authority_dir="$(dirname "$PRODUCTION_DEPLOY_SH_AUTHORITY_PATH")"
+    [[ ! -L "/var/lib/trading-bot" && ! -L "$authority_dir" ]] \
+        || die "Official deploy.sh authority directory ancestry must not contain symlinks."
+    install -d -m 0700 -- "$authority_dir"
+    [[ -d "$authority_dir" && ! -L "$authority_dir" \
+        && "$(stat -c '%u' "$authority_dir")" == "$(id -u)" \
+        && "$(stat -c '%a' "$authority_dir")" == "700" ]] \
+        || die "Official deploy.sh authority directory must be owner-controlled mode 0700."
+    [[ ! -e "$PRODUCTION_DEPLOY_SH_AUTHORITY_PATH" \
+        && ! -L "$PRODUCTION_DEPLOY_SH_AUTHORITY_PATH" ]] \
+        || die "A stale official deploy.sh authority exists; manual recovery review is required."
+    python3 - "$PRODUCTION_DEPLOY_SH_AUTHORITY_PATH" "$PRODUCTION_RELEASE_LOCK_PATH" \
+        "$target" "$BASHPID" "$RELEASE_SHA" "$PRODUCTION_RELEASE_TREE" <<'PY'
+import json
+import os
+from pathlib import Path
+import sys
+
+destination = Path(sys.argv[1])
+lock = Path(sys.argv[2])
+lock_stat = lock.stat()
+payload = {
+    "schema_version": 1,
+    "environment": "production",
+    "target": sys.argv[3],
+    "parent_pid": int(sys.argv[4]),
+    "release_sha": sys.argv[5],
+    "release_tree": sys.argv[6],
+    "release_lock_device": lock_stat.st_dev,
+    "release_lock_inode": lock_stat.st_ino,
+    "secrets_disclosed": False,
+}
+flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+descriptor = os.open(destination, flags, 0o600)
+with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+    json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+    stream.write("\n")
+    stream.flush()
+    os.fsync(stream.fileno())
+directory = os.open(destination.parent, os.O_RDONLY)
+try:
+    os.fsync(directory)
+finally:
+    os.close(directory)
+PY
+}
+
+invoke_official_deploy_sh_foreign() {
+    create_official_deploy_sh_authority foreign
+    local status=0
+    PRODUCTION_OFFICIAL_DEPLOY_AUTHORITY_PATH="$PRODUCTION_DEPLOY_SH_AUTHORITY_PATH" \
+    PRODUCTION_RELEASE_LOCK_PATH="$PRODUCTION_RELEASE_LOCK_PATH" \
+    PRODUCTION_RELEASE_SHA="$RELEASE_SHA" \
+    PRODUCTION_RELEASE_TREE="$PRODUCTION_RELEASE_TREE" \
+    PRODUCTION_EXPECTED_FOREIGN_IMAGE_ID="$PRODUCTION_FOREIGN_IMAGE_ID" \
+    PRODUCTION_EXPECTED_FOREIGN_IMAGE_SIGNATURE="$PRODUCTION_FOREIGN_IMAGE_SIGNATURE" \
+    DEPLOY_MANIFEST="$MANIFEST_PATH" \
+    IRAN_HOST="$IRAN_HOST" \
+    IRAN_PROJECT_DIR="$IRAN_PROJECT_DIR" \
+    "$@" || status=$?
+    if [[ -e "$PRODUCTION_DEPLOY_SH_AUTHORITY_PATH" \
+        || -L "$PRODUCTION_DEPLOY_SH_AUTHORITY_PATH" ]]; then
+        rm -f -- "$PRODUCTION_DEPLOY_SH_AUTHORITY_PATH"
     fi
+    return "$status"
+}
 
-    if [[ -n "$source_env_path" ]]; then
-        mkdir -p "$(dirname "$IRAN_ENV_SOURCE_PATH")" "$(dirname "$local_env_path")"
-        backup_runtime_env_file "$local_env_path" "foreign"
-        backup_runtime_env_file "$IRAN_ENV_SOURCE_PATH" "Iran"
-        export_runtime_renderer_overrides
-        python3 "$RUNTIME_ENV_RENDERER" \
-            --source-env-file "$source_env_path" \
-            --local-output "$local_env_path" \
-            --iran-output "$IRAN_ENV_SOURCE_PATH" \
-            --foreign-frontend-url "$FOREIGN_FRONTEND_URL" \
-            --iran-frontend-url "$IRAN_FRONTEND_URL" \
-            --foreign-server-url "$FOREIGN_SERVER_URL" \
-            --foreign-server-domain "$FOREIGN_SERVER_DOMAIN" \
-            --iran-server-url "$IRAN_SERVER_URL" \
-            --iran-server-domain "$IRAN_SERVER_DOMAIN" \
-            --foreign-api-workers "${FOREIGN_API_WORKERS:-2}" \
-            --iran-api-workers "${IRAN_API_WORKERS:-4}"
-        chmod 600 "$local_env_path" || true
-        chmod 600 "$IRAN_ENV_SOURCE_PATH" || true
-        validate_runtime_identity_files
-        log "Rendered runtime env files from source env: $source_env_path"
-        summarize_web_push_env_file "$local_env_path" "Foreign"
-        summarize_web_push_env_file "$IRAN_ENV_SOURCE_PATH" "Iran"
+write_foreign_image_build_receipt() {
+    local receipt_dir image_id image_signature
+    receipt_dir="$RELEASE_ARTIFACT_DIR"
+    install -d -m 0700 -- "$receipt_dir"
+    image_id="$(docker image inspect --format '{{.Id}}' trading_bot_base)"
+    image_signature="$(cat "$LOCAL_PROJECT_DIR/tmp/deploy-state/foreign-image.signature")"
+    [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ \
+        && "$image_signature" =~ ^[0-9a-f]{64}$ ]] \
+        || die "Foreign image identity/signature is invalid after prebuild."
+    PRODUCTION_FOREIGN_IMAGE_RECEIPT="$receipt_dir/foreign-image-prebuild-receipt.json"
+    rm -f -- "$PRODUCTION_FOREIGN_IMAGE_RECEIPT"
+    python3 - "$PRODUCTION_FOREIGN_IMAGE_RECEIPT" "$RELEASE_SHA" \
+        "$PRODUCTION_RELEASE_TREE" "$image_id" "$image_signature" <<'PY'
+import json
+import os
+from pathlib import Path
+import sys
+
+destination = Path(sys.argv[1])
+payload = {
+    "schema_version": 1,
+    "environment": "production",
+    "release_sha": sys.argv[2],
+    "release_tree": sys.argv[3],
+    "image_id": sys.argv[4],
+    "input_signature": sys.argv[5],
+    "secrets_disclosed": False,
+}
+flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+descriptor = os.open(destination, flags, 0o600)
+with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+    json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+    stream.write("\n")
+    stream.flush()
+    os.fsync(stream.fileno())
+directory = os.open(destination.parent, os.O_RDONLY)
+try:
+    os.fsync(directory)
+finally:
+    os.close(directory)
+PY
+    PRODUCTION_FOREIGN_IMAGE_ID="$image_id"
+    PRODUCTION_FOREIGN_IMAGE_SIGNATURE="$image_signature"
+    PRODUCTION_FOREIGN_IMAGE_RECEIPT_SHA256="$(file_sha256 "$PRODUCTION_FOREIGN_IMAGE_RECEIPT")"
+}
+
+load_foreign_image_build_receipt() {
+    PRODUCTION_FOREIGN_IMAGE_RECEIPT="${PRODUCTION_FOREIGN_IMAGE_RECEIPT:-$RELEASE_ARTIFACT_DIR/foreign-image-prebuild-receipt.json}"
+    [[ -f "$PRODUCTION_FOREIGN_IMAGE_RECEIPT" && ! -L "$PRODUCTION_FOREIGN_IMAGE_RECEIPT" ]] \
+        || die "Exact foreign image receipt is missing. Run the production prebuild first."
+    local loaded
+    loaded="$(python3 - "$PRODUCTION_FOREIGN_IMAGE_RECEIPT" <<'PY'
+import json
+import re
+from pathlib import Path
+import sys
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+if not re.fullmatch(r"sha256:[0-9a-f]{64}", str(payload.get("image_id") or "")):
+    raise SystemExit(2)
+if not re.fullmatch(r"[0-9a-f]{64}", str(payload.get("input_signature") or "")):
+    raise SystemExit(2)
+print(payload["image_id"], payload["input_signature"])
+PY
+)" || die "Exact foreign image receipt is malformed."
+    read -r PRODUCTION_FOREIGN_IMAGE_ID PRODUCTION_FOREIGN_IMAGE_SIGNATURE <<<"$loaded"
+    PRODUCTION_FOREIGN_IMAGE_RECEIPT_SHA256="$(file_sha256 "$PRODUCTION_FOREIGN_IMAGE_RECEIPT")"
+}
+
+verify_foreign_image_build_receipt() {
+    if [[ -z "$PRODUCTION_FOREIGN_IMAGE_RECEIPT_SHA256" ]]; then
+        load_foreign_image_build_receipt
+    fi
+    [[ -f "$PRODUCTION_FOREIGN_IMAGE_RECEIPT" \
+        && ! -L "$PRODUCTION_FOREIGN_IMAGE_RECEIPT" \
+        && "$(file_sha256 "$PRODUCTION_FOREIGN_IMAGE_RECEIPT")" == "$PRODUCTION_FOREIGN_IMAGE_RECEIPT_SHA256" \
+        && "$(docker image inspect --format '{{.Id}}' trading_bot_base)" == "$PRODUCTION_FOREIGN_IMAGE_ID" \
+        && "$(cat "$LOCAL_PROJECT_DIR/tmp/deploy-state/foreign-image.signature")" == "$PRODUCTION_FOREIGN_IMAGE_SIGNATURE" ]] \
+        || die "Exact foreign prebuild receipt/image binding drifted before migration."
+    python3 - "$PRODUCTION_FOREIGN_IMAGE_RECEIPT" "$RELEASE_SHA" \
+        "$PRODUCTION_RELEASE_TREE" "$PRODUCTION_FOREIGN_IMAGE_ID" \
+        "$PRODUCTION_FOREIGN_IMAGE_SIGNATURE" <<'PY'
+import json
+from pathlib import Path
+import sys
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+expected = {
+    "schema_version": 1,
+    "environment": "production",
+    "release_sha": sys.argv[2],
+    "release_tree": sys.argv[3],
+    "image_id": sys.argv[4],
+    "input_signature": sys.argv[5],
+    "secrets_disclosed": False,
+}
+if payload != expected:
+    raise SystemExit(2)
+PY
+}
+
+prebuild_foreign_release_image() {
+    log "Prebuilding the exact foreign image before production writer quiescence"
+    (
+        cd "$LOCAL_PROJECT_DIR"
+        invoke_official_deploy_sh_foreign \
+            env PRODUCTION_PREBUILD_ONLY=1 \
+            PRODUCTION_DEFER_FOREIGN_WRITER_START=1 \
+            PRODUCTION_REQUIRE_PREBUILT_FOREIGN_IMAGE=0 \
+            bash ./deploy.sh foreign
+    )
+    write_foreign_image_build_receipt
+    verify_foreign_image_build_receipt
+    log "Foreign image prebuild gate passed without touching services or databases."
+}
+
+write_iran_image_build_receipt() {
+    local receipt_dir image_id image_signature bundle_sha
+    receipt_dir="$RELEASE_ARTIFACT_DIR"
+    install -d -m 0700 -- "$receipt_dir"
+    image_id="$(docker image inspect --format '{{.Id}}' trading_bot_base_iran)"
+    image_signature="$(cat "$LOCAL_IMAGE_SIGNATURE_FILE")"
+    bundle_sha="$(file_sha256 "$LOCAL_IMAGE_BUNDLE")"
+    [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ \
+        && "$image_signature" =~ ^[0-9a-f]{64}$ \
+        && "$bundle_sha" =~ ^[0-9a-f]{64}$ ]] \
+        || die "Iran image identity/signature/bundle digest is invalid after build."
+    PRODUCTION_IRAN_IMAGE_RECEIPT="$receipt_dir/iran-image-prebuild-receipt.json"
+    python3 - "$PRODUCTION_IRAN_IMAGE_RECEIPT" "$RELEASE_SHA" "$PRODUCTION_RELEASE_TREE" \
+        "$image_id" "$image_signature" "$bundle_sha" "$IRAN_HOST" \
+        "$IRAN_PROJECT_DIR" <<'PY'
+import json
+import os
+from pathlib import Path
+import sys
+from uuid import uuid4
+
+destination = Path(sys.argv[1])
+payload = {
+    "schema_version": 1,
+    "environment": "production",
+    "role": "iran",
+    "release_sha": sys.argv[2],
+    "release_tree": sys.argv[3],
+    "image_id": sys.argv[4],
+    "input_signature": sys.argv[5],
+    "bundle_sha256": sys.argv[6],
+    "target": {
+        "host": sys.argv[7],
+        "project_dir": sys.argv[8],
+        "compose_project": "current",
+        "image": "trading_bot_base_iran:latest",
+    },
+    "secrets_disclosed": False,
+}
+candidate = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
+flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+descriptor = os.open(candidate, flags, 0o600)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(candidate, destination)
+    directory = os.open(destination.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+finally:
+    candidate.unlink(missing_ok=True)
+PY
+    chmod 0600 "$PRODUCTION_IRAN_IMAGE_RECEIPT"
+    PRODUCTION_IRAN_IMAGE_ID="$image_id"
+    PRODUCTION_IRAN_IMAGE_SIGNATURE="$image_signature"
+    PRODUCTION_IRAN_IMAGE_BUNDLE_SHA256="$bundle_sha"
+    PRODUCTION_IRAN_IMAGE_RECEIPT_SHA256="$(file_sha256 "$PRODUCTION_IRAN_IMAGE_RECEIPT")"
+}
+
+load_iran_image_build_receipt() {
+    PRODUCTION_IRAN_IMAGE_RECEIPT="${PRODUCTION_IRAN_IMAGE_RECEIPT:-$RELEASE_ARTIFACT_DIR/iran-image-prebuild-receipt.json}"
+    [[ -f "$PRODUCTION_IRAN_IMAGE_RECEIPT" && ! -L "$PRODUCTION_IRAN_IMAGE_RECEIPT" ]] \
+        || die "Independent Iran image receipt is missing. Run build-release first."
+    local loaded
+    loaded="$(python3 - "$PRODUCTION_IRAN_IMAGE_RECEIPT" <<'PY'
+import json
+import re
+from pathlib import Path
+import sys
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+for field, pattern in (
+    ("image_id", r"sha256:[0-9a-f]{64}"),
+    ("input_signature", r"[0-9a-f]{64}"),
+    ("bundle_sha256", r"[0-9a-f]{64}"),
+):
+    if not re.fullmatch(pattern, str(payload.get(field) or "")):
+        raise SystemExit(2)
+print(payload["image_id"], payload["input_signature"], payload["bundle_sha256"])
+PY
+)" || die "Independent Iran image receipt is malformed."
+    read -r PRODUCTION_IRAN_IMAGE_ID PRODUCTION_IRAN_IMAGE_SIGNATURE \
+        PRODUCTION_IRAN_IMAGE_BUNDLE_SHA256 <<<"$loaded"
+    PRODUCTION_IRAN_IMAGE_RECEIPT_SHA256="$(file_sha256 "$PRODUCTION_IRAN_IMAGE_RECEIPT")"
+}
+
+verify_iran_image_build_receipt() {
+    if [[ -z "$PRODUCTION_IRAN_IMAGE_RECEIPT_SHA256" ]]; then
+        load_iran_image_build_receipt
+    fi
+    local current_input_signature
+    current_input_signature="$(build_image_bundle_signature "$RELEASE_TMP_DIR/iran-build-context")"
+    [[ -f "$PRODUCTION_IRAN_IMAGE_RECEIPT" \
+        && ! -L "$PRODUCTION_IRAN_IMAGE_RECEIPT" \
+        && "$(file_sha256 "$PRODUCTION_IRAN_IMAGE_RECEIPT")" == "$PRODUCTION_IRAN_IMAGE_RECEIPT_SHA256" \
+        && "$(file_sha256 "$LOCAL_IMAGE_BUNDLE")" == "$PRODUCTION_IRAN_IMAGE_BUNDLE_SHA256" \
+        && "$(cat "$LOCAL_IMAGE_SIGNATURE_FILE")" == "$PRODUCTION_IRAN_IMAGE_SIGNATURE" \
+        && "$current_input_signature" == "$PRODUCTION_IRAN_IMAGE_SIGNATURE" ]] \
+        || die "Exact Iran prebuild receipt/bundle binding drifted before migration."
+    local local_identity
+    local_identity="$(docker image inspect --format '{{.Id}}|{{index .Config.Labels "org.opencontainers.image.revision"}}|{{index .Config.Labels "io.gold-trade.release.tree"}}|{{index .Config.Labels "io.gold-trade.release.input-signature"}}' trading_bot_base_iran)"
+    [[ "$local_identity" == "$PRODUCTION_IRAN_IMAGE_ID|$RELEASE_SHA|$PRODUCTION_RELEASE_TREE|$PRODUCTION_IRAN_IMAGE_SIGNATURE" ]] \
+        || die "Exact Iran local image ID/OCI identity drifted before migration."
+    python3 - "$PRODUCTION_IRAN_IMAGE_RECEIPT" "$RELEASE_SHA" \
+        "$PRODUCTION_RELEASE_TREE" "$PRODUCTION_IRAN_IMAGE_ID" \
+        "$PRODUCTION_IRAN_IMAGE_SIGNATURE" "$PRODUCTION_IRAN_IMAGE_BUNDLE_SHA256" \
+        "$IRAN_HOST" "$IRAN_PROJECT_DIR" <<'PY'
+import json
+from pathlib import Path
+import sys
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+expected = {
+    "schema_version": 1,
+    "environment": "production",
+    "role": "iran",
+    "release_sha": sys.argv[2],
+    "release_tree": sys.argv[3],
+    "image_id": sys.argv[4],
+    "input_signature": sys.argv[5],
+    "bundle_sha256": sys.argv[6],
+    "target": {
+        "host": sys.argv[7],
+        "project_dir": sys.argv[8],
+        "compose_project": "current",
+        "image": "trading_bot_base_iran:latest",
+    },
+    "secrets_disclosed": False,
+}
+if payload != expected:
+    raise SystemExit(2)
+PY
+}
+
+verify_release_evidence_gate() {
+    verify_runtime_env_pair_lock
+    verify_foreign_image_build_receipt
+    verify_iran_image_build_receipt
+    [[ "$PRODUCTION_BACKUP_RECEIPT_PATH" == /* \
+        && "$PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_PATH" == /* \
+        && "$PRODUCTION_BACKUP_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ \
+        && "$PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ ]] \
+        || die "Exact production backup and migration-rehearsal receipt paths/digests are required."
+    local loaded
+    loaded="$(PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 - \
+        "$MANIFEST_PATH" "$PRODUCTION_BACKUP_RECEIPT_PATH" \
+        "$PRODUCTION_BACKUP_RECEIPT_SHA256" \
+        "$PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_PATH" \
+        "$PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_SHA256" \
+        "$RELEASE_SHA" "$PRODUCTION_RELEASE_TREE" "$LOCAL_PROJECT_DIR" \
+        "$PRODUCTION_FOREIGN_IMAGE_ID" "$PRODUCTION_FOREIGN_IMAGE_SIGNATURE" \
+        "$PRODUCTION_FOREIGN_IMAGE_RECEIPT_SHA256" \
+        "$PRODUCTION_TWO_HOST_RELEASE_RESUMING" \
+        "$PRODUCTION_RELEASE_EVIDENCE_MAXIMUM_AGE_SECONDS" <<'PY'
+from datetime import datetime, timezone
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+
+from scripts.rehearse_production_migration import (
+    DEFAULT_RECEIPT_ROOT,
+    EXPECTED_NEW_TABLES,
+    EXPECTED_PRE_MIGRATION_HEAD,
+    EXPECTED_ROLES,
+    _parse_utc,
+    production_backup_manifest_values,
+    source_alembic_head,
+    verify_backup_receipt,
+)
+
+(
+    manifest_raw, backup_raw, backup_digest, rehearsal_raw,
+    rehearsal_digest, release_sha, release_tree, project_raw,
+    foreign_image_id, foreign_signature, foreign_receipt_digest,
+    resume_raw, maximum_age_raw,
+) = sys.argv[1:]
+manifest = Path(manifest_raw)
+backup_path = Path(backup_raw)
+rehearsal_path = Path(rehearsal_raw)
+project = Path(project_raw)
+resume = resume_raw == "1"
+maximum_age = int(maximum_age_raw)
+if maximum_age != 3600:
+    raise SystemExit("release evidence freshness policy drifted")
+
+def stream_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+if (
+    not rehearsal_path.is_absolute()
+    or rehearsal_path.parent != DEFAULT_RECEIPT_ROOT
+    or rehearsal_path.is_symlink()
+    or not rehearsal_path.is_file()
+    or rehearsal_path.resolve(strict=True) != rehearsal_path
+    or DEFAULT_RECEIPT_ROOT.is_symlink()
+    or not DEFAULT_RECEIPT_ROOT.is_dir()
+    or DEFAULT_RECEIPT_ROOT.resolve(strict=True) != DEFAULT_RECEIPT_ROOT
+):
+    raise SystemExit("migration rehearsal receipt path is not approved")
+root_meta = DEFAULT_RECEIPT_ROOT.stat()
+receipt_meta = rehearsal_path.stat()
+if (
+    root_meta.st_uid not in {0, os.geteuid()}
+    or stat.S_IMODE(root_meta.st_mode) != 0o700
+    or receipt_meta.st_uid not in {0, os.geteuid()}
+    or stat.S_IMODE(receipt_meta.st_mode) != 0o600
+    or receipt_meta.st_nlink != 1
+    or stream_sha256(rehearsal_path) != rehearsal_digest
+):
+    raise SystemExit("migration rehearsal receipt security/digest check failed")
+payload = json.loads(rehearsal_path.read_text(encoding="utf-8"))
+if not isinstance(payload, dict):
+    raise SystemExit("migration rehearsal receipt is malformed")
+
+# The backup is taken from the currently deployed (old) release, while the
+# source and migration-runner receipts bind the new target release.  Derive the
+# pre-release SHA from both backup roles and never conflate it with new HEAD.
+backup_payload = json.loads(backup_path.read_text(encoding="utf-8"))
+backup_results = backup_payload.get("results") if isinstance(backup_payload, dict) else None
+backup_release_shas = {
+    str(row.get("release_sha") or "")
+    for row in backup_results or []
+    if isinstance(row, dict) and row.get("role") in EXPECTED_ROLES
+}
+if len(backup_release_shas) != 1:
+    raise SystemExit("backup roles do not bind one deployed pre-release SHA")
+pre_release_sha = next(iter(backup_release_shas))
+if not re.fullmatch(r"[0-9a-f]{40}", pre_release_sha):
+    raise SystemExit("backup pre-release SHA is invalid")
+
+# On a forward recovery, validate the same artifact bytes and all bindings but
+# evaluate the backup timestamps at their original evidence time.  Requiring a
+# newly-fresh backup after a migration may have begun would make safe recovery
+# impossible and invite an unbound replacement receipt.
+backup_now = None
+if resume:
+    backup_now = _parse_utc(backup_payload.get("created_at"))
+backup = verify_backup_receipt(
+    receipt_path=backup_path,
+    receipt_sha256=backup_digest,
+    expected_release_sha=pre_release_sha,
+    manifest_values=production_backup_manifest_values(manifest),
+    max_age_seconds=maximum_age,
+    now=backup_now,
+)
+
+source_head = source_alembic_head(project)
+expected_target_bindings = {
+    artifact.role: artifact.target_binding_sha256 for artifact in backup.artifacts
+}
+expected_database_identities = {
+    artifact.role: artifact.database_identity_sha256 for artifact in backup.artifacts
+}
+expected_artifacts = {artifact.role: artifact for artifact in backup.artifacts}
+required_top = {
+    "schema_version", "contract", "status", "mode", "source_commit",
+    "source_tree", "source_alembic_head", "production_release_sha",
+    "pre_migration_head", "migration_runner_image_id",
+    "migration_runner_prebuild_receipt_sha256", "migration_runner_release_tree",
+    "migration_runner_input_signature", "migration_runner_oci_revision",
+    "migration_runner_oci_release_tree", "migration_runner_oci_input_signature",
+    "backup_receipt_sha256", "backup_artifact_set_sha256", "backup_created_at",
+    "roles", "target_bindings_sha256", "expected_public_table_delta",
+    "docker_network", "production_mutation", "run_id", "started_at", "finished_at",
+    "duration_seconds", "committed_source_archive_sha256", "results",
+    "cleanup_status", "cleanup_failure_codes", "error_code",
+}
+if set(payload) != required_top:
+    raise SystemExit("migration rehearsal receipt schema is not exact")
+if (
+    payload.get("schema_version") != 1
+    or payload.get("contract") != "production-migration-rehearsal-v1"
+    or payload.get("status") != "passed"
+    or payload.get("mode") != "execute"
+    or payload.get("source_commit") != release_sha
+    or payload.get("source_tree") != release_tree
+    or payload.get("source_alembic_head") != source_head
+    or payload.get("production_release_sha") != pre_release_sha
+    or payload.get("pre_migration_head") != EXPECTED_PRE_MIGRATION_HEAD
+    or payload.get("migration_runner_image_id") != foreign_image_id
+    or payload.get("migration_runner_prebuild_receipt_sha256") != foreign_receipt_digest
+    or payload.get("migration_runner_release_tree") != release_tree
+    or payload.get("migration_runner_input_signature") != foreign_signature
+    or payload.get("migration_runner_oci_revision") != release_sha
+    or payload.get("migration_runner_oci_release_tree") != release_tree
+    or payload.get("migration_runner_oci_input_signature") != foreign_signature
+    or payload.get("backup_receipt_sha256") != backup_digest
+    or payload.get("backup_artifact_set_sha256") != backup.artifact_set_sha256
+    or payload.get("backup_created_at") != backup.created_at
+    or payload.get("roles") != list(EXPECTED_ROLES)
+    or payload.get("target_bindings_sha256") != expected_target_bindings
+    or payload.get("expected_public_table_delta") != 14
+    or payload.get("docker_network") != "random-internal-no-published-ports"
+    or payload.get("production_mutation") is not False
+    or payload.get("cleanup_status") != "passed"
+    or payload.get("cleanup_failure_codes") != []
+    or payload.get("error_code") is not None
+    or not re.fullmatch(r"[0-9a-f]{64}", str(payload.get("committed_source_archive_sha256") or ""))
+):
+    raise SystemExit("migration rehearsal receipt binding is invalid")
+results = payload.get("results")
+if not isinstance(results, list) or [row.get("role") for row in results if isinstance(row, dict)] != list(EXPECTED_ROLES):
+    raise SystemExit("migration rehearsal role results are incomplete")
+for row in results:
+    role = row["role"]
+    artifact = expected_artifacts[role]
+    if (
+        row.get("status") != "passed"
+        or row.get("artifact_sha256") != artifact.sha256
+        or row.get("artifact_size_bytes") != artifact.size_bytes
+        or row.get("database_identity_sha256") != expected_database_identities[role]
+        or row.get("target_binding_sha256") != expected_target_bindings[role]
+        or row.get("pre_revision") != EXPECTED_PRE_MIGRATION_HEAD
+        or row.get("post_revision") != source_head
+        or row.get("public_table_delta") != 14
+        or row.get("added_tables") != sorted(EXPECTED_NEW_TABLES)
+        or (row.get("preexisting_table_count_contract") or {}).get("all_row_counts_preserved") is not True
+        or row.get("new_table_seed_contract") != {"telegram_delivery_feeder_states": 1, "all_other_new_tables": 0}
+        or row.get("invalid_or_unready_indexes") != 0
+        or row.get("concurrent_index_state") != "valid-ready"
+        or row.get("second_upgrade_noop") is not True
+    ):
+        raise SystemExit("migration rehearsal result binding is invalid")
+
+started = _parse_utc(payload.get("started_at"))
+finished = _parse_utc(payload.get("finished_at"))
+backup_created = _parse_utc(payload.get("backup_created_at"))
+if started > finished or backup_created > started:
+    raise SystemExit("migration rehearsal timestamps are inconsistent")
+if not resume:
+    age = (datetime.now(timezone.utc) - finished).total_seconds()
+    if age < -300 or age > maximum_age:
+        raise SystemExit("migration rehearsal receipt is not fresh")
+print(
+    pre_release_sha,
+    backup.artifact_set_sha256,
+    source_head,
+    expected_target_bindings["foreign"],
+    expected_target_bindings["iran"],
+)
+PY
+)" || die "Production backup/restore-smoke or migration-rehearsal evidence gate failed."
+    read -r PRODUCTION_PRE_RELEASE_SHA PRODUCTION_BACKUP_ARTIFACT_SET_SHA256 PRODUCTION_RELEASE_SCHEMA_HEAD \
+        PRODUCTION_FOREIGN_TARGET_BINDING_SHA256 PRODUCTION_IRAN_TARGET_BINDING_SHA256 \
+        <<<"$loaded"
+    [[ "$PRODUCTION_PRE_RELEASE_SHA" =~ ^[0-9a-f]{40}$ \
+        && "$PRODUCTION_BACKUP_ARTIFACT_SET_SHA256" =~ ^[0-9a-f]{64}$ \
+        && "$PRODUCTION_FOREIGN_TARGET_BINDING_SHA256" =~ ^[0-9a-f]{64}$ \
+        && "$PRODUCTION_IRAN_TARGET_BINDING_SHA256" =~ ^[0-9a-f]{64}$ \
+        && "$PRODUCTION_RELEASE_SCHEMA_HEAD" =~ ^[0-9a-z]{12}$ ]] \
+        || die "Production release evidence output is malformed."
+    if [[ "$PRODUCTION_TWO_HOST_RELEASE_RESUMING" != "1" ]]; then
+        local foreign_live_release iran_live_release
+        foreign_live_release="$(docker exec trading_bot_app printenv RELEASE_SHA | tr -d '[:space:]')"
+        iran_live_release="$(ssh_iran "docker exec trading_bot_app printenv RELEASE_SHA | tr -d '[:space:]'")"
+        [[ "$foreign_live_release" == "$PRODUCTION_PRE_RELEASE_SHA" \
+            && "$iran_live_release" == "$PRODUCTION_PRE_RELEASE_SHA" ]] \
+            || die "Live foreign/Iran writers do not match the backup-bound pre-release SHA."
+    fi
+    PRODUCTION_RELEASE_EVIDENCE_VERIFIED=1
+    log "Verified exact production backup/restore-smoke and migration-rehearsal evidence."
+}
+
+verify_runtime_env_pair_lock() {
+    [[ "$PRODUCTION_RUNTIME_ENV_PAIR_LOCKED" == "1" ]] \
+        || die "Production runtime env pair is not release-locked."
+    [[ -f "$RUNTIME_ENV_SOURCE_PATH" && ! -L "$RUNTIME_ENV_SOURCE_PATH" ]] \
+        || die "Immutable production runtime env source changed type after release lock."
+    [[ "$(file_sha256 "$RUNTIME_ENV_SOURCE_PATH")" == "$PRODUCTION_RUNTIME_ENV_SOURCE_SHA256" ]] \
+        || die "Immutable production runtime env source drifted after the release pair was rendered."
+    [[ -f "$FOREIGN_RUNTIME_ENV_PATH" && ! -L "$FOREIGN_RUNTIME_ENV_PATH" \
+        && "$(file_sha256 "$FOREIGN_RUNTIME_ENV_PATH")" == "$PRODUCTION_RUNTIME_ENV_FOREIGN_SHA256" ]] \
+        || die "Foreign rendered runtime env drifted after the release pair was locked."
+    [[ -f "$IRAN_RUNTIME_ENV_PATH" && ! -L "$IRAN_RUNTIME_ENV_PATH" \
+        && "$(file_sha256 "$IRAN_RUNTIME_ENV_PATH")" == "$PRODUCTION_RUNTIME_ENV_IRAN_SHA256" ]] \
+        || die "Iran rendered runtime env drifted after the release pair was locked."
+    if [[ "$PRODUCTION_RUNTIME_ENV_FOREIGN_INSTALLED" == "1" ]]; then
+        [[ -f "$LOCAL_PROJECT_DIR/.env" && ! -L "$LOCAL_PROJECT_DIR/.env" \
+            && "$(file_sha256 "$LOCAL_PROJECT_DIR/.env")" == "$PRODUCTION_RUNTIME_ENV_FOREIGN_SHA256" ]] \
+            || die "Installed foreign runtime env drifted from the release-locked projection."
+    fi
+}
+
+verify_installed_runtime_env_pair() {
+    verify_runtime_env_pair_lock
+    local remote_digest
+    [[ -f "$LOCAL_PROJECT_DIR/.env" && ! -L "$LOCAL_PROJECT_DIR/.env" \
+        && "$(file_sha256 "$LOCAL_PROJECT_DIR/.env")" == "$PRODUCTION_RUNTIME_ENV_FOREIGN_SHA256" ]] \
+        || die "Installed foreign runtime env does not match the release-locked projection."
+    validate_remote_shell_path "$IRAN_PROJECT_DIR" "IRAN_PROJECT_DIR"
+    remote_digest="$(ssh_iran "test -f '$IRAN_PROJECT_DIR/.env' && test ! -L '$IRAN_PROJECT_DIR/.env' && sha256sum '$IRAN_PROJECT_DIR/.env' | awk '{print \$1}'")"
+    [[ "$remote_digest" == "$PRODUCTION_RUNTIME_ENV_IRAN_SHA256" ]] \
+        || die "Installed Iran runtime env does not match the release-locked projection."
+}
+
+ensure_runtime_env_file() {
+    validate_runtime_env_source_policy
+    validate_secure_runtime_env_source_file \
+        || die "Immutable production runtime env source must be canonical, owner-controlled, non-symlink, and mode 0600."
+    [[ -r "$RUNTIME_ENV_SOURCE_PATH" ]] || die "Immutable production runtime env source is not readable: $RUNTIME_ENV_SOURCE_PATH"
+    if [[ "$PRODUCTION_RUNTIME_ENV_PAIR_LOCKED" == "1" ]]; then
+        verify_runtime_env_pair_lock
+        log "Reused the release-locked foreign and Iran runtime env pair."
         return 0
     fi
 
-    local bot_token=""
-    local bot_username=""
-    local database_url=""
-    local sync_database_url=""
-    local postgres_db=""
-    local postgres_user=""
-    local postgres_password=""
-    local redis_url=""
-    local jwt_secret_key=""
-    local dev_api_key=""
-    local sync_api_key=""
-    local observability_api_key=""
-    local channel_id=""
-    local channel_invite_link=""
-    local smsir_api_key=""
-    local smsir_line_number=""
-    local smsir_otp_template_id="585147"
-    local smsir_otp_template_parameter="CODE"
-    local smsir_invitation_template_id="657938"
-    local smsir_invitation_template_parameter="NAME"
-    local smsir_accountant_invitation_template_id="162103"
-    local smsir_customer_invitation_template_id="903643"
-    local error_tracking_dsn=""
-    local trusted_proxy_cidrs="127.0.0.1/32,::1/128"
-    local observability_telegram_user_hash_salt=""
-    local grafana_alert_default_receiver="Trading Bot Production Webhook"
-    local grafana_alert_critical_receiver="Trading Bot Production Webhook"
-    local grafana_alert_warning_receiver="Trading Bot Production Email"
-    local grafana_alert_webhook_url=""
-    local grafana_alert_email_addresses=""
-    local sync_verify_tls="true"
-    local sync_ca_bundle=""
-    local web_push_enabled="false"
-    local web_push_vapid_public_key=""
-    local web_push_vapid_private_key=""
-    local web_push_vapid_subject=""
-    local web_push_ttl_seconds="3600"
-    local web_push_timeout_seconds="5.0"
+    local source_sha256_before source_sha256_after
+    source_sha256_before="$(file_sha256 "$RUNTIME_ENV_SOURCE_PATH")"
+    [[ "$source_sha256_before" =~ ^[0-9a-f]{64}$ ]] \
+        || die "Immutable production runtime env source digest is invalid."
 
-    if is_truthy "$REQUIRE_WEB_PUSH"; then
-        web_push_enabled="true"
-    fi
-
-    mkdir -p "$(dirname "$IRAN_ENV_SOURCE_PATH")" "$(dirname "$local_env_path")"
-
-    prompt_value bot_token "BOT_TOKEN" "" 1
-    prompt_value bot_username "BOT_USERNAME"
-    prompt_value database_url "DATABASE_URL"
-    prompt_value sync_database_url "SYNC_DATABASE_URL"
-    prompt_value postgres_db "POSTGRES_DB"
-    prompt_value postgres_user "POSTGRES_USER"
-    prompt_value postgres_password "POSTGRES_PASSWORD" "" 1
-    prompt_value redis_url "REDIS_URL"
-    prompt_value jwt_secret_key "JWT_SECRET_KEY" "" 1
-    prompt_value dev_api_key "DEV_API_KEY" "" 1
-    prompt_value sync_api_key "SYNC_API_KEY" "" 1
-    prompt_value sync_verify_tls "SYNC_VERIFY_TLS" "$sync_verify_tls"
-    prompt_value sync_ca_bundle "SYNC_CA_BUNDLE" "$sync_ca_bundle"
-    prompt_value observability_api_key "OBSERVABILITY_API_KEY" "" 1
-    prompt_value channel_id "CHANNEL_ID"
-    prompt_value channel_invite_link "CHANNEL_INVITE_LINK"
-    prompt_value smsir_api_key "SMSIR_API_KEY" "" 1
-    prompt_value smsir_line_number "SMSIR_LINE_NUMBER"
-    prompt_value smsir_otp_template_id "SMSIR_OTP_TEMPLATE_ID"
-    prompt_value smsir_otp_template_parameter "SMSIR_OTP_TEMPLATE_PARAMETER" "$smsir_otp_template_parameter"
-    prompt_value smsir_invitation_template_id "SMSIR_INVITATION_TEMPLATE_ID" "$smsir_invitation_template_id"
-    prompt_value smsir_invitation_template_parameter "SMSIR_INVITATION_TEMPLATE_PARAMETER" "$smsir_invitation_template_parameter"
-    prompt_value smsir_accountant_invitation_template_id "SMSIR_ACCOUNTANT_INVITATION_TEMPLATE_ID" "$smsir_accountant_invitation_template_id"
-    prompt_value smsir_customer_invitation_template_id "SMSIR_CUSTOMER_INVITATION_TEMPLATE_ID" "$smsir_customer_invitation_template_id"
-    prompt_value error_tracking_dsn "ERROR_TRACKING_DSN"
-    prompt_value trusted_proxy_cidrs "TRUSTED_PROXY_CIDRS" "$trusted_proxy_cidrs"
-    prompt_value observability_telegram_user_hash_salt "OBSERVABILITY_TELEGRAM_USER_HASH_SALT" "" 1
-    prompt_value grafana_alert_default_receiver "GRAFANA_ALERT_DEFAULT_RECEIVER" "$grafana_alert_default_receiver"
-    prompt_value grafana_alert_critical_receiver "GRAFANA_ALERT_CRITICAL_RECEIVER" "$grafana_alert_critical_receiver"
-    prompt_value grafana_alert_warning_receiver "GRAFANA_ALERT_WARNING_RECEIVER" "$grafana_alert_warning_receiver"
-    prompt_value grafana_alert_webhook_url "GRAFANA_ALERT_WEBHOOK_URL"
-    prompt_value grafana_alert_email_addresses "GRAFANA_ALERT_EMAIL_ADDRESSES"
-    prompt_value web_push_enabled "WEB_PUSH_ENABLED" "$web_push_enabled"
-    if is_truthy "$web_push_enabled"; then
-        prompt_value web_push_vapid_public_key "WEB_PUSH_VAPID_PUBLIC_KEY"
-        prompt_value web_push_vapid_private_key "WEB_PUSH_VAPID_PRIVATE_KEY" "" 1
-        prompt_value web_push_vapid_subject "WEB_PUSH_VAPID_SUBJECT"
-        prompt_value web_push_ttl_seconds "WEB_PUSH_TTL_SECONDS" "$web_push_ttl_seconds"
-        prompt_value web_push_timeout_seconds "WEB_PUSH_TIMEOUT_SECONDS" "$web_push_timeout_seconds"
-    fi
-    if ! is_truthy "$sync_verify_tls" && [[ -z "$sync_ca_bundle" ]]; then
-        die "SYNC_VERIFY_TLS=false is not allowed for production sync transport without SYNC_CA_BUNDLE"
-    fi
-
+    install -d -m 0700 -- "$(dirname "$FOREIGN_RUNTIME_ENV_PATH")" "$(dirname "$IRAN_RUNTIME_ENV_PATH")"
+    validate_secure_env_directory "$(dirname "$FOREIGN_RUNTIME_ENV_PATH")" \
+        || die "Foreign rendered runtime env directory is not secure."
+    validate_secure_env_directory "$(dirname "$IRAN_RUNTIME_ENV_PATH")" \
+        || die "Iran rendered runtime env directory is not secure."
+    for existing_output in "$FOREIGN_RUNTIME_ENV_PATH" "$IRAN_RUNTIME_ENV_PATH"; do
+        if [[ -e "$existing_output" ]]; then
+            [[ -f "$existing_output" && ! -L "$existing_output" ]] \
+                || die "Rendered runtime env output must be a regular non-symlink file."
+        fi
+    done
+    backup_runtime_env_file "$FOREIGN_RUNTIME_ENV_PATH" "foreign rendered"
+    backup_runtime_env_file "$IRAN_RUNTIME_ENV_PATH" "Iran rendered"
     export_runtime_renderer_overrides
-    BOT_TOKEN="$bot_token" \
-    BOT_USERNAME="$bot_username" \
-    DATABASE_URL="$database_url" \
-    SYNC_DATABASE_URL="$sync_database_url" \
-    POSTGRES_DB="$postgres_db" \
-    POSTGRES_USER="$postgres_user" \
-    POSTGRES_PASSWORD="$postgres_password" \
-    REDIS_URL="$redis_url" \
-    JWT_SECRET_KEY="$jwt_secret_key" \
-    DEV_API_KEY="$dev_api_key" \
-    SYNC_API_KEY="$sync_api_key" \
-    SYNC_VERIFY_TLS="$sync_verify_tls" \
-    SYNC_CA_BUNDLE="$sync_ca_bundle" \
-    OBSERVABILITY_API_KEY="$observability_api_key" \
-    CHANNEL_ID="$channel_id" \
-    CHANNEL_INVITE_LINK="$channel_invite_link" \
-    SMSIR_API_KEY="$smsir_api_key" \
-    SMSIR_LINE_NUMBER="$smsir_line_number" \
-    SMSIR_OTP_TEMPLATE_ID="$smsir_otp_template_id" \
-    SMSIR_OTP_TEMPLATE_PARAMETER="$smsir_otp_template_parameter" \
-    SMSIR_INVITATION_TEMPLATE_ID="$smsir_invitation_template_id" \
-    SMSIR_INVITATION_TEMPLATE_PARAMETER="$smsir_invitation_template_parameter" \
-    SMSIR_ACCOUNTANT_INVITATION_TEMPLATE_ID="$smsir_accountant_invitation_template_id" \
-    SMSIR_CUSTOMER_INVITATION_TEMPLATE_ID="$smsir_customer_invitation_template_id" \
-    ERROR_TRACKING_DSN="$error_tracking_dsn" \
-    TRUSTED_PROXY_CIDRS="$trusted_proxy_cidrs" \
-    OBSERVABILITY_TELEGRAM_USER_HASH_SALT="$observability_telegram_user_hash_salt" \
-    GRAFANA_ALERT_DEFAULT_RECEIVER="$grafana_alert_default_receiver" \
-    GRAFANA_ALERT_CRITICAL_RECEIVER="$grafana_alert_critical_receiver" \
-    GRAFANA_ALERT_WARNING_RECEIVER="$grafana_alert_warning_receiver" \
-    GRAFANA_ALERT_WEBHOOK_URL="$grafana_alert_webhook_url" \
-    GRAFANA_ALERT_EMAIL_ADDRESSES="$grafana_alert_email_addresses" \
-    WEB_PUSH_ENABLED="$web_push_enabled" \
-    WEB_PUSH_VAPID_PUBLIC_KEY="$web_push_vapid_public_key" \
-    WEB_PUSH_VAPID_PRIVATE_KEY="$web_push_vapid_private_key" \
-    WEB_PUSH_VAPID_SUBJECT="$web_push_vapid_subject" \
-    WEB_PUSH_TTL_SECONDS="$web_push_ttl_seconds" \
-    WEB_PUSH_TIMEOUT_SECONDS="$web_push_timeout_seconds" \
     python3 "$RUNTIME_ENV_RENDERER" \
-        --local-output "$local_env_path" \
-        --iran-output "$IRAN_ENV_SOURCE_PATH" \
+        --source-env-file "$RUNTIME_ENV_SOURCE_PATH" \
+        --local-output "$FOREIGN_RUNTIME_ENV_PATH" \
+        --iran-output "$IRAN_RUNTIME_ENV_PATH" \
         --foreign-frontend-url "$FOREIGN_FRONTEND_URL" \
         --iran-frontend-url "$IRAN_FRONTEND_URL" \
         --foreign-server-url "$FOREIGN_SERVER_URL" \
@@ -1794,40 +4285,808 @@ ensure_runtime_env_file() {
         --foreign-api-workers "${FOREIGN_API_WORKERS:-2}" \
         --iran-api-workers "${IRAN_API_WORKERS:-4}"
 
-    chmod 600 "$local_env_path" || true
-    chmod 600 "$IRAN_ENV_SOURCE_PATH" || true
+    source_sha256_after="$(file_sha256 "$RUNTIME_ENV_SOURCE_PATH")"
+    [[ "$source_sha256_after" == "$source_sha256_before" ]] \
+        || die "Immutable production runtime env source drifted while rendering the release pair."
     validate_runtime_identity_files
-    log "Created local env at $local_env_path"
-    log "Created Iran runtime env at $IRAN_ENV_SOURCE_PATH"
+    [[ "$(file_sha256 "$RUNTIME_ENV_SOURCE_PATH")" == "$source_sha256_before" ]] \
+        || die "Immutable production runtime env source drifted before the release pair lock was committed."
+    PRODUCTION_RUNTIME_ENV_SOURCE_SHA256="$source_sha256_before"
+    PRODUCTION_RUNTIME_ENV_FOREIGN_SHA256="$(file_sha256 "$FOREIGN_RUNTIME_ENV_PATH")"
+    PRODUCTION_RUNTIME_ENV_IRAN_SHA256="$(file_sha256 "$IRAN_RUNTIME_ENV_PATH")"
+    [[ "$PRODUCTION_RUNTIME_ENV_FOREIGN_SHA256" =~ ^[0-9a-f]{64}$ \
+        && "$PRODUCTION_RUNTIME_ENV_IRAN_SHA256" =~ ^[0-9a-f]{64}$ ]] \
+        || die "Rendered production runtime env pair digest is invalid."
+    PRODUCTION_RUNTIME_ENV_PAIR_LOCKED=1
+    log "Rendered foreign and Iran runtime env files from the immutable production source."
+    summarize_web_push_env_file "$FOREIGN_RUNTIME_ENV_PATH" "Foreign"
+    summarize_web_push_env_file "$IRAN_RUNTIME_ENV_PATH" "Iran"
 }
 
 install_foreign_runtime_env() {
     local project_env_path="$LOCAL_PROJECT_DIR/.env"
-    if [[ "$LOCAL_ENV_SOURCE_PATH" == "$project_env_path" ]]; then
+    verify_runtime_env_pair_lock
+    atomic_install_local_runtime_env "$FOREIGN_RUNTIME_ENV_PATH" "$project_env_path" "foreign"
+    [[ "$(file_sha256 "$project_env_path")" == "$PRODUCTION_RUNTIME_ENV_FOREIGN_SHA256" ]] \
+        || die "Installed foreign runtime env does not match the release-locked projection."
+    PRODUCTION_RUNTIME_ENV_FOREIGN_INSTALLED=1
+    log "Installed rendered foreign runtime env atomically."
+}
+
+validate_writer_quiesce_state_file() {
+    [[ "$PRODUCTION_WRITER_QUIESCE_STATE_FILE" == "/var/lib/trading-bot/production-release/writer-quiesce-state.json" ]] \
+        || die "Writer quiesce state must use the canonical production path."
+    local parent
+    parent="$(dirname "$PRODUCTION_WRITER_QUIESCE_STATE_FILE")"
+    [[ -d "$parent" && ! -L "$parent" \
+        && "$(stat -c '%u' "$parent")" == "$(id -u)" \
+        && "$(stat -c '%a' "$parent")" == "700" ]] \
+        || die "Writer quiesce state parent must be an owner-controlled 0700 directory."
+    if [[ -e "$PRODUCTION_WRITER_QUIESCE_STATE_FILE" \
+        || -L "$PRODUCTION_WRITER_QUIESCE_STATE_FILE" ]]; then
+        [[ -f "$PRODUCTION_WRITER_QUIESCE_STATE_FILE" \
+            && ! -L "$PRODUCTION_WRITER_QUIESCE_STATE_FILE" \
+            && "$(stat -c '%u' "$PRODUCTION_WRITER_QUIESCE_STATE_FILE")" == "$(id -u)" \
+            && "$(stat -c '%a' "$PRODUCTION_WRITER_QUIESCE_STATE_FILE")" == "600" \
+            && "$(stat -c '%h' "$PRODUCTION_WRITER_QUIESCE_STATE_FILE")" == "1" ]] \
+            || die "Writer quiesce state must be an owner-only regular file."
+    fi
+}
+
+local_writer_inventory() {
+    local service id policy_name retry_count
+    for service in app bot sync_worker; do
+        id="$(docker ps -aq \
+            --filter "label=com.docker.compose.project=$PRODUCTION_FOREIGN_COMPOSE_PROJECT_NAME" \
+            --filter "label=com.docker.compose.service=$service")"
+        [[ -n "$id" && "$id" != *$'\n'* ]] \
+            || die "Exactly one foreign writer container is required before quiescence: $service"
+        policy_name="$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' "$id")"
+        retry_count="$(docker inspect --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}' "$id")"
+        if [[ "$policy_name" == "on-failure" && "$retry_count" != "0" ]]; then
+            policy_name="$policy_name:$retry_count"
+        fi
+        printf 'foreign\t%s\t%s\t%s\n' "$service" "$id" "$policy_name"
+    done
+}
+
+iran_writer_inventory() {
+    ssh_iran "set -euo pipefail
+for service in app sync_worker; do
+  id=\"\$(docker ps -aq --filter label=com.docker.compose.project=current --filter label=com.docker.compose.service=\$service)\"
+  [ -n \"\$id\" ] && [ \"\$(printf '%s\\n' \"\$id\" | wc -l)\" -eq 1 ] || { echo \"Exactly one Iran writer container is required before quiescence: \$service\" >&2; exit 32; }
+  policy=\"\$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' \"\$id\")\"
+  retry=\"\$(docker inspect --format '{{.HostConfig.RestartPolicy.MaximumRetryCount}}' \"\$id\")\"
+  if [ \"\$policy\" = on-failure ] && [ \"\$retry\" != 0 ]; then policy=\"\$policy:\$retry\"; fi
+  printf 'iran\\t%s\\t%s\\t%s\\n' \"\$service\" \"\$id\" \"\$policy\"
+done"
+}
+
+capture_writer_quiesce_state() {
+    [[ ! -L "/var/lib/trading-bot" \
+        && ! -L "$(dirname "$PRODUCTION_WRITER_QUIESCE_STATE_FILE")" ]] \
+        || die "Writer quiesce state directory ancestry must not contain symlinks."
+    install -d -m 0700 -- "$(dirname "$PRODUCTION_WRITER_QUIESCE_STATE_FILE")"
+    validate_writer_quiesce_state_file
+    if [[ -f "$PRODUCTION_WRITER_QUIESCE_STATE_FILE" ]]; then
+        python3 - "$PRODUCTION_WRITER_QUIESCE_STATE_FILE" "$RELEASE_SHA" \
+            "$PRODUCTION_RUNTIME_ENV_SOURCE_SHA256" <<'PY'
+import json, re, sys
+from pathlib import Path
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+if payload.get("release_sha") != sys.argv[2] or payload.get("source_sha256") != sys.argv[3]:
+    raise SystemExit(2)
+statuses = {
+    "quiesce_prepared", "writers_quiesced",
+    "foreign_replacement_creating", "foreign_replacement_prepared",
+    "iran_replacement_creating", "replacements_prepared",
+    "writers_running_restart_disabled",
+}
+if payload.get("schema_version") != 2 or payload.get("status") not in statuses or payload.get("secrets_disclosed") is not False:
+    raise SystemExit(2)
+expected = {("foreign", "app"), ("foreign", "bot"), ("foreign", "sync_worker"), ("iran", "app"), ("iran", "sync_worker")}
+rows = payload.get("writers")
+if not isinstance(rows, list) or {(row.get("role"), row.get("service")) for row in rows} != expected:
+    raise SystemExit(2)
+for row in rows:
+    if set(row) != {"role", "service", "initial_container_id", "current_container_id", "restart_policy"}:
+        raise SystemExit(2)
+    if not re.fullmatch(r"[0-9a-f]{12,64}", str(row.get("initial_container_id", ""))):
+        raise SystemExit(2)
+    if not re.fullmatch(r"[0-9a-f]{12,64}", str(row.get("current_container_id", ""))):
+        raise SystemExit(2)
+    if not re.fullmatch(r"(?:no|always|unless-stopped|on-failure(?::[1-9][0-9]*)?)", str(row.get("restart_policy", ""))):
+        raise SystemExit(2)
+PY
         return 0
     fi
-    cp "$LOCAL_ENV_SOURCE_PATH" "$project_env_path"
-    chmod 600 "$project_env_path" || true
-    log "Installed rendered foreign runtime env at $project_env_path"
+    local state_dir foreign_file iran_file
+    state_dir="$(dirname "$PRODUCTION_WRITER_QUIESCE_STATE_FILE")"
+    install -d -m 0700 -- "$state_dir"
+    foreign_file="$(mktemp "$RELEASE_TMP_DIR/writers.foreign.XXXXXX")"
+    iran_file="$(mktemp "$RELEASE_TMP_DIR/writers.iran.XXXXXX")"
+    chmod 0600 "$foreign_file" "$iran_file"
+    local_writer_inventory > "$foreign_file"
+    iran_writer_inventory > "$iran_file"
+    if ! python3 - "$PRODUCTION_WRITER_QUIESCE_STATE_FILE" "$RELEASE_SHA" \
+        "$PRODUCTION_RUNTIME_ENV_SOURCE_SHA256" "$foreign_file" "$iran_file" <<'PY'
+import json, os, re, sys
+from pathlib import Path
+from uuid import uuid4
+destination = Path(sys.argv[1])
+rows = []
+for source in (Path(sys.argv[4]), Path(sys.argv[5])):
+    for line in source.read_text(encoding="utf-8").splitlines():
+        role, service, container_id, policy = line.split("\t")
+        if not re.fullmatch(r"[0-9a-f]{12,64}", container_id):
+            raise SystemExit(2)
+        if not re.fullmatch(r"(?:no|always|unless-stopped|on-failure(?::[1-9][0-9]*)?)", policy):
+            raise SystemExit(2)
+        rows.append({
+            "role": role,
+            "service": service,
+            "initial_container_id": container_id,
+            "current_container_id": container_id,
+            "restart_policy": policy,
+        })
+expected = {("foreign", "app"), ("foreign", "bot"), ("foreign", "sync_worker"), ("iran", "app"), ("iran", "sync_worker")}
+if {(row["role"], row["service"]) for row in rows} != expected or len(rows) != len(expected):
+    raise SystemExit(2)
+payload = {
+    "schema_version": 2,
+    "status": "quiesce_prepared",
+    "release_sha": sys.argv[2],
+    "source_sha256": sys.argv[3],
+    "writers": sorted(rows, key=lambda row: (row["role"], row["service"])),
+    "recovery_action": "rerun_exact_same_release_do_not_restart_old_code",
+    "secrets_disclosed": False,
+}
+candidate = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
+flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+descriptor = os.open(candidate, flags, 0o600)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(candidate, destination)
+    directory = os.open(destination.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+finally:
+    candidate.unlink(missing_ok=True)
+PY
+    then
+        rm -f -- "$foreign_file" "$iran_file"
+        die "Could not persist the writer quiesce journal."
+    fi
+    rm -f -- "$foreign_file" "$iran_file"
+}
+
+mark_writer_quiesce_complete() {
+    update_writer_journal_phase writers_quiesced
+}
+
+update_writer_journal_phase() {
+    local next_phase="$1"
+    NEXT_WRITER_PHASE="$next_phase" python3 - "$PRODUCTION_WRITER_QUIESCE_STATE_FILE" <<'PY'
+import json
+import os
+from pathlib import Path
+import sys
+from uuid import uuid4
+
+destination = Path(sys.argv[1])
+payload = json.loads(destination.read_text(encoding="utf-8"))
+next_phase = os.environ["NEXT_WRITER_PHASE"]
+transitions = {
+    "quiesce_prepared": {"writers_quiesced"},
+    "writers_quiesced": {"writers_quiesced", "foreign_replacement_creating"},
+    "foreign_replacement_creating": {"writers_quiesced", "foreign_replacement_creating", "foreign_replacement_prepared"},
+    "foreign_replacement_prepared": {"writers_quiesced", "foreign_replacement_prepared", "iran_replacement_creating"},
+    "iran_replacement_creating": {"writers_quiesced", "iran_replacement_creating", "replacements_prepared"},
+    "replacements_prepared": {"writers_quiesced", "replacements_prepared", "writers_running_restart_disabled"},
+    "writers_running_restart_disabled": {"writers_quiesced", "writers_running_restart_disabled"},
+}
+if next_phase not in transitions.get(payload.get("status"), set()):
+    raise SystemExit(2)
+payload["status"] = next_phase
+candidate = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
+flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+descriptor = os.open(candidate, flags, 0o600)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(candidate, destination)
+    directory = os.open(destination.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+finally:
+    candidate.unlink(missing_ok=True)
+PY
+}
+
+record_writer_replacement_inventory() {
+    local role="$1" expected_phase="$2" next_phase="$3" inventory_file="$4"
+    [[ "$role" == "foreign" || "$role" == "iran" ]] \
+        || die "Invalid writer replacement role."
+    ROLE="$role" EXPECTED_WRITER_PHASE="$expected_phase" NEXT_WRITER_PHASE="$next_phase" \
+        python3 - "$PRODUCTION_WRITER_QUIESCE_STATE_FILE" "$inventory_file" <<'PY'
+import json
+import os
+import re
+from pathlib import Path
+import sys
+from uuid import uuid4
+
+destination = Path(sys.argv[1])
+inventory_path = Path(sys.argv[2])
+payload = json.loads(destination.read_text(encoding="utf-8"))
+role = os.environ["ROLE"]
+expected_phase = os.environ["EXPECTED_WRITER_PHASE"]
+next_phase = os.environ["NEXT_WRITER_PHASE"]
+if payload.get("schema_version") != 2 or payload.get("status") != expected_phase:
+    raise SystemExit(2)
+expected_services = {"app", "bot", "sync_worker"} if role == "foreign" else {"app", "sync_worker"}
+inventory = {}
+for line in inventory_path.read_text(encoding="utf-8").splitlines():
+    service, container_id = line.split("\t")
+    if service in inventory or not re.fullmatch(r"[0-9a-f]{12,64}", container_id):
+        raise SystemExit(2)
+    inventory[service] = container_id
+if set(inventory) != expected_services:
+    raise SystemExit(2)
+for row in payload.get("writers") or []:
+    if row.get("role") == role:
+        row["current_container_id"] = inventory[row["service"]]
+payload["status"] = next_phase
+candidate = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
+flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+descriptor = os.open(candidate, flags, 0o600)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(candidate, destination)
+    directory = os.open(destination.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+finally:
+    candidate.unlink(missing_ok=True)
+PY
+}
+
+writer_state_value() {
+    local role="$1" service="$2" field="$3"
+    python3 - "$PRODUCTION_WRITER_QUIESCE_STATE_FILE" "$role" "$service" "$field" <<'PY'
+import json, sys
+from pathlib import Path
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+matches = [row for row in payload["writers"] if row["role"] == sys.argv[2] and row["service"] == sys.argv[3]]
+if len(matches) != 1 or sys.argv[4] not in {"initial_container_id", "current_container_id", "restart_policy"}:
+    raise SystemExit(2)
+print(matches[0][sys.argv[4]])
+PY
+}
+
+writer_state_status() {
+    python3 - "$PRODUCTION_WRITER_QUIESCE_STATE_FILE" <<'PY'
+import json, sys
+from pathlib import Path
+print(json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["status"])
+PY
+}
+
+reconcile_unjournaled_writer_replacements() {
+    local status service expected current image policy inventory
+    status="$(writer_state_status)"
+    if [[ "$status" == "foreign_replacement_creating" ]]; then
+        inventory="$(mktemp "$RELEASE_TMP_DIR/writers.foreign.reconcile.XXXXXX")"
+        chmod 0600 "$inventory"
+        for service in app bot sync_worker; do
+            expected="$(writer_state_value foreign "$service" current_container_id)"
+            current="$(docker ps -aq \
+                --filter "label=com.docker.compose.project=$PRODUCTION_FOREIGN_COMPOSE_PROJECT_NAME" \
+                --filter "label=com.docker.compose.service=$service")"
+            [[ -n "$current" && "$current" != *$'\n'* ]] \
+                || die "A foreign writer disappeared during replacement recovery: $service"
+            if [[ "$current" != "$expected" ]]; then
+                image="$(docker inspect --format '{{.Image}}' "$current")"
+                policy="$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' "$current")"
+                [[ "$image" == "$PRODUCTION_FOREIGN_IMAGE_ID" && "$policy" == "no" ]] \
+                    || die "Unjournaled foreign replacement is not the exact restart-disabled release image: $service"
+            fi
+            printf '%s\t%s\n' "$service" "$current" >>"$inventory"
+        done
+        record_writer_replacement_inventory foreign \
+            foreign_replacement_creating foreign_replacement_creating "$inventory"
+        rm -f -- "$inventory"
+    elif [[ "$status" == "iran_replacement_creating" ]]; then
+        inventory="$(mktemp "$RELEASE_TMP_DIR/writers.iran.reconcile.XXXXXX")"
+        chmod 0600 "$inventory"
+        local expected_app expected_sync
+        expected_app="$(writer_state_value iran app current_container_id)"
+        expected_sync="$(writer_state_value iran sync_worker current_container_id)"
+        ssh_iran "set -euo pipefail
+for pair in app:$expected_app sync_worker:$expected_sync; do
+  service=\"\${pair%%:*}\"; expected=\"\${pair#*:}\"
+  current=\"\$(docker ps -aq --filter label=com.docker.compose.project=current --filter label=com.docker.compose.service=\$service)\"
+  [ -n \"\$current\" ] && [ \"\$(printf '%s\\n' \"\$current\" | wc -l)\" -eq 1 ] || exit 42
+  if [ \"\$current\" != \"\$expected\" ]; then
+    [ \"\$(docker inspect --format '{{.Image}}' \"\$current\")\" = '$PRODUCTION_IRAN_IMAGE_ID' ] || exit 43
+    [ \"\$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' \"\$current\")\" = no ] || exit 44
+  fi
+  printf '%s\\t%s\\n' \"\$service\" \"\$current\"
+done" >"$inventory" \
+            || die "Could not reconcile an interrupted Iran writer replacement."
+        record_writer_replacement_inventory iran \
+            iran_replacement_creating iran_replacement_creating "$inventory"
+        rm -f -- "$inventory"
+    fi
+}
+
+disable_and_stop_current_foreign_writers() {
+    local service expected current
+    for service in app bot sync_worker; do
+        expected="$(writer_state_value foreign "$service" current_container_id)"
+        current="$(docker ps -aq \
+            --filter "label=com.docker.compose.project=$PRODUCTION_FOREIGN_COMPOSE_PROJECT_NAME" \
+            --filter "label=com.docker.compose.service=$service")"
+        [[ -z "$current" || "$current" == "$expected" ]] \
+            || die "Unexpected foreign writer container appeared during release: $service"
+        if [[ -n "$current" ]]; then
+            docker update --restart=no "$current" >/dev/null
+            docker stop -t 30 "$current" >/dev/null || true
+            [[ "$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' "$current")" == "no" ]] \
+                || die "Foreign writer restart policy was not disabled: $service"
+        fi
+    done
+}
+
+disable_and_stop_current_iran_writers() {
+    local expected_app expected_sync
+    expected_app="$(writer_state_value iran app current_container_id)"
+    expected_sync="$(writer_state_value iran sync_worker current_container_id)"
+    ssh_iran "set -euo pipefail
+for pair in app:$expected_app sync_worker:$expected_sync; do
+  service=\"\${pair%%:*}\"; expected=\"\${pair#*:}\"
+  current=\"\$(docker ps -aq --filter label=com.docker.compose.project=current --filter label=com.docker.compose.service=\$service)\"
+  [ -z \"\$current\" ] || [ \"\$current\" = \"\$expected\" ] || { echo \"Unexpected Iran writer container: \$service\" >&2; exit 33; }
+  if [ -n \"\$current\" ]; then
+    docker update --restart=no \"\$current\" >/dev/null
+    docker stop -t 30 \"\$current\" >/dev/null || true
+    [ \"\$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' \"\$current\")\" = no ] || exit 34
+  fi
+done"
+}
+
+clear_writer_quiesce_state() {
+    validate_writer_quiesce_state_file
+    if [[ -f "$PRODUCTION_WRITER_QUIESCE_STATE_FILE" ]]; then
+        python3 - "$PRODUCTION_WRITER_QUIESCE_STATE_FILE" <<'PY'
+import os
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+path.unlink()
+directory = os.open(path.parent, os.O_RDONLY)
+try:
+    os.fsync(directory)
+finally:
+    os.close(directory)
+PY
+    fi
+}
+
+quiesce_two_host_writers_for_migration() {
+    log "Quiescing production writers on both hosts before the first schema migration"
+    capture_writer_quiesce_state
+    PRODUCTION_TWO_HOST_WRITER_RESTART_GUARD_ARMED=1
+    reconcile_unjournaled_writer_replacements
+    disable_and_stop_current_foreign_writers
+    disable_and_stop_current_iran_writers
+    local service running
+    for service in app bot sync_worker; do
+        running="$(docker ps -q \
+            --filter "label=com.docker.compose.project=$PRODUCTION_FOREIGN_COMPOSE_PROJECT_NAME" \
+            --filter "label=com.docker.compose.service=$service")"
+        [[ -z "$running" ]] || die "Foreign writer service remained active before migration: $service"
+    done
+    ssh_iran "set -euo pipefail
+for service in app sync_worker; do
+  running=\"\$(docker ps -q --filter label=com.docker.compose.project=current --filter label=com.docker.compose.service=\$service)\"
+  [ -z \"\$running\" ] || { echo \"Iran writer remained active before migration: \$service\" >&2; exit 31; }
+done"
+    mark_writer_quiesce_complete
+    PRODUCTION_TWO_HOST_WRITERS_QUIESCED=1
+    log "Both production writer planes are restart-disabled and quiesced; DB and Redis services were not targeted."
+}
+
+verify_two_host_schema_head() {
+    [[ "$PRODUCTION_TWO_HOST_WRITERS_QUIESCED" == "1" ]] \
+        || die "Two-host schema verification requires both writer planes to remain quiesced."
+    local heads_output expected_head foreign_head iran_head
+    heads_output="$(
+        cd "$LOCAL_PROJECT_DIR"
+        $LOCAL_COMPOSE_CMD run --rm --no-deps migration python -m alembic heads
+    )"
+    expected_head="$(printf '%s\n' "$heads_output" | sed -n -E 's/^([0-9A-Za-z_]+)[[:space:]]+\(head\)$/\1/p')"
+    [[ -n "$expected_head" && "$expected_head" != *$'\n'* ]] \
+        || die "Production release requires exactly one Alembic head."
+    foreign_head="$(
+        cd "$LOCAL_PROJECT_DIR"
+        $LOCAL_COMPOSE_CMD exec -T db sh -lc \
+            'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "SELECT version_num FROM alembic_version"'
+    )"
+    iran_head="$(ssh_iran "set -euo pipefail
+$(remote_compose_resolver)
+cd '$IRAN_PROJECT_DIR'
+\$compose_cmd -f docker-compose.iran.yml exec -T db sh -lc 'psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -Atc \"SELECT version_num FROM alembic_version\"'")"
+    foreign_head="$(printf '%s' "$foreign_head" | tr -d '[:space:]')"
+    iran_head="$(printf '%s' "$iran_head" | tr -d '[:space:]')"
+    [[ "$foreign_head" == "$expected_head" && "$iran_head" == "$expected_head" ]] \
+        || die "Both production databases must reach the single release schema head before any writer restarts."
+    PRODUCTION_TWO_HOST_SCHEMAS_VERIFIED=1
+    log "Both production databases match the single release schema head."
+}
+
+emergency_disable_all_foreign_writers() {
+    local service ids
+    for service in app bot sync_worker; do
+        ids="$(docker ps -aq \
+            --filter "label=com.docker.compose.project=$PRODUCTION_FOREIGN_COMPOSE_PROJECT_NAME" \
+            --filter "label=com.docker.compose.service=$service")"
+        if [[ -n "$ids" ]]; then
+            # shellcheck disable=SC2086
+            docker update --restart=no $ids >/dev/null 2>&1 || true
+            # shellcheck disable=SC2086
+            docker stop -t 30 $ids >/dev/null 2>&1 || true
+        fi
+    done
+}
+
+emergency_disable_all_iran_writers() {
+    ssh_iran "set -euo pipefail
+for service in app sync_worker; do
+  ids=\"\$(docker ps -aq --filter label=com.docker.compose.project=current --filter label=com.docker.compose.service=\$service)\"
+  if [ -n \"\$ids\" ]; then
+    docker update --restart=no \$ids >/dev/null 2>&1 || true
+    docker stop -t 30 \$ids >/dev/null 2>&1 || true
+  fi
+done" || true
+}
+
+write_writer_restart_disabled_override() {
+    local role="$1"
+    [[ "$role" == "foreign" || "$role" == "iran" ]] \
+        || die "Invalid writer restart-disabled override role."
+    local destination="$RELEASE_ARTIFACT_DIR/writer-restart-disabled.$role.override.yml"
+    install -d -m 0700 -- "$RELEASE_ARTIFACT_DIR"
+    python3 - "$destination" "$role" <<'PY'
+import os
+from pathlib import Path
+import sys
+from uuid import uuid4
+
+destination = Path(sys.argv[1])
+role = sys.argv[2]
+services = ("app", "bot", "sync_worker") if role == "foreign" else ("app", "sync_worker")
+content = "services:\n" + "".join(f'  {service}:\n    restart: "no"\n' for service in services)
+candidate = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
+flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+descriptor = os.open(candidate, flags, 0o600)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        stream.write(content)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(candidate, destination)
+    directory = os.open(destination.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+finally:
+    candidate.unlink(missing_ok=True)
+PY
+    printf '%s\n' "$destination"
+}
+
+install_remote_writer_restart_disabled_override() {
+    local local_override="$1" remote_override remote_candidate expected_digest
+    remote_override="$REMOTE_RELEASE_STATE_DIR/writer-restart-disabled.override.yml"
+    remote_candidate="$remote_override.$RELEASE_SHA.tmp"
+    expected_digest="$(file_sha256 "$local_override")"
+    ssh_iran "install -d -m 0700 '$REMOTE_RELEASE_STATE_DIR'; rm -f -- '$remote_candidate'"
+    scp_iran "$local_override" "$IRAN_SSH_TARGET:$remote_candidate"
+    ssh_iran "set -euo pipefail
+[ -f '$remote_candidate' ] && [ ! -L '$remote_candidate' ]
+[ \"\$(sha256sum '$remote_candidate' | awk '{print \$1}')\" = '$expected_digest' ]
+chmod 0600 '$remote_candidate'
+mv -f -- '$remote_candidate' '$remote_override'
+[ \"\$(sha256sum '$remote_override' | awk '{print \$1}')\" = '$expected_digest' ]"
+    printf '%s\n' "$remote_override"
+}
+
+prepare_restart_disabled_foreign_writers() {
+    local service id image override inventory
+    override="$(write_writer_restart_disabled_override foreign)"
+    update_writer_journal_phase foreign_replacement_creating
+    (
+        cd "$LOCAL_PROJECT_DIR"
+        $LOCAL_COMPOSE_CMD -f docker-compose.yml -f "$override" \
+            create --force-recreate --no-deps app bot sync_worker
+    )
+    inventory="$(mktemp "$RELEASE_TMP_DIR/writers.foreign.replacement.XXXXXX")"
+    chmod 0600 "$inventory"
+    for service in app bot sync_worker; do
+        id="$(docker ps -aq \
+            --filter "label=com.docker.compose.project=$PRODUCTION_FOREIGN_COMPOSE_PROJECT_NAME" \
+            --filter "label=com.docker.compose.service=$service")"
+        [[ -n "$id" && "$id" != *$'\n'* ]] \
+            || die "Exactly one prepared foreign writer container is required: $service"
+        image="$(docker inspect --format '{{.Image}}' "$id")"
+        [[ "$image" == "$PRODUCTION_FOREIGN_IMAGE_ID" \
+            && "$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' "$id")" == "no" ]] \
+            || die "Prepared foreign writer is not the exact restart-disabled release image: $service"
+        printf '%s\t%s\n' "$service" "$id" >>"$inventory"
+    done
+    record_writer_replacement_inventory foreign \
+        foreign_replacement_creating foreign_replacement_prepared "$inventory"
+    rm -f -- "$inventory"
+}
+
+prepare_restart_disabled_iran_writers() {
+    local local_override remote_override inventory
+    local_override="$(write_writer_restart_disabled_override iran)"
+    remote_override="$(install_remote_writer_restart_disabled_override "$local_override")"
+    update_writer_journal_phase iran_replacement_creating
+    inventory="$(mktemp "$RELEASE_TMP_DIR/writers.iran.replacement.XXXXXX")"
+    chmod 0600 "$inventory"
+    ssh_iran "set -euo pipefail
+$(remote_compose_resolver)
+cd '$IRAN_PROJECT_DIR'
+\$compose_cmd -f docker-compose.iran.yml -f '$remote_override' create --force-recreate --no-deps app sync_worker
+for service in app sync_worker; do
+  id=\"\$(docker ps -aq --filter label=com.docker.compose.project=current --filter label=com.docker.compose.service=\$service)\"
+  [ -n \"\$id\" ] && [ \"\$(printf '%s\\n' \"\$id\" | wc -l)\" -eq 1 ] || exit 35
+  [ \"\$(docker inspect --format '{{.Image}}' \"\$id\")\" = '$PRODUCTION_IRAN_IMAGE_ID' ] || exit 36
+  [ \"\$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' \"\$id\")\" = no ] || exit 37
+  printf '%s\\t%s\\n' \"\$service\" \"\$id\"
+done" >"$inventory" \
+        || die "Iran writer replacement preparation failed."
+    record_writer_replacement_inventory iran \
+        iran_replacement_creating replacements_prepared "$inventory"
+    rm -f -- "$inventory"
+}
+
+restore_current_foreign_writer_policies() {
+    local service policy id expected
+    for service in app bot sync_worker; do
+        policy="$(writer_state_value foreign "$service" restart_policy)"
+        id="$(docker ps -aq \
+            --filter "label=com.docker.compose.project=$PRODUCTION_FOREIGN_COMPOSE_PROJECT_NAME" \
+            --filter "label=com.docker.compose.service=$service")"
+        expected="$(writer_state_value foreign "$service" current_container_id)"
+        [[ -n "$id" && "$id" != *$'\n'* && "$id" == "$expected" ]] || return 1
+        docker update --restart="$policy" "$id" >/dev/null || return 1
+        [[ "$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' "$id")" == "${policy%%:*}" ]] || return 1
+    done
+}
+
+restore_current_iran_writer_policies() {
+    local app_policy sync_policy app_id sync_id
+    app_policy="$(writer_state_value iran app restart_policy)"
+    sync_policy="$(writer_state_value iran sync_worker restart_policy)"
+    app_id="$(writer_state_value iran app current_container_id)"
+    sync_id="$(writer_state_value iran sync_worker current_container_id)"
+    ssh_iran "set -euo pipefail
+for triple in app:$app_id:$app_policy sync_worker:$sync_id:$sync_policy; do
+  service=\"\${triple%%:*}\"; remainder=\"\${triple#*:}\"; expected=\"\${remainder%%:*}\"; policy=\"\${remainder#*:}\"
+  id=\"\$(docker ps -aq --filter label=com.docker.compose.project=current --filter label=com.docker.compose.service=\$service)\"
+  [ -n \"\$id\" ] && [ \"\$id\" = \"\$expected\" ] && [ \"\$(printf '%s\\n' \"\$id\" | wc -l)\" -eq 1 ] || exit 37
+  docker update --restart=\"\$policy\" \"\$id\" >/dev/null
+  [ \"\$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' \"\$id\")\" = \"\${policy%%:*}\" ] || exit 38
+done"
+}
+
+start_prepared_foreign_writers() {
+    local ids service id status health
+    ids=""
+    for service in app bot sync_worker; do
+        id="$(docker ps -aq \
+            --filter "label=com.docker.compose.project=$PRODUCTION_FOREIGN_COMPOSE_PROJECT_NAME" \
+            --filter "label=com.docker.compose.service=$service")"
+        [[ -n "$id" && "$id" != *$'\n'* \
+            && "$id" == "$(writer_state_value foreign "$service" current_container_id)" ]] || return 1
+        ids="$ids $id"
+    done
+    # shellcheck disable=SC2086
+    docker start $ids >/dev/null || return 1
+    for _attempt in $(seq 1 60); do
+        status=ready
+        for id in $ids; do
+            [[ "$(docker inspect --format '{{.State.Status}}' "$id")" == "running" ]] || status=waiting
+            health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$id")"
+            [[ "$health" != "unhealthy" ]] || return 1
+            [[ "$health" == "healthy" || "$health" == "none" ]] || status=waiting
+        done
+        [[ "$status" == "ready" ]] && return 0
+        sleep 2
+    done
+    return 1
+}
+
+start_prepared_iran_writers() {
+    local app_id sync_id
+    app_id="$(writer_state_value iran app current_container_id)"
+    sync_id="$(writer_state_value iran sync_worker current_container_id)"
+    ssh_iran "set -euo pipefail
+ids=''
+for pair in app:$app_id sync_worker:$sync_id; do
+  service=\"\${pair%%:*}\"; expected=\"\${pair#*:}\"
+  id=\"\$(docker ps -aq --filter label=com.docker.compose.project=current --filter label=com.docker.compose.service=\$service)\"
+  [ -n \"\$id\" ] && [ \"\$id\" = \"\$expected\" ] && [ \"\$(printf '%s\\n' \"\$id\" | wc -l)\" -eq 1 ] || exit 39
+  ids=\"\$ids \$id\"
+done
+docker start \$ids >/dev/null
+for attempt in \$(seq 1 60); do
+  status=ready
+  for id in \$ids; do
+    [ \"\$(docker inspect --format '{{.State.Status}}' \"\$id\")\" = running ] || status=waiting
+    health=\"\$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \"\$id\")\"
+    [ \"\$health\" != unhealthy ] || exit 40
+    { [ \"\$health\" = healthy ] || [ \"\$health\" = none ]; } || status=waiting
+  done
+  [ \"\$status\" = ready ] && exit 0
+  sleep 2
+done
+exit 41"
+}
+
+start_two_host_writers_after_schema_convergence() {
+    [[ "$PRODUCTION_TWO_HOST_WRITERS_QUIESCED" == "1" \
+        && "$PRODUCTION_TWO_HOST_SCHEMAS_VERIFIED" == "1" ]] \
+        || die "Production writers cannot start before two-host schema convergence."
+    log "Preparing replacement writer containers with their journaled restart policies"
+    if ! prepare_restart_disabled_foreign_writers; then
+        emergency_disable_all_foreign_writers
+        emergency_disable_all_iran_writers
+        die "Foreign writer preparation failed after schema convergence; all writer policies remain disabled."
+    fi
+    if ! prepare_restart_disabled_iran_writers; then
+        emergency_disable_all_foreign_writers
+        emergency_disable_all_iran_writers
+        die "Iran writer preparation failed after schema convergence; all writer policies remain disabled."
+    fi
+    log "Starting restart-disabled foreign writers after two-host schema convergence"
+    if ! start_prepared_foreign_writers; then
+        emergency_disable_all_foreign_writers
+        emergency_disable_all_iran_writers
+        die "Foreign writers failed to start after schema convergence; all writer policies remain disabled."
+    fi
+    if ! start_prepared_iran_writers; then
+        emergency_disable_all_foreign_writers
+        emergency_disable_all_iran_writers
+        die "Iran writers failed to start after schema convergence; both writer planes were returned to restart-disabled stopped state."
+    fi
+    update_writer_journal_phase writers_running_restart_disabled
+    PRODUCTION_TWO_HOST_WRITERS_QUIESCED=0
+    log "Both production writer planes started on the converged schema with restart still disabled until final health passes."
+}
+
+finalize_two_host_writer_restart_policies() {
+    [[ "$PRODUCTION_TWO_HOST_WRITER_RESTART_GUARD_ARMED" == "1" \
+        && "$PRODUCTION_TWO_HOST_SCHEMAS_VERIFIED" == "1" ]] \
+        || die "Writer restart policies cannot be finalized before the schema and health gates."
+    if ! restore_current_foreign_writer_policies \
+        || ! restore_current_iran_writer_policies; then
+        emergency_disable_all_foreign_writers
+        emergency_disable_all_iran_writers
+        die "Writer restart-policy restoration failed; both writer planes were returned to restart-disabled stopped state."
+    fi
+    clear_writer_quiesce_state
+    PRODUCTION_TWO_HOST_WRITER_RESTART_GUARD_ARMED=0
+    log "Prior writer restart policies were restored after the final two-host health gate."
 }
 
 deploy_foreign() {
+    local defer_writer_start="${1:-0}"
     if [[ "$IRAN_SKIP_FOREIGN_DEPLOY" == "1" ]]; then
         log "Skipping foreign deploy because IRAN_SKIP_FOREIGN_DEPLOY=1"
         return 0
     fi
     log "Deploying the foreign server locally"
+    verify_frozen_release_source
+    verify_foreign_image_build_receipt
     ensure_runtime_env_file
+    ensure_local_production_coin_runtime_dir
     install_foreign_runtime_env
-    (cd "$LOCAL_PROJECT_DIR" && bash ./deploy.sh foreign)
+    (
+        cd "$LOCAL_PROJECT_DIR"
+        invoke_official_deploy_sh_foreign \
+            env PRODUCTION_DEFER_FOREIGN_WRITER_START="$defer_writer_start" \
+            PRODUCTION_REQUIRE_PREBUILT_FOREIGN_IMAGE="$defer_writer_start" \
+            bash ./deploy.sh foreign
+    )
+    verify_frozen_release_source
+}
+
+prepare_committed_iran_source_payload() {
+    verify_frozen_release_source
+    local export_dir="$RELEASE_TMP_DIR/iran-source-export"
+    case "$export_dir:$LOCAL_IRAN_SOURCE_PAYLOAD_DIR:$LOCAL_IRAN_SOURCE_PAYLOAD_MANIFEST" in
+        "$RELEASE_TMP_DIR"/*:"$RELEASE_TMP_DIR"/*:"$RELEASE_TMP_DIR"/*) ;;
+        *) die "Iran source payload paths escaped the private release directory." ;;
+    esac
+    rm -rf -- "$export_dir" "$LOCAL_IRAN_SOURCE_PAYLOAD_DIR"
+    rm -f -- "$LOCAL_IRAN_SOURCE_PAYLOAD_MANIFEST"
+    install -d -m 0700 -- "$export_dir" "$LOCAL_IRAN_SOURCE_PAYLOAD_DIR"
+    git -C "$LOCAL_PROJECT_DIR" archive --format=tar "$RELEASE_SHA" \
+        | tar -xf - -C "$export_dir"
+    rsync -a --delete \
+        --exclude '.github' \
+        --exclude '.githooks' \
+        --exclude '.agents' \
+        --exclude '.claude' \
+        --exclude '.codex' \
+        --exclude '.cursor' \
+        --exclude 'docs' \
+        --exclude 'frontend' \
+        --exclude 'tests' \
+        --exclude 'mutants' \
+        --exclude 'stage9-test-packages' \
+        --exclude 'stage9-test-packages-py311' \
+        "$export_dir/" "$LOCAL_IRAN_SOURCE_PAYLOAD_DIR/"
+    rm -rf -- "$export_dir"
+    [[ -z "$(find "$LOCAL_IRAN_SOURCE_PAYLOAD_DIR" -type l -print -quit)" \
+        && -z "$(find "$LOCAL_IRAN_SOURCE_PAYLOAD_DIR" ! -type f ! -type d -print -quit)" ]] \
+        || die "Committed Iran source payload contains an unsupported filesystem entry."
+    (
+        cd "$LOCAL_IRAN_SOURCE_PAYLOAD_DIR"
+        find . -type f -print0 | LC_ALL=C sort -z | xargs -r -0 sha256sum
+    ) >"$LOCAL_IRAN_SOURCE_PAYLOAD_MANIFEST"
+    chmod 0600 "$LOCAL_IRAN_SOURCE_PAYLOAD_MANIFEST"
+    [[ -s "$LOCAL_IRAN_SOURCE_PAYLOAD_MANIFEST" ]] \
+        || die "Committed Iran source payload manifest is empty."
+    PRODUCTION_IRAN_SOURCE_PAYLOAD_MANIFEST_SHA256="$(file_sha256 "$LOCAL_IRAN_SOURCE_PAYLOAD_MANIFEST")"
+    export PRODUCTION_IRAN_SOURCE_PAYLOAD_MANIFEST_SHA256
+    verify_frozen_release_source
 }
 
 sync_project() {
+    verify_frozen_release_source
+    [[ -d "$LOCAL_IRAN_SOURCE_PAYLOAD_DIR" \
+        && -f "$LOCAL_IRAN_SOURCE_PAYLOAD_MANIFEST" \
+        && "$(file_sha256 "$LOCAL_IRAN_SOURCE_PAYLOAD_MANIFEST")" == "${PRODUCTION_IRAN_SOURCE_PAYLOAD_MANIFEST_SHA256:-}" ]] \
+        || die "Exact committed Iran source payload was not prepared before writer quiescence."
     log "Syncing production payload to the Iran host"
     ensure_runtime_env_file
+    resolve_production_coin_runtime_contract
     local staging_dir="$IRAN_PROJECT_DIR"
     ssh_iran "mkdir -p '$IRAN_DEPLOY_BASE_DIR' '$IRAN_DEPLOY_BASE_DIR/releases' '$REMOTE_RELEASE_STATE_DIR' '$staging_dir'"
-    rsync -avz --delete \
+    ensure_remote_production_coin_runtime_dir
+    run_iran_transfer rsync -avz --delete \
         --exclude '.git' \
         --exclude '.github' \
         --exclude '.venv' \
@@ -1844,7 +5103,7 @@ sync_project() {
         --exclude 'map_data' \
         --exclude 'audit_trail' \
         -e "$RSYNC_SSH" \
-        "$LOCAL_PROJECT_DIR/" "$IRAN_SSH_TARGET:$staging_dir/"
+        "$LOCAL_IRAN_SOURCE_PAYLOAD_DIR/" "$IRAN_SSH_TARGET:$staging_dir/"
     local local_pip_hash_file="$LOCAL_PROJECT_DIR/pip_packages/.requirements_hash"
     local remote_pip_hash=""
     if [[ -f "$local_pip_hash_file" ]]; then
@@ -1853,41 +5112,139 @@ sync_project() {
     if [[ "$IRAN_FORCE_RELEASE_REFRESH" != "1" && -f "$local_pip_hash_file" && "$remote_pip_hash" == "$(cat "$local_pip_hash_file")" ]]; then
         log "Remote pip wheelhouse already matches requirements; skipping pip package sync."
     else
-        rsync -avz --delete -e "$RSYNC_SSH" \
+        run_iran_transfer rsync -avz --delete -e "$RSYNC_SSH" \
             "$LOCAL_PROJECT_DIR/pip_packages/" "$IRAN_SSH_TARGET:$staging_dir/pip_packages/"
     fi
-    rsync -avz --delete -e "$RSYNC_SSH" \
+    run_iran_transfer rsync -avz --delete -e "$RSYNC_SSH" \
         "$LOCAL_DIST_DIR/" "$IRAN_SSH_TARGET:$staging_dir/mini_app_dist/"
+    local remote_manifest_candidate="$REMOTE_IRAN_SOURCE_PAYLOAD_MANIFEST.$RELEASE_SHA.tmp"
+    scp_iran "$LOCAL_IRAN_SOURCE_PAYLOAD_MANIFEST" \
+        "$IRAN_SSH_TARGET:$remote_manifest_candidate"
+    ssh_iran "set -euo pipefail
+[ -f '$remote_manifest_candidate' ] && [ ! -L '$remote_manifest_candidate' ]
+[ \"\$(sha256sum '$remote_manifest_candidate' | awk '{print \$1}')\" = '$PRODUCTION_IRAN_SOURCE_PAYLOAD_MANIFEST_SHA256' ]
+chmod 0600 '$remote_manifest_candidate'
+mv -f -- '$remote_manifest_candidate' '$REMOTE_IRAN_SOURCE_PAYLOAD_MANIFEST'
+cd '$IRAN_PROJECT_DIR'
+sha256sum -c '$REMOTE_IRAN_SOURCE_PAYLOAD_MANIFEST' >/dev/null" \
+        || die "Iran committed source payload failed its exact file manifest."
     ssh_iran "set -euo pipefail
 assets_dir='$staging_dir/mini_app_dist/assets'
 find \"\$assets_dir\" -maxdepth 1 -type f -name 'MarketView-*.js' | grep -q . || exit 21
 grep -h -q 'api/offers/market-history' \"\$assets_dir\"/MarketView-*.js || exit 22" \
         || die "Remote Iran frontend release contract failed: deployed MarketView bundle cannot load read-only terminal market offers."
-    scp_iran "$IRAN_ENV_SOURCE_PATH" "$IRAN_SSH_TARGET:$staging_dir/.env"
+    atomic_install_iran_runtime_env
+    verify_installed_runtime_env_pair
+    verify_remote_immutable_runtime_payload
     log "Production payload sync complete"
+}
+
+verify_remote_immutable_runtime_payload() {
+    verify_frozen_release_source
+    local expected_compose_sha expected_dist_sha observed
+    [[ -f "$LOCAL_IRAN_SOURCE_PAYLOAD_MANIFEST" \
+        && "$(file_sha256 "$LOCAL_IRAN_SOURCE_PAYLOAD_MANIFEST")" == "${PRODUCTION_IRAN_SOURCE_PAYLOAD_MANIFEST_SHA256:-}" ]] \
+        || die "Local committed Iran source manifest drifted."
+    expected_compose_sha="$(file_sha256 "$LOCAL_PROJECT_DIR/docker-compose.iran.yml")"
+    expected_dist_sha="$(directory_sha256 "$LOCAL_DIST_DIR")"
+    observed="$(ssh_iran "set -euo pipefail
+compose_file='$IRAN_PROJECT_DIR/docker-compose.iran.yml'
+dist_dir='$IRAN_PROJECT_DIR/mini_app_dist'
+[ -f \"\$compose_file\" ] && [ ! -L \"\$compose_file\" ]
+[ -d \"\$dist_dir\" ] && [ ! -L \"\$dist_dir\" ]
+[ -f '$REMOTE_IRAN_SOURCE_PAYLOAD_MANIFEST' ] && [ ! -L '$REMOTE_IRAN_SOURCE_PAYLOAD_MANIFEST' ]
+[ \"\$(sha256sum '$REMOTE_IRAN_SOURCE_PAYLOAD_MANIFEST' | awk '{print \$1}')\" = '$PRODUCTION_IRAN_SOURCE_PAYLOAD_MANIFEST_SHA256' ]
+cd '$IRAN_PROJECT_DIR'
+sha256sum -c '$REMOTE_IRAN_SOURCE_PAYLOAD_MANIFEST' >/dev/null
+compose_sha=\"\$(sha256sum \"\$compose_file\" | awk '{print \$1}')\"
+dist_sha=\"\$(cd \"\$dist_dir\" && find . -type f -print0 | LC_ALL=C sort -z | xargs -r -0 sha256sum | sha256sum | awk '{print \$1}')\"
+printf '%s %s %s\\n' \"\$compose_sha\" \"\$dist_sha\" '$PRODUCTION_IRAN_SOURCE_PAYLOAD_MANIFEST_SHA256'")" \
+        || die "Iran immutable runtime payload verification failed."
+    [[ "$observed" == "$expected_compose_sha $expected_dist_sha $PRODUCTION_IRAN_SOURCE_PAYLOAD_MANIFEST_SHA256" ]] \
+        || die "Iran Compose/frontend payload drifted from the exact release artifacts."
 }
 
 ship_images() {
     local bundle="$LOCAL_IMAGE_BUNDLE"
     [[ -f "$bundle" ]] || die "Docker image bundle missing: $bundle"
-    local bundle_sha remote_bundle_sha
+    local bundle_sha remote_bundle_sha remote_bundle_candidate remote_sha_candidate
     bundle_sha="$(file_sha256 "$bundle")"
-    remote_bundle_sha="$(ssh_iran "cat '$REMOTE_IMAGE_BUNDLE_SHA' 2>/dev/null || true")"
-    if [[ "$IRAN_FORCE_RELEASE_REFRESH" != "1" && "$remote_bundle_sha" == "$bundle_sha" ]] && ssh_iran "[ -s '$REMOTE_IMAGE_BUNDLE' ]"; then
+    [[ "$bundle_sha" =~ ^[0-9a-f]{64}$ ]] || die "Local Docker image bundle checksum is invalid."
+    if ! remote_bundle_sha="$(ssh_iran "set -euo pipefail
+bundle='$REMOTE_IMAGE_BUNDLE'
+if [ ! -e \"\$bundle\" ]; then
+  printf 'missing\\n'
+elif [ -f \"\$bundle\" ] && [ ! -L \"\$bundle\" ]; then
+  sha256sum \"\$bundle\" | awk '{print \$1}'
+else
+  exit 41
+fi")"; then
+        die "Could not safely inspect the existing Iran Docker image bundle."
+    fi
+    if [[ "$IRAN_FORCE_RELEASE_REFRESH" != "1" && "$remote_bundle_sha" == "$bundle_sha" ]]; then
         log "Docker image bundle already exists on Iran with matching checksum; skipping upload."
         return 0
     fi
+    remote_bundle_candidate="${REMOTE_IMAGE_BUNDLE}.uploading"
+    remote_sha_candidate="${REMOTE_IMAGE_BUNDLE_SHA}.uploading"
     log "Uploading Docker image bundle to the Iran host"
-    ssh_iran "mkdir -p '$IRAN_DEPLOY_BASE_DIR/releases' '$REMOTE_RELEASE_STATE_DIR'"
-    scp_iran "$bundle" "$IRAN_SSH_TARGET:$REMOTE_IMAGE_BUNDLE"
-    ssh_iran "printf '%s\n' '$bundle_sha' > '$REMOTE_IMAGE_BUNDLE_SHA'"
+    ssh_iran "set -euo pipefail
+mkdir -p '$IRAN_DEPLOY_BASE_DIR/releases' '$REMOTE_RELEASE_STATE_DIR'
+rm -f -- '$remote_bundle_candidate' '$remote_sha_candidate'"
+    scp_iran "$bundle" "$IRAN_SSH_TARGET:$remote_bundle_candidate"
+    ssh_iran "set -euo pipefail
+candidate='$remote_bundle_candidate'
+bundle='$REMOTE_IMAGE_BUNDLE'
+sha_candidate='$remote_sha_candidate'
+sha_file='$REMOTE_IMAGE_BUNDLE_SHA'
+cleanup() { rm -f -- \"\$candidate\" \"\$sha_candidate\"; }
+trap cleanup EXIT
+[ -f \"\$candidate\" ] && [ ! -L \"\$candidate\" ]
+candidate_sha=\"\$(sha256sum \"\$candidate\" | awk '{print \$1}')\"
+[ \"\$candidate_sha\" = '$bundle_sha' ]
+chmod 0600 \"\$candidate\"
+mv -f -- \"\$candidate\" \"\$bundle\"
+[ -f \"\$bundle\" ] && [ ! -L \"\$bundle\" ]
+installed_sha=\"\$(sha256sum \"\$bundle\" | awk '{print \$1}')\"
+[ \"\$installed_sha\" = '$bundle_sha' ]
+printf '%s\\n' '$bundle_sha' > \"\$sha_candidate\"
+chmod 0600 \"\$sha_candidate\"
+mv -f -- \"\$sha_candidate\" \"\$sha_file\"
+trap - EXIT"
+    remote_bundle_sha="$(ssh_iran "set -euo pipefail
+bundle='$REMOTE_IMAGE_BUNDLE'
+[ -f \"\$bundle\" ] && [ ! -L \"\$bundle\" ]
+sha256sum \"\$bundle\" | awk '{print \$1}'")" \
+        || die "Could not verify the installed Iran Docker image bundle."
+    [[ "$remote_bundle_sha" == "$bundle_sha" ]] \
+        || die "Iran Docker image bundle checksum does not match the local release bundle after upload."
     log "Docker image bundle upload complete"
+}
+
+verify_remote_iran_image_identity() {
+    local image_signature="$1" expected_id remote_identity
+    expected_id="$(docker image inspect --format '{{.Id}}' trading_bot_base_iran)"
+    [[ "$expected_id" =~ ^sha256:[0-9a-f]{64}$ ]] \
+        || die "Local Iran image ID is invalid."
+    remote_identity="$(ssh_iran "docker image inspect --format '{{.Id}}|{{index .Config.Labels \"org.opencontainers.image.revision\"}}|{{index .Config.Labels \"io.gold-trade.release.tree\"}}|{{index .Config.Labels \"io.gold-trade.release.input-signature\"}}' trading_bot_base_iran:latest")"
+    [[ "$remote_identity" == "$expected_id|$RELEASE_SHA|$PRODUCTION_RELEASE_TREE|$image_signature" ]] \
+        || die "Remote Iran image identity/OCI labels do not match the exact release bundle."
 }
 
 load_images() {
     local bundle="$LOCAL_IMAGE_BUNDLE"
     [[ -f "$bundle" ]] || die "Docker image bundle missing: $bundle"
-    local image_signature remote_loaded_signature
+    verify_iran_image_build_receipt
+    local bundle_sha remote_bundle_sha image_signature remote_loaded_signature
+    bundle_sha="$(file_sha256 "$bundle")"
+    [[ "$bundle_sha" =~ ^[0-9a-f]{64}$ ]] || die "Local Docker image bundle checksum is invalid."
+    remote_bundle_sha="$(ssh_iran "set -euo pipefail
+bundle='$REMOTE_IMAGE_BUNDLE'
+[ -f \"\$bundle\" ] && [ ! -L \"\$bundle\" ]
+sha256sum \"\$bundle\" | awk '{print \$1}'")" \
+        || die "Iran Docker image bundle is missing or cannot be safely hashed."
+    [[ "$remote_bundle_sha" == "$bundle_sha" ]] \
+        || die "Iran Docker image bundle checksum does not match the local release bundle; refusing docker load."
     if [[ -f "$LOCAL_IMAGE_SIGNATURE_FILE" ]]; then
         image_signature="$(cat "$LOCAL_IMAGE_SIGNATURE_FILE")"
     else
@@ -1896,6 +5253,7 @@ load_images() {
     remote_loaded_signature="$(ssh_iran "cat '$REMOTE_IMAGE_LOADED_SIGNATURE' 2>/dev/null || true")"
     if [[ "$IRAN_FORCE_RELEASE_REFRESH" != "1" && "$remote_loaded_signature" == "$image_signature" ]]; then
         if ssh_iran "docker image inspect trading_bot_base_iran:latest >/dev/null 2>&1 && docker image inspect postgres:15-alpine >/dev/null 2>&1 && docker image inspect redis:7-alpine >/dev/null 2>&1"; then
+            verify_remote_iran_image_identity "$image_signature"
             log "Docker images already loaded on Iran with matching signature; skipping docker load."
             return 0
         fi
@@ -1904,6 +5262,10 @@ load_images() {
     log "Loading transferred Docker images on the Iran host"
     ssh_iran "set -euo pipefail
 mkdir -p '$REMOTE_RELEASE_STATE_DIR'
+bundle='$REMOTE_IMAGE_BUNDLE'
+[ -f \"\$bundle\" ] && [ ! -L \"\$bundle\" ]
+actual_bundle_sha=\"\$(sha256sum \"\$bundle\" | awk '{print \$1}')\"
+[ \"\$actual_bundle_sha\" = '$bundle_sha' ]
 docker load -i '$REMOTE_IMAGE_BUNDLE'
 if docker image inspect 'postgres:15-alpine-iran-$IRAN_HOST_ARCH' >/dev/null 2>&1; then
   docker tag 'postgres:15-alpine-iran-$IRAN_HOST_ARCH' 'postgres:15-alpine'
@@ -1912,6 +5274,7 @@ if docker image inspect 'redis:7-alpine-iran-$IRAN_HOST_ARCH' >/dev/null 2>&1; t
   docker tag 'redis:7-alpine-iran-$IRAN_HOST_ARCH' 'redis:7-alpine'
 fi
 printf '%s\n' '$image_signature' > '$REMOTE_IMAGE_LOADED_SIGNATURE'"
+    verify_remote_iran_image_identity "$image_signature"
     log "Docker images loaded on the Iran host"
 }
 
@@ -1930,10 +5293,23 @@ foreign_iran_source_sequence_floor() {
 
 deploy_iran() {
     log "Deploying Docker services on the Iran host"
+    local defer_writer_start="${1:-0}"
     local compose_resolver iran_source_sequence_floor
+    [[ "$defer_writer_start" == "0" || "$defer_writer_start" == "1" ]] \
+        || die "Iran writer deferral must be 0 or 1."
+    verify_frozen_release_source
+    verify_remote_immutable_runtime_payload
+    ensure_remote_production_coin_runtime_dir 1
     compose_resolver="$(remote_compose_resolver)"
     iran_source_sequence_floor="$(foreign_iran_source_sequence_floor)"
     log "Iran change_log source-sequence floor from foreign watermarks: $iran_source_sequence_floor"
+    # This is deliberately repeated after writer quiescence and immediately
+    # before the Iran migration.  A loaded tag or local bundle may not drift
+    # from the independent receipt once the release transaction has started.
+    verify_frozen_release_source
+    verify_remote_immutable_runtime_payload
+    verify_iran_image_build_receipt
+    verify_remote_iran_image_identity "$PRODUCTION_IRAN_IMAGE_SIGNATURE"
     ssh_iran "set -euo pipefail
 $compose_resolver
 cd '$IRAN_PROJECT_DIR'
@@ -1970,9 +5346,15 @@ eval \"\$compose_cmd -f docker-compose.iran.yml run --rm --no-deps migration\"
 docker rm -f trading_bot_migration >/dev/null 2>&1 || true
 eval \"\$compose_cmd -f docker-compose.iran.yml run --rm --no-deps migration python scripts/align_change_log_source_sequence.py align --floor '$iran_source_sequence_floor'\"
 docker rm -f trading_bot_migration >/dev/null 2>&1 || true
-eval \"\$compose_cmd -f docker-compose.iran.yml up -d --no-deps \$wait_args app sync_worker\"
+if [ '$defer_writer_start' = '1' ]; then
+  echo 'Iran writer startup deferred until the official two-host schema gate passes.'
+else
+  eval \"\$compose_cmd -f docker-compose.iran.yml up -d --no-deps \$wait_args app sync_worker\"
+fi
 eval \"\$compose_cmd -f docker-compose.iran.yml ps\""
-    repair_registry_fingerprint_rollout_quarantine
+    if [[ "$defer_writer_start" == "0" ]]; then
+        repair_registry_fingerprint_rollout_quarantine
+    fi
     log "Iran deploy step complete"
 }
 
@@ -2213,10 +5595,10 @@ seed_shared_tables_to_iran() {
 verify_shared_sync_health_clean() {
     log "Verifying cross-server sync health"
     local foreign_observability_key iran_observability_key foreign_health iran_health foreign_unsynced iran_unsynced iran_header
-    foreign_observability_key="$(read_env_value "$LOCAL_ENV_SOURCE_PATH" "OBSERVABILITY_API_KEY")"
-    iran_observability_key="$(read_env_value "$IRAN_ENV_SOURCE_PATH" "OBSERVABILITY_API_KEY")"
-    [[ -n "$foreign_observability_key" ]] || die "OBSERVABILITY_API_KEY is missing from $LOCAL_ENV_SOURCE_PATH"
-    [[ -n "$iran_observability_key" ]] || die "OBSERVABILITY_API_KEY is missing from $IRAN_ENV_SOURCE_PATH"
+    foreign_observability_key="$(read_env_value "$FOREIGN_RUNTIME_ENV_PATH" "OBSERVABILITY_API_KEY")"
+    iran_observability_key="$(read_env_value "$IRAN_RUNTIME_ENV_PATH" "OBSERVABILITY_API_KEY")"
+    [[ -n "$foreign_observability_key" ]] || die "OBSERVABILITY_API_KEY is missing from $FOREIGN_RUNTIME_ENV_PATH"
+    [[ -n "$iran_observability_key" ]] || die "OBSERVABILITY_API_KEY is missing from $IRAN_RUNTIME_ENV_PATH"
 
     foreign_health="$(curl -fsS "http://127.0.0.1:8000/api/sync/health" -H "X-Observability-Api-Key: $foreign_observability_key")"
     foreign_unsynced="$(printf '%s' "$foreign_health" | extract_sync_unsynced_count)"
@@ -2395,7 +5777,7 @@ decide_iran_connectivity() {
     esac
 
     echo
-    echo "Foreign deploy finished."
+    echo "Production preflight is ready."
     read -r -p "Does the Iran server currently have working internet access? [yes/no]: " answer
     answer="$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')"
     case "$answer" in
@@ -2406,56 +5788,126 @@ decide_iran_connectivity() {
 }
 
 run_release() {
-    check_local
+    local iran_mode="${1:-}"
+    if [[ -z "$iran_mode" ]]; then
+        iran_mode="$(decide_iran_connectivity)"
+    fi
+    if [[ "$iran_mode" == "offline" ]]; then
+        die "Iran offline scenario is not implemented; no mutable release preparation, production writer quiescence, or migration was started."
+    fi
+    [[ "$iran_mode" == "online" ]] || die "Production release connectivity decision was not online."
+    prepare_local_release_inputs
+    trap production_release_exit_guard EXIT
+    [[ "$IRAN_SKIP_FOREIGN_DEPLOY" == "0" ]] \
+        || die "The full two-host production release cannot skip the foreign commit."
+    # Reject a different code/env pair before any remote bootstrap, image load,
+    # or other release preparation when a prior two-host transaction is open.
+    prepare_committed_iran_source_payload
+    load_two_host_release_state
     ensure_local_timezone_utc
     install_sync_sampler_local
-    deploy_foreign
-    verify_sync_sampler_local
     sync_hosts_mappings
-    local iran_mode
-    iran_mode="$(decide_iran_connectivity)"
-    if [[ "$iran_mode" == "offline" ]]; then
-        log "Iran offline scenario is not implemented yet. Stopping after the foreign deploy."
-        exit 20
-    fi
-    build_release
+    verify_prepared_release_artifacts
     bootstrap_iran
-    sync_project
-    install_sync_sampler_remote
     configure_nginx
     issue_cert
     ship_images
     load_images
-    deploy_iran
+    verify_foreign_image_build_receipt
+    verify_release_evidence_gate
+    verify_frozen_release_source
+    begin_two_host_release_transaction
+    capture_production_coin_input_timer_recovery_state
+    install_and_verify_production_coin_inputs
+    suspend_production_coin_snapshot_relay
+    verify_frozen_release_source
+    quiesce_two_host_writers_for_migration
+    deploy_foreign 1
+    write_two_host_release_state foreign_committed
+    verify_sync_sampler_local
+    sync_project
+    write_two_host_release_state iran_payload_installed
+    reconcile_production_coin_snapshot_relay
+    install_sync_sampler_remote
+    deploy_iran 1
+    write_two_host_release_state iran_committed
     handle_iran_shared_data
+    verify_two_host_schema_head
+    if [[ "$PRODUCTION_COIN_INFERENCE_REQUESTED" == "1" ]]; then
+        verify_production_coin_snapshot_relay
+    fi
+    start_two_host_writers_after_schema_convergence
+    verify_running_production_coin_consumers
+    repair_registry_fingerprint_rollout_quarantine
     healthcheck
+    finalize_two_host_writer_restart_policies
+    PRODUCTION_COIN_SNAPSHOT_RELAY_GUARD_ARMED=0
+    clear_production_coin_relay_recovery_marker
+    clear_two_host_release_state
+    if [[ "$PRODUCTION_COIN_INFERENCE_REQUESTED" == "1" ]]; then
+        clear_production_coin_input_timer_recovery_state \
+            || die "Could not commit the production coin input timer transition."
+    fi
+    release_production_locks
+    trap - EXIT
 }
 
 main() {
+    local release_iran_mode=""
     parse_args "$@"
     if [[ "$COMMAND" == "help" ]]; then
         usage
         exit 0
     fi
-    ensure_manifest_file
+    [[ -f "$MANIFEST_PATH" ]] || die "Manifest not found: $MANIFEST_PATH"
     load_manifest
+    if [[ "$COMMAND" == "release" ]]; then
+        # Connectivity is the first release decision after the read-only
+        # manifest load. In particular, do not acquire/create release locks,
+        # install packages, render envs, or build artifacts for an offline run.
+        release_iran_mode="$(decide_iran_connectivity)"
+        if [[ "$release_iran_mode" == "offline" ]]; then
+            die "Iran offline scenario is not implemented; no mutable release preparation, production writer quiescence, or migration was started."
+        fi
+        [[ "$release_iran_mode" == "online" ]] \
+            || die "Production release connectivity decision was not online."
+    fi
+    trap release_production_locks EXIT
+    guard_production_release_command
     case "$COMMAND" in
         check-local) check_local ;;
-        release) run_release ;;
-        deploy-foreign) check_local; install_sync_sampler_local; build_release; deploy_foreign; verify_sync_sampler_local ;;
-        bootstrap-iran) check_local; bootstrap_iran ;;
-        configure-nginx) check_local; configure_nginx ;;
-        issue-cert) check_local; issue_cert ;;
-        build-release) check_local; build_release ;;
-        sync-project) check_local; sync_project ;;
-        ship-images) check_local; ship_images ;;
-        load-images) check_local; load_images ;;
-        deploy-iran) check_local; install_sync_sampler_remote; deploy_iran; verify_sync_sampler_remote ;;
+        release) run_release "$release_iran_mode" ;;
+        prepare-release-evidence)
+            prepare_local_release_inputs
+            prepare_release_evidence_artifacts
+            ;;
+        verify-release-evidence)
+            prepare_local_release_inputs
+            prepare_committed_iran_source_payload
+            load_two_host_release_state
+            load_foreign_image_build_receipt
+            load_iran_image_build_receipt
+            verify_release_evidence_gate
+            load_two_host_release_state
+            ;;
+        deploy-foreign) prepare_local_release_inputs; install_sync_sampler_local; build_release; deploy_foreign; verify_sync_sampler_local ;;
+        bootstrap-iran) prepare_local_release_inputs; bootstrap_iran ;;
+        configure-nginx) prepare_local_release_inputs; configure_nginx ;;
+        issue-cert) prepare_local_release_inputs; issue_cert ;;
+        build-release) prepare_local_release_inputs; prepare_release_evidence_artifacts ;;
+        sync-project) prepare_local_release_inputs; sync_project ;;
+        ship-images) prepare_local_release_inputs; ship_images ;;
+        load-images) prepare_local_release_inputs; load_images ;;
+        deploy-iran) prepare_local_release_inputs; install_sync_sampler_remote; deploy_iran; verify_sync_sampler_remote ;;
         inspect-shared-data) check_local; inspect_iran_shared_data ;;
-        seed-shared-data) check_local; handle_iran_shared_data ;;
+        seed-shared-data) prepare_local_release_inputs; handle_iran_shared_data ;;
         healthcheck) check_local; healthcheck ;;
         *) die "Unknown command: $COMMAND" ;;
     esac
+    release_production_locks
+    trap - EXIT
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

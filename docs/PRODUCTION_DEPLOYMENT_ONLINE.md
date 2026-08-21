@@ -43,6 +43,15 @@ Then fill:
 - certbot email
 - path to the private runtime `.env` file that should become `IRAN_PROJECT_DIR/.env`
 
+The immutable runtime source also owns Queue-v1 identity bindings. Staging and
+production use distinct central bots, five distinct Publishers, channels,
+databases, and Redis limiters. Every identity must pass provider readback before
+cutover. Publishers are not outbound-only: they also poll B2B acknowledgements
+and channel callbacks. Therefore any identity collision—or enabling
+`TELEGRAM_DELIVERY_QUEUE_SHARED_PUBLISHER_FLEET_ENABLED` in either environment—
+produces `BLOCKED_SHARED_PUBLISHER_UPDATE_OWNERSHIP_UNSUPPORTED`. Keep the flag
+false; the 1.05-second destination cadence remains mandatory independently.
+
 If the manifest file does not exist, the script will prompt for these values and create it in the repo path automatically.
 
 The script also updates `/etc/hosts` on both servers so the foreign and Iran domains resolve to the expected internal IPs during sync and runtime traffic. That matters because the sync worker still resolves peer URLs from the configured server domains.
@@ -200,7 +209,9 @@ make production-online-seed-shared MANIFEST=/root/secure-envs/trading-bot/online
 1. SSL still depends on live internet and ACME reachability from the Iran server.
 2. The Iran-offline branch is not implemented yet.
 3. The flow does not yet create immutable rollback releases.
-4. The compose file still uses bind mounts, so the runtime payload is synced alongside the loaded image.
+4. Application and migration code execute only from receipt-bound images. The
+   host sync carries Compose, role-specific runtime env, and static frontend
+   assets; their exact digests are rechecked before the Iran migration.
 5. Firewall hardening is optional and conservative.
 6. The script assumes Debian/Ubuntu style package management.
 7. For SSH password auth, `sshpass` must be installed on the foreign server.

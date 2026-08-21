@@ -334,7 +334,12 @@ class OfferCreationServiceAsyncTests(unittest.IsolatedAsyncioTestCase):
             price=100_600,
             is_wholesale=True,
         )
-        with patch("core.config.settings.offer_model_price_guard_enabled", True):
+        with patch(
+            "core.config.settings.offer_model_price_guard_enabled", True
+        ), patch(
+            "core.services.offer_model_price_guard.evaluate_offer_model_price_guard",
+            new=AsyncMock(return_value=SimpleNamespace(allowed=True, message=None)),
+        ):
             await validate_offer_creation_command(FakeDB(), valid)
 
             for invalid in (
@@ -364,12 +369,92 @@ class OfferCreationServiceAsyncTests(unittest.IsolatedAsyncioTestCase):
             "core.config.settings.offer_model_price_guard_enabled",
             True,
         ), patch(
+            "core.services.offer_model_price_guard.evaluate_offer_model_price_guard",
+            new=AsyncMock(return_value=SimpleNamespace(allowed=True, message=None)),
+        ) as model_guard, patch(
             "core.services.trade_service.validate_competitive_price",
             new=AsyncMock(return_value=(False, "legacy rejection")),
         ) as legacy_guard:
             await validate_offer_creation_command(FakeDB(), command)
 
+        model_guard.assert_awaited_once()
         legacy_guard.assert_not_awaited()
+
+    async def test_authoritative_validation_rejects_model_outlier_for_direct_caller(self):
+        command = OfferCreationCommand(
+            source_surface=OfferSourceSurface.WEBAPP,
+            owner_user_id=1,
+            actor_user_id=1,
+            offer_type="sell",
+            commodity_id=7,
+            quantity=10,
+            price=999_999,
+        )
+        with patch(
+            "core.config.settings.offer_model_price_guard_enabled", True
+        ), patch(
+            "core.services.offer_model_price_guard.evaluate_offer_model_price_guard",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    allowed=False,
+                    message="قیمت فروش شما بالاست؛ قیمت بهتری در بازار وجود دارد.",
+                )
+            ),
+        ) as model_guard:
+            with self.assertRaisesRegex(
+                OfferCreationValidationError,
+                "قیمت فروش شما بالاست",
+            ):
+                await validate_offer_creation_command(FakeDB(), command)
+
+        model_guard.assert_awaited_once()
+
+    async def test_validate_market_false_cannot_bypass_model_guard_but_sync_can(self):
+        command = OfferCreationCommand(
+            source_surface=OfferSourceSurface.TELEGRAM_BOT,
+            owner_user_id=1,
+            actor_user_id=1,
+            offer_type="buy",
+            commodity_id=7,
+            quantity=10,
+            price=1,
+        )
+        decision = SimpleNamespace(
+            allowed=False,
+            message="قیمت خرید شما پایین است؛ قیمت بهتری در بازار وجود دارد.",
+        )
+        with patch(
+            "core.config.settings.offer_model_price_guard_enabled", True
+        ), patch(
+            "core.services.offer_model_price_guard.evaluate_offer_model_price_guard",
+            new=AsyncMock(return_value=decision),
+        ) as model_guard:
+            db = FakeDB()
+            with self.assertRaises(OfferCreationValidationError):
+                await create_authoritative_offer_with_outcome(
+                    db,
+                    command,
+                    validate_market=False,
+                    commit=False,
+                    refresh=False,
+                )
+            self.assertEqual(db.added, [])
+
+            sync_command = replace(
+                command,
+                source_surface=OfferSourceSurface.INTERNAL_SYNC,
+                offer_public_id="ofr_synced_price_guard_bypass",
+                incoming_home_server="foreign",
+            )
+            await create_authoritative_offer_with_outcome(
+                db,
+                sync_command,
+                validate_market=False,
+                commit=False,
+                refresh=False,
+            )
+
+        model_guard.assert_awaited_once()
 
     async def test_create_authoritative_offer_validates_before_add(self):
         db = FakeDB()

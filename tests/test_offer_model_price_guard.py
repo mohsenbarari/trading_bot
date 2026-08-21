@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, patch
 
 from core.services.offer_model_price_guard import (
     BUY_PRICE_OUTLIER_MESSAGE,
+    OFFER_MODEL_PRICE_GUARD_MAXIMUM_ANCHOR_AGE_SECONDS,
+    OFFER_MODEL_PRICE_GUARD_MAXIMUM_UNDERLYING_AGE_SECONDS,
     OFFER_MODEL_PRICE_TOLERANCE_BPS_BY_CODE,
     SELL_PRICE_OUTLIER_MESSAGE,
     evaluate_offer_model_price_guard,
@@ -24,6 +26,9 @@ def snapshot_for(
     lower: int = 100_000,
     upper: int = 110_000,
     generated_at: datetime = NOW,
+    confidence: str = "HIGH",
+    anchor_age_seconds: object = 60.0,
+    underlying_age_seconds: object = 30.0,
 ) -> dict:
     return {
         "generated_at_utc": generated_at.isoformat().replace("+00:00", "Z"),
@@ -36,6 +41,9 @@ def snapshot_for(
                     "estimated_project_price": (lower + upper) // 2,
                     "lower_project_price": lower,
                     "upper_project_price": upper,
+                    "confidence": confidence,
+                    "anchor_age_seconds": anchor_age_seconds,
+                    "underlying_age_seconds": underlying_age_seconds,
                 }
             ]
         },
@@ -177,6 +185,148 @@ class OfferModelPriceSnapshotTests(unittest.TestCase):
         self.assertEqual(pack.reason, "COMMODITY_UNSUPPORTED")
         self.assertEqual(missing.reason, "MODEL_RANGE_UNAVAILABLE")
         self.assertTrue(all(item.allowed for item in (stale, future, unsupported, pack, missing)))
+
+    def test_low_paper_fallback_cannot_reject_an_offer(self):
+        decision = evaluate_offer_model_price_snapshot(
+            snapshot_for(
+                "IMAM",
+                confidence="LOW_PAPER_FALLBACK",
+                anchor_age_seconds=30,
+            ),
+            commodity_name="امام",
+            settlement_type="cash",
+            offer_type="sell",
+            proposed_price=999_999,
+            now_utc=NOW,
+            market_opened_at=None,
+        )
+
+        self.assertTrue(decision.allowed)
+        self.assertEqual(decision.status, "ABSTAINED")
+        self.assertEqual(decision.reason, "MODEL_EVIDENCE_CONFIDENCE_UNSAFE")
+
+    def test_high_and_medium_can_reject_but_low_always_abstains(self):
+        for confidence, anchor_age, expected_status in (
+            ("HIGH", 30.0, "REJECTED"),
+            ("MEDIUM", None, "REJECTED"),
+            ("LOW_PAPER_FALLBACK", 30.0, "ABSTAINED"),
+        ):
+            with self.subTest(confidence=confidence):
+                decision = evaluate_offer_model_price_snapshot(
+                    snapshot_for(
+                        "IMAM",
+                        confidence=confidence,
+                        anchor_age_seconds=anchor_age,
+                    ),
+                    commodity_name="امام",
+                    settlement_type="cash",
+                    offer_type="sell",
+                    proposed_price=999_999,
+                    now_utc=NOW,
+                    market_opened_at=None,
+                )
+                self.assertEqual(decision.status, expected_status)
+
+    def test_underlying_age_is_effective_at_decision_time_and_fails_open(self):
+        maximum = OFFER_MODEL_PRICE_GUARD_MAXIMUM_UNDERLYING_AGE_SECONDS
+        at_boundary = evaluate_offer_model_price_snapshot(
+            snapshot_for(
+                "IMAM",
+                generated_at=NOW - timedelta(seconds=1),
+                underlying_age_seconds=maximum - 1,
+            ),
+            commodity_name="امام",
+            settlement_type="cash",
+            offer_type="sell",
+            proposed_price=999_999,
+            now_utc=NOW,
+            market_opened_at=None,
+        )
+        beyond_boundary = evaluate_offer_model_price_snapshot(
+            snapshot_for(
+                "IMAM",
+                generated_at=NOW - timedelta(seconds=1),
+                underlying_age_seconds=maximum,
+            ),
+            commodity_name="امام",
+            settlement_type="cash",
+            offer_type="sell",
+            proposed_price=999_999,
+            now_utc=NOW,
+            market_opened_at=None,
+        )
+        missing = evaluate_offer_model_price_snapshot(
+            snapshot_for("IMAM", underlying_age_seconds=None),
+            commodity_name="امام",
+            settlement_type="cash",
+            offer_type="sell",
+            proposed_price=999_999,
+            now_utc=NOW,
+            market_opened_at=None,
+        )
+
+        self.assertEqual(at_boundary.status, "REJECTED")
+        self.assertEqual(beyond_boundary.reason, "MODEL_UNDERLYING_STALE")
+        self.assertEqual(missing.reason, "MODEL_UNDERLYING_AGE_UNAVAILABLE")
+
+    def test_missing_invalid_and_stale_anchor_age_fail_open(self):
+        cases = (
+            (None, "MODEL_ANCHOR_AGE_UNAVAILABLE"),
+            (True, "MODEL_ANCHOR_AGE_UNAVAILABLE"),
+            (-1, "MODEL_ANCHOR_AGE_INVALID"),
+            (float("inf"), "MODEL_ANCHOR_AGE_INVALID"),
+            (
+                OFFER_MODEL_PRICE_GUARD_MAXIMUM_ANCHOR_AGE_SECONDS + 1,
+                "MODEL_ANCHOR_STALE",
+            ),
+        )
+        for anchor_age, expected_reason in cases:
+            with self.subTest(anchor_age=anchor_age):
+                decision = evaluate_offer_model_price_snapshot(
+                    snapshot_for("IMAM", anchor_age_seconds=anchor_age),
+                    commodity_name="امام",
+                    settlement_type="cash",
+                    offer_type="sell",
+                    proposed_price=999_999,
+                    now_utc=NOW,
+                    market_opened_at=None,
+                )
+                self.assertTrue(decision.allowed)
+                self.assertEqual(decision.reason, expected_reason)
+
+    def test_anchor_age_boundary_includes_elapsed_snapshot_age(self):
+        maximum = OFFER_MODEL_PRICE_GUARD_MAXIMUM_ANCHOR_AGE_SECONDS
+        at_boundary = evaluate_offer_model_price_snapshot(
+            snapshot_for(
+                "IMAM",
+                generated_at=NOW - timedelta(seconds=1),
+                anchor_age_seconds=maximum - 1,
+            ),
+            commodity_name="امام",
+            settlement_type="cash",
+            offer_type="sell",
+            proposed_price=999_999,
+            now_utc=NOW,
+            market_opened_at=None,
+        )
+        beyond_boundary = evaluate_offer_model_price_snapshot(
+            snapshot_for(
+                "IMAM",
+                generated_at=NOW - timedelta(seconds=1),
+                anchor_age_seconds=maximum,
+            ),
+            commodity_name="امام",
+            settlement_type="cash",
+            offer_type="sell",
+            proposed_price=999_999,
+            now_utc=NOW,
+            market_opened_at=None,
+        )
+
+        self.assertFalse(at_boundary.allowed)
+        self.assertEqual(at_boundary.reason, "PRICE_OUTSIDE_MODEL_RANGE")
+        self.assertTrue(beyond_boundary.allowed)
+        self.assertEqual(beyond_boundary.reason, "MODEL_ANCHOR_STALE")
 
 
 class OfferModelPriceGuardLoadingTests(unittest.IsolatedAsyncioTestCase):

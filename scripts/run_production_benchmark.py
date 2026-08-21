@@ -26,6 +26,7 @@ from scripts.capture_production_baseline import (
     run_command,
     utc_iso,
     utc_stamp,
+    validate_production_iran_transport,
 )
 from scripts.deploy_config import resolve_deploy_settings
 
@@ -574,6 +575,8 @@ def main(argv: list[str] | None = None) -> int:
     logs_dir.mkdir(parents=True, exist_ok=True)
 
     settings = resolve_deploy_settings(manifest_path=args.manifest)
+    if not args.dry_run:
+        validate_production_iran_transport(settings)
     tasks = build_tasks(settings=settings, manifest=args.manifest, stamp=stamp, artifact_root=artifact_root, target=args.target)
     selected = [
         task for task in tasks

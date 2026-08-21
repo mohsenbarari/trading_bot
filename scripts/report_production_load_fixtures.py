@@ -23,6 +23,7 @@ from scripts.capture_production_baseline import (
     remote_args,
     utc_iso,
     utc_stamp,
+    validate_production_iran_transport,
 )
 from scripts.deploy_config import resolve_deploy_settings
 
@@ -508,6 +509,7 @@ def run_report(args: argparse.Namespace) -> dict[str, Any]:
     logs_dir.mkdir(parents=True, exist_ok=True)
 
     settings = resolve_deploy_settings(manifest_path=args.manifest)
+    validate_production_iran_transport(settings)
     runner = Runner(settings=settings, logs_dir=logs_dir)
     sync_workers_paused = False
     payload: dict[str, Any] = {

@@ -26,7 +26,7 @@ class IranResourceProfileTests(unittest.TestCase):
         release = (REPO_ROOT / "scripts/production_deploy_online.sh").read_text(encoding="utf-8")
 
         command = release.split("bootstrap-iran)", 1)[1].split(";;", 1)[0]
-        self.assertIn("check_local; bootstrap_iran", command)
+        self.assertIn("prepare_local_release_inputs; bootstrap_iran", command)
         self.assertNotIn("install_sync_sampler_remote", command)
         self.assertNotIn("verify_sync_sampler_remote", command)
 
@@ -113,7 +113,9 @@ class IranResourceProfileTests(unittest.TestCase):
         ):
             self.assertIn(expected, manifest)
 
-        self.assertEqual(release.count('${IRAN_API_WORKERS:-4}'), 2)
+        # One immutable-source render now produces both role projections; the
+        # removed interactive fallback must not duplicate this default path.
+        self.assertEqual(release.count('${IRAN_API_WORKERS:-4}'), 1)
 
 
 if __name__ == "__main__":
