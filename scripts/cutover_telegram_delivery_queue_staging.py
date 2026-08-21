@@ -2525,9 +2525,10 @@ def _frontend_build_environment() -> tuple[dict[str, str], dict[str, Any]]:
     for key in tuple(env):
         if key.startswith("VITE_") or key in {
             "FRONTEND_BUILD_OUT_DIR",
+            "NPM_CONFIG_CACHE",
             "STAGING_FRONTEND_DIST_DIR",
             "STAGING_SKIP_FRONTEND_BUILD",
-        }:
+        } or key.lower() == "npm_config_cache":
             env.pop(key, None)
     env.update(
         {
@@ -2538,8 +2539,9 @@ def _frontend_build_environment() -> tuple[dict[str, str], dict[str, Any]]:
     safe_config = {
         "api_base_url_sha256": hashlib.sha256(api_base_url.encode("utf-8")).hexdigest(),
         "staging_dev_login": dev_login.lower() in {"1", "true", "yes"},
-        "arbitrary_vite_values_inherited": False,
-        "skip_frontend_build_inherited": False,
+            "arbitrary_vite_values_inherited": False,
+            "npm_cache_inherited": False,
+            "skip_frontend_build_inherited": False,
     }
     return env, safe_config
 
@@ -2634,6 +2636,13 @@ def _build_staging_frontend(
             raise StagingCutoverError("tracked_frontend_manifest_missing")
         frontend_source = _directory_content_evidence(frontend_root)
         env, safe_config = _frontend_build_environment()
+        # The host cache may be relocated or unavailable and is not a tracked
+        # build input.  Use a release-temporary cache beside the exported tree
+        # so npm never depends on (or mutates) /root/.npm.
+        npm_cache = export_root / ".npm-cache"
+        npm_cache.mkdir(mode=0o700)
+        env["NPM_CONFIG_CACHE"] = str(npm_cache)
+        safe_config["isolated_npm_cache"] = True
         install = _run_contained(
             [
                 "npm",

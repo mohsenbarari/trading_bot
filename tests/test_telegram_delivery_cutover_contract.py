@@ -1340,6 +1340,8 @@ class TelegramDeliveryCutoverContractTests(unittest.TestCase):
                 "VITE_PRIVATE_ACCIDENT": "must-not-reach-client",
                 "VITE_API_BASE_URL": "wrong",
                 "FRONTEND_BUILD_OUT_DIR": "/tmp/wrong",
+                "NPM_CONFIG_CACHE": "/root/.npm",
+                "npm_config_cache": "/tmp/wrong-npm-cache",
                 "STAGING_FRONTEND_DIST_DIR": "/tmp/wrong-dist",
                 "STAGING_SKIP_FRONTEND_BUILD": "1",
                 "STAGING_VITE_API_BASE_URL": "/api",
@@ -1351,8 +1353,11 @@ class TelegramDeliveryCutoverContractTests(unittest.TestCase):
         self.assertNotIn("STAGING_SKIP_FRONTEND_BUILD", env)
         self.assertNotIn("STAGING_FRONTEND_DIST_DIR", env)
         self.assertNotIn("FRONTEND_BUILD_OUT_DIR", env)
+        self.assertNotIn("NPM_CONFIG_CACHE", env)
+        self.assertNotIn("npm_config_cache", env)
         self.assertEqual(env["VITE_API_BASE_URL"], "/api")
         self.assertFalse(evidence["arbitrary_vite_values_inherited"])
+        self.assertFalse(evidence["npm_cache_inherited"])
         self.assertFalse(evidence["skip_frontend_build_inherited"])
 
     def test_frontend_artifact_publish_replaces_stale_release_only_after_build(self):
@@ -1409,7 +1414,7 @@ class TelegramDeliveryCutoverContractTests(unittest.TestCase):
                 staging_cutover,
                 "_run_contained",
                 side_effect=(Result(0), Result(1)),
-            ):
+            ) as run_contained:
                 destination = staging_cutover._staging_frontend_artifact_dir(
                     release_sha
                 )
@@ -1429,6 +1434,11 @@ class TelegramDeliveryCutoverContractTests(unittest.TestCase):
                 self.assertEqual(
                     (destination / "known-good.js").read_text(encoding="utf-8"),
                     "known-good",
+                )
+                install_env = run_contained.call_args_list[0].kwargs["env"]
+                self.assertEqual(
+                    install_env["NPM_CONFIG_CACHE"],
+                    str(export_root / ".npm-cache"),
                 )
 
     def test_rsync_contract_preserves_managed_wheel_cache(self):
