@@ -397,6 +397,17 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('require_prebuilt_image', producers)
         self.assertIn('require_prebuilt_image', bot)
 
+    def test_staging_iran_sync_start_targets_only_iran_profile_service(self):
+        source = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(
+            encoding='utf-8'
+        )
+        self.assertIn('compose up -d --no-build sync_worker', source)
+        self.assertIn('compose up -d --build sync_worker', source)
+        self.assertNotIn(
+            'compose --profile staging-sync up -d --no-build sync_worker',
+            source,
+        )
+
     def test_docker_build_context_excludes_all_runtime_env_and_host_data(self):
         ordered_patterns = [
             line.strip()

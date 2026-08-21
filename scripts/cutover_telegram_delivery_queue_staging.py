@@ -17,6 +17,7 @@ import os
 import shutil
 import shlex
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -48,6 +49,9 @@ from scripts.deploy_config import parse_env_file
 
 APPLY_CONFIRMATION = "CUTOVER STAGING TELEGRAM DELIVERY TO QUEUE-V1"
 REDEPLOY_CONFIRMATION = "REDEPLOY STAGING TELEGRAM DELIVERY QUEUE-V1"
+REDEPLOY_SUCCESSOR_CONFIRMATION = (
+    "RECOVER STAGING REDEPLOY WITH ONE ORCHESTRATION SUCCESSOR"
+)
 ROLLBACK_CONFIRMATION = "ROLLBACK STAGING TELEGRAM DELIVERY TO LEGACY"
 REHEARSE_CONFIRMATION = "REHEARSE STAGING TELEGRAM DELIVERY FORWARD ROLLBACK"
 FOREIGN_BOT_CONTAINER = "trading_bot_staging-bot-1"
@@ -141,6 +145,14 @@ REDEPLOY_RUNTIME_CONTAINERS = (
     IRAN_APP_CONTAINER,
     FOREIGN_SYNC_CONTAINER,
     IRAN_SYNC_CONTAINER,
+)
+SAFE_REDEPLOY_ORCHESTRATION_SUCCESSOR_PATHS = frozenset(
+    {
+        "scripts/cutover_telegram_delivery_queue_staging.py",
+        "scripts/deploy_staging.sh",
+        "tests/test_deploy_surface_smoke.py",
+        "tests/test_telegram_delivery_cutover_contract.py",
+    }
 )
 
 
@@ -1922,6 +1934,61 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _read_trusted_evidence_file(path: Path) -> tuple[bytes, str]:
+    """Read one operator-owned, non-shared-writable file from a single fd."""
+
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    descriptor = os.open(path, flags)
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_mode & 0o022
+            or metadata.st_nlink != 1
+        ):
+            raise StagingCutoverError("redeploy_evidence_file_untrusted")
+        chunks: list[bytes] = []
+        digest = hashlib.sha256()
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            chunks.append(chunk)
+        return b"".join(chunks), digest.hexdigest()
+    except OSError:
+        raise StagingCutoverError("redeploy_evidence_file_unreadable") from None
+    finally:
+        os.close(descriptor)
+
+
+def _require_trusted_evidence_directory(path: Path) -> None:
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    descriptor = os.open(path, flags)
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_mode & 0o022
+        ):
+            raise StagingCutoverError("redeploy_evidence_directory_untrusted")
+    except OSError:
+        raise StagingCutoverError("redeploy_evidence_directory_unreadable") from None
+    finally:
+        os.close(descriptor)
+
+
 def _content_digest(root: Path, relative_paths: Sequence[Path]) -> tuple[str, int]:
     """Hash path/type/content without following symlinks or runtime caches."""
 
@@ -2308,6 +2375,7 @@ def _write_redeploy_journal(
         "mutation_started": bool(receipt.get("mutation_started")),
         "runtime_mutation_started": bool(receipt.get("runtime_mutation_started")),
         "recovery": receipt.get("recovery"),
+        "orchestration_successor": receipt.get("orchestration_successor"),
         "updated_at": _utc_now(),
         "secrets_disclosed": False,
     }
@@ -2356,15 +2424,19 @@ def _redeploy_lock() -> Any:
 def _redeploy_recovery_state(
     *,
     expected_head: str,
+    orchestration_successor_request: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Read the prior journal before any overwrite and bind recovery to SHA."""
 
     path = REDEPLOY_STATE_DIR / REDEPLOY_JOURNAL_NAME
     if not path.exists():
+        if orchestration_successor_request is not None:
+            raise StagingCutoverError("redeploy_successor_not_required")
         return {"mode": "new", "runtime_mutation_started": False}
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, TypeError, ValueError):
+        journal_bytes, journal_sha256 = _read_trusted_evidence_file(path)
+        payload = json.loads(journal_bytes.decode("utf-8"))
+    except (OSError, TypeError, UnicodeDecodeError, ValueError):
         raise StagingCutoverError("redeploy_journal_invalid") from None
     if (
         not isinstance(payload, dict)
@@ -2375,6 +2447,8 @@ def _redeploy_recovery_state(
         raise StagingCutoverError("redeploy_journal_invalid")
     phase = str(payload.get("phase") or "unknown")
     if phase == "completed" and payload.get("status") == "redeployed":
+        if orchestration_successor_request is not None:
+            raise StagingCutoverError("redeploy_successor_not_required")
         return {"mode": "new", "runtime_mutation_started": False}
     recovery = payload.get("recovery")
     safely_failed_before_mutation = bool(
@@ -2388,20 +2462,44 @@ def _redeploy_recovery_state(
         and recovery.get("resume_error_code") is None
     )
     if safely_failed_before_mutation:
+        if orchestration_successor_request is not None:
+            raise StagingCutoverError("redeploy_successor_not_required")
         # A fully contained preflight/build failure has no runtime state to
         # reconcile.  It is a terminal journal record, so a corrected pushed
         # SHA may start a fresh transaction without deleting state by hand.
         return {
             "mode": "new_after_contained_preflight_failure",
             "prior_phase": phase,
-            "prior_journal_sha256": _sha256_file(path),
+            "prior_journal_sha256": journal_sha256,
             "runtime_mutation_started": False,
             "secret_values_disclosed": False,
         }
     git = payload.get("git")
     prior_head = str(git.get("head") or "") if isinstance(git, Mapping) else ""
+    if prior_head == expected_head and orchestration_successor_request is not None:
+        raise StagingCutoverError("redeploy_successor_not_required")
     if prior_head != expected_head:
-        raise StagingCutoverError("redeploy_recovery_requires_exact_same_sha")
+        successor = _validated_redeploy_orchestration_successor(
+            payload,
+            journal_sha256=journal_sha256,
+            prior_head=prior_head,
+            expected_head=expected_head,
+            request=orchestration_successor_request,
+        )
+        if successor is None:
+            raise StagingCutoverError("redeploy_recovery_requires_exact_same_sha")
+        return {
+            "mode": "recover_safe_orchestration_successor",
+            "prior_phase": phase,
+            "prior_status": str(payload.get("status") or "unknown"),
+            "prior_head": prior_head,
+            "successor_head": expected_head,
+            "orchestration_successor": successor,
+            "mutation_started": True,
+            "runtime_mutation_started": True,
+            "prior_journal_sha256": journal_sha256,
+            "secret_values_disclosed": False,
+        }
     mutating_phases = {
         "quiescing_ingress",
         "ingress_quiesced",
@@ -2426,7 +2524,190 @@ def _redeploy_recovery_state(
         "prior_status": str(payload.get("status") or "unknown"),
         "mutation_started": mutation_started,
         "runtime_mutation_started": runtime_mutation_started,
-        "prior_journal_sha256": _sha256_file(path),
+        "prior_journal_sha256": journal_sha256,
+        "orchestration_successor": payload.get("orchestration_successor"),
+        "secret_values_disclosed": False,
+    }
+
+
+def _validated_redeploy_orchestration_successor(
+    journal: Mapping[str, Any],
+    *,
+    journal_sha256: str,
+    prior_head: str,
+    expected_head: str,
+    request: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Admit one direct, tooling-only fix after a contained producer-start bug.
+
+    Exact-SHA recovery remains the default.  This exception is deliberately
+    limited to the deterministic Iran prebuilt-producer profile failure, a
+    fully stopped five-container runtime, and one direct child commit whose
+    diff cannot include application, schema, dependency, or environment files.
+    """
+
+    if not isinstance(request, Mapping) or journal.get("orchestration_successor"):
+        return None
+    if (
+        journal.get("phase") != "failed"
+        or journal.get("status") != "failed_forward_reconcile_required"
+        or journal.get("mutation_started") is not True
+        or journal.get("runtime_mutation_started") is not True
+    ):
+        return None
+    recovery = journal.get("recovery")
+    if (
+        not isinstance(recovery, Mapping)
+        or recovery.get("required") is not True
+        or recovery.get("runtime_left_quiesced") is not True
+        or recovery.get("strategy") != "rerun_exact_same_pushed_sha"
+        or recovery.get("git_head") != prior_head
+    ):
+        return None
+    actual_journal_sha256 = journal_sha256
+    if (
+        request.get("prior_head") != prior_head
+        or request.get("prior_journal_sha256") != actual_journal_sha256
+    ):
+        return None
+    try:
+        raw_artifact_dir = Path(str(request.get("artifact_dir") or ""))
+        raw_failure_receipt = Path(str(request.get("failure_receipt") or ""))
+        if raw_artifact_dir.is_symlink() or raw_failure_receipt.is_symlink():
+            return None
+        artifact_dir = raw_artifact_dir.resolve(strict=True)
+        failure_receipt = raw_failure_receipt.resolve(strict=True)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if (
+        not failure_receipt.is_file()
+        or failure_receipt.parent != artifact_dir
+        or not failure_receipt.name.startswith("cutover-redeploy-failure-")
+        or failure_receipt.suffix != ".json"
+    ):
+        return None
+    try:
+        _require_trusted_evidence_directory(artifact_dir)
+        failure_bytes, actual_receipt_sha256 = _read_trusted_evidence_file(
+            failure_receipt
+        )
+    except (OSError, StagingCutoverError):
+        return None
+    if request.get("failure_receipt_sha256") != actual_receipt_sha256:
+        return None
+    try:
+        failure = json.loads(failure_bytes.decode("utf-8"))
+    except (TypeError, UnicodeDecodeError, ValueError):
+        return None
+    failure_git = failure.get("git") if isinstance(failure, Mapping) else None
+    failure_recovery = (
+        failure.get("recovery") if isinstance(failure, Mapping) else None
+    )
+    if (
+        not isinstance(failure, Mapping)
+        or failure.get("schema_version") != 1
+        or failure.get("environment") != "staging"
+        or failure.get("command") != "redeploy"
+        or failure.get("status") != "failed_forward_reconcile_required"
+        or failure.get("error_code") != "iran_prebuilt_producer_start_failed"
+        or failure.get("mutation_started") is not True
+        or failure.get("runtime_mutation_started") is not True
+        or not isinstance(failure_git, Mapping)
+        or failure_git.get("head") != prior_head
+        or not isinstance(failure_recovery, Mapping)
+        or failure_recovery.get("required") is not True
+        or failure_recovery.get("runtime_left_quiesced") is not True
+        or failure_recovery.get("strategy") != "rerun_exact_same_pushed_sha"
+        or failure_recovery.get("git_head") != prior_head
+    ):
+        return None
+    steps = failure.get("steps")
+    if not isinstance(steps, list):
+        return None
+    containment = next(
+        (
+            step
+            for step in reversed(steps)
+            if isinstance(step, Mapping)
+            and step.get("name") == "failure_containment"
+        ),
+        None,
+    )
+    events = containment.get("events") if isinstance(containment, Mapping) else None
+    if not isinstance(events, list) or len(events) != len(REDEPLOY_RUNTIME_CONTAINERS):
+        return None
+    observed_containers: set[str] = set()
+    for event in events:
+        if (
+            not isinstance(event, Mapping)
+            or event.get("action") not in {"stop", "already_stopped"}
+            or event.get("running") is not False
+        ):
+            return None
+        observed_containers.add(str(event.get("container") or ""))
+    if observed_containers != set(REDEPLOY_RUNTIME_CONTAINERS):
+        return None
+    lineage = _run(
+        ["git", "rev-list", "--parents", "-n", "1", expected_head],
+        timeout=30,
+    )
+    lineage_parts = str(lineage.stdout or "").strip().split()
+    if (
+        lineage.returncode != 0
+        or len(lineage_parts) != 2
+        or lineage_parts[0] != expected_head
+        or lineage_parts[1] != prior_head
+    ):
+        return None
+    changed = _run(
+        [
+            "git",
+            "diff",
+            "--name-status",
+            "--no-renames",
+            f"{prior_head}..{expected_head}",
+        ],
+        timeout=30,
+    )
+    if changed.returncode != 0:
+        return None
+    changed_paths: list[str] = []
+    for line in str(changed.stdout or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) != 2 or parts[0] != "M" or not parts[1]:
+            return None
+        changed_paths.append(parts[1])
+    if set(changed_paths) != set(SAFE_REDEPLOY_ORCHESTRATION_SUCCESSOR_PATHS):
+        return None
+    summary = _run(
+        ["git", "diff", "--summary", f"{prior_head}..{expected_head}"],
+        timeout=30,
+    )
+    if summary.returncode != 0 or str(summary.stdout or "").strip():
+        return None
+    diff = _run(
+        [
+            "git",
+            "diff",
+            "--binary",
+            "--full-index",
+            f"{prior_head}..{expected_head}",
+        ],
+        timeout=30,
+    )
+    if diff.returncode != 0 or not str(diff.stdout or ""):
+        return None
+    return {
+        "used": True,
+        "from_head": prior_head,
+        "to_head": expected_head,
+        "prior_journal_sha256": actual_journal_sha256,
+        "failure_receipt_name": failure_receipt.name,
+        "failure_receipt_sha256": actual_receipt_sha256,
+        "diff_sha256": hashlib.sha256(
+            str(diff.stdout).encode("utf-8")
+        ).hexdigest(),
+        "changed_paths": sorted(changed_paths),
         "secret_values_disclosed": False,
     }
 
@@ -3474,6 +3755,7 @@ def redeploy_queue_v1(
     artifact_dir: Path,
     *,
     confirm: str,
+    orchestration_successor_request: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Redeploy an already-cut-over Queue-v1 staging pair.
 
@@ -3484,18 +3766,37 @@ def redeploy_queue_v1(
     the durable delivery surfaces have no open work.
     """
 
-    if confirm != REDEPLOY_CONFIRMATION:
-        raise StagingCutoverError("redeploy_confirmation_mismatch")
+    expected_confirmation = (
+        REDEPLOY_SUCCESSOR_CONFIRMATION
+        if orchestration_successor_request is not None
+        else REDEPLOY_CONFIRMATION
+    )
+    if confirm != expected_confirmation:
+        raise StagingCutoverError(
+            "redeploy_successor_confirmation_mismatch"
+            if orchestration_successor_request is not None
+            else "redeploy_confirmation_mismatch"
+        )
     with _redeploy_lock():
-        return _redeploy_queue_v1_locked(artifact_dir)
+        return _redeploy_queue_v1_locked(
+            artifact_dir,
+            orchestration_successor_request=orchestration_successor_request,
+        )
 
 
-def _redeploy_queue_v1_locked(artifact_dir: Path) -> dict[str, Any]:
+def _redeploy_queue_v1_locked(
+    artifact_dir: Path,
+    *,
+    orchestration_successor_request: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     binding = _git_binding()
     _require_clean_pushed_main(binding)
     release_sha = binding["head"]
     release_tree = binding["tree"]
-    prior_recovery = _redeploy_recovery_state(expected_head=release_sha)
+    prior_recovery = _redeploy_recovery_state(
+        expected_head=release_sha,
+        orchestration_successor_request=orchestration_successor_request,
+    )
     receipt: dict[str, Any] = {
         "schema_version": 1,
         "command": "redeploy",
@@ -3512,6 +3813,9 @@ def _redeploy_queue_v1_locked(artifact_dir: Path) -> dict[str, Any]:
             prior_recovery.get("runtime_mutation_started")
         ),
         "recovery": {"required": False},
+        "orchestration_successor": prior_recovery.get(
+            "orchestration_successor"
+        ),
         "prior_recovery": prior_recovery,
         "steps": [],
     }
@@ -3519,7 +3823,8 @@ def _redeploy_queue_v1_locked(artifact_dir: Path) -> dict[str, Any]:
     _write_redeploy_journal(receipt, phase="prechecking")
     try:
         recovering_mutated_runtime = bool(
-            prior_recovery.get("mode") == "recover_exact_sha"
+            prior_recovery.get("mode")
+            in {"recover_exact_sha", "recover_safe_orchestration_successor"}
             and prior_recovery.get("runtime_mutation_started")
         )
         if recovering_mutated_runtime:
@@ -3955,6 +4260,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "restore-probe",
             "apply",
             "redeploy",
+            "redeploy-successor",
             "rehearse-rollback",
             "rollback",
         ),
@@ -3963,6 +4269,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dump")
     parser.add_argument("--confirm", default="")
     parser.add_argument("--skip-deploy", action="store_true")
+    parser.add_argument("--prior-head", default="")
+    parser.add_argument("--prior-journal-sha256", default="")
+    parser.add_argument("--failure-receipt", type=Path)
+    parser.add_argument("--failure-receipt-sha256", default="")
     return parser.parse_args(argv)
 
 
@@ -3991,6 +4301,24 @@ def main(argv: list[str] | None = None) -> int:
             payload = redeploy_queue_v1(
                 args.artifact_dir,
                 confirm=args.confirm,
+            )
+        elif args.command == "redeploy-successor":
+            if args.skip_deploy:
+                raise StagingCutoverError("redeploy_skip_deploy_forbidden")
+            if args.failure_receipt is None:
+                raise StagingCutoverError(
+                    "redeploy_successor_failure_receipt_required"
+                )
+            payload = redeploy_queue_v1(
+                args.artifact_dir,
+                confirm=args.confirm,
+                orchestration_successor_request={
+                    "artifact_dir": args.artifact_dir,
+                    "prior_head": args.prior_head,
+                    "prior_journal_sha256": args.prior_journal_sha256,
+                    "failure_receipt": args.failure_receipt,
+                    "failure_receipt_sha256": args.failure_receipt_sha256,
+                },
             )
         elif args.command == "rehearse-rollback":
             payload = rehearse_forward_rollback(args.artifact_dir, confirm=args.confirm)

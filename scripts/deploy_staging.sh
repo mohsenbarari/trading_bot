@@ -768,7 +768,11 @@ start_prebuilt_producers() {
         die "prebuilt producer start with a bot identity requires STAGING_FOREIGN_ONLY=1"
     else
         compose up -d --no-build app
-        compose --profile staging-sync up -d --no-build sync_worker
+        # Targeting the service directly activates only its own profile.  Do
+        # not activate the shared staging-sync profile globally: that would
+        # also validate the foreign worker while foreign_app is intentionally
+        # absent on the Iran host.
+        compose up -d --no-build sync_worker
         wait_for_app_health
     fi
     install_nginx

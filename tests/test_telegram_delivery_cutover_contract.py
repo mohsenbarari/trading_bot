@@ -1087,6 +1087,194 @@ class TelegramDeliveryCutoverContractTests(unittest.TestCase):
             )
             self.assertFalse(fresh["runtime_mutation_started"])
 
+    def test_redeploy_recovery_allows_one_contained_tooling_only_successor(self):
+        prior_head = "a" * 40
+        successor_head = "b" * 40
+        recovery_contract = {
+            "required": True,
+            "runtime_left_quiesced": True,
+            "strategy": "rerun_exact_same_pushed_sha",
+            "git_head": prior_head,
+        }
+        completed = lambda args, output: subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout=output,
+            stderr="",
+        )
+        changed_paths = sorted(
+            staging_cutover.SAFE_REDEPLOY_ORCHESTRATION_SUCCESSOR_PATHS
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifact_dir = root / "artifacts"
+            artifact_dir.mkdir()
+            failure_receipt = (
+                artifact_dir / "cutover-redeploy-failure-synthetic.json"
+            )
+            failure_receipt.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "environment": "staging",
+                        "command": "redeploy",
+                        "status": "failed_forward_reconcile_required",
+                        "error_code": "iran_prebuilt_producer_start_failed",
+                        "git": {"head": prior_head},
+                        "mutation_started": True,
+                        "runtime_mutation_started": True,
+                        "recovery": recovery_contract,
+                        "steps": [
+                            {
+                                "name": "failure_containment",
+                                "events": [
+                                    {
+                                        "container": container,
+                                        "action": "already_stopped",
+                                        "running": False,
+                                    }
+                                    for container in staging_cutover.REDEPLOY_RUNTIME_CONTAINERS
+                                ],
+                            }
+                        ],
+                    },
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+            with patch.object(
+                staging_cutover, "REDEPLOY_STATE_DIR", root / "state"
+            ):
+                journal = staging_cutover._write_redeploy_journal(
+                    {
+                        "status": "failed_forward_reconcile_required",
+                        "git": {"head": prior_head},
+                        "mutation_started": True,
+                        "runtime_mutation_started": True,
+                        "recovery": recovery_contract,
+                    },
+                    phase="failed",
+                )
+                request = {
+                    "artifact_dir": artifact_dir,
+                    "prior_head": prior_head,
+                    "prior_journal_sha256": staging_cutover._sha256_file(
+                        journal
+                    ),
+                    "failure_receipt": failure_receipt,
+                    "failure_receipt_sha256": staging_cutover._sha256_file(
+                        failure_receipt
+                    ),
+                }
+                with patch.object(
+                    staging_cutover,
+                    "_run",
+                    side_effect=[
+                        completed([], f"{successor_head} {prior_head}\n"),
+                        completed(
+                            [],
+                            "".join(f"M\t{path}\n" for path in changed_paths),
+                        ),
+                        completed([], ""),
+                        completed([], "synthetic-binary-diff"),
+                    ],
+                ):
+                    recovery = staging_cutover._redeploy_recovery_state(
+                        expected_head=successor_head,
+                        orchestration_successor_request=request,
+                    )
+                self.assertEqual(
+                    recovery["mode"], "recover_safe_orchestration_successor"
+                )
+                successor = recovery["orchestration_successor"]
+                self.assertTrue(successor["used"])
+                self.assertEqual(successor["from_head"], prior_head)
+                self.assertEqual(successor["to_head"], successor_head)
+                self.assertEqual(successor["changed_paths"], changed_paths)
+
+                # Persist the one-shot marker before containment.  A second
+                # successor from this journal must fail closed without Git I/O.
+                staging_cutover._write_redeploy_journal(
+                    {
+                        "status": "preparing",
+                        "git": {"head": successor_head},
+                        "mutation_started": True,
+                        "runtime_mutation_started": True,
+                        "recovery": {"required": False},
+                        "orchestration_successor": successor,
+                    },
+                    phase="prechecking",
+                )
+                persisted = json.loads(journal.read_text(encoding="utf-8"))
+                self.assertTrue(persisted["orchestration_successor"]["used"])
+                with self.assertRaisesRegex(
+                    StagingCutoverError,
+                    "redeploy_recovery_requires_exact_same_sha",
+                ):
+                    staging_cutover._redeploy_recovery_state(
+                        expected_head="c" * 40,
+                        orchestration_successor_request=request,
+                    )
+
+    def test_redeploy_successor_requires_its_distinct_confirmation(self):
+        with self.assertRaisesRegex(
+            StagingCutoverError,
+            "redeploy_successor_confirmation_mismatch",
+        ):
+            staging_cutover.redeploy_queue_v1(
+                Path("/tmp/not-used"),
+                confirm=staging_cutover.REDEPLOY_CONFIRMATION,
+                orchestration_successor_request={"requested": True},
+            )
+        args = staging_cutover.parse_args(
+            [
+                "redeploy-successor",
+                "--prior-head",
+                "a" * 40,
+                "--prior-journal-sha256",
+                "b" * 64,
+                "--failure-receipt",
+                "/tmp/failure.json",
+                "--failure-receipt-sha256",
+                "c" * 64,
+            ]
+        )
+        self.assertEqual(args.command, "redeploy-successor")
+
+    def test_redeploy_evidence_rejects_shared_writable_and_hardlinked_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            evidence = root / "evidence.json"
+            evidence.write_text('{"status":"expected"}\n', encoding="utf-8")
+
+            payload, digest = staging_cutover._read_trusted_evidence_file(
+                evidence
+            )
+            self.assertIn(b'"expected"', payload)
+            self.assertEqual(len(digest), 64)
+
+            evidence.chmod(0o666)
+            with self.assertRaisesRegex(
+                StagingCutoverError,
+                "redeploy_evidence_file_untrusted",
+            ):
+                staging_cutover._read_trusted_evidence_file(evidence)
+
+            evidence.chmod(0o600)
+            os.link(evidence, root / "second-link.json")
+            with self.assertRaisesRegex(
+                StagingCutoverError,
+                "redeploy_evidence_file_untrusted",
+            ):
+                staging_cutover._read_trusted_evidence_file(evidence)
+
+            root.chmod(0o777)
+            with self.assertRaisesRegex(
+                StagingCutoverError,
+                "redeploy_evidence_directory_untrusted",
+            ):
+                staging_cutover._require_trusted_evidence_directory(root)
+
     @staticmethod
     def _fake_docker_environment(root: Path, marker: Path) -> dict[str, str]:
         binary_dir = root / "bin"
