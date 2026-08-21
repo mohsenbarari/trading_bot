@@ -1063,6 +1063,30 @@ class TelegramDeliveryCutoverContractTests(unittest.TestCase):
                     expected_head="b" * 40
                 )
 
+            contained_preflight_failure = {
+                "status": "failed_before_runtime_mutation",
+                "git": {"head": "a" * 40},
+                "mutation_started": False,
+                "runtime_mutation_started": False,
+                "recovery": {
+                    "required": False,
+                    "strategy": "none",
+                    "resume_error_code": None,
+                },
+            }
+            staging_cutover._write_redeploy_journal(
+                contained_preflight_failure,
+                phase="failed",
+            )
+            fresh = staging_cutover._redeploy_recovery_state(
+                expected_head="b" * 40
+            )
+            self.assertEqual(
+                fresh["mode"],
+                "new_after_contained_preflight_failure",
+            )
+            self.assertFalse(fresh["runtime_mutation_started"])
+
     @staticmethod
     def _fake_docker_environment(root: Path, marker: Path) -> dict[str, str]:
         binary_dir = root / "bin"

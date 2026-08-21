@@ -2376,6 +2376,28 @@ def _redeploy_recovery_state(
     phase = str(payload.get("phase") or "unknown")
     if phase == "completed" and payload.get("status") == "redeployed":
         return {"mode": "new", "runtime_mutation_started": False}
+    recovery = payload.get("recovery")
+    safely_failed_before_mutation = bool(
+        phase == "failed"
+        and payload.get("status") == "failed_before_runtime_mutation"
+        and payload.get("mutation_started") is False
+        and payload.get("runtime_mutation_started") is False
+        and isinstance(recovery, Mapping)
+        and recovery.get("required") is False
+        and recovery.get("strategy") == "none"
+        and recovery.get("resume_error_code") is None
+    )
+    if safely_failed_before_mutation:
+        # A fully contained preflight/build failure has no runtime state to
+        # reconcile.  It is a terminal journal record, so a corrected pushed
+        # SHA may start a fresh transaction without deleting state by hand.
+        return {
+            "mode": "new_after_contained_preflight_failure",
+            "prior_phase": phase,
+            "prior_journal_sha256": _sha256_file(path),
+            "runtime_mutation_started": False,
+            "secret_values_disclosed": False,
+        }
     git = payload.get("git")
     prior_head = str(git.get("head") or "") if isinstance(git, Mapping) else ""
     if prior_head != expected_head:
