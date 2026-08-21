@@ -4,7 +4,7 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Decisions
 
-- 2026-08-21 | `candidate/webapp-native-controls-v1` aligns all 29 non-Market routes and Messenger M01–M14: RTL/Vazirmatn, 48px controls, grouped lists, safe-area and shared focus/dialog/sheet UX. Exact visual guards fail closed. Evidence: 167/167 routes, 13/13 Messenger, 8/8 boundary viewports and 169/1962 tests. It is not owner/deploy authority.
+- 2026-08-21 | Native standardization is on `main` at `428dd1a0`: 29 non-Market routes plus Messenger M01–M14 passed 167/167 browser cases, 13/13 Messenger, 8/8 boundary widths and 169/1962 tests. The identical 171-file frontend artifact is live on both staging roles; backend/bot were not restarted because inference publishing was off-hours `NO_ESTIMATED_COIN_RATES`. Production/Sites remain untouched.
 - 2026-08-21 | Market is owner-frozen: direct source matches `main` and 390/1440 production captures are pixel-identical. Shared chrome needs explicit Market compatibility scope; Market feed/actions/meter/overtime/history, calendar confirm and delivery interiors retain accepted behavior.
 - 2026-08-20 | Native means installed PWA: one 48px back control, bottom primary CTA, shared destructive dialog, keyboard-safe forms and grouped account/profile/operations/admin/auth surfaces. Today trades remains a horizontal row.
 - 2026-08-15 | Stage 8 closed for UI/UX only (Market A+C: 960/830/130; access 270; zero deferred). It is not merge/deploy/Sites authority.
