@@ -8,7 +8,7 @@ from fastapi import HTTPException
 
 from api.routers.offers import OfferCreate, create_offer
 from core.enums import UserAccountStatus, UserRole
-from models.customer_relation import CustomerTier
+from models.customer_relation import CustomerRelationStatus, CustomerTier
 
 
 class FakeDB:
@@ -137,7 +137,13 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_offer_rejects_tier2_customers(self):
         current_user = make_user()
-        tier2_relation = SimpleNamespace(customer_tier=CustomerTier.TIER_2)
+        tier2_relation = SimpleNamespace(
+            status=CustomerRelationStatus.ACTIVE,
+            customer_tier=CustomerTier.TIER_2,
+            trading_restricted_until=None,
+            min_trade_quantity=None,
+            max_trade_quantity=None,
+        )
 
         with patch(
             "api.routers.offers.check_user_limits",
@@ -152,8 +158,42 @@ class OffersRouterCreateGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(
             exc_info.exception.detail,
-            "مشتری سطح 2 مجاز به ثبت لفظ نیست و فقط می‌تواند روی لفظ‌های دیگر درخواست بزند.",
+            "شما مجاز به انجام این فعالیت نیستید.",
         )
+
+    async def test_create_offer_rejects_tier1_total_and_retail_lot_limit_bypasses(self):
+        current_user = make_user()
+        relation = SimpleNamespace(
+            status=CustomerRelationStatus.ACTIVE,
+            customer_tier=CustomerTier.TIER_1,
+            trading_restricted_until=None,
+            min_trade_quantity=5,
+            max_trade_quantity=20,
+        )
+
+        for offer in (
+            make_offer(quantity=21),
+            make_offer(quantity=20, is_wholesale=False, lot_sizes=[4, 16]),
+        ):
+            with self.subTest(offer=offer), patch(
+                "api.routers.offers.check_user_limits",
+                side_effect=[(True, None), (True, None)],
+            ), patch(
+                "api.routers.offers.get_active_customer_relation_for_customer",
+                new=AsyncMock(return_value=relation),
+            ):
+                with self.assertRaises(HTTPException) as exc_info:
+                    await create_offer(
+                        offer,
+                        db=FakeDB(),
+                        context=make_context(current_user),
+                    )
+
+            self.assertEqual(exc_info.exception.status_code, 403)
+            self.assertEqual(
+                exc_info.exception.detail,
+                "شما مجاز به انجام این فعالیت نیستید.",
+            )
 
     async def test_create_offer_rejects_user_limit_failures(self):
         current_user = make_user()

@@ -15,9 +15,12 @@ from core.services.customer_relation_service import (
     cancel_pending_customer_relation,
     create_owner_customer_relation,
     CUSTOMER_INVITATION_PREFIX,
+    CustomerOfferLimitViolation,
     CustomerTradeLimitViolation,
+    customer_offer_limit_failure_code,
     customer_trade_day_bounds,
     customer_trade_limit_public_message,
+    enforce_customer_offer_limits_for_creation,
     enforce_customer_trade_limits_for_trade,
     get_active_customer_relation_for_customer,
     get_active_customer_relation_for_user,
@@ -123,6 +126,163 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
             CustomerRelation.__table__.c.customer_tier.type.enums,
             ["tier1", "tier2"],
         )
+
+    def test_customer_offer_limits_apply_to_tier1_offer_total_boundaries(self):
+        relation = SimpleNamespace(
+            status=CustomerRelationStatus.ACTIVE,
+            customer_tier=CustomerTier.TIER_1,
+            trading_restricted_until=None,
+            min_trade_quantity=5,
+            max_trade_quantity=20,
+        )
+
+        self.assertEqual(
+            customer_offer_limit_failure_code(
+                relation,
+                quantity=4,
+                is_wholesale=True,
+            ),
+            "offer_below_minimum",
+        )
+        self.assertIsNone(
+            customer_offer_limit_failure_code(
+                relation,
+                quantity=5,
+                is_wholesale=True,
+            )
+        )
+        self.assertIsNone(
+            customer_offer_limit_failure_code(
+                relation,
+                quantity=20,
+                is_wholesale=True,
+            )
+        )
+        self.assertEqual(
+            customer_offer_limit_failure_code(
+                relation,
+                quantity=21,
+                is_wholesale=True,
+            ),
+            "offer_above_maximum",
+        )
+
+    def test_customer_offer_limits_apply_to_every_tier1_retail_lot(self):
+        relation = SimpleNamespace(
+            status=CustomerRelationStatus.ACTIVE,
+            customer_tier=CustomerTier.TIER_1,
+            trading_restricted_until=None,
+            min_trade_quantity=5,
+            max_trade_quantity=20,
+        )
+
+        self.assertIsNone(
+            customer_offer_limit_failure_code(
+                relation,
+                quantity=20,
+                is_wholesale=False,
+                lot_sizes=[5, 15],
+            )
+        )
+        self.assertEqual(
+            customer_offer_limit_failure_code(
+                relation,
+                quantity=20,
+                is_wholesale=False,
+                lot_sizes=[4, 16],
+            ),
+            "lot_below_minimum",
+        )
+
+    def test_customer_offer_limits_reject_tier2_and_ignore_daily_trade_caps(self):
+        tier2_relation = SimpleNamespace(
+            status=CustomerRelationStatus.ACTIVE,
+            customer_tier=CustomerTier.TIER_2,
+            trading_restricted_until=None,
+            min_trade_quantity=None,
+            max_trade_quantity=None,
+            max_daily_trades=0,
+            max_daily_commodity_volume=0,
+        )
+        self.assertEqual(
+            customer_offer_limit_failure_code(
+                tier2_relation,
+                quantity=10,
+                is_wholesale=True,
+            ),
+            "offer_not_allowed_for_tier",
+        )
+
+        tier1_relation = SimpleNamespace(
+            status=CustomerRelationStatus.ACTIVE,
+            customer_tier=CustomerTier.TIER_1,
+            trading_restricted_until=None,
+            min_trade_quantity=None,
+            max_trade_quantity=None,
+            max_daily_trades=0,
+            max_daily_commodity_volume=0,
+        )
+        self.assertIsNone(
+            customer_offer_limit_failure_code(
+                tier1_relation,
+                quantity=10,
+                is_wholesale=True,
+            )
+        )
+
+    async def test_customer_offer_enforcement_locks_active_relation(self):
+        relation = SimpleNamespace(
+            id=12,
+            customer_user_id=5,
+            status=CustomerRelationStatus.ACTIVE,
+            customer_tier=CustomerTier.TIER_1,
+            deleted_at=None,
+            trading_restricted_until=None,
+            min_trade_quantity=5,
+            max_trade_quantity=20,
+        )
+        db = FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=relation)])
+
+        await enforce_customer_offer_limits_for_creation(
+            db,
+            customer_user_id=5,
+            quantity=20,
+            is_wholesale=False,
+            lot_sizes=[5, 15],
+        )
+
+        statement_sql = str(
+            db.executed_statements[0].compile(compile_kwargs={"literal_binds": True})
+        ).lower()
+        self.assertIn("customer_relations.customer_user_id = 5", statement_sql)
+        self.assertIn("customer_relations.status = 'active'", statement_sql)
+        self.assertIn("customer_relations.deleted_at is null", statement_sql)
+        self.assertIn("for update", statement_sql)
+
+    async def test_customer_offer_enforcement_raises_machine_only_violation(self):
+        relation = SimpleNamespace(
+            id=12,
+            customer_user_id=5,
+            status=CustomerRelationStatus.ACTIVE,
+            customer_tier=CustomerTier.TIER_1,
+            deleted_at=None,
+            trading_restricted_until=None,
+            min_trade_quantity=5,
+            max_trade_quantity=20,
+        )
+        db = FakeDB(execute_results=[FakeExecuteResult(scalar_one_value=relation)])
+
+        with self.assertRaises(CustomerOfferLimitViolation) as exc_info:
+            await enforce_customer_offer_limits_for_creation(
+                db,
+                customer_user_id=5,
+                quantity=21,
+                is_wholesale=True,
+            )
+
+        self.assertEqual(exc_info.exception.customer_user_id, 5)
+        self.assertEqual(exc_info.exception.relation_id, 12)
+        self.assertEqual(exc_info.exception.reason_code, "offer_above_maximum")
 
     def test_customer_relation_partial_unique_indexes_protect_live_management_names_and_customers(self):
         indexes = {index.name: index for index in CustomerRelation.__table__.indexes}
@@ -1402,7 +1562,10 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
             "daily_volume_limit",
         ):
             message = customer_trade_limit_public_message(reason_code)
-            self.assertTrue(message)
+            self.assertEqual(
+                message,
+                "شما مجاز به انجام این فعالیت نیستید.",
+            )
             self.assertNotIn("relation", message.lower())
             self.assertNotRegex(message, r"\d")
 

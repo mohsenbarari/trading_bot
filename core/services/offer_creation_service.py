@@ -38,6 +38,10 @@ class OfferCreationLimitExceededError(OfferCreationAdmissionError):
     """Raised when a final user or active-offer limit rejects creation."""
 
 
+class OfferCreationCustomerLimitExceededError(OfferCreationLimitExceededError):
+    """Raised when an active customer relation rejects offer creation."""
+
+
 class OfferCreationQuotaUnavailableError(OfferCreationAdmissionError):
     """Raised when the local per-user quota lock cannot be acquired safely."""
 
@@ -401,6 +405,26 @@ async def _admit_local_offer_quota(
                     f"offer_user_limit_exceeded:{action_type}",
                     error_message or "محدودیت ثبت آفر برای حساب شما فعال است.",
                 )
+
+    from core.services.customer_relation_service import (
+        CUSTOMER_ACTIVITY_NOT_ALLOWED_PUBLIC_MESSAGE,
+        CustomerOfferLimitViolation,
+        enforce_customer_offer_limits_for_creation,
+    )
+
+    try:
+        await enforce_customer_offer_limits_for_creation(
+            db,
+            customer_user_id=int(owner.id),
+            quantity=command.quantity,
+            is_wholesale=bool(command.is_wholesale),
+            lot_sizes=_list_or_none(command.lot_sizes),
+        )
+    except CustomerOfferLimitViolation as exc:
+        raise OfferCreationCustomerLimitExceededError(
+            f"customer_offer_limit:{exc.reason_code}",
+            CUSTOMER_ACTIVITY_NOT_ALLOWED_PUBLIC_MESSAGE,
+        ) from exc
 
     active_offer_count = int(
         await db.scalar(

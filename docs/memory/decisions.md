@@ -2,6 +2,7 @@
 
 Entries are newest first.
 
+- 2026-08-21 | Customer relation limits are authoritative across Web and Bot: tier-1 offer totals/lots obey min/max, tier-2 cannot publish, and both tiers' completed source/responder trades obey min/max plus daily count/volume, including overtime preflight and final recheck. Every customer-limit denial uses only «شما مجاز به انجام این فعالیت نیستید.»
 - 2026-08-21 | Web OTP login at a full session quota atomically replaces the oldest session after OTP proof; old-device approval is not required. Repeated replacements (2/24h, 5/7d, 7/30d) open a typed review-only user flag without restricting access, and active super admins receive deduplicated WebApp plus Queue-v1 Telegram alerts.
 - 2026-08-19 | Profile access remains server-scoped to permitted identities. Within any authorized profile, full mobile and address are product-visible contact fields shown as two plain rows without privacy/help copy; unrelated presence, relation, trade, and management data remain excluded.
 - 2026-08-17 | Staging login OTP is encrypted on foreign Redis and executed only by the credentialed bot; API stays producer-only. After a terminal result, ACK and DELETE the command; health is outstanding rather than historical XLEN; max-deliveries is Redis metadata, not a guessed count. Missing an approved staging SMS credential leaves SMS BLOCKED and must not force Telegram off or copy production secrets. Production Queue-v1 still needs a separate owner order.

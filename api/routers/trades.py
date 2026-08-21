@@ -3298,6 +3298,95 @@ def _try_return_overtime_idempotent_status(
     return None
 
 
+async def _prevalidate_overtime_request_for_trade(
+    db: AsyncSession,
+    *,
+    offer: Offer,
+    trade_data: TradeCreate,
+    requester_user_id: int,
+    market_timezone: str | None,
+) -> JSONResponse | None:
+    """Reject impossible overtime requests before creating an approval row.
+
+    This is intentionally only a preflight. Owner approval still executes the
+    full authoritative validation again, so elapsed time and concurrent trades
+    cannot bypass lot availability or customer limits.
+    """
+
+    is_valid_amount, amount_error, trade_quantity, available_amounts = (
+        validate_offer_trade_amount(
+            quantity=offer.quantity,
+            remaining_quantity=offer.remaining_quantity,
+            is_wholesale=offer.is_wholesale,
+            lot_sizes=offer.lot_sizes,
+            requested_amount=trade_data.quantity,
+        )
+    )
+    if not is_valid_amount:
+        if (
+            not offer.is_wholesale
+            and available_amounts
+            and amount_error == "این لات دیگر موجود نیست."
+        ):
+            await db.refresh(offer, ["commodity"])
+            return JSONResponse(
+                status_code=status.HTTP_409_CONFLICT,
+                content=build_lot_unavailable_suggestion_payload(
+                    offer_id=offer.id,
+                    offer_public_id=getattr(offer, "offer_public_id", None),
+                    requested_amount=trade_data.quantity,
+                    offer_type=offer.offer_type,
+                    settlement_type=getattr(offer, "settlement_type", None),
+                    commodity_name=offer.commodity.name if offer.commodity else None,
+                    price=offer.price,
+                    remaining_quantity=coalesce_offer_remaining_quantity(
+                        offer.remaining_quantity,
+                        offer.quantity,
+                    ),
+                    available_amounts=available_amounts,
+                ),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=amount_error,
+        )
+
+    responder_customer_relation = await get_active_customer_relation_for_customer(
+        db,
+        requester_user_id,
+    )
+    source_customer_relation = await get_active_customer_relation_for_customer(
+        db,
+        offer.user_id,
+    )
+    try:
+        await enforce_customer_trade_limits_for_trade(
+            db,
+            customer_relations={
+                int(requester_user_id): responder_customer_relation,
+                int(offer.user_id): source_customer_relation,
+            },
+            quantity=trade_quantity,
+            timezone_name=market_timezone,
+        )
+    except CustomerTradeLimitViolation as exc:
+        affected_side = (
+            "responder"
+            if exc.customer_user_id == int(requester_user_id)
+            else "source"
+        )
+        public_message = (
+            customer_trade_limit_public_message(exc.reason_code)
+            if affected_side == "responder"
+            else TRADE_UNAVAILABLE_DETAIL
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=public_message,
+        ) from exc
+    return None
+
+
 async def _create_overtime_request_for_trade(
     db: AsyncSession,
     *,
@@ -3693,6 +3782,23 @@ async def _execute_trade_authoritatively(
     else:
         intake_phase, receipt_at = await _classify_trade_request_intake(offer, edge_received_at)
         if intake_phase == OfferRequestIntakePhase.APPROVAL:
+            if not (trade_data.idempotency_key or "").strip():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "error_code": OvertimeRequestErrorCode.IDEMPOTENCY_REQUIRED.value,
+                        "message": "کلید تکرار درخواست الزامی است.",
+                    },
+                )
+            preflight_response = await _prevalidate_overtime_request_for_trade(
+                db,
+                offer=offer,
+                trade_data=trade_data,
+                requester_user_id=int(owner_user.id),
+                market_timezone=getattr(market_evaluation, "timezone", None),
+            )
+            if preflight_response is not None:
+                return preflight_response
             ts = await get_trading_settings_async()
             return await _create_overtime_request_for_trade(
                 db,

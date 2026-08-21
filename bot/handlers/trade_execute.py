@@ -24,6 +24,9 @@ from core.offer_settlement import settlement_type_value, trade_settlement_messag
 from core.offer_quantity import coalesce_offer_remaining_quantity
 from core.services.bot_access_policy import bot_access_denial_message, evaluate_bot_access, evaluate_bot_access_local_state
 from core.services.block_service import is_trade_blocked_by_principals
+from core.services.customer_relation_service import (
+    CUSTOMER_ACTIVITY_NOT_ALLOWED_PUBLIC_MESSAGE,
+)
 from bot.callbacks import ChannelTradeCallback, ChannelTradePublicCallback
 from bot.telegram_callback_answer import answer_callback_query_via_runtime
 from bot.telegram_interaction_message import (
@@ -100,6 +103,13 @@ def _user_facing_trade_error(detail: object) -> str:
     if isinstance(detail, str) and detail.strip():
         return detail.strip()
     return fallback
+
+
+def _presented_trade_error(detail: object) -> str:
+    message = _user_facing_trade_error(detail)
+    if message == CUSTOMER_ACTIVITY_NOT_ALLOWED_PUBLIC_MESSAGE:
+        return message
+    return f"❌ {message}"
 
 
 async def _queue_authoritative_channel_offer_refresh(
@@ -731,7 +741,7 @@ async def _execute_confirmed_channel_trade_via_shared_command(
     except HTTPException as exc:
         await answer_callback_query_via_runtime(
             callback,
-            f"❌ {_user_facing_trade_error(exc.detail)}",
+            _presented_trade_error(exc.detail),
             show_alert=True,
         )
         return
@@ -765,7 +775,7 @@ async def _execute_confirmed_channel_trade_via_shared_command(
         detail = body.get("detail") if isinstance(body, dict) else None
         await answer_callback_query_via_runtime(
             callback,
-            f"❌ {_user_facing_trade_error(detail)}",
+            _presented_trade_error(detail),
             show_alert=True,
         )
         return
@@ -1158,7 +1168,7 @@ async def _handle_channel_trade(
             detail = body_dict.get("detail")
             await answer_callback_query_via_runtime(
                 callback,
-                f"❌ {_user_facing_trade_error(detail)}",
+                _presented_trade_error(detail),
                 show_alert=True,
             )
             return

@@ -50,7 +50,9 @@ from core.telegram_delivery_runtime_policy import (
     configured_telegram_delivery_producer_mode,
 )
 from core.services.customer_relation_service import (
+    CUSTOMER_ACTIVITY_NOT_ALLOWED_PUBLIC_MESSAGE,
     build_customer_offer_read_model,
+    customer_offer_limit_failure_code,
     customer_management_name_for_user_id,
     get_active_customer_relation_for_customer,
     load_offer_customer_read_context,
@@ -1753,10 +1755,16 @@ async def create_offer(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=error_msg)
 
     actor_customer_relation = await get_active_customer_relation_for_customer(db, actor_user.id)
-    if actor_customer_relation and actor_customer_relation.customer_tier == CustomerTier.TIER_2:
+    customer_offer_failure_code = customer_offer_limit_failure_code(
+        actor_customer_relation,
+        quantity=offer_data.quantity,
+        is_wholesale=offer_data.is_wholesale,
+        lot_sizes=offer_data.lot_sizes,
+    )
+    if customer_offer_failure_code is not None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="مشتری سطح 2 مجاز به ثبت لفظ نیست و فقط می‌تواند روی لفظ‌های دیگر درخواست بزند.",
+            detail=CUSTOMER_ACTIVITY_NOT_ALLOWED_PUBLIC_MESSAGE,
         )
     
     # بررسی تعداد لفظ‌های فعال

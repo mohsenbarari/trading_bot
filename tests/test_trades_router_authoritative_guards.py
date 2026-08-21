@@ -593,7 +593,10 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
                 )
 
         self.assertEqual(exc_info.exception.status_code, 400)
-        self.assertEqual(exc_info.exception.detail, "به سقف تعداد معاملات مجاز امروز رسیده‌اید.")
+        self.assertEqual(
+            exc_info.exception.detail,
+            "شما مجاز به انجام این فعالیت نیستید.",
+        )
         self.assertEqual(db.added, [])
         self.assertEqual(offer.remaining_quantity, 10)
         self.assertEqual(len(db.offer_requests), 1)

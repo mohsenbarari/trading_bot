@@ -1,6 +1,6 @@
 import unittest
 
-from bot.handlers.trade_execute import _user_facing_trade_error
+from bot.handlers.trade_execute import _presented_trade_error, _user_facing_trade_error
 
 
 class BotTradeExecuteErrorPresentationTests(unittest.TestCase):
@@ -32,6 +32,16 @@ class BotTradeExecuteErrorPresentationTests(unittest.TestCase):
         self.assertEqual(
             _user_facing_trade_error(None),
             "امکان انجام این معامله وجود ندارد.",
+        )
+
+    def test_customer_limit_message_is_presented_exactly_as_owner_approved(self):
+        self.assertEqual(
+            _presented_trade_error("شما مجاز به انجام این فعالیت نیستید."),
+            "شما مجاز به انجام این فعالیت نیستید.",
+        )
+        self.assertEqual(
+            _presented_trade_error("خطای دیگر"),
+            "❌ خطای دیگر",
         )
 
 

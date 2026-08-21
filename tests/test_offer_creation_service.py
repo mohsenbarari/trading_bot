@@ -8,12 +8,15 @@ from core.offer_source import OfferSourceSurface
 from core.enums import SettlementType
 from core.services.offer_creation_service import (
     OfferCreationCommand,
+    OfferCreationCustomerLimitExceededError,
     OfferCreationIdempotencyConflictError,
+    OfferCreationQuotaPolicy,
     OfferCreationValidationError,
     OFFER_CREATION_FINGERPRINT_VERSION,
     build_authoritative_offer,
     canonical_offer_creation_payload,
     create_authoritative_offer,
+    create_authoritative_offer_with_outcome,
     ensure_offer_idempotency_replay_matches,
     offer_creation_fingerprint,
     validate_offer_creation_command,
@@ -258,8 +261,67 @@ class FakeDB:
     async def refresh(self, offer):
         return None
 
+    async def scalar(self, _statement):
+        return 0
+
 
 class OfferCreationServiceAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_final_offer_admission_enforces_customer_relation_policy(self):
+        from core.services.customer_relation_service import CustomerOfferLimitViolation
+
+        db = FakeDB()
+        command = OfferCreationCommand(
+            source_surface=OfferSourceSurface.TELEGRAM_BOT,
+            owner_user_id=5,
+            actor_user_id=5,
+            offer_type="sell",
+            commodity_id=7,
+            quantity=21,
+            price=100_000,
+        )
+        owner = SimpleNamespace(id=5)
+
+        with patch(
+            "core.services.offer_creation_service.validate_offer_creation_command",
+            new=AsyncMock(),
+        ), patch(
+            "core.services.offer_creation_service._lock_offer_owner",
+            new=AsyncMock(return_value=owner),
+        ), patch(
+            "core.services.offer_creation_service._load_local_idempotency_replay",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "core.services.customer_relation_service.enforce_customer_offer_limits_for_creation",
+            new=AsyncMock(
+                side_effect=CustomerOfferLimitViolation(
+                    customer_user_id=5,
+                    relation_id=12,
+                    reason_code="offer_above_maximum",
+                )
+            ),
+        ):
+            with self.assertRaises(OfferCreationCustomerLimitExceededError) as exc_info:
+                await create_authoritative_offer_with_outcome(
+                    db,
+                    command,
+                    commit=False,
+                    refresh=False,
+                    quota_policy=OfferCreationQuotaPolicy(
+                        max_active_offers=5,
+                        enforce_user_limits=False,
+                    ),
+                )
+
+        self.assertEqual(
+            exc_info.exception.reason,
+            "customer_offer_limit:offer_above_maximum",
+        )
+        self.assertEqual(
+            exc_info.exception.detail,
+            "شما مجاز به انجام این فعالیت نیستید.",
+        )
+        self.assertEqual(db.added, [])
+
     async def test_pack_offer_is_exactly_one_indivisible_hundred_coin_pack(self):
         valid = OfferCreationCommand(
             source_surface=OfferSourceSurface.WEBAPP,

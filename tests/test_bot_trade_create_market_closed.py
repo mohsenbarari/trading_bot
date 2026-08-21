@@ -4,7 +4,10 @@ from unittest.mock import AsyncMock, patch
 
 from bot.handlers.trade_create import handle_text_offer_confirm, handle_trade_confirm
 from core.services.market_transition_service import MarketOfferAdmissionClosedError
-from core.services.offer_creation_service import OfferCreationLimitExceededError
+from core.services.offer_creation_service import (
+    OfferCreationCustomerLimitExceededError,
+    OfferCreationLimitExceededError,
+)
 
 
 class _Session:
@@ -184,6 +187,73 @@ class BotTradeCreateMarketClosedTests(unittest.IsolatedAsyncioTestCase):
         callback.message.edit_text.assert_awaited_once_with(
             f"⚠️ **محدودیت**\n\n{quota_error.detail}",
             parse_mode="Markdown",
+        )
+        bot.send_message.assert_not_awaited()
+        state.clear.assert_awaited_once()
+        callback.answer.assert_awaited_once_with()
+
+    async def test_text_confirm_presents_customer_limit_message_exactly(self):
+        callback = SimpleNamespace(
+            message=SimpleNamespace(edit_text=AsyncMock()),
+            answer=AsyncMock(),
+            from_user=SimpleNamespace(id=1),
+        )
+        state = SimpleNamespace(
+            clear=AsyncMock(),
+            get_data=AsyncMock(
+                return_value={
+                    "quantity": 10,
+                    "trade_type": "buy",
+                    "settlement_type": "cash",
+                    "commodity_id": 7,
+                    "commodity_name": "امام",
+                    "price": 123456,
+                    "is_wholesale": True,
+                    "lot_sizes": None,
+                    "notes": None,
+                }
+            ),
+        )
+        bot = SimpleNamespace(send_message=AsyncMock())
+        customer_limit_error = OfferCreationCustomerLimitExceededError(
+            "customer_offer_limit:offer_above_maximum",
+            "شما مجاز به انجام این فعالیت نیستید.",
+        )
+
+        with patch(
+            "bot.handlers.trade_create._bot_market_is_open",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "core.trading_settings.get_trading_settings",
+            return_value=SimpleNamespace(max_active_offers=3),
+        ), patch(
+            "core.utils.check_user_limits",
+            side_effect=[(True, None), (True, None)],
+        ), patch(
+            "bot.handlers.trade_create.AsyncSessionLocal",
+            side_effect=[_SessionContext(), _SessionContext(), _SessionContext()],
+        ), patch(
+            "core.services.trade_service.validate_competitive_price",
+            new=AsyncMock(return_value=(True, None)),
+        ), patch(
+            "core.services.trade_service.detect_offer_price_warning",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "bot.handlers.trade_create.create_authoritative_offer_with_outcome",
+            new=AsyncMock(side_effect=customer_limit_error),
+        ), patch(
+            "bot.handlers.trade_create.settings",
+            SimpleNamespace(channel_id=-100),
+        ):
+            await handle_text_offer_confirm(
+                callback,
+                state,
+                user=SimpleNamespace(id=1, limitations_expire_at=None),
+                bot=bot,
+            )
+
+        callback.message.edit_text.assert_awaited_once_with(
+            "شما مجاز به انجام این فعالیت نیستید.",
         )
         bot.send_message.assert_not_awaited()
         state.clear.assert_awaited_once()

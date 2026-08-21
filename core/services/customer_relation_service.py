@@ -66,14 +66,11 @@ CUSTOMER_TRADE_LIMIT_DETAILS = {
     "daily_volume_limit": "Customer has reached the daily commodity volume limit",
 }
 
+CUSTOMER_ACTIVITY_NOT_ALLOWED_PUBLIC_MESSAGE = "شما مجاز به انجام این فعالیت نیستید."
+
 CUSTOMER_TRADE_LIMIT_PUBLIC_MESSAGES = {
-    "relation_not_active": "امکان انجام معامله برای حساب شما وجود ندارد.",
-    "quantity_not_positive": "مقدار معامله نامعتبر است.",
-    "temporarily_restricted": "امکان انجام معامله برای حساب شما موقتاً محدود شده است.",
-    "below_minimum": "مقدار معامله کمتر از حد مجاز شماست.",
-    "above_maximum": "مقدار معامله بیشتر از حد مجاز شماست.",
-    "daily_trade_limit": "به سقف تعداد معاملات مجاز امروز رسیده‌اید.",
-    "daily_volume_limit": "به سقف حجم معاملات مجاز امروز رسیده‌اید.",
+    reason_code: CUSTOMER_ACTIVITY_NOT_ALLOWED_PUBLIC_MESSAGE
+    for reason_code in CUSTOMER_TRADE_LIMIT_DETAILS
 }
 
 
@@ -106,6 +103,123 @@ class CustomerTradeLimitViolation(ValueError):
         self.relation_id = int(relation_id) if relation_id is not None else None
         self.reason_code = str(reason_code)
         super().__init__(self.reason_code)
+
+
+class CustomerOfferLimitViolation(ValueError):
+    def __init__(
+        self,
+        *,
+        customer_user_id: int,
+        relation_id: int | None,
+        reason_code: str,
+    ):
+        self.customer_user_id = int(customer_user_id)
+        self.relation_id = int(relation_id) if relation_id is not None else None
+        self.reason_code = str(reason_code)
+        super().__init__(self.reason_code)
+
+
+def customer_offer_limit_failure_code(
+    relation: CustomerRelation | object | None,
+    *,
+    quantity: int | str,
+    is_wholesale: bool,
+    lot_sizes: list[int] | tuple[int, ...] | None = None,
+    now: datetime | None = None,
+) -> str | None:
+    """Return the machine-only reason an active customer cannot create an offer.
+
+    Daily trade limits are deliberately excluded: they constrain completed
+    trades, not publishing an offer. Tier-1 customers must satisfy their
+    per-trade bounds both for the whole offer and for every selectable retail
+    lot. Tier-2 customers cannot publish offers.
+    """
+
+    if relation is None:
+        return None
+
+    relation_status = getattr(
+        getattr(relation, "status", None),
+        "value",
+        getattr(relation, "status", None),
+    )
+    if relation_status != CustomerRelationStatus.ACTIVE.value:
+        return "relation_not_active"
+
+    customer_tier = getattr(
+        getattr(relation, "customer_tier", None),
+        "value",
+        getattr(relation, "customer_tier", None),
+    )
+    if customer_tier == CustomerTier.TIER_2.value:
+        return "offer_not_allowed_for_tier"
+
+    normalized_quantity = _normalize_non_negative_int(quantity, name="quantity")
+    if normalized_quantity <= 0:
+        return "quantity_not_positive"
+
+    current_time = _as_utc_naive(now or utc_now())
+    restricted_until = getattr(relation, "trading_restricted_until", None)
+    if restricted_until is not None and _as_utc_naive(restricted_until) > current_time:
+        return "temporarily_restricted"
+
+    min_trade_quantity = getattr(relation, "min_trade_quantity", None)
+    max_trade_quantity = getattr(relation, "max_trade_quantity", None)
+    if min_trade_quantity is not None and normalized_quantity < int(min_trade_quantity):
+        return "offer_below_minimum"
+    if max_trade_quantity is not None and normalized_quantity > int(max_trade_quantity):
+        return "offer_above_maximum"
+
+    if not is_wholesale:
+        for raw_lot_size in lot_sizes or ():
+            lot_size = _normalize_non_negative_int(raw_lot_size, name="lot_size")
+            if min_trade_quantity is not None and lot_size < int(min_trade_quantity):
+                return "lot_below_minimum"
+            if max_trade_quantity is not None and lot_size > int(max_trade_quantity):
+                return "lot_above_maximum"
+    return None
+
+
+async def enforce_customer_offer_limits_for_creation(
+    db: AsyncSession,
+    *,
+    customer_user_id: int,
+    quantity: int | str,
+    is_wholesale: bool,
+    lot_sizes: list[int] | tuple[int, ...] | None = None,
+    now: datetime | None = None,
+) -> None:
+    """Lock and enforce the active customer's offer-shape policy, if any."""
+
+    normalized_customer_user_id = int(customer_user_id)
+    result = await db.execute(
+        select(CustomerRelation)
+        .where(
+            CustomerRelation.customer_user_id == normalized_customer_user_id,
+            CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+            CustomerRelation.deleted_at.is_(None),
+        )
+        .order_by(CustomerRelation.id.asc())
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    relation = result.scalar_one_or_none()
+    if relation is None:
+        return
+
+    failure_code = customer_offer_limit_failure_code(
+        relation,
+        quantity=quantity,
+        is_wholesale=is_wholesale,
+        lot_sizes=lot_sizes,
+        now=now,
+    )
+    if failure_code is not None:
+        raise CustomerOfferLimitViolation(
+            customer_user_id=normalized_customer_user_id,
+            relation_id=getattr(relation, "id", None),
+            reason_code=failure_code,
+        )
 
 
 def mark_customer_invitation_for_authoritative_replay(
@@ -1132,7 +1246,7 @@ def _customer_trade_limit_failure_code(
 def customer_trade_limit_public_message(reason_code: str) -> str:
     return CUSTOMER_TRADE_LIMIT_PUBLIC_MESSAGES.get(
         str(reason_code or ""),
-        "امکان انجام این معامله وجود ندارد.",
+        CUSTOMER_ACTIVITY_NOT_ALLOWED_PUBLIC_MESSAGE,
     )
 
 

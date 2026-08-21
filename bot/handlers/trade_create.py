@@ -31,6 +31,7 @@ from core.pack_commodities import (
 from core.services.offer_creation_service import (
     OfferCreationAdmissionError,
     OfferCreationCommand,
+    OfferCreationCustomerLimitExceededError,
     OfferCreationLimitExceededError,
     OfferCreationQuotaPolicy,
     OfferCreationQuotaUnavailableError,
@@ -2016,6 +2017,16 @@ async def _handle_trade_confirm_core(
             },
         )
         await edit_callback_message_via_runtime(callback, user, BOT_MARKET_CLOSED_MESSAGE)
+    except OfferCreationCustomerLimitExceededError as exc:
+        logger.info(
+            "Customer offer creation rejected by relation policy",
+            extra={
+                "event": "telegram.offer_create_customer_limit_rejected",
+                "user_id": getattr(user, "id", None),
+                "reason": exc.reason,
+            },
+        )
+        await edit_callback_message_via_runtime(callback, user, exc.detail)
     except OfferCreationLimitExceededError as exc:
         logger.info(
             "Offer creation rejected at final local quota admission",

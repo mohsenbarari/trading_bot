@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from api.routers import trades
 from core.offer_lifecycle import OfferRequestIntakePhase
+from core.services.customer_relation_service import CustomerTradeLimitViolation
 from core.services.offer_overtime_request_service import (
     OvertimeRequestError,
     OvertimeRequestErrorCode,
@@ -24,6 +25,93 @@ RECEIPT_OVERTIME = CREATED + timedelta(minutes=2, seconds=30)
 
 
 class OvertimeIntakeRoutingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_overtime_preflight_rejects_customer_limits_with_approved_message(self):
+        offer = SimpleNamespace(
+            id=7,
+            user_id=1,
+            quantity=10,
+            remaining_quantity=10,
+            is_wholesale=False,
+            lot_sizes=[4, 6],
+        )
+        requester_relation = SimpleNamespace(id=12)
+        source_relation = SimpleNamespace(id=13)
+        db = SimpleNamespace(refresh=AsyncMock())
+
+        for reason_code in (
+            "below_minimum",
+            "above_maximum",
+            "daily_trade_limit",
+            "daily_volume_limit",
+        ):
+            with self.subTest(reason_code=reason_code), patch(
+                "api.routers.trades.get_active_customer_relation_for_customer",
+                new=AsyncMock(side_effect=[requester_relation, source_relation]),
+            ), patch(
+                "api.routers.trades.enforce_customer_trade_limits_for_trade",
+                new=AsyncMock(
+                    side_effect=CustomerTradeLimitViolation(
+                        customer_user_id=9,
+                        relation_id=12,
+                        reason_code=reason_code,
+                    )
+                ),
+            ):
+                with self.assertRaises(HTTPException) as caught:
+                    await trades._prevalidate_overtime_request_for_trade(
+                        db,
+                        offer=offer,
+                        trade_data=trades.TradeCreate(
+                            offer_id=7,
+                            quantity=4,
+                            idempotency_key=f"ot-limit-{reason_code}",
+                        ),
+                        requester_user_id=9,
+                        market_timezone="Asia/Tehran",
+                    )
+
+            self.assertEqual(caught.exception.status_code, 400)
+            self.assertEqual(
+                caught.exception.detail,
+                "شما مجاز به انجام این فعالیت نیستید.",
+            )
+
+    async def test_overtime_preflight_rejects_unavailable_lot_before_customer_checks(self):
+        offer = SimpleNamespace(
+            id=7,
+            offer_public_id="ofr_ot_7",
+            user_id=1,
+            quantity=10,
+            remaining_quantity=6,
+            is_wholesale=False,
+            lot_sizes=[4, 6],
+            offer_type="sell",
+            settlement_type="cash",
+            commodity=SimpleNamespace(name="Gold"),
+            price=123456,
+        )
+        db = SimpleNamespace(refresh=AsyncMock())
+
+        with patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(),
+        ) as relation_mock:
+            response = await trades._prevalidate_overtime_request_for_trade(
+                db,
+                offer=offer,
+                trade_data=trades.TradeCreate(
+                    offer_id=7,
+                    quantity=5,
+                    idempotency_key="ot-unavailable-lot",
+                ),
+                requester_user_id=9,
+                market_timezone="Asia/Tehran",
+            )
+
+        self.assertIsInstance(response, JSONResponse)
+        self.assertEqual(response.status_code, 409)
+        relation_mock.assert_not_awaited()
+
     async def test_is_offer_expired_only_for_rejected_phase(self):
         offer = SimpleNamespace(
             created_at=CREATED,
