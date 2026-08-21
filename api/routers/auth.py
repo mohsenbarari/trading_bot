@@ -42,7 +42,7 @@ from core.services.session_service import (
     hash_token,
     publish_session_revocation,
 )
-from core.session_authority import assert_login_allowed_for_server
+from core.session_authority import assert_login_allowed_for_server, prepare_verified_login_for_server
 from core.services.user_account_status_service import get_user_account_status, is_user_global_web_locked
 from core.services.avatar_service import resolve_owned_avatar_file_id
 from core.services.bot_access_policy import bot_access_denial_message, evaluate_bot_access
@@ -2815,14 +2815,11 @@ async def verify_otp(
         _raise_inactive_account_error()
 
     login_home_server = _login_home_server(raw_request)
-    try:
-        await assert_login_allowed_for_server(db, user, requested_server=login_home_server)
-    except HTTPException as exc:
-        if exc.status_code == 409:
-            await redis.delete(otp_key)
-            await redis.delete(f"otp_limit:{mobile}")
-            await _clear_otp_verify_subject_failures(redis, subject=mobile)
-        raise
+    remote_replaced_session_count = await prepare_verified_login_for_server(
+        db,
+        user,
+        requested_server=login_home_server,
+    )
 
     # پاک کردن کد OTP
     await redis.delete(otp_key)
@@ -2860,6 +2857,29 @@ async def verify_otp(
             "message": "درخواست ورود شما ارسال شد. منتظر تایید از دستگاه اصلی باشید.",
             "expires_at": login_req.expires_at.isoformat(),
         }
+
+    replaced_session_count = (
+        int(session_result.get("replaced_session_count") or 0)
+        + int(remote_replaced_session_count or 0)
+    )
+    if replaced_session_count > 0:
+        try:
+            from core.services.user_flag_service import record_session_replacement_activity
+
+            await record_session_replacement_activity(
+                db,
+                user=user,
+                replaced_session_count=replaced_session_count,
+                device_name=device_info["device_name"],
+                device_ip=device_info["device_ip"],
+                platform=device_info["platform"],
+                home_server=login_home_server,
+            )
+        except Exception:
+            logger.exception(
+                "Session replacement risk recording failed after successful login",
+                extra={"event": "session.replacement.risk_recording_failed", "user_id": user.id},
+            )
     
     # Generate access token with session_id
     session_id = str(session_result["session"].id) if session_result.get("session") else None

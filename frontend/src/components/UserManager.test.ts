@@ -237,6 +237,103 @@ describe('UserManager.vue', () => {
     expect(wrapper.emitted('settled')).toEqual([[]])
   })
 
+  it('lists explainable suspicious-user flags and resolves a reviewed case without leaving the page', async () => {
+    const flaggedUser = makeUser({ id: 9, account_name: 'flagged-user' })
+    const flag = {
+      id: 41,
+      user_id: 9,
+      flag_type: 'session_replacement_frequency',
+      flag_label: 'جابه‌جایی مکرر نشست',
+      reason_code: 'repeated_session_replacement',
+      reason_label: 'ورود مکرر روی دستگاه یا مرورگر جدید',
+      status: 'open',
+      severity: 'warning',
+      details: {
+        counts: { daily: 2, weekly: 3, monthly: 4 },
+        device_name: 'Chrome on Android',
+      },
+      trigger_count: 1,
+      first_flagged_at: '2026-08-21T10:00:00Z',
+      last_flagged_at: '2026-08-21T10:05:00Z',
+      user: flaggedUser,
+    }
+    userManagerMocks.apiFetchMock
+      .mockResolvedValueOnce(makeJsonResponse([makeUser()]))
+      .mockResolvedValueOnce(makeJsonResponse([flag]))
+      .mockResolvedValueOnce(makeJsonResponse({ ...flag, status: 'resolved' }))
+
+    const wrapper = await mountView()
+    const suspiciousTab = wrapper.findAll('[role="tab"]').find(tab => tab.text() === 'کاربران مشکوک')
+    expect(suspiciousTab).toBeTruthy()
+    await suspiciousTab!.trigger('click')
+    await flushPromises()
+
+    expect(userManagerMocks.apiFetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/user-flags/open',
+      expect.any(Object),
+    )
+    expect(wrapper.text()).toContain('flagged-user')
+    expect(wrapper.text()).toContain('جابه‌جایی مکرر نشست')
+    expect(wrapper.text()).toContain('ورود مکرر روی دستگاه یا مرورگر جدید')
+    expect(wrapper.text()).toContain('2 بار در ۲۴ ساعت')
+    expect(wrapper.text()).toContain('Chrome on Android')
+
+    await wrapper.get('.user-flag-resolve').trigger('click')
+    await flushPromises()
+
+    expect(userManagerMocks.apiFetchMock).toHaveBeenNthCalledWith(
+      3,
+      '/api/user-flags/41/resolve',
+      expect.objectContaining({ method: 'POST', body: '{}' }),
+    )
+    expect(wrapper.text()).toContain('کاربر مشکوکی برای بررسی وجود ندارد.')
+    expect(wrapper.text()).not.toContain('flagged-user')
+  })
+
+  it('keeps multiple open reasons for the same user as separate review cases', async () => {
+    const flaggedUser = makeUser({ id: 9, account_name: 'multi-flag-user' })
+    const baseFlag = {
+      user_id: 9,
+      status: 'open',
+      severity: 'warning',
+      details: {},
+      trigger_count: 1,
+      first_flagged_at: '2026-08-21T10:00:00Z',
+      last_flagged_at: '2026-08-21T10:05:00Z',
+      user: flaggedUser,
+    }
+    userManagerMocks.apiFetchMock
+      .mockResolvedValueOnce(makeJsonResponse([makeUser()]))
+      .mockResolvedValueOnce(makeJsonResponse([
+        {
+          ...baseFlag,
+          id: 41,
+          flag_type: 'session_replacement_frequency',
+          flag_label: 'جابه‌جایی مکرر نشست',
+          reason_code: 'repeated_session_replacement',
+          reason_label: 'ورود مکرر روی دستگاه یا مرورگر جدید',
+        },
+        {
+          ...baseFlag,
+          id: 42,
+          flag_type: 'future_detector',
+          flag_label: 'نیازمند بررسی',
+          reason_code: 'future_reason',
+          reason_label: 'رفتار ثبت‌شده نیازمند بررسی مدیر است',
+        },
+      ]))
+
+    const wrapper = await mountView()
+    const suspiciousTab = wrapper.findAll('[role="tab"]').find(tab => tab.text() === 'کاربران مشکوک')
+    await suspiciousTab!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findAll('.users-list-item--flagged')).toHaveLength(2)
+    expect(wrapper.text()).toContain('جابه‌جایی مکرر نشست')
+    expect(wrapper.text()).toContain('نیازمند بررسی')
+  })
+
   it('surfaces an initial failure with a same-screen retry that can recover', async () => {
     userManagerMocks.apiFetchMock
       .mockResolvedValueOnce(makeJsonResponse({ detail: 'boom' }, false))

@@ -22,6 +22,7 @@ from .session import (
 )
 from .commodity import Commodity, CommodityAlias
 from .notification import Notification
+from .user_flag import UserFlag
 from .push_subscription import PushSubscription
 from .user_notification_preference import UserNotificationPreference
 from .telegram_link_token import TelegramLinkToken, TelegramLinkTokenStatus
@@ -172,6 +173,7 @@ __all__ = [
     "Conversation",
     # Other
     "Notification",
+    "UserFlag",
     "PushSubscription",
     "UserNotificationPreference",
     "TelegramLinkToken",

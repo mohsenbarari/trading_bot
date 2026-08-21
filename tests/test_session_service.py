@@ -61,12 +61,6 @@ class SessionServiceHelperTests(unittest.TestCase):
         self.assertEqual(session_service.get_effective_max_sessions(super_admin), 1)
         self.assertEqual(session_service.get_effective_max_sessions(middle_manager), 1)
 
-    def test_calculate_threshold_scales_by_half_session_steps(self):
-        self.assertEqual(session_service.calculate_threshold(4, 1), 4)
-        self.assertEqual(session_service.calculate_threshold(4, 2), 6)
-        self.assertEqual(session_service.calculate_threshold(4, 3), 8)
-
-
 class HandleLoginSessionTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.accountant_patch = patch(
@@ -135,7 +129,7 @@ class HandleLoginSessionTests(unittest.IsolatedAsyncioTestCase):
                 home_server="foreign",
             )
 
-        self.assertEqual(result, {"action": "session_created", "session": created_session})
+        self.assertEqual(result, {"action": "session_created", "session": created_session, "replaced_session_count": 0})
         create_session.assert_awaited_once_with(
             db,
             user.id,
@@ -175,7 +169,7 @@ class HandleLoginSessionTests(unittest.IsolatedAsyncioTestCase):
                 home_server="foreign",
             )
 
-        self.assertEqual(result, {"action": "session_created", "session": created_session})
+        self.assertEqual(result, {"action": "session_created", "session": created_session, "replaced_session_count": 0})
         create_session.assert_awaited_once_with(
             db,
             user.id,
@@ -206,7 +200,7 @@ class HandleLoginSessionTests(unittest.IsolatedAsyncioTestCase):
                 home_server="foreign",
             )
 
-        self.assertEqual(result, {"action": "session_created", "session": created_session})
+        self.assertEqual(result, {"action": "session_created", "session": created_session, "replaced_session_count": 0})
         create_session.assert_awaited_once_with(
             db,
             user.id,
@@ -219,211 +213,70 @@ class HandleLoginSessionTests(unittest.IsolatedAsyncioTestCase):
         )
         db.commit.assert_awaited_once()
 
-    async def test_accountant_users_stay_limited_to_one_active_session(self):
-        db = SimpleNamespace(execute=AsyncMock(return_value=scalar_one_or_none_result(None)), commit=AsyncMock(), add=Mock())
+    async def test_accountant_users_replace_their_only_active_session(self):
+        db = SimpleNamespace(commit=AsyncMock())
         user = SimpleNamespace(id=12, role=UserRole.STANDARD, max_sessions=3)
-        fake_redis = FakeRedis({
-            "session_req:12:daily": "0",
-            "session_req:12:weekly": "0",
-            "session_req:12:monthly": "0",
-        })
-        settings = SimpleNamespace(
-            anti_abuse_daily_base=4,
-            anti_abuse_weekly_base=10,
-            anti_abuse_monthly_base=20,
-        )
+        old_session = SimpleNamespace(id=uuid.uuid4(), is_primary=True, is_active=True)
+        new_session = SimpleNamespace(id=uuid.uuid4())
         self.mock_is_accountant.return_value = True
 
-        with patch("core.services.session_service.get_active_sessions", AsyncMock(return_value=[SimpleNamespace(is_primary=True)])), \
-             patch("bot.utils.redis_helpers.get_redis", AsyncMock(return_value=fake_redis)), \
-             patch("core.services.session_service.get_trading_settings_async", AsyncMock(return_value=settings)), \
-             patch("core.services.session_service.publish_user_event", new=AsyncMock(), create=True):
+        with patch("core.services.session_service.get_active_sessions", AsyncMock(return_value=[old_session])), \
+             patch("core.services.session_service.create_session", AsyncMock(return_value=new_session)) as create_mock, \
+             patch("core.services.session_service.publish_session_revocation", AsyncMock()) as publish_mock:
             result = await session_service.handle_login_session(db, user, "refresh-acc")
 
-        self.assertEqual(result["action"], "approval_required")
-
-    async def test_blocks_when_anti_abuse_threshold_is_hit(self):
-        db = SimpleNamespace(execute=AsyncMock(), commit=AsyncMock())
-        user = SimpleNamespace(id=21, role=UserRole.STANDARD, max_sessions=2)
-        active_sessions = [SimpleNamespace(), SimpleNamespace()]
-        fake_redis = FakeRedis({"session_req:21:daily": "6", "session_req:21:weekly": "0", "session_req:21:monthly": "0"})
-        settings = SimpleNamespace(
-            anti_abuse_daily_base=4,
-            anti_abuse_weekly_base=10,
-            anti_abuse_monthly_base=20,
+        self.assertEqual(result["action"], "session_created")
+        self.assertEqual(result["replaced_session_count"], 1)
+        self.assertFalse(old_session.is_active)
+        create_mock.assert_awaited_once_with(
+            db, user.id, "refresh-acc", "Unknown Device", None, Platform.WEB,
+            is_primary=True, home_server="foreign",
         )
+        db.commit.assert_awaited_once()
+        publish_mock.assert_awaited_once_with(user.id, [old_session])
 
-        with patch("core.services.session_service.get_active_sessions", AsyncMock(return_value=active_sessions)), \
-             patch("bot.utils.redis_helpers.get_redis", AsyncMock(return_value=fake_redis)), \
-             patch("core.services.session_service.get_trading_settings_async", AsyncMock(return_value=settings)):
+    async def test_full_limit_replaces_oldest_session_instead_of_blocking(self):
+        db = SimpleNamespace(commit=AsyncMock())
+        user = SimpleNamespace(id=21, role=UserRole.STANDARD, max_sessions=2)
+        oldest = SimpleNamespace(id=uuid.uuid4(), is_primary=True, is_active=True)
+        newest = SimpleNamespace(id=uuid.uuid4(), is_primary=False, is_active=True)
+        created = SimpleNamespace(id=uuid.uuid4())
+
+        with patch("core.services.session_service.get_active_sessions", AsyncMock(return_value=[oldest, newest])), \
+             patch("core.services.session_service.create_session", AsyncMock(return_value=created)) as create_mock, \
+             patch("core.services.session_service.publish_session_revocation", AsyncMock()) as publish_mock:
             result = await session_service.handle_login_session(db, user, "refresh-3")
 
-        self.assertEqual(result["action"], "blocked")
-        self.assertIn("daily", result["reason"])
-        db.execute.assert_not_awaited()
-        db.commit.assert_not_awaited()
-
-    async def test_reuses_existing_pending_request_when_limit_is_hit(self):
-        existing_request = SimpleNamespace(
-            id=uuid.uuid4(),
-            requester_device_name="Existing Device",
-            requester_ip="10.10.10.10",
-            expires_at=datetime.utcnow() + timedelta(seconds=90),
-        )
-        db = SimpleNamespace(
-            execute=AsyncMock(return_value=scalar_one_or_none_result(existing_request)),
-            commit=AsyncMock(),
-            add=Mock(),
-        )
-        user = SimpleNamespace(id=22, role=UserRole.STANDARD, max_sessions=1)
-        fake_redis = FakeRedis({
-            "session_req:22:daily": "0",
-            "session_req:22:weekly": "0",
-            "session_req:22:monthly": "0",
+        self.assertEqual(result, {
+            "action": "session_created",
+            "session": created,
+            "replaced_session_count": 1,
         })
-        settings = SimpleNamespace(
-            anti_abuse_daily_base=4,
-            anti_abuse_weekly_base=10,
-            anti_abuse_monthly_base=20,
+        self.assertFalse(oldest.is_active)
+        self.assertTrue(newest.is_active)
+        create_mock.assert_awaited_once_with(
+            db, user.id, "refresh-3", "Unknown Device", None, Platform.WEB,
+            is_primary=True, home_server="foreign",
         )
+        publish_mock.assert_awaited_once_with(user.id, [oldest])
 
-        with patch("core.services.session_service.get_active_sessions", AsyncMock(return_value=[SimpleNamespace()])), \
-             patch("bot.utils.redis_helpers.get_redis", AsyncMock(return_value=fake_redis)), \
-             patch("core.services.session_service.get_trading_settings_async", AsyncMock(return_value=settings)), \
-             patch("core.utils.publish_user_event", AsyncMock()) as publish_user_event:
-            result = await session_service.handle_login_session(
-                db,
-                user,
-                "refresh-4",
-                device_name="New Device",
-                device_ip="192.168.1.50",
-            )
+    async def test_full_limit_preserves_remaining_primary(self):
+        db = SimpleNamespace(commit=AsyncMock())
+        user = SimpleNamespace(id=22, role=UserRole.STANDARD, max_sessions=2)
+        oldest = SimpleNamespace(id=uuid.uuid4(), is_primary=False, is_active=True)
+        primary = SimpleNamespace(id=uuid.uuid4(), is_primary=True, is_active=True)
+        created = SimpleNamespace(id=uuid.uuid4())
 
-        self.assertEqual(result, {"action": "approval_required", "request": existing_request})
-        db.commit.assert_not_awaited()
-        db.add.assert_not_called()
-        publish_user_event.assert_awaited_once()
+        with patch("core.services.session_service.get_active_sessions", AsyncMock(return_value=[oldest, primary])), \
+             patch("core.services.session_service.create_session", AsyncMock(return_value=created)) as create_mock, \
+             patch("core.services.session_service.publish_session_revocation", AsyncMock()):
+            result = await session_service.handle_login_session(db, user, "refresh-4")
 
-    async def test_reuses_existing_pending_request_when_publish_fails(self):
-        existing_request = SimpleNamespace(
-            id=uuid.uuid4(),
-            requester_device_name=None,
-            requester_ip=None,
-            expires_at=datetime.utcnow() + timedelta(seconds=90),
+        self.assertEqual(result["replaced_session_count"], 1)
+        create_mock.assert_awaited_once_with(
+            db, user.id, "refresh-4", "Unknown Device", None, Platform.WEB,
+            is_primary=False, home_server="foreign",
         )
-        db = SimpleNamespace(
-            execute=AsyncMock(return_value=scalar_one_or_none_result(existing_request)),
-            commit=AsyncMock(),
-            add=Mock(),
-        )
-        user = SimpleNamespace(id=24, role=UserRole.STANDARD, max_sessions=1)
-        fake_redis = FakeRedis({
-            "session_req:24:daily": "0",
-            "session_req:24:weekly": "0",
-            "session_req:24:monthly": "0",
-        })
-        settings = SimpleNamespace(
-            anti_abuse_daily_base=4,
-            anti_abuse_weekly_base=10,
-            anti_abuse_monthly_base=20,
-        )
-
-        with patch("core.services.session_service.get_active_sessions", AsyncMock(return_value=[SimpleNamespace()])), \
-             patch("bot.utils.redis_helpers.get_redis", AsyncMock(return_value=fake_redis)), \
-             patch("core.services.session_service.get_trading_settings_async", AsyncMock(return_value=settings)), \
-             patch("core.utils.publish_user_event", AsyncMock(side_effect=RuntimeError("pub down"))), \
-             patch.object(session_service, "logger") as logger:
-            result = await session_service.handle_login_session(
-                db,
-                user,
-                "refresh-4b",
-                device_name="Fallback Device",
-                device_ip="192.168.1.51",
-            )
-
-        self.assertEqual(result, {"action": "approval_required", "request": existing_request})
-        logger.warning.assert_called_once()
-
-    async def test_creates_login_request_and_increments_all_period_counters(self):
-        db = SimpleNamespace(
-            execute=AsyncMock(return_value=scalar_one_or_none_result(None)),
-            commit=AsyncMock(),
-            add=Mock(),
-        )
-        user = SimpleNamespace(id=23, role=UserRole.STANDARD, max_sessions=1)
-        fake_redis = FakeRedis({
-            "session_req:23:daily": "0",
-            "session_req:23:weekly": "0",
-            "session_req:23:monthly": "0",
-        })
-        settings = SimpleNamespace(
-            anti_abuse_daily_base=4,
-            anti_abuse_weekly_base=10,
-            anti_abuse_monthly_base=20,
-        )
-
-        with patch("core.services.session_service.get_active_sessions", AsyncMock(return_value=[SimpleNamespace(is_primary=True)])), \
-             patch("bot.utils.redis_helpers.get_redis", AsyncMock(return_value=fake_redis)), \
-             patch("core.services.session_service.get_trading_settings_async", AsyncMock(return_value=settings)), \
-             patch("core.utils.publish_user_event", AsyncMock()) as publish_user_event:
-            result = await session_service.handle_login_session(
-                db,
-                user,
-                "refresh-5",
-                device_name="Queued Device",
-                device_ip="172.16.0.10",
-                home_server="iran",
-            )
-
-        self.assertEqual(result["action"], "approval_required")
-        login_request = result["request"]
-        self.assertEqual(login_request.user_id, user.id)
-        self.assertEqual(login_request.requester_device_name, "Queued Device")
-        self.assertEqual(login_request.requester_ip, "172.16.0.10")
-        self.assertEqual(login_request.requester_home_server, "iran")
-        self.assertEqual(login_request.status, LoginRequestStatus.PENDING)
-        db.add.assert_called_once_with(login_request)
-        db.commit.assert_awaited_once()
-        publish_user_event.assert_awaited_once()
-        self.assertEqual(fake_redis.pipeline_calls.count(("execute",)), 3)
-        self.assertIn(("expire", "session_req:23:daily", 86400), fake_redis.pipeline_calls)
-        self.assertIn(("expire", "session_req:23:weekly", 604800), fake_redis.pipeline_calls)
-        self.assertIn(("expire", "session_req:23:monthly", 2592000), fake_redis.pipeline_calls)
-
-    async def test_creates_login_request_even_when_publish_fails(self):
-        db = SimpleNamespace(
-            execute=AsyncMock(return_value=scalar_one_or_none_result(None)),
-            commit=AsyncMock(),
-            add=Mock(),
-        )
-        user = SimpleNamespace(id=25, role=UserRole.STANDARD, max_sessions=1)
-        fake_redis = FakeRedis({
-            "session_req:25:daily": "0",
-            "session_req:25:weekly": "0",
-            "session_req:25:monthly": "0",
-        })
-        settings = SimpleNamespace(
-            anti_abuse_daily_base=4,
-            anti_abuse_weekly_base=10,
-            anti_abuse_monthly_base=20,
-        )
-
-        with patch("core.services.session_service.get_active_sessions", AsyncMock(return_value=[SimpleNamespace(is_primary=True)])), \
-             patch("bot.utils.redis_helpers.get_redis", AsyncMock(return_value=fake_redis)), \
-             patch("core.services.session_service.get_trading_settings_async", AsyncMock(return_value=settings)), \
-             patch("core.utils.publish_user_event", AsyncMock(side_effect=RuntimeError("pub down"))), \
-             patch.object(session_service, "logger") as logger:
-            result = await session_service.handle_login_session(
-                db,
-                user,
-                "refresh-5b",
-                device_name="Queued Device",
-                device_ip="172.16.0.11",
-            )
-
-        self.assertEqual(result["action"], "approval_required")
-        db.commit.assert_awaited_once()
-        logger.warning.assert_called_once()
 
 
 class ApproveAndRevocationTests(unittest.IsolatedAsyncioTestCase):

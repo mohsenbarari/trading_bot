@@ -1,7 +1,6 @@
 # core/services/session_service.py
 """سرویس مدیریت نشست‌ها و درخواست لاگین"""
 import hashlib
-import math
 import uuid
 import logging
 from datetime import datetime, timedelta
@@ -14,7 +13,6 @@ from core.enums import UserAccountStatus
 from core.utils import utc_now_naive
 from models.session import UserSession, SessionLoginRequest, LoginRequestStatus, Platform
 from models.user import User, UserRole
-from core.trading_settings import get_trading_settings_async
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +39,6 @@ def get_effective_max_sessions(user: User) -> int:
     if user.role in (UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER):
         return 1
     return min(max(user.max_sessions, 1), 3)
-
-
-def calculate_threshold(base: int, max_sessions: int) -> int:
-    """Threshold = Floor( Base * (1 + 0.5 * (Sessions - 1)) )"""
-    return math.floor(base * (1 + 0.5 * (max_sessions - 1)))
 
 
 async def _is_accountant_user(db: AsyncSession, user_id: int) -> bool:
@@ -148,12 +141,24 @@ async def handle_login_session(
 ) -> dict:
     """
     Core login session logic. Returns one of:
-    - {"action": "session_created", "session": UserSession}
-    - {"action": "approval_required", "request": SessionLoginRequest}
+    - {"action": "session_created", "session": UserSession, "replaced_session_count": int}
     - {"action": "blocked", "reason": str}
+
+    When the configured limit is full, the oldest required session(s) are
+    revoked and the authenticated new session is created immediately.  This
+    preserves the limit without requiring access to an old device.
     """
     if _is_inactive_account(user):
         return {"action": "blocked", "reason": ACCOUNT_INACTIVE_BLOCK_REASON}
+
+    # Serialize concurrent logins for a real ORM user.  Test doubles and
+    # compatibility callers still use the explicit session query below.
+    if isinstance(user, User):
+        locked_user = (
+            await db.execute(select(User).where(User.id == user.id).with_for_update())
+        ).scalar_one_or_none()
+        if locked_user is not None:
+            user = locked_user
 
     max_sessions = 1 if await _is_accountant_user(db, user.id) else get_effective_max_sessions(user)
     
@@ -183,7 +188,11 @@ async def handle_login_session(
             suspended_session.last_active_at = utc_now_naive()
             suspended_session.expires_at = utc_now_naive() + timedelta(days=30)
             await db.commit()
-            return {"action": "session_created", "session": suspended_session}
+            return {
+                "action": "session_created",
+                "session": suspended_session,
+                "replaced_session_count": 0,
+            }
 
     active_sessions = await get_active_sessions(db, user.id)
 
@@ -195,7 +204,7 @@ async def handle_login_session(
             home_server=home_server,
         )
         await db.commit()
-        return {"action": "session_created", "session": session}
+        return {"action": "session_created", "session": session, "replaced_session_count": 0}
 
     # Case 2: Under limit → create new session directly (non-primary)
     if len(active_sessions) < max_sessions:
@@ -205,89 +214,38 @@ async def handle_login_session(
             home_server=home_server,
         )
         await db.commit()
-        return {"action": "session_created", "session": session}
+        return {"action": "session_created", "session": session, "replaced_session_count": 0}
 
-    # Case 3: At limit → check anti-abuse then create login request
-    from bot.utils.redis_helpers import get_redis
-    redis = await get_redis()
+    # Case 3: At limit → revoke the oldest required rows and admit the new
+    # authenticated device.  The user-row lock above makes this atomic for
+    # production ORM calls and prevents concurrent logins exceeding the cap.
+    replace_count = len(active_sessions) - max_sessions + 1
+    revoked_sessions = active_sessions[:replace_count]
+    for old_session in revoked_sessions:
+        old_session.is_active = False
 
-    # Check anti-abuse thresholds
-    settings = await get_trading_settings_async()
-    anti_abuse_base = {
-        "daily": settings.anti_abuse_daily_base,
-        "weekly": settings.anti_abuse_weekly_base,
-        "monthly": settings.anti_abuse_monthly_base
-    }
-    
-    for period, base in anti_abuse_base.items():
-        threshold = calculate_threshold(base, max_sessions)
-        key = f"session_req:{user.id}:{period}"
-        count = await redis.get(key)
-        count = int(count) if count else 0
-        if count >= threshold:
-            return {
-                "action": "blocked",
-                "reason": f"تعداد درخواست‌های ورود بیش از حد مجاز ({period})"
-            }
-
-    # Check for existing pending request
-    stmt = select(SessionLoginRequest).where(
-        and_(
-            SessionLoginRequest.user_id == user.id,
-            SessionLoginRequest.status == LoginRequestStatus.PENDING,
-            SessionLoginRequest.expires_at > utc_now_naive(),
-        )
+    remaining_sessions = active_sessions[replace_count:]
+    new_session_is_primary = not any(
+        bool(getattr(existing_session, "is_primary", False))
+        for existing_session in remaining_sessions
     )
-    existing = (await db.execute(stmt)).scalar_one_or_none()
-    if existing:
-        try:
-            from core.utils import publish_user_event
-            await publish_user_event(user.id, "session:login_request", {
-                "request_id": str(existing.id),
-                "device_name": existing.requester_device_name or device_name,
-                "device_ip": existing.requester_ip or device_ip,
-                "expires_at": existing.expires_at.isoformat() + "Z",
-            })
-        except Exception as e:
-            logger.warning(f"Failed to publish login request event (existing): {e}")
-        return {"action": "approval_required", "request": existing}
-
-    # Create login request
-    login_request = SessionLoginRequest(
-        id=uuid.uuid4(),
-        user_id=user.id,
-        requester_device_name=device_name,
-        requester_ip=device_ip,
-        requester_home_server=home_server,
-        status=LoginRequestStatus.PENDING,
-        expires_at=utc_now_naive() + timedelta(seconds=LOGIN_REQUEST_TIMEOUT_SECONDS),
+    session = await create_session(
+        db,
+        user.id,
+        refresh_token,
+        device_name,
+        device_ip,
+        platform,
+        is_primary=new_session_is_primary,
+        home_server=home_server,
     )
-    db.add(login_request)
-
-    # Increment anti-abuse counters
-    ttls = {"daily": 86400, "weekly": 604800, "monthly": 2592000}
-    for period, ttl in ttls.items():
-        key = f"session_req:{user.id}:{period}"
-        pipe = redis.pipeline()
-        pipe.incr(key)
-        pipe.expire(key, ttl)
-        await pipe.execute()
-
     await db.commit()
-
-    # Notify primary device(s) via real-time pub/sub
-    try:
-        from core.utils import publish_user_event
-        await publish_user_event(user.id, "session:login_request", {
-            "request_id": str(login_request.id),
-            "device_name": device_name,
-            "device_ip": device_ip,
-            "expires_at": login_request.expires_at.isoformat() + "Z",
-        })
-    except Exception as e:
-        logger.warning(f"Failed to publish login request event: {e}")
-
-    return {"action": "approval_required", "request": login_request}
+    await publish_session_revocation(user.id, revoked_sessions)
+    return {
+        "action": "session_created",
+        "session": session,
+        "replaced_session_count": len(revoked_sessions),
+    }
 
 
 LOGIN_REQUEST_NOT_FOUND_ERROR = "درخواست یافت نشد"

@@ -7,14 +7,15 @@ from fastapi import HTTPException
 from api.routers.sessions import (
     InternalSessionAuthorityCheck,
     InternalSessionResetRequest,
+    internal_replace_user_sessions,
     internal_reset_user_sessions,
     internal_session_authority_check,
 )
 from core import session_authority
 from core.session_authority import (
-    ACTIVE_SESSION_ON_HOME_SERVER_MESSAGE,
     SESSION_AUTHORITY_UNAVAILABLE_MESSAGE,
     assert_login_allowed_for_server,
+    prepare_verified_login_for_server,
 )
 
 
@@ -46,19 +47,35 @@ class SessionAuthorityTests(unittest.IsolatedAsyncioTestCase):
         ):
             await assert_login_allowed_for_server(FakeDB(), user, requested_server="iran")
 
-    async def test_assert_login_allowed_blocks_remote_active_sessions(self):
+    async def test_assert_login_allowed_preflights_remote_active_sessions_without_old_device_approval(self):
         user = SimpleNamespace(id=5, home_server="iran")
 
         with patch(
             "core.session_authority.fetch_remote_session_authority",
             new=AsyncMock(return_value=(200, {"active_session_count": 1, "can_transfer_home": False})),
         ) as remote_mock:
-            with self.assertRaises(HTTPException) as exc_info:
-                await assert_login_allowed_for_server(FakeDB(), user, requested_server="foreign")
+            result = await assert_login_allowed_for_server(FakeDB(), user, requested_server="foreign")
 
-        self.assertEqual(exc_info.exception.status_code, 409)
-        self.assertEqual(exc_info.exception.detail, ACTIVE_SESSION_ON_HOME_SERVER_MESSAGE)
+        self.assertEqual(result["active_session_count"], 1)
         remote_mock.assert_awaited_once_with("iran", 5)
+
+    async def test_verified_login_revokes_remote_active_sessions(self):
+        user = SimpleNamespace(id=5, home_server="iran", mobile_number="09120000000")
+        with patch(
+            "core.session_authority.fetch_remote_session_authority",
+            new=AsyncMock(return_value=(200, {"active_session_count": 2, "can_transfer_home": False})),
+        ), patch(
+            "core.session_authority.revoke_remote_sessions_for_login",
+            new=AsyncMock(return_value=(200, {"revoked_active_sessions": 2})),
+        ) as revoke_mock:
+            count = await prepare_verified_login_for_server(FakeDB(), user, requested_server="foreign")
+
+        self.assertEqual(count, 2)
+        revoke_mock.assert_awaited_once_with(
+            "iran",
+            user_id=5,
+            mobile_number="09120000000",
+        )
 
     async def test_assert_login_allowed_allows_remote_transfer_without_active_sessions(self):
         user = SimpleNamespace(id=5, home_server="iran")
@@ -204,6 +221,42 @@ class SessionAuthorityTests(unittest.IsolatedAsyncioTestCase):
                 )
 
         self.assertEqual(exc_info.exception.status_code, 409)
+
+    async def test_internal_replace_user_sessions_revokes_without_deleting_history(self):
+        payload_body = session_authority._json_body(
+            {"mobile_number": "09120000000", "source_server": "foreign", "user_id": 5}
+        )
+        timestamp = 1_700_000_000
+        user = SimpleNamespace(id=5, home_server="iran", mobile_number="09120000000")
+
+        async def request_body():
+            return payload_body.encode()
+
+        with patch.object(session_authority.settings, "sync_api_key", "secret"), patch(
+            "core.session_authority.time.time", return_value=timestamp,
+        ), patch(
+            "api.routers.sessions.force_clear_sessions", new=AsyncMock(return_value=2),
+        ) as clear_mock:
+            request = SimpleNamespace(
+                headers={
+                    "X-API-Key": "secret",
+                    "X-Timestamp": str(timestamp),
+                    "X-Signature": session_authority.sign_internal_payload(payload_body, timestamp),
+                },
+                body=request_body,
+            )
+            result = await internal_replace_user_sessions(
+                InternalSessionResetRequest(
+                    user_id=5,
+                    mobile_number="09120000000",
+                    source_server="foreign",
+                ),
+                request=request,
+                db=FakeDB([FakeExecuteResult(user)]),
+            )
+
+        self.assertEqual(result, {"revoked_active_sessions": 2})
+        clear_mock.assert_awaited_once_with(unittest.mock.ANY, 5)
 
 
 if __name__ == "__main__":

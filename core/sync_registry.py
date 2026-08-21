@@ -572,6 +572,18 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "notification routing policy",
         notes="Sync candidate from roadmap; receiver behavior is not enabled by Step 2A.",
     ),
+    "user_flags": _entry(
+        "user_flags",
+        SyncPolicy.NO_SYNC,
+        ("webapp_auth_runtime", "webapp_admin"),
+        "iran WebApp security-review authority",
+        "one open local review case per user and flag type",
+        "local administrator review and cross-surface notification production",
+        notes=(
+            "Flags are review metadata, never automatic access restrictions. Future non-WebApp "
+            "detectors must submit observations to the Iran authority instead of writing peer rows."
+        ),
+    ),
     "user_sessions": _entry(
         "user_sessions",
         SyncPolicy.NO_SYNC,

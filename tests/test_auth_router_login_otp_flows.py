@@ -18,7 +18,6 @@ from api.routers.auth import (
     resend_otp_sms,
     verify_otp,
 )
-from core.session_authority import ACTIVE_SESSION_ON_HOME_SERVER_MESSAGE
 from core.enums import UserAccountStatus
 from models.session import Platform
 from models.user import UserRole
@@ -334,22 +333,25 @@ class AuthRouterLoginOtpFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("12345", joined)
         self.assertNotIn("12***", joined)
 
-    async def test_request_otp_blocks_remote_home_active_session_before_generating_code(self):
+    async def test_request_otp_allows_remote_active_session_until_otp_is_verified(self):
         user = SimpleNamespace(id=7, is_deleted=False, telegram_id=None, home_server="iran")
+        redis = FakeRedis()
 
         with patch("api.routers.auth._login_home_server", return_value="foreign"), patch(
             "api.routers.auth.assert_login_allowed_for_server",
-            new=AsyncMock(side_effect=HTTPException(status_code=409, detail=ACTIVE_SESSION_ON_HOME_SERVER_MESSAGE)),
-        ) as authority_mock, patch("api.routers.auth.get_redis", new=AsyncMock(side_effect=AssertionError("OTP must not be created"))):
-            with self.assertRaises(HTTPException) as exc_info:
-                await request_otp(
-                    OTPRequest(mobile_number="09120000000"),
-                    raw_request=make_request(),
-                    db=FakeDB([FakeExecuteResult(user)]),
-                )
+            new=AsyncMock(return_value={"active_session_count": 1, "can_transfer_home": False}),
+        ) as authority_mock, patch(
+            "api.routers.auth.get_redis", new=AsyncMock(return_value=redis),
+        ), patch("api.routers.auth._generate_otp_code", return_value="12345"), patch(
+            "api.routers.auth.is_internet_connected", new=AsyncMock(return_value=False),
+        ), patch("api.routers.auth.send_otp_sms", return_value=True):
+            result = await request_otp(
+                OTPRequest(mobile_number="09120000000"),
+                raw_request=make_request(),
+                db=FakeDB([FakeExecuteResult(user)]),
+            )
 
-        self.assertEqual(exc_info.exception.status_code, 409)
-        self.assertEqual(exc_info.exception.detail, ACTIVE_SESSION_ON_HOME_SERVER_MESSAGE)
+        self.assertEqual(result["detail"], "کد تایید ارسال شد")
         authority_mock.assert_awaited_once()
 
     async def test_request_otp_sends_via_telegram_when_available(self):
@@ -479,7 +481,7 @@ class AuthRouterLoginOtpFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.detail, "خطا در ارسال کد تایید")
         self.assertEqual(redis.delete_calls, ["otp:09120000000", "otp_limit:09120000000"])
 
-    async def test_resend_otp_sms_blocks_remote_home_active_session_before_sms(self):
+    async def test_resend_otp_sms_allows_remote_active_session_until_verification(self):
         user = SimpleNamespace(id=7, is_deleted=False, home_server="iran")
         redis = FakeRedis({"otp:09120000000": "12345"}, ttl_map={"otp:09120000000": 87})
 
@@ -488,19 +490,17 @@ class AuthRouterLoginOtpFlowTests(unittest.IsolatedAsyncioTestCase):
             return_value="foreign",
         ), patch(
             "api.routers.auth.assert_login_allowed_for_server",
-            new=AsyncMock(side_effect=HTTPException(status_code=409, detail=ACTIVE_SESSION_ON_HOME_SERVER_MESSAGE)),
+            new=AsyncMock(return_value={"active_session_count": 1, "can_transfer_home": False}),
         ) as authority_mock, patch("api.routers.auth.send_otp_sms", return_value=True) as send_sms_mock:
-            with self.assertRaises(HTTPException) as exc_info:
-                await resend_otp_sms(
-                    OTPRequest(mobile_number="09120000000"),
-                    raw_request=make_request(),
-                    db=FakeDB([FakeExecuteResult(user)]),
-                )
+            result = await resend_otp_sms(
+                OTPRequest(mobile_number="09120000000"),
+                raw_request=make_request(),
+                db=FakeDB([FakeExecuteResult(user)]),
+            )
 
-        self.assertEqual(exc_info.exception.status_code, 409)
-        self.assertEqual(exc_info.exception.detail, ACTIVE_SESSION_ON_HOME_SERVER_MESSAGE)
+        self.assertEqual(result["detail"], "کد از طریق پیامک ارسال شد")
         authority_mock.assert_awaited_once()
-        send_sms_mock.assert_not_called()
+        send_sms_mock.assert_called_once_with("09120000000", "12345")
 
     async def test_resend_otp_sms_handles_missing_rate_limited_and_success_paths(self):
         redis = FakeRedis()
@@ -582,26 +582,45 @@ class AuthRouterLoginOtpFlowTests(unittest.IsolatedAsyncioTestCase):
         send_sms_mock.assert_called_once_with("09120000000", "12345")
         self.assertEqual(result["expires_in"], 54)
 
-    async def test_verify_otp_blocks_remote_home_active_session_and_requires_new_request(self):
+    async def test_verify_otp_replaces_remote_home_session_after_otp(self):
         request = OTPVerify(mobile_number="09120000000", code="12345")
-        user = SimpleNamespace(id=7, home_server="iran", account_status=UserAccountStatus.ACTIVE)
+        user = SimpleNamespace(
+            id=7,
+            home_server="iran",
+            mobile_number="09120000000",
+            account_status=UserAccountStatus.ACTIVE,
+        )
         redis = FakeRedis({"otp:09120000000": "12345"})
+        session = SimpleNamespace(id="session-7")
 
         with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
             "api.routers.auth._login_home_server",
             return_value="foreign",
         ), patch(
-            "api.routers.auth.assert_login_allowed_for_server",
-            new=AsyncMock(side_effect=HTTPException(status_code=409, detail=ACTIVE_SESSION_ON_HOME_SERVER_MESSAGE)),
-        ) as authority_mock, patch("api.routers.auth.handle_login_session", new=AsyncMock()) as handle_session_mock:
-            with self.assertRaises(HTTPException) as exc_info:
-                await verify_otp(request, raw_request=make_request(), db=FakeDB([FakeExecuteResult(user)]))
+            "api.routers.auth.prepare_verified_login_for_server",
+            new=AsyncMock(return_value=1),
+        ) as authority_mock, patch(
+            "api.routers.auth.handle_login_session",
+            new=AsyncMock(return_value={
+                "action": "session_created",
+                "session": session,
+                "replaced_session_count": 0,
+            }),
+        ) as handle_session_mock, patch(
+            "core.services.user_flag_service.record_session_replacement_activity",
+            new=AsyncMock(),
+        ) as risk_mock, patch(
+            "api.routers.auth.create_access_token", return_value="access-token",
+        ), patch(
+            "api.routers.auth.create_refresh_token", return_value="refresh-token",
+        ):
+            result = await verify_otp(request, raw_request=make_request(), db=FakeDB([FakeExecuteResult(user)]))
 
-        self.assertEqual(exc_info.exception.status_code, 409)
-        self.assertEqual(exc_info.exception.detail, ACTIVE_SESSION_ON_HOME_SERVER_MESSAGE)
+        self.assertEqual(result["access_token"], "access-token")
         self.assertEqual(redis.delete_calls, ["otp:09120000000", "otp_limit:09120000000"])
         authority_mock.assert_awaited_once()
-        handle_session_mock.assert_not_awaited()
+        handle_session_mock.assert_awaited_once()
+        self.assertEqual(risk_mock.await_args.kwargs["replaced_session_count"], 1)
 
     async def test_verify_otp_rejects_invalid_code_missing_user_and_blocked_session(self):
         request = OTPVerify(mobile_number="09120000000", code="12345")

@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { Search, X, ChevronLeft } from 'lucide-vue-next';
+import { Search, X, ChevronLeft, ShieldAlert, Check } from 'lucide-vue-next';
 import CustomerNameWithBadge from './CustomerNameWithBadge.vue';
 import LoadingSkeleton from './LoadingSkeleton.vue';
 import AppButton from './ui/AppButton.vue';
 import AppEmptyState from './ui/AppEmptyState.vue';
 import AppErrorState from './ui/AppErrorState.vue';
+import AppFilterChips from './ui/AppFilterChips.vue';
 import AppInput from './ui/AppInput.vue';
 import AppListItem from './ui/AppListItem.vue';
 import AppStatusBadge from './ui/AppStatusBadge.vue';
@@ -25,6 +26,25 @@ interface User {
   customer_management_name?: string | null;
   is_accountant?: boolean;
   accountant_owner_account_name?: string | null;
+}
+
+interface UserFlag {
+  id: number;
+  user_id: number;
+  flag_type: string;
+  flag_label: string;
+  reason_code: string;
+  reason_label: string;
+  status: string;
+  severity: string;
+  details: {
+    counts?: Partial<Record<'daily' | 'weekly' | 'monthly', number>>;
+    device_name?: string | null;
+  };
+  trigger_count: number;
+  first_flagged_at: string;
+  last_flagged_at: string;
+  user: User;
 }
 
 const props = withDefaults(defineProps<{
@@ -53,6 +73,9 @@ function isAbortError(error: unknown) {
 }
 
 const users = ref<User[]>([]);
+const userFlags = ref<UserFlag[]>([]);
+const directoryMode = ref<'all' | 'suspicious'>('all');
+const resolvingFlagId = ref<number | null>(null);
 const isLoading = ref(true);
 const errorMessage = ref('');
 const errorKind = ref<'forbidden' | 'generic' | null>(null);
@@ -66,6 +89,16 @@ const isShowingStaleResults = computed(
 let usersRequestSequence = 0;
 let usersAbortController: AbortController | null = null;
 
+const directoryOptions = [
+  { key: 'all', label: 'همه کاربران' },
+  { key: 'suspicious', label: 'کاربران مشکوک' },
+];
+const directoryRows = computed(() => (
+  directoryMode.value === 'all'
+    ? users.value.map(user => ({ key: `user:${user.id}`, user, flag: null as UserFlag | null }))
+    : userFlags.value.map(flag => ({ key: `flag:${flag.id}`, user: flag.user, flag }))
+));
+
 async function fetchUsers(query = committedQuery.value) {
   const requestQuery = normalizeQuery(query);
   const requestSequence = ++usersRequestSequence;
@@ -76,9 +109,10 @@ async function fetchUsers(query = committedQuery.value) {
   errorKind.value = null;
 
   try {
+    const baseUrl = directoryMode.value === 'suspicious' ? '/api/user-flags/open' : '/api/users/';
     const url = requestQuery
-      ? `/api/users/?search=${encodeURIComponent(requestQuery)}`
-      : '/api/users/';
+      ? `${baseUrl}?search=${encodeURIComponent(requestQuery)}`
+      : baseUrl;
     const payload = await routeRequestJson<unknown>(url, {
       signal: usersAbortController.signal,
       errorContext: {
@@ -93,7 +127,11 @@ async function fetchUsers(query = committedQuery.value) {
     if (requestSequence !== usersRequestSequence) return;
     if (!Array.isArray(payload)) throw new Error('invalid_users_payload');
 
-    users.value = payload as User[];
+    if (directoryMode.value === 'suspicious') {
+      userFlags.value = payload as UserFlag[];
+    } else {
+      users.value = payload as User[];
+    }
     displayedQuery.value = requestQuery;
     hasSuccessfulResponse.value = true;
     emit('loaded');
@@ -117,6 +155,59 @@ async function fetchUsers(query = committedQuery.value) {
       // can release that lock without leaving later user scrolling inert.
       emit('settled');
     }
+  }
+}
+
+function changeDirectoryMode(nextMode: string) {
+  if (nextMode !== 'all' && nextMode !== 'suspicious') return;
+  if (directoryMode.value === nextMode) return;
+  directoryMode.value = nextMode;
+  hasSuccessfulResponse.value = false;
+  errorMessage.value = '';
+  void fetchUsers(committedQuery.value);
+}
+
+function formatFlagTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('fa-IR', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(date);
+}
+
+function formatFlagCounts(flag: UserFlag) {
+  const counts = flag.details?.counts || {};
+  const parts = [
+    counts.daily ? `${counts.daily} بار در ۲۴ ساعت` : '',
+    counts.weekly ? `${counts.weekly} بار در ۷ روز` : '',
+    counts.monthly ? `${counts.monthly} بار در ۳۰ روز` : '',
+  ].filter(Boolean);
+  return parts.join(' · ');
+}
+
+async function resolveFlag(flag: UserFlag) {
+  if (resolvingFlagId.value !== null) return;
+  resolvingFlagId.value = flag.id;
+  errorMessage.value = '';
+  try {
+    await routeRequestJson(`/api/user-flags/${flag.id}/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+      errorContext: {
+        surface: 'admin',
+        scope: 'detail',
+        operation: 'mutation',
+        preserveExistingData: true,
+        fallbackMessage: 'ثبت نتیجه بررسی ممکن نشد.',
+      },
+    });
+    userFlags.value = userFlags.value.filter(item => item.id !== flag.id);
+  } catch {
+    errorMessage.value = 'ثبت نتیجه بررسی ممکن نشد. دوباره تلاش کنید.';
+  } finally {
+    resolvingFlagId.value = null;
   }
 }
 
@@ -199,6 +290,15 @@ onUnmounted(() => {
 <template>
   <div class="user-manager ds-page-content">
     <div class="ds-card">
+      <AppFilterChips
+        class="user-directory-tabs"
+        :model-value="directoryMode"
+        :options="directoryOptions"
+        label="نوع فهرست کاربران"
+        id-prefix="user-directory"
+        focus-selection-on-keyboard
+        @update:model-value="changeDirectoryMode"
+      />
       <form class="user-search-form" @submit.prevent="submitSearch">
         <label class="sr-only" for="user-directory-search">جستجوی کاربر</label>
         <AppInput
@@ -253,44 +353,55 @@ onUnmounted(() => {
           <AppButton type="button" size="sm" variant="ghost" :loading="isLoading" @click="retryUsers">تلاش مجدد</AppButton>
         </div>
 
-        <AppEmptyState v-if="users.length === 0" class="no-results" title="کاربری یافت نشد." role="status">
+        <AppEmptyState
+          v-if="directoryRows.length === 0"
+          class="no-results"
+          :title="directoryMode === 'suspicious' ? 'کاربر مشکوکی برای بررسی وجود ندارد.' : 'کاربری یافت نشد.'"
+          role="status"
+        >
           <template #icon>
-            <Search :size="24" />
+            <ShieldAlert v-if="directoryMode === 'suspicious'" :size="24" />
+            <Search v-else :size="24" />
           </template>
         </AppEmptyState>
 
-        <ul v-else class="users-list" aria-label="فهرست کاربران">
-          <li v-for="user in users" :key="user.id" class="users-list-item">
+        <ul v-else class="users-list" :aria-label="directoryMode === 'suspicious' ? 'فهرست کاربران مشکوک' : 'فهرست کاربران'">
+          <li
+            v-for="row in directoryRows"
+            :key="row.key"
+            class="users-list-item"
+            :class="{ 'users-list-item--flagged': row.flag }"
+          >
             <AppListItem
               class="user-item"
               interactive
-              :title="getUserDisplayName(user)"
-              :description="user.mobile_number"
-              :aria-label="`باز کردن پروفایل ${getUserDisplayName(user)}`"
-              @select="selectUser(user)"
+              :title="getUserDisplayName(row.user)"
+              :description="row.user.mobile_number"
+              :aria-label="`باز کردن پروفایل ${getUserDisplayName(row.user)}`"
+              @select="selectUser(row.user)"
             >
               <template #leading>
-                {{ getUserDisplayName(user)[0] || '?' }}
+                {{ getUserDisplayName(row.user)[0] || '?' }}
               </template>
               <template #title>
                 <span class="user-title-block">
                   <span class="user-name" dir="auto">
                     <CustomerNameWithBadge
-                      v-if="user.is_customer || user.customer_management_name"
-                      :name="getUserDisplayName(user)"
+                      v-if="row.user.is_customer || row.user.customer_management_name"
+                      :name="getUserDisplayName(row.user)"
                       compact
                     />
-                    <template v-else>{{ getUserDisplayName(user) }}</template>
+                    <template v-else>{{ getUserDisplayName(row.user) }}</template>
                   </span>
-                  <span v-if="userHasRelationTags(user)" class="user-relation-tags">
-                    <span v-if="user.customer_owner_account_name" class="relation-badge relation-badge--owner">
-                      سرگروه: {{ user.customer_owner_account_name }}
+                  <span v-if="userHasRelationTags(row.user)" class="user-relation-tags">
+                    <span v-if="row.user.customer_owner_account_name" class="relation-badge relation-badge--owner">
+                      سرگروه: {{ row.user.customer_owner_account_name }}
                     </span>
-                    <span v-if="user.is_accountant" class="relation-badge relation-badge--accountant">
+                    <span v-if="row.user.is_accountant" class="relation-badge relation-badge--accountant">
                       حسابدار
                     </span>
-                    <span v-if="user.accountant_owner_account_name" class="relation-badge relation-badge--owner">
-                      سرگروه: {{ user.accountant_owner_account_name }}
+                    <span v-if="row.user.accountant_owner_account_name" class="relation-badge relation-badge--owner">
+                      سرگروه: {{ row.user.accountant_owner_account_name }}
                     </span>
                   </span>
                 </span>
@@ -298,19 +409,46 @@ onUnmounted(() => {
               <template #trailing>
                 <span class="user-meta">
                   <AppStatusBadge
-                    v-if="user.account_status === 'inactive'"
+                    v-if="row.user.account_status === 'inactive'"
                     class="user-account-status"
                     tone="danger"
                   >
                     حساب غیرفعال
                   </AppStatusBadge>
-                  <AppStatusBadge class="role-badge" :class="user.role" :tone="roleBadgeTone(user.role)">
-                    {{ user.role }}
+                  <AppStatusBadge class="role-badge" :class="row.user.role" :tone="roleBadgeTone(row.user.role)">
+                    {{ row.user.role }}
                   </AppStatusBadge>
                   <ChevronLeft class="chevron-icon" :size="20" aria-hidden="true" />
                 </span>
               </template>
             </AppListItem>
+            <div v-if="row.flag" class="user-flag-summary">
+              <div class="user-flag-copy">
+                <strong>{{ row.flag.flag_label }}</strong>
+                <span>{{ row.flag.reason_label }}</span>
+                <small v-if="formatFlagCounts(row.flag)">
+                  {{ formatFlagCounts(row.flag) }}
+                </small>
+                <small>
+                  آخرین ثبت: {{ formatFlagTime(row.flag.last_flagged_at) }}
+                  <template v-if="row.flag.details?.device_name">
+                    · {{ row.flag.details.device_name }}
+                  </template>
+                </small>
+              </div>
+              <AppButton
+                type="button"
+                size="sm"
+                variant="secondary"
+                class="user-flag-resolve"
+                :loading="resolvingFlagId === row.flag.id"
+                :disabled="resolvingFlagId !== null && resolvingFlagId !== row.flag.id"
+                @click="resolveFlag(row.flag)"
+              >
+                <template #icon><Check :size="16" /></template>
+                بررسی شد
+              </AppButton>
+            </div>
           </li>
         </ul>
       </div>
@@ -335,6 +473,10 @@ onUnmounted(() => {
   align-items: stretch;
   gap: 0.5rem;
   margin-bottom: 1rem;
+}
+
+.user-directory-tabs {
+  margin-bottom: 0.75rem;
 }
 
 .user-search-input {
@@ -372,6 +514,50 @@ onUnmounted(() => {
 
 .users-list-item {
   min-width: 0;
+}
+
+.users-list-item--flagged {
+  overflow: hidden;
+  border: 1px solid var(--ds-warning-100);
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-warning-50);
+}
+
+.users-list-item--flagged .user-item {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.user-flag-summary {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 0.8rem 0.75rem;
+  border-top: 1px solid var(--ds-warning-100);
+}
+
+.user-flag-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.16rem;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-xs);
+}
+
+.user-flag-copy strong {
+  color: var(--ds-warning-700);
+  font-size: var(--ds-font-sm);
+}
+
+.user-flag-copy small {
+  color: var(--ds-text-placeholder);
+}
+
+.user-flag-resolve {
+  flex: 0 0 auto;
 }
 
 .user-refresh-error {
@@ -504,6 +690,15 @@ onUnmounted(() => {
 }
 
 @container user-directory (max-width: 34rem) {
+  .user-flag-summary {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .user-flag-resolve {
+    align-self: flex-start;
+  }
+
   .user-item {
     grid-template-columns: var(--ds-native-row-min-height, 48px) minmax(0, 1fr);
     grid-template-areas:

@@ -590,6 +590,32 @@ async def internal_reset_user_sessions(
     )
 
 
+@router.post("/internal/replace-user-sessions")
+async def internal_replace_user_sessions(
+    payload: InternalSessionResetRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Revoke active rows for a verified login transfer without erasing audit history."""
+    body = await request.body()
+    if not verify_session_authority_signature(
+        body,
+        timestamp=request.headers.get("X-Timestamp"),
+        signature=request.headers.get("X-Signature"),
+        api_key=request.headers.get("X-API-Key"),
+    ):
+        raise HTTPException(status_code=401, detail="Invalid internal signature")
+
+    user = (await db.execute(select(User).where(User.id == payload.user_id))).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.mobile_number != payload.mobile_number:
+        raise HTTPException(status_code=409, detail="User identity mismatch")
+
+    revoked_count = await force_clear_sessions(db, user.id)
+    return {"revoked_active_sessions": int(revoked_count)}
+
+
 @router.get("/login-requests/pending", response_model=List[dict])
 async def get_pending_requests(
     request: Request,

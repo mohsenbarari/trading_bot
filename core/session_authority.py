@@ -137,18 +137,76 @@ async def fetch_remote_session_authority(target_server: str, user_id: int) -> tu
     return response.status_code, body_data if isinstance(body_data, dict) else {"detail": body_data}
 
 
+async def revoke_remote_sessions_for_login(
+    target_server: str,
+    *,
+    user_id: int,
+    mobile_number: str,
+) -> tuple[int, dict[str, Any]]:
+    """Ask the old session authority to revoke active sessions after OTP proof."""
+    target_url = peer_server_url_for(target_server)
+    if not target_url:
+        return 503, {"detail": SESSION_AUTHORITY_UNAVAILABLE_MESSAGE}
+
+    payload = {
+        "mobile_number": str(mobile_number),
+        "source_server": current_server(),
+        "user_id": int(user_id),
+    }
+    body = _json_body(payload)
+    timestamp = int(time.time())
+    headers = {
+        "Content-Type": "application/json",
+        "X-API-Key": settings.sync_api_key or "",
+        "X-Timestamp": str(timestamp),
+        "X-Signature": sign_internal_payload(body, timestamp),
+        "X-Source-Server": current_server(),
+    }
+    try:
+        assert_runtime_sync_transport_allowed()
+        async with httpx.AsyncClient(
+            timeout=settings.trade_forward_timeout_seconds,
+            verify=runtime_sync_tls_verify_setting(),
+        ) as client:
+            response = await client.post(
+                f"{target_url}/api/sessions/internal/replace-user-sessions",
+                content=body,
+                headers=headers,
+            )
+    except (httpx.TimeoutException, httpx.RequestError) as exc:
+        logger.warning(
+            "Remote session replacement failed",
+            extra={
+                "event": "session.authority.remote_replacement_failed",
+                "target_server": target_server,
+                "user_id_hash": hashlib.sha256(str(user_id).encode()).hexdigest()[:16],
+                "error_type": type(exc).__name__,
+            },
+        )
+        return 503, {"detail": SESSION_AUTHORITY_UNAVAILABLE_MESSAGE}
+
+    try:
+        body_data = response.json()
+    except ValueError:
+        body_data = {"detail": response.text or SESSION_AUTHORITY_UNAVAILABLE_MESSAGE}
+    return response.status_code, body_data if isinstance(body_data, dict) else {"detail": body_data}
+
+
 async def assert_login_allowed_for_server(
     db: AsyncSession,
     user,
     *,
     requested_server: str,
-) -> None:
-    """Fail closed when login is attempted away from the user's session home."""
+) -> dict[str, Any] | None:
+    """Preflight a remote authority without requiring the old device.
+
+    Revocation is intentionally deferred until OTP verification succeeds.
+    """
     _ = db  # reserved for future local policy checks; keeps call sites explicit
     user_home = normalize_server(getattr(user, "home_server", None), requested_server)
     requested_home = normalize_server(requested_server)
     if user_home == requested_home:
-        return
+        return None
 
     status_code, body = await fetch_remote_session_authority(user_home, int(getattr(user, "id")))
     if status_code != 200:
@@ -158,11 +216,50 @@ async def assert_login_allowed_for_server(
         active_count = int(body.get("active_session_count") or 0)
     except (TypeError, ValueError):
         raise HTTPException(status_code=503, detail=SESSION_AUTHORITY_UNAVAILABLE_MESSAGE)
-    if active_count > 0:
-        raise HTTPException(status_code=409, detail=ACTIVE_SESSION_ON_HOME_SERVER_MESSAGE)
-
-    if body.get("can_transfer_home") is not True:
+    if active_count <= 0 and body.get("can_transfer_home") is not True:
         raise HTTPException(status_code=503, detail=SESSION_AUTHORITY_UNAVAILABLE_MESSAGE)
+    return body
+
+
+async def prepare_verified_login_for_server(
+    db: AsyncSession,
+    user,
+    *,
+    requested_server: str,
+) -> int:
+    """Revoke sessions on the old authority after successful OTP verification."""
+    _ = db
+    user_home = normalize_server(getattr(user, "home_server", None), requested_server)
+    requested_home = normalize_server(requested_server)
+    if user_home == requested_home:
+        return 0
+
+    status_code, authority = await fetch_remote_session_authority(user_home, int(getattr(user, "id")))
+    if status_code != 200:
+        raise HTTPException(status_code=503, detail=SESSION_AUTHORITY_UNAVAILABLE_MESSAGE)
+    try:
+        active_count = int(authority.get("active_session_count") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=503, detail=SESSION_AUTHORITY_UNAVAILABLE_MESSAGE)
+    if active_count <= 0:
+        if authority.get("can_transfer_home") is not True:
+            raise HTTPException(status_code=503, detail=SESSION_AUTHORITY_UNAVAILABLE_MESSAGE)
+        return 0
+
+    status_code, result = await revoke_remote_sessions_for_login(
+        user_home,
+        user_id=int(getattr(user, "id")),
+        mobile_number=str(getattr(user, "mobile_number")),
+    )
+    if status_code != 200:
+        raise HTTPException(status_code=503, detail=SESSION_AUTHORITY_UNAVAILABLE_MESSAGE)
+    try:
+        revoked_count = int(result.get("revoked_active_sessions") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=503, detail=SESSION_AUTHORITY_UNAVAILABLE_MESSAGE)
+    if revoked_count < active_count:
+        raise HTTPException(status_code=503, detail=SESSION_AUTHORITY_UNAVAILABLE_MESSAGE)
+    return revoked_count
 
 
 def verify_session_authority_signature(
