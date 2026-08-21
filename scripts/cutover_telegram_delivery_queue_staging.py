@@ -3039,6 +3039,12 @@ def _assert_prebuilt_image_parity(
     expected_source_digest: str,
     expected_frontend_digest: str,
 ) -> dict[str, Any]:
+    def valid_sha256(value: Any) -> bool:
+        rendered = str(value or "")
+        return len(rendered) == 64 and all(
+            character in "0123456789abcdef" for character in rendered
+        )
+
     image_ref = _staging_image_ref(expected_head)
     expected = {
         "git_head": expected_head,
@@ -3052,10 +3058,11 @@ def _assert_prebuilt_image_parity(
     for evidence, role in ((foreign, "foreign"), (iran, "iran")):
         if evidence.get("role") != role or any(
             evidence.get(key) != value for key, value in expected.items()
+        ) or not valid_sha256(evidence.get("image_id_sha256")) or not valid_sha256(
+            evidence.get("dependency_sha256")
         ):
             raise StagingCutoverError("prebuilt_image_parity_invalid")
     for key in (
-        "image_id_sha256",
         "runtime_source_sha256",
         "frontend_sha256",
         "dependency_sha256",
@@ -3067,7 +3074,16 @@ def _assert_prebuilt_image_parity(
         "git_head": expected_head,
         "git_tree": expected_tree,
         "image_ref": image_ref,
-        "image_id_sha256": foreign["image_id_sha256"],
+        # Docker Engine versions may canonicalize imported config metadata
+        # differently.  The streamed archive digest is verified before load,
+        # and runtime/source/frontend/dependency content must match exactly;
+        # retain each valid host image identity instead of requiring equality.
+        "foreign_image_id_sha256": foreign["image_id_sha256"],
+        "iran_image_id_sha256": iran["image_id_sha256"],
+        "image_identity_recorded_per_host": True,
+        "image_ids_equal": (
+            foreign["image_id_sha256"] == iran["image_id_sha256"]
+        ),
         "runtime_source_sha256": expected_source_digest,
         "frontend_sha256": expected_frontend_digest,
         "dependency_sha256": foreign["dependency_sha256"],

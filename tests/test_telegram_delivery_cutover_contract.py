@@ -1406,6 +1406,57 @@ class TelegramDeliveryCutoverContractTests(unittest.TestCase):
             )
             self.assertEqual(evidence["file_count"], 1)
 
+    def test_prebuilt_image_parity_records_engine_specific_ids_per_host(self):
+        release_sha = "a" * 40
+        release_tree = "b" * 40
+        source_digest = "c" * 64
+        frontend_digest = "d" * 64
+        dependency_digest = "e" * 64
+        image_ref = staging_cutover._staging_image_ref(release_sha)
+
+        def evidence(role: str, image_id: str) -> dict[str, object]:
+            return {
+                "role": role,
+                "git_head": release_sha,
+                "git_tree": release_tree,
+                "image_ref": image_ref,
+                "image_id_sha256": image_id,
+                "runtime_source_sha256": source_digest,
+                "frontend_sha256": frontend_digest,
+                "dependency_sha256": dependency_digest,
+                "runtime_started": False,
+                "secret_values_disclosed": False,
+            }
+
+        foreign = evidence("foreign", "f" * 64)
+        iran = evidence("iran", "1" * 64)
+        parity = staging_cutover._assert_prebuilt_image_parity(
+            foreign,
+            iran,
+            expected_head=release_sha,
+            expected_tree=release_tree,
+            expected_source_digest=source_digest,
+            expected_frontend_digest=frontend_digest,
+        )
+        self.assertFalse(parity["image_ids_equal"])
+        self.assertTrue(parity["image_identity_recorded_per_host"])
+        self.assertEqual(parity["foreign_image_id_sha256"], "f" * 64)
+        self.assertEqual(parity["iran_image_id_sha256"], "1" * 64)
+
+        iran["dependency_sha256"] = "2" * 64
+        with self.assertRaisesRegex(
+            StagingCutoverError,
+            "prebuilt_image_content_split",
+        ):
+            staging_cutover._assert_prebuilt_image_parity(
+                foreign,
+                iran,
+                expected_head=release_sha,
+                expected_tree=release_tree,
+                expected_source_digest=source_digest,
+                expected_frontend_digest=frontend_digest,
+            )
+
     def test_failed_frontend_build_preserves_existing_release_artifact(self):
         release_sha = "a" * 40
         release_tree = "b" * 40
