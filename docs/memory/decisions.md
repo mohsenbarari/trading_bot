@@ -2,6 +2,7 @@
 
 Entries are newest first.
 
+- 2026-08-22 | Cross-host Iran image identity is bound by archive digest, exact release labels, and portable OS/architecture/created/config/rootfs content; target-local runtime image ID is used for container checks because Docker stores may expose config versus manifest digests for the same archive.
 - 2026-08-21 | Queue-v1 and guarded inference production rollout is authorized. Five distinct staging Publishers passed provider identity/channel/permission readback; shared-fleet opt-in is disabled in both envs. Production deployment remains a separate operation and was not authorized in the staging release.
 - 2026-08-21 | Customer relation limits are authoritative across Web and Bot: tier-1 offer totals/lots obey min/max, tier-2 cannot publish, and both tiers' completed source/responder trades obey min/max plus daily count/volume, including overtime preflight and final recheck. Every customer-limit denial uses only «شما مجاز به انجام این فعالیت نیستید.»
 - 2026-08-21 | Web OTP login at a full session quota atomically replaces the oldest session after OTP proof; old-device approval is not required. Repeated replacements (2/24h, 5/7d, 7/30d) open a typed review-only user flag without restricting access, and active super admins receive deduplicated WebApp plus Queue-v1 Telegram alerts.

@@ -1116,6 +1116,7 @@ PRODUCTION_RELEASE_SCHEMA_HEAD=fd3e4f5a6b7c
 PRODUCTION_FOREIGN_IMAGE_ID="sha256:$(printf foreign-image | sha256sum | awk '{print $1}')"
 PRODUCTION_FOREIGN_IMAGE_RECEIPT_SHA256="$(printf foreign-receipt | sha256sum | awk '{print $1}')"
 PRODUCTION_IRAN_IMAGE_ID="sha256:$(printf iran-image | sha256sum | awk '{print $1}')"
+PRODUCTION_IRAN_REMOTE_IMAGE_ID="sha256:$(printf iran-remote-image | sha256sum | awk '{print $1}')"
 PRODUCTION_IRAN_IMAGE_RECEIPT_SHA256="$(printf iran-receipt | sha256sum | awk '{print $1}')"
 PRODUCTION_FOREIGN_TARGET_BINDING_SHA256="$(printf foreign-target | sha256sum | awk '{print $1}')"
 PRODUCTION_IRAN_TARGET_BINDING_SHA256="$(printf iran-target | sha256sum | awk '{print $1}')"
@@ -1322,6 +1323,26 @@ load_two_host_release_state
         remote_migration = iran_deploy.index("run --rm --no-deps migration")
         self.assertLess(iran_deploy.index("verify_iran_image_build_receipt"), remote_migration)
         self.assertLess(iran_deploy.index("verify_remote_iran_image_identity"), remote_migration)
+
+    def test_iran_runtime_image_identity_is_portable_across_docker_stores(self) -> None:
+        source = RELEASE_SCRIPT.read_text(encoding="utf-8")
+        verifier = source.split("verify_remote_iran_image_identity() {", 1)[1].split(
+            "\n}", 1
+        )[0]
+        self.assertIn("PRODUCTION_IRAN_IMAGE_ID", verifier)
+        self.assertIn("PRODUCTION_IRAN_REMOTE_IMAGE_ID", verifier)
+        self.assertIn("{{json .Config}}", verifier)
+        self.assertIn("{{json .RootFS}}", verifier)
+        self.assertIn('remote_portable_sha\" == \"$local_portable_sha', verifier)
+
+        reconciler = source.split("reconcile_unjournaled_writer_replacements() {", 1)[
+            1
+        ].split("\n}", 1)[0]
+        preparer = source.split("prepare_restart_disabled_iran_writers() {", 1)[1].split(
+            "\n}", 1
+        )[0]
+        self.assertIn("PRODUCTION_IRAN_REMOTE_IMAGE_ID", reconciler)
+        self.assertIn("PRODUCTION_IRAN_REMOTE_IMAGE_ID", preparer)
 
     def test_release_evidence_is_durable_and_fresh_only_before_initial_quiesce(self) -> None:
         source = RELEASE_SCRIPT.read_text(encoding="utf-8")

@@ -78,6 +78,7 @@ PRODUCTION_FOREIGN_IMAGE_SIGNATURE=""
 PRODUCTION_FOREIGN_IMAGE_RECEIPT=""
 PRODUCTION_FOREIGN_IMAGE_RECEIPT_SHA256=""
 PRODUCTION_IRAN_IMAGE_ID=""
+PRODUCTION_IRAN_REMOTE_IMAGE_ID=""
 PRODUCTION_IRAN_IMAGE_SIGNATURE=""
 PRODUCTION_IRAN_IMAGE_BUNDLE_SHA256=""
 PRODUCTION_IRAN_IMAGE_RECEIPT=""
@@ -1442,7 +1443,10 @@ write_two_host_release_state() {
         && "$PRODUCTION_BACKUP_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ \
         && "$PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ \
         && "$PRODUCTION_BACKUP_ARTIFACT_SET_SHA256" =~ ^[0-9a-f]{64}$ \
+        && "$PRODUCTION_FOREIGN_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ \
         && "$PRODUCTION_FOREIGN_IMAGE_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ \
+        && "$PRODUCTION_IRAN_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ \
+        && "$PRODUCTION_IRAN_REMOTE_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ \
         && "$PRODUCTION_IRAN_IMAGE_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ \
         && "$PRODUCTION_IRAN_SOURCE_PAYLOAD_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] \
         || die "Two-host production release identity is incomplete."
@@ -4631,7 +4635,7 @@ for pair in app:$expected_app sync_worker:$expected_sync; do
   current=\"\$(docker ps -aq --filter label=com.docker.compose.project=current --filter label=com.docker.compose.service=\$service)\"
   [ -n \"\$current\" ] && [ \"\$(printf '%s\\n' \"\$current\" | wc -l)\" -eq 1 ] || exit 42
   if [ \"\$current\" != \"\$expected\" ]; then
-    [ \"\$(docker inspect --format '{{.Image}}' \"\$current\")\" = '$PRODUCTION_IRAN_IMAGE_ID' ] || exit 43
+    [ \"\$(docker inspect --format '{{.Image}}' \"\$current\")\" = '$PRODUCTION_IRAN_REMOTE_IMAGE_ID' ] || exit 43
     [ \"\$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' \"\$current\")\" = no ] || exit 44
   fi
   printf '%s\\t%s\\n' \"\$service\" \"\$current\"
@@ -4870,7 +4874,7 @@ cd '$IRAN_PROJECT_DIR'
 for service in app sync_worker; do
   id=\"\$(docker ps -aq --filter label=com.docker.compose.project=current --filter label=com.docker.compose.service=\$service)\"
   [ -n \"\$id\" ] && [ \"\$(printf '%s\\n' \"\$id\" | wc -l)\" -eq 1 ] || exit 35
-  [ \"\$(docker inspect --format '{{.Image}}' \"\$id\")\" = '$PRODUCTION_IRAN_IMAGE_ID' ] || exit 36
+  [ \"\$(docker inspect --format '{{.Image}}' \"\$id\")\" = '$PRODUCTION_IRAN_REMOTE_IMAGE_ID' ] || exit 36
   [ \"\$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' \"\$id\")\" = no ] || exit 37
   printf '%s\\t%s\\n' \"\$service\" \"\$id\"
 done" >"$inventory" \
@@ -5222,13 +5226,38 @@ sha256sum \"\$bundle\" | awk '{print \$1}'")" \
 }
 
 verify_remote_iran_image_identity() {
-    local image_signature="$1" expected_id remote_identity
+    local image_signature="$1" expected_id local_portable_sha remote_identity
+    local remote_id remote_revision remote_tree remote_signature remote_portable_sha
     expected_id="$(docker image inspect --format '{{.Id}}' trading_bot_base_iran)"
-    [[ "$expected_id" =~ ^sha256:[0-9a-f]{64}$ ]] \
+    [[ "$expected_id" == "$PRODUCTION_IRAN_IMAGE_ID" \
+        && "$expected_id" =~ ^sha256:[0-9a-f]{64}$ ]] \
         || die "Local Iran image ID is invalid."
-    remote_identity="$(ssh_iran "docker image inspect --format '{{.Id}}|{{index .Config.Labels \"org.opencontainers.image.revision\"}}|{{index .Config.Labels \"io.gold-trade.release.tree\"}}|{{index .Config.Labels \"io.gold-trade.release.input-signature\"}}' trading_bot_base_iran:latest")"
-    [[ "$remote_identity" == "$expected_id|$RELEASE_SHA|$PRODUCTION_RELEASE_TREE|$image_signature" ]] \
+    local_portable_sha="$(
+        docker image inspect \
+            --format '{{.Os}}|{{.Architecture}}|{{.Created}}|{{json .Config}}|{{json .RootFS}}' \
+            trading_bot_base_iran:latest | sha256sum | awk '{print $1}'
+    )"
+    [[ "$local_portable_sha" =~ ^[0-9a-f]{64}$ ]] \
+        || die "Local Iran portable image identity is invalid."
+    remote_identity="$(ssh_iran "set -euo pipefail
+image='trading_bot_base_iran:latest'
+portable_sha=\"\$(docker image inspect --format '{{.Os}}|{{.Architecture}}|{{.Created}}|{{json .Config}}|{{json .RootFS}}' \"\$image\" | sha256sum | awk '{print \$1}')\"
+docker image inspect --format '{{.Id}}|{{index .Config.Labels \"org.opencontainers.image.revision\"}}|{{index .Config.Labels \"io.gold-trade.release.tree\"}}|{{index .Config.Labels \"io.gold-trade.release.input-signature\"}}' \"\$image\"
+printf '|%s\\n' \"\$portable_sha\"")"
+    remote_identity="$(printf '%s' "$remote_identity" | tr -d '\n')"
+    IFS='|' read -r remote_id remote_revision remote_tree remote_signature remote_portable_sha \
+        <<<"$remote_identity"
+    [[ "$remote_id" =~ ^sha256:[0-9a-f]{64}$ \
+        && "$remote_revision" == "$RELEASE_SHA" \
+        && "$remote_tree" == "$PRODUCTION_RELEASE_TREE" \
+        && "$remote_signature" == "$image_signature" \
+        && "$remote_portable_sha" == "$local_portable_sha" ]] \
         || die "Remote Iran image identity/OCI labels do not match the exact release bundle."
+    # Docker's classic and containerd image stores may expose different ID
+    # values for the same loaded archive (config digest versus manifest
+    # digest). Runtime checks use the target host's ID after exact portable
+    # image content and release labels have passed.
+    PRODUCTION_IRAN_REMOTE_IMAGE_ID="$remote_id"
 }
 
 load_images() {
