@@ -2,6 +2,7 @@
 
 Entries are newest first.
 
+- 2026-08-22 | Iran image-cache skips require release SHA, tree, and input signature; the signature alone may survive release-only changes.
 - 2026-08-22 | Cross-host Iran image identity is bound by archive digest, exact release labels, and portable OS/architecture/created/config/rootfs content; target-local runtime image ID is used for container checks because Docker stores may expose config versus manifest digests for the same archive.
 - 2026-08-21 | Queue-v1 and guarded inference production rollout is authorized. Five distinct staging Publishers passed provider identity/channel/permission readback; shared-fleet opt-in is disabled in both envs. Production deployment remains a separate operation and was not authorized in the staging release.
 - 2026-08-21 | Customer relation limits are authoritative across Web and Bot: tier-1 offer totals/lots obey min/max, tier-2 cannot publish, and both tiers' completed source/responder trades obey min/max plus daily count/volume, including overtime preflight and final recheck. Every customer-limit denial uses only «شما مجاز به انجام این فعالیت نیستید.»

@@ -1350,6 +1350,17 @@ load_two_host_release_state
         self.assertIn("PRODUCTION_IRAN_REMOTE_IMAGE_ID", reconciler)
         self.assertIn("PRODUCTION_IRAN_REMOTE_IMAGE_ID", preparer)
 
+        loader = source.split("load_images() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("remote_loaded_binding", loader)
+        self.assertIn(
+            'remote_loaded_binding" == "$RELEASE_SHA|$PRODUCTION_RELEASE_TREE|$image_signature',
+            loader,
+        )
+        self.assertLess(
+            loader.index("remote_loaded_binding"),
+            loader.index("skipping docker load"),
+        )
+
     def test_release_evidence_is_durable_and_fresh_only_before_initial_quiesce(self) -> None:
         source = RELEASE_SCRIPT.read_text(encoding="utf-8")
         gate = source.split("verify_release_evidence_gate() {", 1)[1].split("\nverify_runtime_env_pair_lock() {", 1)[0]

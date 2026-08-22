@@ -5265,6 +5265,7 @@ load_images() {
     [[ -f "$bundle" ]] || die "Docker image bundle missing: $bundle"
     verify_iran_image_build_receipt
     local bundle_sha remote_bundle_sha image_signature remote_loaded_signature
+    local remote_loaded_binding
     bundle_sha="$(file_sha256 "$bundle")"
     [[ "$bundle_sha" =~ ^[0-9a-f]{64}$ ]] || die "Local Docker image bundle checksum is invalid."
     remote_bundle_sha="$(ssh_iran "set -euo pipefail
@@ -5281,12 +5282,14 @@ sha256sum \"\$bundle\" | awk '{print \$1}'")" \
     fi
     remote_loaded_signature="$(ssh_iran "cat '$REMOTE_IMAGE_LOADED_SIGNATURE' 2>/dev/null || true")"
     if [[ "$IRAN_FORCE_RELEASE_REFRESH" != "1" && "$remote_loaded_signature" == "$image_signature" ]]; then
-        if ssh_iran "docker image inspect trading_bot_base_iran:latest >/dev/null 2>&1 && docker image inspect postgres:15-alpine >/dev/null 2>&1 && docker image inspect redis:7-alpine >/dev/null 2>&1"; then
+        remote_loaded_binding="$(ssh_iran "docker image inspect --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}|{{index .Config.Labels \"io.gold-trade.release.tree\"}}|{{index .Config.Labels \"io.gold-trade.release.input-signature\"}}' trading_bot_base_iran:latest 2>/dev/null || true")"
+        if [[ "$remote_loaded_binding" == "$RELEASE_SHA|$PRODUCTION_RELEASE_TREE|$image_signature" ]] \
+            && ssh_iran "docker image inspect trading_bot_base_iran:latest >/dev/null 2>&1 && docker image inspect postgres:15-alpine >/dev/null 2>&1 && docker image inspect redis:7-alpine >/dev/null 2>&1"; then
             verify_remote_iran_image_identity "$image_signature"
             log "Docker images already loaded on Iran with matching signature; skipping docker load."
             return 0
         fi
-        log "Docker image load signature matched but one or more images are missing; reloading bundle."
+        log "Docker image cache signature matched but its release binding or required images did not; reloading the exact bundle."
     fi
     log "Loading transferred Docker images on the Iran host"
     ssh_iran "set -euo pipefail
