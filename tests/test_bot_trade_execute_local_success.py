@@ -210,6 +210,9 @@ class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
         bot = SimpleNamespace(send_message=AsyncMock())
         events: list[str] = []
         callback.answer.side_effect = lambda *args, **kwargs: events.append("answer")
+        callback.message.edit_reply_markup.side_effect = (
+            lambda *args, **kwargs: events.append("markup")
+        )
 
         def record_background_task():
             events.append("background_task")
@@ -257,7 +260,47 @@ class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
         callback.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
         remove_mock.assert_awaited_once_with(7, 200, 50)
         callback.answer.assert_awaited_once_with("معامله ثبت شد ✅", show_alert=False)
-        self.assertEqual(events, ["answer", "background_task"])
+        self.assertEqual(events, ["answer", "markup", "background_task"])
+
+    async def test_committed_trade_keeps_cleanup_and_notifications_when_callback_ack_fails(self):
+        user = make_bot_user(trading_restricted_until=None)
+        offer = make_offer()
+        session = FakeSession(offer)
+        callback = make_callback(chat_id=200)
+        callback.answer.side_effect = RuntimeError("callback transport unavailable")
+        background_task = AsyncMock()
+
+        async def execute_trade_side_effect(*args, **kwargs):
+            kwargs["background_tasks"].add_task(background_task)
+            return {"id": 88}
+
+        with patch(
+            "bot.handlers.trade_execute._execute_trade_authoritatively_with_transient_retry",
+            new=AsyncMock(side_effect=execute_trade_side_effect),
+        ), patch(
+            "bot.handlers.trade_execute.remove_trade_suggestion_record",
+            new=AsyncMock(),
+        ) as remove_mock, patch(
+            "bot.handlers.trade_execute.current_server",
+            return_value="foreign",
+        ), patch(
+            "bot.handlers.trade_execute.settings",
+            SimpleNamespace(channel_id=-100, bot_username="botname"),
+        ):
+            await _execute_confirmed_channel_trade_via_shared_command(
+                callback=callback,
+                callback_data=SimpleNamespace(offer_id=7, amount=2),
+                user=user,
+                bot=SimpleNamespace(),
+                session=session,
+                offer=offer,
+                actual_amount=2,
+            )
+
+        callback.answer.assert_awaited_once()
+        callback.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
+        remove_mock.assert_awaited_once_with(7, 200, 50)
+        background_task.assert_awaited_once_with()
 
 
 if __name__ == "__main__":

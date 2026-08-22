@@ -79,6 +79,11 @@ class BotTradeExecuteLocalPendingTests(unittest.IsolatedAsyncioTestCase):
     async def test_handle_channel_trade_sets_pending_confirmation_state_on_first_click(self):
         user = make_bot_user()
         callback = make_callback(chat_id=200)
+        events: list[str] = []
+        callback.answer.side_effect = lambda *args, **kwargs: events.append("answer")
+        callback.message.edit_reply_markup.side_effect = (
+            lambda *args, **kwargs: events.append("markup")
+        )
 
         with patch("bot.handlers.trade_execute.check_user_limits", return_value=(True, None)), patch(
             "bot.handlers.trade_execute.AsyncSessionLocal", return_value=FakeSessionContext(FakeSession(make_offer()))
@@ -98,6 +103,7 @@ class BotTradeExecuteLocalPendingTests(unittest.IsolatedAsyncioTestCase):
         cleanup_mock.assert_awaited_once()
         pending_reset_mock.assert_awaited_once()
         callback.answer.assert_awaited_with("برای تایید دوباره روی همان دکمه بزنید ☑️", show_alert=False)
+        self.assertEqual(events[:2], ["answer", "markup"])
 
 
 if __name__ == "__main__":

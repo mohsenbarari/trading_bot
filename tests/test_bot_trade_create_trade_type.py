@@ -8,7 +8,13 @@ from bot.handlers.trade_create import Trade, handle_trade_type_selection
 
 class BotTradeCreateTradeTypeTests(unittest.IsolatedAsyncioTestCase):
     async def test_handle_trade_type_selection_updates_state_and_edits_message(self):
-        callback = SimpleNamespace(message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
+        events: list[str] = []
+        callback = SimpleNamespace(
+            message=SimpleNamespace(
+                edit_text=AsyncMock(side_effect=lambda *args, **kwargs: events.append("edit"))
+            ),
+            answer=AsyncMock(side_effect=lambda *args, **kwargs: events.append("answer")),
+        )
         state = SimpleNamespace(
             get_data=AsyncMock(return_value={"wizard_return_to_review": False}),
             update_data=AsyncMock(),
@@ -29,6 +35,7 @@ class BotTradeCreateTradeTypeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("نوع تسویه", callback.message.edit_text.await_args.args[0])
         self.assertEqual(callback.message.edit_text.await_args.kwargs["reply_markup"], "KB")
         callback.answer.assert_awaited_once_with()
+        self.assertEqual(events, ["answer", "edit"])
 
 
 if __name__ == "__main__":

@@ -134,6 +134,16 @@ async def track_daily_expire(user_id: int, total_offers: int) -> dict:
 # DOUBLE-CLICK CONFIRMATION
 # ============================================
 
+_CHECK_DOUBLE_CLICK_SCRIPT = """
+if redis.call('EXISTS', KEYS[1]) == 1 then
+    redis.call('DEL', KEYS[1])
+    return 1
+end
+redis.call('SET', KEYS[1], 'pending', 'EX', ARGV[1])
+return 0
+"""
+
+
 async def check_double_click(user_id: int, offer_id: int, amount: int, timeout: float = 3.0) -> bool:
     """
     بررسی دابل‌کلیک برای تایید معامله
@@ -148,20 +158,20 @@ async def check_double_click(user_id: int, offer_id: int, amount: int, timeout: 
     
     if redis_client:
         try:
-            # چک کردن وجود کلید
-            exists = await redis_client.exists(key)
-            
-            if exists:
-                # کلیک دوم - حذف کلید و تایید
-                await redis_client.delete(key)
-                await redis_client.aclose()
-                return True
-            else:
-                # کلیک اول - ثبت با TTL (حداقل 1 ثانیه)
-                ttl = max(1, int(timeout)) if timeout >= 1 else 1
-                await redis_client.setex(key, ttl, "pending")
-                await redis_client.aclose()
-                return False
+            # Toggle the pending marker in one Redis round-trip.  Besides
+            # reducing callback latency, this removes the EXISTS/DELETE race
+            # where two near-simultaneous taps could both be treated as tap one.
+            ttl = max(1, int(timeout)) if timeout >= 1 else 1
+            confirmed = bool(
+                await redis_client.eval(
+                    _CHECK_DOUBLE_CLICK_SCRIPT,
+                    1,
+                    key,
+                    ttl,
+                )
+            )
+            await redis_client.aclose()
+            return confirmed
                 
         except Exception as e:
             logger.warning(f"Redis double-click failed: {e}")
@@ -301,4 +311,3 @@ async def is_deleted_telegram_user(telegram_id: int) -> bool:
         del _memory_fallback["cache"][key]
 
 get_redis = get_redis_client
-

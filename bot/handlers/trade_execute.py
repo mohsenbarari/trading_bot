@@ -780,18 +780,26 @@ async def _execute_confirmed_channel_trade_via_shared_command(
         )
         return
 
+    # The authoritative command above has committed before this acknowledgement.
+    # Do not make the user wait for optional private-button cleanup or background
+    # notifications once the final outcome is already known.
+    try:
+        await answer_callback_query_via_runtime(
+            callback,
+            "معامله ثبت شد ✅",
+            show_alert=False,
+        )
+    except Exception as exc:
+        # The trade is already committed.  A callback receipt failure must not
+        # suppress cleanup or the durable counterparty/trade notifications.
+        logger.debug(f"Failed to answer local trade callback: {exc}")
+
     try:
         if callback.message and callback.message.chat.id != settings.channel_id:
             await edit_callback_reply_markup_via_runtime(callback, user, reply_markup=None)
             await remove_trade_suggestion_record(offer_id, callback.message.chat.id, callback.message.message_id)
     except Exception as exc:
         logger.debug(f"Failed to clear private suggestion buttons: {exc}")
-
-    await answer_callback_query_via_runtime(
-        callback,
-        "معامله ثبت شد ✅",
-        show_alert=False,
-    )
 
     try:
         await background_tasks()
@@ -979,6 +987,15 @@ async def _handle_channel_trade(
             )
 
             if not is_confirmed:
+                # The Redis confirmation marker is already authoritative for
+                # the first tap.  Acknowledge it before best-effort private
+                # markup/cleanup work so Telegram does not keep the user
+                # waiting on bookkeeping that is not required for tap two.
+                await answer_callback_query_via_runtime(
+                    callback,
+                    "برای تایید دوباره روی همان دکمه بزنید ☑️",
+                    show_alert=False,
+                )
                 if callback.message and callback.message.chat.id != settings.channel_id:
                     try:
                         pending_keyboard = build_trade_amount_buttons(
@@ -999,11 +1016,6 @@ async def _handle_channel_trade(
                         await schedule_trade_suggestion_pending_reset(bot, offer.id)
                     except Exception as exc:
                         logger.debug(f"Failed to set pending state for remote-home offer: {exc}")
-                await answer_callback_query_via_runtime(
-                    callback,
-                    "برای تایید دوباره روی همان دکمه بزنید ☑️",
-                    show_alert=False,
-                )
                 return
 
             idempotency_key = _channel_trade_idempotency_key(
@@ -1129,12 +1141,9 @@ async def _handle_channel_trade(
                 return
 
             if 200 <= status_code < 300:
-                try:
-                    if callback.message and callback.message.chat.id != settings.channel_id:
-                        await edit_callback_reply_markup_via_runtime(callback, user, reply_markup=None)
-                        await remove_trade_suggestion_record(remote_offer_id, callback.message.chat.id, callback.message.message_id)
-                except Exception as exc:
-                    logger.debug(f"Failed to clear remote-home suggestion buttons: {exc}")
+                # The home server has already committed the trade.  Report
+                # that authoritative outcome before non-critical local button
+                # cleanup and notification enrichment.
                 try:
                     await answer_callback_query_via_runtime(
                         callback,
@@ -1143,6 +1152,12 @@ async def _handle_channel_trade(
                     )
                 except Exception as exc:
                     logger.debug(f"Failed to answer remote-home trade callback: {exc}")
+                try:
+                    if callback.message and callback.message.chat.id != settings.channel_id:
+                        await edit_callback_reply_markup_via_runtime(callback, user, reply_markup=None)
+                        await remove_trade_suggestion_record(remote_offer_id, callback.message.chat.id, callback.message.message_id)
+                except Exception as exc:
+                    logger.debug(f"Failed to clear remote-home suggestion buttons: {exc}")
                 await _notify_remote_trade_success(
                     bot,
                     user,
@@ -1246,6 +1261,11 @@ async def _handle_channel_trade(
             return
         else:
             # کلیک اول - Redis ثبت کرده، راهنمایی به کاربر
+            await answer_callback_query_via_runtime(
+                callback,
+                "برای تایید دوباره روی همان دکمه بزنید ☑️",
+                show_alert=False,
+            )
             if callback.message and callback.message.chat.id != settings.channel_id:
                 try:
                     pending_keyboard = build_trade_amount_buttons(
@@ -1266,8 +1286,3 @@ async def _handle_channel_trade(
                     await schedule_trade_suggestion_pending_reset(bot, offer.id)
                 except Exception as exc:
                     logger.debug(f"Failed to set pending confirmation state for suggestion message: {exc}")
-            await answer_callback_query_via_runtime(
-                callback,
-                "برای تایید دوباره روی همان دکمه بزنید ☑️",
-                show_alert=False,
-            )

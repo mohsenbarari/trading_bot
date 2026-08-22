@@ -25,13 +25,19 @@ class _SessionContext:
 
 class BotTradeCreateMarketClosedTests(unittest.IsolatedAsyncioTestCase):
     async def test_wizard_and_text_confirm_paths_stop_when_market_is_closed(self):
+        events: list[str] = []
         callback = SimpleNamespace(
-            message=SimpleNamespace(edit_text=AsyncMock()),
-            answer=AsyncMock(),
+            message=SimpleNamespace(
+                edit_text=AsyncMock(side_effect=lambda *args, **kwargs: events.append("edit"))
+            ),
+            answer=AsyncMock(side_effect=lambda *args, **kwargs: events.append("answer")),
         )
         state = SimpleNamespace(clear=AsyncMock(), get_data=AsyncMock())
 
-        with patch("bot.handlers.trade_create._bot_market_is_open", new=AsyncMock(return_value=False)):
+        market_check = AsyncMock(
+            side_effect=lambda: events.append("market-check") or False
+        )
+        with patch("bot.handlers.trade_create._bot_market_is_open", new=market_check):
             await handle_trade_confirm(callback, state, user=SimpleNamespace(id=1), bot=SimpleNamespace())
 
         callback.message.edit_text.assert_awaited_once_with(
@@ -39,6 +45,7 @@ class BotTradeCreateMarketClosedTests(unittest.IsolatedAsyncioTestCase):
         )
         state.clear.assert_awaited_once()
         callback.answer.assert_awaited_once_with()
+        self.assertEqual(events, ["answer", "market-check", "edit"])
 
         text_callback = SimpleNamespace(
             message=SimpleNamespace(edit_text=AsyncMock()),

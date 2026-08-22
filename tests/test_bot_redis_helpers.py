@@ -70,13 +70,21 @@ class BotRedisHelpersTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_check_double_click_works_in_redis_and_fallback_modes(self):
         redis_client = AsyncMock()
-        redis_client.exists = AsyncMock(side_effect=[0, 1])
+        redis_client.eval = AsyncMock(side_effect=[0, 1])
         with patch('bot.utils.redis_helpers.get_redis_client', AsyncMock(return_value=redis_client)):
             self.assertFalse(await redis_helpers.check_double_click(1, 2, 3, timeout=0.4))
             self.assertTrue(await redis_helpers.check_double_click(1, 2, 3, timeout=0.4))
 
-        redis_client.setex.assert_awaited_once_with('confirm:1:2:3', 1, 'pending')
-        redis_client.delete.assert_awaited_once_with('confirm:1:2:3')
+        self.assertEqual(redis_client.eval.await_count, 2)
+        redis_client.eval.assert_any_await(
+            redis_helpers._CHECK_DOUBLE_CLICK_SCRIPT,
+            1,
+            'confirm:1:2:3',
+            1,
+        )
+        redis_client.exists.assert_not_awaited()
+        redis_client.delete.assert_not_awaited()
+        redis_client.setex.assert_not_awaited()
 
         with patch('bot.utils.redis_helpers.get_redis_client', AsyncMock(return_value=None)), patch(
             'bot.utils.redis_helpers.time.time', return_value=100.0
@@ -85,7 +93,7 @@ class BotRedisHelpersTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await redis_helpers.check_double_click(1, 2, 3))
 
         broken_redis = AsyncMock()
-        broken_redis.exists = AsyncMock(side_effect=RuntimeError('redis down'))
+        broken_redis.eval = AsyncMock(side_effect=RuntimeError('redis down'))
         with patch('bot.utils.redis_helpers.get_redis_client', AsyncMock(return_value=broken_redis)), patch(
             'bot.utils.redis_helpers.time.time', return_value=200.0
         ):
