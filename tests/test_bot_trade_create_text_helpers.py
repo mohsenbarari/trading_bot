@@ -19,10 +19,15 @@ class BotTradeCreateTextHelperTests(unittest.TestCase):
 
     def test_has_trade_indicator_detects_valid_markers_only(self):
         self.assertTrue(has_trade_indicator("خ ربع 30تا 75800"))
+        self.assertTrue(has_trade_indicator("خف ربع 30تا 75"))
+        self.assertTrue(has_trade_indicator("خ‌ف ربع 30تا 75"))
+        self.assertTrue(has_trade_indicator("فف پک 105"))
+        self.assertTrue(has_trade_indicator("ف‌ف پک 105"))
         self.assertTrue(has_trade_indicator("فروش نیم 50عدد 758000: فقط نقدی"))
         self.assertTrue(has_trade_indicator("امام 30تا 75800 خ ن"))
         self.assertTrue(has_trade_indicator("ربع 30تا فروش نقد فردا 75800"))
         self.assertFalse(has_trade_indicator("امام 30تا 75800: خ ن"))
+        self.assertFalse(has_trade_indicator("تخفیف ویژه"))
         self.assertFalse(has_trade_indicator("این پیام عادی است"))
         self.assertFalse(has_trade_indicator(""))
 
@@ -30,6 +35,9 @@ class BotTradeCreateTextHelperTests(unittest.TestCase):
         self.assertTrue(looks_like_text_offer("امام 30تا 75800"))
         self.assertTrue(looks_like_text_offer("امام ۳۰ عدد ۷۵۸۰۰: خ"))
         self.assertTrue(looks_like_text_offer("خ ربع 30تا 75800"))
+        self.assertTrue(looks_like_text_offer("خف ربع 30تا 75"))
+        self.assertTrue(looks_like_text_offer("خف پک 105"))
+        self.assertTrue(looks_like_text_offer("فف نیم 20تا 95"))
         self.assertFalse(looks_like_text_offer("این پیام عادی است"))
         self.assertFalse(looks_like_text_offer("سفارش 30 عدد"))
 

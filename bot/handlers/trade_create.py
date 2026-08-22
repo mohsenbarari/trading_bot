@@ -2310,8 +2310,16 @@ def has_trade_indicator(text: str) -> bool:
     if not text:
         return False
     offer_part = text.split(':')[0]  # فقط قبل از توضیحات
-    # الگوی قدیمی هم باید به parser برسد تا پیام خطای دقیق دریافت کند.
-    pattern = r'(?<![آ-ی])[خف](?![آ-ی])|خرید|فروش'
+    # Keep ingress aligned with the parser's compact settlement grammar.  The
+    # longer forms must be matched as one block so «خف»/«فف» do not depend on
+    # the fallback quantity/price heuristic (which intentionally cannot infer
+    # every valid short-price or pack shape).
+    pattern = (
+        r'(?<![\u0600-\u06FF\u200c])'
+        r'(?:خ[\s\u200c]*ف|ف[\s\u200c]*ف|[خف])'
+        r'(?![\u0600-\u06FF\u200c])'
+        r'|خرید|فروش'
+    )
     return bool(re.search(pattern, offer_part))
 
 
