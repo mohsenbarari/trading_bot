@@ -1442,6 +1442,11 @@ def schema_only_sha256(container: str, username: str, database: str) -> str:
         for line in output.splitlines()
         if not line.startswith("-- Dumped from database version")
         and not line.startswith("-- Dumped by pg_dump version")
+        # PostgreSQL emits a fresh random key for these psql meta-commands on
+        # every dump.  They protect restore input parsing but do not describe
+        # database schema, so retaining them would make two byte-equivalent
+        # schemas appear different during the second-upgrade no-op gate.
+        and not re.fullmatch(r"\\(?:un)?restrict [A-Za-z0-9]+", line)
     )
     return hashlib.sha256((normalized + "\n").encode("utf-8")).hexdigest()
 

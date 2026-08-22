@@ -948,6 +948,41 @@ class ProductionMigrationRehearsalTests(unittest.TestCase):
             [["current"], ["upgrade", "head"], ["current"], ["upgrade", "head"]],
         )
 
+    def test_schema_digest_ignores_pg_dump_random_restrict_keys(self):
+        template = (
+            "--\n-- PostgreSQL database dump\n--\n"
+            "\\restrict {key}\n\n"
+            "-- Dumped from database version {database_version}\n"
+            "-- Dumped by pg_dump version {dump_version}\n\n"
+            "CREATE TABLE public.example (id integer);\n\n"
+            "\\unrestrict {key}\n"
+        )
+        outputs = [
+            template.format(
+                key="a" * 64,
+                database_version="15.18",
+                dump_version="15.18",
+            ),
+            template.format(
+                key="B7c9" * 16,
+                database_version="15.19",
+                dump_version="15.19",
+            ),
+        ]
+
+        digests = []
+        for output in outputs:
+            with patch.object(
+                rehearsal,
+                "_docker",
+                return_value=rehearsal.CommandResult(0, output, ""),
+            ):
+                digests.append(
+                    rehearsal.schema_only_sha256("pg", "scratch_user", "scratch_db")
+                )
+
+        self.assertEqual(digests[0], digests[1])
+
     def test_new_table_seed_contract_is_one_feeder_and_zero_elsewhere(self):
         def good_count(_container, *, username, database, sql, tuples_only=True):
             del username, database, tuples_only
