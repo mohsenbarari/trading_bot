@@ -59,6 +59,7 @@ from core.telegram_delivery_runtime_policy import (
     configured_telegram_delivery_producer_mode,
     configured_telegram_delivery_runtime,
 )
+from core.telegram_multi_publisher_contract import TELEGRAM_PUBLISHER_IDENTITIES
 from core.security import constant_time_secret_equals
 from core.registration_identity import normalize_account_name, normalize_mobile_number
 from core.services.cross_server_recovery_service import active_publication_is_gated, load_active_publication_gate
@@ -90,6 +91,9 @@ logger = logging.getLogger(__name__)
 OBSERVABILITY_API_KEY_HEADER = "X-Observability-Api-Key"
 PRODUCTION_FULL_MATRIX_SYNC_MARKERS = ("PFM_", "PRODTEST_", "FMX_")
 SYNC_PARITY_STATUS_REDIS_KEY = "sync:parity:latest_comparison"
+SYNC_PUBLICATION_PUBLISHER_PROMOTION_SETTING = (
+    "trading_bot.sync_publication_publisher_promotion"
+)
 
 
 def _require_dev_key(request: Request) -> None:
@@ -1100,8 +1104,143 @@ def _offer_publication_status_rank(expression):
     return sa_case(*whens, else_=0)
 
 
-def _offer_publication_state_upsert_where_clause(model, stmt, data: dict):
+def _offer_publication_publisher_promotion_clause(
+    model,
+    stmt,
+    data: dict,
+    *,
+    source_server: str | None,
+):
+    """Allow only the bounded Queue-v1 cutover promotion of a legacy placeholder.
+
+    Before multi-publisher B2B assignment was enabled, a Telegram publication
+    intent could reach its mirror as ``primary/pending/version 1``.  The
+    publication-owner server may later hold the real immutable publisher lane,
+    but the generic immutable-publisher guard would reject that newer canonical
+    state forever.  New Queue-v1 intents start unassigned, so this exception is
+    deliberately limited to the historical placeholder shape and can never
+    replace an already-canonical publisher assignment.
+    """
+    if _offer_publication_publisher_promotion_token(
+        data,
+        source_server=source_server,
+    ) is None:
+        return None
+
+    try:
+        incoming_publisher = stmt.excluded["publisher_bot_identity"]
+        excluded_state_version = stmt.excluded["version_id"]
+        excluded_offer_public_id = stmt.excluded["offer_public_id"]
+    except (AttributeError, KeyError):
+        return None
+
+    return (
+        (model.publisher_bot_identity == "primary")
+        & (model.publication_owner_server == SERVER_FOREIGN)
+        & (model.status == "pending")
+        & (model.version_id == 1)
+        & model.telegram_message_id.is_(None)
+        & (model.offer_public_id == excluded_offer_public_id)
+        & incoming_publisher.in_(list(TELEGRAM_PUBLISHER_IDENTITIES))
+        & (excluded_state_version > model.version_id)
+    )
+
+
+def _offer_publication_publisher_promotion_token(
+    data: dict,
+    *,
+    source_server: str | None,
+) -> str | None:
+    source = normalize_server(source_server, default="")
+    owner = normalize_server(data.get("publication_owner_server"), default="")
+    if (
+        source != SERVER_FOREIGN
+        or owner != SERVER_FOREIGN
+        or current_server() != SERVER_IRAN
+        or _enum_value(data.get("surface")) != "telegram_channel"
+        or str(data.get("publisher_bot_identity") or "").strip()
+        not in TELEGRAM_PUBLISHER_IDENTITIES
+    ):
+        return None
+    try:
+        if int(data.get("version_id")) <= 1:
+            return None
+    except (TypeError, ValueError):
+        return None
+    offer_public_id = str(data.get("offer_public_id") or "").strip()
+    token = str(data.get("dedupe_key") or "").strip()
+    expected_token = (
+        f"offer-publication:telegram_channel:{offer_public_id}"
+        if offer_public_id
+        else ""
+    )
+    return token if token and token == expected_token else None
+
+
+def _offer_publication_sync_authority_rejection_reason(
+    data: dict,
+    *,
+    source_server: str | None,
+) -> str | None:
+    publisher = str(data.get("publisher_bot_identity") or "").strip()
+    if publisher not in TELEGRAM_PUBLISHER_IDENTITIES:
+        return None
+    if current_server() != SERVER_IRAN:
+        return "publisher_target_not_iran"
+    if _enum_value(data.get("surface")) != "telegram_channel":
+        return "publisher_on_non_telegram_surface"
+    owner = normalize_server(data.get("publication_owner_server"), default="")
+    source = normalize_server(source_server, default="")
+    if owner != SERVER_FOREIGN:
+        return "publisher_owner_not_foreign"
+    if source != owner:
+        return "publisher_source_not_owner"
+    if data.get("telegram_message_id") is not None:
+        return "publisher_local_message_identity_present"
+    offer_public_id = str(data.get("offer_public_id") or "").strip()
+    dedupe_key = str(data.get("dedupe_key") or "").strip()
+    if not offer_public_id or dedupe_key != (
+        f"offer-publication:telegram_channel:{offer_public_id}"
+    ):
+        return "publisher_identity_invalid"
+    try:
+        if int(data.get("version_id")) <= 1:
+            return "publisher_version_not_promotable"
+    except (TypeError, ValueError):
+        return "publisher_version_not_promotable"
+    return None
+
+
+async def _set_offer_publication_publisher_promotion_marker(
+    db: AsyncSession,
+    token: str,
+) -> None:
+    await db.execute(
+        select(
+            sa_func.set_config(
+                SYNC_PUBLICATION_PUBLISHER_PROMOTION_SETTING,
+                token,
+                True,
+            )
+        ),
+        execution_options={"is_sync": True},
+    )
+
+
+def _offer_publication_state_upsert_where_clause(
+    model,
+    stmt,
+    data: dict,
+    *,
+    source_server: str | None = None,
+):
     where_clause = None
+    publisher_promotion_clause = _offer_publication_publisher_promotion_clause(
+        model,
+        stmt,
+        data,
+        source_server=source_server,
+    )
 
     if "publisher_bot_identity" in data:
         current_publisher = getattr(model, "publisher_bot_identity", None)
@@ -1116,6 +1255,8 @@ def _offer_publication_state_upsert_where_clause(model, stmt, data: dict):
                     | incoming_publisher.is_(None)
                     | (current_publisher == incoming_publisher)
                 )
+                if publisher_promotion_clause is not None:
+                    publisher_clause = publisher_clause | publisher_promotion_clause
                 where_clause = publisher_clause
 
     if "offer_version_id" in data:
@@ -1166,7 +1307,7 @@ def _offer_publication_state_upsert_where_clause(model, stmt, data: dict):
     return where_clause
 
 
-def _build_upsert_stmt(model, table, data):
+def _build_upsert_stmt(model, table, data, *, source_server: str | None = None):
     """Build the INSERT ON CONFLICT statement for a given model and data."""
     stmt = pg_insert(model).values(**data)
 
@@ -1230,11 +1371,30 @@ def _build_upsert_stmt(model, table, data):
     elif table == "offer_publication_states" and data.get("dedupe_key"):
         set_dict = {key: value for key, value in data.items() if key not in {"id", "dedupe_key"}}
         if "publisher_bot_identity" in set_dict:
+            publisher_promotion_clause = _offer_publication_publisher_promotion_clause(
+                model,
+                stmt,
+                data,
+                source_server=source_server,
+            )
+            publisher_cases = []
+            if publisher_promotion_clause is not None:
+                publisher_cases.append(
+                    (publisher_promotion_clause, stmt.excluded["publisher_bot_identity"])
+                )
+            publisher_cases.append(
+                (model.publisher_bot_identity.isnot(None), model.publisher_bot_identity)
+            )
             set_dict["publisher_bot_identity"] = sa_case(
-                (model.publisher_bot_identity.isnot(None), model.publisher_bot_identity),
+                *publisher_cases,
                 else_=stmt.excluded["publisher_bot_identity"],
             )
-        where_clause = _offer_publication_state_upsert_where_clause(model, stmt, data)
+        where_clause = _offer_publication_state_upsert_where_clause(
+            model,
+            stmt,
+            data,
+            source_server=source_server,
+        )
         if where_clause is None:
             return stmt.on_conflict_do_update(index_elements=['dedupe_key'], set_=set_dict)
         return stmt.on_conflict_do_update(index_elements=['dedupe_key'], set_=set_dict, where=where_clause)
@@ -2868,6 +3028,34 @@ async def _apply_item(
             )
             return "ignored"
 
+    if table == "offer_publication_states":
+        authority_reason = _offer_publication_sync_authority_rejection_reason(
+            data,
+            source_server=source_server,
+        )
+        if authority_reason:
+            record_sync_source_authority_rejection(
+                server_mode=settings.server_mode,
+                table=table,
+                reason=authority_reason,
+            )
+            logger.error(
+                "Rejected non-authoritative publication publisher sync write",
+                extra={
+                    "event": "sync.publication_publisher_authority_rejected",
+                    "table": table,
+                    "operation": operation,
+                    "reason": authority_reason,
+                    "target_server": current_server(),
+                    "source_server": normalize_server(source_server, default="") or None,
+                    "publication_owner_server": normalize_server(
+                        data.get("publication_owner_server"),
+                        default="",
+                    ) or None,
+                },
+            )
+            return "error"
+
     if table == "trading_settings":
         setting_key = data.get('key')
         if not setting_key:
@@ -3061,12 +3249,50 @@ async def _apply_item(
                 return 'ignored'
 
         persist_data = _filter_model_columns(model, data)
-        stmt = _build_upsert_stmt(model, table, persist_data)
+        if table == "offer_publication_states" and source_server is not None:
+            stmt = _build_upsert_stmt(
+                model,
+                table,
+                persist_data,
+                source_server=source_server,
+            )
+        else:
+            stmt = _build_upsert_stmt(model, table, persist_data)
 
         try:
             trade_atomic_guard_noop = False
+            publication_promotion_token = (
+                _offer_publication_publisher_promotion_token(
+                    persist_data,
+                    source_server=source_server,
+                )
+                if table == "offer_publication_states"
+                else None
+            )
             async with db.begin_nested():
+                if publication_promotion_token is not None:
+                    await _set_offer_publication_publisher_promotion_marker(
+                        db,
+                        publication_promotion_token,
+                    )
                 execute_result = await db.execute(stmt, execution_options={"is_sync": True})
+                if publication_promotion_token is not None:
+                    await _set_offer_publication_publisher_promotion_marker(db, "")
+                    if getattr(execute_result, "rowcount", None) != 1:
+                        logger.error(
+                            "Publication publisher promotion did not apply",
+                            extra={
+                                "event": "sync.publication_publisher_promotion_noop",
+                                "table": table,
+                                "record_id": record_id,
+                            },
+                        )
+                        record_sync_conflict(
+                            server_mode=settings.server_mode,
+                            table=table,
+                            reason="publication_publisher_promotion_noop",
+                        )
+                        return 'error'
                 if (
                     table in REGISTRATION_VERSIONED_TABLES
                     and bool(getattr(settings, "registration_sync_v2_enabled", False))
@@ -3873,7 +4099,7 @@ async def receive_sync_data(
                 )
                 apply_args = (
                     {"source_server": source_server}
-                    if table == "offer_requests"
+                    if table in {"offer_requests", "offer_publication_states"}
                     or bool(getattr(settings, "registration_sync_v2_enabled", False))
                     else {}
                 )
@@ -3977,7 +4203,7 @@ async def receive_sync_data(
                     deferred_source_server = _sync_item_source_server(item)
                     apply_args = (
                         {"source_server": deferred_source_server}
-                        if table == "offer_requests"
+                        if table in {"offer_requests", "offer_publication_states"}
                         or bool(getattr(settings, "registration_sync_v2_enabled", False))
                         else {}
                     )

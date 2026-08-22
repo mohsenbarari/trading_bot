@@ -10,8 +10,10 @@ from uuid import uuid4
 
 from sqlalchemy import select, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from api.routers.sync import _apply_item, _build_upsert_stmt
 from core import offer_publication_worker as worker
 from core.services import offer_publication_reconciliation_service as reconciliation
 from core.services.telegram_offer_channel_service import OfferChannelStateApplyResult
@@ -152,8 +154,10 @@ class OfferPublicationRepairPostgresTests(unittest.IsolatedAsyncioTestCase):
                         offer_home_server="foreign",
                         surface=OfferPublicationSurface.TELEGRAM_CHANNEL,
                         publication_owner_server="foreign",
+                        publisher_bot_identity="primary",
                         status=OfferPublicationStatus.SENT,
                         dedupe_key=f"offer-publication:telegram_channel:{public_id}",
+                        telegram_chat_id=-1001234567890,
                         telegram_message_id=offer.channel_message_id,
                         offer_version_id=0,
                         last_known_offer_status=OfferStatus.ACTIVE.value,
@@ -222,6 +226,309 @@ class OfferPublicationRepairPostgresTests(unittest.IsolatedAsyncioTestCase):
                 )
             await session.commit()
         return public_ids
+
+    async def test_sync_promotes_only_canonical_foreign_cutover_placeholder(self):
+        suffix = uuid4().hex[:10]
+        async with self.Session() as session:
+            commodity = Commodity(name=f"stage9_sync_promotion_{suffix}")
+            session.add(commodity)
+            await session.flush()
+
+            states: list[OfferPublicationState] = []
+            for index in range(4):
+                public_id = f"ofr_stage9_sync_promotion_{suffix}_{index}"
+                offer = Offer(
+                    offer_public_id=public_id,
+                    home_server="iran",
+                    offer_type=OfferType.BUY,
+                    commodity_id=commodity.id,
+                    quantity=10,
+                    remaining_quantity=10,
+                    price=100_000,
+                    status=OfferStatus.ACTIVE,
+                    is_wholesale=True,
+                    archived=False,
+                )
+                session.add(offer)
+                await session.flush()
+                state = OfferPublicationState(
+                    version_id=1,
+                    offer_id=offer.id,
+                    offer_public_id=public_id,
+                    offer_home_server="iran",
+                    surface=OfferPublicationSurface.TELEGRAM_CHANNEL,
+                    publication_owner_server="foreign",
+                    publisher_bot_identity="primary",
+                    status=OfferPublicationStatus.PENDING,
+                    dedupe_key=f"offer-publication:telegram_channel:{public_id}",
+                    offer_version_id=1,
+                    last_known_offer_status=OfferStatus.ACTIVE.value,
+                )
+                session.add(state)
+                states.append(state)
+            await session.commit()
+
+            def incoming(
+                state: OfferPublicationState,
+                *,
+                publisher: str,
+                owner: str = "foreign",
+                state_version: int = 7,
+            ) -> dict:
+                return {
+                    "id": state.id,
+                    "version_id": state_version,
+                    "offer_id": state.offer_id,
+                    "offer_public_id": state.offer_public_id,
+                    "offer_home_server": "iran",
+                    "surface": "telegram_channel",
+                    "publication_owner_server": owner,
+                    "publisher_bot_identity": publisher,
+                    "status": "disabled",
+                    "dedupe_key": state.dedupe_key,
+                    "offer_version_id": 5,
+                    "last_known_offer_status": "completed",
+                }
+
+            with patch("api.routers.sync.current_server", return_value="iran"):
+                promoted = await _apply_item(
+                    session,
+                    "offer_publication_states",
+                    "UPDATE",
+                    states[0].id,
+                    incoming(states[0], publisher="publisher_3"),
+                    model=OfferPublicationState,
+                    new_offers=[],
+                    source_server="foreign",
+                )
+                wrong_source = _build_upsert_stmt(
+                    OfferPublicationState,
+                    "offer_publication_states",
+                    incoming(states[1], publisher="publisher_4"),
+                    source_server="iran",
+                )
+                spoofed_owner = _build_upsert_stmt(
+                    OfferPublicationState,
+                    "offer_publication_states",
+                    incoming(states[2], publisher="publisher_5", owner="iran"),
+                    source_server="iran",
+                )
+                same_version = _build_upsert_stmt(
+                    OfferPublicationState,
+                    "offer_publication_states",
+                    incoming(
+                        states[3],
+                        publisher="publisher_3",
+                        state_version=1,
+                    ),
+                    source_server="foreign",
+                )
+                marker_after_promotion = (
+                    await session.execute(
+                        text(
+                            "SELECT COALESCE(current_setting("
+                            "'trading_bot.sync_publication_publisher_promotion', true), '')"
+                        )
+                    )
+                ).scalar_one()
+            await session.commit()
+
+            self.assertEqual(promoted, "ok")
+            self.assertEqual(marker_after_promotion, "")
+            for rejected_statement in (wrong_source, spoofed_owner, same_version):
+                with self.assertRaises(DBAPIError):
+                    async with session.begin_nested():
+                        await session.execute(
+                            rejected_statement,
+                            execution_options={"is_sync": True},
+                        )
+
+            with patch("api.routers.sync.current_server", return_value="iran"):
+                unmarked_promotion = _build_upsert_stmt(
+                    OfferPublicationState,
+                    "offer_publication_states",
+                    incoming(states[1], publisher="publisher_4"),
+                    source_server="foreign",
+                )
+            with self.assertRaises(DBAPIError):
+                async with session.begin_nested():
+                    await session.execute(
+                        unmarked_promotion,
+                        execution_options={"is_sync": True},
+                    )
+
+            session.expire_all()
+            refreshed = list(
+                (
+                    await session.execute(
+                        select(OfferPublicationState).order_by(OfferPublicationState.id.asc())
+                    )
+                ).scalars()
+            )
+            self.assertEqual(
+                (
+                    refreshed[0].publisher_bot_identity,
+                    refreshed[0].status,
+                    refreshed[0].version_id,
+                    refreshed[0].offer_version_id,
+                    refreshed[0].last_known_offer_status,
+                ),
+                ("publisher_3", OfferPublicationStatus.DISABLED, 7, 5, "completed"),
+            )
+            for untouched in refreshed[1:]:
+                self.assertEqual(untouched.publisher_bot_identity, "primary")
+                self.assertEqual(untouched.status, OfferPublicationStatus.PENDING)
+                self.assertEqual(untouched.version_id, 1)
+
+            with patch("api.routers.sync.current_server", return_value="iran"):
+                canonical_rebind = await _apply_item(
+                    session,
+                    "offer_publication_states",
+                    "UPDATE",
+                    refreshed[0].id,
+                    incoming(
+                        refreshed[0],
+                        publisher="publisher_4",
+                        state_version=8,
+                    ),
+                    model=OfferPublicationState,
+                    new_offers=[],
+                    source_server="foreign",
+                )
+            self.assertEqual(canonical_rebind, "error")
+            await session.commit()
+            await session.refresh(refreshed[0])
+            self.assertEqual(refreshed[0].publisher_bot_identity, "publisher_3")
+
+    async def test_sync_worker_publisher_insert_requires_transaction_marker(self):
+        suffix = uuid4().hex[:10]
+        async with self.Session() as session:
+            commodity = Commodity(name=f"stage9_sync_insert_{suffix}")
+            session.add(commodity)
+            await session.flush()
+            offers = []
+            for index in range(2):
+                offer = Offer(
+                    offer_public_id=f"ofr_stage9_sync_insert_{suffix}_{index}",
+                    home_server="iran",
+                    offer_type=OfferType.BUY,
+                    commodity_id=commodity.id,
+                    quantity=10,
+                    remaining_quantity=10,
+                    price=100_000,
+                    status=OfferStatus.ACTIVE,
+                    is_wholesale=True,
+                    archived=False,
+                )
+                session.add(offer)
+                offers.append(offer)
+            await session.commit()
+
+            def payload(offer: Offer, publisher: str) -> dict:
+                return {
+                    "version_id": 3,
+                    "offer_id": offer.id,
+                    "offer_public_id": offer.offer_public_id,
+                    "offer_home_server": "iran",
+                    "surface": "telegram_channel",
+                    "publication_owner_server": "foreign",
+                    "publisher_bot_identity": publisher,
+                    "status": "sent",
+                    "dedupe_key": (
+                        "offer-publication:telegram_channel:"
+                        f"{offer.offer_public_id}"
+                    ),
+                    "offer_version_id": 2,
+                    "last_known_offer_status": "active",
+                }
+
+            with patch("api.routers.sync.current_server", return_value="iran"):
+                applied = await _apply_item(
+                    session,
+                    "offer_publication_states",
+                    "INSERT",
+                    901,
+                    payload(offers[0], "publisher_1"),
+                    model=OfferPublicationState,
+                    new_offers=[],
+                    source_server="foreign",
+                )
+                unmarked = _build_upsert_stmt(
+                    OfferPublicationState,
+                    "offer_publication_states",
+                    payload(offers[1], "publisher_2"),
+                    source_server="foreign",
+                )
+            self.assertEqual(applied, "ok")
+            with self.assertRaises(DBAPIError):
+                async with session.begin_nested():
+                    await session.execute(
+                        unmarked,
+                        execution_options={"is_sync": True},
+                    )
+
+            async def assert_marked_rejected(statement, marker: str) -> None:
+                with self.assertRaises(DBAPIError):
+                    async with session.begin_nested():
+                        await session.execute(
+                            text(
+                                "SELECT set_config("
+                                "'trading_bot.sync_publication_publisher_promotion', "
+                                ":marker, true)"
+                            ),
+                            {"marker": marker},
+                        )
+                        await session.execute(
+                            statement,
+                            execution_options={"is_sync": True},
+                        )
+                marker_after_failure = (
+                    await session.execute(
+                        text(
+                            "SELECT COALESCE(current_setting("
+                            "'trading_bot.sync_publication_publisher_promotion', true), '')"
+                        )
+                    )
+                ).scalar_one()
+                self.assertEqual(marker_after_failure, "")
+
+            await assert_marked_rejected(unmarked, "wrong-marker")
+            with patch("api.routers.sync.current_server", return_value="iran"):
+                marked_with_local_message = _build_upsert_stmt(
+                    OfferPublicationState,
+                    "offer_publication_states",
+                    {
+                        **payload(offers[1], "publisher_2"),
+                        "telegram_message_id": 123,
+                    },
+                    source_server="foreign",
+                )
+            await assert_marked_rejected(
+                marked_with_local_message,
+                payload(offers[1], "publisher_2")["dedupe_key"],
+            )
+            await session.commit()
+
+            rows = list(
+                (
+                    await session.execute(
+                        select(OfferPublicationState).order_by(
+                            OfferPublicationState.id.asc()
+                        )
+                    )
+                ).scalars()
+            )
+            marker_after_commit = (
+                await session.execute(
+                    text(
+                        "SELECT COALESCE(current_setting("
+                        "'trading_bot.sync_publication_publisher_promotion', true), '')"
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].publisher_bot_identity, "publisher_1")
+            self.assertEqual(marker_after_commit, "")
 
     async def test_channel_backlog_of_101_drains_across_bounded_cycles(self):
         await self._seed_channel_candidates(101)

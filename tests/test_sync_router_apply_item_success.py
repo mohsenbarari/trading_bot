@@ -560,6 +560,271 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
             compiled,
         )
 
+    def test_offer_publication_state_upsert_allows_only_authoritative_cutover_placeholder_promotion(self):
+        data = {
+            "id": 41,
+            "version_id": 7,
+            "offer_public_id": "ofr_41",
+            "offer_home_server": "iran",
+            "surface": "telegram_channel",
+            "publication_owner_server": "foreign",
+            "publisher_bot_identity": "publisher_3",
+            "status": "disabled",
+            "dedupe_key": "offer-publication:telegram_channel:ofr_41",
+            "offer_version_id": 5,
+        }
+
+        with patch("api.routers.sync.current_server", return_value="iran"):
+            stmt = _build_upsert_stmt(
+                OfferPublicationState,
+                "offer_publication_states",
+                data,
+                source_server="foreign",
+            )
+        compiled = str(stmt.compile(dialect=postgresql.dialect()))
+
+        self.assertIn("offer_publication_states.publisher_bot_identity =", compiled)
+        self.assertIn("offer_publication_states.status =", compiled)
+        self.assertIn("offer_publication_states.version_id =", compiled)
+        self.assertIn("offer_publication_states.telegram_message_id IS NULL", compiled)
+        self.assertIn("offer_publication_states.offer_public_id = excluded.offer_public_id", compiled)
+        self.assertIn("excluded.publisher_bot_identity IN", compiled)
+        self.assertIn("excluded.version_id > offer_publication_states.version_id", compiled)
+        self.assertIn("THEN excluded.publisher_bot_identity", compiled)
+
+        with patch("api.routers.sync.current_server", return_value="iran"):
+            wrong_source_stmt = _build_upsert_stmt(
+                OfferPublicationState,
+                "offer_publication_states",
+                data,
+                source_server="iran",
+            )
+        wrong_source_compiled = str(wrong_source_stmt.compile(dialect=postgresql.dialect()))
+        self.assertNotIn("excluded.version_id > offer_publication_states.version_id", wrong_source_compiled)
+
+        with patch("api.routers.sync.current_server", return_value="iran"):
+            same_version_stmt = _build_upsert_stmt(
+                OfferPublicationState,
+                "offer_publication_states",
+                {**data, "version_id": 1},
+                source_server="foreign",
+            )
+        same_version_compiled = str(same_version_stmt.compile(dialect=postgresql.dialect()))
+        self.assertNotIn("excluded.version_id > offer_publication_states.version_id", same_version_compiled)
+
+        with patch("api.routers.sync.current_server", return_value="foreign"):
+            wrong_surface_stmt = _build_upsert_stmt(
+                OfferPublicationState,
+                "offer_publication_states",
+                {
+                    **data,
+                    "surface": "webapp_market",
+                    "publication_owner_server": "iran",
+                    "publisher_bot_identity": "publisher_3",
+                },
+                source_server="iran",
+            )
+        wrong_surface_compiled = str(wrong_surface_stmt.compile(dialect=postgresql.dialect()))
+        self.assertNotIn("excluded.version_id > offer_publication_states.version_id", wrong_surface_compiled)
+
+        with patch("api.routers.sync.current_server", return_value="foreign"):
+            owner_target_stmt = _build_upsert_stmt(
+                OfferPublicationState,
+                "offer_publication_states",
+                data,
+                source_server="foreign",
+            )
+        owner_target_compiled = str(owner_target_stmt.compile(dialect=postgresql.dialect()))
+        self.assertNotIn("excluded.version_id > offer_publication_states.version_id", owner_target_compiled)
+
+        with patch("api.routers.sync.current_server", return_value="iran"):
+            spoofed_owner_stmt = _build_upsert_stmt(
+                OfferPublicationState,
+                "offer_publication_states",
+                {**data, "publication_owner_server": "iran"},
+                source_server="iran",
+            )
+        spoofed_owner_compiled = str(spoofed_owner_stmt.compile(dialect=postgresql.dialect()))
+        self.assertNotIn("excluded.version_id > offer_publication_states.version_id", spoofed_owner_compiled)
+
+    async def test_offer_publication_state_apply_forwards_source_for_authoritative_promotion(self):
+        publication_data = {
+            "offer_public_id": "ofr_remote_8",
+            "offer_home_server": "iran",
+            "surface": "telegram_channel",
+            "publication_owner_server": "foreign",
+            "publisher_bot_identity": "publisher_3",
+            "status": "disabled",
+            "dedupe_key": "offer-publication:telegram_channel:ofr_remote_8",
+            "offer_version_id": 5,
+            "version_id": 7,
+        }
+        db = FakeDB(
+            [
+                ScalarOneOrNoneResult(8),
+                SimpleNamespace(),
+                SimpleNamespace(rowcount=1),
+                SimpleNamespace(),
+            ]
+        )
+
+        with (
+            patch("api.routers.sync.current_server", return_value="iran"),
+            patch(
+                "api.routers.sync._build_upsert_stmt",
+                return_value="PUBLICATION_UPSERT",
+            ) as builder,
+        ):
+            result = await _apply_item(
+                db,
+                "offer_publication_states",
+                "UPDATE",
+                40,
+                publication_data,
+                model=OfferPublicationState,
+                new_offers=[],
+                source_server="foreign",
+            )
+
+        self.assertEqual(result, "ok")
+        builder.assert_called_once_with(
+            OfferPublicationState,
+            "offer_publication_states",
+            publication_data,
+            source_server="foreign",
+        )
+        self.assertEqual(len(db.execute_calls), 4)
+        self.assertIn("set_config", str(db.execute_calls[1][0]))
+        self.assertEqual(db.execute_calls[2][0], "PUBLICATION_UPSERT")
+        self.assertIn("set_config", str(db.execute_calls[3][0]))
+
+    async def test_offer_publication_promotion_noop_fails_closed(self):
+        publication_data = {
+            "offer_public_id": "ofr_remote_9",
+            "offer_home_server": "iran",
+            "surface": "telegram_channel",
+            "publication_owner_server": "foreign",
+            "publisher_bot_identity": "publisher_3",
+            "status": "disabled",
+            "dedupe_key": "offer-publication:telegram_channel:ofr_remote_9",
+            "offer_version_id": 5,
+            "version_id": 7,
+        }
+
+        for rowcount in (0, None, -1):
+            db = FakeDB(
+                [
+                    ScalarOneOrNoneResult(9),
+                    SimpleNamespace(),
+                    SimpleNamespace(rowcount=rowcount),
+                    SimpleNamespace(),
+                ]
+            )
+            with (
+                patch("api.routers.sync.current_server", return_value="iran"),
+                patch(
+                    "api.routers.sync._build_upsert_stmt",
+                    return_value="PUBLICATION_UPSERT",
+                ),
+                patch("api.routers.sync.record_sync_conflict") as conflict,
+            ):
+                result = await _apply_item(
+                    db,
+                    "offer_publication_states",
+                    "UPDATE",
+                    41,
+                    publication_data.copy(),
+                    model=OfferPublicationState,
+                    new_offers=[],
+                    source_server="foreign",
+                )
+
+            self.assertEqual(result, "error")
+            conflict.assert_called_once()
+
+    async def test_offer_publication_worker_identity_requires_authoritative_source(self):
+        publication_data = {
+            "offer_public_id": "ofr_remote_10",
+            "offer_home_server": "iran",
+            "surface": "telegram_channel",
+            "publication_owner_server": "foreign",
+            "publisher_bot_identity": "publisher_2",
+            "status": "pending",
+            "dedupe_key": "offer-publication:telegram_channel:ofr_remote_10",
+            "offer_version_id": 1,
+            "version_id": 2,
+        }
+
+        for source_server, owner in (("iran", "foreign"), ("iran", "iran")):
+            payload = {**publication_data, "publication_owner_server": owner}
+            db = FakeDB()
+            with (
+                patch("api.routers.sync.current_server", return_value="iran"),
+                patch(
+                    "api.routers.sync.record_sync_source_authority_rejection"
+                ) as rejection,
+            ):
+                result = await _apply_item(
+                    db,
+                    "offer_publication_states",
+                    "INSERT",
+                    42,
+                    payload,
+                    model=OfferPublicationState,
+                    new_offers=[],
+                    source_server=source_server,
+                )
+            self.assertEqual(result, "error")
+            rejection.assert_called_once()
+            self.assertEqual(db.execute_calls, [])
+
+        invalid_version = {**publication_data, "version_id": 1}
+        with (
+            patch("api.routers.sync.current_server", return_value="iran"),
+            patch(
+                "api.routers.sync.record_sync_source_authority_rejection"
+            ) as rejection,
+        ):
+            result = await _apply_item(
+                FakeDB(),
+                "offer_publication_states",
+                "UPDATE",
+                43,
+                invalid_version,
+                model=OfferPublicationState,
+                new_offers=[],
+                source_server="foreign",
+            )
+        self.assertEqual(result, "error")
+        rejection.assert_called_once()
+
+        for invalid_fields in (
+            {"dedupe_key": "offer-publication:telegram_channel:wrong"},
+            {"offer_public_id": ""},
+            {"telegram_message_id": 123},
+        ):
+            payload = {**publication_data, **invalid_fields}
+            db = FakeDB()
+            with (
+                patch("api.routers.sync.current_server", return_value="iran"),
+                patch(
+                    "api.routers.sync.record_sync_source_authority_rejection"
+                ) as rejection,
+            ):
+                result = await _apply_item(
+                    db,
+                    "offer_publication_states",
+                    "UPDATE",
+                    44,
+                    payload,
+                    model=OfferPublicationState,
+                    new_offers=[],
+                    source_server="foreign",
+                )
+            self.assertEqual(result, "error")
+            rejection.assert_called_once()
+            self.assertEqual(db.execute_calls, [])
+
     async def test_user_block_uses_pair_identity_for_upsert_and_delete_resolution(self):
         stmt = _build_upsert_stmt(
             UserBlock,

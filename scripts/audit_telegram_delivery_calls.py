@@ -142,6 +142,9 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "queue_execution": 1,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
+    "50173941ebbcff6002bf09a12e0bad81d60a4e89bbb455eb5e576741fa31046d"
+)
+PRE_SYNC_PUBLICATION_PROMOTION_RUNTIME_INVENTORY_SHA256 = (
     "a0e11f7efc54c823879d4a2632097dc4bc75a7b6cb69d6e92d3a228cec0c12b0"
 )
 PRE_ABBREVIATED_PRICE_AND_CUSTOMER_LIMITS_RUNTIME_INVENTORY_SHA256 = (
@@ -189,6 +192,10 @@ OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256 = (
 REVIEWED_RUNTIME_INVENTORY_SHA256 = frozenset(
     {
         EXPECTED_RUNTIME_INVENTORY_SHA256,
+        # The bounded publication-publisher sync promotion adds no Telegram
+        # delivery callsite. It moves the existing sync notification call by
+        # 226 lines; all 103 owners and dispositions remain unchanged.
+        PRE_SYNC_PUBLICATION_PROMOTION_RUNTIME_INVENTORY_SHA256,
         # Abbreviated-price normalization and customer-relation admission add
         # no Telegram boundary.  A full inventory comparison found the same
         # 103 path/scope/callee/kind/disposition classifications; twelve
