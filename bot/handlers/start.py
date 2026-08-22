@@ -462,20 +462,41 @@ async def _wait_for_registration_handoff(
 
 
 async def _send_registration_handoff(
-    message: types.Message,
+    event: types.Message | types.CallbackQuery,
     resolution: RegistrationHandoffResolution | None,
 ) -> None:
+    callback = (
+        event
+        if getattr(event, "message", None) is not None
+        and getattr(event, "chat", None) is None
+        else None
+    )
+    message = callback.message if callback is not None else event
+
+    async def deliver(text: str, **kwargs):
+        if callback is not None:
+            return await answer_pre_auth_callback_message_via_runtime(
+                callback,
+                text,
+                **kwargs,
+            )
+        return await answer_pre_auth_message_via_runtime(
+            message,
+            text,
+            **kwargs,
+        )
+
     if resolution is None or resolution.user is None:
         if resolution is not None and resolution.status in {
             TelegramRegistrationIntentStatus.REJECTED,
             TelegramRegistrationIntentStatus.EXPIRED,
         }:
-            await answer_pre_auth_message_via_runtime(message,
+            await deliver(
                 _registration_rejection_message(resolution.reason or resolution.status.value),
                 reply_markup=types.ReplyKeyboardRemove(),
             )
             return
-        await answer_pre_auth_message_via_runtime(message,
+        await deliver(
             _registration_pending_message(),
             reply_markup=types.ReplyKeyboardRemove(),
         )
@@ -484,14 +505,14 @@ async def _send_registration_handoff(
     user = resolution.user
     user, pending_tutorial_step = await _ensure_registration_onboarding(user)
     if pending_tutorial_step is not None:
-        anchor_msg = await answer_pre_auth_message_via_runtime(message,
+        anchor_msg = await deliver(
             onboarding_text_for_step(pending_tutorial_step),
             reply_markup=build_onboarding_keyboard(pending_tutorial_step),
         )
         set_anchor(message.chat.id, anchor_msg.message_id)
         return
 
-    anchor_msg = await answer_pre_auth_message_via_runtime(message,
+    anchor_msg = await deliver(
         await build_linked_account_panel_message(
             getattr(message, "bot", None),
             user,
@@ -1487,7 +1508,7 @@ async def handle_registration_confirm(
             },
         )
         resolution = None
-    await _send_registration_handoff(callback.message, resolution)
+    await _send_registration_handoff(callback, resolution)
 
 
 @router.message(Registration.awaiting_confirmation)

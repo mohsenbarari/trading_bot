@@ -142,6 +142,9 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "queue_execution": 1,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
+    "efc7ac2a07ddd589e5b281ca5f58c5676fe861b8003146102209867c1e38d318"
+)
+PRE_REGISTRATION_CALLBACK_HANDOFF_RUNTIME_INVENTORY_SHA256 = (
     "50173941ebbcff6002bf09a12e0bad81d60a4e89bbb455eb5e576741fa31046d"
 )
 PRE_SYNC_PUBLICATION_PROMOTION_RUNTIME_INVENTORY_SHA256 = (
@@ -192,6 +195,11 @@ OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256 = (
 REVIEWED_RUNTIME_INVENTORY_SHA256 = frozenset(
     {
         EXPECTED_RUNTIME_INVENTORY_SHA256,
+        # Direct-registration handoff now retains the CallbackQuery route for
+        # the final Queue-v1 response. No Telegram boundary changed: all 103
+        # callsites and dispositions remain exact; only existing guarded
+        # start-handler identities moved below the route-preserving helper.
+        PRE_REGISTRATION_CALLBACK_HANDOFF_RUNTIME_INVENTORY_SHA256,
         # The bounded publication-publisher sync promotion adds no Telegram
         # delivery callsite. It moves the existing sync notification call by
         # 226 lines; all 103 owners and dispositions remain unchanged.

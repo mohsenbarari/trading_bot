@@ -1,3 +1,5 @@
+import ast
+from pathlib import Path
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -22,6 +24,33 @@ def _message(*, chat_id=7007, message_id=91):
 
 
 class TelegramPreAuthInteractionTests(unittest.IsolatedAsyncioTestCase):
+    def test_message_adapter_is_never_given_callback_message_directly(self):
+        bot_root = Path(__file__).resolve().parents[1] / "bot"
+        violations = []
+        for path in sorted(bot_root.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call) or not node.args:
+                    continue
+                callee = node.func
+                callee_name = (
+                    callee.id
+                    if isinstance(callee, ast.Name)
+                    else callee.attr
+                    if isinstance(callee, ast.Attribute)
+                    else ""
+                )
+                first = node.args[0]
+                if (
+                    callee_name == "answer_pre_auth_message_via_runtime"
+                    and isinstance(first, ast.Attribute)
+                    and first.attr == "message"
+                    and isinstance(first.value, ast.Name)
+                    and "callback" in first.value.id
+                ):
+                    violations.append(f"{path.relative_to(bot_root.parent)}:{node.lineno}")
+        self.assertEqual(violations, [])
+
     async def test_legacy_answer_preserves_aiogram_call(self):
         message = _message()
         markup = object()
@@ -72,6 +101,55 @@ class TelegramPreAuthInteractionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("7007", source_id)
         self.assertNotIn("91", source_id)
         session.commit.assert_awaited_once()
+
+    async def test_queue_callback_answer_uses_callback_actor_not_bot_message_author(self):
+        message = _message()
+        message.from_user.id = 9999
+        callback = SimpleNamespace(
+            id="callback-event",
+            from_user=SimpleNamespace(id=7007),
+            message=message,
+        )
+        session = SimpleNamespace(commit=AsyncMock())
+
+        with (
+            patch.object(
+                adapter,
+                "configured_telegram_delivery_runtime",
+                return_value=_runtime(TelegramDeliveryRuntimeMode.QUEUE_V1),
+            ),
+            patch.object(adapter, "current_server", return_value="foreign"),
+            patch.object(
+                adapter,
+                "enqueue_pre_auth_interaction_once",
+                new=AsyncMock(return_value=object()),
+            ) as enqueue,
+        ):
+            await adapter.answer_pre_auth_callback_message_via_runtime(
+                callback,
+                "ثبت‌نام تکمیل شد",
+                session=session,
+            )
+
+        self.assertEqual(enqueue.await_args.kwargs["chat_id"], 7007)
+        session.commit.assert_awaited_once()
+
+    async def test_queue_message_answer_rejects_bot_authored_private_message(self):
+        message = _message()
+        message.from_user.id = 9999
+        with patch.object(
+            adapter,
+            "configured_telegram_delivery_runtime",
+            return_value=_runtime(TelegramDeliveryRuntimeMode.QUEUE_V1),
+        ):
+            with self.assertRaisesRegex(
+                adapter.TelegramPreAuthInteractionRouteError,
+                "private_route_mismatch",
+            ):
+                await adapter.answer_pre_auth_message_via_runtime(
+                    message,
+                    "نباید ارسال شود",
+                )
 
     async def test_queue_edit_rejects_non_private_or_cross_user_route(self):
         for chat_type, actor_id, reason in (

@@ -920,7 +920,36 @@ class Stage5ConfirmationTests(unittest.IsolatedAsyncioTestCase):
         create_intent.assert_awaited_once()
         self.assertEqual(create_intent.await_args.kwargs["address"], "Tehran exact address")
         wait.assert_awaited_once_with(intent_id=intent_id, telegram_id=7001)
-        send.assert_awaited_once_with(cb.message, resolution)
+        send.assert_awaited_once_with(cb, resolution)
+
+    async def test_callback_handoff_uses_callback_route_for_bot_authored_message(self):
+        cb = callback()
+        user = SimpleNamespace(id=19, telegram_id=7001, role=UserRole.STANDARD)
+        resolution = start.RegistrationHandoffResolution(
+            status=TelegramRegistrationIntentStatus.RECONCILED_CREATED,
+            user=user,
+        )
+        queued = SimpleNamespace(message_id=None)
+
+        with patch.object(
+            start,
+            "_ensure_registration_onboarding",
+            new=AsyncMock(return_value=(user, start.OFFER_TUTORIAL_STEP)),
+        ), patch.object(
+            start,
+            "answer_pre_auth_callback_message_via_runtime",
+            new=AsyncMock(return_value=queued),
+        ) as callback_answer, patch.object(
+            start,
+            "answer_pre_auth_message_via_runtime",
+            new=AsyncMock(),
+        ) as message_answer:
+            await start._send_registration_handoff(cb, resolution)
+
+        callback_answer.assert_awaited_once()
+        self.assertIs(callback_answer.await_args.args[0], cb)
+        self.assertIn("راهنمای سریع ثبت آفر", callback_answer.await_args.args[1])
+        message_answer.assert_not_awaited()
 
     async def test_edit_address_rejects_group_missing_state_and_supports_retry(self):
         group_callback = callback()
