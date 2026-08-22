@@ -21,6 +21,10 @@ from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
     configured_telegram_delivery_runtime,
 )
+from core.telegram_delivery_queue_wakeup import (
+    notification_outbox_wakeup_event,
+    wait_for_telegram_wakeup,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -104,6 +108,9 @@ async def telegram_notification_outbox_queue_handoff_loop() -> None:
     iteration = 0
     while True:
         iteration += 1
+        wakeup_event = notification_outbox_wakeup_event()
+        wakeup_event.clear()
+        report: TelegramNotificationOutboxQueueFeederReport | None = None
         start_time = time.perf_counter()
         with job_context(JOB_TELEGRAM_DELIVERY_QUEUE, iteration=iteration) as run_id:
             try:
@@ -135,4 +142,10 @@ async def telegram_notification_outbox_queue_handoff_loop() -> None:
                     iteration=iteration,
                     duration_ms=duration_ms_since(start_time),
                 )
-        await asyncio.sleep(_interval_seconds())
+        if report is not None and report.processed_count:
+            await asyncio.sleep(0)
+        else:
+            await wait_for_telegram_wakeup(
+                wakeup_event,
+                timeout_seconds=_interval_seconds(),
+            )

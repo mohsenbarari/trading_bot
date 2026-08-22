@@ -17,6 +17,7 @@ class FakeQueueDB:
         self.added = []
         self.flush_count = 0
         self._next_id = 100
+        self.execute = AsyncMock()
 
     def add_all(self, objects):
         self.added.extend(objects)
@@ -94,6 +95,7 @@ class TelegramNotificationOutboxServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0].telegram_id_at_enqueue, 7007)
         self.assertEqual(rows[0].dedupe_key, "telegram-notification:project_user_joined:9:7")
         self.assertEqual(rows[1].dedupe_key, "telegram-notification:project_user_joined:9:8")
+        self.assertEqual(db.execute.await_count, 1)
 
     async def test_direct_sender_refuses_queue_owner_before_gateway(self):
         db = FakeDeliveryDB(user=SimpleNamespace(id=7, telegram_id=7777))

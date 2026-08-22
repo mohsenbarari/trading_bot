@@ -437,6 +437,11 @@ async def enqueue_telegram_notification_once(
             extra_payload=payload,
         )
         return TelegramNotificationEnqueueResult(outbox=existing, created=False)
+    from core.telegram_delivery_queue_wakeup import (
+        emit_notification_outbox_wakeup,
+    )
+
+    await emit_notification_outbox_wakeup(db)
     return TelegramNotificationEnqueueResult(outbox=row, created=True)
 
 
@@ -875,6 +880,11 @@ async def enqueue_telegram_notifications(
     if rows:
         db.add_all(rows)
         await db.flush()
+        from core.telegram_delivery_queue_wakeup import (
+            emit_notification_outbox_wakeup,
+        )
+
+        await emit_notification_outbox_wakeup(db)
     return rows
 
 

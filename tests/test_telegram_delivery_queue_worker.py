@@ -164,15 +164,15 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                 places=6,
             )
 
-    def test_latency_sensitive_slots_use_bounded_fast_polling(self):
+    def test_lane_polling_is_a_bounded_wakeup_fallback(self):
         with patch.object(
             worker.settings,
             "telegram_delivery_queue_primary_idle_poll_interval_seconds",
-            0.2,
+            1.0,
         ), patch.object(
             worker.settings,
             "telegram_delivery_queue_publisher_idle_poll_interval_seconds",
-            0.5,
+            1.0,
         ), patch.object(
             worker.settings,
             "telegram_delivery_queue_worker_interval_seconds",
@@ -183,25 +183,25 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
                     worker.TELEGRAM_PRIMARY_BOT_IDENTITY,
                     "general-0",
                 ),
-                0.2,
+                1.0,
             )
             self.assertEqual(
                 worker._lane_idle_poll_interval_seconds(
                     worker.TELEGRAM_PRIMARY_BOT_IDENTITY,
                     "general-1",
                 ),
-                0.2,
+                1.0,
             )
             self.assertEqual(
                 worker._lane_idle_poll_interval_seconds(
                     worker.TELEGRAM_PRIMARY_BOT_IDENTITY,
                     "m0-reserved-0",
                 ),
-                0.2,
+                1.0,
             )
             self.assertEqual(
                 worker._lane_idle_poll_interval_seconds("publisher_1", "general-0"),
-                0.5,
+                1.0,
             )
             self.assertEqual(
                 worker._lane_idle_poll_interval_seconds(
@@ -479,8 +479,8 @@ class TelegramDeliveryQueueWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
             "core.telegram_delivery_queue_worker.run_telegram_delivery_queue_cycle",
             new=AsyncMock(side_effect=failure),
         ), patch(
-            "core.telegram_delivery_queue_worker.asyncio.sleep",
-            side_effect=asyncio.CancelledError,
+            "core.telegram_delivery_queue_worker.wait_for_telegram_wakeup",
+            new=AsyncMock(side_effect=asyncio.CancelledError),
         ), patch.object(worker._loop_errors, "log") as log_error:
             with self.assertRaises(asyncio.CancelledError):
                 await worker._telegram_delivery_queue_lane_slot_loop(

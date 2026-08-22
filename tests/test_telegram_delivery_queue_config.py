@@ -26,11 +26,11 @@ class TelegramDeliveryQueueConfigTests(unittest.TestCase):
         settings = _settings()
         self.assertEqual(
             settings.telegram_delivery_queue_primary_idle_poll_interval_seconds,
-            0.2,
+            1.0,
         )
         self.assertEqual(
             settings.telegram_delivery_queue_publisher_idle_poll_interval_seconds,
-            0.5,
+            1.0,
         )
         self.assertEqual(
             settings.telegram_notification_outbox_queue_feeder_interval_seconds,

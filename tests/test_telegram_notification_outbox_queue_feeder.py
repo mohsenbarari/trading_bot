@@ -33,7 +33,7 @@ class TelegramNotificationOutboxQueueFeederTests(
             legacy_workers_enabled=not queue_owner,
         )
 
-    def test_queue_feeder_uses_dedicated_low_latency_poll_interval(self):
+    def test_queue_feeder_keeps_short_fallback_for_synced_rows(self):
         with patch.object(
             feeder.settings,
             "telegram_notification_outbox_queue_feeder_interval_seconds",

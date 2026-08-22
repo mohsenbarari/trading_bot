@@ -1098,6 +1098,12 @@ async def enqueue_telegram_delivery_job(
         run_id=normalized_run_id,
     ):
         raise TelegramDeliveryDedupeConflictError(dedupe_key)
+    if created:
+        from core.telegram_delivery_queue_wakeup import (
+            emit_delivery_queue_wakeup,
+        )
+
+        await emit_delivery_queue_wakeup(db, bot_identity=bot)
     return TelegramDeliveryEnqueueResult(job=record, created=created)
 
 

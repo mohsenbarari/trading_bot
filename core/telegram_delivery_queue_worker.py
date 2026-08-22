@@ -95,6 +95,11 @@ from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
     configured_telegram_delivery_runtime,
 )
+from core.telegram_delivery_queue_wakeup import (
+    delivery_queue_wakeup_event,
+    telegram_delivery_queue_wakeup_listener_loop,
+    wait_for_telegram_wakeup,
+)
 from core.telegram_trade_result_queue_feeder import (
     telegram_trade_result_queue_handoff_loop,
 )
@@ -577,7 +582,7 @@ def _worker_interval_seconds() -> float:
 
 
 def _lane_idle_poll_interval_seconds(bot_identity: str, slot_name: str) -> float:
-    """Keep interactive and publisher lanes responsive with bounded polling."""
+    """Return the bounded fallback used when no commit wake-up arrives."""
     identity = _normalize_lane_identity(bot_identity)
     if identity == TELEGRAM_PRIMARY_BOT_IDENTITY and (
         slot_name in {"general-0", "general-1"}
@@ -589,7 +594,7 @@ def _lane_idle_poll_interval_seconds(bot_identity: str, slot_name: str) -> float
                 getattr(
                     settings,
                     "telegram_delivery_queue_primary_idle_poll_interval_seconds",
-                    0.2,
+                    1.0,
                 )
             ),
         )
@@ -600,7 +605,7 @@ def _lane_idle_poll_interval_seconds(bot_identity: str, slot_name: str) -> float
                 getattr(
                     settings,
                     "telegram_delivery_queue_publisher_idle_poll_interval_seconds",
-                    0.5,
+                    1.0,
                 )
             ),
         )
@@ -1634,6 +1639,8 @@ async def _telegram_delivery_queue_lane_slot_loop(
     iteration = 0
     while True:
         iteration += 1
+        wakeup_event = delivery_queue_wakeup_event(lane.bot_identity)
+        wakeup_event.clear()
         report: TelegramDeliveryQueueCycleReport | None = None
         start_time = time.perf_counter()
         with job_context(JOB_TELEGRAM_DELIVERY_QUEUE, iteration=iteration) as run_id:
@@ -1700,7 +1707,10 @@ async def _telegram_delivery_queue_lane_slot_loop(
         if report is not None and report.processed_count:
             await asyncio.sleep(min(0.01, idle_poll_interval))
         else:
-            await asyncio.sleep(idle_poll_interval)
+            await wait_for_telegram_wakeup(
+                wakeup_event,
+                timeout_seconds=idle_poll_interval,
+            )
 
 
 async def telegram_delivery_queue_lane_loop(
@@ -2318,6 +2328,10 @@ async def telegram_delivery_queue_loop(
                 "lane_count": len(lanes),
                 "restored_limiter_evidence_count": limiter_rehydration.restored_count,
             },
+        )
+        start_task(
+            telegram_delivery_queue_wakeup_listener_loop(),
+            name="telegram-delivery-queue-wakeup-listener",
         )
         for lane in lanes:
             start_task(
