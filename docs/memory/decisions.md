@@ -2,6 +2,7 @@
 
 Entries are newest first.
 
+- 2026-08-22 | Release input signatures exclude Python bytecode/cache artifacts while remaining sensitive to source drift.
 - 2026-08-22 | Closed/quiet-market inference may publish only bound `SAFE_NO_DATA`: healthy retained checkpoints, no price authority or invented values, then atomic replacement by fresh rate-ready data.
 - 2026-08-22 | Queue-v1 forward redeploys use the official two-host release while retaining one owner; cutover and redeploy have separate bound evidence.
 - 2026-08-22 | Iran nginx gets only named `www-data` execute ACL; deploy proves index readable and runtime `.env` unreadable.

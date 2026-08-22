@@ -25,12 +25,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-# This read-only probe imports the pure offer-guard evaluator, whose module
-# initializes application Settings as an import side effect.  Host-side
-# release checks must not parse the operational compose .env (it legitimately
-# contains orchestration-only keys).  Checked-in non-secret defaults satisfy
-# unrelated required Settings fields, while real process environment values
-# retain Pydantic's higher priority inside production containers.
+# Host-side release checks must not parse the operational compose .env (it
+# legitimately contains orchestration-only keys).  The pure offer-guard
+# evaluator is dependency-light, while this checked-in non-secret fallback
+# also protects future probe-only imports from consulting the live .env.
 os.environ.setdefault(
     "APP_ENV_FILE",
     str(REPO_ROOT / "config" / "unit-test.env.example"),

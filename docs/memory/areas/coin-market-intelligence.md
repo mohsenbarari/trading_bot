@@ -13,6 +13,6 @@
 - Staging catalog mirrors Iran؛ Snapshot read-only. v3 exact bands؛ same-family ±10% confirmation؛ ties require choice؛ edits reuse scope؛ no auto-select؛ stale taps fail.
 - Packs require «پک»؛ infer تمام/نیم/ربع from Snapshot؛ quantity 100؛ no lots؛ audit=`PACK_ONLY`.
 - Collectors stay out of bridge `After=`؛ use `flock`.
-- Host readiness uses non-secret settings, never Compose `.env`. Closed-market staleness is `DEGRADED_GUARD_FAIL_OPEN` only with healthy collectors/readable inputs.
+- Host readiness/relay imports stay dependency-light and never parse Compose `.env`. Closed-market staleness is `DEGRADED_GUARD_FAIL_OPEN` only with healthy collectors/readable inputs.
 - Condition v2 separates settlement/form, phase, deadline, 11 families؛ verified spans required. Sealed 240/live shadow stays non-operational؛ retain evidence؛ resume needs explicit offline-evaluated decision.
 - Index anchors؛ no per-message scan. Fetch newest-first then sort؛ oldest-first backlog preserves checkpoints.

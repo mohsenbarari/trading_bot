@@ -659,6 +659,42 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         ):
             self.assertIn(expected, deploy_script)
 
+    def test_release_input_hash_ignores_python_cache_but_detects_source_drift(self):
+        deploy_script = (REPO_ROOT / 'deploy.sh').read_text(encoding='utf-8')
+        function_body = deploy_script.split('hash_file_or_dir() {', 1)[1].split('\n}', 1)[0]
+        shell = f'''hash_file_or_dir() {{{function_body}
+}}
+PROJECT_DIR="$1"
+hash_file_or_dir inputs
+'''
+
+        with tempfile.TemporaryDirectory(prefix='deploy-input-signature-') as temporary:
+            project = Path(temporary)
+            inputs = project / 'inputs'
+            cache = inputs / '__pycache__'
+            cache.mkdir(parents=True)
+            source = inputs / 'module.py'
+            bytecode = cache / 'module.cpython-312.pyc'
+            source.write_text('VALUE = 1\n', encoding='utf-8')
+            bytecode.write_bytes(b'first-cache')
+
+            def signature() -> str:
+                result = subprocess.run(
+                    ['bash', '-c', shell, 'deploy-hash-test', str(project)],
+                    cwd=REPO_ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                return result.stdout
+
+            initial = signature()
+            bytecode.write_bytes(b'rewritten-cache')
+            self.assertEqual(signature(), initial)
+            source.write_text('VALUE = 2\n', encoding='utf-8')
+            self.assertNotEqual(signature(), initial)
+
     def test_production_iran_deploy_does_not_recreate_stateful_services(self):
         production_script = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text(encoding='utf-8')
         legacy_script = (REPO_ROOT / 'deploy.sh').read_text(encoding='utf-8')

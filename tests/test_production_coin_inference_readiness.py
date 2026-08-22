@@ -54,6 +54,41 @@ def test_cli_does_not_parse_operational_compose_dotenv(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
 
 
+def test_host_readiness_and_relay_import_without_application_dependencies() -> None:
+    """The host relay must not require the container-only application stack."""
+
+    environment = os.environ.copy()
+    environment["APP_ENV_FILE"] = str(
+        readiness.REPO_ROOT / "config" / "unit-test.env.example"
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import builtins
+
+original_import = builtins.__import__
+
+def dependency_guard(name, *args, **kwargs):
+    if name.split('.', 1)[0] in {'sqlalchemy', 'pydantic_settings'}:
+        raise ModuleNotFoundError(f'blocked container dependency: {name}')
+    return original_import(name, *args, **kwargs)
+
+builtins.__import__ = dependency_guard
+import scripts.check_production_coin_inference_readiness
+import scripts.relay_production_coin_inference_snapshot
+""",
+        ],
+        cwd=readiness.REPO_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def _snapshot(
     *,
     underlying_age: float = 20.0,

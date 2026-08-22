@@ -12,12 +12,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
 import math
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
-from sqlalchemy.ext.asyncio import AsyncSession
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.config import settings
-from core.metrics import registry as metrics_registry
 from core.market_intelligence.coin_inference import CANONICAL_COMMODITY_NAMES
 from core.market_intelligence.market_contracts import normalize_utc
 from core.market_intelligence.market_snapshot import (
@@ -25,11 +24,16 @@ from core.market_intelligence.market_snapshot import (
     MarketSnapshotUnavailable,
 )
 from core.offer_settlement import normalize_settlement_type
-from core.services.market_transition_service import evaluate_current_market_schedule
-from models.commodity import Commodity
 
 
 logger = logging.getLogger(__name__)
+
+# Explicit dependency-injection seams preserve the existing unit-test and
+# fail-open contract without importing container-only runtime dependencies in
+# host-side readiness/relay processes. Product calls resolve the real objects
+# lazily inside ``evaluate_offer_model_price_guard``.
+settings: Any | None = None
+evaluate_current_market_schedule: Any | None = None
 
 OFFER_MODEL_PRICE_GUARD_VERSION = "offer-model-price-guard-v2"
 OFFER_MODEL_PRICE_GUARD_OPENING_WINDOW_SECONDS = 15 * 60
@@ -88,6 +92,8 @@ def _abstain(reason: str, **values: Any) -> OfferModelPriceGuardDecision:
 
 def _observe(decision: OfferModelPriceGuardDecision) -> OfferModelPriceGuardDecision:
     """Expose every enabled guard outcome with bounded, non-personal labels."""
+
+    from core.metrics import registry as metrics_registry
 
     metrics_registry.counter(
         "trading_bot_offer_model_price_guard_decisions_total",
@@ -327,7 +333,7 @@ def evaluate_offer_model_price_snapshot(
 
 
 async def evaluate_offer_model_price_guard(
-    db: AsyncSession,
+    db: "AsyncSession",
     *,
     commodity_id: int,
     settlement_type: object,
@@ -338,13 +344,21 @@ async def evaluate_offer_model_price_guard(
 ) -> OfferModelPriceGuardDecision:
     """Load the current catalog/Snapshot and fail open unless both are safe."""
 
-    if not bool(getattr(settings, "offer_model_price_guard_enabled", False)):
+    runtime_settings = settings
+    if runtime_settings is None:
+        # Host-side release/readiness probes import only the pure Snapshot
+        # evaluator and intentionally omit the application's settings stack.
+        from core.config import settings as runtime_settings
+
+    if not bool(getattr(runtime_settings, "offer_model_price_guard_enabled", False)):
         return _abstain("FEATURE_DISABLED")
     snapshot_path = str(
-        getattr(settings, "coin_intelligence_inference_snapshot_path", "") or ""
+        getattr(runtime_settings, "coin_intelligence_inference_snapshot_path", "") or ""
     ).strip()
     if not snapshot_path:
         return _observe(_abstain("SNAPSHOT_PATH_UNCONFIGURED"))
+
+    from models.commodity import Commodity
 
     commodity = await db.get(Commodity, int(commodity_id))
     if commodity is None:
@@ -357,8 +371,13 @@ async def evaluate_offer_model_price_guard(
     current_time = now_utc or datetime.now(timezone.utc)
     evaluation = market_evaluation
     if evaluation is None:
+        schedule_evaluator = evaluate_current_market_schedule
+        if schedule_evaluator is None:
+            from core.services.market_transition_service import (
+                evaluate_current_market_schedule as schedule_evaluator,
+            )
         try:
-            evaluation = await evaluate_current_market_schedule(
+            evaluation = await schedule_evaluator(
                 db,
                 current_time=current_time,
             )
@@ -370,7 +389,7 @@ async def evaluate_offer_model_price_guard(
             return _observe(_abstain("MARKET_SCHEDULE_UNAVAILABLE"))
     maximum_age = int(
         getattr(
-            settings,
+            runtime_settings,
             "offer_model_price_guard_max_snapshot_age_seconds",
             OFFER_MODEL_PRICE_GUARD_DEFAULT_MAXIMUM_SNAPSHOT_AGE_SECONDS,
         )

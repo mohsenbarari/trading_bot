@@ -523,7 +523,15 @@ hash_file_or_dir() {
     if [[ -f "$path" ]]; then
         sha256sum "$path" | sed "s#  $PROJECT_DIR/#  #"
     elif [[ -d "$path" ]]; then
-        (cd "$PROJECT_DIR" && find "$rel" -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
+        # Release signatures describe build inputs, never interpreter caches.
+        # These files are excluded from Docker contexts and can be rewritten by
+        # a read-only Python import between prebuild and migration.
+        (cd "$PROJECT_DIR" && find "$rel" -type f \
+            ! -path '*/__pycache__/*' \
+            ! -name '*.pyc' \
+            ! -name '*.pyo' \
+            ! -name '*.pyd' \
+            -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
     fi
 }
 
