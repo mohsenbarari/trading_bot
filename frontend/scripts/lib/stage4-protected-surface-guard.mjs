@@ -503,6 +503,32 @@ export const MARKET_PACK_INFERENCE_EVIDENCE = Object.freeze({
   sha256: '79b72f4776ce5feef1416ee4f7cf02b9d37259a9f5e87180eb2b423881e41dc5',
 })
 
+// Owner-directed history follow-up. Read-only terminal cards gain a uniform
+// responsive minimum height and a stronger top edge. Market history also
+// converges from the existing active-offer poll when a terminal WebSocket
+// event is missed; trading, timers and offer lifecycle authority are unchanged.
+export const MARKET_HISTORY_UNIFORM_LIVE_KIND =
+  'market-history-uniform-live-convergence'
+
+export const MARKET_HISTORY_UNIFORM_LIVE_ALLOWED_PATHS = Object.freeze([
+  'frontend/src/components/OffersList.vue',
+  'frontend/src/views/MarketView.vue',
+])
+
+export const MARKET_HISTORY_UNIFORM_LIVE_ALLOWED_FILE_SHA256 = Object.freeze({
+  'frontend/src/components/OffersList.vue':
+    '9a58458142f8b0213ce6a853b152a5b04ef93d6f87f8f98e6cb1f37d2b2c086c',
+  'frontend/src/views/MarketView.vue':
+    '6eea08979c7a91ae4ea5f96939165c28459f2729fb6a4c4c75f15f169c80e608',
+})
+
+export const MARKET_HISTORY_UNIFORM_LIVE_EVIDENCE = Object.freeze({
+  count: 20,
+  contentBytes: 180207,
+  pathSetSha256: '6035c31eab716d0061c81427da214fbe9765571ba0d370e218b11edab27678f2',
+  sha256: 'b6055a4b3a3d5dfa92f40294d2617875a58761a75babe45342e08bc979f46d97',
+})
+
 export const MESSENGER_RUNTIME_BASELINE = Object.freeze({
   count: 85,
   contentBytes: 1312405,
@@ -1524,8 +1550,7 @@ export function assertMarketHistoryCompactSeparationDisposition(entries) {
   )
 }
 
-export function assertMarketPackInferenceSemantics(entries) {
-  assertMarketHistoryCompactSeparationSemantics(entries)
+function assertMarketPackInferenceTypedSemantics(entries) {
   const market = sourceByPath(entries, 'frontend/src/views/MarketView.vue')
   const modal = sourceByPath(
     entries,
@@ -1554,6 +1579,11 @@ export function assertMarketPackInferenceSemantics(entries) {
   }
 }
 
+export function assertMarketPackInferenceSemantics(entries) {
+  assertMarketHistoryCompactSeparationSemantics(entries)
+  assertMarketPackInferenceTypedSemantics(entries)
+}
+
 function assertMarketPackInferenceAllowedFiles(entries) {
   const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]))
   for (const repoPath of MARKET_PACK_INFERENCE_ALLOWED_PATHS) {
@@ -1576,6 +1606,62 @@ export function assertMarketPackInferenceDisposition(entries) {
     'Market pack inference disposition',
     protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT),
     MARKET_PACK_INFERENCE_EVIDENCE,
+  )
+}
+
+export function assertMarketHistoryUniformLiveSemantics(entries) {
+  assertMarketHistoryCompactSummarySemantics(entries)
+  assertMarketPackInferenceTypedSemantics(entries)
+  const offers = sourceByPath(entries, 'frontend/src/components/OffersList.vue')
+  const market = sourceByPath(entries, 'frontend/src/views/MarketView.vue')
+  const requiredOfferFragments = [
+    '--history-card-min-block-size: 8.75rem;',
+    'min-block-size: calc(var(--history-card-min-block-size) - 2px);',
+    '0 -8px 18px -8px color-mix(in srgb, var(--ds-text-primary) 55%, transparent)',
+    '--history-card-min-block-size: 5.1875rem;',
+  ]
+  for (const fragment of requiredOfferFragments) {
+    if (!offers.includes(fragment)) {
+      throw new Error(`Market uniform history lost bounded styling: ${fragment}`)
+    }
+  }
+  const requiredMarketFragments = [
+    "cache: 'no-store'",
+    'watch(offers, (nextOffers, previousOffers) => {',
+    'previousOffers.some((offer) => !nextIdentities.has(offerRuntimeIdentity(offer)))',
+    "wsOn('offer:cancelled', handleOfferTerminalHistoryEvent)",
+    "wsOn('ws:reconnect', handleRealtimeReconnect)",
+    'remainingQuantity <= 0',
+  ]
+  for (const fragment of requiredMarketFragments) {
+    if (!market.includes(fragment)) {
+      throw new Error(`Market live history lost convergence guard: ${fragment}`)
+    }
+  }
+}
+
+function assertMarketHistoryUniformLiveAllowedFiles(entries) {
+  const entriesByPath = new Map(entries.map((entry) => [entry.path, entry]))
+  for (const repoPath of MARKET_HISTORY_UNIFORM_LIVE_ALLOWED_PATHS) {
+    const entry = entriesByPath.get(repoPath)
+    if (!entry) throw new Error(`Market uniform live history allowed file is missing: ${repoPath}`)
+    const actualSha256 = fileSha256(entry.content)
+    const expectedSha256 = MARKET_HISTORY_UNIFORM_LIVE_ALLOWED_FILE_SHA256[repoPath]
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `Market uniform live history allowed file drift: ${repoPath} ${expectedSha256} -> ${actualSha256}`,
+      )
+    }
+  }
+}
+
+export function assertMarketHistoryUniformLiveDisposition(entries) {
+  assertMarketHistoryUniformLiveAllowedFiles(entries)
+  assertMarketHistoryUniformLiveSemantics(entries)
+  return assertProtectedFileSetEvidence(
+    'Market uniform live history disposition',
+    protectedFileSetEvidence(entries, MARKET_RUNTIME_CONTRACT),
+    MARKET_HISTORY_UNIFORM_LIVE_EVIDENCE,
   )
 }
 
@@ -1681,27 +1767,35 @@ export function resolveMarketRuntimeDisposition(entries) {
                                     evidence: assertMarketPackInferenceDisposition(entries),
                                   }
                                 } catch (packInferenceError) {
-                                  const messages = [
-                                    baselineError,
-                                    integrationError,
-                                    aPlusCError,
-                                    lifecycleError,
-                                    perimeterError,
-                                    linearMeterError,
-                                    compactConfirmError,
-                                    feedHeadingError,
-                                    terminalVisualError,
-                                    customerHistoryError,
-                                    requesterAckError,
-                                    lotSuggestionError,
-                                    inferenceUxError,
-                                    historyCompactError,
-                                    historySeparationError,
-                                    packInferenceError,
-                                  ].map((error) => error instanceof Error ? error.message : String(error))
-                                  throw new Error(
-                                    `Market runtime rejected after Stage 4 baseline drift (${messages[0]}); main/UIUX integration disposition rejected (${messages[1]}); Market A+C disposition rejected (${messages[2]}); Market A+C lifecycle-clarity disposition rejected (${messages[3]}); Market A+C perimeter-deadline disposition rejected (${messages[4]}); Market A+C linear-meter disposition rejected (${messages[5]}); Market compact-confirm disposition rejected (${messages[6]}); Market feed-heading removal disposition rejected (${messages[7]}); Market terminal-history visual disposition rejected (${messages[8]}); Market customer-history access disposition rejected (${messages[9]}); Market overtime requester acknowledgement disposition rejected (${messages[10]}); Market cross-server lot suggestion identity disposition rejected (${messages[11]}); Market inference confirmation UX disposition rejected (${messages[12]}); Market history compact summary disposition rejected (${messages[13]}); Market history compact separation disposition rejected (${messages[14]}); Market pack inference disposition rejected (${messages[15]})`,
-                                  )
+                                  try {
+                                    return {
+                                      kind: MARKET_HISTORY_UNIFORM_LIVE_KIND,
+                                      evidence: assertMarketHistoryUniformLiveDisposition(entries),
+                                    }
+                                  } catch (uniformLiveError) {
+                                    const messages = [
+                                      baselineError,
+                                      integrationError,
+                                      aPlusCError,
+                                      lifecycleError,
+                                      perimeterError,
+                                      linearMeterError,
+                                      compactConfirmError,
+                                      feedHeadingError,
+                                      terminalVisualError,
+                                      customerHistoryError,
+                                      requesterAckError,
+                                      lotSuggestionError,
+                                      inferenceUxError,
+                                      historyCompactError,
+                                      historySeparationError,
+                                      packInferenceError,
+                                      uniformLiveError,
+                                    ].map((error) => error instanceof Error ? error.message : String(error))
+                                    throw new Error(
+                                      `Market runtime rejected after Stage 4 baseline drift (${messages[0]}); main/UIUX integration disposition rejected (${messages[1]}); Market A+C disposition rejected (${messages[2]}); Market A+C lifecycle-clarity disposition rejected (${messages[3]}); Market A+C perimeter-deadline disposition rejected (${messages[4]}); Market A+C linear-meter disposition rejected (${messages[5]}); Market compact-confirm disposition rejected (${messages[6]}); Market feed-heading removal disposition rejected (${messages[7]}); Market terminal-history visual disposition rejected (${messages[8]}); Market customer-history access disposition rejected (${messages[9]}); Market overtime requester acknowledgement disposition rejected (${messages[10]}); Market cross-server lot suggestion identity disposition rejected (${messages[11]}); Market inference confirmation UX disposition rejected (${messages[12]}); Market history compact summary disposition rejected (${messages[13]}); Market history compact separation disposition rejected (${messages[14]}); Market pack inference disposition rejected (${messages[15]}); Market uniform live history disposition rejected (${messages[16]})`,
+                                    )
+                                  }
                                 }
                               }
                             }

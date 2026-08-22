@@ -1147,11 +1147,18 @@ async function cancelOwnOffer(offerId: number) {
   box-shadow: none;
 }
 
-/* The denser history rows still need a calm visual boundary. A top-only
-   shadow separates consecutive terminal cards without adding height or
-   competing with their traded/expired tint and status rail. */
+/* Match every regular terminal row to the tallest compact mobile variant.
+   Exceptionally long content may still grow instead of being clipped. */
 .offer-card-wrap.is-history {
-  box-shadow: 0 -5px 12px -9px color-mix(in srgb, var(--ds-text-primary) 42%, transparent);
+  --history-card-min-block-size: 8.75rem;
+  min-block-size: var(--history-card-min-block-size);
+  box-shadow:
+    0 -8px 18px -8px color-mix(in srgb, var(--ds-text-primary) 55%, transparent),
+    inset 0 1px 0 color-mix(in srgb, white 72%, transparent);
+}
+
+.offer-card-wrap.is-history .offer-card-inner {
+  min-block-size: calc(var(--history-card-min-block-size) - 2px);
 }
 
 /* Terminal cards have no actions or deadline meter. Reuse that free space as
@@ -1749,6 +1756,10 @@ async function cancelOwnOffer(offerId: number) {
     align-items: center;
     gap: 0.85rem;
     padding: 6px 10px;
+  }
+
+  .offer-card-wrap.is-history {
+    --history-card-min-block-size: 5.1875rem;
   }
 
   .offer-card-inner--history :is(.offer-header, .offer-body) {

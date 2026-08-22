@@ -61,6 +61,10 @@ import {
   MARKET_PACK_INFERENCE_ALLOWED_PATHS,
   MARKET_PACK_INFERENCE_EVIDENCE,
   MARKET_PACK_INFERENCE_KIND,
+  MARKET_HISTORY_UNIFORM_LIVE_ALLOWED_FILE_SHA256,
+  MARKET_HISTORY_UNIFORM_LIVE_ALLOWED_PATHS,
+  MARKET_HISTORY_UNIFORM_LIVE_EVIDENCE,
+  MARKET_HISTORY_UNIFORM_LIVE_KIND,
   MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_FILE_SHA256,
   MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_PATHS,
   MARKET_OVERTIME_REQUESTER_ACK_EVIDENCE,
@@ -115,6 +119,8 @@ import {
   assertMarketHistoryCompactSeparationSemantics,
   assertMarketPackInferenceDisposition,
   assertMarketPackInferenceSemantics,
+  assertMarketHistoryUniformLiveDisposition,
+  assertMarketHistoryUniformLiveSemantics,
   assertMarketOvertimeRequesterAcknowledgementDisposition,
   assertMarketOvertimeRequesterAcknowledgementSemantics,
   STAGE4_BASE_COMMIT,
@@ -346,13 +352,13 @@ describe('Stage 4 protected surface baseline', () => {
     )
   })
 
-  it('keeps every prior Market disposition immutable while admitting pack price inference', () => {
+  it('keeps every prior Market disposition immutable while admitting uniform live history', () => {
     expect(ownedPaths.market).toContain('frontend/src/utils/settlementType.ts')
     expect(ownedPaths.market).toContain('frontend/src/components/CommodityInferenceSelectionModal.vue')
     const entries = readFileEntries(repoRoot, ownedPaths.market)
     expect(resolveMarketRuntimeDisposition(entries)).toMatchObject({
-      kind: MARKET_PACK_INFERENCE_KIND,
-      evidence: MARKET_PACK_INFERENCE_EVIDENCE,
+      kind: MARKET_HISTORY_UNIFORM_LIVE_KIND,
+      evidence: MARKET_HISTORY_UNIFORM_LIVE_EVIDENCE,
     })
     expect(MARKET_RUNTIME_BASELINE).toEqual({
       count: 19,
@@ -567,7 +573,7 @@ describe('Stage 4 protected surface baseline', () => {
     expect(Object.isFrozen(MARKET_HISTORY_COMPACT_SEPARATION_ALLOWED_PATHS)).toBe(true)
     expect(Object.isFrozen(MARKET_HISTORY_COMPACT_SEPARATION_ALLOWED_FILE_SHA256)).toBe(true)
     expect(Object.isFrozen(MARKET_HISTORY_COMPACT_SEPARATION_EVIDENCE)).toBe(true)
-    expect(() => assertMarketHistoryCompactSeparationDisposition(entries)).toThrow(/contentBytes drift/)
+    expect(() => assertMarketHistoryCompactSeparationDisposition(entries)).toThrow(/allowed file drift/)
     expect(MARKET_PACK_INFERENCE_KIND).toBe('market-pack-price-inference')
     expect(MARKET_PACK_INFERENCE_ALLOWED_PATHS).toEqual([
       'frontend/src/components/CommodityInferenceSelectionModal.vue',
@@ -588,7 +594,28 @@ describe('Stage 4 protected surface baseline', () => {
     expect(Object.isFrozen(MARKET_PACK_INFERENCE_ALLOWED_PATHS)).toBe(true)
     expect(Object.isFrozen(MARKET_PACK_INFERENCE_ALLOWED_FILE_SHA256)).toBe(true)
     expect(Object.isFrozen(MARKET_PACK_INFERENCE_EVIDENCE)).toBe(true)
-    expect(() => assertMarketPackInferenceDisposition(entries)).not.toThrow()
+    expect(() => assertMarketPackInferenceDisposition(entries)).toThrow(/allowed file drift/)
+    expect(MARKET_HISTORY_UNIFORM_LIVE_KIND).toBe('market-history-uniform-live-convergence')
+    expect(MARKET_HISTORY_UNIFORM_LIVE_ALLOWED_PATHS).toEqual([
+      'frontend/src/components/OffersList.vue',
+      'frontend/src/views/MarketView.vue',
+    ])
+    expect(MARKET_HISTORY_UNIFORM_LIVE_ALLOWED_FILE_SHA256).toEqual({
+      'frontend/src/components/OffersList.vue':
+        '9a58458142f8b0213ce6a853b152a5b04ef93d6f87f8f98e6cb1f37d2b2c086c',
+      'frontend/src/views/MarketView.vue':
+        '6eea08979c7a91ae4ea5f96939165c28459f2729fb6a4c4c75f15f169c80e608',
+    })
+    expect(MARKET_HISTORY_UNIFORM_LIVE_EVIDENCE).toEqual({
+      count: 20,
+      contentBytes: 180207,
+      pathSetSha256: '6035c31eab716d0061c81427da214fbe9765571ba0d370e218b11edab27678f2',
+      sha256: 'b6055a4b3a3d5dfa92f40294d2617875a58761a75babe45342e08bc979f46d97',
+    })
+    expect(Object.isFrozen(MARKET_HISTORY_UNIFORM_LIVE_ALLOWED_PATHS)).toBe(true)
+    expect(Object.isFrozen(MARKET_HISTORY_UNIFORM_LIVE_ALLOWED_FILE_SHA256)).toBe(true)
+    expect(Object.isFrozen(MARKET_HISTORY_UNIFORM_LIVE_EVIDENCE)).toBe(true)
+    expect(() => assertMarketHistoryUniformLiveDisposition(entries)).not.toThrow()
   })
 
   it('fails closed if compact terminal history escapes its read-only responsive grid', () => {
@@ -625,8 +652,30 @@ describe('Stage 4 protected surface baseline', () => {
       '.offer-card-wrap.is-history {',
     ))).toThrow(/allowed file drift/)
     expect(() => resolveMarketRuntimeDisposition(mutateOffers(
-      'box-shadow: 0 -5px 12px -9px color-mix(in srgb, var(--ds-text-primary) 42%, transparent);',
-    ))).toThrow(/Market history compact separation disposition rejected/)
+      '0 -8px 18px -8px color-mix(in srgb, var(--ds-text-primary) 55%, transparent)',
+    ))).toThrow(/Market uniform live history disposition rejected/)
+  })
+
+  it('fails closed if uniform history loses its height or polling convergence', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.market)
+    const mutate = (repoPath, fragment) => entries.map((entry) => (
+      entry.path === repoPath
+        ? { ...entry, content: Buffer.from(entry.content.toString('utf8').replace(fragment, '')) }
+        : entry
+    ))
+
+    expect(() => assertMarketHistoryUniformLiveSemantics(mutate(
+      'frontend/src/components/OffersList.vue',
+      '--history-card-min-block-size: 8.75rem;',
+    ))).toThrow(/lost bounded styling/)
+    expect(() => assertMarketHistoryUniformLiveSemantics(mutate(
+      'frontend/src/views/MarketView.vue',
+      'watch(offers, (nextOffers, previousOffers) => {',
+    ))).toThrow(/lost convergence guard/)
+    expect(() => assertMarketHistoryUniformLiveDisposition(mutate(
+      'frontend/src/views/MarketView.vue',
+      "wsOn('ws:reconnect', handleRealtimeReconnect)",
+    ))).toThrow(/allowed file drift/)
   })
 
   it('fails closed if pack inference loses its typed hint or drifts outside its allowlist', () => {
@@ -637,7 +686,7 @@ describe('Stage 4 protected surface baseline', () => {
         : entry
     ))
 
-    expect(() => assertMarketPackInferenceSemantics(mutate(
+    expect(() => assertMarketHistoryUniformLiveSemantics(mutate(
       'frontend/src/views/MarketView.vue',
       ':pack-hint="pendingCommodityInference.pack_hint"',
     ))).toThrow(/lost typed preview contract/)
@@ -767,11 +816,11 @@ describe('Stage 4 protected surface baseline', () => {
     expect(() => resolveMarketRuntimeDisposition(changedAllowed)).toThrow(
       /Market inference confirmation UX disposition rejected/,
     )
-    expect(() => assertMarketPackInferenceDisposition(changedUnlisted)).toThrow(
+    expect(() => assertMarketHistoryUniformLiveDisposition(changedUnlisted)).toThrow(
       /contentBytes drift/,
     )
     expect(() => resolveMarketRuntimeDisposition(changedUnlisted)).toThrow(
-      /Market pack inference disposition rejected/,
+      /Market uniform live history disposition rejected/,
     )
   })
 

@@ -415,7 +415,13 @@ async function fetchMarketHistoryOffers(options: { reset?: boolean; silent?: boo
     marketHistoryOffersRefreshQueued.value = false
   }
   try {
-    const response = await apiFetch(`/api/offers/market-history?skip=${skip}&limit=${MARKET_HISTORY_OFFERS_PAGE_SIZE}`)
+    const response = await apiFetch(
+      `/api/offers/market-history?skip=${skip}&limit=${MARKET_HISTORY_OFFERS_PAGE_SIZE}`,
+      {
+        cache: 'no-store',
+        retryNetwork: false,
+      },
+    )
     if (!response.ok) {
       throw await createHttpErrorFromResponse(response, {
         surface: 'market',
@@ -517,7 +523,13 @@ function refreshMarketHistorySilently() {
 
 function isTerminalOfferUpdate(data: any) {
   const status = String(data?.status ?? '').toLowerCase()
-  return status === 'expired' || status === 'completed'
+  if (status === 'expired' || status === 'completed' || status === 'cancelled') return true
+
+  const hasRemainingQuantity = data?.remaining_quantity !== undefined
+    && data?.remaining_quantity !== null
+    && data?.remaining_quantity !== ''
+  const remainingQuantity = Number(data?.remaining_quantity)
+  return hasRemainingQuantity && Number.isFinite(remainingQuantity) && remainingQuantity <= 0
 }
 
 function handleOfferTerminalHistoryEvent() {
@@ -526,6 +538,18 @@ function handleOfferTerminalHistoryEvent() {
 
 function handleOfferUpdatedForHistory(data?: any) {
   if (!isTerminalOfferUpdate(data)) return
+  refreshMarketHistorySilently()
+}
+
+function offerRuntimeIdentity(offer: any) {
+  const publicId = typeof offer?.offer_public_id === 'string'
+    ? offer.offer_public_id.trim()
+    : ''
+  return publicId ? `public:${publicId}` : `local:${String(offer?.id ?? '')}`
+}
+
+function handleRealtimeReconnect() {
+  void fetchOffers(true)
   refreshMarketHistorySilently()
 }
 
@@ -1061,6 +1085,17 @@ watch(canViewExpiredMarketOffers, (allowed) => {
   void fetchMarketHistoryOffers({ reset: true, silent: true })
 }, { immediate: true })
 
+// The active list already polls every second. If a terminal realtime event is
+// missed during a mobile connection gap, use the authoritative disappearance
+// from that list to converge history without waiting for a page refresh.
+watch(offers, (nextOffers, previousOffers) => {
+  if (!canViewExpiredMarketOffers.value || previousOffers.length === 0) return
+  const nextIdentities = new Set(nextOffers.map(offerRuntimeIdentity))
+  if (previousOffers.some((offer) => !nextIdentities.has(offerRuntimeIdentity(offer)))) {
+    refreshMarketHistorySilently()
+  }
+})
+
 watch(
   [filterType, settlementFilterType, commodityFilterType],
   () => {
@@ -1098,8 +1133,10 @@ onMounted(() => {
   wsOn('market:notice_hidden', handleMarketNoticeHidden)
   wsOn('market:admin_message_published', handleAdminMarketMessagePublished)
   wsOn('offer:expired', handleOfferTerminalHistoryEvent)
+  wsOn('offer:cancelled', handleOfferTerminalHistoryEvent)
   wsOn('offer:completed', handleOfferTerminalHistoryEvent)
   wsOn('offer:updated', handleOfferUpdatedForHistory)
+  wsOn('ws:reconnect', handleRealtimeReconnect)
   syncOfferInputHeight()
 })
 
@@ -1114,8 +1151,10 @@ onUnmounted(() => {
   wsOff('market:notice_hidden', handleMarketNoticeHidden)
   wsOff('market:admin_message_published', handleAdminMarketMessagePublished)
   wsOff('offer:expired', handleOfferTerminalHistoryEvent)
+  wsOff('offer:cancelled', handleOfferTerminalHistoryEvent)
   wsOff('offer:completed', handleOfferTerminalHistoryEvent)
   wsOff('offer:updated', handleOfferUpdatedForHistory)
+  wsOff('ws:reconnect', handleRealtimeReconnect)
 })
 </script>
 

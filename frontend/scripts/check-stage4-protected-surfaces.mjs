@@ -34,6 +34,8 @@ import {
   MARKET_HISTORY_COMPACT_SEPARATION_KIND,
   MARKET_PACK_INFERENCE_ALLOWED_PATHS,
   MARKET_PACK_INFERENCE_KIND,
+  MARKET_HISTORY_UNIFORM_LIVE_ALLOWED_PATHS,
+  MARKET_HISTORY_UNIFORM_LIVE_KIND,
   MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_PATHS,
   MARKET_OVERTIME_REQUESTER_ACK_KIND,
   STAGE6_MESSENGER_URL_PRIVACY_ALLOWED_PATHS,
@@ -180,6 +182,10 @@ try {
   } else if (market.kind === MARKET_PACK_INFERENCE_KIND) {
     console.log(
       `PASS Market pack price-inference disposition (exact ${MARKET_PACK_INFERENCE_ALLOWED_PATHS.length}-file overlay; ${market.evidence.count} files, ${market.evidence.contentBytes} bytes, ${market.evidence.pathSetSha256}, ${market.evidence.sha256})`,
+    )
+  } else if (market.kind === MARKET_HISTORY_UNIFORM_LIVE_KIND) {
+    console.log(
+      `PASS Market uniform live-history disposition (exact ${MARKET_HISTORY_UNIFORM_LIVE_ALLOWED_PATHS.length}-file overlay; ${market.evidence.count} files, ${market.evidence.contentBytes} bytes, ${market.evidence.pathSetSha256}, ${market.evidence.sha256})`,
     )
   } else {
     throw new Error(`unsupported Market runtime disposition: ${String(market.kind)}`)
