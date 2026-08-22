@@ -13,7 +13,7 @@
 - Estimator: `estimator-live`؛ CASH/TOMORROW؛ `/shadow` facts-only. Freshness=`event_time`. Timers: oneshot inactivity. Aggregate paper=`LOW_PAPER_FALLBACK`, no price authority. Staging publisher transactional؛ SAFE_NO_DATA=exit0؛ exit3=failure؛ freshness=120s.
 - Regime order: private minute gold, Herat, XAU, resolved G1/G2 books. Keep direction/volatility and CASH/TOMORROW separate; low evidence abstains; live changes use hold-down. Public inputs are fallback only.
 - Staging catalog mirrors Iran؛ Snapshot read-only. v3 exact bands؛ same-family ±10% confirmation؛ ties require choice. Edits reuse scope؛ never auto-select؛ reject stale taps.
-- Packs require explicit «پک»: derive تمام/نیم/ربع only from matching base Snapshot rates, never independent pack rates. Packs are wholesale: exactly 100, no lots.
+- Packs: require «پک»؛ infer تمام/نیم/ربع from Snapshot. 100, no lots. Audit=`PACK_ONLY`؛ align ORM/migration/deploy head.
 - Collectors stay out of dashboard/bridge `After=`؛ use `flock`.
 - Condition v2 separates settlement/form, phase, deadline and 11 families؛ reviews need verified spans. Sealed 240/live shadow remain non-operational؛ persist only digests/spans/revisions. Resume requires explicit offline-evaluated decision.
 - Index book/time anchors؛ no per-message scan. Fetch newest-first then sort؛ oldest-first backlog preserves checkpoints.

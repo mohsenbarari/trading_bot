@@ -210,6 +210,57 @@ class CoinInferenceAuditStorageTests(unittest.TestCase):
             session.close()
             engine.dispose()
 
+    def test_table_accepts_pack_only_confirmation_evidence(self) -> None:
+        engine = create_engine("sqlite:///:memory:")
+        CoinIntelligenceInferenceAudit.__table__.create(engine)
+        session = Session(engine)
+        try:
+            session.add(
+                CoinIntelligenceInferenceAudit(
+                    decision_key="f" * 64,
+                    source_surface="TELEGRAM_BOT",
+                    decision_status="CONFIRM",
+                    reason_code="NEAREST_CENTER_FALLBACK_REQUIRES_CONFIRMATION",
+                    settlement_term="CASH",
+                    candidate_scope="PACK_ONLY",
+                    submitted_project_price=105_000,
+                    candidate_count=1,
+                    inference_version="coin-inference-v4",
+                    catalog_resolution_version="coin-catalog-resolution-v2",
+                    snapshot_receipt="c" * 64,
+                    snapshot_generated_at_utc=datetime(
+                        2026, 8, 22, 8, 0, tzinfo=timezone.utc
+                    ),
+                )
+            )
+            session.commit()
+            self.assertEqual(
+                session.query(CoinIntelligenceInferenceAudit).one().candidate_scope,
+                "PACK_ONLY",
+            )
+        finally:
+            session.rollback()
+            session.close()
+            engine.dispose()
+
+    def test_pack_scope_migration_replaces_only_the_scope_constraint(self) -> None:
+        migration = (
+            Path(__file__).resolve().parents[1]
+            / "migrations/versions/ff5a6b7c8d9e_allow_pack_only_inference_scope.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('revision: str = "ff5a6b7c8d9e"', migration)
+        self.assertIn(
+            'down_revision: Union[str, Sequence[str], None] = "fe4f5a6b7c8d"',
+            migration,
+        )
+        self.assertEqual(migration.count("op.drop_constraint("), 2)
+        self.assertEqual(migration.count("op.create_check_constraint("), 2)
+        self.assertIn(
+            "candidate_scope IN ('ALL', 'LOW_DATE_ONLY', 'PACK_ONLY')",
+            migration,
+        )
+        self.assertNotIn("DELETE FROM", migration.upper())
+
     def test_market_context_migration_is_additive_and_downgrade_fails_closed(self) -> None:
         migration = (
             Path(__file__).resolve().parents[1]

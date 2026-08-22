@@ -24,7 +24,7 @@ class CoinIntelligenceInferenceAudit(Base):
             name="ck_coin_intelligence_inference_audit_settlement_term",
         ),
         CheckConstraint(
-            "candidate_scope IN ('ALL', 'LOW_DATE_ONLY')",
+            "candidate_scope IN ('ALL', 'LOW_DATE_ONLY', 'PACK_ONLY')",
             name="ck_coin_intelligence_inference_audit_candidate_scope",
         ),
         CheckConstraint(
