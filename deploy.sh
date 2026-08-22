@@ -808,9 +808,9 @@ deploy_foreign() {
             && [ "$(cat "$FOREIGN_IMAGE_SIGNATURE_FILE")" = "$image_signature" ] \
             && [ "$image_signature" = "$PRODUCTION_EXPECTED_FOREIGN_IMAGE_SIGNATURE" ] \
             && [ "$(docker image inspect --format '{{.Id}}' trading_bot_base)" = "$PRODUCTION_EXPECTED_FOREIGN_IMAGE_ID" ] \
-            && [ "$(docker image inspect --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}' trading_bot_base)" = "$PRODUCTION_RELEASE_SHA" ] \
-            && [ "$(docker image inspect --format '{{index .Config.Labels \"io.gold-trade.release.tree\"}}' trading_bot_base)" = "$PRODUCTION_RELEASE_TREE" ] \
-            && [ "$(docker image inspect --format '{{index .Config.Labels \"io.gold-trade.release.input-signature\"}}' trading_bot_base)" = "$image_signature" ] \
+            && [ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' trading_bot_base)" = "$PRODUCTION_RELEASE_SHA" ] \
+            && [ "$(docker image inspect --format '{{index .Config.Labels "io.gold-trade.release.tree"}}' trading_bot_base)" = "$PRODUCTION_RELEASE_TREE" ] \
+            && [ "$(docker image inspect --format '{{index .Config.Labels "io.gold-trade.release.input-signature"}}' trading_bot_base)" = "$image_signature" ] \
             && docker image inspect trading_bot_base >/dev/null 2>&1 || {
                 echo "The official production migration requires the exact receipt-bound foreign image to be prebuilt before writer quiescence." >&2
                 exit 1
@@ -821,9 +821,9 @@ deploy_foreign() {
         && [ "$(cat "$FOREIGN_IMAGE_SIGNATURE_FILE")" = "$image_signature" ] \
         && docker image inspect trading_bot_base >/dev/null 2>&1 \
         && { [ "$PRODUCTION_OFFICIAL_DEPLOY_AUTHORIZED" != "1" ] \
-            || { [ "$(docker image inspect --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}' trading_bot_base)" = "$PRODUCTION_RELEASE_SHA" ] \
-                && [ "$(docker image inspect --format '{{index .Config.Labels \"io.gold-trade.release.tree\"}}' trading_bot_base)" = "$PRODUCTION_RELEASE_TREE" ] \
-                && [ "$(docker image inspect --format '{{index .Config.Labels \"io.gold-trade.release.input-signature\"}}' trading_bot_base)" = "$image_signature" ]; }; }; then
+            || { [ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' trading_bot_base)" = "$PRODUCTION_RELEASE_SHA" ] \
+                && [ "$(docker image inspect --format '{{index .Config.Labels "io.gold-trade.release.tree"}}' trading_bot_base)" = "$PRODUCTION_RELEASE_TREE" ] \
+                && [ "$(docker image inspect --format '{{index .Config.Labels "io.gold-trade.release.input-signature"}}' trading_bot_base)" = "$image_signature" ]; }; }; then
         echo "✅ Foreign Docker image inputs unchanged. Skipping docker build."
     else
         echo "⏳ Building Docker image explicitly to prevent compose parallel export OOM..."

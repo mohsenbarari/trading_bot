@@ -1312,6 +1312,12 @@ load_two_host_release_state
         self.assertIn("foreign-image-prebuild-receipt.json", source)
         self.assertIn("PRODUCTION_EXPECTED_FOREIGN_IMAGE_ID", legacy)
         self.assertIn("PRODUCTION_EXPECTED_FOREIGN_IMAGE_SIGNATURE", legacy)
+        foreign = legacy.split("deploy_foreign() {", 1)[1].split("\n}", 1)[0]
+        self.assertNotIn(r'Labels \"', foreign)
+        self.assertIn(
+            "{{index .Config.Labels \"org.opencontainers.image.revision\"}}",
+            foreign,
+        )
         self.assertIn("verify_remote_iran_image_identity", source)
         self.assertIn("iran-image-prebuild-receipt.json", source)
         self.assertIn("PRODUCTION_IRAN_IMAGE_RECEIPT_SHA256", source)

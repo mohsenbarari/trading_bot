@@ -2,7 +2,8 @@
 
 Tombstones are newest first.
 
-- Never hash raw schema dumps: remove only PostgreSQL's random `\\restrict`/`\\unrestrict` keys and version banners.
+- Never escape Docker template quotes; run them before writer quiescence.
+- Never hash raw schema dumps; strip only PostgreSQL random `\\restrict`/`\\unrestrict` keys and version banners.
 - Do not restore retired Release0/WA-IR/FI/Writer-Witness/Object-Delta refs/artifacts or three-site full-matrix v2/v3; that obsolete control plane conflicts with current signed sync, multi-publisher Queue, and canonical migrations.
 - Do not restore the deleted admin/bot/Telegram market-monitoring branches; they were immature. Redesign any future monitoring capability from current `main` and its Queue/privacy contracts.
 - Do not restore or reuse the retired Emergency IR fast-track branch family or its artifacts: the audited implementation was pinned to an obsolete base/schema, was internally unconsolidated, and was fully removed. Redesign any future isolated fallback from current `main`.
