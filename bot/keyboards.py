@@ -13,6 +13,9 @@ def get_invitable_roles_for_admin(user_role: UserRole | None) -> list[UserRole]:
         return [UserRole.WATCH, UserRole.STANDARD]
     return [UserRole.WATCH, UserRole.STANDARD, UserRole.POLICE, UserRole.MIDDLE_MANAGER]
 
+# Menu messages keep a durable Queue-v1 anchor, but the Telegram client must be
+# allowed to hide their reply keyboard so the device Back button can leave chat.
+# Users can reopen the keyboard from Telegram's input-bar keyboard icon.
 # --- توابع کیبورد دائمی ---
 def get_create_token_inline_keyboard() -> InlineKeyboardMarkup | None:
     buttons = [[InlineKeyboardButton(text="➕ ارسال لینک دعوت (شیشه‌ای)", callback_data="create_invitation_inline")]]
@@ -38,7 +41,7 @@ def get_persistent_menu_keyboard(user_role: UserRole, mini_app_url: str) -> Repl
     return ReplyKeyboardMarkup(
         keyboard=keyboard_layout,
         resize_keyboard=True,
-        is_persistent=True,
+        is_persistent=False,
     )
 
 def get_user_panel_keyboard(
@@ -68,7 +71,7 @@ def get_user_panel_keyboard(
         return ReplyKeyboardMarkup(
             keyboard=keyboard_layout,
             resize_keyboard=True,
-            is_persistent=True,
+            is_persistent=False,
         )
 
     if user_role in (UserRole.STANDARD, UserRole.POLICE, UserRole.MIDDLE_MANAGER, UserRole.SUPER_ADMIN):
@@ -88,7 +91,7 @@ def get_user_panel_keyboard(
     return ReplyKeyboardMarkup(
         keyboard=keyboard_layout,
         resize_keyboard=True,
-        is_persistent=True,
+        is_persistent=False,
     )
 
 def get_admin_panel_keyboard(user_role: UserRole | None = None) -> ReplyKeyboardMarkup:
@@ -104,7 +107,7 @@ def get_admin_panel_keyboard(user_role: UserRole | None = None) -> ReplyKeyboard
     return ReplyKeyboardMarkup(
         keyboard=keyboard_layout,
         resize_keyboard=True,
-        is_persistent=True,
+        is_persistent=False,
     )
 
 # --- تابع جدید برای کیبورد مدیریت کاربران ---
@@ -117,7 +120,7 @@ def get_users_management_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=keyboard_layout,
         resize_keyboard=True,
-        is_persistent=True,
+        is_persistent=False,
     )
 # ------------------------------------------
 
