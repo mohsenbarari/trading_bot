@@ -25,6 +25,17 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+# This read-only probe imports the pure offer-guard evaluator, whose module
+# initializes application Settings as an import side effect.  Host-side
+# release checks must not parse the operational compose .env (it legitimately
+# contains orchestration-only keys).  Checked-in non-secret defaults satisfy
+# unrelated required Settings fields, while real process environment values
+# retain Pydantic's higher priority inside production containers.
+os.environ.setdefault(
+    "APP_ENV_FILE",
+    str(REPO_ROOT / "config" / "unit-test.env.example"),
+)
+
 from core.market_intelligence.coin_inference import CANONICAL_COMMODITY_NAMES
 from core.market_intelligence.market_contracts import normalize_utc
 from core.market_intelligence.market_snapshot import (

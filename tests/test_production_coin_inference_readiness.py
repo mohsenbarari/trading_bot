@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 
 import pytest
@@ -27,6 +30,28 @@ from scripts import check_production_coin_inference_readiness as readiness
 
 
 NOW = datetime(2026, 8, 21, 9, 30, tzinfo=timezone.utc)
+
+
+def test_cli_does_not_parse_operational_compose_dotenv(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text(
+        "PRODUCTION_ORCHESTRATION_ONLY_KEY=true\n",
+        encoding="utf-8",
+    )
+    environment = os.environ.copy()
+    environment.pop("APP_ENV_FILE", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(readiness.REPO_ROOT / "scripts" / "check_production_coin_inference_readiness.py"),
+            "--help",
+        ],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def _snapshot(
