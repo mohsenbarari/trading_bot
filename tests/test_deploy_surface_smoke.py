@@ -521,6 +521,20 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertNotIn(' service in redis ', function_body)
         self.assertIn('remove_legacy_compose_stateless_containers\n', staging_script)
 
+    def test_staging_deploy_fails_closed_on_role_ambiguity_and_removes_opposite_role_services(self):
+        staging_script = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(encoding='utf-8')
+        role_body = staging_script.split('validate_staging_runtime_role() {', 1)[1].split('\n}', 1)[0]
+        cleanup_body = staging_script.split('remove_legacy_compose_stateless_containers() {', 1)[1].split('\n}', 1)[0]
+
+        self.assertIn('STAGING_ENABLE_BOT" != "$STAGING_FOREIGN_ONLY', role_body)
+        self.assertIn('trading_bot_staging)', role_body)
+        self.assertIn('trading_bot_staging_iran)', role_body)
+        self.assertGreaterEqual(staging_script.count('validate_staging_runtime_role\n'), 4)
+        self.assertIn('conflicting_services=(app sync_worker)', cleanup_body)
+        self.assertIn('conflicting_services=(foreign_app bot foreign_sync_worker)', cleanup_body)
+        self.assertNotIn('conflicting_services=(db', cleanup_body)
+        self.assertNotIn('conflicting_services=(redis', cleanup_body)
+
     def test_staging_frontend_dist_isolated_from_production_artifact(self):
         staging_script = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(encoding='utf-8')
         vite_config = (REPO_ROOT / 'frontend/vite.config.ts').read_text(encoding='utf-8')

@@ -1168,6 +1168,26 @@ class RegistrationSyncApplyTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("sync_version=", sql.replace(" ", ""))
         self.assertIn("updated_at=users.updated_at", sql.replace(" ", "").lower())
 
+    async def test_foreign_user_patch_ignores_null_monotonic_timestamps(self):
+        db = _ApplyDB()
+        result = await _apply_versioned_user_patch(
+            db,
+            record_id=7,
+            data={
+                "id": 7,
+                "bot_onboarding_required_step": 2,
+                "bot_onboarding_completed_at": None,
+                "last_seen_at": None,
+            },
+            source_server="foreign",
+        )
+
+        self.assertEqual(result, "ok")
+        sql = str(db.statements[0][0]).lower()
+        self.assertIn("bot_onboarding_required_step", sql)
+        self.assertNotIn("bot_onboarding_completed_at", sql)
+        self.assertNotIn("last_seen_at", sql)
+
     async def test_counter_event_applies_once_with_epoch_and_local_identity(self):
         user = SimpleNamespace(
             id=91,

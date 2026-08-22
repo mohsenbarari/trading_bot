@@ -167,6 +167,52 @@ class SyncRepairTests(unittest.TestCase):
         self.assertEqual(item["public_identity"]["kind"], "offer_public_id")
         self.assertNotIn("channel_message_id", item["data"])
 
+    def test_user_current_state_replay_includes_receiver_identity_envelope(self):
+        row = fake_row(
+            [
+                "id",
+                "account_name",
+                "mobile_number",
+                "telegram_id",
+                "home_server",
+                "bot_onboarding_required_step",
+                "bot_onboarding_completed_step",
+                "bot_onboarding_completed_at",
+            ],
+            id=214,
+            account_name="deleted-account-214",
+            mobile_number="deleted-mobile-214",
+            telegram_id=None,
+            home_server="iran",
+            bot_onboarding_required_step=2,
+            bot_onboarding_completed_step=2,
+            bot_onboarding_completed_at=None,
+        )
+
+        item = build_current_state_replay_item(
+            table_name="users",
+            row=row,
+            source_server="foreign",
+            source_sequence=315221,
+        )
+
+        self.assertEqual(
+            item["data"]["_sync_identity"],
+            {
+                "current": {
+                    "account_name": "deleted-account-214",
+                    "mobile_number": "deleted-mobile-214",
+                },
+                "previous": {},
+            },
+        )
+        self.assertEqual(item["sync_meta"]["source_sequence"], 315221)
+        self.assertNotIn("account_name", item["data"])
+        self.assertNotIn("mobile_number", item["data"])
+        self.assertNotIn("bot_onboarding_completed_at", item["data"])
+        self.assertEqual(item["data"]["bot_onboarding_required_step"], 2)
+        self.assertEqual(item["sync_meta"]["authority_server"], "iran")
+
     def test_build_signed_headers_matches_receiver_signature_contract(self):
         body = '[{"table":"offers"}]'
         headers = build_signed_headers("secret", body, timestamp=1700000000)

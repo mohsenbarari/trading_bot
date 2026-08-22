@@ -121,8 +121,45 @@ init_compose_cmd() {
     die "docker compose or docker-compose is required"
 }
 
+validate_staging_runtime_role() {
+    if [[ "$STAGING_ENABLE_BOT" != "$STAGING_FOREIGN_ONLY" ]]; then
+        die "staging role is ambiguous: STAGING_ENABLE_BOT and STAGING_FOREIGN_ONLY must match"
+    fi
+    case "$STAGING_PROJECT_NAME" in
+        trading_bot_staging)
+            [[ "$STAGING_ENABLE_BOT" == "1" && "$STAGING_FOREIGN_ONLY" == "1" ]] || \
+                die "trading_bot_staging is the foreign/bot role; use the formal two-server deploy command"
+            ;;
+        trading_bot_staging_iran)
+            [[ "$STAGING_ENABLE_BOT" == "0" && "$STAGING_FOREIGN_ONLY" == "0" ]] || \
+                die "trading_bot_staging_iran is the Iran/API role and must not start the bot role"
+            ;;
+    esac
+}
+
 remove_legacy_compose_stateless_containers() {
     init_compose_cmd
+
+    # Always remove stateless services that belong to the opposite staging
+    # role.  Compose v2 does not remove services omitted from a later targeted
+    # `up`, so an accidental role switch could otherwise leave two sync
+    # executors consuming the same outbox.
+    local conflicting_services=()
+    if [[ "$STAGING_FOREIGN_ONLY" == "1" ]]; then
+        conflicting_services=(app sync_worker)
+    else
+        conflicting_services=(foreign_app bot foreign_sync_worker)
+    fi
+    local service ids
+    for service in "${conflicting_services[@]}"; do
+        ids="$(docker ps -aq \
+            --filter "label=com.docker.compose.project=$STAGING_PROJECT_NAME" \
+            --filter "label=com.docker.compose.service=$service")"
+        if [[ -n "$ids" ]]; then
+            docker rm -f $ids >/dev/null
+        fi
+    done
+
     if [[ "${compose_cmd[0]}" != "docker-compose" ]]; then
         return
     fi
@@ -130,7 +167,6 @@ remove_legacy_compose_stateless_containers() {
     # docker-compose 1.29 cannot recreate images produced by current Docker
     # when the legacy image metadata omits ContainerConfig. Remove only
     # stateless services; staging database and Redis containers/volumes remain.
-    local service ids
     for service in migration app foreign_app bot sync_worker foreign_sync_worker; do
         ids="$(docker ps -aq \
             --filter "label=com.docker.compose.project=$STAGING_PROJECT_NAME" \
@@ -737,6 +773,7 @@ require_prebuilt_image() {
 
 build_runtime_image() {
     check
+    validate_staging_runtime_role
     ensure_env
     ensure_runtime_env_values
     require_prebuilt_image_tag_only
@@ -756,6 +793,7 @@ require_prebuilt_image_tag_only() {
 
 start_prebuilt_producers() {
     check
+    validate_staging_runtime_role
     ensure_env
     ensure_runtime_env_values
     build_frontend
@@ -784,6 +822,7 @@ start_prebuilt_bot() {
     [[ "$STAGING_ENABLE_BOT" == "1" && "$STAGING_FOREIGN_ONLY" == "1" ]] || \
         die "prebuilt bot start is permitted only on the foreign staging role"
     check
+    validate_staging_runtime_role
     ensure_env
     ensure_runtime_env_values
     build_frontend
@@ -817,6 +856,7 @@ check() {
 
 deploy() {
     check
+    validate_staging_runtime_role
     ensure_env
     ensure_runtime_env_values
     build_frontend

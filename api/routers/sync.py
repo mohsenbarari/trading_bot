@@ -2598,7 +2598,10 @@ async def _apply_versioned_user_patch(
                     sa_func.coalesce(data[field_name], 0),
                 )
         for field_name in ("bot_onboarding_completed_at", "last_seen_at"):
-            if field_name in data:
+            # A null incoming timestamp cannot advance a monotonic field.  Do
+            # not emit an untyped SQL NULL into greatest(), which PostgreSQL
+            # rejects as an ambiguous parameter during current-state repair.
+            if field_name in data and data[field_name] is not None:
                 values[field_name] = _nullable_greatest(
                     getattr(User, field_name),
                     sa_literal(data[field_name]),

@@ -16,11 +16,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.routers.sync import get_model_class
+from core.registration_sync_policy import allowed_user_fields_for_source
 from core.server_routing import current_server
 from core.sync_field_policy import sanitize_sync_payload
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity, coerce_positive_int
 from core.sync_parity import build_record_parity, compare_parity_snapshots
 from core.sync_protocol import build_sync_protocol_metadata
+from core.user_counter_sync import USER_SYNC_IDENTITY_FIELD, build_user_sync_identity
 
 
 REPAIR_TOOL_SCHEMA_VERSION = 1
@@ -156,9 +158,24 @@ def build_current_state_replay_item(
     source_sequence: int | None = None,
 ) -> dict[str, Any]:
     record_id = record_id_for_row(row)
-    data = row_to_sync_data(table_name, row)
-    payload_hash = stable_hash(data)
     source_server = source_server or current_server()
+    data = row_to_sync_data(table_name, row)
+    metadata_data = data
+    # Versioned user updates are resolved by a natural-identity envelope on the
+    # receiver.  A current-state repair without that envelope is rejected
+    # closed, even when the numeric id happens to match on both peers.
+    if table_name == "users":
+        allowed_fields = allowed_user_fields_for_source(source_server)
+        data = {key: value for key, value in data.items() if key in allowed_fields}
+        if source_server == "foreign":
+            for field_name in ("bot_onboarding_completed_at", "last_seen_at"):
+                if data.get(field_name) is None:
+                    data.pop(field_name, None)
+        data[USER_SYNC_IDENTITY_FIELD] = build_user_sync_identity(
+            row,
+            include_previous=False,
+        )
+    payload_hash = stable_hash(data)
     item = {
         "type": "db_change",
         "operation": operation,
@@ -172,7 +189,7 @@ def build_current_state_replay_item(
             table_name,
             record_id,
             operation,
-            data,
+            metadata_data,
             change_log_id=source_sequence,
             source_server=source_server,
         ),
