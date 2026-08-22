@@ -20,10 +20,12 @@ from unittest.mock import MagicMock, patch
 
 from core.market_intelligence.market_contracts import MarketObservation, derive_event_key
 from core.market_intelligence.market_store import (
+    advance_source_checkpoint,
     connect_market_store,
     initialize_market_store,
     upsert_observation,
 )
+from core.market_intelligence.snapshot_publisher import MarketSnapshotPublishResult
 from scripts.relay_production_coin_inference_snapshot import (
     PRODUCTION_CONFIRMATION,
     ProductionSnapshotRelayError,
@@ -138,15 +140,41 @@ class ProductionSnapshotRelayTests(unittest.TestCase):
         self.connection.close()
         self.temporary.cleanup()
 
-    def _seed_store(self) -> None:
+    def _seed_store(self, *, private_age_seconds: int = 5) -> None:
+        for index, source in enumerate(("GROUP_1", "GROUP_2"), start=1):
+            upsert_observation(
+                self.connection,
+                MarketObservation(
+                    event_key=derive_event_key("production-relay-test", source),
+                    source_code=source,
+                    source_family="GROUP",
+                    event_time_utc=self.now - timedelta(minutes=10 - index),
+                    available_at_utc=self.now - timedelta(minutes=10 - index),
+                    instrument="COIN_IMAM",
+                    market_label="COIN_MARKET",
+                    settlement_term="CASH",
+                    trade_form="PHYSICAL",
+                    event_type="OFFER",
+                    side="SELL",
+                    price=190_000 + index,
+                    price_unit="PROJECT_THOUSAND_TOMAN",
+                    currency="IRT",
+                    quantity=1,
+                    quantity_unit="PIECE",
+                    parse_confidence=1.0,
+                    parser_version="production-relay-test-v1",
+                    quality_state="ELIGIBLE",
+                    quality_policy_version="production-relay-test-v1",
+                ),
+            )
         upsert_observation(
             self.connection,
             MarketObservation(
                 event_key=derive_event_key("production-relay-test", "physical-gold"),
                 source_code="PRIVATE_GOLD_CHANNEL",
                 source_family="TELEGRAM_PRIVATE",
-                event_time_utc=self.now - timedelta(seconds=5),
-                available_at_utc=self.now - timedelta(seconds=5),
+                event_time_utc=self.now - timedelta(seconds=private_age_seconds),
+                available_at_utc=self.now - timedelta(seconds=private_age_seconds),
                 instrument="MELTED_GOLD_PRIVATE",
                 market_label="PRIVATE_GOLD_PHYSICAL",
                 settlement_term="TODAY",
@@ -162,7 +190,22 @@ class ProductionSnapshotRelayTests(unittest.TestCase):
                 quality_policy_version="production-relay-test-v1",
             ),
         )
+        for index, source in enumerate(
+            (
+                "COIN_GROUP_EVENT_CHANNEL",
+                "PRIVATE_GOLD_EVENT_OFFER",
+                "PRIVATE_GOLD_EVENT_TRADE",
+            ),
+            start=1,
+        ):
+            advance_source_checkpoint(
+                self.connection,
+                source_code=source,
+                message_id=index,
+                event_time_utc=self.now.isoformat().replace("+00:00", "Z"),
+            )
         self.connection.commit()
+        self.store_path.chmod(0o600)
 
     def _invoke(self, *arguments: str) -> tuple[int, dict[str, object]]:
         stream = io.StringIO()
@@ -212,6 +255,66 @@ class ProductionSnapshotRelayTests(unittest.TestCase):
         self.assertEqual(len(str(payload["snapshot_sha256"])), 64)
         self.assertEqual(self.snapshot_path.stat().st_mode & 0o777, 0o644)
         self.assertFalse(list(self.runtime_root.glob("*.tmp")))
+
+    def test_quiet_healthy_source_publishes_safe_no_data_without_price_authority(self) -> None:
+        self._seed_store(private_age_seconds=7_200)
+
+        result, payload = self._invoke(*self._publish_arguments())
+
+        self.assertEqual((result, payload["status"]), (0, "PUBLISHED"))
+        self.assertEqual(payload["snapshot_mode"], "SAFE_NO_DATA")
+        self.assertEqual(payload["estimated_rate_count"], 0)
+        self.assertIs(payload["price_authority"], False)
+        snapshot = json.loads(self.snapshot_path.read_text(encoding="utf-8"))
+        self.assertEqual(snapshot["snapshot_status"], "NO_DATA_COIN_RATE_STATE")
+        self.assertEqual(snapshot["rates"]["estimated_count"], 0)
+        self.assertTrue(
+            all(
+                item["status"] == "NO_DATA"
+                and item["estimated_project_price"] is None
+                and item["lower_project_price"] is None
+                and item["upper_project_price"] is None
+                for item in snapshot["rates"]["items"]
+            )
+        )
+
+    def test_ready_source_cannot_authorize_a_no_data_snapshot(self) -> None:
+        self._seed_store()
+        not_ready = MarketSnapshotPublishResult(
+            status="NOT_RATE_READY",
+            snapshot_digest=None,
+            generated_at_utc=self.now.isoformat().replace("+00:00", "Z"),
+            estimated_rate_count=0,
+            no_data_rate_count=14,
+            reason="NO_ESTIMATED_COIN_RATES",
+            input_watermark={},
+        )
+
+        with patch(
+            "scripts.relay_production_coin_inference_snapshot.publish_rate_ready_snapshot",
+            return_value=not_ready,
+        ) as publish:
+            result, payload = self._invoke(*self._publish_arguments())
+
+        self.assertEqual((result, payload["reason"]), (2, "snapshot_not_rate_ready"))
+        self.assertEqual(publish.call_count, 1)
+        self.assertFalse(self.snapshot_path.exists())
+
+    def test_fresh_rate_ready_snapshot_replaces_safe_no_data_on_next_run(self) -> None:
+        self._seed_store(private_age_seconds=7_200)
+        first_result, first = self._invoke(*self._publish_arguments())
+        self.assertEqual((first_result, first["snapshot_mode"]), (0, "SAFE_NO_DATA"))
+        first_digest = first["snapshot_sha256"]
+
+        self._seed_store(private_age_seconds=5)
+        second_result, second = self._invoke(*self._publish_arguments())
+
+        self.assertEqual((second_result, second["snapshot_mode"]), (0, "RATE_READY"))
+        self.assertGreater(second["estimated_rate_count"], 0)
+        self.assertIs(second["price_authority"], True)
+        self.assertNotEqual(second["snapshot_sha256"], first_digest)
+        snapshot = json.loads(self.snapshot_path.read_text(encoding="utf-8"))
+        self.assertNotIn("production_safe_no_data", snapshot)
 
     def test_remote_failure_preserves_prior_local_final_snapshot(self) -> None:
         self._seed_store()

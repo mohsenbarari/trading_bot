@@ -16,6 +16,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import secrets
 import shlex
 import signal
@@ -47,19 +48,26 @@ from scripts.plan_telegram_delivery_queue_production import (
     DEFAULT_MANIFEST,
     DEFAULT_STAGING_ENV,
     PRODUCTION_IRAN_PROJECT_DIR,
+    REQUIRED_QUEUE_TABLES,
     TOKEN_KEYS,
     ReadinessBlocked,
+    _backup_status,
+    _identities,
     _immutable_source,
+    _profile,
     credential_status,
     git_binding,
+    provider_preflight,
     queue_target_values,
     run_preflight,
     source_profile,
 )
+from scripts.run_production_backup import database_identity_sha256
 from scripts.scan_telegram_queue_artifacts import scan_paths
 
 
 APPLY_CONFIRMATION = "CUTOVER PRODUCTION TELEGRAM DELIVERY TO QUEUE-V1"
+REDEPLOY_CONFIRMATION = "REDEPLOY PRODUCTION TELEGRAM QUEUE-V1 OFFICIAL RELEASE"
 ROLLBACK_CONFIRMATION = "ROLLBACK PRODUCTION TELEGRAM DELIVERY TO LEGACY"
 DEFAULT_ARTIFACT_DIR = Path("/root/secure-envs/trading-bot/queue-cutover-artifacts")
 PREFLIGHT_MAXIMUM_AGE_SECONDS = 900
@@ -123,7 +131,12 @@ class ExclusiveRunLock:
                 state = json.loads(journal.read_text(encoding="utf-8")).get("status")
             except (OSError, ValueError):
                 raise ProductionCutoverError("BLOCKED_PENDING_PHASE_JOURNAL") from None
-            if state not in {"applied", "rolled_back", "failed_recovered"}:
+            if state not in {
+                "applied",
+                "redeployed",
+                "rolled_back",
+                "failed_recovered",
+            }:
                 raise ProductionCutoverError("BLOCKED_PENDING_PHASE_JOURNAL")
         try:
             descriptor = os.open(
@@ -1102,6 +1115,97 @@ class ProductionOperations:
         except (TypeError, ValueError):
             raise ProductionCutoverError("QUEUE_DRAIN_READBACK_FAILED") from None
 
+    def release_schema_inventory(self, expected_database_name: str) -> dict[str, Any]:
+        """Bind the currently deployed Queue runtime to a fresh backup.
+
+        A Queue-v1 redeploy can target a newer clean/pushed commit than the one
+        currently running.  The ordinary cutover preflight therefore cannot be
+        reused: it intentionally requires the live release to equal Git HEAD.
+        This inventory reads the current release/schema/database identities
+        without assuming that equality, while still requiring both production
+        hosts to agree and every Queue table to be present.
+        """
+
+        table_array = ",".join(
+            f"'public.{table}'" for table in REQUIRED_QUEUE_TABLES
+        )
+        query = (
+            "select json_build_object("
+            "'head',(select version_num from alembic_version limit 1),"
+            "'database_name',current_database(),"
+            "'system_identifier',(select system_identifier::text from pg_control_system()),"
+            f"'queue_table_count',(select count(*) from unnest(array[{table_array}]) t(name) "
+            "where to_regclass(name) is not null))"
+        )
+        reports: dict[str, dict[str, Any]] = {}
+        for role, containers in (
+            ("foreign", FOREIGN_CONTAINERS),
+            ("iran", IRAN_CONTAINERS),
+        ):
+            app_env = self._container_env(role, containers["app"])
+            release_sha = str(app_env.get("RELEASE_SHA") or "").strip()
+            if not re.fullmatch(r"[0-9a-f]{40}", release_sha):
+                raise ProductionCutoverError("REDEPLOY_RUNTIME_RELEASE_READBACK_FAILED")
+            self._require_project(role, containers["db"])
+            schema = self._docker(
+                role,
+                [
+                    "exec",
+                    containers["db"],
+                    "sh",
+                    "-lc",
+                    'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc '
+                    + shlex.quote(query),
+                ],
+            )
+            if schema.returncode:
+                raise ProductionCutoverError("REDEPLOY_RUNTIME_SCHEMA_READBACK_FAILED")
+            try:
+                payload = json.loads((schema.stdout or "").strip())
+                database_name = str(payload.get("database_name") or "")
+                system_identifier = str(payload.get("system_identifier") or "")
+                if not database_name or not re.fullmatch(
+                    r"[0-9]+", system_identifier
+                ):
+                    raise ValueError("invalid database identity")
+                reports[role] = {
+                    "release_sha": release_sha,
+                    "schema_head": str(payload.get("head") or ""),
+                    "database_name": database_name,
+                    "database_identity_sha256": database_identity_sha256(
+                        role, database_name, system_identifier
+                    ),
+                    "queue_table_count": int(payload.get("queue_table_count") or 0),
+                }
+            except (TypeError, ValueError):
+                raise ProductionCutoverError(
+                    "REDEPLOY_RUNTIME_SCHEMA_READBACK_FAILED"
+                ) from None
+        foreign = reports["foreign"]
+        iran = reports["iran"]
+        if (
+            foreign["release_sha"] != iran["release_sha"]
+            or foreign["schema_head"] != iran["schema_head"]
+            or not re.fullmatch(r"[0-9a-z]{12}", foreign["schema_head"])
+            or foreign["database_name"] != expected_database_name
+            or iran["database_name"] != expected_database_name
+            or foreign["queue_table_count"] != len(REQUIRED_QUEUE_TABLES)
+            or iran["queue_table_count"] != len(REQUIRED_QUEUE_TABLES)
+        ):
+            raise ProductionCutoverError("REDEPLOY_RUNTIME_PAIR_MISMATCH")
+        return {
+            "status": "verified",
+            "release_sha": foreign["release_sha"],
+            "schema_head": foreign["schema_head"],
+            "queue_table_count": len(REQUIRED_QUEUE_TABLES),
+            "database_identity_sha256": {
+                role: reports[role]["database_identity_sha256"]
+                for role in ("foreign", "iran")
+            },
+            "hosts": ["foreign", "iran"],
+            "addresses_disclosed": False,
+        }
+
     def wait_for_drain(self, timeout_seconds: int, poll_seconds: float) -> dict[str, Any]:
         deadline = time.monotonic() + timeout_seconds
         latest: dict[str, dict[str, int]] = {}
@@ -1676,6 +1780,189 @@ def _static_credential_gate(manifest: Path, staging_env: Path) -> tuple[Path, di
     return source, source_values
 
 
+def _static_redeploy_gate(
+    manifest: Path,
+    staging_env: Path,
+    *,
+    backup_receipt: Path | None = None,
+    backup_digest: str = "",
+) -> tuple[Path, dict[str, str], dict[str, str]]:
+    """Fail closed before constructing an operations object for redeploy."""
+
+    source, manifest_values = _immutable_source(manifest)
+    if not staging_env.is_file():
+        raise ProductionCutoverError("BLOCKED_STAGING_COLLISION_EVIDENCE")
+    source_values = parse_env_file(source)
+    credentials, _ = credential_status(source_values, parse_env_file(staging_env))
+    if credentials["blockers"]:
+        raise ProductionCutoverError(str(credentials["status"]))
+    if source_profile(source_values) != "queue-v1" or not _profile(source_values)[
+        "ready"
+    ]:
+        raise ProductionCutoverError("BLOCKED_SOURCE_NOT_QUEUE_V1")
+    validate_official_release_profile(manifest_values)
+    if backup_receipt is not None:
+        configured_path = Path(
+            str(manifest_values.get("PRODUCTION_BACKUP_RECEIPT_PATH") or "")
+        ).expanduser()
+        configured_digest = str(
+            manifest_values.get("PRODUCTION_BACKUP_RECEIPT_SHA256") or ""
+        ).strip()
+        if (
+            not backup_receipt.is_absolute()
+            or not configured_path.is_absolute()
+            or configured_path.resolve(strict=False)
+            != backup_receipt.resolve(strict=False)
+            or configured_digest != backup_digest
+        ):
+            raise ProductionCutoverError("BLOCKED_REDEPLOY_BACKUP_MANIFEST_BINDING")
+    return source, source_values, manifest_values
+
+
+def run_redeploy_preflight(
+    *,
+    manifest: Path,
+    staging_env: Path,
+    backup_receipt: Path,
+    backup_digest: str,
+    operations_factory: Callable[[Path], ProductionOperations] = ProductionOperations,
+    gateway: Callable[..., Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Read-only target-aware preflight for an active Queue-v1 production pair."""
+
+    source, source_values, manifest_values = _static_redeploy_gate(
+        manifest,
+        staging_env,
+        backup_receipt=backup_receipt,
+        backup_digest=backup_digest,
+    )
+    binding = git_binding()
+    if (
+        binding["branch"] != "main"
+        or binding["worktree"] != "clean"
+        or binding["head"] != binding["origin_main"]
+    ):
+        raise ProductionCutoverError("BLOCKED_CLEAN_PUSHED_MAIN")
+    credentials, identities = credential_status(
+        source_values, parse_env_file(staging_env)
+    )
+    ops = operations_factory(manifest)
+    inventory = ops.executor_inventory()
+    _assert_inventory(inventory, count=1, owner="queue-v1")
+    expected_database_name = str(source_values.get("POSTGRES_DB") or "").strip()
+    runtime = ops.release_schema_inventory(expected_database_name)
+    backup = _backup_status(
+        backup_receipt,
+        backup_digest,
+        manifest_values=manifest_values,
+        expected_release_sha=str(runtime["release_sha"]),
+        expected_database_name=expected_database_name,
+        expected_database_identities=runtime["database_identity_sha256"],
+        expected_schema_head=str(runtime["schema_head"]),
+    )
+    provider_gateway = gateway if gateway is not None else None
+    provider = (
+        provider_preflight(source_values, identities)
+        if provider_gateway is None
+        else provider_preflight(source_values, identities, gateway=provider_gateway)
+    )
+    staging_values = parse_env_file(staging_env)
+    staging_identities, staging_missing = _identities(staging_values)
+    if staging_missing or len(staging_identities) != 6:
+        raise ProductionCutoverError("BLOCKED_STAGING_COLLISION_EVIDENCE")
+    staging_provider = (
+        provider_preflight(staging_values, staging_identities)
+        if provider_gateway is None
+        else provider_preflight(
+            staging_values, staging_identities, gateway=provider_gateway
+        )
+    )
+    provider["staging"] = staging_provider
+    provider["staging_identity_count"] = staging_provider["identity_count"]
+    provider["read_only_provider_call_count"] += staging_provider[
+        "read_only_provider_call_count"
+    ]
+    health = ops.queue_health(expected_database_name)
+    role_contract = ops.runtime_contract(source_values, expected_owner="queue-v1")
+    return {
+        "schema_version": 1,
+        "environment": "production",
+        "mode": "read-only",
+        "status": "READY_FOR_QUEUE_V1_REDEPLOY",
+        "observed_at": _utc_now(),
+        "git": binding,
+        "source_profile": "queue-v1",
+        "source_sha256": _sha256(source),
+        "credentials": credentials,
+        "backup": backup,
+        "current_runtime": runtime,
+        "executor_inventory": inventory,
+        "queue_health": health,
+        "runtime_role_contract": role_contract,
+        "provider": provider,
+        "apply_supported": False,
+        "provider_mutations": 0,
+    }
+
+
+def verify_redeploy_preflight_evidence(
+    path: Path,
+    digest: str,
+    *,
+    backup_digest: str,
+    source_digest: str,
+    binding: Mapping[str, str],
+) -> dict[str, Any]:
+    payload = _read_json_evidence(path, digest)
+    age = (
+        datetime.now(timezone.utc) - _parse_timestamp(payload.get("observed_at"))
+    ).total_seconds()
+    provider = payload.get("provider") or {}
+    runtime = payload.get("current_runtime") or {}
+    inventory = payload.get("executor_inventory") or {}
+    health = payload.get("queue_health") or {}
+    role_contract = payload.get("runtime_role_contract") or {}
+    if (
+        age < -300
+        or age > PREFLIGHT_MAXIMUM_AGE_SECONDS
+        or payload.get("environment") != "production"
+        or payload.get("mode") != "read-only"
+        or payload.get("status") != "READY_FOR_QUEUE_V1_REDEPLOY"
+        or payload.get("apply_supported") is not False
+        or payload.get("source_profile") != "queue-v1"
+        or payload.get("source_sha256") != source_digest
+        or payload.get("git") != dict(binding)
+        or (payload.get("credentials") or {}).get("status") != "ready"
+        or (payload.get("credentials") or {}).get("identity_count") != 6
+        or (payload.get("credentials") or {}).get("publisher_count") != 5
+        or (payload.get("backup") or {}).get("status") != "verified"
+        or (payload.get("backup") or {}).get("digest") != backup_digest
+        or runtime.get("status") != "verified"
+        or not re.fullmatch(r"[0-9a-f]{40}", str(runtime.get("release_sha") or ""))
+        or not re.fullmatch(r"[0-9a-z]{12}", str(runtime.get("schema_head") or ""))
+        or inventory.get("count") != 1
+        or inventory.get("owner") != "queue-v1"
+        or inventory.get("overlap") is not False
+        or health.get("status") != "passed"
+        or health.get("decision") != "continue"
+        or role_contract.get("status") != "verified"
+        or role_contract.get("owner") != "queue-v1"
+        or provider.get("status") != "approved"
+        or provider.get("identity_count") != 6
+        or provider.get("staging_identity_count") != 6
+    ):
+        raise ProductionCutoverError("BLOCKED_REDEPLOY_PREFLIGHT_CONTRACT")
+    return {
+        "status": "verified",
+        "preflight_sha256": digest,
+        "backup_sha256": backup_digest,
+        "current_release_sha": runtime["release_sha"],
+        "target_release_sha": binding["head"],
+        "fresh": True,
+        "secrets_disclosed": False,
+    }
+
+
 def apply_cutover(
     *,
     manifest: Path,
@@ -1903,6 +2190,232 @@ def apply_cutover(
         raise ProductionCutoverError(code, receipt_sha256=receipt_digest) from None
 
 
+def redeploy_queue_v1(
+    *,
+    manifest: Path,
+    staging_env: Path,
+    preflight_report: Path,
+    preflight_digest: str,
+    backup_receipt: Path,
+    backup_digest: str,
+    artifact_dir: Path,
+    confirmation: str,
+    operations_factory: Callable[[Path], ProductionOperations] = ProductionOperations,
+    preflight_runner: Callable[..., dict[str, Any]] = run_redeploy_preflight,
+) -> dict[str, Any]:
+    """Redeploy a newer official release while Queue-v1 remains the owner.
+
+    Unlike the initial cutover, this path never changes the immutable Queue
+    profile and never creates a Legacy/Queue ownership transition.  The
+    ordinary two-host release choreography owns writer quiescence, schema
+    convergence, and exact-image replacement.  A fresh target-aware preflight
+    binds the current live release to the backup while Git binds the target
+    release, so a real forward code release is supported rather than merely a
+    same-SHA restart.
+    """
+
+    if confirmation != REDEPLOY_CONFIRMATION:
+        raise ProductionCutoverError("REDEPLOY_CONFIRMATION_MISMATCH")
+    source, _source_values, _manifest_values = _static_redeploy_gate(
+        manifest,
+        staging_env,
+        backup_receipt=backup_receipt,
+        backup_digest=backup_digest,
+    )
+    source_digest = _sha256(source)
+    binding = git_binding()
+    if (
+        binding["branch"] != "main"
+        or binding["worktree"] != "clean"
+        or binding["head"] != binding["origin_main"]
+    ):
+        raise ProductionCutoverError("BLOCKED_CLEAN_PUSHED_MAIN")
+    evidence = verify_redeploy_preflight_evidence(
+        preflight_report,
+        preflight_digest,
+        backup_digest=backup_digest,
+        source_digest=source_digest,
+        binding=binding,
+    )
+    try:
+        live_preflight = preflight_runner(
+            manifest=manifest,
+            staging_env=staging_env,
+            backup_receipt=backup_receipt,
+            backup_digest=backup_digest,
+            operations_factory=operations_factory,
+        )
+    except (ProductionCutoverError, ReadinessBlocked) as exc:
+        raise ProductionCutoverError(getattr(exc, "code", str(exc))) from None
+    if (
+        live_preflight.get("status") != "READY_FOR_QUEUE_V1_REDEPLOY"
+        or live_preflight.get("source_sha256") != source_digest
+        or live_preflight.get("git") != binding
+        or _sha256(source) != source_digest
+    ):
+        raise ProductionCutoverError("BLOCKED_LIVE_REDEPLOY_PREFLIGHT")
+    if (
+        operations_factory is ProductionOperations
+        and artifact_dir.resolve(strict=False) != DEFAULT_ARTIFACT_DIR
+    ):
+        raise ProductionCutoverError("BLOCKED_PRODUCTION_ARTIFACT_DIRECTORY")
+
+    ops = operations_factory(manifest)
+    run_lock = ExclusiveRunLock(artifact_dir)
+    run_lock.acquire()
+    source_lock = ImmutableSourceLock(source)
+    try:
+        source_lock.acquire()
+        journal = PhaseJournal(
+            artifact_dir,
+            command="redeploy",
+            source_sha256=source_digest,
+            git_head=binding["head"],
+            run_lock=run_lock,
+        )
+    except BaseException:
+        source_lock.release()
+        run_lock.release()
+        raise
+    receipt: dict[str, Any] = {
+        "schema_version": 1,
+        "environment": "production",
+        "command": "redeploy",
+        "started_at": _utc_now(),
+        "status": "running",
+        "git": binding,
+        "preflight": evidence,
+        "steps": [],
+        "executor_timeline": [],
+        "source_profile_changed": False,
+        "synthetic_customer_mutations": 0,
+        "secrets_disclosed": False,
+    }
+    deploy_started = False
+    try:
+        initial = ops.executor_inventory()
+        _assert_inventory(initial, count=1, owner="queue-v1")
+        receipt["executor_timeline"].append(initial)
+        _require_source_digest(source, source_digest)
+        journal.update("official_redeploy_authorizing")
+        authority_path, authority_digest = create_deploy_authority(
+            artifact_dir,
+            source,
+            binding,
+            run_lock=run_lock,
+            journal=journal,
+        )
+        deploy_started = True
+        receipt["steps"].append(
+            {
+                "name": "official_two_host_redeploy",
+                "report": ops.deploy_official(authority_path, authority_digest),
+            }
+        )
+        journal.update("redeployed_runtime")
+        _require_source_digest(source, source_digest)
+        final_inventory = ops.executor_inventory()
+        _assert_inventory(final_inventory, count=1, owner="queue-v1")
+        receipt["executor_timeline"].append(final_inventory)
+        queue_values = parse_env_file(source)
+        receipt["steps"].append(
+            {
+                "name": "runtime_role_contract",
+                "report": ops.runtime_contract(
+                    queue_values, expected_owner="queue-v1"
+                ),
+            }
+        )
+        receipt["steps"].append(
+            {
+                "name": "queue_health",
+                "report": ops.queue_health(
+                    str(queue_values.get("POSTGRES_DB") or "")
+                ),
+            }
+        )
+        receipt["steps"].append(
+            {
+                "name": "b2b_lane_read_only_probe",
+                "report": ops.b2b_lane_probe(),
+            }
+        )
+        receipt["status"] = "redeployed"
+        receipt["finished_at"] = _utc_now()
+        receipt_path, digest = _write_redacted_receipt(
+            artifact_dir, "production-queue-redeploy", receipt
+        )
+        journal.update("redeployed", receipt_sha256=digest)
+        source_lock.release()
+        run_lock.release()
+        return {
+            "status": "redeployed",
+            "receipt_file": receipt_path.name,
+            "receipt_sha256": digest,
+            "source_profile": "queue-v1",
+            "secrets_disclosed": False,
+        }
+    except BaseException as exc:
+        code = (
+            exc.code
+            if isinstance(exc, ProductionCutoverError)
+            else "UNEXPECTED_REDEPLOY_FAILURE"
+        )
+        recovery: dict[str, Any] = {
+            "attempted": bool(deploy_started),
+            "strategy": "exact_target_forward_reconcile",
+            "status": "not_required" if not deploy_started else "failed",
+        }
+        if deploy_started:
+            try:
+                if _sha256(source) != source_digest:
+                    raise ProductionCutoverError("BLOCKED_SOURCE_DRIFT")
+                journal.update("redeploy_forward_reconcile_authorizing")
+                recovery_authority, recovery_authority_digest = (
+                    create_deploy_authority(
+                        artifact_dir,
+                        source,
+                        binding,
+                        run_lock=run_lock,
+                        journal=journal,
+                    )
+                )
+                recovery["deploy"] = ops.deploy_official(
+                    recovery_authority, recovery_authority_digest
+                )
+                recovered = ops.executor_inventory()
+                _assert_inventory(recovered, count=1, owner="queue-v1")
+                queue_values = parse_env_file(source)
+                recovery["runtime"] = ops.runtime_contract(
+                    queue_values, expected_owner="queue-v1"
+                )
+                recovery["health"] = ops.queue_health(
+                    str(queue_values.get("POSTGRES_DB") or "")
+                )
+                recovery["status"] = "queue_v1_forward_reconciled"
+            except BaseException:
+                recovery["status"] = "recovery_failed_fail_closed"
+        receipt["status"] = "failed"
+        receipt["error_code"] = code
+        receipt["safe_recovery"] = recovery
+        receipt["finished_at"] = _utc_now()
+        _failed_path, digest = _write_redacted_receipt(
+            artifact_dir, "production-queue-redeploy-failed", receipt
+        )
+        journal.update(
+            (
+                "failed_recovered"
+                if recovery["status"] == "queue_v1_forward_reconciled"
+                else "recovery_failed"
+            ),
+            receipt_sha256=digest,
+            error_code=code,
+        )
+        source_lock.release()
+        run_lock.release()
+        raise ProductionCutoverError(code, receipt_sha256=digest) from None
+
+
 def rollback_to_legacy(
     *,
     manifest: Path,
@@ -2101,7 +2614,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=("plan", "status", "apply", "rollback", "verify-deploy-authority"),
+        choices=(
+            "plan",
+            "status",
+            "preflight-redeploy",
+            "apply",
+            "redeploy",
+            "rollback",
+            "verify-deploy-authority",
+        ),
     )
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     parser.add_argument("--staging-env", type=Path, default=DEFAULT_STAGING_ENV)
@@ -2129,9 +2650,18 @@ def main(argv: list[str] | None = None) -> int:
                 "environment": "production",
                 "mode": "guarded",
                 "apply_confirmation": APPLY_CONFIRMATION,
+                "redeploy_confirmation": REDEPLOY_CONFIRMATION,
                 "rollback_confirmation": ROLLBACK_CONFIRMATION,
                 "synthetic_customer_mutations": 0,
                 "sequence": ["preflight", "quiesce", "drain", "legacy->zero->queue", "official deploy", "read-only health/probe"],
+                "redeploy_sequence": [
+                    "target-aware read-only preflight",
+                    "one queue-v1 owner",
+                    "one-time official deploy authority",
+                    "official two-host release",
+                    "one queue-v1 owner",
+                    "read-only health/probe",
+                ],
             }
         elif args.command == "status":
             source, source_values = _static_credential_gate(args.manifest, args.staging_env)
@@ -2142,6 +2672,27 @@ def main(argv: list[str] | None = None) -> int:
                 "credential_gate": "ready",
                 "source_profile": source_profile(source_values),
                 "provider_mutations": 0,
+            }
+        elif args.command == "preflight-redeploy":
+            if args.backup_receipt is None or not args.backup_receipt_sha256:
+                raise ProductionCutoverError("REDEPLOY_PREFLIGHT_BACKUP_REQUIRED")
+            if args.artifact_dir.resolve(strict=False) != DEFAULT_ARTIFACT_DIR:
+                raise ProductionCutoverError("BLOCKED_PRODUCTION_ARTIFACT_DIRECTORY")
+            report = run_redeploy_preflight(
+                manifest=args.manifest,
+                staging_env=args.staging_env,
+                backup_receipt=args.backup_receipt,
+                backup_digest=args.backup_receipt_sha256,
+            )
+            report_path, report_digest = _write_redacted_receipt(
+                args.artifact_dir, "production-queue-redeploy-preflight", report
+            )
+            payload = {
+                "status": report["status"],
+                "report_file": report_path.name,
+                "report_sha256": report_digest,
+                "provider_mutations": 0,
+                "secrets_disclosed": False,
             }
         elif args.command == "apply":
             if args.confirm != APPLY_CONFIRMATION:
@@ -2161,6 +2712,30 @@ def main(argv: list[str] | None = None) -> int:
                     backup_receipt=args.backup_receipt,
                     backup_digest=args.backup_receipt_sha256,
                     secure_backup_dir=args.secure_backup_dir,
+                    artifact_dir=args.artifact_dir,
+                    confirmation=args.confirm,
+                )
+        elif args.command == "redeploy":
+            if args.confirm != REDEPLOY_CONFIRMATION:
+                raise ProductionCutoverError("REDEPLOY_CONFIRMATION_MISMATCH")
+            _static_redeploy_gate(
+                args.manifest,
+                args.staging_env,
+                backup_receipt=args.backup_receipt,
+                backup_digest=args.backup_receipt_sha256,
+            )
+            if not all(
+                (args.preflight_report, args.backup_receipt)
+            ) or not args.preflight_report_sha256 or not args.backup_receipt_sha256:
+                raise ProductionCutoverError("REDEPLOY_EVIDENCE_REQUIRED")
+            with fail_safe_signal_guard():
+                payload = redeploy_queue_v1(
+                    manifest=args.manifest,
+                    staging_env=args.staging_env,
+                    preflight_report=args.preflight_report,
+                    preflight_digest=args.preflight_report_sha256,
+                    backup_receipt=args.backup_receipt,
+                    backup_digest=args.backup_receipt_sha256,
                     artifact_dir=args.artifact_dir,
                     confirmation=args.confirm,
                 )

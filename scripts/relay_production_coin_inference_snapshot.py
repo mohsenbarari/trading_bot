@@ -35,11 +35,21 @@ if str(REPO_ROOT) not in sys.path:
 from core.market_intelligence.market_contracts import normalize_utc
 from core.market_intelligence.market_snapshot import (
     AtomicMarketSnapshotProvider,
+    MarketSnapshotError,
     MarketSnapshotUnavailable,
+    publish_market_snapshot_atomically,
 )
 from core.market_intelligence.snapshot_publisher import (
     MarketSnapshotPublisherError,
     publish_rate_ready_snapshot,
+)
+from scripts.check_production_coin_inference_readiness import (
+    SAFE_NO_DATA_CONTEXT_KEY,
+    SAFE_NO_DATA_CONTEXT_VERSION,
+    safe_no_data_snapshot_assessment,
+    safe_no_data_source_assessment,
+    _source_probe,
+    ProductionInferenceReadinessError,
 )
 
 
@@ -298,11 +308,53 @@ def _validated_snapshot(
     if age < 0 or age > maximum_age_seconds:
         raise ProductionSnapshotRelayError("snapshot_stale_or_future")
     rates = snapshot.get("rates")
-    if not isinstance(rates, Mapping) or int(rates.get("estimated_count") or 0) <= 0:
+    if not isinstance(rates, Mapping):
+        raise ProductionSnapshotRelayError("snapshot_rates_unavailable")
+    estimated_count = int(rates.get("estimated_count") or 0)
+    if estimated_count <= 0 and not safe_no_data_snapshot_assessment(snapshot):
         raise ProductionSnapshotRelayError("snapshot_has_no_estimated_rates")
     if expected_digest is not None and _digest(path) != expected_digest.lower():
         raise ProductionSnapshotRelayError("snapshot_digest_mismatch")
     return snapshot
+
+
+def _bind_safe_no_data_context(
+    path: Path,
+    *,
+    source_assessment: Mapping[str, object],
+) -> str:
+    """Bind a no-price Snapshot to the exact bounded production source gate."""
+
+    if not safe_no_data_source_assessment(source_assessment):
+        raise ProductionSnapshotRelayError("safe_no_data_source_not_eligible")
+    try:
+        snapshot = dict(AtomicMarketSnapshotProvider(path).load())
+    except MarketSnapshotUnavailable as exc:
+        raise ProductionSnapshotRelayError("snapshot_unavailable") from exc
+    rates = snapshot.get("rates")
+    if (
+        snapshot.get("snapshot_status") != "NO_DATA_COIN_RATE_STATE"
+        or not isinstance(rates, Mapping)
+        or int(rates.get("estimated_count") or 0) != 0
+        or int(rates.get("no_data_count") or 0) <= 0
+    ):
+        raise ProductionSnapshotRelayError("safe_no_data_snapshot_invalid")
+    snapshot[SAFE_NO_DATA_CONTEXT_KEY] = {
+        "contract_version": SAFE_NO_DATA_CONTEXT_VERSION,
+        "source_status": "DEGRADED_GUARD_FAIL_OPEN",
+        "source_reason": source_assessment["degradation_reason"],
+        "group_inputs_within_hot_retention": True,
+        "private_input_within_hot_retention": True,
+        "collector_checkpoint_count": 3,
+        "price_authority": False,
+    }
+    try:
+        digest = publish_market_snapshot_atomically(path, snapshot)
+    except MarketSnapshotError as exc:
+        raise ProductionSnapshotRelayError("safe_no_data_snapshot_invalid") from exc
+    if not safe_no_data_snapshot_assessment(snapshot):
+        raise ProductionSnapshotRelayError("safe_no_data_context_invalid")
+    return digest
 
 
 @contextmanager
@@ -833,15 +885,41 @@ def _publish_and_relay(args: argparse.Namespace) -> int:
                 snapshot_path=candidate,
                 watermark_path=watermark,
             )
+            bound_no_data_digest: str | None = None
             if result.status not in {"PUBLISHED", "UNCHANGED"}:
-                raise ProductionSnapshotRelayError("snapshot_not_rate_ready")
+                try:
+                    source_assessment = _source_probe(store, now=_utc_now())
+                except ProductionInferenceReadinessError as exc:
+                    raise ProductionSnapshotRelayError(
+                        "snapshot_not_rate_ready"
+                    ) from exc
+                if not safe_no_data_source_assessment(source_assessment):
+                    raise ProductionSnapshotRelayError("snapshot_not_rate_ready")
+                result = publish_rate_ready_snapshot(
+                    market_store_path=store,
+                    snapshot_path=candidate,
+                    watermark_path=watermark,
+                    publish_no_data_snapshot=True,
+                )
+                if result.status != "PUBLISHED_NO_DATA":
+                    raise ProductionSnapshotRelayError("snapshot_not_rate_ready")
+                bound_no_data_digest = _bind_safe_no_data_context(
+                    candidate,
+                    source_assessment=source_assessment,
+                )
             snapshot = _validated_snapshot(
                 candidate,
                 maximum_age_seconds=args.maximum_age_seconds,
             )
             os.chmod(candidate, 0o644)
             digest = _digest(candidate)
-            if result.snapshot_digest and result.snapshot_digest != digest:
+            if bound_no_data_digest is not None and bound_no_data_digest != digest:
+                raise ProductionSnapshotRelayError("published_snapshot_digest_mismatch")
+            if (
+                bound_no_data_digest is None
+                and result.snapshot_digest
+                and result.snapshot_digest != digest
+            ):
                 raise ProductionSnapshotRelayError("published_snapshot_digest_mismatch")
 
             if all(remote_values):
@@ -936,11 +1014,14 @@ def _publish_and_relay(args: argparse.Namespace) -> int:
             candidate.unlink(missing_ok=True)
             watermark.unlink(missing_ok=True)
     rates = snapshot["rates"]
+    safe_no_data = safe_no_data_snapshot_assessment(snapshot)
     _emit(
         status="PUBLISHED",
         snapshot_sha256=digest,
         generated_at_utc=snapshot.get("generated_at_utc"),
         estimated_rate_count=int(rates["estimated_count"]),
+        snapshot_mode="SAFE_NO_DATA" if safe_no_data else "RATE_READY",
+        price_authority=not safe_no_data,
         remote_relayed=bool(all(remote_values)),
     )
     return 0
@@ -968,6 +1049,11 @@ def _install_relayed(args: argparse.Namespace) -> int:
         status="INSTALLED",
         snapshot_sha256=args.expected_sha256.lower(),
         generated_at_utc=snapshot.get("generated_at_utc"),
+        snapshot_mode=(
+            "SAFE_NO_DATA"
+            if safe_no_data_snapshot_assessment(snapshot)
+            else "RATE_READY"
+        ),
     )
     return 0
 
@@ -986,6 +1072,11 @@ def _check(args: argparse.Namespace) -> int:
         snapshot_sha256=digest,
         generated_at_utc=snapshot.get("generated_at_utc"),
         estimated_rate_count=int(snapshot["rates"]["estimated_count"]),
+        snapshot_mode=(
+            "SAFE_NO_DATA"
+            if safe_no_data_snapshot_assessment(snapshot)
+            else "RATE_READY"
+        ),
     )
     return 0
 

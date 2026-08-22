@@ -4007,11 +4007,11 @@ import stat
 import sys
 
 from scripts.rehearse_production_migration import (
+    ALREADY_AT_HEAD_MODE,
     DEFAULT_RECEIPT_ROOT,
-    EXPECTED_NEW_TABLES,
-    EXPECTED_PRE_MIGRATION_HEAD,
     EXPECTED_ROLES,
     _parse_utc,
+    migration_contract,
     production_backup_manifest_values,
     source_alembic_head,
     verify_backup_receipt,
@@ -4088,6 +4088,7 @@ if not re.fullmatch(r"[0-9a-f]{40}", pre_release_sha):
 backup_now = None
 if resume:
     backup_now = _parse_utc(backup_payload.get("created_at"))
+source_head = source_alembic_head(project)
 backup = verify_backup_receipt(
     receipt_path=backup_path,
     receipt_sha256=backup_digest,
@@ -4095,9 +4096,10 @@ backup = verify_backup_receipt(
     manifest_values=production_backup_manifest_values(manifest),
     max_age_seconds=maximum_age,
     now=backup_now,
+    expected_source_head=source_head,
 )
 
-source_head = source_alembic_head(project)
+contract = migration_contract(backup.pre_migration_head, source_head)
 expected_target_bindings = {
     artifact.role: artifact.target_binding_sha256 for artifact in backup.artifacts
 }
@@ -4108,7 +4110,7 @@ expected_artifacts = {artifact.role: artifact for artifact in backup.artifacts}
 required_top = {
     "schema_version", "contract", "status", "mode", "source_commit",
     "source_tree", "source_alembic_head", "production_release_sha",
-    "pre_migration_head", "migration_runner_image_id",
+    "migration_mode", "pre_migration_head", "migration_runner_image_id",
     "migration_runner_prebuild_receipt_sha256", "migration_runner_release_tree",
     "migration_runner_input_signature", "migration_runner_oci_revision",
     "migration_runner_oci_release_tree", "migration_runner_oci_input_signature",
@@ -4129,7 +4131,8 @@ if (
     or payload.get("source_tree") != release_tree
     or payload.get("source_alembic_head") != source_head
     or payload.get("production_release_sha") != pre_release_sha
-    or payload.get("pre_migration_head") != EXPECTED_PRE_MIGRATION_HEAD
+    or payload.get("migration_mode") != contract.mode
+    or payload.get("pre_migration_head") != contract.pre_revision
     or payload.get("migration_runner_image_id") != foreign_image_id
     or payload.get("migration_runner_prebuild_receipt_sha256") != foreign_receipt_digest
     or payload.get("migration_runner_release_tree") != release_tree
@@ -4142,7 +4145,7 @@ if (
     or payload.get("backup_created_at") != backup.created_at
     or payload.get("roles") != list(EXPECTED_ROLES)
     or payload.get("target_bindings_sha256") != expected_target_bindings
-    or payload.get("expected_public_table_delta") != 14
+    or payload.get("expected_public_table_delta") != contract.expected_public_table_delta
     or payload.get("docker_network") != "random-internal-no-published-ports"
     or payload.get("production_mutation") is not False
     or payload.get("cleanup_status") != "passed"
@@ -4157,21 +4160,36 @@ if not isinstance(results, list) or [row.get("role") for row in results if isins
 for row in results:
     role = row["role"]
     artifact = expected_artifacts[role]
+    schema_before = row.get("schema_before_sha256")
+    schema_after = row.get("schema_after_sha256")
+    schema_noop = row.get("schema_noop_sha256")
     if (
         row.get("status") != "passed"
         or row.get("artifact_sha256") != artifact.sha256
         or row.get("artifact_size_bytes") != artifact.size_bytes
         or row.get("database_identity_sha256") != expected_database_identities[role]
         or row.get("target_binding_sha256") != expected_target_bindings[role]
-        or row.get("pre_revision") != EXPECTED_PRE_MIGRATION_HEAD
+        or row.get("migration_mode") != contract.mode
+        or row.get("pre_revision") != contract.pre_revision
         or row.get("post_revision") != source_head
-        or row.get("public_table_delta") != 14
-        or row.get("added_tables") != sorted(EXPECTED_NEW_TABLES)
+        or row.get("public_table_delta") != contract.expected_public_table_delta
+        or row.get("added_tables") != list(contract.expected_added_tables)
         or (row.get("preexisting_table_count_contract") or {}).get("all_row_counts_preserved") is not True
-        or row.get("new_table_seed_contract") != {"telegram_delivery_feeder_states": 1, "all_other_new_tables": 0}
+        or row.get("new_table_seed_contract") != (
+            {"telegram_delivery_feeder_states": 1, "all_other_new_tables": 0}
+            if contract.require_initial_seed_contract
+            else None
+        )
         or row.get("invalid_or_unready_indexes") != 0
         or row.get("concurrent_index_state") != "valid-ready"
+        or row.get("first_upgrade_noop") is not contract.require_first_upgrade_noop
         or row.get("second_upgrade_noop") is not True
+        or not all(
+            re.fullmatch(r"[0-9a-f]{64}", str(value or ""))
+            for value in (schema_before, schema_after, schema_noop)
+        )
+        or schema_after != schema_noop
+        or (contract.mode == ALREADY_AT_HEAD_MODE and schema_before != schema_after)
     ):
         raise SystemExit("migration rehearsal result binding is invalid")
 
@@ -4839,7 +4857,7 @@ prepare_restart_disabled_foreign_writers() {
     (
         cd "$LOCAL_PROJECT_DIR"
         $LOCAL_COMPOSE_CMD -f docker-compose.yml -f "$override" \
-            create --force-recreate --no-deps app bot sync_worker
+            up --no-start --force-recreate --no-deps app bot sync_worker
     )
     inventory="$(mktemp "$RELEASE_TMP_DIR/writers.foreign.replacement.XXXXXX")"
     chmod 0600 "$inventory"
@@ -4870,7 +4888,7 @@ prepare_restart_disabled_iran_writers() {
     ssh_iran "set -euo pipefail
 $(remote_compose_resolver)
 cd '$IRAN_PROJECT_DIR'
-\$compose_cmd -f docker-compose.iran.yml -f '$remote_override' create --force-recreate --no-deps app sync_worker
+\$compose_cmd -f docker-compose.iran.yml -f '$remote_override' up --no-start --force-recreate --no-deps app sync_worker
 for service in app sync_worker; do
   id=\"\$(docker ps -aq --filter label=com.docker.compose.project=current --filter label=com.docker.compose.service=\$service)\"
   [ -n \"\$id\" ] && [ \"\$(printf '%s\\n' \"\$id\" | wc -l)\" -eq 1 ] || exit 35
@@ -5055,9 +5073,20 @@ prepare_committed_iran_source_payload() {
         --exclude '.claude' \
         --exclude '.codex' \
         --exclude '.cursor' \
+        --exclude '.env' \
+        --exclude '.env.*' \
+        --exclude '.venv' \
+        --exclude '.vscode' \
+        --exclude '__pycache__' \
+        --exclude '*.pyc' \
         --exclude 'docs' \
         --exclude 'frontend' \
+        --exclude 'node_modules' \
         --exclude 'tests' \
+        --exclude 'tmp' \
+        --exclude 'uploads' \
+        --exclude 'map_data' \
+        --exclude 'audit_trail' \
         --exclude 'mutants' \
         --exclude 'stage9-test-packages' \
         --exclude 'stage9-test-packages-py311' \
@@ -5138,6 +5167,13 @@ find \"\$assets_dir\" -maxdepth 1 -type f -name 'MarketView-*.js' | grep -q . ||
 grep -h -q 'api/offers/market-history' \"\$assets_dir\"/MarketView-*.js || exit 22" \
         || die "Remote Iran frontend release contract failed: deployed MarketView bundle cannot load read-only terminal market offers."
     atomic_install_iran_runtime_env
+    ssh_iran "set -euo pipefail
+command -v setfacl >/dev/null
+id www-data >/dev/null 2>&1
+setfacl -m u:www-data:--x '$IRAN_PROJECT_DIR'
+runuser -u www-data -- test -r '$IRAN_PROJECT_DIR/mini_app_dist/index.html'
+runuser -u www-data -- test ! -r '$IRAN_PROJECT_DIR/.env'" \
+        || die "Iran web root ACL could not grant nginx traversal without exposing runtime env."
     verify_installed_runtime_env_pair
     verify_remote_immutable_runtime_payload
     log "Production payload sync complete"

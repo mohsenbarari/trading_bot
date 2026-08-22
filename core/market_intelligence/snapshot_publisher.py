@@ -85,11 +85,12 @@ def publish_rate_ready_snapshot(
     The caller owns scheduling and error reporting. This function opens the
     Market Store read-only, never creates a store, and preserves a previous
     valid Snapshot if upstream evidence is empty or not rate-ready.  The sole
-    exception is the explicit staging-only caller contract represented by
+    exception is the explicit caller contract represented by
     ``publish_no_data_snapshot``: it publishes a fresh, structurally valid
-    no-data artifact so staging can start safely outside market hours.  Such an
-    artifact contains no usable rate and therefore cannot become price-reject
-    authority.
+    no-data artifact.  Production callers must separately prove and bind their
+    quiet-source eligibility; this primitive intentionally does not infer that
+    policy.  Such an artifact contains no usable rate and therefore cannot
+    become price-reject authority.
 
     Snapshot content is time-dependent even when the input rows are unchanged:
     source ages, freshness states, and ``generated_at_utc`` must advance on

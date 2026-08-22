@@ -61,10 +61,81 @@ CANONICAL_CONTAINER_SNAPSHOT = CANONICAL_CONTAINER_DIR / "coin-rates.json"
 MAXIMUM_SNAPSHOT_AGE_SECONDS = 120
 MAXIMUM_GROUP_INPUT_AGE_SECONDS = 3 * 86_400
 _DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+SAFE_NO_DATA_CONTEXT_KEY = "production_safe_no_data"
+SAFE_NO_DATA_CONTEXT_VERSION = "production-safe-no-data-v1"
+SAFE_NO_DATA_SOURCE_REASON = "PRIVATE_GOLD_QUIET_OUTSIDE_HARD_AUTHORITY_WINDOW"
 
 
 class ProductionInferenceReadinessError(RuntimeError):
     """One redacted readiness contract failed."""
+
+
+def _exact_integer(value: object, expected: int) -> bool:
+    return not isinstance(value, bool) and isinstance(value, int) and value == expected
+
+
+def _age_inside(value: object, maximum: float) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and 0 <= float(value) <= float(maximum)
+    )
+
+
+def safe_no_data_source_assessment(report: Mapping[str, object]) -> bool:
+    """Return whether a source report can authorize a no-price artifact.
+
+    This is deliberately narrower than a generic degraded source.  Group
+    inputs must remain inside hot retention, all three durable collector
+    checkpoints must exist, and the only degradation must be a quiet/private
+    gold book outside the hard-authority freshness window.  It never grants
+    price authority.
+    """
+
+    return (
+        report.get("status") == "DEGRADED_GUARD_FAIL_OPEN"
+        and report.get("degradation_reason") == SAFE_NO_DATA_SOURCE_REASON
+        and report.get("group_inputs_within_hot_retention") is True
+        and report.get("private_input_within_hot_retention") is True
+        and report.get("private_gold_hard_authority_fresh") is False
+        and _age_inside(
+            report.get("group_1_age_seconds"),
+            MAXIMUM_GROUP_INPUT_AGE_SECONDS,
+        )
+        and _age_inside(
+            report.get("group_2_age_seconds"),
+            MAXIMUM_GROUP_INPUT_AGE_SECONDS,
+        )
+        and _age_inside(
+            report.get("private_gold_age_seconds"),
+            MAXIMUM_GROUP_INPUT_AGE_SECONDS,
+        )
+        and _exact_integer(report.get("collector_checkpoint_count"), 3)
+        and report.get("safe_no_data_snapshot_allowed") is True
+    )
+
+
+def safe_no_data_snapshot_assessment(snapshot: Mapping[str, Any]) -> bool:
+    """Validate the bounded provenance carried by a production no-data file."""
+
+    rates = snapshot.get("rates")
+    context = snapshot.get(SAFE_NO_DATA_CONTEXT_KEY)
+    return (
+        snapshot.get("snapshot_status") == "NO_DATA_COIN_RATE_STATE"
+        and isinstance(rates, Mapping)
+        and _exact_integer(rates.get("estimated_count"), 0)
+        and not isinstance(rates.get("no_data_count"), bool)
+        and isinstance(rates.get("no_data_count"), int)
+        and int(rates["no_data_count"]) > 0
+        and isinstance(context, Mapping)
+        and context.get("contract_version") == SAFE_NO_DATA_CONTEXT_VERSION
+        and context.get("source_status") == "DEGRADED_GUARD_FAIL_OPEN"
+        and context.get("source_reason") == SAFE_NO_DATA_SOURCE_REASON
+        and context.get("group_inputs_within_hot_retention") is True
+        and context.get("private_input_within_hot_retention") is True
+        and _exact_integer(context.get("collector_checkpoint_count"), 3)
+        and context.get("price_authority") is False
+    )
 
 
 def _now() -> datetime:
@@ -153,8 +224,11 @@ def _snapshot_assessment(
         per_settlement[settlement] += 1
 
     represented_codes = {code for code, _settlement in hard_eligible}
-    if not estimated:
+    safe_no_data = not estimated and safe_no_data_snapshot_assessment(snapshot)
+    if not estimated and not safe_no_data:
         raise ProductionInferenceReadinessError("estimated_rate_coverage_unavailable")
+    if require_hard_reject_coverage and safe_no_data:
+        raise ProductionInferenceReadinessError("hard_reject_coverage_insufficient")
     hard_reject_ready = represented_codes == expected_codes and all(
         value > 0 for value in per_settlement.values()
     )
@@ -181,8 +255,22 @@ def _snapshot_assessment(
         if decision.status != "ALLOWED":
             raise ProductionInferenceReadinessError("pure_guard_probe_failed")
         pure_guard_probe = "ALLOWED"
+    elif safe_no_data:
+        sample_code = sorted(expected_codes)[0]
+        decision = evaluate_offer_model_price_snapshot(
+            snapshot,
+            commodity_name=CANONICAL_COMMODITY_NAMES[sample_code],
+            settlement_type="cash",
+            offer_type="sell",
+            proposed_price=100_000,
+            now_utc=now,
+            market_opened_at=None,
+        )
+        if decision.status != "ABSTAINED" or decision.reason != "MODEL_RANGE_UNAVAILABLE":
+            raise ProductionInferenceReadinessError("pure_guard_probe_failed")
     return snapshot, {
         "status": "READY" if hard_reject_ready else "DEGRADED_GUARD_FAIL_OPEN",
+        "snapshot_mode": "SAFE_NO_DATA" if safe_no_data else "RATE_READY",
         "snapshot_age_seconds": round(snapshot_age, 3),
         "estimated_rate_count": len(estimated),
         "hard_reject_eligible_count": len(hard_eligible),
@@ -327,6 +415,9 @@ def _source_probe(path: Path, *, now: datetime) -> dict[str, object]:
         group_1_age <= MAXIMUM_GROUP_INPUT_AGE_SECONDS
         and group_2_age <= MAXIMUM_GROUP_INPUT_AGE_SECONDS
     )
+    private_input_within_hot_retention = (
+        private_age <= MAXIMUM_GROUP_INPUT_AGE_SECONDS
+    )
     private_gold_engine_age_supported = (
         (private_physical_age is not None and private_physical_age <= 900)
         or (private_paper_age is not None and private_paper_age <= 180)
@@ -336,13 +427,29 @@ def _source_probe(path: Path, *, now: datetime) -> dict[str, object]:
         and private_physical_age
         <= OFFER_MODEL_PRICE_GUARD_MAXIMUM_UNDERLYING_AGE_SECONDS
     )
+    status = (
+        "READY"
+        if group_inputs_within_hot_retention
+        and private_gold_hard_authority_fresh
+        else "DEGRADED_GUARD_FAIL_OPEN"
+    )
+    if not group_inputs_within_hot_retention:
+        degradation_reason = "GROUP_INPUTS_OUTSIDE_HOT_RETENTION"
+    elif not private_gold_hard_authority_fresh:
+        degradation_reason = SAFE_NO_DATA_SOURCE_REASON
+    else:
+        degradation_reason = None
+    safe_no_data_allowed = (
+        status == "DEGRADED_GUARD_FAIL_OPEN"
+        and degradation_reason == SAFE_NO_DATA_SOURCE_REASON
+        and group_inputs_within_hot_retention
+        and private_input_within_hot_retention
+        and len(checkpoints) == 3
+    )
     return {
-        "status": (
-            "READY"
-            if group_inputs_within_hot_retention
-            and private_gold_hard_authority_fresh
-            else "DEGRADED_GUARD_FAIL_OPEN"
-        ),
+        "status": status,
+        "degradation_reason": degradation_reason,
+        "safe_no_data_snapshot_allowed": safe_no_data_allowed,
         "group_1_age_seconds": round(group_1_age, 3),
         "group_2_age_seconds": round(group_2_age, 3),
         "private_gold_age_seconds": round(private_age, 3),
@@ -356,6 +463,7 @@ def _source_probe(path: Path, *, now: datetime) -> dict[str, object]:
         ),
         "freshness_basis": "ECONOMIC_EVENT_TIME",
         "group_inputs_within_hot_retention": group_inputs_within_hot_retention,
+        "private_input_within_hot_retention": private_input_within_hot_retention,
         "private_gold_engine_age_supported": private_gold_engine_age_supported,
         "private_gold_hard_authority_fresh": private_gold_hard_authority_fresh,
         "collector_checkpoint_count": len(checkpoints),

@@ -526,6 +526,69 @@ printf 'ssh=%s\nscp=%s\nrsync=%s\n' \
         self.assertIn("IRAN_SSH_COMMAND_TIMEOUT_SECONDS", source)
         self.assertIn("IRAN_TRANSFER_TIMEOUT_SECONDS", source)
 
+    def test_committed_iran_payload_omits_remote_preserved_paths_from_manifest(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="iran-source-payload-") as temporary:
+            root = Path(temporary)
+            project = root / "project"
+            project.mkdir()
+            (project / "runtime.py").write_text("RUNTIME = True\n", encoding="utf-8")
+            (project / ".env.example").write_text("EXAMPLE=true\n", encoding="utf-8")
+            (project / "tmp").mkdir()
+            (project / "tmp" / "tracked.md").write_text("planning\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            subprocess.run(["git", "-C", str(project), "add", "."], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(project),
+                    "-c",
+                    "user.name=Release Test",
+                    "-c",
+                    "user.email=release-test@example.invalid",
+                    "commit",
+                    "-qm",
+                    "fixture",
+                ],
+                check=True,
+            )
+            release_sha = subprocess.check_output(
+                ["git", "-C", str(project), "rev-parse", "HEAD"],
+                text=True,
+            ).strip()
+            result = run_sourced_script(
+                """
+verify_frozen_release_source() { :; }
+LOCAL_PROJECT_DIR="$2"
+RELEASE_SHA="$3"
+RELEASE_TMP_DIR="$4"
+LOCAL_IRAN_SOURCE_PAYLOAD_DIR="$RELEASE_TMP_DIR/iran-source-payload"
+LOCAL_IRAN_SOURCE_PAYLOAD_MANIFEST="$RELEASE_TMP_DIR/iran-source-payload.sha256"
+prepare_committed_iran_source_payload
+test -f "$LOCAL_IRAN_SOURCE_PAYLOAD_DIR/runtime.py"
+test ! -e "$LOCAL_IRAN_SOURCE_PAYLOAD_DIR/tmp"
+test ! -e "$LOCAL_IRAN_SOURCE_PAYLOAD_DIR/.env.example"
+! grep -qE '(^|/)(tmp|\\.env\\.example)(/|$)' "$LOCAL_IRAN_SOURCE_PAYLOAD_MANIFEST"
+""",
+                str(project),
+                release_sha,
+                str(root / "release"),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+
+    def test_iran_web_root_grants_only_nginx_traversal_and_keeps_env_private(self) -> None:
+        source = RELEASE_SCRIPT.read_text(encoding="utf-8")
+        sync = source.split("sync_project() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("setfacl -m u:www-data:--x '$IRAN_PROJECT_DIR'", sync)
+        self.assertIn(
+            "runuser -u www-data -- test -r '$IRAN_PROJECT_DIR/mini_app_dist/index.html'",
+            sync,
+        )
+        self.assertIn(
+            "runuser -u www-data -- test ! -r '$IRAN_PROJECT_DIR/.env'",
+            sync,
+        )
+
     def test_authorized_inference_release_explicitly_activates_input_timers(self) -> None:
         source = RELEASE_SCRIPT.read_text(encoding="utf-8")
         installer = source.split("run_production_coin_input_timer_installer() {", 1)[1].split("\n}", 1)[0]
@@ -1384,6 +1447,10 @@ load_two_host_release_state
         self.assertIn("if resume:", gate)
         self.assertIn("backup_now = _parse_utc", gate)
         self.assertIn("if not resume:", gate)
+        self.assertIn("migration_contract(backup.pre_migration_head, source_head)", gate)
+        self.assertIn('row.get("first_upgrade_noop") is not contract.require_first_upgrade_noop', gate)
+        self.assertIn("contract.expected_public_table_delta", gate)
+        self.assertIn("contract.expected_added_tables", gate)
         self.assertIn("pre_release_sha", gate)
         self.assertIn("Live foreign/Iran writers", gate)
         self.assertLess(release.index("verify_release_evidence_gate"), release.index("begin_two_host_release_transaction"))
@@ -1424,10 +1491,11 @@ load_two_host_release_state
         override = source.split("write_writer_restart_disabled_override() {", 1)[1].split("\n}", 1)[0]
         self.assertIn('restart: "no"', override)
         for body in (foreign, iran):
-            self.assertLess(body.index("write_writer_restart_disabled_override"), body.index("create --force-recreate"))
-            self.assertLess(body.index("update_writer_journal_phase"), body.index("create --force-recreate"))
+            self.assertLess(body.index("write_writer_restart_disabled_override"), body.index("up --no-start --force-recreate --no-deps"))
+            self.assertLess(body.index("update_writer_journal_phase"), body.index("up --no-start --force-recreate --no-deps"))
             self.assertIn("record_writer_replacement_inventory", body)
             self.assertNotIn("docker update --restart=no", body)
+            self.assertNotIn("create --force-recreate --no-deps", body)
         self.assertIn("foreign_replacement_creating", foreign)
         self.assertIn("foreign_replacement_prepared", foreign)
         self.assertIn("iran_replacement_creating", iran)

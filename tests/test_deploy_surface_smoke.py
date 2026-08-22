@@ -376,6 +376,19 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         result = run_checked(['bash', '-n', 'scripts/deploy_staging.sh'])
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
 
+    def test_staging_iran_nginx_acl_is_narrow_and_env_stays_private(self):
+        source = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(
+            encoding='utf-8'
+        )
+        acl = source.split('ensure_iran_nginx_web_root_acl() {', 1)[1].split(
+            '\n}', 1
+        )[0]
+        self.assertIn('trading_bot_staging_iran', acl)
+        self.assertIn('setfacl -m "u:${worker_user}:--x" "$PROJECT_DIR"', acl)
+        self.assertIn('test -r "$STAGING_FRONTEND_DIST_DIR/index.html"', acl)
+        self.assertIn('test ! -r "$ENV_FILE"', acl)
+        self.assertNotIn('chmod 0711', acl)
+
     def test_staging_prebuilt_commands_never_rebuild_while_starting(self):
         source = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(
             encoding='utf-8'

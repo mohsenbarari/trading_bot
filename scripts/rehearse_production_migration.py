@@ -45,6 +45,8 @@ from scripts.run_production_backup import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_PRE_MIGRATION_HEAD = "f2c7d8e9a0b1"
+HISTORICAL_UPGRADE_MODE = "historical-f2-to-source-head"
+ALREADY_AT_HEAD_MODE = "already-at-source-head"
 POSTGRES_IMAGE = "postgres:15-alpine"
 MIGRATION_RUNNER_IMAGE = "trading_bot_base"
 EXECUTE_CONFIRMATION = "REHEARSE VERIFIED PRODUCTION MIGRATIONS"
@@ -161,6 +163,16 @@ class SourceBinding:
 
 
 @dataclass(frozen=True, slots=True)
+class MigrationContract:
+    mode: str
+    pre_revision: str
+    expected_public_table_delta: int
+    expected_added_tables: tuple[str, ...]
+    require_initial_seed_contract: bool
+    require_first_upgrade_noop: bool
+
+
+@dataclass(frozen=True, slots=True)
 class DumpArtifact:
     role: str
     path: Path
@@ -169,6 +181,7 @@ class DumpArtifact:
     release_sha: str
     database_identity_sha256: str
     target_binding_sha256: str
+    pre_revision: str = EXPECTED_PRE_MIGRATION_HEAD
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +191,7 @@ class VerifiedBackup:
     production_release_sha: str
     artifacts: tuple[DumpArtifact, ...]
     artifact_set_sha256: str
+    pre_migration_head: str = EXPECTED_PRE_MIGRATION_HEAD
 
 
 @dataclass(frozen=True, slots=True)
@@ -661,6 +675,7 @@ def verify_backup_receipt(
     manifest_values: Mapping[str, str],
     max_age_seconds: int = DEFAULT_MAX_BACKUP_AGE_SECONDS,
     now: datetime | None = None,
+    expected_source_head: str | None = None,
 ) -> VerifiedBackup:
     if not SHA256_RE.fullmatch(receipt_sha256):
         raise RehearsalRefusal("backup receipt digest is invalid")
@@ -668,6 +683,9 @@ def verify_backup_receipt(
         raise RehearsalRefusal("expected production release binding is invalid")
     if not 60 <= max_age_seconds <= 6 * 60 * 60:
         raise RehearsalRefusal("backup freshness bound is outside the allowed range")
+    source_head = expected_source_head or source_alembic_head()
+    if not REVISION_RE.fullmatch(source_head):
+        raise RehearsalRefusal("source Alembic head binding is invalid")
     receipt_path = _secure_receipt_file(receipt_path)
     if _sha256_file(receipt_path) != receipt_sha256:
         raise RehearsalRefusal("backup receipt digest does not match")
@@ -685,6 +703,7 @@ def verify_backup_receipt(
     artifacts: list[DumpArtifact] = []
     artifact_bindings: list[dict[str, object]] = []
     database_identities: set[str] = set()
+    backup_schema_heads: set[str] = set()
     for role in EXPECTED_ROLES:
         result = indexed[role]
         items = _backup_file_items(result)
@@ -702,8 +721,13 @@ def verify_backup_receipt(
                 "backup result does not bind the approved backup root and exact run root"
             )
         backup_run_dir = next(iter(backup_run_dirs))
-        if result.get("status") != "ok" or result.get("schema_head") != EXPECTED_PRE_MIGRATION_HEAD:
+        schema_head = str(result.get("schema_head") or "")
+        if (
+            result.get("status") != "ok"
+            or schema_head not in {EXPECTED_PRE_MIGRATION_HEAD, source_head}
+        ):
             raise RehearsalRefusal("backup result status or pre-migration schema is invalid")
+        backup_schema_heads.add(schema_head)
         if result.get("project_label") != EXPECTED_PROJECT_LABELS[role]:
             raise RehearsalRefusal("backup compose-project binding is invalid")
         if result.get("release_sha") != expected_release_sha:
@@ -798,8 +822,12 @@ def verify_backup_receipt(
                 release_sha=expected_release_sha,
                 database_identity_sha256=database_identity,
                 target_binding_sha256=target_binding,
+                pre_revision=schema_head,
             )
         )
+    if len(backup_schema_heads) != 1:
+        raise RehearsalRefusal("backup roles do not share one pre-migration schema")
+    pre_migration_head = next(iter(backup_schema_heads))
     return VerifiedBackup(
         receipt_sha256=receipt_sha256,
         created_at=str(payload.get("created_at")),
@@ -810,6 +838,7 @@ def verify_backup_receipt(
                 artifact_bindings, sort_keys=True, separators=(",", ":")
             ).encode("utf-8")
         ).hexdigest(),
+        pre_migration_head=pre_migration_head,
     )
 
 
@@ -1354,7 +1383,11 @@ def _query_preexisting_table_counts(
 
 
 def _query_new_table_counts(
-    container: str, username: str, database: str
+    container: str,
+    username: str,
+    database: str,
+    *,
+    require_initial_seed_contract: bool = True,
 ) -> dict[str, int]:
     tables = set(_query_public_tables(container, username, database))
     if not set(EXPECTED_NEW_TABLES).issubset(tables):
@@ -1370,11 +1403,40 @@ def _query_new_table_counts(
         if not value.isdigit():
             raise RehearsalCommandError("new-table count query returned an invalid value")
         counts[table] = int(value)
-    expected = {table: 0 for table in EXPECTED_NEW_TABLES}
-    expected["telegram_delivery_feeder_states"] = 1
-    if counts != expected:
-        raise RehearsalCommandError("new-table seed contract does not match")
+    if require_initial_seed_contract:
+        expected = {table: 0 for table in EXPECTED_NEW_TABLES}
+        expected["telegram_delivery_feeder_states"] = 1
+        if counts != expected:
+            raise RehearsalCommandError("new-table seed contract does not match")
     return counts
+
+
+def migration_contract(pre_revision: str, source_head: str) -> MigrationContract:
+    """Resolve one of the two exact, fail-closed production rehearsal paths."""
+
+    if not REVISION_RE.fullmatch(pre_revision) or not REVISION_RE.fullmatch(source_head):
+        raise RehearsalCommandError("migration revision binding is invalid")
+    if pre_revision == source_head:
+        return MigrationContract(
+            mode=ALREADY_AT_HEAD_MODE,
+            pre_revision=pre_revision,
+            expected_public_table_delta=0,
+            expected_added_tables=(),
+            require_initial_seed_contract=False,
+            require_first_upgrade_noop=True,
+        )
+    if pre_revision == EXPECTED_PRE_MIGRATION_HEAD:
+        return MigrationContract(
+            mode=HISTORICAL_UPGRADE_MODE,
+            pre_revision=pre_revision,
+            expected_public_table_delta=len(EXPECTED_NEW_TABLES),
+            expected_added_tables=tuple(sorted(EXPECTED_NEW_TABLES)),
+            require_initial_seed_contract=True,
+            require_first_upgrade_noop=False,
+        )
+    raise RehearsalCommandError(
+        "backup schema is neither the historical production head nor the source head"
+    )
 
 
 def _invalid_index_count(container: str, username: str, database: str) -> int:
@@ -1534,6 +1596,7 @@ def rehearse_artifact(
     resources: DockerResources,
     timeout: int,
 ) -> dict[str, Any]:
+    contract = migration_contract(artifact.pre_revision, source.alembic_head)
     username = f"scratch_{secrets.token_hex(6)}"
     password = secrets.token_hex(24)
     database = f"coin_intelligence_prod_rehearsal_{secrets.token_hex(6)}"
@@ -1563,12 +1626,33 @@ def rehearse_artifact(
         pg_container, username, database, pre_tables
     )
     pre_schema_sha = schema_only_sha256(pg_container, username, database)
-    if pre_revision != EXPECTED_PRE_MIGRATION_HEAD:
+    if pre_revision != contract.pre_revision:
         raise RehearsalCommandError("restored database is not at the expected production head")
-    if pre_new:
-        raise RehearsalCommandError("restored database already contains target migration tables")
-    if pre_invalid_indexes != 0 or pre_concurrent_index:
-        raise RehearsalCommandError("restored database has invalid/unready or unexpected target indexes")
+    if contract.mode == HISTORICAL_UPGRADE_MODE:
+        if pre_new:
+            raise RehearsalCommandError(
+                "restored database already contains target migration tables"
+            )
+        if pre_invalid_indexes != 0 or pre_concurrent_index:
+            raise RehearsalCommandError(
+                "restored database has invalid/unready or unexpected target indexes"
+            )
+        pre_new_table_counts: dict[str, int] = {}
+    else:
+        if pre_new != sorted(EXPECTED_NEW_TABLES):
+            raise RehearsalCommandError(
+                "already-at-head database is missing target migration tables"
+            )
+        if pre_invalid_indexes != 0 or pre_concurrent_index != "valid-ready":
+            raise RehearsalCommandError(
+                "already-at-head database has invalid/unready target indexes"
+            )
+        pre_new_table_counts = _query_new_table_counts(
+            pg_container,
+            username,
+            database,
+            require_initial_seed_contract=False,
+        )
 
     current_before = run_guarded_alembic(
         resources,
@@ -1582,7 +1666,7 @@ def rehearse_artifact(
         arguments=["current"],
         timeout=timeout,
     )
-    if EXPECTED_PRE_MIGRATION_HEAD not in current_before:
+    if contract.pre_revision not in current_before:
         raise RehearsalCommandError("guarded Alembic did not report the production head")
     run_guarded_alembic(
         resources,
@@ -1618,16 +1702,29 @@ def rehearse_artifact(
     post_preexisting_counts = _query_preexisting_table_counts(
         pg_container, username, database, pre_tables
     )
-    post_new_table_counts = _query_new_table_counts(pg_container, username, database)
+    post_new_table_counts = _query_new_table_counts(
+        pg_container,
+        username,
+        database,
+        require_initial_seed_contract=contract.require_initial_seed_contract,
+    )
     first_schema_sha = schema_only_sha256(pg_container, username, database)
     added_tables = sorted(set(post_tables) - set(pre_tables))
+    first_upgrade_noop = (
+        post_tables == pre_tables
+        and post_preexisting_counts == preexisting_counts
+        and post_new_table_counts == pre_new_table_counts
+        and first_schema_sha == pre_schema_sha
+    )
     if (
         post_revision != source.alembic_head
-        or added_tables != sorted(EXPECTED_NEW_TABLES)
-        or len(post_tables) - len(pre_tables) != 14
+        or added_tables != list(contract.expected_added_tables)
+        or len(post_tables) - len(pre_tables)
+        != contract.expected_public_table_delta
         or post_invalid_indexes != 0
         or post_concurrent_index != "valid-ready"
         or post_preexisting_counts != preexisting_counts
+        or first_upgrade_noop != contract.require_first_upgrade_noop
     ):
         raise RehearsalCommandError("first migration pass violated the production schema contract")
 
@@ -1648,7 +1745,12 @@ def rehearse_artifact(
     final_preexisting_counts = _query_preexisting_table_counts(
         pg_container, username, database, pre_tables
     )
-    final_new_table_counts = _query_new_table_counts(pg_container, username, database)
+    final_new_table_counts = _query_new_table_counts(
+        pg_container,
+        username,
+        database,
+        require_initial_seed_contract=contract.require_initial_seed_contract,
+    )
     final_invalid_indexes = _invalid_index_count(pg_container, username, database)
     final_concurrent_index = _concurrent_index_state(pg_container, username, database)
     second_schema_sha = schema_only_sha256(pg_container, username, database)
@@ -1670,6 +1772,7 @@ def rehearse_artifact(
         "artifact_size_bytes": artifact.size_bytes,
         "database_identity_sha256": artifact.database_identity_sha256,
         "target_binding_sha256": artifact.target_binding_sha256,
+        "migration_mode": contract.mode,
         "pre_revision": pre_revision,
         "post_revision": post_revision,
         "pre_public_table_count": len(pre_tables),
@@ -1693,12 +1796,15 @@ def rehearse_artifact(
         "new_table_seed_contract": {
             "telegram_delivery_feeder_states": 1,
             "all_other_new_tables": 0,
-        },
+        }
+        if contract.require_initial_seed_contract
+        else None,
         "invalid_or_unready_indexes": final_invalid_indexes,
         "concurrent_index_state": final_concurrent_index,
         "schema_before_sha256": pre_schema_sha,
         "schema_after_sha256": first_schema_sha,
         "schema_noop_sha256": second_schema_sha,
+        "first_upgrade_noop": first_upgrade_noop,
         "second_upgrade_noop": True,
     }
 
@@ -1971,7 +2077,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         expected_release_sha=args.expected_production_release_sha,
         manifest_values=manifest_values,
         max_age_seconds=args.max_backup_age_seconds,
+        expected_source_head=source.alembic_head,
     )
+    contract = migration_contract(backup.pre_migration_head, source.alembic_head)
     runner_prebuild = verify_runner_prebuild_receipt(
         receipt_path=args.migration_runner_prebuild_receipt,
         receipt_sha256=args.migration_runner_prebuild_receipt_sha256,
@@ -1991,7 +2099,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "migration_runner_prebuild_receipt_sha256": runner_prebuild.receipt_sha256,
         "migration_runner_release_tree": runner_prebuild.release_tree,
         "migration_runner_input_signature": runner_prebuild.input_signature,
-        "pre_migration_head": EXPECTED_PRE_MIGRATION_HEAD,
+        "migration_mode": contract.mode,
+        "pre_migration_head": contract.pre_revision,
         "backup_receipt_sha256": backup.receipt_sha256,
         "backup_artifact_set_sha256": backup.artifact_set_sha256,
         "roles": list(EXPECTED_ROLES),
@@ -1999,7 +2108,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             artifact.role: artifact.target_binding_sha256
             for artifact in backup.artifacts
         },
-        "expected_public_table_delta": 14,
+        "expected_public_table_delta": contract.expected_public_table_delta,
         "docker_network": "random-internal-no-published-ports",
         "production_mutation": False,
     }

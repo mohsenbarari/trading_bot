@@ -306,6 +306,61 @@ class ProductionMigrationRehearsalTests(unittest.TestCase):
                 )
         self.assertEqual([item.role for item in backup.artifacts], ["foreign", "iran"])
         self.assertEqual(backup.production_release_sha, fixture.release_sha)
+        self.assertEqual(
+            backup.pre_migration_head, rehearsal.EXPECTED_PRE_MIGRATION_HEAD
+        )
+
+    def test_verified_receipt_accepts_exact_source_head_and_refuses_mixed_roles(self):
+        source_head = "ff5a6b7c8d9e"
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = ReceiptFixture(Path(tmp))
+            for result in fixture.payload["results"]:
+                result["schema_head"] = source_head
+            digest = fixture.write_receipt()
+            with fixture.patches():
+                backup = rehearsal.verify_backup_receipt(
+                    receipt_path=fixture.receipt,
+                    receipt_sha256=digest,
+                    expected_release_sha=fixture.release_sha,
+                    manifest_values=fixture.manifest_values,
+                    expected_source_head=source_head,
+                )
+            self.assertEqual(backup.pre_migration_head, source_head)
+            self.assertTrue(
+                all(artifact.pre_revision == source_head for artifact in backup.artifacts)
+            )
+
+            fixture.payload["results"][1][
+                "schema_head"
+            ] = rehearsal.EXPECTED_PRE_MIGRATION_HEAD
+            digest = fixture.write_receipt()
+            with fixture.patches(), self.assertRaisesRegex(
+                rehearsal.RehearsalRefusal, "one pre-migration schema"
+            ):
+                rehearsal.verify_backup_receipt(
+                    receipt_path=fixture.receipt,
+                    receipt_sha256=digest,
+                    expected_release_sha=fixture.release_sha,
+                    manifest_values=fixture.manifest_values,
+                    expected_source_head=source_head,
+                )
+
+    def test_verified_receipt_refuses_schema_outside_two_exact_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = ReceiptFixture(Path(tmp))
+            for result in fixture.payload["results"]:
+                result["schema_head"] = "abc123def456"
+            digest = fixture.write_receipt()
+            with fixture.patches(), self.assertRaisesRegex(
+                rehearsal.RehearsalRefusal, "pre-migration schema"
+            ):
+                rehearsal.verify_backup_receipt(
+                    receipt_path=fixture.receipt,
+                    receipt_sha256=digest,
+                    expected_release_sha=fixture.release_sha,
+                    manifest_values=fixture.manifest_values,
+                    expected_source_head="ff5a6b7c8d9e",
+                )
 
     def test_verified_receipt_requires_exact_restore_cleanup_proof(self):
         mutations = (
@@ -942,11 +997,144 @@ class ProductionMigrationRehearsalTests(unittest.TestCase):
                 timeout=60,
             )
         self.assertEqual(result["public_table_delta"], 14)
+        self.assertEqual(result["migration_mode"], rehearsal.HISTORICAL_UPGRADE_MODE)
+        self.assertFalse(result["first_upgrade_noop"])
         self.assertTrue(result["second_upgrade_noop"])
         self.assertEqual(
             [item.kwargs["arguments"] for item in guarded.call_args_list],
             [["current"], ["upgrade", "head"], ["current"], ["upgrade", "head"]],
         )
+
+    def test_rehearsal_accepts_already_at_head_only_when_both_upgrades_are_noops(self):
+        source_head = "ff5a6b7c8d9e"
+        artifact = rehearsal.DumpArtifact(
+            role="foreign",
+            path=Path("/secure/foreign.sql.gz"),
+            sha256="1" * 64,
+            size_bytes=100,
+            release_sha="2" * 40,
+            database_identity_sha256="3" * 64,
+            target_binding_sha256="4" * 64,
+            pre_revision=source_head,
+        )
+        source = rehearsal.SourceBinding("5" * 40, "6" * 40, source_head)
+        resources = rehearsal.DockerResources(
+            run_id="tbmr-run",
+            network_name="tbmr_net_1234567890ab",
+            container_names=[],
+            volume_names=[],
+        )
+        tables = tuple(
+            sorted(
+                set(
+                    (
+                        *rehearsal.CRITICAL_PRESERVED_TABLES,
+                        *rehearsal.EXPECTED_NEW_TABLES,
+                    )
+                )
+            )
+        )
+        all_counts = {table: index + 1 for index, table in enumerate(tables)}
+        target_counts = {
+            table: all_counts[table] for table in rehearsal.EXPECTED_NEW_TABLES
+        }
+        guarded_outputs = [source_head, "", source_head, ""]
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(rehearsal, "start_postgres", return_value="pg"))
+            stack.enter_context(patch.object(rehearsal, "extract_owner_roles", return_value=()))
+            stack.enter_context(patch.object(rehearsal, "create_owner_roles"))
+            stack.enter_context(patch.object(rehearsal, "restore_plain_dump"))
+            stack.enter_context(
+                patch.object(
+                    rehearsal,
+                    "_query_public_tables",
+                    side_effect=[tables, tables, tables],
+                )
+            )
+            stack.enter_context(
+                patch.object(
+                    rehearsal,
+                    "_current_revision",
+                    side_effect=[source_head, source_head, source_head],
+                )
+            )
+            stack.enter_context(
+                patch.object(rehearsal, "_invalid_index_count", side_effect=[0, 0, 0])
+            )
+            stack.enter_context(
+                patch.object(
+                    rehearsal,
+                    "_concurrent_index_state",
+                    side_effect=["valid-ready", "valid-ready", "valid-ready"],
+                )
+            )
+            stack.enter_context(
+                patch.object(
+                    rehearsal,
+                    "_query_preexisting_table_counts",
+                    side_effect=[all_counts, all_counts, all_counts],
+                )
+            )
+            target_query = stack.enter_context(
+                patch.object(
+                    rehearsal,
+                    "_query_new_table_counts",
+                    side_effect=[target_counts, target_counts, target_counts],
+                )
+            )
+            stack.enter_context(
+                patch.object(
+                    rehearsal,
+                    "schema_only_sha256",
+                    side_effect=["7" * 64, "7" * 64, "7" * 64],
+                )
+            )
+            guarded = stack.enter_context(
+                patch.object(
+                    rehearsal, "run_guarded_alembic", side_effect=guarded_outputs
+                )
+            )
+            result = rehearsal.rehearse_artifact(
+                artifact,
+                source=source,
+                source_root=Path("/secure/committed-source"),
+                runner_prebuild=rehearsal.RunnerPrebuildBinding(
+                    receipt_path=Path("/secure/foreign-image-prebuild-receipt.json"),
+                    receipt_sha256="8" * 64,
+                    image_id="sha256:" + "9" * 64,
+                    release_sha=source.commit,
+                    release_tree=source.tree,
+                    input_signature="7" * 64,
+                ),
+                resources=resources,
+                timeout=60,
+            )
+        self.assertEqual(result["migration_mode"], rehearsal.ALREADY_AT_HEAD_MODE)
+        self.assertEqual(result["public_table_delta"], 0)
+        self.assertEqual(result["added_tables"], [])
+        self.assertTrue(result["first_upgrade_noop"])
+        self.assertTrue(result["second_upgrade_noop"])
+        self.assertIsNone(result["new_table_seed_contract"])
+        self.assertEqual(
+            [item.kwargs["arguments"] for item in guarded.call_args_list],
+            [["current"], ["upgrade", "head"], ["current"], ["upgrade", "head"]],
+        )
+        self.assertTrue(
+            all(
+                call.kwargs["require_initial_seed_contract"] is False
+                for call in target_query.call_args_list
+            )
+        )
+
+    def test_migration_contract_refuses_any_third_schema_path(self):
+        contract = rehearsal.migration_contract("ff5a6b7c8d9e", "ff5a6b7c8d9e")
+        self.assertEqual(contract.mode, rehearsal.ALREADY_AT_HEAD_MODE)
+        self.assertEqual(contract.expected_public_table_delta, 0)
+        self.assertTrue(contract.require_first_upgrade_noop)
+        with self.assertRaisesRegex(
+            rehearsal.RehearsalCommandError, "neither the historical"
+        ):
+            rehearsal.migration_contract("abc123def456", "ff5a6b7c8d9e")
 
     def test_schema_digest_ignores_pg_dump_random_restrict_keys(self):
         template = (

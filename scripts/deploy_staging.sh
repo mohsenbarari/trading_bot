@@ -598,6 +598,32 @@ nginx_worker_group() {
     fi
 }
 
+nginx_worker_user() {
+    local worker_user
+    worker_user="$(nginx -T 2>/dev/null | awk '$1 == "user" { gsub(";", "", $2); print $2; exit }' || true)"
+    if [[ -n "$worker_user" ]] && id "$worker_user" >/dev/null 2>&1; then
+        printf '%s\n' "$worker_user"
+        return
+    fi
+    if id www-data >/dev/null 2>&1; then
+        printf 'www-data\n'
+    fi
+}
+
+ensure_iran_nginx_web_root_acl() {
+    [[ "$STAGING_PROJECT_NAME" == "trading_bot_staging_iran" ]] || return 0
+    require_cmd setfacl
+    require_cmd runuser
+    local worker_user
+    worker_user="$(nginx_worker_user)"
+    [[ -n "$worker_user" ]] || die "unable to resolve the Iran staging Nginx worker user"
+    setfacl -m "u:${worker_user}:--x" "$PROJECT_DIR"
+    runuser -u "$worker_user" -- test -r "$STAGING_FRONTEND_DIST_DIR/index.html" || \
+        die "Iran staging Nginx worker cannot read the frontend entrypoint"
+    runuser -u "$worker_user" -- test ! -r "$ENV_FILE" || \
+        die "Iran staging Nginx worker must not read the staging runtime env"
+}
+
 install_basic_auth_file() {
     local basic_user="$1"
     local basic_password="$2"
@@ -676,6 +702,7 @@ install_nginx() {
     [[ -n "$dev_key" ]] || die "DEV_API_KEY is empty"
 
     install_basic_auth_file "$basic_user" "$basic_password"
+    ensure_iran_nginx_web_root_acl
 
     tmp="$(mktemp)"
     render_nginx_template | sed \

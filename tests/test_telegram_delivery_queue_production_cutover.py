@@ -105,6 +105,48 @@ class FakeRollbackOperations(FakeOperations):
         )
 
 
+class FakeRedeployOperations:
+    def __init__(self, _manifest: Path, *, fail_first_deploy: bool = False) -> None:
+        self.fail_first_deploy = fail_first_deploy
+        self.deploy_calls = 0
+        self.inventories = iter(
+            (
+                {"count": 1, "owner": "queue-v1", "overlap": False},
+                {"count": 1, "owner": "queue-v1", "overlap": False},
+            )
+        )
+
+    def executor_inventory(self):
+        return next(self.inventories)
+
+    def deploy_official(self, _authority_path=None, _authority_digest=None):
+        self.deploy_calls += 1
+        if self.fail_first_deploy and self.deploy_calls == 1:
+            raise cutover.ProductionCutoverError("SIMULATED_REDEPLOY_FAILURE")
+        return {"status": "completed", "official_script": True}
+
+    def release_schema_inventory(self, _expected_database_name):
+        return {
+            "status": "verified",
+            "release_sha": "c" * 40,
+            "schema_head": "ff5a6b7c8d9e",
+            "queue_table_count": len(planner.REQUIRED_QUEUE_TABLES),
+            "database_identity_sha256": {
+                "foreign": "d" * 64,
+                "iran": "e" * 64,
+            },
+        }
+
+    def runtime_contract(self, _values, *, expected_owner):
+        return {"status": "verified", "owner": expected_owner}
+
+    def queue_health(self, _database_name):
+        return {"status": "passed", "decision": "continue"}
+
+    def b2b_lane_probe(self):
+        return {"status": "passed", "synthetic_mutations": 0}
+
+
 class ProductionQueueCutoverTests(unittest.TestCase):
     def write_env(self, path: Path, values: dict[str, str]) -> None:
         path.write_text(
@@ -245,6 +287,53 @@ class ProductionQueueCutoverTests(unittest.TestCase):
                 "release_sha_exact": True,
                 "schema_head_and_queue_tables_exact": True,
                 "database_identity_exact": True,
+            },
+            "provider": {
+                "status": "approved",
+                "identity_count": 6,
+                "staging_identity_count": 6,
+            },
+            "apply_supported": False,
+        }
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def write_redeploy_preflight(
+        self,
+        path: Path,
+        binding,
+        backup_digest: str,
+        source_digest: str,
+    ) -> str:
+        payload = {
+            "schema_version": 1,
+            "environment": "production",
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+            "status": "READY_FOR_QUEUE_V1_REDEPLOY",
+            "mode": "read-only",
+            "git": binding,
+            "source_profile": "queue-v1",
+            "source_sha256": source_digest,
+            "credentials": {
+                "status": "ready",
+                "identity_count": 6,
+                "publisher_count": 5,
+            },
+            "backup": {"status": "verified", "digest": backup_digest},
+            "current_runtime": {
+                "status": "verified",
+                "release_sha": "c" * 40,
+                "schema_head": "ff5a6b7c8d9e",
+            },
+            "executor_inventory": {
+                "count": 1,
+                "owner": "queue-v1",
+                "overlap": False,
+            },
+            "queue_health": {"status": "passed", "decision": "continue"},
+            "runtime_role_contract": {
+                "status": "verified",
+                "owner": "queue-v1",
             },
             "provider": {
                 "status": "approved",
@@ -1187,6 +1276,239 @@ class ProductionQueueCutoverTests(unittest.TestCase):
             payload = json.loads(journal.read_text(encoding="utf-8"))
             self.assertEqual(payload["status"], "failed_recovered")
             self.assertFalse((artifacts / "production-release.lock").exists())
+
+    def test_guarded_queue_redeploy_keeps_source_and_uses_official_authority(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source, staging, manifest = self.fixture(root)
+            self.write_env(
+                source,
+                planner.queue_target_values(planner.parse_env_file(source)),
+            )
+            backup_receipt = root / "backup.json"
+            backup_receipt.write_text("{}", encoding="utf-8")
+            backup_digest = hashlib.sha256(backup_receipt.read_bytes()).hexdigest()
+            manifest_values = planner.parse_env_file(manifest)
+            manifest_values.update(
+                {
+                    "PRODUCTION_BACKUP_RECEIPT_PATH": str(backup_receipt),
+                    "PRODUCTION_BACKUP_RECEIPT_SHA256": backup_digest,
+                }
+            )
+            self.write_env(manifest, manifest_values)
+            original_source = source.read_bytes()
+            artifacts = root / "artifacts"
+            artifacts.mkdir(mode=0o700)
+            binding = self.binding()
+            source_digest = hashlib.sha256(original_source).hexdigest()
+            preflight = root / "redeploy-preflight.json"
+            preflight_digest = self.write_redeploy_preflight(
+                preflight, binding, backup_digest, source_digest
+            )
+            fake = FakeRedeployOperations(manifest)
+            live = Mock(
+                return_value={
+                    "status": "READY_FOR_QUEUE_V1_REDEPLOY",
+                    "source_sha256": source_digest,
+                    "git": binding,
+                }
+            )
+            with patch.object(cutover, "git_binding", return_value=binding):
+                result = cutover.redeploy_queue_v1(
+                    manifest=manifest,
+                    staging_env=staging,
+                    preflight_report=preflight,
+                    preflight_digest=preflight_digest,
+                    backup_receipt=backup_receipt,
+                    backup_digest=backup_digest,
+                    artifact_dir=artifacts,
+                    confirmation=cutover.REDEPLOY_CONFIRMATION,
+                    operations_factory=lambda _manifest: fake,
+                    preflight_runner=live,
+                )
+            self.assertEqual(result["status"], "redeployed")
+            self.assertEqual(fake.deploy_calls, 1)
+            self.assertEqual(source.read_bytes(), original_source)
+            self.assertEqual(planner.source_profile(parse_env(source)), "queue-v1")
+            receipt = artifacts / result["receipt_file"]
+            payload = json.loads(receipt.read_text(encoding="utf-8"))
+            self.assertEqual(payload["status"], "redeployed")
+            self.assertFalse(payload["source_profile_changed"])
+            self.assertEqual(payload["synthetic_customer_mutations"], 0)
+            live.assert_called_once()
+
+    def test_queue_redeploy_preflight_binds_current_runtime_backup_to_target_git(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source, staging, manifest = self.fixture(root)
+            self.write_env(
+                source,
+                planner.queue_target_values(planner.parse_env_file(source)),
+            )
+            backup_receipt = root / "backup.json"
+            backup_receipt.write_text("{}", encoding="utf-8")
+            backup_digest = hashlib.sha256(backup_receipt.read_bytes()).hexdigest()
+            manifest_values = planner.parse_env_file(manifest)
+            manifest_values.update(
+                {
+                    "PRODUCTION_BACKUP_RECEIPT_PATH": str(backup_receipt),
+                    "PRODUCTION_BACKUP_RECEIPT_SHA256": backup_digest,
+                }
+            )
+            self.write_env(manifest, manifest_values)
+            binding = self.binding()
+            fake = FakeRedeployOperations(manifest)
+
+            def gateway(identity, method, payload):
+                if method == "getMe":
+                    return {"id": identity.bot_id, "username": identity.username}
+                if method == "getChat":
+                    return {"id": int(payload["chat_id"]), "type": "channel"}
+                return {
+                    "status": "administrator",
+                    "is_anonymous": False,
+                    "can_manage_chat": True,
+                    "can_post_messages": True,
+                    "can_edit_messages": True,
+                    "can_delete_messages": True,
+                    "can_restrict_members": True,
+                }
+
+            with (
+                patch.object(cutover, "git_binding", return_value=binding),
+                patch.object(
+                    cutover,
+                    "_backup_status",
+                    return_value={
+                        "status": "verified",
+                        "digest": backup_digest,
+                    },
+                ) as backup_check,
+            ):
+                report = cutover.run_redeploy_preflight(
+                    manifest=manifest,
+                    staging_env=staging,
+                    backup_receipt=backup_receipt,
+                    backup_digest=backup_digest,
+                    operations_factory=lambda _manifest: fake,
+                    gateway=gateway,
+                )
+            self.assertEqual(report["status"], "READY_FOR_QUEUE_V1_REDEPLOY")
+            self.assertEqual(report["git"]["head"], "a" * 40)
+            self.assertEqual(report["current_runtime"]["release_sha"], "c" * 40)
+            self.assertNotEqual(
+                report["git"]["head"], report["current_runtime"]["release_sha"]
+            )
+            self.assertEqual(report["provider"]["identity_count"], 6)
+            self.assertEqual(report["provider"]["staging_identity_count"], 6)
+            backup_check.assert_called_once()
+
+    def test_queue_redeploy_failure_runs_exact_target_forward_reconcile(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source, staging, manifest = self.fixture(root)
+            self.write_env(
+                source,
+                planner.queue_target_values(planner.parse_env_file(source)),
+            )
+            backup_receipt = root / "backup.json"
+            backup_receipt.write_text("{}", encoding="utf-8")
+            backup_digest = hashlib.sha256(backup_receipt.read_bytes()).hexdigest()
+            manifest_values = planner.parse_env_file(manifest)
+            manifest_values.update(
+                {
+                    "PRODUCTION_BACKUP_RECEIPT_PATH": str(backup_receipt),
+                    "PRODUCTION_BACKUP_RECEIPT_SHA256": backup_digest,
+                }
+            )
+            self.write_env(manifest, manifest_values)
+            source_digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            binding = self.binding()
+            preflight = root / "redeploy-preflight.json"
+            preflight_digest = self.write_redeploy_preflight(
+                preflight, binding, backup_digest, source_digest
+            )
+            artifacts = root / "artifacts"
+            artifacts.mkdir(mode=0o700)
+            fake = FakeRedeployOperations(manifest, fail_first_deploy=True)
+            with patch.object(cutover, "git_binding", return_value=binding):
+                with self.assertRaises(cutover.ProductionCutoverError) as raised:
+                    cutover.redeploy_queue_v1(
+                        manifest=manifest,
+                        staging_env=staging,
+                        preflight_report=preflight,
+                        preflight_digest=preflight_digest,
+                        backup_receipt=backup_receipt,
+                        backup_digest=backup_digest,
+                        artifact_dir=artifacts,
+                        confirmation=cutover.REDEPLOY_CONFIRMATION,
+                        operations_factory=lambda _manifest: fake,
+                        preflight_runner=Mock(
+                            return_value={
+                                "status": "READY_FOR_QUEUE_V1_REDEPLOY",
+                                "source_sha256": source_digest,
+                                "git": binding,
+                            }
+                        ),
+                    )
+            self.assertEqual(raised.exception.code, "SIMULATED_REDEPLOY_FAILURE")
+            self.assertEqual(fake.deploy_calls, 2)
+            failed = next(
+                artifacts.glob("production-queue-redeploy-failed-*.json")
+            )
+            payload = json.loads(failed.read_text(encoding="utf-8"))
+            self.assertEqual(
+                payload["safe_recovery"]["status"],
+                "queue_v1_forward_reconciled",
+            )
+            journal = next(artifacts.glob("production-queue-phase-*.json"))
+            self.assertEqual(
+                json.loads(journal.read_text(encoding="utf-8"))["status"],
+                "failed_recovered",
+            )
+
+    def test_queue_redeploy_rejects_initial_cutover_preflight_contract(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            binding = self.binding()
+            path = root / "apply-preflight.json"
+            backup_digest = "d" * 64
+            source_digest = "e" * 64
+            digest = self.write_preflight(
+                path, binding, backup_digest, source_digest
+            )
+            with self.assertRaisesRegex(
+                cutover.ProductionCutoverError,
+                "BLOCKED_REDEPLOY_PREFLIGHT_CONTRACT",
+            ):
+                cutover.verify_redeploy_preflight_evidence(
+                    path,
+                    digest,
+                    backup_digest=backup_digest,
+                    source_digest=source_digest,
+                    binding=binding,
+                )
+
+    def test_queue_redeploy_confirmation_blocks_before_static_or_runtime_gates(self):
+        with patch.object(
+            cutover,
+            "_static_redeploy_gate",
+            side_effect=AssertionError("static gate must not run"),
+        ):
+            with self.assertRaisesRegex(
+                cutover.ProductionCutoverError,
+                "REDEPLOY_CONFIRMATION_MISMATCH",
+            ):
+                cutover.redeploy_queue_v1(
+                    manifest=Path("/missing/manifest"),
+                    staging_env=Path("/missing/staging"),
+                    preflight_report=Path("/missing/preflight"),
+                    preflight_digest="",
+                    backup_receipt=Path("/missing/backup"),
+                    backup_digest="",
+                    artifact_dir=Path("/missing/artifacts"),
+                    confirmation="wrong",
+                )
 
     def test_rollback_requires_and_uses_the_bound_apply_receipt(self):
         with tempfile.TemporaryDirectory() as tmpdir:

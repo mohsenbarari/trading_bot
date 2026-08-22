@@ -103,9 +103,50 @@ def _snapshot(
     }
 
 
+def _no_data_snapshot(*, with_safe_context: bool) -> dict:
+    snapshot = _snapshot()
+    for item in snapshot["rates"]["items"]:
+        item.update(
+            {
+                "status": "NO_DATA",
+                "estimated_project_price": None,
+                "lower_project_price": None,
+                "upper_project_price": None,
+                "confidence": "NONE",
+                "underlying_source": None,
+                "underlying_age_seconds": None,
+                "anchor_age_seconds": None,
+            }
+        )
+    snapshot["snapshot_status"] = "NO_DATA_COIN_RATE_STATE"
+    snapshot["rates"]["estimated_count"] = 0
+    snapshot["rates"]["no_data_count"] = len(snapshot["rates"]["items"])
+    if with_safe_context:
+        snapshot[readiness.SAFE_NO_DATA_CONTEXT_KEY] = {
+            "contract_version": readiness.SAFE_NO_DATA_CONTEXT_VERSION,
+            "source_status": "DEGRADED_GUARD_FAIL_OPEN",
+            "source_reason": readiness.SAFE_NO_DATA_SOURCE_REASON,
+            "group_inputs_within_hot_retention": True,
+            "private_input_within_hot_retention": True,
+            "collector_checkpoint_count": 3,
+            "price_authority": False,
+        }
+    return snapshot
+
+
 def _publish(root: Path, **overrides: object) -> tuple[Path, str]:
     path = root / "coin-rates.json"
     digest = publish_market_snapshot_atomically(path, _snapshot(**overrides))
+    path.chmod(0o600)
+    return path, digest
+
+
+def _publish_no_data(root: Path, *, with_safe_context: bool) -> tuple[Path, str]:
+    path = root / "coin-rates.json"
+    digest = publish_market_snapshot_atomically(
+        path,
+        _no_data_snapshot(with_safe_context=with_safe_context),
+    )
     path.chmod(0o600)
     return path, digest
 
@@ -230,6 +271,50 @@ def test_low_only_snapshot_passes_transport_and_reports_guard_fail_open() -> Non
             )
 
 
+def test_safe_no_data_snapshot_is_degraded_and_guard_abstains() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        path, digest = _publish_no_data(root, with_safe_context=True)
+
+        _loaded, report = readiness._snapshot_assessment(
+            path,
+            expected_sha256=digest,
+            now=NOW,
+        )
+
+        assert report["status"] == "DEGRADED_GUARD_FAIL_OPEN"
+        assert report["snapshot_mode"] == "SAFE_NO_DATA"
+        assert report["estimated_rate_count"] == 0
+        assert report["hard_reject_coverage_ready"] is False
+        assert report["pure_guard_probe"] == "ABSTAINED_FAIL_OPEN"
+        with pytest.raises(
+            readiness.ProductionInferenceReadinessError,
+            match="hard_reject_coverage_insufficient",
+        ):
+            readiness._snapshot_assessment(
+                path,
+                expected_sha256=digest,
+                now=NOW,
+                require_hard_reject_coverage=True,
+            )
+
+
+def test_unbound_no_data_snapshot_remains_blocked() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        path, digest = _publish_no_data(root, with_safe_context=False)
+
+        with pytest.raises(
+            readiness.ProductionInferenceReadinessError,
+            match="estimated_rate_coverage_unavailable",
+        ):
+            readiness._snapshot_assessment(
+                path,
+                expected_sha256=digest,
+                now=NOW,
+            )
+
+
 def test_source_gate_requires_both_groups_private_input_and_all_checkpoints() -> None:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -261,12 +346,42 @@ def test_source_gate_rejects_stale_private_input_and_insecure_store() -> None:
         assert report["freshness_basis"] == "ECONOMIC_EVENT_TIME"
         assert report["private_gold_hard_authority_fresh"] is False
         assert report["private_gold_engine_age_supported"] is True
+        assert report["degradation_reason"] == readiness.SAFE_NO_DATA_SOURCE_REASON
+        assert report["safe_no_data_snapshot_allowed"] is True
+        assert readiness.safe_no_data_source_assessment(report) is True
         stale.chmod(0o644)
         with pytest.raises(
             readiness.ProductionInferenceReadinessError,
             match="market_store_metadata_invalid",
         ):
             readiness._source_probe(stale, now=NOW)
+
+
+def test_stale_group_input_is_degraded_but_cannot_authorize_no_data() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        path = _market_store(root, private_age_seconds=121)
+        connection = connect_market_store(path)
+        connection.execute(
+            """
+            UPDATE market_observations
+            SET event_time_utc = ?, available_at_utc = ?
+            WHERE source_code = 'GROUP_1'
+            """,
+            (
+                (NOW - timedelta(days=4)).isoformat().replace("+00:00", "Z"),
+                (NOW - timedelta(days=4)).isoformat().replace("+00:00", "Z"),
+            ),
+        )
+        connection.commit()
+        connection.close()
+
+        report = readiness._source_probe(path, now=NOW)
+
+        assert report["status"] == "DEGRADED_GUARD_FAIL_OPEN"
+        assert report["degradation_reason"] == "GROUP_INPUTS_OUTSIDE_HOT_RETENTION"
+        assert report["safe_no_data_snapshot_allowed"] is False
+        assert readiness.safe_no_data_source_assessment(report) is False
 
 
 def test_source_freshness_uses_event_time_not_recent_backfill_availability() -> None:
