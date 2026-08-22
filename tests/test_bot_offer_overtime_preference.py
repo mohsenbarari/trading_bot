@@ -13,6 +13,7 @@ from core.offer_overtime_bot_copy import (
     M1_OVERTIME_PREFERENCE_BUTTON,
 )
 from core.services.offer_overtime_preference_service import OfferOvertimePreferenceTransportError
+from core.telegram_delivery_queue_contract import TelegramFlowExit
 
 
 class FakeSessionContext:
@@ -160,13 +161,54 @@ class BotOfferOvertimePreferenceTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "bot.handlers.offer_overtime_preference.answer_callback_message_via_runtime",
             new=AsyncMock(),
-        ), patch(
+        ) as answer_message, patch(
             "bot.handlers.offer_overtime_preference._user_panel_reply_markup",
             new=AsyncMock(return_value="KB"),
         ):
             await handler.cancel_offer_overtime_preference(_callback(), state, user)
 
         self.assertTrue(state.cleared)
+        self.assertEqual(answer_message.await_args.kwargs["reply_markup"], "KB")
+        self.assertTrue(answer_message.await_args.kwargs["set_persistent_anchor"])
+        self.assertEqual(answer_message.await_args.kwargs["flow_exit"], TelegramFlowExit.CANCEL)
+
+    async def test_success_restores_persistent_menu_with_a_new_anchor(self):
+        user = _user()
+        state = FakeState({"overtime_preference_pending_minutes": 5})
+        db_user = SimpleNamespace(id=11, offer_overtime_minutes=3)
+        session = SimpleNamespace(get=AsyncMock(return_value=db_user))
+        result = SimpleNamespace(
+            offer_overtime_minutes=5,
+            detail="✅ وقت اضافه لفظ‌های جدید شما روی ۵ دقیقه تنظیم شد.",
+        )
+
+        with patch(
+            "bot.handlers.offer_overtime_preference._overtime_preference_allowed",
+            new=AsyncMock(return_value=(True, None)),
+        ), patch(
+            "bot.handlers.offer_overtime_preference.AsyncSessionLocal",
+            return_value=FakeSessionContext(session),
+        ), patch(
+            "bot.handlers.offer_overtime_preference.save_overtime_preference_from_bot",
+            new=AsyncMock(return_value=result),
+        ), patch(
+            "bot.handlers.offer_overtime_preference.answer_callback_query_via_runtime",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.offer_overtime_preference.answer_callback_message_via_runtime",
+            new=AsyncMock(),
+        ) as answer_message, patch(
+            "bot.handlers.offer_overtime_preference._user_panel_reply_markup",
+            new=AsyncMock(return_value="KB"),
+        ):
+            await handler.confirm_offer_overtime_preference(_callback(), state, user)
+
+        self.assertTrue(state.cleared)
+        self.assertEqual(user.offer_overtime_minutes, 5)
+        self.assertEqual(answer_message.await_args.args[2], result.detail)
+        self.assertEqual(answer_message.await_args.kwargs["reply_markup"], "KB")
+        self.assertTrue(answer_message.await_args.kwargs["set_persistent_anchor"])
+        self.assertEqual(answer_message.await_args.kwargs["flow_exit"], TelegramFlowExit.SUCCESS)
 
     async def test_transport_error_surfaces_m7(self):
         user = _user()

@@ -38,6 +38,7 @@ from core.services.offer_overtime_preference_service import (
     save_overtime_preference_from_bot,
 )
 from core.services.user_account_status_service import is_user_global_web_locked
+from core.telegram_delivery_queue_contract import TelegramFlowExit
 from models.user import User
 
 router = Router()
@@ -256,6 +257,8 @@ async def confirm_offer_overtime_preference(
         _compose_save_success_text(result.detail),
         source_key="overtime-preference-save-success",
         reply_markup=await _user_panel_reply_markup(user),
+        set_persistent_anchor=True,
+        flow_exit=TelegramFlowExit.SUCCESS,
     )
 
 
@@ -277,4 +280,6 @@ async def cancel_offer_overtime_preference(
             "تنظیم وقت اضافه لغو شد.",
             source_key="overtime-preference-cancelled",
             reply_markup=await _user_panel_reply_markup(user),
+            set_persistent_anchor=True,
+            flow_exit=TelegramFlowExit.CANCEL,
         )
