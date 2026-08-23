@@ -173,7 +173,11 @@ def _negotiated_price_result(
     numeric_seen = False
     candidates = {
         value
-        for value, _score, _span in _price_candidates(text, excluded)
+        for value, _score, _span in _price_candidates(
+            text,
+            excluded,
+            commodity=commodity_code,
+        )
     }
     for match in _NUMBER.finditer(text):
         if _overlap(match.span(1), excluded):

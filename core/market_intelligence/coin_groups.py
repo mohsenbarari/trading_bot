@@ -17,7 +17,7 @@ from typing import Iterable
 from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 
 
-COIN_GROUP_PARSER_VERSION = "coin-group-rules-v6-low-date-year-aliases"
+COIN_GROUP_PARSER_VERSION = "coin-group-rules-v7-canonical-price-scale"
 _DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 _ARABIC_LETTERS = str.maketrans({"ي": "ی", "ى": "ی", "ك": "ک"})
 # Dot and slash are genuine thousands separators when they are attached to
@@ -189,6 +189,8 @@ def _spans_overlap(first: tuple[int, int], spans: Iterable[tuple[int, int]]) -> 
 def _price_candidates(
     text: str,
     excluded_spans: Iterable[tuple[int, int]],
+    *,
+    commodity: str | None = None,
 ) -> list[tuple[int, float, tuple[int, int]]]:
     candidates: dict[tuple[int, tuple[int, int]], float] = {}
     for match in _NUMBER.finditer(text):
@@ -208,16 +210,19 @@ def _price_candidates(
         elif length in {5, 6}:
             values.append((raw, 1.0 if separated else 0.96))
             # Coin shorthand sometimes carries one redundant trailing zero
-            # (`515000` => `51500`). Keeping both candidates lets an explicit
-            # commodity band select safely; an unnamed overlap stays ambiguous.
-            if length == 6 and raw % 10 == 0:
+            # (`515000` => `51500`). This alternate scale is only safe when an
+            # explicit commodity band can reject the canonical raw value.
+            if commodity is not None and length == 6 and raw % 10 == 0:
                 values.append((raw // 10, 0.90))
         elif length == 7 and raw % 10 == 0:
             values.append((raw // 10, 0.72))
-        elif length == 4:
-            values.extend(((raw * 100, 0.86), (raw * 10, 0.80)))
         elif length == 3:
-            values.extend(((raw * 1000, 0.90), (raw * 100, 0.84)))
+            values.append((raw * 1000, 0.90))
+            # A named low-price coin may use a one-decimal shorthand such as
+            # `458` for `45.8`; the explicit commodity band makes that scale
+            # deterministic. Unnamed prices retain the canonical x1000 scale.
+            if commodity is not None:
+                values.append((raw * 100, 0.84))
         elif length == 2:
             values.append((raw * 1000, 0.78))
         for value, score in values:
@@ -235,7 +240,7 @@ def _price(
     excluded_spans: Iterable[tuple[int, int]],
     commodity: str | None,
 ) -> tuple[int | None, list[tuple[int, int]]]:
-    candidates = _price_candidates(text, excluded_spans)
+    candidates = _price_candidates(text, excluded_spans, commodity=commodity)
     if commodity is not None:
         low, high = _PRICE_BOUNDS[commodity]
         candidates = [item for item in candidates if low <= item[0] <= high]

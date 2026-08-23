@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock, patch
 
 from core.telegram_gateway import TelegramGatewayResult
 from core.services.telegram_publisher_dispatch_service import (
+    acknowledge_claimed_telegram_publisher_dispatch_locally,
     TelegramPublisherDispatchError,
     accept_telegram_publisher_acknowledgement,
     accept_telegram_publisher_dispatch,
-    acknowledge_claimed_telegram_publisher_dispatch_locally,
     dispatch_claimed_telegram_publisher_command,
     record_telegram_publisher_dispatch_result,
     render_telegram_publisher_dispatch,
@@ -42,6 +42,14 @@ class _DB:
         self.command = command
         self.execute = AsyncMock(return_value=_Result(command))
         self.flush = AsyncMock()
+        self.commit = AsyncMock()
+        self.rollback = AsyncMock()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return False
 
 
 def _command(*, state="pending"):
@@ -292,6 +300,75 @@ class TelegramPublisherDispatchServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(command.sent_at, NOW)
         observe.assert_not_called()
         db.flush.assert_awaited_once()
+
+    async def test_co_located_dispatch_acknowledges_without_telegram_io(self):
+        command = _command(state="retry_due")
+        command.next_retry_at = NOW
+        command.last_error_class = "telegram_b2b_send_failed"
+        db = _DB(command)
+
+        with patch(
+            "core.services.telegram_publisher_dispatch_service.metrics_registry.observe"
+        ) as observe:
+            acknowledged = (
+                await acknowledge_claimed_telegram_publisher_dispatch_locally(
+                    db,
+                    current_server="foreign",
+                    command_id=command.command_id,
+                    lease_token=4,
+                    now=NOW,
+                )
+            )
+
+        self.assertTrue(acknowledged)
+        self.assertEqual(command.state, "acknowledged")
+        self.assertEqual(command.receipt_sequence, 37)
+        self.assertEqual(command.receipt_received_at, NOW)
+        self.assertIsNone(command.next_retry_at)
+        self.assertIsNone(command.last_error_class)
+        observe.assert_called_once()
+        db.flush.assert_awaited_once()
+
+    async def test_co_located_cycle_claims_then_acknowledges_in_separate_transactions(self):
+        command = _command(state="retry_due")
+        lease = TelegramPublisherDispatchLease(command=command, lease_token=4)
+        claim_db = _DB(command)
+        acknowledgement_db = _DB(command)
+        sessions = iter((claim_db, acknowledgement_db))
+
+        with (
+            patch(
+                "core.services.telegram_publisher_dispatch_service."
+                "claim_next_telegram_publisher_dispatch_command",
+                new=AsyncMock(return_value=lease),
+            ) as claim,
+            patch(
+                "core.services.telegram_publisher_dispatch_service."
+                "acknowledge_claimed_telegram_publisher_dispatch_locally",
+                new=AsyncMock(return_value=True),
+            ) as acknowledge,
+        ):
+            report = await run_co_located_telegram_publisher_dispatch_cycle(
+                session_factory=lambda: next(sessions),
+                current_server="foreign",
+                limit=1,
+                lease_seconds=30,
+                now_factory=lambda: NOW,
+            )
+
+        self.assertEqual(report.claimed_count, 1)
+        self.assertEqual(report.sent_count, 1)
+        self.assertEqual(report.retry_due_count, 0)
+        claim.assert_awaited_once()
+        acknowledge.assert_awaited_once_with(
+            acknowledgement_db,
+            current_server="foreign",
+            command_id=command.command_id,
+            lease_token=4,
+            now=NOW,
+        )
+        claim_db.commit.assert_awaited_once()
+        acknowledgement_db.commit.assert_awaited_once()
 
     async def test_primary_acknowledgement_records_ack_lag_once(self):
         command = _command(state="sent")

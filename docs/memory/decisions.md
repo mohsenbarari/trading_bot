@@ -2,6 +2,7 @@
 
 Entries are newest first.
 
+- 2026-08-23 | Candidate absorbed origin/main `b8746889` without editing main. Conflicts kept local ack + wakeup + batch 8; inference/ops commits auto-merged.
 - 2026-08-23 | Retention preflights command and source holds before any delete. A live source no longer leaves a job without its terminal dispatch command; membership pairs use the same order.
 - 2026-08-23 | Stage 11 `apply_freshness` reuses session-bound Offer/state rows on the four-argument production call. The unused `loaded_context` parameter was removed so the documented path is the live path.
 - 2026-08-23 | Stage 12 sizes bot pools from slot count: `all` needs 23 and keeps 15+10; split `primary` is 12+8 when that role is used; `publishers` keeps 10+8. Settings `db_pool_size` stays 15. No live pool-wait sample was collected.
