@@ -293,6 +293,13 @@ _FIELD_POLICIES: dict[tuple[str, str], SyncFieldPolicyEntry] = {
         SyncFieldClassification.SYNC,
         reason="optional Telegram video size metadata",
     ),
+    ("telegram_admin_broadcasts", "creation_key"): _entry(
+        "telegram_admin_broadcasts",
+        "creation_key",
+        SyncFieldClassification.SYNC,
+        sensitive=True,
+        reason="opaque durable creation token for admin broadcast idempotency",
+    ),
     ("telegram_admin_broadcast_receipts", "telegram_id_at_enqueue"): _entry(
         "telegram_admin_broadcast_receipts",
         "telegram_id_at_enqueue",

@@ -83,13 +83,21 @@ def upgrade() -> None:
         "("
         "content_kind = 'text' "
         "AND telegram_media_file_id IS NULL "
-        "AND telegram_media_file_unique_id IS NULL"
+        "AND telegram_media_file_unique_id IS NULL "
+        "AND media_duration_seconds IS NULL "
+        "AND media_width IS NULL "
+        "AND media_height IS NULL "
+        "AND media_file_size IS NULL"
         ") OR ("
         "content_kind = 'video' "
         "AND telegram_media_file_id IS NOT NULL "
         "AND btrim(telegram_media_file_id) <> '' "
         "AND telegram_media_file_unique_id IS NOT NULL "
-        "AND btrim(telegram_media_file_unique_id) <> ''"
+        "AND btrim(telegram_media_file_unique_id) <> '' "
+        "AND (media_duration_seconds IS NULL OR media_duration_seconds >= 0) "
+        "AND (media_width IS NULL OR media_width > 0) "
+        "AND (media_height IS NULL OR media_height > 0) "
+        "AND (media_file_size IS NULL OR media_file_size > 0)"
         ")",
     )
 

@@ -855,6 +855,7 @@ def setup_telegram_admin_broadcast_events():
             "media_width": getattr(target, "media_width", None),
             "media_height": getattr(target, "media_height", None),
             "media_file_size": getattr(target, "media_file_size", None),
+            "creation_key": getattr(target, "creation_key", None),
             "created_by_id": target.created_by_id,
             "audience_type": _enum_value(target.audience_type),
             "target_groups": target.target_groups or [],

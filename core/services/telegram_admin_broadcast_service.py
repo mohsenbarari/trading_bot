@@ -1,11 +1,13 @@
 """Telegram admin broadcast recipient resolution and queue creation."""
 from __future__ import annotations
 
+import secrets
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.enums import UserAccountStatus
@@ -40,6 +42,8 @@ TELEGRAM_BROADCAST_FILE_ID_MAX_LENGTH = 1024
 TELEGRAM_BROADCAST_FILE_UNIQUE_ID_MAX_LENGTH = 256
 TELEGRAM_BROADCAST_SELECTED_RECIPIENT_CAP = 500
 TELEGRAM_BROADCAST_RECEIPT_INSERT_CHUNK_SIZE = 500
+TELEGRAM_BROADCAST_CREATION_KEY_MIN_LENGTH = 16
+TELEGRAM_BROADCAST_CREATION_KEY_MAX_LENGTH = 64
 
 BOT_BROADCAST_ALLOWED_ROLES = (
     UserRole.STANDARD,
@@ -276,6 +280,56 @@ def telegram_admin_broadcast_dedupe_key(*, broadcast_id: int, recipient_user_id:
     return f"telegram-admin-broadcast:{int(broadcast_id)}:{int(recipient_user_id)}"
 
 
+def new_telegram_admin_broadcast_creation_key() -> str:
+    return secrets.token_urlsafe(24)
+
+
+def validate_telegram_admin_broadcast_creation_key(value: Any) -> str:
+    if not isinstance(value, str):
+        raise TelegramAdminBroadcastValidationError("creation_key_invalid")
+    cleaned = value.strip()
+    if not cleaned:
+        raise TelegramAdminBroadcastValidationError("creation_key_required")
+    if len(cleaned) < TELEGRAM_BROADCAST_CREATION_KEY_MIN_LENGTH:
+        raise TelegramAdminBroadcastValidationError("creation_key_invalid")
+    if len(cleaned) > TELEGRAM_BROADCAST_CREATION_KEY_MAX_LENGTH:
+        raise TelegramAdminBroadcastValidationError("creation_key_too_long")
+    if _has_control_characters(cleaned):
+        raise TelegramAdminBroadcastValidationError("creation_key_invalid")
+    return cleaned
+
+
+def normalize_optional_creation_key(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    return validate_telegram_admin_broadcast_creation_key(value)
+
+
+async def get_telegram_admin_broadcast_by_creation_key(
+    db: AsyncSession,
+    creation_key: str,
+) -> TelegramAdminBroadcastQueueResult | None:
+    key = validate_telegram_admin_broadcast_creation_key(creation_key)
+    result = await db.execute(
+        select(TelegramAdminBroadcast).where(TelegramAdminBroadcast.creation_key == key)
+    )
+    broadcast = result.scalar_one_or_none()
+    if broadcast is None:
+        return None
+    receipt_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(TelegramAdminBroadcastReceipt)
+            .where(TelegramAdminBroadcastReceipt.broadcast_id == int(broadcast.id))
+        )
+    ).scalar_one()
+    return TelegramAdminBroadcastQueueResult(
+        broadcast=broadcast,
+        recipients=(),
+        receipt_count=int(receipt_count or 0),
+    )
+
+
 def _active_accountants_subquery():
     return select(AccountantRelation.accountant_user_id).where(
         AccountantRelation.status == AccountantRelationStatus.ACTIVE,
@@ -461,6 +515,7 @@ async def create_telegram_admin_broadcast(
     media_width: int | None = None,
     media_height: int | None = None,
     media_file_size: int | None = None,
+    creation_key: str | None = None,
 ) -> TelegramAdminBroadcastQueueResult:
     if _enum_value(getattr(actor, "role", None)) != UserRole.SUPER_ADMIN.value:
         raise TelegramAdminBroadcastValidationError("superadmin_required")
@@ -497,6 +552,11 @@ async def create_telegram_admin_broadcast(
     audience = _normalize_audience_type(audience_type)
     groups = _normalize_groups(target_groups) if audience == TelegramAdminBroadcastAudienceType.GROUP else []
     actor_id = int(getattr(actor, "id"))
+    durable_key = normalize_optional_creation_key(creation_key)
+    if durable_key is not None:
+        existing = await get_telegram_admin_broadcast_by_creation_key(db, durable_key)
+        if existing is not None:
+            return existing
 
     recipients = await resolve_telegram_admin_broadcast_recipients(
         db,
@@ -516,6 +576,7 @@ async def create_telegram_admin_broadcast(
         media_width=None if media is None else media.width,
         media_height=None if media is None else media.height,
         media_file_size=None if media is None else media.file_size,
+        creation_key=durable_key,
         created_by_id=actor_id,
         audience_type=audience,
         target_groups=list(groups),
@@ -525,32 +586,43 @@ async def create_telegram_admin_broadcast(
         completed_at=None if recipients else current_time,
         created_at=current_time,
     )
-    db.add(broadcast)
-    await db.flush()
-
-    receipts: list[TelegramAdminBroadcastReceipt] = []
-    for recipient in recipients:
-        receipts.append(
-            TelegramAdminBroadcastReceipt(
-                broadcast_id=int(broadcast.id),
-                recipient_user_id=recipient.user_id,
-                telegram_id_at_enqueue=recipient.telegram_id,
-                dedupe_key=telegram_admin_broadcast_dedupe_key(
-                    broadcast_id=int(broadcast.id),
-                    recipient_user_id=recipient.user_id,
-                ),
-                status=TelegramAdminBroadcastReceiptStatus.PENDING,
-                attempt_count=0,
-                created_at=current_time,
-            )
-        )
-
-    for start in range(0, len(receipts), TELEGRAM_BROADCAST_RECEIPT_INSERT_CHUNK_SIZE):
-        db.add_all(receipts[start : start + TELEGRAM_BROADCAST_RECEIPT_INSERT_CHUNK_SIZE])
+    try:
+        db.add(broadcast)
         await db.flush()
 
-    broadcast.recipient_count = len(receipts)
-    await db.flush()
+        receipts: list[TelegramAdminBroadcastReceipt] = []
+        for recipient in recipients:
+            receipts.append(
+                TelegramAdminBroadcastReceipt(
+                    broadcast_id=int(broadcast.id),
+                    recipient_user_id=recipient.user_id,
+                    telegram_id_at_enqueue=recipient.telegram_id,
+                    dedupe_key=telegram_admin_broadcast_dedupe_key(
+                        broadcast_id=int(broadcast.id),
+                        recipient_user_id=recipient.user_id,
+                    ),
+                    status=TelegramAdminBroadcastReceiptStatus.PENDING,
+                    attempt_count=0,
+                    created_at=current_time,
+                )
+            )
+
+        for start in range(0, len(receipts), TELEGRAM_BROADCAST_RECEIPT_INSERT_CHUNK_SIZE):
+            db.add_all(receipts[start : start + TELEGRAM_BROADCAST_RECEIPT_INSERT_CHUNK_SIZE])
+            await db.flush()
+
+        broadcast.recipient_count = len(receipts)
+        await db.flush()
+    except IntegrityError:
+        if durable_key is None:
+            raise
+        rollback = getattr(db, "rollback", None)
+        if callable(rollback):
+            await rollback()
+        existing = await get_telegram_admin_broadcast_by_creation_key(db, durable_key)
+        if existing is None:
+            raise TelegramAdminBroadcastValidationError("broadcast_create_conflict")
+        return existing
     return TelegramAdminBroadcastQueueResult(
         broadcast=broadcast,
         recipients=recipients,

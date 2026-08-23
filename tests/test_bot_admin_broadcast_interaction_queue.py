@@ -70,6 +70,10 @@ class BotAdminBroadcastInteractionQueueTests(unittest.IsolatedAsyncioTestCase):
             edit.await_args.kwargs["source_key"],
             "admin-broadcast-ask-text",
         )
+        prompt = edit.await_args.args[2]
+        self.assertIn("متن یا ویدئوی دارای کپشن را ارسال کنید.", prompt)
+        self.assertIn("حداکثر متن: ۴۰۹۶", prompt)
+        self.assertNotIn("پیام به صورت متن ساده ارسال می‌شود.", prompt)
         callback.message.edit_text.assert_not_awaited()
 
     async def test_simple_callback_text_edits_use_distinct_durable_sources(self):

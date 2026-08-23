@@ -466,6 +466,7 @@ class TelegramAdminBroadcastVideoHandlerTests(unittest.IsolatedAsyncioTestCase):
                 "telegram_media_file_unique_id": "AQADunique01",
                 "target_groups": [],
                 "selected_user_ids": [],
+                "creation_key": "opaque-video-confirm-key-01",
             }
         )
         callback = _callback("tgb:confirm")
@@ -521,8 +522,8 @@ class TelegramAdminBroadcastVideoHandlerTests(unittest.IsolatedAsyncioTestCase):
             ),
             (
                 _video_message(media_group_id="12"),
-                "admin-broadcast-video-as-document",
-                "ویدئو را به‌صورت Video ارسال کنید.",
+                "admin-broadcast-video-as-album",
+                "هر ویدئو را جداگانه ارسال کنید.",
             ),
             (
                 _video_message(caption=""),

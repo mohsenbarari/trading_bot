@@ -23,10 +23,11 @@ from core.services.telegram_admin_broadcast_service import (
     TELEGRAM_ADMIN_BROADCAST_GROUP_TIER1_CUSTOMERS,
     TELEGRAM_BROADCAST_SELECTED_RECIPIENT_CAP,
     TELEGRAM_BROADCAST_TEXT_MAX_LENGTH,
-    TELEGRAM_BROADCAST_VIDEO_CAPTION_MAX_LENGTH,
     TelegramAdminBroadcastRecipient,
     TelegramAdminBroadcastValidationError,
     create_telegram_admin_broadcast,
+    get_telegram_admin_broadcast_by_creation_key,
+    new_telegram_admin_broadcast_creation_key,
     resolve_telegram_admin_broadcast_recipients,
     search_telegram_admin_broadcast_recipients,
     validate_telegram_admin_broadcast_caption,
@@ -167,9 +168,7 @@ async def _ask_for_message_text(
         callback,
         user,
         "متن یا ویدئوی دارای کپشن را ارسال کنید.\n"
-        f"حداکثر طول متن: {TELEGRAM_BROADCAST_TEXT_MAX_LENGTH} کاراکتر\n"
-        f"حداکثر طول کپشن ویدئو: {TELEGRAM_BROADCAST_VIDEO_CAPTION_MAX_LENGTH} کاراکتر\n"
-        "پیام به صورت متن ساده ارسال می‌شود.",
+        "حداکثر متن: ۴۰۹۶ | حداکثر کپشن: ۱۰۲۴",
         source_key="admin-broadcast-ask-text",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="لغو", callback_data=f"{CALLBACK_PREFIX}:cancel")]]
@@ -417,8 +416,8 @@ async def process_broadcast_message_text(message: types.Message, state: FSMConte
         await answer_incoming_message_via_runtime(
             message,
             user,
-            "ویدئو را به‌صورت Video ارسال کنید.",
-            source_key="admin-broadcast-video-as-document",
+            "هر ویدئو را جداگانه ارسال کنید.",
+            source_key="admin-broadcast-video-as-album",
         )
         return
     if getattr(message, "animation", None) is not None or (
@@ -474,7 +473,8 @@ async def process_broadcast_message_text(message: types.Message, state: FSMConte
             "media_width": media.width,
             "media_height": media.height,
             "media_file_size": media.file_size,
-            "confirm_claimed": False,
+            "creation_key": new_telegram_admin_broadcast_creation_key(),
+            "confirm_completed": False,
         }
         preview_text = (
             "ویدئو آمادهٔ ارسال است.\n\n"
@@ -512,7 +512,8 @@ async def process_broadcast_message_text(message: types.Message, state: FSMConte
             "media_width": None,
             "media_height": None,
             "media_file_size": None,
-            "confirm_claimed": False,
+            "creation_key": new_telegram_admin_broadcast_creation_key(),
+            "confirm_completed": False,
         }
         preview_text = (
             "پیش‌نمایش پیام:\n\n"
@@ -546,6 +547,49 @@ async def process_broadcast_message_text(message: types.Message, state: FSMConte
     )
 
 
+def _confirm_failure_text(*, is_video: bool) -> str:
+    if is_video:
+        return "ارسال ویدئو انجام نشد. دوباره تلاش کنید."
+    return "ارسال پیام انجام نشد. دوباره تلاش کنید."
+
+
+async def _load_broadcast_by_creation_key(creation_key: str):
+    async with AsyncSessionLocal() as db:
+        return await get_telegram_admin_broadcast_by_creation_key(db, creation_key)
+
+
+async def _publish_confirm_result(
+    callback: types.CallbackQuery,
+    user: User,
+    *,
+    is_video: bool,
+    broadcast_id: int,
+    receipt_count: int,
+) -> None:
+    if receipt_count == 0:
+        await edit_callback_message_via_runtime(
+            callback,
+            user,
+            f"گیرنده واجد شرایطی پیدا نشد.\nشناسه ثبت: {broadcast_id}\nپیامی برای ارسال در صف قرار نگرفت.",
+            source_key="admin-broadcast-confirm-empty",
+        )
+        return
+    if is_video:
+        await edit_callback_message_via_runtime(
+            callback,
+            user,
+            f"✅ ویدئو در صف ارسال قرار گرفت.\nشناسه: {broadcast_id}\nتعداد گیرندگان: {receipt_count}",
+            source_key="admin-broadcast-confirm-queued-video",
+        )
+        return
+    await edit_callback_message_via_runtime(
+        callback,
+        user,
+        f"✅ پیام در صف ارسال بات قرار گرفت.\nشناسه: {broadcast_id}\nتعداد گیرندگان: {receipt_count}",
+        source_key="admin-broadcast-confirm-queued",
+    )
+
+
 @router.callback_query(AdminBroadcast.awaiting_confirmation, F.data == f"{CALLBACK_PREFIX}:confirm")
 async def confirm_telegram_admin_broadcast(callback: types.CallbackQuery, state: FSMContext, user: User | None = None):
     if await _reject_if_not_superadmin_callback(callback, user):
@@ -553,11 +597,14 @@ async def confirm_telegram_admin_broadcast(callback: types.CallbackQuery, state:
     lock = _confirm_lock(int(getattr(user, "id", 0) or 0))
     async with lock:
         data = await state.get_data()
-        if data.get("confirm_claimed"):
+        if data.get("confirm_completed"):
             await answer_callback_query_via_runtime(callback)
             return
-        data["confirm_claimed"] = True
-        await state.update_data(confirm_claimed=True)
+        creation_key = str(data.get("creation_key") or "").strip()
+        if not creation_key:
+            creation_key = new_telegram_admin_broadcast_creation_key()
+            data["creation_key"] = creation_key
+            await state.update_data(creation_key=creation_key)
         content = data.get("content")
         audience_type = data.get("audience_type")
         target_groups = data.get("target_groups") or []
@@ -565,6 +612,7 @@ async def confirm_telegram_admin_broadcast(callback: types.CallbackQuery, state:
         content_kind = data.get("content_kind") or TelegramAdminBroadcastContentKind.TEXT.value
         is_video = content_kind == TelegramAdminBroadcastContentKind.VIDEO.value
 
+        result = None
         try:
             async with AsyncSessionLocal() as db:
                 result = await create_telegram_admin_broadcast(
@@ -581,9 +629,8 @@ async def confirm_telegram_admin_broadcast(callback: types.CallbackQuery, state:
                     media_width=data.get("media_width"),
                     media_height=data.get("media_height"),
                     media_file_size=data.get("media_file_size"),
+                    creation_key=creation_key,
                 )
-                broadcast_id = int(result.broadcast.id)
-                receipt_count = result.receipt_count
                 await db.commit()
         except TelegramAdminBroadcastValidationError:
             await answer_callback_query_via_runtime(
@@ -594,36 +641,38 @@ async def confirm_telegram_admin_broadcast(callback: types.CallbackQuery, state:
             await edit_callback_message_via_runtime(
                 callback,
                 user,
-                (
-                    "ارسال ویدئو انجام نشد. دوباره تلاش کنید."
-                    if is_video
-                    else "ارسال پیام انجام نشد. دوباره تلاش کنید."
-                ),
+                _confirm_failure_text(is_video=is_video),
                 source_key="admin-broadcast-confirm-error",
             )
-            await state.clear()
+            return
+        except Exception:
+            try:
+                result = await _load_broadcast_by_creation_key(creation_key)
+            except Exception:
+                result = None
+            if result is None:
+                await answer_callback_query_via_runtime(callback)
+                await edit_callback_message_via_runtime(
+                    callback,
+                    user,
+                    _confirm_failure_text(is_video=is_video),
+                    source_key="admin-broadcast-confirm-error",
+                )
+                return
+
+        try:
+            await _publish_confirm_result(
+                callback,
+                user,
+                is_video=is_video,
+                broadcast_id=int(result.broadcast.id),
+                receipt_count=result.receipt_count,
+            )
+        except Exception:
+            await answer_callback_query_via_runtime(callback)
             return
 
+        data["confirm_completed"] = True
+        await state.update_data(confirm_completed=True)
         await state.clear()
-        if receipt_count == 0:
-            await edit_callback_message_via_runtime(
-                callback,
-                user,
-                f"گیرنده واجد شرایطی پیدا نشد.\nشناسه ثبت: {broadcast_id}\nپیامی برای ارسال در صف قرار نگرفت.",
-                source_key="admin-broadcast-confirm-empty",
-            )
-        elif is_video:
-            await edit_callback_message_via_runtime(
-                callback,
-                user,
-                f"✅ ویدئو در صف ارسال قرار گرفت.\nشناسه: {broadcast_id}\nتعداد گیرندگان: {receipt_count}",
-                source_key="admin-broadcast-confirm-queued-video",
-            )
-        else:
-            await edit_callback_message_via_runtime(
-                callback,
-                user,
-                f"✅ پیام در صف ارسال بات قرار گرفت.\nشناسه: {broadcast_id}\nتعداد گیرندگان: {receipt_count}",
-                source_key="admin-broadcast-confirm-queued",
-            )
         await answer_callback_query_via_runtime(callback)

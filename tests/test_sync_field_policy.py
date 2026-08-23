@@ -229,6 +229,7 @@ class SyncFieldPolicyTests(unittest.TestCase):
             ("telegram_admin_broadcasts", "media_width"): SyncFieldClassification.SYNC,
             ("telegram_admin_broadcasts", "media_height"): SyncFieldClassification.SYNC,
             ("telegram_admin_broadcasts", "media_file_size"): SyncFieldClassification.SYNC,
+            ("telegram_admin_broadcasts", "creation_key"): SyncFieldClassification.SYNC,
             ("telegram_admin_broadcast_receipts", "telegram_id_at_enqueue"): SyncFieldClassification.SYNC,
             ("telegram_admin_broadcast_receipts", "telegram_id_at_send"): SyncFieldClassification.SYNC,
             ("telegram_admin_broadcast_receipts", "last_error_message"): SyncFieldClassification.SYNC,

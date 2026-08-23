@@ -9,7 +9,7 @@ from tests.test_telegram_delivery_queue_postgres import DATABASE_URLS, _run_alem
 
 PARENT_REVISION = "a163f4a5b7c8"
 ROUNDTRIP_REVISION = "a274f5a6b8c9"
-HEAD_REVISION = "a385f6b7c8d0"
+HEAD_REVISION = "a496c8d0e1f2"
 
 
 @unittest.skipUnless(
@@ -152,6 +152,7 @@ class TelegramPreAuthMigrationPostgresTests(unittest.TestCase):
         _run_alembic(self.sync_url, "upgrade", "head")
         with self.assertRaises(AssertionError):
             _run_alembic(self.sync_url, "downgrade", ROUNDTRIP_REVISION)
+        _run_alembic(self.sync_url, "upgrade", "head")
         engine = self._engine()
         try:
             with engine.connect() as connection:

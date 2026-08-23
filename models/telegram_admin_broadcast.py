@@ -80,17 +80,29 @@ class TelegramAdminBroadcast(Base):
             "id",
             postgresql_where=text("status IN ('queued', 'running')"),
         ),
+        UniqueConstraint(
+            "creation_key",
+            name="ux_telegram_admin_broadcasts_creation_key",
+        ),
         CheckConstraint(
             "("
             "content_kind = 'text' "
             "AND telegram_media_file_id IS NULL "
-            "AND telegram_media_file_unique_id IS NULL"
+            "AND telegram_media_file_unique_id IS NULL "
+            "AND media_duration_seconds IS NULL "
+            "AND media_width IS NULL "
+            "AND media_height IS NULL "
+            "AND media_file_size IS NULL"
             ") OR ("
             "content_kind = 'video' "
             "AND telegram_media_file_id IS NOT NULL "
             "AND btrim(telegram_media_file_id) <> '' "
             "AND telegram_media_file_unique_id IS NOT NULL "
-            "AND btrim(telegram_media_file_unique_id) <> ''"
+            "AND btrim(telegram_media_file_unique_id) <> '' "
+            "AND (media_duration_seconds IS NULL OR media_duration_seconds >= 0) "
+            "AND (media_width IS NULL OR media_width > 0) "
+            "AND (media_height IS NULL OR media_height > 0) "
+            "AND (media_file_size IS NULL OR media_file_size > 0)"
             ")",
             name="ck_telegram_admin_broadcasts_content_kind_media",
         ),
@@ -114,6 +126,7 @@ class TelegramAdminBroadcast(Base):
     media_width = Column(Integer, nullable=True)
     media_height = Column(Integer, nullable=True)
     media_file_size = Column(BigInteger, nullable=True)
+    creation_key = Column(String(64), nullable=True)
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     audience_type = Column(
         Enum(
