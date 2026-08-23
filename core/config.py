@@ -149,6 +149,7 @@ class Settings(BaseSettings):
     telegram_multi_publisher_enabled: bool = False
     telegram_b2b_dispatch_enabled: bool = False
     telegram_b2b_dispatch_interval_seconds: float = 0.5
+    telegram_b2b_dispatch_batch_size: int = 8
     telegram_b2b_acknowledgement_timeout_seconds: float = 15.0
     # Publisher credentials remain separate to make accidental token reuse and
     # identity drift fail before a worker can be composed.  They are consumed
@@ -388,6 +389,7 @@ class Settings(BaseSettings):
             "telegram_multi_publisher_lane_concurrency",
             "telegram_offer_queue_feeder_batch_limit",
             "telegram_delivery_queue_limiter_key_ttl_seconds",
+            "telegram_b2b_dispatch_batch_size",
         ):
             if isinstance(getattr(self, name), bool) or int(getattr(self, name)) <= 0:
                 raise ValueError(f"{name}_must_be_positive")

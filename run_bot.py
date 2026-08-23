@@ -151,12 +151,16 @@ def configured_publisher_dispatch_worker_factory(
     async def run_dispatcher() -> None:
         while True:
             cycle_started_at = asyncio.get_running_loop().time()
+            batch_limit = max(
+                1,
+                int(getattr(settings_obj, "telegram_b2b_dispatch_batch_size", 8)),
+            )
             report = await run_telegram_publisher_dispatch_cycle(
                 session_factory=AsyncSessionLocal,
                 current_server=SERVER_FOREIGN,
                 publisher_bot_ids=publisher_bot_ids,
                 gateway_call=gateway_call,
-                limit=1,
+                limit=batch_limit,
                 lease_seconds=float(getattr(settings_obj, "telegram_delivery_queue_worker_lease_seconds", 30.0)),
                 retry_after_seconds=1.0,
                 acknowledgement_timeout_seconds=float(
@@ -189,6 +193,7 @@ def configured_publisher_dispatch_worker_factory(
                     elapsed_seconds=(
                         asyncio.get_running_loop().time() - cycle_started_at
                     ),
+                    batch_limit=batch_limit,
                 )
             )
 
@@ -200,10 +205,15 @@ def publisher_b2b_dispatch_cycle_sleep_seconds(
     interval_seconds: float,
     claimed_count: int,
     elapsed_seconds: float,
+    batch_limit: int = 1,
 ) -> float:
-    """Keep B2B cadence measured from cycle start, including idle cycles."""
+    """Keep idle B2B cadence, but drain immediately after a full batch."""
     interval = max(0.0, float(interval_seconds))
     elapsed = max(0.0, float(elapsed_seconds))
+    claimed = max(0, int(claimed_count))
+    limit = max(1, int(batch_limit))
+    if claimed >= limit:
+        return 0.0
     return max(0.0, interval - elapsed)
 
 

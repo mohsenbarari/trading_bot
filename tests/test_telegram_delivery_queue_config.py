@@ -106,6 +106,7 @@ class TelegramDeliveryQueueConfigTests(unittest.TestCase):
         defaults = _settings()
         self.assertFalse(defaults.telegram_multi_publisher_enabled)
         self.assertFalse(defaults.telegram_b2b_dispatch_enabled)
+        self.assertEqual(defaults.telegram_b2b_dispatch_batch_size, 8)
 
         with self.assertRaises(ValidationError):
             _settings(telegram_b2b_dispatch_enabled=True)
@@ -116,6 +117,8 @@ class TelegramDeliveryQueueConfigTests(unittest.TestCase):
         )
         self.assertTrue(configured.telegram_multi_publisher_enabled)
         self.assertTrue(configured.telegram_b2b_dispatch_enabled)
+        with self.assertRaises(ValidationError):
+            _settings(telegram_b2b_dispatch_batch_size=0)
 
     def test_shared_publisher_fleet_requires_rate_safe_destination_interval(self):
         configured = _settings(

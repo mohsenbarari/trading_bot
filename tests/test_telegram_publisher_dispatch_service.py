@@ -12,6 +12,7 @@ from core.services.telegram_publisher_dispatch_service import (
     dispatch_claimed_telegram_publisher_command,
     record_telegram_publisher_dispatch_result,
     render_telegram_publisher_dispatch,
+    run_telegram_publisher_dispatch_cycle,
     select_telegram_publisher_lane,
     TelegramPublisherDispatchLease,
 )
@@ -346,6 +347,152 @@ class TelegramPublisherDispatchServiceTests(unittest.IsolatedAsyncioTestCase):
                 now=NOW,
             )
         db.execute.assert_not_awaited()
+
+    async def test_dispatch_cycle_sends_a_bounded_batch_and_continues_after_one_failure(self):
+        commands = []
+        for index in range(1, 4):
+            command = _command()
+            command.command_id = f"123e4567-e89b-12d3-a456-42661417400{index}"
+            command.id = index
+            commands.append(command)
+        leases = [
+            TelegramPublisherDispatchLease(command=command, lease_token=1)
+            for command in commands
+        ]
+        remaining = list(leases)
+
+        async def claim(*_args, **_kwargs):
+            return remaining.pop(0) if remaining else None
+
+        results = [
+            TelegramGatewayResult(ok=True, method="sendMessage"),
+            TelegramGatewayResult(ok=False, method="sendMessage", error="timeout"),
+            TelegramGatewayResult(ok=True, method="sendMessage"),
+        ]
+        gateway = AsyncMock(side_effect=results)
+
+        class _CycleSession:
+            def __init__(self):
+                self.commit = AsyncMock()
+                self.rollback = AsyncMock()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+        with patch(
+            "core.services.telegram_publisher_dispatch_service.claim_next_telegram_publisher_dispatch_command",
+            new=AsyncMock(side_effect=claim),
+        ) as claim_mock, patch(
+            "core.services.telegram_publisher_dispatch_service.record_telegram_publisher_dispatch_result",
+            new=AsyncMock(return_value=True),
+        ) as record:
+            report = await run_telegram_publisher_dispatch_cycle(
+                session_factory=_CycleSession,
+                current_server="foreign",
+                publisher_bot_ids={"publisher_3": 303},
+                gateway_call=gateway,
+                limit=8,
+                lease_seconds=30,
+                retry_after_seconds=1,
+                acknowledgement_timeout_seconds=15,
+                request_timeout_seconds=5,
+                now_factory=lambda: NOW,
+            )
+
+        self.assertEqual(report.claimed_count, 3)
+        self.assertEqual(report.sent_count, 2)
+        self.assertEqual(report.retry_due_count, 1)
+        self.assertEqual(gateway.await_count, 3)
+        self.assertEqual(record.await_count, 3)
+        self.assertEqual(claim_mock.await_count, 4)
+        self.assertEqual(
+            [call.kwargs["command_id"] for call in record.await_args_list],
+            [command.command_id for command in commands],
+        )
+
+    async def test_dispatch_cycle_does_not_claim_past_the_batch_limit(self):
+        remaining = [
+            TelegramPublisherDispatchLease(command=_command(), lease_token=index)
+            for index in range(1, 5)
+        ]
+
+        async def claim(*_args, **_kwargs):
+            return remaining.pop(0)
+
+        class _CycleSession:
+            def __init__(self):
+                self.commit = AsyncMock()
+                self.rollback = AsyncMock()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+        gateway = AsyncMock(
+            return_value=TelegramGatewayResult(ok=True, method="sendMessage")
+        )
+        with patch(
+            "core.services.telegram_publisher_dispatch_service.claim_next_telegram_publisher_dispatch_command",
+            new=AsyncMock(side_effect=claim),
+        ), patch(
+            "core.services.telegram_publisher_dispatch_service.record_telegram_publisher_dispatch_result",
+            new=AsyncMock(return_value=True),
+        ):
+            report = await run_telegram_publisher_dispatch_cycle(
+                session_factory=_CycleSession,
+                current_server="foreign",
+                publisher_bot_ids={"publisher_3": 303},
+                gateway_call=gateway,
+                limit=2,
+                lease_seconds=30,
+                retry_after_seconds=1,
+                acknowledgement_timeout_seconds=15,
+                request_timeout_seconds=5,
+                now_factory=lambda: NOW,
+            )
+
+        self.assertEqual(report.claimed_count, 2)
+        self.assertEqual(gateway.await_count, 2)
+        self.assertEqual(len(remaining), 2)
+
+    async def test_idle_dispatch_cycle_claims_nothing(self):
+        class _CycleSession:
+            def __init__(self):
+                self.commit = AsyncMock()
+                self.rollback = AsyncMock()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+        gateway = AsyncMock()
+        with patch(
+            "core.services.telegram_publisher_dispatch_service.claim_next_telegram_publisher_dispatch_command",
+            new=AsyncMock(return_value=None),
+        ):
+            report = await run_telegram_publisher_dispatch_cycle(
+                session_factory=_CycleSession,
+                current_server="foreign",
+                publisher_bot_ids={"publisher_3": 303},
+                gateway_call=gateway,
+                limit=8,
+                lease_seconds=30,
+                retry_after_seconds=1,
+                acknowledgement_timeout_seconds=15,
+                request_timeout_seconds=5,
+                now_factory=lambda: NOW,
+            )
+
+        self.assertEqual(report.claimed_count, 0)
+        self.assertEqual(report.sent_count, 0)
+        gateway.assert_not_awaited()
 
     def test_publisher_queue_claim_requires_a_durable_acknowledgement(self):
         source = Path(
