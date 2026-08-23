@@ -108,9 +108,6 @@ def configured_publisher_b2b_pollers(settings_obj):
     for identity, lane in composition.credential_registry.publisher_lanes.items():
         publisher_bot = Bot(token=lane.credential.token)
         publisher_dp = Dispatcher()
-        publisher_dp.update.outer_middleware(CallbackReceiptMiddleware())
-        publisher_dp.update.outer_middleware(TradeContentionGateMiddleware())
-        publisher_dp.update.outer_middleware(AuthMiddleware(AsyncSessionLocal))
         publisher_dp.update.outer_middleware(TelegramBotIdentityMiddleware(identity))
         publisher_dp.include_router(
             build_publisher_b2b_router(

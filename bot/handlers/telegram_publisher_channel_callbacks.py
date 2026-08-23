@@ -9,13 +9,22 @@ from aiogram.types import CallbackQuery
 from bot.callbacks import ChannelTradeCallback, ChannelTradePublicCallback, ExpireOfferCallback
 from bot.handlers.trade_execute import _handle_channel_trade
 from bot.handlers.trade_manage import handle_expire_offer
+from bot.middlewares import (
+    AuthMiddleware,
+    CallbackReceiptMiddleware,
+    TradeContentionGateMiddleware,
+)
 from core.config import settings
+from core.db import AsyncSessionLocal
 from models.user import User
 
 
 def build_publisher_channel_callback_router() -> Router:
     """Create a fresh router; aiogram routers cannot have multiple parents."""
     router = Router(name="publisher-channel-offer-callbacks")
+    router.callback_query.outer_middleware(CallbackReceiptMiddleware())
+    router.callback_query.outer_middleware(TradeContentionGateMiddleware())
+    router.callback_query.outer_middleware(AuthMiddleware(AsyncSessionLocal))
 
     channel_callback = F.message.chat.id == settings.channel_id
 
