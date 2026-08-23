@@ -2,6 +2,7 @@
 
 Entries are newest first.
 
+- 2026-08-23 | Stage 11 keeps both worker freshness checks and `assert_dispatchable`. The last validate reuses the locked Offer/state rows instead of selecting them again; successful SEND offer/state reads before Telegram drop 8→6.
 - 2026-08-23 | Stage 10 keeps destination interval at 1.05s. No live 429 series was collected, so the number was not lowered and destination_next stays shared without a method dimension.
 - 2026-08-23 | Stage 9 local B2B ack is fail-closed (`telegram_b2b_local_ack_enabled` default false). A fresh publisher heartbeat can replace the Telegram receipt hop; off remains bit-identical. Ownership stays sticky.
 - 2026-08-23 | Stage 8 inverts DB-first only for `answerCallbackQuery`: the edge answers first, then the durable witness is marked `sent` with `answered_at_edge`. Failure to answer still enqueues recovery. Owner approved this exception.

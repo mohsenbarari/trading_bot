@@ -1,5 +1,6 @@
 # Telegram Delivery
 
+- 2026-08-23 | Stage 11 does not drop freshness guards. Validator #1, validator #2, and `assert_dispatchable` stay; only the duplicate unlocked Offer/state read inside the last validate is removed.
 - 2026-08-23 | Stage 9 local B2B ack is off by default. Enable only with multi-publisher B2B; stale heartbeat falls back to Telegram. Do not treat default hop count as one.
 - 2026-08-23 | Owner approved stages 7–12. Stage 8 answers callbacks on the edge and marks the queue witness `answered_at_edge`; worker must not send a second `answerCallbackQuery`.
 - 2026-08-23 | Owner approved stages 7–12. Stage 7 runtime roles: `all` (default), `primary`, `publishers`; unknown fails closed; publishers compose service is profile-gated. Do not invent staging percentiles.
