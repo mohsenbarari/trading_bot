@@ -876,8 +876,21 @@ guard_production_release_command() {
     acquire_production_source_lock
     profile="$(production_runtime_source_profile)" \
         || die "Immutable production source has an invalid Telegram execution profile."
-    [[ "$profile" != "queue-v1" ]] \
-        || die "Queue-v1 production deploys require the guarded cutover authority and full release command."
+    if [[ "$profile" == "queue-v1" ]]; then
+        case "$COMMAND" in
+            prepare-release-evidence|verify-release-evidence)
+                # These commands build or validate immutable artifacts only.
+                # They never quiesce writers, replace containers, mutate a
+                # database, or call Telegram.  A target release must be able
+                # to create its exact image/rehearsal evidence before the
+                # cutover-owned full release can authorize Queue redeploy.
+                return 0
+                ;;
+            *)
+                die "Queue-v1 production deploys require the guarded cutover authority and full release command."
+                ;;
+        esac
+    fi
 }
 
 file_sha256() {

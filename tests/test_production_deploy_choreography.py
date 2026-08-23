@@ -507,6 +507,38 @@ printf 'ssh=%s\nscp=%s\nrsync=%s\n' \
                 self.assertNotEqual(rejected.returncode, 0)
                 self.assertIn("internal to the full two-host release", rejected.stderr)
 
+    def test_queue_profile_allows_only_non_runtime_release_evidence_commands(self) -> None:
+        for command in ("prepare-release-evidence", "verify-release-evidence"):
+            with self.subTest(command=command):
+                allowed = run_sourced_script(
+                    f"""
+COMMAND={command!r}
+acquire_production_operation_lock() {{ :; }}
+acquire_production_source_lock() {{ :; }}
+production_runtime_source_profile() {{ printf 'queue-v1\\n'; }}
+guard_production_release_command
+printf 'allowed\\n'
+"""
+                )
+                self.assertEqual(
+                    allowed.returncode,
+                    0,
+                    allowed.stderr + allowed.stdout,
+                )
+                self.assertEqual(allowed.stdout.strip(), "allowed")
+
+        rejected = run_sourced_script(
+            """
+COMMAND=release
+acquire_production_operation_lock() { :; }
+acquire_production_source_lock() { :; }
+production_runtime_source_profile() { printf 'queue-v1\n'; }
+guard_production_release_command
+"""
+        )
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("guarded cutover authority", rejected.stderr)
+
     def test_release_rechecks_frozen_source_and_remote_payload_after_quiesce(self) -> None:
         source = RELEASE_SCRIPT.read_text(encoding="utf-8")
         release = source.split("run_release() {", 1)[1].split("\n}", 1)[0]
