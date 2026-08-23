@@ -244,20 +244,23 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
         self.assertEqual(foreign_bot["environment"]["TRADING_BOT_SERVICE"], "bot")
         self.assertIn("run_bot.py", str(foreign_bot.get("command", "")))
 
-        self.assertIn("bot_publishers", foreign_services)
-        publishers_block = compose_service_block(
+        self.assertIn("bot_executor", foreign_services)
+        self.assertNotIn("bot_publishers", foreign_services)
+        executor_block = compose_service_block(
             repo_root / "docker-compose.yml",
-            "bot_publishers",
+            "bot_executor",
         )
-        self.assertIn("profiles:", publishers_block)
-        self.assertIn("- bot-publishers", publishers_block)
+        self.assertIn("profiles:", executor_block)
+        self.assertIn("- bot-executor", executor_block)
         self.assertEqual(
-            foreign_services["bot_publishers"]["environment"]["TRADING_BOT_SERVICE"],
+            foreign_services["bot_executor"]["environment"]["TRADING_BOT_SERVICE"],
             "bot",
         )
-        self.assertIn("TELEGRAM_BOT_RUNTIME_ROLE: publishers", publishers_block)
-        self.assertIn("run_bot.py", publishers_block)
+        self.assertIn("TELEGRAM_BOT_RUNTIME_ROLE: executor", executor_block)
+        self.assertIn("TELEGRAM_BOT_SPLIT_ENABLED: \"true\"", executor_block)
+        self.assertIn("run_bot.py", executor_block)
         self.assertNotIn("bot_publishers", iran_services)
+        self.assertNotIn("bot_executor", iran_services)
 
         self.assertNotIn("bot", iran_services)
         for service_name, service in iran_services.items():
@@ -318,26 +321,28 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
         self.assertIn("FRONTEND_URL: ${STAGING_FOREIGN_FRONTEND_URL", staging_bot_block)
         self.assertIn("FOREIGN_SERVER_URL: ${STAGING_FOREIGN_FOREIGN_SERVER_URL", staging_bot_block)
 
-    def test_staging_publisher_runtime_is_profile_gated_and_foreign_only(self):
+    def test_staging_executor_runtime_is_profile_gated_and_foreign_only(self):
         repo_root = Path(__file__).resolve().parents[1]
         staging_compose = repo_root / "deploy/staging/docker-compose.staging.yml"
         staging_services = active_compose_services(staging_compose)
-        publishers_block = compose_service_block(staging_compose, "bot_publishers")
+        executor_block = compose_service_block(staging_compose, "bot_executor")
 
-        self.assertIn("bot_publishers", staging_services)
-        self.assertIn("profiles:", publishers_block)
-        self.assertIn("- staging-bot-publishers", publishers_block)
-        self.assertNotIn("- staging-bot\n", publishers_block)
+        self.assertIn("bot_executor", staging_services)
+        self.assertNotIn("bot_publishers", staging_services)
+        self.assertIn("profiles:", executor_block)
+        self.assertIn("- staging-bot-executor", executor_block)
+        self.assertNotIn("- staging-bot\n", executor_block)
         self.assertEqual(
-            staging_services["bot_publishers"]["environment"]["TRADING_BOT_SERVICE"],
+            staging_services["bot_executor"]["environment"]["TRADING_BOT_SERVICE"],
             "bot",
         )
         self.assertEqual(
-            staging_services["bot_publishers"]["environment"]["SERVER_MODE"],
+            staging_services["bot_executor"]["environment"]["SERVER_MODE"],
             "foreign",
         )
-        self.assertIn("TELEGRAM_BOT_RUNTIME_ROLE: publishers", publishers_block)
-        self.assertIn("run_bot.py", publishers_block)
+        self.assertIn("TELEGRAM_BOT_RUNTIME_ROLE: executor", executor_block)
+        self.assertIn("TELEGRAM_BOT_SPLIT_ENABLED: \"true\"", executor_block)
+        self.assertIn("run_bot.py", executor_block)
 
     def test_staging_bot_profile_includes_internal_foreign_api(self):
         repo_root = Path(__file__).resolve().parents[1]

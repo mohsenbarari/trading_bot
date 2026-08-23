@@ -57,7 +57,9 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         init_db.assert_not_awaited()
         self.assertIn('TRADING_BOT_SERVICE must be bot', str(exc_info.exception))
 
-    async def test_main_initializes_and_registers_all_routers(self):
+    @patch('run_bot.acquire_telegram_central_poller_owner', new_callable=AsyncMock)
+    @patch('run_bot.acquire_telegram_delivery_queue_owner', new_callable=AsyncMock)
+    async def test_main_initializes_and_registers_all_routers(self, _queue_owner, _poller_owner):
         fake_bot = MagicMock()
         fake_bot.session.close = AsyncMock()
         fake_bot.set_my_commands = AsyncMock(return_value=True)
@@ -127,7 +129,11 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         fake_dp.start_polling.assert_awaited_once_with(fake_bot)
         fake_bot.session.close.assert_awaited_once()
 
-    async def test_main_propagates_polling_errors_and_still_closes_bot(self):
+    @patch('run_bot.acquire_telegram_central_poller_owner', new_callable=AsyncMock)
+    @patch('run_bot.acquire_telegram_delivery_queue_owner', new_callable=AsyncMock)
+    async def test_main_propagates_polling_errors_and_still_closes_bot(
+        self, _queue_owner, _poller_owner
+    ):
         fake_bot = MagicMock()
         fake_bot.session.close = AsyncMock()
         fake_bot.set_my_commands = AsyncMock(return_value=True)

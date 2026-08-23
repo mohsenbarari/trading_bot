@@ -4,19 +4,20 @@ import unittest
 from core.config import Settings
 from core.telegram_bot_runtime_role import (
     TELEGRAM_BOT_RUNTIME_ROLE_ALL,
+    TELEGRAM_BOT_RUNTIME_ROLE_EXECUTOR,
     TELEGRAM_BOT_RUNTIME_ROLE_PRIMARY,
-    TELEGRAM_BOT_RUNTIME_ROLE_PUBLISHERS,
 )
 from core.telegram_dispatch_latency_pool import (
     POOL_SCHEMA_VERSION,
     POSTGRES_ADMIN_RESERVE,
     PRODUCTION_ALL_MAX_OVERFLOW,
     PRODUCTION_ALL_POOL_SIZE,
-    PRODUCTION_PUBLISHERS_MAX_OVERFLOW,
-    PRODUCTION_PUBLISHERS_POOL_SIZE,
+    PRODUCTION_EXECUTOR_MAX_OVERFLOW,
+    PRODUCTION_EXECUTOR_POOL_SIZE,
     RECOMMENDED_PRIMARY_MAX_OVERFLOW,
     RECOMMENDED_PRIMARY_POOL_SIZE,
     SESSIONS_PER_SLOT,
+    configured_service_ceilings,
     locked_telegram_dispatch_pools,
     production_role_pools,
     required_connections_for_role,
@@ -37,29 +38,37 @@ class TelegramDispatchLatencyPoolTests(unittest.TestCase):
         self.assertFalse(lock.live_wait_samples_collected)
         self.assertEqual(SESSIONS_PER_SLOT, 1)
         self.assertEqual(slot_count_for_role(TELEGRAM_BOT_RUNTIME_ROLE_ALL), 9)
-        self.assertEqual(slot_count_for_role(TELEGRAM_BOT_RUNTIME_ROLE_PRIMARY), 4)
-        self.assertEqual(slot_count_for_role(TELEGRAM_BOT_RUNTIME_ROLE_PUBLISHERS), 5)
-        self.assertEqual(required_connections_for_role(TELEGRAM_BOT_RUNTIME_ROLE_ALL), 23)
+        self.assertEqual(slot_count_for_role(TELEGRAM_BOT_RUNTIME_ROLE_PRIMARY), 0)
+        self.assertEqual(slot_count_for_role(TELEGRAM_BOT_RUNTIME_ROLE_EXECUTOR), 9)
+        self.assertEqual(required_connections_for_role(TELEGRAM_BOT_RUNTIME_ROLE_ALL), 24)
         self.assertEqual(
             required_connections_for_role(TELEGRAM_BOT_RUNTIME_ROLE_PRIMARY),
-            16,
+            11,
         )
         self.assertEqual(
-            required_connections_for_role(TELEGRAM_BOT_RUNTIME_ROLE_PUBLISHERS),
-            11,
+            required_connections_for_role(TELEGRAM_BOT_RUNTIME_ROLE_EXECUTOR),
+            19,
         )
 
         self.assertEqual(roles[TELEGRAM_BOT_RUNTIME_ROLE_ALL].configured_ceiling, 25)
         self.assertEqual(roles[TELEGRAM_BOT_RUNTIME_ROLE_PRIMARY].configured_ceiling, 20)
         self.assertEqual(
-            roles[TELEGRAM_BOT_RUNTIME_ROLE_PUBLISHERS].configured_ceiling,
-            18,
+            roles[TELEGRAM_BOT_RUNTIME_ROLE_EXECUTOR].configured_ceiling,
+            25,
         )
         for role in lock.roles:
             self.assertGreaterEqual(role.configured_ceiling, role.required_connections)
         self.assertTrue(role_ceilings_fit_postgres(production_role_pools()))
         self.assertEqual(lock.postgres_max_connections, 500)
         self.assertEqual(lock.postgres_admin_reserve, POSTGRES_ADMIN_RESERVE)
+        ceilings = configured_service_ceilings()
+        self.assertLessEqual(
+            ceilings["app"]
+            + ceilings["sync"]
+            + ceilings["bot_primary"]
+            + ceilings["bot_executor"],
+            lock.postgres_max_connections - POSTGRES_ADMIN_RESERVE,
+        )
         self.assertEqual(
             Settings.model_fields["db_pool_size"].default,
             PRODUCTION_ALL_POOL_SIZE,
@@ -82,9 +91,9 @@ class TelegramDispatchLatencyPoolTests(unittest.TestCase):
     def test_compose_keeps_calculated_ceilings_for_bot_roles(self):
         repo_root = Path(__file__).resolve().parents[1]
         bot = compose_service_block(repo_root / "docker-compose.yml", "bot")
-        publishers = compose_service_block(
+        executor = compose_service_block(
             repo_root / "docker-compose.yml",
-            "bot_publishers",
+            "bot_executor",
         )
         db_block = compose_service_block(repo_root / "docker-compose.yml", "db")
 
@@ -96,19 +105,20 @@ class TelegramDispatchLatencyPoolTests(unittest.TestCase):
         self.assertIn("Role `all` ceiling 25", bot)
         self.assertIn("role `primary` use 12+8", bot)
         self.assertIn(
-            "DB_POOL_SIZE: ${DB_PUBLISHERS_POOL_SIZE:-"
-            f"{PRODUCTION_PUBLISHERS_POOL_SIZE}}}",
-            publishers,
+            "DB_POOL_SIZE: ${DB_EXECUTOR_POOL_SIZE:-"
+            f"{PRODUCTION_EXECUTOR_POOL_SIZE}}}",
+            executor,
         )
         self.assertIn(
-            "DB_MAX_OVERFLOW: ${DB_PUBLISHERS_MAX_OVERFLOW:-"
-            f"{PRODUCTION_PUBLISHERS_MAX_OVERFLOW}}}",
-            publishers,
+            "DB_MAX_OVERFLOW: ${DB_EXECUTOR_MAX_OVERFLOW:-"
+            f"{PRODUCTION_EXECUTOR_MAX_OVERFLOW}}}",
+            executor,
         )
-        self.assertIn("Role `publishers` ceiling 18", publishers)
+        self.assertIn("Role `executor` ceiling 25", executor)
         self.assertIn("max_connections=500", db_block)
         self.assertIn(str(RECOMMENDED_PRIMARY_POOL_SIZE), bot)
         self.assertIn(str(RECOMMENDED_PRIMARY_MAX_OVERFLOW), bot)
+        self.assertNotIn("bot_publishers:", (repo_root / "docker-compose.yml").read_text())
 
     def test_pool_document_does_not_invent_live_waits(self):
         text = Path(
@@ -116,8 +126,6 @@ class TelegramDispatchLatencyPoolTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("code_derived_role_pool_lock", text)
-        self.assertIn("۲۳", text)
-        self.assertIn("۲۵", text)
         self.assertIn("destination_next", text)
         self.assertNotIn("p50=", text.lower())
         self.assertNotIn("queue pool timeout", text.lower())
