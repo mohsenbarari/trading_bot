@@ -186,6 +186,9 @@ def configured_publisher_dispatch_worker_factory(
                 ),
                 request_timeout_seconds=float(getattr(settings_obj, "telegram_delivery_queue_worker_request_timeout_seconds", 10.0)),
                 now_factory=utc_now,
+                local_ack_enabled=bool(
+                    getattr(settings_obj, "telegram_b2b_local_ack_enabled", False)
+                ),
             )
             metrics_registry.counter(
                 "telegram_publisher_b2b_dispatch_cycles_total",

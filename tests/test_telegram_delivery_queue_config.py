@@ -108,8 +108,18 @@ class TelegramDeliveryQueueConfigTests(unittest.TestCase):
         self.assertFalse(defaults.telegram_b2b_dispatch_enabled)
         self.assertEqual(defaults.telegram_b2b_dispatch_batch_size, 8)
         self.assertEqual(defaults.telegram_bot_runtime_role, "all")
+        self.assertFalse(defaults.telegram_b2b_local_ack_enabled)
         with self.assertRaises(ValidationError):
             _settings(telegram_bot_runtime_role="sidecar")
+        with self.assertRaises(ValidationError):
+            _settings(telegram_b2b_local_ack_enabled=True)
+        configured = _settings(
+            telegram_multi_publisher_enabled=True,
+            telegram_b2b_dispatch_enabled=True,
+            telegram_b2b_local_ack_enabled=True,
+        )
+        self.assertTrue(configured.telegram_b2b_local_ack_enabled)
+        self.assertEqual(configured.telegram_b2b_local_ack_heartbeat_seconds, 15.0)
 
         with self.assertRaises(ValidationError):
             _settings(telegram_b2b_dispatch_enabled=True)

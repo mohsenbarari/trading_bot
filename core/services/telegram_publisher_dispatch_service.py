@@ -27,6 +27,7 @@ from core.telegram_multi_publisher_contract import (
 )
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
 from models.telegram_publisher_dispatch_command import TelegramPublisherDispatchCommand
+from models.telegram_publisher_lane_heartbeat import TelegramPublisherLaneHeartbeat
 
 
 class TelegramPublisherDispatchError(RuntimeError):
@@ -242,6 +243,112 @@ def render_telegram_publisher_dispatch(command: TelegramPublisherDispatchCommand
             enqueued_at=created_at,
         )
     )
+
+
+async def touch_telegram_publisher_lane_heartbeat(
+    db: AsyncSession,
+    *,
+    publisher_bot_identity: str,
+    worker_id: str,
+    lease_seconds: float,
+    now: datetime,
+) -> TelegramPublisherLaneHeartbeat:
+    """Refresh the durable liveness lease for one publisher lane."""
+    publisher = _publisher_identity(publisher_bot_identity)
+    current_time = _utc(now)
+    if not math.isfinite(float(lease_seconds)) or float(lease_seconds) <= 0:
+        raise TelegramPublisherDispatchError("telegram_publisher_heartbeat_lease_invalid")
+    owner = str(worker_id or "").strip()
+    if not owner:
+        raise TelegramPublisherDispatchError("telegram_publisher_heartbeat_worker_invalid")
+    lease_until = current_time + timedelta(seconds=float(lease_seconds))
+    insert_stmt = (
+        postgresql_insert(TelegramPublisherLaneHeartbeat)
+        .values(
+            publisher_bot_identity=publisher,
+            worker_id=owner[:128],
+            lease_until=lease_until,
+            updated_at=current_time,
+        )
+        .on_conflict_do_update(
+            index_elements=["publisher_bot_identity"],
+            set_={
+                "worker_id": owner[:128],
+                "lease_until": lease_until,
+                "updated_at": current_time,
+            },
+        )
+        .returning(TelegramPublisherLaneHeartbeat)
+    )
+    return (await db.execute(insert_stmt)).scalar_one()
+
+
+async def telegram_publisher_lane_heartbeat_is_fresh(
+    db: AsyncSession,
+    *,
+    publisher_bot_identity: str,
+    now: datetime,
+) -> bool:
+    publisher = _publisher_identity(publisher_bot_identity)
+    current_time = _utc(now)
+    lease_until = (
+        await db.execute(
+            select(TelegramPublisherLaneHeartbeat.lease_until).where(
+                TelegramPublisherLaneHeartbeat.publisher_bot_identity == publisher
+            )
+        )
+    ).scalar_one_or_none()
+    return lease_until is not None and _utc(lease_until) > current_time
+
+
+async def acknowledge_telegram_publisher_dispatch_locally(
+    db: AsyncSession,
+    *,
+    current_server: str,
+    command_id: str,
+    now: datetime,
+) -> bool:
+    """Mark one claimed command acknowledged without a Telegram hop."""
+    _require_foreign(current_server)
+    current_time = _utc(now)
+    command = (
+        await db.execute(
+            select(TelegramPublisherDispatchCommand)
+            .where(TelegramPublisherDispatchCommand.command_id == str(command_id))
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if command is None:
+        return False
+    publisher = _publisher_identity(command.publisher_bot_identity)
+    if command.state == TelegramPublisherDispatchState.ACKNOWLEDGED.value:
+        return True
+    if command.state not in {
+        TelegramPublisherDispatchState.PENDING.value,
+        TelegramPublisherDispatchState.SENT.value,
+        TelegramPublisherDispatchState.RETRY_DUE.value,
+    }:
+        return False
+    if not await telegram_publisher_lane_heartbeat_is_fresh(
+        db,
+        publisher_bot_identity=publisher,
+        now=current_time,
+    ):
+        return False
+    command.state = TelegramPublisherDispatchState.ACKNOWLEDGED.value
+    command.acknowledged_at = current_time
+    command.receipt_sequence = int(command.dispatch_sequence)
+    command.receipt_received_at = current_time
+    command.lease_until = None
+    command.next_retry_at = None
+    command.updated_at = current_time
+    await db.flush()
+    from core.telegram_delivery_queue_wakeup import (
+        emit_delivery_queue_wakeup,
+    )
+
+    await emit_delivery_queue_wakeup(db, bot_identity=publisher)
+    return True
 
 
 async def claim_next_telegram_publisher_dispatch_command(
@@ -526,6 +633,7 @@ async def run_telegram_publisher_dispatch_cycle(
     acknowledgement_timeout_seconds: float,
     request_timeout_seconds: float,
     now_factory: Callable[[], datetime],
+    local_ack_enabled: bool = False,
 ) -> TelegramPublisherDispatchCycleReport:
     """Send a bounded batch while keeping every external call outside a DB transaction."""
     _require_foreign(current_server)
@@ -547,6 +655,19 @@ async def run_telegram_publisher_dispatch_cycle(
                 break
             await db.commit()
         claimed_count += 1
+        if local_ack_enabled:
+            async with session_factory() as db:
+                locally_acked = await acknowledge_telegram_publisher_dispatch_locally(
+                    db,
+                    current_server=current_server,
+                    command_id=str(lease.command.command_id),
+                    now=now_factory(),
+                )
+                if locally_acked:
+                    await db.commit()
+                    sent_count += 1
+                    continue
+                await db.rollback()
         result = await dispatch_claimed_telegram_publisher_command(
             lease,
             publisher_bot_ids=publisher_bot_ids,
