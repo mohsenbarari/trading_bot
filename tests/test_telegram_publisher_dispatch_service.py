@@ -9,10 +9,11 @@ from core.services.telegram_publisher_dispatch_service import (
     TelegramPublisherDispatchError,
     accept_telegram_publisher_acknowledgement,
     accept_telegram_publisher_dispatch,
-    acknowledge_telegram_publisher_dispatch_locally,
+    acknowledge_claimed_telegram_publisher_dispatch_locally,
     dispatch_claimed_telegram_publisher_command,
     record_telegram_publisher_dispatch_result,
     render_telegram_publisher_dispatch,
+    run_co_located_telegram_publisher_dispatch_cycle,
     run_telegram_publisher_dispatch_cycle,
     select_telegram_publisher_lane,
     TelegramPublisherDispatchLease,
@@ -495,20 +496,18 @@ class TelegramPublisherDispatchServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report.sent_count, 0)
         gateway.assert_not_awaited()
 
-    async def test_local_ack_requires_a_fresh_heartbeat_then_wakes_the_lane(self):
+    async def test_local_ack_is_lease_fenced_and_wakes_the_lane(self):
         command = _command()
         db = _DB(command)
         with patch(
-            "core.services.telegram_publisher_dispatch_service.telegram_publisher_lane_heartbeat_is_fresh",
-            new=AsyncMock(return_value=True),
-        ), patch(
             "core.telegram_delivery_queue_wakeup.emit_delivery_queue_wakeup",
             new=AsyncMock(),
         ) as wakeup:
-            acked = await acknowledge_telegram_publisher_dispatch_locally(
+            acked = await acknowledge_claimed_telegram_publisher_dispatch_locally(
                 db,
                 current_server="foreign",
                 command_id=command.command_id,
+                lease_token=command.lease_token,
                 now=NOW,
             )
 
@@ -516,23 +515,22 @@ class TelegramPublisherDispatchServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(command.state, "acknowledged")
         self.assertEqual(command.acknowledged_at, NOW)
         self.assertEqual(command.receipt_sequence, 37)
+        self.assertIsNone(command.lease_until)
         wakeup.assert_awaited_once()
         self.assertEqual(wakeup.await_args.kwargs["bot_identity"], "publisher_3")
 
-    async def test_local_ack_stays_off_when_the_heartbeat_is_stale(self):
+    async def test_local_ack_refuses_a_stale_lease_token(self):
         command = _command()
         db = _DB(command)
         with patch(
-            "core.services.telegram_publisher_dispatch_service.telegram_publisher_lane_heartbeat_is_fresh",
-            new=AsyncMock(return_value=False),
-        ), patch(
             "core.telegram_delivery_queue_wakeup.emit_delivery_queue_wakeup",
             new=AsyncMock(),
         ) as wakeup:
-            acked = await acknowledge_telegram_publisher_dispatch_locally(
+            acked = await acknowledge_claimed_telegram_publisher_dispatch_locally(
                 db,
                 current_server="foreign",
                 command_id=command.command_id,
+                lease_token=int(command.lease_token) + 1,
                 now=NOW,
             )
 
@@ -540,7 +538,23 @@ class TelegramPublisherDispatchServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(command.state, "pending")
         wakeup.assert_not_awaited()
 
-    async def test_dispatch_cycle_skips_telegram_when_local_ack_succeeds(self):
+    async def test_local_ack_refuses_a_terminal_command(self):
+        command = _command()
+        command.state = "superseded"
+        db = _DB(command)
+        with self.assertRaisesRegex(
+            TelegramPublisherDispatchError,
+            "telegram_publisher_dispatch_command_stale",
+        ):
+            await acknowledge_claimed_telegram_publisher_dispatch_locally(
+                db,
+                current_server="foreign",
+                command_id=command.command_id,
+                lease_token=command.lease_token,
+                now=NOW,
+            )
+
+    async def test_co_located_cycle_never_calls_telegram(self):
         lease = TelegramPublisherDispatchLease(command=_command(), lease_token=1)
 
         class _CycleSession:
@@ -554,32 +568,31 @@ class TelegramPublisherDispatchServiceTests(unittest.IsolatedAsyncioTestCase):
             async def __aexit__(self, *_args):
                 return False
 
-        gateway = AsyncMock()
         with patch(
             "core.services.telegram_publisher_dispatch_service.claim_next_telegram_publisher_dispatch_command",
             new=AsyncMock(side_effect=[lease, None]),
         ), patch(
-            "core.services.telegram_publisher_dispatch_service.acknowledge_telegram_publisher_dispatch_locally",
+            "core.services.telegram_publisher_dispatch_service."
+            "acknowledge_claimed_telegram_publisher_dispatch_locally",
             new=AsyncMock(return_value=True),
-        ) as local_ack:
-            report = await run_telegram_publisher_dispatch_cycle(
+        ) as local_ack, patch(
+            "core.services.telegram_publisher_dispatch_service."
+            "dispatch_claimed_telegram_publisher_command",
+            new=AsyncMock(side_effect=AssertionError("telegram bot-to-bot hop")),
+        ):
+            report = await run_co_located_telegram_publisher_dispatch_cycle(
                 session_factory=_CycleSession,
                 current_server="foreign",
-                publisher_bot_ids={"publisher_3": 303},
-                gateway_call=gateway,
                 limit=8,
                 lease_seconds=30,
-                retry_after_seconds=1,
-                acknowledgement_timeout_seconds=15,
-                request_timeout_seconds=5,
                 now_factory=lambda: NOW,
-                local_ack_enabled=True,
             )
 
         self.assertEqual(report.claimed_count, 1)
         self.assertEqual(report.sent_count, 1)
+        self.assertEqual(report.retry_due_count, 0)
         local_ack.assert_awaited_once()
-        gateway.assert_not_awaited()
+        self.assertEqual(local_ack.await_args.kwargs["lease_token"], 1)
 
     def test_publisher_queue_claim_requires_a_durable_acknowledgement(self):
         source = Path(
@@ -591,8 +604,6 @@ class TelegramPublisherDispatchServiceTests(unittest.IsolatedAsyncioTestCase):
             'TelegramPublisherDispatchCommand.state == "acknowledged"',
             source,
         )
-        self.assertIn("local_ack_enabled", source)
-        self.assertIn("TelegramPublisherLaneHeartbeat", source)
 
 
 if __name__ == "__main__":

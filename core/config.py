@@ -154,10 +154,6 @@ class Settings(BaseSettings):
     telegram_b2b_dispatch_interval_seconds: float = 0.5
     telegram_b2b_dispatch_batch_size: int = 8
     telegram_b2b_acknowledgement_timeout_seconds: float = 15.0
-    # Local B2B acknowledgement is fail-closed. When enabled, a fresh
-    # publisher-lane heartbeat can stand in for the Telegram receipt hop.
-    telegram_b2b_local_ack_enabled: bool = False
-    telegram_b2b_local_ack_heartbeat_seconds: float = 15.0
     # Publisher credentials remain separate to make accidental token reuse and
     # identity drift fail before a worker can be composed.  They are consumed
     # only when TELEGRAM_MULTI_PUBLISHER_ENABLED is true.
@@ -299,14 +295,9 @@ class Settings(BaseSettings):
             and not self.telegram_multi_publisher_enabled
         ):
             raise ValueError("telegram_b2b_dispatch_requires_multi_publisher")
-        if self.telegram_b2b_local_ack_enabled and not (
-            self.telegram_multi_publisher_enabled and self.telegram_b2b_dispatch_enabled
-        ):
-            raise ValueError("telegram_b2b_local_ack_requires_b2b")
         for name in (
             "telegram_b2b_dispatch_interval_seconds",
             "telegram_b2b_acknowledgement_timeout_seconds",
-            "telegram_b2b_local_ack_heartbeat_seconds",
         ):
             value = float(getattr(self, name))
             if not math.isfinite(value) or value <= 0:

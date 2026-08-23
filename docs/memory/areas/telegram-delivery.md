@@ -2,7 +2,7 @@
 
 - 2026-08-23 | Stage 12 pool math is slot×1 session plus reserved update/command headroom. Do not shrink Settings `db_pool_size` 15; do not treat 12+8 as the live `all` bot default.
 - 2026-08-23 | Stage 11 does not drop freshness guards. Validator #1, validator #2, and `assert_dispatchable` stay; only the duplicate unlocked Offer/state read inside the last validate is removed.
-- 2026-08-23 | Stage 9 local B2B ack is off by default. Enable only with multi-publisher B2B; stale heartbeat falls back to Telegram. Do not treat default hop count as one.
+- 2026-08-23 | Local B2B ack is now the only path and is always on: lease-fenced, emits the wakeup, records ack lag. Never reintroduce Telegram as bot-to-bot transport, a lane-liveness table, or a local-ack flag.
 - 2026-08-23 | Owner approved stages 7–12. Stage 8 answers callbacks on the edge and marks the queue witness `answered_at_edge`; worker must not send a second `answerCallbackQuery`.
 - 2026-08-23 | Owner approved stages 7–12. Stage 7 runtime roles: `all` (default), `primary`, `publishers`; unknown fails closed; publishers compose service is profile-gated. Do not invent staging percentiles.
 - 2026-08-23 | Latency stages 0–6 are on `candidate/telegram-dispatch-latency-v1`. Midpoint is code-derived: ack wakeup, shared HTTP client, serial B2B batch 8, auth off the B2B path, claim index + terminal-command retention. Do not start stages 7–9 without owner approval; do not invent staging percentiles.

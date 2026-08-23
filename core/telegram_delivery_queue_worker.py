@@ -55,9 +55,6 @@ from core.services.telegram_delivery_queue_service import (
     apply_telegram_delivery_provider_outcome,
     telegram_delivery_database_now,
 )
-from core.services.telegram_publisher_dispatch_service import (
-    touch_telegram_publisher_lane_heartbeat,
-)
 from core.services.telegram_delivery_reconciliation_service import (
     reconcile_telegram_delivery_jobs,
 )
@@ -1193,9 +1190,6 @@ async def run_telegram_delivery_queue_cycle(
                 lease_seconds=_lease_seconds(),
                 allowed_destination_classes=allowed_destination_classes,
                 maximum_effective_priority=maximum_effective_priority,
-                local_ack_enabled=bool(
-                    getattr(settings, "telegram_b2b_local_ack_enabled", False)
-                ),
             )
             if job is None:
                 await db.rollback()
@@ -1661,29 +1655,6 @@ async def _telegram_delivery_queue_lane_slot_loop(
     iteration = 0
     while True:
         iteration += 1
-        if (
-            lane.bot_identity in TELEGRAM_PUBLISHER_IDENTITIES
-            and bool(getattr(settings, "telegram_b2b_local_ack_enabled", False))
-        ):
-            async with AsyncSessionLocal() as db:
-                await touch_telegram_publisher_lane_heartbeat(
-                    db,
-                    publisher_bot_identity=lane.bot_identity,
-                    worker_id=_worker_slot_id(
-                        lane.bot_identity,
-                        "m0" if maximum_effective_priority == 0 else "g",
-                        slot_index,
-                    ),
-                    lease_seconds=float(
-                        getattr(
-                            settings,
-                            "telegram_b2b_local_ack_heartbeat_seconds",
-                            15.0,
-                        )
-                    ),
-                    now=await telegram_delivery_database_now(db),
-                )
-                await db.commit()
         wakeup_event = delivery_queue_wakeup_event(lane.bot_identity)
         wakeup_event.clear()
         report: TelegramDeliveryQueueCycleReport | None = None

@@ -139,6 +139,16 @@ def retention_purges_terminal_commands() -> bool:
     )
 
 
+def b2b_dispatch_acknowledges_locally() -> bool:
+    """True when the durable command is the handoff and no B2B hop is sent."""
+    dispatcher = _source("run_bot.py")
+    service = _source("core/services/telegram_publisher_dispatch_service.py")
+    return (
+        "run_co_located_telegram_publisher_dispatch_cycle" in dispatcher
+        and "acknowledge_claimed_telegram_publisher_dispatch_locally" in service
+    )
+
+
 def current_code_derived_latency_floors() -> TelegramDispatchLatencyCurrentFloors:
     idle = float(
         _default("telegram_delivery_queue_publisher_idle_poll_interval_seconds")
@@ -153,7 +163,7 @@ def current_code_derived_latency_floors() -> TelegramDispatchLatencyCurrentFloor
             _default("telegram_b2b_dispatch_interval_seconds")
         ),
         b2b_dispatch_batch_size=int(_default("telegram_b2b_dispatch_batch_size")),
-        telegram_calls_per_channel_job=3,
+        telegram_calls_per_channel_job=1 if b2b_dispatch_acknowledges_locally() else 3,
         dead_wait_after_ack_seconds_max=0.0 if ack_path_emits_wakeup() else idle,
         shared_destination_gate=True,
         gateway_reuses_http_client=gateway_reuses_http_client(),
@@ -245,7 +255,7 @@ def code_derived_latency_midpoint() -> TelegramDispatchLatencyMidpoint:
             "Dead wait after acknowledgement is now a wakeup, not the idle poll.",
             "Gateway async calls reuse one keepalive client; sync posts stay one-shot.",
             "B2B dispatch claims a serial batch; a full batch sleeps zero seconds.",
-            "Telegram hops per channel job stay at three until a later approved stage.",
+            "Telegram hops per channel job read one: the durable command is the handoff.",
             "Observed staging percentiles were not collected in this worktree.",
         ),
     )

@@ -55,7 +55,6 @@ from core.telegram_multi_publisher_contract import (
 from core.telegram_gateway import TelegramGatewayResult
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
 from models.telegram_publisher_dispatch_command import TelegramPublisherDispatchCommand
-from models.telegram_publisher_lane_heartbeat import TelegramPublisherLaneHeartbeat
 from models.telegram_delivery_feeder_state import TelegramDeliveryFeederState
 from models.telegram_delivery_provider_outcome import (
     TELEGRAM_PROVIDER_OUTCOME_APPLIED,
@@ -1119,7 +1118,6 @@ async def claim_next_telegram_delivery_job(
     allowed_destination_classes: set[TelegramDestinationClass] | None = None,
     maximum_effective_priority: int | None = None,
     now: datetime | None = None,
-    local_ack_enabled: bool = False,
 ) -> TelegramDeliveryJobRecord | None:
     _require_foreign(current_server)
     lane_identity = str(bot_identity or "").strip()
@@ -1298,50 +1296,21 @@ async def claim_next_telegram_delivery_job(
         ~runtime_gate_blocked,
     ]
     if lane_identity in TELEGRAM_PUBLISHER_BOT_IDENTITIES:
-        acknowledged_command = exists(
-            select(TelegramPublisherDispatchCommand.id).where(
-                TelegramPublisherDispatchCommand.job_id
-                == TelegramDeliveryJobRecord.id,
-                TelegramPublisherDispatchCommand.publisher_bot_identity
-                == lane_identity,
-                TelegramPublisherDispatchCommand.state == "acknowledged",
+        claim_filters.append(
+            or_(
+                TelegramDeliveryJobRecord.destination_class
+                == TelegramDestinationClass.PRIVATE,
+                exists(
+                    select(TelegramPublisherDispatchCommand.id).where(
+                        TelegramPublisherDispatchCommand.job_id
+                        == TelegramDeliveryJobRecord.id,
+                        TelegramPublisherDispatchCommand.publisher_bot_identity
+                        == lane_identity,
+                        TelegramPublisherDispatchCommand.state == "acknowledged",
+                    )
+                )
             )
         )
-        if local_ack_enabled:
-            live_assigned_command = exists(
-                select(TelegramPublisherDispatchCommand.id).where(
-                    TelegramPublisherDispatchCommand.job_id
-                    == TelegramDeliveryJobRecord.id,
-                    TelegramPublisherDispatchCommand.publisher_bot_identity
-                    == lane_identity,
-                    TelegramPublisherDispatchCommand.state.in_(
-                        ("pending", "sent", "retry_due", "acknowledged")
-                    ),
-                )
-            )
-            fresh_heartbeat = exists(
-                select(TelegramPublisherLaneHeartbeat.publisher_bot_identity).where(
-                    TelegramPublisherLaneHeartbeat.publisher_bot_identity
-                    == lane_identity,
-                    TelegramPublisherLaneHeartbeat.lease_until > current_time,
-                )
-            )
-            claim_filters.append(
-                or_(
-                    TelegramDeliveryJobRecord.destination_class
-                    == TelegramDestinationClass.PRIVATE,
-                    acknowledged_command,
-                    and_(live_assigned_command, fresh_heartbeat),
-                )
-            )
-        else:
-            claim_filters.append(
-                or_(
-                    TelegramDeliveryJobRecord.destination_class
-                    == TelegramDestinationClass.PRIVATE,
-                    acknowledged_command,
-                )
-            )
     if normalized_destination_classes is not None:
         claim_filters.append(
             TelegramDeliveryJobRecord.destination_class.in_(

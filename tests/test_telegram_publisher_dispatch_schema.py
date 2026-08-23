@@ -4,7 +4,6 @@ import unittest
 from models.telegram_publisher_dispatch_command import (
     TelegramPublisherDispatchCommand,
 )
-from models.telegram_publisher_lane_heartbeat import TelegramPublisherLaneHeartbeat
 
 
 class TelegramPublisherDispatchSchemaTests(unittest.TestCase):
@@ -65,23 +64,17 @@ class TelegramPublisherDispatchSchemaTests(unittest.TestCase):
             str(claim_index.dialect_options["postgresql"]["where"]),
         )
 
-    def test_heartbeat_model_and_migration_are_fail_closed(self):
-        columns = TelegramPublisherLaneHeartbeat.__table__.columns
-        self.assertTrue(
-            {"publisher_bot_identity", "worker_id", "lease_until", "updated_at"}.issubset(
-                columns.keys()
-            )
+    def test_local_acknowledgement_needs_no_extra_liveness_table(self):
+        # The durable command is the handoff, so lane liveness is not a
+        # precondition and must not require its own table or migration.
+        self.assertFalse(
+            Path("models/telegram_publisher_lane_heartbeat.py").exists()
         )
-        source = Path(
-            "migrations/versions/ff7d8e9f0a12_add_publisher_lane_heartbeats.py"
-        ).read_text(encoding="utf-8")
-        self.assertIn('revision: str = "ff7d8e9f0a12"', source)
-        self.assertIn(
-            'down_revision: Union[str, Sequence[str], None] = "ff6c7d8e9f01"',
-            source,
+        self.assertFalse(
+            Path(
+                "migrations/versions/ff7d8e9f0a12_add_publisher_lane_heartbeats.py"
+            ).exists()
         )
-        self.assertIn("telegram_publisher_lane_heartbeats", source)
-        self.assertIn("publisher_1", source)
 
     def test_claim_index_migration_replaces_the_narrow_predicate(self):
         source = Path(
