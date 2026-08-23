@@ -761,6 +761,109 @@ class ProductionQueueCutoverTests(unittest.TestCase):
         self.assertEqual(operations._host.call_args.args[1][:2], ["bash", "-lc"])
         self.assertIn("config --format json", operations._host.call_args.args[1][2])
 
+    def test_queue_runtime_contract_accepts_producer_routing_on_non_bot_roles(self):
+        operations = cutover.ProductionOperations.__new__(cutover.ProductionOperations)
+        api_env = {
+            **cutover.api_process_contract().required,
+            "SERVER_MODE": "foreign",
+            **{key: "" for key in cutover.API_FORBIDDEN_TOKEN_KEYS},
+        }
+        iran_api_env = {**api_env, "SERVER_MODE": "iran"}
+        source_values = {
+            **cutover.bot_process_contract().required,
+            "BOT_USERNAME": "production_central_bot",
+            "CHANNEL_ID": "-100999",
+            "TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_ID": "-100999",
+            "TELEGRAM_DELIVERY_QUEUE_EXPECTED_PRIMARY_BOT_ID": "1000",
+            "TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_EDITOR_BOT_ID": "1000",
+            "TELEGRAM_DELIVERY_QUEUE_SHARED_PUBLISHER_FLEET_ENABLED": "false",
+        }
+        for key in cutover.TOKEN_KEYS:
+            source_values[key] = f"secret-{key.lower()}"
+        for index in range(1, 6):
+            prefix = f"TELEGRAM_PUBLISHER_{index}"
+            source_values.update(
+                {
+                    f"{prefix}_ENABLED": "true",
+                    f"{prefix}_EXPECTED_BOT_ID": str(1000 + index),
+                    f"{prefix}_EXPECTED_USERNAME": f"publisher_{index}_bot",
+                }
+            )
+        bot_env = dict(source_values)
+
+        operations._container_env = Mock(
+            side_effect=lambda role, container: (
+                bot_env
+                if role == "foreign" and container == cutover.FOREIGN_CONTAINERS["bot"]
+                else (api_env if role == "foreign" else iran_api_env)
+            )
+        )
+        operations._compose_service_env = Mock(
+            side_effect=lambda role, _service: api_env if role == "foreign" else iran_api_env
+        )
+        operations._docker = Mock(
+            return_value=subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        )
+
+        report = operations.runtime_contract(source_values, expected_owner="queue-v1")
+
+        self.assertEqual(report["status"], "verified")
+        self.assertEqual(report["owner"], "queue-v1")
+
+    def test_queue_runtime_contract_rejects_disabled_producer_routing(self):
+        operations = cutover.ProductionOperations.__new__(cutover.ProductionOperations)
+        invalid_api_env = {
+            **cutover.api_process_contract().required,
+            "SERVER_MODE": "foreign",
+            "TELEGRAM_MULTI_PUBLISHER_ENABLED": "false",
+            **{key: "" for key in cutover.API_FORBIDDEN_TOKEN_KEYS},
+        }
+        iran_invalid_api_env = {**invalid_api_env, "SERVER_MODE": "iran"}
+        source_values = {
+            **cutover.bot_process_contract().required,
+            "BOT_USERNAME": "production_central_bot",
+            "CHANNEL_ID": "-100999",
+            "TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_ID": "-100999",
+            "TELEGRAM_DELIVERY_QUEUE_EXPECTED_PRIMARY_BOT_ID": "1000",
+            "TELEGRAM_DELIVERY_QUEUE_EXPECTED_CHANNEL_EDITOR_BOT_ID": "1000",
+            "TELEGRAM_DELIVERY_QUEUE_SHARED_PUBLISHER_FLEET_ENABLED": "false",
+        }
+        for key in cutover.TOKEN_KEYS:
+            source_values[key] = f"secret-{key.lower()}"
+        for index in range(1, 6):
+            prefix = f"TELEGRAM_PUBLISHER_{index}"
+            source_values.update(
+                {
+                    f"{prefix}_ENABLED": "true",
+                    f"{prefix}_EXPECTED_BOT_ID": str(1000 + index),
+                    f"{prefix}_EXPECTED_USERNAME": f"publisher_{index}_bot",
+                }
+            )
+        operations._container_env = Mock(
+            side_effect=lambda role, container: (
+                source_values
+                if role == "foreign" and container == cutover.FOREIGN_CONTAINERS["bot"]
+                else (
+                    invalid_api_env
+                    if role == "foreign"
+                    else iran_invalid_api_env
+                )
+            )
+        )
+        operations._compose_service_env = Mock(
+            side_effect=lambda role, _service: (
+                invalid_api_env if role == "foreign" else iran_invalid_api_env
+            )
+        )
+        operations._docker = Mock(
+            return_value=subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        )
+
+        with self.assertRaisesRegex(
+            cutover.ProductionCutoverError, "POST_DEPLOY_ROLE_CONTRACT_FAILED"
+        ):
+            operations.runtime_contract(source_values, expected_owner="queue-v1")
+
     def test_contained_runner_stops_a_timed_out_descendant_group(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

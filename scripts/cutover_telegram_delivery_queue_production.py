@@ -1328,18 +1328,27 @@ class ProductionOperations:
                 violations.append(f"{role}:{service}:mode")
             if role == "foreign" and env.get("SERVER_MODE") != "foreign":
                 violations.append(f"{role}:{service}:mode")
-            expected_process_owner = "producer-only" if expected_owner == "queue-v1" else "legacy"
-            expected = {
-                "TELEGRAM_DELIVERY_PRODUCER_MODE": expected_owner,
-                "TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER": expected_owner,
-                "TELEGRAM_DELIVERY_EXECUTION_OWNER": expected_process_owner,
-                "TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED": "false",
-                "TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY": "false",
-                "TELEGRAM_MULTI_PUBLISHER_ENABLED": "false",
-                "TELEGRAM_B2B_DISPATCH_ENABLED": "false",
-                "TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_ENABLED": "false",
-                **{f"TELEGRAM_PUBLISHER_{index}_ENABLED": "false" for index in range(1, 6)},
-            }
+            if expected_owner == "queue-v1":
+                # API/sync/migration processes are producer-only, but they
+                # must retain Queue-v1 routing semantics so publication jobs
+                # can be assigned to a healthy publisher lane.  Keep this
+                # readback bound to the canonical process-role contract.
+                expected = dict(api_process_contract().required)
+            else:
+                expected = {
+                    "TELEGRAM_DELIVERY_PRODUCER_MODE": "legacy",
+                    "TELEGRAM_DELIVERY_EXPECTED_EXECUTION_OWNER": "legacy",
+                    "TELEGRAM_DELIVERY_EXECUTION_OWNER": "legacy",
+                    "TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED": "false",
+                    "TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY": "false",
+                    "TELEGRAM_MULTI_PUBLISHER_ENABLED": "false",
+                    "TELEGRAM_B2B_DISPATCH_ENABLED": "false",
+                    "TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_ENABLED": "false",
+                    **{
+                        f"TELEGRAM_PUBLISHER_{index}_ENABLED": "false"
+                        for index in range(1, 6)
+                    },
+                }
             if missing_required_env(env, type("Contract", (), {"required": expected})()):
                 violations.append(f"{role}:{service}:role")
             forbidden = {key: bool(str(env.get(key) or "").strip()) for key in API_FORBIDDEN_TOKEN_KEYS}
