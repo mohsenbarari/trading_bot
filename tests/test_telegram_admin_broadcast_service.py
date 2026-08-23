@@ -13,6 +13,7 @@ from models.customer_relation import CustomerRelationStatus, CustomerTier
 from models.telegram_admin_broadcast import (
     TelegramAdminBroadcast,
     TelegramAdminBroadcastAudienceType,
+    TelegramAdminBroadcastContentKind,
     TelegramAdminBroadcastReceipt,
     TelegramAdminBroadcastReceiptStatus,
     TelegramAdminBroadcastStatus,
@@ -365,6 +366,8 @@ class TelegramAdminBroadcastServiceTests(unittest.IsolatedAsyncioTestCase):
 
         resolver.assert_awaited_once()
         self.assertEqual(result.broadcast.content, "پیام تست")
+        self.assertEqual(result.broadcast.content_kind, TelegramAdminBroadcastContentKind.TEXT)
+        self.assertIsNone(result.broadcast.telegram_media_file_id)
         self.assertEqual(result.broadcast.created_by_id, 1)
         self.assertEqual(result.broadcast.audience_type, TelegramAdminBroadcastAudienceType.SELECTED)
         self.assertEqual(result.broadcast.status, TelegramAdminBroadcastStatus.QUEUED)

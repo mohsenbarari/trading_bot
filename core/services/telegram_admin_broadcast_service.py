@@ -5,7 +5,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.enums import UserAccountStatus
@@ -15,6 +15,7 @@ from models.customer_relation import CustomerRelation, CustomerRelationStatus, C
 from models.telegram_admin_broadcast import (
     TelegramAdminBroadcast,
     TelegramAdminBroadcastAudienceType,
+    TelegramAdminBroadcastContentKind,
     TelegramAdminBroadcastReceipt,
     TelegramAdminBroadcastReceiptStatus,
     TelegramAdminBroadcastStatus,
@@ -34,6 +35,9 @@ SUPPORTED_TELEGRAM_ADMIN_BROADCAST_GROUPS = frozenset(
 )
 
 TELEGRAM_BROADCAST_TEXT_MAX_LENGTH = 4096
+TELEGRAM_BROADCAST_VIDEO_CAPTION_MAX_LENGTH = 1024
+TELEGRAM_BROADCAST_FILE_ID_MAX_LENGTH = 1024
+TELEGRAM_BROADCAST_FILE_UNIQUE_ID_MAX_LENGTH = 256
 TELEGRAM_BROADCAST_SELECTED_RECIPIENT_CAP = 500
 TELEGRAM_BROADCAST_RECEIPT_INSERT_CHUNK_SIZE = 500
 
@@ -109,6 +113,163 @@ def validate_telegram_admin_broadcast_content(content: str) -> str:
     if len(cleaned) > TELEGRAM_BROADCAST_TEXT_MAX_LENGTH:
         raise TelegramAdminBroadcastValidationError("content_too_long")
     return cleaned
+
+
+def _has_control_characters(value: str) -> bool:
+    return any(ord(character) < 32 or ord(character) == 127 for character in value)
+
+
+def validate_telegram_admin_broadcast_caption(caption: str) -> str:
+    cleaned = str(caption or "").strip()
+    if not cleaned:
+        raise TelegramAdminBroadcastValidationError("video_caption_required")
+    if len(cleaned) > TELEGRAM_BROADCAST_VIDEO_CAPTION_MAX_LENGTH:
+        raise TelegramAdminBroadcastValidationError("video_caption_too_long")
+    return cleaned
+
+
+def validate_telegram_file_id_token(
+    value: Any,
+    *,
+    field_name: str,
+    max_length: int,
+) -> str:
+    if not isinstance(value, str):
+        raise TelegramAdminBroadcastValidationError(f"{field_name}_invalid")
+    cleaned = value.strip()
+    if not cleaned:
+        raise TelegramAdminBroadcastValidationError(f"{field_name}_required")
+    if len(cleaned) > max_length:
+        raise TelegramAdminBroadcastValidationError(f"{field_name}_too_long")
+    if _has_control_characters(cleaned):
+        raise TelegramAdminBroadcastValidationError(f"{field_name}_invalid")
+    return cleaned
+
+
+def _normalize_optional_positive_int(value: Any, *, field_name: str) -> int | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        raise TelegramAdminBroadcastValidationError(f"{field_name}_invalid")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise TelegramAdminBroadcastValidationError(f"{field_name}_invalid") from exc
+    if parsed <= 0:
+        raise TelegramAdminBroadcastValidationError(f"{field_name}_invalid")
+    return parsed
+
+
+def _normalize_optional_non_negative_int(value: Any, *, field_name: str) -> int | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        raise TelegramAdminBroadcastValidationError(f"{field_name}_invalid")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise TelegramAdminBroadcastValidationError(f"{field_name}_invalid") from exc
+    if parsed < 0:
+        raise TelegramAdminBroadcastValidationError(f"{field_name}_invalid")
+    return parsed
+
+
+def normalize_telegram_admin_broadcast_content_kind(
+    value: TelegramAdminBroadcastContentKind | str | None,
+) -> TelegramAdminBroadcastContentKind:
+    if value is None or value == "":
+        return TelegramAdminBroadcastContentKind.TEXT
+    if isinstance(value, TelegramAdminBroadcastContentKind):
+        return value
+    normalized = str(value).strip().lower()
+    try:
+        return TelegramAdminBroadcastContentKind(normalized)
+    except ValueError as exc:
+        raise TelegramAdminBroadcastValidationError("unsupported_content_kind") from exc
+
+
+def telegram_admin_broadcast_content_kind(
+    broadcast: TelegramAdminBroadcast | Any,
+) -> TelegramAdminBroadcastContentKind:
+    return normalize_telegram_admin_broadcast_content_kind(
+        getattr(broadcast, "content_kind", None)
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramAdminBroadcastVideoMedia:
+    file_id: str
+    file_unique_id: str
+    duration_seconds: int | None = None
+    width: int | None = None
+    height: int | None = None
+    file_size: int | None = None
+
+
+def validate_telegram_admin_broadcast_video_media(
+    *,
+    file_id: Any,
+    file_unique_id: Any,
+    duration_seconds: Any = None,
+    width: Any = None,
+    height: Any = None,
+    file_size: Any = None,
+) -> TelegramAdminBroadcastVideoMedia:
+    return TelegramAdminBroadcastVideoMedia(
+        file_id=validate_telegram_file_id_token(
+            file_id,
+            field_name="telegram_media_file_id",
+            max_length=TELEGRAM_BROADCAST_FILE_ID_MAX_LENGTH,
+        ),
+        file_unique_id=validate_telegram_file_id_token(
+            file_unique_id,
+            field_name="telegram_media_file_unique_id",
+            max_length=TELEGRAM_BROADCAST_FILE_UNIQUE_ID_MAX_LENGTH,
+        ),
+        duration_seconds=_normalize_optional_non_negative_int(
+            duration_seconds,
+            field_name="media_duration_seconds",
+        ),
+        width=_normalize_optional_positive_int(width, field_name="media_width"),
+        height=_normalize_optional_positive_int(height, field_name="media_height"),
+        file_size=_normalize_optional_positive_int(file_size, field_name="media_file_size"),
+    )
+
+
+def validate_telegram_admin_broadcast_record(
+    broadcast: TelegramAdminBroadcast | Any,
+) -> tuple[TelegramAdminBroadcastContentKind, str, TelegramAdminBroadcastVideoMedia | None]:
+    kind = telegram_admin_broadcast_content_kind(broadcast)
+    if kind == TelegramAdminBroadcastContentKind.TEXT:
+        if any(
+            getattr(broadcast, field, None) not in (None, "")
+            for field in (
+                "telegram_media_file_id",
+                "telegram_media_file_unique_id",
+                "media_duration_seconds",
+                "media_width",
+                "media_height",
+                "media_file_size",
+            )
+        ):
+            raise TelegramAdminBroadcastValidationError("text_media_forbidden")
+        return kind, validate_telegram_admin_broadcast_content(
+            str(getattr(broadcast, "content", "") or "")
+        ), None
+    if kind != TelegramAdminBroadcastContentKind.VIDEO:
+        raise TelegramAdminBroadcastValidationError("unsupported_content_kind")
+    caption = validate_telegram_admin_broadcast_caption(
+        str(getattr(broadcast, "content", "") or "")
+    )
+    media = validate_telegram_admin_broadcast_video_media(
+        file_id=getattr(broadcast, "telegram_media_file_id", None),
+        file_unique_id=getattr(broadcast, "telegram_media_file_unique_id", None),
+        duration_seconds=getattr(broadcast, "media_duration_seconds", None),
+        width=getattr(broadcast, "media_width", None),
+        height=getattr(broadcast, "media_height", None),
+        file_size=getattr(broadcast, "media_file_size", None),
+    )
+    return kind, caption, media
 
 
 def telegram_admin_broadcast_dedupe_key(*, broadcast_id: int, recipient_user_id: int) -> str:
@@ -293,11 +454,46 @@ async def create_telegram_admin_broadcast(
     audience_type: TelegramAdminBroadcastAudienceType | str,
     target_groups: Iterable[str] | None = None,
     selected_user_ids: Iterable[int] | None = None,
+    content_kind: TelegramAdminBroadcastContentKind | str | None = None,
+    telegram_media_file_id: str | None = None,
+    telegram_media_file_unique_id: str | None = None,
+    media_duration_seconds: int | None = None,
+    media_width: int | None = None,
+    media_height: int | None = None,
+    media_file_size: int | None = None,
 ) -> TelegramAdminBroadcastQueueResult:
     if _enum_value(getattr(actor, "role", None)) != UserRole.SUPER_ADMIN.value:
         raise TelegramAdminBroadcastValidationError("superadmin_required")
 
-    cleaned_content = validate_telegram_admin_broadcast_content(content)
+    kind = normalize_telegram_admin_broadcast_content_kind(content_kind)
+    if kind == TelegramAdminBroadcastContentKind.TEXT:
+        if any(
+            value not in (None, "")
+            for value in (
+                telegram_media_file_id,
+                telegram_media_file_unique_id,
+                media_duration_seconds,
+                media_width,
+                media_height,
+                media_file_size,
+            )
+        ):
+            raise TelegramAdminBroadcastValidationError("text_media_forbidden")
+        cleaned_content = validate_telegram_admin_broadcast_content(content)
+        media = None
+    elif kind == TelegramAdminBroadcastContentKind.VIDEO:
+        cleaned_content = validate_telegram_admin_broadcast_caption(content)
+        media = validate_telegram_admin_broadcast_video_media(
+            file_id=telegram_media_file_id,
+            file_unique_id=telegram_media_file_unique_id,
+            duration_seconds=media_duration_seconds,
+            width=media_width,
+            height=media_height,
+            file_size=media_file_size,
+        )
+    else:
+        raise TelegramAdminBroadcastValidationError("unsupported_content_kind")
+
     audience = _normalize_audience_type(audience_type)
     groups = _normalize_groups(target_groups) if audience == TelegramAdminBroadcastAudienceType.GROUP else []
     actor_id = int(getattr(actor, "id"))
@@ -313,6 +509,13 @@ async def create_telegram_admin_broadcast(
     current_time = utc_now()
     broadcast = TelegramAdminBroadcast(
         content=cleaned_content,
+        content_kind=kind,
+        telegram_media_file_id=None if media is None else media.file_id,
+        telegram_media_file_unique_id=None if media is None else media.file_unique_id,
+        media_duration_seconds=None if media is None else media.duration_seconds,
+        media_width=None if media is None else media.width,
+        media_height=None if media is None else media.height,
+        media_file_size=None if media is None else media.file_size,
         created_by_id=actor_id,
         audience_type=audience,
         target_groups=list(groups),
@@ -352,4 +555,64 @@ async def create_telegram_admin_broadcast(
         broadcast=broadcast,
         recipients=recipients,
         receipt_count=len(receipts),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramAdminBroadcastStatusCounts:
+    broadcast_id: int
+    broadcast_status: str
+    content_kind: str
+    pending: int
+    sending: int
+    retryable_failed: int
+    sent: int
+    skipped: int
+    terminal_failed: int
+
+
+async def inspect_telegram_admin_broadcast_status(
+    db: AsyncSession,
+    *,
+    broadcast_id: int,
+) -> TelegramAdminBroadcastStatusCounts:
+    normalized_id = int(broadcast_id)
+    if normalized_id <= 0:
+        raise TelegramAdminBroadcastValidationError("broadcast_id_invalid")
+    broadcast = await db.get(TelegramAdminBroadcast, normalized_id)
+    if broadcast is None:
+        raise TelegramAdminBroadcastValidationError("broadcast_missing")
+
+    rows = (
+        await db.execute(
+            select(
+                TelegramAdminBroadcastReceipt.status,
+                func.count(TelegramAdminBroadcastReceipt.id),
+            )
+            .where(TelegramAdminBroadcastReceipt.broadcast_id == normalized_id)
+            .group_by(TelegramAdminBroadcastReceipt.status)
+        )
+    ).all()
+    counts = {
+        TelegramAdminBroadcastReceiptStatus.PENDING.value: 0,
+        TelegramAdminBroadcastReceiptStatus.SENDING.value: 0,
+        TelegramAdminBroadcastReceiptStatus.RETRYABLE_FAILED.value: 0,
+        TelegramAdminBroadcastReceiptStatus.SENT.value: 0,
+        TelegramAdminBroadcastReceiptStatus.SKIPPED.value: 0,
+        TelegramAdminBroadcastReceiptStatus.TERMINAL_FAILED.value: 0,
+    }
+    for status, total in rows:
+        key = str(getattr(status, "value", status) or "")
+        if key in counts:
+            counts[key] = int(total)
+    return TelegramAdminBroadcastStatusCounts(
+        broadcast_id=normalized_id,
+        broadcast_status=str(getattr(broadcast.status, "value", broadcast.status) or ""),
+        content_kind=telegram_admin_broadcast_content_kind(broadcast).value,
+        pending=counts[TelegramAdminBroadcastReceiptStatus.PENDING.value],
+        sending=counts[TelegramAdminBroadcastReceiptStatus.SENDING.value],
+        retryable_failed=counts[TelegramAdminBroadcastReceiptStatus.RETRYABLE_FAILED.value],
+        sent=counts[TelegramAdminBroadcastReceiptStatus.SENT.value],
+        skipped=counts[TelegramAdminBroadcastReceiptStatus.SKIPPED.value],
+        terminal_failed=counts[TelegramAdminBroadcastReceiptStatus.TERMINAL_FAILED.value],
     )

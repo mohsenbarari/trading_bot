@@ -129,7 +129,7 @@ class FakeRedeployOperations:
         return {
             "status": "verified",
             "release_sha": "c" * 40,
-            "schema_head": "ff5a6b7c8d9e",
+            "schema_head": "a385f6b7c8d0",
             "queue_table_count": len(planner.REQUIRED_QUEUE_TABLES),
             "database_identity_sha256": {
                 "foreign": "d" * 64,
@@ -323,7 +323,7 @@ class ProductionQueueCutoverTests(unittest.TestCase):
             "current_runtime": {
                 "status": "verified",
                 "release_sha": "c" * 40,
-                "schema_head": "ff5a6b7c8d9e",
+                "schema_head": "a385f6b7c8d0",
             },
             "executor_inventory": {
                 "count": 1,

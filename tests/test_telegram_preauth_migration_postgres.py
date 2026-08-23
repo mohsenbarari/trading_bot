@@ -9,7 +9,7 @@ from tests.test_telegram_delivery_queue_postgres import DATABASE_URLS, _run_alem
 
 PARENT_REVISION = "a163f4a5b7c8"
 ROUNDTRIP_REVISION = "a274f5a6b8c9"
-HEAD_REVISION = "ff5a6b7c8d9e"
+HEAD_REVISION = "a385f6b7c8d0"
 
 
 @unittest.skipUnless(

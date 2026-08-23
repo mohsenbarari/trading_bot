@@ -846,6 +846,15 @@ def setup_telegram_admin_broadcast_events():
         return {
             "id": target.id,
             "content": target.content,
+            "content_kind": _enum_value(getattr(target, "content_kind", "text")) or "text",
+            "telegram_media_file_id": getattr(target, "telegram_media_file_id", None),
+            "telegram_media_file_unique_id": getattr(
+                target, "telegram_media_file_unique_id", None
+            ),
+            "media_duration_seconds": getattr(target, "media_duration_seconds", None),
+            "media_width": getattr(target, "media_width", None),
+            "media_height": getattr(target, "media_height", None),
+            "media_file_size": getattr(target, "media_file_size", None),
             "created_by_id": target.created_by_id,
             "audience_type": _enum_value(target.audience_type),
             "target_groups": target.target_groups or [],

@@ -27,11 +27,12 @@ class CoinIntelligenceMigrationGraphTests(unittest.TestCase):
         config.set_main_option("script_location", str(REPO_ROOT / "migrations"))
         script = ScriptDirectory.from_config(config)
 
-        self.assertEqual(script.get_heads(), ["ff5a6b7c8d9e"])
+        self.assertEqual(script.get_heads(), ["a385f6b7c8d0"])
         revisions = {
             item.revision: item
-            for item in script.walk_revisions(base="base", head="ff5a6b7c8d9e")
+            for item in script.walk_revisions(base="base", head="a385f6b7c8d0")
         }
+        self.assertEqual(revisions["a385f6b7c8d0"].down_revision, "ff5a6b7c8d9e")
         self.assertEqual(revisions["ff5a6b7c8d9e"].down_revision, "fe4f5a6b7c8d")
         self.assertEqual(revisions["fe4f5a6b7c8d"].down_revision, "fd3e4f5a6b7c")
         self.assertEqual(revisions["fd3e4f5a6b7c"].down_revision, "fc2d3e4f5a6b")

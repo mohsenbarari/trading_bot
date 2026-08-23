@@ -42,6 +42,11 @@ class TelegramAdminBroadcastStatus(str, enum.Enum):
     FAILED = "failed"
 
 
+class TelegramAdminBroadcastContentKind(str, enum.Enum):
+    TEXT = "text"
+    VIDEO = "video"
+
+
 class TelegramAdminBroadcastReceiptStatus(str, enum.Enum):
     PENDING = "pending"
     SENDING = "sending"
@@ -75,10 +80,40 @@ class TelegramAdminBroadcast(Base):
             "id",
             postgresql_where=text("status IN ('queued', 'running')"),
         ),
+        CheckConstraint(
+            "("
+            "content_kind = 'text' "
+            "AND telegram_media_file_id IS NULL "
+            "AND telegram_media_file_unique_id IS NULL"
+            ") OR ("
+            "content_kind = 'video' "
+            "AND telegram_media_file_id IS NOT NULL "
+            "AND btrim(telegram_media_file_id) <> '' "
+            "AND telegram_media_file_unique_id IS NOT NULL "
+            "AND btrim(telegram_media_file_unique_id) <> ''"
+            ")",
+            name="ck_telegram_admin_broadcasts_content_kind_media",
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
     content = Column(Text, nullable=False)
+    content_kind = Column(
+        Enum(
+            TelegramAdminBroadcastContentKind,
+            name="telegramadminbroadcastcontentkind",
+            values_callable=_enum_values,
+        ),
+        nullable=False,
+        default=TelegramAdminBroadcastContentKind.TEXT,
+        server_default=text("'text'"),
+    )
+    telegram_media_file_id = Column(Text, nullable=True)
+    telegram_media_file_unique_id = Column(String(256), nullable=True)
+    media_duration_seconds = Column(Integer, nullable=True)
+    media_width = Column(Integer, nullable=True)
+    media_height = Column(Integer, nullable=True)
+    media_file_size = Column(BigInteger, nullable=True)
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     audience_type = Column(
         Enum(
