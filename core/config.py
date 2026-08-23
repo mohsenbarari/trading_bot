@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     error_tracking_rate_limit_max_fingerprints: int = 2048
     observability_api_key: str | None = None
     trading_bot_service: str = "app"
+    # Split Telegram execution: `all` keeps one process; `primary` and
+    # `publishers` own disjoint lanes. Unknown values refuse startup.
+    telegram_bot_runtime_role: str = "all"
     trading_bot_metrics_backend: str = "memory"
     audit_trail_path: str | None = None
     trusted_proxy_cidrs: str = "127.0.0.1/32,::1/128"
@@ -334,6 +337,10 @@ class Settings(BaseSettings):
             self.trading_bot_service or ""
         ).strip().lower() in {"api", "bot", "sync_worker", "load_runner", "webapp", "migration"}:
             raise ValueError("telegram_provider_test_authority_forbidden_on_deployable_service")
+        runtime_role = str(self.telegram_bot_runtime_role or "").strip().lower()
+        if runtime_role not in {"all", "primary", "publishers"}:
+            raise ValueError("telegram_bot_runtime_role_unknown")
+        self.telegram_bot_runtime_role = runtime_role
         positive_float_fields = (
             "telegram_delivery_queue_preflight_timeout_seconds",
             "telegram_delivery_queue_worker_interval_seconds",

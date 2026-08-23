@@ -41,6 +41,7 @@ x-telegram-bot-role: &telegram_bot_role
   TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY: ${TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY:-false}
   TELEGRAM_MULTI_PUBLISHER_ENABLED: ${TELEGRAM_MULTI_PUBLISHER_ENABLED:-false}
   TELEGRAM_B2B_DISPATCH_ENABLED: ${TELEGRAM_B2B_DISPATCH_ENABLED:-false}
+  TELEGRAM_BOT_RUNTIME_ROLE: ${TELEGRAM_BOT_RUNTIME_ROLE:-all}
 
 services:
   app:
@@ -119,6 +120,36 @@ services:
         source: ${PRODUCTION_COIN_INFERENCE_SNAPSHOT_HOST_DIR:-/srv/trading-bot/production-data/coin-intelligence/production-runtime}
         target: /app/runtime/coin-inference
         read_only: true
+    env_file:
+      - .env
+    extra_hosts:
+      - "${IRAN_PUBLIC_DOMAIN:-coin.gold-trade.ir}:${IRAN_PUBLIC_IP:-65.109.220.59}"
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+    networks:
+      - trading_net
+
+  bot_publishers:
+    image: trading_bot_base
+    logging: *default_logging
+    container_name: trading_bot_bot_publishers
+    restart: always
+    profiles:
+      - bot-publishers
+    command: python run_bot.py
+    environment:
+      <<: *telegram_bot_role
+      TZ: UTC
+      TRADING_BOT_SERVICE: bot
+      TELEGRAM_BOT_RUNTIME_ROLE: publishers
+      TRADING_BOT_METRICS_BACKEND: ${TRADING_BOT_METRICS_BACKEND:-memory}
+      DB_POOL_SIZE: ${DB_PUBLISHERS_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${DB_PUBLISHERS_MAX_OVERFLOW:-8}
+      DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
+    volumes:
+      - uploads_data:/app/uploads
+      - audit_data:/app/audit_trail
     env_file:
       - .env
     extra_hosts:

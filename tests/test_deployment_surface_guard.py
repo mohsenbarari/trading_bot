@@ -244,6 +244,21 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
         self.assertEqual(foreign_bot["environment"]["TRADING_BOT_SERVICE"], "bot")
         self.assertIn("run_bot.py", str(foreign_bot.get("command", "")))
 
+        self.assertIn("bot_publishers", foreign_services)
+        publishers_block = compose_service_block(
+            repo_root / "docker-compose.yml",
+            "bot_publishers",
+        )
+        self.assertIn("profiles:", publishers_block)
+        self.assertIn("- bot-publishers", publishers_block)
+        self.assertEqual(
+            foreign_services["bot_publishers"]["environment"]["TRADING_BOT_SERVICE"],
+            "bot",
+        )
+        self.assertIn("TELEGRAM_BOT_RUNTIME_ROLE: publishers", publishers_block)
+        self.assertIn("run_bot.py", publishers_block)
+        self.assertNotIn("bot_publishers", iran_services)
+
         self.assertNotIn("bot", iran_services)
         for service_name, service in iran_services.items():
             raw_service = "\n".join(service["raw"])
@@ -302,6 +317,27 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
         self.assertIn("IRAN_SERVER_URL: ${STAGING_FOREIGN_IRAN_SERVER_URL", staging_bot_block)
         self.assertIn("FRONTEND_URL: ${STAGING_FOREIGN_FRONTEND_URL", staging_bot_block)
         self.assertIn("FOREIGN_SERVER_URL: ${STAGING_FOREIGN_FOREIGN_SERVER_URL", staging_bot_block)
+
+    def test_staging_publisher_runtime_is_profile_gated_and_foreign_only(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        staging_compose = repo_root / "deploy/staging/docker-compose.staging.yml"
+        staging_services = active_compose_services(staging_compose)
+        publishers_block = compose_service_block(staging_compose, "bot_publishers")
+
+        self.assertIn("bot_publishers", staging_services)
+        self.assertIn("profiles:", publishers_block)
+        self.assertIn("- staging-bot-publishers", publishers_block)
+        self.assertNotIn("- staging-bot\n", publishers_block)
+        self.assertEqual(
+            staging_services["bot_publishers"]["environment"]["TRADING_BOT_SERVICE"],
+            "bot",
+        )
+        self.assertEqual(
+            staging_services["bot_publishers"]["environment"]["SERVER_MODE"],
+            "foreign",
+        )
+        self.assertIn("TELEGRAM_BOT_RUNTIME_ROLE: publishers", publishers_block)
+        self.assertIn("run_bot.py", publishers_block)
 
     def test_staging_bot_profile_includes_internal_foreign_api(self):
         repo_root = Path(__file__).resolve().parents[1]

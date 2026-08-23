@@ -107,6 +107,9 @@ class TelegramDeliveryQueueConfigTests(unittest.TestCase):
         self.assertFalse(defaults.telegram_multi_publisher_enabled)
         self.assertFalse(defaults.telegram_b2b_dispatch_enabled)
         self.assertEqual(defaults.telegram_b2b_dispatch_batch_size, 8)
+        self.assertEqual(defaults.telegram_bot_runtime_role, "all")
+        with self.assertRaises(ValidationError):
+            _settings(telegram_bot_runtime_role="sidecar")
 
         with self.assertRaises(ValidationError):
             _settings(telegram_b2b_dispatch_enabled=True)

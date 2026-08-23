@@ -35,6 +35,18 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         init_db.assert_not_awaited()
         self.assertIn('SERVER_MODE must be foreign', str(exc_info.exception))
 
+    async def test_main_fails_closed_on_unknown_runtime_role(self):
+        with patch.object(run_bot.settings, 'server_mode', 'foreign'), patch.object(
+            run_bot.settings, 'trading_bot_service', 'bot'
+        ), patch.object(run_bot.settings, 'bot_token', 'token'), patch.object(
+            run_bot.settings, 'telegram_bot_runtime_role', 'sidecar'
+        ), patch('run_bot.init_db', AsyncMock()) as init_db:
+            with self.assertRaises(run_bot.BotRuntimeSurfaceError) as exc_info:
+                await run_bot.main()
+
+        init_db.assert_not_awaited()
+        self.assertIn('telegram_bot_runtime_role_unknown', str(exc_info.exception))
+
     async def test_main_fails_closed_without_explicit_bot_service_identity(self):
         with patch.object(run_bot.settings, 'server_mode', 'foreign'), patch.object(
             run_bot.settings, 'trading_bot_service', 'app'

@@ -71,6 +71,15 @@ from core.services.telegram_publisher_dispatch_service import (
 )
 from core.metrics import registry as metrics_registry
 from core.telegram_gateway import aclose_telegram_http_client
+from core.telegram_bot_runtime_role import (
+    TelegramBotRuntimeRoleError,
+    assert_telegram_bot_runtime_role_compatible,
+    assert_telegram_bot_runtime_role_plans_are_disjoint,
+    resolve_telegram_bot_runtime_role,
+    role_owns_primary_surface,
+    role_owns_publisher_surface,
+    select_owned_bot_identities,
+)
 from core.utils import utc_now
 
 # Configure logging
@@ -86,12 +95,24 @@ class BotRuntimeTaskError(RuntimeError):
     """Raised when a required Bot child task exits before polling shuts down."""
 
 
-def configured_publisher_b2b_pollers(settings_obj):
-    """Build isolated publisher pollers only for the all-or-nothing B2B mode."""
+def configured_publisher_b2b_lane_ids(settings_obj):
+    """Return configured publisher bot ids when B2B dispatch is fully enabled."""
     if not (
         bool(getattr(settings_obj, "telegram_multi_publisher_enabled", False))
         and bool(getattr(settings_obj, "telegram_b2b_dispatch_enabled", False))
     ):
+        return {}
+    composition = build_configured_telegram_delivery_runtime(settings=settings_obj)
+    return {
+        identity: lane.expected_bot_id
+        for identity, lane in composition.credential_registry.publisher_lanes.items()
+    }
+
+
+def configured_publisher_b2b_pollers(settings_obj):
+    """Build isolated publisher pollers only for the all-or-nothing B2B mode."""
+    publisher_ids = configured_publisher_b2b_lane_ids(settings_obj)
+    if not publisher_ids:
         return (), {}, ()
     composition = build_configured_telegram_delivery_runtime(settings=settings_obj)
     primary_id = getattr(settings_obj, "telegram_delivery_queue_expected_primary_bot_id", None)
@@ -99,10 +120,6 @@ def configured_publisher_b2b_pollers(settings_obj):
         raise TelegramDeliveryRuntimeConfigurationError(
             "telegram_b2b_expected_primary_bot_id_missing"
         )
-    publisher_ids = {
-        identity: lane.expected_bot_id
-        for identity, lane in composition.credential_registry.publisher_lanes.items()
-    }
     pollers = []
     bots = []
     for identity, lane in composition.credential_registry.publisher_lanes.items():
@@ -254,10 +271,30 @@ async def supervise_bot_runtime(
         await asyncio.gather(*runtime_tasks, return_exceptions=True)
 
 
-def configured_telegram_delivery_queue_worker_factory(settings_obj):
+def configured_telegram_delivery_queue_worker_factory(
+    settings_obj,
+    *,
+    runtime_role=None,
+):
     """Return a zero-argument queue runner with all production dependencies bound."""
 
     composition = build_configured_telegram_delivery_runtime(settings=settings_obj)
+    role = resolve_telegram_bot_runtime_role(settings_obj, role=runtime_role)
+    owned_identities = select_owned_bot_identities(role, composition.bot_identities)
+    if not owned_identities:
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "telegram_bot_runtime_role_has_no_queue_lanes"
+        )
+    owned_validators = {
+        identity: validator
+        for identity, validator in composition.freshness_validators.items()
+        if identity in owned_identities
+    }
+    owned_feedbacks = {
+        identity: feedback
+        for identity, feedback in composition.lifecycle_feedbacks.items()
+        if identity in owned_identities
+    }
 
     async def run_configured_telegram_delivery_queue() -> None:
         redis_client = redis.Redis.from_url(
@@ -270,11 +307,11 @@ def configured_telegram_delivery_queue_worker_factory(settings_obj):
         )
         try:
             await telegram_delivery_queue_loop(
-                freshness_validators=composition.freshness_validators,
-                lifecycle_feedbacks=composition.lifecycle_feedbacks,
+                freshness_validators=owned_validators,
+                lifecycle_feedbacks=owned_feedbacks,
                 credential_registry=composition.credential_registry,
                 dispatch_limiter=limiter,
-                bot_identities=composition.bot_identities,
+                bot_identities=owned_identities,
             )
         finally:
             await redis_client.aclose()
@@ -286,8 +323,25 @@ def telegram_execution_worker_factories(
     runtime: TelegramDeliveryRuntimeDecision,
     *,
     settings_obj=settings,
+    runtime_role=None,
 ):
     """Return exactly one ownership set without creating coroutine objects."""
+    role = resolve_telegram_bot_runtime_role(settings_obj, role=runtime_role)
+    if role_owns_publisher_surface(role) and not role_owns_primary_surface(role):
+        if runtime.mode != TelegramDeliveryRuntimeMode.QUEUE_V1:
+            raise TelegramDeliveryRuntimeConfigurationError(
+                "telegram_bot_runtime_publishers_require_queue_v1"
+            )
+        if runtime.legacy_workers_enabled or not runtime.queue_worker_enabled:
+            raise TelegramDeliveryRuntimeConfigurationError(
+                "inconsistent_queue_runtime_decision"
+            )
+        return (
+            configured_telegram_delivery_queue_worker_factory(
+                settings_obj,
+                runtime_role=role,
+            ),
+        )
     if runtime.mode == TelegramDeliveryRuntimeMode.LEGACY:
         if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
             raise TelegramDeliveryRuntimeConfigurationError(
@@ -306,7 +360,10 @@ def telegram_execution_worker_factories(
                 "inconsistent_queue_runtime_decision"
             )
         return (
-            configured_telegram_delivery_queue_worker_factory(settings_obj),
+            configured_telegram_delivery_queue_worker_factory(
+                settings_obj,
+                runtime_role=role,
+            ),
             configured_telegram_otp_ephemeral_worker_factory(settings_obj),
         )
     raise TelegramDeliveryRuntimeConfigurationError("unknown_runtime_decision_mode")
@@ -327,6 +384,11 @@ def assert_bot_runtime_surface() -> None:
         reasons.append("TRADING_BOT_SERVICE must be bot for Telegram bot runtime")
     if not settings.bot_token:
         reasons.append("BOT_TOKEN is required for Telegram bot runtime")
+    try:
+        resolve_telegram_bot_runtime_role(settings)
+        assert_telegram_bot_runtime_role_plans_are_disjoint()
+    except TelegramBotRuntimeRoleError as exc:
+        reasons.append(str(exc))
 
     if not reasons:
         return
@@ -348,6 +410,15 @@ async def main():
     assert_bot_runtime_surface()
     validate_non_iran_sms_isolation(settings)
     telegram_runtime = configured_telegram_delivery_runtime()
+    try:
+        runtime_role = assert_telegram_bot_runtime_role_compatible(
+            settings_obj=settings,
+            runtime=telegram_runtime,
+        )
+    except TelegramBotRuntimeRoleError as exc:
+        raise BotRuntimeSurfaceError(str(exc)) from exc
+    start_primary = role_owns_primary_surface(runtime_role)
+    start_publishers = role_owns_publisher_surface(runtime_role)
 
     # Initialize Database
     await init_db()
@@ -355,72 +426,95 @@ async def main():
     # Register SQLAlchemy event listeners for sync & realtime events
     setup_event_listeners()
 
-    bot = Bot(token=settings.bot_token)
-    storage = RedisStorage.from_url(settings.redis_url)
-    dp = Dispatcher(
-        storage=storage,
-        events_isolation=storage.create_isolation(lock_kwargs={"timeout": 120}),
+    bot = None
+    dp = None
+    if start_primary:
+        bot = Bot(token=settings.bot_token)
+        storage = RedisStorage.from_url(settings.redis_url)
+        dp = Dispatcher(
+            storage=storage,
+            events_isolation=storage.create_isolation(lock_kwargs={"timeout": 120}),
+        )
+
+        # Capture the callback deadline origin before Auth or any other DB work.
+        dp.update.outer_middleware(CallbackReceiptMiddleware())
+
+        # Hot trade callbacks must fail fast before Auth opens a DB session.
+        dp.update.outer_middleware(TradeContentionGateMiddleware())
+
+        # Auth: inject user into handler data for ALL updates (must be before routers)
+        auth_mw = AuthMiddleware(AsyncSessionLocal)
+        dp.update.outer_middleware(auth_mw)
+        dp.update.outer_middleware(BotLoggingContextMiddleware())
+        dp.update.outer_middleware(StaleNavigationHandoffMiddleware())
+
+        # Include routers
+        dp.include_router(start.router)
+        dp.include_router(link_account.router) # 👈 Added (high priority)
+        dp.include_router(panel.router)
+        dp.include_router(trade_create.router)
+        dp.include_router(trade_execute.router)
+        dp.include_router(trade_manage.router)
+        dp.include_router(trade_history.router)
+        dp.include_router(commodity_catalog.router)
+        dp.include_router(admin.router)
+        dp.include_router(admin_broadcast.router)
+        dp.include_router(admin_commodities.router)
+        dp.include_router(admin_users.router)
+        dp.include_router(block_manage.router)
+        dp.include_router(offer_overtime_preference.router)
+        dp.include_router(offer_overtime_callbacks.router)
+
+    publisher_pollers, publisher_bot_ids, publisher_bots = (
+        configured_publisher_b2b_pollers(settings)
+        if start_publishers
+        else ((), configured_publisher_b2b_lane_ids(settings), ())
     )
-
-    # Capture the callback deadline origin before Auth or any other DB work.
-    dp.update.outer_middleware(CallbackReceiptMiddleware())
-
-    # Hot trade callbacks must fail fast before Auth opens a DB session.
-    dp.update.outer_middleware(TradeContentionGateMiddleware())
-
-    # Auth: inject user into handler data for ALL updates (must be before routers)
-    auth_mw = AuthMiddleware(AsyncSessionLocal)
-    dp.update.outer_middleware(auth_mw)
-    dp.update.outer_middleware(BotLoggingContextMiddleware())
-    dp.update.outer_middleware(StaleNavigationHandoffMiddleware())
-
-    # Include routers
-    dp.include_router(start.router)
-    dp.include_router(link_account.router) # 👈 Added (high priority)
-    dp.include_router(panel.router)
-    dp.include_router(trade_create.router)
-    dp.include_router(trade_execute.router)
-    dp.include_router(trade_manage.router)
-    dp.include_router(trade_history.router)
-    dp.include_router(commodity_catalog.router)
-    dp.include_router(admin.router)
-    dp.include_router(admin_broadcast.router)
-    dp.include_router(admin_commodities.router)
-    dp.include_router(admin_users.router)
-    dp.include_router(block_manage.router)
-    dp.include_router(offer_overtime_preference.router)
-    dp.include_router(offer_overtime_callbacks.router)
-    publisher_pollers, publisher_bot_ids, publisher_bots = configured_publisher_b2b_pollers(
-        settings
-    )
-    if publisher_pollers:
+    if start_primary and publisher_bot_ids:
         dp.include_router(build_primary_b2b_router(publisher_bot_ids=publisher_bot_ids))
-    publisher_dispatcher = configured_publisher_dispatch_worker_factory(
-        settings,
-        publisher_bot_ids=publisher_bot_ids,
+    publisher_dispatcher = (
+        configured_publisher_dispatch_worker_factory(
+            settings,
+            publisher_bot_ids=publisher_bot_ids,
+        )
+        if start_primary
+        else None
     )
-    
-    # Default router should be last
-    dp.include_router(default.router)
+    if start_primary:
+        # Default router should be last
+        dp.include_router(default.router)
+
+    polling = []
+    if start_primary:
+        polling.append(dp.start_polling(bot))
+    polling.extend(publisher_pollers)
+    if not polling:
+        raise BotRuntimeSurfaceError("telegram_bot_runtime_role_has_no_polling_surface")
+
+    child_coroutines = []
+    if start_primary:
+        child_coroutines.append(listen_trade_suggestion_events(bot))
+        if publisher_dispatcher is not None:
+            child_coroutines.append(publisher_dispatcher())
+    child_coroutines.extend(
+        worker_factory()
+        for worker_factory in telegram_execution_worker_factories(
+            telegram_runtime,
+            runtime_role=runtime_role,
+        )
+    )
 
     try:
-        await configure_interactive_bot_command_menu(bot)
+        if start_primary:
+            await configure_interactive_bot_command_menu(bot)
         logger.info("🤖 Bot started...")
         await supervise_bot_runtime(
-            polling_coro=supervise_pollers(dp.start_polling(bot), *publisher_pollers),
-            child_coroutines=[
-                listen_trade_suggestion_events(bot),
-                *(() if publisher_dispatcher is None else (publisher_dispatcher(),)),
-                *(
-                    worker_factory()
-                    for worker_factory in telegram_execution_worker_factories(
-                        telegram_runtime
-                    )
-                ),
-            ],
+            polling_coro=supervise_pollers(*polling),
+            child_coroutines=child_coroutines,
         )
     finally:
-        await bot.session.close()
+        if bot is not None:
+            await bot.session.close()
         await aclose_telegram_http_client()
         await asyncio.gather(
             *(publisher_bot.session.close() for publisher_bot in publisher_bots),
