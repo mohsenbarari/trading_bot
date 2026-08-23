@@ -30,10 +30,6 @@ from core.telegram_central_poller_owner import TELEGRAM_CENTRAL_POLLER_LOCK_KEY
 from core.telegram_delivery_queue_owner import (
     TELEGRAM_DELIVERY_QUEUE_OWNER_LOCK_KEY,
 )
-from core.telegram_delivery_runtime_policy import (
-    TelegramDeliveryRuntimeDecision,
-    TelegramDeliveryRuntimeMode,
-)
 from core.telegram_multi_publisher_contract import TELEGRAM_PUBLISHER_IDENTITIES
 
 
@@ -49,7 +45,15 @@ def _wait_release(path: str | None, timeout: float = 90.0) -> None:
     sys.stdin.readline()
 
 
-def _queue_decision() -> TelegramDeliveryRuntimeDecision:
+def _queue_decision():
+    # Keep runtime settings out of module import so `--help` remains a
+    # secret-free diagnostic even when the selected env file contains
+    # deploy-only keys that the application Settings model does not accept.
+    from core.telegram_delivery_runtime_policy import (
+        TelegramDeliveryRuntimeDecision,
+        TelegramDeliveryRuntimeMode,
+    )
+
     return TelegramDeliveryRuntimeDecision(
         mode=TelegramDeliveryRuntimeMode.QUEUE_V1,
         legacy_workers_enabled=False,

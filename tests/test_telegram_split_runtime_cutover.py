@@ -206,6 +206,29 @@ class TelegramSplitRuntimeCutoverTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Fail-closed Telegram split cutover", result.stdout)
 
+    def test_probe_help_does_not_load_runtime_settings_or_echo_env_values(self):
+        marker = "must-not-appear-in-probe-help"
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / "deploy-only.env"
+            env_file.write_text(f"DEPLOY_ONLY_SECRET={marker}\n", encoding="utf-8")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "scripts.probe_telegram_split_runtime",
+                    "--help",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=str(REPO_ROOT),
+                env={**os.environ, "APP_ENV_FILE": str(env_file)},
+            )
+        combined = f"{result.stdout}\n{result.stderr}"
+        self.assertEqual(result.returncode, 0, combined)
+        self.assertNotIn(marker, combined)
+        self.assertIn("--role", result.stdout)
+
     def test_deploy_script_exposes_official_commands(self):
         text = (REPO_ROOT / "scripts/deploy_staging.sh").read_text(encoding="utf-8")
         self.assertIn("start-split-bot-runtime", text)
