@@ -1,7 +1,5 @@
 # Telegram Delivery
 
-# Telegram Delivery
-
 - 2026-08-23 | Video broadcast: central-bot `file_id` only; no binary/path/base64; Queue-v1 `sendVideo`.
 - 2026-08-23 | Ignore co-located staging by exact project/service/role; unknown/second executors block. Pre-mutation failure needs no recovery. Guarded Legacy↔Queue releases rebuild evidence after profile switch; others reuse.
 - 2026-08-22 | Staging roles fail closed: `trading_bot_staging` is foreign/bot and `_iran` Iran/API; deploy removes opposites. Repair preserves identity/authority; quarantine needs durable replacement.

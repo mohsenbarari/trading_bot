@@ -373,7 +373,7 @@ The official bot-admin broadcast path now accepts one text **or** one Telegram `
 - The bot stores only bot-scoped `file_id`, `file_unique_id`, caption, and optional numeric metadata.
 - The repository, database, and queue payload never store the video bytes, a local path, a URL, or base64.
 - `file_id` is specific to this central bot. A file uploaded to another bot, or a file on disk such as `tmp/1.mp4`, cannot be injected.
-- Document, animation, and media-group albums are rejected. Caption is required and capped at 1024 characters. Plain text stays capped at 4096.
+- Document and animation are rejected with a Video reminder. A media group is rejected separately so each video is sent alone. Caption is required and capped at 1024 characters. Plain text stays capped at 4096.
 - `parse_mode` remains `None`.
 
 ### Queue-v1 send
@@ -398,5 +398,6 @@ Do **not** treat the two training videos as one album or a dependency graph.
 ### Rollback / failure
 
 - Migration `a385f6b7c8d0` can downgrade to `ff5a6b7c8d9e` on a scratch database. Live production migrate/downgrade is out of this change.
+- Durable confirm uses opaque `creation_key` (`a496c8d0e1f2`). Retry after restart or an ambiguous commit replays the same row; a definite pre-commit failure stays retryable.
 - A bad video job is quarantined or marked terminal; it is never rewritten into a text `sendMessage`.
 - Double confirm in the bot creates only one broadcast row.
