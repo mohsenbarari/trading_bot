@@ -352,6 +352,68 @@ async def record_telegram_publisher_dispatch_result(
     return True
 
 
+async def acknowledge_claimed_telegram_publisher_dispatch_locally(
+    db: AsyncSession,
+    *,
+    current_server: str,
+    command_id: str,
+    lease_token: int,
+    now: datetime,
+) -> bool:
+    """Complete the durable handoff when every publisher runs in this process.
+
+    Telegram Bot API cannot be used as a bot-to-bot transport.  The production
+    runtime creates the Central Bot and all five publisher Bot clients inside
+    one supervised process, so the durable database command is the handoff;
+    the selected publisher lane may claim its job immediately after this
+    transaction commits.
+    """
+
+    _require_foreign(current_server)
+    current_time = _utc(now)
+    command = (
+        await db.execute(
+            select(TelegramPublisherDispatchCommand)
+            .where(
+                TelegramPublisherDispatchCommand.command_id == str(command_id)
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if command is None or int(command.lease_token or 0) != int(lease_token):
+        return False
+    _publisher_identity(command.publisher_bot_identity)
+    if command.state == TelegramPublisherDispatchState.ACKNOWLEDGED.value:
+        return True
+    if command.state in {
+        TelegramPublisherDispatchState.FAILED.value,
+        TelegramPublisherDispatchState.SUPERSEDED.value,
+    }:
+        raise TelegramPublisherDispatchError(
+            "telegram_publisher_dispatch_command_stale"
+        )
+    command.state = TelegramPublisherDispatchState.ACKNOWLEDGED.value
+    command.acknowledged_at = current_time
+    command.receipt_sequence = _positive_int(
+        command.dispatch_sequence,
+        reason="telegram_publisher_dispatch_sequence_invalid",
+    )
+    command.receipt_received_at = current_time
+    command.lease_until = None
+    command.next_retry_at = None
+    command.last_error_class = None
+    command.last_error_message = None
+    command.updated_at = current_time
+    await db.flush()
+    metrics_registry.observe(
+        "telegram_publisher_b2b_ack_lag_ms",
+        "Lag from durable B2B command creation to publisher acknowledgement.",
+        max(0.0, (current_time - _utc(command.created_at)).total_seconds() * 1000),
+        lane=str(command.publisher_bot_identity),
+    )
+    return True
+
+
 async def accept_telegram_publisher_dispatch(
     db: AsyncSession,
     *,
@@ -566,4 +628,54 @@ async def run_telegram_publisher_dispatch_cycle(
         claimed_count=claimed_count,
         sent_count=sent_count,
         retry_due_count=retry_due_count,
+    )
+
+
+async def run_co_located_telegram_publisher_dispatch_cycle(
+    *,
+    session_factory: Callable[[], Any],
+    current_server: str,
+    limit: int,
+    lease_seconds: float,
+    now_factory: Callable[[], datetime],
+) -> TelegramPublisherDispatchCycleReport:
+    """Acknowledge publisher commands without impossible Telegram bot-to-bot I/O."""
+
+    _require_foreign(current_server)
+    claimed_count = 0
+    acknowledged_count = 0
+    for _ in range(max(1, int(limit))):
+        async with session_factory() as db:
+            lease = await claim_next_telegram_publisher_dispatch_command(
+                db,
+                current_server=current_server,
+                lease_seconds=lease_seconds,
+                now=now_factory(),
+            )
+            if lease is None:
+                rollback = getattr(db, "rollback", None)
+                if callable(rollback):
+                    await rollback()
+                break
+            await db.commit()
+        claimed_count += 1
+        async with session_factory() as db:
+            acknowledged = (
+                await acknowledge_claimed_telegram_publisher_dispatch_locally(
+                    db,
+                    current_server=current_server,
+                    command_id=str(lease.command.command_id),
+                    lease_token=lease.lease_token,
+                    now=now_factory(),
+                )
+            )
+            if acknowledged:
+                await db.commit()
+                acknowledged_count += 1
+            else:
+                await db.rollback()
+    return TelegramPublisherDispatchCycleReport(
+        claimed_count=claimed_count,
+        sent_count=acknowledged_count,
+        retry_due_count=0,
     )

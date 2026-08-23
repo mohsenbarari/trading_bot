@@ -67,7 +67,7 @@ from core.telegram_delivery_runtime_policy import (
     configured_telegram_delivery_runtime,
 )
 from core.services.telegram_publisher_dispatch_service import (
-    run_telegram_publisher_dispatch_cycle,
+    run_co_located_telegram_publisher_dispatch_cycle,
 )
 from core.metrics import registry as metrics_registry
 from core.utils import utc_now
@@ -145,27 +145,20 @@ def configured_publisher_dispatch_worker_factory(
             identity: lane.expected_bot_id
             for identity, lane in composition.credential_registry.publisher_lanes.items()
         }
-    gateway_call = composition.credential_registry.build_gateway_calls()["primary"]
+    expected_publishers = set(composition.credential_registry.publisher_lanes)
+    if set(publisher_bot_ids) != expected_publishers:
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "telegram_b2b_co_located_publisher_set_mismatch"
+        )
 
     async def run_dispatcher() -> None:
         while True:
             cycle_started_at = asyncio.get_running_loop().time()
-            report = await run_telegram_publisher_dispatch_cycle(
+            report = await run_co_located_telegram_publisher_dispatch_cycle(
                 session_factory=AsyncSessionLocal,
                 current_server=SERVER_FOREIGN,
-                publisher_bot_ids=publisher_bot_ids,
-                gateway_call=gateway_call,
                 limit=1,
                 lease_seconds=float(getattr(settings_obj, "telegram_delivery_queue_worker_lease_seconds", 30.0)),
-                retry_after_seconds=1.0,
-                acknowledgement_timeout_seconds=float(
-                    getattr(
-                        settings_obj,
-                        "telegram_b2b_acknowledgement_timeout_seconds",
-                        15.0,
-                    )
-                ),
-                request_timeout_seconds=float(getattr(settings_obj, "telegram_delivery_queue_worker_request_timeout_seconds", 10.0)),
                 now_factory=utc_now,
             )
             metrics_registry.counter(
