@@ -53,6 +53,49 @@ class TelegramPublisherDispatchSchemaTests(unittest.TestCase):
                 "ix_telegram_publisher_dispatch_commands_lane_state",
             }.issubset(index_names)
         )
+        claim_index = next(
+            index
+            for index in TelegramPublisherDispatchCommand.__table__.indexes
+            if index.name == "ix_telegram_publisher_dispatch_commands_claim"
+        )
+        self.assertEqual([column.name for column in claim_index.columns], ["id"])
+        self.assertIn(
+            "state IN ('pending', 'retry_due', 'sent')",
+            str(claim_index.dialect_options["postgresql"]["where"]),
+        )
+
+    def test_local_acknowledgement_needs_no_extra_liveness_table(self):
+        # The durable command is the handoff, so lane liveness is not a
+        # precondition and must not require its own table or migration.
+        self.assertFalse(
+            Path("models/telegram_publisher_lane_heartbeat.py").exists()
+        )
+        self.assertFalse(
+            Path(
+                "migrations/versions/ff7d8e9f0a12_add_publisher_lane_heartbeats.py"
+            ).exists()
+        )
+
+    def test_claim_index_migration_replaces_the_narrow_predicate(self):
+        source = Path(
+            "migrations/versions/"
+            "ff6c7d8e9f01_align_publisher_dispatch_claim_index.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('revision: str = "ff6c7d8e9f01"', source)
+        self.assertIn(
+            'down_revision: Union[str, Sequence[str], None] = "a496c8d0e1f2"',
+            source,
+        )
+        self.assertIn("state IN ('pending', 'retry_due', 'sent')", source)
+        self.assertIn("state IN ('pending', 'retry_due')", source)
+        self.assertIn('["id"]', source)
+        upgrade = source[source.index("def upgrade") : source.index("def downgrade")]
+        downgrade = source[source.index("def downgrade") :]
+        self.assertIn("op.drop_index", upgrade)
+        self.assertIn("op.create_index", upgrade)
+        self.assertIn("op.drop_index", downgrade)
+        self.assertIn('["state", "next_retry_at", "id"]', downgrade)
 
     def test_migration_backfills_legacy_owner_and_fails_closed_on_downgrade(self):
         source = Path(

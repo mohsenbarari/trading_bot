@@ -24,6 +24,7 @@ from core.telegram_delivery_offer_freshness import (
     OFFER_FRESHNESS_ACTIONS,
     OFFER_PUBLISH_ACTIONS,
     OFFER_TERMINAL_EDIT_ACTIONS,
+    TelegramOfferFreshnessContext,
     validate_offer_telegram_delivery_freshness,
 )
 from core.telegram_delivery_queue_contract import (
@@ -104,16 +105,126 @@ def _action(job: TelegramDeliveryJobRecord) -> TelegramDeliveryAction:
     return action
 
 
-async def _load_offer_and_state_for_update(
-    db: AsyncSession,
-    *,
-    job: TelegramDeliveryJobRecord,
-) -> tuple[Offer, OfferPublicationState]:
+def _offer_public_id(job: TelegramDeliveryJobRecord) -> str:
     offer_public_id = str(job.source_natural_id or "").strip()
     if not offer_public_id:
         raise TelegramOfferQueueFeedbackError(
             "telegram_offer_queue_feedback_source_missing"
         )
+    return offer_public_id
+
+
+def _session_bound_offer_and_state(
+    db: AsyncSession,
+    *,
+    offer_public_id: str,
+) -> tuple[Offer | None, OfferPublicationState | None]:
+    """Return Offer/state the current session already loaded, if any."""
+
+    identity_map = getattr(getattr(db, "sync_session", None), "identity_map", None)
+    if identity_map is None:
+        return None, None
+    offer: Offer | None = None
+    state: OfferPublicationState | None = None
+    for obj in identity_map.values():
+        if isinstance(obj, Offer) and str(
+            getattr(obj, "offer_public_id", "") or ""
+        ) == offer_public_id:
+            offer = obj
+        elif (
+            isinstance(obj, OfferPublicationState)
+            and str(getattr(obj, "offer_public_id", "") or "") == offer_public_id
+            and getattr(obj, "surface", None) == OfferPublicationSurface.TELEGRAM_CHANNEL
+        ):
+            state = obj
+    return offer, state
+
+
+async def _lock_known_offer_and_state(
+    db: AsyncSession,
+    *,
+    job: TelegramDeliveryJobRecord,
+    offer: Offer,
+    state: OfferPublicationState | None,
+) -> tuple[Offer, OfferPublicationState]:
+    offer_id = getattr(offer, "id", None)
+    if not isinstance(offer_id, int) or isinstance(offer_id, bool) or offer_id <= 0:
+        return await _load_offer_and_state_for_update(db, job=job)
+    locked_offer = (
+        await db.execute(
+            select(Offer)
+            .options(selectinload(Offer.commodity))
+            .where(Offer.id == offer_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if locked_offer is None:
+        raise TelegramOfferQueueFeedbackError(
+            "telegram_offer_queue_feedback_offer_missing"
+        )
+    state_id = getattr(state, "id", None) if state is not None else None
+    if isinstance(state_id, int) and not isinstance(state_id, bool) and state_id > 0:
+        locked_state = (
+            await db.execute(
+                select(OfferPublicationState)
+                .where(OfferPublicationState.id == state_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+    else:
+        locked_state = (
+            await db.execute(
+                select(OfferPublicationState)
+                .where(
+                    OfferPublicationState.offer_public_id
+                    == _offer_public_id(job),
+                    OfferPublicationState.surface
+                    == OfferPublicationSurface.TELEGRAM_CHANNEL,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+    if locked_state is None:
+        locked_state = await get_or_create_telegram_publication_state(db, locked_offer)
+    return locked_offer, locked_state
+
+
+async def _reuse_or_load_offer_and_state_for_update(
+    db: AsyncSession,
+    *,
+    job: TelegramDeliveryJobRecord,
+    context: TelegramOfferFreshnessContext | None = None,
+) -> tuple[Offer, OfferPublicationState]:
+    offer_public_id = _offer_public_id(job)
+    offer: Offer | None = None
+    state: OfferPublicationState | None = None
+    if (
+        context is not None
+        and context.binds_job(job)
+        and context.offer is not None
+    ):
+        offer, state = context.offer, context.publication_state
+    if offer is None:
+        offer, state = _session_bound_offer_and_state(
+            db,
+            offer_public_id=offer_public_id,
+        )
+    if offer is not None:
+        return await _lock_known_offer_and_state(
+            db,
+            job=job,
+            offer=offer,
+            state=state,
+        )
+    return await _load_offer_and_state_for_update(db, job=job)
+
+
+async def _load_offer_and_state_for_update(
+    db: AsyncSession,
+    *,
+    job: TelegramDeliveryJobRecord,
+) -> tuple[Offer, OfferPublicationState]:
+    offer_public_id = _offer_public_id(job)
     offer = (
         await db.execute(
             select(Offer)
@@ -242,12 +353,14 @@ class TelegramOfferQueueLifecycleFeedback:
         now: datetime,
     ) -> None:
         _action(job)
-        await _load_offer_and_state_for_update(db, job=job)
+        offer, state = await _load_offer_and_state_for_update(db, job=job)
         decision = await validate_offer_telegram_delivery_freshness(
             db,
             job,
             now,
             expected_channel_id=_configured_channel_id(),
+            offer=offer,
+            publication_state=state,
         )
         if decision.outcome != TelegramFreshnessOutcome.SEND:
             raise TelegramDeliveryFreshnessChangedBeforeDispatch(decision)
@@ -269,7 +382,10 @@ class TelegramOfferQueueLifecycleFeedback:
             return
 
         try:
-            offer, state = await _load_offer_and_state_for_update(db, job=job)
+            offer, state = await _reuse_or_load_offer_and_state_for_update(
+                db,
+                job=job,
+            )
         except TelegramOfferQueueFeedbackError as exc:
             if (
                 str(exc) == "telegram_offer_queue_feedback_offer_missing"

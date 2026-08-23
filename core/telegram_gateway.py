@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+import asyncio
 import base64
 import binascii
 import hashlib
@@ -31,6 +32,90 @@ TELEGRAM_MESSAGE_NOT_MODIFIED = "message is not modified"
 _MISSING = object()
 _CORRELATION_HASH_DOMAIN = b"telegram-delivery-correlation-v1\x00"
 _MAX_DOCUMENT_BYTES = 5 * 1024 * 1024
+_HTTP_CLIENT_LIMITS = httpx.Limits(
+    max_connections=32,
+    max_keepalive_connections=8,
+)
+_async_http_client: httpx.AsyncClient | None = None
+_async_http_client_loop: asyncio.AbstractEventLoop | None = None
+_async_http_client_factory: Any = None
+_async_http_client_lock: asyncio.Lock | None = None
+
+
+def _http_client_lock() -> asyncio.Lock:
+    global _async_http_client_lock
+    if _async_http_client_lock is None:
+        _async_http_client_lock = asyncio.Lock()
+    return _async_http_client_lock
+
+
+def _http_client_is_usable(
+    client: httpx.AsyncClient | None,
+    loop: asyncio.AbstractEventLoop,
+) -> bool:
+    if client is None:
+        return False
+    if bool(getattr(client, "is_closed", False)):
+        return False
+    stored_loop = _async_http_client_loop
+    if stored_loop is None:
+        return False
+    if stored_loop is not loop:
+        return False
+    if _async_http_client_factory is not httpx.AsyncClient:
+        return False
+    is_closed = getattr(stored_loop, "is_closed", None)
+    if callable(is_closed) and is_closed():
+        return False
+    return True
+
+
+async def aclose_telegram_http_client() -> None:
+    """Close the recycled gateway client. Safe to call when none exists."""
+    global _async_http_client, _async_http_client_loop, _async_http_client_factory
+    client = _async_http_client
+    _async_http_client = None
+    _async_http_client_loop = None
+    _async_http_client_factory = None
+    closer = getattr(client, "aclose", None)
+    if client is None or not callable(closer):
+        return
+    try:
+        await closer()
+    except Exception as exc:
+        logger.debug(
+            "Telegram gateway HTTP client close failed",
+            extra={
+                "event": "telegram.gateway_client_close_failed",
+                "error_class": type(exc).__name__,
+            },
+        )
+
+
+def reset_telegram_gateway_http_client_for_test() -> None:
+    global _async_http_client, _async_http_client_loop, _async_http_client_factory, _async_http_client_lock
+    _async_http_client = None
+    _async_http_client_loop = None
+    _async_http_client_factory = None
+    _async_http_client_lock = None
+
+
+async def get_telegram_http_client() -> httpx.AsyncClient:
+    """Return one event-loop-bound client. Created on first use, not import."""
+    global _async_http_client, _async_http_client_loop, _async_http_client_factory
+    loop = asyncio.get_running_loop()
+    if _http_client_is_usable(_async_http_client, loop):
+        return _async_http_client
+    async with _http_client_lock():
+        if _http_client_is_usable(_async_http_client, loop):
+            return _async_http_client
+        await aclose_telegram_http_client()
+        factory = httpx.AsyncClient
+        client = factory(limits=_HTTP_CLIENT_LIMITS)
+        _async_http_client = client
+        _async_http_client_loop = loop
+        _async_http_client_factory = factory
+        return client
 
 
 class TelegramGatewaySurfaceError(RuntimeError):
@@ -214,21 +299,21 @@ async def post_telegram_method(
 
     response = None
     try:
-        async with httpx.AsyncClient() as client:
-            if method == "sendDocument":
-                data, files = _document_multipart_payload(payload)
-                response = await client.post(
-                    f"{TELEGRAM_API_BASE_URL}/bot{token}/{method}",
-                    data=data,
-                    files=files,
-                    timeout=timeout,
-                )
-            else:
-                response = await client.post(
-                    f"{TELEGRAM_API_BASE_URL}/bot{token}/{method}",
-                    json=_json_request_payload(payload),
-                    timeout=timeout,
-                )
+        client = await get_telegram_http_client()
+        if method == "sendDocument":
+            data, files = _document_multipart_payload(payload)
+            response = await client.post(
+                f"{TELEGRAM_API_BASE_URL}/bot{token}/{method}",
+                data=data,
+                files=files,
+                timeout=timeout,
+            )
+        else:
+            response = await client.post(
+                f"{TELEGRAM_API_BASE_URL}/bot{token}/{method}",
+                json=_json_request_payload(payload),
+                timeout=timeout,
+            )
     except Exception as exc:
         received_response = (
             response if response is not None else getattr(exc, "response", None)

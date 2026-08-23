@@ -220,7 +220,7 @@ class BotTradeManageSuccessTests(unittest.IsolatedAsyncioTestCase):
             enqueue_callback.await_args.kwargs["action"].value,
             "offer_expiry_callback",
         )
-        callback.answer.assert_not_awaited()
+        callback.answer.assert_awaited_once()
         callback.message.edit_reply_markup.assert_awaited_once_with(
             reply_markup=None
         )

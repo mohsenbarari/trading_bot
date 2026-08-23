@@ -14,6 +14,7 @@ from core.services.telegram_publisher_dispatch_service import (
     record_telegram_publisher_dispatch_result,
     render_telegram_publisher_dispatch,
     run_co_located_telegram_publisher_dispatch_cycle,
+    run_telegram_publisher_dispatch_cycle,
     select_telegram_publisher_lane,
     TelegramPublisherDispatchLease,
 )
@@ -150,6 +151,100 @@ class TelegramPublisherDispatchServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(duplicate.duplicate)
         self.assertEqual(db.flush.await_count, 1)
+
+    async def test_first_acknowledgement_wakes_the_assigned_publisher_lane(self):
+        command = _command()
+        db = _DB(command)
+        text = render_telegram_publisher_dispatch(command)
+
+        with patch(
+            "core.telegram_delivery_queue_wakeup.emit_delivery_queue_wakeup",
+            new=AsyncMock(),
+        ) as emit:
+            accepted = await accept_telegram_publisher_dispatch(
+                db,
+                current_server="foreign",
+                publisher_bot_identity="publisher_3",
+                expected_primary_bot_id=100,
+                sender_bot_id=100,
+                text=text,
+                now=NOW,
+            )
+            duplicate = await accept_telegram_publisher_dispatch(
+                db,
+                current_server="foreign",
+                publisher_bot_identity="publisher_3",
+                expected_primary_bot_id=100,
+                sender_bot_id=100,
+                text=text,
+                now=NOW,
+            )
+
+        self.assertFalse(accepted.duplicate)
+        self.assertTrue(duplicate.duplicate)
+        emit.assert_awaited_once_with(db, bot_identity="publisher_3")
+        self.assertEqual(db.flush.await_count, 1)
+
+    async def test_acknowledgement_wakeup_stays_on_the_same_transaction(self):
+        command = _command()
+        db = _DB(command)
+
+        with patch(
+            "core.telegram_delivery_queue_wakeup.emit_delivery_queue_wakeup",
+            new=AsyncMock(),
+        ) as emit:
+            await accept_telegram_publisher_dispatch(
+                db,
+                current_server="foreign",
+                publisher_bot_identity="publisher_3",
+                expected_primary_bot_id=100,
+                sender_bot_id=100,
+                text=render_telegram_publisher_dispatch(command),
+                now=NOW,
+            )
+
+        self.assertIs(emit.await_args.args[0], db)
+        self.assertEqual(emit.await_args.kwargs["bot_identity"], "publisher_3")
+
+    async def test_primary_acknowledgement_wakes_the_lane_once(self):
+        command = _command(state="sent")
+        db = _DB(command)
+        text = render_telegram_publisher_b2b_envelope(
+            TelegramPublisherB2BEnvelope(
+                message_type=TelegramPublisherB2BMessageType.ACK,
+                command_id=command.command_id,
+                sequence=command.dispatch_sequence,
+                enqueued_at=NOW,
+                ack_sent_at=NOW,
+            )
+        )
+
+        with patch(
+            "core.telegram_delivery_queue_wakeup.emit_delivery_queue_wakeup",
+            new=AsyncMock(),
+        ) as emit, patch(
+            "core.services.telegram_publisher_dispatch_service.metrics_registry.observe"
+        ):
+            first = await accept_telegram_publisher_acknowledgement(
+                db,
+                current_server="foreign",
+                sender_bot_id=303,
+                publisher_bot_ids={"publisher_3": 303},
+                text=text,
+                now=NOW,
+            )
+            second = await accept_telegram_publisher_acknowledgement(
+                db,
+                current_server="foreign",
+                sender_bot_id=303,
+                publisher_bot_ids={"publisher_3": 303},
+                text=text,
+                now=NOW,
+            )
+
+        self.assertTrue(first)
+        self.assertTrue(second)
+        emit.assert_awaited_once_with(db, bot_identity="publisher_3")
 
     async def test_dispatch_uses_primary_gateway_and_publisher_private_chat_only(self):
         command = _command()
@@ -331,6 +426,250 @@ class TelegramPublisherDispatchServiceTests(unittest.IsolatedAsyncioTestCase):
                 now=NOW,
             )
         db.execute.assert_not_awaited()
+
+    async def test_dispatch_cycle_sends_a_bounded_batch_and_continues_after_one_failure(self):
+        commands = []
+        for index in range(1, 4):
+            command = _command()
+            command.command_id = f"123e4567-e89b-12d3-a456-42661417400{index}"
+            command.id = index
+            commands.append(command)
+        leases = [
+            TelegramPublisherDispatchLease(command=command, lease_token=1)
+            for command in commands
+        ]
+        remaining = list(leases)
+
+        async def claim(*_args, **_kwargs):
+            return remaining.pop(0) if remaining else None
+
+        results = [
+            TelegramGatewayResult(ok=True, method="sendMessage"),
+            TelegramGatewayResult(ok=False, method="sendMessage", error="timeout"),
+            TelegramGatewayResult(ok=True, method="sendMessage"),
+        ]
+        gateway = AsyncMock(side_effect=results)
+
+        class _CycleSession:
+            def __init__(self):
+                self.commit = AsyncMock()
+                self.rollback = AsyncMock()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+        with patch(
+            "core.services.telegram_publisher_dispatch_service.claim_next_telegram_publisher_dispatch_command",
+            new=AsyncMock(side_effect=claim),
+        ) as claim_mock, patch(
+            "core.services.telegram_publisher_dispatch_service.record_telegram_publisher_dispatch_result",
+            new=AsyncMock(return_value=True),
+        ) as record:
+            report = await run_telegram_publisher_dispatch_cycle(
+                session_factory=_CycleSession,
+                current_server="foreign",
+                publisher_bot_ids={"publisher_3": 303},
+                gateway_call=gateway,
+                limit=8,
+                lease_seconds=30,
+                retry_after_seconds=1,
+                acknowledgement_timeout_seconds=15,
+                request_timeout_seconds=5,
+                now_factory=lambda: NOW,
+            )
+
+        self.assertEqual(report.claimed_count, 3)
+        self.assertEqual(report.sent_count, 2)
+        self.assertEqual(report.retry_due_count, 1)
+        self.assertEqual(gateway.await_count, 3)
+        self.assertEqual(record.await_count, 3)
+        self.assertEqual(claim_mock.await_count, 4)
+        self.assertEqual(
+            [call.kwargs["command_id"] for call in record.await_args_list],
+            [command.command_id for command in commands],
+        )
+
+    async def test_dispatch_cycle_does_not_claim_past_the_batch_limit(self):
+        remaining = [
+            TelegramPublisherDispatchLease(command=_command(), lease_token=index)
+            for index in range(1, 5)
+        ]
+
+        async def claim(*_args, **_kwargs):
+            return remaining.pop(0)
+
+        class _CycleSession:
+            def __init__(self):
+                self.commit = AsyncMock()
+                self.rollback = AsyncMock()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+        gateway = AsyncMock(
+            return_value=TelegramGatewayResult(ok=True, method="sendMessage")
+        )
+        with patch(
+            "core.services.telegram_publisher_dispatch_service.claim_next_telegram_publisher_dispatch_command",
+            new=AsyncMock(side_effect=claim),
+        ), patch(
+            "core.services.telegram_publisher_dispatch_service.record_telegram_publisher_dispatch_result",
+            new=AsyncMock(return_value=True),
+        ):
+            report = await run_telegram_publisher_dispatch_cycle(
+                session_factory=_CycleSession,
+                current_server="foreign",
+                publisher_bot_ids={"publisher_3": 303},
+                gateway_call=gateway,
+                limit=2,
+                lease_seconds=30,
+                retry_after_seconds=1,
+                acknowledgement_timeout_seconds=15,
+                request_timeout_seconds=5,
+                now_factory=lambda: NOW,
+            )
+
+        self.assertEqual(report.claimed_count, 2)
+        self.assertEqual(gateway.await_count, 2)
+        self.assertEqual(len(remaining), 2)
+
+    async def test_idle_dispatch_cycle_claims_nothing(self):
+        class _CycleSession:
+            def __init__(self):
+                self.commit = AsyncMock()
+                self.rollback = AsyncMock()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+        gateway = AsyncMock()
+        with patch(
+            "core.services.telegram_publisher_dispatch_service.claim_next_telegram_publisher_dispatch_command",
+            new=AsyncMock(return_value=None),
+        ):
+            report = await run_telegram_publisher_dispatch_cycle(
+                session_factory=_CycleSession,
+                current_server="foreign",
+                publisher_bot_ids={"publisher_3": 303},
+                gateway_call=gateway,
+                limit=8,
+                lease_seconds=30,
+                retry_after_seconds=1,
+                acknowledgement_timeout_seconds=15,
+                request_timeout_seconds=5,
+                now_factory=lambda: NOW,
+            )
+
+        self.assertEqual(report.claimed_count, 0)
+        self.assertEqual(report.sent_count, 0)
+        gateway.assert_not_awaited()
+
+    async def test_local_ack_is_lease_fenced_and_wakes_the_lane(self):
+        command = _command()
+        db = _DB(command)
+        with patch(
+            "core.telegram_delivery_queue_wakeup.emit_delivery_queue_wakeup",
+            new=AsyncMock(),
+        ) as wakeup:
+            acked = await acknowledge_claimed_telegram_publisher_dispatch_locally(
+                db,
+                current_server="foreign",
+                command_id=command.command_id,
+                lease_token=command.lease_token,
+                now=NOW,
+            )
+
+        self.assertTrue(acked)
+        self.assertEqual(command.state, "acknowledged")
+        self.assertEqual(command.acknowledged_at, NOW)
+        self.assertEqual(command.receipt_sequence, 37)
+        self.assertIsNone(command.lease_until)
+        wakeup.assert_awaited_once()
+        self.assertEqual(wakeup.await_args.kwargs["bot_identity"], "publisher_3")
+
+    async def test_local_ack_refuses_a_stale_lease_token(self):
+        command = _command()
+        db = _DB(command)
+        with patch(
+            "core.telegram_delivery_queue_wakeup.emit_delivery_queue_wakeup",
+            new=AsyncMock(),
+        ) as wakeup:
+            acked = await acknowledge_claimed_telegram_publisher_dispatch_locally(
+                db,
+                current_server="foreign",
+                command_id=command.command_id,
+                lease_token=int(command.lease_token) + 1,
+                now=NOW,
+            )
+
+        self.assertFalse(acked)
+        self.assertEqual(command.state, "pending")
+        wakeup.assert_not_awaited()
+
+    async def test_local_ack_refuses_a_terminal_command(self):
+        command = _command()
+        command.state = "superseded"
+        db = _DB(command)
+        with self.assertRaisesRegex(
+            TelegramPublisherDispatchError,
+            "telegram_publisher_dispatch_command_stale",
+        ):
+            await acknowledge_claimed_telegram_publisher_dispatch_locally(
+                db,
+                current_server="foreign",
+                command_id=command.command_id,
+                lease_token=command.lease_token,
+                now=NOW,
+            )
+
+    async def test_co_located_cycle_never_calls_telegram(self):
+        lease = TelegramPublisherDispatchLease(command=_command(), lease_token=1)
+
+        class _CycleSession:
+            def __init__(self):
+                self.commit = AsyncMock()
+                self.rollback = AsyncMock()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+        with patch(
+            "core.services.telegram_publisher_dispatch_service.claim_next_telegram_publisher_dispatch_command",
+            new=AsyncMock(side_effect=[lease, None]),
+        ), patch(
+            "core.services.telegram_publisher_dispatch_service."
+            "acknowledge_claimed_telegram_publisher_dispatch_locally",
+            new=AsyncMock(return_value=True),
+        ) as local_ack, patch(
+            "core.services.telegram_publisher_dispatch_service."
+            "dispatch_claimed_telegram_publisher_command",
+            new=AsyncMock(side_effect=AssertionError("telegram bot-to-bot hop")),
+        ):
+            report = await run_co_located_telegram_publisher_dispatch_cycle(
+                session_factory=_CycleSession,
+                current_server="foreign",
+                limit=8,
+                lease_seconds=30,
+                now_factory=lambda: NOW,
+            )
+
+        self.assertEqual(report.claimed_count, 1)
+        self.assertEqual(report.sent_count, 1)
+        self.assertEqual(report.retry_due_count, 0)
+        local_ack.assert_awaited_once()
+        self.assertEqual(local_ack.await_args.kwargs["lease_token"], 1)
 
     def test_publisher_queue_claim_requires_a_durable_acknowledgement(self):
         source = Path(

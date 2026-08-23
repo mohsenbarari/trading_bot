@@ -5,6 +5,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
+from core.schema_revision import CANONICAL_SCHEMA_HEAD
 from tests.test_telegram_delivery_queue_postgres import DATABASE_URLS, _run_alembic
 
 
@@ -269,7 +270,7 @@ class TelegramAdminBroadcastVideoMigrationPostgresTests(unittest.TestCase):
                     connection.execute(
                         text("SELECT version_num FROM alembic_version")
                     ).scalar_one(),
-                    HEAD_REVISION,
+                    CANONICAL_SCHEMA_HEAD,
                 )
                 self.assertEqual(
                     connection.execute(text("SELECT COUNT(*) FROM alembic_version")).scalar_one(),

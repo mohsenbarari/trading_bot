@@ -14,6 +14,13 @@ PRODUCTION_COIN_SNAPSHOT_RELAY_INSTALLER="$PROJECT_DIR/scripts/install_productio
 PRODUCTION_COIN_INPUT_TIMER_INSTALLER="$PROJECT_DIR/scripts/install_coin_intelligence_input_timers.sh"
 PRODUCTION_COIN_READINESS_SCRIPT="$PROJECT_DIR/scripts/check_production_coin_inference_readiness.py"
 TELEGRAM_QUEUE_PRODUCTION_CUTOVER_SCRIPT="$PROJECT_DIR/scripts/cutover_telegram_delivery_queue_production.py"
+TELEGRAM_BOT_SPLIT_PREFLIGHT_SCRIPT="$PROJECT_DIR/scripts/telegram_bot_split_preflight.py"
+# The production release controller currently owns the combined `all` bot
+# lifecycle only.  The compose profile bot-executor is intentionally not an
+# activation surface here: starting bot_executor without a release-owned hand-off and
+# rollback would risk two queue owners.  Production split activation therefore
+# requires a separate, guarded controller before this script may invoke the
+# reserved TELEGRAM_BOT_SPLIT_PREFLIGHT_SCRIPT hook and opt into it.
 PRODUCTION_RELEASE_LOCK_DIR="/root/secure-envs/trading-bot/queue-cutover-artifacts"
 PRODUCTION_RELEASE_LOCK_PATH="$PRODUCTION_RELEASE_LOCK_DIR/production-release.lock"
 DEFAULT_MANIFEST="$PROJECT_DIR/deploy/production/online.env"

@@ -648,6 +648,7 @@ def record_telegram_delivery_retention(report: Mapping[str, Any]) -> None:
         "legal_hold_due",
         "unresolved_due",
         "source_blocked_due",
+        "dispatch_blocked_due",
     ):
         try:
             value = max(float(report.get(field) or 0), 0.0)

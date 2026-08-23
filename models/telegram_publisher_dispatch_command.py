@@ -69,10 +69,10 @@ class TelegramPublisherDispatchCommand(Base):
         ),
         Index(
             "ix_telegram_publisher_dispatch_commands_claim",
-            "state",
-            "next_retry_at",
             "id",
-            postgresql_where=text("state IN ('pending', 'retry_due')"),
+            postgresql_where=text(
+                "state IN ('pending', 'retry_due', 'sent')"
+            ),
         ),
         Index(
             "ix_telegram_publisher_dispatch_commands_lease_recovery",

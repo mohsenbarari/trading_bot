@@ -85,6 +85,16 @@ async def _answer_offer_expiry_callback(
             await callback.answer(text)
         return
 
+    answered_at_edge = False
+    try:
+        if text is None:
+            await callback.answer()
+        else:
+            await callback.answer(text)
+        answered_at_edge = True
+    except Exception:
+        answered_at_edge = False
+
     async def _enqueue(db) -> None:
         await enqueue_telegram_callback_answer(
             db,
@@ -94,6 +104,7 @@ async def _answer_offer_expiry_callback(
             action=TelegramDeliveryAction.OFFER_EXPIRY_CALLBACK,
             text=text,
             bot_identity=current_telegram_callback_bot_identity(),
+            answered_at_edge=answered_at_edge,
         )
         if commit:
             await db.commit()

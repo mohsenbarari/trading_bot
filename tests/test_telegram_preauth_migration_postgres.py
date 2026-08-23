@@ -4,14 +4,12 @@ from uuid import uuid4
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
+from core.schema_revision import CANONICAL_SCHEMA_HEAD as HEAD_REVISION
 from tests.test_telegram_delivery_queue_postgres import DATABASE_URLS, _run_alembic
 
 
 PARENT_REVISION = "a163f4a5b7c8"
 ROUNDTRIP_REVISION = "a274f5a6b8c9"
-HEAD_REVISION = "a496c8d0e1f2"
-
-
 @unittest.skipUnless(
     DATABASE_URLS,
     "set TELEGRAM_QUEUE_STAGE3_TEST_DATABASE_URL to an isolated scratch database",

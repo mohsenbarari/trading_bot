@@ -6,6 +6,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import run_bot
 
 
+class _FakeLease:
+    async def close(self):
+        return None
+
+    async def assert_held(self):
+        return None
+
+
 async def _listener_forever(_bot):
     await asyncio.sleep(3600)
 
@@ -35,6 +43,18 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         init_db.assert_not_awaited()
         self.assertIn('SERVER_MODE must be foreign', str(exc_info.exception))
 
+    async def test_main_fails_closed_on_unknown_runtime_role(self):
+        with patch.object(run_bot.settings, 'server_mode', 'foreign'), patch.object(
+            run_bot.settings, 'trading_bot_service', 'bot'
+        ), patch.object(run_bot.settings, 'bot_token', 'token'), patch.object(
+            run_bot.settings, 'telegram_bot_runtime_role', 'sidecar'
+        ), patch('run_bot.init_db', AsyncMock()) as init_db:
+            with self.assertRaises(run_bot.BotRuntimeSurfaceError) as exc_info:
+                await run_bot.main()
+
+        init_db.assert_not_awaited()
+        self.assertIn('telegram_bot_runtime_role_unknown', str(exc_info.exception))
+
     async def test_main_fails_closed_without_explicit_bot_service_identity(self):
         with patch.object(run_bot.settings, 'server_mode', 'foreign'), patch.object(
             run_bot.settings, 'trading_bot_service', 'app'
@@ -45,7 +65,11 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         init_db.assert_not_awaited()
         self.assertIn('TRADING_BOT_SERVICE must be bot', str(exc_info.exception))
 
-    async def test_main_initializes_and_registers_all_routers(self):
+    @patch('run_bot.acquire_telegram_central_poller_owner', new_callable=AsyncMock)
+    @patch('run_bot.acquire_telegram_delivery_queue_owner', new_callable=AsyncMock)
+    async def test_main_initializes_and_registers_all_routers(self, _queue_owner, _poller_owner):
+        _queue_owner.return_value = _FakeLease()
+        _poller_owner.return_value = _FakeLease()
         fake_bot = MagicMock()
         fake_bot.session.close = AsyncMock()
         fake_bot.set_my_commands = AsyncMock(return_value=True)
@@ -115,7 +139,13 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         fake_dp.start_polling.assert_awaited_once_with(fake_bot)
         fake_bot.session.close.assert_awaited_once()
 
-    async def test_main_propagates_polling_errors_and_still_closes_bot(self):
+    @patch('run_bot.acquire_telegram_central_poller_owner', new_callable=AsyncMock)
+    @patch('run_bot.acquire_telegram_delivery_queue_owner', new_callable=AsyncMock)
+    async def test_main_propagates_polling_errors_and_still_closes_bot(
+        self, _queue_owner, _poller_owner
+    ):
+        _queue_owner.return_value = _FakeLease()
+        _poller_owner.return_value = _FakeLease()
         fake_bot = MagicMock()
         fake_bot.session.close = AsyncMock()
         fake_bot.set_my_commands = AsyncMock(return_value=True)

@@ -40,6 +40,24 @@ from models.offer_publication_state import (
 from models.telegram_delivery_job import TelegramDeliveryJobRecord
 
 
+# Distinguishes "caller did not pass a row" from an authoritative miss.
+_UNSET: Any = object()
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramOfferFreshnessContext:
+    """Rows the freshness validator already read for this job."""
+
+    offer: Offer | None
+    publication_state: OfferPublicationState | None
+    offer_public_id: str
+
+    def binds_job(self, job: TelegramDeliveryJobRecord) -> bool:
+        return self.offer_public_id == str(
+            getattr(job, "source_natural_id", "") or ""
+        ).strip()
+
+
 OFFER_PUBLISH_ACTIONS = frozenset({TelegramDeliveryAction.OFFER_PUBLISH})
 OFFER_ACTIVE_EDIT_ACTIONS = frozenset(
     {
@@ -485,6 +503,8 @@ async def validate_offer_telegram_delivery_freshness(
     now: datetime,
     *,
     expected_channel_id: int,
+    offer: Offer | None | object = _UNSET,
+    publication_state: OfferPublicationState | None | object = _UNSET,
 ) -> TelegramFreshnessDecision:
     channel_id = _strict_nonzero_int(
         expected_channel_id,
@@ -507,11 +527,14 @@ async def validate_offer_telegram_delivery_freshness(
     source_natural_id = str(job.source_natural_id or "").strip()
     if not source_natural_id:
         return _quarantined("offer_freshness_source_identity_missing")
-    offer = await _load_offer(db, offer_public_id=source_natural_id)
-    state = await _load_publication_state(
-        db,
-        offer_public_id=source_natural_id,
-    )
+    if offer is _UNSET:
+        offer = await _load_offer(db, offer_public_id=source_natural_id)
+    if publication_state is _UNSET:
+        publication_state = await _load_publication_state(
+            db,
+            offer_public_id=source_natural_id,
+        )
+    state = publication_state
     if offer is None:
         if state is not None:
             return _quarantined("offer_freshness_source_missing_with_publication")

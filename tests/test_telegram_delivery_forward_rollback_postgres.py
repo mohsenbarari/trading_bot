@@ -28,10 +28,8 @@ from models.telegram_delivery_provider_outcome import (
 )
 from models.telegram_delivery_resume_operation import TelegramDeliveryResumeOperation
 from models.telegram_delivery_runtime_gate import TelegramDeliveryRuntimeGate
+from core.schema_revision import CANONICAL_SCHEMA_HEAD as EXPECTED_HEAD
 from tests.test_telegram_delivery_queue_postgres import DATABASE_URLS, _run_alembic
-
-
-EXPECTED_HEAD = "a496c8d0e1f2"
 
 
 @unittest.skipUnless(

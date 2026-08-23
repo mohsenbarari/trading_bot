@@ -272,8 +272,9 @@ class BotTradeCreateStaleStateTextOfferTests(unittest.IsolatedAsyncioTestCase):
                 user=SimpleNamespace(id=276),
             )
 
-        callback.answer.assert_not_awaited()
+        callback.answer.assert_awaited_once()
         enqueue.assert_awaited_once()
+        self.assertTrue(enqueue.await_args.kwargs["answered_at_edge"])
         self.assertIs(enqueue.await_args.args[0], session)
         self.assertEqual(
             enqueue.await_args.kwargs["callback_query_id"],

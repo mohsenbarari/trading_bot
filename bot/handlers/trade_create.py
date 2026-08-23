@@ -3131,6 +3131,16 @@ async def _answer_stale_trade_creation_callback(
             await callback.answer(text, show_alert=show_alert)
         return
 
+    answered_at_edge = False
+    try:
+        if text is None and not show_alert:
+            await callback.answer()
+        else:
+            await callback.answer(text, show_alert=show_alert)
+        answered_at_edge = True
+    except Exception:
+        answered_at_edge = False
+
     async with AsyncSessionLocal() as session:
         await enqueue_telegram_callback_answer(
             session,
@@ -3139,6 +3149,7 @@ async def _answer_stale_trade_creation_callback(
             received_at=received_at,
             text=text,
             show_alert=show_alert,
+            answered_at_edge=answered_at_edge,
         )
         await session.commit()
 

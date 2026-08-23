@@ -7,10 +7,16 @@ from dataclasses import dataclass, field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from core.db import engine as application_engine
-
-
 TELEGRAM_DELIVERY_QUEUE_OWNER_LOCK_KEY = 0x5447515545554531
+
+
+def _application_engine() -> AsyncEngine:
+    # Deployment probes need the lock key without loading runtime settings.
+    # Queue execution resolves the canonical engine only when it acquires or
+    # inspects the lease.
+    from core.db import engine
+
+    return engine
 
 
 class TelegramDeliveryQueueAlreadyOwnedError(RuntimeError):
@@ -84,7 +90,7 @@ async def acquire_telegram_delivery_queue_owner(
     engine: AsyncEngine | None = None,
 ) -> TelegramDeliveryQueueOwnerLease:
     """Acquire one session-level owner shared by all bot roles and processes."""
-    active_engine = engine or application_engine
+    active_engine = engine if engine is not None else _application_engine()
     connection = await active_engine.connect()
     try:
         result = await connection.execute(
@@ -106,6 +112,33 @@ async def acquire_telegram_delivery_queue_owner(
     except BaseException:
         await connection.close()
         raise
+
+
+async def telegram_delivery_queue_owner_is_held(
+    engine: AsyncEngine | None = None,
+) -> bool:
+    """Read whether the global queue-owner advisory lock is granted.
+
+    This does not acquire or weaken the lock. Primary health uses it to
+    report an incomplete split topology without becoming a second owner.
+    """
+    active_engine = engine if engine is not None else _application_engine()
+    class_id = (TELEGRAM_DELIVERY_QUEUE_OWNER_LOCK_KEY >> 32) & 0xFFFFFFFF
+    object_id = TELEGRAM_DELIVERY_QUEUE_OWNER_LOCK_KEY & 0xFFFFFFFF
+    async with active_engine.connect() as connection:
+        result = await connection.execute(
+            text(
+                "SELECT EXISTS ("
+                "SELECT 1 FROM pg_locks "
+                "WHERE locktype = 'advisory' "
+                "AND classid = :class_id "
+                "AND objid = :object_id "
+                "AND objsubid = 1 AND granted"
+                ")"
+            ),
+            {"class_id": class_id, "object_id": object_id},
+        )
+        return result.scalar() is True
 
 
 async def telegram_delivery_queue_owner_monitor_loop(

@@ -15,15 +15,21 @@ class FakeAsyncClientContext:
         self.response = response
         self.error = error
         self.exit_error = exit_error
+        self.is_closed = False
         self.post = AsyncMock(side_effect=self._post)
+        self.aclose = AsyncMock(side_effect=self._aclose)
 
     async def __aenter__(self):
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
+        await self.aclose()
+        return False
+
+    async def _aclose(self):
+        self.is_closed = True
         if self.exit_error is not None:
             raise self.exit_error
-        return False
 
     async def _post(self, *_args, **_kwargs):
         if self.error is not None:
@@ -40,6 +46,13 @@ class FakeResponse:
 
 
 class TelegramGatewayPolicyTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        telegram_gateway.reset_telegram_gateway_http_client_for_test()
+
+    async def asyncTearDown(self):
+        await telegram_gateway.aclose_telegram_http_client()
+        telegram_gateway.reset_telegram_gateway_http_client_for_test()
+
     async def test_gateway_hard_fails_on_iran_before_http_call(self):
         with patch("core.telegram_gateway.current_server", return_value="iran"), patch(
             "core.telegram_gateway.httpx.AsyncClient"
@@ -176,7 +189,78 @@ class TelegramGatewayPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.transport_phase, "pre_write")
         client_ctor.assert_not_called()
 
-    async def test_response_survives_client_close_error_after_provider_reply(self):
+    async def test_two_calls_reuse_one_http_client(self):
+        client = FakeAsyncClientContext(response=FakeResponse())
+        with patch("core.telegram_gateway.current_server", return_value="foreign"), patch(
+            "core.telegram_gateway.httpx.AsyncClient",
+            return_value=client,
+        ) as client_ctor:
+            first = await telegram_gateway.send_message(9, "hello", bot_token="token")
+            second = await telegram_gateway.send_message(
+                9,
+                "again",
+                bot_token="token",
+                timeout=3,
+            )
+
+        self.assertTrue(first.ok)
+        self.assertTrue(second.ok)
+        client_ctor.assert_called_once()
+        self.assertEqual(
+            client_ctor.call_args.kwargs["limits"],
+            telegram_gateway._HTTP_CLIENT_LIMITS,
+        )
+        self.assertEqual(client.post.await_count, 2)
+        self.assertEqual(client.post.await_args_list[0].kwargs["timeout"], 10)
+        self.assertEqual(client.post.await_args_list[1].kwargs["timeout"], 3)
+        client.aclose.assert_not_awaited()
+
+    async def test_caller_timeout_is_passed_on_every_request(self):
+        client = FakeAsyncClientContext(response=FakeResponse())
+        with patch("core.telegram_gateway.current_server", return_value="foreign"), patch(
+            "core.telegram_gateway.httpx.AsyncClient",
+            return_value=client,
+        ):
+            await telegram_gateway.post_telegram_method(
+                "sendMessage",
+                {"chat_id": 9, "text": "hello"},
+                timeout=1.5,
+                bot_token="token",
+            )
+            await telegram_gateway.post_telegram_method(
+                "sendDocument",
+                {
+                    "chat_id": 9,
+                    "document_base64": base64.b64encode(b"report").decode("ascii"),
+                    "document_filename": "report.xlsx",
+                    "document_sha256": hashlib.sha256(b"report").hexdigest(),
+                },
+                timeout=7,
+                bot_token="token",
+            )
+
+        self.assertEqual(client.post.await_args_list[0].kwargs["timeout"], 1.5)
+        self.assertEqual(client.post.await_args_list[1].kwargs["timeout"], 7)
+
+    async def test_shutdown_closes_the_shared_client(self):
+        client = FakeAsyncClientContext(response=FakeResponse())
+        with patch("core.telegram_gateway.current_server", return_value="foreign"), patch(
+            "core.telegram_gateway.httpx.AsyncClient",
+            return_value=client,
+        ):
+            result = await telegram_gateway.send_message(
+                9,
+                "hello",
+                bot_token="token",
+            )
+            await telegram_gateway.aclose_telegram_http_client()
+
+        self.assertTrue(result.ok)
+        self.assertIsNone(result.error)
+        client.aclose.assert_awaited_once()
+        self.assertTrue(client.is_closed)
+
+    async def test_close_error_on_shutdown_does_not_rewrite_prior_result(self):
         client = FakeAsyncClientContext(
             response=FakeResponse(),
             exit_error=RuntimeError("synthetic close failure"),
@@ -190,11 +274,12 @@ class TelegramGatewayPolicyTests(unittest.IsolatedAsyncioTestCase):
                 "hello",
                 bot_token="token",
             )
+            await telegram_gateway.aclose_telegram_http_client()
 
         self.assertTrue(result.ok)
         self.assertEqual(result.message_id, 42)
         self.assertEqual(result.status_code, 200)
-        self.assertEqual(result.error, "RuntimeError")
+        self.assertIsNone(result.error)
         self.assertEqual(result.transport_phase, "response_received")
 
     async def test_transport_failures_record_prewrite_vs_unknown_write(self):

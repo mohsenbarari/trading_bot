@@ -3,6 +3,7 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+from core.telegram_bot_runtime_role import TelegramBotRuntimeRoleError
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeConfigurationError,
     TelegramDeliveryRuntimeDecision,
@@ -86,6 +87,129 @@ class BotTelegramExecutionOwnershipTests(unittest.TestCase):
         self.assertNotIn(telegram_admin_broadcast_delivery_loop, factories)
         self.assertNotIn(telegram_notification_outbox_delivery_loop, factories)
         self.assertNotIn(telegram_market_notice_delivery_loop, factories)
+
+    def test_executor_role_starts_queue_and_otp_workers(self):
+        settings_obj = self._queue_settings(
+            telegram_bot_runtime_role="executor",
+            telegram_bot_split_enabled=True,
+            telegram_multi_publisher_enabled=True,
+            telegram_b2b_dispatch_enabled=True,
+        )
+        with patch(
+            "run_bot.configured_telegram_delivery_queue_worker_factory",
+            return_value=lambda: None,
+        ) as factory:
+            factories = telegram_execution_worker_factories(
+                TelegramDeliveryRuntimeDecision(
+                    mode=TelegramDeliveryRuntimeMode.QUEUE_V1,
+                    legacy_workers_enabled=False,
+                    queue_worker_enabled=True,
+                ),
+                settings_obj=settings_obj,
+                runtime_role="executor",
+            )
+
+        self.assertEqual(len(factories), 2)
+        factory.assert_called_once()
+        self.assertEqual(factory.call_args.kwargs["runtime_role"], "executor")
+        self.assertEqual(factories[1].__name__, "run_telegram_otp_ephemeral_worker")
+
+    def test_primary_role_returns_no_queue_or_otp_worker(self):
+        factories = telegram_execution_worker_factories(
+            TelegramDeliveryRuntimeDecision(
+                mode=TelegramDeliveryRuntimeMode.QUEUE_V1,
+                legacy_workers_enabled=False,
+                queue_worker_enabled=True,
+            ),
+            settings_obj=self._queue_settings(
+                telegram_bot_runtime_role="primary",
+                telegram_bot_split_enabled=True,
+            ),
+            runtime_role="primary",
+        )
+        self.assertEqual(factories, ())
+
+    def test_executor_role_rejects_legacy_workers(self):
+        with self.assertRaises(TelegramBotRuntimeRoleError):
+            telegram_execution_worker_factories(
+                TelegramDeliveryRuntimeDecision(
+                    mode=TelegramDeliveryRuntimeMode.LEGACY,
+                    legacy_workers_enabled=True,
+                    queue_worker_enabled=False,
+                ),
+                settings_obj=self._queue_settings(
+                    telegram_bot_runtime_role="executor",
+                    telegram_bot_split_enabled=True,
+                    telegram_multi_publisher_enabled=True,
+                    telegram_b2b_dispatch_enabled=True,
+                ),
+                runtime_role="executor",
+            )
+
+    def test_configured_queue_factory_rejects_primary_and_binds_all_executor_lanes(self):
+        settings_obj = self._queue_settings(
+            telegram_bot_runtime_role="executor",
+            telegram_bot_split_enabled=True,
+            telegram_multi_publisher_enabled=True,
+            telegram_b2b_dispatch_enabled=True,
+        )
+        composition = SimpleNamespace(
+            bot_identities=("primary", "channel_editor", "publisher_1", "publisher_2"),
+            freshness_validators={
+                "primary": object(),
+                "channel_editor": object(),
+                "publisher_1": object(),
+                "publisher_2": object(),
+            },
+            lifecycle_feedbacks={
+                "primary": object(),
+                "channel_editor": object(),
+                "publisher_1": object(),
+                "publisher_2": object(),
+            },
+            credential_registry=SimpleNamespace(
+                bot_identities=("primary", "channel_editor", "publisher_1", "publisher_2")
+            ),
+        )
+        redis_client = Mock()
+        redis_client.aclose = AsyncMock()
+        limiter = object()
+
+        with self.assertRaises(TelegramDeliveryRuntimeConfigurationError):
+            configured_telegram_delivery_queue_worker_factory(
+                self._queue_settings(telegram_bot_split_enabled=True),
+                runtime_role="primary",
+            )
+
+        with (
+            patch("run_bot.build_configured_telegram_delivery_runtime", return_value=composition),
+            patch("run_bot.redis.Redis.from_url", return_value=redis_client),
+            patch(
+                "run_bot.configured_redis_telegram_delivery_limiter",
+                return_value=limiter,
+            ),
+            patch("run_bot.telegram_delivery_queue_loop", new=AsyncMock()) as queue_loop,
+        ):
+            runner = configured_telegram_delivery_queue_worker_factory(
+                settings_obj,
+                runtime_role="executor",
+            )
+            asyncio.run(runner())
+
+        kwargs = queue_loop.await_args.kwargs
+        self.assertEqual(
+            kwargs["bot_identities"],
+            ("primary", "channel_editor", "publisher_1", "publisher_2"),
+        )
+        self.assertEqual(
+            set(kwargs["freshness_validators"]),
+            {"primary", "channel_editor", "publisher_1", "publisher_2"},
+        )
+        self.assertEqual(
+            set(kwargs["lifecycle_feedbacks"]),
+            {"primary", "channel_editor", "publisher_1", "publisher_2"},
+        )
+        self.assertIs(kwargs["dispatch_limiter"], limiter)
 
     def test_configured_queue_factory_binds_registry_adapters_and_shared_limiter(self):
         settings_obj = self._queue_settings(

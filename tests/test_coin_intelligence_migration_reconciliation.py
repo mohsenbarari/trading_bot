@@ -7,6 +7,11 @@ from unittest.mock import Mock, patch
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 
+from core.schema_revision import (
+    CANONICAL_SCHEMA_HEAD,
+    CANONICAL_SCHEMA_PARENT,
+    assert_canonical_schema_head,
+)
 from migrations.versions import fb1c2d3e4f5a_reconcile_coin_schema_history as migration
 
 
@@ -27,12 +32,14 @@ class CoinIntelligenceMigrationGraphTests(unittest.TestCase):
         config.set_main_option("script_location", str(REPO_ROOT / "migrations"))
         script = ScriptDirectory.from_config(config)
 
-        self.assertEqual(script.get_heads(), ["a496c8d0e1f2"])
+        self.assertEqual(script.get_heads(), [CANONICAL_SCHEMA_HEAD])
+        self.assertEqual(assert_canonical_schema_head(REPO_ROOT), CANONICAL_SCHEMA_HEAD)
         revisions = {
             item.revision: item
-            for item in script.walk_revisions(base="base", head="a496c8d0e1f2")
+            for item in script.walk_revisions(base="base", head=CANONICAL_SCHEMA_HEAD)
         }
-        self.assertEqual(revisions["a496c8d0e1f2"].down_revision, "a385f6b7c8d0")
+        self.assertEqual(revisions[CANONICAL_SCHEMA_HEAD].down_revision, CANONICAL_SCHEMA_PARENT)
+        self.assertEqual(revisions[CANONICAL_SCHEMA_PARENT].down_revision, "a385f6b7c8d0")
         self.assertEqual(revisions["a385f6b7c8d0"].down_revision, "ff5a6b7c8d9e")
         self.assertEqual(revisions["ff5a6b7c8d9e"].down_revision, "fe4f5a6b7c8d")
         self.assertEqual(revisions["fe4f5a6b7c8d"].down_revision, "fd3e4f5a6b7c")

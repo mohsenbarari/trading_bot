@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     error_tracking_rate_limit_max_fingerprints: int = 2048
     observability_api_key: str | None = None
     trading_bot_service: str = "app"
+    # Split Telegram execution: `all` keeps one process when split is off.
+    # `primary` and `executor` are valid only with TELEGRAM_BOT_SPLIT_ENABLED.
+    telegram_bot_runtime_role: str = "all"
+    telegram_bot_split_enabled: bool = False
     trading_bot_metrics_backend: str = "memory"
     audit_trail_path: str | None = None
     trusted_proxy_cidrs: str = "127.0.0.1/32,::1/128"
@@ -149,6 +153,7 @@ class Settings(BaseSettings):
     telegram_multi_publisher_enabled: bool = False
     telegram_b2b_dispatch_enabled: bool = False
     telegram_b2b_dispatch_interval_seconds: float = 0.5
+    telegram_b2b_dispatch_batch_size: int = 8
     telegram_b2b_acknowledgement_timeout_seconds: float = 15.0
     # Publisher credentials remain separate to make accidental token reuse and
     # identity drift fail before a worker can be composed.  They are consumed
@@ -333,6 +338,28 @@ class Settings(BaseSettings):
             self.trading_bot_service or ""
         ).strip().lower() in {"api", "bot", "sync_worker", "load_runner", "webapp", "migration"}:
             raise ValueError("telegram_provider_test_authority_forbidden_on_deployable_service")
+        runtime_role = str(self.telegram_bot_runtime_role or "").strip().lower()
+        if runtime_role == "publishers":
+            raise ValueError("telegram_bot_runtime_role_publishers_retired_use_executor")
+        if runtime_role not in {"all", "primary", "executor"}:
+            raise ValueError("telegram_bot_runtime_role_unknown")
+        self.telegram_bot_runtime_role = runtime_role
+        split_enabled = bool(self.telegram_bot_split_enabled)
+        if split_enabled and runtime_role == "all":
+            raise ValueError("telegram_bot_split_rejects_combined_all")
+        if not split_enabled and runtime_role != "all":
+            raise ValueError("telegram_bot_split_required_for_role")
+        if runtime_role == "executor" and not (
+            bool(self.telegram_multi_publisher_enabled)
+            and bool(self.telegram_b2b_dispatch_enabled)
+        ):
+            raise ValueError("telegram_bot_runtime_executor_requires_b2b")
+        if str(self.trading_bot_service or "").strip().lower() == "bot":
+            from core.telegram_dispatch_latency_pool import required_connections_for_role
+
+            ceiling = int(self.db_pool_size) + int(self.db_max_overflow)
+            if ceiling < required_connections_for_role(runtime_role):
+                raise ValueError("telegram_bot_db_pool_below_role_requirement")
         positive_float_fields = (
             "telegram_delivery_queue_preflight_timeout_seconds",
             "telegram_delivery_queue_worker_interval_seconds",
@@ -388,6 +415,7 @@ class Settings(BaseSettings):
             "telegram_multi_publisher_lane_concurrency",
             "telegram_offer_queue_feeder_batch_limit",
             "telegram_delivery_queue_limiter_key_ttl_seconds",
+            "telegram_b2b_dispatch_batch_size",
         ):
             if isinstance(getattr(self, name), bool) or int(getattr(self, name)) <= 0:
                 raise ValueError(f"{name}_must_be_positive")

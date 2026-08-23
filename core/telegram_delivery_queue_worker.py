@@ -23,6 +23,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import telegram_gateway
+from core.telegram_delivery_callback_contract import (
+    TELEGRAM_CALLBACK_ANSWERED_AT_EDGE_REASON,
+)
 from core.background_job_authority import (
     JOB_TELEGRAM_DELIVERY_QUEUE,
     assert_background_job_authority,
@@ -1558,12 +1561,25 @@ async def run_telegram_delivery_queue_cycle(
 
         try:
             try:
-                gateway_result = await gateway_call(
-                    str(job.method),
-                    dict(job.payload or {}),
-                    timeout=_request_timeout_seconds(),
-                    idempotency_key=str(job.dedupe_key),
-                )
+                if (
+                    str(job.method) == "answerCallbackQuery"
+                    and str(getattr(job, "outcome_reason", "") or "")
+                    == TELEGRAM_CALLBACK_ANSWERED_AT_EDGE_REASON
+                ):
+                    gateway_result = telegram_gateway.TelegramGatewayResult(
+                        ok=True,
+                        method=str(job.method),
+                        status_code=200,
+                        response_json={"ok": True, "result": True},
+                        idempotency_key=str(job.dedupe_key),
+                    )
+                else:
+                    gateway_result = await gateway_call(
+                        str(job.method),
+                        dict(job.payload or {}),
+                        timeout=_request_timeout_seconds(),
+                        idempotency_key=str(job.dedupe_key),
+                    )
             except asyncio.CancelledError:
                 # Dispatch was already marked. Lease recovery must classify this as
                 # ambiguous/reconcile; releasing it as retryable could duplicate.
@@ -2268,6 +2284,7 @@ async def telegram_delivery_queue_loop(
     credential_registry: TelegramDeliveryCredentialRegistry | None = None,
     dispatch_limiter: TelegramDeliveryDispatchLimiter | None = None,
     bot_identities: Sequence[str] | None = None,
+    process_owner_lease: TelegramDeliveryQueueOwnerLease | None = None,
 ) -> None:
     """Supervise independent bot lanes under the single queue-v1 owner."""
     global _active_process_owner_lease
@@ -2299,7 +2316,8 @@ async def telegram_delivery_queue_loop(
             "telegram_preflight_channel_destination_invalid"
         )
     channel_destination_key = f"channel:{normalized_channel_id}"
-    process_owner_lease = await acquire_telegram_delivery_queue_owner()
+    if process_owner_lease is None:
+        process_owner_lease = await acquire_telegram_delivery_queue_owner()
     if (
         _active_process_owner_lease is not None
         and _active_process_owner_lease is not process_owner_lease
