@@ -410,4 +410,67 @@ test.describe('Non-messenger responsive viewport matrix', () => {
       }
     })
   }
+
+  for (const viewport of [
+    { width: 390, height: 844, label: 'mobile-390' },
+    { width: 1440, height: 900, label: 'desktop-1440' },
+  ]) {
+    test(
+      `${viewport.label} keeps dashboard account actions visible and clickable`,
+      async ({ page }) => {
+        await page.setViewportSize({ width: viewport.width, height: viewport.height })
+        await gotoRouteWithNavigationRetry(page, '/')
+        await expect(page.getByText('ورود به بازار').first()).toBeVisible({ timeout: 10_000 })
+        await waitForStableRouteLayout(page)
+
+        const trigger = page.locator('.dashboard-account-menu__trigger')
+        await trigger.click()
+
+        const menu = page.getByRole('menu', { name: 'گزینه‌های حساب کاربری' })
+        const profileAction = menu.getByRole('menuitem', { name: 'پروفایل' })
+        const logoutAction = menu.getByRole('menuitem', { name: 'خروج' })
+        await expect(menu).toBeVisible()
+        await expect(profileAction).toBeVisible()
+        await expect(logoutAction).toBeVisible()
+
+        const geometry = await page.evaluate(() => {
+          const triggerElement = document.querySelector<HTMLElement>(
+            '.dashboard-account-menu__trigger',
+          )
+          const menuElement = document.querySelector<HTMLElement>('#dashboard-account-menu')
+          const actions = Array.from(
+            menuElement?.querySelectorAll<HTMLElement>('[role="menuitem"]') || [],
+          )
+
+          if (!triggerElement || !menuElement || actions.length !== 2) return null
+
+          const triggerRect = triggerElement.getBoundingClientRect()
+          const menuRect = menuElement.getBoundingClientRect()
+          return {
+            menuPosition: getComputedStyle(menuElement).position,
+            opensBelowTrigger: menuRect.top >= triggerRect.bottom,
+            insideViewport:
+              menuRect.left >= 0 &&
+              menuRect.right <= window.innerWidth &&
+              menuRect.top >= 0 &&
+              menuRect.bottom <= window.innerHeight,
+            actionsHitTestThemselves: actions.every((action) => {
+              const rect = action.getBoundingClientRect()
+              const hit = document.elementFromPoint(
+                rect.left + rect.width / 2,
+                rect.top + rect.height / 2,
+              )
+              return hit === action || action.contains(hit)
+            }),
+          }
+        })
+
+        expect(geometry).not.toBeNull()
+        expect(geometry?.menuPosition).toBe('absolute')
+        expect(geometry?.opensBelowTrigger).toBe(true)
+        expect(geometry?.insideViewport).toBe(true)
+        expect(geometry?.actionsHitTestThemselves).toBe(true)
+      },
+    )
+  }
 })
