@@ -244,73 +244,6 @@ def render_telegram_publisher_dispatch(command: TelegramPublisherDispatchCommand
     )
 
 
-async def acknowledge_claimed_telegram_publisher_dispatch_locally(
-    db: AsyncSession,
-    *,
-    current_server: str,
-    command_id: str,
-    lease_token: int,
-    now: datetime,
-) -> bool:
-    """Complete the durable handoff when every publisher runs in this process.
-
-    Telegram Bot API cannot be used as a bot-to-bot transport.  The durable
-    database command is the handoff, so the selected publisher lane may claim
-    its job as soon as this transaction commits.  The lane is woken through
-    the same transactional hint the enqueue path uses; without it the lane
-    would not notice the acknowledgement until its next idle poll.
-    """
-
-    _require_foreign(current_server)
-    current_time = _utc(now)
-    command = (
-        await db.execute(
-            select(TelegramPublisherDispatchCommand)
-            .where(
-                TelegramPublisherDispatchCommand.command_id == str(command_id)
-            )
-            .with_for_update()
-        )
-    ).scalar_one_or_none()
-    if command is None or int(command.lease_token or 0) != int(lease_token):
-        return False
-    publisher = _publisher_identity(command.publisher_bot_identity)
-    if command.state == TelegramPublisherDispatchState.ACKNOWLEDGED.value:
-        return True
-    if command.state in {
-        TelegramPublisherDispatchState.FAILED.value,
-        TelegramPublisherDispatchState.SUPERSEDED.value,
-    }:
-        raise TelegramPublisherDispatchError(
-            "telegram_publisher_dispatch_command_stale"
-        )
-    command.state = TelegramPublisherDispatchState.ACKNOWLEDGED.value
-    command.acknowledged_at = current_time
-    command.receipt_sequence = _positive_int(
-        command.dispatch_sequence,
-        reason="telegram_publisher_dispatch_sequence_invalid",
-    )
-    command.receipt_received_at = current_time
-    command.lease_until = None
-    command.next_retry_at = None
-    command.last_error_class = None
-    command.last_error_message = None
-    command.updated_at = current_time
-    await db.flush()
-    from core.telegram_delivery_queue_wakeup import (
-        emit_delivery_queue_wakeup,
-    )
-
-    await emit_delivery_queue_wakeup(db, bot_identity=publisher)
-    metrics_registry.observe(
-        "telegram_publisher_b2b_ack_lag_ms",
-        "Lag from durable B2B command creation to publisher acknowledgement.",
-        max(0.0, (current_time - _utc(command.created_at)).total_seconds() * 1000),
-        lane=str(command.publisher_bot_identity),
-    )
-    return True
-
-
 async def claim_next_telegram_publisher_dispatch_command(
     db: AsyncSession,
     *,
@@ -416,6 +349,73 @@ async def record_telegram_publisher_dispatch_result(
         command.last_error_message = None
     command.updated_at = current_time
     await db.flush()
+    return True
+
+
+async def acknowledge_claimed_telegram_publisher_dispatch_locally(
+    db: AsyncSession,
+    *,
+    current_server: str,
+    command_id: str,
+    lease_token: int,
+    now: datetime,
+) -> bool:
+    """Complete the durable handoff when every publisher runs in this process.
+
+    Telegram Bot API cannot be used as a bot-to-bot transport.  The durable
+    database command is the handoff, so the selected publisher lane may claim
+    its job as soon as this transaction commits.  The lane is woken through
+    the same transactional hint the enqueue path uses; without it the lane
+    would not notice the acknowledgement until its next idle poll.
+    """
+
+    _require_foreign(current_server)
+    current_time = _utc(now)
+    command = (
+        await db.execute(
+            select(TelegramPublisherDispatchCommand)
+            .where(
+                TelegramPublisherDispatchCommand.command_id == str(command_id)
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if command is None or int(command.lease_token or 0) != int(lease_token):
+        return False
+    publisher = _publisher_identity(command.publisher_bot_identity)
+    if command.state == TelegramPublisherDispatchState.ACKNOWLEDGED.value:
+        return True
+    if command.state in {
+        TelegramPublisherDispatchState.FAILED.value,
+        TelegramPublisherDispatchState.SUPERSEDED.value,
+    }:
+        raise TelegramPublisherDispatchError(
+            "telegram_publisher_dispatch_command_stale"
+        )
+    command.state = TelegramPublisherDispatchState.ACKNOWLEDGED.value
+    command.acknowledged_at = current_time
+    command.receipt_sequence = _positive_int(
+        command.dispatch_sequence,
+        reason="telegram_publisher_dispatch_sequence_invalid",
+    )
+    command.receipt_received_at = current_time
+    command.lease_until = None
+    command.next_retry_at = None
+    command.last_error_class = None
+    command.last_error_message = None
+    command.updated_at = current_time
+    await db.flush()
+    from core.telegram_delivery_queue_wakeup import (
+        emit_delivery_queue_wakeup,
+    )
+
+    await emit_delivery_queue_wakeup(db, bot_identity=publisher)
+    metrics_registry.observe(
+        "telegram_publisher_b2b_ack_lag_ms",
+        "Lag from durable B2B command creation to publisher acknowledgement.",
+        max(0.0, (current_time - _utc(command.created_at)).total_seconds() * 1000),
+        lane=str(command.publisher_bot_identity),
+    )
     return True
 
 
