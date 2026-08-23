@@ -154,6 +154,28 @@ class CoinGroupParserTests(unittest.TestCase):
         self.assertIsNone(cash.commodity_code)
         self.assertEqual(cash.settlement_term, "CASH")
 
+    def test_unnamed_market_prices_use_only_the_canonical_scale(self) -> None:
+        cases = {
+            "10 تا 209700 ف": (209_700, 10, "SELL"),
+            "10 تا 210 خ": (210_000, 10, "BUY"),
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                parsed = parse_coin_group_offers(self.source(text))
+                self.assertEqual(len(parsed), 1)
+                self.assertEqual(
+                    (
+                        parsed[0].price_project_thousand_toman,
+                        parsed[0].quantity,
+                        parsed[0].side,
+                    ),
+                    expected,
+                )
+
+        # Four digits have no unambiguous project price scale and must not be
+        # guessed into a valid market band.
+        self.assertEqual(parse_coin_group_offers(self.source("10 تا 2097 خ")), [])
+
     def test_full_toman_and_redundant_zero_prices_and_low_date_shorthand(self) -> None:
         cases = {
             "۴ گرمی سالم ف ۲۷.۷۰۰.۰۰۰": ("ONE_GRAM", 4, "SELL", 27_700),
