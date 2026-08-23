@@ -264,6 +264,27 @@ class TelegramSplitRuntimeCutoverTests(unittest.TestCase):
             self.assertIn("staging-bot", args)
             self.assertIn("staging-bot-executor", args)
 
+    def test_compose_operator_pins_the_runtime_image_to_the_expected_release(self):
+        world = _FakeComposeWorld()
+        world.running.pop("bot")
+        operator = ComposeSplitOperator(
+            world,
+            project_name="trading_bot_staging",
+            compose_file="deploy/staging/docker-compose.staging.yml",
+            env_file=".env.staging",
+            expected_sha="testsha",
+        )
+
+        operator.start_service("bot_executor", role="executor", split_enabled=True)
+
+        up_env = next(
+            env
+            for args, env in world.calls_with_env
+            if "up" in args and args[-1] == "bot_executor"
+        )
+        self.assertEqual(up_env["STAGING_IMAGE_TAG"], "testsha")
+        self.assertEqual(up_env["STAGING_RELEASE_SHA"], "testsha")
+
     def test_compose_operator_detects_crash_loop_and_rolls_back(self):
         world = _FakeComposeWorld()
         world.crash_executor = True
@@ -312,6 +333,7 @@ class TelegramSplitRuntimeCutoverTests(unittest.TestCase):
 class _FakeComposeWorld:
     def __init__(self):
         self.calls: list[list[str]] = []
+        self.calls_with_env: list[tuple[list[str], dict[str, str]]] = []
         self.roles = {"bot": "all"}
         self.split = {"bot": False}
         self.running = {"bot": True, "foreign_app": True}
@@ -349,6 +371,7 @@ class _FakeComposeWorld:
 
     def __call__(self, args, *, env=None):
         self.calls.append(list(args))
+        self.calls_with_env.append((list(args), dict(env or {})))
         if args[:2] == ["docker", "inspect"]:
             name = str(args[-1]).removeprefix("cid-")
             if name not in self.running:

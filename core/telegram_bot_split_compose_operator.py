@@ -129,6 +129,14 @@ class ComposeSplitOperator:
         return result
 
     def _compose(self, *args: str, extra_env: dict[str, str] | None = None) -> CommandResult:
+        compose_env = dict(extra_env or {})
+        if self.expected_sha:
+            # The staging Compose file selects the immutable runtime image via
+            # STAGING_IMAGE_TAG, while RELEASE_SHA is only the in-container
+            # identity.  Supplying just the latter can silently resolve the
+            # service to the mutable ``latest`` image during a split cutover.
+            compose_env.setdefault("STAGING_IMAGE_TAG", self.expected_sha)
+            compose_env.setdefault("STAGING_RELEASE_SHA", self.expected_sha)
         command = [
             "docker",
             "compose",
@@ -148,7 +156,7 @@ class ComposeSplitOperator:
             self.executor_profile,
             *args,
         ]
-        return self._run(command, env=extra_env)
+        return self._run(command, env=compose_env)
 
     def _inspect_payload(self, name: str) -> dict[str, Any] | None:
         listed = self._compose("ps", "-a", "-q", name)
