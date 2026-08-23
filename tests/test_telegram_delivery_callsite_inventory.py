@@ -7,6 +7,7 @@ from scripts.audit_telegram_delivery_calls import (
     EXPECTED_RUNTIME_INVENTORY_SHA256,
     MAIN_UIUX_INTEGRATION_RUNTIME_INVENTORY_SHA256,
     OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256,
+    PRE_STAGE8_EDGE_CALLBACK_WITNESS_RUNTIME_INVENTORY_SHA256,
     PRE_REGISTRATION_CALLBACK_HANDOFF_RUNTIME_INVENTORY_SHA256,
     PRE_SYNC_PUBLICATION_PROMOTION_RUNTIME_INVENTORY_SHA256,
     PRE_ABBREVIATED_PRICE_AND_CUSTOMER_LIMITS_RUNTIME_INVENTORY_SHA256,
@@ -73,6 +74,7 @@ class TelegramDeliveryCallsiteInventoryTests(unittest.TestCase):
                 PRE_OTP_QUEUE_HARDENING_RUNTIME_INVENTORY_SHA256,
                 PRE_OTP_QUEUE_METADATA_FIX_RUNTIME_INVENTORY_SHA256,
                 OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256,
+                PRE_STAGE8_EDGE_CALLBACK_WITNESS_RUNTIME_INVENTORY_SHA256,
                 PRE_OVERTIME_REQUEST_CANCEL_FORWARD_RUNTIME_INVENTORY_SHA256,
                 PRODUCER_ONLY_OTP_QUEUE_RUNTIME_INVENTORY_SHA256,
             },
@@ -106,7 +108,25 @@ class TelegramDeliveryCallsiteInventoryTests(unittest.TestCase):
         ]
         self.assertEqual({item.scope for item in matches}, expected_scopes)
         self.assertTrue(
-            all(item.disposition == "legacy_mode_guarded" for item in matches)
+            all(
+                item.disposition
+                in {"legacy_mode_guarded", "queue_execution"}
+                for item in matches
+            )
+        )
+        self.assertTrue(
+            any(
+                item.scope == "_answer_stale_trade_creation_callback"
+                and item.disposition == "queue_execution"
+                for item in matches
+            )
+        )
+        self.assertTrue(
+            any(
+                item.scope == "_send_stale_trade_builder_guidance"
+                and item.disposition == "legacy_mode_guarded"
+                for item in matches
+            )
         )
 
     def test_repeat_offer_direct_fallbacks_are_owner_guarded(self):

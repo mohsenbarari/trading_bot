@@ -139,10 +139,12 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "non_delivery_timer": 5,
     "non_message_control": 2,
     "operational_control": 3,
-    "queue_execution": 1,
+    # Shared credential-bound gateway plus Stage 8 edge callback answers
+    # that keep one durable enqueue_telegram_callback_answer witness.
+    "queue_execution": 6,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
-    "efc7ac2a07ddd589e5b281ca5f58c5676fe861b8003146102209867c1e38d318"
+    "a11b3849c4e75aca266ba6354c2a798311aef12964ff2dff8623faadf70feef1"
 )
 PRE_REGISTRATION_CALLBACK_HANDOFF_RUNTIME_INVENTORY_SHA256 = (
     "50173941ebbcff6002bf09a12e0bad81d60a4e89bbb455eb5e576741fa31046d"
@@ -192,9 +194,16 @@ MAIN_UIUX_INTEGRATION_RUNTIME_INVENTORY_SHA256 = (
 OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256 = (
     "e15b604e99e012f1156e5f0d93070470d58d6b7ea97f3f48853f567db68c1995"
 )
+PRE_STAGE8_EDGE_CALLBACK_WITNESS_RUNTIME_INVENTORY_SHA256 = (
+    "efc7ac2a07ddd589e5b281ca5f58c5676fe861b8003146102209867c1e38d318"
+)
 REVIEWED_RUNTIME_INVENTORY_SHA256 = frozenset(
     {
         EXPECTED_RUNTIME_INVENTORY_SHA256,
+        # Stage 8 already answered callbacks on the edge and enqueued one
+        # durable witness. Those five callback.answer callsites are now
+        # queue_execution instead of remaining_callback_direct.
+        PRE_STAGE8_EDGE_CALLBACK_WITNESS_RUNTIME_INVENTORY_SHA256,
         # Direct-registration handoff now retains the CallbackQuery route for
         # the final Queue-v1 response. No Telegram boundary changed: all 103
         # callsites and dispositions remain exact; only existing guarded
@@ -870,6 +879,14 @@ def _classify(
         "interactive_message",
     }:
         return "remaining_cleanup_direct", "direct bot cleanup still bypasses shared queue"
+    if (
+        kind == "callback_answer"
+        and "enqueue_telegram_callback_answer" in scope_text
+    ):
+        return (
+            "queue_execution",
+            "edge callback answer keeps one durable queue witness",
+        )
     if kind == "callback_answer":
         return "remaining_callback_direct", "deadline callback still uses aiogram directly"
     if kind in {"interactive_message", "dynamic_delivery_lookup"}:

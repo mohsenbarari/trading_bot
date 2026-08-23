@@ -2,6 +2,7 @@
 
 Entries are newest first.
 
+- 2026-08-23 | Central-poller lock is monitored and fail-closes independently of the queue owner. Split cutover is a postcheck state machine with automatic job-preserving rollback. Bot pools use DB_BOT_*/STAGING_DB_BOT_*; APIs stay untouched. Canonical Alembic head is `ff6c7d8e9f01`. This mission did not deploy staging or production.
 - 2026-08-23 | Candidate absorbed origin/main `b8746889` without editing main. Conflicts kept local ack + wakeup + batch 8; inference/ops commits auto-merged.
 - 2026-08-23 | Split runtime is fail-closed: default `TELEGRAM_BOT_SPLIT_ENABLED=false` and role `all`. `primary` never owns the queue or OTP and must not acquire the global owner. `executor` (retired name `publishers`) is the only Queue-v1 owner of every lane plus OTP, taken before publisher polling or provider calls. Legacy accepts only `all`. Status remains READY FOR STAGING INTEGRATION REVIEW; no live percentiles.
 - 2026-08-23 | Stage 12 sizes pools from slots, not live waits. `all` keeps 15+10. Split `primary` has no queue slots (ceiling 12+8 kept). `executor` owns every lane so its ceiling rose to 15+10. Settings `db_pool_size` stays 15.
