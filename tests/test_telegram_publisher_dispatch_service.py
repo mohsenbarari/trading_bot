@@ -141,6 +141,100 @@ class TelegramPublisherDispatchServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(duplicate.duplicate)
         self.assertEqual(db.flush.await_count, 1)
 
+    async def test_first_acknowledgement_wakes_the_assigned_publisher_lane(self):
+        command = _command()
+        db = _DB(command)
+        text = render_telegram_publisher_dispatch(command)
+
+        with patch(
+            "core.telegram_delivery_queue_wakeup.emit_delivery_queue_wakeup",
+            new=AsyncMock(),
+        ) as emit:
+            accepted = await accept_telegram_publisher_dispatch(
+                db,
+                current_server="foreign",
+                publisher_bot_identity="publisher_3",
+                expected_primary_bot_id=100,
+                sender_bot_id=100,
+                text=text,
+                now=NOW,
+            )
+            duplicate = await accept_telegram_publisher_dispatch(
+                db,
+                current_server="foreign",
+                publisher_bot_identity="publisher_3",
+                expected_primary_bot_id=100,
+                sender_bot_id=100,
+                text=text,
+                now=NOW,
+            )
+
+        self.assertFalse(accepted.duplicate)
+        self.assertTrue(duplicate.duplicate)
+        emit.assert_awaited_once_with(db, bot_identity="publisher_3")
+        self.assertEqual(db.flush.await_count, 1)
+
+    async def test_acknowledgement_wakeup_stays_on_the_same_transaction(self):
+        command = _command()
+        db = _DB(command)
+
+        with patch(
+            "core.telegram_delivery_queue_wakeup.emit_delivery_queue_wakeup",
+            new=AsyncMock(),
+        ) as emit:
+            await accept_telegram_publisher_dispatch(
+                db,
+                current_server="foreign",
+                publisher_bot_identity="publisher_3",
+                expected_primary_bot_id=100,
+                sender_bot_id=100,
+                text=render_telegram_publisher_dispatch(command),
+                now=NOW,
+            )
+
+        self.assertIs(emit.await_args.args[0], db)
+        self.assertEqual(emit.await_args.kwargs["bot_identity"], "publisher_3")
+
+    async def test_primary_acknowledgement_wakes_the_lane_once(self):
+        command = _command(state="sent")
+        db = _DB(command)
+        text = render_telegram_publisher_b2b_envelope(
+            TelegramPublisherB2BEnvelope(
+                message_type=TelegramPublisherB2BMessageType.ACK,
+                command_id=command.command_id,
+                sequence=command.dispatch_sequence,
+                enqueued_at=NOW,
+                ack_sent_at=NOW,
+            )
+        )
+
+        with patch(
+            "core.telegram_delivery_queue_wakeup.emit_delivery_queue_wakeup",
+            new=AsyncMock(),
+        ) as emit, patch(
+            "core.services.telegram_publisher_dispatch_service.metrics_registry.observe"
+        ):
+            first = await accept_telegram_publisher_acknowledgement(
+                db,
+                current_server="foreign",
+                sender_bot_id=303,
+                publisher_bot_ids={"publisher_3": 303},
+                text=text,
+                now=NOW,
+            )
+            second = await accept_telegram_publisher_acknowledgement(
+                db,
+                current_server="foreign",
+                sender_bot_id=303,
+                publisher_bot_ids={"publisher_3": 303},
+                text=text,
+                now=NOW,
+            )
+
+        self.assertTrue(first)
+        self.assertTrue(second)
+        emit.assert_awaited_once_with(db, bot_identity="publisher_3")
+
     async def test_dispatch_uses_primary_gateway_and_publisher_private_chat_only(self):
         command = _command()
         lease = TelegramPublisherDispatchLease(command=command, lease_token=2)

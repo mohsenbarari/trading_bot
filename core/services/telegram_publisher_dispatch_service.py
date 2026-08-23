@@ -404,6 +404,11 @@ async def accept_telegram_publisher_dispatch(
         command.next_retry_at = None
         command.updated_at = current_time
         await db.flush()
+        from core.telegram_delivery_queue_wakeup import (
+            emit_delivery_queue_wakeup,
+        )
+
+        await emit_delivery_queue_wakeup(db, bot_identity=publisher)
     acknowledgement_text = render_telegram_publisher_b2b_envelope(
         TelegramPublisherB2BEnvelope(
             message_type=TelegramPublisherB2BMessageType.ACK,
@@ -471,6 +476,11 @@ async def accept_telegram_publisher_acknowledgement(
     command.next_retry_at = None
     command.updated_at = current_time
     await db.flush()
+    from core.telegram_delivery_queue_wakeup import (
+        emit_delivery_queue_wakeup,
+    )
+
+    await emit_delivery_queue_wakeup(db, bot_identity=publisher)
     metrics_registry.observe(
         "telegram_publisher_b2b_ack_lag_ms",
         "Lag from durable B2B command creation to publisher acknowledgement.",
