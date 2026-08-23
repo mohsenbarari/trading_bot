@@ -138,6 +138,14 @@ class ComposeSplitOperator:
             self.env_file,
             "-f",
             self.compose_file,
+            # Profile-scoped services are omitted from the Compose model even
+            # for read-only `ps` unless their profiles are active. Keep both
+            # bot roles visible throughout inspection and mutation so the
+            # operator cannot mistake an existing runtime for a missing one.
+            "--profile",
+            self.bot_profile,
+            "--profile",
+            self.executor_profile,
             *args,
         ]
         return self._run(command, env=extra_env)
@@ -250,7 +258,6 @@ class ComposeSplitOperator:
             and bot["role"] == TELEGRAM_BOT_RUNTIME_ROLE_ALL
         ):
             raise SplitCutoverError("telegram_bot_all_plus_executor_forbidden")
-        profile = self.executor_profile if name == "bot_executor" else self.bot_profile
         assignment = compose_pool_for_bot_role(role)
         extra_env = {
             "STAGING_TELEGRAM_BOT_RUNTIME_ROLE": role,
@@ -264,8 +271,6 @@ class ComposeSplitOperator:
                 assignment["db_max_overflow"]
             )
         self._compose(
-            "--profile",
-            profile,
             "up",
             "-d",
             "--no-build",

@@ -245,6 +245,25 @@ class TelegramSplitRuntimeCutoverTests(unittest.TestCase):
         self.assertNotIn("delete from telegram_delivery", joined.lower())
         self.assertFalse(operator.purged_jobs)
 
+    def test_compose_operator_keeps_both_bot_profiles_visible_during_inspection(self):
+        world = _FakeComposeWorld()
+        operator = ComposeSplitOperator(
+            world,
+            project_name="trading_bot_staging",
+            compose_file="deploy/staging/docker-compose.staging.yml",
+            env_file=".env.staging",
+            expected_sha="testsha",
+        )
+
+        topology = operator.record_topology()
+
+        self.assertEqual(topology["role"], "all")
+        compose_calls = [args for args in world.calls if "compose" in args]
+        self.assertTrue(compose_calls)
+        for args in compose_calls:
+            self.assertIn("staging-bot", args)
+            self.assertIn("staging-bot-executor", args)
+
     def test_compose_operator_detects_crash_loop_and_rolls_back(self):
         world = _FakeComposeWorld()
         world.crash_executor = True
