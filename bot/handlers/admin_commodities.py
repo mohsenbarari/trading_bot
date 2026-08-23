@@ -34,9 +34,18 @@ from aiogram.filters import StateFilter
 logger = logging.getLogger(__name__)
 router = Router()
 
-COMMODITIES_API_URL = "http://app:8000/api/commodities/"
-ALIASES_API_URL = "http://app:8000/api/commodities/aliases/"
 COMMODITY_PANEL_UNAVAILABLE_TEXT = "❌ مدیریت کالاها فعلاً در دسترس نیست. دوباره تلاش کنید."
+
+
+def commodities_api_url() -> str:
+    """Resolve the API service from the runtime topology, not a compose alias."""
+
+    origin = (settings.foreign_server_url or "http://app:8000").rstrip("/")
+    return f"{origin}/api/commodities/"
+
+
+def commodity_aliases_api_url() -> str:
+    return f"{commodities_api_url()}aliases/"
 
 
 async def _ack_admin_commodity_callback(
@@ -155,7 +164,7 @@ async def show_commodity_list(
     try:
         headers = get_auth_headers()
         async with httpx.AsyncClient() as client:
-            response = await client.get(COMMODITIES_API_URL, timeout=10.0, headers=headers)
+            response = await client.get(commodities_api_url(), timeout=10.0, headers=headers)
             response.raise_for_status()
             raw = response.json()
         # نرمال کردن به لیست: گاهی پاسخ dict با کلیدهای عددی است
@@ -246,7 +255,7 @@ async def show_aliases_list(
     try:
         headers = get_auth_headers()
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{COMMODITIES_API_URL}{commodity_id}", headers=headers)
+            response = await client.get(f"{commodities_api_url()}{commodity_id}", headers=headers)
             response.raise_for_status()
         commodity = response.json()
 
@@ -368,7 +377,7 @@ async def handle_alias_add_name(message: types.Message, state: FSMContext, user:
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(f"{COMMODITIES_API_URL}{commodity_id}/aliases", json={"alias": new_alias_name}, headers=get_auth_headers())
+            response = await client.post(f"{commodities_api_url()}{commodity_id}/aliases", json={"alias": new_alias_name}, headers=get_auth_headers())
             response.raise_for_status()
 
         await edit_interaction_result_via_runtime(message, user, status_msg, f"✅ نام مستعار **'{new_alias_name}'** افزوده شد.", parse_mode="Markdown")
@@ -433,7 +442,7 @@ async def handle_alias_edit_name(message: types.Message, state: FSMContext, user
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.put(f"{ALIASES_API_URL}{alias_id}", json={"alias": new_name}, headers=get_auth_headers())
+            response = await client.put(f"{commodity_aliases_api_url()}{alias_id}", json={"alias": new_name}, headers=get_auth_headers())
             response.raise_for_status()
         await edit_interaction_result_via_runtime(message, user, status_msg, f"✅ ویرایش شد.", parse_mode="Markdown")
     except httpx.HTTPStatusError as e:
@@ -489,7 +498,7 @@ async def handle_alias_delete_yes(query: types.CallbackQuery, user: Optional[Use
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.delete(f"{ALIASES_API_URL}{alias_id}", headers=get_auth_headers())
+            response = await client.delete(f"{commodity_aliases_api_url()}{alias_id}", headers=get_auth_headers())
             response.raise_for_status()
         await edit_interaction_result_via_runtime(
             query, user, status_msg, "✅ حذف شد."
@@ -540,7 +549,7 @@ async def handle_commodity_edit_name(message: types.Message, state: FSMContext, 
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.put(f"{COMMODITIES_API_URL}{commodity_id}", json={"name": new_name}, headers=get_auth_headers())
+            response = await client.put(f"{commodities_api_url()}{commodity_id}", json={"name": new_name}, headers=get_auth_headers())
             response.raise_for_status()
         await edit_interaction_result_via_runtime(message, user, status_msg, f"✅ نام کالا تغییر یافت.", parse_mode="Markdown")
     except httpx.HTTPStatusError as e:
@@ -581,7 +590,7 @@ async def handle_add_name(message: types.Message, state: FSMContext, user: Optio
     # بررسی تکراری بودن نام
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.get(COMMODITIES_API_URL, headers=get_auth_headers())
+            response = await client.get(commodities_api_url(), headers=get_auth_headers())
             response.raise_for_status()
             raw = response.json()
             if isinstance(raw, dict):
@@ -636,7 +645,7 @@ async def handle_add_aliases_and_create(message: types.Message, state: FSMContex
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(COMMODITIES_API_URL, json=payload, headers=get_auth_headers())
+            response = await client.post(commodities_api_url(), json=payload, headers=get_auth_headers())
             response.raise_for_status()
         await edit_interaction_result_via_runtime(message, user, status_msg, f"✅ کالا **'{commodity_name}'** ثبت شد.", parse_mode="Markdown")
         await clear_state_retain_anchor(state)
@@ -686,7 +695,7 @@ async def handle_delete_yes(query: types.CallbackQuery, user: Optional[User], st
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.delete(f"{COMMODITIES_API_URL}{commodity_id}", headers=get_auth_headers())
+            response = await client.delete(f"{commodities_api_url()}{commodity_id}", headers=get_auth_headers())
             response.raise_for_status()
         await edit_interaction_result_via_runtime(
             query, user, status_msg, "✅ کالا حذف شد."

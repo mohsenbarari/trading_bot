@@ -4,7 +4,12 @@ from types import SimpleNamespace
 
 import httpx
 
-from bot.handlers.admin_commodities import get_auth_headers, get_error_detail
+from bot.handlers.admin_commodities import (
+    commodities_api_url,
+    commodity_aliases_api_url,
+    get_auth_headers,
+    get_error_detail,
+)
 
 
 class FakeResponse:
@@ -20,6 +25,29 @@ class FakeResponse:
 
 
 class BotAdminCommoditiesHelperTests(unittest.TestCase):
+    def test_api_urls_follow_the_runtime_foreign_service_origin(self):
+        from bot.handlers import admin_commodities as module
+
+        original = module.settings.foreign_server_url
+        try:
+            module.settings.foreign_server_url = "http://foreign_app:8000/"
+            self.assertEqual(
+                commodities_api_url(),
+                "http://foreign_app:8000/api/commodities/",
+            )
+            self.assertEqual(
+                commodity_aliases_api_url(),
+                "http://foreign_app:8000/api/commodities/aliases/",
+            )
+
+            module.settings.foreign_server_url = None
+            self.assertEqual(
+                commodities_api_url(),
+                "http://app:8000/api/commodities/",
+            )
+        finally:
+            module.settings.foreign_server_url = original
+
     def test_get_auth_headers_uses_dev_key_or_not_set(self):
         from bot.handlers import admin_commodities as module
 

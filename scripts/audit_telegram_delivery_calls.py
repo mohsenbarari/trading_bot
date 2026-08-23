@@ -146,6 +146,9 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "queue_execution": 6,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
+    "05c198d98c2197832451c204610ba6fb5851d649836199484f21dcb693a79ad9"
+)
+PRE_COMMODITY_RUNTIME_ORIGIN_ROUTING_INVENTORY_SHA256 = (
     "3518df831edbcb7d278097f750921c5ced0cd530014fcbe72c3f712f05b77cb4"
 )
 PRE_PANEL_CALLBACK_HARDENING_RUNTIME_INVENTORY_SHA256 = (
@@ -214,6 +217,10 @@ PRE_STAGE8_EDGE_CALLBACK_WITNESS_RUNTIME_INVENTORY_SHA256 = (
 REVIEWED_RUNTIME_INVENTORY_SHA256 = frozenset(
     {
         EXPECTED_RUNTIME_INVENTORY_SHA256,
+        # Commodity management now resolves its API origin from the runtime
+        # topology. This only shifts reviewed source identities; the exact
+        # 109 Telegram boundaries and their dispositions are unchanged.
+        PRE_COMMODITY_RUNTIME_ORIGIN_ROUTING_INVENTORY_SHA256,
         # Panel callback hardening adds only Queue-v1 adapters and moves the
         # reviewed legacy fallback line identities. The exact 109 Telegram
         # boundaries and every disposition remain unchanged.

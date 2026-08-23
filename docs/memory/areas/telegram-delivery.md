@@ -1,7 +1,7 @@
 # Telegram Delivery
 
 - 2026-08-23 | `primary` polls/ACKs; the sole `executor` owns Queue-v1, OTP and global locks. APIs only produce. Leases and cutover fail closed, preserve jobs and await old owners; compose pins image+SHA.
-- 2026-08-23 | Panel navigation precedes FSM/router. Commodity admin API on foreign requires the exact dev key; callbacks ACK before work and stale actions fail visibly. Durable menu anchors preserve device Back.
+- 2026-08-23 | Panel navigation precedes FSM/router. Commodity admin API uses the configured foreign runtime origin (never a fixed Compose alias) plus exact dev key; callbacks ACK before work and stale actions fail visibly. Durable menu anchors preserve device Back.
 - 2026-08-23 | Latency uses ACK wakeup, shared HTTP, serial batch 8, claim index with `sent` and 1.05s/destination. Local ACK is lease-fenced; workers never repeat it.
 - 2026-08-23 | Video broadcast uses central-bot `file_id` through Queue-v1 `sendVideo`; never binary/path/base64. Pre-auth callbacks retain their origin event with actor/chat guards.
 - 2026-08-23 | Staging foreign runs bot/executor and five Publishers; Iran runs API. Inventory uses exact project/service/env; deploy removes opposites. Token/channel collisions block production; foreign assigns WebApp offers; APIs stay token-free.
