@@ -153,8 +153,9 @@ class BotTradeManageOfferGuardTests(unittest.IsolatedAsyncioTestCase):
 
         enqueue_callback.assert_awaited_once()
         self.assertIn("لفظ یافت نشد", enqueue_callback.await_args.kwargs["text"])
+        self.assertTrue(enqueue_callback.await_args.kwargs["answered_at_edge"])
         session.commit.assert_awaited_once()
-        callback.answer.assert_not_awaited()
+        callback.answer.assert_awaited_once()
 
 
 if __name__ == "__main__":

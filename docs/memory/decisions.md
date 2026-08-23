@@ -2,6 +2,7 @@
 
 Entries are newest first.
 
+- 2026-08-23 | Stage 8 inverts DB-first only for `answerCallbackQuery`: the edge answers first, then the durable witness is marked `sent` with `answered_at_edge`. Failure to answer still enqueues recovery. Owner approved this exception.
 - 2026-08-23 | Owner approved remaining Telegram latency stages on `candidate/telegram-dispatch-latency-v1`. Stage 7 adds fail-closed `TELEGRAM_BOT_RUNTIME_ROLE` (`all` default, `primary`, `publishers`) with disjoint lane ownership; the publishers compose service is profile-gated so current single-process deploys do not overlap.
 - 2026-08-23 | Stage 6 midpoint is code-derived only: dead wait 1s→0, B2B batch 1→8, keepalive HTTP, one B2B session, claim index covers `sent`. Channel interval, three Telegram hops, and the shared process are unchanged. Live staging percentiles were not collected, so stage 7 stays blocked on owner approval plus live evidence.
 - 2026-08-23 | Low-risk Telegram latency stages 1–5 are on `candidate/telegram-dispatch-latency-v1`: acknowledgement now emits the existing transactional wakeup; the gateway recycles one HTTP client per event loop; B2B dispatch claims a serial batch of 8; publisher B2B messages skip auth; the claim index covers `sent` and retention deletes terminal commands with their jobs. Sticky ownership, shared `destination_next`, and payload-free B2B stay locked. Stages 7–9 still need owner approval.

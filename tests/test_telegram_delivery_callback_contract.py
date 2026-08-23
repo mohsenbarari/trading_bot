@@ -14,6 +14,7 @@ from core.telegram_delivery_callback_contract import (
     CALLBACK_DEADLINE_TEMPLATE_VERSION,
     OFFER_EXPIRY_CALLBACK_TEMPLATE_VERSION,
     TELEGRAM_CALLBACK_ANSWER_DEADLINE_SECONDS,
+    TELEGRAM_CALLBACK_ANSWERED_AT_EDGE_REASON,
     build_telegram_callback_answer_payload,
     telegram_callback_destination_key,
     telegram_callback_source_natural_id,
@@ -273,6 +274,50 @@ class TelegramDeliveryCallbackContractTests(unittest.IsolatedAsyncioTestCase):
             callback_job.state,
             TelegramDeliveryState.EXPIRED_INTERACTION,
         )
+
+    async def test_edge_answer_marks_claimable_jobs_sent_and_skips_others(self):
+        now = utc_now()
+        pending = SimpleNamespace(
+            method="answerCallbackQuery",
+            state=TelegramDeliveryState.PENDING,
+            outcome_reason=None,
+            sent_at=None,
+            terminal_at=None,
+            updated_at=None,
+            next_retry_at=now,
+            last_error_class="x",
+            last_error_message="y",
+            provider_ok=None,
+        )
+        db = SimpleNamespace(flush=AsyncMock())
+        marked = await queue_service.mark_telegram_callback_answered_at_edge(
+            db,
+            pending,
+            now=now,
+        )
+        self.assertIs(marked, pending)
+        self.assertEqual(pending.state, TelegramDeliveryState.SENT)
+        self.assertEqual(pending.outcome_reason, TELEGRAM_CALLBACK_ANSWERED_AT_EDGE_REASON)
+        self.assertTrue(pending.provider_ok)
+        self.assertEqual(pending.sent_at, now)
+        db.flush.assert_awaited_once()
+
+        leased = SimpleNamespace(
+            method="answerCallbackQuery",
+            state=TelegramDeliveryState.LEASED,
+            outcome_reason=None,
+        )
+        unchanged = await queue_service.mark_telegram_callback_answered_at_edge(
+            db,
+            leased,
+            now=now,
+        )
+        self.assertEqual(unchanged.state, TelegramDeliveryState.LEASED)
+        with self.assertRaisesRegex(ValueError, "edge_mark_method_invalid"):
+            await queue_service.mark_telegram_callback_answered_at_edge(
+                db,
+                SimpleNamespace(method="sendMessage", state=TelegramDeliveryState.PENDING),
+            )
 
     def test_runtime_coverage_is_complete_after_scheduled_sources(self):
         freshness = configured_telegram_delivery_freshness_registry(
