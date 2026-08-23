@@ -1218,6 +1218,28 @@ class ProductionQueueCutoverTests(unittest.TestCase):
             finally:
                 first.release()
 
+    def test_reconciliation_lock_allows_only_its_exact_failed_journal(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            secure = Path(tmpdir) / "artifacts"
+            secure.mkdir(mode=0o700)
+            failed = secure / "production-queue-phase-failed.json"
+            failed.write_text('{"status":"recovery_failed"}\n', encoding="utf-8")
+            failed.chmod(0o600)
+            terminal = secure / "production-queue-phase-terminal.json"
+            terminal.write_text('{"status":"redeployed"}\n', encoding="utf-8")
+            terminal.chmod(0o600)
+            lock = cutover.ExclusiveRunLock(secure)
+            lock.acquire(allow_recovery_journal=failed)
+            lock.release()
+
+            other = secure / "production-queue-phase-other.json"
+            other.write_text('{"status":"recovery_failed"}\n', encoding="utf-8")
+            other.chmod(0o600)
+            with self.assertRaisesRegex(
+                cutover.ProductionCutoverError, "BLOCKED_PENDING_PHASE_JOURNAL"
+            ):
+                lock.acquire(allow_recovery_journal=failed)
+
     def test_source_updater_lock_rejects_a_concurrent_mutator_before_write(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1675,6 +1697,107 @@ class ProductionQueueCutoverTests(unittest.TestCase):
             self.assertEqual(
                 json.loads(journal.read_text(encoding="utf-8"))["status"],
                 "failed_recovered",
+            )
+
+    def test_reconcile_failed_redeploy_preserves_journal_and_requires_live_proof(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            artifacts = root / "artifacts"
+            artifacts.mkdir(mode=0o700)
+            source = root / "source.env"
+            source.write_text("PROFILE=queue-v1\n", encoding="utf-8")
+            source.chmod(0o600)
+            source_digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            binding = self.binding()
+            journal = artifacts / "production-queue-phase-failed.json"
+            failed = artifacts / "production-queue-redeploy-failed-proof.json"
+            failed_payload = {
+                "environment": "production",
+                "command": "redeploy",
+                "status": "failed",
+                "git": binding,
+                "safe_recovery": {"status": "recovery_failed_fail_closed"},
+                "secrets_disclosed": False,
+            }
+            failed.write_text(
+                json.dumps(failed_payload, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            failed.chmod(0o600)
+            failed_digest = hashlib.sha256(failed.read_bytes()).hexdigest()
+            journal_payload = {
+                "environment": "production",
+                "command": "redeploy",
+                "status": "recovery_failed",
+                "git_head": binding["head"],
+                "source_sha256": source_digest,
+                "receipt_sha256": failed_digest,
+                "secrets_disclosed": False,
+            }
+            journal.write_text(
+                json.dumps(journal_payload, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            journal.chmod(0o600)
+            journal_bytes = journal.read_bytes()
+            journal_digest = hashlib.sha256(journal_bytes).hexdigest()
+            live = {
+                "status": "READY_FOR_QUEUE_V1_REDEPLOY",
+                "source_sha256": source_digest,
+                "git": binding,
+                "executor_inventory": {
+                    "count": 1,
+                    "owner": "queue-v1",
+                    "overlap": False,
+                },
+                "current_runtime": {"status": "verified"},
+                "runtime_role_contract": {
+                    "status": "verified",
+                    "owner": "queue-v1",
+                },
+                "queue_health": {"status": "passed", "decision": "continue"},
+            }
+            with (
+                patch.object(cutover, "DEFAULT_ARTIFACT_DIR", artifacts),
+                patch.object(cutover, "git_binding", return_value=binding),
+                patch.object(
+                    cutover,
+                    "_static_redeploy_gate",
+                    return_value=(source, {}, {}),
+                ),
+                patch.object(
+                    cutover,
+                    "verify_redeploy_preflight_evidence",
+                    return_value={"status": "verified"},
+                ),
+            ):
+                result = cutover.reconcile_failed_redeploy(
+                    manifest=root / "manifest.env",
+                    staging_env=root / "staging.env",
+                    preflight_report=root / "preflight.json",
+                    preflight_digest="a" * 64,
+                    backup_receipt=root / "backup.json",
+                    backup_digest="b" * 64,
+                    failed_receipt=failed,
+                    failed_digest=failed_digest,
+                    phase_journal=journal,
+                    phase_journal_digest=journal_digest,
+                    artifact_dir=artifacts,
+                    confirmation=cutover.RECONCILE_REDEPLOY_CONFIRMATION,
+                    preflight_runner=Mock(return_value=live),
+                )
+            self.assertEqual(result["status"], "failed_recovered")
+            self.assertEqual(
+                json.loads(journal.read_text(encoding="utf-8"))["status"],
+                "failed_recovered",
+            )
+            original = next(
+                artifacts.glob("production-queue-recovery-original-*.json")
+            )
+            self.assertEqual(original.read_bytes(), journal_bytes)
+            receipt = artifacts / result["receipt_file"]
+            self.assertEqual(
+                json.loads(receipt.read_text(encoding="utf-8"))["database_mutations"],
+                0,
             )
 
     def test_queue_redeploy_rejects_initial_cutover_preflight_contract(self):

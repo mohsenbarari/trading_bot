@@ -68,6 +68,9 @@ from scripts.scan_telegram_queue_artifacts import scan_paths
 
 APPLY_CONFIRMATION = "CUTOVER PRODUCTION TELEGRAM DELIVERY TO QUEUE-V1"
 REDEPLOY_CONFIRMATION = "REDEPLOY PRODUCTION TELEGRAM QUEUE-V1 OFFICIAL RELEASE"
+RECONCILE_REDEPLOY_CONFIRMATION = (
+    "RECONCILE CONTAINED PRODUCTION QUEUE-V1 REDEPLOY FAILURE"
+)
 ROLLBACK_CONFIRMATION = "ROLLBACK PRODUCTION TELEGRAM DELIVERY TO LEGACY"
 DEFAULT_ARTIFACT_DIR = Path("/root/secure-envs/trading-bot/queue-cutover-artifacts")
 PREFLIGHT_MAXIMUM_AGE_SECONDS = 900
@@ -126,12 +129,23 @@ class ExclusiveRunLock:
         self.device: int | None = None
         self.inode: int | None = None
 
-    def acquire(self) -> None:
+    def acquire(self, *, allow_recovery_journal: Path | None = None) -> None:
+        allowed = (
+            allow_recovery_journal.resolve(strict=False)
+            if allow_recovery_journal is not None
+            else None
+        )
         for journal in self.directory.glob("production-queue-phase-*.json"):
             try:
                 state = json.loads(journal.read_text(encoding="utf-8")).get("status")
             except (OSError, ValueError):
                 raise ProductionCutoverError("BLOCKED_PENDING_PHASE_JOURNAL") from None
+            if (
+                allowed is not None
+                and journal.resolve(strict=False) == allowed
+                and state == "recovery_failed"
+            ):
+                continue
             if state not in {
                 "applied",
                 "redeployed",
@@ -1539,6 +1553,32 @@ def _write_redacted_receipt(
     return _write_secure_json(artifact_dir, prefix, receipt)
 
 
+def _write_secure_bytes(artifact_dir: Path, prefix: str, payload: bytes) -> Path:
+    secure_dir = _ensure_secure_artifact_dir(artifact_dir)
+    descriptor, name = tempfile.mkstemp(
+        prefix=f"{prefix}-", suffix=".json", dir=secure_dir
+    )
+    path = Path(name)
+    os.fchmod(descriptor, 0o600)
+    try:
+        os.write(descriptor, payload)
+        os.fsync(descriptor)
+        directory_fd = os.open(secure_dir, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+    finally:
+        os.close(descriptor)
+    if scan_paths([path]).get("status") != "clean":
+        path.unlink(missing_ok=True)
+        raise ProductionCutoverError("RECEIPT_REDACTION_FAILED")
+    return path
+
+
 def verify_apply_receipt(
     receipt_path: Path,
     receipt_digest: str,
@@ -2506,6 +2546,173 @@ def redeploy_queue_v1(
         raise ProductionCutoverError(code, receipt_sha256=digest) from None
 
 
+def reconcile_failed_redeploy(
+    *,
+    manifest: Path,
+    staging_env: Path,
+    preflight_report: Path,
+    preflight_digest: str,
+    backup_receipt: Path,
+    backup_digest: str,
+    failed_receipt: Path,
+    failed_digest: str,
+    phase_journal: Path,
+    phase_journal_digest: str,
+    artifact_dir: Path,
+    confirmation: str,
+    preflight_runner: Callable[..., dict[str, Any]] = run_redeploy_preflight,
+) -> dict[str, Any]:
+    """Close only a contained redeploy failure after independent live proof.
+
+    This command does not deploy, migrate, call Telegram, or modify product
+    data.  It preserves the failed journal byte-for-byte and marks it terminal
+    only while the production/source locks are held and a fresh Queue-v1
+    redeploy preflight proves the old two-host release is healthy.
+    """
+
+    if confirmation != RECONCILE_REDEPLOY_CONFIRMATION:
+        raise ProductionCutoverError("RECONCILE_CONFIRMATION_MISMATCH")
+    if artifact_dir.resolve(strict=False) != DEFAULT_ARTIFACT_DIR:
+        raise ProductionCutoverError("BLOCKED_PRODUCTION_ARTIFACT_DIRECTORY")
+    source, _source_values, _manifest_values = _static_redeploy_gate(
+        manifest,
+        staging_env,
+        backup_receipt=backup_receipt,
+        backup_digest=backup_digest,
+    )
+    source_digest = _sha256(source)
+    binding = git_binding()
+    if (
+        binding["branch"] != "main"
+        or binding["worktree"] != "clean"
+        or binding["head"] != binding["origin_main"]
+    ):
+        raise ProductionCutoverError("BLOCKED_CLEAN_PUSHED_MAIN")
+    preflight = verify_redeploy_preflight_evidence(
+        preflight_report,
+        preflight_digest,
+        backup_digest=backup_digest,
+        source_digest=source_digest,
+        binding=binding,
+    )
+    _require_secure_authority_file(
+        phase_journal, artifact_dir, prefix="production-queue-phase-"
+    )
+    _require_secure_authority_file(
+        failed_receipt,
+        artifact_dir,
+        prefix="production-queue-redeploy-failed-",
+    )
+    journal_bytes = phase_journal.read_bytes()
+    if _sha256(phase_journal) != phase_journal_digest:
+        raise ProductionCutoverError("BLOCKED_RECONCILIATION_BINDING")
+    try:
+        journal = json.loads(journal_bytes)
+    except ValueError:
+        raise ProductionCutoverError("BLOCKED_RECONCILIATION_BINDING") from None
+    failed = _read_json_evidence(failed_receipt, failed_digest)
+    failed_git = failed.get("git") or {}
+    recovery = failed.get("safe_recovery") or {}
+    if (
+        journal.get("environment") != "production"
+        or journal.get("command") != "redeploy"
+        or journal.get("status") != "recovery_failed"
+        or journal.get("source_sha256") != source_digest
+        or journal.get("receipt_sha256") != failed_digest
+        or journal.get("git_head") != failed_git.get("head")
+        or failed.get("environment") != "production"
+        or failed.get("command") != "redeploy"
+        or failed.get("status") != "failed"
+        or failed_git.get("branch") != "main"
+        or failed_git.get("head") != failed_git.get("origin_main")
+        or recovery.get("status") != "recovery_failed_fail_closed"
+    ):
+        raise ProductionCutoverError("BLOCKED_RECONCILIATION_BINDING")
+
+    run_lock = ExclusiveRunLock(artifact_dir)
+    source_lock = ImmutableSourceLock(source)
+    run_lock.acquire(allow_recovery_journal=phase_journal)
+    try:
+        source_lock.acquire()
+        live = preflight_runner(
+            manifest=manifest,
+            staging_env=staging_env,
+            backup_receipt=backup_receipt,
+            backup_digest=backup_digest,
+        )
+        if (
+            live.get("status") != "READY_FOR_QUEUE_V1_REDEPLOY"
+            or live.get("source_sha256") != source_digest
+            or live.get("git") != binding
+            or _sha256(source) != source_digest
+        ):
+            raise ProductionCutoverError("BLOCKED_LIVE_RECONCILIATION")
+        original = _write_secure_bytes(
+            artifact_dir,
+            f"production-queue-recovery-original-{phase_journal.stem}",
+            journal_bytes,
+        )
+        if _sha256(original) != phase_journal_digest:
+            raise ProductionCutoverError("BLOCKED_JOURNAL_COPY_DIGEST")
+        receipt = {
+            "schema_version": 1,
+            "environment": "production",
+            "command": "reconcile-contained-redeploy-failure",
+            "status": "old_release_pair_independently_verified_healthy",
+            "reconciled_at": _utc_now(),
+            "git": binding,
+            "failed_git": failed_git,
+            "source_sha256": source_digest,
+            "failed_receipt_file": failed_receipt.name,
+            "failed_receipt_sha256": failed_digest,
+            "journal_file": phase_journal.name,
+            "journal_sha256_before": phase_journal_digest,
+            "original_journal_copy_file": original.name,
+            "original_journal_copy_sha256": phase_journal_digest,
+            "preflight_file": preflight_report.name,
+            "preflight_sha256": preflight_digest,
+            "preflight": preflight,
+            "executor": live["executor_inventory"],
+            "runtime": live["current_runtime"],
+            "runtime_contract": live["runtime_role_contract"],
+            "queue_health": live["queue_health"],
+            "recovery_actions": [
+                "preserved_original_phase_journal_bytes",
+                "fresh_read_only_redeploy_preflight_verified",
+                "old_release_pair_and_queue_v1_health_confirmed",
+            ],
+            "database_mutations": 0,
+            "provider_mutations": 0,
+            "customer_mutations": 0,
+            "secrets_disclosed": False,
+        }
+        receipt_path, receipt_digest = _write_redacted_receipt(
+            artifact_dir, "production-queue-recovery-reconciliation", receipt
+        )
+        journal["status"] = "failed_recovered"
+        journal["updated_at"] = _utc_now()
+        journal["reconciliation_receipt_file"] = receipt_path.name
+        journal["reconciliation_receipt_sha256"] = receipt_digest
+        journal["original_journal_sha256"] = phase_journal_digest
+        rendered = (
+            json.dumps(journal, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        ).encode("utf-8")
+        _atomic_write(phase_journal, rendered)
+        if scan_paths([phase_journal]).get("status") != "clean":
+            raise ProductionCutoverError("PHASE_JOURNAL_REDACTION_FAILED")
+        return {
+            "status": "failed_recovered",
+            "receipt_file": receipt_path.name,
+            "receipt_sha256": receipt_digest,
+            "database_mutations": 0,
+            "provider_mutations": 0,
+            "secrets_disclosed": False,
+        }
+    finally:
+        source_lock.release()
+        run_lock.release()
+
+
 def rollback_to_legacy(
     *,
     manifest: Path,
@@ -2710,6 +2917,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "preflight-redeploy",
             "apply",
             "redeploy",
+            "reconcile-redeploy-failure",
             "rollback",
             "verify-deploy-authority",
         ),
@@ -2726,6 +2934,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--source-backup-sha256", default="")
     parser.add_argument("--apply-receipt", type=Path)
     parser.add_argument("--apply-receipt-sha256", default="")
+    parser.add_argument("--failed-receipt", type=Path)
+    parser.add_argument("--failed-receipt-sha256", default="")
+    parser.add_argument("--phase-journal", type=Path)
+    parser.add_argument("--phase-journal-sha256", default="")
     parser.add_argument("--deploy-authority", type=Path)
     parser.add_argument("--deploy-authority-sha256", default="")
     parser.add_argument("--confirm", default="")
@@ -2826,6 +3038,37 @@ def main(argv: list[str] | None = None) -> int:
                     preflight_digest=args.preflight_report_sha256,
                     backup_receipt=args.backup_receipt,
                     backup_digest=args.backup_receipt_sha256,
+                    artifact_dir=args.artifact_dir,
+                    confirmation=args.confirm,
+                )
+        elif args.command == "reconcile-redeploy-failure":
+            if args.confirm != RECONCILE_REDEPLOY_CONFIRMATION:
+                raise ProductionCutoverError("RECONCILE_CONFIRMATION_MISMATCH")
+            if not all(
+                (
+                    args.preflight_report,
+                    args.preflight_report_sha256,
+                    args.backup_receipt,
+                    args.backup_receipt_sha256,
+                    args.failed_receipt,
+                    args.failed_receipt_sha256,
+                    args.phase_journal,
+                    args.phase_journal_sha256,
+                )
+            ):
+                raise ProductionCutoverError("RECONCILIATION_EVIDENCE_REQUIRED")
+            with fail_safe_signal_guard():
+                payload = reconcile_failed_redeploy(
+                    manifest=args.manifest,
+                    staging_env=args.staging_env,
+                    preflight_report=args.preflight_report,
+                    preflight_digest=args.preflight_report_sha256,
+                    backup_receipt=args.backup_receipt,
+                    backup_digest=args.backup_receipt_sha256,
+                    failed_receipt=args.failed_receipt,
+                    failed_digest=args.failed_receipt_sha256,
+                    phase_journal=args.phase_journal,
+                    phase_journal_digest=args.phase_journal_sha256,
                     artifact_dir=args.artifact_dir,
                     confirmation=args.confirm,
                 )
