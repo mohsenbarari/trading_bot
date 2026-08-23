@@ -74,6 +74,7 @@ PREFLIGHT_MAXIMUM_AGE_SECONDS = 900
 ROLLBACK_RECEIPT_MAXIMUM_AGE_SECONDS = 86400
 FOREIGN_PROJECT = "trading_bot"
 IRAN_PROJECT = "current"
+FOREIGN_COLOCATED_STAGING_PROJECT = "trading_bot_staging"
 FOREIGN_CONTAINERS = {
     "app": "trading_bot_app",
     "sync": "trading_bot_sync_worker",
@@ -858,14 +859,80 @@ class ProductionOperations:
             timeout=timeout,
         )
 
-    def _host_bot_process_count(self, role: str) -> int:
-        result = self._host(role, ["ps", "-eo", "args="])
+    def _container_bot_process_count(self, role: str, container_id: str) -> int:
+        result = self._docker(
+            role, ["top", container_id, "-eo", "pid,ppid,args"]
+        )
         if result.returncode:
             raise ProductionCutoverError("EXECUTOR_INVENTORY_READBACK_FAILED")
         return sum(
             "run_bot.py" in line and "python" in line.lower()
+            for line in (result.stdout or "").splitlines()[1:]
+        )
+
+    def _is_allowed_colocated_staging_bot(
+        self, role: str, container_id: str
+    ) -> bool:
+        if role != "foreign":
+            return False
+        observed = self._docker(
+            role,
+            [
+                "inspect",
+                "-f",
+                '{{json .Config.Env}}\t{{index .Config.Labels "com.docker.compose.project"}}\t{{index .Config.Labels "com.docker.compose.service"}}',
+                container_id,
+            ],
+        )
+        if observed.returncode:
+            raise ProductionCutoverError("EXECUTOR_INVENTORY_READBACK_FAILED")
+        try:
+            raw_env, project, service = (observed.stdout or "").strip().split("\t", 2)
+            environment = {
+                row.split("=", 1)[0]: row.split("=", 1)[1]
+                for row in json.loads(raw_env)
+                if isinstance(row, str) and "=" in row
+            }
+        except (TypeError, ValueError):
+            raise ProductionCutoverError("EXECUTOR_INVENTORY_READBACK_FAILED") from None
+        return (
+            project == FOREIGN_COLOCATED_STAGING_PROJECT
+            and service == "bot"
+            and environment.get("TRADING_BOT_SERVICE") == "bot"
+            and environment.get("SERVER_MODE") == "foreign"
+        )
+
+    def _partition_bot_containers(
+        self, role: str, container_ids: list[str]
+    ) -> tuple[list[str], list[str]]:
+        production: list[str] = []
+        allowed_staging: list[str] = []
+        for container_id in container_ids:
+            target = (
+                allowed_staging
+                if self._is_allowed_colocated_staging_bot(role, container_id)
+                else production
+            )
+            target.append(container_id)
+        return production, allowed_staging
+
+    def _host_bot_process_count(
+        self, role: str, *, excluded_containers: tuple[str, ...] = ()
+    ) -> int:
+        result = self._host(role, ["ps", "-eo", "args="])
+        if result.returncode:
+            raise ProductionCutoverError("EXECUTOR_INVENTORY_READBACK_FAILED")
+        observed = sum(
+            "run_bot.py" in line and "python" in line.lower()
             for line in (result.stdout or "").splitlines()
         )
+        excluded = sum(
+            self._container_bot_process_count(role, container_id)
+            for container_id in excluded_containers
+        )
+        if excluded > observed:
+            raise ProductionCutoverError("EXECUTOR_INVENTORY_READBACK_FAILED")
+        return observed - excluded
 
     def _potential_bot_containers(self, role: str) -> list[str]:
         listed = self._docker(role, ["ps", "-q"])
@@ -1026,11 +1093,20 @@ class ProductionOperations:
             raise ProductionCutoverError("BOT_START_FAILED")
 
     def executor_inventory(self) -> dict[str, Any]:
-        iran_host_process_count = self._host_bot_process_count("iran")
-        if self._potential_bot_containers("iran") or iran_host_process_count:
+        iran_candidates, iran_staging = self._partition_bot_containers(
+            "iran", self._potential_bot_containers("iran")
+        )
+        iran_host_process_count = self._host_bot_process_count(
+            "iran", excluded_containers=tuple(iran_staging)
+        )
+        if iran_candidates or iran_staging or iran_host_process_count:
             raise ProductionCutoverError("EXECUTOR_INVENTORY_AMBIGUOUS")
-        host_process_count = self._host_bot_process_count("foreign")
-        container_ids = self._potential_bot_containers("foreign")
+        container_ids, allowed_staging = self._partition_bot_containers(
+            "foreign", self._potential_bot_containers("foreign")
+        )
+        host_process_count = self._host_bot_process_count(
+            "foreign", excluded_containers=tuple(allowed_staging)
+        )
         if not container_ids:
             return executor_inventory_from_observation(
                 running_container_count=0,
@@ -1048,13 +1124,7 @@ class ProductionOperations:
         if name.returncode:
             raise ProductionCutoverError("EXECUTOR_INVENTORY_READBACK_FAILED")
         env = self._container_env("foreign", container_id)
-        top = self._docker("foreign", ["top", container_id, "-eo", "args"])
-        if top.returncode:
-            raise ProductionCutoverError("EXECUTOR_INVENTORY_READBACK_FAILED")
-        process_count = sum(
-            "run_bot.py" in line and "python" in line.lower()
-            for line in (top.stdout or "").splitlines()[1:]
-        )
+        process_count = self._container_bot_process_count("foreign", container_id)
         decision_result = self._docker(
             "foreign",
             [
@@ -2047,6 +2117,7 @@ def apply_cutover(
         "secrets_disclosed": False,
     }
     stopped: list[tuple[str, str]] = []
+    mutation_started = False
     source_backup: SecureSourceBackup | None = None
     source_after_digest: str | None = None
     try:
@@ -2055,6 +2126,7 @@ def apply_cutover(
         receipt["executor_timeline"].append(initial)
         _require_source_digest(source, source_digest)
         stopped = ops.stop_producers()
+        mutation_started = bool(stopped)
         journal.update("producers_quiesced", stopped_count=len(stopped))
         receipt["steps"].append({"name": "quiesce_both_producer_hosts", "stopped_count": len(stopped)})
         drained = ops.wait_for_drain(drain_timeout_seconds, drain_poll_seconds)
@@ -2121,7 +2193,12 @@ def apply_cutover(
         code = exc.code if isinstance(exc, ProductionCutoverError) else "UNEXPECTED_CUTOVER_FAILURE"
         recovery: dict[str, Any] = {"attempted": True, "status": "failed"}
         try:
-            if source_backup is not None:
+            if not mutation_started and source_backup is None:
+                recovery = {
+                    "attempted": False,
+                    "status": "not_required_before_mutation",
+                }
+            elif source_backup is not None:
                 # A post-deploy failure may have restarted Queue producers and
                 # the Queue executor.  Re-enter the same guarded choreography;
                 # never restore Legacy underneath a live Queue executor.
@@ -2159,6 +2236,7 @@ def apply_cutover(
                 recovery["runtime"] = ops.runtime_contract(
                     parse_env_file(source), expected_owner="legacy"
                 )
+                recovery["status"] = "restored_legacy"
             else:
                 observed_executor = ops.executor_inventory()
                 if observed_executor.get("count") == 0:
@@ -2170,7 +2248,7 @@ def apply_cutover(
                 ops.resume_producers(stopped)
                 recovered_inventory = ops.executor_inventory()
                 _assert_inventory(recovered_inventory, count=1, owner="legacy")
-            recovery["status"] = "restored_legacy"
+                recovery["status"] = "restored_legacy"
         except BaseException:
             recovery["status"] = "recovery_failed"
         receipt["status"] = "failed"
@@ -2181,7 +2259,10 @@ def apply_cutover(
             artifact_dir, "production-queue-cutover-failed", receipt
         )
         journal.update(
-            "failed_recovered" if recovery["status"] == "restored_legacy" else "recovery_failed",
+            "failed_recovered"
+            if recovery["status"]
+            in {"restored_legacy", "not_required_before_mutation"}
+            else "recovery_failed",
             receipt_sha256=receipt_digest,
             error_code=code,
         )

@@ -640,6 +640,44 @@ class ProductionQueueCutoverTests(unittest.TestCase):
             operations._potential_bot_containers("foreign"), ["stray-id"]
         )
 
+    def test_runtime_inventory_excludes_only_the_identity_bound_colocated_staging_bot(self):
+        operations = cutover.ProductionOperations.__new__(cutover.ProductionOperations)
+        operations._docker = Mock(
+            return_value=subprocess.CompletedProcess(
+                [],
+                0,
+                stdout=(
+                    '["TRADING_BOT_SERVICE=bot","SERVER_MODE=foreign"]'
+                    "\ttrading_bot_staging\tbot\n"
+                ),
+                stderr="",
+            )
+        )
+        self.assertTrue(
+            operations._is_allowed_colocated_staging_bot("foreign", "staging-id")
+        )
+        self.assertFalse(
+            operations._is_allowed_colocated_staging_bot("iran", "staging-id")
+        )
+
+    def test_host_inventory_subtracts_the_verified_colocated_staging_process(self):
+        operations = cutover.ProductionOperations.__new__(cutover.ProductionOperations)
+        operations._host = Mock(
+            return_value=subprocess.CompletedProcess(
+                [],
+                0,
+                stdout="python run_bot.py\npython run_bot.py\n",
+                stderr="",
+            )
+        )
+        operations._container_bot_process_count = Mock(return_value=1)
+        self.assertEqual(
+            operations._host_bot_process_count(
+                "foreign", excluded_containers=("staging-id",)
+            ),
+            1,
+        )
+
     def test_official_deploy_marks_inherited_source_lock_only_with_authority(self):
         operations = cutover.ProductionOperations.__new__(cutover.ProductionOperations)
         operations.manifest = Path("/secure/online.env")
@@ -1184,6 +1222,63 @@ class ProductionQueueCutoverTests(unittest.TestCase):
                 )
             live.assert_called_once()
             self.assertTrue(live.call_args.kwargs["target_queue_cutover"])
+
+    def test_initial_inventory_failure_is_terminal_without_false_recovery_failure(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source, staging, manifest = self.fixture(root)
+            secure = root / "secure"
+            secure.mkdir(mode=0o700)
+            artifacts = root / "artifacts"
+            artifacts.mkdir(mode=0o700)
+            backup_receipt = root / "backup.json"
+            backup_receipt.write_text("{}", encoding="utf-8")
+            backup_digest = hashlib.sha256(backup_receipt.read_bytes()).hexdigest()
+            preflight = root / "preflight.json"
+            binding = self.binding()
+            source_digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            preflight_digest = self.write_preflight(
+                preflight, binding, backup_digest, source_digest
+            )
+            operations = Mock()
+            operations.executor_inventory.side_effect = (
+                cutover.ProductionCutoverError("EXECUTOR_INVENTORY_AMBIGUOUS")
+            )
+            with patch.object(cutover, "git_binding", return_value=binding):
+                with self.assertRaises(cutover.ProductionCutoverError) as raised:
+                    cutover.apply_cutover(
+                        manifest=manifest,
+                        staging_env=staging,
+                        preflight_report=preflight,
+                        preflight_digest=preflight_digest,
+                        backup_receipt=backup_receipt,
+                        backup_digest=backup_digest,
+                        secure_backup_dir=secure,
+                        artifact_dir=artifacts,
+                        confirmation=cutover.APPLY_CONFIRMATION,
+                        operations_factory=lambda _manifest: operations,
+                        preflight_runner=Mock(
+                            return_value={
+                                "status": "READY_FOR_SEPARATE_CUTOVER_CHOREOGRAPHY",
+                                "source_sha256": source_digest,
+                            }
+                        ),
+                    )
+            self.assertEqual(raised.exception.code, "EXECUTOR_INVENTORY_AMBIGUOUS")
+            operations.stop_producers.assert_not_called()
+            failed = next(
+                artifacts.glob("production-queue-cutover-failed-*.json")
+            )
+            failed_payload = json.loads(failed.read_text(encoding="utf-8"))
+            self.assertEqual(
+                failed_payload["safe_recovery"]["status"],
+                "not_required_before_mutation",
+            )
+            journal = next(artifacts.glob("production-queue-phase-*.json"))
+            self.assertEqual(
+                json.loads(journal.read_text(encoding="utf-8"))["status"],
+                "failed_recovered",
+            )
 
     def test_failure_after_source_switch_restores_legacy_and_emits_receipt(self):
         with tempfile.TemporaryDirectory() as tmpdir:
