@@ -146,6 +146,9 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "queue_execution": 6,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
+    "3518df831edbcb7d278097f750921c5ced0cd530014fcbe72c3f712f05b77cb4"
+)
+PRE_PANEL_CALLBACK_HARDENING_RUNTIME_INVENTORY_SHA256 = (
     "79781c5c68efa9e6628ef66136cface0f71382066296713b8e4e0be666929249"
 )
 PRE_SPLIT_INTEGRATION_RUNTIME_INVENTORY_SHA256 = (
@@ -211,6 +214,10 @@ PRE_STAGE8_EDGE_CALLBACK_WITNESS_RUNTIME_INVENTORY_SHA256 = (
 REVIEWED_RUNTIME_INVENTORY_SHA256 = frozenset(
     {
         EXPECTED_RUNTIME_INVENTORY_SHA256,
+        # Panel callback hardening adds only Queue-v1 adapters and moves the
+        # reviewed legacy fallback line identities. The exact 109 Telegram
+        # boundaries and every disposition remain unchanged.
+        PRE_PANEL_CALLBACK_HARDENING_RUNTIME_INVENTORY_SHA256,
         # Final video-broadcast branch inventory before split-runtime
         # integration; retained as a reviewed historical baseline.
         PRE_SPLIT_INTEGRATION_RUNTIME_INVENTORY_SHA256,

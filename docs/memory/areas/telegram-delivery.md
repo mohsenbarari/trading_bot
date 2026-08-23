@@ -1,16 +1,12 @@
 # Telegram Delivery
 
-- 2026-08-23 | Video broadcast: central-bot `file_id` via Queue-v1 `sendVideo`; never binary/path/base64.
-- 2026-08-23 | Split: `primary` polls/ACKs; sole `executor` owns queues, OTP/global lock. Leases fail closed; cutover awaits owners and preserves jobs. Readbacks use profiles/labels; compose pins image+SHA. APIs only produce.
-- 2026-08-23 | Latency: ACK wakeup, shared HTTP, serial batch 8, claim index with `sent`, 1.05s/destination. Local ACK is lease-fenced; workers do not repeat edge callback answers.
-- 2026-08-23 | Staging: `trading_bot_staging` foreign bot/bot_executor; `_iran` Iran API. Inventory excludes staging only by exact project/service/env; deploy removes opposites.
-- 2026-08-22 | Pre-auth `CallbackQuery` replies retain that route; never adapt bot-authored `callback.message`. Registration handoff uses the origin event with actor/chat guards.
-- 2026-08-21 | Sync promotes only Iran `primary/pending/v1` placeholders from newer foreign `publisher_1..5`; bind authority/identity, require one row plus transaction marker. Repair uses DB-sequenced `ChangeLog`.
-- 2026-08-21 | Staging has five Publishers; credential/channel collisions block production. APIs are token-free; foreign assigns WebApp offers.
-- 2026-08-18 | Offer IDs are local; suggestions keep `offer_public_id` and rebind to source. Keep bounded overtime polling. Terminal ratios stay bottom-left/LTR. Reachability: `telegram_id`, then username/`tg://user?id=`.
-- 2026-08-17 | Mini App and `/api/auth/webapp-login` are retired; WebApp auth is OTP-first.
-- 2026-08-19 | Queue-v1 runs on bot; APIs produce. OTP uses encrypted Redis, ACK+DELETE and quarantine. PG hints only wake; tables rule. ACK is receipt-only; success follows commit. Durable menu anchors preserve device Back.
-- 2026-08-16 | Overtime mutations run only on offer/request home; mirrors reject them. Presentation follows offer home; interaction stays at origin. Cancellation is signed, idempotent, fail-closed and forwarded home.
-- 2026-08-12 | The 500-offer matrix uses 60/40 Bot/WebApp, fake transport and bounded lifecycles. Unknown-client quarantine proves execution, not delivery.
-- 2026-08-11 | Queue-v1 central ingress uses sticky five-publisher ownership. Co-located publishers locally ACK durable dispatch; Telegram Bot API is never bot-to-bot transport. Callbacks remain receiver-local; scans skip final jobs; freshness changes use fenced requeues.
-- 2026-08-11 | Interaction probes need authenticated chat and positive message identity. Resume clears cadence; only preflight-approved lanes block.
+- 2026-08-23 | `primary` polls/ACKs; the sole `executor` owns Queue-v1, OTP and global locks. APIs only produce. Leases and cutover fail closed, preserve jobs and await old owners; compose pins image+SHA.
+- 2026-08-23 | Panel navigation precedes FSM/router. Commodity admin API on foreign requires the exact dev key; callbacks ACK before work and stale actions fail visibly. Durable menu anchors preserve device Back.
+- 2026-08-23 | Latency uses ACK wakeup, shared HTTP, serial batch 8, claim index with `sent` and 1.05s/destination. Local ACK is lease-fenced; workers never repeat it.
+- 2026-08-23 | Video broadcast uses central-bot `file_id` through Queue-v1 `sendVideo`; never binary/path/base64. Pre-auth callbacks retain their origin event with actor/chat guards.
+- 2026-08-23 | Staging foreign runs bot/executor and five Publishers; Iran runs API. Inventory uses exact project/service/env; deploy removes opposites. Token/channel collisions block production; foreign assigns WebApp offers; APIs stay token-free.
+- 2026-08-21 | Sync promotes only newer foreign `publisher_1..5` into Iran `primary/pending/v1`, bound to authority/identity and transaction marker. Repair uses DB-sequenced `ChangeLog`.
+- 2026-08-19 | OTP uses encrypted Redis, ACK+DELETE and quarantine. PG only wakes; tables decide. ACK is receipt, success follows commit. Mini App and `/api/auth/webapp-login` are retired; WebApp is OTP-first.
+- 2026-08-18 | Offer IDs are local; suggestions retain `offer_public_id` and rebind at source. Overtime polling is bounded; mutations run only on offer/request home and signed cancellation forwards fail-closed. Terminal ratios stay bottom-left/LTR; reachability uses ID then username/tg URI.
+- 2026-08-18 | Queue ingress uses sticky five-publisher ownership; co-located publishers ACK locally and Telegram is never bot-to-bot transport. Callbacks stay receiver-local; final jobs are skipped and freshness requeues are fenced.
+- 2026-08-12 | The 500-offer matrix uses 60/40 Bot/WebApp, fake transport and bounded lifecycles. Quarantine proves execution, not delivery; probes require authenticated chat and positive message identity. Resume clears cadence; only preflight lanes block.

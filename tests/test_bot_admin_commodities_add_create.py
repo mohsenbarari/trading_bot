@@ -60,7 +60,7 @@ class ErrorPostClient(FakePostClient):
 
 class BotAdminCommoditiesAddCreateTests(unittest.IsolatedAsyncioTestCase):
     async def test_handle_add_start_sets_state_and_prompt(self):
-        query = SimpleNamespace(message=SimpleNamespace(edit_text=AsyncMock()))
+        query = SimpleNamespace(message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
         state = SimpleNamespace(set_state=AsyncMock())
 
         with patch("bot.handlers.admin_commodities.get_commodity_fsm_cancel_keyboard", return_value="KB"):

@@ -18,6 +18,7 @@ from bot.telegram_interaction_message import (
     edit_callback_message_via_runtime,
     edit_interaction_result_via_runtime,
 )
+from bot.telegram_callback_answer import answer_callback_query_via_runtime
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
     configured_telegram_delivery_runtime,
@@ -35,6 +36,24 @@ router = Router()
 
 COMMODITIES_API_URL = "http://app:8000/api/commodities/"
 ALIASES_API_URL = "http://app:8000/api/commodities/aliases/"
+COMMODITY_PANEL_UNAVAILABLE_TEXT = "❌ مدیریت کالاها فعلاً در دسترس نیست. دوباره تلاش کنید."
+
+
+async def _ack_admin_commodity_callback(
+    callback: types.CallbackQuery,
+    user: Optional[User],
+) -> bool:
+    """Acknowledge panel callbacks before DB/HTTP work and reject stale access."""
+
+    if not user or user.role != UserRole.SUPER_ADMIN:
+        await answer_callback_query_via_runtime(
+            callback,
+            "این گزینه برای حساب شما فعال نیست.",
+            show_alert=True,
+        )
+        return False
+    await answer_callback_query_via_runtime(callback)
+    return True
 
 
 def _interaction_event_kwargs(event: types.Message | types.CallbackQuery) -> dict:
@@ -197,7 +216,19 @@ async def show_commodity_list(
             configured_telegram_delivery_runtime().mode
             == TelegramDeliveryRuntimeMode.QUEUE_V1
         ):
-            raise
+            if interaction_event is None:
+                raise
+            adapter = (
+                answer_callback_message_via_runtime
+                if isinstance(interaction_event, types.CallbackQuery)
+                else answer_incoming_message_via_runtime
+            )
+            await adapter(
+                interaction_event,
+                user,
+                COMMODITY_PANEL_UNAVAILABLE_TEXT,
+            )
+            return
         err = await bot.send_message(chat_id, f"❌ خطای سیستمی: {e}")
         asyncio.create_task(safe_delete_message(bot, chat_id, err.message_id, delay=30))
 
@@ -277,7 +308,8 @@ async def handle_manage_commodities(message: types.Message, user: Optional[User]
 
 @router.callback_query(F.data == "comm_back_to_list", StateFilter("*"))
 async def handle_back_to_list(query: types.CallbackQuery, user: Optional[User], state: FSMContext):
-    if not user: return
+    if not await _ack_admin_commodity_callback(query, user):
+        return
     await clear_state_retain_anchor(state)
     # نکته: پیام فعلی (لیست نام‌های مستعار) را دستی پاک نمی‌کنیم.
     # وقتی show_commodity_list پیام جدید بفرستد، این پیام به عنوان anchor قدیمی ۳۰ ثانیه بعد پاک می‌شود.
@@ -291,7 +323,8 @@ async def handle_back_to_list(query: types.CallbackQuery, user: Optional[User], 
 
 @router.callback_query(F.data.startswith("comm_manage_aliases_"))
 async def handle_manage_aliases(query: types.CallbackQuery, user: Optional[User], state: FSMContext):
-    if not user: return
+    if not await _ack_admin_commodity_callback(query, user):
+        return
     commodity_id = int(query.data.split("_")[-1])
     # اینجا هم دستی پاک نمی‌کنیم تا ۳۰ ثانیه بماند
     await show_aliases_list(
@@ -307,7 +340,8 @@ async def handle_manage_aliases(query: types.CallbackQuery, user: Optional[User]
 # === 3. افزودن نام مستعار ===
 @router.callback_query(F.data.startswith("alias_add_"), StateFilter(None))
 async def handle_alias_add_start(query: types.CallbackQuery, user: Optional[User], state: FSMContext):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not await _ack_admin_commodity_callback(query, user):
+        return
     commodity_id = int(query.data.split("_")[-1])
     await state.set_state(CommodityManagement.awaiting_alias_add_name)
     await state.update_data(commodity_id=commodity_id)
@@ -364,7 +398,8 @@ async def handle_alias_add_name(message: types.Message, state: FSMContext, user:
 # === 4. ویرایش نام مستعار ===
 @router.callback_query(F.data.startswith("alias_edit_"), StateFilter(None))
 async def handle_alias_edit_start(query: types.CallbackQuery, user: Optional[User], state: FSMContext):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not await _ack_admin_commodity_callback(query, user):
+        return
     parts = query.data.split("_"); commodity_id = int(parts[2]); alias_id = int(parts[3])
 
     alias_name = "---"
@@ -421,7 +456,8 @@ async def handle_alias_edit_name(message: types.Message, state: FSMContext, user
 # === 5. حذف نام مستعار ===
 @router.callback_query(F.data.startswith("alias_delete_"), StateFilter(None))
 async def handle_alias_delete_start(query: types.CallbackQuery, user: Optional[User], state: FSMContext):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not await _ack_admin_commodity_callback(query, user):
+        return
     parts = query.data.split("_"); commodity_id = int(parts[2]); alias_id = int(parts[3])
 
     alias_name = "---"
@@ -441,7 +477,8 @@ async def handle_alias_delete_start(query: types.CallbackQuery, user: Optional[U
 
 @router.callback_query(F.data.startswith("alias_delete_confirm_yes_"), StateFilter(CommodityManagement.awaiting_alias_delete_confirm))
 async def handle_alias_delete_yes(query: types.CallbackQuery, user: Optional[User], state: FSMContext):
-    if not user: return
+    if not await _ack_admin_commodity_callback(query, user):
+        return
     data = await state.get_data()
     alias_id = data.get("alias_to_delete_id")
     commodity_id = data.get("commodity_id")
@@ -476,7 +513,8 @@ async def handle_alias_delete_yes(query: types.CallbackQuery, user: Optional[Use
 # === 6. ویرایش نام اصلی کالا ===
 @router.callback_query(F.data.startswith("comm_edit_name_"), StateFilter(None))
 async def handle_commodity_edit_start(query: types.CallbackQuery, user: Optional[User], state: FSMContext):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not await _ack_admin_commodity_callback(query, user):
+        return
     commodity_id = int(query.data.split("_")[-1])
 
     await state.set_state(CommodityManagement.awaiting_commodity_edit_name)
@@ -524,7 +562,8 @@ async def handle_commodity_edit_name(message: types.Message, state: FSMContext, 
 # === 7. افزودن کالا ===
 @router.callback_query(F.data == "comm_add_new", StateFilter(None))
 async def handle_add_start(query: types.CallbackQuery, user: Optional[User], state: FSMContext):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not await _ack_admin_commodity_callback(query, user):
+        return
     await state.set_state(CommodityManagement.awaiting_add_name)
 
     await edit_callback_message_via_runtime(query, user,
@@ -622,7 +661,8 @@ async def handle_add_aliases_and_create(message: types.Message, state: FSMContex
 # === 8. حذف کل کالا ===
 @router.callback_query(F.data.startswith("comm_delete_"), StateFilter(None))
 async def handle_delete_confirm(query: types.CallbackQuery, user: Optional[User], state: FSMContext):
-    if not user or user.role != UserRole.SUPER_ADMIN: return
+    if not await _ack_admin_commodity_callback(query, user):
+        return
     commodity_id = int(query.data.split("_")[-1])
 
     await state.set_state(CommodityManagement.awaiting_delete_confirmation)
@@ -635,7 +675,8 @@ async def handle_delete_confirm(query: types.CallbackQuery, user: Optional[User]
 
 @router.callback_query(F.data.startswith("comm_delete_confirm_yes_"), StateFilter(CommodityManagement.awaiting_delete_confirmation))
 async def handle_delete_yes(query: types.CallbackQuery, user: Optional[User], state: FSMContext):
-    if not user: return
+    if not await _ack_admin_commodity_callback(query, user):
+        return
     data = await state.get_data()
     commodity_id = data.get("commodity_to_delete_id")
 
@@ -668,7 +709,8 @@ async def handle_delete_yes(query: types.CallbackQuery, user: Optional[User], st
 # === لغو عملیات ===
 @router.callback_query(F.data == "comm_fsm_cancel", StateFilter("*"))
 async def handle_cancel_fsm(query: types.CallbackQuery, state: FSMContext, user: Optional[User]):
-    if not user: return
+    if not await _ack_admin_commodity_callback(query, user):
+        return
     data = await state.get_data()
     commodity_id = data.get("commodity_id")
     await clear_state_retain_anchor(state)

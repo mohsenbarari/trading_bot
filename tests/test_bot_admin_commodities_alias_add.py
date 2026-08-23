@@ -35,7 +35,7 @@ class FakeClient:
 
 class BotAdminCommoditiesAliasAddTests(unittest.IsolatedAsyncioTestCase):
     async def test_handle_alias_add_start_and_name_success(self):
-        query = SimpleNamespace(message=SimpleNamespace(edit_text=AsyncMock()), data="alias_add_7")
+        query = SimpleNamespace(message=SimpleNamespace(edit_text=AsyncMock()), data="alias_add_7", answer=AsyncMock())
         state = SimpleNamespace(set_state=AsyncMock(), update_data=AsyncMock())
 
         with patch("bot.handlers.admin_commodities.get_commodity_fsm_cancel_keyboard", return_value="KB"):

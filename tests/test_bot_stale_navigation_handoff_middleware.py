@@ -25,20 +25,24 @@ class BotStaleNavigationHandoffMiddlewareTests(unittest.IsolatedAsyncioTestCase)
         handoff.assert_awaited_once_with(message, state, user)
         handler.assert_not_awaited()
 
-    async def test_idle_fsm_bypasses_navigation_handoff(self):
+    async def test_idle_fsm_navigation_is_handed_off_before_router_dispatch(self):
         middleware = StaleNavigationHandoffMiddleware()
         handler = AsyncMock(return_value="next")
         message = MagicMock(spec=Message)
         state = SimpleNamespace(get_state=AsyncMock(return_value=None))
 
-        with patch("bot.handlers.panel.handoff_navigation_button", new=AsyncMock()) as handoff:
+        with patch(
+            "bot.handlers.panel.handoff_navigation_button",
+            new=AsyncMock(return_value=True),
+        ) as handoff:
             result = await middleware(handler, message, {"state": state, "user": SimpleNamespace(id=1)})
 
-        self.assertEqual(result, "next")
-        handoff.assert_not_awaited()
-        handler.assert_awaited_once()
+        self.assertIsNone(result)
+        handoff.assert_awaited_once_with(message, state, unittest.mock.ANY)
+        state.get_state.assert_not_awaited()
+        handler.assert_not_awaited()
 
-    async def test_unknown_stale_fsm_text_continues_to_original_handler(self):
+    async def test_unknown_message_text_continues_to_original_handler(self):
         middleware = StaleNavigationHandoffMiddleware()
         handler = AsyncMock(return_value="next")
         message = MagicMock(spec=Message)

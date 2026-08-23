@@ -57,6 +57,7 @@ router = Router()
 USERS_PER_PAGE = 10
 ADMIN_MANAGEMENT_ROLES = {UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER}
 ADMIN_ROLE_VALUES = {UserRole.SUPER_ADMIN.value, UserRole.MIDDLE_MANAGER.value}
+USER_MANAGEMENT_UNAVAILABLE_TEXT = "❌ مدیریت کاربران فعلاً در دسترس نیست. دوباره تلاش کنید."
 
 
 def _users_admin_write_decision(operation: str):
@@ -415,7 +416,20 @@ async def show_users_list(
     except Exception as e:
         logger.error(f"Error showing users list: {e}")
         if queue_mode:
-            raise
+            if actor is None or interaction_event is None:
+                raise
+            adapter = (
+                answer_callback_message_via_runtime
+                if isinstance(interaction_event, types.CallbackQuery)
+                else answer_incoming_message_via_runtime
+            )
+            await adapter(
+                interaction_event,
+                actor,
+                USER_MANAGEMENT_UNAVAILABLE_TEXT,
+                source_key="admin-users-list-unavailable",
+            )
+            return
         error_msg = await bot.send_message(chat_id, "❌ خطایی در دریافت لیست کاربران رخ داد.")
         asyncio.create_task(safe_delete_message(bot, chat_id, error_msg.message_id, delay=30))
 
@@ -475,12 +489,20 @@ async def get_user_profile_text(target_user: User) -> str:
 @router.message(F.text == "👥 مدیریت کاربران")
 async def handle_users_menu(message: types.Message, user: Optional[User], state: FSMContext):
     if not _can_open_user_management(user):
+        if user:
+            await answer_incoming_message_via_runtime(
+                message,
+                user,
+                "این گزینه برای حساب شما فعال نیست.",
+                source_key="admin-users-menu-denied",
+            )
         return
     await delete_user_message(message)
 
     msg = await answer_incoming_message_via_runtime(message, user,
         "👥 **مدیریت کاربران**\n\n"
         "لطفاً گزینه مورد نظر را انتخاب کنید:",
+        source_key="admin-users-menu",
         reply_markup=await build_users_management_navigation_keyboard(user),
         parse_mode="Markdown"
     )

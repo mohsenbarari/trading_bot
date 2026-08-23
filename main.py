@@ -68,6 +68,7 @@ configure_logging("api")
 logger = logging.getLogger(__name__)
 _PROCESS_STARTED_AT = time.monotonic()
 OBSERVABILITY_API_KEY_HEADER = "X-Observability-Api-Key"
+DEV_API_KEY_HEADER = "X-DEV-API-KEY"
 FOREIGN_INTERNAL_EXACT_PATHS = {"/metrics"}
 FOREIGN_INTERNAL_API_PREFIXES = (
     "/api/sync",
@@ -77,6 +78,7 @@ FOREIGN_INTERNAL_API_PREFIXES = (
     "/api/auth/internal/telegram-otp",
 )
 FOREIGN_LOOPBACK_INTERNAL_PATHS = {"/api/config"}
+FOREIGN_DEV_KEY_INTERNAL_API_PREFIXES = ("/api/commodities",)
 PRODUCTION_TEST_ISOLATION_PUBLIC_EXACT_PATHS = {
     "/api/config",
     "/api/auth/request-otp",
@@ -156,6 +158,14 @@ def _is_foreign_internal_path(path: str, request: Request) -> bool:
         return True
     if path in FOREIGN_LOOPBACK_INTERNAL_PATHS:
         return _is_loopback_client(request.client.host if request.client else None)
+    if any(
+        _path_matches_prefix(path, prefix)
+        for prefix in FOREIGN_DEV_KEY_INTERNAL_API_PREFIXES
+    ):
+        return constant_time_secret_equals(
+            request.headers.get(DEV_API_KEY_HEADER),
+            getattr(settings, "dev_api_key", None),
+        )
     return False
 
 

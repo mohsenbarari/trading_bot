@@ -56,6 +56,37 @@ class BotAdminUsersInteractionQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(enqueue.await_args.kwargs["set_persistent_anchor"])
         message.answer.assert_not_awaited()
 
+    async def test_queue_list_failure_returns_visible_panel_error(self):
+        message = SimpleNamespace()
+        user = SimpleNamespace(id=7, role=admin_users.UserRole.SUPER_ADMIN)
+        runtime = SimpleNamespace(mode=TelegramDeliveryRuntimeMode.QUEUE_V1)
+
+        with patch(
+            "bot.handlers.admin_users.configured_telegram_delivery_runtime",
+            return_value=runtime,
+        ), patch(
+            "bot.handlers.admin_users.AsyncSessionLocal",
+            side_effect=RuntimeError("db unavailable"),
+        ), patch(
+            "bot.handlers.admin_users.answer_incoming_message_via_runtime",
+            new=AsyncMock(),
+        ) as answer:
+            await admin_users.show_users_list(
+                bot=SimpleNamespace(send_message=AsyncMock()),
+                chat_id=7,
+                page=1,
+                state=SimpleNamespace(),
+                actor=user,
+                interaction_event=message,
+            )
+
+        answer.assert_awaited_once()
+        self.assertEqual(
+            answer.await_args.kwargs["source_key"],
+            "admin-users-list-unavailable",
+        )
+        self.assertIn("مدیریت کاربران", answer.await_args.args[2])
+
     async def test_non_authoritative_message_rejection_uses_interaction_queue(self):
         message = SimpleNamespace(answer=AsyncMock())
         user = SimpleNamespace(id=7, role=admin_users.UserRole.SUPER_ADMIN)

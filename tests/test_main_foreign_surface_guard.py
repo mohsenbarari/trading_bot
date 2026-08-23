@@ -13,6 +13,7 @@ def _request(path: str, *, client_host: str = "198.51.100.10"):
     return SimpleNamespace(
         url=SimpleNamespace(path=path),
         client=SimpleNamespace(host=client_host),
+        headers={},
     )
 
 
@@ -74,6 +75,27 @@ class MainForeignSurfaceGuardTests(unittest.IsolatedAsyncioTestCase):
             ):
                 with self.subTest(path=path):
                     self.assertIsNone(main._foreign_surface_guard_reason(_request(path)))
+
+    def test_foreign_mode_allows_commodity_api_only_with_internal_dev_key(self):
+        request = _request("/api/commodities/7/aliases")
+        request.headers[main.DEV_API_KEY_HEADER] = "internal-key"
+
+        with patch.object(main.settings, "server_mode", "foreign"), patch.object(
+            main.settings, "dev_api_key", "internal-key"
+        ):
+            self.assertIsNone(main._foreign_surface_guard_reason(request))
+
+            request.headers[main.DEV_API_KEY_HEADER] = "wrong-key"
+            self.assertEqual(
+                main._foreign_surface_guard_reason(request),
+                "foreign_webapp_api_blocked",
+            )
+
+            request.headers.clear()
+            self.assertEqual(
+                main._foreign_surface_guard_reason(request),
+                "foreign_webapp_api_blocked",
+            )
 
     def test_foreign_mode_allows_config_only_for_loopback_healthcheck(self):
         with patch.object(main.settings, "server_mode", "foreign"):
@@ -141,6 +163,24 @@ class MainForeignSurfaceGuardTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertIs(response, expected_response)
+        call_next.assert_awaited_once()
+
+    async def test_middleware_requires_exact_dev_key_for_foreign_commodity_api(self):
+        expected_response = JSONResponse({"status": "ok"})
+        call_next = AsyncMock(return_value=expected_response)
+        request = _request("/api/commodities/")
+
+        with patch.object(main.settings, "server_mode", "foreign"), patch.object(
+            main.settings, "dev_api_key", "internal-key"
+        ), patch.object(main.logger, "warning"):
+            request.headers[main.DEV_API_KEY_HEADER] = "internal-key"
+            allowed = await main.enforce_foreign_surface_guard(request, call_next)
+
+            request.headers[main.DEV_API_KEY_HEADER] = "wrong-key"
+            blocked = await main.enforce_foreign_surface_guard(request, call_next)
+
+        self.assertIs(allowed, expected_response)
+        self.assertEqual(blocked.status_code, 404)
         call_next.assert_awaited_once()
 
     async def test_app_blocks_foreign_public_config_but_keeps_loopback_healthcheck(self):

@@ -16,7 +16,7 @@ def _extract_message(event: TelegramObject) -> Message | None:
 
 
 class StaleNavigationHandoffMiddleware(BaseMiddleware):
-    """Give persistent navigation buttons priority when an old FSM is active."""
+    """Give persistent navigation buttons priority over every FSM/router."""
 
     async def __call__(
         self,
@@ -29,9 +29,6 @@ class StaleNavigationHandoffMiddleware(BaseMiddleware):
         user = data.get("user")
         if message is None or state is None or user is None:
             return await handler(event, data)
-        if await state.get_state() is None:
-            return await handler(event, data)
-
         from bot.handlers.panel import handoff_navigation_button
 
         if await handoff_navigation_button(message, state, user):

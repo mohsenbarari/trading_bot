@@ -26,6 +26,17 @@ class BotPanelNavigationHandoffTests(unittest.IsolatedAsyncioTestCase):
         commodities_handler.assert_awaited_once_with(message, user, state)
 
         state = SimpleNamespace(clear=AsyncMock())
+        with patch(
+            "bot.handlers.admin_users.handle_users_menu",
+            new=AsyncMock(),
+        ) as users_handler:
+            message = SimpleNamespace(text="👥 مدیریت کاربران")
+            result = await handoff_navigation_button(message, state, user)
+        self.assertTrue(result)
+        state.clear.assert_awaited_once_with()
+        users_handler.assert_awaited_once_with(message, user, state)
+
+        state = SimpleNamespace(clear=AsyncMock())
         with patch("bot.handlers.panel.show_colleagues_list", new=AsyncMock()) as colleagues_handler:
             message = SimpleNamespace(text="👥 لیست همکاران")
             result = await handoff_navigation_button(message, state, user)

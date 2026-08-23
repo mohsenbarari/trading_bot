@@ -34,7 +34,7 @@ class FakeClient:
 
 class BotAdminCommoditiesAddFlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_handle_add_start_and_add_name_duplicate_and_success(self):
-        query = SimpleNamespace(message=SimpleNamespace(edit_text=AsyncMock()))
+        query = SimpleNamespace(message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
         state = SimpleNamespace(set_state=AsyncMock())
         with patch("bot.handlers.admin_commodities.get_commodity_fsm_cancel_keyboard", return_value="KB"):
             await handle_add_start(query, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), state=state)

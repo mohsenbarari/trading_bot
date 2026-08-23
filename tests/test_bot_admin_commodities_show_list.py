@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 from bot.handlers.admin_commodities import show_commodity_list
 from core.enums import UserRole
+from core.telegram_delivery_runtime_policy import TelegramDeliveryRuntimeMode
 
 
 class FakeResponse:
@@ -89,6 +90,35 @@ class BotAdminCommoditiesShowListTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("خطای سیستمی", bot.send_message.await_args_list[-1].args[1])
         logger_mock.assert_called_once()
         create_task_mock.assert_called_once()
+
+    async def test_queue_failure_returns_visible_panel_error(self):
+        bot = SimpleNamespace(send_message=AsyncMock())
+        state = SimpleNamespace()
+        user = SimpleNamespace(role=UserRole.SUPER_ADMIN)
+        message = SimpleNamespace()
+        runtime = SimpleNamespace(mode=TelegramDeliveryRuntimeMode.QUEUE_V1)
+
+        with patch(
+            "bot.handlers.admin_commodities.configured_telegram_delivery_runtime",
+            return_value=runtime,
+        ), patch(
+            "bot.handlers.admin_commodities.httpx.AsyncClient",
+            return_value=FakeClient([], raise_error=RuntimeError("boom")),
+        ), patch(
+            "bot.handlers.admin_commodities.answer_incoming_message_via_runtime",
+            new=AsyncMock(),
+        ) as answer:
+            await show_commodity_list(
+                bot,
+                1,
+                user,
+                state,
+                interaction_event=message,
+            )
+
+        answer.assert_awaited_once()
+        self.assertIn("مدیریت کالاها", answer.await_args.args[2])
+        bot.send_message.assert_not_awaited()
 
 
 if __name__ == "__main__":
