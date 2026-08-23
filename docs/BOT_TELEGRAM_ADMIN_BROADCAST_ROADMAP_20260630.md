@@ -362,3 +362,41 @@ For selected-user search, customers should be displayed with the customer manage
 ## Open Items Before Coding
 
 No blocking product question remains after the 2026-06-30 decisions. The implementation should proceed with the defaults above unless the product scope changes.
+
+## Video Broadcast Addendum - 2026-08-23
+
+The official bot-admin broadcast path now accepts one text **or** one Telegram `Video` per campaign. WebApp/messenger broadcast stays untouched.
+
+### Media contract
+
+- The superadmin sends the video once, as Telegram `Video`, in the same central bot chat.
+- The bot stores only bot-scoped `file_id`, `file_unique_id`, caption, and optional numeric metadata.
+- The repository, database, and queue payload never store the video bytes, a local path, a URL, or base64.
+- `file_id` is specific to this central bot. A file uploaded to another bot, or a file on disk such as `tmp/1.mp4`, cannot be injected.
+- Document, animation, and media-group albums are rejected. Caption is required and capped at 1024 characters. Plain text stays capped at 4096.
+- `parse_mode` remains `None`.
+
+### Queue-v1 send
+
+- Text campaigns stay `sendMessage` + template `admin-broadcast-v1`.
+- Video campaigns use `sendVideo` + template `admin-broadcast-video-v1`.
+- Payload shape is `{chat_id, video: file_id, caption, parse_mode: None, supports_streaming: true}`.
+- Only `ADMIN_BROADCAST` may use `sendVideo`. Publishers cannot create or send this media.
+- Invalid/wrong file identifier is terminal. 429, 5xx, and transport errors stay retryable.
+- Iran remains observer-only. It does not send.
+
+### Operator runbook: two sequential campaigns
+
+Do **not** treat the two training videos as one album or a dependency graph.
+
+1. Inspect the previous campaign with `scripts/inspect_telegram_admin_broadcast_status.py <id>` if a campaign already exists.
+2. Send the first video in the central bot chat, preview, and confirm. Caption: `آموزش تکمیل ورود و ثبت لفظ`.
+3. Wait until that campaign is `completed`. If status is `completed_with_errors` or `failed`, stop. Do not start the second campaign automatically.
+4. After a clean first campaign, send the second video the same way. Caption: `آموزش امکانات بات`.
+5. If enqueue or send fails, cancel the FSM, inspect counts only, and retry the same campaign after the cause is fixed. Do not upload the file from disk and do not paste a raw `file_id`.
+
+### Rollback / failure
+
+- Migration `a385f6b7c8d0` can downgrade to `ff5a6b7c8d9e` on a scratch database. Live production migrate/downgrade is out of this change.
+- A bad video job is quarantined or marked terminal; it is never rewritten into a text `sendMessage`.
+- Double confirm in the bot creates only one broadcast row.
