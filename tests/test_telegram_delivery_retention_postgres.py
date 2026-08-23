@@ -11,6 +11,10 @@ from core.services.telegram_delivery_retention_service import (
     run_telegram_delivery_retention_cycle,
     set_telegram_delivery_retention_legal_hold,
 )
+from core.services.telegram_publisher_dispatch_service import (
+    get_or_create_telegram_publisher_dispatch_command,
+)
+from models.telegram_publisher_dispatch_command import TelegramPublisherDispatchCommand
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
     TelegramDeliveryState,
@@ -84,6 +88,30 @@ class TelegramDeliveryRetentionPostgresTests(unittest.IsolatedAsyncioTestCase):
             method=method,
             payload=payload
             or {"chat_id": 8_477_001, "text": f"private payload {key}"},
+            template_version="retention-test-v1",
+        )
+        job = result.job
+        job.state = TelegramDeliveryState.SENT
+        job.sent_at = utc_now() - timedelta(days=age_days)
+        job.terminal_at = utc_now() - timedelta(days=age_days)
+        job.provider_response = {"ok": True, "result": {"message_id": 10}}
+        job.last_error_message = "raw provider diagnostic"
+        await db.flush()
+        return job
+
+    async def _publisher_job(self, db, *, key: str, age_days: int):
+        result = await enqueue_telegram_delivery_job(
+            db,
+            current_server="foreign",
+            feeder=TelegramFeederKind.OFFER_CONTROL,
+            source_natural_id=f"retention-publisher:{key}",
+            source_version=1,
+            action=TelegramDeliveryAction.OFFER_PUBLISH,
+            bot_identity="publisher_1",
+            destination_key="channel:-1001234567890",
+            destination_class=TelegramDestinationClass.CHANNEL,
+            method="sendMessage",
+            payload={"chat_id": -1001234567890, "text": f"channel payload {key}"},
             template_version="retention-test-v1",
         )
         job = result.job
@@ -360,3 +388,87 @@ class TelegramDeliveryRetentionPostgresTests(unittest.IsolatedAsyncioTestCase):
                     current_server="iran",
                     now=utc_now(),
                 )
+
+    async def test_purge_deletes_terminal_publisher_command_with_its_job(self):
+        async with self.Session() as db:
+            job = await self._publisher_job(db, key="acked-command", age_days=40)
+            command = await get_or_create_telegram_publisher_dispatch_command(
+                db,
+                current_server="foreign",
+                job=job,
+                publisher_bot_identity="publisher_1",
+                now=utc_now() - timedelta(days=40),
+            )
+            command.state = "acknowledged"
+            command.acknowledged_at = utc_now() - timedelta(days=40)
+            job_id = int(job.id)
+            command_id = str(command.command_id)
+            await db.commit()
+
+        async with self.Session() as db:
+            report = await run_telegram_delivery_retention_cycle(
+                db,
+                current_server="foreign",
+                now=utc_now(),
+            )
+            await db.commit()
+            self.assertEqual(report.terminal_purged, 1)
+            self.assertEqual(report.dispatch_blocked_due, 0)
+
+        async with self.Session() as db:
+            self.assertIsNone(await db.get(TelegramDeliveryJobRecord, job_id))
+            leftover = (
+                await db.execute(
+                    select(TelegramPublisherDispatchCommand).where(
+                        TelegramPublisherDispatchCommand.command_id == command_id
+                    )
+                )
+            ).scalar_one_or_none()
+            self.assertIsNone(leftover)
+
+    async def test_purge_blocks_job_when_publisher_command_is_still_live(self):
+        async with self.Session() as db:
+            job = await self._publisher_job(db, key="live-command", age_days=40)
+            command = await get_or_create_telegram_publisher_dispatch_command(
+                db,
+                current_server="foreign",
+                job=job,
+                publisher_bot_identity="publisher_1",
+                now=utc_now() - timedelta(days=40),
+            )
+            command.state = "sent"
+            job_id = int(job.id)
+            command_pk = int(command.id)
+            await db.commit()
+
+        async with self.Session() as db:
+            report = await run_telegram_delivery_retention_cycle(
+                db,
+                current_server="foreign",
+                now=utc_now(),
+            )
+            await db.commit()
+            self.assertEqual(report.terminal_purged, 0)
+            self.assertEqual(report.dispatch_blocked_due, 1)
+
+        async with self.Session() as db:
+            self.assertIsNotNone(await db.get(TelegramDeliveryJobRecord, job_id))
+            self.assertIsNotNone(
+                await db.get(TelegramPublisherDispatchCommand, command_pk)
+            )
+
+    async def test_claim_index_predicate_covers_sent_state(self):
+        async with self.engine.connect() as connection:
+            indexdef = (
+                await connection.execute(
+                    text(
+                        "SELECT indexdef FROM pg_indexes "
+                        "WHERE indexname = "
+                        "'ix_telegram_publisher_dispatch_commands_claim'"
+                    )
+                )
+            ).scalar_one()
+        self.assertIn("pending", indexdef)
+        self.assertIn("retry_due", indexdef)
+        self.assertIn("sent", indexdef)
+        self.assertIn("(id)", indexdef)
