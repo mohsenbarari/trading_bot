@@ -25,6 +25,9 @@ class TelegramCentralPollerLeaseLostError(RuntimeError):
     """Raised if the central-poller PostgreSQL session changed."""
 
 
+TELEGRAM_CENTRAL_POLLER_MONITOR_INTERVAL_SECONDS = 1.0
+
+
 @dataclass(slots=True)
 class TelegramCentralPollerLease:
     connection: AsyncConnection
@@ -107,3 +110,42 @@ async def acquire_telegram_central_poller_owner(
     except BaseException:
         await connection.close()
         raise
+
+
+async def telegram_central_poller_owner_is_held(
+    engine: AsyncEngine | None = None,
+) -> bool:
+    """Read whether the central-poller advisory lock is granted.
+
+    This does not acquire the lock. Executor health and deploy postchecks
+    use it without becoming a second central poller.
+    """
+    active_engine = engine or application_engine
+    class_id = (TELEGRAM_CENTRAL_POLLER_LOCK_KEY >> 32) & 0xFFFFFFFF
+    object_id = TELEGRAM_CENTRAL_POLLER_LOCK_KEY & 0xFFFFFFFF
+    async with active_engine.connect() as connection:
+        result = await connection.execute(
+            text(
+                "SELECT EXISTS ("
+                "SELECT 1 FROM pg_locks "
+                "WHERE locktype = 'advisory' "
+                "AND classid = :class_id "
+                "AND objid = :object_id "
+                "AND objsubid = 1 AND granted"
+                ")"
+            ),
+            {"class_id": class_id, "object_id": object_id},
+        )
+        return result.scalar() is True
+
+
+async def telegram_central_poller_owner_monitor_loop(
+    lease: TelegramCentralPollerLease,
+    *,
+    interval_seconds: float = TELEGRAM_CENTRAL_POLLER_MONITOR_INTERVAL_SECONDS,
+) -> None:
+    """Fail closed if the central-poller lease is lost after startup."""
+    interval = max(0.05, float(interval_seconds))
+    while True:
+        await asyncio.sleep(interval)
+        await lease.assert_held()

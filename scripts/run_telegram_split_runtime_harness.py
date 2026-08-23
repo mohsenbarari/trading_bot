@@ -2,6 +2,9 @@
 """Two-process scratch harness for split Telegram runtime.
 
 Never talks to Telegram. Prints no secrets.
+Supported invocation: python -m scripts.run_telegram_split_runtime_harness
+Direct `python scripts/run_telegram_split_runtime_harness.py` is not an
+operator command and is not import-path safe.
 """
 from __future__ import annotations
 

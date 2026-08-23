@@ -86,6 +86,7 @@ from core.telegram_bot_runtime_topology import describe_telegram_bot_runtime_top
 from core.telegram_central_poller_owner import (
     TelegramCentralPollerAlreadyOwnedError,
     acquire_telegram_central_poller_owner,
+    telegram_central_poller_owner_monitor_loop,
 )
 from core.telegram_delivery_queue_owner import (
     TelegramDeliveryQueueAlreadyOwnedError,
@@ -146,7 +147,11 @@ def configured_publisher_b2b_pollers(settings_obj):
         )
         publisher_dp.include_router(build_publisher_channel_callback_router())
         bots.append(publisher_bot)
-        pollers.append(publisher_dp.start_polling(publisher_bot))
+        pollers.append(
+            lambda bot=publisher_bot, dispatcher=publisher_dp: dispatcher.start_polling(
+                bot
+            )
+        )
     return tuple(pollers), publisher_ids, tuple(bots)
 
 
@@ -236,17 +241,38 @@ def publisher_b2b_dispatch_cycle_sleep_seconds(
     return max(0.0, interval - elapsed)
 
 
+def _materialize_runtime_coro(item):
+    if asyncio.iscoroutine(item) or asyncio.isfuture(item):
+        return item
+    if callable(item):
+        return item()
+    raise TypeError("bot_runtime_child_must_be_coroutine_or_factory")
+
+
 async def supervise_bot_runtime(
     *,
-    polling_coro,
-    child_coroutines,
+    polling_coro=None,
+    child_coroutines=(),
+    polling_factory=None,
+    child_factories=None,
 ) -> None:
     """Fail the process if any required worker stops unexpectedly."""
 
-    polling_task = asyncio.create_task(polling_coro, name="telegram-polling")
+    active_polling = (
+        polling_factory() if polling_factory is not None else polling_coro
+    )
+    try:
+        children = [_materialize_runtime_coro(item) for item in child_coroutines]
+        if child_factories:
+            children.extend(_materialize_runtime_coro(item) for item in child_factories)
+    except BaseException:
+        if asyncio.iscoroutine(active_polling):
+            active_polling.close()
+        raise
+    polling_task = asyncio.create_task(active_polling, name="telegram-polling")
     child_tasks = [
         asyncio.create_task(coro, name=f"bot-child-{index}")
-        for index, coro in enumerate(child_coroutines, start=1)
+        for index, coro in enumerate(children, start=1)
     ]
     runtime_tasks = [polling_task, *child_tasks]
     try:
@@ -534,31 +560,40 @@ async def main():
             # Default router should be last
             dp.include_router(default.router)
 
-        polling = []
+        polling_factories = []
         if start_primary:
-            polling.append(dp.start_polling(bot))
-        polling.extend(publisher_pollers)
-        if not polling:
+            polling_factories.append(lambda: dp.start_polling(bot))
+        polling_factories.extend(publisher_pollers)
+        if not polling_factories:
             raise BotRuntimeSurfaceError("telegram_bot_runtime_role_has_no_polling_surface")
 
-        child_coroutines = []
+        child_factories = []
         if start_primary:
-            child_coroutines.append(listen_trade_suggestion_events(bot))
+            child_factories.append(lambda: listen_trade_suggestion_events(bot))
+            if central_poller_lease is not None:
+                child_factories.append(
+                    lambda: telegram_central_poller_owner_monitor_loop(
+                        central_poller_lease
+                    )
+                )
             if publisher_dispatcher is not None:
-                child_coroutines.append(publisher_dispatcher())
+                child_factories.append(publisher_dispatcher)
             await configure_interactive_bot_command_menu(bot)
-        worker_factories = telegram_execution_worker_factories(
-            telegram_runtime,
-            runtime_role=runtime_role,
-            process_owner_lease=queue_owner_lease,
+        child_factories.extend(
+            telegram_execution_worker_factories(
+                telegram_runtime,
+                runtime_role=runtime_role,
+                process_owner_lease=queue_owner_lease,
+            )
         )
-        child_coroutines.extend(worker_factory() for worker_factory in worker_factories)
         if owns_queue:
             queue_lease_handed_off = True
         logger.info("🤖 Bot started...")
         await supervise_bot_runtime(
-            polling_coro=supervise_pollers(*polling),
-            child_coroutines=child_coroutines,
+            polling_factory=lambda: supervise_pollers(
+                *(factory() for factory in polling_factories)
+            ),
+            child_factories=child_factories,
         )
     finally:
         if bot is not None:

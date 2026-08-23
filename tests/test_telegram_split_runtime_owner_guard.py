@@ -25,6 +25,9 @@ class _FakeLease:
     async def close(self):
         self.closed += 1
 
+    async def assert_held(self):
+        return None
+
 
 def _queue_runtime():
     return TelegramDeliveryRuntimeDecision(

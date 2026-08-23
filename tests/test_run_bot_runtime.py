@@ -6,6 +6,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import run_bot
 
 
+class _FakeLease:
+    async def close(self):
+        return None
+
+    async def assert_held(self):
+        return None
+
+
 async def _listener_forever(_bot):
     await asyncio.sleep(3600)
 
@@ -60,6 +68,8 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
     @patch('run_bot.acquire_telegram_central_poller_owner', new_callable=AsyncMock)
     @patch('run_bot.acquire_telegram_delivery_queue_owner', new_callable=AsyncMock)
     async def test_main_initializes_and_registers_all_routers(self, _queue_owner, _poller_owner):
+        _queue_owner.return_value = _FakeLease()
+        _poller_owner.return_value = _FakeLease()
         fake_bot = MagicMock()
         fake_bot.session.close = AsyncMock()
         fake_bot.set_my_commands = AsyncMock(return_value=True)
@@ -134,6 +144,8 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_main_propagates_polling_errors_and_still_closes_bot(
         self, _queue_owner, _poller_owner
     ):
+        _queue_owner.return_value = _FakeLease()
+        _poller_owner.return_value = _FakeLease()
         fake_bot = MagicMock()
         fake_bot.session.close = AsyncMock()
         fake_bot.set_my_commands = AsyncMock(return_value=True)

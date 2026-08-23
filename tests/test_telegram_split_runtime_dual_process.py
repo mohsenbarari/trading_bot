@@ -14,7 +14,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import create_async_engine
 
+from core.telegram_central_poller_owner import (
+    TelegramCentralPollerLeaseLostError,
+    acquire_telegram_central_poller_owner,
+    telegram_central_poller_owner_monitor_loop,
+)
+from core.telegram_delivery_queue_owner import (
+    acquire_telegram_delivery_queue_owner,
+)
 from tests.test_telegram_delivery_queue_postgres import _run_alembic
 
 
@@ -521,6 +530,136 @@ class TelegramSplitRuntimeDualProcessTests(unittest.TestCase):
         self.assertTrue(payload["sticky"])
         self.assertEqual(payload["first_publisher"], payload["edit_publisher"])
         self.assertEqual(payload["first_publisher"], "publisher_3")
+
+    def test_two_primaries_cannot_share_central_poller(self):
+        with tempfile.TemporaryDirectory(prefix="split-central-") as raw_dir:
+            workdir = Path(raw_dir)
+            first = _start_script(
+                "scripts.probe_telegram_split_runtime",
+                "--role",
+                "primary",
+                "--split-enabled",
+                "--acquire-central",
+                "--hold",
+                url=self.database_url,
+                workdir=workdir,
+            )
+            try:
+                ready = json.loads(first.wait_ready().splitlines()[0])
+                self.assertTrue(ready["acquired_central"])
+                second = _probe(
+                    "--role",
+                    "primary",
+                    "--split-enabled",
+                    "--acquire-central",
+                    url=self.database_url,
+                )
+                self.assertEqual(second.returncode, 3, second.stderr)
+                second_payload = json.loads(second.stdout)
+                self.assertFalse(second_payload["acquired_central"])
+                self.assertEqual(
+                    second_payload["error"],
+                    "telegram_central_poller_already_active",
+                )
+                executor = _probe(
+                    "--role",
+                    "executor",
+                    "--split-enabled",
+                    "--acquire-central",
+                    url=self.database_url,
+                )
+                self.assertEqual(executor.returncode, 3, executor.stderr)
+                self.assertEqual(
+                    json.loads(executor.stdout)["error"],
+                    "executor_must_not_acquire_central_poller",
+                )
+            finally:
+                if first.process.poll() is None:
+                    first.release()
+
+        successor = _probe(
+            "--role",
+            "primary",
+            "--split-enabled",
+            "--acquire-central",
+            url=self.database_url,
+        )
+        self.assertEqual(successor.returncode, 0, successor.stderr)
+        self.assertTrue(json.loads(successor.stdout)["acquired_central"])
+
+    def test_all_holds_both_locks_and_central_loss_keeps_queue(self):
+        with tempfile.TemporaryDirectory(prefix="split-all-locks-") as raw_dir:
+            holder = _start_script(
+                "scripts.probe_telegram_split_runtime",
+                "--role",
+                "all",
+                "--acquire-queue",
+                "--acquire-central",
+                "--hold",
+                url=self.database_url,
+                workdir=Path(raw_dir),
+            )
+            try:
+                ready = json.loads(holder.wait_ready().splitlines()[0])
+                self.assertTrue(ready["acquired"])
+                self.assertTrue(ready["acquired_central"])
+                second_queue = _probe(
+                    "--role",
+                    "executor",
+                    "--split-enabled",
+                    "--acquire-queue",
+                    url=self.database_url,
+                )
+                self.assertEqual(second_queue.returncode, 3, second_queue.stderr)
+                second_central = _probe(
+                    "--role",
+                    "primary",
+                    "--split-enabled",
+                    "--acquire-central",
+                    url=self.database_url,
+                )
+                self.assertEqual(second_central.returncode, 3, second_central.stderr)
+            finally:
+                if holder.process.poll() is None:
+                    holder.release()
+
+        import asyncio
+
+        async def lost_central_keeps_queue():
+            engine = create_async_engine(
+                make_url(self.database_url)
+                .set(drivername="postgresql+asyncpg")
+                .render_as_string(hide_password=False),
+                pool_pre_ping=True,
+            )
+            try:
+                queue_lease = await acquire_telegram_delivery_queue_owner(engine)
+                central_lease = await acquire_telegram_central_poller_owner(engine)
+                import psycopg2
+
+                admin = psycopg2.connect(self.database_url)
+                admin.autocommit = True
+                try:
+                    with admin.cursor() as cursor:
+                        cursor.execute(
+                            "SELECT pg_terminate_backend(%s)",
+                            (central_lease.backend_pid,),
+                        )
+                finally:
+                    admin.close()
+                with self.assertRaises(TelegramCentralPollerLeaseLostError):
+                    await asyncio.wait_for(
+                        telegram_central_poller_owner_monitor_loop(
+                            central_lease, interval_seconds=0.05
+                        ),
+                        timeout=3,
+                    )
+                await queue_lease.assert_held()
+                await queue_lease.close()
+            finally:
+                await engine.dispose()
+
+        asyncio.run(lost_central_keeps_queue())
 
 
 if __name__ == "__main__":

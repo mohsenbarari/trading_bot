@@ -2,6 +2,7 @@
 """Test-only subprocess probe for split Telegram runtime ownership.
 
 Never talks to Telegram. Prints no secrets.
+Supported invocation: python -m scripts.probe_telegram_split_runtime
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ from core.telegram_bot_runtime_topology import (
     TELEGRAM_BOT_RUNTIME_ALL_IDENTITIES,
     describe_telegram_bot_runtime_topology,
 )
+from core.telegram_central_poller_owner import TELEGRAM_CENTRAL_POLLER_LOCK_KEY
 from core.telegram_delivery_queue_owner import (
     TELEGRAM_DELIVERY_QUEUE_OWNER_LOCK_KEY,
 )
@@ -55,6 +57,20 @@ def _queue_decision() -> TelegramDeliveryRuntimeDecision:
     )
 
 
+def _acquire(url: str, lock_key: int):
+    import psycopg2
+
+    connection = psycopg2.connect(url)
+    connection.autocommit = True
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT pg_try_advisory_lock(%s), pg_backend_pid()",
+            (lock_key,),
+        )
+        acquired, backend_pid = cursor.fetchone()
+    return bool(acquired), int(backend_pid or 0), connection
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--role", required=True, choices=("all", "primary", "executor"))
@@ -63,59 +79,114 @@ def main() -> int:
     parser.add_argument("--ready-file")
     parser.add_argument("--release-file")
     parser.add_argument("--acquire-queue", action="store_true")
+    parser.add_argument("--acquire-central", action="store_true")
     args = parser.parse_args()
     url = str(os.environ.get("TELEGRAM_QUEUE_STAGE3_TEST_DATABASE_URL") or "")
     acquired = False
+    central_acquired = False
     backend_pid = None
+    central_backend_pid = None
     error = None
-    if args.acquire_queue:
-        if not role_owns_queue_executor(args.role):
-            error = "primary_must_not_acquire_queue_owner"
-        elif not url:
-            return 2
-        else:
-            import psycopg2
-
-            connection = psycopg2.connect(url)
-            connection.autocommit = True
-            try:
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        "SELECT pg_try_advisory_lock(%s), pg_backend_pid()",
-                        (TELEGRAM_DELIVERY_QUEUE_OWNER_LOCK_KEY,),
-                    )
-                    acquired, backend_pid = cursor.fetchone()
+    connections = []
+    try:
+        if args.acquire_queue:
+            if not role_owns_queue_executor(args.role):
+                error = "primary_must_not_acquire_queue_owner"
+            elif not url:
+                return 2
+            else:
+                acquired, backend_pid, connection = _acquire(
+                    url, TELEGRAM_DELIVERY_QUEUE_OWNER_LOCK_KEY
+                )
+                connections.append(connection)
                 if not acquired:
                     error = "telegram_delivery_queue_process_owner_already_active"
                     payload = _payload(
                         args,
                         acquired=False,
-                        backend_pid=int(backend_pid or 0),
+                        central_acquired=False,
+                        backend_pid=backend_pid,
+                        central_backend_pid=None,
                         error=error,
                     )
                     print(json.dumps(payload, sort_keys=True), flush=True)
                     return 3
+        if error is None and args.acquire_central:
+            if not role_owns_primary_surface(args.role):
+                error = "executor_must_not_acquire_central_poller"
+            elif not url:
+                return 2
+            else:
+                central_acquired, central_backend_pid, connection = _acquire(
+                    url, TELEGRAM_CENTRAL_POLLER_LOCK_KEY
+                )
+                connections.append(connection)
+                if not central_acquired:
+                    error = "telegram_central_poller_already_active"
+                    payload = _payload(
+                        args,
+                        acquired=acquired,
+                        central_acquired=False,
+                        backend_pid=backend_pid,
+                        central_backend_pid=central_backend_pid,
+                        error=error,
+                    )
+                    print(json.dumps(payload, sort_keys=True), flush=True)
+                    return 3
+        if args.acquire_queue or args.acquire_central:
+            if error is not None:
                 payload = _payload(
                     args,
-                    acquired=True,
-                    backend_pid=int(backend_pid),
-                    error=None,
+                    acquired=acquired,
+                    central_acquired=central_acquired,
+                    backend_pid=backend_pid,
+                    central_backend_pid=central_backend_pid,
+                    error=error,
                 )
                 print(json.dumps(payload, sort_keys=True), flush=True)
-                if args.ready_file:
-                    Path(args.ready_file).write_text("ready\n", encoding="utf-8")
-                if args.hold:
-                    _wait_release(args.release_file)
-                return 0
-            finally:
+                return 3
+            payload = _payload(
+                args,
+                acquired=acquired,
+                central_acquired=central_acquired,
+                backend_pid=backend_pid,
+                central_backend_pid=central_backend_pid,
+                error=None,
+            )
+            print(json.dumps(payload, sort_keys=True), flush=True)
+            if args.ready_file:
+                Path(args.ready_file).write_text("ready\n", encoding="utf-8")
+            if args.hold:
+                _wait_release(args.release_file)
+            return 0
+    finally:
+        for connection in connections:
+            try:
                 connection.close()
+            except Exception:
+                pass
 
-    payload = _payload(args, acquired=acquired, backend_pid=backend_pid, error=error)
+    payload = _payload(
+        args,
+        acquired=acquired,
+        central_acquired=central_acquired,
+        backend_pid=backend_pid,
+        central_backend_pid=central_backend_pid,
+        error=error,
+    )
     print(json.dumps(payload, sort_keys=True), flush=True)
     return 0 if error is None else 3
 
 
-def _payload(args, *, acquired, backend_pid, error):
+def _payload(
+    args,
+    *,
+    acquired,
+    central_acquired,
+    backend_pid,
+    central_backend_pid,
+    error,
+):
     report = describe_telegram_bot_runtime_topology(
         role=args.role,
         split_enabled=bool(args.split_enabled),
@@ -125,7 +196,9 @@ def _payload(args, *, acquired, backend_pid, error):
         "role": args.role,
         "split_enabled": bool(args.split_enabled),
         "acquired": bool(acquired),
+        "acquired_central": bool(central_acquired),
         "backend_pid": backend_pid,
+        "central_backend_pid": central_backend_pid,
         "error": error,
         "owns_queue_executor": role_owns_queue_executor(args.role),
         "owns_otp_worker": role_owns_otp_worker(args.role),
