@@ -1,7 +1,7 @@
 # Telegram Delivery
 
-- 2026-08-23 | Exclude co-located staging from production inventory only by exact project/service/role; unknown or second production executors block. Pre-mutation failure needs no recovery.
-- 2026-08-22 | Staging roles fail closed: `trading_bot_staging` is foreign/bot and `_iran` Iran/API; deploy removes opposite services. Repair preserves identity/authority and omits null monotonic timestamps; quarantine needs durable replacement before supersession.
+- 2026-08-23 | Ignore co-located staging by exact project/service/role; unknown/second executors block. Pre-mutation failure needs no recovery. Guarded Legacy↔Queue releases rebuild evidence after profile switch; others reuse.
+- 2026-08-22 | Staging roles fail closed: `trading_bot_staging` is foreign/bot and `_iran` Iran/API; deploy removes opposites. Repair preserves identity/authority; quarantine needs durable replacement.
 - 2026-08-22 | Pre-auth `CallbackQuery` replies retain that route; never adapt bot-authored `callback.message`. Registration handoff uses the origin event with actor/chat guards.
 - 2026-08-21 | Sync may promote only Iran's `primary/pending/v1` placeholder from newer foreign `publisher_1..5`. Bind authority/identity, forbid message injection, require rowcount one and transaction marker. Repair uses fresh DB-sequenced `ChangeLog`, never direct edits or consumed sequences.
 - 2026-08-21 | Staging has five Publishers; six identities passed provider/channel checks; shared opt-in is false. Credential/channel collisions block production. APIs are token-free producers; foreign assigns WebApp offers. Production rollout is separate.

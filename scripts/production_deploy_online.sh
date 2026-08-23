@@ -66,6 +66,7 @@ PRODUCTION_SOURCE_LOCK_FD=""
 PRODUCTION_SOURCE_LOCK_PATH=""
 PRODUCTION_SOURCE_LOCK_OWNED=0
 PRODUCTION_SOURCE_LOCK_INHERITED_OBSERVED=0
+PRODUCTION_QUEUE_CUTOVER_REBUILD_EVIDENCE=0
 PRODUCTION_TWO_HOST_RELEASE_GUARD_ARMED=0
 PRODUCTION_TWO_HOST_RELEASE_PHASE=""
 PRODUCTION_TWO_HOST_RELEASE_RESUMING=0
@@ -832,6 +833,13 @@ verify_queue_cutover_deploy_authority() {
         --deploy-authority "$authority_path" \
         --deploy-authority-sha256 "$authority_digest" >/dev/null \
         || die "The guarded Queue cutover authority receipt is invalid."
+    # A Queue cutover changes the immutable runtime source profile while the
+    # Git release stays fixed.  The ordinary release deliberately reuses
+    # evidence prepared for the current profile, but that evidence is stale
+    # across this Legacy <-> Queue ownership transition.  Only a consumed,
+    # source-lock-bound cutover authority may opt the full release into a
+    # same-source rebuild before any production writer transaction starts.
+    PRODUCTION_QUEUE_CUTOVER_REBUILD_EVIDENCE=1
 }
 
 guard_production_release_command() {
@@ -5870,6 +5878,10 @@ run_release() {
         || die "The full two-host production release cannot skip the foreign commit."
     # Reject a different code/env pair before any remote bootstrap, image load,
     # or other release preparation when a prior two-host transaction is open.
+    if [[ "$PRODUCTION_QUEUE_CUTOVER_REBUILD_EVIDENCE" == "1" ]]; then
+        log "Rebuilding release evidence for the guarded Queue ownership transition."
+        prepare_release_evidence_artifacts
+    fi
     prepare_committed_iran_source_payload
     load_two_host_release_state
     ensure_local_timezone_utc

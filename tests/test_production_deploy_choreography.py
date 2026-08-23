@@ -1460,6 +1460,7 @@ load_two_host_release_state
         source = RELEASE_SCRIPT.read_text(encoding="utf-8")
         prepare = source.split("prepare_release_evidence_artifacts() {", 1)[1].split("\n}", 1)[0]
         release = source.split("run_release() {", 1)[1].split("\n}", 1)[0]
+        authority = source.split("verify_queue_cutover_deploy_authority() {", 1)[1].split("\n}", 1)[0]
         for token in (
             "build_release",
             "write_iran_image_build_receipt",
@@ -1473,6 +1474,15 @@ load_two_host_release_state
         self.assertIn("verify_prepared_release_artifacts", release)
         self.assertNotIn("build_release", release)
         self.assertNotIn("prebuild_foreign_release_image", release)
+        self.assertIn("PRODUCTION_QUEUE_CUTOVER_REBUILD_EVIDENCE=1", authority)
+        self.assertIn(
+            'if [[ "$PRODUCTION_QUEUE_CUTOVER_REBUILD_EVIDENCE" == "1" ]]',
+            release,
+        )
+        self.assertLess(
+            release.index("prepare_release_evidence_artifacts"),
+            release.index("prepare_committed_iran_source_payload"),
+        )
         help_text = subprocess.run(
             ["bash", str(RELEASE_SCRIPT), "--help"],
             cwd=REPO_ROOT,
