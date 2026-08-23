@@ -70,6 +70,7 @@ from core.services.telegram_publisher_dispatch_service import (
     run_telegram_publisher_dispatch_cycle,
 )
 from core.metrics import registry as metrics_registry
+from core.telegram_gateway import aclose_telegram_http_client
 from core.utils import utc_now
 
 # Configure logging
@@ -413,6 +414,7 @@ async def main():
         )
     finally:
         await bot.session.close()
+        await aclose_telegram_http_client()
         await asyncio.gather(
             *(publisher_bot.session.close() for publisher_bot in publisher_bots),
             return_exceptions=True,
