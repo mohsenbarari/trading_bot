@@ -45,7 +45,9 @@ from scripts.run_production_backup import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_PRE_MIGRATION_HEAD = "f2c7d8e9a0b1"
+CURRENT_PRODUCTION_PRE_MIGRATION_HEAD = "ff5a6b7c8d9e"
 HISTORICAL_UPGRADE_MODE = "historical-f2-to-source-head"
+INCREMENTAL_UPGRADE_MODE = "incremental-ff5-to-source-head"
 ALREADY_AT_HEAD_MODE = "already-at-source-head"
 POSTGRES_IMAGE = "postgres:15-alpine"
 MIGRATION_RUNNER_IMAGE = "trading_bot_base"
@@ -724,7 +726,12 @@ def verify_backup_receipt(
         schema_head = str(result.get("schema_head") or "")
         if (
             result.get("status") != "ok"
-            or schema_head not in {EXPECTED_PRE_MIGRATION_HEAD, source_head}
+            or schema_head
+            not in {
+                EXPECTED_PRE_MIGRATION_HEAD,
+                CURRENT_PRODUCTION_PRE_MIGRATION_HEAD,
+                source_head,
+            }
         ):
             raise RehearsalRefusal("backup result status or pre-migration schema is invalid")
         backup_schema_heads.add(schema_head)
@@ -1432,6 +1439,15 @@ def migration_contract(pre_revision: str, source_head: str) -> MigrationContract
             expected_public_table_delta=len(EXPECTED_NEW_TABLES),
             expected_added_tables=tuple(sorted(EXPECTED_NEW_TABLES)),
             require_initial_seed_contract=True,
+            require_first_upgrade_noop=False,
+        )
+    if pre_revision == CURRENT_PRODUCTION_PRE_MIGRATION_HEAD:
+        return MigrationContract(
+            mode=INCREMENTAL_UPGRADE_MODE,
+            pre_revision=pre_revision,
+            expected_public_table_delta=0,
+            expected_added_tables=(),
+            require_initial_seed_contract=False,
             require_first_upgrade_noop=False,
         )
     raise RehearsalCommandError(

@@ -1136,6 +1136,17 @@ class ProductionMigrationRehearsalTests(unittest.TestCase):
         ):
             rehearsal.migration_contract("abc123def456", "ff5a6b7c8d9e")
 
+    def test_migration_contract_accepts_current_production_incremental_path(self):
+        contract = rehearsal.migration_contract(
+            rehearsal.CURRENT_PRODUCTION_PRE_MIGRATION_HEAD,
+            "ff6c7d8e9f01",
+        )
+        self.assertEqual(contract.mode, rehearsal.INCREMENTAL_UPGRADE_MODE)
+        self.assertEqual(contract.expected_public_table_delta, 0)
+        self.assertEqual(contract.expected_added_tables, ())
+        self.assertFalse(contract.require_initial_seed_contract)
+        self.assertFalse(contract.require_first_upgrade_noop)
+
     def test_schema_digest_ignores_pg_dump_random_restrict_keys(self):
         template = (
             "--\n-- PostgreSQL database dump\n--\n"

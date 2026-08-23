@@ -2,7 +2,7 @@
 
 Entries are newest first.
 
-- 2026-08-23 | Central-poller lock is monitored and fail-closes independently of the queue owner. Split cutover uses postchecks and job-preserving rollback; bot pools are role-aware and APIs remain producer-only. Canonical Alembic head is `ff6c7d8e9f01` after the video-broadcast migrations.
+- 2026-08-23 | Central-poller lock is monitored and fail-closes independently of the queue owner. Split cutover uses postchecks and job-preserving rollback; bot pools are role-aware and APIs remain producer-only. Canonical Alembic head is `ff6c7d8e9f01`; production rehearsal accepts the live `ff5`→`ff6` incremental path, preserves rows, and requires a second-pass no-op.
 - 2026-08-23 | Split runtime is fail-closed: default role `all`; `primary` owns central polling only, while the sole `executor` owns every Queue-v1 lane and OTP after acquiring the global owner. Legacy accepts only `all`.
 - 2026-08-23 | Stage 12 sizes pools from slots, not live waits. `all` keeps 15+10. Split `primary` has no queue slots (ceiling 12+8 kept). `executor` owns every lane so its ceiling rose to 15+10. Settings `db_pool_size` stays 15.
 - 2026-08-23 | Stages 8–11 stay: edge callback answer then durable witness; durable command is the B2B handoff with lease-fenced local ack and transactional wakeup; destination interval stays 1.05s; freshness validators stay and the last validate reuses locked Offer/state rows (8→6 reads). Retention preflights command and source holds before delete. Claim index covers `sent`.
