@@ -13,7 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core import telegram_gateway
 from core.server_routing import SERVER_FOREIGN
 from core.services.bot_access_policy import evaluate_bot_access
-from core.services.telegram_admin_broadcast_service import validate_telegram_admin_broadcast_content
+from core.services.telegram_admin_broadcast_service import (
+    validate_telegram_admin_broadcast_record,
+)
 from core.utils import utc_now
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeConfigurationError,
@@ -23,6 +25,7 @@ from core.telegram_delivery_runtime_policy import (
 from models.telegram_admin_broadcast import (
     TERMINAL_TELEGRAM_ADMIN_BROADCAST_RECEIPT_STATUSES,
     TelegramAdminBroadcast,
+    TelegramAdminBroadcastContentKind,
     TelegramAdminBroadcastReceipt,
     TelegramAdminBroadcastReceiptStatus,
     TelegramAdminBroadcastStatus,
@@ -78,6 +81,8 @@ _MALFORMED_PAYLOAD_PATTERNS = (
     "can't parse entities",
     "parse mode",
     "entity",
+    "wrong file identifier",
+    "invalid file identifier",
 )
 
 
@@ -466,6 +471,7 @@ async def deliver_claimed_telegram_admin_broadcast_receipt(
     *,
     current_server: str,
     gateway_send: TelegramSendCallable = telegram_gateway.send_message,
+    gateway_send_video: TelegramSendCallable = telegram_gateway.send_video_by_file_id,
     bot_token: str | None = None,
     now: datetime | None = None,
 ) -> TelegramAdminBroadcastDeliveryResult:
@@ -517,7 +523,7 @@ async def deliver_claimed_telegram_admin_broadcast_receipt(
         )
 
     try:
-        message = validate_telegram_admin_broadcast_content(broadcast.content)
+        kind, message, media = validate_telegram_admin_broadcast_record(broadcast)
     except Exception:
         await _mark_receipt(
             db,
@@ -588,13 +594,46 @@ async def deliver_claimed_telegram_admin_broadcast_receipt(
         f"telegram-admin-broadcast:{int(receipt.broadcast_id)}:{int(receipt.recipient_user_id)}:"
         f"attempt:{int(receipt.attempt_count or 0)}"
     )
-    gateway_result = await gateway_send(
-        telegram_id,
-        message,
-        parse_mode=None,
-        bot_token=bot_token,
-        idempotency_key=correlation_key,
-    )
+    if kind == TelegramAdminBroadcastContentKind.VIDEO:
+        if media is None:
+            await _mark_receipt(
+                db,
+                receipt=receipt,
+                status=TelegramAdminBroadcastReceiptStatus.TERMINAL_FAILED,
+                current_time=current_time,
+                reason="broadcast_invalid_content",
+                error_class="BroadcastPayloadError",
+                error_message="broadcast_invalid_content",
+            )
+            await finalize_telegram_admin_broadcast_status(
+                db, broadcast_id=int(receipt.broadcast_id), now=current_time
+            )
+            return TelegramAdminBroadcastDeliveryResult(
+                status=TELEGRAM_ADMIN_BROADCAST_DELIVERY_STATUS_TERMINAL_FAILED,
+                current_server=normalized_server,
+                receipt=receipt,
+                broadcast_id=broadcast_id,
+                recipient_user_id=recipient_user_id,
+                reason="broadcast_invalid_content",
+                alert_required=True,
+            )
+        gateway_result = await gateway_send_video(
+            telegram_id,
+            media.file_id,
+            caption=message,
+            parse_mode=None,
+            supports_streaming=True,
+            bot_token=bot_token,
+            idempotency_key=correlation_key,
+        )
+    else:
+        gateway_result = await gateway_send(
+            telegram_id,
+            message,
+            parse_mode=None,
+            bot_token=bot_token,
+            idempotency_key=correlation_key,
+        )
     if gateway_result.ok:
         telegram_message_id = gateway_result.message_id
         await _mark_receipt(
@@ -681,6 +720,7 @@ async def claim_and_deliver_next_telegram_admin_broadcast_receipt(
     current_server: str,
     lease_seconds: int,
     gateway_send: TelegramSendCallable = telegram_gateway.send_message,
+    gateway_send_video: TelegramSendCallable = telegram_gateway.send_video_by_file_id,
     bot_token: str | None = None,
 ) -> TelegramAdminBroadcastDeliveryResult:
     receipt = await claim_next_telegram_admin_broadcast_receipt(
@@ -698,5 +738,6 @@ async def claim_and_deliver_next_telegram_admin_broadcast_receipt(
         receipt,
         current_server=current_server,
         gateway_send=gateway_send,
+        gateway_send_video=gateway_send_video,
         bot_token=bot_token,
     )

@@ -79,7 +79,7 @@ def _validate_job_route(job: TelegramDeliveryJobRecord) -> None:
         or _enum_value(job.feeder_kind) != TelegramFeederKind.ADMIN_SYSTEM.value
         or _enum_value(job.destination_class)
         != TelegramDestinationClass.PRIVATE.value
-        or str(job.method or "") != "sendMessage"
+        or str(job.method or "") not in {"sendMessage", "sendVideo"}
         or str(job.bot_identity or "") != "primary"
     ):
         raise TelegramAdminBroadcastQueueFeedbackError(

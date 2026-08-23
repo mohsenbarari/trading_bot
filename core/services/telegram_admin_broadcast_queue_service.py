@@ -14,18 +14,20 @@ from core.services.telegram_admin_broadcast_delivery_service import (
     finalize_telegram_admin_broadcast_status,
 )
 from core.services.telegram_admin_broadcast_service import (
-    validate_telegram_admin_broadcast_content,
+    TelegramAdminBroadcastValidationError,
+    validate_telegram_admin_broadcast_record,
 )
 from core.services.telegram_delivery_queue_service import (
     enqueue_telegram_delivery_job,
 )
 from core.telegram_delivery_admin_broadcast_freshness import (
-    ADMIN_BROADCAST_TEMPLATE_VERSION,
     build_telegram_admin_broadcast_payload,
     telegram_admin_broadcast_campaign_id,
     telegram_admin_broadcast_destination_key,
+    telegram_admin_broadcast_method,
     telegram_admin_broadcast_source_natural_id,
     telegram_admin_broadcast_source_version,
+    telegram_admin_broadcast_template_version,
 )
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
@@ -237,8 +239,8 @@ async def handoff_next_due_telegram_admin_broadcast_receipt(
             now=current_time,
         )
     try:
-        validate_telegram_admin_broadcast_content(broadcast.content)
-    except Exception:
+        validate_telegram_admin_broadcast_record(broadcast)
+    except (TelegramAdminBroadcastValidationError, ValueError, TypeError):
         return await _finalize_unhandoffable_receipt(
             db,
             receipt=receipt,
@@ -309,9 +311,9 @@ async def handoff_next_due_telegram_admin_broadcast_receipt(
         bot_identity="primary",
         destination_key=destination_key,
         destination_class=TelegramDestinationClass.PRIVATE,
-        method="sendMessage",
+        method=telegram_admin_broadcast_method(broadcast),
         payload=payload,
-        template_version=ADMIN_BROADCAST_TEMPLATE_VERSION,
+        template_version=telegram_admin_broadcast_template_version(broadcast),
         campaign_id=campaign_id,
     )
     job_id = int(enqueue_result.job.id)

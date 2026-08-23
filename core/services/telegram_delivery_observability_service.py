@@ -113,6 +113,7 @@ def _bounded_method(value: Any) -> str:
     method = str(value or "")
     allowed = {
         "sendMessage",
+        "sendVideo",
         "editMessageText",
         "editMessageReplyMarkup",
         "deleteMessage",

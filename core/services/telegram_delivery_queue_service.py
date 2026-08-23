@@ -27,6 +27,7 @@ from core.telegram_delivery_queue_contract import (
     MINIMUM_LEASE_MARGIN_SECONDS,
     NON_DURABLE_TELEGRAM_QUEUE_ACTIONS,
     TELEGRAM_NON_IDEMPOTENT_SEND_METHODS,
+    telegram_action_allows_method,
     TelegramDeliveryAction,
     TelegramDeliveryDedupeConflictError,
     TelegramDeliveryDecision,
@@ -89,6 +90,7 @@ SUPPORTED_TELEGRAM_QUEUE_METHODS = frozenset(
         "editMessageText",
         "sendDocument",
         "sendMessage",
+        "sendVideo",
         "unbanChatMember",
     }
 )
@@ -981,6 +983,10 @@ async def enqueue_telegram_delivery_job(
         )
     if normalized_method not in SUPPORTED_TELEGRAM_QUEUE_METHODS:
         raise TelegramDeliveryQueueValidationError("telegram_method_not_allowlisted")
+    if not telegram_action_allows_method(action, normalized_method):
+        raise TelegramDeliveryQueueValidationError(
+            "telegram_method_not_allowlisted_for_action"
+        )
     if bot not in SUPPORTED_TELEGRAM_BOT_IDENTITIES:
         raise TelegramDeliveryQueueValidationError("telegram_bot_identity_not_allowlisted")
     if bot == TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY and (

@@ -8,10 +8,13 @@ from core.services.telegram_delivery_queue_service import (
 )
 from core.telegram_delivery_admin_broadcast_freshness import (
     ADMIN_BROADCAST_TEMPLATE_VERSION,
+    ADMIN_BROADCAST_VIDEO_TEMPLATE_VERSION,
     build_telegram_admin_broadcast_payload,
     telegram_admin_broadcast_campaign_id,
     telegram_admin_broadcast_destination_key,
+    telegram_admin_broadcast_method,
     telegram_admin_broadcast_source_natural_id,
+    telegram_admin_broadcast_template_version,
     validate_admin_broadcast_telegram_delivery_freshness,
 )
 from core.telegram_delivery_queue_contract import (
@@ -22,6 +25,7 @@ from core.telegram_delivery_queue_contract import (
 )
 from models.telegram_admin_broadcast import (
     TelegramAdminBroadcast,
+    TelegramAdminBroadcastContentKind,
     TelegramAdminBroadcastReceipt,
     TelegramAdminBroadcastReceiptStatus,
     TelegramAdminBroadcastStatus,
@@ -100,9 +104,9 @@ def _job(*, receipt=None, broadcast=None, user=None, **overrides):
         "action_kind": TelegramDeliveryAction.ADMIN_BROADCAST,
         "feeder_kind": TelegramFeederKind.ADMIN_SYSTEM,
         "destination_class": TelegramDestinationClass.PRIVATE,
-        "method": "sendMessage",
+        "method": telegram_admin_broadcast_method(broadcast),
         "bot_identity": "primary",
-        "template_version": ADMIN_BROADCAST_TEMPLATE_VERSION,
+        "template_version": telegram_admin_broadcast_template_version(broadcast),
         "delivery_deadline_at": None,
         "freshness_deadline_at": None,
         "run_id": None,
@@ -218,6 +222,50 @@ class TelegramAdminBroadcastFreshnessTests(unittest.IsolatedAsyncioTestCase):
                 NOW,
             )
         self.assertEqual(decision.outcome, TelegramFreshnessOutcome.WAIT_DEPENDENCY)
+
+    async def test_video_job_is_sendable_and_method_mismatch_quarantines(self):
+        broadcast = _broadcast(
+            content="آموزش امکانات بات",
+            content_kind=TelegramAdminBroadcastContentKind.VIDEO,
+            telegram_media_file_id="AgAC-video-file",
+            telegram_media_file_unique_id="AQADunique01",
+        )
+        decision = await self._validate(broadcast=broadcast)
+        self.assertEqual(decision.outcome, TelegramFreshnessOutcome.SEND)
+        self.assertEqual(telegram_admin_broadcast_method(broadcast), "sendVideo")
+        self.assertEqual(
+            telegram_admin_broadcast_template_version(broadcast),
+            ADMIN_BROADCAST_VIDEO_TEMPLATE_VERSION,
+        )
+
+        job = _job(broadcast=broadcast)
+        job.method = "sendMessage"
+        job.template_version = ADMIN_BROADCAST_TEMPLATE_VERSION
+        decision = await self._validate(broadcast=broadcast, job=job)
+        self.assertEqual(decision.outcome, TelegramFreshnessOutcome.QUARANTINED)
+        self.assertIn("method", decision.reason)
+
+    async def test_video_caption_or_file_change_reclassifies(self):
+        receipt = _receipt()
+        old_broadcast = _broadcast(
+            content="کپشن قدیمی",
+            content_kind=TelegramAdminBroadcastContentKind.VIDEO,
+            telegram_media_file_id="AgAC-old-file",
+            telegram_media_file_unique_id="AQADold01",
+        )
+        job = _job(receipt=receipt, broadcast=old_broadcast)
+        decision = await self._validate(
+            receipt=receipt,
+            broadcast=_broadcast(
+                content="کپشن جدید",
+                content_kind=TelegramAdminBroadcastContentKind.VIDEO,
+                telegram_media_file_id="AgAC-old-file",
+                telegram_media_file_unique_id="AQADold01",
+            ),
+            job=job,
+        )
+        self.assertEqual(decision.outcome, TelegramFreshnessOutcome.RECLASSIFY)
+        self.assertEqual(decision.reason, "admin_broadcast_freshness_content_changed")
 
 
 if __name__ == "__main__":

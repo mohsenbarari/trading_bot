@@ -386,6 +386,56 @@ def send_message_sync(
     )
 
 
+def _looks_like_external_media_reference(value: str) -> bool:
+    lowered = value.strip().lower()
+    return (
+        lowered.startswith("/")
+        or lowered.startswith("./")
+        or lowered.startswith("../")
+        or lowered.startswith("file:")
+        or "://" in lowered
+        or "\\" in value
+    )
+
+
+async def send_video_by_file_id(
+    chat_id: int,
+    file_id: str,
+    *,
+    caption: str,
+    parse_mode: Optional[str] = None,
+    supports_streaming: bool = True,
+    timeout: float = 10,
+    bot_token: Optional[str] = None,
+    idempotency_key: Optional[str] = None,
+) -> TelegramGatewayResult:
+    """Send one Telegram video by bot-scoped file_id. JSON only; no local file."""
+    video = str(file_id or "").strip()
+    if not video or _looks_like_external_media_reference(video):
+        return TelegramGatewayResult(
+            ok=False,
+            method="sendVideo",
+            idempotency_key=idempotency_key,
+            error="invalid_file_identifier",
+            transport_phase="pre_write",
+        )
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "video": video,
+        "caption": caption,
+        "supports_streaming": supports_streaming,
+    }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    return await post_telegram_method(
+        "sendVideo",
+        payload,
+        timeout=timeout,
+        bot_token=bot_token,
+        idempotency_key=idempotency_key,
+    )
+
+
 async def edit_message_reply_markup(
     chat_id: int,
     message_id: int,

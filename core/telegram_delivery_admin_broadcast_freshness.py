@@ -13,8 +13,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.services.bot_access_policy import evaluate_bot_access
 from core.services.telegram_admin_broadcast_service import (
+    TelegramAdminBroadcastValidationError,
+    telegram_admin_broadcast_content_kind,
     telegram_admin_broadcast_dedupe_key,
+    validate_telegram_admin_broadcast_caption,
     validate_telegram_admin_broadcast_content,
+    validate_telegram_admin_broadcast_record,
+    validate_telegram_file_id_token,
+    TELEGRAM_BROADCAST_FILE_ID_MAX_LENGTH,
+    TELEGRAM_BROADCAST_FILE_UNIQUE_ID_MAX_LENGTH,
 )
 from core.services.telegram_delivery_queue_service import (
     TelegramDeliveryQueueValidationError,
@@ -29,6 +36,7 @@ from core.telegram_delivery_queue_contract import (
 )
 from models.telegram_admin_broadcast import (
     TelegramAdminBroadcast,
+    TelegramAdminBroadcastContentKind,
     TelegramAdminBroadcastReceipt,
     TelegramAdminBroadcastReceiptStatus,
     TelegramAdminBroadcastStatus,
@@ -41,7 +49,18 @@ ADMIN_BROADCAST_FRESHNESS_ACTIONS = frozenset(
     {TelegramDeliveryAction.ADMIN_BROADCAST}
 )
 ADMIN_BROADCAST_TEMPLATE_VERSION = "admin-broadcast-v1"
+ADMIN_BROADCAST_VIDEO_TEMPLATE_VERSION = "admin-broadcast-video-v1"
+ADMIN_BROADCAST_TEMPLATE_VERSIONS = frozenset(
+    {
+        ADMIN_BROADCAST_TEMPLATE_VERSION,
+        ADMIN_BROADCAST_VIDEO_TEMPLATE_VERSION,
+    }
+)
 _ADMIN_BROADCAST_SOURCE_SEPARATOR = ":content-v1:"
+_VIDEO_PAYLOAD_KEYS = frozenset(
+    {"chat_id", "video", "caption", "parse_mode", "supports_streaming"}
+)
+_TEXT_PAYLOAD_KEYS = frozenset({"chat_id", "text", "parse_mode"})
 _ACTIVE_RECEIPT_STATUSES = frozenset(
     {
         TelegramAdminBroadcastReceiptStatus.PENDING.value,
@@ -104,23 +123,77 @@ def telegram_admin_broadcast_source_version(user: User | Any) -> int:
     return version
 
 
-def _source_natural_id_from_content(*, dedupe_key: str, content: str) -> str:
-    normalized_content = validate_telegram_admin_broadcast_content(content)
-    snapshot = json.dumps(
-        {
-            "content": normalized_content,
-            "dedupe_key": dedupe_key,
-            "template_version": ADMIN_BROADCAST_TEMPLATE_VERSION,
-        },
+def _source_identity(*, dedupe_key: str, snapshot: Mapping[str, Any]) -> str:
+    encoded = json.dumps(
+        snapshot,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
     )
-    fingerprint = hashlib.sha256(snapshot.encode("utf-8")).hexdigest()[:24]
+    fingerprint = hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:24]
     identity = f"{dedupe_key}{_ADMIN_BROADCAST_SOURCE_SEPARATOR}{fingerprint}"
     if len(identity) > 256:
         raise ValueError("telegram_admin_broadcast_source_identity_too_long")
     return identity
+
+
+def _source_natural_id_from_content(*, dedupe_key: str, content: str) -> str:
+    normalized_content = validate_telegram_admin_broadcast_content(content)
+    return _source_identity(
+        dedupe_key=dedupe_key,
+        snapshot={
+            "content": normalized_content,
+            "dedupe_key": dedupe_key,
+            "template_version": ADMIN_BROADCAST_TEMPLATE_VERSION,
+        },
+    )
+
+
+def _source_natural_id_from_video(
+    *,
+    dedupe_key: str,
+    caption: str,
+    file_id: str,
+    file_unique_id: str,
+) -> str:
+    normalized_caption = validate_telegram_admin_broadcast_caption(caption)
+    normalized_file_id = validate_telegram_file_id_token(
+        file_id,
+        field_name="telegram_media_file_id",
+        max_length=TELEGRAM_BROADCAST_FILE_ID_MAX_LENGTH,
+    )
+    normalized_unique_id = validate_telegram_file_id_token(
+        file_unique_id,
+        field_name="telegram_media_file_unique_id",
+        max_length=TELEGRAM_BROADCAST_FILE_UNIQUE_ID_MAX_LENGTH,
+    )
+    return _source_identity(
+        dedupe_key=dedupe_key,
+        snapshot={
+            "caption": normalized_caption,
+            "content_kind": TelegramAdminBroadcastContentKind.VIDEO.value,
+            "dedupe_key": dedupe_key,
+            "file_id": normalized_file_id,
+            "file_unique_id": normalized_unique_id,
+            "template_version": ADMIN_BROADCAST_VIDEO_TEMPLATE_VERSION,
+        },
+    )
+
+
+def telegram_admin_broadcast_template_version(
+    broadcast: TelegramAdminBroadcast | Any,
+) -> str:
+    kind = telegram_admin_broadcast_content_kind(broadcast)
+    if kind == TelegramAdminBroadcastContentKind.VIDEO:
+        return ADMIN_BROADCAST_VIDEO_TEMPLATE_VERSION
+    return ADMIN_BROADCAST_TEMPLATE_VERSION
+
+
+def telegram_admin_broadcast_method(broadcast: TelegramAdminBroadcast | Any) -> str:
+    kind = telegram_admin_broadcast_content_kind(broadcast)
+    if kind == TelegramAdminBroadcastContentKind.VIDEO:
+        return "sendVideo"
+    return "sendMessage"
 
 
 def telegram_admin_broadcast_source_natural_id(
@@ -130,6 +203,16 @@ def telegram_admin_broadcast_source_natural_id(
     dedupe_key = str(getattr(receipt, "dedupe_key", "") or "").strip()
     if not dedupe_key:
         raise ValueError("telegram_admin_broadcast_receipt_dedupe_missing")
+    kind = telegram_admin_broadcast_content_kind(broadcast)
+    if kind == TelegramAdminBroadcastContentKind.VIDEO:
+        return _source_natural_id_from_video(
+            dedupe_key=dedupe_key,
+            caption=str(getattr(broadcast, "content", "") or ""),
+            file_id=str(getattr(broadcast, "telegram_media_file_id", "") or ""),
+            file_unique_id=str(
+                getattr(broadcast, "telegram_media_file_unique_id", "") or ""
+            ),
+        )
     return _source_natural_id_from_content(
         dedupe_key=dedupe_key,
         content=str(getattr(broadcast, "content", "") or ""),
@@ -153,19 +236,90 @@ def telegram_admin_broadcast_receipt_dedupe_from_source(
     return dedupe_key
 
 
+def _looks_like_external_media_reference(value: str) -> bool:
+    lowered = value.strip().lower()
+    return (
+        lowered.startswith("/")
+        or lowered.startswith("./")
+        or lowered.startswith("../")
+        or lowered.startswith("file:")
+        or "://" in lowered
+        or "\\" in value
+    )
+
+
+def validate_telegram_admin_broadcast_queue_payload(
+    *,
+    method: str,
+    payload: Mapping[str, Any],
+    broadcast: TelegramAdminBroadcast | Any | None = None,
+) -> dict[str, Any]:
+    if not isinstance(payload, Mapping):
+        raise ValueError("telegram_admin_broadcast_payload_invalid")
+    normalized_method = str(method or "").strip()
+    if normalized_method == "sendMessage":
+        text = payload.get("text")
+        if (
+            set(payload) != _TEXT_PAYLOAD_KEYS
+            or _strict_positive_int(payload.get("chat_id")) is None
+            or not isinstance(text, str)
+            or not text.strip()
+            or payload.get("parse_mode") is not None
+        ):
+            raise ValueError("telegram_admin_broadcast_text_payload_invalid")
+        validate_telegram_admin_broadcast_content(text)
+        return dict(payload)
+    if normalized_method == "sendVideo":
+        video = payload.get("video")
+        caption = payload.get("caption")
+        if (
+            set(payload) != _VIDEO_PAYLOAD_KEYS
+            or _strict_positive_int(payload.get("chat_id")) is None
+            or not isinstance(video, str)
+            or not isinstance(caption, str)
+            or payload.get("parse_mode") is not None
+            or payload.get("supports_streaming") is not True
+        ):
+            raise ValueError("telegram_admin_broadcast_video_payload_invalid")
+        if _looks_like_external_media_reference(video):
+            raise ValueError("telegram_admin_broadcast_video_reference_forbidden")
+        validate_telegram_file_id_token(
+            video,
+            field_name="telegram_media_file_id",
+            max_length=TELEGRAM_BROADCAST_FILE_ID_MAX_LENGTH,
+        )
+        validate_telegram_admin_broadcast_caption(caption)
+        if broadcast is not None:
+            kind, _, media = validate_telegram_admin_broadcast_record(broadcast)
+            if kind != TelegramAdminBroadcastContentKind.VIDEO or media is None:
+                raise ValueError("telegram_admin_broadcast_video_kind_mismatch")
+            if video != media.file_id or caption != _:
+                raise ValueError("telegram_admin_broadcast_video_payload_mismatch")
+        return dict(payload)
+    raise ValueError("telegram_admin_broadcast_method_unsupported")
+
+
 def build_telegram_admin_broadcast_payload(
     broadcast: TelegramAdminBroadcast | Any,
     user: User | Any,
 ) -> dict[str, Any]:
-    content = validate_telegram_admin_broadcast_content(
-        str(getattr(broadcast, "content", "") or "")
-    )
     telegram_id = _strict_positive_int(getattr(user, "telegram_id", None))
     if telegram_id is None:
         raise ValueError("telegram_admin_broadcast_current_chat_id_invalid")
+    kind, body, media = validate_telegram_admin_broadcast_record(broadcast)
+    if kind == TelegramAdminBroadcastContentKind.VIDEO:
+        if media is None:
+            raise ValueError("telegram_admin_broadcast_video_media_missing")
+        return {
+            "chat_id": telegram_id,
+            "video": media.file_id,
+            "caption": body,
+            "parse_mode": None,
+            "supports_streaming": True,
+        }
     return {
         "chat_id": telegram_id,
-        "text": content,
+        "text": body,
         "parse_mode": None,
     }
 
@@ -186,12 +340,18 @@ def _validate_static_route(
         return _quarantined("admin_broadcast_freshness_feeder_mismatch")
     if _enum_value(job.destination_class) != TelegramDestinationClass.PRIVATE.value:
         return _quarantined("admin_broadcast_freshness_destination_class_mismatch")
-    if str(job.method or "") != "sendMessage":
+    method = str(job.method or "")
+    template_version = str(job.template_version or "")
+    if method == "sendMessage":
+        if template_version != ADMIN_BROADCAST_TEMPLATE_VERSION:
+            return _quarantined("admin_broadcast_freshness_template_version_mismatch")
+    elif method == "sendVideo":
+        if template_version != ADMIN_BROADCAST_VIDEO_TEMPLATE_VERSION:
+            return _quarantined("admin_broadcast_freshness_template_version_mismatch")
+    else:
         return _quarantined("admin_broadcast_freshness_method_mismatch")
     if str(job.bot_identity or "") != "primary":
         return _quarantined("admin_broadcast_freshness_bot_identity_mismatch")
-    if str(job.template_version or "") != ADMIN_BROADCAST_TEMPLATE_VERSION:
-        return _quarantined("admin_broadcast_freshness_template_version_mismatch")
     if (
         job.delivery_deadline_at is not None
         or job.freshness_deadline_at is not None
@@ -268,6 +428,42 @@ def _stored_snapshot_decision(
         return _quarantined("admin_broadcast_freshness_payload_not_strict_json")
     if str(job.payload_hash or "") != payload_hash:
         return _quarantined("admin_broadcast_freshness_payload_hash_mismatch")
+    expected_method = telegram_admin_broadcast_method(broadcast)
+    expected_template = telegram_admin_broadcast_template_version(broadcast)
+    if str(job.method or "") != expected_method or str(job.template_version or "") != expected_template:
+        return _quarantined("admin_broadcast_freshness_method_kind_mismatch")
+    if str(job.method or "") == "sendVideo":
+        try:
+            validate_telegram_admin_broadcast_queue_payload(
+                method="sendVideo",
+                payload=normalized_payload,
+            )
+            snapshot_source = _source_natural_id_from_video(
+                dedupe_key=str(receipt.dedupe_key),
+                caption=str(normalized_payload.get("caption") or ""),
+                file_id=str(normalized_payload.get("video") or ""),
+                file_unique_id=str(
+                    getattr(broadcast, "telegram_media_file_unique_id", "") or ""
+                ),
+            )
+            current_source = telegram_admin_broadcast_source_natural_id(
+                receipt,
+                broadcast,
+            )
+        except (TelegramAdminBroadcastValidationError, ValueError, TypeError):
+            return _quarantined("admin_broadcast_freshness_payload_shape_invalid")
+        if snapshot_source != current_source:
+            return _decision(
+                TelegramFreshnessOutcome.RECLASSIFY,
+                replacement_action=TelegramDeliveryAction.ADMIN_BROADCAST,
+                reason="admin_broadcast_freshness_content_changed",
+            )
+        if str(job.source_natural_id or "") != snapshot_source:
+            return _quarantined(
+                "admin_broadcast_freshness_source_snapshot_fingerprint_invalid"
+            )
+        return None
+
     job_text = normalized_payload.get("text")
     if (
         set(normalized_payload) != {"chat_id", "text", "parse_mode"}

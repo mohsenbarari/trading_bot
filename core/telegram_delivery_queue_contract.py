@@ -17,8 +17,9 @@ from typing import Any, Protocol
 
 
 TELEGRAM_NON_IDEMPOTENT_SEND_METHODS = frozenset(
-    {"sendMessage", "sendDocument"}
+    {"sendMessage", "sendDocument", "sendVideo"}
 )
+TELEGRAM_ADMIN_BROADCAST_ALLOWED_METHODS = frozenset({"sendMessage", "sendVideo"})
 
 
 class TelegramGatewayResultLike(Protocol):
@@ -111,6 +112,26 @@ class TelegramDeliveryAction(str, Enum):
     DELAYED_RESTRICTION = "delayed_restriction"
     TEMPORARY_CLEANUP = "temporary_cleanup"
     COSMETIC_CLEANUP = "cosmetic_cleanup"
+
+
+TELEGRAM_SEND_VIDEO_ALLOWED_ACTIONS = frozenset(
+    {TelegramDeliveryAction.ADMIN_BROADCAST}
+)
+
+
+def telegram_action_allows_method(
+    action: TelegramDeliveryAction | str,
+    method: str,
+) -> bool:
+    normalized_action = str(getattr(action, "value", action) or "").strip().lower()
+    normalized_method = str(method or "").strip()
+    if normalized_method == "sendVideo":
+        return normalized_action in {
+            item.value for item in TELEGRAM_SEND_VIDEO_ALLOWED_ACTIONS
+        }
+    if normalized_action == TelegramDeliveryAction.ADMIN_BROADCAST.value:
+        return normalized_method in TELEGRAM_ADMIN_BROADCAST_ALLOWED_METHODS
+    return True
 
 
 class TelegramDeliveryState(str, Enum):
@@ -230,6 +251,8 @@ _MALFORMED_PAYLOAD_PATTERNS = (
     "message text is empty",
     "parse mode",
     "text must be non-empty",
+    "wrong file identifier",
+    "invalid file identifier",
 )
 _MESSAGE_NOT_FOUND_PATTERNS = (
     "message to edit not found",

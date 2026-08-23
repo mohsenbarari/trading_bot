@@ -163,6 +163,17 @@ class TelegramAdminBroadcastDeliveryServiceTests(unittest.IsolatedAsyncioTestCas
             telegram_gateway.TelegramGatewayResult(ok=False, method="sendMessage", error="missing_bot_token")
         )
         self.assertEqual(missing_token.status, TelegramAdminBroadcastReceiptStatus.TERMINAL_FAILED)
+
+        wrong_file = service.classify_telegram_admin_broadcast_failure(
+            telegram_gateway.TelegramGatewayResult(
+                ok=False,
+                method="sendVideo",
+                status_code=400,
+                response_text="Bad Request: wrong file identifier/HTTP URL specified",
+            )
+        )
+        self.assertEqual(wrong_file.status, TelegramAdminBroadcastReceiptStatus.TERMINAL_FAILED)
+        self.assertEqual(wrong_file.reason, "telegram_malformed_payload")
         self.assertTrue(missing_token.alert_required)
 
     def test_bounded_retry_delay_uses_retry_after_or_exponential_backoff(self):

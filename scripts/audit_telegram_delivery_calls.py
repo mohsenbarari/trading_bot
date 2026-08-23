@@ -63,6 +63,7 @@ GATEWAY_METHODS = BOT_API_METHODS | frozenset(
         "post_telegram_method",
         "post_telegram_method_sync",
         "send_message_sync",
+        "send_video_by_file_id",
     }
 )
 AIROGRAM_CONVENIENCE_METHODS = frozenset(
@@ -86,6 +87,7 @@ AIROGRAM_CONVENIENCE_PREFIXES = (
 CALLABLE_GATEWAY_NAMES = frozenset(
     {
         "gateway_send",
+        "gateway_send_video",
         "send_offer_to_channel",
     }
 )
@@ -134,7 +136,7 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     # are gated by configured_telegram_delivery_runtime(), plus Queue-v1
     # producer exits that keep legacy OTP/sync send unreachable.
     "legacy_mode_guarded": 75,
-    "legacy_owner_guarded": 13,
+    "legacy_owner_guarded": 14,
     "legacy_parameter_guarded": 2,
     "non_delivery_timer": 5,
     "non_message_control": 2,
@@ -142,6 +144,9 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "queue_execution": 1,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
+    "87729bc0b14108af468bb9c87fe26b2d60adf347f0558ae1b0e4ac35f9a9120b"
+)
+PRE_ADMIN_BROADCAST_VIDEO_RUNTIME_INVENTORY_SHA256 = (
     "efc7ac2a07ddd589e5b281ca5f58c5676fe861b8003146102209867c1e38d318"
 )
 PRE_REGISTRATION_CALLBACK_HANDOFF_RUNTIME_INVENTORY_SHA256 = (
@@ -195,6 +200,10 @@ OVERTIME_OWNER_PROMPT_RUNTIME_INVENTORY_SHA256 = (
 REVIEWED_RUNTIME_INVENTORY_SHA256 = frozenset(
     {
         EXPECTED_RUNTIME_INVENTORY_SHA256,
+        # Admin video broadcast adds one legacy-owner-guarded gateway_send_video
+        # beside the existing text gateway_send. Queue-v1 sendVideo stays on
+        # the shared worker; this extra callsite is only the Legacy fallback.
+        PRE_ADMIN_BROADCAST_VIDEO_RUNTIME_INVENTORY_SHA256,
         # Direct-registration handoff now retains the CallbackQuery route for
         # the final Queue-v1 response. No Telegram boundary changed: all 103
         # callsites and dispositions remain exact; only existing guarded
