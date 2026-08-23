@@ -1,7 +1,7 @@
 # Telegram Delivery
 
 - 2026-08-23 | Video broadcast uses central-bot `file_id` and Queue-v1 `sendVideo`; never binary/path/base64.
-- 2026-08-23 | Split: `primary` polls/ACKs; sole `executor` owns queues, OTP/global lock. Leases fail closed; cutover awaits owners and preserves jobs. Readbacks activate both profiles; compose pins image tag + SHA. APIs only produce.
+- 2026-08-23 | Split: `primary` polls/ACKs; sole `executor` owns queues, OTP/global lock. Leases fail closed; cutover awaits owners and preserves jobs. Readbacks use profiles/labels; compose pins image+SHA. APIs only produce.
 - 2026-08-23 | Latency: ACK wakeup, shared HTTP, serial batch 8, claim index with `sent`, 1.05s/destination. Local ACK is lease-fenced; workers do not repeat edge callback answers.
 - 2026-08-23 | Staging roles fail closed: `trading_bot_staging` foreign/bot, `_iran` Iran/API; deploy removes opposites. Repair preserves authority; quarantine needs durable replacement.
 - 2026-08-22 | Pre-auth `CallbackQuery` replies retain that route; never adapt bot-authored `callback.message`. Registration handoff uses the origin event with actor/chat guards.

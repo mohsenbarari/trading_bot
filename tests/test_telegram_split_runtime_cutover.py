@@ -323,6 +323,28 @@ class TelegramSplitRuntimeCutoverTests(unittest.TestCase):
         self.assertTrue(status["running"])
         self.assertEqual(sleeps, [0.5, 0.5])
 
+    def test_retired_runtime_check_uses_docker_labels_not_compose_service_lookup(self):
+        world = _FakeComposeWorld()
+        world.running["bot_publishers"] = True
+        operator = ComposeSplitOperator(
+            world,
+            project_name="trading_bot_staging",
+            compose_file="compose.yml",
+            env_file=".env.staging",
+            expected_sha="testsha",
+        )
+
+        unknown = operator.unknown_or_duplicate_runtimes()
+
+        self.assertIn("bot_publishers", unknown)
+        retired_calls = [
+            args
+            for args in world.calls
+            if "label=com.docker.compose.service=bot_publishers" in args
+        ]
+        self.assertTrue(retired_calls)
+        self.assertTrue(all("compose" not in args for args in retired_calls))
+
     def test_cutover_cli_uses_real_sleep_for_compose_settle(self):
         script = (REPO_ROOT / "scripts/telegram_bot_split_cutover.py").read_text(
             encoding="utf-8"
@@ -400,6 +422,19 @@ class _FakeComposeWorld:
     def __call__(self, args, *, env=None):
         self.calls.append(list(args))
         self.calls_with_env.append((list(args), dict(env or {})))
+        if args[:4] == ["docker", "ps", "-a", "-q"]:
+            service_filter = next(
+                (
+                    value
+                    for value in args
+                    if value.startswith("label=com.docker.compose.service=")
+                ),
+                "",
+            )
+            name = service_filter.rsplit("=", 1)[-1] if service_filter else ""
+            if name in self.running:
+                return CommandResult(stdout=f"cid-{name}\n")
+            return CommandResult(stdout="")
         if args[:2] == ["docker", "inspect"]:
             name = str(args[-1]).removeprefix("cid-")
             if name not in self.running:

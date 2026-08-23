@@ -171,6 +171,25 @@ class ComposeSplitOperator:
             return payload[0]
         return payload
 
+    def _service_container_ids_by_label(self, name: str) -> tuple[str, ...]:
+        # Retired services are intentionally absent from the current Compose
+        # model, so `compose ps <retired-name>` fails with "no such service".
+        # Docker labels still expose orphaned containers without requiring the
+        # service to exist in today's YAML.
+        result = self._run(
+            [
+                "docker",
+                "ps",
+                "-a",
+                "-q",
+                "--filter",
+                f"label=com.docker.compose.project={self.project_name}",
+                "--filter",
+                f"label=com.docker.compose.service={name}",
+            ]
+        )
+        return tuple(line.strip() for line in result.stdout.splitlines() if line.strip())
+
     def _env_map(self, payload: dict[str, Any] | None) -> dict[str, str]:
         if not payload:
             return {}
@@ -371,7 +390,7 @@ class ComposeSplitOperator:
     def unknown_or_duplicate_runtimes(self) -> tuple[str, ...]:
         unknown: list[str] = []
         for retired in RETIRED_BOT_SERVICES:
-            if self._inspect_payload(retired):
+            if self._service_container_ids_by_label(retired):
                 unknown.append(retired)
         roles: dict[str, int] = {}
         for name in KNOWN_BOT_SERVICES:
