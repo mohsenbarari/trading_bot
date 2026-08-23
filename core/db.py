@@ -10,6 +10,9 @@ Connection Pool:
 
 در محیط production با چند worker، کل اتصالات = pool_size × workers
 مثال: 10 pool × 4 workers = 40 اتصال همزمان به Postgres
+
+اندازهٔ استخر نقش‌های بات تلگرام از
+core/telegram_dispatch_latency_pool.py حساب می‌شود، نه با حدس جدا.
 """
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from typing import AsyncGenerator
