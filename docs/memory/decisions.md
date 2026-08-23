@@ -2,6 +2,8 @@
 
 Entries are newest first.
 
+- 2026-08-23 | Telegram dispatch latency work lives on `candidate/telegram-dispatch-latency-v1` from `origin/main` `44babdc4`; execution contract is `docs/TELEGRAM_DISPATCH_LATENCY_ROADMAP.md`. Root causes: central bot and all five publishers share one process and one event loop; the only queue wakeup fires at job creation while a publisher lane cannot claim until its own B2B command is `acknowledged`, and the acknowledgement path emits no wakeup, so every channel post and edit pays a dead 0–1s wait; the gateway opens a fresh HTTP client per Telegram call; the B2B hop costs two extra Telegram round trips per job even though both sides share one database. Sticky publisher ownership, the shared `destination_next` gate, and payload-free B2B stay locked. Stage 8 (inline callback answer) and Stage 9 (skipping the B2B round trip when colocated) each need explicit owner approval because they change a stated contract.
+
 - 2026-08-22 | Release input signatures exclude Python bytecode/cache artifacts while remaining sensitive to source drift.
 - 2026-08-22 | Closed/quiet-market inference may publish only bound `SAFE_NO_DATA`: healthy retained checkpoints, no price authority or invented values, then atomic replacement by fresh rate-ready data.
 - 2026-08-22 | Queue-v1 forward redeploys use the official two-host release while retaining one owner; cutover and redeploy have separate bound evidence.
