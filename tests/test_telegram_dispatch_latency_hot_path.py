@@ -5,7 +5,6 @@ import unittest
 
 from core import telegram_delivery_queue_worker as worker
 from core.services import telegram_offer_queue_feedback as feedback_module
-from core.telegram_delivery_offer_freshness import TelegramOfferFreshnessContext
 from core.telegram_delivery_queue_limiter import TelegramDeliveryDispatchAdmission
 from core.telegram_delivery_queue_contract import (
     TelegramDeliveryAction,
@@ -128,7 +127,7 @@ class TelegramDispatchLatencyHotPathTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(validate.await_args.kwargs["offer"], offer)
         self.assertIs(validate.await_args.kwargs["publication_state"], state)
 
-    async def test_apply_freshness_reuses_passed_rows_instead_of_public_id_load(self):
+    async def test_apply_freshness_reuses_session_rows_on_the_production_call(self):
         job = make_job(TelegramDeliveryAction.OFFER_PUBLISH)
         offer = make_offer()
         state = make_state(telegram_message_id=None)
@@ -146,14 +145,13 @@ class TelegramDispatchLatencyHotPathTests(unittest.IsolatedAsyncioTestCase):
             TelegramFreshnessOutcome.SENT_NOOP,
             reason="offer_freshness_already_published",
         )
-        context = TelegramOfferFreshnessContext(
-            offer=offer,
-            publication_state=state,
-            offer_public_id=offer.offer_public_id,
-        )
         load = AsyncMock(side_effect=AssertionError("public-id reload"))
         adapter = feedback_module.TelegramOfferQueueLifecycleFeedback()
         with patch.object(
+            feedback_module,
+            "_session_bound_offer_and_state",
+            return_value=(offer, state),
+        ), patch.object(
             feedback_module,
             "_load_offer_and_state_for_update",
             new=load,
@@ -161,13 +159,7 @@ class TelegramDispatchLatencyHotPathTests(unittest.IsolatedAsyncioTestCase):
             feedback_module,
             "_mark_terminal_without_publication",
         ) as mark_terminal:
-            await adapter.apply_freshness(
-                db,
-                job,
-                decision,
-                utc_now(),
-                loaded_context=context,
-            )
+            await adapter.apply_freshness(db, job, decision, utc_now())
 
         load.assert_not_awaited()
         mark_terminal.assert_called_once()

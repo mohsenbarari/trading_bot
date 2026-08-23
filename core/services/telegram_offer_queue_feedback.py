@@ -371,8 +371,6 @@ class TelegramOfferQueueLifecycleFeedback:
         job: TelegramDeliveryJobRecord,
         decision: TelegramFreshnessDecision,
         now: datetime,
-        *,
-        loaded_context: TelegramOfferFreshnessContext | None = None,
     ) -> None:
         action = _action(job)
         outcome = decision.outcome
@@ -387,7 +385,6 @@ class TelegramOfferQueueLifecycleFeedback:
             offer, state = await _reuse_or_load_offer_and_state_for_update(
                 db,
                 job=job,
-                context=loaded_context,
             )
         except TelegramOfferQueueFeedbackError as exc:
             if (

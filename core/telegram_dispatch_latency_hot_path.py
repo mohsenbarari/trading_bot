@@ -147,6 +147,7 @@ def locked_telegram_dispatch_hot_path() -> TelegramDispatchLatencyHotPathLock:
             "Both worker freshness checks stay; stale jobs still fail before the channel budget.",
             "assert_dispatchable still runs the full offer validator after the write lock.",
             "The removed reads are the unlocked Offer/state SELECTs inside that last validate.",
+            "apply_freshness reuses the current session's Offer/state rows on the four-argument production call.",
             "apply_delivery_result after Telegram is unchanged.",
             "Live query percentiles were not collected in this worktree.",
         ),

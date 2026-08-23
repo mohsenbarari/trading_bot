@@ -2,6 +2,8 @@
 
 Entries are newest first.
 
+- 2026-08-23 | Retention preflights command and source holds before any delete. A live source no longer leaves a job without its terminal dispatch command; membership pairs use the same order.
+- 2026-08-23 | Stage 11 `apply_freshness` reuses session-bound Offer/state rows on the four-argument production call. The unused `loaded_context` parameter was removed so the documented path is the live path.
 - 2026-08-23 | Stage 12 sizes bot pools from slot count: `all` needs 23 and keeps 15+10; split `primary` is 12+8 when that role is used; `publishers` keeps 10+8. Settings `db_pool_size` stays 15. No live pool-wait sample was collected.
 - 2026-08-23 | Stage 11 keeps both worker freshness checks and `assert_dispatchable`. The last validate reuses the locked Offer/state rows instead of selecting them again; successful SEND offer/state reads before Telegram drop 8→6.
 - 2026-08-23 | Stage 10 keeps destination interval at 1.05s. No live 429 series was collected, so the number was not lowered and destination_next stays shared without a method dimension.

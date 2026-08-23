@@ -274,6 +274,59 @@ async def _detach_terminal_source_bindings(
     return True
 
 
+async def _preflight_terminal_job_purge(
+    db: AsyncSession,
+    *,
+    job_id: int,
+) -> str:
+    """Inspect command and source holds without mutating either row."""
+
+    command_decision = await _purge_publisher_dispatch_command_for_job(
+        db,
+        job_id=job_id,
+        dry_run=True,
+    )
+    if command_decision == "blocked":
+        return "blocked"
+    if not await _detach_terminal_source_bindings(
+        db,
+        job_id=job_id,
+        mutate=False,
+    ):
+        return "source_blocked"
+    return "ready"
+
+
+async def _commit_terminal_job_dependencies(
+    db: AsyncSession,
+    *,
+    job_id: int,
+) -> None:
+    """Detach sources first, then delete a terminal command.
+
+    Source detach is first so a late hold cannot leave a job without its
+    command. Unexpected drift after preflight aborts the whole cycle.
+    """
+
+    if not await _detach_terminal_source_bindings(
+        db,
+        job_id=job_id,
+        mutate=True,
+    ):
+        raise TelegramDeliveryRetentionError(
+            "telegram_delivery_retention_source_hold_after_preflight"
+        )
+    command_decision = await _purge_publisher_dispatch_command_for_job(
+        db,
+        job_id=job_id,
+        dry_run=False,
+    )
+    if command_decision == "blocked":
+        raise TelegramDeliveryRetentionError(
+            "telegram_delivery_retention_live_command_after_preflight"
+        )
+
+
 async def _redact_payload_batch(
     db: AsyncSession,
     *,
@@ -362,7 +415,7 @@ async def _purge_membership_pairs(
     cutoff: datetime,
     limit: int,
     dry_run: bool,
-) -> tuple[int, int, int, int]:
+) -> tuple[int, int, int, int, int]:
     sagas = (
         await db.execute(
             select(TelegramChannelMembershipSaga)
@@ -412,53 +465,20 @@ async def _purge_membership_pairs(
         if await _has_pending_provider_outcome(db, ids):
             unresolved += 2
             continue
-        command_decisions = [
-            await _purge_publisher_dispatch_command_for_job(
-                db,
-                job_id=job_id,
-                dry_run=True,
-            )
+        preflight = [
+            await _preflight_terminal_job_purge(db, job_id=job_id)
             for job_id in ids
         ]
-        if any(decision == "blocked" for decision in command_decisions):
+        if any(decision == "blocked" for decision in preflight):
             dispatch_blocked += 2
             continue
-        if not dry_run:
-            for job_id in ids:
-                await _purge_publisher_dispatch_command_for_job(
-                    db,
-                    job_id=job_id,
-                    dry_run=False,
-                )
-        sources_are_terminal = all(
-            [
-                await _detach_terminal_source_bindings(
-                    db,
-                    job_id=ids[0],
-                    mutate=False,
-                ),
-                await _detach_terminal_source_bindings(
-                    db,
-                    job_id=ids[1],
-                    mutate=False,
-                ),
-            ]
-        )
-        if not sources_are_terminal:
+        if any(decision == "source_blocked" for decision in preflight):
             blocked_source += 2
             continue
         purged += 2
         if not dry_run:
-            await _detach_terminal_source_bindings(
-                db,
-                job_id=ids[0],
-                mutate=True,
-            )
-            await _detach_terminal_source_bindings(
-                db,
-                job_id=ids[1],
-                mutate=True,
-            )
+            for job_id in ids:
+                await _commit_terminal_job_dependencies(db, job_id=job_id)
             await db.delete(saga)
             for job in jobs:
                 await db.delete(job)
@@ -500,25 +520,16 @@ async def _purge_terminal_batch(
         if await _has_pending_provider_outcome(db, (job_id,)):
             unresolved += 1
             continue
-        if (
-            await _purge_publisher_dispatch_command_for_job(
-                db,
-                job_id=job_id,
-                dry_run=dry_run,
-            )
-            == "blocked"
-        ):
+        preflight = await _preflight_terminal_job_purge(db, job_id=job_id)
+        if preflight == "blocked":
             dispatch_blocked += 1
             continue
-        if not await _detach_terminal_source_bindings(
-            db,
-            job_id=job_id,
-            mutate=not dry_run,
-        ):
+        if preflight == "source_blocked":
             blocked_source += 1
             continue
         purged += 1
         if not dry_run:
+            await _commit_terminal_job_dependencies(db, job_id=job_id)
             await db.delete(job)
 
     remaining = limit - len(jobs)
