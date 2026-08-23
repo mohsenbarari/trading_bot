@@ -55,7 +55,7 @@ from core.market_intelligence.price_magnitude_policy import (
 )
 
 
-BRIDGE_VERSION = "staging-market-input-bridge-v5"
+BRIDGE_VERSION = "staging-market-input-bridge-v6-poison-row-isolation"
 STATE_VERSION = 1
 BATCH_SIZE = 2000
 GROUP_HOT_RETENTION_HOURS = MARKET_STORE_HOT_RETENTION_HOURS
@@ -89,6 +89,13 @@ _LEGACY_SKIP_ERRORS = frozenset(
         "legacy_instrument_unsupported",
         "instrument_price_unit_mismatch",
     }
+)
+_SOURCE_SKIP_ERROR_PREFIXES = (
+    # A single malformed or wrongly classified legacy quote must not pin the
+    # bridge checkpoint and starve every valid market fact that follows it.
+    # Keep the magnitude guard strict: discard the row instead of clamping or
+    # guessing its scale, then continue the same ordered batch.
+    "price_out_of_canonical_range:",
 )
 
 _UPSERT_SQL = """
@@ -546,29 +553,35 @@ def _write_source_rows(
     *,
     available_at: str,
     skip_errors: frozenset[str] = frozenset(),
-) -> tuple[int, int]:
+    skip_error_prefixes: tuple[str, ...] = (),
+) -> tuple[int, int, int]:
     """Write a source in bounded transactions and return count/max-id."""
 
     values: list[tuple[object, ...]] = []
     latest = 0
+    skipped = 0
     for row in rows:
         latest = int(row["id"])
         try:
             observation = convert(row, available_at=available_at)
             values.append(_storage_values(observation.normalized()))
         except BridgeError as exc:
-            if str(exc) in skip_errors:
+            reason = str(exc)
+            if reason in skip_errors or reason.startswith(skip_error_prefixes):
+                skipped += 1
                 continue
             raise
         except MarketStoreContractError as exc:
-            if str(exc) in skip_errors:
+            reason = str(exc)
+            if reason in skip_errors or reason.startswith(skip_error_prefixes):
+                skipped += 1
                 continue
             raise BridgeError(str(exc)) from exc
     if values:
         destination.executemany(_UPSERT_SQL, values)
         destination.commit()
     count = len(values)
-    return count, latest
+    return count, latest, skipped
 
 
 def _legacy_rows(source: sqlite3.Connection, after_id: int) -> Iterator[sqlite3.Row]:
@@ -629,7 +642,14 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     lock_path = _path_inside(runtime_root, args.lock_file, field="lock_file")
     state = _load_state(state_path)
     available_at = _now()
-    counts = {"legacy_public": 0, "external": 0, "group": 0, "archived": 0}
+    counts = {
+        "legacy_public": 0,
+        "legacy_public_skipped": 0,
+        "external": 0,
+        "external_skipped": 0,
+        "group": 0,
+        "archived": 0,
+    }
     last_legacy = int(state.get("legacy_price_event_id") or 0)
     last_external = int(state.get("external_observation_id") or 0)
     group_skipped = not bool(args.conversation_db)
@@ -650,14 +670,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                         batch = list(_legacy_rows(source, last_legacy))
                     if not batch:
                         break
-                    imported, latest = _write_source_rows(
+                    imported, latest, skipped = _write_source_rows(
                         destination,
                         batch,
                         _legacy_observation,
                         available_at=available_at,
                         skip_errors=_LEGACY_SKIP_ERRORS,
+                        skip_error_prefixes=_SOURCE_SKIP_ERROR_PREFIXES,
                     )
                     counts["legacy_public"] += imported
+                    counts["legacy_public_skipped"] += skipped
                     last_legacy = max(last_legacy, latest)
                     state["legacy_price_event_id"] = last_legacy
                     _save_state(state_path, state)
@@ -667,14 +689,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                         batch = list(_external_rows(source, last_external))
                     if not batch:
                         break
-                    imported, latest = _write_source_rows(
+                    imported, latest, skipped = _write_source_rows(
                         destination,
                         batch,
                         _external_observation,
                         available_at=available_at,
                         skip_errors=frozenset({"external_quote_not_selected"}),
+                        skip_error_prefixes=_SOURCE_SKIP_ERROR_PREFIXES,
                     )
                     counts["external"] += imported
+                    counts["external_skipped"] += skipped
                     last_external = max(last_external, latest)
                     state["external_observation_id"] = last_external
                     _save_state(state_path, state)
