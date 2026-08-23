@@ -581,7 +581,14 @@ class SyncGuaranteeMatrixTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(item["sync_meta"]["source_server"], "foreign")
                 self.assertEqual(item["sync_meta"]["source_sequence"], 1000 + sync.TABLE_ORDER[table_name])
                 self.assertIn("sync_protocol", item)
-                self.assertEqual(row_to_sync_data(table_name, fake_row(table_name, payload)), item["data"])
+                self.assertEqual(
+                    row_to_sync_data(
+                        table_name,
+                        fake_row(table_name, payload),
+                        source_server="foreign",
+                    ),
+                    item["data"],
+                )
                 self.assertNotIn("avatar_file_id", item["data"])
                 self.assertNotIn("channel_message_id", item["data"])
                 self.assertNotIn("worker_id", item["data"])

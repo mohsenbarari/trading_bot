@@ -136,7 +136,7 @@ def record_id_for_row(row: Any) -> Any:
     raise ValueError(f"Cannot resolve record id for {row!r}")
 
 
-def row_to_sync_data(table_name: str, row: Any) -> dict[str, Any]:
+def sanitized_row_sync_payload(table_name: str, row: Any) -> dict[str, Any]:
     skip_columns = REPLAY_SKIP_COLUMNS_BY_TABLE.get(table_name, set())
     payload: dict[str, Any] = {}
     for column in row.__table__.columns:
@@ -149,6 +149,46 @@ def row_to_sync_data(table_name: str, row: Any) -> dict[str, Any]:
     return sanitized
 
 
+def apply_canonical_sync_projection(
+    table_name: str,
+    data: dict[str, Any],
+    *,
+    row: Any,
+    source_server: str,
+) -> dict[str, Any]:
+    if table_name != "users":
+        return data
+    # Repair/replay for users uses the same source-aware projection as
+    # incremental registration sync. The receiver fail-closes without the
+    # natural-identity envelope, so current-state repair must carry it too.
+    allowed_fields = allowed_user_fields_for_source(source_server)
+    projected = {key: value for key, value in data.items() if key in allowed_fields}
+    if source_server == "foreign":
+        for field_name in ("bot_onboarding_completed_at", "last_seen_at"):
+            if projected.get(field_name) is None:
+                projected.pop(field_name, None)
+    projected[USER_SYNC_IDENTITY_FIELD] = build_user_sync_identity(
+        row,
+        include_previous=False,
+    )
+    return projected
+
+
+def row_to_sync_data(
+    table_name: str,
+    row: Any,
+    *,
+    source_server: str | None = None,
+) -> dict[str, Any]:
+    sanitized = sanitized_row_sync_payload(table_name, row)
+    return apply_canonical_sync_projection(
+        table_name,
+        sanitized,
+        row=row,
+        source_server=source_server or current_server(),
+    )
+
+
 def build_current_state_replay_item(
     *,
     table_name: str,
@@ -159,22 +199,13 @@ def build_current_state_replay_item(
 ) -> dict[str, Any]:
     record_id = record_id_for_row(row)
     source_server = source_server or current_server()
-    data = row_to_sync_data(table_name, row)
-    metadata_data = data
-    # Versioned user updates are resolved by a natural-identity envelope on the
-    # receiver.  A current-state repair without that envelope is rejected
-    # closed, even when the numeric id happens to match on both peers.
-    if table_name == "users":
-        allowed_fields = allowed_user_fields_for_source(source_server)
-        data = {key: value for key, value in data.items() if key in allowed_fields}
-        if source_server == "foreign":
-            for field_name in ("bot_onboarding_completed_at", "last_seen_at"):
-                if data.get(field_name) is None:
-                    data.pop(field_name, None)
-        data[USER_SYNC_IDENTITY_FIELD] = build_user_sync_identity(
-            row,
-            include_previous=False,
-        )
+    metadata_data = sanitized_row_sync_payload(table_name, row)
+    data = apply_canonical_sync_projection(
+        table_name,
+        metadata_data,
+        row=row,
+        source_server=source_server,
+    )
     payload_hash = stable_hash(data)
     item = {
         "type": "db_change",

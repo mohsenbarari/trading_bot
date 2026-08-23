@@ -85,11 +85,31 @@ class SyncRepairTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            row_to_sync_data("users", user_row),
+            row_to_sync_data("users", user_row, source_server="foreign"),
+            {
+                "id": 9,
+                "_sync_identity": {
+                    "current": {
+                        "account_name": "CanonicalUser",
+                        "mobile_number": "09120000009",
+                    },
+                    "previous": {},
+                },
+            },
+        )
+        self.assertEqual(
+            row_to_sync_data("users", user_row, source_server="iran"),
             {
                 "id": 9,
                 "account_name": "CanonicalUser",
                 "mobile_number": "09120000009",
+                "_sync_identity": {
+                    "current": {
+                        "account_name": "CanonicalUser",
+                        "mobile_number": "09120000009",
+                    },
+                    "previous": {},
+                },
             },
         )
         self.assertEqual(row_to_sync_data("offers", offer_row), {"id": 1, "offer_public_id": "ofr_1", "price": 100})
