@@ -1,5 +1,6 @@
 # Telegram Delivery
 
+- 2026-08-23 | Latency stages 0–6 are on `candidate/telegram-dispatch-latency-v1`. Midpoint is code-derived: ack wakeup, shared HTTP client, serial B2B batch 8, auth off the B2B path, claim index + terminal-command retention. Do not start stages 7–9 without owner approval; do not invent staging percentiles.
 - 2026-08-23 | Ignore co-located staging by exact project/service/role; unknown/second executors block. Pre-mutation failure needs no recovery. Guarded Legacy↔Queue releases rebuild evidence after profile switch; others reuse.
 - 2026-08-22 | Staging roles fail closed: `trading_bot_staging` is foreign/bot and `_iran` Iran/API; deploy removes opposites. Repair preserves identity/authority; quarantine needs durable replacement.
 - 2026-08-22 | Pre-auth `CallbackQuery` replies retain that route; never adapt bot-authored `callback.message`. Registration handoff uses the origin event with actor/chat guards.
