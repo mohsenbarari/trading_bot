@@ -2284,6 +2284,7 @@ async def telegram_delivery_queue_loop(
     credential_registry: TelegramDeliveryCredentialRegistry | None = None,
     dispatch_limiter: TelegramDeliveryDispatchLimiter | None = None,
     bot_identities: Sequence[str] | None = None,
+    process_owner_lease: TelegramDeliveryQueueOwnerLease | None = None,
 ) -> None:
     """Supervise independent bot lanes under the single queue-v1 owner."""
     global _active_process_owner_lease
@@ -2315,7 +2316,8 @@ async def telegram_delivery_queue_loop(
             "telegram_preflight_channel_destination_invalid"
         )
     channel_destination_key = f"channel:{normalized_channel_id}"
-    process_owner_lease = await acquire_telegram_delivery_queue_owner()
+    if process_owner_lease is None:
+        process_owner_lease = await acquire_telegram_delivery_queue_owner()
     if (
         _active_process_owner_lease is not None
         and _active_process_owner_lease is not process_owner_lease

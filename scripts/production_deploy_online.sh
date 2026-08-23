@@ -14,6 +14,11 @@ PRODUCTION_COIN_SNAPSHOT_RELAY_INSTALLER="$PROJECT_DIR/scripts/install_productio
 PRODUCTION_COIN_INPUT_TIMER_INSTALLER="$PROJECT_DIR/scripts/install_coin_intelligence_input_timers.sh"
 PRODUCTION_COIN_READINESS_SCRIPT="$PROJECT_DIR/scripts/check_production_coin_inference_readiness.py"
 TELEGRAM_QUEUE_PRODUCTION_CUTOVER_SCRIPT="$PROJECT_DIR/scripts/cutover_telegram_delivery_queue_production.py"
+TELEGRAM_BOT_SPLIT_PREFLIGHT_SCRIPT="$PROJECT_DIR/scripts/telegram_bot_split_preflight.py"
+# Default foreign writers stay app bot sync_worker with role=all.
+# Opt-in TELEGRAM_BOT_SPLIT_ENABLED=1 uses profile bot-executor and service bot_executor.
+# Activation: preflight, stop all, start bot_executor, confirm one queue owner, start bot as primary.
+# Rollback: stop bot and bot_executor, split=false, start role=all. Never two pollers for one identity.
 PRODUCTION_RELEASE_LOCK_DIR="/root/secure-envs/trading-bot/queue-cutover-artifacts"
 PRODUCTION_RELEASE_LOCK_PATH="$PRODUCTION_RELEASE_LOCK_DIR/production-release.lock"
 DEFAULT_MANIFEST="$PROJECT_DIR/deploy/production/online.env"

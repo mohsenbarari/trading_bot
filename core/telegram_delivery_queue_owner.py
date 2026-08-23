@@ -108,6 +108,33 @@ async def acquire_telegram_delivery_queue_owner(
         raise
 
 
+async def telegram_delivery_queue_owner_is_held(
+    engine: AsyncEngine | None = None,
+) -> bool:
+    """Read whether the global queue-owner advisory lock is granted.
+
+    This does not acquire or weaken the lock. Primary health uses it to
+    report an incomplete split topology without becoming a second owner.
+    """
+    active_engine = engine or application_engine
+    class_id = (TELEGRAM_DELIVERY_QUEUE_OWNER_LOCK_KEY >> 32) & 0xFFFFFFFF
+    object_id = TELEGRAM_DELIVERY_QUEUE_OWNER_LOCK_KEY & 0xFFFFFFFF
+    async with active_engine.connect() as connection:
+        result = await connection.execute(
+            text(
+                "SELECT EXISTS ("
+                "SELECT 1 FROM pg_locks "
+                "WHERE locktype = 'advisory' "
+                "AND classid = :class_id "
+                "AND objid = :object_id "
+                "AND objsubid = 1 AND granted"
+                ")"
+            ),
+            {"class_id": class_id, "object_id": object_id},
+        )
+        return result.scalar() is True
+
+
 async def telegram_delivery_queue_owner_monitor_loop(
     lease: TelegramDeliveryQueueOwnerLease,
     *,

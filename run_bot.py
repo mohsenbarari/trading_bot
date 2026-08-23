@@ -76,9 +76,21 @@ from core.telegram_bot_runtime_role import (
     assert_telegram_bot_runtime_role_compatible,
     assert_telegram_bot_runtime_role_plans_are_disjoint,
     resolve_telegram_bot_runtime_role,
+    role_owns_otp_worker,
     role_owns_primary_surface,
     role_owns_publisher_surface,
-    select_owned_bot_identities,
+    role_owns_queue_executor,
+    select_queue_execution_bot_identities,
+)
+from core.telegram_bot_runtime_topology import describe_telegram_bot_runtime_topology
+from core.telegram_central_poller_owner import (
+    TelegramCentralPollerAlreadyOwnedError,
+    acquire_telegram_central_poller_owner,
+)
+from core.telegram_delivery_queue_owner import (
+    TelegramDeliveryQueueAlreadyOwnedError,
+    acquire_telegram_delivery_queue_owner,
+    telegram_delivery_queue_owner_is_held,
 )
 from core.utils import utc_now
 
@@ -268,12 +280,19 @@ def configured_telegram_delivery_queue_worker_factory(
     settings_obj,
     *,
     runtime_role=None,
+    process_owner_lease=None,
 ):
     """Return a zero-argument queue runner with all production dependencies bound."""
 
-    composition = build_configured_telegram_delivery_runtime(settings=settings_obj)
     role = resolve_telegram_bot_runtime_role(settings_obj, role=runtime_role)
-    owned_identities = select_owned_bot_identities(role, composition.bot_identities)
+    if not role_owns_queue_executor(role):
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "telegram_bot_runtime_primary_must_not_own_queue"
+        )
+    composition = build_configured_telegram_delivery_runtime(settings=settings_obj)
+    owned_identities = select_queue_execution_bot_identities(
+        role, composition.bot_identities
+    )
     if not owned_identities:
         raise TelegramDeliveryRuntimeConfigurationError(
             "telegram_bot_runtime_role_has_no_queue_lanes"
@@ -305,6 +324,7 @@ def configured_telegram_delivery_queue_worker_factory(
                 credential_registry=composition.credential_registry,
                 dispatch_limiter=limiter,
                 bot_identities=owned_identities,
+                process_owner_lease=process_owner_lease,
             )
         finally:
             await redis_client.aclose()
@@ -317,24 +337,14 @@ def telegram_execution_worker_factories(
     *,
     settings_obj=settings,
     runtime_role=None,
+    process_owner_lease=None,
 ):
     """Return exactly one ownership set without creating coroutine objects."""
-    role = resolve_telegram_bot_runtime_role(settings_obj, role=runtime_role)
-    if role_owns_publisher_surface(role) and not role_owns_primary_surface(role):
-        if runtime.mode != TelegramDeliveryRuntimeMode.QUEUE_V1:
-            raise TelegramDeliveryRuntimeConfigurationError(
-                "telegram_bot_runtime_publishers_require_queue_v1"
-            )
-        if runtime.legacy_workers_enabled or not runtime.queue_worker_enabled:
-            raise TelegramDeliveryRuntimeConfigurationError(
-                "inconsistent_queue_runtime_decision"
-            )
-        return (
-            configured_telegram_delivery_queue_worker_factory(
-                settings_obj,
-                runtime_role=role,
-            ),
-        )
+    role = assert_telegram_bot_runtime_role_compatible(
+        settings_obj=settings_obj,
+        runtime=runtime,
+        role=runtime_role,
+    )
     if runtime.mode == TelegramDeliveryRuntimeMode.LEGACY:
         if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
             raise TelegramDeliveryRuntimeConfigurationError(
@@ -352,13 +362,20 @@ def telegram_execution_worker_factories(
             raise TelegramDeliveryRuntimeConfigurationError(
                 "inconsistent_queue_runtime_decision"
             )
-        return (
+        if not role_owns_queue_executor(role):
+            return ()
+        workers = [
             configured_telegram_delivery_queue_worker_factory(
                 settings_obj,
                 runtime_role=role,
-            ),
-            configured_telegram_otp_ephemeral_worker_factory(settings_obj),
-        )
+                process_owner_lease=process_owner_lease,
+            )
+        ]
+        if role_owns_otp_worker(role):
+            workers.append(
+                configured_telegram_otp_ephemeral_worker_factory(settings_obj)
+            )
+        return tuple(workers)
     raise TelegramDeliveryRuntimeConfigurationError("unknown_runtime_decision_mode")
 
 
@@ -412,6 +429,10 @@ async def main():
         raise BotRuntimeSurfaceError(str(exc)) from exc
     start_primary = role_owns_primary_surface(runtime_role)
     start_publishers = role_owns_publisher_surface(runtime_role)
+    owns_queue = (
+        role_owns_queue_executor(runtime_role)
+        and telegram_runtime.mode == TelegramDeliveryRuntimeMode.QUEUE_V1
+    )
 
     # Initialize Database
     await init_db()
@@ -419,87 +440,121 @@ async def main():
     # Register SQLAlchemy event listeners for sync & realtime events
     setup_event_listeners()
 
+    queue_owner_lease = None
+    central_poller_lease = None
+    queue_lease_handed_off = False
     bot = None
     dp = None
-    if start_primary:
-        bot = Bot(token=settings.bot_token)
-        storage = RedisStorage.from_url(settings.redis_url)
-        dp = Dispatcher(
-            storage=storage,
-            events_isolation=storage.create_isolation(lock_kwargs={"timeout": 120}),
+    publisher_bots = ()
+    try:
+        if owns_queue:
+            try:
+                queue_owner_lease = await acquire_telegram_delivery_queue_owner()
+            except TelegramDeliveryQueueAlreadyOwnedError as exc:
+                raise BotRuntimeSurfaceError(str(exc)) from exc
+        if start_primary:
+            try:
+                central_poller_lease = await acquire_telegram_central_poller_owner()
+            except TelegramCentralPollerAlreadyOwnedError as exc:
+                raise BotRuntimeSurfaceError(str(exc)) from exc
+
+        split_enabled = bool(getattr(settings, "telegram_bot_split_enabled", False))
+        if owns_queue:
+            queue_owner_present = True
+        elif split_enabled and start_primary:
+            queue_owner_present = await telegram_delivery_queue_owner_is_held()
+        else:
+            queue_owner_present = None
+        topology = describe_telegram_bot_runtime_topology(
+            role=runtime_role,
+            split_enabled=split_enabled,
+            queue_owner_present=queue_owner_present,
+        )
+        logger.info(
+            "Telegram bot runtime topology",
+            extra={
+                "event": "bot.runtime_topology",
+                **topology.as_dict(),
+            },
         )
 
-        # Capture the callback deadline origin before Auth or any other DB work.
-        dp.update.outer_middleware(CallbackReceiptMiddleware())
+        if start_primary:
+            bot = Bot(token=settings.bot_token)
+            storage = RedisStorage.from_url(settings.redis_url)
+            dp = Dispatcher(
+                storage=storage,
+                events_isolation=storage.create_isolation(lock_kwargs={"timeout": 120}),
+            )
 
-        # Hot trade callbacks must fail fast before Auth opens a DB session.
-        dp.update.outer_middleware(TradeContentionGateMiddleware())
+            # Capture the callback deadline origin before Auth or any other DB work.
+            dp.update.outer_middleware(CallbackReceiptMiddleware())
 
-        # Auth: inject user into handler data for ALL updates (must be before routers)
-        auth_mw = AuthMiddleware(AsyncSessionLocal)
-        dp.update.outer_middleware(auth_mw)
-        dp.update.outer_middleware(BotLoggingContextMiddleware())
-        dp.update.outer_middleware(StaleNavigationHandoffMiddleware())
+            # Hot trade callbacks must fail fast before Auth opens a DB session.
+            dp.update.outer_middleware(TradeContentionGateMiddleware())
 
-        # Include routers
-        dp.include_router(start.router)
-        dp.include_router(link_account.router) # 👈 Added (high priority)
-        dp.include_router(panel.router)
-        dp.include_router(trade_create.router)
-        dp.include_router(trade_execute.router)
-        dp.include_router(trade_manage.router)
-        dp.include_router(trade_history.router)
-        dp.include_router(commodity_catalog.router)
-        dp.include_router(admin.router)
-        dp.include_router(admin_broadcast.router)
-        dp.include_router(admin_commodities.router)
-        dp.include_router(admin_users.router)
-        dp.include_router(block_manage.router)
-        dp.include_router(offer_overtime_preference.router)
-        dp.include_router(offer_overtime_callbacks.router)
+            # Auth: inject user into handler data for ALL updates (must be before routers)
+            auth_mw = AuthMiddleware(AsyncSessionLocal)
+            dp.update.outer_middleware(auth_mw)
+            dp.update.outer_middleware(BotLoggingContextMiddleware())
+            dp.update.outer_middleware(StaleNavigationHandoffMiddleware())
 
-    publisher_pollers, publisher_bot_ids, publisher_bots = (
-        configured_publisher_b2b_pollers(settings)
-        if start_publishers
-        else ((), configured_publisher_b2b_lane_ids(settings), ())
-    )
-    if start_primary and publisher_bot_ids:
-        dp.include_router(build_primary_b2b_router(publisher_bot_ids=publisher_bot_ids))
-    publisher_dispatcher = (
-        configured_publisher_dispatch_worker_factory(
-            settings,
-            publisher_bot_ids=publisher_bot_ids,
+            # Include routers
+            dp.include_router(start.router)
+            dp.include_router(link_account.router) # 👈 Added (high priority)
+            dp.include_router(panel.router)
+            dp.include_router(trade_create.router)
+            dp.include_router(trade_execute.router)
+            dp.include_router(trade_manage.router)
+            dp.include_router(trade_history.router)
+            dp.include_router(commodity_catalog.router)
+            dp.include_router(admin.router)
+            dp.include_router(admin_broadcast.router)
+            dp.include_router(admin_commodities.router)
+            dp.include_router(admin_users.router)
+            dp.include_router(block_manage.router)
+            dp.include_router(offer_overtime_preference.router)
+            dp.include_router(offer_overtime_callbacks.router)
+
+        publisher_pollers, publisher_bot_ids, publisher_bots = (
+            configured_publisher_b2b_pollers(settings)
+            if start_publishers
+            else ((), configured_publisher_b2b_lane_ids(settings), ())
         )
-        if start_primary
-        else None
-    )
-    if start_primary:
-        # Default router should be last
-        dp.include_router(default.router)
+        if start_primary and publisher_bot_ids:
+            dp.include_router(build_primary_b2b_router(publisher_bot_ids=publisher_bot_ids))
+        publisher_dispatcher = (
+            configured_publisher_dispatch_worker_factory(
+                settings,
+                publisher_bot_ids=publisher_bot_ids,
+            )
+            if start_primary
+            else None
+        )
+        if start_primary:
+            # Default router should be last
+            dp.include_router(default.router)
 
-    polling = []
-    if start_primary:
-        polling.append(dp.start_polling(bot))
-    polling.extend(publisher_pollers)
-    if not polling:
-        raise BotRuntimeSurfaceError("telegram_bot_runtime_role_has_no_polling_surface")
+        polling = []
+        if start_primary:
+            polling.append(dp.start_polling(bot))
+        polling.extend(publisher_pollers)
+        if not polling:
+            raise BotRuntimeSurfaceError("telegram_bot_runtime_role_has_no_polling_surface")
 
-    child_coroutines = []
-    if start_primary:
-        child_coroutines.append(listen_trade_suggestion_events(bot))
-        if publisher_dispatcher is not None:
-            child_coroutines.append(publisher_dispatcher())
-    child_coroutines.extend(
-        worker_factory()
-        for worker_factory in telegram_execution_worker_factories(
+        child_coroutines = []
+        if start_primary:
+            child_coroutines.append(listen_trade_suggestion_events(bot))
+            if publisher_dispatcher is not None:
+                child_coroutines.append(publisher_dispatcher())
+            await configure_interactive_bot_command_menu(bot)
+        worker_factories = telegram_execution_worker_factories(
             telegram_runtime,
             runtime_role=runtime_role,
+            process_owner_lease=queue_owner_lease,
         )
-    )
-
-    try:
-        if start_primary:
-            await configure_interactive_bot_command_menu(bot)
+        child_coroutines.extend(worker_factory() for worker_factory in worker_factories)
+        if owns_queue:
+            queue_lease_handed_off = True
         logger.info("🤖 Bot started...")
         await supervise_bot_runtime(
             polling_coro=supervise_pollers(*polling),
@@ -513,6 +568,10 @@ async def main():
             *(publisher_bot.session.close() for publisher_bot in publisher_bots),
             return_exceptions=True,
         )
+        if central_poller_lease is not None:
+            await central_poller_lease.close()
+        if queue_owner_lease is not None and not queue_lease_handed_off:
+            await queue_owner_lease.close()
 
 if __name__ == "__main__":
     try:

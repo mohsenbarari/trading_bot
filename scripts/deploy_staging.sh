@@ -48,6 +48,7 @@ STAGING_FOREIGN_APP_PORT="${STAGING_FOREIGN_APP_PORT:-8121}"
 STAGING_PROJECT_NAME="${STAGING_PROJECT_NAME:-trading_bot_staging}"
 STAGING_NGINX_SITE="${STAGING_NGINX_SITE:-trading-bot-staging}"
 STAGING_ENABLE_BOT="${STAGING_ENABLE_BOT:-0}"
+STAGING_TELEGRAM_BOT_SPLIT_ENABLED="${STAGING_TELEGRAM_BOT_SPLIT_ENABLED:-0}"
 STAGING_FOREIGN_ONLY="${STAGING_FOREIGN_ONLY:-0}"
 STAGING_BOT_USERNAME="${STAGING_BOT_USERNAME:-}"
 STAGING_INTERNAL_IRAN_SERVER_URL="${STAGING_INTERNAL_IRAN_SERVER_URL:-http://app:8000}"
@@ -845,6 +846,55 @@ start_prebuilt_producers() {
     health
 }
 
+telegram_bot_split_enabled() {
+    [[ "$STAGING_TELEGRAM_BOT_SPLIT_ENABLED" == "1" || "$STAGING_TELEGRAM_BOT_SPLIT_ENABLED" == "true" ]]
+}
+
+assert_telegram_bot_split_topology() {
+    if telegram_bot_split_enabled; then
+        STAGING_TELEGRAM_BOT_RUNTIME_ROLE="${STAGING_TELEGRAM_BOT_RUNTIME_ROLE:-primary}"
+        if [[ "$STAGING_TELEGRAM_BOT_RUNTIME_ROLE" == "all" ]]; then
+            die "split runtime forbids STAGING_TELEGRAM_BOT_RUNTIME_ROLE=all"
+        fi
+        if [[ "$STAGING_TELEGRAM_BOT_RUNTIME_ROLE" != "primary" ]]; then
+            die "split runtime requires STAGING_TELEGRAM_BOT_RUNTIME_ROLE=primary on bot"
+        fi
+        export STAGING_TELEGRAM_BOT_RUNTIME_ROLE
+        export STAGING_TELEGRAM_BOT_SPLIT_ENABLED=true
+        return
+    fi
+    STAGING_TELEGRAM_BOT_RUNTIME_ROLE="${STAGING_TELEGRAM_BOT_RUNTIME_ROLE:-all}"
+    if [[ "$STAGING_TELEGRAM_BOT_RUNTIME_ROLE" != "all" ]]; then
+        die "split roles require STAGING_TELEGRAM_BOT_SPLIT_ENABLED=1"
+    fi
+    export STAGING_TELEGRAM_BOT_RUNTIME_ROLE
+    export STAGING_TELEGRAM_BOT_SPLIT_ENABLED=false
+}
+
+start_split_bot_runtime() {
+    assert_telegram_bot_split_topology
+    python3 "$PROJECT_DIR/scripts/telegram_bot_split_preflight.py" \
+        --bot-role "${STAGING_TELEGRAM_BOT_RUNTIME_ROLE}" \
+        --split-enabled true \
+        --executor-enabled true \
+        || die "telegram bot split preflight refused the topology"
+    compose --profile staging-bot --profile staging-sync stop bot || true
+    compose --profile staging-bot --profile staging-bot-executor --profile staging-sync \
+        up -d --no-build bot_executor
+    compose --profile staging-bot --profile staging-bot-executor --profile staging-sync \
+        up -d --no-build bot
+}
+
+rollback_split_bot_runtime() {
+    compose --profile staging-bot --profile staging-bot-executor --profile staging-sync \
+        stop bot bot_executor || true
+    STAGING_TELEGRAM_BOT_SPLIT_ENABLED=0
+    STAGING_TELEGRAM_BOT_RUNTIME_ROLE=all
+    export STAGING_TELEGRAM_BOT_SPLIT_ENABLED=false
+    export STAGING_TELEGRAM_BOT_RUNTIME_ROLE=all
+    compose --profile staging-bot --profile staging-sync up -d --no-build bot
+}
+
 start_prebuilt_bot() {
     [[ "$STAGING_ENABLE_BOT" == "1" && "$STAGING_FOREIGN_ONLY" == "1" ]] || \
         die "prebuilt bot start is permitted only on the foreign staging role"
@@ -854,7 +904,12 @@ start_prebuilt_bot() {
     ensure_runtime_env_values
     build_frontend
     require_prebuilt_image
-    compose --profile staging-bot --profile staging-sync up -d --no-build bot
+    assert_telegram_bot_split_topology
+    if telegram_bot_split_enabled; then
+        start_split_bot_runtime
+    else
+        compose --profile staging-bot --profile staging-sync up -d --no-build bot
+    fi
     compose ps
 }
 
@@ -888,8 +943,14 @@ deploy() {
     ensure_runtime_env_values
     build_frontend
     remove_legacy_compose_stateless_containers
+    assert_telegram_bot_split_topology
     if [[ "$STAGING_ENABLE_BOT" == "1" && "$STAGING_FOREIGN_ONLY" == "1" ]]; then
-        compose --profile staging-bot --profile staging-sync up -d --build foreign_app bot foreign_sync_worker
+        if telegram_bot_split_enabled; then
+            compose --profile staging-bot --profile staging-sync up -d --build foreign_app foreign_sync_worker
+            start_split_bot_runtime
+        else
+            compose --profile staging-bot --profile staging-sync up -d --build foreign_app bot foreign_sync_worker
+        fi
     elif [[ "$STAGING_ENABLE_BOT" == "1" ]]; then
         compose --profile staging-bot up -d --build
     else

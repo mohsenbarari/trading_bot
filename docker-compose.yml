@@ -42,6 +42,7 @@ x-telegram-bot-role: &telegram_bot_role
   TELEGRAM_MULTI_PUBLISHER_ENABLED: ${TELEGRAM_MULTI_PUBLISHER_ENABLED:-false}
   TELEGRAM_B2B_DISPATCH_ENABLED: ${TELEGRAM_B2B_DISPATCH_ENABLED:-false}
   TELEGRAM_BOT_RUNTIME_ROLE: ${TELEGRAM_BOT_RUNTIME_ROLE:-all}
+  TELEGRAM_BOT_SPLIT_ENABLED: ${TELEGRAM_BOT_SPLIT_ENABLED:-false}
 
 services:
   app:
@@ -104,7 +105,8 @@ services:
       TZ: UTC
       TRADING_BOT_SERVICE: bot
       TRADING_BOT_METRICS_BACKEND: ${TRADING_BOT_METRICS_BACKEND:-memory}
-      # Role `all` ceiling 25 covers the calculated 23. For role `primary` use 12+8.
+      # Role `all` ceiling 25 covers the calculated queue+headroom budget.
+      # For role `primary` use 12+8. Never start `all` together with bot_executor.
       DB_POOL_SIZE: ${DB_POOL_SIZE:-15}
       DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
@@ -131,23 +133,24 @@ services:
     networks:
       - trading_net
 
-  bot_publishers:
+  bot_executor:
     image: trading_bot_base
     logging: *default_logging
-    container_name: trading_bot_bot_publishers
+    container_name: trading_bot_bot_executor
     restart: always
     profiles:
-      - bot-publishers
+      - bot-executor
     command: python run_bot.py
     environment:
       <<: *telegram_bot_role
       TZ: UTC
       TRADING_BOT_SERVICE: bot
-      TELEGRAM_BOT_RUNTIME_ROLE: publishers
+      TELEGRAM_BOT_RUNTIME_ROLE: executor
+      TELEGRAM_BOT_SPLIT_ENABLED: "true"
       TRADING_BOT_METRICS_BACKEND: ${TRADING_BOT_METRICS_BACKEND:-memory}
-      # Role `publishers` ceiling 18 covers the calculated 11 slot/headroom budget.
-      DB_POOL_SIZE: ${DB_PUBLISHERS_POOL_SIZE:-10}
-      DB_MAX_OVERFLOW: ${DB_PUBLISHERS_MAX_OVERFLOW:-8}
+      # Role `executor` ceiling 25 covers every queue lane plus owner and OTP.
+      DB_POOL_SIZE: ${DB_EXECUTOR_POOL_SIZE:-15}
+      DB_MAX_OVERFLOW: ${DB_EXECUTOR_MAX_OVERFLOW:-10}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
     volumes:
       - uploads_data:/app/uploads
@@ -159,6 +162,8 @@ services:
     depends_on:
       migration:
         condition: service_completed_successfully
+      redis:
+        condition: service_started
     networks:
       - trading_net
 

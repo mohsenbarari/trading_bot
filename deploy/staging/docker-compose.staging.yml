@@ -318,6 +318,7 @@ services:
       TZ: UTC
       TRADING_BOT_SERVICE: bot
       TELEGRAM_BOT_RUNTIME_ROLE: ${STAGING_TELEGRAM_BOT_RUNTIME_ROLE:-all}
+      TELEGRAM_BOT_SPLIT_ENABLED: ${STAGING_TELEGRAM_BOT_SPLIT_ENABLED:-false}
       ENVIRONMENT: staging
       SERVER_MODE: foreign
       RELEASE_SHA: ${STAGING_RELEASE_SHA:-staging}
@@ -358,19 +359,20 @@ services:
     networks:
       - staging_net
 
-  bot_publishers:
+  bot_executor:
     image: *app_image
     logging: *default_logging
     build: *app_build
     profiles:
-      - staging-bot-publishers
+      - staging-bot-executor
     restart: unless-stopped
     command: python run_bot.py
     environment:
       <<: *non_iran_sms_isolation
       TZ: UTC
       TRADING_BOT_SERVICE: bot
-      TELEGRAM_BOT_RUNTIME_ROLE: publishers
+      TELEGRAM_BOT_RUNTIME_ROLE: executor
+      TELEGRAM_BOT_SPLIT_ENABLED: "true"
       ENVIRONMENT: staging
       SERVER_MODE: foreign
       RELEASE_SHA: ${STAGING_RELEASE_SHA:-staging}
@@ -378,8 +380,8 @@ services:
       IRAN_SERVER_URL: ${STAGING_FOREIGN_IRAN_SERVER_URL:-https://staging.gold-trade.ir}
       FOREIGN_SERVER_URL: ${STAGING_FOREIGN_FOREIGN_SERVER_URL:-http://foreign_app:8000}
       GERMANY_SERVER_URL: ${STAGING_FOREIGN_FOREIGN_SERVER_URL:-http://foreign_app:8000}
-      DB_POOL_SIZE: ${STAGING_DB_PUBLISHERS_POOL_SIZE:-5}
-      DB_MAX_OVERFLOW: ${STAGING_DB_PUBLISHERS_MAX_OVERFLOW:-5}
+      DB_POOL_SIZE: ${STAGING_DB_EXECUTOR_POOL_SIZE:-15}
+      DB_MAX_OVERFLOW: ${STAGING_DB_EXECUTOR_MAX_OVERFLOW:-10}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
       OTP_DELIVERY_STATE_SECRET: ""
       IRAN_OTP_DELIVERY_STATE_SECRET: ""
