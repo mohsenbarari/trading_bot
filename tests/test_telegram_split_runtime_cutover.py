@@ -302,6 +302,33 @@ class TelegramSplitRuntimeCutoverTests(unittest.TestCase):
         self.assertTrue(report.rollback_ok)
         self.assertEqual(world.roles.get("bot"), "all")
 
+    def test_compose_operator_waits_for_the_role_owner_lease(self):
+        world = _FakeComposeWorld()
+        world.roles["bot"] = "executor"
+        world.split["bot"] = True
+        world.queue_owner_delayed_reads = 2
+        sleeps: list[float] = []
+        operator = ComposeSplitOperator(
+            world,
+            project_name="trading_bot_staging",
+            compose_file="compose.yml",
+            env_file=".env.staging",
+            expected_sha="testsha",
+            stable_attempts=5,
+            sleep=sleeps.append,
+        )
+
+        status = operator.wait_stable("bot")
+
+        self.assertTrue(status["running"])
+        self.assertEqual(sleeps, [0.5, 0.5])
+
+    def test_cutover_cli_uses_real_sleep_for_compose_settle(self):
+        script = (REPO_ROOT / "scripts/telegram_bot_split_cutover.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("sleep=time.sleep", script)
+
     def test_harness_is_module_only(self):
         harness = (REPO_ROOT / "scripts/run_telegram_split_runtime_harness.py").read_text(
             encoding="utf-8"
@@ -344,6 +371,7 @@ class _FakeComposeWorld:
         self.jobs = 4
         self.crash_executor = False
         self.image = "sha256:abc"
+        self.queue_owner_delayed_reads = 0
 
     def _inspect(self, name: str) -> dict:
         role = self.roles.get(name, "")
@@ -420,6 +448,9 @@ class _FakeComposeWorld:
         queue_obj = str(TELEGRAM_DELIVERY_QUEUE_OWNER_LOCK_KEY & 0xFFFFFFFF)
         central_obj = str(TELEGRAM_CENTRAL_POLLER_LOCK_KEY & 0xFFFFFFFF)
         if queue_obj in sql:
+            if self.queue_owner_delayed_reads > 0:
+                self.queue_owner_delayed_reads -= 1
+                return CommandResult(stdout="0")
             return CommandResult(stdout=str(self.queue_owners))
         if central_obj in sql:
             return CommandResult(stdout=str(self.central_pollers))

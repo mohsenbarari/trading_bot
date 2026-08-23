@@ -293,7 +293,18 @@ class ComposeSplitOperator:
             if last["running"] and last["restarts"] < 2:
                 health = str(last.get("health") or "")
                 if health in {"", "healthy", "running", "starting"}:
-                    if health != "starting":
+                    role = str(last.get("role") or "")
+                    owner_ready = True
+                    if role == TELEGRAM_BOT_RUNTIME_ROLE_EXECUTOR:
+                        owner_ready = self.queue_owner_count() == 1
+                    elif role == TELEGRAM_BOT_RUNTIME_ROLE_PRIMARY:
+                        owner_ready = self.central_poller_count() == 1
+                    elif role == TELEGRAM_BOT_RUNTIME_ROLE_ALL:
+                        owner_ready = (
+                            self.queue_owner_count() == 1
+                            and self.central_poller_count() == 1
+                        )
+                    if health != "starting" and owner_ready:
                         return last
             self.sleep(0.5)
         return last

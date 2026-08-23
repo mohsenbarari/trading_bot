@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -74,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
                 expected_sha=args.expected_sha,
                 bot_profile=args.bot_profile,
                 executor_profile=args.executor_profile,
+                sleep=time.sleep,
             )
     except SplitCutoverError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, sort_keys=True))
