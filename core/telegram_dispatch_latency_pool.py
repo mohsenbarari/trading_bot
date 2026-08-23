@@ -17,12 +17,14 @@ from core.telegram_bot_runtime_role import (
 from core.telegram_multi_publisher_contract import TELEGRAM_PUBLISHER_IDENTITIES
 
 
-POOL_SCHEMA_VERSION = "telegram_dispatch_latency_pool_v2"
+POOL_SCHEMA_VERSION = "telegram_dispatch_latency_pool_v3"
 
 # Each queue slot opens one session at a time and commits before the next step.
 SESSIONS_PER_SLOT = 1
 # The queue owner advisory lock holds one connection for the process lifetime.
 OWNER_LEASE_CONNECTIONS = 1
+# The central-poller advisory lock holds one connection for primary/all.
+CENTRAL_POLLER_LEASE_CONNECTIONS = 1
 # Reserved concurrent private-update sessions on the central bot. Not a live p95.
 PRIMARY_UPDATE_HEADROOM = 8
 # Reserved B2B/command/callback sessions. Executor keeps one per worker bot.
@@ -125,7 +127,11 @@ def slot_count_for_role(role: str) -> int:
 
 def reserved_connections_for_role(role: str) -> int:
     if role == TELEGRAM_BOT_RUNTIME_ROLE_PRIMARY:
-        return PRIMARY_UPDATE_HEADROOM + SUPERVISOR_BURST
+        return (
+            CENTRAL_POLLER_LEASE_CONNECTIONS
+            + PRIMARY_UPDATE_HEADROOM
+            + SUPERVISOR_BURST
+        )
     if role == TELEGRAM_BOT_RUNTIME_ROLE_EXECUTOR:
         return (
             OWNER_LEASE_CONNECTIONS
@@ -136,6 +142,7 @@ def reserved_connections_for_role(role: str) -> int:
     if role == TELEGRAM_BOT_RUNTIME_ROLE_ALL:
         return (
             OWNER_LEASE_CONNECTIONS
+            + CENTRAL_POLLER_LEASE_CONNECTIONS
             + SUPERVISOR_BURST
             + PRIMARY_UPDATE_HEADROOM
             + PUBLISHER_COMMAND_HEADROOM
@@ -187,6 +194,24 @@ def production_role_pools() -> tuple[TelegramRolePoolNeed, ...]:
     )
 
 
+def compose_pool_for_bot_role(role: str) -> dict[str, int]:
+    """Return bot-only pool env values. API and sync keep their own settings."""
+    if role == TELEGRAM_BOT_RUNTIME_ROLE_PRIMARY:
+        return {
+            "db_pool_size": RECOMMENDED_PRIMARY_POOL_SIZE,
+            "db_max_overflow": RECOMMENDED_PRIMARY_MAX_OVERFLOW,
+        }
+    if role == TELEGRAM_BOT_RUNTIME_ROLE_EXECUTOR:
+        return {
+            "db_pool_size": PRODUCTION_EXECUTOR_POOL_SIZE,
+            "db_max_overflow": PRODUCTION_EXECUTOR_MAX_OVERFLOW,
+        }
+    return {
+        "db_pool_size": PRODUCTION_ALL_POOL_SIZE,
+        "db_max_overflow": PRODUCTION_ALL_MAX_OVERFLOW,
+    }
+
+
 def configured_service_ceilings() -> dict[str, int]:
     return {
         "app": PRODUCTION_APP_POOL_SIZE + PRODUCTION_APP_MAX_OVERFLOW,
@@ -222,9 +247,12 @@ def locked_telegram_dispatch_pools() -> TelegramDispatchLatencyPoolLock:
         notes=(
             "Each queue slot holds one session at a time; the count is not guessed.",
             "Primary has no queue slots and no queue-owner connection.",
+            "Primary and all hold one extra connection for the central-poller lease.",
             "Executor owns every queue lane, the global owner lease, supervisors, and OTP.",
             "Executor ceiling rose from 10+8 to 15+10 because it now owns all lanes.",
             "Primary 12+8 was not shrunk; no live pool-wait sample was collected.",
             "Settings db_pool_size stays 15 so API and the default role=all process do not shrink.",
+            "Compose assigns bot pools through DB_BOT_* so API/sync are not resized.",
+            "Primary 12+8 is the applied bot assignment, not a comment-only hint.",
         ),
     )

@@ -117,6 +117,12 @@ class TelegramDeliveryQueueConfigTests(unittest.TestCase):
             _settings(telegram_bot_runtime_role="primary")
         with self.assertRaises(ValidationError):
             _settings(telegram_bot_runtime_role="all", telegram_bot_split_enabled=True)
+        with self.assertRaises(ValidationError):
+            _settings(
+                trading_bot_service="bot",
+                db_pool_size=5,
+                db_max_overflow=5,
+            )
 
         with self.assertRaises(ValidationError):
             _settings(telegram_b2b_dispatch_enabled=True)

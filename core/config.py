@@ -354,6 +354,12 @@ class Settings(BaseSettings):
             and bool(self.telegram_b2b_dispatch_enabled)
         ):
             raise ValueError("telegram_bot_runtime_executor_requires_b2b")
+        if str(self.trading_bot_service or "").strip().lower() == "bot":
+            from core.telegram_dispatch_latency_pool import required_connections_for_role
+
+            ceiling = int(self.db_pool_size) + int(self.db_max_overflow)
+            if ceiling < required_connections_for_role(runtime_role):
+                raise ValueError("telegram_bot_db_pool_below_role_requirement")
         positive_float_fields = (
             "telegram_delivery_queue_preflight_timeout_seconds",
             "telegram_delivery_queue_worker_interval_seconds",

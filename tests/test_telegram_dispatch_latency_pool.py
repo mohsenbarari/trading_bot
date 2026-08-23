@@ -17,6 +17,7 @@ from core.telegram_dispatch_latency_pool import (
     RECOMMENDED_PRIMARY_MAX_OVERFLOW,
     RECOMMENDED_PRIMARY_POOL_SIZE,
     SESSIONS_PER_SLOT,
+    compose_pool_for_bot_role,
     configured_service_ceilings,
     locked_telegram_dispatch_pools,
     production_role_pools,
@@ -40,10 +41,10 @@ class TelegramDispatchLatencyPoolTests(unittest.TestCase):
         self.assertEqual(slot_count_for_role(TELEGRAM_BOT_RUNTIME_ROLE_ALL), 9)
         self.assertEqual(slot_count_for_role(TELEGRAM_BOT_RUNTIME_ROLE_PRIMARY), 0)
         self.assertEqual(slot_count_for_role(TELEGRAM_BOT_RUNTIME_ROLE_EXECUTOR), 9)
-        self.assertEqual(required_connections_for_role(TELEGRAM_BOT_RUNTIME_ROLE_ALL), 24)
+        self.assertEqual(required_connections_for_role(TELEGRAM_BOT_RUNTIME_ROLE_ALL), 25)
         self.assertEqual(
             required_connections_for_role(TELEGRAM_BOT_RUNTIME_ROLE_PRIMARY),
-            11,
+            12,
         )
         self.assertEqual(
             required_connections_for_role(TELEGRAM_BOT_RUNTIME_ROLE_EXECUTOR),
@@ -97,13 +98,15 @@ class TelegramDispatchLatencyPoolTests(unittest.TestCase):
         )
         db_block = compose_service_block(repo_root / "docker-compose.yml", "db")
 
-        self.assertIn(f"DB_POOL_SIZE: ${{DB_POOL_SIZE:-{PRODUCTION_ALL_POOL_SIZE}}}", bot)
+        self.assertIn(f"DB_POOL_SIZE: ${{DB_BOT_POOL_SIZE:-{PRODUCTION_ALL_POOL_SIZE}}}", bot)
         self.assertIn(
-            f"DB_MAX_OVERFLOW: ${{DB_MAX_OVERFLOW:-{PRODUCTION_ALL_MAX_OVERFLOW}}}",
+            f"DB_MAX_OVERFLOW: ${{DB_BOT_MAX_OVERFLOW:-{PRODUCTION_ALL_MAX_OVERFLOW}}}",
             bot,
         )
-        self.assertIn("Role `all` ceiling 25", bot)
-        self.assertIn("role `primary` use 12+8", bot)
+        self.assertIn("Role `all` defaults to 15+10", bot)
+        self.assertIn("DB_BOT_POOL_SIZE=12", bot)
+        self.assertEqual(compose_pool_for_bot_role("primary")["db_pool_size"], 12)
+        self.assertEqual(compose_pool_for_bot_role("primary")["db_max_overflow"], 8)
         self.assertIn(
             "DB_POOL_SIZE: ${DB_EXECUTOR_POOL_SIZE:-"
             f"{PRODUCTION_EXECUTOR_POOL_SIZE}}}",
@@ -119,6 +122,12 @@ class TelegramDispatchLatencyPoolTests(unittest.TestCase):
         self.assertIn(str(RECOMMENDED_PRIMARY_POOL_SIZE), bot)
         self.assertIn(str(RECOMMENDED_PRIMARY_MAX_OVERFLOW), bot)
         self.assertNotIn("bot_publishers:", (repo_root / "docker-compose.yml").read_text())
+        staging_bot = compose_service_block(
+            repo_root / "deploy/staging/docker-compose.staging.yml",
+            "bot",
+        )
+        self.assertIn("DB_POOL_SIZE: ${STAGING_DB_BOT_POOL_SIZE:-15}", staging_bot)
+        self.assertIn("DB_MAX_OVERFLOW: ${STAGING_DB_BOT_MAX_OVERFLOW:-10}", staging_bot)
 
     def test_pool_document_does_not_invent_live_waits(self):
         text = Path(

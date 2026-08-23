@@ -49,6 +49,8 @@ STAGING_PROJECT_NAME="${STAGING_PROJECT_NAME:-trading_bot_staging}"
 STAGING_NGINX_SITE="${STAGING_NGINX_SITE:-trading-bot-staging}"
 STAGING_ENABLE_BOT="${STAGING_ENABLE_BOT:-0}"
 STAGING_TELEGRAM_BOT_SPLIT_ENABLED="${STAGING_TELEGRAM_BOT_SPLIT_ENABLED:-0}"
+STAGING_TELEGRAM_SPLIT_START_CONFIRM_TEXT="start-telegram-split-runtime"
+STAGING_TELEGRAM_SPLIT_ROLLBACK_CONFIRM_TEXT="rollback-telegram-split-runtime"
 STAGING_FOREIGN_ONLY="${STAGING_FOREIGN_ONLY:-0}"
 STAGING_BOT_USERNAME="${STAGING_BOT_USERNAME:-}"
 STAGING_INTERNAL_IRAN_SERVER_URL="${STAGING_INTERNAL_IRAN_SERVER_URL:-http://app:8000}"
@@ -149,7 +151,7 @@ remove_legacy_compose_stateless_containers() {
     if [[ "$STAGING_FOREIGN_ONLY" == "1" ]]; then
         conflicting_services=(app sync_worker)
     else
-        conflicting_services=(foreign_app bot foreign_sync_worker)
+        conflicting_services=(foreign_app bot bot_executor foreign_sync_worker)
     fi
     local service ids
     for service in "${conflicting_services[@]}"; do
@@ -168,7 +170,7 @@ remove_legacy_compose_stateless_containers() {
     # docker-compose 1.29 cannot recreate images produced by current Docker
     # when the legacy image metadata omits ContainerConfig. Remove only
     # stateless services; staging database and Redis containers/volumes remain.
-    for service in migration app foreign_app bot sync_worker foreign_sync_worker; do
+    for service in migration app foreign_app bot bot_executor sync_worker foreign_sync_worker; do
         ids="$(docker ps -aq \
             --filter "label=com.docker.compose.project=$STAGING_PROJECT_NAME" \
             --filter "label=com.docker.compose.service=$service")"
@@ -861,6 +863,8 @@ assert_telegram_bot_split_topology() {
         fi
         export STAGING_TELEGRAM_BOT_RUNTIME_ROLE
         export STAGING_TELEGRAM_BOT_SPLIT_ENABLED=true
+        export STAGING_DB_BOT_POOL_SIZE="${STAGING_DB_BOT_POOL_SIZE:-12}"
+        export STAGING_DB_BOT_MAX_OVERFLOW="${STAGING_DB_BOT_MAX_OVERFLOW:-8}"
         return
     fi
     STAGING_TELEGRAM_BOT_RUNTIME_ROLE="${STAGING_TELEGRAM_BOT_RUNTIME_ROLE:-all}"
@@ -869,30 +873,63 @@ assert_telegram_bot_split_topology() {
     fi
     export STAGING_TELEGRAM_BOT_RUNTIME_ROLE
     export STAGING_TELEGRAM_BOT_SPLIT_ENABLED=false
+    export STAGING_DB_BOT_POOL_SIZE="${STAGING_DB_BOT_POOL_SIZE:-15}"
+    export STAGING_DB_BOT_MAX_OVERFLOW="${STAGING_DB_BOT_MAX_OVERFLOW:-10}"
+}
+
+require_split_start_confirm() {
+    [[ "${STAGING_TELEGRAM_SPLIT_CONFIRM:-}" == "$STAGING_TELEGRAM_SPLIT_START_CONFIRM_TEXT" ]] \
+        || die "split start requires STAGING_TELEGRAM_SPLIT_CONFIRM=$STAGING_TELEGRAM_SPLIT_START_CONFIRM_TEXT"
+}
+
+require_split_rollback_confirm() {
+    [[ "${STAGING_TELEGRAM_SPLIT_CONFIRM:-}" == "$STAGING_TELEGRAM_SPLIT_ROLLBACK_CONFIRM_TEXT" ]] \
+        || die "split rollback requires STAGING_TELEGRAM_SPLIT_CONFIRM=$STAGING_TELEGRAM_SPLIT_ROLLBACK_CONFIRM_TEXT"
 }
 
 start_split_bot_runtime() {
+    # Official split writers: compose service bot_executor
+    # (profile staging-bot-executor) then bot as primary.
+    require_split_start_confirm
     assert_telegram_bot_split_topology
     python3 "$PROJECT_DIR/scripts/telegram_bot_split_preflight.py" \
         --bot-role "${STAGING_TELEGRAM_BOT_RUNTIME_ROLE}" \
         --split-enabled true \
         --executor-enabled true \
         || die "telegram bot split preflight refused the topology"
-    compose --profile staging-bot --profile staging-sync stop bot || true
-    compose --profile staging-bot --profile staging-bot-executor --profile staging-sync \
-        up -d --no-build bot_executor
-    compose --profile staging-bot --profile staging-bot-executor --profile staging-sync \
-        up -d --no-build bot
+    python3 "$PROJECT_DIR/scripts/telegram_bot_split_cutover.py" forward \
+        --confirm "${STAGING_TELEGRAM_SPLIT_CONFIRM}" \
+        --operator compose \
+        --project-name "$STAGING_PROJECT_NAME" \
+        --compose-file "$COMPOSE_FILE" \
+        --env-file "$ENV_FILE" \
+        --expected-sha "$(staging_release_sha)" \
+        --bot-profile staging-bot \
+        --executor-profile staging-bot-executor \
+        || {
+            rollback_split_bot_runtime --internal || true
+            die "split forward failed; rollback attempted"
+        }
 }
 
 rollback_split_bot_runtime() {
-    compose --profile staging-bot --profile staging-bot-executor --profile staging-sync \
-        stop bot bot_executor || true
-    STAGING_TELEGRAM_BOT_SPLIT_ENABLED=0
-    STAGING_TELEGRAM_BOT_RUNTIME_ROLE=all
-    export STAGING_TELEGRAM_BOT_SPLIT_ENABLED=false
-    export STAGING_TELEGRAM_BOT_RUNTIME_ROLE=all
-    compose --profile staging-bot --profile staging-sync up -d --no-build bot
+    if [[ "${1:-}" != "--internal" ]]; then
+        require_split_rollback_confirm
+    fi
+    local confirm="${STAGING_TELEGRAM_SPLIT_CONFIRM}"
+    if [[ "${1:-}" == "--internal" ]]; then
+        confirm="$STAGING_TELEGRAM_SPLIT_ROLLBACK_CONFIRM_TEXT"
+    fi
+    python3 "$PROJECT_DIR/scripts/telegram_bot_split_cutover.py" rollback \
+        --confirm "$confirm" \
+        --operator compose \
+        --project-name "$STAGING_PROJECT_NAME" \
+        --compose-file "$COMPOSE_FILE" \
+        --env-file "$ENV_FILE" \
+        --expected-sha "$(staging_release_sha)" \
+        --bot-profile staging-bot \
+        --executor-profile staging-bot-executor \
+        || die "split rollback failed"
 }
 
 start_prebuilt_bot() {
@@ -996,6 +1033,12 @@ case "${1:-deploy}" in
     deploy)
         deploy
         ;;
+    start-split-bot-runtime)
+        start_split_bot_runtime
+        ;;
+    rollback-split-bot-runtime)
+        rollback_split_bot_runtime
+        ;;
     ps)
         compose ps
         ;;
@@ -1023,6 +1066,8 @@ Commands:
   nginx           Install/reload the staging Nginx server block
   up              Compose up -d --build
   deploy          check + ensure-env + build frontend + nginx + compose up + health
+  start-split-bot-runtime  Opt-in split forward; requires STAGING_TELEGRAM_SPLIT_CONFIRM
+  rollback-split-bot-runtime  Split rollback; requires rollback confirmation
   ps              Show staging compose services
   health          Check /api/config
   logs            Show recent staging logs

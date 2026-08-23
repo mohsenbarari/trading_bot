@@ -527,7 +527,7 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
 
         self.assertIn('if [[ "${compose_cmd[0]}" != "docker-compose" ]]', function_body)
         self.assertIn(
-            'for service in migration app foreign_app bot sync_worker foreign_sync_worker',
+            'for service in migration app foreign_app bot bot_executor sync_worker foreign_sync_worker',
             function_body,
         )
         self.assertNotIn(' service in db ', function_body)
@@ -544,7 +544,7 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('trading_bot_staging_iran)', role_body)
         self.assertGreaterEqual(staging_script.count('validate_staging_runtime_role\n'), 4)
         self.assertIn('conflicting_services=(app sync_worker)', cleanup_body)
-        self.assertIn('conflicting_services=(foreign_app bot foreign_sync_worker)', cleanup_body)
+        self.assertIn('conflicting_services=(foreign_app bot bot_executor foreign_sync_worker)', cleanup_body)
         self.assertNotIn('conflicting_services=(db', cleanup_body)
         self.assertNotIn('conflicting_services=(redis', cleanup_body)
 
@@ -823,10 +823,24 @@ hash_file_or_dir inputs
         compose_command = resolve_docker_compose_command()
         if compose_command is None:
             self.skipTest('docker compose is not installed')
-        for compose_file in ('docker-compose.yml', 'docker-compose.iran.yml'):
-            with self.subTest(compose_file=compose_file):
-                result = run_checked([*compose_command, '--env-file', '/dev/null', '-f', compose_file, 'config', '-q'])
-                self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+        created: list = []
+        try:
+            for compose_file, env_name in (
+                ('docker-compose.yml', '.env'),
+                ('docker-compose.iran.yml', '.env'),
+                ('deploy/staging/docker-compose.staging.yml', '.env.staging'),
+            ):
+                placeholder = REPO_ROOT / env_name
+                if not placeholder.exists():
+                    placeholder.write_text('', encoding='utf-8')
+                    created.append(placeholder)
+                with self.subTest(compose_file=compose_file):
+                    result = run_checked([*compose_command, '--env-file', '/dev/null', '-f', compose_file, 'config', '-q'])
+                    self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+        finally:
+            for placeholder in created:
+                if placeholder.exists():
+                    placeholder.unlink()
 
     def test_all_runtime_services_have_bounded_docker_logs(self):
         compose_files = (
