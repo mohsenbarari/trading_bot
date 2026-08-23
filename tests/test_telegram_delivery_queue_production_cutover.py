@@ -758,6 +758,7 @@ class ProductionQueueCutoverTests(unittest.TestCase):
         self.assertEqual(
             env["TELEGRAM_DELIVERY_EXECUTION_OWNER"], "producer-only"
         )
+        self.assertEqual(operations._host.call_args.args[1][:2], ["bash", "-lc"])
         self.assertIn("config --format json", operations._host.call_args.args[1][2])
 
     def test_contained_runner_stops_a_timed_out_descendant_group(self):

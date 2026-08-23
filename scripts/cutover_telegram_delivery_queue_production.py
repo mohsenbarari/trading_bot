@@ -1011,7 +1011,7 @@ class ProductionOperations:
             f"docker-compose -f {shlex.quote(compose_file)} config --format json; "
             "else exit 127; fi"
         )
-        result = self._host(role, ["sh", "-lc", script])
+        result = self._host(role, ["bash", "-lc", script])
         if result.returncode:
             raise ProductionCutoverError("COMPOSE_ROLE_CONFIG_READBACK_FAILED")
         try:
