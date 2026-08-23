@@ -642,22 +642,33 @@ class ProductionQueueCutoverTests(unittest.TestCase):
 
     def test_runtime_inventory_excludes_only_the_identity_bound_colocated_staging_bot(self):
         operations = cutover.ProductionOperations.__new__(cutover.ProductionOperations)
-        operations._docker = Mock(
-            return_value=subprocess.CompletedProcess(
+        def observation(service: str):
+            return subprocess.CompletedProcess(
                 [],
                 0,
                 stdout=(
                     '["TRADING_BOT_SERVICE=bot","SERVER_MODE=foreign"]'
-                    "\ttrading_bot_staging\tbot\n"
+                    f"\ttrading_bot_staging\t{service}\n"
                 ),
                 stderr="",
             )
-        )
+
+        operations._docker = Mock(return_value=observation("bot"))
         self.assertTrue(
             operations._is_allowed_colocated_staging_bot("foreign", "staging-id")
         )
         self.assertFalse(
             operations._is_allowed_colocated_staging_bot("iran", "staging-id")
+        )
+        operations._docker = Mock(return_value=observation("bot_executor"))
+        self.assertTrue(
+            operations._is_allowed_colocated_staging_bot(
+                "foreign", "staging-executor-id"
+            )
+        )
+        operations._docker = Mock(return_value=observation("unknown-bot"))
+        self.assertFalse(
+            operations._is_allowed_colocated_staging_bot("foreign", "unknown-id")
         )
 
     def test_host_inventory_subtracts_the_verified_colocated_staging_process(self):

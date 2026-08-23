@@ -1,9 +1,9 @@
 # Telegram Delivery
 
-- 2026-08-23 | Video broadcast uses central-bot `file_id` and Queue-v1 `sendVideo`; never binary/path/base64.
+- 2026-08-23 | Video broadcast: central-bot `file_id` via Queue-v1 `sendVideo`; never binary/path/base64.
 - 2026-08-23 | Split: `primary` polls/ACKs; sole `executor` owns queues, OTP/global lock. Leases fail closed; cutover awaits owners and preserves jobs. Readbacks use profiles/labels; compose pins image+SHA. APIs only produce.
 - 2026-08-23 | Latency: ACK wakeup, shared HTTP, serial batch 8, claim index with `sent`, 1.05s/destination. Local ACK is lease-fenced; workers do not repeat edge callback answers.
-- 2026-08-23 | Staging roles fail closed: `trading_bot_staging` foreign/bot, `_iran` Iran/API; deploy removes opposites. Repair preserves authority; quarantine needs durable replacement.
+- 2026-08-23 | Staging: `trading_bot_staging` foreign bot/bot_executor; `_iran` Iran API. Inventory excludes staging only by exact project/service/env; deploy removes opposites.
 - 2026-08-22 | Pre-auth `CallbackQuery` replies retain that route; never adapt bot-authored `callback.message`. Registration handoff uses the origin event with actor/chat guards.
 - 2026-08-21 | Sync promotes only Iran `primary/pending/v1` placeholders from newer foreign `publisher_1..5`; bind authority/identity, require one row plus transaction marker. Repair uses DB-sequenced `ChangeLog`.
 - 2026-08-21 | Staging has five Publishers; credential/channel collisions block production. APIs are token-free; foreign assigns WebApp offers.

@@ -897,7 +897,7 @@ class ProductionOperations:
             raise ProductionCutoverError("EXECUTOR_INVENTORY_READBACK_FAILED") from None
         return (
             project == FOREIGN_COLOCATED_STAGING_PROJECT
-            and service == "bot"
+            and service in {"bot", "bot_executor"}
             and environment.get("TRADING_BOT_SERVICE") == "bot"
             and environment.get("SERVER_MODE") == "foreign"
         )
