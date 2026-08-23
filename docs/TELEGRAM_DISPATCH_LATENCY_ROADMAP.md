@@ -110,7 +110,9 @@ worktree: `/root/trading-bot/telegram-dispatch-latency-v1`
 
 خروج: یک پروندهٔ شاهد با اعداد پایه در `docs/`، بدون هیچ تغییر رفتاری.
 
-وضعیت: انجام نشده.
+وضعیت: انجام شد. شاهد `docs/TELEGRAM_DISPATCH_LATENCY_BASELINE_20260823.md`
+کف‌های استخراج‌شده از کد را قفل کرد. صدک زندهٔ آزمایش در این worktree
+جمع نشد.
 
 ---
 
