@@ -13,6 +13,7 @@ from core.market_intelligence.coin_group_resolution import (
 from core.market_intelligence.coin_groups import CoinGroupMessageInput
 from core.market_intelligence.coin_prediction_anchors import (
     CoinPredictionAnchorError,
+    _project_price,
     load_coin_prediction_anchors,
 )
 
@@ -74,6 +75,13 @@ def test_prediction_ledger_is_unit_safe_causal_and_downsampled() -> None:
         ] == [
             (
                 "IMAM",
+                188_500,
+                "2026-08-16T10:00:00Z",
+                "2026-08-16T10:00:05Z",
+                "MODEL_SNAPSHOT",
+            ),
+            (
+                "IMAM",
                 188_600,
                 "2026-08-16T10:10:00Z",
                 "2026-08-16T10:10:05Z",
@@ -105,6 +113,41 @@ def test_prediction_ledger_rejects_missing_schema() -> None:
                 earliest_event_time_utc="2026-08-16T10:20:00Z",
                 as_of_utc="2026-08-16T10:30:00Z",
             )
+
+
+def test_prediction_family_envelopes_admit_current_ranges_but_reject_swaps() -> None:
+    assert _project_price(112_000_000, commodity_code="HALF_BAHAR") == 112_000
+    assert _project_price(60_000_000, commodity_code="QUARTER_BAHAR") == 60_000
+    assert _project_price(55_000_000, commodity_code="QUARTER_LOW_DATE") == 55_000
+    assert _project_price(55_000_000, commodity_code="IMAM") is None
+    assert _project_price(222_000_000, commodity_code="QUARTER_BAHAR") is None
+
+
+def test_intrabracket_price_transition_is_retained_for_historical_causality() -> None:
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "predictions.sqlite3"
+        connection = _ledger(path)
+        connection.executemany(
+            "INSERT INTO coin_estimate_predictions VALUES(?,?,?,?,?,?,?)",
+            (
+                (1, "2026-08-16T10:00:00Z", "2026-08-16T10:00:01Z", "MAIN_ONLINE", "امام", "TOMORROW", 188_000_000),
+                (2, "2026-08-16T10:05:00Z", "2026-08-16T10:05:01Z", "MAIN_ONLINE", "امام", "TOMORROW", 190_000_000),
+                (3, "2026-08-16T10:10:00Z", "2026-08-16T10:10:01Z", "MAIN_ONLINE", "امام", "TOMORROW", 191_000_000),
+            ),
+        )
+        connection.commit()
+        connection.close()
+
+        loaded = load_coin_prediction_anchors(
+            path,
+            earliest_event_time_utc="2026-08-16T10:08:00Z",
+            as_of_utc="2026-08-16T10:12:00Z",
+        )
+        assert [item.price_project_thousand_toman for item in loaded.anchors] == [
+            188_000,
+            190_000,
+            191_000,
+        ]
 
 
 def _source(text: str) -> CoinGroupMessageInput:

@@ -157,6 +157,74 @@ class CoinGroupTradeTests(unittest.TestCase):
             [(177_300, 10)],
         )
 
+    def test_bare_price_tails_are_not_misclassified_as_quantities(self) -> None:
+        cases = (
+            (215_300, 20, "100 ب", 215_100, 20),
+            (217_000, 10, "100 ب", 217_100, 10),
+            (54_900, 9, "55", 55_000, 9),
+        )
+        for root_price, root_quantity, reply, final_price, final_quantity in cases:
+            with self.subTest(reply=reply, root_price=root_price):
+                rows = [
+                    message(1, OWNER, "root", at_second=0),
+                    message(2, BUYER_ONE, reply, reply=1, at_second=2),
+                    message(3, OWNER, "برکت", reply=2, at_second=4),
+                ]
+                commodity = "QUARTER_BAHAR" if root_price < 100_000 else "IMAM"
+                trades = link_coin_group_trades(
+                    rows,
+                    [
+                        offer_record(
+                            price=root_price,
+                            quantity=root_quantity,
+                            commodity=commodity,
+                        )
+                    ],
+                )
+                self.assertEqual(
+                    [(item.price_project_thousand_toman, item.quantity) for item in trades],
+                    [(final_price, final_quantity)],
+                )
+
+        explicit_hundred = [
+            message(1, OWNER, "root", at_second=0),
+            message(2, BUYER_ONE, "100 تا", reply=1, at_second=2),
+            message(3, OWNER, "برکت", reply=2, at_second=4),
+        ]
+        self.assertEqual(
+            link_coin_group_trades(
+                explicit_hundred,
+                [offer_record(quantity=20)],
+            )[0].quantity,
+            100,
+        )
+
+    def test_unambiguous_direct_siblings_form_one_reciprocal_trade(self) -> None:
+        rows = [
+            message(1, OWNER, "10 تا ف 183100", at_second=0),
+            message(2, BUYER_ONE, "3 تا 182900 ب", reply=1, at_second=2),
+            message(3, OWNER, "برکت", reply=1, at_second=4),
+        ]
+        trades = link_coin_group_trades(rows, [offer_record()])
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(
+            (
+                trades[0].price_project_thousand_toman,
+                trades[0].quantity,
+                trades[0].confirmation_kind,
+            ),
+            (182_900, 3, "SIBLING_RECIPROCAL_OFFERER_CONFIRMATION"),
+        )
+
+    def test_multiple_counterparty_siblings_remain_ambiguous(self) -> None:
+        rows = [
+            message(1, OWNER, "10 تا ف 183100", at_second=0),
+            message(2, BUYER_ONE, "3 تا 182900 ب", reply=1, at_second=2),
+            message(3, BUYER_TWO, "4 تا 182800 ب", reply=1, at_second=3),
+            message(4, OWNER, "برکت", reply=1, at_second=4),
+        ]
+        self.assertEqual(link_coin_group_trades(rows, [offer_record()]), [])
+
     def test_dot_or_slash_negotiated_price_is_not_truncated(self) -> None:
         for reply, expected in (("ب 5 تا 182.900", 182_900), ("ب 5 تا 182/800", 182_800)):
             with self.subTest(reply=reply):

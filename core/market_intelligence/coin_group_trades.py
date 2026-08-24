@@ -24,11 +24,15 @@ from .coin_groups import (
 from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 
 
-COIN_GROUP_TRADE_LINKER_VERSION = "coin-group-trade-link-v5-negotiated-quantity"
+COIN_GROUP_TRADE_LINKER_VERSION = "coin-group-trade-link-v6-contextual-replies"
 MAX_REPLY_DEPTH = 12
 MAX_REPLY_AGE_SECONDS = 2 * 60 * 60
 MAX_NEGOTIATED_PRICE_RELATIVE_DELTA = 0.05
-_NUMBER = re.compile(r"(?<!\d)(\d{1,3}(?:[٬،,./]\d{3})+|\d{2,7})(?!\d)")
+_NUMBER = re.compile(
+    r"(?<!\d)(\d[٬،,./]\d{2}[٬،,./]\d{3}|"
+    r"\d{1,3}(?:[٬،,./]\d{3})+|\d{2,3}[٬،,./]\d{1,2}|"
+    r"\d{2,3}[٬،,./]\d{4,5}|\d{2,7})(?!\d)"
+)
 _SMALL_NUMBER = re.compile(r"(?<!\d)(\d{1,3})(?!\d)")
 _CANCEL = re.compile(
     r"کنسل|لغو|منتفی|پاس|حذف|نشد|ندارم|اشتباه|عذر|بی\s*خیال|"
@@ -116,7 +120,11 @@ def _signal(text: str) -> str:
     return "NEGOTIATION"
 
 
-def _quantity_and_spans(text: str) -> tuple[int | None, list[tuple[int, int]]]:
+def _quantity_and_spans(
+    text: str,
+    *,
+    offer_price: int,
+) -> tuple[int | None, list[tuple[int, int]]]:
     explicit, spans = _explicit_quantity(text)
     if explicit is not None:
         return explicit, spans
@@ -146,7 +154,19 @@ def _quantity_and_spans(text: str) -> tuple[int | None, list[tuple[int, int]]]:
         or other_price_shaped_number
     ):
         candidate = candidates[0]
-        return int(re.sub(r"\D", "", candidate.group(1))), [candidate.span(1)]
+        value = int(re.sub(r"\D", "", candidate.group(1)))
+        digits = len(re.sub(r"\D", "", candidate.group(1)))
+        # In coin bargaining, bare three-digit multiples and two-digit values
+        # near the root quote are price/tail shorthands.  Quantity 100 remains
+        # available only when explicitly marked with «تا/عدد/دونه».
+        price_shorthand = bool(
+            digits == 3
+            or digits == 2
+            and abs(value * 1000 - offer_price) / offer_price
+            <= MAX_NEGOTIATED_PRICE_RELATIVE_DELTA
+        )
+        if not price_shorthand:
+            return value, [candidate.span(1)]
     return None, []
 
 
@@ -391,7 +411,10 @@ def _trade_from_confirmation(
     post_reject_has_terms = False
     for evidence_message in active_evidence:
         normalized = _text(evidence_message.text)
-        candidate_quantity, spans = _quantity_and_spans(normalized)
+        candidate_quantity, spans = _quantity_and_spans(
+            normalized,
+            offer_price=offer.price_project_thousand_toman,
+        )
         if candidate_quantity is not None:
             quantity = candidate_quantity
             post_reject_has_terms = True
@@ -501,6 +524,85 @@ def _has_later_participant_rejection(
     return False
 
 
+def _trade_from_sibling_confirmation(
+    message: StagedCoinGroupMessage,
+    *,
+    root: CoinGroupOfferRecord,
+    messages: Mapping[tuple[int, int], StagedCoinGroupMessage],
+    children: Mapping[tuple[int, int], tuple[StagedCoinGroupMessage, ...]],
+) -> tuple[LinkedCoinGroupTrade, frozenset[bytes]] | None:
+    """Pair one unambiguous direct proposal with an owner's direct acceptance.
+
+    Telegram users sometimes reply independently to the root instead of to
+    each other.  This is accepted only when exactly one earlier counterparty
+    sibling contains participation or negotiated terms.  Multiple users or
+    multiple candidate branches remain unlinked.
+    """
+
+    if (
+        root.offerer_digest is None
+        or message.sender_digest != root.offerer_digest
+        or message.reply_to_message_id != root.message_id
+        or _signal(message.text) not in {"ACCEPT", "EXPLICIT_TRADE"}
+        or _CUMULATIVE.search(_text(message.text))
+    ):
+        return None
+    candidates: list[StagedCoinGroupMessage] = []
+    for sibling in children.get((root.group_number, root.message_id), ()):
+        if (
+            sibling.message_id == message.message_id
+            or sibling.sender_digest is None
+            or sibling.sender_digest == root.offerer_digest
+            or sibling.event_time_utc >= message.event_time_utc
+            or not 0
+            <= _age_seconds(message.event_time_utc, sibling.event_time_utc)
+            <= 5 * 60
+        ):
+            continue
+        signal = _signal(sibling.text)
+        normalized = _text(sibling.text)
+        quantity, spans = _quantity_and_spans(
+            normalized,
+            offer_price=root.offer.price_project_thousand_toman,
+        )
+        price, price_seen, _safe = _negotiated_price_result(
+            normalized,
+            offer_price=root.offer.price_project_thousand_toman,
+            quantity_spans=spans,
+            commodity_code=root.offer.commodity_code,
+        )
+        if signal in {
+            "ACCEPT",
+            "EXPLICIT_TRADE",
+            "BUY_REQUEST",
+            "SELL_REQUEST",
+        } or quantity is not None or price is not None or price_seen:
+            candidates.append(sibling)
+    if len(candidates) != 1:
+        return None
+    proposal = candidates[0]
+    synthetic_confirmation = replace(
+        message,
+        reply_to_message_id=proposal.message_id,
+    )
+    synthetic_messages = dict(messages)
+    synthetic_messages[
+        (message.group_number, message.message_id)
+    ] = synthetic_confirmation
+    linked = _trade_from_confirmation(
+        synthetic_confirmation,
+        root=root,
+        messages=synthetic_messages,
+    )
+    if linked is None:
+        return None
+    trade, participants = linked
+    return replace(
+        trade,
+        confirmation_kind="SIBLING_RECIPROCAL_OFFERER_CONFIRMATION",
+    ), participants
+
+
 def link_coin_group_trades(
     messages: Iterable[StagedCoinGroupMessage],
     offers: Iterable[CoinGroupOfferRecord],
@@ -526,7 +628,12 @@ def link_coin_group_trades(
         root = _root_offer(message, messages=message_by_key, offers=offer_by_key)
         if root is None or message.message_id == root.message_id:
             continue
-        linked = _trade_from_confirmation(message, root=root, messages=message_by_key)
+        linked = _trade_from_sibling_confirmation(
+            message,
+            root=root,
+            messages=message_by_key,
+            children=frozen_children,
+        ) or _trade_from_confirmation(message, root=root, messages=message_by_key)
         if linked is None:
             continue
         trade, participants = linked
@@ -543,6 +650,7 @@ def link_coin_group_trades(
     authority = {
         "OWNER_EXPLICIT_AGGREGATE_REPLY_TRADE": 3,
         "RECIPROCAL_OFFERER_CONFIRMATION": 3,
+        "SIBLING_RECIPROCAL_OFFERER_CONFIRMATION": 3,
         "COUNTERPARTY_EXPLICIT_REPLY_TRADE": 2,
         "RECIPROCAL_COUNTERPARTY_CONFIRMATION": 2,
     }
@@ -620,6 +728,7 @@ def link_coin_group_trades(
                 and trade.confirmation_kind
                 in {
                     "RECIPROCAL_OFFERER_CONFIRMATION",
+                    "SIBLING_RECIPROCAL_OFFERER_CONFIRMATION",
                     "RECIPROCAL_COUNTERPARTY_CONFIRMATION",
                 }
             )

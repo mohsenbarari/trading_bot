@@ -149,7 +149,17 @@ def load_coin_prediction_anchors(
             connection.close()
 
     rejected = 0
-    by_bucket: dict[tuple[str, str, int], CoinPriceAnchor] = {}
+    # Keep both edges of each bounded bucket.  Keeping only the last sample
+    # creates a historical causality blind spot: for an offer in the middle of
+    # a bucket, that sample is still in the future and the entire bucket
+    # disappears.  First+last stays bounded while providing a prior sample for
+    # in-bucket messages and a recent sample for the next bucket.
+    by_bucket: dict[
+        tuple[str, str, int],
+        tuple[CoinPriceAnchor, CoinPriceAnchor],
+    ] = {}
+    transition_anchors: list[CoinPriceAnchor] = []
+    last_price_by_book: dict[tuple[str, str], int] = {}
     for row in rows:
         code = _COMMODITY_CODES.get(str(row["commodity"] or "").strip())
         settlement = str(row["settlement"] or "").strip().upper()
@@ -179,7 +189,7 @@ def load_coin_prediction_anchors(
             rejected += 1
             continue
         bucket = int(event_stamp.timestamp()) // int(bucket_seconds)
-        by_bucket[(code, settlement, bucket)] = CoinPriceAnchor(
+        anchor = CoinPriceAnchor(
             commodity_code=code,
             price_project_thousand_toman=price,
             event_time_utc=event_utc,
@@ -188,9 +198,19 @@ def load_coin_prediction_anchors(
             trade_form="PHYSICAL",
             evidence_kind="MODEL_SNAPSHOT",
         )
+        key = (code, settlement, bucket)
+        first, _last = by_bucket.get(key, (anchor, anchor))
+        by_bucket[key] = (first, anchor)
+        book = (code, settlement)
+        if last_price_by_book.get(book) != price:
+            transition_anchors.append(anchor)
+            last_price_by_book[book] = price
+    edge_anchors = tuple(
+        item for edges in by_bucket.values() for item in edges
+    )
     anchors = tuple(
         sorted(
-            by_bucket.values(),
+            {*edge_anchors, *transition_anchors},
             key=lambda item: (
                 str(item.event_time_utc),
                 item.commodity_code,

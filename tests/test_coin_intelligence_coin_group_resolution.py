@@ -233,6 +233,22 @@ class CoinGroupResolutionTests(unittest.TestCase):
         assert result.quality_state == "ELIGIBLE"
         assert result.anchor_count == 0
 
+    def test_recent_causal_anchors_override_an_older_intraday_regime(self) -> None:
+        result = resolve_coin_group_offers(
+            source("فروش 188,900 / 5 تا"),
+            anchors=(
+                anchor("IMAM", 180_000, "2026-08-04T08:20:00Z"),
+                anchor("IMAM", 180_200, "2026-08-04T08:30:00Z"),
+                anchor("IMAM", 180_400, "2026-08-04T08:40:00Z"),
+                anchor("IMAM", 188_700, "2026-08-04T10:06:00Z"),
+                anchor("IMAM", 188_800, "2026-08-04T10:08:00Z"),
+                anchor("BAHAR", 184_000, "2026-08-04T10:06:30Z"),
+                anchor("BAHAR", 184_100, "2026-08-04T10:08:30Z"),
+            ),
+        )[0]
+        assert (result.commodity_code, result.quality_state) == ("IMAM", "ELIGIBLE")
+        assert result.anchor_count == 2
+
     def test_resolved_fact_waits_until_reconciliation_is_available_and_has_no_private_fields(self) -> None:
         observations = resolved_coin_group_observations(
             source("بهار فروش فردا 181,900 / 5 تا"),

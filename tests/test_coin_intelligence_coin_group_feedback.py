@@ -351,7 +351,7 @@ def test_feedback_corrects_negotiated_trade_fact_after_reply_linking() -> None:
         market.close()
 
 
-def test_feedback_persists_number_redacted_syntax_calibration_for_later_offer() -> None:
+def test_feedback_generalizes_only_linguistic_fields_not_economic_identity() -> None:
     with TemporaryDirectory() as directory:
         root = Path(directory)
         staging = connect_coin_group_staging(root / "staging.sqlite3")
@@ -438,22 +438,19 @@ def test_feedback_persists_number_redacted_syntax_calibration_for_later_offer() 
             (derive_event_key("coin-group-offer-v1", 1, 102, 0),),
         ).fetchone()
         attributes = json.loads(second["attributes_json"])
-        assert report.feedback_pattern_calibrations_applied == 1
+        assert report.feedback_pattern_calibrations_applied == 0
         assert (
             second["instrument"],
             second["settlement_term"],
             second["quality_state"],
-        ) == ("COIN_IMAM", "CASH", "ELIGIBLE")
-        assert "human-pattern-r1" in second["parser_version"]
+        ) == ("COIN_UNRESOLVED", "TOMORROW", "PENDING_REVIEW")
+        assert "human-pattern-r1" not in second["parser_version"]
         assert tuple(before_review) == (
             "COIN_UNRESOLVED",
             "TOMORROW",
             "PENDING_REVIEW",
         )
-        assert attributes["human_pattern_calibration_fields"] == [
-            "commodity",
-            "settlement",
-        ]
+        assert "human_pattern_calibration_fields" not in attributes
         assert "human_feedback_syntax_fingerprint" not in attributes
         staging.close()
         market.close()

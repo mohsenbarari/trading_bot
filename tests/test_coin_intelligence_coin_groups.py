@@ -176,6 +176,102 @@ class CoinGroupParserTests(unittest.TestCase):
         # guessed into a valid market band.
         self.assertEqual(parse_coin_group_offers(self.source("10 تا 2097 خ")), [])
 
+    def test_price_formats_use_explicit_family_or_causal_same_time_context(self) -> None:
+        explicit_cases = {
+            "20 تا نیم ف 112": ("HALF_BAHAR", 112_000, 20),
+            "15 تا ربع بالای 80 ف 54.2": ("QUARTER_LOW_DATE", 54_200, 15),
+            "20 تا نیم ف 10300": ("HALF_BAHAR", 103_000, 20),
+            "1 دونه ربع خ 5400": ("QUARTER_BAHAR", 54_000, 1),
+        }
+        for text, expected in explicit_cases.items():
+            with self.subTest(text=text):
+                item = parse_coin_group_offers(self.source(text))[0]
+                self.assertEqual(
+                    (item.commodity_code, item.price_project_thousand_toman, item.quantity),
+                    expected,
+                )
+
+        contextual = parse_coin_group_offers(
+            self.source("100 تا 2181 خ"),
+            price_context={"IMAM": (217_900, 218_000)},
+        )
+        self.assertEqual(
+            (
+                contextual[0].price_project_thousand_toman,
+                contextual[0].quantity,
+            ),
+            (218_100, 100),
+        )
+        redundant = parse_coin_group_offers(
+            self.source("10 تا 585000 ف"),
+            price_context={"QUARTER_BAHAR": (58_400, 58_600)},
+        )[0]
+        self.assertEqual(redundant.price_project_thousand_toman, 58_500)
+        tail = parse_coin_group_offers(
+            self.source("500 خرید 5 تا"),
+            price_context={"IMAM": (214_300, 214_500)},
+        )[0]
+        self.assertEqual(tail.price_project_thousand_toman, 214_500)
+        missing_hundreds = parse_coin_group_offers(
+            self.source("10 تا 14/800 ف"),
+            price_context={"IMAM": (214_700, 214_900)},
+        )[0]
+        self.assertEqual(missing_hundreds.price_project_thousand_toman, 214_800)
+        missing_full_zero = parse_coin_group_offers(
+            self.source("10 تا نقدی خ 21900000"),
+            price_context={"IMAM": (218_900, 219_100)},
+        )[0]
+        self.assertEqual(missing_full_zero.price_project_thousand_toman, 219_000)
+
+    def test_quantity_aliases_and_multiple_clauses_are_parsed(self) -> None:
+        cases = {
+            "یدونه نیم 110400 خ": (1, 110_400),
+            "دونه نیم 110400 خ": (1, 110_400),
+            "یکی نیم نقدی 110.400 خ": (1, 110_400),
+            "امام 201 خ بیستا": (20, 201_000),
+            "ا عدد 217 ف": (1, 217_000),
+            "1 امام نقدی 86 203400 ف": (1, 203_400),
+            "45 ف 55500 ربع 86": (45, 55_500),
+            "203/50005 تا ن خ": (5, 203_500),
+            "20 تا خرید202/50000": (20, 202_500),
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                item = parse_coin_group_offers(self.source(text))[0]
+                self.assertEqual(
+                    (item.quantity, item.price_project_thousand_toman),
+                    expected,
+                )
+
+        parsed = parse_coin_group_offers(
+            self.source("امام 20 تا 211 خ 20 تا 212500 ف")
+        )
+        self.assertEqual(
+            [(item.side, item.quantity, item.price_project_thousand_toman) for item in parsed],
+            [("BUY", 20, 211_000), ("SELL", 20, 212_500)],
+        )
+        malformed = parse_coin_group_offers(
+            self.source("9 تا 217.500 ف 3 تا امام 403 و 404 2.15.500 ف")
+        )
+        self.assertEqual(
+            [item.price_project_thousand_toman for item in malformed],
+            [217_500, 215_500],
+        )
+        conditional_quantity = parse_coin_group_offers(
+            self.source("100 تا نیم خ یکجا نهایت 2 تا حساب 104500")
+        )
+        self.assertEqual(
+            [
+                (
+                    item.commodity_code,
+                    item.quantity,
+                    item.price_project_thousand_toman,
+                )
+                for item in conditional_quantity
+            ],
+            [("HALF_BAHAR", 100, 104_500)],
+        )
+
     def test_full_toman_and_redundant_zero_prices_and_low_date_shorthand(self) -> None:
         cases = {
             "۴ گرمی سالم ف ۲۷.۷۰۰.۰۰۰": ("ONE_GRAM", 4, "SELL", 27_700),

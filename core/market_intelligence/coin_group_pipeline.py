@@ -35,7 +35,7 @@ from .coin_group_trades import (
     link_coin_group_trades,
 )
 from .coin_groups import (
-    _PRICE_BOUNDS,
+    _dimensions as coin_group_dimensions,
     _text as normalize_coin_group_text,
     CoinGroupMessageInput,
     parse_coin_group_offers,
@@ -44,7 +44,7 @@ from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 from .market_store import upsert_observation
 
 
-COIN_GROUP_PIPELINE_VERSION = "coin-group-pipeline-v5-causal-trade-feedback"
+COIN_GROUP_PIPELINE_VERSION = "coin-group-pipeline-v6-safe-causal-calibration"
 PROVISIONAL_BOOTSTRAP_WINDOW_SECONDS = 30 * 60
 PROVISIONAL_MINIMUM_MESSAGES = 3
 PROVISIONAL_MINIMUM_SENDERS = 2
@@ -55,6 +55,9 @@ _SYNTAX_NUMBERS = re.compile(r"\d+(?:[٬،,./_-]\d+)*")
 _SAFE_PRICE_MULTIPLIERS = (0.001, 0.01, 0.1, 10.0, 100.0, 1_000.0)
 _TRADE_ROOT_DERIVED_FIELDS = frozenset(
     {"commodity", "side", "settlement", "trade_form", "conditional"}
+)
+_SAFE_PATTERN_FIELDS = frozenset(
+    {"side", "trade_form", "conditional"}
 )
 
 
@@ -555,51 +558,17 @@ def _pattern_calibrated_offer(
     offer: ResolvedCoinGroupOffer,
     calibration: _ParserPatternCalibration,
 ) -> ResolvedCoinGroupOffer:
-    fields = calibration.ambiguous_fields
-    commodity = (
-        calibration.commodity_code
-        if "commodity" in fields
-        else offer.commodity_code
-    )
-    price = offer.price_project_thousand_toman
-    if "price" in fields and calibration.price_multiplier is not None:
-        candidate_price = int(round(price * calibration.price_multiplier))
-        if (
-            commodity in _PRICE_BOUNDS
-            and _PRICE_BOUNDS[str(commodity)][0]
-            <= candidate_price
-            <= _PRICE_BOUNDS[str(commodity)][1]
-        ):
-            price = candidate_price
-    event_rejected = (
-        "event_validity" in fields and not calibration.event_confirmed
-    )
-    price_in_band = bool(
-        commodity in _PRICE_BOUNDS
-        and _PRICE_BOUNDS[str(commodity)][0]
-        <= price
-        <= _PRICE_BOUNDS[str(commodity)][1]
-    )
-    human_resolved = (
-        "commodity" in fields
-        or "event_validity" in fields
-        and calibration.event_confirmed
-    )
-    quality = offer.quality_state
-    if event_rejected:
-        quality = "REJECTED"
-    elif human_resolved and price_in_band:
-        quality = "ELIGIBLE"
+    # A number-redacted skeleton describes language only.  It cannot safely
+    # transfer commodity, price, quantity, or event validity: the same shape
+    # (for example ``# تا ف #``) is used for every coin family and both genuine
+    # offers and chatter.  Those economic decisions remain exact-event or
+    # strictly-prior price-context decisions.
+    fields = calibration.ambiguous_fields & _SAFE_PATTERN_FIELDS
+    if not fields:
+        return offer
     return replace(
         offer,
-        commodity_code=commodity,
-        price_project_thousand_toman=price,
         side=calibration.side if "side" in fields else offer.side,
-        settlement_term=(
-            calibration.settlement_term
-            if "settlement" in fields
-            else offer.settlement_term
-        ),
         trade_form=(
             calibration.trade_form
             if "trade_form" in fields
@@ -610,17 +579,7 @@ def _pattern_calibrated_offer(
             if "conditional" in fields
             else offer.is_conditional
         ),
-        quality_state=quality,
-        resolution_reason=(
-            "HUMAN_REVIEWED_SYNTAX_NOT_AN_EVENT"
-            if event_rejected
-            else "HUMAN_REVIEWED_SYNTAX_CALIBRATION"
-        ),
-        authoritative_anchor_count=(
-            max(2, offer.authoritative_anchor_count)
-            if quality == "ELIGIBLE"
-            else offer.authoritative_anchor_count
-        ),
+        resolution_reason="HUMAN_REVIEWED_LINGUISTIC_SYNTAX_CALIBRATION",
     )
 
 
@@ -632,52 +591,21 @@ def _pattern_calibrated_observation(
     protected_fields: frozenset[str] = frozenset(),
 ) -> MarketObservation:
     review_fields = calibration.ambiguous_fields
+    permitted_fields = review_fields & _SAFE_PATTERN_FIELDS - protected_fields
     fields = (
-        review_fields - protected_fields
+        permitted_fields
         if apply_economic_fields
         else frozenset()
     )
-    skipped_fields = review_fields - fields if apply_economic_fields else frozenset()
-    instrument = str(observation.instrument)
-    if "commodity" in fields:
-        instrument = "COIN_" + calibration.commodity_code
-    code = instrument[len("COIN_") :] if instrument.startswith("COIN_") else ""
-    price = int(observation.price)
-    if "price" in fields and calibration.price_multiplier is not None:
-        candidate_price = int(round(price * calibration.price_multiplier))
-        if (
-            code in _PRICE_BOUNDS
-            and _PRICE_BOUNDS[code][0] <= candidate_price <= _PRICE_BOUNDS[code][1]
-        ):
-            price = candidate_price
-    event_rejected = (
-        "event_validity" in fields and not calibration.event_confirmed
-    )
-    price_in_band = bool(
-        code in _PRICE_BOUNDS
-        and _PRICE_BOUNDS[code][0] <= price <= _PRICE_BOUNDS[code][1]
-    )
-    human_resolved = (
-        "commodity" in fields
-        or "event_validity" in fields
-        and calibration.event_confirmed
-    )
+    skipped_fields = review_fields - permitted_fields
     quality = observation.quality_state
-    if event_rejected:
-        quality = "REJECTED"
-    elif human_resolved and price_in_band:
-        quality = "ELIGIBLE"
     attributes = dict(observation.attributes)
     attributes.update(
         {
             "human_pattern_calibration_revision": calibration.review_revision,
             "human_pattern_calibration_fields": sorted(review_fields),
             "human_pattern_calibration_reviewed_at_utc": calibration.reviewed_at_utc,
-            "resolution_reason": (
-                "HUMAN_REVIEWED_SYNTAX_NOT_AN_EVENT"
-                if event_rejected
-                else "HUMAN_REVIEWED_SYNTAX_CALIBRATION"
-            ),
+            "resolution_reason": "HUMAN_REVIEWED_LINGUISTIC_SYNTAX_CALIBRATION",
         }
     )
     if skipped_fields:
@@ -686,20 +614,12 @@ def _pattern_calibrated_observation(
         )
     return replace(
         observation,
-        instrument=instrument,
-        market_label="GROUP_" + instrument,
-        settlement_term=(
-            calibration.settlement_term
-            if "settlement" in fields
-            else observation.settlement_term
-        ),
         trade_form=(
             calibration.trade_form
             if "trade_form" in fields
             else observation.trade_form
         ),
         side=calibration.side if "side" in fields else observation.side,
-        price=price,
         parser_version=(
             observation.parser_version
             + f"+human-pattern-r{calibration.review_revision}"
@@ -944,7 +864,24 @@ def process_coin_group_staging(
     applied_feedback_keys: set[bytes] = set()
     for message in messages:
         source = _source(message)
-        parsed = parse_coin_group_offers(source)
+        trade_form, settlement = coin_group_dimensions(
+            normalize_coin_group_text(source.text)
+        )
+        parsed = parse_coin_group_offers(
+            source,
+            price_context=anchor_index.reference_prices(
+                settlement_term=settlement,
+                trade_form=trade_form,
+                source_event_time_utc=normalize_utc(
+                    source.published_at_utc,
+                    field_name="coin_group_parser_context_event_time_utc",
+                ),
+                source_available_at_utc=normalize_utc(
+                    source.available_at_utc,
+                    field_name="coin_group_parser_context_available_at_utc",
+                ),
+            ),
+        )
         provisional_anchors = _coherent_provisional_anchors(
             explicit_claims,
             source=source,
@@ -994,7 +931,10 @@ def process_coin_group_staging(
                         field_name="coin_group_pattern_offer_available_at_utc",
                     ),
                 )
-                if calibration is not None:
+                if (
+                    calibration is not None
+                    and calibration.ambiguous_fields & _SAFE_PATTERN_FIELDS
+                ):
                     reviewed = _pattern_calibrated_offer(reviewed, calibration)
                     offer_pattern_calibrations[offer_index] = calibration
                     pattern_calibrations_applied += 1
@@ -1150,7 +1090,13 @@ def process_coin_group_staging(
                     field_name="coin_group_pattern_trade_available_at_utc",
                 ),
             )
-            if calibration is not None:
+            if (
+                calibration is not None
+                and (
+                    calibration.ambiguous_fields & _SAFE_PATTERN_FIELDS
+                )
+                - _TRADE_ROOT_DERIVED_FIELDS
+            ):
                 observation = _pattern_calibrated_observation(
                     observation,
                     calibration,

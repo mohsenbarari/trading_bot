@@ -25,11 +25,12 @@ from .coin_groups import (
 from .market_contracts import MarketObservation, MarketStoreContractError, derive_event_key, normalize_utc
 
 
-COIN_GROUP_RESOLUTION_VERSION = "coin-group-context-v6-causal-model-range"
+COIN_GROUP_RESOLUTION_VERSION = "coin-group-context-v7-near-time-range"
 MINIMUM_ANCHOR_COUNT = 2
 MAXIMUM_RELATIVE_DISTANCE = 0.015
 MINIMUM_RUNNER_UP_MARGIN = 0.005
 MAXIMUM_ANCHOR_AGE_SECONDS = 2 * 60 * 60
+PREFERRED_ANCHOR_AGE_SECONDS = 5 * 60
 _NormalizedAnchor = tuple[str, int, str, str, str, str, str]
 
 
@@ -180,6 +181,50 @@ class CoinPriceAnchorIndex:
         stop = bisect_left(bucket.event_stamps, source_event_stamp)
         return tuple(bucket.anchors[start:stop])
 
+    def reference_prices(
+        self,
+        *,
+        settlement_term: str,
+        trade_form: str,
+        source_event_time_utc: str,
+        source_available_at_utc: str,
+    ) -> dict[str, tuple[int, ...]]:
+        """Return causal, preferably near-time prices for parser scale choice."""
+
+        source_stamp = _anchor_event_stamp(source_event_time_utc)
+        grouped: dict[str, list[tuple[int, datetime]]] = {}
+        for normalized in self.matching(
+            settlement_term=settlement_term,
+            trade_form=trade_form,
+            source_event_stamp=source_stamp,
+        ):
+            (
+                code,
+                price,
+                event_time,
+                available_at,
+                _settlement,
+                _form,
+                _kind,
+            ) = normalized
+            if available_at > source_available_at_utc:
+                continue
+            grouped.setdefault(code, []).append(
+                (price, _anchor_event_stamp(event_time))
+            )
+        result: dict[str, tuple[int, ...]] = {}
+        preferred_lower = source_stamp - timedelta(
+            seconds=PREFERRED_ANCHOR_AGE_SECONDS
+        )
+        for code, values in grouped.items():
+            preferred = [price for price, stamp in values if stamp >= preferred_lower]
+            result[code] = tuple(
+                preferred
+                if len(preferred) >= MINIMUM_ANCHOR_COUNT
+                else (price for price, _stamp_value in values)
+            )
+        return result
+
 
 def _candidate_centers(
     parsed: ParsedCoinGroupOffer,
@@ -191,7 +236,7 @@ def _candidate_centers(
 ) -> list[tuple[str, float, int, float, int, bool, bool]]:
     """Return strictly-prior same-book centers as code/center/count/distance."""
 
-    grouped: dict[str, list[tuple[int, str]]] = {}
+    grouped: dict[str, list[tuple[int, str, datetime]]] = {}
     source_stamp = datetime.fromisoformat(
         source_event_time_utc.replace("Z", "+00:00")
     )
@@ -229,12 +274,24 @@ def _candidate_centers(
             continue
         if settlement != parsed.settlement_term or form != parsed.trade_form:
             continue
-        grouped.setdefault(code, []).append((price, evidence_kind))
+        grouped.setdefault(code, []).append((price, evidence_kind, anchor_stamp))
     candidates: list[tuple[str, float, int, float, int, bool, bool]] = []
+    preferred_lower = source_stamp - timedelta(
+        seconds=PREFERRED_ANCHOR_AGE_SECONDS
+    )
     for code, evidence in grouped.items():
+        recent = [item for item in evidence if item[2] >= preferred_lower]
+        if len(recent) >= MINIMUM_ANCHOR_COUNT or any(
+            kind == "HUMAN_REVIEWED" for _, kind, _stamp_value in recent
+        ):
+            evidence = recent
         prices = [item[0] for item in evidence]
-        human_reviewed = any(kind == "HUMAN_REVIEWED" for _, kind in evidence)
-        model_snapshot = any(kind == "MODEL_SNAPSHOT" for _, kind in evidence)
+        human_reviewed = any(
+            kind == "HUMAN_REVIEWED" for _, kind, _stamp_value in evidence
+        )
+        model_snapshot = any(
+            kind == "MODEL_SNAPSHOT" for _, kind, _stamp_value in evidence
+        )
         if len(prices) < MINIMUM_ANCHOR_COUNT and not human_reviewed:
             continue
         low, high = _PRICE_BOUNDS[code]
@@ -245,9 +302,11 @@ def _candidate_centers(
         # One explicit operator review has the contradiction strength of the
         # normal two-anchor canonical quorum while remaining causal by its
         # review availability timestamp.
-        authoritative_count = sum(kind == "CANONICAL" for _, kind in evidence)
+        authoritative_count = sum(
+            kind == "CANONICAL" for _, kind, _stamp_value in evidence
+        )
         authoritative_count += MINIMUM_ANCHOR_COUNT * sum(
-            kind == "HUMAN_REVIEWED" for _, kind in evidence
+            kind == "HUMAN_REVIEWED" for _, kind, _stamp_value in evidence
         )
         candidates.append(
             (

@@ -12,22 +12,28 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 import re
-from typing import Iterable
+from statistics import median
+from typing import Iterable, Mapping, Sequence
 
 from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 
 
-COIN_GROUP_PARSER_VERSION = "coin-group-rules-v7-canonical-price-scale"
+COIN_GROUP_PARSER_VERSION = "coin-group-rules-v8-causal-price-formats"
 _DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 _ARABIC_LETTERS = str.maketrans({"ي": "ی", "ى": "ی", "ك": "ک"})
 # Dot and slash are genuine thousands separators when they are attached to
 # exactly three trailing digits.  Whitespace-delimited `/ 5 تا` remains two
 # fields because it cannot match the grouped branch.
-_NUMBER = re.compile(r"(?<!\d)(\d{1,3}(?:[٬،,./]\d{3})+|\d{2,9})(?!\d)")
+_NUMBER = re.compile(
+    r"(?<!\d)(\d[٬،,./]\d{2}[٬،,./]\d{3}|"
+    r"\d{1,3}(?:[٬،,./]\d{3})+|\d{2,3}[٬،,./]\d{1,2}|"
+    r"\d{2,3}[٬،,./]\d{4,5}|\d{2,9})(?!\d)"
+)
 _SMALL_NUMBER = re.compile(r"(?<!\d)(\d{1,3})(?!\d)")
-_QUANTITY = re.compile(r"(?<!\d)(\d{1,3})\s*(?:د?تا|عدد)")
+_QUANTITY = re.compile(r"(?<!\d)(\d{1,3})\s*(?:د?تا|عدد|دونه|دانه)")
 _SIDE = re.compile(r"خرید|فروش|(?<![آ-ی])([خف]+)(?![آ-ی])")
 _YEAR_TOKEN = re.compile(r"(?<!\d)(?:403|404|1403|1404)(?!\d)")
+_LOW_DATE_FLOOR_TOKEN = re.compile(r"بالا(?:ی)?\s*(80)(?!\d)")
 _THURSDAY = re.compile(r"پنج\s*شنبه|پنجشنبه|کشیک")
 _CONDITIONAL = re.compile(
     r"فیش|شرط|مهلت|واریز|تسویه|چک|حساب|شب\s*ح(?:ساب)?|ش\s*ح(?:ساب)?|"
@@ -38,18 +44,22 @@ _NON_OFFER = re.compile(
     r"آماده\s*بکار|عضو\s+شدند"
 )
 
-# Broad static guards catch malformed zeros and obvious typos, but do not
-# resolve the legitimate overlap of full Imam and low-date Bahar.  That needs
-# a strictly-prior Snapshot in P2-C-B/P5.
+# These are deliberately broad family-level safety envelopes, not live market
+# ranges.  Exact scale and unnamed commodity resolution use strictly-prior,
+# same-book context at the message timestamp.
 _PRICE_BOUNDS = {
-    "IMAM": (130_000, 260_000),
-    "BAHAR": (130_000, 250_000),
-    "QUARTER_BAHAR": (46_000, 70_000),
-    "HALF_BAHAR": (82_000, 110_000),
-    "QUARTER_LOW_DATE": (35_000, 49_000),
-    "HALF_LOW_DATE": (70_000, 100_000),
-    "ONE_GRAM": (20_000, 36_000),
+    "IMAM": (130_000, 350_000),
+    "BAHAR": (130_000, 350_000),
+    "QUARTER_BAHAR": (30_000, 100_000),
+    "HALF_BAHAR": (70_000, 180_000),
+    "QUARTER_LOW_DATE": (30_000, 100_000),
+    "HALF_LOW_DATE": (70_000, 180_000),
+    "ONE_GRAM": (15_000, 60_000),
 }
+_GLOBAL_PRICE_LOW = min(low for low, _high in _PRICE_BOUNDS.values())
+_GLOBAL_PRICE_HIGH = max(high for _low, high in _PRICE_BOUNDS.values())
+_CONTEXTUAL_PRICE_MAXIMUM_RELATIVE_DISTANCE = 0.08
+_CONTEXTUAL_PRICE_MINIMUM_RUNNER_MARGIN = 0.002
 
 _PERSIAN_UNITS = {
     "یه": 1,
@@ -79,7 +89,11 @@ _WORD_QUANTITY = re.compile(
     + "|".join((*_PERSIAN_TENS, *_PERSIAN_UNITS))
     + r")(?:\s+و\s+(?:"
     + "|".join(_PERSIAN_UNITS)
-    + r"))?|صد)\s*(?:د?تا|عدد)(?![آ-ی])"
+    + r"))?|صد)\s*(?:د?تا|عدد|دونه|دانه)(?![آ-ی])"
+)
+_QUANTITY_ALIASES = re.compile(
+    r"(?<![آ-ی])(?:ی\s*دونه|یه\s*دونه|یک\s*دونه|دونه|دانه|یکی)(?![آ-ی])|"
+    r"(?<![آ-ی])بیستا(?![آ-ی])|(?<![آ-ی])ا\s*عدد(?![آ-ی])"
 )
 
 
@@ -112,6 +126,17 @@ class ParsedCoinGroupOffer:
 def _text(value: str) -> str:
     normalized = str(value or "").translate(_DIGITS).translate(_ARABIC_LETTERS)
     normalized = normalized.replace("\u200c", " ").replace("\u200f", " ")
+    # Recover common missing-space forms before tokenization.
+    normalized = re.sub(
+        r"((?:امام(?:ی)?|بهار|آزادی|ربع|رب|نیم)\s*40[34])(?=\d{5,6})",
+        r"\1 ",
+        normalized,
+    )
+    normalized = re.sub(
+        r"(\d{2,3}[٬،,./]\d{3})(?=(?:0?[1-9]|[1-9]\d|100)\s*(?:د?تا|عدد|دونه|دانه))",
+        r"\1 ",
+        normalized,
+    )
     return " ".join(normalized.split())
 
 
@@ -179,7 +204,13 @@ def _explicit_quantity(text: str) -> tuple[int | None, list[tuple[int, int]]]:
     if match is not None:
         quantity = int(match.group(1))
         return (quantity if 1 <= quantity <= 100 else None), [match.span(1)]
-    return _word_quantity(text)
+    word_value, word_spans = _word_quantity(text)
+    if word_value is not None:
+        return word_value, word_spans
+    alias = _QUANTITY_ALIASES.search(text)
+    if alias is None:
+        return None, []
+    return (20 if "بیست" in alias.group() else 1), [alias.span()]
 
 
 def _spans_overlap(first: tuple[int, int], spans: Iterable[tuple[int, int]]) -> bool:
@@ -203,30 +234,58 @@ def _price_candidates(
         length = len(digits)
         separated = bool(re.search(r"[٬،,./]", match.group(1)))
         values: list[tuple[int, float]] = []
-        if length in {8, 9} and raw % 1_000 == 0:
+        long_decimal = re.fullmatch(
+            r"(\d{2,3})[٬،,./](\d{4,5})",
+            match.group(1),
+        )
+        short_decimal = re.fullmatch(
+            r"(\d{2,3})[٬،,./](\d{1,2})",
+            match.group(1),
+        )
+        if (
+            long_decimal is not None
+            and set(long_decimal.group(2)[3:]) == {"0"}
+        ):
+            values.append(
+                (
+                    int(long_decimal.group(1)) * 1000
+                    + int(long_decimal.group(2)[:3]),
+                    0.82,
+                )
+            )
+        elif short_decimal is not None:
+            whole = int(short_decimal.group(1))
+            fraction = int(short_decimal.group(2).ljust(3, "0"))
+            values.append((whole * 1000 + fraction, 1.0))
+        elif length in {8, 9} and raw % 1_000 == 0:
             # Some group clients paste the full Toman amount, e.g.
             # `188.750.000`; the project contract stores thousand Toman.
             values.append((raw // 1_000, 1.0 if separated else 0.92))
+            if length == 8 and raw % 100 == 0:
+                values.append((raw // 100, 0.72))
         elif length in {5, 6}:
             values.append((raw, 1.0 if separated else 0.96))
-            # Coin shorthand sometimes carries one redundant trailing zero
-            # (`515000` => `51500`). This alternate scale is only safe when an
-            # explicit commodity band can reject the canonical raw value.
-            if commodity is not None and length == 6 and raw % 10 == 0:
-                values.append((raw // 10, 0.90))
+            # Missing/redundant terminal zeroes are common.  Keep the alternate
+            # interpretation at a lower grammar score; an explicit family or
+            # strictly-prior price context must make it unique.
+            if length == 5:
+                values.append((raw * 10, 0.80))
+            elif raw % 10 == 0:
+                values.append((raw // 10, 0.80))
         elif length == 7 and raw % 10 == 0:
             values.append((raw // 10, 0.72))
+        elif length == 4:
+            values.extend(((raw * 10, 0.72), (raw * 100, 0.70)))
         elif length == 3:
             values.append((raw * 1000, 0.90))
             # A named low-price coin may use a one-decimal shorthand such as
             # `458` for `45.8`; the explicit commodity band makes that scale
             # deterministic. Unnamed prices retain the canonical x1000 scale.
-            if commodity is not None:
-                values.append((raw * 100, 0.84))
+            values.append((raw * 100, 0.78))
         elif length == 2:
             values.append((raw * 1000, 0.78))
         for value, score in values:
-            if 20_000 <= value <= 260_000:
+            if _GLOBAL_PRICE_LOW <= value <= _GLOBAL_PRICE_HIGH:
                 key = (value, match.span(1))
                 candidates[key] = max(candidates.get(key, 0.0), score)
     return sorted(
@@ -239,13 +298,81 @@ def _price(
     text: str,
     excluded_spans: Iterable[tuple[int, int]],
     commodity: str | None,
+    price_context: Mapping[str, Sequence[int]] | None = None,
 ) -> tuple[int | None, list[tuple[int, int]]]:
     candidates = _price_candidates(text, excluded_spans, commodity=commodity)
+    context_codes = (commodity,) if commodity is not None else tuple(_PRICE_BOUNDS)
+    context_centers = {
+        code: float(median(tuple(int(item) for item in prices)))
+        for code in context_codes
+        if price_context is not None
+        and (prices := price_context.get(code, ()))
+    }
+    # A bare ``500``/``100`` in price position can be the tail of the current
+    # quote. Reconstruct it only against causal same-book context.
+    for match in _NUMBER.finditer(text):
+        if _spans_overlap(match.span(1), excluded_spans):
+            continue
+        digits = re.sub(r"\D", "", match.group(1))
+        raw = int(digits)
+        missing_hundreds = re.fullmatch(
+            r"(\d{2})[٬،,./](\d{3})",
+            match.group(1),
+        )
+        if missing_hundreds is not None:
+            visible = (
+                int(missing_hundreds.group(1)) * 1000
+                + int(missing_hundreds.group(2))
+            )
+            for code, center in context_centers.items():
+                base = int(center // 100_000) * 100_000
+                for value in (
+                    base - 100_000 + visible,
+                    base + visible,
+                    base + 100_000 + visible,
+                ):
+                    low, high = _PRICE_BOUNDS[code]
+                    if low <= value <= high:
+                        candidates.append((value, 0.70, match.span(1)))
+        if len(digits) not in {3, 4} or raw % 50:
+            continue
+        for code, center in context_centers.items():
+            scale = 1000 if len(digits) == 3 else 10_000
+            base = int(center // scale) * scale
+            for value in (base - scale + raw, base + raw, base + scale + raw):
+                low, high = _PRICE_BOUNDS[code]
+                if low <= value <= high:
+                    candidates.append((value, 0.74, match.span(1)))
     if commodity is not None:
         low, high = _PRICE_BOUNDS[commodity]
         candidates = [item for item in candidates if low <= item[0] <= high]
     if not candidates:
         return None, []
+    contextual: list[tuple[float, float, int, tuple[int, int]]] = []
+    for value, grammar_score, span in candidates:
+        codes = (commodity,) if commodity is not None else tuple(_PRICE_BOUNDS)
+        centers = [
+            float(median(prices))
+            for code in codes
+            if price_context is not None
+            and (prices := tuple(int(item) for item in price_context.get(code, ())))
+        ]
+        if not centers:
+            continue
+        distance = min(abs(value - center) / center for center in centers if center > 0)
+        if distance <= _CONTEXTUAL_PRICE_MAXIMUM_RELATIVE_DISTANCE:
+            contextual.append((distance, -grammar_score, value, span))
+    if contextual:
+        contextual.sort()
+        best = contextual[0]
+        # Different representations that normalize to the same value are not
+        # ambiguous.  Otherwise require a useful temporal-distance margin.
+        runner = next((item for item in contextual[1:] if item[2] != best[2]), None)
+        if (
+            runner is None
+            or runner[0] - best[0] >= _CONTEXTUAL_PRICE_MINIMUM_RUNNER_MARGIN
+        ):
+            return best[2], [best[3]]
     winner, score, span = candidates[0]
     if len(candidates) > 1 and candidates[1][0] != winner and score - candidates[1][1] < 0.08:
         return None, []
@@ -335,7 +462,33 @@ def _dimensions(text: str) -> tuple[str, str]:
     return "PHYSICAL", settlement
 
 
-def parse_coin_group_offers(source: CoinGroupMessageInput) -> list[ParsedCoinGroupOffer]:
+def _offer_segments(value: str) -> list[str]:
+    """Split repeated explicit quantity clauses without inventing terms."""
+
+    normalized = _text(value)
+    starts = [match.start() for match in _QUANTITY.finditer(normalized)]
+    if len(starts) < 2:
+        return [normalized]
+    prefix = normalized[: starts[0]].strip()
+    segments = [
+        " ".join(part for part in (prefix, normalized[start:end]) if part).strip()
+        for start, end in zip(starts, (*starts[1:], len(normalized)), strict=True)
+    ]
+    # A second quantity may describe a payment/lot condition inside one offer
+    # (`100 تا نیم ... نهایت 2 تا حساب`).  Split only when every clause carries
+    # its own side signal.
+    return (
+        segments
+        if all(_side(segment) is not None for segment in segments)
+        else [normalized]
+    )
+
+
+def parse_coin_group_offers(
+    source: CoinGroupMessageInput,
+    *,
+    price_context: Mapping[str, Sequence[int]] | None = None,
+) -> list[ParsedCoinGroupOffer]:
     """Parse only self-contained offer lines; unrelated text yields no fact."""
 
     if int(source.group_number) not in {1, 2}:
@@ -344,15 +497,38 @@ def parse_coin_group_offers(source: CoinGroupMessageInput) -> list[ParsedCoinGro
     if not whole or _NON_OFFER.search(whole):
         return []
     results: list[ParsedCoinGroupOffer] = []
-    for line in [item for item in str(source.text).splitlines() if _text(item)] or [whole]:
-        text = _text(line)
+    lines = [item for item in str(source.text).splitlines() if _text(item)] or [whole]
+    segments = [segment for line in lines for segment in _offer_segments(line)]
+    for text in segments:
         if _THURSDAY.search(text):
             continue
         commodity = _commodity(text)
         side = _side(text)
         year_spans = [match.span() for match in _YEAR_TOKEN.finditer(text)]
+        year_spans.extend(
+            match.span(1) for match in _LOW_DATE_FLOOR_TOKEN.finditer(text)
+        )
         quantity, quantity_spans = _explicit_quantity(text)
-        price, price_spans = _price(text, (*quantity_spans, *year_spans), commodity)
+        remaining_numbers = [
+            match
+            for match in _NUMBER.finditer(text)
+            if not _spans_overlap(match.span(1), (*quantity_spans, *year_spans))
+        ]
+        if commodity is not None and len(remaining_numbers) >= 2:
+            # `86` is a prevalent mint-year annotation.  Treat it as metadata
+            # only beside an explicit commodity and another price token, so a
+            # genuine shorthand quote of 86 is not discarded.
+            year_spans.extend(
+                match.span(1)
+                for match in remaining_numbers
+                if re.sub(r"\D", "", match.group(1)) == "86"
+            )
+        price, price_spans = _price(
+            text,
+            (*quantity_spans, *year_spans),
+            commodity,
+            price_context,
+        )
         if quantity is None and price is not None:
             quantity, quantity_spans = _bare_quantity(
                 text,
