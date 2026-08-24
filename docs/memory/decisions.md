@@ -2,6 +2,7 @@
 
 Entries are newest first.
 
+- 2026-08-24 | Telegram capture promotion is cutover-seeded and causal: `source_id` is authoritative, receipt time controls availability, channel reconciliation is 30m, and coin groups use a 6h graph plus reply ancestors within the 2h trade window. Production also requires an open-market live gate; closed-market `SAFE_NO_DATA` is insufficient.
 - 2026-08-23 | Central-poller lock fail-closes independently of queue ownership. Split cutover uses postchecks/job-preserving rollback; APIs remain producer-only. Canonical head is `ff6c7d8e9f01`; production rehearsal accepts live `ff5`→`ff6`, preserves rows, and requires second-pass no-op. A failed redeploy journal becomes terminal only after byte-preserving backup and fresh read-only live proof.
 - 2026-08-23 | Split runtime is fail-closed: default role `all`; `primary` owns central polling only, while the sole `executor` owns every Queue-v1 lane and OTP after acquiring the global owner. Legacy accepts only `all`.
 - 2026-08-23 | Stage 12 sizes pools from slots, not live waits. `all` keeps 15+10. Split `primary` has no queue slots (ceiling 12+8 kept). `executor` owns every lane so its ceiling rose to 15+10. Settings `db_pool_size` stays 15.

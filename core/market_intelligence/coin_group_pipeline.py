@@ -825,6 +825,8 @@ def process_coin_group_staging(
     as_of_utc: datetime | str,
     additional_anchors: Iterable[CoinPriceAnchor] = (),
     parser_feedback: Mapping[bytes, CoinGroupParserFeedback] | None = None,
+    reconciliation_horizon_utc: datetime | str | None = None,
+    included_message_keys: frozenset[tuple[int, int]] | None = None,
 ) -> CoinGroupPipelineReport:
     """Process current staging idempotently in one caller-owned Store transaction.
 
@@ -839,7 +841,21 @@ def process_coin_group_staging(
     pattern_calibrations = _store_parser_calibrations(market_connection)
     pattern_calibrations_applied = 0
     messages = list_current_staged_coin_group_messages(staging_connection, as_of_utc=as_of)
+    if included_message_keys is not None:
+        messages = [
+            message
+            for message in messages
+            if (message.group_number, message.message_id) in included_message_keys
+        ]
     staging_horizon = min((item.event_time_utc for item in messages), default=None)
+    reconciliation_horizon = (
+        normalize_utc(
+            reconciliation_horizon_utc,
+            field_name="coin_group_reconciliation_horizon_utc",
+        )
+        if reconciliation_horizon_utc is not None
+        else staging_horizon
+    )
     minimum_anchor_time = (
         (_stamp(staging_horizon) - timedelta(seconds=MAXIMUM_ANCHOR_AGE_SECONDS))
         .replace(microsecond=0)
@@ -1111,7 +1127,7 @@ def process_coin_group_staging(
     retracted_facts = _reconcile_missing_current_facts(
         market_connection,
         active_event_keys=active_event_keys,
-        staging_horizon_utc=staging_horizon,
+        staging_horizon_utc=reconciliation_horizon,
         available_at_utc=as_of,
     )
     return CoinGroupPipelineReport(

@@ -1,0 +1,19 @@
+[Unit]
+Description=Collect the independent Wallex input for the capture shadow Store
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=@APP_ROOT@
+Environment=PYTHONPATH=@APP_ROOT@
+UMask=0077
+ExecStart=/usr/bin/flock --exclusive --timeout 45 @RUNTIME_ROOT@/run/market-writer.lock /usr/bin/python3 @APP_ROOT@/scripts/collect_capture_shadow_external.py --runtime-root @RUNTIME_ROOT@ --market-store market/market.sqlite3 --lock-file run/external.lock
+TimeoutStartSec=60
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadOnlyPaths=@APP_ROOT@
+ReadWritePaths=@RUNTIME_ROOT@

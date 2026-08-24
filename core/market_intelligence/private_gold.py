@@ -8,6 +8,7 @@ It never starts a Telegram client or persists the input text itself.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -487,26 +488,66 @@ def refresh_private_gold_paper_minute(
     """
 
     minute_start = _strict_utc(minute_utc, field_name="private_gold_minute_utc")
-    available_at = _strict_utc(available_at_utc, field_name="private_gold_minute_available_at_utc")
-    assert minute_start is not None and available_at is not None
-    start = datetime.fromisoformat(minute_start.replace("Z", "+00:00")).replace(second=0)
-    end = _minute_end(start)
+    assert minute_start is not None
+    key = (
+        str(settlement_term).upper(),
+        str(paper_variant).upper(),
+        minute_start[:16] + ":00Z",
+    )
+    return refresh_private_gold_paper_minutes(
+        connection,
+        minute_books=(key,),
+        available_at_utc=available_at_utc,
+    ).get(key)
+
+
+def refresh_private_gold_paper_minutes(
+    connection: sqlite3.Connection,
+    *,
+    minute_books: Iterable[tuple[str, str, datetime | str]],
+    available_at_utc: datetime | str,
+) -> dict[tuple[str, str, str], int]:
+    """Materialize many paper minutes with one bounded source-fact read."""
+
+    available_at = _strict_utc(
+        available_at_utc,
+        field_name="private_gold_minutes_available_at_utc",
+    )
+    assert available_at is not None
     available = datetime.fromisoformat(available_at.replace("Z", "+00:00"))
-    # A derived minute quote cannot be known before the minute has closed.
-    # Storing it with a synthetic future availability time would leak future
-    # information into historical replay, so reject that caller mistake.
-    if available < end:
-        raise ValueError("private_gold_minute_not_closed")
-    label = "PRIVATE_GOLD_PAPER_" + str(paper_variant).upper()
+    requested: set[tuple[str, str, str]] = set()
+    starts: list[datetime] = []
+    for settlement_term, paper_variant, minute_utc in minute_books:
+        minute_start = _strict_utc(
+            minute_utc,
+            field_name="private_gold_minute_utc",
+        )
+        assert minute_start is not None
+        start = datetime.fromisoformat(minute_start.replace("Z", "+00:00")).replace(
+            second=0,
+            microsecond=0,
+        )
+        if available < _minute_end(start):
+            raise ValueError("private_gold_minute_not_closed")
+        requested.add(
+            (
+                str(settlement_term).upper(),
+                str(paper_variant).upper(),
+                normalize_utc(start, field_name="private_gold_minute_start"),
+            )
+        )
+        starts.append(start)
+    if not requested:
+        return {}
+    earliest = min(starts)
+    latest = _minute_end(max(starts))
     rows = connection.execute(
         """
-        SELECT price_num, event_type
+        SELECT price_num,event_type,settlement_term,trade_form,event_time_utc
         FROM market_observations
         WHERE source_code = ?
           AND instrument = 'MELTED_GOLD_PRIVATE'
-          AND market_label = ?
-          AND settlement_term = ?
-          AND trade_form = ?
+          AND trade_form IN ('PAPER_NORMAL','PAPER_REVERSE','PAPER_SWIM')
           AND event_type IN ('OFFER', 'TRADE')
           AND quality_state = 'ELIGIBLE'
           AND is_conditional = 0
@@ -516,54 +557,73 @@ def refresh_private_gold_paper_minute(
         """,
         (
             PRIVATE_GOLD_SOURCE_CODE,
-            label,
-            str(settlement_term).upper(),
-            "PAPER_" + str(paper_variant).upper(),
-            normalize_utc(start, field_name="private_gold_minute_start"),
-            normalize_utc(end, field_name="private_gold_minute_end"),
+            normalize_utc(earliest, field_name="private_gold_minutes_start"),
+            normalize_utc(latest, field_name="private_gold_minutes_end"),
             available_at,
         ),
     ).fetchall()
-    if not rows:
-        return None
-    weighted_total = Decimal("0")
-    weights = Decimal("0")
-    trade_count = 0
+    grouped: dict[tuple[str, str, str], list[sqlite3.Row]] = defaultdict(list)
     for row in rows:
-        weight = PRIVATE_GOLD_TRADE_WEIGHT if row["event_type"] == "TRADE" else PRIVATE_GOLD_OFFER_WEIGHT
-        weighted_total += Decimal(str(row["price_num"])) * weight
-        weights += weight
-        trade_count += int(row["event_type"] == "TRADE")
-    event_time = normalize_utc(end, field_name="private_gold_minute_event_time")
-    observation = MarketObservation(
-        event_key=derive_event_key(
-            "private-gold-paper-minute-v1",
-            event_time,
-            str(settlement_term).upper(),
-            str(paper_variant).upper(),
-        ),
-        source_code=PRIVATE_GOLD_MINUTE_SOURCE_CODE,
-        source_family="TELEGRAM_PRIVATE",
-        event_time_utc=event_time,
-        available_at_utc=available_at,
-        instrument="MELTED_GOLD_PRIVATE",
-        market_label=label,
-        settlement_term=str(settlement_term).upper(),
-        trade_form="PAPER_" + str(paper_variant).upper(),
-        event_type="QUOTE",
-        side="MID",
-        price=weighted_total / weights,
-        price_unit="TOMAN_PER_MESGHAL_750",
-        currency="TOMAN",
-        parse_confidence=1.0,
-        parser_version="private-gold-minute-v1",
-        quality_state="ELIGIBLE",
-        quality_policy_version="private-gold-minute-v1",
-        attributes={
-            "derived_quote": True,
-            "input_count": len(rows),
-            "trade_count": trade_count,
-            "trade_weight": int(PRIVATE_GOLD_TRADE_WEIGHT),
-        },
-    )
-    return upsert_observation(connection, observation)
+        key = (
+            str(row["settlement_term"]),
+            str(row["trade_form"]).removeprefix("PAPER_"),
+            str(row["event_time_utc"])[:16] + ":00Z",
+        )
+        if key in requested:
+            grouped[key].append(row)
+    written: dict[tuple[str, str, str], int] = {}
+    for key in sorted(requested):
+        matching = grouped.get(key, [])
+        if not matching:
+            continue
+        settlement_term, paper_variant, minute_start = key
+        start = datetime.fromisoformat(minute_start.replace("Z", "+00:00"))
+        event_time = normalize_utc(
+            _minute_end(start),
+            field_name="private_gold_minute_event_time",
+        )
+        weighted_total = Decimal("0")
+        weights = Decimal("0")
+        trade_count = 0
+        for row in matching:
+            weight = (
+                PRIVATE_GOLD_TRADE_WEIGHT
+                if row["event_type"] == "TRADE"
+                else PRIVATE_GOLD_OFFER_WEIGHT
+            )
+            weighted_total += Decimal(str(row["price_num"])) * weight
+            weights += weight
+            trade_count += int(row["event_type"] == "TRADE")
+        observation = MarketObservation(
+            event_key=derive_event_key(
+                "private-gold-paper-minute-v1",
+                event_time,
+                settlement_term,
+                paper_variant,
+            ),
+            source_code=PRIVATE_GOLD_MINUTE_SOURCE_CODE,
+            source_family="TELEGRAM_PRIVATE",
+            event_time_utc=event_time,
+            available_at_utc=available_at,
+            instrument="MELTED_GOLD_PRIVATE",
+            market_label="PRIVATE_GOLD_PAPER_" + paper_variant,
+            settlement_term=settlement_term,
+            trade_form="PAPER_" + paper_variant,
+            event_type="QUOTE",
+            side="MID",
+            price=weighted_total / weights,
+            price_unit="TOMAN_PER_MESGHAL_750",
+            currency="TOMAN",
+            parse_confidence=1.0,
+            parser_version="private-gold-minute-v1",
+            quality_state="ELIGIBLE",
+            quality_policy_version="private-gold-minute-v1",
+            attributes={
+                "derived_quote": True,
+                "input_count": len(matching),
+                "trade_count": trade_count,
+                "trade_weight": int(PRIVATE_GOLD_TRADE_WEIGHT),
+            },
+        )
+        written[key] = upsert_observation(connection, observation)
+    return written

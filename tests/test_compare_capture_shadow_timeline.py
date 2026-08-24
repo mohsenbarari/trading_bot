@@ -1,0 +1,68 @@
+"""Fail-closed coverage tests for capture shadow comparison."""
+
+from __future__ import annotations
+
+from argparse import Namespace
+from contextlib import redirect_stdout
+from io import StringIO
+import json
+from pathlib import Path
+import tempfile
+import unittest
+
+from scripts.compare_capture_shadow_timeline import _run
+
+
+class CaptureShadowComparisonTests(unittest.TestCase):
+    def test_missing_candidate_book_is_a_coverage_loss(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            baseline = root / "baseline.json"
+            candidate = root / "candidate.json"
+            baseline.write_text(
+                json.dumps(
+                    {
+                        "engine_version": "coin-rate-engine-test",
+                        "points": [
+                            {
+                                "as_of_utc": "2026-08-24T10:00:00Z",
+                                "rates": [
+                                    {
+                                        "commodity_code": "IMAM",
+                                        "settlement_term": "CASH",
+                                        "status": "ESTIMATED",
+                                        "estimated_project_price": 190_000,
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            candidate.write_text(
+                json.dumps(
+                    {
+                        "engine_version": "coin-rate-engine-test",
+                        "input": {"records_seen": 1, "records_rejected": 0},
+                        "points": [
+                            {
+                                "as_of_utc": "2026-08-24T10:00:00Z",
+                                "rates": [],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            output = StringIO()
+            with redirect_stdout(output):
+                status = _run(Namespace(baseline=str(baseline), candidate=str(candidate)))
+            report = json.loads(output.getvalue())
+            self.assertEqual(status, 3)
+            self.assertEqual(report["candidate_coverage_losses"], 1)
+            self.assertEqual(report["recommendation"], "KEEP_SHADOW")
+
+
+if __name__ == "__main__":
+    unittest.main()

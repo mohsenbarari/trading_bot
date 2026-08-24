@@ -16,7 +16,7 @@ from typing import Iterable
 from .market_contracts import normalize_utc
 from .private_gold import (
     PRIVATE_GOLD_SOURCE_CODE,
-    refresh_private_gold_paper_minute,
+    refresh_private_gold_paper_minutes,
 )
 from .private_gold_payloads import (
     PrivateGoldPayloadEnvelope,
@@ -132,18 +132,16 @@ def process_private_gold_payloads(
         market_connection,
         as_of_utc=as_of,
     )
-    refreshed = 0
-    for settlement, variant, minute in _paper_minutes_to_refresh(market_connection, as_of_utc=as_of):
-        refreshed += int(
-            refresh_private_gold_paper_minute(
+    refreshed = len(
+        refresh_private_gold_paper_minutes(
+            market_connection,
+            minute_books=_paper_minutes_to_refresh(
                 market_connection,
-                settlement_term=settlement,
-                paper_variant=variant,
-                minute_utc=minute,
-                available_at_utc=as_of,
-            )
-            is not None
+                as_of_utc=as_of,
+            ),
+            available_at_utc=as_of,
         )
+    )
     purged = purge_expired_private_gold_staging(staging_connection, as_of_utc=as_of)
     return PrivateGoldPipelineReport(
         envelope_count=len(reports),

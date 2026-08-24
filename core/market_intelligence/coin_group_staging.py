@@ -355,6 +355,34 @@ def list_current_staged_coin_group_messages(
     ]
 
 
+def delete_coin_group_staged_message(
+    connection: sqlite3.Connection,
+    *,
+    group_number: int,
+    message_id: int,
+) -> bool:
+    """Apply one source tombstone to the current private reply graph.
+
+    The durable capture adapter keeps the tombstone itself.  This bounded
+    staging database only needs to remove the current raw node; the next
+    pipeline reconciliation rejects any offer/trade facts that depended on
+    that node.  The caller owns the transaction boundary.
+    """
+
+    try:
+        group = int(group_number)
+        message = int(message_id)
+    except (TypeError, ValueError) as exc:
+        raise CoinGroupStagingError("coin_group_staging_message_identity_invalid") from exc
+    if group not in {1, 2} or message <= 0:
+        raise CoinGroupStagingError("coin_group_staging_message_identity_invalid")
+    result = connection.execute(
+        "DELETE FROM coin_group_staged_messages WHERE group_number = ? AND message_id = ?",
+        (group, message),
+    )
+    return bool(result.rowcount)
+
+
 def purge_expired_coin_group_staging(
     connection: sqlite3.Connection,
     *,

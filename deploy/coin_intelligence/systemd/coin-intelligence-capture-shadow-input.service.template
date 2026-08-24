@@ -1,0 +1,20 @@
+[Unit]
+Description=Project new Telegram capture spools and publish the shadow coin snapshot
+After=coin-capture.service market-channel-capture.service
+Wants=coin-capture.service market-channel-capture.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=@APP_ROOT@
+Environment=PYTHONPATH=@APP_ROOT@
+UMask=0077
+ExecStart=/usr/bin/flock --exclusive --timeout 120 @RUNTIME_ROOT@/run/market-writer.lock /usr/bin/python3 @APP_ROOT@/scripts/ingest_capture_event_spools.py --runtime-root @RUNTIME_ROOT@ --market-store market/market.sqlite3 --staging-store staging/capture.sqlite3 --lock-file run/capture-spool.lock --market-spool-dir @MARKET_SPOOL@ --coin-spool-dir @COIN_SPOOL@
+ExecStart=/usr/bin/python3 @APP_ROOT@/scripts/publish_coin_intelligence_snapshot.py publish --runtime-root @RUNTIME_ROOT@ --market-store market/market.sqlite3 --snapshot staging/coin-rates.json --publish-staging-no-data-snapshot --environment staging --confirm publish-staging-no-data-snapshot
+TimeoutStartSec=300
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadOnlyPaths=@APP_ROOT@ @MARKET_SPOOL@ @COIN_SPOOL@
+ReadWritePaths=@RUNTIME_ROOT@
