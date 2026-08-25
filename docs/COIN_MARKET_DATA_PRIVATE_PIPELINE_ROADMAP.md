@@ -1,6 +1,6 @@
 # Roadmap انتقال داده و Parse بازار روی شبکه خصوصی
 
-وضعیت: طراحی مورد توافق؛ اجرای مرحله 0 آغاز شده و cutover هنوز انجام نشده است
+وضعیت: مرحله 0 تکمیل شده؛ مرحله 1 هنوز آغاز نشده و cutover انجام نشده است
 
 تاریخ بازبینی: 2026-08-25
 
@@ -406,6 +406,17 @@ Gate:
 - همه منابع allowlist‌شده resolve شده‌اند؛
 - مسیر authoritative هر داده مشخص است؛
 - هیچ write یا delete عملیاتی انجام نشده است.
+
+نتیجه اجرا در 2026-08-25:
+
+- inventory روی هر دو میزبان فقط‌خواندنی اجرا شد؛
+- هر دو گروه و هر پنج کانال allowlist‌شده در capture جدید resolve شدند؛
+- مسیر authority فعلی و هدف برای spool، staging، canonical store و model state ثبت شد؛
+- artifact گزارش هیچ متن خام، Telegram ID، session، credential یا env value ندارد؛
+- اختلاف freshness مسیر قدیمی و جدید و کمبود metric پایدار duplicate/gap برای capture گروه‌ها به‌عنوان ورودی مراحل بعد ثبت شد؛
+- هیچ service، timer، container، network، database یا دادهٔ زنده تغییر نکرد.
+
+گزارش و gate receipt: [COIN_MARKET_DATA_STAGE0_BASELINE.md](./COIN_MARKET_DATA_STAGE0_BASELINE.md)
 
 ### مرحله 1 — آماده‌سازی شبکه خصوصی
 
