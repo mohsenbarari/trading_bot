@@ -1,10 +1,10 @@
 # Roadmap انتقال داده و Parse بازار روی شبکه خصوصی
 
-وضعیت: طراحی مورد توافق؛ پیاده‌سازی و cutover هنوز شروع نشده است
+وضعیت: طراحی مورد توافق؛ اجرای مرحله 0 آغاز شده و cutover هنوز انجام نشده است
 
 تاریخ بازبینی: 2026-08-25
 
-مبنای Git: `main@379b1a80`
+مبنای بازنگری Docker: `main@315f7e6a`
 
 ## 1. نتیجه نهایی مورد انتظار
 
@@ -14,19 +14,19 @@
 Telegram/API
     │
     ▼
-Capture موقت ──► Parse/Normalize ──► Permanent Market Store (Web/Data)
+[Docker Capture] ──► [Docker Processor] ──► Persistent Market Store (Web/Data)
                                             │
                                             ▼
-                                  Durable Market Facts Outbox
+                                  [Durable Facts Outbox]
                                             │  private network
                                             ▼
-                                  Bot Market Store / Adapter
+                                  [Docker Receiver/Adapter]
                                             │
                                             ▼
-                                      Estimator Models
+                                      [Docker Estimator]
                                             │  private network
                                             ▼
-                                  Versioned Estimator Snapshot
+                                  [Versioned Snapshot Relay]
                                             │
                                             ▼
                                       WebApp Dashboard
@@ -55,6 +55,13 @@ Capture موقت ──► Parse/Normalize ──► Permanent Market Store (Web
 14. آفرهای دو گروه سکه می‌توانند معامله‌ای با تعداد و قیمت توافقی متفاوت داشته باشند؛ این outcome باید جدا و دائمی ثبت شود.
 15. دو کانال عمومی آبشده برای مصرف زنده مدل قابل استفاده‌اند، اما تاریخچه دائمی نمی‌خواهند.
 16. بورس در این نسخه خارج از محدوده است، ولی schema و source registry باید افزودن آن را بدون بازطراحی ممکن کند.
+17. تمام اجزای جایگزین Market Intelligence از ابتدا Docker-native و بخشی از deploy رسمی پروژه هستند.
+18. یک image immutable و متصل به Git SHA/digest می‌تواند چند command داشته باشد، اما هر مسئولیت process/service مستقل دارد؛ یک کانتینر یکپارچه ساخته نمی‌شود.
+19. کد و dependency داخل image است؛ database، spool، outbox، checkpoint، model artifact، Telegram session و secret داخل image نیست.
+20. SQLite فقط روی volume محلی و با single writer مجاز است؛ SQLite مشترک روی network filesystem ممنوع است.
+21. legacy host-native برای shadow و rollback موقت می‌ماند و فقط پس از container parity بازنشسته می‌شود.
+22. یک Telegram session هرگز هم‌زمان توسط owner میزبان و owner کانتینری باز نمی‌شود.
+23. migration و deployment از الگوی expand/contract، preflight، health gate و rollback به image digest قبلی پیروی می‌کنند.
 
 ## 3. مرز مسئولیت دو سرور
 
@@ -229,9 +236,89 @@ price row تکراری برای هر اجرای پنج‌ثانیه‌ای سا�
 
 در محاسبه intrinsic، XAU point وارد فرمول می‌شود. USDT جای مستقیم Herat نیست؛ برای trend/fallback، morning reopen و regime استفاده می‌شود. ledger باید همه roleهای واقعاً مصرف‌شده را ثبت کند، نه فقط آخرین quote را.
 
-## 7. قرارداد انتقال روی شبکه خصوصی
+## 7. قرارداد Docker و deployment
 
-### 7.1 lane رفت: Market Facts
+### 7.1 مرز image و service
+
+یک image اصلی با source و dependency ثابت از همان commit ساخته می‌شود. serviceها command متفاوت همان image را اجرا می‌کنند؛ estimator می‌تواند در صورت نیاز image جدا با dependency سنگین‌تر داشته باشد، ولی lineage و Git SHA آن باید یکسان و قابل اثبات باشد.
+
+| میزبان | service | مالکیت |
+| --- | --- | --- |
+| وب/داده | `market-capture-account1` | session و کانال‌های Account 1 |
+| وب/داده | `market-capture-account2` | session و گروه‌های Account 2 |
+| وب/داده | `market-processor` | Parse، lifecycle، quality و feature materialization |
+| وب/داده | `market-fact-sync-worker` | outbox رفت روی شبکه خصوصی |
+| وب/داده | `estimator-snapshot-receiver` | دریافت اتمیک خروجی مدل |
+| وب/داده | `market-database` | فقط در صورت انتخاب engine کانتینری اختصاصی |
+| بات | `market-fact-receiver` | validate، apply و ACK پایدار |
+| بات | `market-store-adapter` | projection سازگار با estimator فعلی |
+| بات | `coin-estimator` | main و shadow inference |
+| بات | `estimator-snapshot-sender` | snapshot برگشت روی شبکه خصوصی |
+
+Captureهای دو حساب جدا هستند. Parse، lifecycle و feature materialization در نسخه اول یک `market-processor` می‌مانند تا تعداد serviceها بدون نیاز عملی زیاد نشود؛ جداسازی آینده فقط با evidence منابع یا failure isolation انجام می‌شود.
+
+### 7.2 Compose و deploy topology
+
+- تعریف serviceها در Composeهای version-controlled و سازگار با deploy پروژه؛
+- profile/override مستقل برای میزبان وب/داده و میزبان بات؛
+- build یک‌باره، tag بر پایه Git SHA و verify همان image digest روی دو سرور؛
+- نام project، network، volume و container قطعی و قابل inventory؛
+- deployment receiver-first، سپس sender، shadow و در آخر authority switch؛
+- migration به‌صورت one-shot container و قبل از شروع writer جدید؛
+- systemd فقط می‌تواند Docker/Compose stack را در boot فراخوانی کند؛ اجرای مستقیم Python جدید روی میزبان ممنوع است؛
+- host-native legacy تا پایان rollback window خارج از Compose باقی می‌ماند، اما هم‌زمان owner یک session یا writer یک store نمی‌شود.
+
+### 7.3 داده و volume
+
+- image و container filesystem disposable و ترجیحاً read-only؛
+- database، WAL، spool، outbox، checkpoint و state روی volume/bind mount پایدار و جدا؛
+- model artifact و static calibration read-only؛ mutable calibration/state جدا و writable؛
+- Telegram session روی mount اختصاصی writable با permission محدود؛ credential از secret/env file خارج Git؛
+- backup از pathهای میزبان و با consistency پایگاه داده انجام می‌شود، نه با export تصادفی container layer؛
+- database یا SQLite file بین دو میزبان mount مشترک ندارد؛ انتقال فقط با قرارداد Market Facts/Snapshot است؛
+- volumeهای staging و production نام و مسیر مجزا دارند.
+
+### 7.4 امنیت و محدودیت منابع
+
+- user غیر root، `read_only`, `no-new-privileges`, `cap_drop` و `tmpfs` محدود؛
+- فقط receiverهای لازم روی private IP publish می‌شوند؛ capture و processor port عمومی ندارند؛
+- resource limit/reservation جدا برای capture، processor، database، sync و estimator؛
+- log rotation و byte limit؛ raw payload در stdout/stderr ممنوع؛
+- healthcheck لایه‌ای: process، dependency، freshness و durable-write؛
+- restart policy bounded و همراه alert؛ restart loop سبز تلقی نمی‌شود؛
+- process lock روی volume پایدار علاوه بر `replicas=1` حفظ می‌شود.
+
+### 7.5 چرخه release و rollback
+
+1. source/tests/contract build؛
+2. image build و ثبت SHA/digest/labels؛
+3. secret/volume/private-network preflight؛
+4. backup و migration rehearsal؛
+5. deploy receiverها؛
+6. deploy writerها بدون authority switch؛
+7. shadow health/parity؛
+8. switch با feature flag؛
+9. postcheck و soak؛
+10. ثبت release evidence.
+
+Rollback کد با pin کردن digest قبلی انجام می‌شود. schema migration باید expand/contract باشد تا image قبلی در rollback window قابل اجرا بماند. rollback هرگز volume، outbox، checkpoint یا capture history را حذف نمی‌کند.
+
+### 7.6 جابه‌جایی امن Telegram session
+
+برای هر account:
+
+1. checkpoint و آخرین durable append ثبت شود؛
+2. owner میزبان stop و lock آن آزاد شود؛
+3. container همان session mount را با owner واحد باز کند؛
+4. reconciliation از checkpoint اجرا شود؛
+5. gap/duplicate/heartbeat کنترل شود؛
+6. سپس live-ready اعلام شود.
+
+در rollback ابتدا container stop و lock آزاد می‌شود، بعد owner قبلی فعال می‌شود. اجرای overlap برای «کاهش downtime» ممنوع است؛ reconciliation راه پوشش فاصله است.
+
+## 8. قرارداد انتقال روی شبکه خصوصی
+
+### 8.1 lane رفت: Market Facts
 
 `market_fact_sync_worker` روی سرور وب outbox را می‌خواند و batchهای نسخه‌بندی‌شده را به receiver سرور بات می‌فرستد.
 
@@ -258,7 +345,7 @@ ACK فقط بعد از commit پایدار receiver صادر می‌شود و ش
 
 lost ACK باعث replay می‌شود و replay باید no-op باشد. gap اجازه advance checkpoint نمی‌دهد.
 
-### 7.2 lane برگشت: Estimator Snapshot
+### 8.2 lane برگشت: Estimator Snapshot
 
 خروجی مدل append-only market fact نیست و قرارداد جدا دارد:
 
@@ -273,7 +360,7 @@ lost ACK باعث replay می‌شود و replay باید no-op باشد. gap ا
 
 receiver وب snapshot را ابتدا در فایل/رکورد staging اعتبارسنجی می‌کند و سپس atomically آخرین نسخه را عوض می‌کند. نسخه قدیمی‌تر هرگز نسخه جدیدتر را overwrite نمی‌کند.
 
-### 7.3 امنیت و شبکه
+### 8.3 امنیت و شبکه
 
 - endpointها فقط روی interface/IP خصوصی bind می‌شوند؛
 - firewall فقط private IP دو میزبان و port مشخص را می‌پذیرد؛
@@ -284,7 +371,7 @@ receiver وب snapshot را ابتدا در فایل/رکورد staging اعتب
 - health probe خصوصی از data endpoint جدا است؛
 - clock skew قبل از cutover سنجیده و محدود می‌شود.
 
-### 7.4 جداسازی از sync عمومی
+### 8.4 جداسازی از sync عمومی
 
 - process، queue، outbox، checkpoint و metric مستقل؛
 - connection pool مستقل؛
@@ -292,7 +379,7 @@ receiver وب snapshot را ابتدا در فایل/رکورد staging اعتب
 - failure آن نباید offer/trade/user sync را متوقف کند؛
 - کد مشترک فقط برای signing، TLS policy، retry primitives و structured logging مجاز است.
 
-## 8. مراحل اجرایی
+## 9. مراحل اجرایی
 
 هر مرحله یک commit مستقل روی branch اجرای این roadmap دارد. deployment و promotion commit جدا از implementation است. عبور از gate هر مرحله پیش‌شرط مرحله بعد است.
 
@@ -372,7 +459,33 @@ Gate:
 - migration rehearsal و restore backup موفق؛
 - هیچ unresolved unit یا timestamp semantics وجود ندارد.
 
-### مرحله 3 — Capture پایدار و retention
+### مرحله 3 — Docker foundation و اتصال به deploy پروژه
+
+اقدامات:
+
+1. ساخت Dockerfile چندمرحله‌ای با runtime غیر root و image labels شامل Git SHA.
+2. تعریف Compose پایه و override/profile جدا برای وب/داده و بات.
+3. تعریف service commands طبق جدول بخش 7، بدون اجرای مستقیم Python جدید روی میزبان.
+4. تعریف volumeها، ownership، mode و backup path بدون انتقال داده زنده.
+5. تعریف secret/env contract و جلوگیری از ورود credential/session به image یا Git.
+6. تعریف healthcheck، resource limits، log rotation و restart policy.
+7. افزودن build/pull/digest verification، migration one-shot، preflight و postcheck به deploy رسمی.
+8. ساخت image و اجرای smoke با fixture و network مصنوعی؛ هیچ capture زنده در این مرحله owner نمی‌شود.
+9. آزمون rollback به digest قبلی و compatibility با schema expand-only.
+10. تولید inventory machine-readable از image/service/volume/network برای هر میزبان.
+
+Gate:
+
+- image با source SHA یکسان reproducible و secret scan سبز؛
+- containerها بدون root/privileged و با filesystem حداقلی اجرا می‌شوند؛
+- state پس از recreate container باقی می‌ماند؛
+- SQLite روی volume محلی و single-writer است؛
+- serviceهای بدون نیاز inbound هیچ port منتشر نمی‌کنند؛
+- receiver فقط قابلیت bind به private endpoint تنظیم‌شده دارد؛
+- deploy و rollback rehearsal بدون data deletion موفق است؛
+- legacy host service هنوز authority اصلی و بدون تداخل است.
+
+### مرحله 4 — Capture پایدار و retention
 
 اقدامات:
 
@@ -392,7 +505,7 @@ Gate:
 - raw بیش از retention باقی نمی‌ماند؛
 - capture از parser کند یا unavailable متوقف نمی‌شود.
 
-### مرحله 4 — انتقال Parser دو گروه سکه
+### مرحله 5 — انتقال Parser دو گروه سکه
 
 اقدامات:
 
@@ -421,7 +534,7 @@ Gate:
 - parse موفق pending نمی‌ماند؛
 - تفاوت با parser فعلی برای هر event reason code دارد.
 
-### مرحله 5 — Parser کانال‌ها و lifecycle آبشده خصوصی
+### مرحله 6 — Parser کانال‌ها و lifecycle آبشده خصوصی
 
 اقدامات:
 
@@ -441,7 +554,7 @@ Gate:
 - `final_price/final_quantity` در schema/code/API وجود ندارد؛
 - دو کانال عمومی آبشده وارد archive دائمی نمی‌شوند.
 
-### مرحله 6 — USDT/XAU materializer و input ledger
+### مرحله 7 — USDT/XAU materializer و input ledger
 
 اقدامات:
 
@@ -461,7 +574,7 @@ Gate:
 - missing direct XAU دقیقاً fallback/NO_DATA فعلی را می‌دهد؛
 - point و mean در dashboard و audit قابل تفکیک‌اند.
 
-### مرحله 7 — Market Facts outbox و worker خصوصی
+### مرحله 8 — Market Facts outbox و worker خصوصی
 
 اقدامات:
 
@@ -489,7 +602,7 @@ Gate:
 - p95 commit وب تا durable ACK بات در شبکه سالم حداکثر 1 ثانیه؛
 - p99 حداکثر 3 ثانیه یا baseline مصوب سخت‌گیرانه‌تر.
 
-### مرحله 8 — Adapter مصرف‌کننده روی سرور بات
+### مرحله 9 — Adapter مصرف‌کننده روی سرور بات
 
 اقدامات:
 
@@ -508,7 +621,7 @@ Gate:
 - snapshot model input قابل اتصال به source event است؛
 - rollback به legacy feed بدون از دست رفتن capture ممکن است.
 
-### مرحله 9 — مسیر برگشت Snapshot به WebApp
+### مرحله 10 — مسیر برگشت Snapshot به WebApp
 
 اقدامات:
 
@@ -526,7 +639,7 @@ Gate:
 - قطع مسیر برگشت stale state را واضح نشان می‌دهد؛
 - هیچ query مستقل UI عددی متفاوت از snapshot مدل تولید نمی‌کند.
 
-### مرحله 10 — Backfill و تجمیع تاریخچه
+### مرحله 11 — Backfill و تجمیع تاریخچه
 
 اقدامات:
 
@@ -552,7 +665,7 @@ Gate:
 - backup قبل و بعد import قابل restore؛
 - import دوم no-op است.
 
-### مرحله 11 — Shadow parity و آزمون بازار باز
+### مرحله 12 — Shadow parity و آزمون بازار باز
 
 اقدامات:
 
@@ -582,7 +695,7 @@ Gate:
 - promotion recommendation صریح؛
 - rollback rehearsal موفق.
 
-### مرحله 12 — Cutover staging
+### مرحله 13 — Cutover staging
 
 ترتیب:
 
@@ -611,7 +724,7 @@ Gate:
 - disk-full/receiver restart/lost ACK آزمایش شده؛
 - تایید صریح برای production وجود دارد.
 
-### مرحله 13 — Cutover production
+### مرحله 14 — Cutover production
 
 این مرحله خودکار و ضمنی نیست و authorization جدا می‌خواهد.
 
@@ -646,7 +759,7 @@ Gate نهایی:
 - restore/rollback آماده؛
 - تایید اپراتور.
 
-### مرحله 14 — مهاجرت sync عمومی به شبکه خصوصی
+### مرحله 15 — مهاجرت sync عمومی به شبکه خصوصی
 
 این مرحله فقط پس از تثبیت production Market Facts آغاز می‌شود و contract داده sync عمومی را تغییر نمی‌دهد.
 
@@ -670,7 +783,7 @@ Gate:
 - rollback هر دو جهت آزموده شده؛
 - Market Facts و product sync با وجود شبکه مشترک failure domain عملیاتی مستقل دارند.
 
-### مرحله 15 — بازنشستگی مسیرهای قدیمی
+### مرحله 16 — بازنشستگی مسیرهای قدیمی
 
 فقط پس از retention window و تایید جداگانه:
 
@@ -684,7 +797,7 @@ Gate:
 
 هیچ data directory، database، tag یا artifact بدون ممیزی و اجازه حذف نمی‌شود.
 
-## 9. Observability و SLO
+## 10. Observability و SLO
 
 Metricهای الزامی per stream:
 
@@ -697,7 +810,9 @@ Metricهای الزامی per stream:
 - parser eligible/review/rejected ratio؛
 - model input age و selection method؛
 - snapshot age و WebApp publication age؛
-- disk free/inode و DB checkpoint/backup age.
+- disk free/inode و DB checkpoint/backup age؛
+- image SHA/digest drift، container restart/OOM و healthcheck failure؛
+- volume permission/space و active owner identity هر Telegram session.
 
 SLO اولیه:
 
@@ -711,7 +826,7 @@ SLO اولیه:
 
 SLOها بعد از baseline خصوصی می‌توانند فقط سخت‌گیرانه‌تر شوند؛ شل‌کردن آنها نیاز به تصمیم مستند دارد.
 
-## 10. آزمون‌های اجباری ماتریسی
+## 11. آزمون‌های اجباری ماتریسی
 
 ### صحت داده
 
@@ -737,6 +852,17 @@ SLOها بعد از baseline خصوصی می‌توانند فقط سخت‌گی
 - clock skew؛
 - secret rotation.
 
+### Docker و deploy
+
+- build تکرارپذیر و image secret scan؛
+- recreate/upgrade/rollback container با حفظ volume؛
+- اجرای non-root و failure صحیح permission؛
+- جلوگیری از owner هم‌زمان host/container برای هر session؛
+- migration one-shot دوباره‌پذیر و second-pass no-op؛
+- digest mismatch بین دو میزبان که باید deploy را متوقف کند؛
+- resource limit/OOM و recovery بدون corruption؛
+- receiver private bind و اثبات نبود public listener.
+
 ### امنیت
 
 - public endpoint unreachable؛
@@ -757,7 +883,7 @@ SLOها بعد از baseline خصوصی می‌توانند فقط سخت‌گی
 - WebApp hash equals bot snapshot hash؛
 - rollback feed without deleting new facts.
 
-## 11. Backup، بازیابی و retention
+## 12. Backup، بازیابی و retention
 
 - raw spool: سه روز؛
 - curated permanent facts: بدون حذف خودکار تا تصویب policy آینده؛
@@ -765,10 +891,11 @@ SLOها بعد از baseline خصوصی می‌توانند فقط سخت‌گی
 - outbox delivered rows: bounded operational retention پس از checkpoint/backup؛
 - model input bindings: برای replay و audit دائمی یا مطابق retention مصوب model ledger؛
 - backup روی volume جدا از active database؛
+- container layer و image جای backup داده نیستند؛
 - backup بدون restore test معتبر نیست؛
 - RPO/RTO نهایی بعد از اندازه‌گیری حجم واقعی در مرحله 0 تصویب می‌شود.
 
-## 12. Rollback سراسری
+## 13. Rollback سراسری
 
 Rollback هرگز capture یا archive وب را خاموش نمی‌کند. تنها authority مصرف مدل جابه‌جا می‌شود:
 
@@ -782,7 +909,7 @@ Rollback هرگز capture یا archive وب را خاموش نمی‌کند. ت�
 
 برای مهاجرت sync عمومی، rollback فقط peer URL/route را به transport قبلی برمی‌گرداند؛ schema، change log و source sequence دست‌کاری نمی‌شوند.
 
-## 13. موارد خارج از محدوده
+## 14. موارد خارج از محدوده
 
 - انتقال خود مدل‌های اصلی به سرور وب؛
 - بازطراحی الگوریتم قیمت بدون shadow/evaluation جدا؛
@@ -792,10 +919,11 @@ Rollback هرگز capture یا archive وب را خاموش نمی‌کند. ت�
 - ذخیره هرثانیه‌ای مصنوعی XAU/USDT؛
 - bot-to-bot transport؛
 - استفاده از sync عمومی به‌عنوان bulk market event bus؛
+- بازنویسی و داکرایزکردن legacy صرفاً برای یکسان‌سازی ظاهری؛ replacement جدید Docker-native است؛
 - افزودن بورس در این نسخه؛
 - production deploy بدون تایید مستقل.
 
-## 14. تصمیم‌های باز که قبل از مرحله 2 باید بسته شوند
+## 15. تصمیم‌های باز که قبل از مرحله 2 باید بسته شوند
 
 این موارد در گفتگو نهایی نشده‌اند و roadmap نباید پاسخ جعلی برایشان بسازد:
 
@@ -806,14 +934,18 @@ Rollback هرگز capture یا archive وب را خاموش نمی‌کند. ت�
 5. threshold نهایی alertها پس از baseline؛
 6. مدت rollback window پیش از بازنشستگی legacy؛
 7. سیاست نمایش نام/Telegram ID در WebApp و سطح دسترسی اپراتورها.
+8. base image و dependency-lock نهایی پس از benchmark اندازه، build time و runtime compatibility.
 
 انتخاب هر مورد باید ADR کوتاه، تست و rollback داشته باشد.
 
-## 15. تعریف Done نهایی
+## 16. تعریف Done نهایی
 
 این roadmap فقط وقتی تمام است که:
 
 - همه captureها روی وب/داده single-owner و پایدار باشند؛
+- تمام replacement serviceها با image SHA/digest قابل اثبات و از deploy رسمی اجرا شوند؛
+- هیچ Python process جدید این pipeline مستقیماً روی host اجرا نشود؛
+- database/session/model/state روی volumeهای پایدار و امن، نه container layer، باشند؛
 - Parse آفر/معامله و lifecycle روی وب انجام شود؛
 - آرشیو دائمی دقیقاً مطابق ماتریس retention باشد؛
 - bot فقط facts/features لازم را از شبکه خصوصی بگیرد؛
