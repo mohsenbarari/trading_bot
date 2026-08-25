@@ -11,6 +11,6 @@
 - Inputs: private gold, Herat, XAU, G1/G2; weak evidence abstains. Rates prefer private melted, else bounded fresh public flow. Malformed legacy rows are skipped with checkpoint advance.
 - Staging catalog mirrors Iran; Snapshot is read-only. v3 family bands ±10%; ties require choice. `پک` means full/half/quarter, quantity=100, `PACK_ONLY`.
 - Fetch newest-first/sort; backlog oldest-first. Jobs run from `main`; collectors use `flock`. Closed-market guard may fail open only with healthy inputs.
-- Capture accepts only `market_channel_event/1.0` and `coin_group_event/2.0`; receipt availability, revisions, reply status, and allowlisted `source_id` are authoritative; parser hints are advisory. Raw state is protected for 3 days; Store facts stay opaque.
-- Primary melted flow uses its parser; edits never imply trades. Post-cutover may be offers-only; verified trades seed only pre-cutover state.
-- Cutover seeds normalized pre-cutover facts, parser calibration, and independent external history—not raw Telegram data. Capture analysis and external collection run on `65.109.220.59`; consumers require parity, freshness, magnitude, and open-market live gates.
+- Capture accepts only `market_channel_event/1.0` and `coin_group_event/2.0`; receipt time, revisions, reply status, and allowlisted `source_id` are authoritative. Raw state is protected for 3 days; Store facts stay opaque.
+- Primary melted offers expire 120s from publication; edits never extend lifetime or imply trades. Post-cutover may be offers-only; verified trades seed only pre-cutover state.
+- Cutover seeds normalized facts, parser calibration, and external history—not raw Telegram data. Capture analysis runs on `65.109.220.59`; consumers require parity, freshness, magnitude, and open-market live gates.

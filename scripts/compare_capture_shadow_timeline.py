@@ -40,6 +40,35 @@ def _load(path: Path) -> dict[str, object]:
     return payload
 
 
+def _capture_input_evidence(
+    candidate: dict[str, object],
+    *,
+    report_path: str | None,
+) -> tuple[dict[str, object] | None, str, str | None]:
+    embedded = candidate.get("input")
+    if isinstance(embedded, dict):
+        return embedded, "candidate_timeline", None
+    if not report_path:
+        return None, "missing", None
+    report = json.loads(
+        _external_file(report_path, field="candidate_input_report").read_text(
+            encoding="utf-8"
+        )
+    )
+    if (
+        not isinstance(report, dict)
+        or report.get("schema") != "capture_shadow_replay"
+        or not isinstance(report.get("input"), dict)
+        or not str(report.get("adapter_version") or "").strip()
+    ):
+        raise ComparisonError("candidate_input_report_invalid")
+    return (
+        report["input"],  # type: ignore[return-value]
+        "capture_shadow_replay",
+        str(report["adapter_version"]),
+    )
+
+
 def _rates(payload: dict[str, object]) -> dict[tuple[str, str, str], dict[str, object]]:
     result: dict[tuple[str, str, str], dict[str, object]] = {}
     for point in payload["points"]:  # type: ignore[index]
@@ -104,9 +133,12 @@ def _run(args: argparse.Namespace) -> int:
     coverage_gate = losses <= max(2, math.floor(0.01 * len(keys)))
     parity_gate = bool(paired_deltas) and p95 is not None and p95 <= 0.02 and maximum is not None and maximum <= 0.05
     magnitude_gate = invalid_magnitude == 0
+    input_payload, input_evidence, adapter_version = _capture_input_evidence(
+        candidate,
+        report_path=getattr(args, "candidate_input_report", None),
+    )
     rejection_rate = None
-    input_payload = candidate.get("input")
-    if isinstance(input_payload, dict):
+    if input_payload is not None:
         seen = int(input_payload.get("records_seen") or 0)
         rejected = int(input_payload.get("records_rejected") or 0)
         rejection_rate = rejected / seen if seen else None
@@ -126,6 +158,8 @@ def _run(args: argparse.Namespace) -> int:
         "max_absolute_relative_delta": maximum,
         "median_underlying_age_delta_seconds": median_age_delta,
         "candidate_input_rejection_rate": rejection_rate,
+        "candidate_input_evidence": input_evidence,
+        "candidate_adapter_version": adapter_version,
         "by_book": {
             key: {
                 "paired": len(values),
@@ -151,6 +185,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline", required=True)
     parser.add_argument("--candidate", required=True)
+    parser.add_argument(
+        "--candidate-input-report",
+        help="optional causal replay report supplying capture contract counters",
+    )
     return parser
 
 
