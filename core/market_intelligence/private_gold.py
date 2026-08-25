@@ -63,8 +63,8 @@ class PrivateGoldOfferInput:
     """Transient, transport-bound offer data; do not store this object.
 
     ``source_event_id`` and ``text`` are used only to derive opaque keys and
-    economic fields.  ``edited_at_utc`` is explicit evidence of completion for
-    this source by its documented market convention.
+    economic fields. ``edited_at_utc`` is only the time of an independently
+    verified trade; a generic edit is not transaction evidence.
     """
 
     source_event_id: str | int
@@ -306,14 +306,13 @@ def _trade_time_and_quantity(
     quantity: int,
 ) -> tuple[str | None, int | None]:
     status = str(source.trade_status or "").strip().upper()
-    # An explicit verifier result of no trade is stronger than the generic
-    # source convention below.  The staging layer also applies this guard.
+    # An explicit verifier result of no trade is authoritative.
     if status in {"NONE", "NO_TRADE"}:
         return None, None
-    if status not in {"FULL", "PARTIAL", "COMPLETED", "TRADED"} and not source.edited_at_utc:
+    if status not in {"FULL", "PARTIAL", "COMPLETED", "TRADED"}:
         return None, None
-    # This feed's verified convention is that an edit is settlement evidence;
-    # its timestamp wins over a delayed crawler-verifier timestamp.
+    # The edit time wins only after an explicit verifier status; generic edits
+    # include closure and correction events.
     trade_time = _strict_utc(source.edited_at_utc, field_name="private_gold_edited_at_utc")
     if trade_time is None:
         trade_time = _strict_utc(
@@ -330,10 +329,6 @@ def _trade_time_and_quantity(
         # evidence only; inventing a full trade would overweight the price.
         return None, None
     if status in {"FULL", "COMPLETED", "TRADED"}:
-        return trade_time, quantity
-    if source.edited_at_utc:
-        # In this source an edited offer is the completion signal.  In the
-        # absence of an explicit partial quantity, treat it as the full offer.
         return trade_time, quantity
     return None, None
 

@@ -31,6 +31,7 @@ def market_event(
     available: str = "2026-08-24T10:00:01Z",
     edited: str | None = None,
     is_backfill: bool = False,
+    entities: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     message = {
         "message_id": str(message_id),
@@ -39,6 +40,7 @@ def market_event(
         "text": text,
         "text_sha256": sha256(text.encode("utf-8")).hexdigest() if text is not None else None,
         "is_forwarded": False,
+        "entities": entities or [],
     }
     return {
         "schema": "market_channel_event",
@@ -309,27 +311,156 @@ class CaptureEventAdapterTests(unittest.TestCase):
         self.assertEqual(row["available_at_utc"], "2026-08-24T10:00:01Z")
         self.assertEqual(row["revision"], 1)
 
-    def test_schema_v2_digest_is_recomputed_without_reprojection(self) -> None:
+    def test_schema_v3_is_upgraded_with_revision_and_deadline_state(self) -> None:
         self._stage_market(
             market_event(33, source="MELTED_PRIMARY_FLOW", text="80,000,000 خرید 5 تا با حواله")
         )
         self.staging.execute(
-            "UPDATE capture_market_messages SET content_digest=?",
-            (b"x" * 32,),
+            "UPDATE capture_adapter_metadata SET schema_version=3 WHERE singleton=1"
         )
+        self.staging.execute("DROP TABLE capture_market_message_revisions")
+        self.staging.execute("DROP TABLE capture_primary_trade_deadlines")
         self.staging.execute(
-            "UPDATE capture_adapter_metadata SET schema_version=2 WHERE singleton=1"
+            "CREATE TABLE capture_market_messages_v3 AS "
+            "SELECT source_id,message_id,event_time_utc,available_at_utc,edited_at_utc,"
+            "parser_profile,is_forwarded,message_text,content_digest,revision,expires_at_utc "
+            "FROM capture_market_messages"
+        )
+        self.staging.execute("DROP TABLE capture_market_messages")
+        self.staging.execute(
+            "ALTER TABLE capture_market_messages_v3 RENAME TO capture_market_messages"
         )
         self.staging.commit()
         initialize_capture_adapter(self.staging)
         row = self.staging.execute(
             "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
         ).fetchone()
-        digest = self.staging.execute(
-            "SELECT content_digest FROM capture_market_messages"
-        ).fetchone()[0]
-        self.assertEqual(row["schema_version"], 3)
-        self.assertNotEqual(bytes(digest), b"x" * 32)
+        self.assertEqual(row["schema_version"], 4)
+        self.assertEqual(
+            self.staging.execute(
+                "SELECT COUNT(*) FROM capture_market_message_revisions"
+            ).fetchone()[0],
+            1,
+        )
+        self.assertEqual(
+            self.staging.execute(
+                "SELECT COUNT(*) FROM capture_primary_trade_deadlines"
+            ).fetchone()[0],
+            1,
+        )
+
+    def test_primary_partial_trade_finalizes_at_deadline_without_new_event(self) -> None:
+        self._stage_market(
+            market_event(
+                50,
+                source="MELTED_PRIMARY_FLOW",
+                text="95,000,000 فروش 10 تا بدون حواله",
+                message_id=50,
+            )
+        )
+        self._project("2026-08-24T10:00:10Z")
+        self._stage_market(
+            market_event(
+                51,
+                source="MELTED_PRIMARY_FLOW",
+                text="95,000,000 فروش 10 تا بدون حواله باقی 6",
+                event_type="message_edited",
+                message_id=50,
+                edited="2026-08-24T10:00:40Z",
+                available="2026-08-24T10:00:41Z",
+            )
+        )
+        pending = self._project("2026-08-24T10:01:00Z")
+        self.assertEqual(pending.private_trade_facts_upserted, 0)
+        final = self._project("2026-08-24T10:02:01Z")
+        self.assertEqual(final.private_trade_facts_upserted, 1)
+        row = self.market.execute(
+            "SELECT quantity_num,parser_version,available_at_utc FROM market_observations "
+            "WHERE source_code='PRIVATE_GOLD_CHANNEL' AND event_type='TRADE' "
+            "AND quality_state='ELIGIBLE'"
+        ).fetchone()
+        self.assertEqual(row["quantity_num"], 4.0)
+        self.assertEqual(row["parser_version"], "private-gold-trade-revisions-v1")
+        self.assertEqual(row["available_at_utc"], "2026-08-24T10:02:01Z")
+
+    def test_primary_no_trade_closure_overrides_tentative_partial(self) -> None:
+        self._stage_market(
+            market_event(
+                60,
+                source="MELTED_PRIMARY_FLOW",
+                text="95,000,000 فروش 10 تا بدون حواله",
+                message_id=60,
+            )
+        )
+        self._stage_market(
+            market_event(
+                61,
+                source="MELTED_PRIMARY_FLOW",
+                text="95,000,000 فروش 10 تا بدون حواله باقی 6",
+                event_type="message_edited",
+                message_id=60,
+                edited="2026-08-24T10:00:30Z",
+                available="2026-08-24T10:00:31Z",
+            )
+        )
+        self._stage_market(
+            market_event(
+                62,
+                source="MELTED_PRIMARY_FLOW",
+                text="95,000,000 فروش 10 تا بدون حواله ✅",
+                event_type="message_edited",
+                message_id=60,
+                edited="2026-08-24T10:01:30Z",
+                available="2026-08-24T10:01:31Z",
+            )
+        )
+        report = self._project("2026-08-24T10:01:31Z")
+        self.assertEqual(report.private_trade_facts_upserted, 0)
+        self.assertEqual(
+            self.market.execute(
+                "SELECT COUNT(*) FROM market_observations "
+                "WHERE source_code='PRIVATE_GOLD_CHANNEL' AND event_type='TRADE' "
+                "AND quality_state='ELIGIBLE'"
+            ).fetchone()[0],
+            0,
+        )
+
+    def test_entity_only_revision_is_retained_but_not_a_trade(self) -> None:
+        text = "95,000,000 فروش 10 تا بدون حواله"
+        self._stage_market(
+            market_event(70, source="MELTED_PRIMARY_FLOW", text=text, message_id=70)
+        )
+        report = stage_capture_event(
+            self.staging,
+            decode_market_channel_event(
+                market_event(
+                    71,
+                    source="MELTED_PRIMARY_FLOW",
+                    text=text,
+                    event_type="message_edited",
+                    message_id=70,
+                    edited="2026-08-24T10:00:20Z",
+                    available="2026-08-24T10:00:21Z",
+                    entities=[
+                        {
+                            "type": "MessageEntityBold",
+                            "offset_utf16": 0,
+                            "length_utf16": 2,
+                        }
+                    ],
+                )
+            ),
+        )
+        self.assertTrue(report.staged_change)
+        self.assertEqual(
+            self.staging.execute(
+                "SELECT COUNT(*) FROM capture_market_message_revisions "
+                "WHERE source_id='MELTED_PRIMARY_FLOW' AND message_id=70"
+            ).fetchone()[0],
+            2,
+        )
+        projection = self._project("2026-08-24T10:02:01Z")
+        self.assertEqual(projection.private_trade_facts_upserted, 0)
 
     def test_old_market_backfill_is_ignored_but_recent_backfill_is_staged(self) -> None:
         old = stage_capture_event(

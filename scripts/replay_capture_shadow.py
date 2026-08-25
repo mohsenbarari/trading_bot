@@ -150,6 +150,9 @@ def _run(args: argparse.Namespace) -> int:
         "market_facts_upserted": 0,
         "market_facts_retracted": 0,
         "private_paper_minutes_refreshed": 0,
+        "private_trade_facts_upserted": 0,
+        "private_trade_messages_finalized": 0,
+        "private_trade_messages_ambiguous": 0,
         "group_pipeline_runs": 0,
         "group_eligible_offers_last": 0,
         "group_eligible_trades_last": 0,
@@ -175,6 +178,9 @@ def _run(args: argparse.Namespace) -> int:
             projection_totals["market_facts_upserted"] += projection.market_facts_upserted
             projection_totals["market_facts_retracted"] += projection.market_facts_retracted
             projection_totals["private_paper_minutes_refreshed"] += projection.private_paper_minutes_refreshed
+            projection_totals["private_trade_facts_upserted"] += projection.private_trade_facts_upserted
+            projection_totals["private_trade_messages_finalized"] += projection.private_trade_messages_finalized
+            projection_totals["private_trade_messages_ambiguous"] += projection.private_trade_messages_ambiguous
             if projection.group_pipeline is not None:
                 projection_totals["group_pipeline_runs"] += 1
                 projection_totals["group_eligible_offers_last"] = projection.group_pipeline.eligible_offers

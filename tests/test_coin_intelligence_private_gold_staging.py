@@ -123,17 +123,15 @@ class PrivateGoldStagingTests(unittest.TestCase):
         self.assertEqual((report.offer_facts_upserted, report.trade_facts_upserted), (1, 0))
         self.assertEqual([row["event_type"] for row in self._facts()], ["OFFER"])
 
-    def test_offer_edit_is_trade_evidence_when_verifier_is_delayed(self) -> None:
+    def test_offer_edit_waits_for_explicit_verifier(self) -> None:
         stage_private_gold_offer(
             self.staging,
             self.offer(edited_at_utc="2026-08-04T12:01:10Z"),
         )
         report = self._promote()
 
-        self.assertEqual((report.offer_facts_upserted, report.trade_facts_upserted), (1, 1))
-        facts = self._facts()
-        self.assertEqual(facts[1]["event_time_utc"], "2026-08-04T12:01:10Z")
-        self.assertEqual(facts[1]["available_at_utc"], "2026-08-04T12:01:10Z")
+        self.assertEqual((report.offer_facts_upserted, report.trade_facts_upserted), (1, 0))
+        self.assertEqual([row["event_type"] for row in self._facts()], ["OFFER"])
 
     def test_staging_expiry_deletes_text_but_not_normalized_market_facts(self) -> None:
         stage_private_gold_offer(self.staging, self.offer())

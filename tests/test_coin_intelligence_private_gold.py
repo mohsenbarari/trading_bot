@@ -132,7 +132,7 @@ class PrivateGoldParserTests(unittest.TestCase):
 
         self.assertEqual([item.event_type for item in observations], ["OFFER"])
 
-    def test_edit_without_verifier_quantity_is_full_trade_by_source_convention(self) -> None:
+    def test_edit_without_verifier_is_not_trade_evidence(self) -> None:
         observations = private_gold_observations(
             self.source(
                 "80,300,000 فروش 5 تا با حواله",
@@ -140,8 +140,7 @@ class PrivateGoldParserTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual([item.event_type for item in observations], ["OFFER", "TRADE"])
-        self.assertEqual(observations[1].quantity, 5)
+        self.assertEqual([item.event_type for item in observations], ["OFFER"])
 
     def test_explicit_no_trade_overrides_an_edit(self) -> None:
         observations = private_gold_observations(

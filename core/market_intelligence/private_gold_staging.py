@@ -325,15 +325,6 @@ def stage_private_gold_offer(
         if existing is not None and existing["trade_available_at_utc"] is not None
         else None
     )
-    # This source's documented convention treats an edit as completion
-    # evidence.  A later verifier update still wins, but an edited offer must
-    # not lose its trade simply because the verifier stream was delayed.
-    inferred_trade_available = existing_trade_available or (available if edited is not None else None)
-    inferred_trade_edited = (
-        str(existing["trade_edited_at_utc"])
-        if existing is not None and existing["trade_edited_at_utc"] is not None
-        else edited
-    )
     _write(
         connection,
         message_id=message_id,
@@ -345,8 +336,12 @@ def stage_private_gold_offer(
         trade_status=str(existing["trade_status"]) if existing is not None else "PENDING",
         traded_quantity=(int(existing["traded_quantity"]) if existing is not None and existing["traded_quantity"] is not None else None),
         trade_detected=(str(existing["trade_detected_at_utc"]) if existing is not None and existing["trade_detected_at_utc"] is not None else None),
-        trade_edited=inferred_trade_edited,
-        trade_available=inferred_trade_available,
+        trade_edited=(
+            str(existing["trade_edited_at_utc"])
+            if existing is not None and existing["trade_edited_at_utc"] is not None
+            else None
+        ),
+        trade_available=existing_trade_available,
         trade_digest=(bytes(existing["trade_digest"]) if existing is not None and existing["trade_digest"] is not None else None),
         existing=existing,
         staged_at=staged_at,

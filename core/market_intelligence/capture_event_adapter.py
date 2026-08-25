@@ -10,7 +10,7 @@ in its reports.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from hashlib import blake2b, sha256
 import json
@@ -35,13 +35,19 @@ from .private_gold import (
     private_gold_observations,
     refresh_private_gold_paper_minutes,
 )
+from .private_gold_trade_revisions import (
+    PRIVATE_GOLD_OFFER_LIFETIME_SECONDS,
+    PRIVATE_GOLD_TRADE_REVISION_VERSION,
+    PrivateGoldRevision,
+    extract_private_gold_trade,
+)
 from .public_telegram.ingest import PublicTelegramMessage, ingest_public_message
 from .public_telegram.parser import parse_public_message, should_ignore_public_message
 from .public_telegram.sources import source_for_code
 
 
-CAPTURE_ADAPTER_SCHEMA_VERSION = 3
-CAPTURE_ADAPTER_VERSION = "capture-event-adapter-v5-bounded-reconciliation"
+CAPTURE_ADAPTER_SCHEMA_VERSION = 4
+CAPTURE_ADAPTER_VERSION = "capture-event-adapter-v6-private-trade-revisions"
 CAPTURE_RAW_RETENTION = timedelta(days=3)
 COIN_GROUP_ACTIVE_REPLAY_WINDOW = timedelta(hours=6)
 MARKET_BACKFILL_REPLAY_WINDOW = timedelta(minutes=30)
@@ -90,6 +96,7 @@ class CaptureEvent:
     is_forwarded: bool
     is_backfill: bool
     parser_profile: str | None = None
+    entities_json: str = "[]"
     sender_identity: str | None = None
     reply_to_message_id: int | None = None
 
@@ -108,6 +115,9 @@ class CaptureProjectionReport:
     market_facts_upserted: int
     market_facts_retracted: int
     private_paper_minutes_refreshed: int
+    private_trade_facts_upserted: int
+    private_trade_messages_finalized: int
+    private_trade_messages_ambiguous: int
     group_pipeline: CoinGroupPipelineReport | None
     raw_rows_purged: int
 
@@ -148,6 +158,7 @@ CREATE TABLE IF NOT EXISTS capture_market_messages (
     parser_profile TEXT NOT NULL,
     is_forwarded INTEGER NOT NULL CHECK(is_forwarded IN (0,1)),
     message_text TEXT NOT NULL,
+    entities_json TEXT NOT NULL,
     content_digest BLOB NOT NULL CHECK(length(content_digest)=32),
     revision INTEGER NOT NULL CHECK(revision > 0),
     expires_at_utc TEXT NOT NULL,
@@ -157,6 +168,38 @@ CREATE INDEX IF NOT EXISTS idx_capture_market_source_time
     ON capture_market_messages(source_id,event_time_utc,message_id);
 CREATE INDEX IF NOT EXISTS idx_capture_market_expiry
     ON capture_market_messages(expires_at_utc);
+
+CREATE TABLE IF NOT EXISTS capture_market_message_revisions (
+    source_id TEXT NOT NULL,
+    message_id INTEGER NOT NULL CHECK(message_id > 0),
+    event_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    event_time_utc TEXT NOT NULL,
+    available_at_utc TEXT NOT NULL,
+    edited_at_utc TEXT,
+    parser_profile TEXT NOT NULL,
+    is_forwarded INTEGER NOT NULL CHECK(is_forwarded IN (0,1)),
+    message_text TEXT NOT NULL,
+    entities_json TEXT NOT NULL,
+    content_digest BLOB NOT NULL CHECK(length(content_digest)=32),
+    expires_at_utc TEXT NOT NULL,
+    PRIMARY KEY(source_id,message_id,event_id)
+);
+CREATE INDEX IF NOT EXISTS idx_capture_market_revision_message
+    ON capture_market_message_revisions(source_id,message_id,edited_at_utc,available_at_utc);
+CREATE INDEX IF NOT EXISTS idx_capture_market_revision_expiry
+    ON capture_market_message_revisions(expires_at_utc);
+
+CREATE TABLE IF NOT EXISTS capture_primary_trade_deadlines (
+    source_id TEXT NOT NULL,
+    message_id INTEGER NOT NULL CHECK(message_id > 0),
+    finalize_after_utc TEXT NOT NULL,
+    finalized_at_utc TEXT,
+    expires_at_utc TEXT NOT NULL,
+    PRIMARY KEY(source_id,message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_capture_primary_trade_due
+    ON capture_primary_trade_deadlines(finalized_at_utc,finalize_after_utc);
 
 CREATE TABLE IF NOT EXISTS capture_dirty_market_messages (
     source_id TEXT NOT NULL,
@@ -210,6 +253,13 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _primary_trade_finalize_after(event_time_utc: str) -> str:
+    moment = datetime.fromisoformat(event_time_utc.replace("Z", "+00:00"))
+    return (
+        moment + timedelta(seconds=PRIVATE_GOLD_OFFER_LIFETIME_SECONDS)
+    ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
 def _stamp(value: object, *, field: str, required: bool = True) -> str | None:
     if value is None:
         if required:
@@ -249,6 +299,41 @@ def _text(value: object, *, required: bool) -> str | None:
     if len(value.encode("utf-8")) > _MAX_TEXT_BYTES:
         raise CaptureEventContractError("capture_message_text_too_large")
     return value
+
+
+def _entities_json(value: object, *, text: str | None) -> str:
+    if value is None:
+        return "[]"
+    if not isinstance(value, list) or len(value) > 512:
+        raise CaptureEventContractError("market_capture_entities_invalid")
+    text_units = len(str(text or "").encode("utf-16-le")) // 2
+    normalized: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise CaptureEventContractError("market_capture_entity_invalid")
+        entity_type = str(item.get("type") or "").strip()
+        try:
+            offset = int(item.get("offset_utf16"))
+            length = int(item.get("length_utf16"))
+        except (TypeError, ValueError) as exc:
+            raise CaptureEventContractError("market_capture_entity_range_invalid") from exc
+        if (
+            not entity_type
+            or len(entity_type) > 96
+            or offset < 0
+            or length <= 0
+            or offset + length > text_units
+        ):
+            raise CaptureEventContractError("market_capture_entity_range_invalid")
+        row: dict[str, object] = {
+            "type": entity_type,
+            "offset_utf16": offset,
+            "length_utf16": length,
+        }
+        if "url_present" in item:
+            row["url_present"] = bool(item.get("url_present"))
+        normalized.append(row)
+    return json.dumps(normalized, sort_keys=True, separators=(",", ":"))
 
 
 def _event_id(value: object) -> str:
@@ -303,6 +388,7 @@ def decode_market_channel_event(record: object) -> CaptureEvent:
         is_forwarded=bool(message.get("is_forwarded", False)),
         is_backfill=bool(producer.get("is_backfill", False)),
         parser_profile=profile,
+        entities_json=_entities_json(message.get("entities"), text=text),
     )
     _validate_time_order(event)
     return event
@@ -440,6 +526,116 @@ def initialize_capture_adapter(connection: sqlite3.Connection) -> None:
         metadata = connection.execute(
             "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
         ).fetchone()
+    if metadata is not None and int(metadata[0]) == 3:
+        connection.executescript(
+            """
+            ALTER TABLE capture_market_messages
+              ADD COLUMN entities_json TEXT NOT NULL DEFAULT '[]';
+            CREATE TABLE capture_market_message_revisions (
+                source_id TEXT NOT NULL,
+                message_id INTEGER NOT NULL CHECK(message_id > 0),
+                event_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                event_time_utc TEXT NOT NULL,
+                available_at_utc TEXT NOT NULL,
+                edited_at_utc TEXT,
+                parser_profile TEXT NOT NULL,
+                is_forwarded INTEGER NOT NULL CHECK(is_forwarded IN (0,1)),
+                message_text TEXT NOT NULL,
+                entities_json TEXT NOT NULL,
+                content_digest BLOB NOT NULL CHECK(length(content_digest)=32),
+                expires_at_utc TEXT NOT NULL,
+                PRIMARY KEY(source_id,message_id,event_id)
+            );
+            CREATE INDEX idx_capture_market_revision_message
+                ON capture_market_message_revisions(
+                  source_id,message_id,edited_at_utc,available_at_utc
+                );
+            CREATE INDEX idx_capture_market_revision_expiry
+                ON capture_market_message_revisions(expires_at_utc);
+            CREATE TABLE capture_primary_trade_deadlines (
+                source_id TEXT NOT NULL,
+                message_id INTEGER NOT NULL CHECK(message_id > 0),
+                finalize_after_utc TEXT NOT NULL,
+                finalized_at_utc TEXT,
+                expires_at_utc TEXT NOT NULL,
+                PRIMARY KEY(source_id,message_id)
+            );
+            CREATE INDEX idx_capture_primary_trade_due
+                ON capture_primary_trade_deadlines(
+                  finalized_at_utc,finalize_after_utc
+                );
+            """
+        )
+        rows = connection.execute(
+            """
+            SELECT source_id,message_id,event_time_utc,available_at_utc,
+                   edited_at_utc,parser_profile,is_forwarded,message_text,
+                   entities_json,content_digest,expires_at_utc
+            FROM capture_market_messages
+            """
+        ).fetchall()
+        for current in rows:
+            seed_id = "capture-v4-seed-" + sha256(
+                b"|".join(
+                    (
+                        str(current["source_id"]).encode(),
+                        str(current["message_id"]).encode(),
+                        bytes(current["content_digest"]),
+                    )
+                )
+            ).hexdigest()
+            connection.execute(
+                """
+                INSERT INTO capture_market_message_revisions(
+                  source_id,message_id,event_id,event_type,event_time_utc,
+                  available_at_utc,edited_at_utc,parser_profile,is_forwarded,
+                  message_text,entities_json,content_digest,expires_at_utc
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    str(current["source_id"]),
+                    int(current["message_id"]),
+                    seed_id,
+                    "message_snapshot",
+                    str(current["event_time_utc"]),
+                    str(current["available_at_utc"]),
+                    (
+                        str(current["edited_at_utc"])
+                        if current["edited_at_utc"] is not None
+                        else None
+                    ),
+                    str(current["parser_profile"]),
+                    int(current["is_forwarded"]),
+                    str(current["message_text"]),
+                    str(current["entities_json"]),
+                    bytes(current["content_digest"]),
+                    str(current["expires_at_utc"]),
+                ),
+            )
+            if str(current["source_id"]) == _PRIMARY_SOURCE_CODE:
+                connection.execute(
+                    """
+                    INSERT INTO capture_primary_trade_deadlines(
+                      source_id,message_id,finalize_after_utc,finalized_at_utc,
+                      expires_at_utc
+                    ) VALUES(?,?,?,?,?)
+                    """,
+                    (
+                        _PRIMARY_SOURCE_CODE,
+                        int(current["message_id"]),
+                        _primary_trade_finalize_after(str(current["event_time_utc"])),
+                        str(current["available_at_utc"]),
+                        str(current["expires_at_utc"]),
+                    ),
+                )
+        connection.execute(
+            "UPDATE capture_adapter_metadata SET schema_version=4 WHERE singleton=1"
+        )
+        connection.commit()
+        metadata = connection.execute(
+            "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
+        ).fetchone()
     if metadata is None or int(metadata[0]) != CAPTURE_ADAPTER_SCHEMA_VERSION:
         raise CaptureEventContractError("capture_adapter_schema_upgrade_required")
 
@@ -458,6 +654,7 @@ def _market_digest(event: CaptureEvent) -> bytes:
         event.edited_at_utc,
         int(event.is_forwarded),
         event.text,
+        event.entities_json,
     ):
         encoded = str(value or "").encode("utf-8")
         digest.update(len(encoded).to_bytes(4, "big"))
@@ -558,6 +755,21 @@ def _apply_tombstone(connection: sqlite3.Connection, event: CaptureEvent) -> boo
             event_time_utc=event_time,
             available_at_utc=event.available_at_utc,
         )
+        if event.source_id == _PRIMARY_SOURCE_CODE:
+            connection.execute(
+                """
+                UPDATE capture_primary_trade_deadlines
+                SET finalized_at_utc=COALESCE(finalized_at_utc,?),
+                    expires_at_utc=?
+                WHERE source_id=? AND message_id=?
+                """,
+                (
+                    event.available_at_utc,
+                    _expiry(event.available_at_utc),
+                    event.source_id,
+                    event.message_id,
+                ),
+            )
     else:
         group = _GROUP_NUMBERS[event.source_id]
         delete_coin_group_staged_message(
@@ -604,13 +816,38 @@ def _apply_market_message(connection: sqlite3.Connection, event: CaptureEvent) -
             return False
         if incoming_revision_time == existing_revision_time and event.available_at_utc <= str(existing["available_at_utc"]):
             return False
+    connection.execute(
+        """
+        INSERT OR IGNORE INTO capture_market_message_revisions(
+          source_id,message_id,event_id,event_type,event_time_utc,
+          available_at_utc,edited_at_utc,parser_profile,is_forwarded,
+          message_text,entities_json,content_digest,expires_at_utc
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            event.source_id,
+            event.message_id,
+            event.event_id,
+            event.event_type,
+            event.event_time_utc,
+            event.available_at_utc,
+            event.edited_at_utc,
+            event.parser_profile,
+            int(event.is_forwarded),
+            event.text,
+            event.entities_json,
+            digest,
+            _expiry(event.available_at_utc),
+        ),
+    )
     revision = int(existing["revision"]) + 1 if existing is not None else 1
     connection.execute(
         """
         INSERT INTO capture_market_messages(
           source_id,message_id,event_time_utc,available_at_utc,edited_at_utc,
-          parser_profile,is_forwarded,message_text,content_digest,revision,expires_at_utc
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+          parser_profile,is_forwarded,message_text,entities_json,content_digest,
+          revision,expires_at_utc
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(source_id,message_id) DO UPDATE SET
           event_time_utc=excluded.event_time_utc,
           available_at_utc=excluded.available_at_utc,
@@ -618,6 +855,7 @@ def _apply_market_message(connection: sqlite3.Connection, event: CaptureEvent) -
           parser_profile=excluded.parser_profile,
           is_forwarded=excluded.is_forwarded,
           message_text=excluded.message_text,
+          entities_json=excluded.entities_json,
           content_digest=excluded.content_digest,
           revision=excluded.revision,
           expires_at_utc=excluded.expires_at_utc
@@ -631,11 +869,41 @@ def _apply_market_message(connection: sqlite3.Connection, event: CaptureEvent) -
             event.parser_profile,
             int(event.is_forwarded),
             event.text,
+            event.entities_json,
             digest,
             revision,
             _expiry(event.available_at_utc),
         ),
     )
+    if event.source_id == _PRIMARY_SOURCE_CODE:
+        finalize_after = _primary_trade_finalize_after(event.event_time_utc)
+        reset_finalization = (
+            event.event_type in {"message_created", "message_snapshot"}
+            or (event.edited_at_utc is not None and event.edited_at_utc <= finalize_after)
+        )
+        connection.execute(
+            """
+            INSERT INTO capture_primary_trade_deadlines(
+              source_id,message_id,finalize_after_utc,finalized_at_utc,
+              expires_at_utc
+            ) VALUES(?,?,?,?,?)
+            ON CONFLICT(source_id,message_id) DO UPDATE SET
+              finalize_after_utc=excluded.finalize_after_utc,
+              finalized_at_utc=CASE
+                WHEN ? THEN NULL
+                ELSE capture_primary_trade_deadlines.finalized_at_utc
+              END,
+              expires_at_utc=excluded.expires_at_utc
+            """,
+            (
+                event.source_id,
+                event.message_id,
+                finalize_after,
+                None,
+                _expiry(event.available_at_utc),
+                int(reset_finalization),
+            ),
+        )
     _mark_dirty_market(
         connection,
         source_id=event.source_id,
@@ -857,9 +1125,11 @@ def _project_primary_row(
     staging: sqlite3.Connection,
     market: sqlite3.Connection,
     row: sqlite3.Row,
-) -> int:
+    *,
+    as_of_utc: str,
+) -> tuple[int, int, set[str], bool, bool]:
     if bool(row["is_forwarded"]):
-        return 0
+        return 0, 0, set(), True, False
     observations = private_gold_observations(
         PrivateGoldOfferInput(
             source_event_id=_primary_source_event_id(int(row["message_id"])),
@@ -873,14 +1143,102 @@ def _project_primary_row(
     offer_rows = tuple(item for item in observations if item.event_type == "OFFER")
     for item in offer_rows:
         upsert_observation(market, item)
+    revision_rows = staging.execute(
+        """
+        SELECT * FROM capture_market_message_revisions
+        WHERE source_id=? AND message_id=? AND available_at_utc<=?
+        ORDER BY COALESCE(edited_at_utc,event_time_utc),available_at_utc,event_id
+        """,
+        (_PRIMARY_SOURCE_CODE, int(row["message_id"]), as_of_utc),
+    ).fetchall()
+    decision = extract_private_gold_trade(
+        (
+            PrivateGoldRevision(
+                event_id=str(item["event_id"]),
+                event_type=str(item["event_type"]),
+                published_at_utc=str(item["event_time_utc"]),
+                available_at_utc=str(item["available_at_utc"]),
+                edited_at_utc=(
+                    str(item["edited_at_utc"])
+                    if item["edited_at_utc"] is not None
+                    else None
+                ),
+                text=str(item["message_text"]),
+            )
+            for item in revision_rows
+        ),
+        as_of_utc=as_of_utc,
+    )
+    trade_rows = ()
+    if (
+        decision.finalized
+        and decision.status in {"FULL", "PARTIAL"}
+        and decision.evidence_event_id is not None
+        and decision.event_time_utc is not None
+        and decision.available_at_utc is not None
+        and decision.traded_quantity is not None
+    ):
+        evidence = next(
+            (
+                item
+                for item in revision_rows
+                if str(item["event_id"]) == decision.evidence_event_id
+            ),
+            None,
+        )
+        if evidence is not None:
+            candidates = private_gold_observations(
+                PrivateGoldOfferInput(
+                    source_event_id=(
+                        _primary_source_event_id(int(row["message_id"]))
+                        + ":trade:"
+                        + decision.evidence_event_id
+                    ),
+                    published_at_utc=decision.published_at_utc,
+                    available_at_utc=decision.available_at_utc,
+                    edited_at_utc=decision.event_time_utc,
+                    trade_status=decision.status,
+                    traded_quantity=decision.traded_quantity,
+                    text=str(evidence["message_text"]),
+                )
+            )
+            trade_rows = tuple(
+                replace(
+                    item,
+                    parser_version=PRIVATE_GOLD_TRADE_REVISION_VERSION,
+                    quality_policy_version="private-gold-trade-revision-v1",
+                    attributes={
+                        **item.attributes,
+                        "trade_evidence": decision.reason,
+                        "trade_extractor_version": PRIVATE_GOLD_TRADE_REVISION_VERSION,
+                        "remaining_quantity": decision.remaining_quantity,
+                        "offer_quantity": decision.offer_quantity,
+                    },
+                )
+                for item in candidates
+                if item.event_type == "TRADE"
+            )
+            for item in trade_rows:
+                upsert_observation(market, item)
+    projected_rows = (*offer_rows, *trade_rows)
     _remember_projection(
         staging,
         source_id=_PRIMARY_SOURCE_CODE,
         message_id=int(row["message_id"]),
-        event_keys=tuple(item.event_key for item in offer_rows),
+        event_keys=tuple(item.event_key for item in projected_rows),
         bucket_utc=str(row["event_time_utc"])[:16],
     )
-    return len(offer_rows)
+    affected_minutes = {
+        normalize_utc(item.event_time_utc, field_name="capture_primary_projection_time")[:16]
+        for item in projected_rows
+    }
+    return (
+        len(projected_rows),
+        len(trade_rows),
+        affected_minutes,
+        decision.finalized,
+        decision.status == "AMBIGUOUS",
+    )
 
 
 def _refresh_private_minutes(
@@ -1056,11 +1414,38 @@ def project_capture_changes(
 
     as_of = normalize_utc(as_of_utc, field_name="capture_projection_as_of_utc")
     initialize_market_store(market)
+    due_primary = staging.execute(
+        """
+        SELECT deadline.source_id,deadline.message_id,
+               deadline.finalize_after_utc,current.event_time_utc
+        FROM capture_primary_trade_deadlines AS deadline
+        LEFT JOIN capture_market_messages AS current
+          ON current.source_id=deadline.source_id
+         AND current.message_id=deadline.message_id
+        WHERE deadline.finalized_at_utc IS NULL
+          AND deadline.finalize_after_utc<=?
+        ORDER BY deadline.finalize_after_utc,deadline.message_id
+        """,
+        (as_of,),
+    ).fetchall()
+    for deadline in due_primary:
+        _mark_dirty_market(
+            staging,
+            source_id=str(deadline["source_id"]),
+            message_id=int(deadline["message_id"]),
+            event_time_utc=(
+                str(deadline["event_time_utc"])
+                if deadline["event_time_utc"] is not None
+                else None
+            ),
+            available_at_utc=as_of,
+        )
     dirty = staging.execute(
         "SELECT * FROM capture_dirty_market_messages WHERE available_at_utc<=? ORDER BY available_at_utc,source_id,message_id",
         (as_of,),
     ).fetchall()
     projected = upserted = retracted = 0
+    private_trades = private_finalized = private_ambiguous = 0
     xau_dirty = [row for row in dirty if str(row["source_id"]) == "XAUUSD"]
     if xau_dirty:
         counts = _project_xau_buckets(staging, market, xau_dirty)
@@ -1088,13 +1473,41 @@ def project_capture_changes(
             primary_changed = primary_changed or source_id == _PRIMARY_SOURCE_CODE
             if source_id == _PRIMARY_SOURCE_CODE and item["event_time_utc"]:
                 primary_minutes.add(str(item["event_time_utc"])[:16])
+            if source_id == _PRIMARY_SOURCE_CODE:
+                staging.execute(
+                    """
+                    UPDATE capture_primary_trade_deadlines
+                    SET finalized_at_utc=COALESCE(finalized_at_utc,?)
+                    WHERE source_id=? AND message_id=?
+                    """,
+                    (as_of, source_id, int(item["message_id"])),
+                )
             continue
         projected += 1
         if source_id == _PRIMARY_SOURCE_CODE:
             primary_changed = True
             if item["event_time_utc"]:
                 primary_minutes.add(str(item["event_time_utc"])[:16])
-            upserted += _project_primary_row(staging, market, row)
+            counts = _project_primary_row(
+                staging,
+                market,
+                row,
+                as_of_utc=as_of,
+            )
+            upserted += counts[0]
+            private_trades += counts[1]
+            primary_minutes.update(counts[2])
+            private_finalized += int(counts[3])
+            private_ambiguous += int(counts[4])
+            if counts[3]:
+                staging.execute(
+                    """
+                    UPDATE capture_primary_trade_deadlines
+                    SET finalized_at_utc=?
+                    WHERE source_id=? AND message_id=?
+                    """,
+                    (as_of, source_id, int(item["message_id"])),
+                )
         else:
             upserted += _project_public_row(staging, market, row)
     if dirty:
@@ -1146,6 +1559,9 @@ def project_capture_changes(
         market_facts_upserted=upserted,
         market_facts_retracted=retracted + (group_report.retracted_facts if group_report else 0),
         private_paper_minutes_refreshed=refreshed,
+        private_trade_facts_upserted=private_trades,
+        private_trade_messages_finalized=private_finalized,
+        private_trade_messages_ambiguous=private_ambiguous,
         group_pipeline=group_report,
         raw_rows_purged=raw_purged,
     )
@@ -1165,6 +1581,8 @@ def purge_capture_staging(connection: sqlite3.Connection, *, as_of_utc: datetime
             [(str(row["source_id"]), int(row["message_id"])) for row in expired],
         )
     for table in (
+        "capture_market_message_revisions",
+        "capture_primary_trade_deadlines",
         "capture_market_messages",
         "capture_seen_events",
         "capture_tombstones",
