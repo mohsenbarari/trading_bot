@@ -42,6 +42,8 @@ services:
     command: [service, --role, market-store-adapter]
     environment:
       MARKET_PIPELINE_MARKET_STORE_PATH: /var/lib/market-data/market-store/market-store.sqlite
+      MARKET_PIPELINE_RECEIVER_DB_PATH: /var/lib/market-data/receiver/market-fact-receiver/market-fact-receiver.sqlite3
+      MARKET_PIPELINE_FEED_MODE: ${MARKET_PIPELINE_FEED_MODE:-LEGACY}
     volumes:
       - type: bind
         source: ${MARKET_BOT_DATA_ROOT:?MARKET_BOT_DATA_ROOT is required}/state/market-store-adapter
@@ -49,6 +51,10 @@ services:
       - type: bind
         source: ${MARKET_BOT_DATA_ROOT:?MARKET_BOT_DATA_ROOT is required}/market-store
         target: /var/lib/market-data/market-store
+      - type: bind
+        source: ${MARKET_BOT_DATA_ROOT:?MARKET_BOT_DATA_ROOT is required}/state/market-fact-receiver
+        target: /var/lib/market-data/receiver
+        read_only: true
     depends_on:
       market-fact-receiver:
         condition: service_healthy
@@ -67,6 +73,9 @@ services:
       service: market-runtime-base
     profiles: [bot]
     command: [service, --role, coin-estimator]
+    environment:
+      MARKET_PIPELINE_FEED_MODE: ${MARKET_PIPELINE_FEED_MODE:-LEGACY}
+      MARKET_PIPELINE_PRIVATE_MARKET_STORE_PATH: /var/lib/market-data/market-store/market-store.sqlite
     volumes:
       - type: bind
         source: ${MARKET_BOT_DATA_ROOT:?MARKET_BOT_DATA_ROOT is required}/state/coin-estimator

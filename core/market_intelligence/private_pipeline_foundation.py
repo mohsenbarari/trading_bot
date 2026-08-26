@@ -72,6 +72,7 @@ LIVE_ROLES = CAPTURE_ROLES | EXTERNAL_CAPTURE_ROLES | {
     "market-processor",
     "market-fact-sync-worker",
     "market-fact-receiver",
+    "market-store-adapter",
 }
 RECEIVER_ROLES = frozenset(
     {"market-fact-receiver", "estimator-snapshot-receiver"}
@@ -524,6 +525,22 @@ def run_service(role: str) -> int:
                     )
                 except MarketFactReceiverServiceError as exc:
                     raise FoundationError(str(exc)) from exc
+            if role == "market-store-adapter" and mode == "live":
+                from .market_fact_adapter import (
+                    MarketFactAdapterError,
+                    run_market_fact_adapter_service,
+                )
+
+                try:
+                    return run_market_fact_adapter_service(
+                        role=role,
+                        mode=mode,
+                        release_sha=release_sha,
+                        state_directory=role_state(role),
+                        stop=stop,
+                    )
+                except MarketFactAdapterError as exc:
+                    raise FoundationError(str(exc)) from exc
             initialize_market_store_fixture(role, release_sha)
             heartbeat = Heartbeat(role, mode, release_sha)
             heartbeat.write(status="fixture-starting")
@@ -639,6 +656,17 @@ def run_healthcheck(role: str, max_age_seconds: float) -> int:
                 or not isinstance(document.get("streams"), dict)
             ):
                 raise FoundationError("market_fact_receiver_heartbeat_invalid")
+        elif role == "market-store-adapter" and document.get("mode") == "live":
+            if (
+                document.get("schema") != "market_fact_adapter/1.0"
+                or document.get("status") != "live-ready"
+                or document.get("feed_mode")
+                not in {"LEGACY", "PRIVATE_SHADOW", "PRIVATE_PRIMARY"}
+                or not isinstance(document.get("streams"), dict)
+                or document.get("consuming_private_facts")
+                is not (document.get("feed_mode") != "LEGACY")
+            ):
+                raise FoundationError("market_fact_adapter_heartbeat_invalid")
         elif document.get("status") != "fixture-ready":
             raise FoundationError("heartbeat_not_ready")
         if not 0 <= age <= max_age_seconds:
