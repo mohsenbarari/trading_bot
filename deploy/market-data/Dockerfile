@@ -15,6 +15,7 @@ COPY deploy/market-data/requirements.lock ./requirements.lock
 RUN python -m pip install \
         --no-compile \
         --only-binary=:all: \
+        --no-binary=pyaes \
         --require-hashes \
         --target=/rootfs/opt/market-python \
         --requirement requirements.lock
@@ -31,7 +32,7 @@ RUN mkdir -p /rootfs/var/lib/market-data/state \
 FROM ${PYTHON_BASE_IMAGE} AS runtime
 
 ARG SOURCE_SHA
-ARG IMAGE_VERSION=stage3-foundation
+ARG IMAGE_VERSION=stage4-capture
 
 LABEL org.opencontainers.image.title="Trading Bot Private Market Pipeline" \
       org.opencontainers.image.description="Docker-native private market data pipeline" \

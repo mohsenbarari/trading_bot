@@ -68,6 +68,8 @@ services:
     command: [service, --role, market-capture-account1]
     environment:
       MARKET_PIPELINE_SESSION_ROOT: /var/lib/market-data/session
+      MARKET_PIPELINE_CAPTURE_ROOT: /var/lib/market-data/capture
+      MARKET_CAPTURE_CONFIG_FILE: /run/secrets/market_capture_account1_config
     secrets:
       - market_capture_account1_config
     volumes:
@@ -101,8 +103,12 @@ services:
     command: [service, --role, market-capture-account2]
     environment:
       MARKET_PIPELINE_SESSION_ROOT: /var/lib/market-data/session
+      MARKET_PIPELINE_CAPTURE_ROOT: /var/lib/market-data/capture
+      MARKET_CAPTURE_CONFIG_FILE: /run/secrets/market_capture_account2_config
+      MARKET_CAPTURE_HMAC_KEY_FILE: /run/secrets/market_capture_account2_hmac
     secrets:
       - market_capture_account2_config
+      - market_capture_account2_hmac
     volumes:
       - type: bind
         source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/state/market-capture-account2
@@ -233,6 +239,8 @@ secrets:
     file: ${MARKET_CAPTURE_ACCOUNT1_CONFIG_FILE:?MARKET_CAPTURE_ACCOUNT1_CONFIG_FILE is required}
   market_capture_account2_config:
     file: ${MARKET_CAPTURE_ACCOUNT2_CONFIG_FILE:?MARKET_CAPTURE_ACCOUNT2_CONFIG_FILE is required}
+  market_capture_account2_hmac:
+    file: ${MARKET_CAPTURE_ACCOUNT2_HMAC_FILE:?MARKET_CAPTURE_ACCOUNT2_HMAC_FILE is required}
   market_transport_ca:
     file: ${MARKET_TRANSPORT_CA_FILE:?MARKET_TRANSPORT_CA_FILE is required}
   market_web_transport_cert:

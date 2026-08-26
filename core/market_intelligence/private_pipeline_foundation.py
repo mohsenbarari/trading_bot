@@ -1,10 +1,10 @@
-"""Fail-closed Docker foundation for the private market-data pipeline.
+"""Fail-closed Docker entrypoint for the private market-data pipeline.
 
-Stage 3 deliberately implements only synthetic fixture services, health checks,
-an idempotent migration runner, and durable-volume probes.  ``live`` mode is
-rejected until the role-specific implementations pass their later roadmap
-gates.  This prevents the foundation stack from becoming a Telegram owner or
-market authority by accident.
+Stage 4 promotes only the two capture roles from synthetic fixture behavior to
+an authority-gated live implementation.  Every other role remains fixture-only
+until its own roadmap gate passes.  A live capture still requires a
+release-bound marker on the Telegram session mount, so deploying the image
+alone cannot create a second owner.
 """
 
 from __future__ import annotations
@@ -162,8 +162,10 @@ def validate_role(role: str) -> None:
 def validate_fixture_environment(role: str) -> tuple[str, str]:
     validate_role(role)
     mode = os.environ.get("MARKET_PIPELINE_MODE", "disabled").strip().lower()
-    if mode != "fixture":
-        raise FoundationError("runtime_mode_not_available_at_stage3")
+    if mode not in {"fixture", "live"}:
+        raise FoundationError("runtime_mode_not_available_at_stage4")
+    if mode == "live" and role not in CAPTURE_ROLES:
+        raise FoundationError("role_live_mode_not_available_at_stage4")
     release_sha = os.environ.get("MARKET_PIPELINE_RELEASE_SHA", "").strip().lower()
     image_revision = os.environ.get("MARKET_PIPELINE_IMAGE_REVISION", "").strip().lower()
     if not RELEASE_SHA.fullmatch(release_sha):
@@ -519,6 +521,20 @@ def run_service(role: str) -> int:
         for path in owner_lock_paths(role):
             locks.enter_context(exclusive_lock(path))
         try:
+            if role in CAPTURE_ROLES:
+                from .private_capture import CaptureRuntimeError
+                from .private_capture_service import run_capture_service
+
+                try:
+                    return run_capture_service(
+                        role=role,
+                        mode=mode,
+                        release_sha=release_sha,
+                        state_directory=role_state(role),
+                        stop=stop,
+                    )
+                except CaptureRuntimeError as exc:
+                    raise FoundationError(str(exc)) from exc
             initialize_market_store_fixture(role, release_sha)
             heartbeat = Heartbeat(role, mode, release_sha)
             heartbeat.write(status="fixture-starting")
@@ -540,7 +556,29 @@ def run_healthcheck(role: str, max_age_seconds: float) -> int:
         document = json.loads(path.read_text(encoding="utf-8"))
         updated = datetime.fromisoformat(document["updated_at_utc"].replace("Z", "+00:00"))
         age = (utc_now() - updated.astimezone(timezone.utc)).total_seconds()
-        if document.get("role") != role or document.get("status") != "fixture-ready":
+        if document.get("role") != role:
+            raise FoundationError("heartbeat_not_ready")
+        if role in CAPTURE_ROLES:
+            if document.get("schema") != "market_capture_engine/1.0":
+                raise FoundationError("capture_heartbeat_schema_invalid")
+            mode = document.get("mode")
+            if document.get("status") != f"{mode}-ready" or mode not in {
+                "fixture",
+                "live",
+            }:
+                raise FoundationError("capture_heartbeat_not_ready")
+            if set((document.get("sources") or {})) != {
+                "market-capture-account1": {
+                    "MELTED_PRIMARY_FLOW",
+                    "MELTED_AGGREGATE",
+                    "MELTED_FLOW",
+                    "USD_HERAT",
+                    "XAUUSD",
+                },
+                "market-capture-account2": {"GROUP_1", "GROUP_2"},
+            }[role]:
+                raise FoundationError("capture_heartbeat_source_inventory_invalid")
+        elif document.get("status") != "fixture-ready":
             raise FoundationError("heartbeat_not_ready")
         if not 0 <= age <= max_age_seconds:
             raise FoundationError("heartbeat_stale")
@@ -625,7 +663,9 @@ def run_migration(migration_path: Path) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    service = commands.add_parser("service", help="run one Stage 3 fixture role")
+    service = commands.add_parser(
+        "service", help="run one market role; Stage 4 live is capture-only"
+    )
     service.add_argument("--role", choices=sorted(ROLES), required=True)
     health = commands.add_parser("healthcheck", help="validate durable role health")
     health.add_argument("--role", choices=sorted(ROLES), required=True)

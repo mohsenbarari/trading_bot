@@ -21,7 +21,7 @@ def fixture(name):
 
 
 class MarketPipelineStage3FoundationTests(unittest.TestCase):
-    def test_live_mode_is_fail_closed_and_fixture_binds_revision(self):
+    def test_live_mode_is_capture_only_and_fixture_binds_revision(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             sessions = root / "session"
@@ -36,12 +36,14 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
             with patch.dict(os.environ, environment, clear=False), patch(
                 "os.geteuid", return_value=10001
             ):
+                mode, revision = foundation.validate_fixture_environment(
+                    "market-capture-account1"
+                )
+                self.assertEqual((mode, revision), ("live", "a" * 40))
                 with self.assertRaisesRegex(
-                    foundation.FoundationError, "not_available_at_stage3"
+                    foundation.FoundationError, "not_available_at_stage4"
                 ):
-                    foundation.validate_fixture_environment(
-                        "market-capture-account1"
-                    )
+                    foundation.validate_fixture_environment("market-processor")
                 os.environ["MARKET_PIPELINE_MODE"] = "fixture"
                 mode, revision = foundation.validate_fixture_environment(
                     "market-capture-account1"

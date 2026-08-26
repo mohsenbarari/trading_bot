@@ -131,6 +131,7 @@ def fixture_environment(
         "MARKET_POSTGRES_PASSWORD_FILE": secrets_root / "postgres-password",
         "MARKET_CAPTURE_ACCOUNT1_CONFIG_FILE": secrets_root / "account1-config",
         "MARKET_CAPTURE_ACCOUNT2_CONFIG_FILE": secrets_root / "account2-config",
+        "MARKET_CAPTURE_ACCOUNT2_HMAC_FILE": secrets_root / "account2-hmac",
         "MARKET_TRANSPORT_CA_FILE": secrets_root / "transport-ca",
         "MARKET_WEB_TRANSPORT_CERT_FILE": secrets_root / "web-cert",
         "MARKET_WEB_TRANSPORT_KEY_FILE": secrets_root / "web-key",
@@ -161,6 +162,7 @@ def prepare_fixture_root(root: Path) -> None:
     write_secret(secrets_root / "postgres-password", secrets.token_hex(24))
     write_secret(secrets_root / "account1-config", "{}")
     write_secret(secrets_root / "account2-config", "{}")
+    write_secret(secrets_root / "account2-hmac", secrets.token_hex(32))
     for name in (
         "transport-ca",
         "web-cert",
