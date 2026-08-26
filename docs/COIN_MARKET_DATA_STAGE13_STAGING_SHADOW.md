@@ -132,8 +132,10 @@ capture نیز با manifest و reconciliation مستقل سنجیده می‌ش
    tail به اجرای بعد موکول می‌شود؛
 3. هر رکورد کامل خراب، contract نامعتبر، truncation، قفل اشغال، خطای backup/ingest/snapshot
    یا پاک‌نشدن scratch را fail-closed می‌کند و artifact ناقص باقی نمی‌گذارد؛
-4. دو کپی یکسان seed و capture freeze را با Python code rootهای baseline و candidate
-   version-pinned و در laneهای کاملاً جدا replay می‌کند؛ هیچ network call، session تلگرام،
+4. پس از اعتبارسنجی تمام رکوردهای کامل prefix، فقط رکوردهایی را که receipt time آن‌ها دقیقاً
+   داخل window است در spool مشتق‌شده و موقت می‌گذارد؛ همان subset و یک `now/as_of` ثابت
+   برابر `window_end` با دو کپی یکسان seed و Python code rootهای baseline/candidate
+   version-pinned در laneهای کاملاً جدا replay می‌شود؛ هیچ network call، session تلگرام،
    product feed یا runtime state مشترک ساخته نمی‌شود؛
 5. final Market Storeهای دو lane را روی event keyهای HMACشده از نظر missing/added، unit،
    lifecycle و semantics parser مقایسه و snapshot/rate را در یک timestamp هم‌تراز می‌سازد؛
@@ -148,10 +150,11 @@ capture نیز با manifest و reconciliation مستقل سنجیده می‌ش
 SSD ندارد؛ به همین دلیل scratch باید فقط روی storage کنترل‌شده میزبان قرار گیرد و هیچ backup
 یا sync خودکاری آن را پوشش ندهد.
 
-پنجره اجرای این rehearsal حداکثر ۲۵ دقیقه اخیر است تا مرز backlog سی‌دقیقه‌ای ingester
-بین دو process جابه‌جا نشود. همه factهای نهایی دو clone مقایسه می‌شوند، نه فقط factهایی که
-`available_at` آن‌ها داخل پنجره است؛ بنابراین edit/delete یک پیام قدیمی نیز از مقایسه حذف
-نمی‌شود. زمان snapshot پس از پایان هر دو replay یکسان تثبیت می‌شود.
+پنجره اجرای این rehearsal حداکثر ۲۵ دقیقه اخیر است و زمان منطقی ingester در هر دو process
+ثابت است؛ بنابراین مرز backlog سی‌دقیقه‌ای با طول اجرای lane جابه‌جا نمی‌شود. همه factهای
+نهایی دو clone مقایسه می‌شوند، نه فقط factهایی که `available_at` آن‌ها داخل پنجره است؛ در
+نتیجه edit/delete یک پیام قدیمی نیز از مقایسه حذف نمی‌شود. زمان snapshot نیز دقیقاً همان
+`window_end` مشترک است.
 
 نمونه اجرا، بدون درج مقدار secret:
 

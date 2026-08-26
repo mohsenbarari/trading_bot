@@ -261,12 +261,19 @@ def build_capture_manifest(
     identity_key: bytes,
     window_start: datetime,
     window_end: datetime,
-) -> tuple[dict[str, Any], str]:
+    replay_root: Path,
+) -> tuple[dict[str, Any], str, dict[str, Path]]:
     items: list[dict[str, Any]] = []
     duplicate_refs: Counter[str] = Counter()
     partial_tail_count = 0
     total_complete = 0
     frozen_digest = hmac.new(identity_key, b"frozen-spools-v1\0", sha256)
+    replay_directories: dict[str, Path] = {}
+    for stream in ("market", "coin"):
+        directory = replay_root / stream
+        directory.mkdir(parents=True, mode=0o700)
+        os.chmod(directory, 0o700)
+        replay_directories[stream] = directory
     for stream, path, _device, _inode, expected_size in frozen_records:
         frozen_digest.update(stream.encode("ascii") + b"\0")
         frozen_digest.update(path.name.encode("ascii") + b"\0")
@@ -275,46 +282,52 @@ def build_capture_manifest(
             raise SingleOwnerParityError("frozen_spool_size_changed")
         frozen_digest.update(len(data).to_bytes(8, "big"))
         frozen_digest.update(data)
-        lines = data.splitlines(keepends=True)
-        for index, raw in enumerate(lines):
-            if not raw.endswith(b"\n"):
-                if index != len(lines) - 1:
-                    raise SingleOwnerParityError("capture_spool_incomplete_middle_record")
-                partial_tail_count += 1
-                continue
-            if len(raw) > MAX_RECORD_BYTES:
-                raise SingleOwnerParityError("capture_spool_complete_record_too_large")
-            total_complete += 1
-            try:
-                decoded = json.loads(raw.decode("utf-8"))
-                event = decode_capture_event(decoded, stream=stream)
-            except (UnicodeDecodeError, json.JSONDecodeError, CaptureEventContractError) as exc:
-                raise SingleOwnerParityError("capture_spool_complete_record_invalid") from exc
-            available = _utc(event.available_at_utc, field="capture_available_at")
-            occurred_value = (
-                event.edited_at_utc
-                if event.event_type == "message_edited" and event.edited_at_utc
-                else event.event_time_utc
-            ) or event.available_at_utc
-            occurred = _utc(occurred_value, field="capture_occurred_at")
-            if not (window_start <= available <= window_end):
-                continue
-            event_ref = _hmac_ref(
-                identity_key,
-                b"capture-event-v1",
-                f"{stream}:{event.event_id}".encode("utf-8"),
-            )
-            duplicate_refs[event_ref] += 1
-            items.append(
-                {
-                    "event_ref": event_ref,
-                    "stream": stream,
-                    "source_code": event.source_id,
-                    "event_type": event.event_type,
-                    "occurred_at_utc": _stamp(occurred),
-                    "available_at_utc": _stamp(available),
-                }
-            )
+        replay_path = replay_directories[stream] / path.name
+        with replay_path.open("xb") as replay_handle:
+            lines = data.splitlines(keepends=True)
+            for index, raw in enumerate(lines):
+                if not raw.endswith(b"\n"):
+                    if index != len(lines) - 1:
+                        raise SingleOwnerParityError("capture_spool_incomplete_middle_record")
+                    partial_tail_count += 1
+                    continue
+                if len(raw) > MAX_RECORD_BYTES:
+                    raise SingleOwnerParityError("capture_spool_complete_record_too_large")
+                total_complete += 1
+                try:
+                    decoded = json.loads(raw.decode("utf-8"))
+                    event = decode_capture_event(decoded, stream=stream)
+                except (UnicodeDecodeError, json.JSONDecodeError, CaptureEventContractError) as exc:
+                    raise SingleOwnerParityError("capture_spool_complete_record_invalid") from exc
+                available = _utc(event.available_at_utc, field="capture_available_at")
+                occurred_value = (
+                    event.edited_at_utc
+                    if event.event_type == "message_edited" and event.edited_at_utc
+                    else event.event_time_utc
+                ) or event.available_at_utc
+                occurred = _utc(occurred_value, field="capture_occurred_at")
+                if not (window_start <= available <= window_end):
+                    continue
+                replay_handle.write(raw)
+                event_ref = _hmac_ref(
+                    identity_key,
+                    b"capture-event-v1",
+                    f"{stream}:{event.event_id}".encode("utf-8"),
+                )
+                duplicate_refs[event_ref] += 1
+                items.append(
+                    {
+                        "event_ref": event_ref,
+                        "stream": stream,
+                        "source_code": event.source_id,
+                        "event_type": event.event_type,
+                        "occurred_at_utc": _stamp(occurred),
+                        "available_at_utc": _stamp(available),
+                    }
+                )
+            replay_handle.flush()
+            os.fsync(replay_handle.fileno())
+        replay_path.chmod(0o400)
     items.sort(
         key=lambda item: (
             item["available_at_utc"],
@@ -329,11 +342,18 @@ def build_capture_manifest(
         "frozen_file_count": len(frozen_records),
         "complete_record_count": total_complete,
         "window_record_count": len(items),
+        "replay_record_count": len(items),
         "duplicate_event_count": sum(max(0, count - 1) for count in duplicate_refs.values()),
         "partial_tail_count": partial_tail_count,
         "events": items,
     }
-    return manifest, frozen_digest.hexdigest()
+    for directory in replay_directories.values():
+        descriptor = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    return manifest, frozen_digest.hexdigest(), replay_directories
 
 
 def code_identity(code_root: Path) -> dict[str, Any]:
@@ -378,6 +398,34 @@ def _minimal_environment() -> dict[str, str]:
     }
 
 
+_FROZEN_INGEST_PROGRAM = r"""
+import importlib.util
+from datetime import datetime as RealDateTime
+import sys
+
+code_root, script_path, frozen_now, *arguments = sys.argv[1:]
+sys.path.insert(0, code_root)
+spec = importlib.util.spec_from_file_location("single_owner_lane_ingest", script_path)
+if spec is None or spec.loader is None:
+    raise SystemExit(91)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+fixed = RealDateTime.fromisoformat(frozen_now.replace("Z", "+00:00"))
+
+
+class FrozenDateTime(RealDateTime):
+    @classmethod
+    def now(cls, tz=None):
+        if tz is None:
+            return fixed.replace(tzinfo=None)
+        return fixed.astimezone(tz)
+
+
+module.datetime = FrozenDateTime
+raise SystemExit(module.main(arguments))
+"""
+
+
 def run_lane_ingest(
     *,
     code_root: Path,
@@ -387,11 +435,10 @@ def run_lane_ingest(
     coin_spool_dir: Path,
     maximum_records: int,
     timeout_seconds: int,
+    replay_as_of_utc: str,
 ) -> dict[str, int]:
     script = code_root / "scripts" / "ingest_capture_event_spools.py"
-    command = [
-        str(python_executable),
-        str(script),
+    ingest_arguments = [
         "--runtime-root",
         str(runtime_root),
         "--market-spool-dir",
@@ -400,6 +447,15 @@ def run_lane_ingest(
         str(coin_spool_dir),
         "--maximum-records",
         str(maximum_records),
+    ]
+    command = [
+        str(python_executable),
+        "-c",
+        _FROZEN_INGEST_PROGRAM,
+        str(code_root),
+        str(script),
+        replay_as_of_utc,
+        *ingest_arguments,
     ]
     try:
         completed = subprocess.run(
@@ -791,16 +847,17 @@ def run_single_owner_parity(
             seed = temporary_path / "seed"
             sqlite_online_backup(baseline_market, seed / "market.sqlite3")
             sqlite_online_backup(baseline_staging, seed / "capture.sqlite3")
-        frozen, frozen_records = freeze_spools(
+        _frozen, frozen_records = freeze_spools(
             market_spool_dir=market_spool_dir,
             coin_spool_dir=coin_spool_dir,
             destination_root=temporary_path,
         )
-        manifest, frozen_input_hmac = build_capture_manifest(
+        manifest, frozen_input_hmac, replay_spools = build_capture_manifest(
             frozen_records,
             identity_key=identity_key,
             window_start=start,
             window_end=end,
+            replay_root=temporary_path / "replay",
         )
         lanes: dict[str, dict[str, Any]] = {}
         lane_runtimes: dict[str, Path] = {}
@@ -815,10 +872,11 @@ def run_single_owner_parity(
                 code_root=code_root,
                 python_executable=python_path,
                 runtime_root=runtime,
-                market_spool_dir=frozen["market"],
-                coin_spool_dir=frozen["coin"],
+                market_spool_dir=replay_spools["market"],
+                coin_spool_dir=replay_spools["coin"],
                 maximum_records=maximum_records,
                 timeout_seconds=subprocess_timeout_seconds,
+                replay_as_of_utc=_stamp(end),
             )
             activity_count, versions = _lane_fact_activity(
                 runtime / "market" / "market.sqlite3",
@@ -836,7 +894,7 @@ def run_single_owner_parity(
             lane_runtimes["candidate"] / "market" / "market.sqlite3",
             identity_key=identity_key,
         )
-        snapshot_evaluation_at = _stamp(datetime.now(timezone.utc))
+        snapshot_evaluation_at = _stamp(end)
         for lane_name in ("baseline", "candidate"):
             lane_snapshots[lane_name] = build_lane_snapshot(
                 code_root=lane_code_roots[lane_name],
@@ -866,6 +924,7 @@ def run_single_owner_parity(
             "snapshot_evaluation_at_utc": snapshot_evaluation_at,
             "capture_manifest_hash": content_hash(manifest),
             "capture_window_record_count": manifest["window_record_count"],
+            "replay_record_count": manifest["replay_record_count"],
             "capture_complete_record_count": manifest["complete_record_count"],
             "capture_duplicate_event_count": manifest["duplicate_event_count"],
             "capture_partial_tail_count": manifest["partial_tail_count"],

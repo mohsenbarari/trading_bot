@@ -986,8 +986,9 @@ Gate:
   ناهم‌ارز است؛ بنابراین parity زنده بعدی باید eventهای یک capture owner را پس از capture به
   دو projection ایزوله fan-out کند و هرگز session تلگرام دوم نسازد.
 - هارنس تک‌مالک version-pinned برای همین fan-out ساخته شد: یک prefix ثابت از spool زنده و
-  یک SQLite seed سازگار به دو lane مستقل replay می‌شود؛ final facts، snapshot و rate بدون
-  ماندگاری raw/identity/price اختلاف مقایسه و report امضاشده تولید می‌شود. append-race،
+  یک SQLite seed سازگار به دو lane مستقل replay می‌شود؛ بعد از اعتبارسنجی کامل prefix فقط
+  eventهای window با `now/as_of` ثابت مشترک وارد هر دو lane می‌شوند. final facts، snapshot
+  و rate بدون ماندگاری raw/identity/price اختلاف مقایسه و report امضاشده تولید می‌شود. append-race،
   corrupt complete record، writer-lock، tamper، redaction و cleanup در تست پوشش داده شدند.
   این rehearsal همیشه `HOLD_STAGE12_LIVE_PARITY_REQUIRED` است و اجرای staging آن هیچ feed،
   owner یا cutover را تغییر نمی‌دهد.

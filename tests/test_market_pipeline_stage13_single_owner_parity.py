@@ -128,8 +128,14 @@ class SingleOwnerParityTests(unittest.TestCase):
         self.now = datetime.now(timezone.utc).replace(microsecond=0)
         self.when = self.now - timedelta(minutes=1)
         day = self.when.date().isoformat()
+        old_market = market_event(self.now - timedelta(minutes=10))
+        old_market["event_id"] = "70000000-0000-7000-8000-000000000002"
+        old_market["message"]["message_id"] = "987654320"
         (self.market_spool / f"events-{day}.jsonl").write_text(
-            json.dumps(market_event(self.when), ensure_ascii=False) + "\n",
+            json.dumps(old_market, ensure_ascii=False)
+            + "\n"
+            + json.dumps(market_event(self.when), ensure_ascii=False)
+            + "\n",
             encoding="utf-8",
         )
         (self.coin_spool / f"events-{day}.jsonl").write_text(
@@ -180,6 +186,12 @@ class SingleOwnerParityTests(unittest.TestCase):
             self.assertEqual((path.stat().st_mode & 0o777), 0o600)
         report = json.loads((artifact / "report.json").read_text(encoding="utf-8"))
         self.assertTrue(verify_parity_report(report, key=SIGNING_KEY))
+        self.assertEqual(report["capture_complete_record_count"], 3)
+        self.assertEqual(report["capture_window_record_count"], 2)
+        self.assertEqual(report["replay_record_count"], 2)
+        for lane in report["lanes"].values():
+            self.assertEqual(lane["ingest_counters"]["records"], 2)
+            self.assertEqual(lane["ingest_counters"]["stale_market_skipped"], 0)
         tampered = deepcopy(report)
         tampered["capture_window_record_count"] += 1
         self.assertFalse(verify_parity_report(tampered, key=SIGNING_KEY))
