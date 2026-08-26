@@ -140,12 +140,13 @@ def prepare_fixture(root: Path) -> tuple[Path, Path, Path, str]:
             reply_to=2,
         ),
         # Instrument is deliberately omitted.  Two causal model anchors below
-        # make QUARTER_BAHAR the only valid same-book resolution.
+        # make ONE_GRAM the only valid same-book resolution; unlike the two
+        # quarter-coin families, this fixture band does not overlap a sibling.
         event(
             4,
             group=2,
             message_id=1,
-            text="3 تا نقدی ف 51900",
+            text="3 تا نقدی ف 27700",
             sender="c" * 16,
             when=at + timedelta(seconds=6),
         ),
@@ -198,18 +199,18 @@ def prepare_fixture(root: Path) -> tuple[Path, Path, Path, str]:
                     stamp(at - timedelta(minutes=10)),
                     stamp(at - timedelta(minutes=10) + timedelta(seconds=1)),
                     "MAIN_ONLINE",
-                    "ربع بهار",
+                    "یک گرمی",
                     "CASH",
-                    51_800_000,
+                    27_600_000,
                 ),
                 (
                     2,
                     stamp(at - timedelta(minutes=5)),
                     stamp(at - timedelta(minutes=5) + timedelta(seconds=1)),
                     "MAIN_ONLINE",
-                    "ربع بهار",
+                    "یک گرمی",
                     "CASH",
-                    51_900_000,
+                    27_700_000,
                 ),
             ],
         )
@@ -303,7 +304,7 @@ def inspect_result(root: Path) -> dict[str, Any]:
         raise Stage5RehearsalError("market_projection_gate_failed")
     if not any(
         row["source_code"] == "GROUP_2"
-        and row["instrument"] == "COIN_QUARTER_BAHAR"
+        and row["instrument"] == "COIN_ONE_GRAM"
         for row in eligible
     ):
         raise Stage5RehearsalError("temporal_instrument_resolution_failed")
