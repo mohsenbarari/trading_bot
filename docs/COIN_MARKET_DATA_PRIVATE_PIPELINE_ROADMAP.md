@@ -1,6 +1,6 @@
 # Roadmap انتقال داده و Parse بازار روی شبکه خصوصی
 
-وضعیت: مراحل 0 تا 5 تکمیل شده‌اند؛ Stage 5 فقط shadow است و cutover انجام نشده است
+وضعیت: مراحل 0 تا 6 تکمیل شده‌اند؛ pipeline فقط shadow است و cutover انجام نشده است
 
 تاریخ بازبینی: 2026-08-26
 
@@ -9,6 +9,8 @@
 مبنای gate Capture مرحله 4: `main@2848b36560cfc8586dbd9759668d708625c16f2c`
 
 مبنای gate Parser مرحله 5: `main@3cd136b2e94f1795cba388be3d98a2cb46e94cbc`
+
+مبنای gate Parser/Lifecycle مرحله 6: `main@bbe93ed5af03f0d87738aa3d2d0b2a04e589e6f3`
 
 ## 1. نتیجه نهایی مورد انتظار
 
@@ -657,6 +659,24 @@ Gate:
 - revision ناقص یا inconsistent به AMBIGUOUS می‌رود؛
 - `final_price/final_quantity` در schema/code/API وجود ندارد؛
 - دو کانال عمومی آبشده وارد archive دائمی نمی‌شوند.
+
+نتیجه اجرا در 2026-08-26:
+
+- `market-processor` هر دو spool را مستقل و با بودجه جدا مصرف می‌کند تا حجم XAU مانع
+  پیشرفت گروه‌های سکه نشود؛ inventory سلامت هر هفت stream را پوشش می‌دهد؛
+- ممیزی فقط‌خواندنی 75,900 رویداد جدید، بدون انتقال raw، خطای contract یا parser نشان
+  نداد؛ کانال خصوصی 10,063 از 10,063 آفر و XAU هر 39,677 quote را Parse کرد؛
+- قیمت و تعداد اولین revision آفر خصوصی immutable ماند و outcome در جدول جدا با
+  `FULL/PARTIAL/NONE/AMBIGUOUS` ثبت شد؛ generic یا inconsistent edit معامله فرض نشد؛
+- حذف پیام منقضی در کانال خصوصی fact اقتصادی تاریخی را retract نمی‌کند، زیرا حذف source
+  بخشی از رفتار عادی کانال است؛ evidence bounded فقط برای audit حفظ می‌شود؛
+- هر quote واقعی XAU حفظ و مسیر compaction دقیقه‌ای حذف شد؛ facts دو کانال عمومی آبشده
+  پس از سه روز از store موقت purge و هرگز archive دائمی نمی‌شوند؛
+- Docker gate با network بسته، هر هفت source، partial-tail/replay، lifecycle و cleanup
+  کامل را از commit تمیز پاس کرد؛ هیچ deploy، session ownership یا model authority تغییر
+  نکرد.
+
+گزارش و gate receipt: [COIN_MARKET_DATA_STAGE6_CHANNEL_LIFECYCLE.md](./COIN_MARKET_DATA_STAGE6_CHANNEL_LIFECYCLE.md)
 
 ### مرحله 7 — USDT/XAU materializer و input ledger
 
