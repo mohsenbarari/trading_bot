@@ -1,6 +1,6 @@
 # Roadmap انتقال داده و Parse بازار روی شبکه خصوصی
 
-وضعیت: مراحل 0 تا 9 تکمیل شده‌اند؛ pipeline فقط shadow است و cutover انجام نشده است
+وضعیت: مراحل 0 تا 10 تکمیل شده‌اند؛ pipeline فقط shadow است و cutover انجام نشده است
 
 تاریخ بازبینی: 2026-08-26
 
@@ -17,6 +17,8 @@
 مبنای gate Private Fact Lane مرحله 8: `main@0cbd008a`
 
 مبنای gate Bot Adapter مرحله 9: `main@a491632b`
+
+مبنای gate Snapshot Return مرحله 10: `main@fa4efd846d7f677e609b1173a1f447f50b561164`
 
 ## 1. نتیجه نهایی مورد انتظار
 
@@ -825,6 +827,24 @@ Gate:
 - snapshot قدیمی‌تر قابل overwrite نیست؛
 - قطع مسیر برگشت stale state را واضح نشان می‌دهد؛
 - هیچ query مستقل UI عددی متفاوت از snapshot مدل تولید نمی‌کند.
+
+نتیجه اجرا در 2026-08-26:
+
+- estimator موجود در read transaction ثابت اجرا و snapshot دارای id/version/input hash
+  به‌صورت اتمیک روی بات منتشر می‌شود؛ pending publish پس از crash با همان payload برمی‌گردد؛
+- input trace شامل source fact/event/revision، point، mean، method، fallback، freshness و
+  occurred/available/parsed/transferred است؛ inferred/received/published نیز ثبت می‌شوند؛
+- sender فقط با mTLS/HMAC خصوصی و ACK منطبق checkpoint می‌دهد؛ lost ACK، restart و قطع
+  مسیر بدون public fallback ایمن هستند؛
+- receiver laneهای shadow/primary را جدا و یکنواخت نگه می‌دارد؛ regression/conflict رد و
+  duplicate idempotent است؛
+- پس از commit، web view، cache generation و realtime outbox با hash قطعی منتشر می‌شوند؛
+  view هیچ نرخ مستقلی محاسبه نمی‌کند و route cut را `STALE` نشان می‌دهد؛
+- hash bot، ACK و web view برابر بود؛ ۴۱ آزمون متمرکز، schema check و گیت کامل Docker با
+  rollback/cleanup پاس شد؛
+- پیش‌فرض `LEGACY` ماند و هیچ deploy، cache/realtime عملیاتی یا WebApp authority تغییر نکرد.
+
+گزارش و gate receipt: [COIN_MARKET_DATA_STAGE10_SNAPSHOT_RETURN.md](./COIN_MARKET_DATA_STAGE10_SNAPSHOT_RETURN.md)
 
 ### مرحله 11 — Backfill و تجمیع تاریخچه
 
