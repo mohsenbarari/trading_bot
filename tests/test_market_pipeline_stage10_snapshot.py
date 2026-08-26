@@ -5,9 +5,11 @@ import json
 from pathlib import Path
 import sqlite3
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
+from core.market_intelligence import estimator_snapshot_receiver_service
 from core.market_intelligence.estimator_snapshot_receiver import (
     apply_estimator_snapshot,
     connect_snapshot_receiver,
@@ -266,6 +268,52 @@ class Stage10SnapshotTests(unittest.TestCase):
         self.assertTrue(recovered.recovered_pending)
         recovered_document = json.loads(recovered_output.read_text(encoding="utf-8"))
         self.assertEqual(int(recovered_document["snapshot_version"]), 1)
+
+    def test_live_receiver_startup_writes_health_before_serving(self):
+        stop = threading.Event()
+
+        class FakeServer:
+            def __init__(self, *_args, **_kwargs):
+                self.socket = object()
+                self.timeout = None
+
+            def handle_request(self):
+                stop.set()
+
+            def server_close(self):
+                return None
+
+        class FakeTls:
+            def wrap_socket(self, socket, *, server_side):
+                self.server_side = server_side
+                return socket
+
+        environment = {
+            "MARKET_PIPELINE_ALLOWED_PEER_IP": "10.240.1.10",
+            "MARKET_PIPELINE_SNAPSHOT_ROOT": str(self.root / "live-snapshots"),
+            "MARKET_PIPELINE_CALIBRATION_ROOT": str(self.root / "live-calibration"),
+        }
+        with patch.dict("os.environ", environment, clear=False), patch.object(
+            estimator_snapshot_receiver_service, "_Server", FakeServer
+        ), patch.object(
+            estimator_snapshot_receiver_service,
+            "server_tls_context",
+            return_value=FakeTls(),
+        ), patch.object(
+            estimator_snapshot_receiver_service,
+            "read_key",
+            return_value=b"k" * 32,
+        ):
+            result = estimator_snapshot_receiver_service.run_estimator_snapshot_receiver_service(
+                role="estimator-snapshot-receiver",
+                mode="live",
+                release_sha="a" * 40,
+                state_directory=self.root / "live-state",
+                stop=stop,
+            )
+        self.assertEqual(result, 0)
+        health = json.loads((self.root / "live-state" / "health.json").read_text())
+        self.assertEqual(health["status"], "live-ready")
 
 
 if __name__ == "__main__":
