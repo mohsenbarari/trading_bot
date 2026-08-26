@@ -536,6 +536,13 @@ class CaptureState:
             (source_code, int(message_id)),
         ).fetchone() is not None
 
+    def highest_message_id(self, source_code: str) -> int | None:
+        row = self.connection.execute(
+            "SELECT MAX(message_id) FROM capture_messages WHERE source_code=?",
+            (source_code,),
+        ).fetchone()
+        return int(row[0]) if row is not None and row[0] is not None else None
+
     def message_deleted(self, source_code: str, message_id: int) -> bool:
         row = self.connection.execute(
             "SELECT deleted FROM capture_messages WHERE source_code=? AND message_id=?",

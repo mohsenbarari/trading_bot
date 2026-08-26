@@ -196,6 +196,59 @@ class CaptureFixture(unittest.TestCase):
         ).fetchone()
         self.assertEqual(tuple(quarantine), ("CAPTURE_MESSAGE_TEXT_INVALID", 1))
 
+    def test_reconciliation_stops_after_durable_watermark_overlap(self):
+        now = telegram_capture.utc_now()
+        seed = market_document(
+            "XAUUSD",
+            1000,
+            published=now - timedelta(seconds=2),
+            received=now - timedelta(seconds=1),
+        )
+        self.engine.accept(seed)
+        self.assertEqual(self.state.highest_message_id("XAUUSD"), 1000)
+
+        class FakeClient:
+            yielded = 0
+
+            async def iter_messages(self, _entity, *, limit):
+                self.limit = limit
+                for message_id in range(1001, 0, -1):
+                    self.yielded += 1
+                    yield SimpleNamespace(
+                        id=message_id,
+                        date=now - timedelta(seconds=1),
+                        edit_date=None,
+                        message="2,350.50",
+                    )
+
+        config = TelegramCaptureConfig(
+            contract="market_telegram_capture_config/1.0",
+            account="account1",
+            api_id=1,
+            api_hash="a" * 32,
+            session_filename="account1.session",
+            sources=tuple(
+                CaptureBinding(source_code=source, peer_id=-(index + 1))
+                for index, source in enumerate(
+                    sorted(capture.ACCOUNT_SOURCES["account1"])
+                )
+            ),
+        )
+        provider = telegram_capture.TelegramCaptureProvider(
+            config,
+            self.engine,
+            session_path=self.root / "account1.session",
+            hmac_key=None,
+            stop=threading.Event(),
+        )
+        provider._entity_by_source["XAUUSD"] = SimpleNamespace(forum=False)
+        client = FakeClient()
+        asyncio.run(provider._reconcile_source(client, SOURCE_POLICIES["XAUUSD"]))
+
+        self.assertEqual(client.yielded, 201)
+        self.assertFalse(provider.reconciliation_truncated)
+        self.assertEqual(self.state.highest_message_id("XAUUSD"), 1001)
+
     def test_fsync_failure_keeps_outbox_and_restart_recovers_without_loss(self):
         moment = datetime(2026, 8, 26, 10, 0, tzinfo=UTC)
         document = market_document(

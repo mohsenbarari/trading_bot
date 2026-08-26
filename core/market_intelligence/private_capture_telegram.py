@@ -710,14 +710,31 @@ class TelegramCaptureProvider:
         horizon = timedelta(minutes=30) if policy.account == "account1" else timedelta(hours=6)
         cutoff = utc_now() - horizon
         maximum = 2_000 if policy.account == "account1" else 10_000
+        overlap_after_watermark = 200
+        watermark = self.engine.state.highest_message_id(policy.source_code)
+        watermark_reached = False
+        overlap_seen = 0
         newest: list[object] = []
         async for message in client.iter_messages(entity, limit=maximum + 1):  # type: ignore[attr-defined]
             published = _aware(getattr(message, "date", None), field="telegram_reconcile_date")
             if published is None or published < cutoff:
                 break
             newest.append(message)
+            try:
+                message_id = int(getattr(message, "id"))
+            except (TypeError, ValueError):
+                message_id = 0
+            if watermark is not None and message_id <= watermark:
+                watermark_reached = True
+                overlap_seen += 1
+                if overlap_seen >= overlap_after_watermark:
+                    break
         if len(newest) > maximum:
-            self.reconciliation_truncated = True
+            # A bounded first bootstrap intentionally does not claim old
+            # history. On restart, however, failing to reach the durable
+            # watermark means a real recovery gap and keeps health degraded.
+            if watermark is not None and not watermark_reached:
+                self.reconciliation_truncated = True
             newest = newest[:maximum]
         for message in reversed(newest):
             try:
