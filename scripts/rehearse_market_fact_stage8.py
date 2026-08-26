@@ -143,6 +143,28 @@ def run(total: int) -> dict[str, object]:
         with tempfile.TemporaryDirectory() as directory:
             receiver = connect_receiver(Path(directory) / "receiver.sqlite3")
             try:
+                def receiver_down(_document):
+                    raise MarketTransportError("simulated_receiver_down")
+
+                down = run_sync_cycle(
+                    connection,
+                    sender_instance_id="stage8-rehearsal-1",
+                    send=receiver_down,
+                )
+                if int(down.get("acknowledged", 0)) != 0:
+                    raise RuntimeError("stage8_receiver_down_was_acknowledged")
+                if receiver.execute("SELECT COUNT(*) FROM fact_deliveries").fetchone()[0]:
+                    raise RuntimeError("stage8_receiver_down_applied_fact")
+                if _counts(connection)[3] != 0:
+                    raise RuntimeError("stage8_receiver_down_removed_outbox")
+                with connection:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            "UPDATE market_data.market_fact_outbox "
+                            "SET next_attempt_at_utc=clock_timestamp() "
+                            "WHERE acknowledged_at_utc IS NULL"
+                        )
+
                 failed_once = False
 
                 def lost_ack(document):
@@ -220,6 +242,7 @@ def run(total: int) -> dict[str, object]:
             "acknowledged_count": acknowledged,
             "batch_count": len(latencies),
             "lost_ack_replayed_as_duplicate": True,
+            "receiver_down_preserved_outbox": True,
             "publish_ms": round(publish_ms, 3),
             "ack_p50_ms": round(statistics.median(latencies), 3) if latencies else 0,
             "ack_p95_ms": round(p95, 3),
