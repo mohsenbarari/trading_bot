@@ -1,6 +1,6 @@
 # Roadmap انتقال داده و Parse بازار روی شبکه خصوصی
 
-وضعیت: مراحل 0 تا 6 تکمیل شده‌اند؛ pipeline فقط shadow است و cutover انجام نشده است
+وضعیت: مراحل 0 تا 7 تکمیل شده‌اند؛ pipeline فقط shadow است و cutover انجام نشده است
 
 تاریخ بازبینی: 2026-08-26
 
@@ -11,6 +11,8 @@
 مبنای gate Parser مرحله 5: `main@3cd136b2e94f1795cba388be3d98a2cb46e94cbc`
 
 مبنای gate Parser/Lifecycle مرحله 6: `main@bbe93ed5af03f0d87738aa3d2d0b2a04e589e6f3`
+
+مبنای gate External/Input Ledger مرحله 7: `main@9db072c5157c1684314dea71f9b3b804d6778d75`
 
 ## 1. نتیجه نهایی مورد انتظار
 
@@ -697,6 +699,24 @@ Gate:
 - quiet interval هیچ row مصنوعی نمی‌سازد؛
 - missing direct XAU دقیقاً fallback/NO_DATA فعلی را می‌دهد؛
 - point و mean در dashboard و audit قابل تفکیک‌اند.
+
+نتیجه اجرا در 2026-08-26:
+
+- capture مستقل API با SQLite FULL outbox و spool fsynced برای Wallex و PAXG به image و
+  Compose وب افزوده شد؛ هیچ session یا credential خصوصی ندارد و poll پیش‌فرض 10s است؛
+- response خام، URL/header/credential حذف و فقط `external_quote_event/1.0` کمینه ثبت
+  می‌شود؛ Wallex هر `BID/ASK/MID` واقعی را نگه می‌دارد و مدل فقط MID را مصرف می‌کند؛
+- materializer با Decimal، point/mean نودثانیه، roleهای invoked 180/600 ثانیه و ledger
+  immutable پیاده شد؛ quiet cycle با sample set ثابت snapshot تازه تولید نمی‌کند؛
+- PAXG source دائمی و transfer-safe به registry افزوده شد، اما همیشه proxy می‌ماند؛
+  direct XAU مقدم و guard دو book/فاصله 2% از XAU اخیر fail-closed است؛
+- timestamp مشترک با selection فعلی مدل decimal-equal بود؛ 112 تست pipeline و 81 تست
+  estimator/collector پاس شدند؛
+- گیت Docker parser/materializer، گیت کامل reproducible foundation/PostgreSQL و poll
+  واقعی Wallex/PAXG از داخل image همگی پاس و cleanup کامل داشتند؛
+- هیچ deploy، PostgreSQL زنده، model feed یا authority تغییر نکرد.
+
+گزارش و gate receipt: [COIN_MARKET_DATA_STAGE7_INPUT_MATERIALIZER.md](./COIN_MARKET_DATA_STAGE7_INPUT_MATERIALIZER.md)
 
 ### مرحله 8 — Market Facts outbox و worker خصوصی
 
