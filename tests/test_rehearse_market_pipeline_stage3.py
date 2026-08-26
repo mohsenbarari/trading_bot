@@ -39,6 +39,19 @@ class MarketPipelineStage3RehearsalTests(unittest.TestCase):
         self.assertEqual(len(rehearsal.EXPECTED_RUNTIME_WEB), 5)
         self.assertEqual(len(rehearsal.EXPECTED_RUNTIME_BOT), 4)
 
+    def test_compose_state_summary_never_reads_container_logs(self):
+        absent = rehearsal.subprocess.CompletedProcess(
+            ["docker"], 0, stdout="", stderr=""
+        )
+        with patch.object(rehearsal, "command", return_value=absent) as runner:
+            summary = rehearsal.compose_state_summary(
+                "bot", "fixture-project", {}
+            )
+        self.assertIn("market-fact-receiver:absent", summary)
+        self.assertTrue(
+            all("logs" not in call.args[0][0] for call in runner.call_args_list)
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

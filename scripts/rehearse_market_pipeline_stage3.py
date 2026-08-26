@@ -273,6 +273,47 @@ def wait_healthy(
     raise RehearsalError(f"{role}_health_timeout")
 
 
+def compose_state_summary(
+    role: str,
+    project: str,
+    environment: Mapping[str, str],
+) -> str:
+    service_names = (
+        {
+            *EXPECTED_RUNTIME_WEB,
+            "market-database",
+            "market-migration",
+        }
+        if role == "web"
+        else set(EXPECTED_RUNTIME_BOT)
+    )
+    states: list[str] = []
+    for service in sorted(service_names):
+        container_id = command(
+            [*compose(role, project), "ps", "-aq", service],
+            label="compose_failure_ps",
+            environment=environment,
+            check=False,
+        ).stdout.strip()
+        if not container_id:
+            states.append(f"{service}:absent")
+            continue
+        output = command(
+            [
+                "docker",
+                "inspect",
+                container_id,
+                "--format",
+                "{{.State.Status}}|{{.State.ExitCode}}|"
+                "{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}",
+            ],
+            label="compose_failure_inspect",
+            check=False,
+        ).stdout.strip()
+        states.append(f"{service}:{output or 'inspect-failed'}")
+    return ",".join(states)
+
+
 def post_json(port: int, path: str, document: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
     request = Request(
         f"http://127.0.0.1:{port}{path}",
@@ -453,16 +494,28 @@ def run_rehearsal() -> dict[str, Any]:
         web_inventory = inventory(web_config, role="web", image=metadata)
         bot_inventory = inventory(bot_config, role="bot", image=metadata)
 
-        command(
+        web_up = command(
             [*compose("web", project), "up", "-d"],
             label="compose_web_up",
             environment=environment,
+            check=False,
         )
-        command(
+        if web_up.returncode:
+            raise RehearsalError(
+                "compose_web_up_failed:"
+                + compose_state_summary("web", project, environment)
+            )
+        bot_up = command(
             [*compose("bot", project), "up", "-d"],
             label="compose_bot_up",
             environment=environment,
+            check=False,
         )
+        if bot_up.returncode:
+            raise RehearsalError(
+                "compose_bot_up_failed:"
+                + compose_state_summary("bot", project, environment)
+            )
         web_services = sorted(EXPECTED_RUNTIME_WEB)
         bot_services = sorted(EXPECTED_RUNTIME_BOT)
         wait_healthy("web", project, web_services, environment)
