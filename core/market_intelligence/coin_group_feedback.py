@@ -139,12 +139,20 @@ def _reviewer_digest(value: str) -> bytes:
     ).digest()
 
 
-def _connection(path: Path | str, *, read_only: bool) -> sqlite3.Connection:
+def _connection(
+    path: Path | str,
+    *,
+    read_only: bool,
+    immutable: bool = False,
+) -> sqlite3.Connection:
     database = Path(path).expanduser().resolve()
     if read_only:
         if not database.is_file():
             raise CoinGroupFeedbackError("parser_feedback_store_unavailable")
-        connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+        immutable_query = "&immutable=1" if immutable else ""
+        connection = sqlite3.connect(
+            f"file:{database}?mode=ro{immutable_query}", uri=True
+        )
     else:
         database.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(database)
@@ -413,9 +421,11 @@ def _feedback_from_row(row: sqlite3.Row) -> CoinGroupParserFeedback:
 
 def load_coin_group_parser_feedback(
     path: Path | str,
+    *,
+    immutable: bool = False,
 ) -> dict[bytes, CoinGroupParserFeedback]:
     try:
-        connection = _connection(path, read_only=True)
+        connection = _connection(path, read_only=True, immutable=immutable)
     except CoinGroupFeedbackError:
         return {}
     try:

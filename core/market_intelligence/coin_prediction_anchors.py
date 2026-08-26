@@ -80,6 +80,7 @@ def load_coin_prediction_anchors(
     earliest_event_time_utc: datetime | str,
     as_of_utc: datetime | str,
     bucket_seconds: int = PREDICTION_ANCHOR_BUCKET_SECONDS,
+    immutable: bool = False,
 ) -> CoinPredictionAnchorLoad:
     """Load bounded MAIN_ONLINE prices known before the staged event window.
 
@@ -113,8 +114,9 @@ def load_coin_prediction_anchors(
         raise CoinPredictionAnchorError("coin_prediction_ledger_unavailable")
     connection: sqlite3.Connection | None = None
     try:
+        immutable_query = "&immutable=1" if immutable else ""
         connection = sqlite3.connect(
-            f"file:{database}?mode=ro",
+            f"file:{database}?mode=ro{immutable_query}",
             uri=True,
             timeout=5,
         )

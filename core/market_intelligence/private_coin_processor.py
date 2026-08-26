@@ -90,7 +90,9 @@ def _external_file(value: str, *, reason: str) -> Path:
 
 
 def _validate_prediction_schema(path: Path) -> None:
-    connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
+    connection = sqlite3.connect(
+        path.as_uri() + "?mode=ro&immutable=1", uri=True
+    )
     try:
         connection.execute("PRAGMA query_only=ON")
         columns = {
@@ -341,7 +343,10 @@ def _load_causal_inputs(
     as_of_utc: str,
 ) -> tuple[Mapping[bytes, CoinGroupParserFeedback], tuple, dict[str, int]]:
     feedback = (
-        load_coin_group_parser_feedback(paths.feedback_database)
+        load_coin_group_parser_feedback(
+            paths.feedback_database,
+            immutable=True,
+        )
         if paths.feedback_database is not None
         else {}
     )
@@ -350,7 +355,7 @@ def _load_causal_inputs(
         # missing store.  The path was already checked, so verify its schema to
         # distinguish a valid empty corpus from silent contract drift.
         connection = sqlite3.connect(
-            paths.feedback_database.as_uri() + "?mode=ro", uri=True
+            paths.feedback_database.as_uri() + "?mode=ro&immutable=1", uri=True
         )
         try:
             table = connection.execute(
@@ -389,6 +394,7 @@ def _load_causal_inputs(
             paths.prediction_database,
             earliest_event_time_utc=bounded_earliest,
             as_of_utc=as_of_utc,
+            immutable=True,
         )
         anchors = loaded.anchors
         anchor_stats = {
