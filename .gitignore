@@ -50,6 +50,13 @@ docs/uiux-native-standardization/*
 !docs/uiux-native-standardization/EXCLUSIONS.md
 !docs/uiux-native-standardization/EXECUTION_REPORT.md
 !docs/uiux-native-standardization/FINAL_REVIEW_RECEIPT.json
+!docs/uiux-native-app-v2/
+docs/uiux-native-app-v2/*
+!docs/uiux-native-app-v2/ROADMAP.md
+!docs/uiux-native-app-v2/LANGUAGE.md
+!docs/uiux-native-app-v2/AUDIT.md
+!docs/uiux-native-app-v2/EXCLUSIONS.md
+!docs/uiux-native-app-v2/SURFACE_INVENTORY.json
 !docs/AUTOMATED_TEST_CHECKLIST.md
 !docs/COIN_OFFER_CONDITION_ANNOTATION_GUIDE.md
 !docs/COIN_OFFER_CONDITION_CALIBRATION_REPORT_20260820.md
@@ -84,6 +91,8 @@ docs/uiux-native-standardization/*
 # Environments
 frontend/node_modules/
 .idea/
+# Cursor: only shared project rules/skills are tracked.
+# Local IDE state such as .cursor/settings.json stays untracked.
 .cursor/*
 !.cursor/skills/
 !.cursor/skills/**

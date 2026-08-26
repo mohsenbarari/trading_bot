@@ -5,11 +5,14 @@ alwaysApply: true
 
 # Native App Standardization
 
-- Branch: `candidate/webapp-native-controls-v1`
+- Branch: `candidate/webapp-native-app-v2`
 - Goal: native iOS/Android feel for the whole PWA except Market
+- Roadmap: `docs/uiux-native-app-v2/ROADMAP.md`
+- Language: `docs/uiux-native-app-v2/LANGUAGE.md`
 - Messenger frontend restyle is fully allowed
 - Do not edit `/market` or `home-market-widget`. Chrome of AdminMessages/TradingSettings/Jalali may restyle; keep calendar confirm and market interiors.
 - Fields: `--ds-control-*` or `AppInput` / `AppSelect` / `AppTextarea` / `AppSearchField`
-- Touch target: 48px; lists: inset grouped rows; no `--ui-v2-*` in new product CSS
+- Lists: `AppInsetGroup` + grouped `AppListItem`; 16px page gutter; no edge-flush cards
+- Touch target: 48px; button text stays inside the control; no `--ui-v2-*` in new product CSS
 - Messenger behavior stays legacy-default; albums only via `album_id` + `album_index`
 - No push, merge, or deploy unless the user asks

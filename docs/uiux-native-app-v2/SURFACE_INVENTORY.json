@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "track": "native-app-feel-v2",
+  "branch": "candidate/webapp-native-app-v2",
+  "baseCommit": "951ca9f0",
+  "status": "audit-complete-roadmap-ready",
+  "ownerScoresAtStart": {
+    "unification": 80,
+    "simplification": 70,
+    "nativeFeel": 49
+  },
+  "targetScores": {
+    "unification": 90,
+    "simplification": 85,
+    "nativeFeel": 75
+  },
+  "routeContract": {
+    "totalRoutes": 30,
+    "nativeTrackRoutes": 29,
+    "marketExcludedRoutes": 1,
+    "unknownRoutes": 0
+  },
+  "families": [
+    {
+      "id": "shell",
+      "routes": ["shared"],
+      "status": "partial-tab-bar-web-leftovers",
+      "phase": 2,
+      "gaps": ["dual-token-nav", "tiny-tab-labels", "messenger-fab-nav", "session-overtime-pwa-chrome"]
+    },
+    {
+      "id": "home",
+      "routes": ["/"],
+      "status": "web-dashboard-around-frozen-market",
+      "phase": 3,
+      "protectedInteriors": ["home-market-widget"],
+      "gaps": ["v2-home-scope", "raw-identity-menu", "disclosure-42px", "trades-scroll-hint"]
+    },
+    {
+      "id": "account-settings",
+      "routes": [
+        "/account",
+        "/account/security",
+        "/account/storage",
+        "/account/notifications",
+        "/notifications",
+        "/settings"
+      ],
+      "status": "grouped-start-copy-and-title-gaps",
+      "phase": 4,
+      "gaps": ["sr-only-title", "triple-copy", "notif-color-bar", "hardcoded-overtime-colors"]
+    },
+    {
+      "id": "profiles",
+      "routes": ["/profile", "/users/:id", "/admin/users/:id"],
+      "status": "web-card-dashboard",
+      "phase": 5,
+      "gaps": ["outer-card", "help-popover", "stat-cards", "mini-trade-cards", "duplicate-headers"]
+    },
+    {
+      "id": "operations",
+      "routes": [
+        "/operations",
+        "/operations/customers",
+        "/operations/customers/:relationId",
+        "/operations/accountants",
+        "/operations/accountants/:relationId"
+      ],
+      "status": "shell-ok-lists-and-actions-not-native",
+      "phase": 6,
+      "gaps": [
+        "list-item-as-cards",
+        "four-button-pending-rows",
+        "verbose-section-copy",
+        "legacy-owner-modals"
+      ]
+    },
+    {
+      "id": "administration",
+      "routes": [
+        "/admin",
+        "/admin/invitations",
+        "/admin/users",
+        "/admin/commodities",
+        "/admin/messages",
+        "/admin/system"
+      ],
+      "status": "menu-closer-interiors-web",
+      "phase": 7,
+      "protectedInteriors": [
+        "admin-messages-market-delivery",
+        "trading-settings-market-controls"
+      ],
+      "gaps": ["user-manager-card-gap", "admin-messages-help-stack", "small-subview-title"]
+    },
+    {
+      "id": "public-auth-recovery",
+      "routes": [
+        "/login",
+        "/setup-password",
+        "/i/:code",
+        "/register",
+        "/:pathMatch(.*)*"
+      ],
+      "status": "app-fields-public-web-chrome",
+      "phase": 8,
+      "gaps": ["ui-v2-auth-catalog", "guidance-paragraphs"]
+    },
+    {
+      "id": "messenger",
+      "routes": ["/chat", "/admin/channels", "/share-receive"],
+      "status": "tokens-ok-shell-and-safe-area-gaps",
+      "phase": 9,
+      "gaps": [
+        "global-fab-on-chat",
+        "dual-fab-on-list",
+        "inset-conversation-list",
+        "composer-safe-area",
+        "fixed-chatview-notch"
+      ]
+    },
+    {
+      "id": "market",
+      "routes": ["/market"],
+      "status": "excluded-owner-locked",
+      "phase": null,
+      "protectedInteriors": ["entire-route"]
+    }
+  ]
+}
