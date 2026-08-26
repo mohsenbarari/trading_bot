@@ -1,6 +1,8 @@
 # Roadmap انتقال داده و Parse بازار روی شبکه خصوصی
 
-وضعیت: مراحل 0 تا 10 تکمیل شده‌اند؛ pipeline فقط shadow است و cutover انجام نشده است
+وضعیت: مراحل 0 تا 11 تکمیل شده‌اند؛ Stage 12 از نظر offline کامل و در انتظار جلسه کامل
+بازار باز است؛ Stage 13-A در staging با `PRIVATE_SHADOW` مستقر شده و cutover اصلی انجام
+نشده است
 
 تاریخ بازبینی: 2026-08-26
 
@@ -19,6 +21,12 @@
 مبنای gate Bot Adapter مرحله 9: `main@a491632b`
 
 مبنای gate Snapshot Return مرحله 10: `main@fa4efd846d7f677e609b1173a1f447f50b561164`
+
+مبنای gate History Backfill مرحله 11: `main@22e9fa5c97c2bceabb921399e496d135e1b74f40`
+
+مبنای gate offline Shadow Parity مرحله 12: `main@b3fce43050df6ad0bdbb5034f1f7f79df47f9c1e`
+
+مبنای استقرار Stage 13-A staging shadow: `main@7047ef005ce64c0266d7b55a7593ea977d65bfb1`
 
 ## 1. نتیجه نهایی مورد انتظار
 
@@ -958,6 +966,24 @@ Gate:
 - private route failure و recovery موفق؛
 - disk-full/receiver restart/lost ACK آزمایش شده؛
 - تایید صریح برای production وجود دارد.
+
+نتیجه Stage 13-A در 2026-08-26:
+
+- image متصل به commit روی هر دو میزبان در rootهای ایزوله staging مستقر شد؛ تمام اجزای
+  capture، processor، archive، انتقال facts، adapter، estimator و بازگشت snapshot در
+  `PRIVATE_SHADOW` سالم هستند؛
+- اختیار زنده دو Telegram session به captureهای کانتینری تحویل شد و ownerهای میزبان بدون
+  حذف unit، session یا امکان rollback متوقف ماندند؛ guard موقت systemd مانع شروع دوباره
+  آن‌ها توسط timer قدیمی می‌شود؛
+- صف facts در soak خالی، rejected/duplicate صفر و snapshot canonical دو میزبان برابر بود؛
+  قطع receiver در هر جهت، restart دو capture و بازیابی صف/ACK موفق بود؛
+- یک payload تاریخی نامعتبر، SQLite WAL فقط‌خواندنی و outcome یتیم جدا و fail-closed شدند
+  تا هیچ‌کدام loop زنده را متوقف نکند؛
+- این فقط استقرار shadow است: WebApp/product authority، `PRIVATE_PRIMARY`، production،
+  sync عمومی و retirement legacy تغییر نکردند؛ Stage 12/13 تا جلسه کامل بازار باز و گزارش
+  parity امضاشده باز می‌مانند.
+
+رسید عملیاتی: [COIN_MARKET_DATA_STAGE13_STAGING_SHADOW.md](./COIN_MARKET_DATA_STAGE13_STAGING_SHADOW.md)
 
 ### مرحله 14 — Cutover production
 
