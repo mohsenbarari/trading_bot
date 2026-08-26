@@ -86,6 +86,16 @@ def git_release_sha() -> str:
     return value
 
 
+def git_source_epoch() -> int:
+    value = command(
+        ["git", "show", "-s", "--format=%ct", "HEAD"],
+        label="git_source_epoch",
+    ).stdout.strip()
+    if not value.isdigit() or int(value) <= 0:
+        raise RehearsalError("git_source_epoch_invalid")
+    return int(value)
+
+
 def free_port() -> int:
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
@@ -177,7 +187,14 @@ def compose(role: str, project: str) -> list[str]:
     ]
 
 
-def build_image(tag: str, release_sha: str, version: str, *, no_cache: bool) -> float:
+def build_image(
+    tag: str,
+    release_sha: str,
+    source_epoch: int,
+    version: str,
+    *,
+    no_cache: bool,
+) -> float:
     arguments = [
         "docker",
         "build",
@@ -189,6 +206,8 @@ def build_image(tag: str, release_sha: str, version: str, *, no_cache: bool) -> 
         f"SOURCE_SHA={release_sha}",
         "--build-arg",
         f"IMAGE_VERSION={version}",
+        "--build-arg",
+        f"SOURCE_DATE_EPOCH={source_epoch}",
     ]
     if no_cache:
         arguments.append("--no-cache")
@@ -369,6 +388,7 @@ def verify_market_store(path: Path, release_sha: str) -> bool:
 
 def run_rehearsal() -> dict[str, Any]:
     release_sha = git_release_sha()
+    source_epoch = git_source_epoch()
     temporary = Path(tempfile.mkdtemp(prefix="market-stage3-"))
     project = f"market-stage3-{os.getpid()}"
     candidate = f"market-pipeline-stage3:{os.getpid()}-candidate"
@@ -390,10 +410,26 @@ def run_rehearsal() -> dict[str, Any]:
         while bot_port == web_port:
             bot_port = free_port()
 
-        first_build = build_image(candidate, release_sha, "stage3-candidate", no_cache=True)
-        repeat_build = build_image(repeated, release_sha, "stage3-candidate", no_cache=True)
+        first_build = build_image(
+            candidate,
+            release_sha,
+            source_epoch,
+            "stage3-candidate",
+            no_cache=True,
+        )
+        repeat_build = build_image(
+            repeated,
+            release_sha,
+            source_epoch,
+            "stage3-candidate",
+            no_cache=True,
+        )
         rollback_build = build_image(
-            rollback, release_sha, "stage3-rollback-fixture", no_cache=False
+            rollback,
+            release_sha,
+            source_epoch,
+            "stage3-rollback-fixture",
+            no_cache=False,
         )
         candidate_id = image_id(candidate)
         repeated_id = image_id(repeated)
@@ -505,6 +541,7 @@ def run_rehearsal() -> dict[str, Any]:
                 "candidate_id": candidate_id,
                 "rollback_fixture_id": rollback_id,
                 "same_source_reproducible": True,
+                "source_date_epoch": source_epoch,
                 "first_build_seconds": round(first_build, 3),
                 "repeat_build_seconds": round(repeat_build, 3),
                 "rollback_build_seconds": round(rollback_build, 3),

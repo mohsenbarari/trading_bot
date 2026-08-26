@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 ARG PYTHON_BASE_IMAGE=python:3.11-slim-bookworm@sha256:0bee7276f83efd4a1ee05bbbf4281d95ed28e079220a9457f25a93e3f1e3c31b
+ARG SOURCE_DATE_EPOCH=0
 
 FROM ${PYTHON_BASE_IMAGE} AS dependencies
 

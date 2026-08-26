@@ -23,6 +23,16 @@ class MarketPipelineStage3RehearsalTests(unittest.TestCase):
             ):
                 rehearsal.git_release_sha()
 
+    def test_source_epoch_requires_positive_commit_timestamp(self):
+        invalid = rehearsal.subprocess.CompletedProcess(
+            ["git"], 0, stdout="not-a-timestamp\n", stderr=""
+        )
+        with patch.object(rehearsal, "command", return_value=invalid):
+            with self.assertRaisesRegex(
+                rehearsal.RehearsalError, "source_epoch_invalid"
+            ):
+                rehearsal.git_source_epoch()
+
     def test_expected_runtime_services_exclude_database_and_migration(self):
         self.assertNotIn("market-database", rehearsal.EXPECTED_RUNTIME_WEB)
         self.assertNotIn("market-migration", rehearsal.EXPECTED_RUNTIME_WEB)
