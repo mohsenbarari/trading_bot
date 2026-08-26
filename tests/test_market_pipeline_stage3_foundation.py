@@ -153,6 +153,25 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
             finally:
                 connection.close()
 
+    def test_shared_resource_locks_live_on_session_and_market_store_mounts(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ,
+            {
+                "MARKET_PIPELINE_STATE_ROOT": str(Path(directory) / "state"),
+                "MARKET_PIPELINE_SESSION_ROOT": str(Path(directory) / "session"),
+                "MARKET_PIPELINE_MARKET_STORE_PATH": str(
+                    Path(directory) / "store" / "market.sqlite"
+                ),
+            },
+            clear=False,
+        ):
+            capture_locks = foundation.owner_lock_paths(
+                "market-capture-account1"
+            )
+            adapter_locks = foundation.owner_lock_paths("market-store-adapter")
+            self.assertEqual(capture_locks[-1], Path(directory) / "session/owner.lock")
+            self.assertEqual(adapter_locks[-1], Path(directory) / "store/owner.lock")
+
     def test_compose_is_split_by_host_and_pins_security_contract(self):
         base = (DEPLOY / "compose.yml").read_text(encoding="utf-8")
         web = (DEPLOY / "compose.web.yml").read_text(encoding="utf-8")

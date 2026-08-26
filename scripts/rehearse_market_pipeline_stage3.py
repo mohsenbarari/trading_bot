@@ -461,11 +461,58 @@ def inspect_running_image(
     ).stdout.strip()
 
 
-def verify_second_owner_fails(
+def verify_shared_resource_second_owner_fails(
     image: str,
     release_sha: str,
     root: Path,
+    role: str,
 ) -> bool:
+    probe_state = root / f"bot/state/second-owner-{role}"
+    if role.startswith("market-capture"):
+        probe_state = root / f"web/state/second-owner-{role}"
+    probe_state.mkdir(mode=0o700)
+    os.chown(probe_state, 10001, 10001)
+    mounts = [
+        "--mount",
+        f"type=bind,source={probe_state},target=/var/lib/market-data/state",
+    ]
+    environment = [
+        "--env",
+        "MARKET_PIPELINE_MODE=fixture",
+        "--env",
+        f"MARKET_PIPELINE_RELEASE_SHA={release_sha}",
+        "--env",
+        "MARKET_PIPELINE_STATE_ROOT=/var/lib/market-data/state",
+    ]
+    if role in {"market-capture-account1", "market-capture-account2"}:
+        account = "account1" if role.endswith("account1") else "account2"
+        mounts.extend(
+            [
+                "--mount",
+                "type=bind,"
+                f"source={root / f'web/sessions/{account}'},"
+                "target=/var/lib/market-data/session",
+            ]
+        )
+        environment.extend(
+            ["--env", "MARKET_PIPELINE_SESSION_ROOT=/var/lib/market-data/session"]
+        )
+    if role == "market-store-adapter":
+        mounts.extend(
+            [
+                "--mount",
+                "type=bind,"
+                f"source={root / 'bot/market-store'},"
+                "target=/var/lib/market-data/market-store",
+            ]
+        )
+        environment.extend(
+            [
+                "--env",
+                "MARKET_PIPELINE_MARKET_STORE_PATH="
+                "/var/lib/market-data/market-store/market-store.sqlite",
+            ]
+        )
     result = command(
         [
             "docker",
@@ -482,26 +529,12 @@ def verify_second_owner_fails(
             "no-new-privileges:true",
             "--tmpfs",
             "/tmp:size=8m,mode=1777,noexec,nosuid,nodev",
-            "--mount",
-            "type=bind,"
-            f"source={root / 'web/state/market-capture-account1'},"
-            "target=/var/lib/market-data/state",
-            "--mount",
-            "type=bind,"
-            f"source={root / 'web/sessions/account1'},"
-            "target=/var/lib/market-data/session",
-            "--env",
-            "MARKET_PIPELINE_MODE=fixture",
-            "--env",
-            f"MARKET_PIPELINE_RELEASE_SHA={release_sha}",
-            "--env",
-            "MARKET_PIPELINE_STATE_ROOT=/var/lib/market-data/state",
-            "--env",
-            "MARKET_PIPELINE_SESSION_ROOT=/var/lib/market-data/session",
+            *mounts,
+            *environment,
             image,
             "service",
             "--role",
-            "market-capture-account1",
+            role,
         ],
         label="second_owner_probe",
         check=False,
@@ -643,8 +676,20 @@ def run_rehearsal() -> dict[str, Any]:
         market_store = temporary / "bot/market-store/market-store.sqlite"
         if not verify_market_store(market_store, release_sha):
             raise RehearsalError("market_store_fixture_missing")
-        if not verify_second_owner_fails(candidate, release_sha, temporary):
+        if not verify_shared_resource_second_owner_fails(
+            candidate,
+            release_sha,
+            temporary,
+            "market-capture-account1",
+        ):
             raise RehearsalError("capture_second_owner_did_not_fail_closed")
+        if not verify_shared_resource_second_owner_fails(
+            candidate,
+            release_sha,
+            temporary,
+            "market-store-adapter",
+        ):
+            raise RehearsalError("market_store_second_writer_did_not_fail_closed")
 
         command(
             [
@@ -715,6 +760,7 @@ def run_rehearsal() -> dict[str, Any]:
             "persistence": {
                 "market_store_survived_recreate": True,
                 "capture_second_owner_failed_closed": True,
+                "market_store_second_writer_failed_closed": True,
                 "rollback_preserved_schema_and_state": True,
             },
         }

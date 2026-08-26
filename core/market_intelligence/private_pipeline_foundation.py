@@ -10,7 +10,7 @@ market authority by accident.
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from datetime import datetime, timezone
 import errno
 import fcntl
@@ -253,6 +253,21 @@ def initialize_market_store_fixture(role: str, release_sha: str) -> None:
         connection.commit()
     finally:
         connection.close()
+
+
+def owner_lock_paths(role: str) -> tuple[Path, ...]:
+    paths = [role_state(role) / "owner.lock"]
+    if role in CAPTURE_ROLES:
+        paths.append(session_root() / "owner.lock")
+    if role == "market-store-adapter":
+        market_store_path = Path(
+            os.environ.get(
+                "MARKET_PIPELINE_MARKET_STORE_PATH",
+                "/var/lib/market-data/market-store/market-store.sqlite",
+            )
+        )
+        paths.append(market_store_path.parent / "owner.lock")
+    return tuple(paths)
 
 
 def receiver_database(role: str) -> sqlite3.Connection:
@@ -500,14 +515,9 @@ def run_service(role: str) -> int:
 
     signal.signal(signal.SIGTERM, stop_service)
     signal.signal(signal.SIGINT, stop_service)
-    lock_paths = [role_state(role) / "owner.lock"]
-    if role in CAPTURE_ROLES:
-        lock_paths.append(session_root() / "owner.lock")
-
-    with exclusive_lock(lock_paths[0]):
-        session_lock = exclusive_lock(lock_paths[1]) if len(lock_paths) == 2 else None
-        if session_lock is not None:
-            session_lock.__enter__()
+    with ExitStack() as locks:
+        for path in owner_lock_paths(role):
+            locks.enter_context(exclusive_lock(path))
         try:
             initialize_market_store_fixture(role, release_sha)
             heartbeat = Heartbeat(role, mode, release_sha)
@@ -519,8 +529,7 @@ def run_service(role: str) -> int:
                     heartbeat.write()
             heartbeat.write(status="fixture-stopped")
         finally:
-            if session_lock is not None:
-                session_lock.__exit__(None, None, None)
+            stop.set()
     return 0
 
 
