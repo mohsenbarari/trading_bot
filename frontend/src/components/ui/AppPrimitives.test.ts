@@ -5,6 +5,7 @@ import { defineComponent, nextTick, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import {
   AppActionCard,
+  AppActionOverflow,
   AppBottomSheet,
   AppButton,
   AppDangerZone,
@@ -16,6 +17,7 @@ import {
   AppFilterChips,
   AppFormField,
   AppInput,
+  AppInsetGroup,
   AppListItem,
   AppLoadingState,
   AppMasterDetail,
@@ -796,5 +798,79 @@ describe('ui primitives', () => {
     expect(guardedDialog.emitted('close')).toBeUndefined()
     guardedDialog.unmount()
     await nextTick()
+  })
+
+  it('keeps grouped list rows, wrapped button labels, and a 16px page gutter', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/assets/main.css'), 'utf8')
+    expect(css).toMatch(/--ds-page-padding:\s*16px/)
+    expect(css).toMatch(/--ds-inset-group-radius:\s*12px/)
+    expect(css).not.toMatch(/--ds-page-padding:\s*14px/)
+    expect(css).toMatch(/\.ui-button\s*\{[\s\S]*?white-space:\s*normal/)
+    expect(css).toMatch(/\.ui-list-item\s*\{[\s\S]*?min-height:\s*var\(--ds-native-row-min-height/)
+    expect(css).not.toMatch(/\.ui-list-item--interactive:hover\s*\{[\s\S]*?transform:\s*translateY/)
+
+    const longLabel = 'کپی لینک تلگرام و بررسی دعوت باز مشتری'
+    const button = mount(AppButton, {
+      props: { block: true },
+      slots: { default: longLabel },
+    })
+    expect(button.classes()).toContain('ui-button--block')
+    expect(button.get('.ui-button__label').text()).toBe(longLabel)
+    expect(css).toMatch(/\.ui-button__label\s*\{[\s\S]*?overflow-wrap:\s*anywhere/)
+    button.unmount()
+
+    const grouped = mount(AppListItem, {
+      props: { title: 'حسن رضایی', interactive: true },
+    })
+    expect(grouped.classes()).toContain('ui-list-item--grouped')
+    expect(grouped.classes()).not.toContain('ui-list-item--card')
+    grouped.unmount()
+
+    const card = mount(AppListItem, {
+      props: { title: 'کارت جدا', variant: 'card' },
+    })
+    expect(card.classes()).toContain('ui-list-item--card')
+    card.unmount()
+  })
+
+  it('keeps inset groups off the page edge and overflow actions inside a menu', async () => {
+    const page = mount({
+      components: { AppInsetGroup, AppListItem },
+      template: `
+        <main class="ui-page" style="width: 390px">
+          <AppInsetGroup title="پروفایل">
+            <AppListItem title="پروفایل من" />
+            <AppListItem title="نشست‌های فعال" />
+          </AppInsetGroup>
+        </main>
+      `,
+    })
+    const group = page.get('.ui-inset-group')
+    expect(group.findAll('.ui-list-item')).toHaveLength(2)
+    expect(page.get('.ui-page').classes()).toContain('ui-page')
+    const css = readFileSync(resolve(process.cwd(), 'src/assets/main.css'), 'utf8')
+    expect(css).toMatch(/\.ui-page[\s\S]*?padding:[\s\S]*?var\(--ds-page-padding\)/)
+    expect(css).toMatch(/\.ui-inset-group__body\s*\{[\s\S]*?border-radius:\s*var\(--ds-inset-group-radius/)
+    page.unmount()
+
+    const overflow = mount(AppActionOverflow, {
+      props: {
+        actions: [
+          { id: 'copy-web', label: 'کپی لینک وب' },
+          { id: 'cancel', label: 'لغو دعوت', tone: 'danger' },
+        ],
+      },
+      slots: {
+        default: '<button type="button" class="ui-button">بررسی دعوت</button>',
+      },
+    })
+    expect(overflow.get('.ui-action-overflow__primary').text()).toContain('بررسی دعوت')
+    expect(overflow.find('.ui-action-overflow__panel').exists()).toBe(false)
+    await overflow.get('button[aria-label="بیشتر"]').trigger('click')
+    expect(overflow.find('[role="menu"]').exists()).toBe(true)
+    await overflow.get('button[role="menuitem"]').trigger('click')
+    expect(overflow.emitted('select')?.[0]).toEqual(['copy-web'])
+    expect(overflow.find('[role="menu"]').exists()).toBe(false)
+    overflow.unmount()
   })
 })

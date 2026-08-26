@@ -4,8 +4,10 @@ withDefaults(defineProps<{
   description?: string
   meta?: string
   interactive?: boolean
+  variant?: 'grouped' | 'card'
 }>(), {
   interactive: false,
+  variant: 'grouped',
 })
 
 const emit = defineEmits<{
@@ -18,7 +20,11 @@ const emit = defineEmits<{
     :is="interactive ? 'button' : 'article'"
     :type="interactive ? 'button' : undefined"
     class="ui-list-item"
-    :class="{ 'ui-list-item--interactive': interactive }"
+    :class="{
+      'ui-list-item--interactive': interactive,
+      'ui-list-item--card': variant === 'card',
+      'ui-list-item--grouped': variant === 'grouped',
+    }"
     @click="interactive && emit('select')"
   >
     <span v-if="$slots.leading" class="ui-list-item__leading" aria-hidden="true">

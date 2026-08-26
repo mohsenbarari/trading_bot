@@ -302,7 +302,7 @@ Gate:
 | فاز | وضعیت |
 |---|---|
 | ۰ قرارداد و ممیزی | complete |
-| ۱ foundation | pending |
+| ۱ foundation | implementation-complete |
 | ۲ پوسته | pending |
 | ۳ خانه | pending |
 | ۴ حساب | pending |

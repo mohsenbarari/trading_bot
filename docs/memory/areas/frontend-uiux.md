@@ -4,6 +4,7 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Decisions
 
+- 2026-08-26 | Phase 1 foundation: `AppInsetGroup` + grouped `AppListItem` (card is opt-in), wrapping `AppButton` labels, `AppActionOverflow`, and `--ds-page-padding` stays 16px at all widths. Figma language page not created this slice. No Market file changes.
 - 2026-08-26 | Native feel V2 process: commit only at phase end; start each phase from a clean worktree; review the staged diff so Market, backend, and unrelated dirty files stay out. `.cursor/settings.json` stays ignored; only `.cursor/rules` and `.cursor/skills` are tracked.
 - 2026-08-26 | Native feel V2 starts on `candidate/webapp-native-app-v2` from local `main` `951ca9f0`. Owner scores at kickoff: unification 80, simplification 70, native feel below 50. V1 receipts stay historical; this track owns remaining native-feel gaps (inset grouped lists, 16px gutters, button overflow, copy diet, immersive messenger). Roadmap: `docs/uiux-native-app-v2/ROADMAP.md`.
 - 2026-08-21 | Native standardization is on `main` at `428dd1a0`: 29 non-Market routes plus Messenger M01–M14 passed 167/167 browser cases, 13/13 Messenger, 8/8 boundary widths and 169/1962 tests. The identical 171-file frontend artifact is live on both staging roles; backend/bot were not restarted because inference publishing was off-hours `NO_ESTIMATED_COIN_RATES`. Production/Sites remain untouched.
