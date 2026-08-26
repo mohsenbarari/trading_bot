@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Run the disposable, network-none Docker gate for Stage 5 coin parsing."""
+"""Run the disposable, network-none Docker gate for Stage 5/6 parsing."""
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -32,6 +33,10 @@ UTC = timezone.utc
 
 class Stage5RehearsalError(RuntimeError):
     pass
+
+
+def stamp(value: datetime) -> str:
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def command(
@@ -109,6 +114,49 @@ def event(
     }
 
 
+def market_event(
+    sequence: int,
+    *,
+    source: str,
+    message_id: int,
+    text: str | None,
+    when: datetime | None,
+    available: datetime,
+    event_type: str = "message_created",
+    edited: datetime | None = None,
+) -> dict[str, Any]:
+    encoded = text.encode("utf-8") if text is not None else None
+    return {
+        "schema": "market_channel_event",
+        "schema_version": "1.0",
+        "event_id": f"70000000-0000-7000-8000-{sequence:012d}",
+        "event_type": event_type,
+        "source": {
+            "market": "coin_intelligence",
+            "source_id": source,
+            "source_family": (
+                "TELEGRAM_PRIVATE"
+                if source == "MELTED_PRIMARY_FLOW"
+                else "TELEGRAM_PUBLIC"
+            ),
+            "parser_profile": source,
+        },
+        "message": {
+            "message_id": str(message_id),
+            "published_at_utc": stamp(when) if when is not None else None,
+            "edited_at_utc": stamp(edited) if edited is not None else None,
+            "text": text,
+            "text_sha256": sha256(encoded).hexdigest() if encoded is not None else None,
+            "entities": [],
+            "is_forwarded": False,
+        },
+        "producer": {
+            "available_at_utc": stamp(available),
+            "is_backfill": False,
+        },
+    }
+
+
 def prepare_fixture(root: Path) -> tuple[Path, Path, Path, str]:
     state = root / "state"
     spool = root / "capture" / "account2"
@@ -171,6 +219,65 @@ def prepare_fixture(root: Path) -> tuple[Path, Path, Path, str]:
     os.chown(spool_file, 10001, 10001)
     os.chmod(spool_file, 0o600)
 
+    private_at = at - timedelta(minutes=4)
+    market_records = [
+        market_event(100, source="XAUUSD", message_id=100, text="4630.10", when=at, available=at + timedelta(seconds=1)),
+        market_event(101, source="XAUUSD", message_id=101, text="4631.20", when=at + timedelta(seconds=20), available=at + timedelta(seconds=21)),
+        market_event(102, source="USD_HERAT", message_id=102, text="هرات فردایی 185,200 خرید", when=at, available=at + timedelta(seconds=1)),
+        market_event(103, source="MELTED_AGGREGATE", message_id=103, text="#آبشده نقدی 80,000,000", when=at, available=at + timedelta(seconds=1)),
+        market_event(104, source="MELTED_FLOW", message_id=104, text="79,270,000 باحواله فروش", when=at, available=at + timedelta(seconds=1)),
+    ]
+    private_cases = (
+        (200, "95,000,000 فروش 10 تا بدون حواله", "95,000,000 فروش 10 تا بدون حواله باقی 6"),
+        (201, "95,100,000 فروش 10 تا بدون حواله", "95,100,000 فروش 10 تا بدون حواله ✅"),
+        (202, "95,200,000 فروش 10 تا بدون حواله", "96,200,000 فروش 10 تا بدون حواله باقی 6"),
+        (203, "95,300,000 فروش 10 تا بدون حواله", "95,300,000 فروش 10 تا بدون حواله باقی 0"),
+    )
+    for index, (message_id, original, revision) in enumerate(private_cases):
+        market_records.extend(
+            (
+                market_event(
+                    110 + index * 3,
+                    source="MELTED_PRIMARY_FLOW",
+                    message_id=message_id,
+                    text=original,
+                    when=private_at,
+                    available=private_at + timedelta(seconds=1),
+                ),
+                market_event(
+                    111 + index * 3,
+                    source="MELTED_PRIMARY_FLOW",
+                    message_id=message_id,
+                    text=revision,
+                    when=private_at,
+                    edited=private_at + timedelta(seconds=40),
+                    available=private_at + timedelta(seconds=41),
+                    event_type="message_edited",
+                ),
+            )
+        )
+    market_records.append(
+        market_event(
+            130,
+            source="MELTED_PRIMARY_FLOW",
+            message_id=200,
+            text=None,
+            when=None,
+            available=private_at + timedelta(seconds=100),
+            event_type="message_deleted",
+        )
+    )
+    market_spool_file = market_spool / f"events-{at.date().isoformat()}.jsonl"
+    market_spool_file.write_text(
+        "".join(
+            json.dumps(item, ensure_ascii=False) + "\n"
+            for item in market_records
+        ),
+        encoding="utf-8",
+    )
+    os.chown(market_spool_file, 10001, 10001)
+    os.chmod(market_spool_file, 0o400)
+
     feedback = calibration / "review-decisions.sqlite3"
     ensure_coin_group_feedback_store(feedback)
     prediction = calibration / "prediction-ledger.sqlite3"
@@ -189,9 +296,6 @@ def prepare_fixture(root: Path) -> tuple[Path, Path, Path, str]:
             )
             """
         )
-        def stamp(value: datetime) -> str:
-            return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
-
         connection.executemany(
             "INSERT INTO coin_estimate_predictions VALUES(?,?,?,?,?,?,?)",
             [
@@ -293,6 +397,8 @@ def inspect_result(root: Path) -> dict[str, Any]:
     health = json.loads((role_state / "health.json").read_text(encoding="utf-8"))
     market = sqlite3.connect(role_state / "shadow-market.sqlite3")
     market.row_factory = sqlite3.Row
+    staging = sqlite3.connect(role_state / "capture-staging.sqlite3")
+    staging.row_factory = sqlite3.Row
     try:
         rows = market.execute(
             "SELECT source_code,event_type,instrument,price_value,quality_state,"
@@ -300,29 +406,72 @@ def inspect_result(root: Path) -> dict[str, Any]:
             "ORDER BY source_code,event_type,instrument"
         ).fetchall()
         integrity = market.execute("PRAGMA integrity_check").fetchone()[0]
+        staging_integrity = staging.execute("PRAGMA integrity_check").fetchone()[0]
+        outcomes = {
+            str(row["status"]): int(row["total"])
+            for row in staging.execute(
+                "SELECT status,COUNT(*) AS total "
+                "FROM capture_primary_trade_outcomes GROUP BY status"
+            ).fetchall()
+        }
+        outcome_columns = {
+            str(row["name"])
+            for row in staging.execute(
+                "PRAGMA table_info(capture_primary_trade_outcomes)"
+            ).fetchall()
+        }
     finally:
+        staging.close()
         market.close()
     eligible = [row for row in rows if row["quality_state"] == "ELIGIBLE"]
-    if integrity != "ok" or len(eligible) != 4:
+    group_eligible = [row for row in eligible if row["source_code"] in {"GROUP_1", "GROUP_2"}]
+    if integrity != "ok" or staging_integrity != "ok" or len(group_eligible) != 4:
         raise Stage5RehearsalError("market_projection_gate_failed")
     if not any(
         row["source_code"] == "GROUP_2"
         and row["instrument"] == "COIN_ONE_GRAM"
-        for row in eligible
+        for row in group_eligible
     ):
         raise Stage5RehearsalError("temporal_instrument_resolution_failed")
-    trades = [row for row in eligible if row["event_type"] == "TRADE"]
+    trades = [row for row in group_eligible if row["event_type"] == "TRADE"]
     if len(trades) != 1 or trades[0]["price_value"] != "189900":
         raise Stage5RehearsalError("exact_reply_branch_trade_failed")
     if any("امام فروش" in str(row["attributes_json"]) for row in rows):
         raise Stage5RehearsalError("raw_text_leaked_to_market_store")
+    xau = [row for row in eligible if row["source_code"] == "XAUUSD"]
+    if len(xau) != 2:
+        raise Stage5RehearsalError("xau_event_compaction_detected")
+    if outcomes != {"AMBIGUOUS": 1, "FULL": 1, "NONE": 1, "PARTIAL": 1}:
+        raise Stage5RehearsalError("private_gold_lifecycle_gate_failed")
+    private = [row for row in eligible if row["source_code"] == "PRIVATE_GOLD_CHANNEL"]
+    if len([row for row in private if row["event_type"] == "OFFER"]) != 4:
+        raise Stage5RehearsalError("private_gold_offer_gate_failed")
+    if len([row for row in private if row["event_type"] == "TRADE"]) != 2:
+        raise Stage5RehearsalError("private_gold_trade_gate_failed")
+    if {"final_price", "final_quantity"} & outcome_columns:
+        raise Stage5RehearsalError("private_gold_final_fields_forbidden")
+    if set(health["sources"]) != {
+        "GROUP_1",
+        "GROUP_2",
+        "MELTED_PRIMARY_FLOW",
+        "MELTED_AGGREGATE",
+        "MELTED_FLOW",
+        "USD_HERAT",
+        "XAUUSD",
+    }:
+        raise Stage5RehearsalError("processor_source_inventory_gate_failed")
     return {
         "facts": len(rows),
         "eligible": len(eligible),
         "trades": len(trades),
         "pending_or_rejected": len(rows) - len(eligible),
-        "integrity": integrity,
+        "integrity": {"market": integrity, "staging": staging_integrity},
         "parser_version": health["parser_version"],
+        "public_parser_version": health["public_parser_version"],
+        "private_gold_parser_version": health["private_gold_parser_version"],
+        "private_gold_trade_version": health["private_gold_trade_version"],
+        "private_gold_outcomes": outcomes,
+        "xau_events": len(xau),
         "anchors": health["last_projection_causal_inputs"]["anchors"],
     }
 
@@ -375,7 +524,9 @@ def run_rehearsal() -> dict[str, Any]:
         first_health = json.loads(
             (root / "state/market-processor/health.json").read_text(encoding="utf-8")
         )
-        if first_health["counters"]["records"] != 5:
+        if first_health["counters"]["records"] != 19 or first_health["counters"][
+            "stream_records"
+        ] != {"coin": 5, "market": 14}:
             raise Stage5RehearsalError("partial_tail_cursor_gate_failed")
         with spool_file.open("a", encoding="utf-8") as stream:
             stream.write(partial_line[50:] + "\n")
@@ -383,13 +534,17 @@ def run_rehearsal() -> dict[str, Any]:
         second_health = json.loads(
             (root / "state/market-processor/health.json").read_text(encoding="utf-8")
         )
-        if second_health["counters"]["records"] != 1:
+        if second_health["counters"]["records"] != 1 or second_health["counters"][
+            "stream_records"
+        ] != {"coin": 1, "market": 0}:
             raise Stage5RehearsalError("partial_tail_resume_gate_failed")
         docker_run(image, release_sha, root, mode="live", oneshot=True)
         replay_health = json.loads(
             (root / "state/market-processor/health.json").read_text(encoding="utf-8")
         )
-        if replay_health["counters"]["records"] != 0:
+        if replay_health["counters"]["records"] != 0 or replay_health["counters"][
+            "stream_records"
+        ] != {"coin": 0, "market": 0}:
             raise Stage5RehearsalError("replay_idempotency_gate_failed")
         inspected = inspect_result(root)
 
