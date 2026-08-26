@@ -1,6 +1,6 @@
 # Roadmap انتقال داده و Parse بازار روی شبکه خصوصی
 
-وضعیت: مراحل 0 تا 2 تکمیل شده‌اند؛ مرحله 3 هنوز آغاز نشده و cutover انجام نشده است
+وضعیت: مراحل 0 تا 3 تکمیل شده‌اند؛ مرحله 4 هنوز آغاز نشده و cutover انجام نشده است
 
 تاریخ بازبینی: 2026-08-26
 
@@ -531,6 +531,20 @@ Gate:
 - deploy و rollback rehearsal بدون data deletion موفق است؛
 - legacy host service هنوز authority اصلی و بدون تداخل است.
 
+نتیجه اجرا در 2026-08-26:
+
+- image مستقل pipeline روی Python 3.11 slim Bookworm با base/frontend digest و dependency hash ثابت ساخته شد؛
+- دو build بدون cache از commit یکسان byte-identical شدند و OCI revision با Git SHA تطبیق داده شد؛
+- Compose پایه و override مستقل وب/داده و بات، به‌ترتیب هفت و چهار service، بدون port اضافی تثبیت شد؛
+- تمام runtimeها non-root، read-only، بدون capability و با restart/log/resource محدود هستند؛
+- secretها فقط از file mount با parent `root:root 0700` و فایل `root:10001 0440` خوانده می‌شوند؛ PostgreSQL فقط supplemental group لازم را دارد؛
+- migration مستقل 22 جدولی و اجرای دوم no-op، ACK/replay fixture، snapshot اتمیک، recreate state و rollback image پاس شد؛
+- مالک دوم Telegram session و writer دوم SQLite حتی با state path متفاوت روی resource مشترک fail-closed شدند؛
+- filesystem/history secret scan سبز و cleanup container/network/image/temp کامل بود؛
+- `MARKET_PIPELINE_MODE=live` عمداً تا مراحل بعدی با exit 78 مسدود است؛ هیچ deploy، owner switch یا دست‌کاری runtime زنده انجام نشد.
+
+گزارش و gate receipt: [COIN_MARKET_DATA_STAGE3_DOCKER_FOUNDATION.md](./COIN_MARKET_DATA_STAGE3_DOCKER_FOUNDATION.md)
+
 ### مرحله 4 — Capture پایدار و retention
 
 اقدامات:
@@ -981,7 +995,7 @@ Rollback هرگز capture یا archive وب را خاموش نمی‌کند. ت�
 6. rollback window برابر هفت روز کامل بازار باز است؛
 7. Telegram identity و متن خام منتخب فقط رمز‌شده روی وب، با decrypt محدود و قابل ممیزی برای reviewer/admin نگهداری می‌شوند.
 
-یک تصمیم اجرایی عمداً در gate مرحله 3 باقی مانده است: runtime کاندید Python 3.11 slim Bookworm و PostgreSQL 15 Alpine هستند، اما digest نهایی و dependency lock فقط پس از build، secret scan، benchmark اندازه/build-time و آزمون compatibility pin می‌شوند.
+تصمیم image در مرحله 3 بسته شد: baseهای Python 3.11 slim Bookworm، Dockerfile frontend و PostgreSQL 15 Alpine با digest ثابت و dependencyهای Stage 3 با version/hash قفل شدند. application image برای هر release از commit تمیز و `SOURCE_DATE_EPOCH` همان commit ساخته می‌شود و manifest digest نهایی هنگام انتشار همان release روی هر دو میزبان pin و تطبیق داده خواهد شد.
 
 جزئیات و شواهد: [COIN_MARKET_DATA_STAGE2_CONTRACT_STORAGE.md](./COIN_MARKET_DATA_STAGE2_CONTRACT_STORAGE.md)
 
