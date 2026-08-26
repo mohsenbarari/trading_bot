@@ -1,8 +1,8 @@
 # Roadmap انتقال داده و Parse بازار روی شبکه خصوصی
 
-وضعیت: مرحله 0 تکمیل شده؛ مرحله 1 هنوز آغاز نشده و cutover انجام نشده است
+وضعیت: مرحله 0 تکمیل شده؛ مرحله 1 در حال اجرا و شبکه خصوصی provider ساخته شده است؛ cutover انجام نشده است
 
-تاریخ بازبینی: 2026-08-25
+تاریخ بازبینی: 2026-08-26
 
 مبنای بازنگری Docker: `main@315f7e6a`
 
@@ -445,6 +445,19 @@ Gate:
 - health probe و authentication موفق؛
 - rollback شبکه مستند و آزمایش‌شده؛
 - هیچ sync عمومی هنوز تغییر نکرده است.
+
+نتیجه زیرمرحله provider network در 2026-08-26:
+
+- هر دو میزبان به‌عنوان Hetzner Cloud Server در `hel1-dc2` تأیید شدند؛ vSwitch لازم نبود؛
+- Network با نام `trading-bot-market-private`، بازه `10.240.0.0/16` و subnet نوع `cloud` با بازه `10.240.1.0/24` در `eu-central` ساخته شد؛
+- IP ثابت خصوصی میزبان بات `10.240.1.10` و میزبان وب/داده `10.240.1.20` است؛
+- هر دو رابط `enp7s0` به‌صورت خودکار با MTU برابر 1450 و prefix برابر `/32` بالا آمدند؛
+- ping دوطرفه پنج‌تایی با packet loss صفر موفق شد؛ میانگین RTT مشاهده‌شده حدود 1.42ms در مسیر بات به وب و 0.48ms در مسیر وب به بات بود؛
+- اتصال TCP از وب به SSH بات موفق بود؛ SSH وب عمداً روی IP خصوصی listen نمی‌کند و هیچ bind یا firewallی برای آن تغییر نکرد؛
+- delete protection خود Hetzner برای Network فعال شد؛
+- هیچ endpoint داده، route اضافه، public fallback، firewall rule، certificate، service یا sync عمومی در این زیرمرحله تغییر نکرد.
+
+موارد باقی‌مانده برای عبور از gate مرحله 1: endpoint خصوصی آزمایشی، HMAC/TLS و rotation، آزمون throughput/reconnect/packet-loss/clock-skew، policy دقیق firewall و rollback rehearsal.
 
 ### مرحله 2 — تثبیت contract، schema و storage engine
 
