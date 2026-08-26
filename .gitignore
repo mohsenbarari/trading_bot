@@ -82,6 +82,10 @@ frontend/node_modules/
 !.cursor/skills/**
 !.cursor/rules/
 !.cursor/rules/**
+!.cursor/environment.json
+!.cursor/install.sh
+!.cursor/start.sh
+!.cursor/dev.env.example
 # IDE specific files
 mini_app_dist/
 mini_app_dist_staging/
