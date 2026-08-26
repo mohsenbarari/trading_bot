@@ -49,8 +49,18 @@ class MarketPipelineStage3RehearsalTests(unittest.TestCase):
             )
         self.assertIn("market-fact-receiver:absent", summary)
         self.assertTrue(
-            all("logs" not in call.args[0][0] for call in runner.call_args_list)
+            all("logs" not in call.args[0] for call in runner.call_args_list)
         )
+
+    def test_image_secret_scan_fails_closed_on_invalid_scanner_output(self):
+        invalid = rehearsal.subprocess.CompletedProcess(
+            ["docker"], 0, stdout="not-json", stderr=""
+        )
+        with patch.object(rehearsal, "command", return_value=invalid):
+            with self.assertRaisesRegex(
+                rehearsal.RehearsalError, "scan_output_invalid"
+            ):
+                rehearsal.image_secret_scan("fixture-image")
 
 
 if __name__ == "__main__":

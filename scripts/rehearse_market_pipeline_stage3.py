@@ -226,6 +226,96 @@ def image_id(tag: str) -> str:
     ).stdout.strip()
 
 
+def image_secret_scan(image: str) -> dict[str, Any]:
+    scanner = r"""
+import json
+from pathlib import Path
+import re
+
+roots = (Path('/app'),)
+bad_names = []
+bad_content = []
+patterns = (
+    re.compile(rb'-----BEGIN [A-Z ]*PRIVATE KEY-----'),
+    re.compile(rb'(?<![A-Za-z0-9_])[0-9]{8,12}:[A-Za-z0-9_-]{30,}(?![A-Za-z0-9_])'),
+    re.compile(rb'(?<![A-Za-z0-9_])(?:sk-|hcloud_)[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_])'),
+)
+for root in roots:
+    for path in root.rglob('*'):
+        if not path.is_file() or path.is_symlink():
+            continue
+        lowered = path.name.lower()
+        if lowered.startswith('.env') or lowered.endswith(('.session', '.pem', '.key')):
+            bad_names.append(str(path))
+        if path.stat().st_size <= 2 * 1024 * 1024:
+            payload = path.read_bytes()
+            if any(pattern.search(payload) for pattern in patterns):
+                bad_content.append(str(path))
+print(json.dumps({'bad_name_count': len(bad_names), 'bad_content_count': len(bad_content)}))
+raise SystemExit(3 if bad_names or bad_content else 0)
+"""
+    scan = command(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--read-only",
+            "--entrypoint",
+            "python",
+            image,
+            "-c",
+            scanner,
+        ],
+        label="image_secret_scan",
+        check=False,
+    )
+    try:
+        result = json.loads(scan.stdout)
+    except json.JSONDecodeError as exc:
+        raise RehearsalError("image_secret_scan_output_invalid") from exc
+    if scan.returncode or result != {"bad_name_count": 0, "bad_content_count": 0}:
+        raise RehearsalError("image_secret_scan_failed")
+    history = command(
+        [
+            "docker",
+            "history",
+            "--no-trunc",
+            "--format",
+            "{{.CreatedBy}}",
+            image,
+        ],
+        label="image_history_scan",
+    ).stdout.encode("utf-8")
+    history_patterns = (
+        re.compile(rb'-----BEGIN [A-Z ]*PRIVATE KEY-----'),
+        re.compile(rb'(?<![A-Za-z0-9_])[0-9]{8,12}:[A-Za-z0-9_-]{30,}(?![A-Za-z0-9_])'),
+    )
+    if any(pattern.search(history) for pattern in history_patterns):
+        raise RehearsalError("image_history_secret_scan_failed")
+    runtime_version = command(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--read-only",
+            "--entrypoint",
+            "python",
+            image,
+            "--version",
+        ],
+        label="image_runtime_version",
+    ).stdout.strip()
+    return {
+        "filesystem_secret_scan": "pass",
+        "history_secret_scan": "pass",
+        "runtime_version": runtime_version,
+    }
+
+
 def render(role: str, project: str, environment: Mapping[str, str]) -> dict[str, Any]:
     output = command(
         [*compose(role, project), "config", "--format", "json"],
@@ -483,6 +573,7 @@ def run_rehearsal() -> dict[str, Any]:
             raise RehearsalError("rollback_fixture_image_not_distinct")
 
         metadata = image_metadata(candidate, release_sha, fixture=True)
+        security_scan = image_secret_scan(candidate)
         environment = fixture_environment(
             temporary,
             project=project,
@@ -597,6 +688,8 @@ def run_rehearsal() -> dict[str, Any]:
                 "rollback_fixture_id": rollback_id,
                 "same_source_reproducible": True,
                 "source_date_epoch": source_epoch,
+                "size_mib": round(metadata["size_bytes"] / (1024 * 1024), 3),
+                **security_scan,
                 "first_build_seconds": round(first_build, 3),
                 "repeat_build_seconds": round(repeat_build, 3),
                 "rollback_build_seconds": round(rollback_build, 3),

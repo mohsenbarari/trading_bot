@@ -337,6 +337,7 @@ def image_metadata(image: str, release_sha: str, *, fixture: bool) -> dict[str, 
         raise Stage3Error("image_environment_contains_secret")
     return {
         "image_id": document.get("Id"),
+        "size_bytes": int(document.get("Size") or 0),
         "repo_digests": sorted(document.get("RepoDigests") or []),
         "platform": f"{document.get('Os')}/{document.get('Architecture')}",
         "revision": labels.get("org.opencontainers.image.revision"),
