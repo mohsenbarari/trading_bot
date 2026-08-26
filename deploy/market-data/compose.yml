@@ -1,0 +1,61 @@
+name: ${MARKET_PIPELINE_PROJECT_NAME:-market-private-pipeline}
+
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: ${MARKET_LOG_MAX_SIZE:-10m}
+    max-file: ${MARKET_LOG_MAX_FILE:-5}
+
+x-runtime-environment: &runtime-environment
+  TZ: UTC
+  MARKET_PIPELINE_MODE: ${MARKET_PIPELINE_MODE:-disabled}
+  MARKET_PIPELINE_RELEASE_SHA: ${MARKET_PIPELINE_RELEASE_SHA:?MARKET_PIPELINE_RELEASE_SHA is required}
+  MARKET_PIPELINE_STATE_ROOT: /var/lib/market-data/state
+  MARKET_HEALTH_MAX_AGE_SECONDS: ${MARKET_HEALTH_MAX_AGE_SECONDS:-30}
+
+services:
+  market-runtime-base:
+    image: ${MARKET_PIPELINE_IMAGE:?MARKET_PIPELINE_IMAGE must be an immutable release image}
+    profiles: [foundation-template]
+    user: "10001:10001"
+    read_only: true
+    init: true
+    restart: "on-failure:5"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 384m
+    cpus: 1.0
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    logging: *default-logging
+    environment: *runtime-environment
+
+  market-postgres-base:
+    image: postgres:15-alpine@sha256:fe0737ba566a2c5b2a28f34433c0a423261900ec17b9bf7ad115e1aae7e57f1b
+    profiles: [foundation-template]
+    user: "70:70"
+    read_only: true
+    restart: "on-failure:5"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 1g
+    cpus: 2.0
+    shm_size: 256m
+    tmpfs:
+      - /tmp:size=32m,mode=1777,noexec,nosuid,nodev
+      - /var/run/postgresql:size=8m,uid=70,gid=70,mode=0770,nosuid,nodev
+    logging: *default-logging
+
+networks:
+  market-backend:
+    internal: true
+  market-bot-internal:
+    internal: true
+  market-transport:
+    driver: bridge

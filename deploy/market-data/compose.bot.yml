@@ -1,0 +1,139 @@
+services:
+  market-fact-receiver:
+    extends:
+      file: compose.yml
+      service: market-runtime-base
+    profiles: [bot]
+    command: [service, --role, market-fact-receiver]
+    environment:
+      MARKET_PIPELINE_LISTEN_HOST: 0.0.0.0
+      MARKET_PIPELINE_LISTEN_PORT: "9443"
+    secrets:
+      - market_transport_ca
+      - market_bot_transport_cert
+      - market_bot_transport_key
+      - market_hmac_active
+      - market_hmac_previous
+    volumes:
+      - type: bind
+        source: ${MARKET_BOT_DATA_ROOT:?MARKET_BOT_DATA_ROOT is required}/state/market-fact-receiver
+        target: /var/lib/market-data/state
+    ports:
+      - name: market-fact-private
+        target: 9443
+        published: ${MARKET_BOT_FACT_RECEIVER_PORT:-9443}
+        host_ip: ${MARKET_PRIVATE_BIND_IP:?MARKET_PRIVATE_BIND_IP is required}
+        protocol: tcp
+    healthcheck:
+      test: [CMD, python, -m, core.market_intelligence.private_pipeline_foundation, healthcheck, --role, market-fact-receiver]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - market-transport
+
+  market-store-adapter:
+    extends:
+      file: compose.yml
+      service: market-runtime-base
+    profiles: [bot]
+    command: [service, --role, market-store-adapter]
+    environment:
+      MARKET_PIPELINE_MARKET_STORE_PATH: /var/lib/market-data/market-store/market-store.sqlite
+    volumes:
+      - type: bind
+        source: ${MARKET_BOT_DATA_ROOT:?MARKET_BOT_DATA_ROOT is required}/state/market-store-adapter
+        target: /var/lib/market-data/state
+      - type: bind
+        source: ${MARKET_BOT_DATA_ROOT:?MARKET_BOT_DATA_ROOT is required}/market-store
+        target: /var/lib/market-data/market-store
+    depends_on:
+      market-fact-receiver:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -m, core.market_intelligence.private_pipeline_foundation, healthcheck, --role, market-store-adapter]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - market-bot-internal
+
+  coin-estimator:
+    extends:
+      file: compose.yml
+      service: market-runtime-base
+    profiles: [bot]
+    command: [service, --role, coin-estimator]
+    volumes:
+      - type: bind
+        source: ${MARKET_BOT_DATA_ROOT:?MARKET_BOT_DATA_ROOT is required}/state/coin-estimator
+        target: /var/lib/market-data/state
+      - type: bind
+        source: ${MARKET_BOT_DATA_ROOT:?MARKET_BOT_DATA_ROOT is required}/market-store
+        target: /var/lib/market-data/market-store
+        read_only: true
+      - type: bind
+        source: ${MARKET_BOT_DATA_ROOT:?MARKET_BOT_DATA_ROOT is required}/models
+        target: /var/lib/market-data/models
+        read_only: true
+      - type: bind
+        source: ${MARKET_BOT_DATA_ROOT:?MARKET_BOT_DATA_ROOT is required}/snapshots
+        target: /var/lib/market-data/snapshots
+    depends_on:
+      market-store-adapter:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -m, core.market_intelligence.private_pipeline_foundation, healthcheck, --role, coin-estimator]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - market-bot-internal
+
+  estimator-snapshot-sender:
+    extends:
+      file: compose.yml
+      service: market-runtime-base
+    profiles: [bot]
+    command: [service, --role, estimator-snapshot-sender]
+    secrets:
+      - market_transport_ca
+      - market_bot_transport_cert
+      - market_bot_transport_key
+      - market_hmac_active
+      - market_hmac_previous
+    volumes:
+      - type: bind
+        source: ${MARKET_BOT_DATA_ROOT:?MARKET_BOT_DATA_ROOT is required}/state/estimator-snapshot-sender
+        target: /var/lib/market-data/state
+      - type: bind
+        source: ${MARKET_BOT_DATA_ROOT:?MARKET_BOT_DATA_ROOT is required}/snapshots
+        target: /var/lib/market-data/snapshots
+        read_only: true
+    depends_on:
+      coin-estimator:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -m, core.market_intelligence.private_pipeline_foundation, healthcheck, --role, estimator-snapshot-sender]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - market-bot-internal
+      - market-transport
+
+secrets:
+  market_transport_ca:
+    file: ${MARKET_TRANSPORT_CA_FILE:?MARKET_TRANSPORT_CA_FILE is required}
+  market_bot_transport_cert:
+    file: ${MARKET_BOT_TRANSPORT_CERT_FILE:?MARKET_BOT_TRANSPORT_CERT_FILE is required}
+  market_bot_transport_key:
+    file: ${MARKET_BOT_TRANSPORT_KEY_FILE:?MARKET_BOT_TRANSPORT_KEY_FILE is required}
+  market_hmac_active:
+    file: ${MARKET_HMAC_ACTIVE_FILE:?MARKET_HMAC_ACTIVE_FILE is required}
+  market_hmac_previous:
+    file: ${MARKET_HMAC_PREVIOUS_FILE:?MARKET_HMAC_PREVIOUS_FILE is required}

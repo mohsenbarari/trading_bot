@@ -54,7 +54,13 @@ def run(output: Path, *, write: bool) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--write", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--write", action="store_true")
+    mode.add_argument(
+        "--check",
+        action="store_true",
+        help="verify current schemas (the default; provided for explicit CI use)",
+    )
     args = parser.parse_args(argv)
     return run(args.output.resolve(), write=args.write)
 
