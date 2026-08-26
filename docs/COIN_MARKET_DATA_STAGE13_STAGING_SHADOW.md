@@ -118,6 +118,65 @@ immutable را بعد از capture به دو projection ایزوله و version-
 capture نیز با manifest و reconciliation مستقل سنجیده می‌شود؛ برای ساخت lane دوم هرگز session
 تلگرام دوم یا owner هم‌زمان ایجاد نمی‌شود.
 
+## هارنس parity تک‌مالک
+
+برای ادامه ممیزی بدون ساخت Telegram owner دوم، هارنس
+`scripts/rehearse_market_single_owner_parity_stage13.py` اضافه شد. قرارداد آن
+`market_single_owner_parity/1.0` و mode آن `SINGLE_OWNER_FROZEN_REPLAY` است. این هارنس:
+
+1. lock موجود writer قدیمی را بدون ساخت یا جایگزینی lock می‌گیرد و از Market Store و
+   staging DB با SQLite online backup یک seed سازگار می‌سازد؛ capture زنده جدید در این مدت
+   متوقف نمی‌شود؛
+2. اندازه، inode و device هر فایل spool را هنگام بازکردن ثبت و دقیقاً همان prefix را در
+   scratch با mode محافظت‌شده freeze می‌کند؛ append بعدی وارد این اجرا نمی‌شود و partial
+   tail به اجرای بعد موکول می‌شود؛
+3. هر رکورد کامل خراب، contract نامعتبر، truncation، قفل اشغال، خطای backup/ingest/snapshot
+   یا پاک‌نشدن scratch را fail-closed می‌کند و artifact ناقص باقی نمی‌گذارد؛
+4. دو کپی یکسان seed و capture freeze را با Python code rootهای baseline و candidate
+   version-pinned و در laneهای کاملاً جدا replay می‌کند؛ هیچ network call، session تلگرام،
+   product feed یا runtime state مشترک ساخته نمی‌شود؛
+5. final Market Storeهای دو lane را روی event keyهای HMACشده از نظر missing/added، unit،
+   lifecycle و semantics parser مقایسه و snapshot/rate را در یک timestamp هم‌تراز می‌سازد؛
+6. فقط `report.json` امضاشده و `capture-manifest.json` privacy-minimized را با mode `0600`
+   در artifact directory با mode `0700` حفظ می‌کند. متن خام، شناسه پیام، sender، event ID
+   مستقیم، قیمت/تعداد اختلاف و database/spool موقت در خروجی ماندگار نمی‌ماند؛
+7. کلید identity و signing را فقط از فایل root-only با mode `0400` یا `0600` می‌خواند؛
+   انتقال secret در argv ممنوع است.
+
+حذف scratch به معنی حذف مسیرهای filesystem پس از اجراست و ادعای forensic erase روی
+SSD ندارد؛ به همین دلیل scratch باید فقط روی storage کنترل‌شده میزبان قرار گیرد و هیچ backup
+یا sync خودکاری آن را پوشش ندهد.
+
+پنجره اجرای این rehearsal حداکثر ۲۵ دقیقه اخیر است تا مرز backlog سی‌دقیقه‌ای ingester
+بین دو process جابه‌جا نشود. همه factهای نهایی دو clone مقایسه می‌شوند، نه فقط factهایی که
+`available_at` آن‌ها داخل پنجره است؛ بنابراین edit/delete یک پیام قدیمی نیز از مقایسه حذف
+نمی‌شود. زمان snapshot پس از پایان هر دو replay یکسان تثبیت می‌شود.
+
+نمونه اجرا، بدون درج مقدار secret:
+
+```bash
+python3 scripts/rehearse_market_single_owner_parity_stage13.py run \
+  --baseline-code-root /srv/coin-intelligence-shadow/app \
+  --candidate-code-root /srv/trading-bot/market-pipeline-releases/COMMIT_SHA \
+  --baseline-market-store /srv/coin-intelligence-shadow/runtime/live/market/market.sqlite3 \
+  --baseline-staging-store /srv/coin-intelligence-shadow/runtime/live/staging/capture.sqlite3 \
+  --baseline-writer-lock /srv/coin-intelligence-shadow/runtime/live/run/market-writer.lock \
+  --market-spool-dir /srv/trading-bot/market-data-staging-shadow/capture/account1 \
+  --coin-spool-dir /srv/trading-bot/market-data-staging-shadow/capture/account2 \
+  --scratch-root /srv/trading-bot/market-data-staging-shadow/tmp \
+  --artifact-dir /srv/trading-bot/market-data-staging-shadow/backups-staging/stage13-single-owner-parity-COMMIT_SHA \
+  --identity-key-file ROOT_ONLY_HMAC_KEY_FILE \
+  --signing-key-file ROOT_ONLY_SIGNING_KEY_FILE \
+  --signing-key-id stage13-staging:COMMIT_SHA \
+  --window-start UTC_START --window-end UTC_END \
+  --acknowledge-no-cutover --confirm-sensitive-ephemeral-copy
+```
+
+این evidence عمداً `snapshot_timeline_complete=false`، `full_market_session=false` و
+`promotion_recommendation=HOLD_STAGE12_LIVE_PARITY_REQUIRED` ثبت می‌کند. حتی در صورت صفر
+بودن تمام اختلاف‌ها، به‌تنهایی مجوز `PRIVATE_PRIMARY` نیست؛ timeline واقعی، جلسه کامل بازار
+باز و gate زنده Stage 12 همچنان لازم است.
+
 ## failure drill و اصلاحات حین استقرار
 
 - قطع ۱۲ ثانیه‌ای Fact receiver باعث backlog موقت ۳۳تایی شد؛ پس از بازگشت، صف بدون
