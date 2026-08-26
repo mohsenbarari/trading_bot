@@ -916,6 +916,20 @@ Gate:
 - promotion recommendation صریح؛
 - rollback rehearsal موفق.
 
+نتیجه پیاده‌سازی و گیت offline در 2026-08-26:
+
+- collector فقط‌خواندنی و report امضاشده برای مقایسه capture/fact/feature/estimator/timing
+  ساخته شد و اختلاف را در هفت دسته مصوب طبقه‌بندی می‌کند؛ parser/lifecycle بدون label
+  انسانی تاییدشده قابل پذیرش نیست؛
+- replay برابر ۱۰۰۰ event در هر lane، صفر loss/duplicate/gap، برابری XAU/USDT، صفر
+  same-input estimator mismatch و p95 برابر ۵٫۸ ثانیه را ثبت کرد؛
+- ماتریس منفی، HMAC/tamper، ۲۸ آزمون متمرکز و گیت کامل Docker/rollback/cleanup پاس شد؛
+- این نتیجه جای جلسه واقعی بازار باز را نمی‌گیرد. هیچ deploy/cutover انجام نشد و توصیه رسمی
+  `HOLD_LIVE_OPEN_MARKET_REQUIRED` است؛ تکمیل Stage 12 به مجوز استقرار shadow و live soak
+  وابسته است.
+
+گزارش و gate receipt: [COIN_MARKET_DATA_STAGE12_SHADOW_PARITY.md](./COIN_MARKET_DATA_STAGE12_SHADOW_PARITY.md)
+
 ### مرحله 13 — Cutover staging
 
 ترتیب:

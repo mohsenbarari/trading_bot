@@ -9,8 +9,9 @@
 - Stage 4 has SQLite FULL/fsynced capture per account, 3d retention, 30m channel/6h group reconciliation, 2h reply ancestors and parser-independent flow. Live needs a release-bound session marker.
 - Stages 5–6 consume Telegram spools separately with calibration sidecars. XAU keeps every quote; public melted is transient. Private offer/outcome stay separate; expiry deletion is not economic retraction.
 - Stage 7 adds durable Wallex/PAXG capture. Decimal ledgers reuse sample sets; 180s/600s features are on-demand. Direct XAU wins; PAXG is guarded proxy.
-- Stage 8 separates logical source sequence from revision delivery order. Atomic PostgreSQL outbox plus mTLS/HMAC apply, contiguous ACK and bounded repair are Product-Sync-independent; the 1,000-fact loss/replay/down gate passed.
-- Stage 9 atomically maps with unit/magnitude/time guards, revision projections and checkpoints. Feed modes are explicit; rollback keeps capture. Bad mappings isolate; storage/sequence fail closed. Herat keeps trade dimensions.
-- Stage 10 returns per-lane snapshots over private mTLS/HMAC with monotonic version/hash ACK. Pending publish, lost ACK and web apply are durable/idempotent; the exact model web view carries timing/point/mean/fallback trace and goes stale on route loss. No authority changed.
-- Stage 11 history import is source-batched, hash-reconciled and idempotent; revisions are ordered and incompatible rows quarantine digest-only while storage failures fail closed. Selected raw/actors must already be encrypted on web; bot seeds facts only. Real import needs backup and cutover authorization.
+- Stage 8 separates logical from delivery sequence; atomic outbox, contiguous ACK and bounded repair stay independent of Product Sync.
+- Stage 9 maps atomically with unit/magnitude/time guards, revision projections and explicit feed modes. Bad mappings isolate; storage/sequence fail closed; rollback keeps capture.
+- Stage 10 returns monotonic per-lane snapshots with durable pending/ACK/web apply. The exact web view carries timing/point/mean/fallback trace and becomes stale on route loss.
+- History import is batch-hashed/idempotent with ordered revisions and digest-only quarantine; storage fails closed. Raw/actors are encrypted on web, bot seeds facts only, and real import needs backup/cutover authorization.
+- Stage 12 parity evidence is redacted, hashed/HMAC-signed and classifies capture/parser/lifecycle/unit/timing/transport/estimator drift. Parser drift needs approved labels; offline replay can never replace the live open-market gate.
 - Account 2 cutover reuses sender HMAC; rotation would split reply identity. Host/container session overlap is forbidden.
