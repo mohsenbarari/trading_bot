@@ -405,6 +405,99 @@ class Stage9AdapterTests(unittest.TestCase):
         self.assertEqual((rollback.primary_store, rollback.shadow_store), (legacy, None))
         self.assertTrue(rollback.private_capture_continues)
 
+    def test_large_inbox_selection_is_bounded_and_causal_per_stream(self):
+        xau_stream = "market.fact.xauusd"
+        usdt_stream = "market.fact.wallex-usdt"
+        xau_1 = _fact(
+            101,
+            source_code="XAUUSD",
+            stream_id=xau_stream,
+            source_sequence=1,
+            payload={
+                "kind": "EXTERNAL_QUOTE",
+                "instrument": "XAUUSD",
+                "quote_kind": "MID",
+                "price_value": "3400",
+                "price_unit": "USD_PER_TROY_OUNCE",
+                "currency": "USD",
+            },
+        )
+        xau_2 = _fact(
+            102,
+            source_code="XAUUSD",
+            stream_id=xau_stream,
+            source_sequence=2,
+            payload={
+                **xau_1["payload"],
+                "price_value": "3401",
+            },
+        )
+        xau_2["payload_hash"] = content_hash(xau_2["payload"])
+        usdt = _fact(
+            103,
+            source_code="WALLEX_PUBLIC_API",
+            stream_id=usdt_stream,
+            source_sequence=1,
+            payload={
+                "kind": "EXTERNAL_QUOTE",
+                "instrument": "USDT_IRT",
+                "quote_kind": "MID",
+                "price_value": "97000",
+                "price_unit": "TOMAN_PER_USDT",
+                "currency": "TOMAN",
+            },
+        )
+        self._receive(
+            _batch(101, stream_id=xau_stream, deliveries=[(1, xau_1), (2, xau_2)])
+        )
+        self._receive(_batch(102, stream_id=usdt_stream, deliveries=[(1, usdt)]))
+        # A replay can make receipt timestamps non-monotonic.  The adapter must
+        # still expose each stream's sequence N before N+1.
+        self.receiver.execute(
+            "UPDATE fact_deliveries SET received_at_utc=? "
+            "WHERE stream_id=? AND delivery_sequence=1",
+            ("2026-08-26T05:00:10Z", xau_stream),
+        )
+        self.receiver.execute(
+            "UPDATE fact_deliveries SET received_at_utc=? "
+            "WHERE stream_id=? AND delivery_sequence=2",
+            ("2026-08-26T05:00:00Z", xau_stream),
+        )
+        self.receiver.execute(
+            "UPDATE fact_deliveries SET received_at_utc=? WHERE stream_id=?",
+            ("2026-08-26T05:00:05Z", usdt_stream),
+        )
+        statements: list[str] = []
+        self.receiver.set_trace_callback(statements.append)
+        first = run_adapter_cycle(self.receiver, self.market, max_deliveries=2)
+        self.receiver.set_trace_callback(None)
+        second = run_adapter_cycle(self.receiver, self.market, max_deliveries=2)
+
+        self.assertEqual((first.selected, first.applied), (2, 2))
+        self.assertEqual((second.selected, second.applied), (1, 1))
+        checkpoints = dict(
+            self.market.execute(
+                "SELECT stream_id,highest_delivery_sequence "
+                "FROM private_fact_adapter_checkpoints"
+            ).fetchall()
+        )
+        self.assertEqual(checkpoints, {usdt_stream: 1, xau_stream: 2})
+        normalized = [" ".join(statement.split()).upper() for statement in statements]
+        self.assertTrue(
+            any(
+                "WHERE STREAM_ID=" in statement
+                and "DELIVERY_SEQUENCE>" in statement
+                and "LIMIT" in statement
+                for statement in normalized
+            )
+        )
+        self.assertFalse(
+            any(
+                "FROM FACT_DELIVERIES ORDER BY RECEIVED_AT_UTC" in statement
+                for statement in normalized
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

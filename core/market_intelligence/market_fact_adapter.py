@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import hashlib
+import heapq
 import json
 import os
 from pathlib import Path
@@ -31,6 +32,7 @@ ADAPTER_SCHEMA = "market_fact_adapter/1.0"
 ADAPTER_VERSION = "market-fact-adapter-v1"
 FEED_MODES = frozenset({"LEGACY", "PRIVATE_SHADOW", "PRIVATE_PRIMARY"})
 MAX_DELIVERIES_PER_CYCLE = 500
+MAX_ADAPTER_STREAMS = 128
 MAX_FUTURE_SKEW_SECONDS = 30
 _REASON = re.compile(r"[^A-Z0-9_]+")
 
@@ -124,6 +126,7 @@ def connect_receiver_read_only(path: Path | str) -> sqlite3.Connection:
         connection.execute("PRAGMA query_only=ON")
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("SELECT 1 FROM fact_deliveries LIMIT 1").fetchone()
+        connection.execute("SELECT 1 FROM fact_checkpoints LIMIT 1").fetchone()
     except sqlite3.Error as exc:
         try:
             connection.close()
@@ -776,21 +779,11 @@ def run_adapter_cycle(
             "SELECT stream_id,highest_delivery_sequence FROM private_fact_adapter_checkpoints"
         ).fetchall()
     }
-    rows = receiver.execute(
-        """
-        SELECT stream_id,delivery_sequence,fact_id,fact_revision,payload_hash,
-               payload_json,received_at_utc
-        FROM fact_deliveries
-        ORDER BY received_at_utc,stream_id,delivery_sequence
-        """
-    ).fetchall()
-    selected: list[sqlite3.Row] = []
-    for row in rows:
-        if int(row["delivery_sequence"]) <= checkpoints.get(str(row["stream_id"]), 0):
-            continue
-        selected.append(row)
-        if len(selected) >= max_deliveries:
-            break
+    selected = _select_pending_deliveries(
+        receiver,
+        checkpoints=checkpoints,
+        max_deliveries=max_deliveries,
+    )
     counts = {"APPLIED": 0, "AUDIT_ONLY": 0, "REJECTED": 0, "DUPLICATE": 0}
     for row in selected:
         counts[apply_received_delivery(destination, row)] += 1
@@ -801,6 +794,87 @@ def run_adapter_cycle(
         rejected=counts["REJECTED"],
         duplicate=counts["DUPLICATE"],
     )
+
+
+def _select_pending_deliveries(
+    receiver: sqlite3.Connection,
+    *,
+    checkpoints: Mapping[str, int],
+    max_deliveries: int,
+) -> list[sqlite3.Row]:
+    """Select a bounded, causal batch without sorting the whole inbox.
+
+    ``fact_deliveries`` can grow permanently while the adapter is stopped.
+    Sorting every payload by receipt time therefore spills into SQLite's temp
+    directory and can exhaust the deliberately small container tmpfs.  The
+    primary key already gives an efficient contiguous sequence per stream.
+    Fetch a bounded prefix from each stream, then merge only those prefixes in
+    memory while never exposing sequence N+1 before sequence N.
+    """
+
+    stream_ids = [
+        str(row["stream_id"])
+        for row in receiver.execute(
+            "SELECT stream_id FROM fact_checkpoints ORDER BY stream_id"
+        ).fetchall()
+    ]
+    if len(stream_ids) > MAX_ADAPTER_STREAMS:
+        raise MarketFactAdapterError("market_fact_adapter_stream_limit_exceeded")
+    cursors: dict[str, sqlite3.Cursor] = {}
+    heads: dict[str, sqlite3.Row] = {}
+    next_sequences: dict[str, int] = {}
+    heap: list[tuple[str, str, int]] = []
+    selected: list[sqlite3.Row] = []
+    try:
+        for stream_id in stream_ids:
+            cursor = receiver.execute(
+                """
+                SELECT stream_id,delivery_sequence,fact_id,fact_revision,payload_hash,
+                       payload_json,received_at_utc
+                FROM fact_deliveries
+                WHERE stream_id=? AND delivery_sequence>?
+                ORDER BY delivery_sequence
+                LIMIT ?
+                """,
+                (stream_id, int(checkpoints.get(stream_id, 0)), max_deliveries),
+            )
+            cursors[stream_id] = cursor
+            head = cursor.fetchone()
+            if head is None:
+                continue
+            heads[stream_id] = head
+            next_sequences[stream_id] = int(checkpoints.get(stream_id, 0)) + 1
+            heapq.heappush(
+                heap,
+                (
+                    str(head["received_at_utc"]),
+                    stream_id,
+                    int(head["delivery_sequence"]),
+                ),
+            )
+        while heap and len(selected) < max_deliveries:
+            _received_at, stream_id, sequence = heapq.heappop(heap)
+            row = heads[stream_id]
+            expected = next_sequences[stream_id]
+            if sequence != expected or int(row["delivery_sequence"]) != expected:
+                raise MarketFactAdapterError("market_fact_adapter_sequence_gap")
+            selected.append(row)
+            next_sequences[stream_id] = expected + 1
+            following = cursors[stream_id].fetchone()
+            if following is not None:
+                heads[stream_id] = following
+                heapq.heappush(
+                    heap,
+                    (
+                        str(following["received_at_utc"]),
+                        stream_id,
+                        int(following["delivery_sequence"]),
+                    ),
+                )
+    finally:
+        for cursor in cursors.values():
+            cursor.close()
+    return selected
 
 
 def adapter_metrics(connection: sqlite3.Connection) -> dict[str, object]:
