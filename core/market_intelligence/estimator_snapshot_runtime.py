@@ -66,13 +66,22 @@ class SnapshotSendResult:
 
 
 def _utc(value: datetime | None = None) -> datetime:
-    return (value or datetime.now(timezone.utc)).astimezone(timezone.utc).replace(
-        microsecond=0
-    )
+    return _precise_utc(value).replace(microsecond=0)
+
+
+def _precise_utc(value: datetime | None = None) -> datetime:
+    supplied = value or datetime.now(timezone.utc)
+    if supplied.tzinfo is None or supplied.utcoffset() is None:
+        raise EstimatorSnapshotRuntimeError("estimator_snapshot_time_timezone_required")
+    return supplied.astimezone(timezone.utc)
 
 
 def _stamp(value: datetime | None = None) -> str:
     return _utc(value).isoformat().replace("+00:00", "Z")
+
+
+def _precise_stamp(value: datetime | None = None) -> str:
+    return _precise_utc(value).isoformat().replace("+00:00", "Z")
 
 
 def _code(value: object, *, fallback: str) -> str:
@@ -205,9 +214,11 @@ def build_estimator_snapshot(
     as_of_utc: datetime,
     snapshot_version: int,
     feed_mode: str,
+    generated_at_utc: datetime | None = None,
 ) -> EstimatorSnapshotV1:
     if feed_mode not in {"PRIVATE_SHADOW", "PRIVATE_PRIMARY"}:
         raise EstimatorSnapshotRuntimeError("estimator_snapshot_feed_mode_invalid")
+    generated_at = _precise_utc(generated_at_utc or as_of_utc)
     market = build_market_snapshot(connection, as_of_utc=as_of_utc)
     traces = _input_traces(connection, market["signals"])
     input_snapshot_hash = content_hash(
@@ -243,7 +254,7 @@ def build_estimator_snapshot(
     identity = {
         "contract": "estimator_snapshot_identity/1.0",
         "snapshot_version": snapshot_version,
-        "generated_at_utc": _stamp(as_of_utc),
+        "generated_at_utc": _precise_stamp(generated_at),
         "input_snapshot_hash": input_snapshot_hash,
         "model_version": COIN_RATE_ENGINE_VERSION,
         "feed_mode": feed_mode,
@@ -256,7 +267,7 @@ def build_estimator_snapshot(
         contract="estimator_snapshot/1.0",
         snapshot_id=content_hash(identity),
         snapshot_version=snapshot_version,
-        generated_at_utc=as_of_utc,
+        generated_at_utc=generated_at,
         input_snapshot_hash=input_snapshot_hash,
         model_version=COIN_RATE_ENGINE_VERSION,
         feed_mode=feed_mode,
@@ -295,11 +306,23 @@ def publish_estimator_snapshot(
         try:
             verify_market_store_read_only(market)
             market.execute("BEGIN")
+            # Pin the SQLite read snapshot before choosing a live evaluation
+            # time.  Otherwise a fact may commit after the timestamp is
+            # chosen but before the first estimator SELECT.
+            metadata = market.execute(
+                "SELECT schema_version FROM market_store_metadata WHERE singleton=1"
+            ).fetchone()
+            if metadata is None:
+                raise EstimatorSnapshotRuntimeError(
+                    "estimator_snapshot_market_metadata_missing"
+                )
+            generated_at = _precise_utc(as_of_utc)
             snapshot = build_estimator_snapshot(
                 market,
-                as_of_utc=_utc(as_of_utc),
+                as_of_utc=_utc(generated_at),
                 snapshot_version=version,
                 feed_mode=feed_mode,
+                generated_at_utc=generated_at,
             )
             market.rollback()
         finally:

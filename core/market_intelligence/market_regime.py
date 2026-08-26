@@ -82,9 +82,18 @@ def _read_rows(
         "event_time_utc >= ?",
         "event_time_utc <= ?",
         "available_at_utc <= ?",
+        "(CASE WHEN instr(inserted_at_utc, '.')=0 "
+        "THEN replace(inserted_at_utc, 'Z', '.000000Z') "
+        "ELSE inserted_at_utc END) <= ?",
         "price_num > 0",
     ]
-    parameters: list[Any] = [*instruments, _iso(start), _iso(end), _iso(end)]
+    parameters: list[Any] = [
+        *instruments,
+        _iso(start),
+        _iso(end),
+        _iso(end),
+        _iso(end).replace("Z", ".000000Z"),
+    ]
     for column, values in (
         ("settlement_term", settlements),
         ("trade_form", trade_forms),

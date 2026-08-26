@@ -581,6 +581,12 @@ class EstimatorSnapshotV1(ContractModel):
             raise ValueError("ok_snapshot_requires_rates")
         if self.status != "OK" and self.rates:
             raise ValueError("non_ok_snapshot_cannot_publish_rates")
+        if any(
+            item.transferred_at_utc is not None
+            and item.transferred_at_utc > self.generated_at_utc
+            for item in self.inputs
+        ):
+            raise ValueError("snapshot_input_transferred_after_generation")
         return self
 
 

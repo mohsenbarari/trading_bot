@@ -73,6 +73,10 @@ class MarketPipelineStage7InputMaterializerTests(unittest.TestCase):
     def _insert(self, connection: sqlite3.Connection, item: Quote) -> None:
         _event_id, observation = decode_quote_event(quote_event(item))
         upsert_observation(connection, observation)
+        connection.execute(
+            "UPDATE market_observations SET inserted_at_utc=? WHERE event_key=?",
+            (item.available_at_utc, observation.normalized().event_key),
+        )
 
     def test_wallex_and_paxg_network_payloads_are_minimized_and_checked(self) -> None:
         at = datetime(2026, 8, 26, 10, 0, tzinfo=UTC)
@@ -198,6 +202,54 @@ class MarketPipelineStage7InputMaterializerTests(unittest.TestCase):
             finally:
                 connection.close()
 
+    def test_materializer_excludes_late_availability_and_local_insert(self) -> None:
+        at = datetime(2026, 8, 26, 10, 0, tzinfo=UTC)
+        with tempfile.TemporaryDirectory() as directory:
+            connection = self._store(Path(directory))
+            try:
+                late_insert = quote(
+                    source="WALLEX_PUBLIC_API",
+                    instrument="USDT_IRT",
+                    kind="MID",
+                    price="185100",
+                    at=at - timedelta(seconds=10),
+                )
+                self._insert(connection, late_insert)
+                connection.execute(
+                    "UPDATE market_observations SET inserted_at_utc=?",
+                    ((at + timedelta(microseconds=1)).isoformat().replace("+00:00", "Z"),),
+                )
+                late_available = Quote(
+                    source_code="WALLEX_PUBLIC_API",
+                    instrument="USDT_IRT",
+                    quote_kind="MID",
+                    price_value="185200",
+                    price_unit="TOMAN_PER_USDT",
+                    currency="TOMAN",
+                    observed_at_utc=(at - timedelta(seconds=5)).isoformat().replace("+00:00", "Z"),
+                    available_at_utc=(at + timedelta(seconds=1)).isoformat().replace("+00:00", "Z"),
+                    provenance={"method": "TEST"},
+                )
+                self._insert(connection, late_available)
+                connection.execute(
+                    "UPDATE market_observations SET inserted_at_utc=? WHERE price_value=?",
+                    (
+                        (at - timedelta(seconds=4)).isoformat().replace("+00:00", "Z"),
+                        "185200",
+                    ),
+                )
+                connection.commit()
+
+                components = {
+                    item.feature_role: item
+                    for item in build_input_components(connection, as_of_utc=at)
+                }
+
+                self.assertIsNone(components["USDT_IRT_90S_POINT"].consumed_value)
+                self.assertEqual(components["USDT_IRT_90S_POINT"].sample_count, 0)
+            finally:
+                connection.close()
+
     def test_same_timestamp_values_are_equal_to_current_model_selection(self) -> None:
         at = datetime(2026, 8, 26, 10, 0, tzinfo=UTC)
         with tempfile.TemporaryDirectory() as directory:
@@ -266,10 +318,11 @@ class MarketPipelineStage7InputMaterializerTests(unittest.TestCase):
                     (2, -10, "4631.2"),
                 ):
                     moment = at + timedelta(seconds=seconds)
+                    event_key = derive_event_key("direct-xau", identifier)
                     upsert_observation(
                         connection,
                         MarketObservation(
-                            event_key=derive_event_key("direct-xau", identifier),
+                            event_key=event_key,
                             source_code="XAUUSD",
                             source_family="TELEGRAM_PUBLIC",
                             event_time_utc=moment,
@@ -283,6 +336,13 @@ class MarketPipelineStage7InputMaterializerTests(unittest.TestCase):
                             price=value,
                             price_unit="USD_PER_TROY_OUNCE",
                             currency="USD",
+                        ),
+                    )
+                    connection.execute(
+                        "UPDATE market_observations SET inserted_at_utc=? WHERE event_key=?",
+                        (
+                            (moment + timedelta(seconds=1)).isoformat().replace("+00:00", "Z"),
+                            event_key,
                         ),
                     )
                     legacy.execute(
@@ -349,10 +409,11 @@ class MarketPipelineStage7InputMaterializerTests(unittest.TestCase):
                 # Telegram direct XAU uses its native parser/observation path.
                 from core.market_intelligence.market_contracts import MarketObservation, derive_event_key
 
+                event_key = derive_event_key("direct-xau")
                 upsert_observation(
                     connection,
                     MarketObservation(
-                        event_key=derive_event_key("direct-xau"),
+                        event_key=event_key,
                         source_code="XAUUSD",
                         source_family="TELEGRAM_PUBLIC",
                         event_time_utc=at - timedelta(seconds=120),
@@ -366,6 +427,13 @@ class MarketPipelineStage7InputMaterializerTests(unittest.TestCase):
                         price="4630",
                         price_unit="USD_PER_TROY_OUNCE",
                         currency="USD",
+                    ),
+                )
+                connection.execute(
+                    "UPDATE market_observations SET inserted_at_utc=? WHERE event_key=?",
+                    (
+                        (at - timedelta(seconds=119)).isoformat().replace("+00:00", "Z"),
+                        event_key,
                     ),
                 )
                 connection.commit()

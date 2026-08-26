@@ -119,6 +119,7 @@ def _rows(
     price_unit: str,
     event_types: Iterable[str] = ("OFFER", "TRADE", "QUOTE", "REFERENCE"),
     include_comparable_conditional: bool = False,
+    knowledge_as_of: datetime | None = None,
 ) -> list[sqlite3.Row]:
     settlements = tuple(settlement_terms)
     forms = tuple(trade_forms)
@@ -139,6 +140,9 @@ def _rows(
               AND price_unit = ?
               AND event_time_utc <= ?
               AND available_at_utc <= ?
+              AND (CASE WHEN instr(inserted_at_utc, '.')=0
+                        THEN replace(inserted_at_utc, 'Z', '.000000Z')
+                        ELSE inserted_at_utc END) <= ?
             ORDER BY event_time_utc DESC, id DESC
             LIMIT 250
             """,
@@ -150,6 +154,7 @@ def _rows(
                 price_unit,
                 _iso(as_of),
                 _iso(as_of),
+                _iso(knowledge_as_of or as_of).replace("Z", ".000000Z"),
             ),
         ).fetchall()
     )
@@ -185,7 +190,13 @@ def _robust_project_point(rows: list[sqlite3.Row], *, as_of: datetime, source_ki
     return MeltedPoint(float(median(accepted)), age, spread, source_kind, fallback)
 
 
-def _melted_point(connection: sqlite3.Connection, *, as_of: datetime, settlement: str) -> MeltedPoint:
+def _melted_point(
+    connection: sqlite3.Connection,
+    *,
+    as_of: datetime,
+    settlement: str,
+    knowledge_as_of: datetime | None = None,
+) -> MeltedPoint:
     if settlement == "CASH":
         policies = (
             ("MELTED_GOLD_PRIVATE", ("TODAY",), ("PHYSICAL",), "PRIVATE_PHYSICAL_TODAY", False, 900),
@@ -226,6 +237,7 @@ def _melted_point(connection: sqlite3.Connection, *, as_of: datetime, settlement
                 include_comparable_conditional=(
                     instrument == "MELTED_GOLD_PRIVATE" and "PHYSICAL" in forms
                 ),
+                knowledge_as_of=knowledge_as_of,
             ),
             as_of=as_of,
             source_kind=label,
@@ -267,7 +279,13 @@ def _robust_herat_point(
     return HeratPoint(float(median(accepted)), age, spread, source_kind, fallback)
 
 
-def _herat_point(connection: sqlite3.Connection, *, as_of: datetime, settlement: str) -> HeratPoint:
+def _herat_point(
+    connection: sqlite3.Connection,
+    *,
+    as_of: datetime,
+    settlement: str,
+    knowledge_as_of: datetime | None = None,
+) -> HeratPoint:
     """Read a Herat driver without substituting USDT or mixing market forms.
 
     The cash coin book prefers explicit physical Herat.  The tomorrow book
@@ -296,6 +314,7 @@ def _herat_point(connection: sqlite3.Connection, *, as_of: datetime, settlement:
                 settlement_terms=terms,
                 trade_forms=forms,
                 price_unit="TOMAN_PER_USD",
+                knowledge_as_of=knowledge_as_of,
             ),
             as_of=as_of,
             source_kind=label,
@@ -411,7 +430,12 @@ def build_coin_rate_estimates(connection: sqlite3.Connection, *, as_of_utc: date
             herat_fallback = False
             if anchor is not None:
                 anchor_price, anchor_time = anchor
-                anchor_melted = _melted_point(connection, as_of=anchor_time, settlement=settlement)
+                anchor_melted = _melted_point(
+                    connection,
+                    as_of=anchor_time,
+                    settlement=settlement,
+                    knowledge_as_of=as_of,
+                )
                 if anchor_melted.value_project is not None:
                     old_intrinsic = anchor_melted.value_project * coefficient
                     residual = anchor_price - old_intrinsic
@@ -428,7 +452,12 @@ def build_coin_rate_estimates(connection: sqlite3.Connection, *, as_of_utc: date
                     # counting while making fresh paper Herat material at a
                     # coin-anchor transfer.
                     current_herat = _herat_point(connection, as_of=as_of, settlement=settlement)
-                    anchor_herat = _herat_point(connection, as_of=anchor_time, settlement=settlement)
+                    anchor_herat = _herat_point(
+                        connection,
+                        as_of=anchor_time,
+                        settlement=settlement,
+                        knowledge_as_of=as_of,
+                    )
                     if (
                         current_herat.value_toman is not None
                         and anchor_herat.value_toman is not None

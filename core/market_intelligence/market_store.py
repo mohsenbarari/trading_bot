@@ -366,8 +366,7 @@ def snapshot_input_watermark(connection: sqlite3.Connection) -> dict[str, int | 
 def _utc_now() -> str:
     return (
         datetime.now(timezone.utc)
-        .replace(microsecond=0)
-        .isoformat(timespec="seconds")
+        .isoformat(timespec="microseconds")
         .replace("+00:00", "Z")
     )
 

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from core.market_intelligence.coin_rate_engine import build_coin_rate_estimates
 from core.market_intelligence.market_fact_adapter import (
@@ -92,8 +93,14 @@ class Stage9AdapterTests(unittest.TestCase):
         self.market_path = root / "market.sqlite3"
         self.market = connect_market_store(self.market_path)
         initialize_adapter_store(self.market)
+        self.market_clock = patch(
+            "core.market_intelligence.market_store._utc_now",
+            return_value="2026-08-26T05:00:04.000000Z",
+        )
+        self.market_clock.start()
 
     def tearDown(self) -> None:
+        self.market_clock.stop()
         self.market.close()
         self.receiver.close()
         self.directory.cleanup()

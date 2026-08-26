@@ -54,10 +54,11 @@ class MarketSnapshotTests(unittest.TestCase):
         event_type: str = "QUOTE",
         side: str = "MID",
     ) -> None:
+        event_key = derive_event_key("snapshot-test", identity)
         upsert_observation(
             self.connection,
             MarketObservation(
-                event_key=derive_event_key("snapshot-test", identity),
+                event_key=event_key,
                 source_code=source_code,
                 source_family="EXTERNAL_MARKET",
                 event_time_utc=event_time,
@@ -77,7 +78,40 @@ class MarketSnapshotTests(unittest.TestCase):
                 quality_policy_version="snapshot-test-v1",
             ),
         )
+        inserted_at = available_time or event_time
+        self.connection.execute(
+            "UPDATE market_observations SET inserted_at_utc=? WHERE event_key=?",
+            (
+                inserted_at.astimezone(timezone.utc)
+                .isoformat(timespec="microseconds")
+                .replace("+00:00", "Z"),
+                event_key,
+            ),
+        )
         self.connection.commit()
+
+    def test_snapshot_excludes_fact_inserted_after_evaluation_time(self) -> None:
+        self._store(
+            identity="late-local-insert",
+            source_code="USD_HERAT",
+            instrument="USD_HERAT",
+            price=114_000,
+            price_unit="TOMAN_PER_USD",
+            event_time=self.now - timedelta(seconds=20),
+            settlement="TOMORROW",
+            trade_form="PAPER_NORMAL",
+            event_type="OFFER",
+            side="BUY",
+        )
+        self.connection.execute(
+            "UPDATE market_observations SET inserted_at_utc=?",
+            ((self.now + timedelta(microseconds=1)).isoformat().replace("+00:00", "Z"),),
+        )
+        self.connection.commit()
+
+        snapshot = build_market_snapshot(self.connection, as_of_utc=self.now)
+
+        self.assertEqual(snapshot["signals"]["USD_HERAT_TOMORROW"]["status"], "MISSING")
 
     def test_snapshot_obeys_event_and_availability_cutoffs(self) -> None:
         self._store(

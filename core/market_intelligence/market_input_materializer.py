@@ -171,10 +171,21 @@ def _samples(
           AND instrument=?
           AND source_code IN ({placeholders})
           AND event_time_utc>? AND event_time_utc<=?
+          AND available_at_utc<=?
+          AND (CASE WHEN instr(inserted_at_utc,'.')=0
+                    THEN replace(inserted_at_utc,'Z','.000000Z')
+                    ELSE inserted_at_utc END)<=?
           AND (instrument NOT IN ('USDT_IRT','PAXG_USD_PROXY') OR side='MID')
         ORDER BY event_time_utc,id
         """,
-        (instrument, *sources, _stamp(start), _stamp(end)),
+        (
+            instrument,
+            *sources,
+            _stamp(start),
+            _stamp(end),
+            _stamp(end),
+            _stamp(end).replace("Z", ".000000Z"),
+        ),
     ).fetchall()
     samples: list[Sample] = []
     unit: str | None = None

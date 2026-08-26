@@ -137,8 +137,16 @@ def _read_fact_rows(
         "quality_state = 'ELIGIBLE'",
         "event_time_utc <= ?",
         "available_at_utc <= ?",
+        "(CASE WHEN instr(inserted_at_utc, '.')=0 "
+        "THEN replace(inserted_at_utc, 'Z', '.000000Z') "
+        "ELSE inserted_at_utc END) <= ?",
     ]
-    parameters: list[object] = [instrument, _iso(as_of), _iso(as_of)]
+    parameters: list[object] = [
+        instrument,
+        _iso(as_of),
+        _iso(as_of),
+        _iso(as_of).replace("Z", ".000000Z"),
+    ]
     if settlement_term is not None:
         clauses.append("settlement_term = ?")
         parameters.append(settlement_term)
