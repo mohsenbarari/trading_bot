@@ -403,6 +403,14 @@ class SingleOwnerParityTests(unittest.TestCase):
         self.assertEqual(
             metadata["issues"][0]["code"], "SNAPSHOT_METADATA_MISMATCH"
         )
+        schema = deepcopy(candidate)
+        del schema["signals"]["XAUUSD"]["mean_price"]
+        schema_result = compare_snapshots(baseline, schema, same_fact_inputs=False)
+        self.assertEqual(schema_result["severity_1_count"], 0)
+        self.assertEqual(
+            schema_result["issues"][0]["code"],
+            "SNAPSHOT_VALUE_SCHEMA_MISMATCH",
+        )
         candidate["signals"]["XAUUSD"]["latest_price"] = 4631.0
         value = compare_snapshots(baseline, candidate, same_fact_inputs=False)
         self.assertEqual(value["severity_1_count"], 1)

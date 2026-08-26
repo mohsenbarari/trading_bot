@@ -779,6 +779,7 @@ def compare_snapshots(
     signal_names = sorted(set(baseline_signals) | set(candidate_signals))
     signal_mismatches = 0
     signal_value_mismatches = 0
+    signal_value_schema_mismatches = 0
     value_fields = (
         "status",
         "price_unit",
@@ -795,24 +796,39 @@ def compare_snapshots(
         signal_mismatches += 1
         left = baseline_signals.get(name)
         right = candidate_signals.get(name)
+        left_fields = (
+            {field for field in value_fields if field in left}
+            if isinstance(left, Mapping)
+            else set()
+        )
+        right_fields = (
+            {field for field in value_fields if field in right}
+            if isinstance(right, Mapping)
+            else set()
+        )
+        shared_fields = left_fields & right_fields
         left_values = (
-            {field: left.get(field) for field in value_fields}
+            {field: left.get(field) for field in shared_fields}
             if isinstance(left, Mapping)
             else None
         )
         right_values = (
-            {field: right.get(field) for field in value_fields}
+            {field: right.get(field) for field in shared_fields}
             if isinstance(right, Mapping)
             else None
         )
         value_mismatch = content_hash(left_values) != content_hash(right_values)
+        value_schema_mismatch = left_fields != right_fields
         signal_value_mismatches += int(value_mismatch)
+        signal_value_schema_mismatches += int(value_schema_mismatch)
         external = name in {"XAUUSD", "USDT_IRT"}
         issues.append(
             {
                 "code": (
                     "CONSUMED_EXTERNAL_VALUE_MISMATCH"
                     if external and value_mismatch
+                    else "SNAPSHOT_VALUE_SCHEMA_MISMATCH"
+                    if value_schema_mismatch
                     else "SNAPSHOT_METADATA_MISMATCH"
                     if external
                     else "SNAPSHOT_FEATURE_MISMATCH"
@@ -854,6 +870,7 @@ def compare_snapshots(
         "signal_count": len(signal_names),
         "signal_mismatch_count": signal_mismatches,
         "signal_value_mismatch_count": signal_value_mismatches,
+        "signal_value_schema_mismatch_count": signal_value_schema_mismatches,
         "rate_count": len(set(baseline_rates) | set(candidate_rates)),
         "rate_mismatch_count": rate_mismatches,
         "same_fact_inputs": same_fact_inputs,
