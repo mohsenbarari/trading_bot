@@ -13,6 +13,8 @@
 
 بنابراین این نسخه مجوز deploy یا تصاحب session تلگرام نیست. capture/processor/transport/estimator زنده در مراحل بعدی پیاده می‌شوند و تا gate همان مرحله نباید این stack روی staging یا production بالا آورده شود.
 
+دایرکتوری والد secret باید `root:root 0700` و فایل‌های مصرفی باید `root:10001 0440` باشند. PostgreSQL با UID/GID `70:70` فقط supplemental group `10001` می‌گیرد؛ بنابراین همان فایل password برای migration/runtime قابل خواندن است، بدون root container یا world-readable secret.
+
 ## فایل‌ها
 
 - `Dockerfile`: image مشترک serviceها، Python 3.11 Bookworm pinned؛

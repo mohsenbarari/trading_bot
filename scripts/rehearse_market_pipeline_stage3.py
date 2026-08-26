@@ -106,12 +106,14 @@ def free_port() -> int:
 
 
 def write_secret(path: Path, value: str) -> None:
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o440)
     try:
         os.write(descriptor, value.encode("utf-8"))
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
+    os.chown(path, 0, 10001)
+    os.chmod(path, 0o440)
 
 
 def fixture_environment(

@@ -49,6 +49,10 @@ EXPECTED_RECEIVER = {
 }
 RELEASE_SHA = re.compile(r"^[0-9a-f]{8,64}$")
 IMMUTABLE_IMAGE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
+SECRET_PARENT_UID = 0
+SECRET_PARENT_GID = 0
+SECRET_FILE_UID = 0
+SECRET_FILE_GID = 10001
 
 
 class Stage3Error(RuntimeError):
@@ -91,6 +95,25 @@ PATH_CONTRACTS = {
         PathContract("market-store", 10001, 10001),
         PathContract("models", 10001, 10001),
         PathContract("snapshots", 10001, 10001),
+    ),
+}
+SECRET_ENV_KEYS = {
+    "web": (
+        "MARKET_POSTGRES_PASSWORD_FILE",
+        "MARKET_CAPTURE_ACCOUNT1_CONFIG_FILE",
+        "MARKET_CAPTURE_ACCOUNT2_CONFIG_FILE",
+        "MARKET_TRANSPORT_CA_FILE",
+        "MARKET_WEB_TRANSPORT_CERT_FILE",
+        "MARKET_WEB_TRANSPORT_KEY_FILE",
+        "MARKET_HMAC_ACTIVE_FILE",
+        "MARKET_HMAC_PREVIOUS_FILE",
+    ),
+    "bot": (
+        "MARKET_TRANSPORT_CA_FILE",
+        "MARKET_BOT_TRANSPORT_CERT_FILE",
+        "MARKET_BOT_TRANSPORT_KEY_FILE",
+        "MARKET_HMAC_ACTIVE_FILE",
+        "MARKET_HMAC_PREVIOUS_FILE",
     ),
 }
 
@@ -176,6 +199,45 @@ def prepare_path_contract(root: Path, role: str) -> list[dict[str, Any]]:
         os.chown(path, contract.uid, contract.gid)
         os.chmod(path, contract.mode)
     return inspect_path_contract(root, role)
+
+
+def inspect_secret_contract(
+    role: str, environment: Mapping[str, str]
+) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    for key in SECRET_ENV_KEYS[role]:
+        raw_path = environment.get(key, "")
+        if not raw_path:
+            findings.append({"secret": key, "status": "path_missing"})
+            continue
+        path = Path(raw_path)
+        if not path.is_absolute():
+            findings.append({"secret": key, "status": "path_not_absolute"})
+            continue
+        try:
+            parent_info = path.parent.lstat()
+            info = path.lstat()
+        except FileNotFoundError:
+            findings.append({"secret": key, "status": "file_missing"})
+            continue
+        status = "ok"
+        if path.is_symlink() or not stat.S_ISREG(info.st_mode):
+            status = "regular_file_required"
+        elif (parent_info.st_uid, parent_info.st_gid) != (
+            SECRET_PARENT_UID,
+            SECRET_PARENT_GID,
+        ):
+            status = "parent_owner_mismatch"
+        elif stat.S_IMODE(parent_info.st_mode) != 0o700:
+            status = "parent_mode_mismatch"
+        elif (info.st_uid, info.st_gid) != (SECRET_FILE_UID, SECRET_FILE_GID):
+            status = "file_owner_mismatch"
+        elif stat.S_IMODE(info.st_mode) != 0o440:
+            status = "file_mode_mismatch"
+        elif info.st_size <= 0:
+            status = "file_empty"
+        findings.append({"secret": key, "status": status})
+    return findings
 
 
 def validate_bind_ip(value: str, *, fixture: bool) -> str:
@@ -335,6 +397,12 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--image", required=True)
     render.add_argument("--release-sha", required=True)
     render.add_argument("--fixture", action="store_true")
+    preflight = commands.add_parser("preflight")
+    preflight.add_argument("--role", choices=sorted(COMPOSE_ROLE), required=True)
+    preflight.add_argument("--root", type=Path, required=True)
+    preflight.add_argument("--image", required=True)
+    preflight.add_argument("--release-sha", required=True)
+    preflight.add_argument("--fixture", action="store_true")
     return parser
 
 
@@ -361,6 +429,35 @@ def main(argv: Sequence[str] | None = None) -> int:
             metadata = image_metadata(args.image, release_sha, fixture=args.fixture)
             print(json_text(inventory(document, role=args.role, image=metadata)))
             return 0
+        if args.command == "preflight":
+            release_sha = args.release_sha.lower()
+            if not RELEASE_SHA.fullmatch(release_sha):
+                raise Stage3Error("release_sha_invalid")
+            if args.fixture:
+                os.environ["MARKET_PIPELINE_MODE"] = "fixture"
+            paths = inspect_path_contract(args.root, args.role)
+            secrets = inspect_secret_contract(args.role, os.environ)
+            document = render_compose(args.role)
+            metadata = image_metadata(
+                args.image, release_sha, fixture=args.fixture
+            )
+            passed = all(
+                item["status"] == "ok" for item in [*paths, *secrets]
+            )
+            print(
+                json_text(
+                    {
+                        "status": "pass" if passed else "fail",
+                        "role": args.role,
+                        "path_findings": paths,
+                        "secret_findings": secrets,
+                        "inventory": inventory(
+                            document, role=args.role, image=metadata
+                        ),
+                    }
+                )
+            )
+            return 0 if passed else 1
     except (OSError, ValueError, json.JSONDecodeError, Stage3Error) as exc:
         print(json_text({"status": "fail", "reason_code": str(exc)}), file=sys.stderr)
         return 1

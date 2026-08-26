@@ -187,6 +187,31 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
             Path("/tmp/market-stage3-fixture"),
         )
 
+    def test_secret_contract_requires_root_only_parent_and_shared_runtime_group(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            secret = root / "fixture-secret"
+            secret.write_text("fixture-only", encoding="utf-8")
+            os.chmod(secret, 0o440)
+            environment = {
+                key: str(secret) for key in manager.SECRET_ENV_KEYS["bot"]
+            }
+            secret_info = secret.stat()
+            with patch.object(
+                manager, "SECRET_FILE_GID", secret_info.st_gid
+            ):
+                findings = manager.inspect_secret_contract("bot", environment)
+            self.assertTrue(all(item["status"] == "ok" for item in findings))
+            os.chmod(secret, 0o444)
+            with patch.object(
+                manager, "SECRET_FILE_GID", secret_info.st_gid
+            ):
+                findings = manager.inspect_secret_contract("bot", environment)
+            self.assertTrue(
+                all(item["status"] == "file_mode_mismatch" for item in findings)
+            )
+            self.assertEqual(manager.SECRET_FILE_GID, 10001)
+
 
 if __name__ == "__main__":
     unittest.main()
