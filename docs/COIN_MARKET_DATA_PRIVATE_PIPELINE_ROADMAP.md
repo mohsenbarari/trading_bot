@@ -1,12 +1,14 @@
 # Roadmap انتقال داده و Parse بازار روی شبکه خصوصی
 
-وضعیت: مراحل 0 تا 4 تکمیل شده‌اند؛ مرحله 5 هنوز آغاز نشده و cutover انجام نشده است
+وضعیت: مراحل 0 تا 5 تکمیل شده‌اند؛ Stage 5 فقط shadow است و cutover انجام نشده است
 
 تاریخ بازبینی: 2026-08-26
 
 مبنای بازنگری Docker: `main@315f7e6a`
 
 مبنای gate Capture مرحله 4: `main@2848b36560cfc8586dbd9759668d708625c16f2c`
+
+مبنای gate Parser مرحله 5: `main@3cd136b2e94f1795cba388be3d98a2cb46e94cbc`
 
 ## 1. نتیجه نهایی مورد انتظار
 
@@ -595,7 +597,8 @@ Gate:
 
 1. انتقال parser آفر با grammar فعلی و temporal price resolver.
 2. انتقال instrument inference برای آفر بدون نام کالا.
-3. انتقال settlement rules جدید (`خ` نقد، `خ ف` فردا و معادل فروش).
+3. انتقال settlement rule تأییدشدهٔ production: marker نقد صریح = نقد؛ marker فردا
+   صریح یا نبود marker = فردا، با تقدم marker فردا در syntaxهای مرکب.
 4. ساخت reply graph از oldest root و exact branch.
 5. تشخیص reciprocal confirmation، چانه‌زنی چندکاربره، تعداد و فی توافقی.
 6. ambiguity/review بدون متوقف‌کردن sibling eventها.
@@ -617,6 +620,23 @@ Gate:
 - موارد مبهم به‌جای حدس وارد REVIEW؛
 - parse موفق pending نمی‌ماند؛
 - تفاوت با parser فعلی برای هر event reason code دارد.
+
+نتیجه اجرا در 2026-08-26:
+
+- parser آفر، resolver زمانی و reply/trade linker دو گروه در role مستقل Docker به
+  Account 2 spool متصل شدند؛ role فقط shadow است و هیچ مدل یا outbox اصلی را تغییر نمی‌دهد؛
+- production-shaped replay روی 5,926 پیام و 2,845 fact با حضور هر چهار ورودی علّی،
+  اختلاف اقتصادی و provenance صفر و runtime failure صفر داشت؛
+- 1,961 candidate بی‌نام در عبور اول شناسایی شد و prediction ledger به‌عنوان dependency
+  اجباری تثبیت شد؛ نبود correction یا prediction snapshot در live، startup را fail می‌کند؛
+- field-level evidence، parser version و correction corpus append-only بدون raw/identity
+  اضافه شد؛ WebApp هر revision را به‌صورت رکورد مستقل در corpus نگه می‌دارد؛
+- partial tail، invalid sibling، replay، restart، reply branch، قیمت/تعداد توافقی و
+  instrument inference در Docker با network بسته پاس شدند؛ cleanup کامل بود؛
+- SQLite sidecarها فقط snapshot اتمیک immutable هستند؛ DB زنده یا WAL مشترک mount نمی‌شود؛
+- هیچ deploy، Telegram session، PostgreSQL، product DB، authority switch یا cutover انجام نشد.
+
+گزارش و gate receipt: [COIN_MARKET_DATA_STAGE5_COIN_GROUP_PARSER.md](./COIN_MARKET_DATA_STAGE5_COIN_GROUP_PARSER.md)
 
 ### مرحله 6 — Parser کانال‌ها و lifecycle آبشده خصوصی
 
