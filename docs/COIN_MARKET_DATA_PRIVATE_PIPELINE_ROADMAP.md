@@ -872,6 +872,20 @@ Gate:
 - backup قبل و بعد import قابل restore؛
 - import دوم no-op است.
 
+نتیجه اجرا در 2026-08-26:
+
+- importer نسخه‌بندی‌شده با artifact hash، logical identity، source revision و سه جدول
+  افزایشی lineage/item/quarantine ساخته شد؛ schema مستقل به version 2 و ۲۶ جدول رسید؛
+- URL/credential/envelope/identity مستقیم پیش از commit رد می‌شود؛ raw و participant منتخب
+  فقط به شکل ciphertext در archive وب می‌ماند و seed بات فقط current facts را می‌گیرد؛
+- گیت ۶ source با ۱۰۰۶ رکورد، ۹۹۵ fact یکتا، ۱۰۰۰ revision، ۶ quarantine و import دوم
+  no-op پاس شد؛ backup قبل/بعد restore و duplicate logical fact صفر بود؛
+- گیت بازگشتی Docker/Compose، migration second-pass، recreate، rollback و cleanup پاس شد؛
+- تاریخچه واقعی import و هیچ feed/authority/deploy تغییر نکرد؛ اجرای عملیاتی به cutover
+  مجوزدار موکول است.
+
+گزارش و gate receipt: [COIN_MARKET_DATA_STAGE11_HISTORY_BACKFILL.md](./COIN_MARKET_DATA_STAGE11_HISTORY_BACKFILL.md)
+
 ### مرحله 12 — Shadow parity و آزمون بازار باز
 
 اقدامات:
