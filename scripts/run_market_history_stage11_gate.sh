@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-candidate_image="${MARKET_STAGE11_IMAGE:-trading-bot-market-pipeline:stage11-worktree}"
+candidate_image="${MARKET_STAGE11_IMAGE:?MARKET_STAGE11_IMAGE is required}"
 suffix="$$"
 container="market-stage11-rehearsal-${suffix}"
 volume="market-stage11-rehearsal-${suffix}"

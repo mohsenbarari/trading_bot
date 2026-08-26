@@ -145,6 +145,15 @@ class MarketPipelineStage11BackfillTests(unittest.TestCase):
         self.assertNotIn("JOIN market_data.market_actor_identities", seed_query)
         self.assertIn('"contains_raw_telegram_history": False', seed_query)
 
+    def test_rehearsal_requires_an_explicit_candidate_image(self):
+        gate = (
+            REPO_ROOT / "scripts/run_market_history_stage11_gate.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            '${MARKET_STAGE11_IMAGE:?MARKET_STAGE11_IMAGE is required}', gate
+        )
+        self.assertNotIn("stage11-worktree", gate)
+
 
 if __name__ == "__main__":
     unittest.main()
