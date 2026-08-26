@@ -304,7 +304,7 @@ Gate:
 | ۰ قرارداد و ممیزی | complete |
 | ۱ foundation | implementation-complete |
 | ۲ پوسته | implementation-complete |
-| ۳ خانه | pending |
+| ۳ خانه | implementation-complete |
 | ۴ حساب | pending |
 | ۵ پروفایل | pending |
 | ۶ عملیات | pending |

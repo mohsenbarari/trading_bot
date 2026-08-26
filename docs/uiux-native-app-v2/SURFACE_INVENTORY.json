@@ -31,10 +31,10 @@
     {
       "id": "home",
       "routes": ["/"],
-      "status": "web-dashboard-around-frozen-market",
+      "status": "native-chrome-around-frozen-market",
       "phase": 3,
       "protectedInteriors": ["home-market-widget"],
-      "gaps": ["v2-home-scope", "raw-identity-menu", "disclosure-42px", "trades-scroll-hint"]
+      "gaps": []
     },
     {
       "id": "account-settings",

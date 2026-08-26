@@ -286,6 +286,9 @@ describe('DashboardView.vue Stage 4 Home contract', () => {
 
     expect(requestedUrls()).toEqual(['/api/auth/me'])
     expect(wrapper.get('#dashboard-page-title').text()).toBe('خانه')
+    expect(wrapper.get('#dashboard-page-title').classes()).toContain('dashboard-page-title')
+    expect(wrapper.find('.ui-v2-home-top').exists()).toBe(false)
+    expect(wrapper.get('.dashboard-home-top').element.closest('[data-ui-system="v2"]')).toBeNull()
     expect(wrapper.get('.user-name').text()).toBe('رضا محمدی')
     expect(wrapper.get('.avatar').text()).toBe('ر')
     expect(wrapper.get('.user-info-center').attributes('aria-label')).toBe(
@@ -650,6 +653,8 @@ describe('DashboardView.vue Stage 4 Home contract', () => {
       /\.today-trades-card|\.dashboard-project-users|\.dashboard-commodit|\.telegram-connect/,
     )
     expect(styleSource.match(/\.today-trades-refresh/g)).toHaveLength(1)
+    expect(styleSource).toMatch(/\.dashboard-content\s*\{[\s\S]*?padding:\s*var\(--ds-page-padding\)/)
+    expect(runtimeSource).not.toMatch(/ui-v2-home-/)
   })
 
   it('retains the byte-locked six-section Market interior contract', () => {

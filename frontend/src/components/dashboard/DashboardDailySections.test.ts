@@ -148,8 +148,9 @@ describe('DashboardDailySections.vue', () => {
       role: 'region',
       tabindex: '0',
     })
-    expect(wrapper.get('.dashboard-trades__scroller').attributes('aria-label')).toContain('۲ معامله')
-    expect(wrapper.text()).toContain('جدول را به چپ یا راست بکشید')
+    expect(wrapper.get('.dashboard-trades__scroller').attributes('aria-label')).toBe('۲ معامله')
+    expect(wrapper.text()).not.toContain('جدول را به چپ یا راست بکشید')
+    expect(wrapper.text()).not.toContain('با پیمایش افقی')
     expect(wrapper.text()).toContain('شماره معامله')
     expect(wrapper.text()).toContain('۱۲۳۴۵۶')
     expect(wrapper.text()).not.toContain('۱۲۳٬۴۵۶')

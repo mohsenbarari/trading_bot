@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { AlertTriangle, Ban, Bell, ChevronDown, LogOut, Store, UserRound } from 'lucide-vue-next'
+import { Bell, ChevronDown, LogOut, Store, UserRound } from 'lucide-vue-next'
 import { useNotificationStore } from '../stores/notifications'
 import { apiFetch, forceLogout, isAppConnecting } from '../utils/auth'
 import {
@@ -267,25 +267,25 @@ onUnmounted(() => {
     </AppErrorState>
 
     <div v-else-if="user" class="dashboard-content">
-      <AppDesignSystemScope as="div" class="ui-v2-home-top">
+      <div class="dashboard-home-top">
         <header
-          class="dashboard-header ui-v2-home-header"
+          class="dashboard-header"
           aria-labelledby="dashboard-page-title"
         >
-          <div class="dashboard-header-main ui-v2-home-header__main">
+          <div class="dashboard-header-main">
             <div class="dashboard-account-menu">
               <button
                 ref="accountMenuTrigger"
                 type="button"
-                class="user-info-center ui-v2-home-identity dashboard-account-menu__trigger"
+                class="user-info-center dashboard-account-menu__trigger"
                 aria-haspopup="dialog"
                 :aria-expanded="accountMenuOpen"
                 :aria-label="`باز کردن منوی حساب ${currentUserDisplayName}`"
                 @click="toggleAccountMenu"
                 @keydown.down.prevent="openAccountMenuAndFocusFirst"
               >
-                <span class="avatar ui-v2-home-avatar" aria-hidden="true">{{ userInitial }}</span>
-                <span class="user-name ui-v2-home-name">{{ currentUserDisplayName }}</span>
+                <span class="avatar" aria-hidden="true">{{ userInitial }}</span>
+                <span class="user-name">{{ currentUserDisplayName }}</span>
                 <ChevronDown
                   :size="17"
                   class="dashboard-account-menu__chevron"
@@ -328,9 +328,8 @@ onUnmounted(() => {
 
             <AppIconButton
               type="button"
-              class="notif-btn ui-v2-home-notifications"
+              class="notif-btn"
               :label="hasUnreadNotifications ? 'اعلان‌های خوانده‌نشده' : 'اعلان‌ها'"
-              size="sm"
               @click="router.push('/account/notifications')"
             >
               <Bell :size="22" />
@@ -341,12 +340,12 @@ onUnmounted(() => {
               ></span>
             </AppIconButton>
           </div>
-          <h1 id="dashboard-page-title" class="ui-v2-home-title">خانه</h1>
+          <h1 id="dashboard-page-title" class="dashboard-page-title">خانه</h1>
         </header>
 
         <AppToast
           v-if="connectionNoticeState"
-          class="dashboard-connectivity-notice ui-v2-home-alert"
+          class="dashboard-notice dashboard-connectivity-notice"
           tone="warning"
           role="status"
           :title="
@@ -361,7 +360,7 @@ onUnmounted(() => {
             type="button"
             size="sm"
             variant="secondary"
-            class="dashboard-identity-retry ui-v2-home-alert-action"
+            class="dashboard-identity-retry"
             @click="fetchUser"
           >
             به‌روزرسانی
@@ -370,21 +369,15 @@ onUnmounted(() => {
 
         <AppToast
           v-if="isInactiveAccount"
-          class="dashboard-alert-card alert-blocked ui-v2-home-alert"
+          class="dashboard-notice dashboard-alert-card alert-blocked"
           tone="danger"
           role="alert"
           :title="isGloballyLockedAccount ? 'حساب کاربری قفل شده است' : 'حساب کاربری غیرفعال شده است'"
           :message="inactiveAccountMessage"
         >
-          <template #icon>
-            <span class="alert-icon blocked-icon">
-              <Ban :size="26" />
-            </span>
-          </template>
           <AppButton
             type="button"
-            block
-            class="dashboard-account-follow-up ui-v2-home-alert-action"
+            class="dashboard-account-follow-up"
             @click="router.push({ name: 'account' })"
           >
             پیگیری در حساب
@@ -393,19 +386,13 @@ onUnmounted(() => {
 
         <AppToast
           v-else-if="isRestricted"
-          class="dashboard-alert-card alert-restricted ui-v2-home-alert"
+          class="dashboard-notice dashboard-alert-card alert-restricted"
           tone="warning"
           role="alert"
           title="معاملات موقتاً محدود است"
-        >
-          <template #icon>
-            <span class="alert-icon restricted-icon">
-              <AlertTriangle :size="24" />
-            </span>
-          </template>
-          <p>دسترسی معاملاتی شما تا <strong>{{ restrictedUntil }}</strong> محدود شده است.</p>
-        </AppToast>
-      </AppDesignSystemScope>
+          :message="`دسترسی معاملاتی شما تا ${restrictedUntil} محدود شده است.`"
+        />
+      </div>
 
       <section class="main-section">
 
@@ -464,7 +451,7 @@ onUnmounted(() => {
   width: 100%;
   max-width: var(--ds-page-max-width);
   margin: 0 auto;
-  padding: 1.25rem;
+  padding: var(--ds-page-padding);
   padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 3rem);
 }
 
@@ -472,7 +459,7 @@ onUnmounted(() => {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: var(--ds-page-padding);
 }
 
 .hero-btn:disabled {
@@ -519,6 +506,76 @@ onUnmounted(() => {
   .dashboard-account-menu__chevron {
     transition-duration: 1ms;
   }
+}
+
+.dashboard-home-top {
+  display: grid;
+  width: 100%;
+  gap: var(--ds-page-padding);
+  margin-block-end: var(--ds-page-padding);
+}
+
+.dashboard-header {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.dashboard-header-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.user-info-center {
+  display: inline-flex;
+  min-width: 0;
+  min-height: var(--ds-native-row-min-height);
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ds-text-primary);
+  font: inherit;
+  text-align: start;
+}
+
+.avatar {
+  display: inline-flex;
+  width: var(--ds-native-row-min-height);
+  height: var(--ds-native-row-min-height);
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--ds-radius-full);
+  background: var(--ds-primary-50);
+  color: var(--ds-primary-700);
+  font-size: var(--ds-font-lg);
+  font-weight: 750;
+}
+
+.dashboard-page-title {
+  margin: 0;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-native-title-size);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+}
+
+.dashboard-notice {
+  box-sizing: border-box;
+  max-width: none;
+  width: 100%;
+  box-shadow: none;
+  padding: 0.7rem 0.85rem;
+  border-radius: var(--ds-inset-group-radius, 12px);
+}
+
+.dashboard-notice :deep(.ui-button) {
+  min-width: 0;
+  margin-block-start: 0.4rem;
 }
 
 /* ═══ Hero Button ═══ */

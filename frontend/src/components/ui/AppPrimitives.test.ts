@@ -807,6 +807,9 @@ describe('ui primitives', () => {
     expect(css).not.toMatch(/--ds-page-padding:\s*14px/)
     expect(css).toMatch(/\.ui-button\s*\{[\s\S]*?white-space:\s*normal/)
     expect(css).toMatch(/\.ui-list-item\s*\{[\s\S]*?min-height:\s*var\(--ds-native-row-min-height/)
+    expect(css).toMatch(
+      /\.ui-disclosure__leading\s*\{[\s\S]*?width:\s*var\(--ds-native-row-min-height\)/,
+    )
     expect(css).not.toMatch(/\.ui-list-item--interactive:hover\s*\{[\s\S]*?transform:\s*translateY/)
 
     const longLabel = 'کپی لینک تلگرام و بررسی دعوت باز مشتری'

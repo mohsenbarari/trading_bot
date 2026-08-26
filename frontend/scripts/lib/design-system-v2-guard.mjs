@@ -1755,24 +1755,25 @@ function isApprovedStage4ActivationBoundary({ path: sourcePath, source }) {
     const scopedSections = [
       ...source.matchAll(/<AppDesignSystemScope\b([^>]*)>([\s\S]*?)<\/AppDesignSystemScope>/g),
     ]
-    const homeSections = scopedSections.filter((section) =>
-      /\bclass\s*=\s*["'][^"']*\bui-v2-home-top\b[^"']*["']/.test(section[1]),
-    )
     const pwaSections = scopedSections.filter((section) =>
       /\bclass\s*=\s*["'][^"']*\bui-v2-pwa-section\b[^"']*["']/.test(section[1]),
     )
-    const homeContent = homeSections[0]?.[2] ?? ''
+    const homeMatch = source.match(
+      /<div\b([^>]*)\bclass\s*=\s*["'][^"']*\bdashboard-home-top\b[^"']*["'][^>]*>([\s\S]*?)<\/div>\s*<section\b/,
+    )
+    const homeContent = homeMatch?.[2] ?? ''
     const pwaContent = pwaSections[0]?.[2] ?? ''
     if (
-      scopedSections.length !== 2 ||
-      homeSections.length !== 1 ||
+      scopedSections.length !== 1 ||
       pwaSections.length !== 1 ||
-      !/<header\b[^>]*\bui-v2-home-header\b/.test(homeContent) ||
-      !/\bui-v2-home-header__main\b/.test(homeContent) ||
-      !/\bui-v2-home-identity\b/.test(homeContent) ||
-      !/\bui-v2-home-notifications\b/.test(homeContent) ||
-      !/\bui-v2-home-title\b/.test(homeContent) ||
-      !/\bui-v2-home-alert\b/.test(homeContent) ||
+      !homeMatch ||
+      /\bui-v2-home-/.test(source) ||
+      !/<header\b[^>]*\bdashboard-header\b/.test(homeContent) ||
+      !/\bdashboard-header-main\b/.test(homeContent) ||
+      !/\buser-info-center\b/.test(homeContent) ||
+      !/\bnotif-btn\b/.test(homeContent) ||
+      !/\bdashboard-page-title\b/.test(homeContent) ||
+      !/\bdashboard-notice\b/.test(homeContent) ||
       /\bhero-btn\b|Market Entry|<MarketHero\b|<PWAInstallOverlay\b/.test(homeContent) ||
       !/^\s*<PWAInstallOverlay\b[^>]*\/>\s*$/.test(pwaContent) ||
       /\bhero-btn\b|Market Entry|<MarketHero\b/.test(pwaContent)

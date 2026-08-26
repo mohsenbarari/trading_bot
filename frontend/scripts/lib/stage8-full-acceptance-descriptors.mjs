@@ -196,7 +196,7 @@ const DESCRIPTORS = {
         'DashboardView',
         'Offer cards belong to MarketView, not the home identity surface.',
       ),
-      normal: yes({ settle: '.dashboard-content, .ui-v2-home-top' }),
+      normal: yes({ settle: '.dashboard-content, .dashboard-home-top' }),
       dense: noListInventory(
         'home / DashboardView',
         'frontend/src/views/DashboardView.vue',
@@ -218,7 +218,7 @@ const DESCRIPTORS = {
       ),
     },
     touch: yes({
-      selector: 'button.ui-v2-home-identity, .ui-v2-home-identity',
+      selector: 'button.user-info-center, .user-info-center',
       expectedName: 'profile',
       allowNavigation: true,
     }),

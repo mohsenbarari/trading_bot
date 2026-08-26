@@ -1350,8 +1350,8 @@
   }
 
   .ui-disclosure__leading {
-    width: 42px;
-    height: 42px;
+    width: var(--ds-native-row-min-height);
+    height: var(--ds-native-row-min-height);
     border-radius: var(--ds-radius-md);
     background: var(--ds-bg-inset);
     color: var(--ds-primary-700);
