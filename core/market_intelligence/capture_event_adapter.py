@@ -41,6 +41,7 @@ from .private_gold_trade_revisions import (
     PRIVATE_GOLD_OFFER_LIFETIME_SECONDS,
     PRIVATE_GOLD_TRADE_REVISION_VERSION,
     PrivateGoldRevision,
+    PrivateGoldTradeDecision,
     extract_private_gold_trade,
 )
 from .public_telegram.ingest import PublicTelegramMessage, ingest_public_message
@@ -48,8 +49,8 @@ from .public_telegram.parser import parse_public_message, should_ignore_public_m
 from .public_telegram.sources import source_for_code
 
 
-CAPTURE_ADAPTER_SCHEMA_VERSION = 4
-CAPTURE_ADAPTER_VERSION = "capture-event-adapter-v6-private-trade-revisions"
+CAPTURE_ADAPTER_SCHEMA_VERSION = 5
+CAPTURE_ADAPTER_VERSION = "capture-event-adapter-v7-immutable-private-lifecycle"
 CAPTURE_RAW_RETENTION = timedelta(days=3)
 COIN_GROUP_ACTIVE_REPLAY_WINDOW = timedelta(hours=6)
 MARKET_BACKFILL_REPLAY_WINDOW = timedelta(minutes=30)
@@ -202,6 +203,24 @@ CREATE TABLE IF NOT EXISTS capture_primary_trade_deadlines (
 );
 CREATE INDEX IF NOT EXISTS idx_capture_primary_trade_due
     ON capture_primary_trade_deadlines(finalized_at_utc,finalize_after_utc);
+
+CREATE TABLE IF NOT EXISTS capture_primary_trade_outcomes (
+    source_id TEXT NOT NULL,
+    message_id INTEGER NOT NULL CHECK(message_id > 0),
+    status TEXT NOT NULL CHECK(status IN ('PENDING','FULL','PARTIAL','NONE','AMBIGUOUS')),
+    reason TEXT NOT NULL,
+    finalize_after_utc TEXT NOT NULL,
+    finalized_at_utc TEXT,
+    offered_quantity INTEGER CHECK(offered_quantity IS NULL OR offered_quantity > 0),
+    executed_quantity INTEGER CHECK(executed_quantity IS NULL OR executed_quantity > 0),
+    remaining_quantity INTEGER CHECK(remaining_quantity IS NULL OR remaining_quantity >= 0),
+    evidence_event_id TEXT,
+    updated_at_utc TEXT NOT NULL,
+    expires_at_utc TEXT NOT NULL,
+    PRIMARY KEY(source_id,message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_capture_primary_outcome_expiry
+    ON capture_primary_trade_outcomes(expires_at_utc);
 
 CREATE TABLE IF NOT EXISTS capture_dirty_market_messages (
     source_id TEXT NOT NULL,
@@ -638,6 +657,43 @@ def initialize_capture_adapter(connection: sqlite3.Connection) -> None:
         metadata = connection.execute(
             "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
         ).fetchone()
+    if metadata is not None and int(metadata[0]) == 4:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS capture_primary_trade_outcomes (
+                source_id TEXT NOT NULL,
+                message_id INTEGER NOT NULL CHECK(message_id > 0),
+                status TEXT NOT NULL CHECK(
+                  status IN ('PENDING','FULL','PARTIAL','NONE','AMBIGUOUS')
+                ),
+                reason TEXT NOT NULL,
+                finalize_after_utc TEXT NOT NULL,
+                finalized_at_utc TEXT,
+                offered_quantity INTEGER CHECK(
+                  offered_quantity IS NULL OR offered_quantity > 0
+                ),
+                executed_quantity INTEGER CHECK(
+                  executed_quantity IS NULL OR executed_quantity > 0
+                ),
+                remaining_quantity INTEGER CHECK(
+                  remaining_quantity IS NULL OR remaining_quantity >= 0
+                ),
+                evidence_event_id TEXT,
+                updated_at_utc TEXT NOT NULL,
+                expires_at_utc TEXT NOT NULL,
+                PRIMARY KEY(source_id,message_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_capture_primary_outcome_expiry
+                ON capture_primary_trade_outcomes(expires_at_utc);
+            UPDATE capture_adapter_metadata
+               SET schema_version=5
+             WHERE singleton=1;
+            """
+        )
+        connection.commit()
+        metadata = connection.execute(
+            "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
+        ).fetchone()
     if metadata is None or int(metadata[0]) != CAPTURE_ADAPTER_SCHEMA_VERSION:
         raise CaptureEventContractError("capture_adapter_schema_upgrade_required")
 
@@ -746,10 +802,16 @@ def _apply_tombstone(connection: sqlite3.Connection, event: CaptureEvent) -> boo
     )
     if event.stream == "market":
         event_time = str(current["event_time_utc"]) if current is not None else event.event_time_utc
-        connection.execute(
-            "DELETE FROM capture_market_messages WHERE source_id=? AND message_id=?",
-            (event.source_id, event.message_id),
-        )
+        # The private source routinely removes an offer when its two-minute
+        # display window closes.  That deletion is neither a correction nor
+        # trade evidence: retain the bounded current row/revision graph so the
+        # immutable offer and evidenced outcome survive.  Public-source
+        # deletes remain true retractions.
+        if event.source_id != _PRIMARY_SOURCE_CODE:
+            connection.execute(
+                "DELETE FROM capture_market_messages WHERE source_id=? AND message_id=?",
+                (event.source_id, event.message_id),
+            )
         _mark_dirty_market(
             connection,
             source_id=event.source_id,
@@ -761,12 +823,10 @@ def _apply_tombstone(connection: sqlite3.Connection, event: CaptureEvent) -> boo
             connection.execute(
                 """
                 UPDATE capture_primary_trade_deadlines
-                SET finalized_at_utc=COALESCE(finalized_at_utc,?),
-                    expires_at_utc=?
+                SET expires_at_utc=?
                 WHERE source_id=? AND message_id=?
                 """,
                 (
-                    event.available_at_utc,
                     _expiry(event.available_at_utc),
                     event.source_id,
                     event.message_id,
@@ -1123,6 +1183,51 @@ def _primary_source_event_id(message_id: int) -> str:
     return f"market-capture-v1:{_PRIMARY_SOURCE_CODE}:{int(message_id)}"
 
 
+def _record_primary_outcome(
+    staging: sqlite3.Connection,
+    *,
+    message_id: int,
+    decision: PrivateGoldTradeDecision,
+    as_of_utc: str,
+) -> None:
+    """Persist lifecycle state separately from the immutable offer fact."""
+
+    staging.execute(
+        """
+        INSERT INTO capture_primary_trade_outcomes(
+          source_id,message_id,status,reason,finalize_after_utc,
+          finalized_at_utc,offered_quantity,executed_quantity,
+          remaining_quantity,evidence_event_id,updated_at_utc,expires_at_utc
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(source_id,message_id) DO UPDATE SET
+          status=excluded.status,
+          reason=excluded.reason,
+          finalize_after_utc=excluded.finalize_after_utc,
+          finalized_at_utc=excluded.finalized_at_utc,
+          offered_quantity=excluded.offered_quantity,
+          executed_quantity=excluded.executed_quantity,
+          remaining_quantity=excluded.remaining_quantity,
+          evidence_event_id=excluded.evidence_event_id,
+          updated_at_utc=excluded.updated_at_utc,
+          expires_at_utc=excluded.expires_at_utc
+        """,
+        (
+            _PRIMARY_SOURCE_CODE,
+            int(message_id),
+            decision.status,
+            decision.reason,
+            decision.finalize_after_utc,
+            as_of_utc if decision.finalized else None,
+            decision.offer_quantity,
+            decision.traded_quantity,
+            decision.remaining_quantity,
+            decision.evidence_event_id,
+            as_of_utc,
+            _expiry(as_of_utc),
+        ),
+    )
+
+
 def _project_primary_row(
     staging: sqlite3.Connection,
     market: sqlite3.Connection,
@@ -1132,19 +1237,6 @@ def _project_primary_row(
 ) -> tuple[int, int, set[str], bool, bool]:
     if bool(row["is_forwarded"]):
         return 0, 0, set(), True, False
-    observations = private_gold_observations(
-        PrivateGoldOfferInput(
-            source_event_id=_primary_source_event_id(int(row["message_id"])),
-            published_at_utc=str(row["event_time_utc"]),
-            available_at_utc=str(row["available_at_utc"]),
-            edited_at_utc=(str(row["edited_at_utc"]) if row["edited_at_utc"] is not None else None),
-            trade_status="NONE",
-            text=str(row["message_text"]),
-        )
-    )
-    offer_rows = tuple(item for item in observations if item.event_type == "OFFER")
-    for item in offer_rows:
-        upsert_observation(market, item)
     revision_rows = staging.execute(
         """
         SELECT * FROM capture_market_message_revisions
@@ -1153,6 +1245,23 @@ def _project_primary_row(
         """,
         (_PRIMARY_SOURCE_CODE, int(row["message_id"]), as_of_utc),
     ).fetchall()
+    if not revision_rows:
+        raise CaptureEventContractError("private_gold_revision_history_missing")
+    baseline = revision_rows[0]
+    # Offered economics are immutable.  Edits may only contribute lifecycle
+    # evidence; they must never rewrite the original price or quantity.
+    observations = private_gold_observations(
+        PrivateGoldOfferInput(
+            source_event_id=_primary_source_event_id(int(row["message_id"])),
+            published_at_utc=str(baseline["event_time_utc"]),
+            available_at_utc=str(baseline["available_at_utc"]),
+            trade_status="NONE",
+            text=str(baseline["message_text"]),
+        )
+    )
+    offer_rows = tuple(item for item in observations if item.event_type == "OFFER")
+    for item in offer_rows:
+        upsert_observation(market, item)
     decision = extract_private_gold_trade(
         (
             PrivateGoldRevision(
@@ -1169,6 +1278,12 @@ def _project_primary_row(
             )
             for item in revision_rows
         ),
+        as_of_utc=as_of_utc,
+    )
+    _record_primary_outcome(
+        staging,
+        message_id=int(row["message_id"]),
+        decision=decision,
         as_of_utc=as_of_utc,
     )
     trade_rows = ()
@@ -1303,51 +1418,6 @@ def _refresh_private_minutes(
     )
 
 
-def _project_xau_buckets(
-    staging: sqlite3.Connection,
-    market: sqlite3.Connection,
-    dirty: list[sqlite3.Row],
-) -> tuple[int, int, int]:
-    buckets = {str(row["event_time_utc"])[:16] for row in dirty if row["event_time_utc"]}
-    projected = upserted = retracted = 0
-    for bucket in sorted(buckets):
-        projections = staging.execute(
-            "SELECT DISTINCT source_id,message_id,event_key FROM capture_projection_keys WHERE source_id='XAUUSD' AND bucket_utc=?",
-            (bucket,),
-        ).fetchall()
-        available = max(
-            [str(row["available_at_utc"]) for row in dirty if row["event_time_utc"] and str(row["event_time_utc"])[:16] == bucket],
-            default=_utc_now(),
-        )
-        for item in projections:
-            retracted += _retract_fact(market, bytes(item["event_key"]), available)
-        staging.execute(
-            "DELETE FROM capture_projection_keys WHERE source_id='XAUUSD' AND bucket_utc=?",
-            (bucket,),
-        )
-        current = staging.execute(
-            """
-            SELECT * FROM capture_market_messages
-            WHERE source_id='XAUUSD' AND substr(event_time_utc,1,16)=?
-            ORDER BY event_time_utc DESC,message_id DESC LIMIT 1
-            """,
-            (bucket,),
-        ).fetchone()
-        if current is not None:
-            # The compact key represents the current minute, not one immutable
-            # message.  Remove the rejected later revision so an earlier still
-            # active quote can correctly become the current minute value.
-            market.execute(
-                "DELETE FROM market_observations WHERE event_key IN ("
-                "SELECT event_key FROM market_observations WHERE source_code='XAUUSD' "
-                "AND substr(event_time_utc,1,16)=? AND quality_state='REJECTED')",
-                (bucket,),
-            )
-            projected += 1
-            upserted += _project_public_row(staging, market, current)
-    return projected, upserted, retracted
-
-
 def _bounded_group_reply_graph(
     staging: sqlite3.Connection,
     *,
@@ -1450,18 +1520,10 @@ def project_capture_changes(
     ).fetchall()
     projected = upserted = retracted = 0
     private_trades = private_finalized = private_ambiguous = 0
-    xau_dirty = [row for row in dirty if str(row["source_id"]) == "XAUUSD"]
-    if xau_dirty:
-        counts = _project_xau_buckets(staging, market, xau_dirty)
-        projected += counts[0]
-        upserted += counts[1]
-        retracted += counts[2]
     primary_changed = False
     primary_minutes: set[str] = set()
     for item in dirty:
         source_id = str(item["source_id"])
-        if source_id == "XAUUSD":
-            continue
         retracted += _clear_projection(
             staging,
             market,
@@ -1588,6 +1650,7 @@ def purge_capture_staging(connection: sqlite3.Connection, *, as_of_utc: datetime
         )
     for table in (
         "capture_market_message_revisions",
+        "capture_primary_trade_outcomes",
         "capture_primary_trade_deadlines",
         "capture_market_messages",
         "capture_seen_events",

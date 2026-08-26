@@ -18,7 +18,9 @@ PUBLIC_TELEGRAM_SOURCES = (
     PublicTelegramSource("MELTED_AGGREGATE", "abshdh"),
     PublicTelegramSource("MELTED_FLOW", "NaghdP"),
     PublicTelegramSource("USD_HERAT", "ToofanHarirodOfficial"),
-    PublicTelegramSource("XAUUSD", "qheimat_ounce", compact_latest_per_minute=True),
+    # Every real quote is an estimator input candidate.  Minute compaction
+    # destroys the exact event sequence and cannot be reproduced causally.
+    PublicTelegramSource("XAUUSD", "qheimat_ounce"),
 )
 SOURCES_BY_CODE = {source.code: source for source in PUBLIC_TELEGRAM_SOURCES}
 SOURCES_BY_USERNAME = {

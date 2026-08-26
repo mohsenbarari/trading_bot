@@ -605,7 +605,7 @@ def run_healthcheck(role: str, max_age_seconds: float) -> int:
             }[role]:
                 raise FoundationError("capture_heartbeat_source_inventory_invalid")
         elif role == "market-processor":
-            if document.get("schema") != "market_coin_processor/1.0":
+            if document.get("schema") != "market_processor/2.0":
                 raise FoundationError("processor_heartbeat_schema_invalid")
             mode = document.get("mode")
             expected_status = (
@@ -616,7 +616,23 @@ def run_healthcheck(role: str, max_age_seconds: float) -> int:
                 or document.get("status") != expected_status
             ):
                 raise FoundationError("processor_heartbeat_not_ready")
-            if set(document.get("sources") or {}) != {"GROUP_1", "GROUP_2"}:
+            processor_sources = set(document.get("sources") or {})
+            all_sources = {
+                "GROUP_1",
+                "GROUP_2",
+                "MELTED_PRIMARY_FLOW",
+                "MELTED_AGGREGATE",
+                "MELTED_FLOW",
+                "USD_HERAT",
+                "XAUUSD",
+            }
+            if (
+                (mode == "live" and processor_sources != all_sources)
+                or (
+                    mode == "fixture"
+                    and processor_sources not in ({"GROUP_1", "GROUP_2"}, all_sources)
+                )
+            ):
                 raise FoundationError("processor_heartbeat_source_inventory_invalid")
             if document.get("shadow_only") is not True:
                 raise FoundationError("processor_shadow_boundary_invalid")

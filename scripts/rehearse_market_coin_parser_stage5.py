@@ -112,8 +112,9 @@ def event(
 def prepare_fixture(root: Path) -> tuple[Path, Path, Path, str]:
     state = root / "state"
     spool = root / "capture" / "account2"
+    market_spool = root / "capture" / "account1"
     calibration = root / "calibration"
-    for path in (state, spool, calibration):
+    for path in (state, spool, market_spool, calibration):
         path.mkdir(parents=True, mode=0o700)
         os.chown(path, 10001, 10001)
         os.chmod(path, 0o700)
@@ -253,6 +254,8 @@ def docker_run(
         "MARKET_PIPELINE_STATE_ROOT=/var/lib/market-data/state",
         "-e",
         "MARKET_PIPELINE_CAPTURE_ROOT=/var/lib/market-data/capture",
+        "-e",
+        "MARKET_PROCESSOR_MARKET_SPOOL_DIR=/var/lib/market-data/capture/account1",
         "-e",
         "MARKET_PROCESSOR_COIN_SPOOL_DIR=/var/lib/market-data/capture/account2",
         "-e",

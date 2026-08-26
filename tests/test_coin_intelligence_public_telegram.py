@@ -169,15 +169,21 @@ class PublicTelegramIngestionTests(unittest.TestCase):
         self.assertEqual(row["count"], 1)
         self.assertEqual(row["price_value"], "80200000")
 
-    def test_xau_compacts_to_latest_event_in_the_minute(self) -> None:
+    def test_xau_preserves_every_real_event_in_the_minute(self) -> None:
         self.ingest("XAUUSD", 2, "2026-08-04T05:35:59Z", "🔵4539.50")
         result = self.ingest("XAUUSD", 1, "2026-08-04T05:35:01Z", "🔴4538.10")
-        row = self.connection.execute(
-            "SELECT event_time_utc, price_value FROM market_observations"
-        ).fetchone()
-        self.assertEqual(row["event_time_utc"], "2026-08-04T05:35:59Z")
-        self.assertEqual(row["price_value"], "4539.50")
-        self.assertTrue(result.compact_older_message_ignored)
+        rows = self.connection.execute(
+            "SELECT event_time_utc, price_value FROM market_observations "
+            "ORDER BY event_time_utc"
+        ).fetchall()
+        self.assertEqual(
+            [(row["event_time_utc"], row["price_value"]) for row in rows],
+            [
+                ("2026-08-04T05:35:01Z", "4538.10"),
+                ("2026-08-04T05:35:59Z", "4539.50"),
+            ],
+        )
+        self.assertFalse(result.compact_older_message_ignored)
         self.assertEqual(read_source_checkpoint(self.connection, "XAUUSD"), 2)
 
     def test_forwarded_message_advances_cursor_without_a_fact(self) -> None:

@@ -1,10 +1,10 @@
-"""Docker-native shadow processor for Account 2 coin-group capture spools.
+"""Docker-native shadow processor for both market capture accounts.
 
-The processor is deliberately downstream from capture: it only reads durable
-JSONL, keeps raw text in its three-day staging SQLite, and writes redacted
-Market Store facts.  Live mode requires both the operator-feedback sidecar and
-the causal estimator-prediction ledger; silently parsing without either input
-would change unnamed-instrument decisions compared with production.
+The processor is deliberately downstream from capture: it reads the Account 1
+market-channel and Account 2 coin-group durable JSONL spools, keeps raw text in
+its three-day staging SQLite, and writes redacted shadow Market Store facts.
+Live mode requires both coin-group causal sidecars; silently parsing without
+either input would change unnamed-instrument decisions compared with production.
 """
 
 from __future__ import annotations
@@ -44,14 +44,32 @@ from .coin_groups import COIN_GROUP_PARSER_VERSION
 from .coin_prediction_anchors import load_coin_prediction_anchors
 from .market_contracts import normalize_utc
 from .market_store import connect_market_store, initialize_market_store
+from .private_gold import PRIVATE_GOLD_PARSER_VERSION
+from .private_gold_trade_revisions import PRIVATE_GOLD_TRADE_REVISION_VERSION
 from .private_pipeline_foundation import atomic_json_write, utc_text
+from .public_telegram.parser import PARSER_VERSION as PUBLIC_MARKET_PARSER_VERSION
 
 
-PROCESSOR_HEARTBEAT_SCHEMA = "market_coin_processor/1.0"
-PROCESSOR_VERSION = "market-coin-processor-v1-shadow"
+PROCESSOR_HEARTBEAT_SCHEMA = "market_processor/2.0"
+PROCESSOR_VERSION = "market-processor-v2-channel-lifecycle-shadow"
 MAX_RECORD_BYTES = 256 * 1024
 MAX_RECORDS_PER_CYCLE = 20_000
 SPOOL_NAME = re.compile(r"^events-\d{4}-\d{2}-\d{2}\.jsonl$")
+PROCESSOR_SOURCES = frozenset(
+    {
+        "GROUP_1",
+        "GROUP_2",
+        "MELTED_PRIMARY_FLOW",
+        "MELTED_AGGREGATE",
+        "MELTED_FLOW",
+        "USD_HERAT",
+        "XAUUSD",
+    }
+)
+TEMPORARY_PUBLIC_MELTED_SOURCES = frozenset(
+    {"MELTED_AGGREGATE", "MELTED_FLOW"}
+)
+TEMPORARY_PUBLIC_MELTED_RETENTION = timedelta(days=3)
 _PREDICTION_REQUIRED_COLUMNS = frozenset(
     {
         "id",
@@ -77,6 +95,7 @@ class CoinProcessorPaths:
     corpus_database: Path
     feedback_database: Path | None
     prediction_database: Path | None
+    market_spool_directory: Path | None = None
 
 
 def _external_file(value: str, *, reason: str) -> Path:
@@ -129,6 +148,20 @@ def _paths(*, mode: str, state_directory: Path) -> CoinProcessorPaths:
     prediction_value = os.environ.get("MARKET_PROCESSOR_PREDICTION_DB", "").strip()
     if mode == "live" and (not feedback_value or not prediction_value):
         raise CoinProcessorError("coin_processor_causal_inputs_required")
+    market_spool_supplied = Path(
+        os.environ.get(
+            "MARKET_PROCESSOR_MARKET_SPOOL_DIR",
+            str(capture_root / "account1"),
+        )
+    ).expanduser()
+    if market_spool_supplied.is_symlink():
+        raise CoinProcessorError("market_processor_spool_unavailable")
+    market_spool_candidate = market_spool_supplied.resolve()
+    if mode == "live" and not market_spool_candidate.is_dir():
+        raise CoinProcessorError("market_processor_spool_unavailable")
+    market_spool = (
+        market_spool_candidate if market_spool_candidate.is_dir() else None
+    )
     if mode == "live":
         feedback = _external_file(
             feedback_value, reason="coin_processor_feedback_unavailable"
@@ -177,6 +210,7 @@ def _paths(*, mode: str, state_directory: Path) -> CoinProcessorPaths:
         corpus_database=state_directory / "calibration-corpus.sqlite3",
         feedback_database=feedback,
         prediction_database=prediction,
+        market_spool_directory=market_spool,
     )
 
 
@@ -193,6 +227,7 @@ def _spool_files(directory: Path) -> tuple[Path, ...]:
 def _cursor(
     connection: sqlite3.Connection,
     *,
+    stream: str,
     path: Path,
     device: int,
     inode: int,
@@ -200,8 +235,8 @@ def _cursor(
 ) -> int:
     row = connection.execute(
         "SELECT device,inode,byte_offset FROM capture_file_cursors "
-        "WHERE stream='coin' AND file_path=?",
-        (str(path),),
+        "WHERE stream=? AND file_path=?",
+        (stream, str(path)),
     ).fetchone()
     if row is None:
         return 0
@@ -214,6 +249,7 @@ def _cursor(
 def _save_cursor(
     connection: sqlite3.Connection,
     *,
+    stream: str,
     path: Path,
     device: int,
     inode: int,
@@ -224,12 +260,12 @@ def _save_cursor(
         """
         INSERT INTO capture_file_cursors(
           stream,file_path,device,inode,byte_offset,updated_at_utc
-        ) VALUES('coin',?,?,?,?,?)
+        ) VALUES(?,?,?,?,?,?)
         ON CONFLICT(stream,file_path) DO UPDATE SET
           device=excluded.device,inode=excluded.inode,
           byte_offset=excluded.byte_offset,updated_at_utc=excluded.updated_at_utc
         """,
-        (str(path), device, inode, offset, updated_at_utc),
+        (stream, str(path), device, inode, offset, updated_at_utc),
     )
 
 
@@ -244,6 +280,7 @@ def _safe_rejection_reason(exc: BaseException) -> str:
 def _ingest_file(
     connection: sqlite3.Connection,
     *,
+    stream: str,
     path: Path,
     now_utc: str,
     remaining_records: int,
@@ -252,6 +289,7 @@ def _ingest_file(
     size = int(stat.st_size)
     offset = _cursor(
         connection,
+        stream=stream,
         path=path,
         device=int(stat.st_dev),
         inode=int(stat.st_ino),
@@ -289,7 +327,7 @@ def _ingest_file(
                     break
                 record_capture_rejection(
                     connection,
-                    stream="coin",
+                    stream=stream,
                     record_bytes=f"oversize:{path.name}:{start}".encode("ascii"),
                     reason="capture_record_too_large",
                     seen_at_utc=now_utc,
@@ -304,7 +342,7 @@ def _ingest_file(
                 document = json.loads(raw.decode("utf-8"))
                 report = stage_capture_event(
                     connection,
-                    decode_capture_event(document, stream="coin"),
+                    decode_capture_event(document, stream=stream),
                 )
             except (
                 UnicodeDecodeError,
@@ -313,7 +351,7 @@ def _ingest_file(
             ) as exc:
                 record_capture_rejection(
                     connection,
-                    stream="coin",
+                    stream=stream,
                     record_bytes=raw,
                     reason=_safe_rejection_reason(exc),
                     seen_at_utc=now_utc,
@@ -326,6 +364,7 @@ def _ingest_file(
             counters["tombstones"] += int(report.tombstone_applied)
     _save_cursor(
         connection,
+        stream=stream,
         path=path,
         device=int(stat.st_dev),
         inode=int(stat.st_ino),
@@ -417,6 +456,28 @@ def _corpus_connection(path: Path) -> sqlite3.Connection:
     return connection
 
 
+def _purge_temporary_public_melted(
+    market: sqlite3.Connection,
+    *,
+    as_of_utc: str,
+) -> int:
+    cutoff = (
+        datetime.fromisoformat(as_of_utc.replace("Z", "+00:00"))
+        - TEMPORARY_PUBLIC_MELTED_RETENTION
+    ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    placeholders = ",".join("?" for _ in TEMPORARY_PUBLIC_MELTED_SOURCES)
+    parameters = (*sorted(TEMPORARY_PUBLIC_MELTED_SOURCES), cutoff)
+    purged = 0
+    for table in ("market_observations", "market_observations_archive"):
+        result = market.execute(
+            f"DELETE FROM {table} WHERE source_code IN ({placeholders}) "
+            "AND available_at_utc<=?",
+            parameters,
+        )
+        purged += max(0, int(result.rowcount or 0))
+    return purged
+
+
 def process_coin_spool_cycle(
     *,
     paths: CoinProcessorPaths,
@@ -432,7 +493,7 @@ def process_coin_spool_cycle(
     staging = connect_coin_group_staging(paths.staging_database)
     market = connect_market_store(paths.market_database)
     corpus = _corpus_connection(paths.corpus_database)
-    totals = {
+    totals: dict[str, int] = {
         "records": 0,
         "accepted": 0,
         "duplicates": 0,
@@ -440,21 +501,35 @@ def process_coin_spool_cycle(
         "tombstones": 0,
         "rejected": 0,
     }
+    stream_totals = {
+        stream: {key: 0 for key in totals}
+        for stream in ("market", "coin")
+    }
     try:
         initialize_capture_adapter(staging)
         initialize_market_store(market)
-        for path in _spool_files(paths.spool_directory):
-            remaining = MAX_RECORDS_PER_CYCLE - totals["records"]
-            if remaining <= 0:
-                break
-            report = _ingest_file(
-                staging,
-                path=path,
-                now_utc=now,
-                remaining_records=remaining,
-            )
-            for key, value in report.items():
-                totals[key] += value
+        spool_sources = (
+            (("market", paths.market_spool_directory),)
+            if paths.market_spool_directory is not None
+            else ()
+        ) + (("coin", paths.spool_directory),)
+        # Each account receives its own cycle budget.  A high-volume XAU feed
+        # must never starve the two coin groups, or vice versa.
+        for stream, directory in spool_sources:
+            for path in _spool_files(directory):
+                remaining = MAX_RECORDS_PER_CYCLE - stream_totals[stream]["records"]
+                if remaining <= 0:
+                    break
+                report = _ingest_file(
+                    staging,
+                    stream=stream,
+                    path=path,
+                    now_utc=now,
+                    remaining_records=remaining,
+                )
+                for key, value in report.items():
+                    stream_totals[stream][key] += value
+                    totals[key] += value
         # The raw event and byte cursor are one durable restart boundary.
         staging.commit()
         feedback, anchors, causal = _load_causal_inputs(
@@ -476,6 +551,17 @@ def process_coin_spool_cycle(
             group_additional_anchors=anchors,
             group_parser_feedback=feedback,
         )
+        temporary_public_melted_purged = _purge_temporary_public_melted(
+            market,
+            as_of_utc=now,
+        )
+        outcome_counts = {
+            str(row["status"]): int(row["total"])
+            for row in staging.execute(
+                "SELECT status,COUNT(*) AS total "
+                "FROM capture_primary_trade_outcomes GROUP BY status"
+            ).fetchall()
+        }
         market.commit()
         staging.commit()
         corpus.commit()
@@ -491,6 +577,12 @@ def process_coin_spool_cycle(
     group = projection.group_pipeline
     return {
         **totals,
+        "stream_records": {
+            stream: values["records"] for stream, values in stream_totals.items()
+        },
+        "stream_rejected": {
+            stream: values["rejected"] for stream, values in stream_totals.items()
+        },
         **causal,
         "corpus_revisions_appended": corpus_report.revisions_appended,
         "corpus_idempotent_replays": corpus_report.idempotent_replays,
@@ -502,6 +594,15 @@ def process_coin_spool_cycle(
             if group
             else 0
         ),
+        "market_messages_reprojected": projection.market_messages_reprojected,
+        "market_facts_upserted": projection.market_facts_upserted,
+        "market_facts_retracted": projection.market_facts_retracted,
+        "private_paper_minutes_refreshed": projection.private_paper_minutes_refreshed,
+        "private_trade_facts_upserted": projection.private_trade_facts_upserted,
+        "private_trade_messages_finalized": projection.private_trade_messages_finalized,
+        "private_trade_messages_ambiguous": projection.private_trade_messages_ambiguous,
+        "private_trade_outcomes": outcome_counts,
+        "temporary_public_melted_facts_purged": temporary_public_melted_purged,
         "raw_rows_purged": projection.raw_rows_purged,
     }
 
@@ -577,9 +678,19 @@ def run_coin_processor_service(
                     if stopped
                     else ("live-shadow-ready" if mode == "live" else "fixture-ready")
                 ),
-                "sources": {"GROUP_1": "ready", "GROUP_2": "ready"},
+                "sources": {
+                    source: "ready"
+                    for source in sorted(
+                        PROCESSOR_SOURCES
+                        if paths.market_spool_directory is not None
+                        else {"GROUP_1", "GROUP_2"}
+                    )
+                },
                 "adapter_version": CAPTURE_ADAPTER_VERSION,
                 "parser_version": COIN_GROUP_PARSER_VERSION,
+                "public_parser_version": PUBLIC_MARKET_PARSER_VERSION,
+                "private_gold_parser_version": PRIVATE_GOLD_PARSER_VERSION,
+                "private_gold_trade_version": PRIVATE_GOLD_TRADE_REVISION_VERSION,
                 "pipeline_version": COIN_GROUP_PIPELINE_VERSION,
                 "calibration_corpus_version": CALIBRATION_CORPUS_VERSION,
                 "shadow_only": True,

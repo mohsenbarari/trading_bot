@@ -168,7 +168,10 @@ class CaptureEventAdapterTests(unittest.TestCase):
             "SELECT event_type,price_num FROM market_observations "
             "WHERE source_code='PRIVATE_GOLD_CHANNEL' AND quality_state='ELIGIBLE'"
         ).fetchall()
-        self.assertEqual([(row["event_type"], row["price_num"]) for row in rows], [("OFFER", 95_100_000.0)])
+        self.assertEqual(
+            [(row["event_type"], row["price_num"]) for row in rows],
+            [("OFFER", 95_000_000.0)],
+        )
 
         self._stage_market(
             market_event(
@@ -186,10 +189,10 @@ class CaptureEventAdapterTests(unittest.TestCase):
             self.market.execute(
                 "SELECT COUNT(*) FROM market_observations WHERE source_code='PRIVATE_GOLD_CHANNEL' AND quality_state='ELIGIBLE'"
             ).fetchone()[0],
-            0,
+            1,
         )
 
-    def test_xau_delete_restores_previous_current_minute_quote(self) -> None:
+    def test_xau_keeps_each_event_and_delete_retracts_only_target(self) -> None:
         self._stage_market(
             market_event(
                 10,
@@ -212,10 +215,15 @@ class CaptureEventAdapterTests(unittest.TestCase):
         )
         self._project()
         self.assertEqual(
-            self.market.execute(
-                "SELECT price_num FROM market_observations WHERE source_code='XAUUSD' AND quality_state='ELIGIBLE'"
-            ).fetchone()[0],
-            4631.2,
+            [
+                row["price_num"]
+                for row in self.market.execute(
+                    "SELECT price_num FROM market_observations "
+                    "WHERE source_code='XAUUSD' AND quality_state='ELIGIBLE' "
+                    "ORDER BY event_time_utc"
+                ).fetchall()
+            ],
+            [4630.1, 4631.2],
         )
         self._stage_market(
             market_event(
@@ -335,7 +343,7 @@ class CaptureEventAdapterTests(unittest.TestCase):
         row = self.staging.execute(
             "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
         ).fetchone()
-        self.assertEqual(row["schema_version"], 4)
+        self.assertEqual(row["schema_version"], 5)
         self.assertEqual(
             self.staging.execute(
                 "SELECT COUNT(*) FROM capture_market_message_revisions"
