@@ -118,7 +118,7 @@ def read_private_key(path: Path, *, field: str) -> bytes:
     key_path = _existing_file(path, field=field)
     info = key_path.stat()
     mode = stat.S_IMODE(info.st_mode)
-    if mode not in {0o400, 0o600}:
+    if mode not in {0o400, 0o440, 0o600, 0o640} or mode & 0o007:
         raise SingleOwnerParityError(f"{field}_permissions_invalid")
     if info.st_size > 4096:
         raise SingleOwnerParityError(f"{field}_size_invalid")

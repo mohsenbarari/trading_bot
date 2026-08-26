@@ -29,6 +29,7 @@ from core.market_intelligence.single_owner_parity import (
     compare_facts,
     compare_market_stores,
     exclusive_existing_lock,
+    read_private_key,
     run_single_owner_parity,
 )
 
@@ -240,6 +241,15 @@ class SingleOwnerParityTests(unittest.TestCase):
         finally:
             fcntl.flock(descriptor, fcntl.LOCK_UN)
             os.close(descriptor)
+
+    def test_private_key_allows_service_group_read_but_rejects_world_access(self):
+        key_path = self.root / "service-key"
+        key_path.write_bytes(IDENTITY_KEY)
+        key_path.chmod(0o440)
+        self.assertEqual(read_private_key(key_path, field="test_key"), IDENTITY_KEY)
+        key_path.chmod(0o444)
+        with self.assertRaisesRegex(SingleOwnerParityError, "permissions_invalid"):
+            read_private_key(key_path, field="test_key")
 
     def test_fact_differences_are_classified_without_financial_values(self):
         baseline = {

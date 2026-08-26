@@ -140,8 +140,9 @@ capture نیز با manifest و reconciliation مستقل سنجیده می‌ش
 6. فقط `report.json` امضاشده و `capture-manifest.json` privacy-minimized را با mode `0600`
    در artifact directory با mode `0700` حفظ می‌کند. متن خام، شناسه پیام، sender، event ID
    مستقیم، قیمت/تعداد اختلاف و database/spool موقت در خروجی ماندگار نمی‌ماند؛
-7. کلید identity و signing را فقط از فایل root-only با mode `0400` یا `0600` می‌خواند؛
-   انتقال secret در argv ممنوع است.
+7. کلید identity و signing را فقط از فایل محافظت‌شده با mode `0400`، `0440`، `0600` یا
+   `0640` و بدون هیچ world permission می‌خواند؛ انتقال secret در argv ممنوع است. کلید
+   signing مستقل است و با کلید transport reuse نمی‌شود.
 
 حذف scratch به معنی حذف مسیرهای filesystem پس از اجراست و ادعای forensic erase روی
 SSD ندارد؛ به همین دلیل scratch باید فقط روی storage کنترل‌شده میزبان قرار گیرد و هیچ backup
