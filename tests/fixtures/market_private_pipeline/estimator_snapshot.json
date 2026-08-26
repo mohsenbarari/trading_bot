@@ -1,0 +1,31 @@
+{
+  "contract": "estimator_snapshot/1.0",
+  "snapshot_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "snapshot_version": 1,
+  "generated_at_utc": "2026-08-26T05:00:05Z",
+  "input_snapshot_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "model_version": "fixture-model-v1",
+  "status": "OK",
+  "rates": [
+    {
+      "instrument": "COIN_IMAM",
+      "settlement": "CASH",
+      "value": "187450",
+      "unit": "PROJECT_THOUSAND_TOMAN",
+      "lower_bound": "186900",
+      "upper_bound": "188000",
+      "confidence": 0.91,
+      "method": "WEIGHTED_BOOK"
+    }
+  ],
+  "health": [
+    {
+      "component": "GROUP_1",
+      "status": "FRESH",
+      "latest_available_at_utc": "2026-08-26T05:00:01Z",
+      "age_seconds": 4,
+      "reason_codes": []
+    }
+  ],
+  "reason_codes": []
+}

@@ -1,0 +1,140 @@
+{
+  "$defs": {
+    "SourceDefinitionV1": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_fact_kinds": {
+          "items": {
+            "enum": [
+              "OBSERVATION",
+              "COIN_OFFER",
+              "COIN_TRADE",
+              "PRIVATE_GOLD_OFFER",
+              "PRIVATE_GOLD_OUTCOME",
+              "EXTERNAL_QUOTE"
+            ],
+            "type": "string"
+          },
+          "title": "Allowed Fact Kinds",
+          "type": "array"
+        },
+        "capture_enabled": {
+          "title": "Capture Enabled",
+          "type": "boolean"
+        },
+        "capture_stream_id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Capture Stream Id"
+        },
+        "fact_stream_id": {
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}$",
+          "title": "Fact Stream Id",
+          "type": "string"
+        },
+        "parser_profile": {
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+          "title": "Parser Profile",
+          "type": "string"
+        },
+        "permanent_archive": {
+          "title": "Permanent Archive",
+          "type": "boolean"
+        },
+        "pii_classification": {
+          "enum": [
+            "NONE",
+            "LOW",
+            "MEDIUM",
+            "HIGH"
+          ],
+          "title": "Pii Classification",
+          "type": "string"
+        },
+        "raw_retention_seconds": {
+          "maximum": 604800,
+          "minimum": 0,
+          "title": "Raw Retention Seconds",
+          "type": "integer"
+        },
+        "source_code": {
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+          "title": "Source Code",
+          "type": "string"
+        },
+        "source_family": {
+          "enum": [
+            "TELEGRAM_GROUP",
+            "TELEGRAM_PUBLIC",
+            "TELEGRAM_PRIVATE",
+            "EXTERNAL_API",
+            "DERIVED",
+            "RESERVED"
+          ],
+          "title": "Source Family",
+          "type": "string"
+        },
+        "transfer_to_bot": {
+          "title": "Transfer To Bot",
+          "type": "boolean"
+        },
+        "upstream_schema": {
+          "title": "Upstream Schema",
+          "type": "string"
+        },
+        "upstream_schema_version": {
+          "title": "Upstream Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_code",
+        "capture_stream_id",
+        "fact_stream_id",
+        "source_family",
+        "upstream_schema",
+        "upstream_schema_version",
+        "parser_profile",
+        "capture_enabled",
+        "permanent_archive",
+        "raw_retention_seconds",
+        "transfer_to_bot",
+        "pii_classification",
+        "allowed_fact_kinds"
+      ],
+      "title": "SourceDefinitionV1",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "contract": {
+      "const": "market_source_registry/1.0",
+      "enum": [
+        "market_source_registry/1.0"
+      ],
+      "title": "Contract",
+      "type": "string"
+    },
+    "sources": {
+      "items": {
+        "$ref": "#/$defs/SourceDefinitionV1"
+      },
+      "title": "Sources",
+      "type": "array"
+    }
+  },
+  "required": [
+    "contract",
+    "sources"
+  ],
+  "title": "SourceRegistryV1",
+  "type": "object"
+}

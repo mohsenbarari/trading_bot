@@ -1,0 +1,211 @@
+{
+  "$defs": {
+    "EstimatorInputHealthV1": {
+      "additionalProperties": false,
+      "properties": {
+        "age_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Age Seconds"
+        },
+        "component": {
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+          "title": "Component",
+          "type": "string"
+        },
+        "latest_available_at_utc": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Latest Available At Utc"
+        },
+        "reason_codes": {
+          "default": [],
+          "items": {
+            "pattern": "^[A-Z][A-Z0-9_]{1,95}$",
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "FRESH",
+            "STALE",
+            "MISSING",
+            "REJECTED"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "component",
+        "status",
+        "latest_available_at_utc"
+      ],
+      "title": "EstimatorInputHealthV1",
+      "type": "object"
+    },
+    "EstimatorRateV1": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "instrument": {
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+          "title": "Instrument",
+          "type": "string"
+        },
+        "lower_bound": {
+          "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+          "title": "Lower Bound",
+          "type": "string"
+        },
+        "method": {
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+          "title": "Method",
+          "type": "string"
+        },
+        "settlement": {
+          "enum": [
+            "CASH",
+            "TOMORROW"
+          ],
+          "title": "Settlement",
+          "type": "string"
+        },
+        "unit": {
+          "enum": [
+            "PROJECT_THOUSAND_TOMAN",
+            "TOMAN_PER_COIN"
+          ],
+          "title": "Unit",
+          "type": "string"
+        },
+        "upper_bound": {
+          "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+          "title": "Upper Bound",
+          "type": "string"
+        },
+        "value": {
+          "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "instrument",
+        "settlement",
+        "value",
+        "unit",
+        "lower_bound",
+        "upper_bound",
+        "confidence",
+        "method"
+      ],
+      "title": "EstimatorRateV1",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "contract": {
+      "const": "estimator_snapshot/1.0",
+      "enum": [
+        "estimator_snapshot/1.0"
+      ],
+      "title": "Contract",
+      "type": "string"
+    },
+    "generated_at_utc": {
+      "format": "date-time",
+      "title": "Generated At Utc",
+      "type": "string"
+    },
+    "health": {
+      "items": {
+        "$ref": "#/$defs/EstimatorInputHealthV1"
+      },
+      "title": "Health",
+      "type": "array"
+    },
+    "input_snapshot_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Input Snapshot Hash",
+      "type": "string"
+    },
+    "model_version": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Model Version",
+      "type": "string"
+    },
+    "rates": {
+      "items": {
+        "$ref": "#/$defs/EstimatorRateV1"
+      },
+      "title": "Rates",
+      "type": "array"
+    },
+    "reason_codes": {
+      "default": [],
+      "items": {
+        "pattern": "^[A-Z][A-Z0-9_]{1,95}$",
+        "type": "string"
+      },
+      "title": "Reason Codes",
+      "type": "array"
+    },
+    "snapshot_id": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Snapshot Id",
+      "type": "string"
+    },
+    "snapshot_version": {
+      "minimum": 1,
+      "title": "Snapshot Version",
+      "type": "integer"
+    },
+    "status": {
+      "enum": [
+        "OK",
+        "SAFE_NO_DATA",
+        "FAILURE"
+      ],
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "contract",
+    "snapshot_id",
+    "snapshot_version",
+    "generated_at_utc",
+    "input_snapshot_hash",
+    "model_version",
+    "status",
+    "rates",
+    "health"
+  ],
+  "title": "EstimatorSnapshotV1",
+  "type": "object"
+}

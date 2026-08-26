@@ -1,6 +1,6 @@
 # Roadmap انتقال داده و Parse بازار روی شبکه خصوصی
 
-وضعیت: مراحل 0 و 1 تکمیل شده‌اند؛ مرحله 2 هنوز آغاز نشده و cutover انجام نشده است
+وضعیت: مراحل 0 تا 2 تکمیل شده‌اند؛ مرحله 3 هنوز آغاز نشده و cutover انجام نشده است
 
 تاریخ بازبینی: 2026-08-26
 
@@ -492,6 +492,19 @@ Gate:
 - migration rehearsal و restore backup موفق؛
 - هیچ unresolved unit یا timestamp semantics وجود ندارد.
 
+نتیجه اجرا در 2026-08-26:
+
+- typed contract و شش JSON Schema برای capture، fact، batch، ACK، snapshot و source registry تثبیت شد؛
+- fact stream از capture stream جدا و batch به یک stream با sequence پیوسته محدود شد؛
+- PostgreSQL 15 اختصاصی Market Data انتخاب و migration chain آن از product DB/Alembic جدا شد؛
+- 22 جدول برای capture، quarantine، curated facts/evidence/identity، outbox، input ledger، snapshot و review تعریف شد؛
+- PII دائمی فقط رمز‌شده و با lookup HMAC روی وب مجاز است و هیچ PII در Market Fact به بات نمی‌رود؛
+- source registry ده نقش، از جمله بورس reserved/disabled، را بدون source ID یا link runtime پوشش می‌دهد؛
+- volume root خالی و root-only روی وب ایجاد شد؛ backup نهایی باید خارج failure domain روی Object Storage باشد؛
+- rehearsal پنجاه‌هزار row در هر جدول اصلی، query benchmark، backup/restore، down migration و cleanup کامل را پاس کرد.
+
+گزارش، ADR و gate receipt: [COIN_MARKET_DATA_STAGE2_CONTRACT_STORAGE.md](./COIN_MARKET_DATA_STAGE2_CONTRACT_STORAGE.md)
+
 ### مرحله 3 — Docker foundation و اتصال به deploy پروژه
 
 اقدامات:
@@ -926,7 +939,7 @@ SLOها بعد از baseline خصوصی می‌توانند فقط سخت‌گی
 - backup روی volume جدا از active database؛
 - container layer و image جای backup داده نیستند؛
 - backup بدون restore test معتبر نیست؛
-- RPO/RTO نهایی بعد از اندازه‌گیری حجم واقعی در مرحله 0 تصویب می‌شود.
+- RPO/RTO اولیه در مرحله 2 تصویب شد و پس از اندازه‌گیری بار واقعی در مراحل live دوباره کالیبره می‌شود.
 
 ## 13. Rollback سراسری
 
@@ -956,20 +969,21 @@ Rollback هرگز capture یا archive وب را خاموش نمی‌کند. ت�
 - افزودن بورس در این نسخه؛
 - production deploy بدون تایید مستقل.
 
-## 15. تصمیم‌های باز که قبل از مرحله 2 باید بسته شوند
+## 15. تصمیم‌های بسته‌شده در مرحله 2 و gate باقی‌مانده مرحله 3
 
-این موارد در گفتگو نهایی نشده‌اند و roadmap نباید پاسخ جعلی برایشان بسازد:
+تصمیم‌های storage/contract در مرحله 2 با ADR، migration rehearsal و restore test بسته شدند:
 
-1. engine نهایی archive دائمی: PostgreSQL اختصاصی یا SQLite single-writer اثبات‌شده؛
-2. حجم و نوع volume جدید روی سرور وب/داده؛
-3. port، private hostname و certificate authority شبکه خصوصی؛
-4. RPO/RTO و retention دقیق quarantine/input ledger؛
-5. threshold نهایی alertها پس از baseline؛
-6. مدت rollback window پیش از بازنشستگی legacy؛
-7. سیاست نمایش نام/Telegram ID در WebApp و سطح دسترسی اپراتورها.
-8. base image و dependency-lock نهایی پس از benchmark اندازه، build time و runtime compatibility.
+1. archive دائمی PostgreSQL 15 اختصاصی و جدا از product DB/Alembic است؛ SQLite سمت مدل فقط projection محلی می‌ماند؛
+2. bind-root جدا روی سرور وب/داده با ظرفیت فعلی کافی است؛ paid volume فقط با evidence رشد فضا اضافه می‌شود؛
+3. receiverها روی private IP دقیق و port `9443` با CA داخلی، leafهای جدا و HMAC دوکلیدی کار می‌کنند؛ endpoint از env می‌آید؛
+4. raw/quarantine به‌ترتیب 3/14 روز، input ledger دائمی، RPO حداکثر 5 دقیقه و RTO حداکثر 60 دقیقه است؛
+5. thresholdهای اولیه در gate receipt مرحله 2 ثبت شده‌اند و در مرحله 12 فقط با evidence بازار باز کالیبره می‌شوند؛
+6. rollback window برابر هفت روز کامل بازار باز است؛
+7. Telegram identity و متن خام منتخب فقط رمز‌شده روی وب، با decrypt محدود و قابل ممیزی برای reviewer/admin نگهداری می‌شوند.
 
-انتخاب هر مورد باید ADR کوتاه، تست و rollback داشته باشد.
+یک تصمیم اجرایی عمداً در gate مرحله 3 باقی مانده است: runtime کاندید Python 3.11 slim Bookworm و PostgreSQL 15 Alpine هستند، اما digest نهایی و dependency lock فقط پس از build، secret scan، benchmark اندازه/build-time و آزمون compatibility pin می‌شوند.
+
+جزئیات و شواهد: [COIN_MARKET_DATA_STAGE2_CONTRACT_STORAGE.md](./COIN_MARKET_DATA_STAGE2_CONTRACT_STORAGE.md)
 
 ## 16. تعریف Done نهایی
 

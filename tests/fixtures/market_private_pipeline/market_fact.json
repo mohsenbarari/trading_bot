@@ -1,0 +1,30 @@
+{
+  "contract": "market_fact/1.0",
+  "fact_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "event_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "origin_event_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "source_code": "GROUP_1",
+  "stream_id": "market.fact.coin.group.1",
+  "source_sequence": 1,
+  "occurred_at_utc": "2026-08-26T05:00:00Z",
+  "available_at_utc": "2026-08-26T05:00:01Z",
+  "persisted_at_utc": "2026-08-26T05:00:02Z",
+  "schema_version": "1.0",
+  "parser_version": "fixture-v1",
+  "fact_revision": 1,
+  "quality_state": "ELIGIBLE",
+  "quality_reason_codes": [],
+  "payload_hash": "fba8736e5af1c79247959af2b4d3ec7e3cd923a9af4149d167726e2f66403cad",
+  "payload": {
+    "kind": "COIN_OFFER",
+    "quantity_value": "3",
+    "quantity_unit": "COIN",
+    "group_code": 1,
+    "instrument": "COIN_IMAM",
+    "side": "BUY",
+    "settlement": "CASH",
+    "trade_form": "PHYSICAL",
+    "offered_price_value": "187500",
+    "price_unit": "PROJECT_THOUSAND_TOMAN"
+  }
+}

@@ -1,0 +1,803 @@
+{
+  "$defs": {
+    "CoinOfferPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "group_code": {
+          "enum": [
+            1,
+            2
+          ],
+          "title": "Group Code",
+          "type": "integer"
+        },
+        "instrument": {
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+          "title": "Instrument",
+          "type": "string"
+        },
+        "kind": {
+          "const": "COIN_OFFER",
+          "enum": [
+            "COIN_OFFER"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "offered_price_value": {
+          "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+          "title": "Offered Price Value",
+          "type": "string"
+        },
+        "price_unit": {
+          "enum": [
+            "PROJECT_THOUSAND_TOMAN",
+            "TOMAN_PER_COIN"
+          ],
+          "title": "Price Unit",
+          "type": "string"
+        },
+        "quantity_unit": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quantity Unit"
+        },
+        "quantity_value": {
+          "anyOf": [
+            {
+              "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quantity Value"
+        },
+        "settlement": {
+          "enum": [
+            "CASH",
+            "TOMORROW"
+          ],
+          "title": "Settlement",
+          "type": "string"
+        },
+        "side": {
+          "enum": [
+            "BUY",
+            "SELL"
+          ],
+          "title": "Side",
+          "type": "string"
+        },
+        "trade_form": {
+          "enum": [
+            "PHYSICAL",
+            "PAPER_NORMAL",
+            "PAPER_REVERSE",
+            "PAPER_SWIM",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ],
+          "title": "Trade Form",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "group_code",
+        "instrument",
+        "side",
+        "settlement",
+        "trade_form",
+        "offered_price_value",
+        "price_unit"
+      ],
+      "title": "CoinOfferPayload",
+      "type": "object"
+    },
+    "CoinTradePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "agreed_price_value": {
+          "anyOf": [
+            {
+              "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agreed Price Value"
+        },
+        "agreed_quantity_value": {
+          "anyOf": [
+            {
+              "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agreed Quantity Value"
+        },
+        "kind": {
+          "const": "COIN_TRADE",
+          "enum": [
+            "COIN_TRADE"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "offer_fact_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Offer Fact Id",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "CONFIRMED_FULL",
+            "CONFIRMED_PARTIAL",
+            "REJECTED",
+            "AMBIGUOUS"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "price_unit": {
+          "anyOf": [
+            {
+              "enum": [
+                "PROJECT_THOUSAND_TOMAN",
+                "TOMAN_PER_COIN"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Price Unit"
+        },
+        "quantity_unit": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quantity Unit"
+        }
+      },
+      "required": [
+        "kind",
+        "offer_fact_id",
+        "outcome"
+      ],
+      "title": "CoinTradePayload",
+      "type": "object"
+    },
+    "ExternalQuotePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "currency": {
+          "enum": [
+            "TOMAN",
+            "USD"
+          ],
+          "title": "Currency",
+          "type": "string"
+        },
+        "instrument": {
+          "enum": [
+            "XAUUSD",
+            "USD_HERAT",
+            "USDT_IRT"
+          ],
+          "title": "Instrument",
+          "type": "string"
+        },
+        "kind": {
+          "const": "EXTERNAL_QUOTE",
+          "enum": [
+            "EXTERNAL_QUOTE"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "price_unit": {
+          "enum": [
+            "USD_PER_TROY_OUNCE",
+            "TOMAN_PER_USD",
+            "TOMAN_PER_USDT"
+          ],
+          "title": "Price Unit",
+          "type": "string"
+        },
+        "price_value": {
+          "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+          "title": "Price Value",
+          "type": "string"
+        },
+        "quote_kind": {
+          "enum": [
+            "BID",
+            "ASK",
+            "MID",
+            "LAST"
+          ],
+          "title": "Quote Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "instrument",
+        "quote_kind",
+        "price_value",
+        "price_unit",
+        "currency"
+      ],
+      "title": "ExternalQuotePayload",
+      "type": "object"
+    },
+    "MarketFactV1": {
+      "additionalProperties": false,
+      "properties": {
+        "available_at_utc": {
+          "format": "date-time",
+          "title": "Available At Utc",
+          "type": "string"
+        },
+        "contract": {
+          "const": "market_fact/1.0",
+          "enum": [
+            "market_fact/1.0"
+          ],
+          "title": "Contract",
+          "type": "string"
+        },
+        "event_key": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Event Key",
+          "type": "string"
+        },
+        "fact_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Fact Id",
+          "type": "string"
+        },
+        "fact_revision": {
+          "minimum": 1,
+          "title": "Fact Revision",
+          "type": "integer"
+        },
+        "occurred_at_utc": {
+          "format": "date-time",
+          "title": "Occurred At Utc",
+          "type": "string"
+        },
+        "origin_event_key": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Origin Event Key",
+          "type": "string"
+        },
+        "parser_version": {
+          "maxLength": 96,
+          "minLength": 1,
+          "title": "Parser Version",
+          "type": "string"
+        },
+        "payload": {
+          "discriminator": {
+            "mapping": {
+              "COIN_OFFER": "#/$defs/CoinOfferPayload",
+              "COIN_TRADE": "#/$defs/CoinTradePayload",
+              "EXTERNAL_QUOTE": "#/$defs/ExternalQuotePayload",
+              "OBSERVATION": "#/$defs/ObservationPayload",
+              "PRIVATE_GOLD_OFFER": "#/$defs/PrivateGoldOfferPayload",
+              "PRIVATE_GOLD_OUTCOME": "#/$defs/PrivateGoldOutcomePayload"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ObservationPayload"
+            },
+            {
+              "$ref": "#/$defs/CoinOfferPayload"
+            },
+            {
+              "$ref": "#/$defs/CoinTradePayload"
+            },
+            {
+              "$ref": "#/$defs/PrivateGoldOfferPayload"
+            },
+            {
+              "$ref": "#/$defs/PrivateGoldOutcomePayload"
+            },
+            {
+              "$ref": "#/$defs/ExternalQuotePayload"
+            }
+          ],
+          "title": "Payload"
+        },
+        "payload_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Payload Hash",
+          "type": "string"
+        },
+        "persisted_at_utc": {
+          "format": "date-time",
+          "title": "Persisted At Utc",
+          "type": "string"
+        },
+        "quality_reason_codes": {
+          "default": [],
+          "items": {
+            "pattern": "^[A-Z][A-Z0-9_]{1,95}$",
+            "type": "string"
+          },
+          "title": "Quality Reason Codes",
+          "type": "array"
+        },
+        "quality_state": {
+          "enum": [
+            "ELIGIBLE",
+            "REVIEW",
+            "REJECTED",
+            "AUDIT_ONLY"
+          ],
+          "title": "Quality State",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "enum": [
+            "1.0"
+          ],
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source_code": {
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+          "title": "Source Code",
+          "type": "string"
+        },
+        "source_sequence": {
+          "minimum": 1,
+          "title": "Source Sequence",
+          "type": "integer"
+        },
+        "stream_id": {
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}$",
+          "title": "Stream Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "contract",
+        "fact_id",
+        "event_key",
+        "origin_event_key",
+        "source_code",
+        "stream_id",
+        "source_sequence",
+        "occurred_at_utc",
+        "available_at_utc",
+        "persisted_at_utc",
+        "schema_version",
+        "parser_version",
+        "fact_revision",
+        "quality_state",
+        "payload_hash",
+        "payload"
+      ],
+      "title": "MarketFactV1",
+      "type": "object"
+    },
+    "ObservationPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "currency": {
+          "enum": [
+            "TOMAN",
+            "USD"
+          ],
+          "title": "Currency",
+          "type": "string"
+        },
+        "event_type": {
+          "enum": [
+            "OFFER",
+            "TRADE",
+            "QUOTE",
+            "REFERENCE"
+          ],
+          "title": "Event Type",
+          "type": "string"
+        },
+        "instrument": {
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+          "title": "Instrument",
+          "type": "string"
+        },
+        "kind": {
+          "const": "OBSERVATION",
+          "enum": [
+            "OBSERVATION"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "price_unit": {
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+          "title": "Price Unit",
+          "type": "string"
+        },
+        "price_value": {
+          "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+          "title": "Price Value",
+          "type": "string"
+        },
+        "quantity_unit": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quantity Unit"
+        },
+        "quantity_value": {
+          "anyOf": [
+            {
+              "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quantity Value"
+        },
+        "settlement": {
+          "enum": [
+            "CASH",
+            "TODAY",
+            "TOMORROW",
+            "SPOT",
+            "UNKNOWN"
+          ],
+          "title": "Settlement",
+          "type": "string"
+        },
+        "side": {
+          "enum": [
+            "BUY",
+            "SELL",
+            "MID",
+            "UNKNOWN"
+          ],
+          "title": "Side",
+          "type": "string"
+        },
+        "trade_form": {
+          "enum": [
+            "PHYSICAL",
+            "PAPER_NORMAL",
+            "PAPER_REVERSE",
+            "PAPER_SWIM",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ],
+          "title": "Trade Form",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "instrument",
+        "event_type",
+        "side",
+        "settlement",
+        "trade_form",
+        "price_value",
+        "price_unit",
+        "currency"
+      ],
+      "title": "ObservationPayload",
+      "type": "object"
+    },
+    "PrivateGoldOfferPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "instrument": {
+          "const": "MELTED_GOLD_PRIVATE",
+          "enum": [
+            "MELTED_GOLD_PRIVATE"
+          ],
+          "title": "Instrument",
+          "type": "string"
+        },
+        "kind": {
+          "const": "PRIVATE_GOLD_OFFER",
+          "enum": [
+            "PRIVATE_GOLD_OFFER"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "lifetime_seconds": {
+          "const": 120,
+          "enum": [
+            120
+          ],
+          "title": "Lifetime Seconds",
+          "type": "integer"
+        },
+        "offered_price_value": {
+          "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+          "title": "Offered Price Value",
+          "type": "string"
+        },
+        "price_unit": {
+          "const": "TOMAN_PER_MESGHAL_750",
+          "enum": [
+            "TOMAN_PER_MESGHAL_750"
+          ],
+          "title": "Price Unit",
+          "type": "string"
+        },
+        "quantity_unit": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quantity Unit"
+        },
+        "quantity_value": {
+          "anyOf": [
+            {
+              "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quantity Value"
+        },
+        "settlement": {
+          "enum": [
+            "CASH",
+            "TODAY",
+            "TOMORROW",
+            "SPOT",
+            "UNKNOWN"
+          ],
+          "title": "Settlement",
+          "type": "string"
+        },
+        "side": {
+          "enum": [
+            "BUY",
+            "SELL"
+          ],
+          "title": "Side",
+          "type": "string"
+        },
+        "trade_form": {
+          "enum": [
+            "PHYSICAL",
+            "PAPER_NORMAL",
+            "PAPER_REVERSE",
+            "PAPER_SWIM",
+            "NOT_APPLICABLE",
+            "UNKNOWN"
+          ],
+          "title": "Trade Form",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "instrument",
+        "side",
+        "settlement",
+        "trade_form",
+        "offered_price_value",
+        "price_unit",
+        "lifetime_seconds"
+      ],
+      "title": "PrivateGoldOfferPayload",
+      "type": "object"
+    },
+    "PrivateGoldOutcomePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "executed_quantity_value": {
+          "anyOf": [
+            {
+              "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Executed Quantity Value"
+        },
+        "kind": {
+          "const": "PRIVATE_GOLD_OUTCOME",
+          "enum": [
+            "PRIVATE_GOLD_OUTCOME"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "offer_fact_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Offer Fact Id",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "FULL",
+            "PARTIAL",
+            "NO_TRADE",
+            "AMBIGUOUS"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "quantity_unit": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quantity Unit"
+        },
+        "remaining_quantity_value": {
+          "anyOf": [
+            {
+              "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Remaining Quantity Value"
+        }
+      },
+      "required": [
+        "kind",
+        "offer_fact_id",
+        "outcome"
+      ],
+      "title": "PrivateGoldOutcomePayload",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "batch_id": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Batch Id",
+      "type": "string"
+    },
+    "contract": {
+      "const": "market_fact_batch/1.0",
+      "enum": [
+        "market_fact_batch/1.0"
+      ],
+      "title": "Contract",
+      "type": "string"
+    },
+    "created_at_utc": {
+      "format": "date-time",
+      "title": "Created At Utc",
+      "type": "string"
+    },
+    "first_sequence": {
+      "minimum": 1,
+      "title": "First Sequence",
+      "type": "integer"
+    },
+    "item_count": {
+      "maximum": 500,
+      "minimum": 1,
+      "title": "Item Count",
+      "type": "integer"
+    },
+    "items": {
+      "items": {
+        "$ref": "#/$defs/MarketFactV1"
+      },
+      "title": "Items",
+      "type": "array"
+    },
+    "items_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Items Hash",
+      "type": "string"
+    },
+    "last_sequence": {
+      "minimum": 1,
+      "title": "Last Sequence",
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "enum": [
+        "1.0"
+      ],
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "sender_instance_id": {
+      "pattern": "^[a-z][a-z0-9._-]{2,63}$",
+      "title": "Sender Instance Id",
+      "type": "string"
+    },
+    "stream_id": {
+      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}$",
+      "title": "Stream Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "contract",
+    "batch_id",
+    "schema_version",
+    "stream_id",
+    "first_sequence",
+    "last_sequence",
+    "created_at_utc",
+    "item_count",
+    "items_hash",
+    "sender_instance_id",
+    "items"
+  ],
+  "title": "MarketFactBatchV1",
+  "type": "object"
+}

@@ -1,0 +1,23 @@
+{
+  "contract": "market_capture_record/1.0",
+  "upstream_schema": "coin_group_event",
+  "upstream_schema_version": "2.0",
+  "event_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "upstream_event_id": "018fe12a-0000-7000-8000-000000000001",
+  "source_code": "GROUP_1",
+  "stream_id": "capture.coin.group.1",
+  "source_sequence": 1,
+  "event_type": "MESSAGE_CREATED",
+  "occurred_at_utc": "2026-08-26T05:00:00Z",
+  "available_at_utc": "2026-08-26T05:00:01Z",
+  "persisted_at_utc": "2026-08-26T05:00:02Z",
+  "retention_until_utc": "2026-08-29T05:00:02Z",
+  "payload_hash": "aaca07c9da7b91c79184b1996c3ef4fc074e450f453aefd84ec051452d412051",
+  "retention_class": "RAW_3D",
+  "contains_pii": true,
+  "raw_payload": {
+    "message": {
+      "text": "fixture offer"
+    }
+  }
+}

@@ -1,0 +1,120 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "available_at_utc": {
+      "format": "date-time",
+      "title": "Available At Utc",
+      "type": "string"
+    },
+    "contains_pii": {
+      "title": "Contains Pii",
+      "type": "boolean"
+    },
+    "contract": {
+      "const": "market_capture_record/1.0",
+      "enum": [
+        "market_capture_record/1.0"
+      ],
+      "title": "Contract",
+      "type": "string"
+    },
+    "event_key": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Event Key",
+      "type": "string"
+    },
+    "event_type": {
+      "enum": [
+        "MESSAGE_CREATED",
+        "MESSAGE_SNAPSHOT",
+        "MESSAGE_EDITED",
+        "MESSAGE_DELETED",
+        "QUOTE_OBSERVED"
+      ],
+      "title": "Event Type",
+      "type": "string"
+    },
+    "occurred_at_utc": {
+      "format": "date-time",
+      "title": "Occurred At Utc",
+      "type": "string"
+    },
+    "payload_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Payload Hash",
+      "type": "string"
+    },
+    "persisted_at_utc": {
+      "format": "date-time",
+      "title": "Persisted At Utc",
+      "type": "string"
+    },
+    "raw_payload": {
+      "title": "Raw Payload",
+      "type": "object"
+    },
+    "retention_class": {
+      "const": "RAW_3D",
+      "enum": [
+        "RAW_3D"
+      ],
+      "title": "Retention Class",
+      "type": "string"
+    },
+    "retention_until_utc": {
+      "format": "date-time",
+      "title": "Retention Until Utc",
+      "type": "string"
+    },
+    "source_code": {
+      "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+      "title": "Source Code",
+      "type": "string"
+    },
+    "source_sequence": {
+      "minimum": 1,
+      "title": "Source Sequence",
+      "type": "integer"
+    },
+    "stream_id": {
+      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}$",
+      "title": "Stream Id",
+      "type": "string"
+    },
+    "upstream_event_id": {
+      "maxLength": 192,
+      "minLength": 8,
+      "title": "Upstream Event Id",
+      "type": "string"
+    },
+    "upstream_schema": {
+      "title": "Upstream Schema",
+      "type": "string"
+    },
+    "upstream_schema_version": {
+      "title": "Upstream Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "contract",
+    "upstream_schema",
+    "upstream_schema_version",
+    "event_key",
+    "upstream_event_id",
+    "source_code",
+    "stream_id",
+    "source_sequence",
+    "event_type",
+    "occurred_at_utc",
+    "available_at_utc",
+    "persisted_at_utc",
+    "retention_until_utc",
+    "payload_hash",
+    "retention_class",
+    "contains_pii",
+    "raw_payload"
+  ],
+  "title": "MarketCaptureRecordV1",
+  "type": "object"
+}
