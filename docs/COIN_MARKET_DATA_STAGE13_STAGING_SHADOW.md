@@ -184,6 +184,49 @@ python3 scripts/rehearse_market_single_owner_parity_stage13.py run \
 بودن تمام اختلاف‌ها، به‌تنهایی مجوز `PRIVATE_PRIMARY` نیست؛ timeline واقعی، جلسه کامل بازار
 باز و gate زنده Stage 12 همچنان لازم است.
 
+## نتیجه rehearsal تک‌مالک
+
+نسخه نهایی هارنس با release `main@50aea41de5db9bb03482756f8b7c601c32824470`
+و archive SHA-256 برابر
+`e2ec9f6eed1da5cbdfbb17c0d94bdd699116513d300472919b10739e9160b4a6` داخل image
+فعال Stage 13 با network خاموش اجرا شد. image فقط dependency runtime را فراهم کرد؛ code
+baseline و candidate هر دو از mountهای version-pinned خوانده شدند و هیچ service/image زنده
+تعویض نشد. ۱۷ آزمون Stage 12/13 داخل همان image سبز بود.
+
+گزارش نهایی window برابر `2026-08-26T18:45:11Z` تا `19:05:11Z` با report hash
+`2f1cb107efdfe336cb6e0dca1d7d4c7cd08996fbbd53dbac01c220b18082903c` و key ID برابر
+`stage13-staging:50aea41d` امضا و سپس مستقل verify شد. نتیجه redacted:
+
+- ۴۸٬۵۱۵ رکورد کامل prefix اعتبارسنجی و دقیقاً ۱٬۲۱۶ event داخل window replay شد؛
+  duplicate، partial tail، rejected و stale-skipped صفر بود و هر دو lane دقیقاً
+  `records=accepted=1216` ثبت کردند؛
+- manifest شامل ۱٬۲۱۵ event واقعی XAU و یک event `MELTED_AGGREGATE` بود. candidate دقیقاً
+  ۱٬۲۱۵ XAU fact ساخت، درحالی‌که baseline قدیمی ۲۳ public fact نوشت. final Store دارای
+  ۱٬۲۱۲ XAU fact اضافه candidate و ۲۰ XAU bucket/key قدیمیِ فقط baseline بود؛
+- unit/parser/lifecycle mismatch در این window صفر بود. اختلاف XAU ناشی از سیاست مصوب
+  حفظ هر quote واقعی و ممنوعیت minute compaction است؛ baseline قدیمی برای XAU oracle
+  event-by-event معتبر نیست؛
+- از ۱۹ signal، ۱۷ مورد schema جدید `mean_price` را داشتند. value مشترک USDT برابر بود؛
+  فقط XAU به‌علت sample set کامل‌تر candidate value متفاوت داشت؛
+- هر ۱۴ خروجی rate دقیقاً برابر و `rate_mismatch_count=0` بود؛
+- severity-1 برابر ۱ (فقط XAU consumed value) و severity-2 برابر ۱٬۲۴۸ بود. این اختلاف‌ها
+  حذف یا auto-accept نشدند و recommendation همان `HOLD_STAGE12_LIVE_PARITY_REQUIRED`
+  ماند؛
+- artifact directory با mode `0700` و دو فایل با mode `0600` باقی ماند. کلیدهای حساس،
+  متن/شناسه پیام، sender، قیمت/تعداد اختلاف و رشته non-ASCII در artifact نبود؛ scratch پاک
+  شد و هر هفت service زنده پس از اجرا healthy ماندند.
+
+اجرای ابتدایی `951ca9f0` نشان داد `now-30m` دو process می‌تواند با طول replay جابه‌جا شود؛
+آن evidence برای تصمیم parser `SUPERSEDED_TIMING_CONFOUND` است و فقط برای audit نگه داشته
+شد. هارنس از `c751f582` به بعد subset دقیق window و `now/as_of=window_end` مشترک را اعمال
+می‌کند. اجراهای میانی به تفکیک value/metadata/schema منجر شدند و گزارش بالا تنها مرجع نهایی
+این rehearsal است.
+
+این window پس از آرام‌شدن بازار فقط channel/XAU داشت و gate کامل گروه‌های سکه، کانال خصوصی،
+هرات و session کامل بازار باز را نمی‌بندد. مرحله بعد باید valueهای XAU candidate را در
+timestamp مشترک با ورودی واقعی مدل اصلی مقایسه و سپس یک session کامل بازار باز با snapshot
+timeline واقعی ثبت کند؛ مقایسه دوباره با XAU دقیقه‌ای baseline معیار پذیرش نیست.
+
 ## failure drill و اصلاحات حین استقرار
 
 - قطع ۱۲ ثانیه‌ای Fact receiver باعث backlog موقت ۳۳تایی شد؛ پس از بازگشت، صف بدون

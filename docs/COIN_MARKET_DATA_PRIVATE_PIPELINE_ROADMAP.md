@@ -994,6 +994,11 @@ Gate:
   از metadata/cadence و value-schema mismatch جداست تا severity-1 کاذب ساخته نشود.
   این rehearsal همیشه `HOLD_STAGE12_LIVE_PARITY_REQUIRED` است و اجرای staging آن هیچ feed،
   owner یا cutover را تغییر نمی‌دهد.
+- rehearsal نهایی تک‌مالک با `main@50aea41d` تعداد ۱٬۲۱۶ event window را در هر دو lane
+  بدون duplicate/reject/stale پردازش کرد. candidate هر ۱٬۲۱۵ quote واقعی XAU را حفظ کرد،
+  baseline قدیمی فقط cadence compactشده را داشت، unit/parser/lifecycle mismatch صفر و هر
+  ۱۴ rate برابر بود. اختلاف XAU و schema جدید `mean_price` باعث ماندن gate در HOLD شد؛
+  window آرام بازار جای session کامل گروه/آبشده/هرات را نمی‌گیرد.
 
 رسید عملیاتی: [COIN_MARKET_DATA_STAGE13_STAGING_SHADOW.md](./COIN_MARKET_DATA_STAGE13_STAGING_SHADOW.md)
 
