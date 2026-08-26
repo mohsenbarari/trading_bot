@@ -273,8 +273,10 @@ function goHome() { router.replace('/') }
 
 <style scoped>
 .share-receive-root {
-  min-height: 100vh;
-  background: var(--app-bg, #f5f7fb);
+  min-height: 100dvh;
+  height: 100dvh;
+  background: var(--messenger-surface-page, #f2f2f7);
+  color: var(--messenger-text-strong, #1c1c1e);
 }
 .state-overlay {
   position: fixed;
@@ -284,10 +286,10 @@ function goHome() { router.replace('/') }
   align-items: center;
   justify-content: center;
   gap: 14px;
-  padding: 24px;
+  padding: calc(24px + env(safe-area-inset-top, 0px)) 24px calc(24px + env(safe-area-inset-bottom, 0px));
   text-align: center;
-  background: var(--app-bg, #f5f7fb);
-  color: var(--app-fg, #1f2937);
+  background: var(--messenger-surface-page, #f2f2f7);
+  color: var(--messenger-text-strong, #1c1c1e);
   direction: rtl;
   z-index: 10;
 }

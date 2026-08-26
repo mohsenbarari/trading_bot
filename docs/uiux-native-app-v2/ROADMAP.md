@@ -310,7 +310,7 @@ Gate:
 | ۶ عملیات | implementation-complete |
 | ۷ مدیریت | implementation-complete |
 | ۸ احراز | pending |
-| ۹ پیام‌رسان | pending |
+| ۹ پیام‌رسان | implementation-complete |
 | ۱۰ overlay | pending |
 | ۱۱ پذیرش | pending |
 

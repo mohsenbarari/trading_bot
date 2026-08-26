@@ -672,9 +672,9 @@ function confirmForward() {
 }
 
 .forward-modal-footer {
-  padding: 12px 16px;
-  border-top: 1px solid #f1f5f9;
-  background: #ffffff;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--messenger-border-subtle, rgba(60, 60, 67, 0.18));
+  background: var(--messenger-surface-panel, #ffffff);
 }
 
 .forward-send-btn {

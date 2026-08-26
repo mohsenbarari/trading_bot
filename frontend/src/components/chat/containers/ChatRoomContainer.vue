@@ -49,8 +49,7 @@ const useVirtualTimeline = computed(() => {
       <MessengerLoadingScreen
         v-else
         mode="chat"
-        title="در حال باز کردن گفتگو"
-        subtitle="آخرین پیام‌ها با یک بارگذاری سبک و سریع آماده می‌شوند."
+        title="در حال بارگذاری…"
       />
     </div>
 

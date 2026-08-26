@@ -733,6 +733,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding-top: var(--messenger-header-height, 56px);
   background: var(--messenger-surface-page, #f2f2f7);
 }
 
@@ -812,7 +813,7 @@ onBeforeUnmount(() => {
 .conversations-list {
   flex: 1;
   overflow-y: auto;
-  padding: 0 0 112px;
+  padding: 0 0 calc(80px + env(safe-area-inset-bottom, 0px));
   scrollbar-width: thin;
   scrollbar-color: rgba(60, 60, 67, 0.18) transparent;
 }
@@ -1272,24 +1273,19 @@ onBeforeUnmount(() => {
 
 .fab-new-chat {
   position: absolute;
-  right: 22px;
-  bottom: 26px;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   z-index: 4;
-  width: 58px;
-  height: 58px;
+  width: 48px;
+  height: 48px;
   border: none;
-  border-radius: var(--messenger-radius-panel, 18px);
+  border-radius: 50%;
   background: var(--messenger-accent, #f59e0b);
   color: #111827;
   display: flex;
   align-items: center;
   justify-content: center;
   box-shadow: none;
-  transition: transform var(--messenger-motion-standard, 180ms) ease, box-shadow var(--messenger-motion-standard, 180ms) ease;
-}
-
-.fab-new-chat:hover {
-  transform: translateY(-1px) scale(1.02);
 }
 
 .conversation-menu-overlay {
@@ -1435,25 +1431,21 @@ onBeforeUnmount(() => {
 
 @media (max-width: 640px) {
   .conversation-panel {
-    margin: 6px 8px 0;
-    border-radius: 24px 24px 0 0;
+    margin: 0;
+    border-radius: 0;
   }
 
   .conversation-summary-strip {
-    padding: 16px 14px 10px;
+    padding: 16px 16px 10px;
   }
 
   .conversations-list {
-    padding: 10px 10px 108px;
+    padding: 0 0 calc(80px + env(safe-area-inset-bottom, 0px));
   }
 
   .conversation-card {
-    padding: 13px 14px;
-    border-radius: var(--messenger-radius-panel, 18px);
-  }
-  .fab-new-chat {
-    right: 18px;
-    bottom: 22px;
+    padding: 10px 16px;
+    border-radius: 0;
   }
 }
 

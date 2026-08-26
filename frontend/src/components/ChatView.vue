@@ -4095,8 +4095,7 @@ defineExpose({
     <div v-if="isLoading" class="loading-state">
       <MessengerLoadingScreen
         mode="list"
-        title="در حال آماده‌سازی پیام‌رسان"
-        subtitle="گفتگوها و وضعیت‌ها در حال همگام‌سازی هستند."
+        title="در حال بارگذاری…"
       />
     </div>
 
@@ -4222,14 +4221,14 @@ defineExpose({
   bottom: 0;
   display: flex;
   flex-direction: column;
-  /* Telegram classic light background color */
-  background-color: #e4eaef;
+  padding-top: env(safe-area-inset-top, 0px);
+  background-color: var(--messenger-surface-page, #f2f2f7);
   z-index: 100;
 }
 
 .pinned-message-banner {
   position: absolute;
-  top: 60px;
+  top: calc(60px + env(safe-area-inset-top, 0px));
   left: 12px;
   right: 12px;
   z-index: 980;
@@ -4587,9 +4586,6 @@ defineExpose({
   }
 }
 
-/* Loading & Empty States */
-.loading-state, .error-state, 
-
 .error-state button {
   margin-top: 12px;
   padding: 8px 16px;
@@ -4600,20 +4596,6 @@ defineExpose({
   cursor: pointer;
 }
 
-/* Conversations List */
-
-
-.conversation-item:hover {
-  background: #f4f4f5; /* Very light modern gray hover */
-}
-
-.conversation-item:active {
-  background: #e4e4e7;
-}
-
-.conversation-item.has-unread {
-  background: rgba(245, 158, 11, 0.05);
-}
 
 
 
@@ -5176,71 +5158,16 @@ defineExpose({
   }
 }
 
-/* Fix layout for absolute header */
-.conversation-list-wrapper, .loading-state, .error-state {
-  flex: 1;
-  padding-top: 60px; /* Space for absolute header */
-  width: 100%;
-}
-
 .loading-state, .error-state {
+  flex: 1;
+  padding-top: 60px;
+  width: 100%;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
 }
 
-.compact-chat-loading {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
-  color: var(--messenger-text-secondary);
-  font-size: 0.92rem;
-}
-
-.compact-spinner {
-  width: 18px;
-  height: 18px;
-}
-
-.chat-panel-error {
-  margin: 18px auto;
-  width: min(92%, 420px);
-  padding: 14px 16px;
-  border: 1px solid rgba(220, 38, 38, 0.18);
-  border-radius: 14px;
-  background: rgba(255, 247, 237, 0.96);
-  color: #7f1d1d;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.chat-panel-error strong {
-  display: block;
-  font-size: 14px;
-  margin-bottom: 4px;
-}
-
-.chat-panel-error p {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.chat-panel-error button {
-  flex: 0 0 auto;
-  border: none;
-  border-radius: 10px;
-  background: #b91c1c;
-  color: #fff;
-  padding: 8px 12px;
-  font-size: 13px;
-  cursor: pointer;
-}
 /* Context Menu */
 .context-menu {
   position: fixed;

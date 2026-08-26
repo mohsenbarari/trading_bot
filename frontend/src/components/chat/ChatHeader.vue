@@ -480,7 +480,7 @@ function formatDateForSeparator(dateString: string) {
 <style scoped>
 .chat-header {
   position: absolute;
-  top: 0;
+  top: env(safe-area-inset-top, 0px);
   left: 0;
   right: 0;
   height: var(--messenger-header-height, 56px);

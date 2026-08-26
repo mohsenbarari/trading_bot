@@ -109,15 +109,9 @@
     {
       "id": "messenger",
       "routes": ["/chat", "/admin/channels", "/share-receive"],
-      "status": "tokens-ok-shell-and-safe-area-gaps",
+      "status": "aligned-native",
       "phase": 9,
-      "gaps": [
-        "global-fab-on-chat",
-        "dual-fab-on-list",
-        "inset-conversation-list",
-        "composer-safe-area",
-        "fixed-chatview-notch"
-      ]
+      "gaps": []
     },
     {
       "id": "market",
