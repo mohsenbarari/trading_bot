@@ -1,10 +1,12 @@
 # Roadmap انتقال داده و Parse بازار روی شبکه خصوصی
 
-وضعیت: مراحل 0 تا 3 تکمیل شده‌اند؛ مرحله 4 هنوز آغاز نشده و cutover انجام نشده است
+وضعیت: مراحل 0 تا 4 تکمیل شده‌اند؛ مرحله 5 هنوز آغاز نشده و cutover انجام نشده است
 
 تاریخ بازبینی: 2026-08-26
 
 مبنای بازنگری Docker: `main@315f7e6a`
+
+مبنای gate Capture مرحله 4: `main@2848b36560cfc8586dbd9759668d708625c16f2c`
 
 ## 1. نتیجه نهایی مورد انتظار
 
@@ -565,6 +567,28 @@ Gate:
 - raw بیش از retention باقی نمی‌ماند؛
 - capture از parser کند یا unavailable متوقف نمی‌شود.
 
+نتیجه اجرا در 2026-08-26:
+
+- engine مشترک هر دو حساب با SQLite FULL outbox، append/flush/fsync و ACK داخلی پس
+  از durable append پیاده شد؛ parser هیچ dependency یا backpressure روی capture ندارد؛
+- contractهای جاری `market_channel_event/1.0` و `coin_group_event/2.0`، متن دقیق،
+  edit/delete/reply/topic و HMAC identity بدون افزودن فیلد اقتصادی حفظ شدند؛
+- reconciliation کانال‌ها 30 دقیقه و گروه‌ها 6 ساعت است؛ اجداد reply فقط تا 2 ساعت
+  و عمق 20 بازیابی می‌شوند و truncation به‌صورت health degraded fail-visible است؛
+- retention دقیق سه‌روزه بر اساس `available_at_utc` با rewrite اتمیک، purge state و
+  audit بدون raw payload پیاده شد؛ partial tail repair و corrupt middle fail-closed است؛
+- heartbeat برای هر هفت source شامل created/edited/deleted/duplicate/quarantine،
+  gap recovered، lag، sequence و آخرین durable append است؛
+- rehearsal Docker با `network=none` هر دو crash window، restart/replay، duplicate،
+  sequence بدون gap، مالک دوم، retention و نبود parser/session/product DB را پاس کرد؛
+- gate کامل Stage 3 روی image جدید دوباره پاس شد: دو build مستقل برابر، Telethon 1.44.0
+  hash-locked، image برابر 147.232 MiB، secret scan و cleanup کامل؛
+- live فقط برای دو capture role شناخته می‌شود و بدون config allowlist، session 0600،
+  HMAC موجود Account 2 و authority marker متصل به همان release fail-closed است؛
+- هیچ deploy، Telegram login، session copy، owner switch یا رویداد live انجام نشد.
+
+گزارش و gate receipt: [COIN_MARKET_DATA_STAGE4_DURABLE_CAPTURE.md](./COIN_MARKET_DATA_STAGE4_DURABLE_CAPTURE.md)
+
 ### مرحله 5 — انتقال Parser دو گروه سکه
 
 اقدامات:
@@ -983,7 +1007,7 @@ Rollback هرگز capture یا archive وب را خاموش نمی‌کند. ت�
 - افزودن بورس در این نسخه؛
 - production deploy بدون تایید مستقل.
 
-## 15. تصمیم‌های بسته‌شده در مرحله 2 و gate باقی‌مانده مرحله 3
+## 15. تصمیم‌های بسته‌شده در مراحل 2 تا 4
 
 تصمیم‌های storage/contract در مرحله 2 با ADR، migration rehearsal و restore test بسته شدند:
 
@@ -996,6 +1020,11 @@ Rollback هرگز capture یا archive وب را خاموش نمی‌کند. ت�
 7. Telegram identity و متن خام منتخب فقط رمز‌شده روی وب، با decrypt محدود و قابل ممیزی برای reviewer/admin نگهداری می‌شوند.
 
 تصمیم image در مرحله 3 بسته شد: baseهای Python 3.11 slim Bookworm، Dockerfile frontend و PostgreSQL 15 Alpine با digest ثابت و dependencyهای Stage 3 با version/hash قفل شدند. application image برای هر release از commit تمیز و `SOURCE_DATE_EPOCH` همان commit ساخته می‌شود و manifest digest نهایی هنگام انتشار همان release روی هر دو میزبان pin و تطبیق داده خواهد شد.
+
+تصمیم capture در مرحله 4 بسته شد: هر حساب owner و spool محلی جدا دارد، sequence داخل
+همان حساب سراسری است، ACK داخلی فقط بعد از fsync انجام می‌شود و parser مصرف‌کننده مستقل
+است. cutover باید HMAC فعال Account 2 را حفظ کند و authority marker را فقط بعد از توقف
+owner میزبان بسازد؛ اجرای overlap ممنوع است.
 
 جزئیات و شواهد: [COIN_MARKET_DATA_STAGE2_CONTRACT_STORAGE.md](./COIN_MARKET_DATA_STAGE2_CONTRACT_STORAGE.md)
 
