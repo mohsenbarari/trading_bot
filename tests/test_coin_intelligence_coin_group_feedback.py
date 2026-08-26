@@ -140,7 +140,14 @@ def test_feedback_corrects_exact_event_and_calibrates_later_similar_offer() -> N
         ) == ("COIN_IMAM", "SELL", 188_600, 5, "ELIGIBLE")
         assert rows[0]["available_at_utc"] == "2026-08-15T10:03:00Z"
         assert "human-feedback-r1" in rows[0]["parser_version"]
-        assert json.loads(rows[0]["attributes_json"])["human_feedback_revision"] == 1
+        reviewed_attributes = json.loads(rows[0]["attributes_json"])
+        assert reviewed_attributes["human_feedback_revision"] == 1
+        assert reviewed_attributes["field_evidence"]["instrument"] == [
+            "HUMAN_REVIEWED_CORRECTION"
+        ]
+        assert reviewed_attributes["field_evidence"]["price"] == [
+            "MESSAGE_NUMERIC_GRAMMAR"
+        ]
         assert (rows[1]["instrument"], rows[1]["quality_state"]) == (
             "COIN_IMAM",
             "ELIGIBLE",

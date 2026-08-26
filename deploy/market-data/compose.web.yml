@@ -138,8 +138,12 @@ services:
       service: market-runtime-base
     profiles: [web]
     command: [service, --role, market-processor]
-    secrets:
-      - market_postgres_password
+    environment:
+      MARKET_PIPELINE_CAPTURE_ROOT: /var/lib/market-data/capture
+      MARKET_PROCESSOR_COIN_SPOOL_DIR: /var/lib/market-data/capture/account2
+      MARKET_PROCESSOR_FEEDBACK_DB: /var/lib/market-data/calibration/coin-groups/review-decisions.sqlite3
+      MARKET_PROCESSOR_PREDICTION_DB: /var/lib/market-data/calibration/coin-groups/prediction-ledger.sqlite3
+      MARKET_PROCESSOR_INTERVAL_SECONDS: ${MARKET_PROCESSOR_INTERVAL_SECONDS:-1}
     volumes:
       - type: bind
         source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/state/market-processor
@@ -147,6 +151,10 @@ services:
       - type: bind
         source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/capture
         target: /var/lib/market-data/capture
+        read_only: true
+      - type: bind
+        source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/calibration/coin-groups
+        target: /var/lib/market-data/calibration/coin-groups
         read_only: true
     depends_on:
       market-migration:

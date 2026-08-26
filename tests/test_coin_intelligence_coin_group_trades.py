@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import unittest
 
 from core.market_intelligence.coin_group_resolution import ResolvedCoinGroupOffer
@@ -521,6 +522,15 @@ class CoinGroupTradeTests(unittest.TestCase):
         observation = coin_group_trade_observations(trades)[0].normalized()
         self.assertNotIn("message", observation.attributes_json)
         self.assertNotIn("sender", observation.attributes_json)
+        evidence = json.loads(observation.attributes_json)["field_evidence"]
+        self.assertEqual(
+            evidence["event_type"],
+            ["OWNER_EXPLICIT_AGGREGATE_REPLY_TRADE"],
+        )
+        self.assertEqual(
+            evidence["price"],
+            ["EXACT_REPLY_BRANCH_LAST_AGREED_TERM"],
+        )
 
 
 if __name__ == "__main__":

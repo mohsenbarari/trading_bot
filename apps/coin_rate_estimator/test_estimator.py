@@ -2204,6 +2204,7 @@ class EstimatorTests(unittest.TestCase):
             db_path = root / "conversation.sqlite3"
             calibration_db = root / "calibration.sqlite3"
             feedback_db = root / "parser-feedback.sqlite3"
+            feedback_corpus_db = root / "parser-calibration-corpus.sqlite3"
             staging_db = root / "coin-groups.sqlite3"
             analytics_root = root / "analytics" / "training-snapshots"
             analytics_root.mkdir(parents=True)
@@ -2389,8 +2390,23 @@ class EstimatorTests(unittest.TestCase):
                     "is_conditional": False,
                 },
                 reviewer="test-operator",
+                calibration_corpus_db=feedback_corpus_db,
             )
             self.assertNotIn(b"<script>alert(1)</script>", feedback_db.read_bytes())
+            corpus = sqlite3.connect(feedback_corpus_db)
+            try:
+                self.assertEqual(
+                    corpus.execute(
+                        "SELECT review_revision,event_type,group_number "
+                        "FROM coin_group_calibration_corpus"
+                    ).fetchone(),
+                    (1, "OFFER", 1),
+                )
+                self.assertNotIn(
+                    b"<script>alert(1)</script>", feedback_corpus_db.read_bytes()
+                )
+            finally:
+                corpus.close()
 
             with patch.dict(
                 "os.environ",

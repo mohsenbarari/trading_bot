@@ -16,9 +16,11 @@ from hashlib import blake2b, sha256
 import json
 import re
 import sqlite3
-from typing import Mapping
+from typing import Iterable, Mapping
 
+from .coin_group_feedback import CoinGroupParserFeedback
 from .coin_group_pipeline import CoinGroupPipelineReport, process_coin_group_staging
+from .coin_group_resolution import CoinPriceAnchor
 from .coin_group_trades import MAX_REPLY_AGE_SECONDS
 from .coin_group_staging import (
     CoinGroupStagingMessage,
@@ -1409,6 +1411,8 @@ def project_capture_changes(
     market: sqlite3.Connection,
     *,
     as_of_utc: datetime | str,
+    group_additional_anchors: Iterable[CoinPriceAnchor] = (),
+    group_parser_feedback: Mapping[bytes, CoinGroupParserFeedback] | None = None,
 ) -> CaptureProjectionReport:
     """Project every dirty current revision; callers commit both databases."""
 
@@ -1546,6 +1550,8 @@ def project_capture_changes(
             staging,
             market,
             as_of_utc=as_of,
+            additional_anchors=group_additional_anchors,
+            parser_feedback=group_parser_feedback,
             reconciliation_horizon_utc=max(group_cutoff, dirty_horizon),
             included_message_keys=included_group_keys,
         )

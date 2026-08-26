@@ -44,7 +44,7 @@ from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 from .market_store import upsert_observation
 
 
-COIN_GROUP_PIPELINE_VERSION = "coin-group-pipeline-v6-safe-causal-calibration"
+COIN_GROUP_PIPELINE_VERSION = "coin-group-pipeline-v7-field-evidence"
 PROVISIONAL_BOOTSTRAP_WINDOW_SECONDS = 30 * 60
 PROVISIONAL_MINIMUM_MESSAGES = 3
 PROVISIONAL_MINIMUM_SENDERS = 2
@@ -59,6 +59,16 @@ _TRADE_ROOT_DERIVED_FIELDS = frozenset(
 _SAFE_PATTERN_FIELDS = frozenset(
     {"side", "trade_form", "conditional"}
 )
+_FEEDBACK_TO_EVIDENCE_FIELD = {
+    "event_validity": "event_type",
+    "commodity": "instrument",
+    "side": "side",
+    "price": "price",
+    "quantity": "quantity",
+    "settlement": "settlement",
+    "trade_form": "trade_form",
+    "conditional": "conditional",
+}
 
 
 _SEMANTIC_OBSERVATION_COLUMNS = (
@@ -517,6 +527,10 @@ def _reviewed_observation(
         else None
     )
     attributes = dict(observation.attributes)
+    field_evidence = dict(attributes.get("field_evidence") or {})
+    for field in review.ambiguous_fields:
+        evidence_field = _FEEDBACK_TO_EVIDENCE_FIELD[field]
+        field_evidence[evidence_field] = ("HUMAN_REVIEWED_CORRECTION",)
     attributes.update(
         {
             "human_feedback_version": COIN_GROUP_PIPELINE_VERSION,
@@ -531,6 +545,7 @@ def _reviewed_observation(
                 if review.event_confirmed
                 else "HUMAN_REVIEWED_NOT_AN_EVENT"
             ),
+            "field_evidence": field_evidence,
         }
     )
     return replace(
@@ -600,12 +615,18 @@ def _pattern_calibrated_observation(
     skipped_fields = review_fields - permitted_fields
     quality = observation.quality_state
     attributes = dict(observation.attributes)
+    field_evidence = dict(attributes.get("field_evidence") or {})
+    for field in permitted_fields:
+        field_evidence[_FEEDBACK_TO_EVIDENCE_FIELD[field]] = (
+            "HUMAN_PATTERN_CALIBRATION",
+        )
     attributes.update(
         {
             "human_pattern_calibration_revision": calibration.review_revision,
             "human_pattern_calibration_fields": sorted(review_fields),
             "human_pattern_calibration_reviewed_at_utc": calibration.reviewed_at_utc,
             "resolution_reason": "HUMAN_REVIEWED_LINGUISTIC_SYNTAX_CALIBRATION",
+            "field_evidence": field_evidence,
         }
     )
     if skipped_fields:

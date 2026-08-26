@@ -2,7 +2,7 @@
 
 این مسیر فقط stack جدید Market Data را تعریف می‌کند و از Compose محصول جدا است.
 
-وضعیت فعلی پس از Stage 4:
+وضعیت فعلی پس از Stage 5:
 
 - image و dependencyها pinned و runtime غیر root است؛
 - Compose پایه با override مستقل `web` و `bot` وجود دارد؛
@@ -11,11 +11,19 @@
 - فقط دو receiver روی host port منتشر می‌شوند و bind باید private IP دقیق باشد؛
 - دو نقش capture دارای runtime پایدار Stage 4 هستند، اما `live` فقط با marker
   release-bound روی همان session mount قابل اجرا است؛
-- نقش‌های processor، transport، adapter و estimator همچنان در `live` fail-closed هستند.
+- `market-processor` فقط برای دو گروه سکه و فقط به‌صورت shadow قابل اجرا است؛
+- نقش‌های transport، adapter و estimator همچنان در `live` fail-closed هستند.
 
 بنابراین این نسخه مجوز deploy یا تصاحب session تلگرام نیست. marker فقط در choreography
-cutover و بعد از توقف owner میزبان ساخته می‌شود؛ خود Stage 4 هیچ marker یا session واقعی
-نساخته است. processor/transport/estimator زنده نیز در مراحل بعدی پیاده می‌شوند.
+cutover و بعد از توقف owner میزبان ساخته می‌شود؛ Stage 4 یا 5 هیچ marker یا session واقعی
+نساخته است. processor سکه هیچ خروجی را به مدل اصلی یا PostgreSQL نمی‌فرستد و
+transport/estimator زنده در مراحل بعدی پیاده می‌شوند.
+
+در mode زنده، processor بدون دو snapshot فقط‌خواندنی و هم‌دورهٔ
+`review-decisions.sqlite3` و `prediction-ledger.sqlite3` شروع نمی‌شود. فایل دوم باید
+لنگرهای `MAIN_ONLINE` را با زمان رخداد و زمان availability واقعی نگه دارد. جایگزین‌کردن
+آن با تخمین فعلی یا اجرای parser بدون این دو ورودی ممنوع است. ورودی‌ها باید با rename
+اتمیک در مسیر `calibration/coin-groups` منتشر شوند؛ DB در حال نوشتن مستقیم mount نشود.
 
 دایرکتوری والد secret باید `root:root 0700` و فایل‌های مصرفی باید `root:10001 0440` باشند. PostgreSQL با UID/GID `70:70` فقط supplemental group `10001` می‌گیرد؛ بنابراین همان فایل password برای migration/runtime قابل خواندن است، بدون root container یا world-readable secret.
 
@@ -65,6 +73,25 @@ Account 2 باید دقیقاً `GROUP_1`, `GROUP_2` را bind کند. peer ID �
 داخل همان secret خارج Git می‌مانند. HMAC هویت فرستنده Account 2 secret جداگانه است.
 در cutover، همان HMAC key فعال capture فعلی باید به secret جدید منتقل شود؛ تولید کلید
 تازه branchهای reply نزدیک cutover را از هم جدا می‌کند و ممنوع است.
+
+## Gate مرحله 5
+
+```bash
+APP_ENV_FILE=config/unit-test.env.example python3 -m unittest \
+  tests.test_audit_coin_group_parser_production \
+  tests.test_coin_group_calibration_corpus \
+  tests.test_market_pipeline_stage5_coin_processor \
+  tests.test_rehearse_market_coin_parser_stage5
+
+python3 scripts/rehearse_market_coin_parser_stage5.py
+```
+
+ممیزی production-shaped با چهار SQLite فقط‌خواندنی اجرا می‌شود: staging خام، Market
+Store، اصلاحات انسانی و prediction ledger. خروجی فقط count و reason code دارد و متن،
+شناسه پیام، event key یا هویت فرستنده را چاپ/کپی نمی‌کند. rehearsal Docker نیز با
+`--network none`، داده مصنوعی، partial tail، invalid sibling، restart/replay، reply
+branch دقیق و instrument inference مبتنی بر لنگر زمانی اجرا و همه artifactهای خود را
+پاک می‌کند.
 
 ## ترتیب release آینده
 

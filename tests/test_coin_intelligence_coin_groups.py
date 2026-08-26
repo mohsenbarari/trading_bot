@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import tempfile
 import unittest
 
@@ -364,6 +365,15 @@ class CoinGroupObservationTests(unittest.TestCase):
         self.assertNotIn("message_id", columns)
         self.assertNotIn("private-telegram-id", row["attributes_json"])
         self.assertNotIn("امام", row["attributes_json"])
+        attributes = json.loads(row["attributes_json"])
+        self.assertEqual(
+            attributes["field_evidence"]["settlement"],
+            ["DEFAULT_TOMORROW_BOOK"],
+        )
+        self.assertEqual(
+            attributes["field_evidence"]["instrument"],
+            ["EXPLICIT_COMMODITY_TOKEN"],
+        )
 
 
 if __name__ == "__main__":

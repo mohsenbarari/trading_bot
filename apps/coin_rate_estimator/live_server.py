@@ -91,14 +91,21 @@ from core.market_intelligence.coin_group_feedback import (  # noqa: E402
     load_coin_group_parser_feedback,
     record_coin_group_parser_feedback,
 )
+from core.market_intelligence.coin_group_calibration_corpus import (  # noqa: E402
+    append_coin_group_feedback_revisions,
+)
 from core.market_intelligence.coin_condition_review import (  # noqa: E402
     ConditionReviewError,
     ConditionReviewService,
 )
 from condition_review_page import render_condition_review_page  # noqa: E402
 from core.market_intelligence.coin_groups import (  # noqa: E402
+    COIN_GROUP_PARSER_VERSION,
     CoinGroupMessageInput,
     parse_coin_group_offers,
+)
+from core.market_intelligence.coin_group_trades import (  # noqa: E402
+    COIN_GROUP_TRADE_LINKER_VERSION,
 )
 from core.market_intelligence.market_contracts import derive_event_key  # noqa: E402
 from telegram_price_collector.external_collectors import (  # noqa: E402
@@ -171,6 +178,12 @@ DEFAULT_ML_SHADOW_STATE_PATH = Path(
     )
 )
 DEFAULT_WRITE_TOKEN_FILE = RUNTIME_ROOT / "manual-entry.token"
+DEFAULT_PARSER_CALIBRATION_CORPUS_DB = Path(
+    os.environ.get(
+        "COIN_PARSER_CALIBRATION_CORPUS_DB",
+        str(RUNTIME_ROOT / "parser-calibration-corpus.sqlite3"),
+    )
+).expanduser()
 DEFAULT_GROUP_LIVE_CONTROL = RUNTIME_ROOT / "group-live-input-control.json"
 DEFAULT_DASHBOARD_CREDENTIALS_FILE = RUNTIME_ROOT / "dashboard-credentials.json"
 DEFAULT_CONDITION_OWNER_PACK = Path(
@@ -2189,6 +2202,7 @@ def submit_coin_group_parser_feedback(
     payload: dict[str, Any],
     *,
     reviewer: str,
+    calibration_corpus_db: Path | None = None,
 ) -> dict[str, Any]:
     """Validate a complete operator correction against the canonical event."""
 
@@ -2231,6 +2245,30 @@ def submit_coin_group_parser_feedback(
         is_conditional=is_conditional,
         reviewer=reviewer,
     )
+    if calibration_corpus_db is not None:
+        calibration_corpus_db.parent.mkdir(parents=True, exist_ok=True)
+        corpus = sqlite3.connect(calibration_corpus_db)
+        corpus.row_factory = sqlite3.Row
+        try:
+            corpus.execute("PRAGMA busy_timeout=5000")
+            corpus.execute("PRAGMA journal_mode=WAL")
+            corpus.execute("PRAGMA synchronous=FULL")
+            append_coin_group_feedback_revisions(
+                corpus,
+                (review,),
+                parser_version_before=(
+                    COIN_GROUP_PARSER_VERSION
+                    if review.event_type == "OFFER"
+                    else COIN_GROUP_TRADE_LINKER_VERSION
+                ),
+                appended_at_utc=review.reviewed_at_utc,
+            )
+            corpus.commit()
+        except BaseException:
+            corpus.rollback()
+            raise
+        finally:
+            corpus.close()
     return {
         "status": "RECORDED_PENDING_PIPELINE",
         "event_id": review.event_key.hex(),
@@ -6947,6 +6985,7 @@ def handler_factory(
     conversation_db: Path,
     calibration_db: Path,
     feedback_db: Path,
+    calibration_corpus_db: Path,
     coin_group_staging_db: Path | None,
     write_token: str | None,
     refresh_estimate,
@@ -7452,6 +7491,7 @@ def handler_factory(
                         feedback_db,
                         payload,
                         reviewer=user_session,
+                        calibration_corpus_db=calibration_corpus_db,
                     )
                 except (
                     CoinGroupFeedbackError,
@@ -7727,6 +7767,7 @@ def start_web_server(
     conversation_db: Path,
     calibration_db: Path,
     feedback_db: Path,
+    calibration_corpus_db: Path,
     coin_group_staging_db: Path | None,
     write_token: str | None,
     refresh_estimate,
@@ -7741,6 +7782,7 @@ def start_web_server(
             conversation_db=conversation_db,
             calibration_db=calibration_db,
             feedback_db=feedback_db,
+            calibration_corpus_db=calibration_corpus_db,
             coin_group_staging_db=coin_group_staging_db,
             write_token=write_token,
             refresh_estimate=refresh_estimate,
@@ -8684,6 +8726,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Privacy-safe operator corrections used by the coin-group parser.",
     )
     parser.add_argument(
+        "--parser-calibration-corpus-db",
+        type=Path,
+        default=DEFAULT_PARSER_CALIBRATION_CORPUS_DB,
+        help="Append-only privacy-safe history of parser review revisions.",
+    )
+    parser.add_argument(
         "--coin-group-staging-db",
         type=Path,
         default=None,
@@ -8814,6 +8862,7 @@ def main() -> int:
         conversation_db=args.conversation_db,
         calibration_db=args.calibration_db,
         feedback_db=args.parser_feedback_db,
+        calibration_corpus_db=args.parser_calibration_corpus_db,
         coin_group_staging_db=args.coin_group_staging_db,
         write_token=write_token,
         refresh_estimate=refresh_from_web,

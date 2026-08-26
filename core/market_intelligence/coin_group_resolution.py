@@ -20,6 +20,7 @@ from .coin_groups import (
     CoinGroupMessageInput,
     ParsedCoinGroupOffer,
     _PRICE_BOUNDS,
+    coin_group_offer_field_evidence,
     parse_coin_group_offers,
 )
 from .market_contracts import MarketObservation, MarketStoreContractError, derive_event_key, normalize_utc
@@ -569,6 +570,38 @@ def resolved_coin_group_observations(
     )
     for resolved in resolved_values:
         commodity = resolved.commodity_code or "UNRESOLVED"
+        parsed_evidence = coin_group_offer_field_evidence(
+            source.text,
+            ParsedCoinGroupOffer(
+                commodity_code=resolved.commodity_code,
+                price_project_thousand_toman=resolved.price_project_thousand_toman,
+                quantity=resolved.quantity,
+                side=resolved.side,
+                settlement_term=resolved.settlement_term,
+                trade_form=resolved.trade_form,
+                is_conditional=resolved.is_conditional,
+                quality_state=resolved.quality_state,
+                resolution_reason=resolved.resolution_reason,
+            ),
+        )
+        reason = resolved.resolution_reason
+        instrument_evidence = (
+            "HUMAN_REVIEWED_CORRECTION"
+            if "HUMAN" in reason
+            else "TEMPORAL_MODEL_ANCHORS"
+            if "MODEL_PRICE_RANGE" in reason
+            else "TEMPORAL_CANONICAL_ANCHORS"
+            if "STRICTLY_PRIOR_SAME_BOOK_PRICE" in reason
+            else "TEMPORAL_GROUP_CLUSTER"
+            if "COHERENT_PRIOR_GROUP_CLUSTER" in reason
+            else "EXPLICIT_COMMODITY_TOKEN"
+            if resolved.commodity_code is not None
+            else "TEMPORAL_RESOLUTION_REQUIRED"
+        )
+        field_evidence = {
+            **parsed_evidence,
+            "instrument": (instrument_evidence,),
+        }
         observations.append(
             MarketObservation(
                 event_key=derive_event_key(
@@ -601,6 +634,7 @@ def resolved_coin_group_observations(
                     "anchor_count": resolved.anchor_count,
                     "authoritative_anchor_count": resolved.authoritative_anchor_count,
                     "relative_distance": resolved.relative_distance,
+                    "field_evidence": field_evidence,
                 },
             )
         )

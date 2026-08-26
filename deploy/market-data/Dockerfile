@@ -32,7 +32,7 @@ RUN mkdir -p /rootfs/var/lib/market-data/state \
 FROM ${PYTHON_BASE_IMAGE} AS runtime
 
 ARG SOURCE_SHA
-ARG IMAGE_VERSION=stage4-capture
+ARG IMAGE_VERSION=stage5-coin-parser-shadow
 
 LABEL org.opencontainers.image.title="Trading Bot Private Market Pipeline" \
       org.opencontainers.image.description="Docker-native private market data pipeline" \

@@ -18,7 +18,7 @@ from typing import Iterable, Mapping, Sequence
 from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 
 
-COIN_GROUP_PARSER_VERSION = "coin-group-rules-v8-causal-price-formats"
+COIN_GROUP_PARSER_VERSION = "coin-group-rules-v9-field-evidence"
 _DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 _ARABIC_LETTERS = str.maketrans({"ي": "ی", "ى": "ی", "ك": "ک"})
 # Dot and slash are genuine thousands separators when they are attached to
@@ -462,6 +462,42 @@ def _dimensions(text: str) -> tuple[str, str]:
     return "PHYSICAL", settlement
 
 
+def coin_group_offer_field_evidence(
+    text: str,
+    parsed: ParsedCoinGroupOffer,
+) -> dict[str, tuple[str, ...]]:
+    """Return redacted, field-level provenance for one parsed offer.
+
+    Evidence names describe the deterministic rule that supplied a field;
+    they never contain the private message text, numeric token, sender, or
+    Telegram identity.  Commodity resolution may be refined by the causal
+    resolver before projection.
+    """
+
+    explicit_cash, explicit_tomorrow = coin_group_settlement_markers(text)
+    settlement_evidence = (
+        "EXPLICIT_TOMORROW_MARKER"
+        if explicit_tomorrow
+        else "EXPLICIT_CASH_MARKER"
+        if explicit_cash
+        else "DEFAULT_TOMORROW_BOOK"
+    )
+    return {
+        "event_type": ("COMPLETE_OFFER_GRAMMAR",),
+        "instrument": (
+            "EXPLICIT_COMMODITY_TOKEN"
+            if parsed.commodity_code is not None
+            else "TEMPORAL_RESOLUTION_REQUIRED",
+        ),
+        "side": ("EXPLICIT_SIDE_MARKER",),
+        "price": ("MESSAGE_NUMERIC_GRAMMAR",),
+        "quantity": ("MESSAGE_QUANTITY_GRAMMAR",),
+        "settlement": (settlement_evidence,),
+        "trade_form": ("MESSAGE_FORM_GRAMMAR",),
+        "conditional": ("MESSAGE_CONDITION_GRAMMAR",),
+    }
+
+
 def _offer_segments(value: str) -> list[str]:
     """Split repeated explicit quantity clauses without inventing terms."""
 
@@ -605,6 +641,10 @@ def coin_group_offer_observations(source: CoinGroupMessageInput) -> list[MarketO
                     "group_number": int(source.group_number),
                     "commodity_resolution": "EXPLICIT" if parsed.commodity_code else "UNRESOLVED",
                     "resolution_reason": parsed.resolution_reason,
+                    "field_evidence": coin_group_offer_field_evidence(
+                        source.text,
+                        parsed,
+                    ),
                 },
             )
         )

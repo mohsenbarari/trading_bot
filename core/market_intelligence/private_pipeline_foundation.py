@@ -1,10 +1,9 @@
 """Fail-closed Docker entrypoint for the private market-data pipeline.
 
-Stage 4 promotes only the two capture roles from synthetic fixture behavior to
-an authority-gated live implementation.  Every other role remains fixture-only
-until its own roadmap gate passes.  A live capture still requires a
-release-bound marker on the Telegram session mount, so deploying the image
-alone cannot create a second owner.
+Stage 5 promotes the two capture roles and the downstream coin-group processor.
+All other roles remain fixture-only.  Capture still requires a release-bound
+session authority marker; the processor remains shadow-only and requires its
+causal prediction ledger plus human-correction sidecar in live mode.
 """
 
 from __future__ import annotations
@@ -69,6 +68,7 @@ ROLES = WEB_ROLES | BOT_ROLES
 CAPTURE_ROLES = frozenset(
     {"market-capture-account1", "market-capture-account2"}
 )
+LIVE_ROLES = CAPTURE_ROLES | {"market-processor"}
 RECEIVER_ROLES = frozenset(
     {"market-fact-receiver", "estimator-snapshot-receiver"}
 )
@@ -163,9 +163,9 @@ def validate_fixture_environment(role: str) -> tuple[str, str]:
     validate_role(role)
     mode = os.environ.get("MARKET_PIPELINE_MODE", "disabled").strip().lower()
     if mode not in {"fixture", "live"}:
-        raise FoundationError("runtime_mode_not_available_at_stage4")
-    if mode == "live" and role not in CAPTURE_ROLES:
-        raise FoundationError("role_live_mode_not_available_at_stage4")
+        raise FoundationError("runtime_mode_not_available_at_stage5")
+    if mode == "live" and role not in LIVE_ROLES:
+        raise FoundationError("role_live_mode_not_available_at_stage5")
     release_sha = os.environ.get("MARKET_PIPELINE_RELEASE_SHA", "").strip().lower()
     image_revision = os.environ.get("MARKET_PIPELINE_IMAGE_REVISION", "").strip().lower()
     if not RELEASE_SHA.fullmatch(release_sha):
@@ -535,6 +535,32 @@ def run_service(role: str) -> int:
                     )
                 except CaptureRuntimeError as exc:
                     raise FoundationError(str(exc)) from exc
+            if role == "market-processor":
+                from .coin_group_calibration_corpus import (
+                    CoinGroupCalibrationCorpusError,
+                )
+                from .coin_group_feedback import CoinGroupFeedbackError
+                from .coin_prediction_anchors import CoinPredictionAnchorError
+                from .private_coin_processor import (
+                    CoinProcessorError,
+                    run_coin_processor_service,
+                )
+
+                try:
+                    return run_coin_processor_service(
+                        role=role,
+                        mode=mode,
+                        release_sha=release_sha,
+                        state_directory=role_state(role),
+                        stop=stop,
+                    )
+                except (
+                    CoinGroupCalibrationCorpusError,
+                    CoinGroupFeedbackError,
+                    CoinPredictionAnchorError,
+                    CoinProcessorError,
+                ) as exc:
+                    raise FoundationError(str(exc)) from exc
             initialize_market_store_fixture(role, release_sha)
             heartbeat = Heartbeat(role, mode, release_sha)
             heartbeat.write(status="fixture-starting")
@@ -578,6 +604,22 @@ def run_healthcheck(role: str, max_age_seconds: float) -> int:
                 "market-capture-account2": {"GROUP_1", "GROUP_2"},
             }[role]:
                 raise FoundationError("capture_heartbeat_source_inventory_invalid")
+        elif role == "market-processor":
+            if document.get("schema") != "market_coin_processor/1.0":
+                raise FoundationError("processor_heartbeat_schema_invalid")
+            mode = document.get("mode")
+            expected_status = (
+                "live-shadow-ready" if mode == "live" else "fixture-ready"
+            )
+            if (
+                mode not in {"fixture", "live"}
+                or document.get("status") != expected_status
+            ):
+                raise FoundationError("processor_heartbeat_not_ready")
+            if set(document.get("sources") or {}) != {"GROUP_1", "GROUP_2"}:
+                raise FoundationError("processor_heartbeat_source_inventory_invalid")
+            if document.get("shadow_only") is not True:
+                raise FoundationError("processor_shadow_boundary_invalid")
         elif document.get("status") != "fixture-ready":
             raise FoundationError("heartbeat_not_ready")
         if not 0 <= age <= max_age_seconds:
@@ -664,7 +706,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     service = commands.add_parser(
-        "service", help="run one market role; Stage 4 live is capture-only"
+        "service", help="run one market role; Stage 5 live is capture/coin-shadow only"
     )
     service.add_argument("--role", choices=sorted(ROLES), required=True)
     health = commands.add_parser("healthcheck", help="validate durable role health")

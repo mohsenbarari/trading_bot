@@ -73,6 +73,8 @@ PATH_CONTRACTS = {
         PathContract("capture", 10001, 10001),
         PathContract("capture/account1", 10001, 10001),
         PathContract("capture/account2", 10001, 10001),
+        PathContract("calibration", 10001, 10001),
+        PathContract("calibration/coin-groups", 10001, 10001),
         PathContract("sessions", 10001, 10001),
         PathContract("sessions/account1", 10001, 10001),
         PathContract("sessions/account2", 10001, 10001),

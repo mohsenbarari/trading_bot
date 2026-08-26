@@ -24,7 +24,7 @@ from .coin_groups import (
 from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 
 
-COIN_GROUP_TRADE_LINKER_VERSION = "coin-group-trade-link-v6-contextual-replies"
+COIN_GROUP_TRADE_LINKER_VERSION = "coin-group-trade-link-v7-field-evidence"
 MAX_REPLY_DEPTH = 12
 MAX_REPLY_AGE_SECONDS = 2 * 60 * 60
 MAX_NEGOTIATED_PRICE_RELATIVE_DELTA = 0.05
@@ -814,6 +814,16 @@ def coin_group_trade_observations(
                         0,
                     ).hex(),
                     "resolution_reason": trade.resolution_reason,
+                    "field_evidence": {
+                        "event_type": (trade.confirmation_kind,),
+                        "instrument": ("ROOT_OFFER",),
+                        "side": ("ROOT_OFFER",),
+                        "price": ("EXACT_REPLY_BRANCH_LAST_AGREED_TERM",),
+                        "quantity": ("EXACT_REPLY_BRANCH_LAST_AGREED_TERM",),
+                        "settlement": ("ROOT_OR_EXPLICIT_REPLY_BRANCH",),
+                        "trade_form": ("ROOT_OFFER",),
+                        "conditional": ("ROOT_OFFER",),
+                    },
                 },
             )
         )
