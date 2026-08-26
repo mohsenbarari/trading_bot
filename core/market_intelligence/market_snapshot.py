@@ -220,6 +220,7 @@ def _source_summary(
         "side_counts": dict(sorted(side_counts.items())),
         "latest_price": _finite_number(rows[0]["price_num"]),
         "weighted_median_price": weighted,
+        "mean_price": sum(prices) / len(prices),
         "median_price": _median(prices),
         "minimum_price": min(prices),
         "maximum_price": max(prices),

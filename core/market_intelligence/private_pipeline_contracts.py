@@ -501,6 +501,61 @@ class EstimatorInputHealthV1(ContractModel):
         return _utc(value) if value is not None else None
 
 
+class EstimatorInputTraceV1(ContractModel):
+    component: Code
+    source_codes: tuple[Code, ...]
+    source_event_key: Hex64 | None = None
+    source_fact_id: Hex64 | None = None
+    fact_revision: int | None = Field(default=None, ge=1)
+    occurred_at_utc: AwareDatetime | None = None
+    available_at_utc: AwareDatetime | None = None
+    parsed_at_utc: AwareDatetime | None = None
+    transferred_at_utc: AwareDatetime | None = None
+    point_value: DecimalText | None = None
+    mean_value: DecimalText | None = None
+    unit: UnitCode
+    sample_count: int = Field(ge=0)
+    selection_method: Code
+    fallback: bool
+    freshness: Literal["FRESH", "STALE", "MISSING", "REJECTED"]
+    age_seconds: float | None = Field(default=None, ge=0)
+
+    @field_validator(
+        "occurred_at_utc",
+        "available_at_utc",
+        "parsed_at_utc",
+        "transferred_at_utc",
+    )
+    @classmethod
+    def normalize_optional_timestamp(cls, value: datetime | None) -> datetime | None:
+        return _utc(value) if value is not None else None
+
+    @model_validator(mode="after")
+    def validate_trace(self) -> "EstimatorInputTraceV1":
+        identity = (self.source_event_key, self.source_fact_id, self.fact_revision)
+        times = (
+            self.occurred_at_utc,
+            self.available_at_utc,
+            self.parsed_at_utc,
+            self.transferred_at_utc,
+        )
+        if self.freshness == "MISSING":
+            if any(value is not None for value in (*identity, *times)):
+                raise ValueError("missing_input_cannot_have_source_identity")
+            if self.point_value is not None or self.mean_value is not None:
+                raise ValueError("missing_input_cannot_have_value")
+        else:
+            if any(value is None for value in (*identity, *times)):
+                raise ValueError("observed_input_requires_full_trace")
+            if self.available_at_utc < self.occurred_at_utc:
+                raise ValueError("input_availability_before_occurrence")
+            if self.parsed_at_utc < self.available_at_utc:
+                raise ValueError("input_parse_before_availability")
+            if self.transferred_at_utc < self.parsed_at_utc:
+                raise ValueError("input_transfer_before_parse")
+        return self
+
+
 class EstimatorSnapshotV1(ContractModel):
     contract: Literal["estimator_snapshot/1.0"]
     snapshot_id: Hex64
@@ -508,9 +563,11 @@ class EstimatorSnapshotV1(ContractModel):
     generated_at_utc: AwareDatetime
     input_snapshot_hash: Hex64
     model_version: str = Field(min_length=1, max_length=128)
+    feed_mode: Literal["LEGACY", "PRIVATE_SHADOW", "PRIVATE_PRIMARY"] = "PRIVATE_SHADOW"
     status: Literal["OK", "SAFE_NO_DATA", "FAILURE"]
     rates: tuple[EstimatorRateV1, ...]
     health: tuple[EstimatorInputHealthV1, ...]
+    inputs: tuple[EstimatorInputTraceV1, ...] = ()
     reason_codes: tuple[ReasonCode, ...] = ()
 
     @field_validator("generated_at_utc")

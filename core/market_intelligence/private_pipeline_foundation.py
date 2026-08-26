@@ -1,9 +1,9 @@
 """Fail-closed Docker entrypoint for the private market-data pipeline.
 
-Stages 4-8 promote capture, processing, the fact outbox worker, and the fact
-receiver.  Estimator/adapter/snapshot roles remain fixture-only.  Telegram
-capture still requires release-bound session authority; the processor requires
-causal calibration sidecars and writes only the isolated market archive.
+Stages 4-10 promote the isolated capture, processing, fact transport, adapter,
+estimator snapshot and return-path roles. Telegram capture still requires
+release-bound session authority; every promotion mode remains explicit and no
+service receives product authority merely by entering live runtime mode.
 """
 
 from __future__ import annotations
@@ -73,6 +73,9 @@ LIVE_ROLES = CAPTURE_ROLES | EXTERNAL_CAPTURE_ROLES | {
     "market-fact-sync-worker",
     "market-fact-receiver",
     "market-store-adapter",
+    "coin-estimator",
+    "estimator-snapshot-sender",
+    "estimator-snapshot-receiver",
 }
 RECEIVER_ROLES = frozenset(
     {"market-fact-receiver", "estimator-snapshot-receiver"}
@@ -168,9 +171,9 @@ def validate_fixture_environment(role: str) -> tuple[str, str]:
     validate_role(role)
     mode = os.environ.get("MARKET_PIPELINE_MODE", "disabled").strip().lower()
     if mode not in {"fixture", "live"}:
-        raise FoundationError("runtime_mode_not_available_at_stage5")
+        raise FoundationError("runtime_mode_not_available_at_stage10")
     if mode == "live" and role not in LIVE_ROLES:
-        raise FoundationError("role_live_mode_not_available_at_stage5")
+        raise FoundationError("role_live_mode_not_available_at_stage10")
     release_sha = os.environ.get("MARKET_PIPELINE_RELEASE_SHA", "").strip().lower()
     image_revision = os.environ.get("MARKET_PIPELINE_IMAGE_REVISION", "").strip().lower()
     if not RELEASE_SHA.fullmatch(release_sha):
@@ -541,6 +544,54 @@ def run_service(role: str) -> int:
                     )
                 except MarketFactAdapterError as exc:
                     raise FoundationError(str(exc)) from exc
+            if role == "coin-estimator" and mode == "live":
+                from .estimator_snapshot_runtime import (
+                    EstimatorSnapshotRuntimeError,
+                    run_coin_estimator_service,
+                )
+
+                try:
+                    return run_coin_estimator_service(
+                        role=role,
+                        mode=mode,
+                        release_sha=release_sha,
+                        state_directory=role_state(role),
+                        stop=stop,
+                    )
+                except EstimatorSnapshotRuntimeError as exc:
+                    raise FoundationError(str(exc)) from exc
+            if role == "estimator-snapshot-sender" and mode == "live":
+                from .estimator_snapshot_runtime import (
+                    EstimatorSnapshotRuntimeError,
+                    run_estimator_snapshot_sender_service,
+                )
+
+                try:
+                    return run_estimator_snapshot_sender_service(
+                        role=role,
+                        mode=mode,
+                        release_sha=release_sha,
+                        state_directory=role_state(role),
+                        stop=stop,
+                    )
+                except EstimatorSnapshotRuntimeError as exc:
+                    raise FoundationError(str(exc)) from exc
+            if role == "estimator-snapshot-receiver" and mode == "live":
+                from .estimator_snapshot_receiver_service import (
+                    EstimatorSnapshotReceiverServiceError,
+                    run_estimator_snapshot_receiver_service,
+                )
+
+                try:
+                    return run_estimator_snapshot_receiver_service(
+                        role=role,
+                        mode=mode,
+                        release_sha=release_sha,
+                        state_directory=role_state(role),
+                        stop=stop,
+                    )
+                except EstimatorSnapshotReceiverServiceError as exc:
+                    raise FoundationError(str(exc)) from exc
             initialize_market_store_fixture(role, release_sha)
             heartbeat = Heartbeat(role, mode, release_sha)
             heartbeat.write(status="fixture-starting")
@@ -667,6 +718,29 @@ def run_healthcheck(role: str, max_age_seconds: float) -> int:
                 is not (document.get("feed_mode") != "LEGACY")
             ):
                 raise FoundationError("market_fact_adapter_heartbeat_invalid")
+        elif role == "coin-estimator" and document.get("mode") == "live":
+            if (
+                document.get("schema") != "coin_estimator_runtime/1.0"
+                or document.get("status") != "live-ready"
+                or document.get("feed_mode")
+                not in {"LEGACY", "PRIVATE_SHADOW", "PRIVATE_PRIMARY"}
+            ):
+                raise FoundationError("coin_estimator_heartbeat_invalid")
+        elif role == "estimator-snapshot-sender" and document.get("mode") == "live":
+            if (
+                document.get("schema") != "estimator_snapshot_sender/1.0"
+                or document.get("status") not in {"live-ready", "live-degraded"}
+                or document.get("private_transport_only") is not True
+            ):
+                raise FoundationError("snapshot_sender_heartbeat_invalid")
+        elif role == "estimator-snapshot-receiver" and document.get("mode") == "live":
+            if (
+                document.get("schema") != "estimator_snapshot_receiver/1.0"
+                or document.get("status") != "live-ready"
+                or document.get("private_transport_only") is not True
+                or not isinstance(document.get("lanes"), dict)
+            ):
+                raise FoundationError("snapshot_receiver_heartbeat_invalid")
         elif document.get("status") != "fixture-ready":
             raise FoundationError("heartbeat_not_ready")
         if not 0 <= age <= max_age_seconds:

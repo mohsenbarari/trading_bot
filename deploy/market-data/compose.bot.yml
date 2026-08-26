@@ -76,6 +76,7 @@ services:
     environment:
       MARKET_PIPELINE_FEED_MODE: ${MARKET_PIPELINE_FEED_MODE:-LEGACY}
       MARKET_PIPELINE_PRIVATE_MARKET_STORE_PATH: /var/lib/market-data/market-store/market-store.sqlite
+      MARKET_PIPELINE_ESTIMATOR_SNAPSHOT_PATH: /var/lib/market-data/snapshots/latest-estimator-snapshot.json
     volumes:
       - type: bind
         source: ${MARKET_BOT_DATA_ROOT:?MARKET_BOT_DATA_ROOT is required}/state/coin-estimator
@@ -109,6 +110,11 @@ services:
       service: market-runtime-base
     profiles: [bot]
     command: [service, --role, estimator-snapshot-sender]
+    environment:
+      MARKET_PIPELINE_FEED_MODE: ${MARKET_PIPELINE_FEED_MODE:-LEGACY}
+      MARKET_PIPELINE_ESTIMATOR_SNAPSHOT_PATH: /var/lib/market-data/snapshots/latest-estimator-snapshot.json
+      MARKET_SNAPSHOT_RECEIVER_HOST: ${MARKET_WEB_PRIVATE_IP:?MARKET_WEB_PRIVATE_IP is required}
+      MARKET_SNAPSHOT_RECEIVER_PORT: ${MARKET_WEB_SNAPSHOT_RECEIVER_PORT:-9443}
     secrets:
       - market_transport_ca
       - market_bot_transport_cert

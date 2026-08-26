@@ -163,6 +163,11 @@ def initialize_adapter_store(connection: sqlite3.Connection) -> None:
             event_key BLOB NOT NULL CHECK(length(event_key)=32),
             payload_hash TEXT NOT NULL,
             status TEXT NOT NULL CHECK(status IN ('APPLIED','AUDIT_ONLY','REJECTED')),
+            occurred_at_utc TEXT NOT NULL,
+            available_at_utc TEXT NOT NULL,
+            parsed_at_utc TEXT NOT NULL,
+            transferred_at_utc TEXT NOT NULL,
+            adapted_at_utc TEXT NOT NULL,
             updated_at_utc TEXT NOT NULL,
             UNIQUE(stream_id,source_sequence)
         );
@@ -588,6 +593,7 @@ def _advance(
     body_hash: str,
     status: str,
     reason_code: str | None,
+    transferred_at_utc: str,
 ) -> None:
     fact_id = fact.fact_id if fact else None
     revision = fact.fact_revision if fact else None
@@ -610,12 +616,18 @@ def _advance(
             """
             INSERT INTO private_fact_adapter_projections(
               fact_id,stream_id,source_sequence,fact_revision,event_key,
-              payload_hash,status,updated_at_utc
-            ) VALUES(?,?,?,?,?,?,?,?)
+              payload_hash,status,occurred_at_utc,available_at_utc,parsed_at_utc,
+              transferred_at_utc,adapted_at_utc,updated_at_utc
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(fact_id) DO UPDATE SET
               stream_id=excluded.stream_id,source_sequence=excluded.source_sequence,
               fact_revision=excluded.fact_revision,event_key=excluded.event_key,
               payload_hash=excluded.payload_hash,status=excluded.status,
+              occurred_at_utc=excluded.occurred_at_utc,
+              available_at_utc=excluded.available_at_utc,
+              parsed_at_utc=excluded.parsed_at_utc,
+              transferred_at_utc=excluded.transferred_at_utc,
+              adapted_at_utc=excluded.adapted_at_utc,
               updated_at_utc=excluded.updated_at_utc
             WHERE excluded.fact_revision>=private_fact_adapter_projections.fact_revision
             """,
@@ -627,6 +639,11 @@ def _advance(
                 bytes.fromhex(fact.event_key),
                 fact.payload_hash,
                 status,
+                utc_text(fact.occurred_at_utc),
+                utc_text(fact.available_at_utc),
+                utc_text(fact.persisted_at_utc),
+                transferred_at_utc,
+                utc_text(),
                 utc_text(),
             ),
         )
@@ -708,6 +725,7 @@ def apply_received_delivery(
             body_hash=body_hash,
             status=status,
             reason_code=None,
+            transferred_at_utc=str(row["received_at_utc"]),
         )
         destination.commit()
         return status
@@ -735,6 +753,7 @@ def apply_received_delivery(
             body_hash=body_hash,
             status="REJECTED",
             reason_code=reason,
+            transferred_at_utc=str(row["received_at_utc"]),
         )
         destination.commit()
         return "REJECTED"

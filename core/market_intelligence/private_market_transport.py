@@ -25,6 +25,8 @@ import zlib
 
 
 FACT_PATH = "/v1/market-facts"
+SNAPSHOT_PATH = "/v1/estimator-snapshots"
+SNAPSHOT_CURRENT_PATH = "/v1/estimator-snapshots/current"
 HEALTH_PATH = "/healthz"
 MAX_WIRE_BYTES = 1_048_576
 MAX_DOCUMENT_BYTES = 2_097_152

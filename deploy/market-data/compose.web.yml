@@ -253,6 +253,8 @@ services:
     environment:
       MARKET_PIPELINE_LISTEN_HOST: 0.0.0.0
       MARKET_PIPELINE_LISTEN_PORT: "9443"
+      MARKET_PIPELINE_ALLOWED_PEER_IP: ${MARKET_BOT_PRIVATE_IP:?MARKET_BOT_PRIVATE_IP is required}
+      MARKET_PIPELINE_SNAPSHOT_ROOT: /var/lib/market-data/snapshots
     secrets:
       - market_postgres_password
       - market_transport_ca

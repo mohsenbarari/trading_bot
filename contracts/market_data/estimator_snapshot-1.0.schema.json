@@ -61,6 +61,194 @@
       "title": "EstimatorInputHealthV1",
       "type": "object"
     },
+    "EstimatorInputTraceV1": {
+      "additionalProperties": false,
+      "properties": {
+        "age_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Age Seconds"
+        },
+        "available_at_utc": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Available At Utc"
+        },
+        "component": {
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+          "title": "Component",
+          "type": "string"
+        },
+        "fact_revision": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fact Revision"
+        },
+        "fallback": {
+          "title": "Fallback",
+          "type": "boolean"
+        },
+        "freshness": {
+          "enum": [
+            "FRESH",
+            "STALE",
+            "MISSING",
+            "REJECTED"
+          ],
+          "title": "Freshness",
+          "type": "string"
+        },
+        "mean_value": {
+          "anyOf": [
+            {
+              "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mean Value"
+        },
+        "occurred_at_utc": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Occurred At Utc"
+        },
+        "parsed_at_utc": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parsed At Utc"
+        },
+        "point_value": {
+          "anyOf": [
+            {
+              "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Point Value"
+        },
+        "sample_count": {
+          "minimum": 0,
+          "title": "Sample Count",
+          "type": "integer"
+        },
+        "selection_method": {
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+          "title": "Selection Method",
+          "type": "string"
+        },
+        "source_codes": {
+          "items": {
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "type": "string"
+          },
+          "title": "Source Codes",
+          "type": "array"
+        },
+        "source_event_key": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Event Key"
+        },
+        "source_fact_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Fact Id"
+        },
+        "transferred_at_utc": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Transferred At Utc"
+        },
+        "unit": {
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "component",
+        "source_codes",
+        "unit",
+        "sample_count",
+        "selection_method",
+        "fallback",
+        "freshness"
+      ],
+      "title": "EstimatorInputTraceV1",
+      "type": "object"
+    },
     "EstimatorRateV1": {
       "additionalProperties": false,
       "properties": {
@@ -136,6 +324,16 @@
       "title": "Contract",
       "type": "string"
     },
+    "feed_mode": {
+      "default": "PRIVATE_SHADOW",
+      "enum": [
+        "LEGACY",
+        "PRIVATE_SHADOW",
+        "PRIVATE_PRIMARY"
+      ],
+      "title": "Feed Mode",
+      "type": "string"
+    },
     "generated_at_utc": {
       "format": "date-time",
       "title": "Generated At Utc",
@@ -152,6 +350,14 @@
       "pattern": "^[0-9a-f]{64}$",
       "title": "Input Snapshot Hash",
       "type": "string"
+    },
+    "inputs": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/EstimatorInputTraceV1"
+      },
+      "title": "Inputs",
+      "type": "array"
     },
     "model_version": {
       "maxLength": 128,
