@@ -303,7 +303,7 @@ Gate:
 |---|---|
 | ۰ قرارداد و ممیزی | complete |
 | ۱ foundation | implementation-complete |
-| ۲ پوسته | pending |
+| ۲ پوسته | implementation-complete |
 | ۳ خانه | pending |
 | ۴ حساب | pending |
 | ۵ پروفایل | pending |

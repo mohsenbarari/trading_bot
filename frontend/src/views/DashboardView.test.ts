@@ -291,7 +291,7 @@ describe('DashboardView.vue Stage 4 Home contract', () => {
     expect(wrapper.get('.user-info-center').attributes('aria-label')).toBe(
       'باز کردن منوی حساب رضا محمدی',
     )
-    expect(wrapper.get('.user-info-center').attributes('aria-haspopup')).toBe('menu')
+    expect(wrapper.get('.user-info-center').attributes('aria-haspopup')).toBe('dialog')
     expect(wrapper.get('.user-info-center').attributes('aria-expanded')).toBe('false')
     expect(wrapper.findAll('.notif-dot')).toHaveLength(1)
     expect(wrapper.get('.notif-btn').attributes('aria-label')).toBe('اعلان‌های خوانده‌نشده')
@@ -303,7 +303,7 @@ describe('DashboardView.vue Stage 4 Home contract', () => {
     expect(wrapper.text()).toContain('لیست همکاران')
     expect(wrapper.text()).toContain('کالاهای مجاز برای معامله')
     expect(wrapper.text()).not.toContain('اتصال تلگرام')
-    expect(wrapper.find('.dashboard-account-menu__panel').exists()).toBe(false)
+    expect(document.body.querySelector('.dashboard-account-sheet')).toBeNull()
     expect(wrapper.getComponent(PWAInstallOverlay).props('eligible')).toBe(true)
 
     const marketHero = wrapper.get('.hero-btn')
@@ -311,8 +311,11 @@ describe('DashboardView.vue Stage 4 Home contract', () => {
 
     await wrapper.get('.notif-btn').trigger('click')
     await wrapper.get('.user-info-center').trigger('click')
+    await flushPromises()
     expect(wrapper.get('.user-info-center').attributes('aria-expanded')).toBe('true')
-    await wrapper.get('[role="menuitem"]').trigger('click')
+    const profileItem = document.body.querySelector<HTMLElement>('[role="menuitem"]')
+    expect(profileItem).not.toBeNull()
+    profileItem!.click()
     await marketHero.trigger('click')
 
     expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(1, '/account/notifications')
@@ -368,18 +371,20 @@ describe('DashboardView.vue Stage 4 Home contract', () => {
     const trigger = wrapper.get<HTMLButtonElement>('.user-info-center')
     const focusSpy = vi.spyOn(trigger.element, 'focus')
     await trigger.trigger('click')
+    await flushPromises()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     await flushPromises()
 
-    expect(wrapper.find('.dashboard-account-menu__panel').exists()).toBe(false)
+    expect(document.body.querySelector('.dashboard-account-sheet')).toBeNull()
     expect(focusSpy).toHaveBeenCalledTimes(1)
 
     await trigger.trigger('click')
-    const logoutButton = wrapper
-      .findAll<HTMLButtonElement>('[role="menuitem"]')
-      .find((button) => button.text().includes('خروج'))
+    await flushPromises()
+    const logoutButton = Array.from(
+      document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+    ).find((button) => button.textContent?.includes('خروج'))
     expect(logoutButton).toBeTruthy()
-    await logoutButton!.trigger('click')
+    logoutButton!.click()
     await flushPromises()
 
     expect(requestedUrls()).toEqual([
@@ -570,7 +575,8 @@ describe('DashboardView.vue Stage 4 Home contract', () => {
 
     await wrapper.get('.notif-btn').trigger('click')
     await wrapper.get('.user-info-center').trigger('click')
-    await wrapper.get('[role="menuitem"]').trigger('click')
+    await flushPromises()
+    document.body.querySelector<HTMLElement>('[role="menuitem"]')!.click()
 
     expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(1, '/account/notifications')
     expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(2, '/profile')

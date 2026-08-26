@@ -4,6 +4,7 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Decisions
 
+- 2026-08-26 | Phase 2 shell: messenger is immersive (no tab bar, no global FAB, no daily-nav reserve). Market FAB unchanged. Home account menu is `AppBottomSheet`. BottomNav labels use `--ds-font-xs`.
 - 2026-08-26 | Phase 1 foundation: `AppInsetGroup` + grouped `AppListItem` (card is opt-in), wrapping `AppButton` labels, `AppActionOverflow`, and `--ds-page-padding` stays 16px at all widths. Figma language page not created this slice. No Market file changes.
 - 2026-08-26 | Native feel V2 process: commit only at phase end; start each phase from a clean worktree; review the staged diff so Market, backend, and unrelated dirty files stay out. `.cursor/settings.json` stays ignored; only `.cursor/rules` and `.cursor/skills` are tracked.
 - 2026-08-26 | Native feel V2 starts on `candidate/webapp-native-app-v2` from local `main` `951ca9f0`. Owner scores at kickoff: unification 80, simplification 70, native feel below 50. V1 receipts stay historical; this track owns remaining native-feel gaps (inset grouped lists, 16px gutters, button overflow, copy diet, immersive messenger). Roadmap: `docs/uiux-native-app-v2/ROADMAP.md`.

@@ -157,6 +157,7 @@ function onDragEnd() {
 // Auto-collapse on the market page
 const isMarketPage = computed(() => route.name === 'market')
 const isMessengerPage = computed(() => route.name === 'messenger')
+const showsTabBar = computed(() => !isMarketPage.value && !isMessengerPage.value)
 
 // Close when navigating
 watch(() => route.name, () => {
@@ -330,7 +331,7 @@ const fabButtonLabel = computed(() => (isExpanded.value ? 'بستن ناوبری
 <template>
   <!-- ═══ Normal Bottom Nav (non-market, non-messenger pages) ═══ -->
   <nav
-    v-if="!isMarketPage && !isMessengerPage"
+    v-if="showsTabBar"
     class="bottom-nav-wrapper"
     :class="{ 'ui-v2-bottom-nav': v2Scope }"
     aria-label="ناوبری اصلی"
@@ -395,8 +396,8 @@ const fabButtonLabel = computed(() => (isExpanded.value ? 'بستن ناوبری
     </div>
   </nav>
 
-  <!-- ═══ Collapsed FAB on market & messenger ═══ -->
-  <div v-else class="fab-container" :class="{ 'fab-container--market': isMarketPage }" :style="fabStyle">
+  <!-- ═══ Collapsed FAB only on market. Messenger stays immersive. ═══ -->
+  <div v-else-if="isMarketPage" class="fab-container fab-container--market" :style="fabStyle">
     <!-- Overlay -->
     <transition name="fade">
       <div v-if="isExpanded" class="fab-overlay" @click="isExpanded = false"></div>
@@ -535,9 +536,9 @@ const fabButtonLabel = computed(() => (isExpanded.value ? 'بستن ناوبری
   flex-direction: column;
   align-items: center;
   min-height: 0.9rem;
-  font-size: 0.6rem;
-  font-weight: 600;
-  line-height: 1.1;
+  font-size: var(--ds-font-xs);
+  font-weight: 650;
+  line-height: 1.2;
 }
 
 .nav-label--market {

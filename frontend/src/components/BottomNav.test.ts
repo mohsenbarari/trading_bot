@@ -381,8 +381,31 @@ describe('BottomNav.vue', () => {
     wrapper.unmount()
   })
 
-  it('restores the persisted FAB position for messenger and ignores malformed stored coordinates', async () => {
+  it('keeps messenger immersive without a global navigation FAB', async () => {
     routeState.name = 'messenger'
+    localStorage.setItem('fab_position', JSON.stringify({ x: 88, y: 144 }))
+
+    const BottomNav = (await import('./BottomNav.vue')).default
+    const wrapper = mount(BottomNav, {
+      global: {
+        stubs: {
+          'router-link': {
+            template: '<a><slot /></a>',
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('.fab-container').exists()).toBe(false)
+    expect(wrapper.find('.bottom-nav-wrapper').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('restores the persisted FAB position for market and ignores malformed stored coordinates', async () => {
+    routeState.name = 'market'
     localStorage.setItem('fab_position', JSON.stringify({ x: 88, y: 144 }))
 
     const BottomNav = (await import('./BottomNav.vue')).default

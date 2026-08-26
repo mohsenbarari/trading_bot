@@ -133,9 +133,10 @@ const unscopedRouteKey = computed(() => {
 })
 const shouldReserveDailyNavigation = computed(
   () =>
-    isStandardAuthenticatedShell.value ||
-    isProtectedLegacyShell.value ||
-    isAuthenticatedSystemRecovery.value,
+    route.name !== 'messenger' &&
+    (isStandardAuthenticatedShell.value ||
+      isProtectedLegacyShell.value ||
+      isAuthenticatedSystemRecovery.value),
 )
 
 watch(
