@@ -1,6 +1,6 @@
 # Roadmap انتقال داده و Parse بازار روی شبکه خصوصی
 
-وضعیت: مراحل 0 تا 8 تکمیل شده‌اند؛ pipeline فقط shadow است و cutover انجام نشده است
+وضعیت: مراحل 0 تا 9 تکمیل شده‌اند؛ pipeline فقط shadow است و cutover انجام نشده است
 
 تاریخ بازبینی: 2026-08-26
 
@@ -15,6 +15,8 @@
 مبنای gate External/Input Ledger مرحله 7: `main@9db072c5157c1684314dea71f9b3b804d6778d75`
 
 مبنای gate Private Fact Lane مرحله 8: `main@0cbd008a`
+
+مبنای gate Bot Adapter مرحله 9: `main@a491632b`
 
 ## 1. نتیجه نهایی مورد انتظار
 
@@ -784,6 +786,27 @@ Gate:
 - restart adapter idempotent است؛
 - snapshot model input قابل اتصال به source event است؛
 - rollback به legacy feed بدون از دست رفتن capture ممکن است.
+
+نتیجه اجرا در 2026-08-26:
+
+- receiver SQLite فقط‌خواندنی و Market Store با single writer مصرف می‌شوند؛ observation،
+  projection، offer dimensions، rejection و checkpoint هر delivery اتمیک هستند؛
+- قیمت project-thousand/Toman بدون تبدیل ثانویه عبور می‌کند و guard واحد، magnitude،
+  currency، quantity pair و timestamp پیش از eligibility اعمال می‌شود؛
+- معاملهٔ سکه ابعاد آفر ریشه و price/quantity توافقی را حفظ می‌کند؛ outcome آبشده قیمت
+  immutable آفر را نگه می‌دارد؛ outcome غیرمعامله‌ای audit-only است؛
+- ردیف malformed جدا رد و همان stream ادامه داده می‌شود؛ gap یا خطای storage fail-closed
+  است؛ revision و restart idempotent هستند؛
+- projection هرات پیش از اتصال اصلاح شد تا OFFER/TRADE، settlement، form و quantity را
+  برخلاف quote ساده از دست ندهد؛
+- سوییچ صریح `LEGACY/PRIVATE_SHADOW/PRIVATE_PRIMARY` با rollback مستقل از capture اضافه
+  شد و حالت `AUTO` وجود ندارد؛
+- estimator و snapshot publisher موجود بدون تغییر artifact روی feed خصوصی اجرا شدند؛
+  input component از event key به fact/revision قابل ردیابی است؛
+- گیت Docker کامل، ۲۷ آزمون متمرکز و تست restart/malformed/واحد پاس شدند؛ هیچ deploy یا
+  تغییر model authority انجام نشد.
+
+گزارش و gate receipt: [COIN_MARKET_DATA_STAGE9_BOT_ADAPTER.md](./COIN_MARKET_DATA_STAGE9_BOT_ADAPTER.md)
 
 ### مرحله 10 — مسیر برگشت Snapshot به WebApp
 
