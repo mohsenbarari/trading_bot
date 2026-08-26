@@ -449,10 +449,7 @@ onUnmounted(() => {
 
 .dashboard-content {
   width: 100%;
-  max-width: var(--ds-page-max-width);
-  margin: 0 auto;
-  padding: var(--ds-page-padding);
-  padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 3rem);
+  min-width: 0;
 }
 
 .main-section {

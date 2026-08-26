@@ -108,6 +108,15 @@ describe('DashboardDailySections.vue', () => {
     mocks.wsOff.mockClear()
   })
 
+  it('renders coworkers and commodities as inset groups without outer card chrome', () => {
+    expect(componentSource).toMatch(
+      /\.dashboard-coworkers,\s*\.dashboard-commodities\s*\{[\s\S]*?border:\s*0;/,
+    )
+    expect(componentSource).toMatch(
+      /\.dashboard-coworkers,\s*\.dashboard-commodities\s*\{[\s\S]*?border-radius:\s*var\(--ds-inset-group-radius/,
+    )
+  })
+
   it('keeps one semantic row per trade inside a keyboard-focusable horizontal scroller', () => {
     expect(componentSource.match(/<tr v-for="trade in trades"/g)).toHaveLength(1)
     expect(componentSource).toMatch(

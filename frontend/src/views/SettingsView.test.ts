@@ -226,6 +226,8 @@ describe('SettingsView.vue', () => {
 
     expect(wrapper.get('h1').text()).toBe('تنظیمات حساب')
     expect(wrapper.get('.settings-overtime-card').text()).toContain('وقت اضافه')
+    expect(wrapper.get('.settings-overtime-card').findAll('h3').length).toBe(1)
+    expect(wrapper.get('.settings-overtime-card').find('.ui-section-card__header').exists()).toBe(false)
     expect(wrapper.find('.settings-security-card').exists()).toBe(false)
     expect(wrapper.find('.settings-storage-card').exists()).toBe(false)
     expect(requestsFor('/api/sessions/active')).toHaveLength(0)

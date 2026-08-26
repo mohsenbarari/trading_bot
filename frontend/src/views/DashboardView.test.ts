@@ -653,7 +653,8 @@ describe('DashboardView.vue Stage 4 Home contract', () => {
       /\.today-trades-card|\.dashboard-project-users|\.dashboard-commodit|\.telegram-connect/,
     )
     expect(styleSource.match(/\.today-trades-refresh/g)).toHaveLength(1)
-    expect(styleSource).toMatch(/\.dashboard-content\s*\{[\s\S]*?padding:\s*var\(--ds-page-padding\)/)
+    expect(styleSource).toMatch(/\.dashboard-content\s*\{[\s\S]*?min-width:\s*0/)
+    expect(styleSource).not.toMatch(/\.dashboard-content\s*\{[\s\S]*?padding:\s*var\(--ds-page-padding\)/)
     expect(runtimeSource).not.toMatch(/ui-v2-home-/)
   })
 

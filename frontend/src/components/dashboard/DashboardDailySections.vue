@@ -769,6 +769,15 @@ onUnmounted(() => {
   gap: 0.75rem;
 }
 
+.dashboard-coworkers,
+.dashboard-commodities {
+  border: 0;
+  border-radius: var(--ds-inset-group-radius, 12px);
+  background: var(--ds-bg-card);
+  box-shadow: none;
+  overflow: hidden;
+}
+
 .dashboard-today-trades {
   min-width: 0;
 }

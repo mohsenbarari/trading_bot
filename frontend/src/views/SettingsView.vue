@@ -652,7 +652,6 @@ watch(
         <AppSectionCard
           v-if="showOvertimePreference"
           class="settings-section-card settings-overtime-card"
-          title="وقت اضافه"
         >
           <OfferOvertimePreferencePanel class="settings-overtime-panel" />
         </AppSectionCard>

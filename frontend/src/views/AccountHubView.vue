@@ -429,7 +429,7 @@ onMounted(refreshIdentity)
 }
 
 .account-telegram-panel {
-  box-shadow: inset 0 1px 0 var(--ds-native-hairline);
+  box-shadow: none;
 }
 
 .account-action-grid :deep(.ui-list-item) {

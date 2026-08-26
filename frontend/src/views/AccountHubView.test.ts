@@ -5,6 +5,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AccountHubView from './AccountHubView.vue'
 
 const accountHubSource = readFileSync(resolve(process.cwd(), 'src/views/AccountHubView.vue'), 'utf8')
+const telegramPanelSource = readFileSync(
+  resolve(process.cwd(), 'src/components/account/TelegramConnectPanel.vue'),
+  'utf8',
+)
 
 const accountHubMocks = vi.hoisted(() => ({
   routerPushMock: vi.fn(),
@@ -334,7 +338,10 @@ describe('AccountHubView.vue', () => {
     const wrapper = await mountView()
 
     expect(wrapper.get('.account-telegram-panel').text()).toContain('اتصال تلگرام')
-    expect(wrapper.get('.account-telegram-panel').text()).not.toContain('ضربه بزنید!')
+    expect(wrapper.get('.account-telegram-panel').text()).not.toContain('ضربه بزنید')
+    expect(telegramPanelSource).not.toContain('ضربه بزنید')
+    expect(telegramPanelSource).toMatch(/border:\s*0/)
+    expect(telegramPanelSource).not.toMatch(/border-radius:\s*12px/)
 
     await wrapper.get('.telegram-connect-panel').trigger('click')
     await flushPromises()

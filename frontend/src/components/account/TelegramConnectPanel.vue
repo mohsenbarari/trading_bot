@@ -34,9 +34,13 @@ const emit = defineEmits<{
       <span v-if="error" class="telegram-connect-panel__error">{{ error }}</span>
     </span>
 
-    <span class="telegram-connect-panel__state" aria-hidden="true">
+    <span
+      v-if="loading || connected"
+      class="telegram-connect-panel__state"
+      aria-hidden="true"
+    >
       <span v-if="loading" class="telegram-connect-panel__spinner"></span>
-      <span v-else>{{ connected ? 'متصل' : 'ضربه بزنید' }}</span>
+      <span v-else>متصل</span>
     </span>
   </button>
 </template>
@@ -44,9 +48,6 @@ const emit = defineEmits<{
 <style scoped>
 .telegram-connect-panel {
   --telegram-blue: var(--ds-telegram-500);
-  --telegram-blue-dark: var(--ds-telegram-600);
-  --telegram-blue-light: var(--ds-telegram-400);
-  --telegram-blue-border: var(--ds-telegram-border);
 
   width: 100%;
   display: grid;
@@ -54,14 +55,14 @@ const emit = defineEmits<{
   align-items: center;
   gap: 0.9rem;
   min-height: var(--ds-native-row-min-height, 48px);
-  padding: 0.85rem 1rem;
-  border: 1px solid var(--ds-native-hairline);
-  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  border: 0;
+  border-radius: 0;
   color: var(--ds-text-primary);
   font: inherit;
   text-align: right;
   cursor: pointer;
-  background: var(--ds-bg-card);
+  background: transparent;
   box-shadow: none;
   transition: background 0.18s ease;
   -webkit-tap-highlight-color: transparent;
@@ -86,9 +87,6 @@ const emit = defineEmits<{
 
 .telegram-connect-panel.is-connected {
   --telegram-blue: var(--ds-success-600);
-  --telegram-blue-dark: var(--ds-trade-buy-text);
-  --telegram-blue-light: #34d399;
-  --telegram-blue-border: rgba(22, 101, 52, 0.22);
 }
 
 .telegram-connect-panel.is-loading {
@@ -102,7 +100,7 @@ const emit = defineEmits<{
   align-items: center;
   justify-content: center;
   border-radius: 8px;
-  color: #ffffff;
+  color: var(--ds-bg-card);
   background: var(--telegram-blue);
   border: 0;
   box-shadow: none;
@@ -139,23 +137,21 @@ const emit = defineEmits<{
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.35rem;
-  min-height: 2rem;
-  padding: 0.24rem 0.72rem;
-  border-radius: var(--ds-radius-full);
-  border: 1px solid var(--ds-native-hairline);
-  background: var(--ds-bg-inset);
-  color: var(--telegram-blue);
-  font-size: var(--ds-font-xs);
-  font-weight: 800;
-  white-space: nowrap;
+  min-height: 1.25rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ds-text-muted);
+  font-size: var(--ds-font-sm);
+  font-weight: 650;
+  line-height: 1.7;
 }
 
 .telegram-connect-panel__spinner {
   width: 1rem;
   height: 1rem;
   border-radius: 999px;
-  border: 2px solid rgba(22, 155, 215, 0.28);
+  border: 2px solid var(--ds-telegram-border);
   border-top-color: var(--telegram-blue);
   animation: telegram-connect-spin 0.8s linear infinite;
 }
@@ -163,17 +159,6 @@ const emit = defineEmits<{
 @keyframes telegram-connect-spin {
   to {
     transform: rotate(360deg);
-  }
-}
-
-@media (max-width: 640px) {
-  .telegram-connect-panel {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .telegram-connect-panel__state {
-    grid-column: 1 / -1;
-    justify-self: stretch;
   }
 }
 </style>
