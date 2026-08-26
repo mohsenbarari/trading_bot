@@ -290,7 +290,6 @@ onUnmounted(() => {
 
 <template>
   <div class="user-manager ds-page-content">
-    <div class="ds-card">
       <AppFilterChips
         class="user-directory-tabs"
         :model-value="directoryMode"
@@ -455,7 +454,6 @@ onUnmounted(() => {
         </ul>
         </AppInsetGroup>
       </div>
-    </div>
   </div>
 </template>
 
@@ -569,10 +567,10 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: 0.75rem;
   margin-bottom: 0.5rem;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--ds-danger-100);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-danger-50);
+  padding: 0.6rem 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--ds-danger-700);
   font-size: var(--ds-font-xs);
 }

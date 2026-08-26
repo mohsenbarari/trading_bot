@@ -3,6 +3,7 @@ import { ChevronLeft, Megaphone, Package, PlusCircle, Settings, Users } from 'lu
 import { computed } from 'vue'
 import type { Component } from 'vue'
 import { isCachedMiddleManager, isCachedSuperAdmin } from '../utils/adminAccess'
+import AppInsetGroup from './ui/AppInsetGroup.vue'
 import AppListItem from './ui/AppListItem.vue'
 
 defineEmits(['navigate'])
@@ -98,6 +99,7 @@ const actions = computed<AdminAction[]>(() => {
 
 <template>
   <nav class="admin-panel-container" aria-label="ابزارهای مدیریت">
+    <AppInsetGroup>
     <ul class="admin-action-list">
       <li v-for="action in actions" :key="action.key" class="admin-action-list__item">
         <AppListItem
@@ -116,6 +118,7 @@ const actions = computed<AdminAction[]>(() => {
         </AppListItem>
       </li>
     </ul>
+    </AppInsetGroup>
   </nav>
 </template>
 
@@ -133,9 +136,6 @@ const actions = computed<AdminAction[]>(() => {
   margin: 0;
   padding: 0;
   list-style: none;
-  overflow: hidden;
-  border-radius: 12px;
-  background: var(--ds-bg-card);
 }
 
 .admin-action-list__item {

@@ -480,7 +480,7 @@ function formatDateForSeparator(dateString: string) {
 <style scoped>
 .chat-header {
   position: absolute;
-  top: env(safe-area-inset-top, 0px);
+  top: 0;
   left: 0;
   right: 0;
   height: var(--messenger-header-height, 56px);
@@ -671,8 +671,7 @@ function formatDateForSeparator(dateString: string) {
   flex: 0 0 auto;
 }
 
-.room-badge-small,
-.header-room-meta {
+.room-badge-small {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -719,21 +718,6 @@ function formatDateForSeparator(dateString: string) {
   color: #b45309;
 }
 
-.header-room-meta {
-  background: rgba(148, 163, 184, 0.14);
-  color: var(--messenger-text-muted, #64748b);
-}
-
-.header-room-meta.mandatory {
-  background: rgba(245, 158, 11, 0.16);
-  color: var(--messenger-accent-strong, #b45309);
-}
-
-.header-room-meta.system {
-  background: rgba(124, 58, 237, 0.12);
-  color: #6d28d9;
-}
-
 .search-bar-container {
   display: flex;
   align-items: center;
@@ -759,32 +743,6 @@ function formatDateForSeparator(dateString: string) {
   width: 100%;
   direction: rtl;
 }
-
-.search-results-dropdown {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  background: var(--messenger-surface-panel, #ffffff);
-  box-shadow: var(--messenger-shadow-panel, 0 18px 50px rgba(15, 23, 42, 0.12));
-  border-radius: var(--messenger-radius-panel, 18px);
-  max-height: 300px;
-  overflow-y: auto;
-  z-index: 1001;
-  margin-top: 4px;
-}
-
-.search-result-item {
-  padding: 12px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  cursor: pointer;
-  border-bottom: 1px solid var(--messenger-border-subtle, rgba(148, 163, 184, 0.32));
-}
-.search-result-item:hover { background: var(--messenger-surface-muted, #f8fafc); }
-.search-res-text { font-size: 14px; color: var(--messenger-text-strong, #1f2937); }
-.search-res-date { font-size: 12px; color: var(--messenger-text-muted, #64748b); }
 
 .header-menu-container { position: relative; }
 .header-dropdown-menu {

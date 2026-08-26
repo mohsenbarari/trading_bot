@@ -980,7 +980,7 @@ onBeforeUnmount(() => {
       <AppBackButton label="بازگشت" :disabled="!canGoBack" @click="handleManagerBack()" />
       <div class="header-copy">
         <h2>{{ pageTitle }}</h2>
-        <span>{{ pageSubtitle }}</span>
+        <span v-if="showCloseButton">{{ pageSubtitle }}</span>
       </div>
       <AppIconButton v-if="showCloseButton" label="بستن" size="md" @click="requestClose()">
         <X :size="20" />
@@ -1015,7 +1015,7 @@ onBeforeUnmount(() => {
 
         <AppSectionCard class="manager-section-card" title="کانال‌های موجود">
           <AppLoadingState v-if="isLoadingChannels" label="در حال دریافت کانال‌ها" />
-          <AppEmptyState v-else-if="existingChannels.length === 0" title="هنوز کانالی ساخته نشده است" message="بعد از ساخت اولین کانال، فهرست مدیریت آن در همین بخش نمایش داده می‌شود." />
+          <AppEmptyState v-else-if="existingChannels.length === 0" title="هنوز کانالی ساخته نشده است" />
           <div v-else class="manager-action-list">
             <AppListItem
               v-for="channel in existingChannels"

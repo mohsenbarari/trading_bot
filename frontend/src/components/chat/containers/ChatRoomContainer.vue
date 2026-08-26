@@ -362,14 +362,14 @@ const useVirtualTimeline = computed(() => {
   align-self: center;
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 14px;
+  gap: 8px;
+  padding: 8px 12px;
   margin-bottom: 6px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.88);
-  color: #5f6d79;
+  border-radius: 0;
+  background: transparent;
+  color: var(--messenger-text-secondary, #5f6d79);
   font-size: 12px;
-  box-shadow: 0 8px 18px rgba(26, 41, 53, 0.08);
+  box-shadow: none;
   position: sticky;
   top: 8px;
   z-index: 8;
@@ -470,12 +470,12 @@ const useVirtualTimeline = computed(() => {
 .chat-panel-error {
   margin: 18px auto;
   width: min(92%, 420px);
-  padding: 14px 16px;
-  border: 1px solid rgba(220, 38, 38, 0.18);
-  border-radius: 14px;
-  background: rgba(255, 247, 237, 0.96);
+  padding: 12px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: #7f1d1d;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  box-shadow: none;
   display: flex;
   gap: 12px;
   align-items: center;
@@ -525,8 +525,8 @@ const useVirtualTimeline = computed(() => {
 }
 
 .scroll-bottom-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  transform: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
 
 .scroll-badge {
@@ -605,7 +605,7 @@ const useVirtualTimeline = computed(() => {
 
 .selection-action-btn.primary:hover {
   background: rgba(245, 158, 11, 0.1);
-  color: #1d6fc2;
+  color: #b45309;
 }
 
 .album-download-selection-bar {

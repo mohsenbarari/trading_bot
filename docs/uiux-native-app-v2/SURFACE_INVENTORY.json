@@ -3,7 +3,7 @@
   "track": "native-app-feel-v2",
   "branch": "candidate/webapp-native-app-v2",
   "baseCommit": "951ca9f0",
-  "status": "audit-complete-roadmap-ready",
+  "status": "phases-1-7-9-implemented-audit-cleaned",
   "ownerScoresAtStart": {
     "unification": 80,
     "simplification": 70,
@@ -53,9 +53,9 @@
     {
       "id": "profiles",
       "routes": ["/profile", "/users/:id", "/admin/users/:id"],
-      "status": "web-card-dashboard",
+      "status": "native-grouped-with-listed-gaps",
       "phase": 5,
-      "gaps": ["outer-card", "help-popover", "stat-cards", "mini-trade-cards", "duplicate-headers"]
+      "gaps": ["mini-trade-cards", "action-row-copy"]
     },
     {
       "id": "operations",
@@ -66,13 +66,11 @@
         "/operations/accountants",
         "/operations/accountants/:relationId"
       ],
-      "status": "shell-ok-lists-and-actions-not-native",
+      "status": "native-lists-workspace-adapter-left",
       "phase": 6,
       "gaps": [
-        "list-item-as-cards",
-        "four-button-pending-rows",
-        "verbose-section-copy",
-        "legacy-owner-modals"
+        "ui-v2-workspace-adapter",
+        "verbose-danger-copy"
       ]
     },
     {
@@ -85,13 +83,16 @@
         "/admin/messages",
         "/admin/system"
       ],
-      "status": "menu-closer-interiors-web",
+      "status": "menu-native-interiors-partial",
       "phase": 7,
       "protectedInteriors": [
         "admin-messages-market-delivery",
         "trading-settings-market-controls"
       ],
-      "gaps": ["user-manager-card-gap", "admin-messages-help-stack", "small-subview-title"]
+      "gaps": [
+        "invite-copy-buttons-test-locked",
+        "admin-messages-market-help-locked"
+      ]
     },
     {
       "id": "public-auth-recovery",

@@ -589,8 +589,6 @@ onBeforeUnmount(() => {
               @pointercancel="cancelLongPress"
               @pointerleave="cancelLongPress"
             >
-              <div class="conversation-card-glow"></div>
-
               <div
                 class="conv-avatar"
                 :class="{
@@ -751,65 +749,6 @@ onBeforeUnmount(() => {
   box-shadow: none;
 }
 
-.conversation-summary-strip {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 18px 18px 12px;
-  border-bottom: 1px solid rgba(217, 119, 6, 0.1);
-}
-
-.summary-copy h2 {
-  margin: 2px 0 6px;
-  color: var(--text-strong);
-  font-size: 1.2rem;
-  font-weight: 900;
-}
-
-.summary-copy p {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 0.82rem;
-}
-
-.summary-kicker {
-  display: inline-flex;
-  color: var(--accent);
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-}
-
-.summary-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.summary-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border-radius: 999px;
-  font-size: 0.74rem;
-  font-weight: 800;
-  border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.8);
-}
-
-.summary-pill.accent {
-  color: var(--teal);
-  border-color: rgba(15, 118, 110, 0.16);
-}
-
-.summary-pill.warm {
-  color: var(--accent);
-  border-color: rgba(217, 119, 6, 0.16);
-}
-
 .conversations-list {
   flex: 1;
   overflow-y: auto;
@@ -825,51 +764,6 @@ onBeforeUnmount(() => {
 .conversations-list::-webkit-scrollbar-thumb {
   background: rgba(60, 60, 67, 0.18);
   border-radius: 999px;
-}
-
-.conversation-section + .conversation-section {
-  margin-top: 18px;
-}
-
-.section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 4px 6px 10px;
-}
-
-.section-header h3 {
-  margin: 0;
-  color: var(--text-strong);
-  font-size: 0.92rem;
-  font-weight: 900;
-}
-
-.section-header p {
-  margin: 3px 0 0;
-  color: var(--text-muted);
-  font-size: 0.74rem;
-}
-
-.section-count {
-  min-width: 30px;
-  height: 30px;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.84);
-  color: var(--accent);
-  font-size: 0.76rem;
-  font-weight: 900;
-  box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.1);
-}
-
-.section-items {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
 }
 
 .conversation-card {
@@ -975,10 +869,6 @@ onBeforeUnmount(() => {
 
 .conversation-card--active .conv-role-badge {
   color: inherit;
-}
-
-.conversation-card-glow {
-  display: none;
 }
 
 .conv-avatar {
@@ -1433,10 +1323,6 @@ onBeforeUnmount(() => {
   .conversation-panel {
     margin: 0;
     border-radius: 0;
-  }
-
-  .conversation-summary-strip {
-    padding: 16px 16px 10px;
   }
 
   .conversations-list {

@@ -428,24 +428,12 @@ onMounted(loadDashboard)
         role="tabpanel"
         aria-labelledby="admin-message-tab-chat"
       >
-        <AppInsetGroup>
-          <div class="status-card status-card--broadcast">
-            <div class="status-card-header">
-              <div>
-                <span class="status-pill status-pill--info">مخاطبان انتخاب‌شده</span>
-                <p class="status-meta">{{ selectedBroadcastCount.toLocaleString('fa-IR') }} گروه مقصد</p>
-              </div>
-              <span class="history-badge">{{ selectedBroadcastLabels.join('، ') || 'بدون انتخاب' }}</span>
-            </div>
-          </div>
-        </AppInsetGroup>
-
         <section class="composer-card composer-card--sheet">
           <div class="composer-header">
             <div>
               <h4>نوشتن پیام چت</h4>
             </div>
-            <span class="composer-counter">{{ broadcastContent.trim().length.toLocaleString('fa-IR') }} کاراکتر</span>
+            <span class="history-badge">{{ selectedBroadcastLabels.join('، ') || 'بدون انتخاب' }}</span>
           </div>
           <AppTextarea v-model="broadcastContent" class="message-textarea" rows="7" placeholder="متن پیام همگانی..." />
 
@@ -602,10 +590,10 @@ onMounted(loadDashboard)
 }
 
 .message-panel--chat .composer-card--sheet {
-  padding: 1rem;
-  border-radius: 12px;
+  padding: 0.25rem 0 1rem;
+  border-radius: 0;
   border: 0;
-  background: var(--ds-bg-card);
+  background: transparent;
 }
 
 .message-panel--chat .history-item {

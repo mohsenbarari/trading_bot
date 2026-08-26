@@ -2037,7 +2037,6 @@ function handleHistoryPresetChipChange(value: string) {
                   v-for="projectUser in projectUsers"
                   :key="projectUser.id"
                   :title="projectUser.account_name"
-                  :description="projectUserMobileLabel(projectUser)"
                   interactive
                   class="project-user-card"
                   @select="openProjectUserProfile(projectUser)"

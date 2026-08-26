@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { apiFetch } from '../utils/auth'
-import { Loader2, ChevronLeft, Save, RotateCcw, Mail, ClipboardList, Clock, ShieldCheck, AlertCircle } from 'lucide-vue-next'
+import { Loader2, ChevronLeft, Save, RotateCcw, Mail, ClipboardList, Clock, ShieldCheck } from 'lucide-vue-next'
 import { formatIranDateTime } from '../utils/iranTime'
 import JalaliDatePicker from './JalaliDatePicker.vue'
 import { AppButton, AppCheckbox, AppConfirmDialog, AppInput, AppSelect } from './ui'
@@ -638,10 +638,6 @@ onBeforeUnmount(() => {
           role="region"
           aria-labelledby="trading-settings-security-header"
         >
-          <div class="info-note">
-            <AlertCircle :size="16" />
-            <span>این مقادیر آستانه پایه برای جلوگیری از سوءاستفاده (Anti-Abuse) هستند. برای کاربرانی با بیش از یک نشست فعال، سیستم به صورت خودکار آستانه را افزایش می‌دهد.</span>
-          </div>
           <div class="ds-form-group">
             <label class="ds-label">آستانه پایه روزانه</label>
             <AppInput
@@ -1005,24 +1001,6 @@ onBeforeUnmount(() => {
 
 .is-default {
   color: var(--ds-text-placeholder) !important;
-}
-
-.info-note {
-  display: flex;
-  gap: 0.75rem;
-  padding: 0.25rem 0 1rem;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  font-size: 0.75rem;
-  line-height: 1.6;
-  color: var(--ds-text-secondary);
-  margin-bottom: 0.5rem;
-}
-
-.info-note svg {
-  flex-shrink: 0;
-  margin-top: 2px;
 }
 
 .footer-actions {

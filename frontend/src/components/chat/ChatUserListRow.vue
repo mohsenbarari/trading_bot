@@ -273,11 +273,11 @@ function handleClick(event: MouseEvent) {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+  transition: background-color 0.18s ease, color 0.18s ease;
 }
 
 :deep(.chat-user-row__action-btn:hover) {
-  transform: translateY(-1px);
+  transform: none;
 }
 
 :deep(.chat-user-row__action-btn--primary) {

@@ -551,20 +551,20 @@ function normalizeMobile(mobile: string): string {
 .pending-notice,
 .pending-refresh-error,
 .pending-state {
-  border: 1px solid var(--ds-border-medium);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-bg-card);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .result-box.error,
 .pending-refresh-error {
-  border-color: var(--ds-danger-200);
-  background: var(--ds-danger-50);
+  border-color: transparent;
+  background: transparent;
   color: var(--ds-danger-800);
 }
 
 .result-box.error {
-  padding: 1rem;
+  padding: 0.25rem 0;
   font-size: var(--ds-font-sm);
   line-height: 1.75;
   overflow-wrap: anywhere;
@@ -639,14 +639,14 @@ function normalizeMobile(mobile: string): string {
 .pending-refresh-error,
 .pending-state {
   margin: 0;
-  padding: 0.75rem;
+  padding: 0.25rem 0;
   font-size: var(--ds-font-xs);
   line-height: 1.7;
 }
 
 .pending-notice {
-  border-color: var(--ds-success-100);
-  background: var(--ds-success-50);
+  border-color: transparent;
+  background: transparent;
   color: var(--ds-success-800);
 }
 
