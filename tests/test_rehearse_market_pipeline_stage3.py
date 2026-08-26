@@ -62,6 +62,27 @@ class MarketPipelineStage3RehearsalTests(unittest.TestCase):
             ):
                 rehearsal.image_secret_scan("fixture-image")
 
+    def test_image_secret_scan_accepts_clean_filesystem_and_history(self):
+        responses = [
+            rehearsal.subprocess.CompletedProcess(
+                ["docker"],
+                0,
+                stdout='{"bad_name_count": 0, "bad_content_count": 0}\n',
+                stderr="",
+            ),
+            rehearsal.subprocess.CompletedProcess(
+                ["docker"], 0, stdout="COPY fixture /app\n", stderr=""
+            ),
+            rehearsal.subprocess.CompletedProcess(
+                ["docker"], 0, stdout="Python 3.11.14\n", stderr=""
+            ),
+        ]
+        with patch.object(rehearsal, "command", side_effect=responses):
+            result = rehearsal.image_secret_scan("fixture-image")
+        self.assertEqual(result["filesystem_secret_scan"], "pass")
+        self.assertEqual(result["history_secret_scan"], "pass")
+        self.assertEqual(result["runtime_version"], "Python 3.11.14")
+
 
 if __name__ == "__main__":
     unittest.main()
