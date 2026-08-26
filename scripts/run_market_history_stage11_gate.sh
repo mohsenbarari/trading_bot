@@ -34,13 +34,17 @@ docker run -d --name "${container}" \
   -e POSTGRES_HOST_AUTH_METHOD=trust \
   postgres:15-alpine >/dev/null
 
+ready=0
 for _ in $(seq 1 120); do
   if docker exec "${container}" pg_isready -U postgres >/dev/null 2>&1; then
+    ready=1
     break
   fi
   sleep 0.25
 done
-docker exec "${container}" pg_isready -U postgres >/dev/null
+if [[ "${ready}" != "1" ]]; then
+  exit 72
+fi
 docker exec "${container}" createdb -U postgres market_archive_rehearsal
 docker exec "${container}" createdb -U postgres market_archive_pre_restore
 docker exec "${container}" createdb -U postgres market_archive_post_restore
