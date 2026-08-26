@@ -18,6 +18,7 @@ from core.market_intelligence.market_fact_receiver import apply_fact_batch, conn
 from core.market_intelligence.market_input_materializer import materialize_input_snapshot
 from core.market_intelligence.market_store import connect_market_store
 from core.market_intelligence.private_pipeline_contracts import content_hash
+from core.market_intelligence.snapshot_publisher import publish_rate_ready_snapshot
 
 
 AT = "2026-08-26T05:00:00Z"
@@ -349,6 +350,14 @@ class Stage9AdapterTests(unittest.TestCase):
             if row.commodity_code == "IMAM" and row.settlement_term == "CASH"
         )
         self.assertEqual(imam.status, "ESTIMATED", repr(imam))
+        self.market.commit()
+        published = publish_rate_ready_snapshot(
+            market_store_path=self.market_path,
+            snapshot_path=Path(self.directory.name) / "stage9-rate-snapshot.json",
+            as_of_utc="2026-08-26T05:00:10Z",
+        )
+        self.assertEqual(published.status, "PUBLISHED")
+        self.assertIsNotNone(published.snapshot_digest)
         snapshot = materialize_input_snapshot(
             self.market, as_of_utc="2026-08-26T05:00:10Z"
         )
