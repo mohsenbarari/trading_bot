@@ -15,7 +15,7 @@ lives below the protected coin-intelligence data root.
 The application contains:
 
 - `coin_estimator.py`: robust hybrid training and live inference with a
-  30-second feature window plus the latest parsed point
+  90-second feature window plus the latest parsed point
 - `live_server.py`: read-only Telegram live listener and HTTP page
 - `test_estimator.py`: offline unit tests
 - `runtime/`: intentionally ignored local model, data, state and operator

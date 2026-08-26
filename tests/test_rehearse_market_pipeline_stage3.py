@@ -36,7 +36,7 @@ class MarketPipelineStage3RehearsalTests(unittest.TestCase):
     def test_expected_runtime_services_exclude_database_and_migration(self):
         self.assertNotIn("market-database", rehearsal.EXPECTED_RUNTIME_WEB)
         self.assertNotIn("market-migration", rehearsal.EXPECTED_RUNTIME_WEB)
-        self.assertEqual(len(rehearsal.EXPECTED_RUNTIME_WEB), 5)
+        self.assertEqual(len(rehearsal.EXPECTED_RUNTIME_WEB), 6)
         self.assertEqual(len(rehearsal.EXPECTED_RUNTIME_BOT), 4)
 
     def test_compose_state_summary_never_reads_container_logs(self):

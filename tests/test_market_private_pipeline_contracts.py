@@ -70,6 +70,7 @@ class MarketPrivatePipelineContractTests(unittest.TestCase):
             "USD_HERAT",
             "XAUUSD",
             "WALLEX_PUBLIC_API",
+            "BINANCE_PAXG_PUBLIC_API",
             "MELTED_AGGREGATE",
             "MELTED_FLOW",
             "PRIVATE_GOLD_PAPER_MINUTE",

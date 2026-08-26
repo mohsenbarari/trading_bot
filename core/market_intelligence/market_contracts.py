@@ -203,6 +203,7 @@ def _validate_instrument_unit(instrument: str, price_unit: str) -> None:
         "USD_HERAT": {"TOMAN_PER_USD"},
         "USDT_IRT": {"TOMAN_PER_USDT"},
         "XAUUSD": {"USD_PER_TROY_OUNCE"},
+        "PAXG_USD_PROXY": {"USD_PER_TROY_OUNCE"},
         "IME_GOLD_BAR": {"TOMAN_PER_MESGHAL_750"},
         "IME_GOLD_COIN_IMAM": {"TOMAN_PER_COIN"},
     }.get(instrument)

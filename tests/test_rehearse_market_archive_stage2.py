@@ -37,7 +37,7 @@ class MarketArchiveStage2RehearsalTests(unittest.TestCase):
         rendered = repr(rows)
         self.assertNotIn("source_id", rendered)
         self.assertNotIn("telegram", rendered.lower())
-        self.assertEqual(len(rows), 10)
+        self.assertEqual(len(rows), 11)
 
 
 if __name__ == "__main__":

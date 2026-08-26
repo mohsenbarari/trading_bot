@@ -210,7 +210,8 @@
           "enum": [
             "XAUUSD",
             "USD_HERAT",
-            "USDT_IRT"
+            "USDT_IRT",
+            "PAXG_USD_PROXY"
           ],
           "title": "Instrument",
           "type": "string"

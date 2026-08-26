@@ -325,7 +325,7 @@ class PrivateGoldOutcomePayload(ContractModel):
 
 class ExternalQuotePayload(ContractModel):
     kind: Literal["EXTERNAL_QUOTE"]
-    instrument: Literal["XAUUSD", "USD_HERAT", "USDT_IRT"]
+    instrument: Literal["XAUUSD", "USD_HERAT", "USDT_IRT", "PAXG_USD_PROXY"]
     quote_kind: Literal["BID", "ASK", "MID", "LAST"]
     price_value: DecimalText
     price_unit: Literal[
@@ -341,6 +341,7 @@ class ExternalQuotePayload(ContractModel):
             "XAUUSD": ("USD_PER_TROY_OUNCE", "USD"),
             "USD_HERAT": ("TOMAN_PER_USD", "TOMAN"),
             "USDT_IRT": ("TOMAN_PER_USDT", "TOMAN"),
+            "PAXG_USD_PROXY": ("USD_PER_TROY_OUNCE", "USD"),
         }[self.instrument]
         if (self.price_unit, self.currency) != expected:
             raise ValueError("external_quote_instrument_unit_mismatch")

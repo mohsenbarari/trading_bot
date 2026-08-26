@@ -2,7 +2,7 @@
 
 این مسیر فقط stack جدید Market Data را تعریف می‌کند و از Compose محصول جدا است.
 
-وضعیت فعلی پس از Stage 5:
+وضعیت فعلی پس از Stage 7:
 
 - image و dependencyها pinned و runtime غیر root است؛
 - Compose پایه با override مستقل `web` و `bot` وجود دارد؛
@@ -11,13 +11,17 @@
 - فقط دو receiver روی host port منتشر می‌شوند و bind باید private IP دقیق باشد؛
 - دو نقش capture دارای runtime پایدار Stage 4 هستند، اما `live` فقط با marker
   release-bound روی همان session mount قابل اجرا است؛
-- `market-processor` فقط برای دو گروه سکه و فقط به‌صورت shadow قابل اجرا است؛
+- `market-capture-external` بدون session/credential خصوصی، Wallex و PAXG را با outbox
+  پایدار و poll پیش‌فرض ۱۰ ثانیه‌ای در spool مستقل ثبت می‌کند؛
+- `market-processor` هر سه spool و نه source را با بودجه مستقل مصرف می‌کند و فقط
+  Market Store و input ledger در حالت shadow می‌سازد؛
 - نقش‌های transport، adapter و estimator همچنان در `live` fail-closed هستند.
 
 بنابراین این نسخه مجوز deploy یا تصاحب session تلگرام نیست. marker فقط در choreography
 cutover و بعد از توقف owner میزبان ساخته می‌شود؛ Stage 4 یا 5 هیچ marker یا session واقعی
 نساخته است. processor سکه هیچ خروجی را به مدل اصلی یا PostgreSQL نمی‌فرستد و
-transport/estimator زنده در مراحل بعدی پیاده می‌شوند.
+transport/estimator زنده در مراحل بعدی پیاده می‌شوند. Stage 7 هیچ deploy یا authority
+switch انجام نمی‌دهد.
 
 در mode زنده، processor بدون دو snapshot فقط‌خواندنی و هم‌دورهٔ
 `review-decisions.sqlite3` و `prediction-ledger.sqlite3` شروع نمی‌شود. فایل دوم باید
@@ -92,6 +96,25 @@ Store، اصلاحات انسانی و prediction ledger. خروجی فقط coun
 `--network none`، داده مصنوعی، partial tail، invalid sibling، restart/replay، reply
 branch دقیق و instrument inference مبتنی بر لنگر زمانی اجرا و همه artifactهای خود را
 پاک می‌کند.
+
+## Gate مراحل 6 و 7
+
+همان rehearsal ایزوله parser علاوه بر lifecycle کانال خصوصی، مسیر external و ledger را
+می‌سنجد: دو quote واقعی XAU در یک دقیقه، Wallex point/mean دقیق Decimal، تقدم XAU مستقیم
+بر PAXG، چهار outcome خصوصی، quiet-cycle idempotency و replay صفر. تست متمرکز Stage 7:
+
+```bash
+APP_ENV_FILE=config/unit-test.env.example python3 -m unittest \
+  tests.test_market_pipeline_stage7_input_materializer \
+  tests.test_market_pipeline_stage6_channel_processor
+
+python3 scripts/rehearse_market_coin_parser_stage5.py
+```
+
+spool خارجی فقط قرارداد کمینه `external_quote_event/1.0` را نگه می‌دارد؛ response خام،
+URL، API key یا header در آن ذخیره نمی‌شود. MID هر poll موفق Wallex ورودی اصلی USDT است؛
+BID/ASK برای audit همان observation واقعی باقی می‌مانند. PAXG همیشه proxy برچسب می‌خورد
+و فقط با guard دو book و band اونس مستقیم قابل انتخاب است.
 
 ## ترتیب release آینده
 

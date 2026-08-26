@@ -827,6 +827,7 @@ def run_rehearsal() -> dict[str, Any]:
 EXPECTED_RUNTIME_WEB = {
     "market-capture-account1",
     "market-capture-account2",
+    "market-capture-external",
     "market-processor",
     "market-fact-sync-worker",
     "estimator-snapshot-receiver",

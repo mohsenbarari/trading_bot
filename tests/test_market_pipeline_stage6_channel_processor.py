@@ -162,7 +162,10 @@ class MarketPipelineStage6ChannelProcessorTests(unittest.TestCase):
                 mode="fixture",
                 now_utc="2026-08-24T10:02:01Z",
             )
-            self.assertEqual(report["stream_records"], {"market": 8, "coin": 0})
+            self.assertEqual(
+                report["stream_records"],
+                {"market": 8, "coin": 0, "external": 0},
+            )
             self.assertEqual(report["private_trade_outcomes"], {"PARTIAL": 1})
             market = sqlite3.connect(paths.market_database)
             market.row_factory = sqlite3.Row

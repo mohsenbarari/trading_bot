@@ -972,8 +972,8 @@ def select_usd_average(
         config["usd_candidates"]
     ):
         # Do not discard offers merely because a trade is also present in the
-        # same 30-second window.  The raw parsed stream remains available in
-        # event_type_counts and the point_price is the newest real event.
+        # same configured observed window. The raw parsed stream remains
+        # available in event_type_counts; point_price is the newest real event.
         value = average_market_value(
             connection,
             end=end,
@@ -3222,7 +3222,7 @@ def historical_market_context(
             instrument="XAUUSD",
             market_label="اونس جهانی",
         ),
-        # Every market lane has the same 30-second observed window.  The
+        # Every market lane has the same 90-second observed window.  The
         # latest parsed event is carried separately as point_price; no old
         # dollar/USDT quote is copied into a new observation.
         "usd": select_effective_usd_average(
@@ -5143,7 +5143,7 @@ def _observed_inputs_uncached(
     regime_connection: sqlite3.Connection | None = None,
 ) -> dict[str, dict[str, Any]]:
     # All values below originate from parser/normalizer output tables.  Raw
-    # Telegram text is never consumed by inference.  The 30-second summaries
+    # Telegram text is never consumed by inference.  The 90-second summaries
     # and the latest real points are intentionally both exposed to the model.
     average_seconds = MARKET_AVERAGE_SECONDS
     return {
@@ -5735,7 +5735,7 @@ def estimate_rates(
                     previous_regime,
                 )
             # The point estimate follows the last real parsed event; the
-            # 30-second averages remain present in ``inputs`` for stability,
+            # 90-second averages remain present in ``inputs`` for stability,
             # trend and diagnostics.
             melted_value = live_point_value(inputs["melted_gold"])
             generic_coin_value = live_point_value(inputs["generic_coin"])

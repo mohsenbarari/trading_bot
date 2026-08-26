@@ -1,9 +1,9 @@
 """Fail-closed Docker entrypoint for the private market-data pipeline.
 
-Stage 5 promotes the two capture roles and the downstream coin-group processor.
-All other roles remain fixture-only.  Capture still requires a release-bound
-session authority marker; the processor remains shadow-only and requires its
-causal prediction ledger plus human-correction sidecar in live mode.
+Stages 4-7 promote the two Telegram capture roles, an independent external
+quote capture role, and the downstream shadow processor/materializer.  Other
+roles remain fixture-only.  Telegram capture still requires release-bound
+session authority; the processor requires causal calibration sidecars.
 """
 
 from __future__ import annotations
@@ -51,6 +51,7 @@ WEB_ROLES = frozenset(
     {
         "market-capture-account1",
         "market-capture-account2",
+        "market-capture-external",
         "market-processor",
         "market-fact-sync-worker",
         "estimator-snapshot-receiver",
@@ -68,7 +69,8 @@ ROLES = WEB_ROLES | BOT_ROLES
 CAPTURE_ROLES = frozenset(
     {"market-capture-account1", "market-capture-account2"}
 )
-LIVE_ROLES = CAPTURE_ROLES | {"market-processor"}
+EXTERNAL_CAPTURE_ROLES = frozenset({"market-capture-external"})
+LIVE_ROLES = CAPTURE_ROLES | EXTERNAL_CAPTURE_ROLES | {"market-processor"}
 RECEIVER_ROLES = frozenset(
     {"market-fact-receiver", "estimator-snapshot-receiver"}
 )
@@ -535,6 +537,22 @@ def run_service(role: str) -> int:
                     )
                 except CaptureRuntimeError as exc:
                     raise FoundationError(str(exc)) from exc
+            if role in EXTERNAL_CAPTURE_ROLES:
+                from .external_quote_capture import (
+                    ExternalQuoteCaptureError,
+                    run_external_capture_service,
+                )
+
+                try:
+                    return run_external_capture_service(
+                        role=role,
+                        mode=mode,
+                        release_sha=release_sha,
+                        state_directory=role_state(role),
+                        stop=stop,
+                    )
+                except ExternalQuoteCaptureError as exc:
+                    raise FoundationError(str(exc)) from exc
             if role == "market-processor":
                 from .coin_group_calibration_corpus import (
                     CoinGroupCalibrationCorpusError,
@@ -604,8 +622,19 @@ def run_healthcheck(role: str, max_age_seconds: float) -> int:
                 "market-capture-account2": {"GROUP_1", "GROUP_2"},
             }[role]:
                 raise FoundationError("capture_heartbeat_source_inventory_invalid")
+        elif role in EXTERNAL_CAPTURE_ROLES:
+            if document.get("schema") != "external_quote_capture/1.0":
+                raise FoundationError("external_capture_heartbeat_schema_invalid")
+            mode = document.get("mode")
+            if mode not in {"fixture", "live"} or document.get("status") != f"{mode}-ready":
+                raise FoundationError("external_capture_heartbeat_not_ready")
+            if set(document.get("sources") or {}) != {
+                "WALLEX_PUBLIC_API",
+                "BINANCE_PAXG_PUBLIC_API",
+            }:
+                raise FoundationError("external_capture_source_inventory_invalid")
         elif role == "market-processor":
-            if document.get("schema") != "market_processor/2.0":
+            if document.get("schema") != "market_processor/3.0":
                 raise FoundationError("processor_heartbeat_schema_invalid")
             mode = document.get("mode")
             expected_status = (
@@ -625,12 +654,17 @@ def run_healthcheck(role: str, max_age_seconds: float) -> int:
                 "MELTED_FLOW",
                 "USD_HERAT",
                 "XAUUSD",
+                "WALLEX_PUBLIC_API",
+                "BINANCE_PAXG_PUBLIC_API",
             }
             if (
                 (mode == "live" and processor_sources != all_sources)
                 or (
                     mode == "fixture"
-                    and processor_sources not in ({"GROUP_1", "GROUP_2"}, all_sources)
+                    and (
+                        not {"GROUP_1", "GROUP_2"}.issubset(processor_sources)
+                        or not processor_sources.issubset(all_sources)
+                    )
                 )
             ):
                 raise FoundationError("processor_heartbeat_source_inventory_invalid")
@@ -730,7 +764,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     service = commands.add_parser(
-        "service", help="run one market role; Stage 5 live is capture/coin-shadow only"
+        "service", help="run one market role; live authority remains stage-gated"
     )
     service.add_argument("--role", choices=sorted(ROLES), required=True)
     health = commands.add_parser("healthcheck", help="validate durable role health")

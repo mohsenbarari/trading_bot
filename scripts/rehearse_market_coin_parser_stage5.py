@@ -25,6 +25,7 @@ if str(REPO_ROOT) not in sys.path:
 from core.market_intelligence.coin_group_feedback import (  # noqa: E402
     ensure_coin_group_feedback_store,
 )
+from core.market_intelligence.external_quote_capture import Quote, quote_event  # noqa: E402
 
 
 DOCKERFILE = REPO_ROOT / "deploy/market-data/Dockerfile"
@@ -161,8 +162,9 @@ def prepare_fixture(root: Path) -> tuple[Path, Path, Path, str]:
     state = root / "state"
     spool = root / "capture" / "account2"
     market_spool = root / "capture" / "account1"
+    external_spool = root / "capture" / "external"
     calibration = root / "calibration"
-    for path in (state, spool, market_spool, calibration):
+    for path in (state, spool, market_spool, external_spool, calibration):
         path.mkdir(parents=True, mode=0o700)
         os.chown(path, 10001, 10001)
         os.chmod(path, 0o700)
@@ -278,6 +280,48 @@ def prepare_fixture(root: Path) -> tuple[Path, Path, Path, str]:
     os.chown(market_spool_file, 10001, 10001)
     os.chmod(market_spool_file, 0o400)
 
+    external_records = [
+        quote_event(
+            Quote(
+                source_code="WALLEX_PUBLIC_API",
+                instrument="USDT_IRT",
+                quote_kind="MID",
+                price_value=value,
+                price_unit="TOMAN_PER_USDT",
+                currency="TOMAN",
+                observed_at_utc=stamp(at + timedelta(seconds=offset)),
+                available_at_utc=stamp(at + timedelta(seconds=offset + 1)),
+                provenance={"method": "ORDER_BOOK_TOP", "symbol": "USDTTMN"},
+            )
+        )
+        for offset, value in ((0, "185100"), (20, "185200"))
+    ]
+    external_records.append(
+        quote_event(
+            Quote(
+                source_code="BINANCE_PAXG_PUBLIC_API",
+                instrument="PAXG_USD_PROXY",
+                quote_kind="MID",
+                price_value="4630.50",
+                price_unit="USD_PER_TROY_OUNCE",
+                currency="USD",
+                observed_at_utc=stamp(at + timedelta(seconds=20)),
+                available_at_utc=stamp(at + timedelta(seconds=21)),
+                provenance={
+                    "method": "TWO_BOOK_MIDPOINT_CORROBORATION",
+                    "symbols": ["PAXGUSDC", "PAXGUSDT"],
+                },
+            )
+        )
+    )
+    external_spool_file = external_spool / f"events-{at.date().isoformat()}.jsonl"
+    external_spool_file.write_text(
+        "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in external_records),
+        encoding="utf-8",
+    )
+    os.chown(external_spool_file, 10001, 10001)
+    os.chmod(external_spool_file, 0o400)
+
     feedback = calibration / "review-decisions.sqlite3"
     ensure_coin_group_feedback_store(feedback)
     prediction = calibration / "prediction-ledger.sqlite3"
@@ -363,6 +407,8 @@ def docker_run(
         "-e",
         "MARKET_PROCESSOR_COIN_SPOOL_DIR=/var/lib/market-data/capture/account2",
         "-e",
+        "MARKET_PROCESSOR_EXTERNAL_SPOOL_DIR=/var/lib/market-data/capture/external",
+        "-e",
         "MARKET_PROCESSOR_INTERVAL_SECONDS=0.25",
         "-e",
         f"MARKET_PROCESSOR_ONESHOT={'true' if oneshot else 'false'}",
@@ -420,6 +466,16 @@ def inspect_result(root: Path) -> dict[str, Any]:
                 "PRAGMA table_info(capture_primary_trade_outcomes)"
             ).fetchall()
         }
+        input_components = {
+            str(row["feature_role"]): dict(row)
+            for row in market.execute(
+                "SELECT feature_role,consumed_value,consumed_unit,sample_count,"
+                "selection_method FROM input_snapshot_components"
+            ).fetchall()
+        }
+        input_snapshots = int(
+            market.execute("SELECT COUNT(*) FROM input_snapshots").fetchone()[0]
+        )
     finally:
         staging.close()
         market.close()
@@ -458,8 +514,24 @@ def inspect_result(root: Path) -> dict[str, Any]:
         "MELTED_FLOW",
         "USD_HERAT",
         "XAUUSD",
+        "WALLEX_PUBLIC_API",
+        "BINANCE_PAXG_PUBLIC_API",
     }:
         raise Stage5RehearsalError("processor_source_inventory_gate_failed")
+    if input_snapshots != 1 or set(input_components) != {
+        "USDT_IRT_90S_POINT",
+        "USDT_IRT_90S_MEAN",
+        "XAUUSD_90S_POINT",
+        "XAUUSD_90S_MEAN",
+    }:
+        raise Stage5RehearsalError("input_ledger_inventory_gate_failed")
+    if (
+        input_components["USDT_IRT_90S_POINT"]["consumed_value"] != "185200"
+        or input_components["USDT_IRT_90S_MEAN"]["consumed_value"] != "185150"
+        or input_components["XAUUSD_90S_POINT"]["selection_method"]
+        != "TELEGRAM_DIRECT_XAUUSD"
+    ):
+        raise Stage5RehearsalError("input_ledger_value_gate_failed")
     return {
         "facts": len(rows),
         "eligible": len(eligible),
@@ -472,6 +544,16 @@ def inspect_result(root: Path) -> dict[str, Any]:
         "private_gold_trade_version": health["private_gold_trade_version"],
         "private_gold_outcomes": outcomes,
         "xau_events": len(xau),
+        "input_snapshot_count": input_snapshots,
+        "input_components": {
+            role: {
+                "value": row["consumed_value"],
+                "unit": row["consumed_unit"],
+                "samples": row["sample_count"],
+                "selection": row["selection_method"],
+            }
+            for role, row in sorted(input_components.items())
+        },
         "anchors": health["last_projection_causal_inputs"]["anchors"],
     }
 
@@ -524,9 +606,9 @@ def run_rehearsal() -> dict[str, Any]:
         first_health = json.loads(
             (root / "state/market-processor/health.json").read_text(encoding="utf-8")
         )
-        if first_health["counters"]["records"] != 19 or first_health["counters"][
+        if first_health["counters"]["records"] != 22 or first_health["counters"][
             "stream_records"
-        ] != {"coin": 5, "market": 14}:
+        ] != {"coin": 5, "market": 14, "external": 3}:
             raise Stage5RehearsalError("partial_tail_cursor_gate_failed")
         with spool_file.open("a", encoding="utf-8") as stream:
             stream.write(partial_line[50:] + "\n")
@@ -536,7 +618,7 @@ def run_rehearsal() -> dict[str, Any]:
         )
         if second_health["counters"]["records"] != 1 or second_health["counters"][
             "stream_records"
-        ] != {"coin": 1, "market": 0}:
+        ] != {"coin": 1, "market": 0, "external": 0}:
             raise Stage5RehearsalError("partial_tail_resume_gate_failed")
         docker_run(image, release_sha, root, mode="live", oneshot=True)
         replay_health = json.loads(
@@ -544,7 +626,7 @@ def run_rehearsal() -> dict[str, Any]:
         )
         if replay_health["counters"]["records"] != 0 or replay_health["counters"][
             "stream_records"
-        ] != {"coin": 0, "market": 0}:
+        ] != {"coin": 0, "market": 0, "external": 0}:
             raise Stage5RehearsalError("replay_idempotency_gate_failed")
         inspected = inspect_result(root)
 

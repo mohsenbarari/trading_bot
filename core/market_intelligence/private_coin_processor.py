@@ -42,16 +42,25 @@ from .coin_group_staging import connect_coin_group_staging
 from .coin_group_trades import MAX_REPLY_AGE_SECONDS
 from .coin_groups import COIN_GROUP_PARSER_VERSION
 from .coin_prediction_anchors import load_coin_prediction_anchors
+from .external_quote_capture import (
+    EXTERNAL_CAPTURE_VERSION,
+    ExternalQuoteCaptureError,
+    decode_quote_event,
+)
+from .market_input_materializer import (
+    INPUT_LEDGER_VERSION,
+    materialize_input_snapshot,
+)
 from .market_contracts import normalize_utc
-from .market_store import connect_market_store, initialize_market_store
+from .market_store import connect_market_store, initialize_market_store, upsert_observation
 from .private_gold import PRIVATE_GOLD_PARSER_VERSION
 from .private_gold_trade_revisions import PRIVATE_GOLD_TRADE_REVISION_VERSION
 from .private_pipeline_foundation import atomic_json_write, utc_text
 from .public_telegram.parser import PARSER_VERSION as PUBLIC_MARKET_PARSER_VERSION
 
 
-PROCESSOR_HEARTBEAT_SCHEMA = "market_processor/2.0"
-PROCESSOR_VERSION = "market-processor-v2-channel-lifecycle-shadow"
+PROCESSOR_HEARTBEAT_SCHEMA = "market_processor/3.0"
+PROCESSOR_VERSION = "market-processor-v3-input-materializer-shadow"
 MAX_RECORD_BYTES = 256 * 1024
 MAX_RECORDS_PER_CYCLE = 20_000
 SPOOL_NAME = re.compile(r"^events-\d{4}-\d{2}-\d{2}\.jsonl$")
@@ -64,7 +73,22 @@ PROCESSOR_SOURCES = frozenset(
         "MELTED_FLOW",
         "USD_HERAT",
         "XAUUSD",
+        "WALLEX_PUBLIC_API",
+        "BINANCE_PAXG_PUBLIC_API",
     }
+)
+COIN_PROCESSOR_SOURCES = frozenset({"GROUP_1", "GROUP_2"})
+MARKET_PROCESSOR_SOURCES = frozenset(
+    {
+        "MELTED_PRIMARY_FLOW",
+        "MELTED_AGGREGATE",
+        "MELTED_FLOW",
+        "USD_HERAT",
+        "XAUUSD",
+    }
+)
+EXTERNAL_PROCESSOR_SOURCES = frozenset(
+    {"WALLEX_PUBLIC_API", "BINANCE_PAXG_PUBLIC_API"}
 )
 TEMPORARY_PUBLIC_MELTED_SOURCES = frozenset(
     {"MELTED_AGGREGATE", "MELTED_FLOW"}
@@ -96,6 +120,7 @@ class CoinProcessorPaths:
     feedback_database: Path | None
     prediction_database: Path | None
     market_spool_directory: Path | None = None
+    external_spool_directory: Path | None = None
 
 
 def _external_file(value: str, *, reason: str) -> Path:
@@ -162,6 +187,20 @@ def _paths(*, mode: str, state_directory: Path) -> CoinProcessorPaths:
     market_spool = (
         market_spool_candidate if market_spool_candidate.is_dir() else None
     )
+    external_spool_supplied = Path(
+        os.environ.get(
+            "MARKET_PROCESSOR_EXTERNAL_SPOOL_DIR",
+            str(capture_root / "external"),
+        )
+    ).expanduser()
+    if external_spool_supplied.is_symlink():
+        raise CoinProcessorError("external_processor_spool_unavailable")
+    external_spool_candidate = external_spool_supplied.resolve()
+    if mode == "live" and not external_spool_candidate.is_dir():
+        raise CoinProcessorError("external_processor_spool_unavailable")
+    external_spool = (
+        external_spool_candidate if external_spool_candidate.is_dir() else None
+    )
     if mode == "live":
         feedback = _external_file(
             feedback_value, reason="coin_processor_feedback_unavailable"
@@ -211,6 +250,7 @@ def _paths(*, mode: str, state_directory: Path) -> CoinProcessorPaths:
         feedback_database=feedback,
         prediction_database=prediction,
         market_spool_directory=market_spool,
+        external_spool_directory=external_spool,
     )
 
 
@@ -374,6 +414,113 @@ def _ingest_file(
     return counters
 
 
+def _ingest_external_file(
+    staging: sqlite3.Connection,
+    market: sqlite3.Connection,
+    *,
+    path: Path,
+    now_utc: str,
+    remaining_records: int,
+) -> dict[str, int]:
+    """Ingest minimized API quotes without mixing them into Telegram staging."""
+
+    stat = path.stat()
+    size = int(stat.st_size)
+    offset = _cursor(
+        staging,
+        stream="external",
+        path=path,
+        device=int(stat.st_dev),
+        inode=int(stat.st_ino),
+        size=size,
+    )
+    counters = {
+        "records": 0,
+        "accepted": 0,
+        "duplicates": 0,
+        "changes": 0,
+        "tombstones": 0,
+        "rejected": 0,
+    }
+    with path.open("rb") as handle:
+        handle.seek(offset)
+        while counters["records"] < remaining_records and handle.tell() < size:
+            start = handle.tell()
+            raw = handle.readline(min(MAX_RECORD_BYTES + 2, size - start))
+            if not raw:
+                break
+            if not raw.endswith(b"\n"):
+                if len(raw) <= MAX_RECORD_BYTES:
+                    handle.seek(start)
+                    break
+                complete = False
+                while handle.tell() < size:
+                    tail = handle.readline(
+                        min(MAX_RECORD_BYTES + 2, size - handle.tell())
+                    )
+                    if tail.endswith(b"\n"):
+                        complete = True
+                        break
+                if not complete:
+                    handle.seek(start)
+                    break
+                record_capture_rejection(
+                    staging,
+                    stream="external",
+                    record_bytes=f"oversize:{path.name}:{start}".encode("ascii"),
+                    reason="capture_record_too_large",
+                    seen_at_utc=now_utc,
+                )
+                counters["records"] += 1
+                counters["rejected"] += 1
+                offset = handle.tell()
+                continue
+            counters["records"] += 1
+            offset = handle.tell()
+            try:
+                document = json.loads(raw.decode("utf-8"))
+                _event_id, observation = decode_quote_event(document)
+                existing = market.execute(
+                    "SELECT 1 FROM market_observations WHERE event_key=?",
+                    (observation.event_key,),
+                ).fetchone()
+                upsert_observation(market, observation)
+            except (
+                UnicodeDecodeError,
+                json.JSONDecodeError,
+                ExternalQuoteCaptureError,
+                ValueError,
+            ) as exc:
+                record_capture_rejection(
+                    staging,
+                    stream="external",
+                    record_bytes=raw,
+                    reason=(
+                        str(exc)
+                        if isinstance(exc, ExternalQuoteCaptureError)
+                        else "external_capture_record_invalid"
+                    ),
+                    seen_at_utc=now_utc,
+                )
+                counters["rejected"] += 1
+                continue
+            if existing is None:
+                counters["accepted"] += 1
+                counters["changes"] += 1
+            else:
+                counters["duplicates"] += 1
+    _save_cursor(
+        staging,
+        stream="external",
+        path=path,
+        device=int(stat.st_dev),
+        inode=int(stat.st_ino),
+        offset=offset,
+        updated_at_utc=now_utc,
+    )
+    return counters
+
+
 def _load_causal_inputs(
     staging: sqlite3.Connection,
     paths: CoinProcessorPaths,
@@ -503,7 +650,7 @@ def process_coin_spool_cycle(
     }
     stream_totals = {
         stream: {key: 0 for key in totals}
-        for stream in ("market", "coin")
+        for stream in ("market", "coin", "external")
     }
     try:
         initialize_capture_adapter(staging)
@@ -530,6 +677,25 @@ def process_coin_spool_cycle(
                 for key, value in report.items():
                     stream_totals[stream][key] += value
                     totals[key] += value
+        if paths.external_spool_directory is not None:
+            for path in _spool_files(paths.external_spool_directory):
+                remaining = MAX_RECORDS_PER_CYCLE - stream_totals["external"]["records"]
+                if remaining <= 0:
+                    break
+                report = _ingest_external_file(
+                    staging,
+                    market,
+                    path=path,
+                    now_utc=now,
+                    remaining_records=remaining,
+                )
+                for key, value in report.items():
+                    stream_totals["external"][key] += value
+                    totals[key] += value
+            # Commit the idempotent fact before its byte cursor.  A crash in
+            # between replays the same opaque event key; the inverse order
+            # could skip an observation permanently.
+            market.commit()
         # The raw event and byte cursor are one durable restart boundary.
         staging.commit()
         feedback, anchors, causal = _load_causal_inputs(
@@ -555,6 +721,7 @@ def process_coin_spool_cycle(
             market,
             as_of_utc=now,
         )
+        input_snapshot = materialize_input_snapshot(market, as_of_utc=now)
         outcome_counts = {
             str(row["status"]): int(row["total"])
             for row in staging.execute(
@@ -603,6 +770,13 @@ def process_coin_spool_cycle(
         "private_trade_messages_ambiguous": projection.private_trade_messages_ambiguous,
         "private_trade_outcomes": outcome_counts,
         "temporary_public_melted_facts_purged": temporary_public_melted_purged,
+        "input_snapshot_hash": input_snapshot.hash_hex,
+        "input_snapshot_inserted": input_snapshot.inserted,
+        "input_component_count": len(input_snapshot.components),
+        "input_component_no_data": sum(
+            component.consumed_value is None
+            for component in input_snapshot.components
+        ),
         "raw_rows_purged": projection.raw_rows_purged,
     }
 
@@ -662,6 +836,11 @@ def run_coin_processor_service(
                 "prediction_rows_rejected": int(counters["rows_rejected"]),
                 "anchors": int(counters["anchors"]),
             }
+        active_sources = set(COIN_PROCESSOR_SOURCES)
+        if paths.market_spool_directory is not None:
+            active_sources.update(MARKET_PROCESSOR_SOURCES)
+        if paths.external_spool_directory is not None:
+            active_sources.update(EXTERNAL_PROCESSOR_SOURCES)
         atomic_json_write(
             health_path,
             {
@@ -680,17 +859,15 @@ def run_coin_processor_service(
                 ),
                 "sources": {
                     source: "ready"
-                    for source in sorted(
-                        PROCESSOR_SOURCES
-                        if paths.market_spool_directory is not None
-                        else {"GROUP_1", "GROUP_2"}
-                    )
+                    for source in sorted(active_sources)
                 },
                 "adapter_version": CAPTURE_ADAPTER_VERSION,
                 "parser_version": COIN_GROUP_PARSER_VERSION,
                 "public_parser_version": PUBLIC_MARKET_PARSER_VERSION,
                 "private_gold_parser_version": PRIVATE_GOLD_PARSER_VERSION,
                 "private_gold_trade_version": PRIVATE_GOLD_TRADE_REVISION_VERSION,
+                "external_capture_version": EXTERNAL_CAPTURE_VERSION,
+                "input_ledger_version": INPUT_LEDGER_VERSION,
                 "pipeline_version": COIN_GROUP_PIPELINE_VERSION,
                 "calibration_corpus_version": CALIBRATION_CORPUS_VERSION,
                 "shadow_only": True,
