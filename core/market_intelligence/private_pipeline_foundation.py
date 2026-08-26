@@ -38,9 +38,9 @@ FOUNDATION_SCHEMA = "market_pipeline_foundation/1.0"
 LIVE_NOT_IMPLEMENTED_EXIT = 78
 DEFAULT_STATE_ROOT = Path("/var/lib/market-data/state")
 DEFAULT_SESSION_ROOT = Path("/var/lib/market-data/session")
-DEFAULT_MIGRATION = Path(
-    "/app/deploy/market-data/migrations/0001_market_archive.up.sql"
-)
+DEFAULT_MIGRATION = Path("/app/deploy/market-data/migrations")
+MARKET_SCHEMA_VERSION = 2
+MARKET_SCHEMA_TABLE_COUNT = 26
 RELEASE_SHA = re.compile(r"^[0-9a-f]{8,64}$")
 ROLE_CODE = re.compile(r"^[a-z][a-z0-9-]{2,63}$")
 MAX_FIXTURE_BODY_BYTES = 2 * 1024 * 1024
@@ -772,6 +772,24 @@ def _read_secret(path: str, *, label: str) -> str:
     return value
 
 
+def _migration_files(migration_path: Path) -> tuple[tuple[int, Path], ...]:
+    candidates = (
+        sorted(migration_path.glob("[0-9][0-9][0-9][0-9]_*.up.sql"))
+        if migration_path.is_dir()
+        else [migration_path]
+    )
+    migrations: list[tuple[int, Path]] = []
+    for candidate in candidates:
+        try:
+            version = int(candidate.name.split("_", 1)[0])
+        except (ValueError, IndexError) as exc:
+            raise FoundationError("market_migration_filename_invalid") from exc
+        migrations.append((version, candidate))
+    if not migrations or len({version for version, _ in migrations}) != len(migrations):
+        raise FoundationError("market_migration_set_invalid")
+    return tuple(sorted(migrations))
+
+
 def run_migration(migration_path: Path) -> int:
     import psycopg2
 
@@ -797,29 +815,47 @@ def run_migration(migration_path: Path) -> int:
     try:
         try:
             connection.autocommit = True
+            applied_any = False
+            for version, path in _migration_files(migration_path):
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT to_regclass('market_data.schema_migrations')")
+                    table = cursor.fetchone()[0]
+                    if table is not None:
+                        cursor.execute(
+                            "SELECT 1 FROM market_data.schema_migrations WHERE version = %s",
+                            (version,),
+                        )
+                        if cursor.fetchone() is not None:
+                            continue
+                    cursor.execute(path.read_text(encoding="utf-8"))
+                    applied_any = True
             with connection.cursor() as cursor:
-                cursor.execute("SELECT to_regclass('market_data.schema_migrations')")
-                table = cursor.fetchone()[0]
-                if table is not None:
-                    cursor.execute(
-                        "SELECT 1 FROM market_data.schema_migrations WHERE version = 1"
-                    )
-                    if cursor.fetchone() is not None:
-                        print(safe_json({"status": "already_current", "version": 1}))
-                        return 0
-                cursor.execute(migration_path.read_text(encoding="utf-8"))
+                cursor.execute(
+                    "SELECT COALESCE(MAX(version),0) FROM market_data.schema_migrations"
+                )
+                schema_version = int(cursor.fetchone()[0])
                 cursor.execute(
                     "SELECT COUNT(*) FROM information_schema.tables "
                     "WHERE table_schema = 'market_data'"
                 )
                 table_count = int(cursor.fetchone()[0])
-                if table_count != 23:
+                if schema_version != MARKET_SCHEMA_VERSION:
+                    raise FoundationError("migration_schema_version_mismatch")
+                if table_count != MARKET_SCHEMA_TABLE_COUNT:
                     raise FoundationError("migration_table_count_mismatch")
         except psycopg2.Error as exc:
             raise FoundationError("market_migration_database_failure") from exc
     finally:
         connection.close()
-    print(safe_json({"status": "applied", "version": 1, "table_count": 23}))
+    print(
+        safe_json(
+            {
+                "status": "applied" if applied_any else "already_current",
+                "version": MARKET_SCHEMA_VERSION,
+                "table_count": MARKET_SCHEMA_TABLE_COUNT,
+            }
+        )
+    )
     return 0
 
 

@@ -27,6 +27,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 UP_MIGRATION = (
     REPO_ROOT / "deploy" / "market-data" / "migrations" / "0001_market_archive.up.sql"
 )
+UP_MIGRATIONS = tuple(
+    sorted((REPO_ROOT / "deploy" / "market-data" / "migrations").glob("*.up.sql"))
+)
 DOWN_MIGRATION = (
     REPO_ROOT / "deploy" / "market-data" / "migrations" / "0001_market_archive.down.sql"
 )
@@ -291,7 +294,8 @@ def run(rows: int, iterations: int) -> dict[str, Any]:
         connection.autocommit = True
         try:
             with connection.cursor() as cursor:
-                cursor.execute(UP_MIGRATION.read_text(encoding="utf-8"))
+                for migration in UP_MIGRATIONS:
+                    cursor.execute(migration.read_text(encoding="utf-8"))
                 cursor.execute(
                     "SELECT COUNT(*) FROM information_schema.tables "
                     "WHERE table_schema = 'market_data'"
