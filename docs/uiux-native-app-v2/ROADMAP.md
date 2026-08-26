@@ -309,7 +309,7 @@ Gate:
 | ۵ پروفایل | implementation-complete |
 | ۶ عملیات | implementation-complete |
 | ۷ مدیریت | implementation-complete |
-| ۸ احراز | pending |
+| ۸ احراز | implementation-complete |
 | ۹ پیام‌رسان | implementation-complete |
 | ۱۰ overlay | pending |
 | ۱۱ پذیرش | pending |

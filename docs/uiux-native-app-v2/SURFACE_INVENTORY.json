@@ -103,9 +103,9 @@
         "/register",
         "/:pathMatch(.*)*"
       ],
-      "status": "app-fields-public-web-chrome",
+      "status": "native-grouped-auth-shell",
       "phase": 8,
-      "gaps": ["ui-v2-auth-catalog", "guidance-paragraphs"]
+      "gaps": []
     },
     {
       "id": "messenger",

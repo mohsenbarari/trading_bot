@@ -1188,20 +1188,20 @@ const authFlowTitle = computed(() => {
 
 const authFlowDescription = computed(() => {
   if (step.value === 'mobile') {
-    return 'شماره موبایل ثبت‌شده را وارد کنید تا کد تأیید برای شما ارسال شود.'
+    return 'شماره موبایل ثبت‌شده را وارد کنید.'
   }
   if (step.value === 'otp') return 'کد ارسال‌شده را وارد کنید.'
   if (step.value === 'waiting_approval') {
-    return 'درخواست ورود به دستگاه اصلی شما ارسال شد. نتیجه بدون نیاز به به‌روزرسانی دستی در همین صفحه نمایش داده می‌شود.'
+    return 'درخواست ورود به دستگاه اصلی شما ارسال شد.'
   }
   if (step.value === 'recovery_waiting') {
-    return 'نتیجه به‌صورت خودکار در همین صفحه اعلام می‌شود. اگر مدرکی لازم باشد، درخواست آن را همین‌جا می‌بینید.'
+    return 'نتیجه در همین صفحه اعلام می‌شود.'
   }
   if (step.value === 'recovery_identity') {
-    return 'تصویر کارت شناسایی یا فایل مدرک را ارسال کنید.'
+    return 'تصویر کارت یا فایل مدرک را بفرستید.'
   }
   if (step.value === 'recovery_submitted') {
-    return 'مدرک برای بررسی ارسال شد و نتیجه به‌صورت خودکار در همین صفحه اعلام می‌شود.'
+    return 'مدرک ارسال شد. نتیجه در همین صفحه می‌آید.'
   }
   if (step.value === 'recovery_approved') {
     return 'نشست قدیمی منقضی شد و اکنون می‌توانید وارد سامانه شوید.'

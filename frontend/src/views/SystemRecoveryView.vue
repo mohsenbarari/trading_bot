@@ -37,7 +37,7 @@ const outcomeContent: Record<SystemRecoveryOutcome, { title: string; description
   },
   [SYSTEM_RECOVERY_OUTCOME.DEEP_LINK_FAILURE]: {
     title: 'باز کردن این صفحه ممکن نشد',
-    description: 'برای ادامه، به صفحه اصلی برگردید و دوباره مسیر موردنظر را انتخاب کنید.',
+    description: 'به صفحه اصلی برگردید و دوباره مسیر را انتخاب کنید.',
   },
 }
 

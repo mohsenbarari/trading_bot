@@ -102,14 +102,10 @@ const otpCodeValid = computed(() => /^\d{5}$/.test(otpCode.value))
 const showRequiredProgress = computed(() => contextKind.value === 'invitation' && step.value <= 3)
 const requiredProgressStep = computed(() => (showRequiredProgress.value ? step.value : undefined))
 const authDescription = computed(() => {
-  if (step.value === 1) return 'اطلاعات دعوت‌نامه را بررسی کنید و کد تأیید را دریافت کنید.'
-  if (step.value === 2) return 'کد پنج‌رقمی ارسال‌شده به موبایل دعوت‌شده را وارد کنید.'
-  if (step.value === 3) {
-    return contextKind.value === 'registration'
-      ? 'برای تکمیل حساب، نشانی دقیق پستی را ثبت کنید.'
-      : 'پس از تأیید موبایل، نشانی دقیق پستی را ثبت کنید.'
-  }
-  return 'اتصال تلگرام اختیاری است و دسترسی وب را محدود نمی‌کند.'
+  if (step.value === 1) return 'کد تأیید را برای موبایل دعوت‌نامه بگیرید.'
+  if (step.value === 2) return 'کد پنج‌رقمی را وارد کنید.'
+  if (step.value === 3) return 'نشانی دقیق پستی را ثبت کنید.'
+  return 'اتصال تلگرام اختیاری است.'
 })
 
 class TerminalRegistrationError extends Error {}
@@ -682,13 +678,7 @@ async function skipTelegramConnect() {
           </button>
         </div>
 
-        <template v-if="step === 1">
-          <p class="ui-v2-auth-register-guidance">
-            کد تأیید برای موبایل ثبت‌شده در دعوت‌نامه ارسال می‌شود.
-          </p>
-        </template>
-
-        <template v-else-if="step === 2">
+        <template v-if="step === 2">
           <AppFormField label="کد تأیید پنج‌رقمی">
             <template #default="{ id, describedby }">
               <AppInput
@@ -711,10 +701,7 @@ async function skipTelegramConnect() {
         </template>
 
         <template v-else-if="step === 3">
-          <AppFormField
-            label="نشانی دقیق پستی"
-            hint="استان، شهر، خیابان، پلاک و توضیح لازم را کامل وارد کنید."
-          >
+          <AppFormField label="نشانی دقیق پستی">
             <template #default="{ id, describedby }">
               <AppTextarea
                 :id="id"
@@ -741,7 +728,7 @@ async function skipTelegramConnect() {
             aria-labelledby="registration-complete-title"
           >
             <strong id="registration-complete-title">اتصال تلگرام</strong>
-            <p>این اتصال اختیاری است و دسترسی وب شما را محدود نمی‌کند.</p>
+            <p>این اتصال اختیاری است.</p>
           </div>
           <div v-if="telegramLinkError" class="ui-v2-auth-error" role="alert">
             {{ telegramLinkError }}

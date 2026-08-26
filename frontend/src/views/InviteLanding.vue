@@ -43,10 +43,10 @@ const inviteTitle = computed(() => {
 })
 
 const inviteDescription = computed(() => {
-  if (loading.value || redirecting.value) return 'اعتبار دعوت‌نامه در حال بررسی است.'
-  if (error.value) return 'نتیجه بررسی دعوت‌نامه را ببینید و فقط در صورت امکان دوباره تلاش کنید.'
+  if (loading.value || redirecting.value) return 'در حال بررسی…'
+  if (error.value) return ''
   if (webAvailable.value && !botAvailable.value) {
-    return 'برای ادامه، شماره موبایل را تأیید و اطلاعات حساب را تکمیل کنید.'
+    return 'شماره و اطلاعات حساب را تکمیل کنید.'
   }
   return 'تا پایان مهلت، روش ثبت‌نام را انتخاب کنید.'
 })
@@ -306,7 +306,6 @@ function goToTelegramRegister() {
           </span>
           <span class="ui-v2-auth-invite-route__copy">
             <strong>ثبت‌نام با تلگرام</strong>
-            <small>ورود مستقیم به ربات و ادامه ثبت‌نام</small>
           </span>
         </button>
 
@@ -323,7 +322,6 @@ function goToTelegramRegister() {
           </span>
           <span class="ui-v2-auth-invite-route__copy">
             <strong>{{ botAvailable ? 'ثبت‌نام از طریق وب' : 'ادامه ثبت‌نام' }}</strong>
-            <small v-if="botAvailable">تأیید موبایل و تکمیل اطلاعات در وب‌اپ</small>
           </span>
         </button>
       </div>
