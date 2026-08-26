@@ -999,6 +999,21 @@ Gate:
   baseline قدیمی فقط cadence compactشده را داشت، unit/parser/lifecycle mismatch صفر و هر
   ۱۴ rate برابر بود. اختلاف XAU و schema جدید `mean_price` باعث ماندن gate در HOLD شد؛
   window آرام بازار جای session کامل گروه/آبشده/هرات را نمی‌گیرد.
+- adapter پس از یک backlog واقعی به‌علت full-table sort/fetch و tmpfs محدود متوقف شد؛
+  `main@fd665759` خواندن را به cursorهای per-stream و merge bounded پانصدتایی تبدیل کرد.
+  preflight هشت‌مگابایتی پاس شد و ۱۰ stream زنده با ۵۱٬۲۸۹ delivery، lag/duplicate/rejection
+  صفر بازیابی شدند.
+- timeline اولیه یک race علّی میان timestamp ارزیابی و اولین SELECT نشان داد. اصلاح
+  `main@d2b79298` cutoff زمان ورود محلی، pin شدن read snapshot پیش از تعیین زمان زنده،
+  `generated_at` زیرثانیه و guard قطعی `transferred_at <= generated_at` را اضافه کرد؛ window
+  اقتصادی anchor قدیمی نیز از knowledge cutoff فعلی جدا شد.
+- چهار service بات با release جدید و همچنان `PRIVATE_SHADOW` healthy/restart-zero شدند؛ وب
+  snapshot تازه را `FRESH` گرفت و هیچ authority یا feed اصلی تغییر نکرد.
+- timeline امضاشده ده snapshot product و ۵۵ snapshot بدون version gap را ثبت کرد؛ p95
+  pair skew برابر `4.114s` و transfer-to-snapshot برابر `6.788s` بود. XAU/USDT point و mean
+  همگی حداکثر ۲۵ bps فاصله داشتند و هرات فردایی/سه aggregate دقیقاً برابر بودند، اما drift
+  private-gold و نبود همهٔ نرخ‌های coin در بازار آرام، gate بازار باز را باز نگه داشت. نتیجه
+  رسمی `HOLD_FULL_OPEN_MARKET_SESSION_REQUIRED` و `cutover_performed=false` است.
 
 رسید عملیاتی: [COIN_MARKET_DATA_STAGE13_STAGING_SHADOW.md](./COIN_MARKET_DATA_STAGE13_STAGING_SHADOW.md)
 

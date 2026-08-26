@@ -227,6 +227,54 @@ baseline و candidate هر دو از mountهای version-pinned خوانده ش�
 timestamp مشترک با ورودی واقعی مدل اصلی مقایسه و سپس یک session کامل بازار باز با snapshot
 timeline واقعی ثبت کند؛ مقایسه دوباره با XAU دقیقه‌ای baseline معیار پذیرش نیست.
 
+## بازیابی backlog و snapshot علّی
+
+در ادامهٔ soak، receiver و sender سالم بودند ولی snapshot بات متوقف شد. adapter هنگام backlog
+تمام `fact_deliveries` را با `ORDER BY` و `fetchall()` می‌خواند و مرتب‌سازی payloadهای کامل در
+tmpfs محدود کانتینر به `database or disk is full` می‌رسید. اصلاح `main@fd665759` خواندن را به
+cursor مستقل هر stream و merge سراسری bounded تبدیل کرد؛ در هر cycle حداکثر ۵۰۰ delivery
+انتخاب می‌شود و ترتیب علّی داخل هر stream محفوظ است. preflight واقعی با tmpfs هشت‌مگابایتی
+۵۰۰ delivery را بدون spill پردازش کرد و adapter سپس هر ۱۰ stream را به lag صفر رساند.
+
+اولین اجرای timeline پس از بازیابی، `timeline_trace_time_order_invalid` را آشکار کرد: زمان
+ارزیابی پیش از اولین SELECT تعیین و به ثانیه گرد می‌شد، بنابراین factی که بین آن لحظه و pin شدن
+read snapshot commit شده بود می‌توانست `transferred_at` بعد از `generated_at` داشته باشد.
+اصلاح `main@d2b79298` این مرز را در همهٔ خوانش‌های point-in-time روی event time، availability و
+زمان ورود محلی اعمال می‌کند، read snapshot را پیش از انتخاب زمان زنده pin می‌کند، زمان تولید را
+با دقت زیرثانیه نگه می‌دارد و contract هر ورودی منتقل‌شده پس از زمان تولید را رد می‌کند. محاسبهٔ
+anchor تاریخی نیز window اقتصادی قدیمی را از مرز دانسته‌های زمان ارزیابی جدا نگه می‌دارد.
+
+چهار service بات به image
+`sha256:05d66759d14e47b19a41959c42d90ba50599b807d049ccb5f19346b070f4fff7` با revision کامل
+`d2b79298d2e265a57a3fe5a4fac8ebcdcd9315a7` به‌ترتیب recreate شدند. هر چهار service healthy،
+restart count صفر و feed همچنان `PRIVATE_SHADOW` بود. در postcheck، ۵۱٬۲۸۹ delivery روی ۱۰
+stream با duplicate/rejection و lag صفر اعمال شده بود؛ snapshot جدید ترتیب علّی داشت و envelope
+وب آن را `FRESH` دریافت کرد. هیچ service وب، product authority یا primary feed تغییر نکرد.
+
+timeline واقعی ده‌نمونه‌ای پس از این اصلاح با report hash
+`cdf73b4b297c7e51e16bd28bb794afa6bd1fe209072c3f38546275171a894883` و key ID برابر
+`stage13-consumed-input:d2b79298` امضا و مستقل verify شد. artifact با mode `0600` در
+`/srv/trading-bot/staging-data/coin-intelligence/private-pipeline-shadow/backups-staging/stage13-consumed-input-d2b79298.json`
+قرار دارد و redaction و `cutover_performed=false` نیز مستقل تایید شدند. نتیجه:
+
+- ۱۰ snapshot تازهٔ product با ۵۵ snapshot متوالی candidate مقایسه شد؛ version gap صفر و
+  `snapshot_timeline_complete=true` بود؛
+- p95 اختلاف زمانی جفت snapshotها `4.114s` و p95 انتقال ورودی جدید تا snapshot بعدی
+  `6.788s` بود که gate هفت‌ثانیه‌ای را در این window پاس می‌کند؛
+- point و mean اونس و تتر در همهٔ نمونه‌ها حداکثر ۲۵ bps فاصله داشتند؛ هرات فردایی و سه
+  aggregate آبشده در هر ۱۰ نمونه دقیقاً برابر بودند؛
+- private-gold امروز در product غایب و در candidate حاضر بود و private-gold فردایی و
+  `MELTED_PAPER_TODAY` بیش از ۱۰۰ bps اختلاف داشتند. scheduled و exact-as-of تقریباً همان
+  طبقه‌بندی را دادند، پس skew چهارثانیه‌ای علت اصلی این drift نیست؛
+- بازار آرام بود و هر دو مسیر برای تمام ۱۴ نرخ coin فاقد خروجی بودند؛ بنابراین این window
+  هیچ evidence پذیرشی برای rate parity یا parser/lifecycle بازار باز نمی‌سازد؛
+- recommendation نهایی همان `HOLD_FULL_OPEN_MARKET_SESSION_REQUIRED` ماند و هیچ cutover
+  انجام نشد.
+
+گیت کد شامل ۸۶ تست متمرکز روی host و ۷۴ تست سازگار داخل image با network خاموش بود و همه
+سبز شدند. دو تست shell استقرار که وجود `curl` را فرض می‌کنند فقط روی host اجرا و پاس شدند و
+جزء runtime image بازار نیستند.
+
 ## failure drill و اصلاحات حین استقرار
 
 - قطع ۱۲ ثانیه‌ای Fact receiver باعث backlog موقت ۳۳تایی شد؛ پس از بازگشت، صف بدون
