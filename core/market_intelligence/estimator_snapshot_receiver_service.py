@@ -48,12 +48,14 @@ class _Server(ThreadingHTTPServer):
         *,
         database_path: Path,
         snapshot_root: Path,
+        prediction_ledger_path: Path,
         events_path: Path,
         allowed_peer_ip: str,
         keys: Mapping[str, bytes],
     ) -> None:
         self.database_path = database_path
         self.snapshot_root = snapshot_root
+        self.prediction_ledger_path = prediction_ledger_path
         self.events_path = events_path
         self.allowed_peer_ip = allowed_peer_ip
         self.keys = dict(keys)
@@ -171,6 +173,7 @@ class _Handler(BaseHTTPRequestHandler):
                 document,
                 snapshot_root=self.receiver.snapshot_root,
                 publication_events_path=self.receiver.events_path,
+                prediction_ledger_path=self.receiver.prediction_ledger_path,
             )
             if status != 200:
                 record_snapshot_rejection(
@@ -179,7 +182,7 @@ class _Handler(BaseHTTPRequestHandler):
                     body_hash=body_hash,
                 )
             self._respond(status, response)
-        except (OSError, sqlite3.Error):
+        except (EstimatorSnapshotReceiverError, OSError, sqlite3.Error):
             self._respond(503, {"status": "REJECTED", "reason_code": "DURABLE_STORE_UNAVAILABLE"})
         finally:
             connection.close()
@@ -196,7 +199,14 @@ def run_estimator_snapshot_receiver_service(
     snapshot_root = Path(
         os.environ.get("MARKET_PIPELINE_SNAPSHOT_ROOT", "/var/lib/market-data/snapshots")
     )
+    calibration_root = Path(
+        os.environ.get(
+            "MARKET_PIPELINE_CALIBRATION_ROOT",
+            "/var/lib/market-data/calibration/coin-groups",
+        )
+    )
     snapshot_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    calibration_root.mkdir(mode=0o700, parents=True, exist_ok=True)
     database_path = state_directory / "estimator-snapshot-receiver.sqlite3"
     probe = connect_snapshot_receiver(database_path)
     probe.close()
@@ -220,6 +230,7 @@ def run_estimator_snapshot_receiver_service(
         ),
         database_path=database_path,
         snapshot_root=snapshot_root,
+        prediction_ledger_path=calibration_root / "prediction-ledger.sqlite3",
         events_path=state_directory / "snapshot-publication-events.jsonl",
         allowed_peer_ip=peer,
         keys=keys,

@@ -29,7 +29,13 @@ choreography cutover و بعد از توقف owner میزبان ساخته می�
 `review-decisions.sqlite3` و `prediction-ledger.sqlite3` شروع نمی‌شود. فایل دوم باید
 لنگرهای `MAIN_ONLINE` را با زمان رخداد و زمان availability واقعی نگه دارد. جایگزین‌کردن
 آن با تخمین فعلی یا اجرای parser بدون این دو ورودی ممنوع است. ورودی‌ها باید با rename
-اتمیک در مسیر `calibration/coin-groups` منتشر شوند؛ DB در حال نوشتن مستقیم mount نشود.
+اتمیک در مسیر `calibration/coin-groups` منتشر شوند؛ DB در حال نوشتن legacy مستقیم mount
+نمی‌شود.
+seed اولیه فقط با `export_market_calibration_seed.py` و از ستون‌های allowlist‌شده ساخته
+می‌شود؛ کپی کامل SQLite تولیدی ممنوع است. پس از شروع shadow، receiver وب هر estimator
+snapshot امضاشده را با transaction اتمیک به ledger اختصاصی single-writer/WAL می‌افزاید و
+فقط ۲۴ ساعت را نگه می‌دارد. processor این ledger محلی را query-only می‌خواند؛ DB زندهٔ
+legacy هرگز mount نمی‌شود و parser به snapshot ثابت روز deployment وابسته نمی‌ماند.
 
 دایرکتوری والد secret باید `root:root 0700` و فایل‌های مصرفی باید `root:10001 0440` باشند. PostgreSQL با UID/GID `70:70` فقط supplemental group `10001` می‌گیرد؛ بنابراین همان فایل password برای migration/runtime قابل خواندن است، بدون root container یا world-readable secret.
 

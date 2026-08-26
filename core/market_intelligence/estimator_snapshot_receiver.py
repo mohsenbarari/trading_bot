@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 import os
@@ -17,6 +18,16 @@ from .private_pipeline_contracts import EstimatorSnapshotV1
 
 SNAPSHOT_RECEIVER_SCHEMA = "estimator_snapshot_receiver/1.0"
 DEFAULT_STALE_AFTER_SECONDS = 30
+PREDICTION_LEDGER_RETENTION = timedelta(hours=24)
+_PREDICTION_COMMODITY = {
+    "COIN_IMAM": "امام",
+    "COIN_BAHAR": "بهار",
+    "COIN_HALF_BAHAR": "نیم بهار",
+    "COIN_QUARTER_BAHAR": "ربع بهار",
+    "COIN_HALF_LOW_DATE": "نیم تاریخ پایین",
+    "COIN_QUARTER_LOW_DATE": "ربع تاریخ پایین",
+    "COIN_ONE_GRAM": "یک گرمی",
+}
 
 
 class EstimatorSnapshotReceiverError(RuntimeError):
@@ -85,6 +96,85 @@ def initialize_snapshot_receiver(connection: sqlite3.Connection) -> None:
     )
 
 
+def _prediction_price(value: object) -> int:
+    try:
+        project_price = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise EstimatorSnapshotReceiverError("prediction_ledger_rate_invalid") from exc
+    if (
+        not project_price.is_finite()
+        or project_price <= 0
+        or project_price != project_price.to_integral_value()
+    ):
+        raise EstimatorSnapshotReceiverError("prediction_ledger_rate_invalid")
+    return int(project_price) * 1_000
+
+
+def update_prediction_ledger(
+    path: Path | str,
+    snapshot: EstimatorSnapshotV1,
+    *,
+    created_at_utc: str,
+) -> int:
+    """Append one received snapshot to the dedicated local WAL ledger."""
+    destination = Path(path)
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    ledger = sqlite3.connect(destination, timeout=30)
+    try:
+        ledger.execute("PRAGMA journal_mode=WAL")
+        ledger.execute("PRAGMA synchronous=FULL")
+        ledger.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS coin_estimate_predictions(
+              id INTEGER PRIMARY KEY,
+              prediction_time_utc TEXT NOT NULL,
+              created_at_utc TEXT NOT NULL,
+              model_id TEXT NOT NULL,
+              commodity TEXT NOT NULL,
+              settlement TEXT NOT NULL,
+              estimated_price_toman INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS coin_estimate_predictions_causal_idx
+            ON coin_estimate_predictions(model_id,prediction_time_utc,created_at_utc);
+            """
+        )
+        prediction_time = snapshot.generated_at_utc.isoformat().replace("+00:00", "Z")
+        lane_offset = 1 if snapshot.feed_mode == "PRIVATE_PRIMARY" else 0
+        rows = []
+        for index, rate in enumerate(snapshot.rates):
+            commodity = _PREDICTION_COMMODITY.get(rate.instrument)
+            if commodity is None or rate.settlement not in {"CASH", "TOMORROW"}:
+                continue
+            rows.append(
+                (
+                    (snapshot.snapshot_version * 1000 + index) * 2 + lane_offset,
+                    prediction_time,
+                    created_at_utc,
+                    "MAIN_ONLINE",
+                    commodity,
+                    rate.settlement,
+                    _prediction_price(rate.value),
+                )
+            )
+        cutoff = (
+            snapshot.generated_at_utc.astimezone(timezone.utc)
+            - PREDICTION_LEDGER_RETENTION
+        ).isoformat().replace("+00:00", "Z")
+        with ledger:
+            ledger.executemany(
+                "INSERT OR IGNORE INTO coin_estimate_predictions VALUES(?,?,?,?,?,?,?)",
+                rows,
+            )
+            ledger.execute(
+                "DELETE FROM coin_estimate_predictions WHERE prediction_time_utc<?",
+                (cutoff,),
+            )
+        os.chmod(destination, 0o600)
+        return len(rows)
+    finally:
+        ledger.close()
+
+
 def record_snapshot_rejection(
     connection: sqlite3.Connection, *, reason_code: str, body_hash: str
 ) -> None:
@@ -141,6 +231,7 @@ def apply_estimator_snapshot(
     *,
     snapshot_root: Path,
     publication_events_path: Path,
+    prediction_ledger_path: Path | None = None,
 ) -> tuple[int, dict[str, object]]:
     from .private_pipeline_foundation import atomic_json_write
 
@@ -190,6 +281,12 @@ def apply_estimator_snapshot(
             connection.rollback()
             raise
     published_at = _stamp()
+    if prediction_ledger_path is not None:
+        update_prediction_ledger(
+            prediction_ledger_path,
+            snapshot,
+            created_at_utc=received_at,
+        )
     view = _web_view(
         snapshot,
         received_at_utc=received_at,
@@ -296,6 +393,7 @@ __all__ = [
     "EstimatorSnapshotReceiverError",
     "apply_estimator_snapshot",
     "connect_snapshot_receiver",
+    "update_prediction_ledger",
     "read_web_snapshot_view",
     "record_snapshot_rejection",
     "snapshot_receiver_metrics",

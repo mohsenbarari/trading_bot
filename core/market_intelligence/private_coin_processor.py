@@ -581,7 +581,7 @@ def _load_causal_inputs(
             paths.prediction_database,
             earliest_event_time_utc=bounded_earliest,
             as_of_utc=as_of_utc,
-            immutable=True,
+            immutable=mode != "live",
         )
         anchors = loaded.anchors
         anchor_stats = {

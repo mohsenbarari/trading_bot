@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -37,6 +38,7 @@ class Stage10SnapshotTests(unittest.TestCase):
         self.sender_state = self.root / "sender-state.sqlite3"
         self.snapshot_path = self.root / "bot" / "latest-estimator-snapshot.json"
         self.web_root = self.root / "web"
+        self.prediction_ledger = self.root / "calibration" / "prediction-ledger.sqlite3"
         self.events_path = self.root / "web-state" / "events.jsonl"
         self.web_receiver = connect_snapshot_receiver(
             self.root / "web-state" / "receiver.sqlite3"
@@ -157,6 +159,7 @@ class Stage10SnapshotTests(unittest.TestCase):
             document,
             snapshot_root=self.web_root,
             publication_events_path=self.events_path,
+            prediction_ledger_path=self.prediction_ledger,
         )
 
     def test_hash_timing_inputs_and_web_view_are_one_authoritative_snapshot(self):
@@ -185,6 +188,17 @@ class Stage10SnapshotTests(unittest.TestCase):
             (self.web_root / "cache-private_shadow.json").read_text(encoding="utf-8")
         )
         self.assertEqual(cache["snapshot_hash"], document["snapshot_id"])
+        ledger = sqlite3.connect(self.prediction_ledger)
+        try:
+            rows = ledger.execute(
+                "SELECT model_id,commodity,settlement,estimated_price_toman "
+                "FROM coin_estimate_predictions ORDER BY id"
+            ).fetchall()
+        finally:
+            ledger.close()
+        self.assertTrue(rows)
+        self.assertTrue(all(row[0] == "MAIN_ONLINE" for row in rows))
+        self.assertTrue(all(int(row[3]) % 1000 == 0 for row in rows))
 
     def test_monotonic_guard_duplicate_and_stale_route_cut(self):
         first = self._publish()

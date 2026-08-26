@@ -255,6 +255,7 @@ services:
       MARKET_PIPELINE_LISTEN_PORT: "9443"
       MARKET_PIPELINE_ALLOWED_PEER_IP: ${MARKET_BOT_PRIVATE_IP:?MARKET_BOT_PRIVATE_IP is required}
       MARKET_PIPELINE_SNAPSHOT_ROOT: /var/lib/market-data/snapshots
+      MARKET_PIPELINE_CALIBRATION_ROOT: /var/lib/market-data/calibration/coin-groups
     secrets:
       - market_postgres_password
       - market_transport_ca
@@ -269,6 +270,9 @@ services:
       - type: bind
         source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/snapshots
         target: /var/lib/market-data/snapshots
+      - type: bind
+        source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/calibration/coin-groups
+        target: /var/lib/market-data/calibration/coin-groups
     ports:
       - name: estimator-snapshot-private
         target: 9443
