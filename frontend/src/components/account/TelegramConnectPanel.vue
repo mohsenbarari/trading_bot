@@ -30,8 +30,7 @@ const emit = defineEmits<{
     </span>
 
     <span class="telegram-connect-panel__copy">
-      <strong>{{ connected ? 'تلگرام متصل است' : 'اتصال به بات تلگرام' }}</strong>
-      <span>برای استفاده از امکانات اپ در بستر تلگرام ضربه بزنید!</span>
+      <strong>{{ connected ? 'تلگرام متصل است' : 'اتصال تلگرام' }}</strong>
       <span v-if="error" class="telegram-connect-panel__error">{{ error }}</span>
     </span>
 

@@ -395,7 +395,7 @@ describe('SettingsView.vue', () => {
     const wrapper = await mountSettingsView()
 
     expect(wrapper.get('.settings-other-sessions-card').text()).toContain(
-      'نشست فعلی این دستگاه را حفظ می‌کند',
+      'خروج از نشست‌های دیگر',
     )
     await wrapper.get('.logout-all-btn').trigger('click')
     expect(bodyConfirmDialog().textContent).toContain('نشست فعلی این دستگاه باز می‌ماند')

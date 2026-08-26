@@ -4,6 +4,7 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Decisions
 
+- 2026-08-26 | Phase 4 account family: visible large «حساب» title, inset groups without duplicate row copy, Telegram as one action row, overtime uses `--ds-*` not `#f8fafc`, notifications drop the 3px color bar. Session privacy copy stays in dialogs/notices only.
 - 2026-08-26 | Phase 3 home chrome: header uses `--ds-*` (no `ui-v2-home-*`), 16px page gutter, compact account notices, disclosure leading 48px, today-trades inset without the web scroll hint. Byte-locked Market hero in `DashboardView` stayed unchanged (`f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860`).
 - 2026-08-26 | Phase 2 shell: messenger is immersive (no tab bar, no global FAB, no daily-nav reserve). Market FAB unchanged. Home account menu is `AppBottomSheet`. BottomNav labels use `--ds-font-xs`.
 - 2026-08-26 | Phase 1 foundation: `AppInsetGroup` + grouped `AppListItem` (card is opt-in), wrapping `AppButton` labels, `AppActionOverflow`, and `--ds-page-padding` stays 16px at all widths. Figma language page not created this slice. No Market file changes.

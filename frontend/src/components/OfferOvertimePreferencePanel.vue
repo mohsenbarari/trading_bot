@@ -121,28 +121,28 @@ async function save() {
 .overtime-pref {
   display: grid;
   gap: 0.85rem;
-  padding: 1rem;
-  border-radius: 0.9rem;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
 }
 
 .overtime-pref--compact {
-  padding: 0.85rem;
+  padding: 0;
 }
 
 .overtime-pref__copy h3 {
   margin: 0 0 0.35rem;
-  font-size: 0.95rem;
+  font-size: var(--ds-font-md);
   font-weight: 700;
-  color: #0f172a;
+  color: var(--ds-text-primary);
 }
 
 .overtime-pref__copy p {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: var(--ds-font-sm);
   line-height: 1.55;
-  color: #475569;
+  color: var(--ds-text-secondary);
 }
 
 .overtime-pref__current {
@@ -166,10 +166,10 @@ async function save() {
 }
 
 .overtime-pref__detail {
-  color: #047857;
+  color: var(--ds-success-700);
 }
 
 .overtime-pref__error {
-  color: #b91c1c;
+  color: var(--ds-danger-700);
 }
 </style>

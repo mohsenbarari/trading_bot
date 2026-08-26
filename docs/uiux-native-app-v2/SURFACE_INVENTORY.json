@@ -46,9 +46,9 @@
         "/notifications",
         "/settings"
       ],
-      "status": "grouped-start-copy-and-title-gaps",
+      "status": "native-grouped-account-family",
       "phase": 4,
-      "gaps": ["sr-only-title", "triple-copy", "notif-color-bar", "hardcoded-overtime-colors"]
+      "gaps": []
     },
     {
       "id": "profiles",
