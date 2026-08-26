@@ -94,6 +94,30 @@ ledger کالیبراسیون در postcheck دارای `quick_check=ok`، تع�
 `2026-08-26T14:43:59Z` و ۴۵ feedback تاییدشده بود. هیچ raw text یا Telegram identity به
 این ledger منتقل نمی‌شود.
 
+## ممیزی قابلیت parity زنده
+
+یک window فقط‌خواندنی `14:30Z` تا `14:50Z` بین Market Store قدیمی و private shadow
+مقایسه شد. این ممیزی فقط count و اشتراک event key را خواند و هیچ متن/هویتی خارج نکرد:
+
+- legacy دارای ۹۲۳ و private shadow دارای ۲۸۹۲ fact یکتا بود؛
+- برای `MELTED_AGGREGATE` تعداد ۱۳۷، `MELTED_FLOW` تعداد ۱۸۲ و `USD_HERAT` تعداد ۱۱
+  event key مشترک وجود داشت؛
+- legacy برای `PRIVATE_GOLD_CHANNEL` در این window رکوردی نداشت، در حالی که private
+  shadow تعداد ۴۲۴ fact داشت. آخرین رکورد legacy این منبع متعلق به
+  `2026-08-25T09:30:12Z` بود؛
+- cadence منابع API یکسان نبود؛ برای نمونه XAU در همان window برابر ۲۲ در legacy و ۱۵۶۵
+  در private shadow بود. این منابع باید بر اساس consumed value در timestamp هم‌تراز مقایسه
+  شوند، نه count رویداد؛
+- event keyهای گروه‌ها بین دو lane مشترک نبودند و حجم داده نیز هم‌ارز نبود. lane قدیمی فقط
+  پنج fact گروه و private shadow تعداد ۴۹ fact گروه داشت.
+
+در نتیجه اجرای مستقیم Stage 12 comparator روی این دو ورودی، outage/cadence/identity قدیمی
+را به‌اشتباه به‌عنوان capture یا parser drift گزارش می‌کند و evidence معتبر promotion
+نمی‌سازد. ادامه‌ی امن gate باید از یک Telegram capture owner استفاده کند و همان eventهای
+immutable را بعد از capture به دو projection ایزوله و version-pinned fan-out کند. completeness
+capture نیز با manifest و reconciliation مستقل سنجیده می‌شود؛ برای ساخت lane دوم هرگز session
+تلگرام دوم یا owner هم‌زمان ایجاد نمی‌شود.
+
 ## failure drill و اصلاحات حین استقرار
 
 - قطع ۱۲ ثانیه‌ای Fact receiver باعث backlog موقت ۳۳تایی شد؛ پس از بازگشت، صف بدون
@@ -138,6 +162,7 @@ Stage 13-A مجوز این تغییرها را ایجاد نمی‌کند:
 - مهاجرت Product Sync عمومی به شبکه خصوصی؛
 - disable/delete timer و unitهای legacy یا پاک‌سازی artifactها.
 
-Stage 12 و Stage 13 تا ثبت یک جلسه کامل بازار باز با capture manifest و snapshot timeline
-واقعی، report parity امضاشده، severity-1/2 صفر، p95 حداکثر ۷ ثانیه و تصمیم صریح promotion
-در وضعیت HOLD باقی می‌مانند. failure soak کوتاه این سند جای آن جلسه کامل را نمی‌گیرد.
+Stage 12 و Stage 13 تا پیاده‌سازی fan-out قابل ممیزی بالا، ثبت یک جلسه کامل بازار باز با
+capture manifest و snapshot timeline واقعی، report parity امضاشده، severity-1/2 صفر، p95
+حداکثر ۷ ثانیه و تصمیم صریح promotion در وضعیت HOLD باقی می‌مانند. failure soak کوتاه این
+سند جای آن جلسه کامل را نمی‌گیرد.

@@ -982,6 +982,9 @@ Gate:
 - این فقط استقرار shadow است: WebApp/product authority، `PRIVATE_PRIMARY`، production،
   sync عمومی و retirement legacy تغییر نکردند؛ Stage 12/13 تا جلسه کامل بازار باز و گزارش
   parity امضاشده باز می‌مانند.
+- ممیزی overlap نشان داد lane قدیمی کانال خصوصی از روز قبل متوقف و cadence منابع بیرونی
+  ناهم‌ارز است؛ بنابراین parity زنده بعدی باید eventهای یک capture owner را پس از capture به
+  دو projection ایزوله fan-out کند و هرگز session تلگرام دوم نسازد.
 
 رسید عملیاتی: [COIN_MARKET_DATA_STAGE13_STAGING_SHADOW.md](./COIN_MARKET_DATA_STAGE13_STAGING_SHADOW.md)
 
