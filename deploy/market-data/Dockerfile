@@ -2,7 +2,9 @@
 ARG PYTHON_BASE_IMAGE=python:3.11-slim-bookworm@sha256:0bee7276f83efd4a1ee05bbbf4281d95ed28e079220a9457f25a93e3f1e3c31b
 ARG SOURCE_DATE_EPOCH=0
 
-FROM ${PYTHON_BASE_IMAGE} AS dependencies
+FROM ${PYTHON_BASE_IMAGE} AS assembly
+
+ARG SOURCE_DATE_EPOCH
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -14,8 +16,17 @@ RUN python -m pip install \
         --no-compile \
         --only-binary=:all: \
         --require-hashes \
-        --target=/opt/market-python \
+        --target=/rootfs/opt/market-python \
         --requirement requirements.lock
+
+COPY core/__init__.py /rootfs/app/core/__init__.py
+COPY core/market_intelligence /rootfs/app/core/market_intelligence
+COPY config/market_data_sources.v1.json /rootfs/app/config/market_data_sources.v1.json
+COPY contracts/market_data /rootfs/app/contracts/market_data
+COPY deploy/market-data/migrations /rootfs/app/deploy/market-data/migrations
+RUN mkdir -p /rootfs/var/lib/market-data/state \
+    && chown -R 10001:10001 /rootfs/app /rootfs/var/lib/market-data \
+    && find /rootfs -exec touch -h -d "@${SOURCE_DATE_EPOCH}" {} +
 
 FROM ${PYTHON_BASE_IMAGE} AS runtime
 
@@ -34,18 +45,8 @@ ENV LANG=C.UTF-8 \
     PYTHONPATH=/app:/opt/market-python \
     MARKET_PIPELINE_IMAGE_REVISION="${SOURCE_SHA}"
 
-RUN groupadd --gid 10001 market \
-    && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin market \
-    && mkdir -p /app /var/lib/market-data/state \
-    && chown -R 10001:10001 /var/lib/market-data
-
-COPY --from=dependencies /opt/market-python /opt/market-python
+COPY --from=assembly /rootfs/ /
 WORKDIR /app
-COPY core/__init__.py /app/core/__init__.py
-COPY core/market_intelligence /app/core/market_intelligence
-COPY config/market_data_sources.v1.json /app/config/market_data_sources.v1.json
-COPY contracts/market_data /app/contracts/market_data
-COPY deploy/market-data/migrations /app/deploy/market-data/migrations
 
 USER 10001:10001
 ENTRYPOINT ["python", "-m", "core.market_intelligence.private_pipeline_foundation"]
