@@ -193,7 +193,6 @@ def observation_payload(
         }
     if source in {
         "XAUUSD",
-        "USD_HERAT",
         "WALLEX_PUBLIC_API",
         "BINANCE_PAXG_PUBLIC_API",
     }:

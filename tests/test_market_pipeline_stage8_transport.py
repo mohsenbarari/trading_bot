@@ -158,6 +158,46 @@ class Stage8ReceiverTests(unittest.TestCase):
             self.assertRegex(payload["offer_fact_id"], r"^[0-9a-f]{64}$")
             market.close()
 
+    def test_herat_projection_preserves_trade_dimensions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            market = connect_market_store(Path(directory) / "market.sqlite3")
+            initialize_market_store(market)
+            event_key = derive_event_key("stage8", "herat-trade")
+            upsert_observation(
+                market,
+                MarketObservation(
+                    event_key=event_key,
+                    source_code="USD_HERAT",
+                    source_family="TELEGRAM_PUBLIC",
+                    event_time_utc="2026-08-26T05:00:00Z",
+                    available_at_utc="2026-08-26T05:00:01Z",
+                    instrument="USD_HERAT",
+                    market_label="HERAT_PAPER",
+                    settlement_term="TOMORROW",
+                    trade_form="PAPER_NORMAL",
+                    event_type="TRADE",
+                    side="SELL",
+                    price="97500",
+                    price_unit="TOMAN_PER_USD",
+                    currency="TOMAN",
+                    quantity="2",
+                    quantity_unit="BILLION_TOMAN",
+                    parser_version="stage8-test-v1",
+                ),
+            )
+            market.commit()
+            row = market.execute(
+                "SELECT * FROM market_observations WHERE event_key=?", (event_key,)
+            ).fetchone()
+            payload = observation_payload(market, row)
+            TypeAdapter(FactPayload).validate_python(payload)
+            self.assertEqual(payload["kind"], "OBSERVATION")
+            self.assertEqual(payload["event_type"], "TRADE")
+            self.assertEqual(payload["settlement"], "TOMORROW")
+            self.assertEqual(payload["trade_form"], "PAPER_NORMAL")
+            self.assertEqual(payload["quantity_value"], "2")
+            market.close()
+
     def test_out_of_order_batch_does_not_advance_or_partially_apply(self):
         with tempfile.TemporaryDirectory() as directory:
             connection = connect_receiver(Path(directory) / "receiver.sqlite3")
