@@ -4,7 +4,7 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { apiFetch } from '../utils/auth'
 import { formatIranDateTime } from '../utils/iranTime'
 import HelpPopover from './HelpPopover.vue'
-import { AppButton, AppCheckbox, AppIconButton, AppTextarea } from './ui'
+import { AppButton, AppCheckbox, AppIconButton, AppInsetGroup, AppTextarea } from './ui'
 
 type AdminMarketMessage = {
   id: number
@@ -428,31 +428,19 @@ onMounted(loadDashboard)
         role="tabpanel"
         aria-labelledby="admin-message-tab-chat"
       >
-        <article class="status-card status-card--broadcast card-with-help">
-          <HelpPopover
-            floating
-            button-test="broadcast-status-help"
-            note-test="broadcast-status-help-note"
-            label="راهنمای مخاطبان پیام چت"
-            text="پیام با عنوان «پیام مدیریت» برای هر کاربر در اتاق مدیریت خودش ثبت می‌شود و هویت واقعی ادمین به گیرنده نشان داده نمی‌شود."
-          />
-          <div class="status-card-header">
-            <div>
-              <span class="status-pill status-pill--info">مخاطبان انتخاب‌شده</span>
-              <p class="status-meta">{{ selectedBroadcastCount.toLocaleString('fa-IR') }} گروه مقصد</p>
+        <AppInsetGroup>
+          <div class="status-card status-card--broadcast">
+            <div class="status-card-header">
+              <div>
+                <span class="status-pill status-pill--info">مخاطبان انتخاب‌شده</span>
+                <p class="status-meta">{{ selectedBroadcastCount.toLocaleString('fa-IR') }} گروه مقصد</p>
+              </div>
+              <span class="history-badge">{{ selectedBroadcastLabels.join('، ') || 'بدون انتخاب' }}</span>
             </div>
-            <span class="history-badge">{{ selectedBroadcastLabels.join('، ') || 'بدون انتخاب' }}</span>
           </div>
-        </article>
+        </AppInsetGroup>
 
-        <section class="composer-card card-with-help">
-          <HelpPopover
-            floating
-            button-test="broadcast-composer-help"
-            note-test="broadcast-composer-help-note"
-            label="راهنمای نوشتن پیام چت"
-            text="گیرنده‌ها را انتخاب کن و پیام را یک‌بار برای همه آن‌ها در چت ثبت کن. اتاق مقصد فقط‌خواندنی است و unread عادی پیام‌رسان را هم به‌روزرسانی می‌کند."
-          />
+        <section class="composer-card composer-card--sheet">
           <div class="composer-header">
             <div>
               <h4>نوشتن پیام چت</h4>
@@ -488,21 +476,7 @@ onMounted(loadDashboard)
           </div>
         </section>
 
-        <section class="history-card card-with-help">
-          <HelpPopover
-            floating
-            button-test="broadcast-history-help"
-            note-test="broadcast-history-help-note"
-            label="راهنمای تاریخچه پیام‌های چت"
-            text="ارسال‌های قبلی برای بازاستفاده و اصلاح سریع اینجا نگه داشته می‌شوند."
-          />
-          <div class="history-header">
-            <div>
-              <h4>تاریخچه پیام‌های چت</h4>
-            </div>
-            <span class="history-badge">{{ broadcastHistory.length.toLocaleString('fa-IR') }} مورد</span>
-          </div>
-
+        <AppInsetGroup title="تاریخچه پیام‌های چت">
           <article v-for="message in broadcastHistory" :key="message.id" class="history-item">
             <div class="history-meta">
               <span>{{ formatDate(message.published_at) }}</span>
@@ -516,7 +490,7 @@ onMounted(loadDashboard)
           </article>
 
           <p v-if="!broadcastHistory.length" class="empty-history">هنوز هیچ ارسال همگانی ثبت نشده است.</p>
-        </section>
+        </AppInsetGroup>
       </section>
     </div>
   </div>
@@ -617,6 +591,30 @@ onMounted(loadDashboard)
 .composer-card,
 .history-card {
   padding: 1rem;
+}
+
+.message-panel--chat .status-card,
+.message-panel--chat .audience-panel {
+  padding: 0.85rem 1rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.message-panel--chat .composer-card--sheet {
+  padding: 1rem;
+  border-radius: 12px;
+  border: 0;
+  background: var(--ds-bg-card);
+}
+
+.message-panel--chat .history-item {
+  padding: 0.9rem 1rem;
+  border-top: 1px solid var(--ds-native-hairline);
+}
+
+.message-panel--chat .history-item:first-of-type {
+  border-top: 0;
 }
 
 .card-with-help {

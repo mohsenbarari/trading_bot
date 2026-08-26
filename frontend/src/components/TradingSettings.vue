@@ -1010,14 +1010,14 @@ onBeforeUnmount(() => {
 .info-note {
   display: flex;
   gap: 0.75rem;
-  padding: 0.85rem;
-  background: var(--ds-primary-50);
-  border: 1px solid var(--ds-primary-100);
-  border-radius: var(--ds-radius-lg);
+  padding: 0.25rem 0 1rem;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   font-size: 0.75rem;
   line-height: 1.6;
-  color: var(--ds-primary-800);
-  margin-bottom: 1.5rem;
+  color: var(--ds-text-secondary);
+  margin-bottom: 0.5rem;
 }
 
 .info-note svg {

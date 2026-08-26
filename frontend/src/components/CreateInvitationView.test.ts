@@ -353,7 +353,8 @@ describe('CreateInvitationView.vue', () => {
       trackConnectionState: false,
       signal: expect.any(AbortSignal),
     }))
-    expect(wrapper.get('.pending-header p').text()).toBe('فهرست دعوت‌های در انتظار')
+    expect(wrapper.get('#pending-invitations-title').text()).toBe('دعوت‌نامه‌های در انتظار')
+    expect(wrapper.find('.pending-header p').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('دعوت‌نامه فعال')
     expect(wrapper.findAll('.pending-copy-btn')).toHaveLength(2)
     expect(wrapper.findAll('.pending-copy-btn')[0]!.classes()).toContain('ui-button--secondary')

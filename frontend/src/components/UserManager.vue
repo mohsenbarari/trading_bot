@@ -8,6 +8,7 @@ import AppEmptyState from './ui/AppEmptyState.vue';
 import AppErrorState from './ui/AppErrorState.vue';
 import AppFilterChips from './ui/AppFilterChips.vue';
 import AppInput from './ui/AppInput.vue';
+import AppInsetGroup from './ui/AppInsetGroup.vue';
 import AppListItem from './ui/AppListItem.vue';
 import AppStatusBadge from './ui/AppStatusBadge.vue';
 import { routeRequestJson } from '../utils/routeRequest';
@@ -365,7 +366,8 @@ onUnmounted(() => {
           </template>
         </AppEmptyState>
 
-        <ul v-else class="users-list" :aria-label="directoryMode === 'suspicious' ? 'فهرست کاربران مشکوک' : 'فهرست کاربران'">
+        <AppInsetGroup v-else>
+        <ul class="users-list" :aria-label="directoryMode === 'suspicious' ? 'فهرست کاربران مشکوک' : 'فهرست کاربران'">
           <li
             v-for="row in directoryRows"
             :key="row.key"
@@ -451,6 +453,7 @@ onUnmounted(() => {
             </div>
           </li>
         </ul>
+        </AppInsetGroup>
       </div>
     </div>
   </div>
@@ -500,7 +503,7 @@ onUnmounted(() => {
 .users-list {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -518,9 +521,9 @@ onUnmounted(() => {
 
 .users-list-item--flagged {
   overflow: hidden;
-  border: 1px solid var(--ds-warning-100);
-  border-radius: var(--ds-radius-lg);
-  background: var(--ds-warning-50);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .users-list-item--flagged .user-item {
@@ -534,8 +537,8 @@ onUnmounted(() => {
   align-items: flex-end;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.65rem 0.8rem 0.75rem;
-  border-top: 1px solid var(--ds-warning-100);
+  padding: 0.65rem 1rem 0.75rem;
+  border-top: 1px solid var(--ds-native-hairline);
 }
 
 .user-flag-copy {

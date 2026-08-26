@@ -308,7 +308,7 @@ Gate:
 | ۴ حساب | implementation-complete |
 | ۵ پروفایل | implementation-complete |
 | ۶ عملیات | implementation-complete |
-| ۷ مدیریت | pending |
+| ۷ مدیریت | implementation-complete |
 | ۸ احراز | pending |
 | ۹ پیام‌رسان | pending |
 | ۱۰ overlay | pending |

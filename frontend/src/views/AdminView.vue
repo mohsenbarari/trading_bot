@@ -800,7 +800,6 @@ onUnmounted(() => {
         <AppPageHeader
           eyebrow="مدیریت پروژه"
           title="مرکز مدیریت"
-          description="ابزارهای مدیریتی مجاز حساب خود را از این بخش دنبال کنید."
         />
         <AdminPanel @navigate="handleNavigate" />
       </template>
@@ -907,6 +906,9 @@ onUnmounted(() => {
 
 .admin-subview-card {
   min-width: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
 }
 
 .admin-subview-card :deep(.ui-section-card__body) {
@@ -924,9 +926,9 @@ onUnmounted(() => {
   margin: 0;
   min-width: 0;
   color: var(--ds-text-primary);
-  font-size: var(--ds-font-lg);
+  font-size: var(--ds-native-title-size);
   font-weight: 800;
-  line-height: 1.4;
+  line-height: 1.25;
 }
 
 .fade-enter-active,
@@ -942,7 +944,7 @@ onUnmounted(() => {
 @media (max-width: 767px) {
   .admin-subview-card :deep(.ui-section-card__header),
   .admin-subview-card :deep(.ui-section-card__body) {
-    padding-inline: 0.85rem;
+    padding-inline: 0;
   }
 }
 </style>

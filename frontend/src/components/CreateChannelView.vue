@@ -993,7 +993,7 @@ onBeforeUnmount(() => {
       <div v-if="successMessage" class="channel-status-banner success">{{ successMessage }}</div>
 
       <template v-if="page === 'home'">
-        <AppSectionCard class="manager-section-card card-with-help" title="ساخت کانال جدید" description="کانال اختیاری را بسازید، اعضا را دعوت کنید و نقش ادمین‌ها را مدیریت کنید.">
+        <AppSectionCard class="manager-section-card card-with-help" title="ساخت کانال جدید">
           <template #actions>
             <HelpPopover
               floating
@@ -1003,7 +1003,7 @@ onBeforeUnmount(() => {
               text="کانال اختیاری را بسازید، اعضا را دعوت کنید و نقش ادمین‌ها را از همین بخش مدیریت کنید."
             />
           </template>
-          <AppListItem title="کانال جدید" description="ساخت کانال و ورود به فرم تنظیمات اولیه" interactive @select="openCreatePage">
+          <AppListItem title="کانال جدید" interactive @select="openCreatePage">
             <template #leading>
               <UsersRound :size="18" />
             </template>
@@ -1013,7 +1013,7 @@ onBeforeUnmount(() => {
           </AppListItem>
         </AppSectionCard>
 
-        <AppSectionCard class="manager-section-card" title="کانال‌های موجود" description="یک کانال را برای مشاهده اعضا، ادمین‌ها و تنظیمات انتخاب کنید.">
+        <AppSectionCard class="manager-section-card" title="کانال‌های موجود">
           <AppLoadingState v-if="isLoadingChannels" label="در حال دریافت کانال‌ها" />
           <AppEmptyState v-else-if="existingChannels.length === 0" title="هنوز کانالی ساخته نشده است" message="بعد از ساخت اولین کانال، فهرست مدیریت آن در همین بخش نمایش داده می‌شود." />
           <div v-else class="manager-action-list">
@@ -1036,7 +1036,7 @@ onBeforeUnmount(() => {
       </template>
 
       <template v-else-if="page === 'create'">
-        <AppSectionCard class="manager-section-card manager-preview-card card-with-help" title="پیش‌نمایش کانال" description="نام، تصویر و توضیح کانال را پیش از ساخت مرور کنید.">
+        <AppSectionCard class="manager-section-card manager-preview-card card-with-help" title="پیش‌نمایش کانال">
           <template #actions>
             <HelpPopover
               floating
@@ -1060,7 +1060,7 @@ onBeforeUnmount(() => {
           </div>
         </AppSectionCard>
 
-        <AppSectionCard class="manager-section-card" title="مشخصات کانال" description="حداقل نام کانال را وارد کنید و در صورت نیاز توضیح کوتاه بنویسید.">
+        <AppSectionCard class="manager-section-card" title="مشخصات کانال">
           <AppFormField label="نام کانال">
             <template #default="{ id }">
               <AppInput id="channel-title" v-model="title" :maxlength="255" placeholder="مثلاً اطلاعیه‌های ویژه" />
@@ -1083,7 +1083,7 @@ onBeforeUnmount(() => {
       </template>
 
       <template v-else-if="page === 'overview' && activeChannel">
-        <AppSectionCard class="manager-section-card manager-preview-card" title="نمای کلی کانال" :description="activeChannel.description || 'جزئیات این کانال برای اعضا و ادمین‌ها از همین بخش مدیریت می‌شود.'">
+        <AppSectionCard class="manager-section-card manager-preview-card" title="نمای کلی کانال" :description="activeChannel.description || undefined">
           <template #actions>
             <AppStatusBadge :tone="currentChannelKindTone">{{ getChannelKindLabel(activeChannel) }}</AppStatusBadge>
           </template>
@@ -1118,23 +1118,23 @@ onBeforeUnmount(() => {
           <strong>{{ currentChannelRoleLabel }}</strong>
         </div>
 
-        <AppSectionCard class="manager-section-card" title="اعضا و دسترسی‌ها" description="فهرست اعضا، ادمین‌ها و دعوت افراد جدید از این بخش انجام می‌شود.">
+        <AppSectionCard class="manager-section-card" title="اعضا و دسترسی‌ها">
           <div class="manager-action-list">
-            <AppListItem title="اعضای کانال" description="فهرست کامل اعضا و نقش‌ها" :meta="activeChannel.member_count.toLocaleString('fa-IR')" interactive @select="setPage('members')">
+            <AppListItem title="اعضای کانال" :meta="activeChannel.member_count.toLocaleString('fa-IR')" interactive @select="setPage('members')">
               <template #leading><UsersRound :size="18" /></template>
               <template #trailing>
                 <span>{{ activeChannel.member_count.toLocaleString('fa-IR') }}</span>
                 <ChevronLeft :size="18" aria-hidden="true" />
               </template>
             </AppListItem>
-            <AppListItem v-if="!isMembershipManagementLocked" title="مدیریت ادمین‌ها" description="تعیین و تغییر ادمین‌های کانال" :meta="activeAdminCount.toLocaleString('fa-IR')" interactive @select="setPage('admins')">
+            <AppListItem v-if="!isMembershipManagementLocked" title="مدیریت ادمین‌ها" :meta="activeAdminCount.toLocaleString('fa-IR')" interactive @select="setPage('admins')">
               <template #leading><Shield :size="18" /></template>
               <template #trailing>
                 <span>{{ activeAdminCount.toLocaleString('fa-IR') }}</span>
                 <ChevronLeft :size="18" aria-hidden="true" />
               </template>
             </AppListItem>
-            <AppListItem v-if="!isMembershipManagementLocked" title="افزودن عضو" description="دعوت اعضای جدید به کانال" interactive @select="setPage('add-members')">
+            <AppListItem v-if="!isMembershipManagementLocked" title="افزودن عضو" interactive @select="setPage('add-members')">
               <template #leading><UserPlus :size="18" /></template>
               <template #trailing>
                 <ChevronLeft :size="18" aria-hidden="true" />
@@ -1143,9 +1143,9 @@ onBeforeUnmount(() => {
           </div>
         </AppSectionCard>
 
-        <AppSectionCard class="manager-section-card" title="تنظیمات" description="نام، توضیح و تصویر کانال را در این بخش ویرایش کنید.">
+        <AppSectionCard class="manager-section-card" title="تنظیمات">
           <div class="manager-action-list">
-            <AppListItem title="تنظیمات کانال" description="ویرایش نام، توضیح و تصویر کانال" interactive @select="setPage('edit')">
+            <AppListItem title="تنظیمات کانال" interactive @select="setPage('edit')">
               <template #leading><PencilLine :size="18" /></template>
               <template #trailing>
                 <ChevronLeft :size="18" aria-hidden="true" />
@@ -1331,7 +1331,7 @@ onBeforeUnmount(() => {
       </template>
 
       <template v-else-if="page === 'edit' && activeChannel">
-        <AppSectionCard class="manager-section-card" title="تنظیمات کانال" description="نام، توضیحات و تصویر کانال را از این بخش تغییر دهید.">
+        <AppSectionCard class="manager-section-card" title="تنظیمات کانال">
           <div class="avatar-editor-block">
             <div class="manager-avatar small-editor">
               <img v-if="channelAvatarUrl" :src="channelAvatarUrl" :alt="activeChannel.title" class="hero-avatar-image" />
