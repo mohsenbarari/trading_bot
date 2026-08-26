@@ -4,6 +4,7 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Decisions
 
+- 2026-08-26 | Post-phase-5 audit: leftover profile action rows no longer paint the whole row; color stays on the icon. History toolbar is flat; «اعمال فیلتر» stays primary and reset/Excel/PDF move to overflow. Visitor sections are full width. UserProfile limitation/session boxes drop warning/success card chrome. Dead HelpPopover CSS removed. Market hero hash unchanged.
 - 2026-08-26 | Phase 5 profile: live `PublicProfile`/`UserProfile` drop HelpPopover and outer web cards. Identity is the page title; workspace no longer adds a second header. Stats, relations, actions, and trades use inset groups/rows. Permissions stay split. `/profile` ↔ `/users/:id` still shares one `PublicProfile` root.
 - 2026-08-26 | Post-phase-4 audit: home `.dashboard-content` no longer repeats `--ds-page-padding` (AppPage already has 16px). Telegram is a flat inset row without «ضربه بزنید» or nested card/chip. Settings overtime keeps one `M9_LABEL` title. Home coworkers/commodities drop `AppDisclosure` outer border so they read as inset groups. Market hero hash unchanged.
 - 2026-08-26 | Phase 4 account family: visible large «حساب» title, inset groups without duplicate row copy, Telegram as one action row, overtime uses `--ds-*` not `#f8fafc`, notifications drop the 3px color bar. Session privacy copy stays in dialogs/notices only.

@@ -2099,16 +2099,17 @@ input[type="number"].form-input::-webkit-inner-spin-button {
 }
 
 .limitations-box {
-  background: var(--ds-warning-50);
-  border: 1px solid rgba(245, 158, 11, 0.22);
-  border-radius: var(--ds-radius-md);
-  padding: 0.75rem;
+  background: transparent;
+  border: 0;
+  border-block-start: 1px solid var(--ds-native-hairline);
+  border-radius: 0;
+  padding: 0.75rem 0 0;
 }
 .limitations-box h4 {
   margin: 0 0 0.5rem 0;
   font-size: var(--ds-font-base);
   font-weight: 800;
-  color: var(--ds-warning-700);
+  color: var(--ds-text-primary);
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
@@ -2119,21 +2120,21 @@ input[type="number"].form-input::-webkit-inner-spin-button {
   gap: 0.75rem;
   font-size: var(--ds-font-sm);
   margin-bottom: 0.25rem;
-  color: var(--ds-warning-700);
+  color: var(--ds-text-primary);
 }
 .limit-expiry {
   margin-top: 0.5rem;
   padding-top: 0.5rem;
-  border-top: 1px dashed rgba(245, 158, 11, 0.35);
+  border-top: 1px solid var(--ds-native-hairline);
   font-size: var(--ds-font-xs);
-  color: var(--ds-warning-600);
+  color: var(--ds-text-secondary);
   display: flex;
   justify-content: space-between;
 }
 .usage-ratio {
   font-family: 'Vazirmatn', tahoma, sans-serif;
   font-weight: 700;
-  color: var(--ds-warning-700);
+  color: var(--ds-text-primary);
   direction: ltr;
 }
 
@@ -2141,13 +2142,14 @@ input[type="number"].form-input::-webkit-inner-spin-button {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.75rem 1rem;
-  border-radius: var(--ds-radius-md);
-  animation: pulse 2s infinite;
+  padding: 0.75rem 0;
+  border-radius: 0;
+  animation: none;
 }
 .restriction-countdown {
-  background: var(--ds-danger-50);
-  border: 1px solid var(--ds-danger-200);
+  background: transparent;
+  border: 0;
+  border-block-start: 1px solid var(--ds-native-hairline);
 }
 .countdown-icon { font-size: 1rem; }
 .countdown-label { font-size: var(--ds-font-sm); color: var(--ds-danger-800); }
@@ -2187,20 +2189,20 @@ input[type="number"].form-input::-webkit-inner-spin-button {
 
 .sessions-config-box {
   margin: 0.25rem 0;
-  padding: 0.75rem;
-  background: var(--ds-success-50);
-  border: 1px solid rgba(16, 185, 129, 0.22);
-  border-radius: var(--ds-radius-md);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   display: grid;
-  gap: 0.5rem;
+  gap: 0;
 }
 .admin-sensitive-readonly {
   margin: 0.25rem 0;
-  padding: 0.7rem 0.8rem;
-  border: 1px solid rgba(14, 165, 233, 0.28);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-info-50);
-  color: var(--ds-info-700);
+  padding: 0.7rem 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ds-text-secondary);
   font-size: var(--ds-font-base);
   line-height: 1.75;
 }

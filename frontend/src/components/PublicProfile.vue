@@ -15,6 +15,7 @@ import CustomerNameWithBadge from './CustomerNameWithBadge.vue';
 import UserProfile from './UserProfile.vue';
 import JalaliDatePicker from './JalaliDatePicker.vue';
 import {
+  AppActionOverflow,
   AppButton,
   AppConfirmDialog,
   AppEmptyState,
@@ -1851,6 +1852,38 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   });
 }
 
+const historyOverflowActions = computed(() => [
+  {
+    id: 'reset',
+    label: 'حذف فیلتر',
+    disabled: !hasActiveHistoryFilters.value && !historyLoadedQueryKey.value,
+  },
+  {
+    id: 'excel',
+    label: historyExportingFormat.value === 'excel' ? 'در حال دانلود...' : 'خروجی Excel',
+    disabled: isHistoryLoading.value || historyExportingFormat.value !== null,
+  },
+  {
+    id: 'pdf',
+    label: historyExportingFormat.value === 'pdf' ? 'در حال دانلود...' : 'خروجی PDF',
+    disabled: isHistoryLoading.value || historyExportingFormat.value !== null,
+  },
+])
+
+function handleHistoryOverflow(id: string) {
+  if (id === 'reset') {
+    void resetHistoryFilters()
+    return
+  }
+  if (id === 'excel') {
+    void downloadHistoryExport('excel')
+    return
+  }
+  if (id === 'pdf') {
+    void downloadHistoryExport('pdf')
+  }
+}
+
 function handleHistoryPresetChipChange(value: string) {
   const months = Number(value);
   if (!Number.isInteger(months) || months <= 0) {
@@ -2168,30 +2201,14 @@ function handleHistoryPresetChipChange(value: string) {
                 </AppFormField>
               </div>
 
-              <div class="history-filter-actions">
+              <AppActionOverflow
+                class="history-filter-actions"
+                :actions="historyOverflowActions"
+                more-label="اقدام‌های دیگر تاریخچه"
+                @select="handleHistoryOverflow"
+              >
                 <AppButton type="button" size="sm" @click.stop="applyHistoryFilters">اعمال فیلتر</AppButton>
-                <AppButton
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  :disabled="!hasActiveHistoryFilters && !historyLoadedQueryKey"
-                  @click.stop="resetHistoryFilters"
-                >حذف فیلتر</AppButton>
-                <AppButton
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  :disabled="isHistoryLoading || historyExportingFormat !== null"
-                  @click.stop="downloadHistoryExport('excel')"
-                >{{ historyExportingFormat === 'excel' ? 'در حال دانلود...' : 'خروجی Excel' }}</AppButton>
-                <AppButton
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  :disabled="isHistoryLoading || historyExportingFormat !== null"
-                  @click.stop="downloadHistoryExport('pdf')"
-                >{{ historyExportingFormat === 'pdf' ? 'در حال دانلود...' : 'خروجی PDF' }}</AppButton>
-              </div>
+              </AppActionOverflow>
 
               <p v-if="historyFilterSummary" class="history-filter-summary">{{ historyFilterSummary }}</p>
               <p v-if="historyError" class="error-text history-error-text">{{ historyError }}</p>
@@ -2346,24 +2363,28 @@ function handleHistoryPresetChipChange(value: string) {
 .profile-content {
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  align-items: center;
+  gap: 0.75rem;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
   padding: 4px 0 12rem 0;
 }
 
 .profile-content--own {
-  gap: 7px;
+  gap: 0.75rem;
   padding-top: 4px;
 }
 
+.profile-content .profile-section,
 .profile-content--own .profile-section {
   width: 100%;
+  min-width: 0;
 }
 
 .profile-stats-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
   width: 100%;
   max-width: var(--ds-page-max-width);
 }
@@ -2511,7 +2532,7 @@ function handleHistoryPresetChipChange(value: string) {
 }
 
 .profile-presence-status.online {
-  color: #f59e0b;
+  color: var(--ds-warning-600);
 }
 
 .customer-context-banner {
@@ -2678,7 +2699,7 @@ function handleHistoryPresetChipChange(value: string) {
   align-items: center;
   border: 1px solid var(--ds-native-hairline);
   border-radius: 12px;
-  background: rgba(248, 250, 252, 0.78);
+  background: var(--ds-bg-subtle);
   padding: 10px 12px;
 }
 
@@ -2725,12 +2746,12 @@ function handleHistoryPresetChipChange(value: string) {
 
 .address-edit-textarea {
   width: 100%;
-  border: 1px solid rgba(148, 163, 184, 0.28);
+  border: 1px solid var(--ds-native-hairline);
   border-radius: 14px;
   padding: 10px 12px;
   resize: vertical;
   min-height: 78px;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--ds-bg-card);
   color: var(--ds-text-primary);
   font: inherit;
   line-height: 1.8;
@@ -2771,48 +2792,10 @@ function handleHistoryPresetChipChange(value: string) {
     color: var(--ds-text-primary);
 }
 
-.stats-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0;
-  width: 100%;
-}
-
-.card-with-help {
-  position: relative;
-  overflow: visible;
-  padding-left: 0;
-}
-
-.accordion-header-actions {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 0.45rem;
-  direction: ltr;
-  flex: 0 0 auto;
-}
-
-.stats-grid.single-column {
-  grid-template-columns: 1fr;
-}
-
 .profile-action-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 0.75rem;
-}
-
-.stat-card {
-  background: var(--ds-bg-card);
-  padding: 12px;
-  border-radius: var(--ds-radius-md);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid var(--ds-native-hairline);
-  box-shadow: none;
+  gap: 0;
 }
 
 .stat-icon {
@@ -2843,7 +2826,7 @@ function handleHistoryPresetChipChange(value: string) {
   padding-right: 0.2rem;
   font-size: 0.8rem;
   font-weight: 800;
-  color: #92400e;
+  color: var(--ds-text-secondary);
 }
 
 .profile-action-card {
@@ -2896,8 +2879,8 @@ function handleHistoryPresetChipChange(value: string) {
   width: 2rem;
   height: 2rem;
   border-radius: 0.8rem;
-  background: rgba(245, 158, 11, 0.12);
-  color: #92400e;
+  background: var(--ds-warning-50);
+  color: var(--ds-warning-700);
   font-size: 0.95rem;
   line-height: 1;
   flex: 0 0 auto;
@@ -2921,74 +2904,67 @@ function handleHistoryPresetChipChange(value: string) {
   font-size: 0.72rem;
   line-height: 1.55;
   font-weight: 600;
-  color: #6b7280;
+  color: var(--ds-text-secondary);
 }
 
-.message-menu-btn {
-  background: var(--ds-info-50) !important;
-  color: var(--ds-info-700) !important;
-  border-color: color-mix(in srgb, var(--ds-info-500) 22%, transparent) !important;
+.message-menu-btn,
+:deep(.message-menu-btn) {
+  background: transparent !important;
+  color: var(--ds-text-primary) !important;
+  border-color: transparent !important;
 }
 
 .message-menu-btn .profile-action-card__icon {
-  background: color-mix(in srgb, var(--ds-info-500) 14%, transparent);
+  background: var(--ds-info-50);
   color: var(--ds-info-700);
 }
 
 .settings-btn {
-  background: var(--ds-primary-50) !important;
-  color: var(--ds-primary-800) !important;
-  border-color: color-mix(in srgb, var(--ds-primary-500) 20%, transparent) !important;
+  background: transparent !important;
+  color: var(--ds-text-primary) !important;
+  border-color: transparent !important;
+}
+
+.settings-btn .profile-action-card__icon,
+:deep(.settings-btn .profile-action-card__icon) {
+  background: var(--ds-primary-50);
+  color: var(--ds-primary-800);
 }
 
 .block-btn {
-  background: var(--ds-danger-50) !important;
-  color: var(--ds-danger-800) !important;
-  border-color: var(--ds-danger-200) !important;
+  background: transparent !important;
+  color: var(--ds-text-primary) !important;
+  border-color: transparent !important;
 }
 
-.block-btn .profile-action-card__icon {
-  background: color-mix(in srgb, var(--ds-danger-500) 12%, transparent);
+.block-btn .profile-action-card__icon,
+:deep(.block-btn .profile-action-card__icon) {
+  background: var(--ds-danger-50);
   color: var(--ds-danger-700);
 }
 
 .unblock-btn {
-  background: var(--ds-success-50) !important;
-  color: var(--ds-success-800) !important;
-  border-color: var(--ds-success-100) !important;
+  background: transparent !important;
+  color: var(--ds-text-primary) !important;
+  border-color: transparent !important;
 }
 
-.unblock-btn .profile-action-card__icon {
-  background: color-mix(in srgb, var(--ds-success-500) 14%, transparent);
+.unblock-btn .profile-action-card__icon,
+:deep(.unblock-btn .profile-action-card__icon) {
+  background: var(--ds-success-50);
   color: var(--ds-success-800);
+}
+
+:deep(.settings-btn),
+:deep(.block-btn),
+:deep(.unblock-btn) {
+  background: transparent !important;
+  color: var(--ds-text-primary) !important;
+  border-color: transparent !important;
 }
 
 :deep(.profile-action-card) {
   width: 100%;
-}
-
-:deep(.message-menu-btn) {
-  background: var(--ds-info-50) !important;
-  color: var(--ds-info-700) !important;
-  border-color: color-mix(in srgb, var(--ds-info-500) 22%, transparent) !important;
-}
-
-:deep(.settings-btn) {
-  background: var(--ds-primary-50) !important;
-  color: var(--ds-primary-800) !important;
-  border-color: color-mix(in srgb, var(--ds-primary-500) 20%, transparent) !important;
-}
-
-:deep(.block-btn) {
-  background: var(--ds-danger-50) !important;
-  color: var(--ds-danger-800) !important;
-  border-color: var(--ds-danger-200) !important;
-}
-
-:deep(.unblock-btn) {
-  background: var(--ds-success-50) !important;
-  color: var(--ds-success-800) !important;
-  border-color: var(--ds-success-100) !important;
 }
 
 .retry-btn {
@@ -2997,48 +2973,27 @@ function handleHistoryPresetChipChange(value: string) {
 
 
 
-.mt-4 {
-  margin-top: 1rem;
-}
-
 .history-list {
     display: flex;
     flex-direction: column;
-    gap: var(--ds-section-gap);
+    gap: 0;
 }
 
 .history-toolbar {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 14px;
-  margin-bottom: 14px;
-  border-radius: 12px;
-  border: 1px solid var(--ds-native-hairline);
-  background: var(--ds-bg-card);
+  padding: 0;
+  margin-bottom: 0;
+  border-radius: 0;
+  border: 0;
+  background: transparent;
 }
 
 .history-presets {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-.history-chip {
-  border: 1px solid rgba(217, 119, 6, 0.18);
-  background: rgba(255, 251, 235, 0.9);
-  color: #9a3412;
-  border-radius: 999px;
-  padding: 8px 12px;
-  font-size: var(--ds-font-helper);
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.history-chip.active {
-  background: var(--ds-primary-500);
-  color: white;
-  border-color: transparent;
 }
 
 .history-filter-grid {
@@ -3061,10 +3016,10 @@ function handleHistoryPresetChipChange(value: string) {
 
 .history-filter-field input,
 .history-filter-field select {
-  border: 1px solid rgba(148, 163, 184, 0.28);
+  border: 1px solid var(--ds-native-hairline);
   border-radius: 12px;
   padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--ds-bg-card);
   color: var(--ds-text-primary);
   font: inherit;
 }
@@ -3081,34 +3036,14 @@ function handleHistoryPresetChipChange(value: string) {
 }
 
 .history-filter-hint.error {
-  color: #b91c1c;
+  color: var(--ds-danger-700);
 }
 
 .history-filter-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: stretch;
   gap: 8px;
-}
-
-.history-control {
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 12px;
-  background: white;
-  color: var(--ds-text-primary);
-  padding: 10px 12px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.history-control.primary {
-  background: var(--ds-primary-500);
-  border-color: transparent;
-  color: white;
-}
-
-.history-control:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 .history-filter-summary {
@@ -3266,12 +3201,10 @@ function handleHistoryPresetChipChange(value: string) {
 .trade-badge.buy { 
   background: var(--ds-success-50); 
   color: var(--ds-success-600);
-  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.1);
 }
 .trade-badge.sell { 
   background: var(--ds-danger-50); 
   color: var(--ds-danger-600);
-  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.1);
 }
 
 .trade-details {

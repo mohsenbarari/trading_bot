@@ -50,6 +50,15 @@ function makeResponse(payload: unknown, ok = true, status = ok ? 200 : 400): Res
   })
 }
 
+async function clickHistoryOverflowAction(wrapper: { find: (selector: string) => { exists: () => boolean; trigger: (event: string) => Promise<unknown> }; findAll: (selector: string) => Array<{ text: () => string; trigger: (event: string) => Promise<unknown> }> }, label: string) {
+  const more = wrapper.find('[aria-label="اقدام‌های دیگر تاریخچه"]')
+  expect(more.exists()).toBe(true)
+  await more.trigger('click')
+  const action = wrapper.findAll('button').find((node) => node.text().includes(label))
+  expect(action).toBeTruthy()
+  await action!.trigger('click')
+}
+
 function makeHistoryPage(items: unknown[], nextCursor: string | null = null, hasMore = false): Response {
   return makeResponse({
     items,
@@ -419,9 +428,7 @@ describe('PublicProfile.vue', () => {
 
     fetchMock.mockResolvedValueOnce(new Response('server exploded', { status: 400, headers: { 'Content-Type': 'text/plain' } }))
 
-    const pdfButton = wrapper.findAll('button').find((node) => node.text().includes('خروجی PDF'))
-    expect(pdfButton).toBeTruthy()
-    await pdfButton!.trigger('click')
+    await clickHistoryOverflowAction(wrapper, 'خروجی PDF')
     await flushPromises()
 
     expect(wrapper.text()).toContain('خطا در دریافت خروجی تاریخچه معاملات')
@@ -2664,9 +2671,7 @@ describe('PublicProfile.vue', () => {
     expect(filteredCall?.[0]).toContain('trade_type=sell')
     expect(filteredCall?.[0]).toContain('settlement_type=tomorrow')
 
-    const pdfButton = wrapper.findAll('button').find((node) => node.text().includes('خروجی PDF'))
-    expect(pdfButton).toBeTruthy()
-    await pdfButton!.trigger('click')
+    await clickHistoryOverflowAction(wrapper, 'خروجی PDF')
     await flushPromises()
 
     const exportCall = fetchMock.mock.calls.find(([url]) => typeof url === 'string' && url.includes('/api/trades/my/export?'))
@@ -3004,9 +3009,7 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.text()).toContain('بازه زمانی انتخاب‌شده معتبر نیست.')
     expect(fetchMock.mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/trades/my/page?'))).toHaveLength(1)
 
-    const pdfButton = wrapper.findAll('button').find((node) => node.text().includes('خروجی PDF'))
-    expect(pdfButton).toBeTruthy()
-    await pdfButton!.trigger('click')
+    await clickHistoryOverflowAction(wrapper, 'خروجی PDF')
     await flushPromises()
 
     expect(fetchMock.mock.calls.some(([url]) => typeof url === 'string' && url.includes('/api/trades/my/export?'))).toBe(false)
