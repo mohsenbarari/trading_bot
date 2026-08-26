@@ -1,6 +1,6 @@
 # Roadmap انتقال داده و Parse بازار روی شبکه خصوصی
 
-وضعیت: مراحل 0 تا 7 تکمیل شده‌اند؛ pipeline فقط shadow است و cutover انجام نشده است
+وضعیت: مراحل 0 تا 8 تکمیل شده‌اند؛ pipeline فقط shadow است و cutover انجام نشده است
 
 تاریخ بازبینی: 2026-08-26
 
@@ -13,6 +13,8 @@
 مبنای gate Parser/Lifecycle مرحله 6: `main@bbe93ed5af03f0d87738aa3d2d0b2a04e589e6f3`
 
 مبنای gate External/Input Ledger مرحله 7: `main@9db072c5157c1684314dea71f9b3b804d6778d75`
+
+مبنای gate Private Fact Lane مرحله 8: `main@0cbd008a`
 
 ## 1. نتیجه نهایی مورد انتظار
 
@@ -745,6 +747,24 @@ Gate:
 - Market Facts backlog اثری روی product sync ندارد؛
 - p95 commit وب تا durable ACK بات در شبکه سالم حداکثر 1 ثانیه؛
 - p99 حداکثر 3 ثانیه یا baseline مصوب سخت‌گیرانه‌تر.
+
+نتیجه اجرا در 2026-08-26:
+
+- آرشیو fact، revision، projection تخصصی و outbox در یک transaction PostgreSQL ثبت
+  می‌شوند و delivery cursor مستقل از source sequence امکان انتقال revision را می‌دهد؛
+- sender با batch صدتایی/۷۶۸ KiB، flush ۲۵۰ms، backoff محدود، dead-letter قابل repair
+  و head-of-stream blocking هیچ fact را حذف یا جابه‌جا نمی‌کند؛
+- receiver با SQLite FULL، checkpoint مستقل stream، revision-aware apply و contiguous
+  ACK، duplicate/gap/conflict را idempotent یا fail-closed مدیریت می‌کند؛
+- mTLS اجباری، HMAC روی بایت دقیق body، nonce/replay/skew guard، peer allowlist و نبود
+  public fallback تثبیت شد؛ raw و secret در log/heartbeat نیست؛
+- گیت ۱۰۰۰ fact با ۱۰ batch، p95/p99 برابر 81.517ms، lost-ACK replay امن و حفظ کامل
+  outbox هنگام قطع receiver پاس شد؛
+- گیت Docker کامل، migration ۲۳ جدولی، persistence، rollback، secret scan و cleanup
+  کامل پاس شدند؛ backlog این lane هیچ dependency به Product Sync ندارد؛
+- هیچ deploy، endpoint زنده، model feed، authority switch یا cutover انجام نشد.
+
+گزارش و gate receipt: [COIN_MARKET_DATA_STAGE8_PRIVATE_FACT_LANE.md](./COIN_MARKET_DATA_STAGE8_PRIVATE_FACT_LANE.md)
 
 ### مرحله 9 — Adapter مصرف‌کننده روی سرور بات
 
