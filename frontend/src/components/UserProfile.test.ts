@@ -205,7 +205,7 @@ describe('UserProfile.vue authoritative admin actions', () => {
   })
 
   it('keeps admin-profile typography locally aligned with the Figma Persian card scale', () => {
-    expect(userProfileSource).toMatch(/<div class="card admin-user-profile">/)
+    expect(userProfileSource).toMatch(/<div class="admin-user-profile">/)
     expect(userProfileSource).toMatch(
       /\.admin-user-profile\s*\{[\s\S]*?font-family:\s*Vazirmatn,\s*Tahoma,\s*Arial,\s*sans-serif;[\s\S]*?font-synthesis:\s*none;/,
     )

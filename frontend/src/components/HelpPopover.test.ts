@@ -75,14 +75,12 @@ describe('HelpPopover.vue', () => {
     }
   })
 
-  it('limits the larger target to the ten remaining profile help affordances', () => {
+  it('keeps live profile surfaces free of HelpPopover', () => {
     const publicProfile = componentSource('PublicProfile.vue')
     const userProfile = componentSource('UserProfile.vue')
 
-    expect(helpPopoverCalls(publicProfile)).toHaveLength(7)
-    expect(helpPopoverCalls(publicProfile).every((call) => call.includes('comfortable-target'))).toBe(true)
-    expect(helpPopoverCalls(userProfile)).toHaveLength(3)
-    expect(helpPopoverCalls(userProfile).every((call) => call.includes('comfortable-target'))).toBe(true)
+    expect(helpPopoverCalls(publicProfile)).toHaveLength(0)
+    expect(helpPopoverCalls(userProfile)).toHaveLength(0)
 
     for (const protectedCaller of [
       'CreateChannelView.vue',

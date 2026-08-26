@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PublicProfile from '../components/PublicProfile.vue'
-import { AppButton, AppErrorState, AppLoadingState, AppPage, AppPageHeader } from '../components/ui'
+import { AppButton, AppErrorState, AppLoadingState, AppPage } from '../components/ui'
 import { apiFetch } from '../utils/auth'
 import { routeRequestJson } from '../utils/routeRequest'
 
@@ -207,12 +207,6 @@ onMounted(async () => {
       :class="isSelfRoute ? 'profile-view' : 'public-profile-view'"
       data-test="profile-workspace-root"
     >
-      <AppPageHeader
-        v-if="!isSelfRoute"
-        eyebrow="پروفایل عمومی"
-        title="مشاهده پروفایل"
-        description="اطلاعات عمومی و راه‌های ارتباطی مجاز این کاربر را از این صفحه دنبال کنید."
-      />
       <PublicProfile
         v-if="profileUser"
         :user="profileUser"

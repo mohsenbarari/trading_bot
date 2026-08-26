@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AppListItem } from '../ui'
+import { AppInsetGroup, AppListItem } from '../ui'
 import type { ProfileCustomerContext, ProfileStatItem } from './types'
 
 withDefaults(defineProps<{
@@ -15,23 +15,27 @@ withDefaults(defineProps<{
 
 <template>
   <section class="profile-section shared-profile-section" data-test="profile-summary">
-    <div v-if="customerContext" class="customer-context-banner">
-      <div class="customer-context-title">پروفایل مشتری</div>
-      <p class="customer-context-copy">
-        <slot name="customer-name">{{ customerContext.managementName }}</slot>
-        <span v-if="customerContext.ownerAccountName"> | سرگروه: {{ customerContext.ownerAccountName }}</span>
-        <span v-if="customerContext.showTier && customerTierLabel"> | {{ customerTierLabel }}</span>
-      </p>
-    </div>
+    <AppInsetGroup v-if="customerContext" class="customer-context-group">
+      <div class="customer-context-banner">
+        <div class="customer-context-title">پروفایل مشتری</div>
+        <p class="customer-context-copy">
+          <slot name="customer-name">{{ customerContext.managementName }}</slot>
+          <span v-if="customerContext.ownerAccountName"> | سرگروه: {{ customerContext.ownerAccountName }}</span>
+          <span v-if="customerContext.showTier && customerTierLabel"> | {{ customerTierLabel }}</span>
+        </p>
+      </div>
+    </AppInsetGroup>
 
-    <section v-if="stats.length > 0" class="profile-stats-grid" aria-label="خلاصه وضعیت پروفایل">
-      <AppListItem
-        v-for="stat in stats"
-        :key="stat.key"
-        :title="stat.label"
-        :meta="stat.value"
-      />
-    </section>
+    <AppInsetGroup v-if="stats.length > 0">
+      <section class="profile-stats-grid" aria-label="خلاصه وضعیت پروفایل">
+        <AppListItem
+          v-for="stat in stats"
+          :key="stat.key"
+          :title="stat.label"
+          :meta="stat.value"
+        />
+      </section>
+    </AppInsetGroup>
 
     <slot />
   </section>
@@ -51,20 +55,16 @@ withDefaults(defineProps<{
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
   width: 100%;
-  max-width: var(--ds-page-max-width);
-  overflow: hidden;
-  border-radius: 12px;
-  background: var(--ds-bg-card);
+  min-width: 0;
 }
 
 .customer-context-banner {
   width: 100%;
-  max-width: min(100%, 520px);
-  margin: 0 auto;
-  padding: 12px 14px;
-  border-radius: 12px;
-  border: 1px solid var(--ds-native-hairline);
-  background: var(--ds-bg-card);
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   text-align: right;
 }
 

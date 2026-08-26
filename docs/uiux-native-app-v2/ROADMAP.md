@@ -306,7 +306,7 @@ Gate:
 | ۲ پوسته | implementation-complete |
 | ۳ خانه | implementation-complete |
 | ۴ حساب | implementation-complete |
-| ۵ پروفایل | pending |
+| ۵ پروفایل | implementation-complete |
 | ۶ عملیات | pending |
 | ۷ مدیریت | pending |
 | ۸ احراز | pending |

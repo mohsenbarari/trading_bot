@@ -23,7 +23,6 @@ import { isAppHttpError, normalizeErrorPresentation } from '../utils/httpErrorPo
 import { formatIranDateTime } from '../utils/iranTime';
 import { routeRequest } from '../utils/routeRequest';
 import CustomerNameWithBadge from './CustomerNameWithBadge.vue';
-import HelpPopover from './HelpPopover.vue';
 import JalaliDatePicker from './JalaliDatePicker.vue';
 import { ProfileIdentityHeader } from './profile';
 import {
@@ -31,6 +30,7 @@ import {
   AppConfirmDialog,
   AppFormField,
   AppInput,
+  AppInsetGroup,
   AppListItem,
   AppResponsiveDialog,
   AppSelect,
@@ -1140,7 +1140,7 @@ async function confirmPendingAction() {
 </script>
 
 <template>
-  <div class="card admin-user-profile">
+  <div class="admin-user-profile">
     <ProfileIdentityHeader
       :display-name="userDisplayName"
       :avatar-initial="userDisplayName.slice(0, 1)"
@@ -1157,7 +1157,7 @@ async function confirmPendingAction() {
       </template>
     </ProfileIdentityHeader>
 
-    <div class="profile-details">
+    <AppInsetGroup class="profile-details">
       <div class="detail-item">
         <span class="label">نام کاربری</span>
         <span class="value">
@@ -1246,6 +1246,8 @@ async function confirmPendingAction() {
               <span>{{ getCustomerTierLabel(user.customer_tier) }}</span>
             </div>
           </div>
+
+    </AppInsetGroup>
 
       <p
         v-if="isAdminView && isSensitiveAdminTargetReadOnly"
@@ -1385,22 +1387,11 @@ async function confirmPendingAction() {
 
       <!-- منوی مدیریت (فقط ادمین) -->
       <template v-if="isAdminView">
-        <div v-if="!showSettings || !canPerformSensitiveAdminActions" class="main-actions profile-menu-card card-with-help">
-            <HelpPopover
-              floating
-              comfortable-target
-              button-test="user-profile-admin-menu-help"
-              note-test="user-profile-admin-menu-help-note"
-              label="راهنمای منوی مدیریت کاربر"
-              :text="canPerformSensitiveAdminActions
-                ? 'عملیات این بخش فقط روی همین کاربر اعمال می‌شود. حذف کاربر، نشست‌ها و دسترسی‌های فعال او را هم مدیریت می‌کند.'
-                : 'اطلاعات این حساب برای مشاهده نمایش داده می‌شود؛ عملیات حساس مدیریتی از این مسیر مجاز نیست.'"
-            />
+        <AppInsetGroup v-if="!showSettings || !canPerformSensitiveAdminActions" class="main-actions profile-menu-card" title="مدیریت کاربر">
             <template v-if="canPerformSensitiveAdminActions">
               <AppListItem
                 class="profile-control settings-btn"
                 title="تنظیمات کاربر"
-                description="وضعیت، نقش، محدودیت و مسدودیت"
                 interactive
                 @select="showSettings = true"
               >
@@ -1410,7 +1401,6 @@ async function confirmPendingAction() {
               <AppListItem
                 class="profile-control delete-btn"
                 title="حذف کاربر"
-                description="قطع دسترسی وب و پیام‌رسان"
                 interactive
                 :disabled="isUserMutationBusy"
                 @select="deleteUser"
@@ -1427,17 +1417,9 @@ async function confirmPendingAction() {
             >
               <template #leading><ChevronLeft :size="20" /></template>
             </AppListItem>
-        </div>
+        </AppInsetGroup>
 
-        <div v-else-if="canPerformSensitiveAdminActions" class="settings-menu profile-menu-card card-with-help">
-          <HelpPopover
-            floating
-            comfortable-target
-            button-test="user-profile-settings-menu-help"
-            note-test="user-profile-settings-menu-help-note"
-            label="راهنمای زیرمنوی تنظیمات کاربر"
-            text="این زیرمنو برای تغییر وضعیت حساب، نقش، محدودیت و مسدودیت کاربر است. گزینه‌های حذف یا بازگشت در منوی قبلی قرار دارند."
-          />
+        <AppInsetGroup v-else-if="canPerformSensitiveAdminActions" class="settings-menu profile-menu-card" title="تنظیمات کاربر">
           <AppListItem
             class="profile-control"
             :title="`تغییر وضعیت حساب (${isAccountInactive ? 'غیرفعال' : 'فعال'})`"
@@ -1515,9 +1497,8 @@ async function confirmPendingAction() {
             >
               <template #leading><ChevronLeft :size="20" /></template>
             </AppListItem>
-        </div>
+        </AppInsetGroup>
       </template>
-    </div>
 
     <!-- مودال انتخاب مدت زمان مسدودیت -->
     <AppResponsiveDialog
@@ -1630,15 +1611,7 @@ async function confirmPendingAction() {
     </AppResponsiveDialog>
 
     <template v-if="!isAdminView">
-      <div class="profile-user-actions profile-menu-card card-with-help">
-        <HelpPopover
-          floating
-          comfortable-target
-          button-test="profile-user-actions-help"
-          note-test="profile-user-actions-help-note"
-          label="راهنمای پنل کاربری"
-          text="از این بخش به پیام‌های سیستمی و تنظیمات مجاز همین حساب دسترسی داری. گزینه‌های مدیریتی فقط برای ادمین‌ها نمایش داده می‌شود."
-        />
+      <AppInsetGroup class="profile-user-actions profile-menu-card" title="اقدام‌ها">
         <AppListItem
           class="profile-control notification-btn"
           title="صندوق پیام‌ها"
@@ -1658,7 +1631,7 @@ async function confirmPendingAction() {
           <template #leading><Settings :size="20" /></template>
           <template #trailing><ChevronLeft :size="18" aria-hidden="true" /></template>
         </AppListItem>
-      </div>
+      </AppInsetGroup>
     </template>
 
     <!-- Moved Block Date Modal -->
@@ -1962,14 +1935,6 @@ async function confirmPendingAction() {
 </style>
 
 <style scoped>
-.card {
-  background: var(--ds-bg-card);
-  border: 1px solid var(--ds-border-medium);
-  border-radius: var(--ds-radius-xl);
-  padding: var(--ds-card-padding);
-  box-shadow: none;
-  min-width: 0;
-}
 .admin-user-profile {
   display: flex;
   flex-direction: column;
@@ -2071,7 +2036,6 @@ input[type="number"].form-input::-webkit-inner-spin-button {
   position: relative;
   margin-top: 0.25rem;
   padding: 0;
-  padding-left: 3.8rem;
   border: 0;
   border-radius: 12px;
   background: var(--ds-bg-card);

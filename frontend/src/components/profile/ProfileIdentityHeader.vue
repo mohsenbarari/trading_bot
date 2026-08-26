@@ -44,13 +44,13 @@ const emit = defineEmits<{
     />
     <div v-else class="header-back-spacer" aria-hidden="true"></div>
     <div class="header-title">
-      <h2 v-if="displayName">
+      <h1 v-if="displayName">
         <slot name="title">{{ displayName }}</slot>
-      </h2>
-      <h2 v-else-if="loading" class="skeleton-text-header">
+      </h1>
+      <h1 v-else-if="loading" class="skeleton-text-header">
         <div class="skeleton-box" style="width: 120px; height: 24px;"></div>
-      </h2>
-      <h2 v-else>پروفایل</h2>
+      </h1>
+      <h1 v-else>پروفایل</h1>
     </div>
     <div class="header-spacer">
       <div v-if="displayName || avatarUrl || editable || loading" class="profile-avatar-stack profile-avatar-stack--header">
@@ -106,8 +106,13 @@ const emit = defineEmits<{
   min-width: 0;
 }
 
-.header-title h2 {
+.header-title h1 {
   margin: 0;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-native-title-size, 1.7rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
   overflow-wrap: anywhere;
   word-break: break-word;
 }

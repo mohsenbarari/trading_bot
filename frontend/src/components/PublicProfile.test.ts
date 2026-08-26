@@ -176,7 +176,7 @@ describe('PublicProfile.vue', () => {
   })
 
   it('keeps public-profile typography locally aligned with the Figma Persian card scale', () => {
-    expect(publicProfileSource).toMatch(/<div class="card public-profile-typography">/)
+    expect(publicProfileSource).toMatch(/<div class="public-profile public-profile-typography">/)
     expect(publicProfileSource).toMatch(
       /\.public-profile-typography\s*\{[\s\S]*?font-family:\s*Vazirmatn,\s*Tahoma,\s*Arial,\s*sans-serif;[\s\S]*?font-synthesis:\s*none;/,
     )
@@ -202,18 +202,18 @@ describe('PublicProfile.vue', () => {
     const actionCardRule = publicProfileSource.match(/\.profile-action-card\s*\{([\s\S]*?)\n\}/)?.[1]
     const miniTradeRule = Array.from(
       publicProfileSource.matchAll(/\.mini-trade-card\s*\{([\s\S]*?)\n\}/g),
-    ).find(([, rule]) => rule.includes('transition: transform 0.15s;'))
+    ).find(([, rule]) => rule.includes('transition: background 0.18s ease;'))
     const miniTradeReducedMotionRule = publicProfileSource.match(
       /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.mini-trade-card\s*\{\s*transition:\s*none;\s*\}\s*\}/,
     )?.[0]
 
     expect(backRule).toContain('justify-self: start;')
     expect(addressEditRule).toContain('transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;')
-    expect(actionCardRule).toContain('transition: all 0.2s;')
-    expect(miniTradeRule?.[1]).toContain('transition: transform 0.15s;')
+    expect(actionCardRule).toContain('transition: background 0.18s ease;')
+    expect(miniTradeRule?.[1]).toContain('transition: background 0.18s ease;')
     expect(publicProfileSource).toMatch(/\.profile-nav-back\s*\{[\s\S]*?min-block-size:\s*3rem;/)
-    expect(publicProfileSource).toMatch(/\.profile-action-card:active\s*\{\s*transform:\s*scale\(0\.98\);/)
-    expect(publicProfileSource).toMatch(/\.mini-trade-card:active\s*\{\s*transform:\s*scale\(0\.98\);/)
+    expect(publicProfileSource).toMatch(/\.profile-action-card:active\s*\{\s*transform:\s*none;/)
+    expect(publicProfileSource).toMatch(/\.mini-trade-card:active\s*\{\s*transform:\s*none;/)
     expect(publicProfileSource).toMatch(
       /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.profile-nav-back,\s*\.address-edit-trigger,\s*\.profile-action-card\s*\{\s*transition:\s*none;\s*\}/,
     )
@@ -224,6 +224,7 @@ describe('PublicProfile.vue', () => {
   })
 
   it('renders remaining public-profile chrome with shared icon and button primitives', () => {
+    expect(publicProfileFileSource).not.toContain('HelpPopover')
     expect(publicProfileFileSource).toMatch(/<ProfileIdentityHeader/)
     expect(publicProfileSource).toMatch(/<AppBackButton[\s\S]*?class="profile-nav-back"/)
     expect(publicProfileSource).toMatch(/<AppButton class="retry-btn"/)
@@ -1365,8 +1366,8 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    expect(wrapper.get('.header-title h2 .customer-name-with-badge__name').text()).toBe('مشتری ویژه')
-    expect(wrapper.get('.header-title h2 .customer-name-with-badge__badge').text()).toBe('مشتری')
+    expect(wrapper.get('.header-title h1 .customer-name-with-badge__name').text()).toBe('مشتری ویژه')
+    expect(wrapper.get('.header-title h1 .customer-name-with-badge__badge').text()).toBe('مشتری')
     expect(wrapper.get('[data-test="profile-avatar-trigger"]').text()).toContain('م')
     expect(wrapper.text()).not.toContain('لیست همکاران')
     expect(wrapper.findAll('button').some((button) => button.text().includes('حسابداران'))).toBe(false)
@@ -1979,7 +1980,7 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.find('.address-edit-form').exists()).toBe(false)
   })
 
-  it('renders meaningful help popovers for owner profile menus and keeps accountant list closed by default', async () => {
+  it('renders owner profile lists without help popovers and keeps accountant list visible as rows', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({
       id: 44,
@@ -2036,13 +2037,13 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.find('.profile-accordion').exists()).toBe(false)
 
     expect(wrapper.find('[data-test="public-profile-info-help"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="public-profile-project-users-help"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="public-profile-accountants-help"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="public-profile-history-help"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('برای حفظ حریم خصوصی')
-    await wrapper.get('[data-test="public-profile-project-users-help"]').trigger('click')
-    expect(wrapper.text()).toContain('با انتخاب نام هر همکار')
-    await wrapper.get('[data-test="public-profile-accountants-help"]').trigger('click')
-    expect(wrapper.text()).toContain('عنوان هر ردیف همان نام نمایشی رابطه است')
-    await wrapper.get('[data-test="public-profile-history-help"]').trigger('click')
-    expect(wrapper.text()).toContain('طرف دیگر معامله را از میان همکاران پروژه انتخاب کنید')
+    expect(wrapper.text()).not.toContain('با انتخاب نام هر همکار')
+    expect(wrapper.text()).toContain('حسابدار اصلی')
+    expect(wrapper.text()).toContain('@acct66')
   })
 
   it('exposes owner actions for settings and owner workspace navigation', async () => {
@@ -2459,8 +2460,8 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.find('.customer-context-banner').text()).toContain('سرگروه: owner15')
     expect(wrapper.find('.customer-context-banner').text()).not.toContain('سطح 2')
     expect(wrapper.text()).not.toContain('طرف دیگر معامله')
-    await wrapper.get('[data-test="public-profile-history-help"]').trigger('click')
-    expect(wrapper.text()).toContain('بازه زمانی و کالا را از فهرست کالاهای ثبت‌شده محدود کنید')
+    expect(wrapper.find('[data-test="public-profile-history-help"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('بازه زمانی و کالا را از فهرست کالاهای ثبت‌شده محدود کنید')
     expect(wrapper.text()).not.toContain('طرف دیگر معامله را از میان همکاران پروژه انتخاب کنید')
 
     const applyButton = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))

@@ -11,7 +11,6 @@ import {
   Wrench,
 } from 'lucide-vue-next';
 import LoadingSkeleton from './LoadingSkeleton.vue';
-import HelpPopover from './HelpPopover.vue';
 import CustomerNameWithBadge from './CustomerNameWithBadge.vue';
 import UserProfile from './UserProfile.vue';
 import JalaliDatePicker from './JalaliDatePicker.vue';
@@ -25,8 +24,8 @@ import {
   AppIconButton,
   AppInput,
   AppListItem,
+  AppInsetGroup,
   AppResponsiveDialog,
-  AppSectionCard,
   AppSelect,
   AppStatusBadge,
   AppTextarea,
@@ -348,12 +347,6 @@ const showCustomerTierInProfileBanner = computed(() => {
 });
 const shouldHideCustomerTradeRelationshipDetails = computed(() => {
   return viewerIsCustomer.value || (isOwnProfile.value && customerProfileContext.value !== null);
-});
-const tradeHistoryHelpText = computed(() => {
-  if (shouldHideCustomerTradeRelationshipDetails.value) {
-    return 'در تاریخچه خودتان می‌توانید بازه زمانی و کالا را از فهرست کالاهای ثبت‌شده محدود کنید. خروجی‌ها همین فیلترها را رعایت می‌کنند.';
-  }
-  return 'در تاریخچه خودتان می‌توانید طرف دیگر معامله را از میان همکاران پروژه انتخاب کنید و کالا را از فهرست کالاهای ثبت‌شده محدود کنید. خروجی‌ها همین فیلترها را رعایت می‌کنند.';
 });
 const showTargetTradeHistory = computed(() => {
   return isOwnProfile.value;
@@ -1869,7 +1862,7 @@ function handleHistoryPresetChipChange(value: string) {
 </script>
 
 <template>
-  <div class="card public-profile-typography">
+  <div class="public-profile public-profile-typography">
     <input ref="avatarInput" type="file" accept="image/*" class="hidden-avatar-input" @change="handleAvatarSelected" />
     <ProfileIdentityHeader
       :display-name="profileData ? profileDisplayName : ''"
@@ -1925,11 +1918,7 @@ function handleHistoryPresetChipChange(value: string) {
           />
         </template>
 
-        <AppSectionCard
-          class="profile-section-card mt-4"
-          title="اطلاعات شخصی"
-        >
-          <div class="profile-section-card__body">
+        <AppInsetGroup title="اطلاعات شخصی">
             <div class="info-section">
               <div class="info-row">
                 <span class="label">شماره تماس</span>
@@ -1972,25 +1961,14 @@ function handleHistoryPresetChipChange(value: string) {
                 </form>
               </div>
             </div>
-          </div>
-        </AppSectionCard>
+        </AppInsetGroup>
       </ProfileSummary>
 
       <ProfileRelationshipSection
         v-if="showProjectUsersSection"
         section-class="project-users-section"
         title="لیست همکاران"
-        description="اعضای قابل مشاهده پروژه را جستجو و از همین بخش باز کنید."
       >
-        <template #actions>
-            <HelpPopover
-              comfortable-target
-              button-test="public-profile-project-users-help"
-              note-test="public-profile-project-users-help-note"
-              label="راهنمای لیست همکاران"
-              text="لیست همکاران، اعضای قابل مشاهده پروژه را نشان می‌دهد. با انتخاب نام هر همکار، پروفایل عمومی همان کاربر باز می‌شود."
-            />
-        </template>
             <form class="project-users-search" @submit.prevent="submitProjectUsersSearch">
               <label class="sr-only" for="project-users-directory-search">جستجوی همکاران پروژه</label>
               <AppInput
@@ -2053,31 +2031,16 @@ function handleHistoryPresetChipChange(value: string) {
         v-if="showOwnerSections && accountantRelations.length > 0"
         section-class="accountant-relations-section"
         title="لیست حسابداران"
-        description="عنوان هر ردیف همان نام نمایشی رابطه است و توضیح وظیفه، در صورت ثبت، زیر آن می‌آید."
       >
-        <template #actions>
-            <HelpPopover
-              comfortable-target
-              button-test="public-profile-accountants-help"
-              note-test="public-profile-accountants-help-note"
-              label="راهنمای لیست حسابداران"
-              text="این لیست حسابداران فعال مالک را نشان می‌دهد. عنوان هر ردیف همان نام نمایشی رابطه است و توضیح وظیفه، در صورت ثبت، زیر آن می‌آید."
-            />
-        </template>
             <div class="public-accountant-list">
-              <article
+              <AppListItem
                 v-for="relation in accountantRelations"
                 :key="`${relation.accountant_user_id || 'relation'}-${relation.relation_display_name}`"
-                class="public-accountant-card profile-relation-card profile-relation-card--accountant"
-              >
-                <div class="public-accountant-card-head">
-                  <div>
-                    <h4>{{ relation.relation_display_name }}</h4>
-                    <p class="public-accountant-handle">@{{ relation.accountant_account_name || 'unknown' }}</p>
-                  </div>
-                </div>
-                <p v-if="relation.duty_description" class="public-accountant-duty">{{ relation.duty_description }}</p>
-              </article>
+                class="public-accountant-card"
+                :title="relation.relation_display_name"
+                :description="relation.duty_description || undefined"
+                :meta="relation.accountant_account_name ? `@${relation.accountant_account_name}` : undefined"
+              />
             </div>
       </ProfileRelationshipSection>
 
@@ -2085,42 +2048,24 @@ function handleHistoryPresetChipChange(value: string) {
         v-if="showCustomerListSection"
         section-class="customer-relations-section"
         title="مشتریان این مالک"
-        description="نمایش این بخش به حسابداران همان مالک و مدیر ارشد محدود است."
       >
-        <template #actions>
-            <HelpPopover
-              comfortable-target
-              button-test="public-profile-customers-help"
-              note-test="public-profile-customers-help-note"
-              label="راهنمای مشتریان این مالک"
-              text="این بخش مشتریان ثبت‌شده زیر این مالک را نشان می‌دهد. نمایش آن به حسابداران همان مالک و مدیر ارشد محدود است."
-            />
-        </template>
             <div class="public-customer-list">
-              <article
+              <AppListItem
                 v-for="relation in customerRelations"
                 :key="`${relation.customer_user_id || 'customer'}-${relation.management_name}`"
-                class="public-customer-card profile-relation-card profile-relation-card--customer"
+                class="public-customer-card"
+                :title="relation.management_name"
+                :description="relation.customer_account_name ? `@${relation.customer_account_name}` : undefined"
+                :interactive="Boolean(relation.customer_user_id && relation.customer_account_name)"
+                @select="openOwnerCustomerProfile(relation)"
               >
-                <div class="public-customer-card-head">
-                  <div>
-                    <button
-                      v-if="relation.customer_user_id && relation.customer_account_name"
-                      type="button"
-                      class="profile-link-btn public-customer-profile-link customer-profile-link-btn"
-                      @click.stop="openOwnerCustomerProfile(relation)"
-                    >
-                      <CustomerNameWithBadge class="public-customer-link-title" :name="relation.management_name" compact />
-                      <span class="public-customer-handle">@{{ relation.customer_account_name }}</span>
-                    </button>
-                    <template v-else>
-                      <h4><CustomerNameWithBadge :name="relation.management_name" compact /></h4>
-                      <span v-if="relation.customer_account_name" class="public-customer-handle">@{{ relation.customer_account_name }}</span>
-                    </template>
-                  </div>
+                <template #title>
+                  <CustomerNameWithBadge :name="relation.management_name" compact />
+                </template>
+                <template #trailing>
                   <AppStatusBadge tone="info">{{ getCustomerTierLabel(relation.customer_tier) }}</AppStatusBadge>
-                </div>
-              </article>
+                </template>
+              </AppListItem>
             </div>
       </ProfileRelationshipSection>
 
@@ -2128,20 +2073,9 @@ function handleHistoryPresetChipChange(value: string) {
         v-if="showVisitorSections"
         section-class="visitor-profile-section"
         title="اقدام‌های عمومی"
-        description="ارسال پیام و مدیریت دسترسی عمومی این کاربر از این بخش انجام می‌شود."
         :actions="visitorActionItems"
         @select="handleActionClick"
       >
-        <template #actions>
-            <HelpPopover
-              floating
-              comfortable-target
-              button-test="public-profile-visitor-menu-help"
-              note-test="public-profile-visitor-menu-help-note"
-              label="راهنمای منوی پروفایل عمومی"
-              text="اقدام‌های عمومی این پروفایل در این بخش قرار گرفته‌اند تا مسیر پیام، بلاک و عملیات مشابه یکپارچه و قابل پیش‌بینی بماند."
-            />
-        </template>
           <p
             v-if="publicBlockFeedback"
             class="public-block-feedback"
@@ -2159,38 +2093,16 @@ function handleHistoryPresetChipChange(value: string) {
       >
         <ProfileActions
           title="مدیریت کاربر"
-          description="ابزارهای مدیریتی این پروفایل از اقدام‌های عمومی جدا شده‌اند."
           :actions="adminActionItems"
           :loading="adminUserLoading"
           @select="handleActionClick"
-        >
-          <template #actions>
-            <HelpPopover
-              floating
-              comfortable-target
-              button-test="public-profile-admin-menu-help"
-              note-test="public-profile-admin-menu-help-note"
-              label="راهنمای منوی مدیریت پروفایل"
-              text="تنظیمات مدیریتی کاربر از بخش عمومی جدا شده‌اند تا عملیات روزمره با ابزارهای مدیریتی مخلوط نشود."
-            />
-          </template>
-        </ProfileActions>
+        />
       </ProfileAdminControls>
 
       <ProfileTradeHistory
         v-if="showOwnerSections"
         :title="tradeHistoryTitle"
-        description="فیلترها و خروجی‌ها دقیقاً روی همین بازه و کالا اعمال می‌شوند."
       >
-          <template #actions>
-            <HelpPopover
-              comfortable-target
-              button-test="public-profile-history-help"
-              note-test="public-profile-history-help-note"
-              label="راهنمای تاریخچه معاملات"
-              :text="tradeHistoryHelpText"
-            />
-          </template>
 
           <div class="profile-section-card__body">
             <div class="history-toolbar">
@@ -2371,21 +2283,9 @@ function handleHistoryPresetChipChange(value: string) {
         v-if="showOwnerSections"
         section-class="owner-profile-section"
         title="میانبرهای مدیریت پروفایل"
-        description="تنظیمات، مشتریان و حسابداران از همین بخش در دسترس هستند."
         :actions="ownerActionItems"
         @select="handleActionClick"
-      >
-        <template #actions>
-            <HelpPopover
-              floating
-              comfortable-target
-              button-test="public-profile-owner-menu-help"
-              note-test="public-profile-owner-menu-help-note"
-              label="راهنمای منوی مالک"
-              text="میانبرهای تنظیمات، مشتریان و حسابداران در همین منو جمع شده‌اند تا ظاهر پروفایل شما با پروفایل عمومی بقیه بخش‌ها هم‌راستا بماند."
-            />
-        </template>
-      </ProfileActions>
+      />
     </div>
 
     <AppResponsiveDialog
@@ -2881,6 +2781,7 @@ function handleHistoryPresetChipChange(value: string) {
 .card-with-help {
   position: relative;
   overflow: visible;
+  padding-left: 0;
 }
 
 .accordion-header-actions {
@@ -2928,7 +2829,6 @@ function handleHistoryPresetChipChange(value: string) {
 .profile-menu-card {
   position: relative;
   padding: 0;
-  padding-left: 3.8rem;
   border: 0;
   border-radius: 12px;
   background: var(--ds-bg-card);
@@ -2948,31 +2848,30 @@ function handleHistoryPresetChipChange(value: string) {
 
 .profile-action-card {
   width: 100%;
-  min-height: 3.4rem;
-  padding: 0.78rem 0.9rem;
-  font-size: 0.85rem;
-  font-weight: 850;
-  background: rgba(255, 255, 255, 0.94);
-  color: #1f2937;
-  border: 1px solid rgba(15, 23, 42, 0.07);
-  border-radius: 1rem;
+  min-height: var(--ds-native-row-min-height, 48px);
+  padding: 0.75rem 1rem;
+  font-size: var(--ds-font-md);
+  font-weight: 650;
+  background: transparent;
+  color: var(--ds-text-primary);
+  border: 0;
+  border-radius: 0;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 0.72rem;
-  transition: all 0.2s;
+  transition: background 0.18s ease;
   text-align: right;
   -webkit-tap-highlight-color: transparent;
 }
 
 .profile-action-card:hover {
-  border-color: color-mix(in srgb, var(--ds-primary-500) 30%, transparent);
-  background: var(--ds-primary-50);
+  background: var(--ds-bg-hover);
 }
 
 .profile-action-card:active {
-  transform: scale(0.98);
+  transform: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3325,15 +3224,16 @@ function handleHistoryPresetChipChange(value: string) {
 }
 
 .mini-trade-card {
-    background: var(--ds-bg-inset);
-    border: 1px solid var(--ds-border-light);
-    padding: var(--ds-card-padding);
-    border-radius: var(--ds-radius-md);
-    transition: transform 0.15s;
+    background: transparent;
+    border: 0;
+    padding: 0.85rem 1rem;
+    border-radius: 0;
+    box-shadow: inset 0 -1px 0 var(--ds-native-hairline);
+    transition: background 0.18s ease;
 }
 
 .mini-trade-card:active {
-  transform: scale(0.98);
+  transform: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AppSectionCard } from '../ui'
+import { AppInsetGroup } from '../ui'
 
 withDefaults(defineProps<{
   title: string
@@ -11,17 +11,8 @@ withDefaults(defineProps<{
 
 <template>
   <section class="profile-section" data-test="profile-trade-history">
-    <AppSectionCard
-      class="profile-section-card card-with-help history-section-card"
-      :title="title"
-      :description="description || undefined"
-    >
-      <template v-if="$slots.actions" #actions>
-        <slot name="actions" />
-      </template>
-      <div class="profile-section-card__body">
-        <slot />
-      </div>
-    </AppSectionCard>
+    <AppInsetGroup class="history-section-card" :title="title">
+      <slot />
+    </AppInsetGroup>
   </section>
 </template>

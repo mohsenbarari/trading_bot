@@ -4,9 +4,11 @@ withDefaults(defineProps<{
   description?: string
   meta?: string
   interactive?: boolean
+  disabled?: boolean
   variant?: 'grouped' | 'card'
 }>(), {
   interactive: false,
+  disabled: false,
   variant: 'grouped',
 })
 
@@ -19,6 +21,7 @@ const emit = defineEmits<{
   <component
     :is="interactive ? 'button' : 'article'"
     :type="interactive ? 'button' : undefined"
+    :disabled="interactive ? disabled : undefined"
     class="ui-list-item"
     :class="{
       'ui-list-item--interactive': interactive,
