@@ -990,6 +990,8 @@ Gate:
   eventهای window با `now/as_of` ثابت مشترک وارد هر دو lane می‌شوند. final facts، snapshot
   و rate بدون ماندگاری raw/identity/price اختلاف مقایسه و report امضاشده تولید می‌شود. append-race،
   corrupt complete record، writer-lock، tamper، redaction و cleanup در تست پوشش داده شدند.
+  اختلاف fact بر اساس source/instrument داخلی aggregate می‌شود و XAU/USDT value mismatch
+  از metadata/cadence mismatch جداست تا severity-1 کاذب ساخته نشود.
   این rehearsal همیشه `HOLD_STAGE12_LIVE_PARITY_REQUIRED` است و اجرای staging آن هیچ feed،
   owner یا cutover را تغییر نمی‌دهد.
 

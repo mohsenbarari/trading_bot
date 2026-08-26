@@ -28,6 +28,7 @@ from core.market_intelligence.single_owner_parity import (
     _copy_exact_prefix,
     compare_facts,
     compare_market_stores,
+    compare_snapshots,
     exclusive_existing_lock,
     read_private_key,
     run_single_owner_parity,
@@ -369,9 +370,45 @@ class SingleOwnerParityTests(unittest.TestCase):
                 "FACT_UNIT_MISMATCH": 1,
             },
         )
+        self.assertEqual(
+            result["difference_counts_by_source"]["CANDIDATE_FACT_ADDED"],
+            {"XAUUSD": 1},
+        )
+        self.assertEqual(
+            result["difference_counts_by_instrument"]["FACT_UNIT_MISMATCH"],
+            {"COIN_IMAM": 1},
+        )
         serialized = json.dumps(result)
         self.assertNotIn("188600", serialized)
         self.assertNotIn("199999", serialized)
+
+    def test_external_snapshot_metadata_is_not_a_consumed_value_mismatch(self):
+        signal = {
+            "status": "FRESH",
+            "price_unit": "USD_PER_TROY_OUNCE",
+            "latest_price": 4630.1,
+            "weighted_median_price": 4630.0,
+            "mean_price": 4630.0,
+            "median_price": 4630.0,
+            "minimum_price": 4629.9,
+            "maximum_price": 4630.1,
+            "observation_count": 5,
+        }
+        baseline = {"signals": {"XAUUSD": signal}, "rates": {"items": []}}
+        candidate = deepcopy(baseline)
+        candidate["signals"]["XAUUSD"]["observation_count"] = 7
+        metadata = compare_snapshots(baseline, candidate, same_fact_inputs=False)
+        self.assertEqual(metadata["severity_1_count"], 0)
+        self.assertEqual(metadata["severity_2_count"], 1)
+        self.assertEqual(
+            metadata["issues"][0]["code"], "SNAPSHOT_METADATA_MISMATCH"
+        )
+        candidate["signals"]["XAUUSD"]["latest_price"] = 4631.0
+        value = compare_snapshots(baseline, candidate, same_fact_inputs=False)
+        self.assertEqual(value["severity_1_count"], 1)
+        self.assertEqual(
+            value["issues"][0]["code"], "CONSUMED_EXTERNAL_VALUE_MISMATCH"
+        )
 
 
 if __name__ == "__main__":

@@ -531,45 +531,26 @@ def compare_market_stores(
         candidate_count = int(
             connection.execute("SELECT COUNT(*) FROM candidate.market_observations").fetchone()[0]
         )
-        common_count = int(
-            connection.execute(
-                "SELECT COUNT(*) FROM main.market_observations b "
-                "JOIN candidate.market_observations c ON c.event_key=b.event_key"
-            ).fetchone()[0]
-        )
-        predicates = {
-            "FACT_UNIT_MISMATCH": (
-                1,
-                "b.price_unit IS NOT c.price_unit OR b.currency IS NOT c.currency "
-                "OR b.quantity_unit IS NOT c.quantity_unit",
-            ),
-            "FACT_LIFECYCLE_MISMATCH": (
-                2,
-                "b.event_type IS NOT c.event_type OR b.quality_state IS NOT c.quality_state "
-                "OR b.is_conditional IS NOT c.is_conditional",
-            ),
-            "FACT_PARSER_MISMATCH": (
-                2,
-                "b.source_code IS NOT c.source_code OR b.source_family IS NOT c.source_family "
-                "OR b.instrument IS NOT c.instrument OR b.market_label IS NOT c.market_label "
-                "OR b.settlement_term IS NOT c.settlement_term OR b.trade_form IS NOT c.trade_form "
-                "OR b.side IS NOT c.side OR b.price_num IS NOT c.price_num "
-                "OR b.quantity_num IS NOT c.quantity_num",
-            ),
-        }
+        common_count = 0
         counts: Counter[str] = Counter()
         severity_counts: Counter[int] = Counter()
+        sources: dict[str, Counter[str]] = {}
+        instruments: dict[str, Counter[str]] = {}
         issues: list[dict[str, Any]] = []
 
-        def add_rows(code: str, severity: int, sql: str, parameters: Sequence[object] = ()) -> None:
-            count = int(connection.execute(f"SELECT COUNT(*) FROM ({sql})", parameters).fetchone()[0])
-            if count:
-                counts[code] += count
-                severity_counts[severity] += count
-            remaining = max(0, issue_limit - len(issues))
-            if not remaining:
-                return
-            for row in connection.execute(f"{sql} LIMIT ?", (*parameters, remaining)).fetchall():
+        def record(
+            code: str,
+            severity: int,
+            row: sqlite3.Row,
+            *,
+            source_code: str,
+            instrument: str,
+        ) -> None:
+            counts[code] += 1
+            severity_counts[severity] += 1
+            sources.setdefault(code, Counter())[source_code] += 1
+            instruments.setdefault(code, Counter())[instrument] += 1
+            if len(issues) < issue_limit:
                 raw = row[0]
                 key_bytes = bytes(raw) if isinstance(raw, (bytes, bytearray, memoryview)) else str(raw).encode("utf-8")
                 issues.append(
@@ -580,28 +561,94 @@ def compare_market_stores(
                     }
                 )
 
-        add_rows(
-            "CANDIDATE_FACT_MISSING",
-            2,
-            "SELECT b.event_key FROM main.market_observations b "
+        for row in connection.execute(
+            "SELECT b.event_key,b.source_code,b.instrument FROM main.market_observations b "
             "LEFT JOIN candidate.market_observations c ON c.event_key=b.event_key "
             "WHERE c.event_key IS NULL ORDER BY b.event_key",
-        )
-        add_rows(
-            "CANDIDATE_FACT_ADDED",
-            2,
-            "SELECT c.event_key FROM candidate.market_observations c "
+        ):
+            record(
+                "CANDIDATE_FACT_MISSING",
+                2,
+                row,
+                source_code=str(row[1]),
+                instrument=str(row[2]),
+            )
+        for row in connection.execute(
+            "SELECT c.event_key,c.source_code,c.instrument FROM candidate.market_observations c "
             "LEFT JOIN main.market_observations b ON b.event_key=c.event_key "
             "WHERE b.event_key IS NULL ORDER BY c.event_key",
-        )
-        for code, (severity, predicate) in predicates.items():
-            add_rows(
-                code,
-                severity,
-                "SELECT b.event_key FROM main.market_observations b "
-                "JOIN candidate.market_observations c ON c.event_key=b.event_key "
-                f"WHERE {predicate} ORDER BY b.event_key",
+        ):
+            record(
+                "CANDIDATE_FACT_ADDED",
+                2,
+                row,
+                source_code=str(row[1]),
+                instrument=str(row[2]),
             )
+        common_rows = connection.execute(
+            """
+            SELECT b.event_key,
+                   b.source_code,b.source_family,b.instrument,b.market_label,
+                   b.settlement_term,b.trade_form,b.event_type,b.side,b.price_num,
+                   b.price_unit,b.currency,b.quantity_num,b.quantity_unit,
+                   b.quality_state,b.is_conditional,
+                   c.source_code,c.source_family,c.instrument,c.market_label,
+                   c.settlement_term,c.trade_form,c.event_type,c.side,c.price_num,
+                   c.price_unit,c.currency,c.quantity_num,c.quantity_unit,
+                   c.quality_state,c.is_conditional
+            FROM main.market_observations b
+            JOIN candidate.market_observations c ON c.event_key=b.event_key
+            ORDER BY b.event_key
+            """
+        )
+        for row in common_rows:
+            common_count += 1
+            source_code = str(row[16])
+            instrument = str(row[18])
+            if (row[10], row[11], row[13]) != (row[25], row[26], row[28]):
+                record(
+                    "FACT_UNIT_MISMATCH",
+                    1,
+                    row,
+                    source_code=source_code,
+                    instrument=instrument,
+                )
+            if (row[7], row[14], row[15]) != (row[22], row[29], row[30]):
+                record(
+                    "FACT_LIFECYCLE_MISMATCH",
+                    2,
+                    row,
+                    source_code=source_code,
+                    instrument=instrument,
+                )
+            if (
+                row[1],
+                row[2],
+                row[3],
+                row[4],
+                row[5],
+                row[6],
+                row[8],
+                row[9],
+                row[12],
+            ) != (
+                row[16],
+                row[17],
+                row[18],
+                row[19],
+                row[20],
+                row[21],
+                row[23],
+                row[24],
+                row[27],
+            ):
+                record(
+                    "FACT_PARSER_MISMATCH",
+                    2,
+                    row,
+                    source_code=source_code,
+                    instrument=instrument,
+                )
     except sqlite3.Error as exc:
         raise SingleOwnerParityError("lane_fact_compare_failed") from exc
     finally:
@@ -611,6 +658,13 @@ def compare_market_stores(
         "candidate_fact_count": candidate_count,
         "common_fact_count": common_count,
         "difference_counts": dict(sorted(counts.items())),
+        "difference_counts_by_source": {
+            code: dict(sorted(values.items())) for code, values in sorted(sources.items())
+        },
+        "difference_counts_by_instrument": {
+            code: dict(sorted(values.items()))
+            for code, values in sorted(instruments.items())
+        },
         "issue_count": sum(counts.values()),
         "severity_1_count": severity_counts[1],
         "severity_2_count": severity_counts[2],
@@ -724,18 +778,46 @@ def compare_snapshots(
     candidate_signals = candidate.get("signals", {})
     signal_names = sorted(set(baseline_signals) | set(candidate_signals))
     signal_mismatches = 0
+    signal_value_mismatches = 0
+    value_fields = (
+        "status",
+        "price_unit",
+        "latest_price",
+        "weighted_median_price",
+        "mean_price",
+        "median_price",
+        "minimum_price",
+        "maximum_price",
+    )
     for name in signal_names:
         if content_hash(baseline_signals.get(name)) == content_hash(candidate_signals.get(name)):
             continue
         signal_mismatches += 1
+        left = baseline_signals.get(name)
+        right = candidate_signals.get(name)
+        left_values = (
+            {field: left.get(field) for field in value_fields}
+            if isinstance(left, Mapping)
+            else None
+        )
+        right_values = (
+            {field: right.get(field) for field in value_fields}
+            if isinstance(right, Mapping)
+            else None
+        )
+        value_mismatch = content_hash(left_values) != content_hash(right_values)
+        signal_value_mismatches += int(value_mismatch)
+        external = name in {"XAUUSD", "USDT_IRT"}
         issues.append(
             {
                 "code": (
-                    "CONSUMED_EXTERNAL_MISMATCH"
-                    if name in {"XAUUSD", "USDT_IRT"}
+                    "CONSUMED_EXTERNAL_VALUE_MISMATCH"
+                    if external and value_mismatch
+                    else "SNAPSHOT_METADATA_MISMATCH"
+                    if external
                     else "SNAPSHOT_FEATURE_MISMATCH"
                 ),
-                "severity": 1 if name in {"XAUUSD", "USDT_IRT"} else 2,
+                "severity": 1 if external and value_mismatch else 2,
                 "component": name,
             }
         )
@@ -771,6 +853,7 @@ def compare_snapshots(
     return {
         "signal_count": len(signal_names),
         "signal_mismatch_count": signal_mismatches,
+        "signal_value_mismatch_count": signal_value_mismatches,
         "rate_count": len(set(baseline_rates) | set(candidate_rates)),
         "rate_mismatch_count": rate_mismatches,
         "same_fact_inputs": same_fact_inputs,

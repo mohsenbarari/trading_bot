@@ -138,7 +138,10 @@ capture نیز با manifest و reconciliation مستقل سنجیده می‌ش
    version-pinned در laneهای کاملاً جدا replay می‌شود؛ هیچ network call، session تلگرام،
    product feed یا runtime state مشترک ساخته نمی‌شود؛
 5. final Market Storeهای دو lane را روی event keyهای HMACشده از نظر missing/added، unit،
-   lifecycle و semantics parser مقایسه و snapshot/rate را در یک timestamp هم‌تراز می‌سازد؛
+   lifecycle و semantics parser مقایسه و count اختلاف را با source/instrument داخلی تفکیک
+   می‌کند؛ snapshot/rate نیز در یک timestamp هم‌تراز ساخته می‌شود. برای XAU/USDT تفاوت
+   value مصرف‌شده severity-1 است، ولی تفاوت صرفاً metadata/cadence به‌اشتباه value mismatch
+   نام‌گذاری نمی‌شود؛
 6. فقط `report.json` امضاشده و `capture-manifest.json` privacy-minimized را با mode `0600`
    در artifact directory با mode `0700` حفظ می‌کند. متن خام، شناسه پیام، sender، event ID
    مستقیم، قیمت/تعداد اختلاف و database/spool موقت در خروجی ماندگار نمی‌ماند؛
