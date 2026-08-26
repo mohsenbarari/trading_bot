@@ -99,6 +99,28 @@ def _root_offer_fact_id(row: sqlite3.Row, attributes: Mapping[str, Any]) -> str:
     )
 
 
+def _require_root_offer_observation(
+    market: sqlite3.Connection,
+    row: sqlite3.Row,
+    attributes: Mapping[str, Any],
+) -> None:
+    event_key = str(attributes.get("root_offer_event_key") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", event_key):
+        raise MarketFactProjectionError("market_fact_projection_offer_reference_missing")
+    root = market.execute(
+        "SELECT source_code,event_type FROM market_observations WHERE event_key=?",
+        (bytes.fromhex(event_key),),
+    ).fetchone()
+    if (
+        root is None
+        or str(root["source_code"]) != str(row["source_code"])
+        or str(root["event_type"]) != "OFFER"
+    ):
+        raise MarketFactProjectionError(
+            "market_fact_projection_offer_dependency_missing"
+        )
+
+
 def _root_quantity(
     market: sqlite3.Connection,
     attributes: Mapping[str, Any],
@@ -136,6 +158,7 @@ def observation_payload(
             "quantity_unit": quantity_unit,
         }
     if source in {"GROUP_1", "GROUP_2"} and event_type == "TRADE":
+        _require_root_offer_observation(market, row, attributes)
         quality = _quality(str(row["quality_state"]))
         if quality == "ELIGIBLE":
             root_quantity = _root_quantity(market, attributes)
@@ -173,6 +196,7 @@ def observation_payload(
             "lifetime_seconds": 120,
         }
     if source == "PRIVATE_GOLD_CHANNEL" and event_type == "TRADE":
+        _require_root_offer_observation(market, row, attributes)
         remaining = attributes.get("remaining_quantity")
         offer_quantity = attributes.get("offer_quantity")
         outcome = "FULL"

@@ -11,7 +11,10 @@ from core.market_intelligence.market_fact_receiver import (
     apply_fact_batch,
     connect_receiver,
 )
-from core.market_intelligence.market_fact_projection import observation_payload
+from core.market_intelligence.market_fact_projection import (
+    MarketFactProjectionError,
+    observation_payload,
+)
 from core.market_intelligence.market_contracts import MarketObservation, derive_event_key
 from core.market_intelligence.market_store import (
     connect_market_store,
@@ -156,6 +159,49 @@ class Stage8ReceiverTests(unittest.TestCase):
             self.assertEqual(payload["agreed_price_value"], "187300")
             self.assertEqual(payload["agreed_quantity_value"], "2")
             self.assertRegex(payload["offer_fact_id"], r"^[0-9a-f]{64}$")
+            market.close()
+
+    def test_trade_projection_rejects_missing_offer_dependency_before_archive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            market = connect_market_store(Path(directory) / "market.sqlite3")
+            initialize_market_store(market)
+            trade_key = derive_event_key("stage8", "orphan-trade")
+            missing_offer_key = derive_event_key("stage8", "missing-offer")
+            upsert_observation(
+                market,
+                MarketObservation(
+                    event_key=trade_key,
+                    source_code="PRIVATE_GOLD_CHANNEL",
+                    source_family="TELEGRAM_PRIVATE",
+                    event_time_utc="2026-08-26T05:00:02Z",
+                    available_at_utc="2026-08-26T05:00:03Z",
+                    instrument="MELTED_GOLD_PRIVATE",
+                    market_label="PRIVATE_GOLD",
+                    settlement_term="TODAY",
+                    trade_form="PHYSICAL",
+                    event_type="TRADE",
+                    side="SELL",
+                    price="80000000",
+                    price_unit="TOMAN_PER_MESGHAL_750",
+                    currency="TOMAN",
+                    quantity="1",
+                    quantity_unit="LOT_COUNT",
+                    parser_version="stage8-test-v1",
+                    attributes={
+                        "root_offer_event_key": missing_offer_key.hex(),
+                        "remaining_quantity": "0",
+                    },
+                ),
+            )
+            market.commit()
+            row = market.execute(
+                "SELECT * FROM market_observations WHERE event_key=?", (trade_key,)
+            ).fetchone()
+            with self.assertRaisesRegex(
+                MarketFactProjectionError,
+                "market_fact_projection_offer_dependency_missing",
+            ):
+                observation_payload(market, row)
             market.close()
 
     def test_herat_projection_preserves_trade_dimensions(self):
