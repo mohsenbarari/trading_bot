@@ -525,9 +525,42 @@ def run_coin_processor_service(
         raise CoinProcessorError("coin_processor_interval_invalid")
     started_at = utc_text()
     health_path = state_directory / "health.json"
+    last_projection_causal_inputs = {
+        "feedback_rows": 0,
+        "prediction_rows_seen": 0,
+        "prediction_rows_rejected": 0,
+        "anchors": 0,
+    }
+    try:
+        previous_health = json.loads(health_path.read_text(encoding="utf-8"))
+        previous_causal = previous_health.get("last_projection_causal_inputs")
+        if (
+            previous_health.get("schema") == PROCESSOR_HEARTBEAT_SCHEMA
+            and previous_health.get("release_sha") == release_sha
+            and isinstance(previous_causal, dict)
+            and all(
+                isinstance(previous_causal.get(field), int)
+                and int(previous_causal[field]) >= 0
+                for field in last_projection_causal_inputs
+            )
+        ):
+            last_projection_causal_inputs = {
+                field: int(previous_causal[field])
+                for field in last_projection_causal_inputs
+            }
+    except (FileNotFoundError, json.JSONDecodeError, OSError, TypeError, ValueError):
+        pass
 
     def cycle_and_write(*, stopped: bool = False) -> None:
+        nonlocal last_projection_causal_inputs
         counters = process_coin_spool_cycle(paths=paths, mode=mode)
+        if int(counters["changes"]) or int(counters["tombstones"]):
+            last_projection_causal_inputs = {
+                "feedback_rows": int(counters["feedback_rows"]),
+                "prediction_rows_seen": int(counters["rows_seen"]),
+                "prediction_rows_rejected": int(counters["rows_rejected"]),
+                "anchors": int(counters["anchors"]),
+            }
         atomic_json_write(
             health_path,
             {
@@ -551,6 +584,7 @@ def run_coin_processor_service(
                 "calibration_corpus_version": CALIBRATION_CORPUS_VERSION,
                 "shadow_only": True,
                 "counters": counters,
+                "last_projection_causal_inputs": last_projection_causal_inputs,
             },
         )
 

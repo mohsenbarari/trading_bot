@@ -320,7 +320,7 @@ def inspect_result(root: Path) -> dict[str, Any]:
         "pending_or_rejected": len(rows) - len(eligible),
         "integrity": integrity,
         "parser_version": health["parser_version"],
-        "anchors": health["counters"]["anchors"],
+        "anchors": health["last_projection_causal_inputs"]["anchors"],
     }
 
 

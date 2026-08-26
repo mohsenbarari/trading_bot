@@ -620,6 +620,14 @@ def run_healthcheck(role: str, max_age_seconds: float) -> int:
                 raise FoundationError("processor_heartbeat_source_inventory_invalid")
             if document.get("shadow_only") is not True:
                 raise FoundationError("processor_shadow_boundary_invalid")
+            causal = document.get("last_projection_causal_inputs")
+            if not isinstance(causal, dict) or not {
+                "feedback_rows",
+                "prediction_rows_seen",
+                "prediction_rows_rejected",
+                "anchors",
+            }.issubset(causal):
+                raise FoundationError("processor_causal_input_health_invalid")
         elif document.get("status") != "fixture-ready":
             raise FoundationError("heartbeat_not_ready")
         if not 0 <= age <= max_age_seconds:
