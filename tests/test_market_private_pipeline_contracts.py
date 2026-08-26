@@ -10,6 +10,7 @@ from core.market_intelligence.private_pipeline_contracts import (
     EstimatorSnapshotV1,
     MarketCaptureRecordV1,
     MarketFactBatchV1,
+    MarketFactDeliveryV1,
     MarketFactV1,
     batch_items_hash,
     content_hash,
@@ -155,14 +156,31 @@ class MarketPrivatePipelineContractTests(unittest.TestCase):
 
     def test_batch_requires_contiguous_exactly_hashed_items(self):
         batch = fixture("market_fact_batch.json")
-        fact = MarketFactV1.model_validate(batch["items"][0])
-        self.assertEqual(batch["items_hash"], batch_items_hash([fact]))
+        delivery = MarketFactDeliveryV1.model_validate(batch["items"][0])
+        self.assertEqual(batch["items_hash"], batch_items_hash([delivery]))
 
         gap = copy.deepcopy(batch)
-        gap["items"][0]["source_sequence"] = 2
+        gap["items"][0]["delivery_sequence"] = 2
         gap["items_hash"] = content_hash(gap["items"])
         with self.assertRaises(ValidationError):
             MarketFactBatchV1.model_validate(gap)
+
+    def test_fact_revision_keeps_source_sequence_but_gets_new_delivery_sequence(self):
+        batch = fixture("market_fact_batch.json")
+        first = copy.deepcopy(batch["items"][0])
+        revised = copy.deepcopy(first)
+        revised["delivery_sequence"] = 2
+        revised["fact"]["fact_revision"] = 2
+        revised["fact"]["payload"]["offered_price_value"] = "187600"
+        revised["fact"]["payload_hash"] = content_hash(revised["fact"]["payload"])
+        batch["last_sequence"] = 2
+        batch["item_count"] = 2
+        batch["items"] = [first, revised]
+        batch["items_hash"] = content_hash(batch["items"])
+        validated = MarketFactBatchV1.model_validate(batch)
+        self.assertEqual(
+            [item.fact.source_sequence for item in validated.items], [1, 1]
+        )
 
     def test_safe_no_data_cannot_carry_rates(self):
         snapshot = fixture("estimator_snapshot.json")

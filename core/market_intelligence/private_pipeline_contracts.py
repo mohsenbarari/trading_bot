@@ -401,6 +401,19 @@ class MarketFactV1(ContractModel):
         return self
 
 
+class MarketFactDeliveryV1(ContractModel):
+    """One ordered delivery of a fact revision.
+
+    ``source_sequence`` identifies the logical fact at its source and remains
+    stable across parser corrections.  ``delivery_sequence`` is the strictly
+    increasing transport cursor, so a later revision can be delivered without
+    pretending that it is a new source fact.
+    """
+
+    delivery_sequence: int = Field(ge=1)
+    fact: MarketFactV1
+
+
 class MarketFactBatchV1(ContractModel):
     contract: Literal["market_fact_batch/1.0"]
     batch_id: Hex64
@@ -414,7 +427,7 @@ class MarketFactBatchV1(ContractModel):
     sender_instance_id: Annotated[
         str, StringConstraints(pattern=r"^[a-z][a-z0-9._-]{2,63}$")
     ]
-    items: tuple[MarketFactV1, ...]
+    items: tuple[MarketFactDeliveryV1, ...]
 
     @field_validator("created_at_utc")
     @classmethod
@@ -425,8 +438,8 @@ class MarketFactBatchV1(ContractModel):
     def validate_batch(self) -> "MarketFactBatchV1":
         if self.item_count != len(self.items):
             raise ValueError("batch_item_count_mismatch")
-        sequences = [item.source_sequence for item in self.items]
-        if any(item.stream_id != self.stream_id for item in self.items):
+        sequences = [item.delivery_sequence for item in self.items]
+        if any(item.fact.stream_id != self.stream_id for item in self.items):
             raise ValueError("batch_stream_mismatch")
         if sequences != list(range(self.first_sequence, self.last_sequence + 1)):
             raise ValueError("batch_sequence_not_contiguous")
@@ -531,5 +544,5 @@ def exported_schemas() -> dict[str, dict[str, Any]]:
     }
 
 
-def batch_items_hash(items: Sequence[MarketFactV1]) -> str:
+def batch_items_hash(items: Sequence[MarketFactDeliveryV1]) -> str:
     return content_hash([item.model_dump(mode="json") for item in items])

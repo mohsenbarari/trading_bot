@@ -95,14 +95,15 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
             gap["batch_id"] = "9" * 64
             gap["first_sequence"] = 3
             gap["last_sequence"] = 3
-            gap["items"][0]["fact_id"] = "8" * 64
-            gap["items"][0]["source_sequence"] = 3
+            gap["items"][0]["delivery_sequence"] = 3
+            gap["items"][0]["fact"]["fact_id"] = "8" * 64
+            gap["items"][0]["fact"]["source_sequence"] = 2
             gap["items_hash"] = content_hash(gap["items"])
             status, rejection = foundation.apply_fact_batch(
                 "market-fact-receiver", gap
             )
             self.assertEqual(status, 409)
-            self.assertEqual(rejection["reason_code"], "SEQUENCE_GAP")
+            self.assertEqual(rejection["rejection_reason_codes"], ["SEQUENCE_GAP"])
 
     def test_snapshot_version_regression_does_not_replace_latest(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(

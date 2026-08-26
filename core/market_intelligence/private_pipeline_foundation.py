@@ -1,9 +1,9 @@
 """Fail-closed Docker entrypoint for the private market-data pipeline.
 
-Stages 4-7 promote the two Telegram capture roles, an independent external
-quote capture role, and the downstream shadow processor/materializer.  Other
-roles remain fixture-only.  Telegram capture still requires release-bound
-session authority; the processor requires causal calibration sidecars.
+Stages 4-8 promote capture, processing, the fact outbox worker, and the fact
+receiver.  Estimator/adapter/snapshot roles remain fixture-only.  Telegram
+capture still requires release-bound session authority; the processor requires
+causal calibration sidecars and writes only the isolated market archive.
 """
 
 from __future__ import annotations
@@ -31,8 +31,6 @@ from pydantic import ValidationError
 
 from .private_pipeline_contracts import (
     EstimatorSnapshotV1,
-    MarketFactAckV1,
-    MarketFactBatchV1,
 )
 
 
@@ -70,7 +68,11 @@ CAPTURE_ROLES = frozenset(
     {"market-capture-account1", "market-capture-account2"}
 )
 EXTERNAL_CAPTURE_ROLES = frozenset({"market-capture-external"})
-LIVE_ROLES = CAPTURE_ROLES | EXTERNAL_CAPTURE_ROLES | {"market-processor"}
+LIVE_ROLES = CAPTURE_ROLES | EXTERNAL_CAPTURE_ROLES | {
+    "market-processor",
+    "market-fact-sync-worker",
+    "market-fact-receiver",
+}
 RECEIVER_ROLES = frozenset(
     {"market-fact-receiver", "estimator-snapshot-receiver"}
 )
@@ -275,32 +277,11 @@ def owner_lock_paths(role: str) -> tuple[Path, ...]:
 
 
 def receiver_database(role: str) -> sqlite3.Connection:
+    from .market_fact_receiver import connect_receiver
+
     root = role_state(role)
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    path = root / "fixture-receiver.sqlite"
-    connection = sqlite3.connect(path)
-    connection.execute("PRAGMA journal_mode=WAL")
-    connection.execute("PRAGMA synchronous=FULL")
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS fact_receipts (
-            stream_id TEXT NOT NULL,
-            source_sequence INTEGER NOT NULL,
-            fact_id TEXT NOT NULL UNIQUE,
-            payload_json TEXT NOT NULL,
-            received_at_utc TEXT NOT NULL,
-            PRIMARY KEY(stream_id, source_sequence)
-        )
-        """
-    )
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS fact_checkpoints (
-            stream_id TEXT PRIMARY KEY,
-            highest_contiguous_sequence INTEGER NOT NULL
-        )
-        """
-    )
+    connection = connect_receiver(root / "fixture-receiver.sqlite")
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS snapshot_receipts (
@@ -316,81 +297,13 @@ def receiver_database(role: str) -> sqlite3.Connection:
 
 
 def apply_fact_batch(role: str, document: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
-    try:
-        batch = MarketFactBatchV1.model_validate(document)
-    except ValidationError:
-        return 422, {"status": "REJECTED", "reason_code": "CONTRACT_INVALID"}
+    from .market_fact_receiver import apply_fact_batch as apply_to_receiver
 
     connection = receiver_database(role)
-    accepted = 0
-    duplicate = 0
     try:
-        connection.execute("BEGIN IMMEDIATE")
-        row = connection.execute(
-            "SELECT highest_contiguous_sequence FROM fact_checkpoints WHERE stream_id = ?",
-            (batch.stream_id,),
-        ).fetchone()
-        highest = int(row[0]) if row else 0
-        for item in batch.items:
-            existing = connection.execute(
-                "SELECT fact_id FROM fact_receipts WHERE stream_id = ? AND source_sequence = ?",
-                (batch.stream_id, item.source_sequence),
-            ).fetchone()
-            if existing:
-                if existing[0] != item.fact_id:
-                    connection.rollback()
-                    return 409, {
-                        "status": "REJECTED",
-                        "reason_code": "SEQUENCE_CONFLICT",
-                    }
-                duplicate += 1
-                continue
-            if item.source_sequence != highest + 1:
-                connection.rollback()
-                return 409, {"status": "REJECTED", "reason_code": "SEQUENCE_GAP"}
-            connection.execute(
-                """
-                INSERT INTO fact_receipts(
-                    stream_id, source_sequence, fact_id, payload_json, received_at_utc
-                ) VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    batch.stream_id,
-                    item.source_sequence,
-                    item.fact_id,
-                    item.model_dump_json(),
-                    utc_text(),
-                ),
-            )
-            highest = item.source_sequence
-            accepted += 1
-        connection.execute(
-            """
-            INSERT INTO fact_checkpoints(stream_id, highest_contiguous_sequence)
-            VALUES (?, ?)
-            ON CONFLICT(stream_id) DO UPDATE SET
-                highest_contiguous_sequence = excluded.highest_contiguous_sequence
-            """,
-            (batch.stream_id, highest),
-        )
-        connection.commit()
+        return apply_to_receiver(connection, document)
     finally:
         connection.close()
-
-    ack = MarketFactAckV1(
-        contract="market_fact_ack/1.0",
-        batch_id=batch.batch_id,
-        stream_id=batch.stream_id,
-        status="ACK",
-        highest_contiguous_sequence=highest,
-        received_count=len(batch.items),
-        accepted_count=accepted,
-        duplicate_count=duplicate,
-        rejected_count=0,
-        rejection_reason_codes=(),
-        receiver_timestamp_utc=utc_now(),
-    )
-    return 200, ack.model_dump(mode="json")
 
 
 def apply_estimator_snapshot(
@@ -579,6 +492,38 @@ def run_service(role: str) -> int:
                     CoinProcessorError,
                 ) as exc:
                     raise FoundationError(str(exc)) from exc
+            if role == "market-fact-sync-worker" and mode == "live":
+                from .market_fact_sync import (
+                    MarketFactSyncError,
+                    run_market_fact_sync_service,
+                )
+
+                try:
+                    return run_market_fact_sync_service(
+                        role=role,
+                        mode=mode,
+                        release_sha=release_sha,
+                        state_directory=role_state(role),
+                        stop=stop,
+                    )
+                except MarketFactSyncError as exc:
+                    raise FoundationError(str(exc)) from exc
+            if role == "market-fact-receiver" and mode == "live":
+                from .market_fact_receiver_service import (
+                    MarketFactReceiverServiceError,
+                    run_market_fact_receiver_service,
+                )
+
+                try:
+                    return run_market_fact_receiver_service(
+                        role=role,
+                        mode=mode,
+                        release_sha=release_sha,
+                        state_directory=role_state(role),
+                        stop=stop,
+                    )
+                except MarketFactReceiverServiceError as exc:
+                    raise FoundationError(str(exc)) from exc
             initialize_market_store_fixture(role, release_sha)
             heartbeat = Heartbeat(role, mode, release_sha)
             heartbeat.write(status="fixture-starting")
@@ -634,7 +579,7 @@ def run_healthcheck(role: str, max_age_seconds: float) -> int:
             }:
                 raise FoundationError("external_capture_source_inventory_invalid")
         elif role == "market-processor":
-            if document.get("schema") != "market_processor/3.0":
+            if document.get("schema") != "market_processor/4.0":
                 raise FoundationError("processor_heartbeat_schema_invalid")
             mode = document.get("mode")
             expected_status = (
@@ -678,13 +623,29 @@ def run_healthcheck(role: str, max_age_seconds: float) -> int:
                 "anchors",
             }.issubset(causal):
                 raise FoundationError("processor_causal_input_health_invalid")
+        elif role == "market-fact-sync-worker" and document.get("mode") == "live":
+            if (
+                document.get("schema") != "market_fact_sync/1.0"
+                or document.get("status") != "live-ready"
+                or document.get("private_transport_only") is not True
+                or not isinstance(document.get("queue_depth"), int)
+            ):
+                raise FoundationError("market_fact_sync_heartbeat_invalid")
+        elif role == "market-fact-receiver" and document.get("mode") == "live":
+            if (
+                document.get("schema") != "market_fact_receiver/1.0"
+                or document.get("status") != "live-ready"
+                or document.get("private_transport_only") is not True
+                or not isinstance(document.get("streams"), dict)
+            ):
+                raise FoundationError("market_fact_receiver_heartbeat_invalid")
         elif document.get("status") != "fixture-ready":
             raise FoundationError("heartbeat_not_ready")
         if not 0 <= age <= max_age_seconds:
             raise FoundationError("heartbeat_stale")
         pid = int(document["pid"])
         os.kill(pid, 0)
-        if role in RECEIVER_ROLES:
+        if role in RECEIVER_ROLES and document.get("mode") != "live":
             port = int(os.environ.get("MARKET_PIPELINE_LISTEN_PORT", "9443"))
             with urlopen(f"http://127.0.0.1:{port}/healthz", timeout=2) as response:
                 if response.status != 200:
@@ -750,13 +711,13 @@ def run_migration(migration_path: Path) -> int:
                     "WHERE table_schema = 'market_data'"
                 )
                 table_count = int(cursor.fetchone()[0])
-                if table_count != 22:
+                if table_count != 23:
                     raise FoundationError("migration_table_count_mismatch")
         except psycopg2.Error as exc:
             raise FoundationError("market_migration_database_failure") from exc
     finally:
         connection.close()
-    print(safe_json({"status": "applied", "version": 1, "table_count": 22}))
+    print(safe_json({"status": "applied", "version": 1, "table_count": 23}))
     return 0
 
 

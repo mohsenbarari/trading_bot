@@ -278,7 +278,7 @@ CREATE TABLE market_data.inference_input_uses (
 CREATE TABLE market_data.market_fact_outbox (
     stream_id TEXT NOT NULL,
     delivery_sequence BIGINT NOT NULL CHECK (delivery_sequence > 0),
-    fact_id BYTEA NOT NULL UNIQUE REFERENCES market_data.market_facts(fact_id),
+    fact_id BYTEA NOT NULL REFERENCES market_data.market_facts(fact_id),
     envelope JSONB NOT NULL,
     envelope_hash BYTEA NOT NULL CHECK (octet_length(envelope_hash) = 32),
     created_at_utc TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
@@ -286,12 +286,31 @@ CREATE TABLE market_data.market_fact_outbox (
     attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
     acknowledged_at_utc TIMESTAMPTZ,
     last_reason_code TEXT,
-    PRIMARY KEY (stream_id, delivery_sequence)
+    fact_revision INTEGER NOT NULL CHECK (fact_revision > 0),
+    dead_lettered_at_utc TIMESTAMPTZ,
+    PRIMARY KEY (stream_id, delivery_sequence),
+    UNIQUE (fact_id, fact_revision)
 );
 
 CREATE INDEX market_fact_outbox_claim_idx
 ON market_data.market_fact_outbox(stream_id, delivery_sequence)
 WHERE acknowledged_at_utc IS NULL;
+
+CREATE TABLE market_data.market_fact_dead_letters (
+    stream_id TEXT NOT NULL,
+    delivery_sequence BIGINT NOT NULL,
+    fact_id BYTEA NOT NULL CHECK (octet_length(fact_id) = 32),
+    fact_revision INTEGER NOT NULL CHECK (fact_revision > 0),
+    envelope_hash BYTEA NOT NULL CHECK (octet_length(envelope_hash) = 32),
+    reason_code TEXT NOT NULL,
+    first_failed_at_utc TIMESTAMPTZ NOT NULL,
+    last_failed_at_utc TIMESTAMPTZ NOT NULL,
+    failure_count INTEGER NOT NULL CHECK (failure_count > 0),
+    repaired_at_utc TIMESTAMPTZ,
+    PRIMARY KEY (stream_id, delivery_sequence),
+    FOREIGN KEY (stream_id, delivery_sequence)
+        REFERENCES market_data.market_fact_outbox(stream_id, delivery_sequence)
+);
 
 CREATE TABLE market_data.market_fact_delivery_checkpoints (
     stream_id TEXT PRIMARY KEY,

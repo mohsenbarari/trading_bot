@@ -8,6 +8,7 @@ services:
     environment:
       MARKET_PIPELINE_LISTEN_HOST: 0.0.0.0
       MARKET_PIPELINE_LISTEN_PORT: "9443"
+      MARKET_PIPELINE_ALLOWED_PEER_IP: ${MARKET_WEB_PRIVATE_IP:?MARKET_WEB_PRIVATE_IP is required}
     secrets:
       - market_transport_ca
       - market_bot_transport_cert

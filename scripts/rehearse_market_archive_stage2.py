@@ -188,12 +188,13 @@ def seed_sql(rows: int) -> str:
     FROM generate_series(1, {rows}) AS n;
 
     INSERT INTO market_data.market_fact_outbox (
-        stream_id, delivery_sequence, fact_id, envelope, envelope_hash
+        stream_id, delivery_sequence, fact_id, fact_revision, envelope, envelope_hash
     )
     SELECT
         'market.fact.coin.group.1',
         n,
         decode(md5('fact-' || n::text) || md5('fact-b-' || n::text), 'hex'),
+        1,
         jsonb_build_object('contract', 'market_fact/1.0', 'sequence', n),
         decode(md5('outbox-' || n::text) || md5('outbox-b-' || n::text), 'hex')
     FROM generate_series(1, {rows}) AS n;

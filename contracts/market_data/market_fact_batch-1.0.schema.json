@@ -260,6 +260,26 @@
       "title": "ExternalQuotePayload",
       "type": "object"
     },
+    "MarketFactDeliveryV1": {
+      "additionalProperties": false,
+      "description": "One ordered delivery of a fact revision.\n\n``source_sequence`` identifies the logical fact at its source and remains\nstable across parser corrections.  ``delivery_sequence`` is the strictly\nincreasing transport cursor, so a later revision can be delivered without\npretending that it is a new source fact.",
+      "properties": {
+        "delivery_sequence": {
+          "minimum": 1,
+          "title": "Delivery Sequence",
+          "type": "integer"
+        },
+        "fact": {
+          "$ref": "#/$defs/MarketFactV1"
+        }
+      },
+      "required": [
+        "delivery_sequence",
+        "fact"
+      ],
+      "title": "MarketFactDeliveryV1",
+      "type": "object"
+    },
     "MarketFactV1": {
       "additionalProperties": false,
       "properties": {
@@ -752,7 +772,7 @@
     },
     "items": {
       "items": {
-        "$ref": "#/$defs/MarketFactV1"
+        "$ref": "#/$defs/MarketFactDeliveryV1"
       },
       "title": "Items",
       "type": "array"

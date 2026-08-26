@@ -148,6 +148,8 @@ def fixture_environment(
         "MARKET_WEB_DATA_ROOT": str(root / "web"),
         "MARKET_BOT_DATA_ROOT": str(root / "bot"),
         "MARKET_PRIVATE_BIND_IP": "127.0.0.1",
+        "MARKET_WEB_PRIVATE_IP": "127.0.0.1",
+        "MARKET_BOT_PRIVATE_IP": "127.0.0.1",
         "MARKET_WEB_SNAPSHOT_RECEIVER_PORT": str(web_port),
         "MARKET_BOT_FACT_RECEIVER_PORT": str(bot_port),
         "MARKET_POSTGRES_USER": "market_data",
@@ -651,7 +653,7 @@ def run_rehearsal() -> dict[str, Any]:
         wait_healthy("bot", project, bot_services, environment)
 
         table_count = database_table_count(project, environment)
-        if table_count != 22:
+        if table_count != 23:
             raise RehearsalError("market_schema_table_count_mismatch")
         second_migration = command(
             [*compose("web", project), "run", "--rm", "market-migration"],
@@ -723,7 +725,7 @@ def run_rehearsal() -> dict[str, Any]:
             "bot", project, "market-fact-receiver", rollback_environment
         ) != rollback_id:
             raise RehearsalError("rollback_image_not_active")
-        if database_table_count(project, rollback_environment) != 22:
+        if database_table_count(project, rollback_environment) != 23:
             raise RehearsalError("rollback_schema_compatibility_failed")
         if not verify_market_store(market_store, release_sha):
             raise RehearsalError("rollback_lost_market_store")

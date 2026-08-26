@@ -387,16 +387,18 @@ def private_gold_observations(source: PrivateGoldOfferInput) -> list[MarketObser
     available_at = _strict_utc(source.available_at_utc, field_name="private_gold_available_at_utc")
     assert published_at is not None and available_at is not None
     price_store = Decimal(parsed.price_toman)
+    root_offer_event_key = _event_key(source.source_event_id, "OFFER")
     attributes: dict[str, object] = {
         "paper_variant": parsed.paper_variant or "NOT_APPLICABLE",
         "conditional_reason": parsed.conditional_reason or "NONE",
         "condition_class": parsed.condition_class,
         "has_description": parsed.has_description,
         "requires_market_comparability": parsed.is_conditional,
+        "root_offer_event_key": root_offer_event_key.hex(),
     }
     observations = [
         MarketObservation(
-            event_key=_event_key(source.source_event_id, "OFFER"),
+            event_key=root_offer_event_key,
             source_code=PRIVATE_GOLD_SOURCE_CODE,
             source_family="TELEGRAM_PRIVATE",
             event_time_utc=published_at,

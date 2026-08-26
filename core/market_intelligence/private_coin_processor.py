@@ -51,6 +51,7 @@ from .market_input_materializer import (
     INPUT_LEDGER_VERSION,
     materialize_input_snapshot,
 )
+from .market_fact_projection import export_market_store_facts
 from .market_contracts import normalize_utc
 from .market_store import connect_market_store, initialize_market_store, upsert_observation
 from .private_gold import PRIVATE_GOLD_PARSER_VERSION
@@ -59,8 +60,8 @@ from .private_pipeline_foundation import atomic_json_write, utc_text
 from .public_telegram.parser import PARSER_VERSION as PUBLIC_MARKET_PARSER_VERSION
 
 
-PROCESSOR_HEARTBEAT_SCHEMA = "market_processor/3.0"
-PROCESSOR_VERSION = "market-processor-v3-input-materializer-shadow"
+PROCESSOR_HEARTBEAT_SCHEMA = "market_processor/4.0"
+PROCESSOR_VERSION = "market-processor-v4-fact-archive-shadow"
 MAX_RECORD_BYTES = 256 * 1024
 MAX_RECORDS_PER_CYCLE = 20_000
 SPOOL_NAME = re.compile(r"^events-\d{4}-\d{2}-\d{2}\.jsonl$")
@@ -625,6 +626,35 @@ def _purge_temporary_public_melted(
     return purged
 
 
+def _archive_connection():
+    import psycopg2
+
+    secret_path = Path(
+        os.environ.get(
+            "MARKET_POSTGRES_PASSWORD_FILE",
+            "/run/secrets/market_postgres_password",
+        )
+    )
+    try:
+        password = secret_path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise CoinProcessorError("market_processor_archive_secret_unavailable") from exc
+    if not password:
+        raise CoinProcessorError("market_processor_archive_secret_unavailable")
+    try:
+        return psycopg2.connect(
+            host=os.environ.get("MARKET_POSTGRES_HOST", "market-database"),
+            port=int(os.environ.get("MARKET_POSTGRES_PORT", "5432")),
+            user=os.environ.get("MARKET_POSTGRES_USER", "market_data"),
+            password=password,
+            dbname=os.environ.get("MARKET_POSTGRES_DB", "market_archive"),
+            connect_timeout=5,
+            application_name="market-processor-archive",
+        )
+    except psycopg2.Error as exc:
+        raise CoinProcessorError("market_processor_archive_unavailable") from exc
+
+
 def process_coin_spool_cycle(
     *,
     paths: CoinProcessorPaths,
@@ -732,6 +762,20 @@ def process_coin_spool_cycle(
         market.commit()
         staging.commit()
         corpus.commit()
+        archive_report = None
+        if os.environ.get("MARKET_PROCESSOR_ARCHIVE_ENABLED", "0").strip() == "1":
+            archive = _archive_connection()
+            try:
+                with archive:
+                    archive_report = export_market_store_facts(market, archive)
+                # Advance the local export ledger only after PostgreSQL has
+                # committed the fact and outbox item in one transaction.
+                market.commit()
+            except BaseException:
+                market.rollback()
+                raise
+            finally:
+                archive.close()
     except BaseException:
         market.rollback()
         staging.rollback()
@@ -778,6 +822,10 @@ def process_coin_spool_cycle(
             for component in input_snapshot.components
         ),
         "raw_rows_purged": projection.raw_rows_purged,
+        "archive_selected": archive_report.selected if archive_report else 0,
+        "archive_published": archive_report.published if archive_report else 0,
+        "archive_unchanged": archive_report.unchanged if archive_report else 0,
+        "archive_rejected": archive_report.rejected if archive_report else 0,
     }
 
 
