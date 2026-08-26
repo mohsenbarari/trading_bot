@@ -307,7 +307,7 @@ Gate:
 | ۳ خانه | implementation-complete |
 | ۴ حساب | implementation-complete |
 | ۵ پروفایل | implementation-complete |
-| ۶ عملیات | pending |
+| ۶ عملیات | implementation-complete |
 | ۷ مدیریت | pending |
 | ۸ احراز | pending |
 | ۹ پیام‌رسان | pending |

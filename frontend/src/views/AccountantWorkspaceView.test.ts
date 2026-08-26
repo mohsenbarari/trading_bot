@@ -884,7 +884,8 @@ describe('AccountantWorkspaceView.vue', () => {
     const rawServerDetail = 'raw-server-detail: accountant relation=12'
     const wrapper = mount(AccountantWorkspaceView)
     await flushPromises()
-    await wrapper.get('.accountant-pending-card .ui-button--danger').trigger('click')
+    await wrapper.get('.accountant-pending-card [aria-label="اقدام‌های دعوت"]').trigger('click')
+    await wrapper.get('.accountant-pending-card .ui-action-overflow__item--danger').trigger('click')
     const vm = viewVm(wrapper)
 
     expect(confirmDialog().text()).toContain('لغو رابطه و دعوت حسابدار')

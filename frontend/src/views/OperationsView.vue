@@ -180,7 +180,6 @@ onMounted(refreshIdentity)
       <WorkspaceSection
         v-if="hasIdentity && ownerActions.length"
         title="روابط کاری"
-        tone="primary"
         v2-scope
       >
         <div class="action-grid">
@@ -203,7 +202,6 @@ onMounted(refreshIdentity)
       <WorkspaceSection
         v-if="hasIdentity && adminActions.length"
         title="مدیریت"
-        tone="success"
         v2-scope
       >
         <div class="action-grid">

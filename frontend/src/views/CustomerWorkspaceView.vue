@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Clock, Copy, ReceiptText, ShieldAlert, UserPlus, Users } from 'lucide-vue-next'
+import { Clock, ReceiptText, ShieldAlert, UserPlus, Users } from 'lucide-vue-next'
 import CustomerNameWithBadge from '../components/CustomerNameWithBadge.vue'
 import {
   WorkspaceAccountDeletionDialog,
@@ -12,15 +12,16 @@ import {
   WorkspaceShell,
 } from '../components/workspace'
 import {
+  AppActionOverflow,
   AppBottomSheet,
   AppButton,
-  AppCard,
   AppConfirmDialog,
   AppDangerZone,
   AppEmptyState,
   AppFilterChips,
   AppFormField,
   AppInput,
+  AppInsetGroup,
   AppListItem,
   AppLoadingState,
   AppNumberStepper,
@@ -297,24 +298,37 @@ const activeRelationLimits = computed(() => {
     {
       label: 'حداقل مقدار معامله',
       value: formatMaybeNumber(relation.min_trade_quantity),
-      description: 'کمترین حجمی که مشتری مجاز به معامله است.',
     },
     {
       label: 'حداکثر مقدار معامله',
       value: formatMaybeNumber(relation.max_trade_quantity),
-      description: 'بیشترین حجم مجاز برای هر معامله.',
     },
     {
       label: 'حداکثر تعداد روزانه',
       value: formatMaybeNumber(relation.max_daily_trades),
-      description: 'سقف تعداد معاملات مشتری در یک روز.',
     },
     {
       label: 'حداکثر حجم روزانه',
       value: formatMaybeNumber(relation.max_daily_commodity_volume),
-      description: 'سقف مجموع حجم کالایی در روز.',
     },
   ]
+})
+
+const statsPeriodOptions = [
+  { key: '1', label: '۱ روز' },
+  { key: '3', label: '۳ روز' },
+  { key: '7', label: '۷ روز' },
+  { key: '30', label: '۳۰ روز' },
+  { key: '90', label: '۹۰ روز' },
+  { key: '180', label: '۱۸۰ روز' },
+]
+
+const statsPeriodKey = computed({
+  get: () => String(statsPeriodDays.value),
+  set: (value: string) => {
+    const days = Number(value)
+    if (Number.isInteger(days) && days > 0) setStatsPeriod(days)
+  },
 })
 
 const createCommissionRate = computed({
@@ -1337,6 +1351,77 @@ function getSessionDescription(session: CustomerSessionSummary) {
   return `${platform} · آخرین فعالیت ${formatDate(session.last_active_at)}`
 }
 
+function pendingInviteOverflowActions(relation: CustomerRelation) {
+  const actions: { id: string; label: string; tone?: 'neutral' | 'danger' }[] = []
+  if (invitationRelationLink(relation, 'bot')) {
+    actions.push({
+      id: 'bot',
+      label:
+        copiedRelationId.value === relation.id && copiedInvitationSurface.value === 'bot'
+          ? 'کپی شد'
+          : 'کپی لینک تلگرام',
+    })
+  }
+  if (invitationRelationLink(relation, 'web')) {
+    actions.push({
+      id: 'web',
+      label:
+        copiedRelationId.value === relation.id && copiedInvitationSurface.value === 'web'
+          ? 'کپی شد'
+          : 'کپی لینک وب',
+    })
+  }
+  actions.push({ id: 'cancel', label: 'لغو دعوت', tone: 'danger' })
+  return actions
+}
+
+function handlePendingInviteOverflow(relation: CustomerRelation, id: string) {
+  if (id === 'bot') {
+    void copyRegistrationLink(relation, 'bot')
+    return
+  }
+  if (id === 'web') {
+    void copyRegistrationLink(relation, 'web')
+    return
+  }
+  if (id === 'cancel') {
+    openConfirmDialog('cancel-invitation', relation)
+  }
+}
+
+function detailInviteCopyActions(relation: CustomerRelation) {
+  const actions: { id: string; label: string }[] = []
+  if (invitationRelationLink(relation, 'web')) {
+    actions.push({
+      id: 'web',
+      label:
+        copiedRelationId.value === relation.id && copiedInvitationSurface.value === 'web'
+          ? 'کپی شد'
+          : 'کپی لینک وب‌اپ',
+    })
+  }
+  if (invitationRelationLink(relation, 'bot')) {
+    actions.push({
+      id: 'bot',
+      label:
+        copiedRelationId.value === relation.id && copiedInvitationSurface.value === 'bot'
+          ? 'کپی شد'
+          : 'کپی لینک تلگرام',
+    })
+  }
+  return actions
+}
+
+function handleDetailInviteCopy(relation: CustomerRelation, id: string) {
+  if (id === 'bot') {
+    void copyRegistrationLink(relation, 'bot')
+    return
+  }
+  if (id === 'web') {
+    void copyRegistrationLink(relation, 'web')
+  }
+}
+
 function getStatusTone(status: string) {
   if (status === 'active') return 'success'
   if (status === 'pending') return 'warning'
@@ -1517,7 +1602,6 @@ onBeforeUnmount(() => {
       class="ui-v2-workspace-customer-root"
       title="مشتریان"
       eyebrow="عملیات"
-      description="جستجو، دعوت و مدیریت مشتری با تمرکز بر اقدام بعدی."
       layout="split"
       v2-scope
       show-back
@@ -1553,7 +1637,6 @@ onBeforeUnmount(() => {
           v-if="hasDetailRoute"
           class="customer-detail-section ui-v2-workspace-customer-detail-section"
           title="پرونده مشتری"
-          description="مشخصات، محدودیت‌ها، معاملات، آمار، نشست‌ها و اقدامات حساس در یک نمای یکپارچه."
           v2-scope
         >
           <WorkspaceNotice
@@ -1614,7 +1697,6 @@ onBeforeUnmount(() => {
             <WorkspaceDetailHeader
               header-class="customer-detail-header ui-v2-workspace-customer-detail-header"
               badges-class="customer-detail-badges ui-v2-workspace-customer-detail-badges"
-              :description="getRelationDescription(activeRelation)"
             >
               <template #title>
                 <CustomerNameWithBadge :name="getRelationTitle(activeRelation)" />
@@ -1633,16 +1715,18 @@ onBeforeUnmount(() => {
               v-if="activeRelation.status === 'pending'"
               class="customer-pending-detail ui-v2-workspace-customer-pending-detail"
             >
-              <AppCard
-                tone="warning"
-                class="customer-pending-card ui-v2-workspace-customer-pending-card"
-              >
-                <strong>دعوت در انتظار ثبت‌نام</strong>
-                <p>{{ getRelationDescription(activeRelation) }}</p>
+              <AppInsetGroup class="customer-pending-card ui-v2-workspace-customer-pending-card">
+                <div class="customer-pending-card__header ui-v2-workspace-customer-pending-header">
+                  <div>
+                    <strong>دعوت در انتظار ثبت‌نام</strong>
+                    <p>{{ getRelationDescription(activeRelation) }}</p>
+                  </div>
+                  <AppStatusBadge tone="warning">دعوت</AppStatusBadge>
+                </div>
                 <p class="customer-pending-deadline ui-v2-workspace-customer-pending-deadline">
                   {{ formatInvitationDeadline(activeRelation.expires_at) }}
                 </p>
-              </AppCard>
+              </AppInsetGroup>
               <WorkspaceNotice
                 v-if="invitationSmsStatusMessage(activeRelation.sms_status)"
                 v2-scope
@@ -1657,34 +1741,12 @@ onBeforeUnmount(() => {
                 title="بازخورد دعوت"
                 :message="invitationFeedback[activeRelation.id]?.message"
               />
-              <div
+              <AppActionOverflow
                 class="customer-pending-detail__actions ui-v2-workspace-customer-pending-actions"
-              >
-                <AppButton
-                  v-if="invitationRelationLink(activeRelation, 'web')"
-                  variant="primary"
-                  block
-                  @click="copyRegistrationLink(activeRelation, 'web')"
-                >
-                  {{
-                    copiedRelationId === activeRelation.id && copiedInvitationSurface === 'web'
-                      ? 'کپی شد'
-                      : 'کپی لینک وب‌اپ'
-                  }}
-                </AppButton>
-                <AppButton
-                  v-if="invitationRelationLink(activeRelation, 'bot')"
-                  variant="secondary"
-                  block
-                  @click="copyRegistrationLink(activeRelation, 'bot')"
-                >
-                  {{
-                    copiedRelationId === activeRelation.id && copiedInvitationSurface === 'bot'
-                      ? 'کپی شد'
-                      : 'کپی لینک تلگرام'
-                  }}
-                </AppButton>
-              </div>
+                :actions="detailInviteCopyActions(activeRelation)"
+                more-label="کپی لینک دعوت"
+                @select="(id) => handleDetailInviteCopy(activeRelation, id)"
+              />
               <div class="customer-pending-detail__danger ui-v2-workspace-customer-pending-danger">
                 <AppButton
                   variant="danger"
@@ -1713,7 +1775,7 @@ onBeforeUnmount(() => {
               message="این رابطه پایان یافته است؛ مشخصات و تاریخچه قابل مشاهده‌اند، اما ویرایش محدودیت‌ها، مدیریت نشست و حذف حساب در دسترس نیست."
             />
 
-            <div
+            <AppInsetGroup
               v-if="activeRelation.status !== 'pending' && detailTab === 'profile'"
               class="customer-detail-grid ui-v2-workspace-customer-detail-grid"
             >
@@ -1745,28 +1807,30 @@ onBeforeUnmount(() => {
               />
               <AppListItem title="فعال‌سازی" :meta="formatDate(activeRelation.activated_at)" />
               <AppListItem title="ایجاد رابطه" :meta="formatDate(activeRelation.created_at)" />
-            </div>
+            </AppInsetGroup>
 
             <div
               v-else-if="canEditLimits && detailTab === 'limits'"
               class="customer-detail-list ui-v2-workspace-customer-detail-list"
             >
-              <div class="customer-detail-grid ui-v2-workspace-customer-detail-grid">
+              <AppInsetGroup class="customer-detail-grid ui-v2-workspace-customer-detail-grid">
                 <AppListItem
                   v-for="item in activeRelationLimits"
                   :key="item.label"
                   :title="item.label"
-                  :description="item.description"
                   :meta="item.value"
                 />
-              </div>
+              </AppInsetGroup>
+              <p class="customer-meta-label ui-v2-workspace-customer-meta-label">
+                خالی یعنی بدون سقف
+              </p>
 
-              <AppCard
+              <div
                 v-if="!isLimitsReviewOpen"
                 class="customer-edit-form-card ui-v2-workspace-customer-edit-card"
               >
                 <div class="customer-edit-form-grid ui-v2-workspace-customer-form-grid">
-                  <AppFormField label="سطح مشتری" hint="سطح مشتری، رفتار کمیسیون را تعیین می‌کند.">
+                  <AppFormField label="سطح مشتری">
                     <template #default="{ id }">
                       <AppSelect
                         :id="id"
@@ -1795,7 +1859,7 @@ onBeforeUnmount(() => {
                     </template>
                   </AppFormField>
 
-                  <AppFormField label="حداقل مقدار معامله" hint="خالی بماند یعنی بدون محدودیت.">
+                  <AppFormField label="حداقل مقدار معامله">
                     <template #default="{ id }">
                       <AppInput
                         :id="id"
@@ -1805,7 +1869,7 @@ onBeforeUnmount(() => {
                     </template>
                   </AppFormField>
 
-                  <AppFormField label="حداکثر مقدار معامله" hint="خالی بماند یعنی بدون محدودیت.">
+                  <AppFormField label="حداکثر مقدار معامله">
                     <template #default="{ id }">
                       <AppInput
                         :id="id"
@@ -1815,7 +1879,7 @@ onBeforeUnmount(() => {
                     </template>
                   </AppFormField>
 
-                  <AppFormField label="حداکثر تعداد روزانه" hint="خالی بماند یعنی بدون محدودیت.">
+                  <AppFormField label="حداکثر تعداد روزانه">
                     <template #default="{ id }">
                       <AppInput
                         :id="id"
@@ -1825,7 +1889,7 @@ onBeforeUnmount(() => {
                     </template>
                   </AppFormField>
 
-                  <AppFormField label="حداکثر حجم روزانه" hint="خالی بماند یعنی بدون محدودیت.">
+                  <AppFormField label="حداکثر حجم روزانه">
                     <template #default="{ id }">
                       <AppInput
                         :id="id"
@@ -1856,9 +1920,9 @@ onBeforeUnmount(() => {
                     مرور تغییرات
                   </AppButton>
                 </WorkspaceFormActions>
-              </AppCard>
+              </div>
 
-              <AppCard
+              <div
                 v-else
                 class="customer-financial-review ui-v2-workspace-customer-financial-review"
               >
@@ -1868,7 +1932,6 @@ onBeforeUnmount(() => {
                   <strong>مرور تغییرات</strong>
                   <AppStatusBadge tone="success">فعال</AppStatusBadge>
                 </header>
-                <p>پیش از ثبت، مقدارهای قبل و بعد را بررسی کنید.</p>
                 <table
                   class="customer-financial-review__table ui-v2-workspace-customer-financial-table"
                 >
@@ -1921,7 +1984,7 @@ onBeforeUnmount(() => {
                     بازگشت و اصلاح
                   </AppButton>
                 </WorkspaceFormActions>
-              </AppCard>
+              </div>
             </div>
 
             <div
@@ -1966,7 +2029,7 @@ onBeforeUnmount(() => {
                 title="معامله‌ای ثبت نشده است"
                 message="برای این مشتری هنوز معامله‌ای در بازه اخیر پیدا نشد."
               />
-              <template v-if="detailTrades.length">
+              <AppInsetGroup v-if="detailTrades.length">
                 <AppListItem
                   v-for="trade in detailTrades"
                   :key="trade.id"
@@ -1978,31 +2041,19 @@ onBeforeUnmount(() => {
                     <ReceiptText :size="18" />
                   </template>
                 </AppListItem>
-              </template>
+              </AppInsetGroup>
             </div>
 
             <div
               v-else-if="canViewHistory && detailTab === 'stats'"
               class="customer-detail-list ui-v2-workspace-customer-detail-list"
             >
-              <div
+              <AppFilterChips
                 class="customer-period-tabs ui-v2-workspace-customer-period-tabs"
-                aria-label="بازه گزارش مشتری"
-              >
-                <button
-                  v-for="days in [1, 3, 7, 30, 90, 180]"
-                  :key="days"
-                  type="button"
-                  class="ui-v2-workspace-customer-period-tab"
-                  :class="{
-                    'is-active': statsPeriodDays === days,
-                    'ui-v2-workspace-customer-period-tab--active': statsPeriodDays === days,
-                  }"
-                  @click="setStatsPeriod(days)"
-                >
-                  {{ days.toLocaleString('fa-IR') }} روز
-                </button>
-              </div>
+                v-model="statsPeriodKey"
+                label="بازه گزارش مشتری"
+                :options="statsPeriodOptions"
+              />
               <WorkspaceNotice
                 v-if="detailStatsError"
                 v2-scope
@@ -2023,7 +2074,7 @@ onBeforeUnmount(() => {
                 v-if="detailStatsLoading && !detailStats"
                 label="در حال آماده‌سازی ساختار آمار"
               />
-              <div
+              <AppInsetGroup
                 v-if="detailStats"
                 class="customer-stats-grid ui-v2-workspace-customer-stats-grid"
               >
@@ -2048,7 +2099,7 @@ onBeforeUnmount(() => {
                     </li>
                   </ul>
                 </div>
-              </div>
+              </AppInsetGroup>
               <WorkspaceNotice
                 v-if="!detailStatsLoading && !detailStatsError && !detailStats"
                 v2-scope
@@ -2107,7 +2158,7 @@ onBeforeUnmount(() => {
                 title="نشست فعالی وجود ندارد"
                 message="برای این مشتری نشست فعالی ثبت نشده است."
               />
-              <template v-if="detailSessions.length">
+              <AppInsetGroup v-if="detailSessions.length">
                 <AppListItem
                   v-for="session in detailSessions"
                   :key="session.id"
@@ -2134,7 +2185,7 @@ onBeforeUnmount(() => {
                     </div>
                   </template>
                 </AppListItem>
-              </template>
+              </AppInsetGroup>
             </div>
 
             <div
@@ -2194,7 +2245,6 @@ onBeforeUnmount(() => {
           v-if="!hasDetailRoute || !isMobile"
           class="customer-list-section ui-v2-workspace-customer-list-section"
           title="لیست مشتریان"
-          description="جستجو، فیلتر و انتخاب مشتری با دسترسی مستقیم به دعوت‌ها و پرونده‌های فعال."
           v2-scope
         >
           <template #actions>
@@ -2281,15 +2331,14 @@ onBeforeUnmount(() => {
             class="workspace-relation-list ui-v2-workspace-customer-relation-list"
             @scroll.passive="handleListScroll"
           >
-            <div
+            <AppInsetGroup
               v-if="visiblePendingRelations.length"
               class="customer-list-group ui-v2-workspace-customer-list-group"
+              title="دعوت‌های در انتظار"
             >
-              <h3>دعوت‌های در انتظار</h3>
-              <AppCard
+              <div
                 v-for="relation in visiblePendingRelations"
                 :key="relation.id"
-                tone="warning"
                 class="customer-pending-card ui-v2-workspace-customer-pending-card"
               >
                 <div class="customer-pending-card__header ui-v2-workspace-customer-pending-header">
@@ -2304,48 +2353,16 @@ onBeforeUnmount(() => {
                 <p class="customer-pending-deadline ui-v2-workspace-customer-pending-deadline">
                   {{ formatInvitationDeadline(relation.expires_at) }}
                 </p>
-                <WorkspaceFormActions action-class="customer-inline-actions ui-v2-workspace-customer-inline-actions">
+                <AppActionOverflow
+                  class="customer-inline-actions ui-v2-workspace-customer-inline-actions"
+                  :actions="pendingInviteOverflowActions(relation)"
+                  more-label="اقدام‌های دعوت"
+                  @select="(id) => handlePendingInviteOverflow(relation, id)"
+                >
                   <AppButton size="sm" variant="primary" @click="openRelation(relation.id)">
                     بررسی دعوت
                   </AppButton>
-                  <AppButton
-                    v-if="invitationRelationLink(relation, 'bot')"
-                    size="sm"
-                    variant="secondary"
-                    @click="copyRegistrationLink(relation, 'bot')"
-                  >
-                    <template #icon>
-                      <Copy :size="16" />
-                    </template>
-                    {{
-                      copiedRelationId === relation.id && copiedInvitationSurface === 'bot'
-                        ? 'کپی شد'
-                        : 'کپی لینک تلگرام'
-                    }}
-                  </AppButton>
-                  <AppButton
-                    v-if="invitationRelationLink(relation, 'web')"
-                    size="sm"
-                    variant="secondary"
-                    @click="copyRegistrationLink(relation, 'web')"
-                  >
-                    <template #icon>
-                      <Copy :size="16" />
-                    </template>
-                    {{
-                      copiedRelationId === relation.id && copiedInvitationSurface === 'web'
-                        ? 'کپی شد'
-                        : 'کپی لینک وب'
-                    }}
-                  </AppButton>
-                  <AppButton
-                    size="sm"
-                    variant="danger"
-                    @click="openConfirmDialog('cancel-invitation', relation)"
-                  >
-                    لغو دعوت
-                  </AppButton>
-                </WorkspaceFormActions>
+                </AppActionOverflow>
                 <WorkspaceNotice
                   v-if="invitationSmsStatusMessage(relation.sms_status)"
                   v2-scope
@@ -2360,14 +2377,14 @@ onBeforeUnmount(() => {
                   title="بازخورد دعوت"
                   :message="invitationFeedback[relation.id]?.message"
                 />
-              </AppCard>
-            </div>
+              </div>
+            </AppInsetGroup>
 
-            <div
+            <AppInsetGroup
               v-if="visibleManageableRelations.length"
               class="customer-list-group ui-v2-workspace-customer-list-group"
+              title="پرونده‌های مشتریان"
             >
-              <h3>پرونده‌های مشتریان</h3>
               <AppListItem
                 v-for="relation in visibleManageableRelations"
                 :key="relation.id"
@@ -2400,7 +2417,7 @@ onBeforeUnmount(() => {
                   </div>
                 </template>
               </AppListItem>
-            </div>
+            </AppInsetGroup>
           </div>
         </WorkspaceSection>
       </div>
@@ -2441,7 +2458,6 @@ onBeforeUnmount(() => {
       :is="isMobile ? AppBottomSheet : AppResponsiveDialog"
       :open="isCreatePanelOpen"
       title="افزودن مشتری"
-      description="اطلاعات اولیه مشتری و محدودیت‌های پایه را ثبت کنید."
       :show-close="!isCreateSubmitting"
       :close-on-backdrop="!isCreateSubmitting"
       :close-on-escape="!isCreateSubmitting"
@@ -2458,7 +2474,7 @@ onBeforeUnmount(() => {
           :aria-busy="isCreateSubmitting ? 'true' : undefined"
         >
           <legend>اطلاعات دعوت مشتری</legend>
-          <AppFormField label="نام مدیریتی" hint="نامی که در فضای کاری خودتان می‌بینید.">
+          <AppFormField label="نام مدیریتی">
             <template #default="{ id }">
               <AppInput
                 :id="id"
@@ -2468,7 +2484,7 @@ onBeforeUnmount(() => {
             </template>
           </AppFormField>
 
-          <AppFormField label="شماره موبایل" hint="برای ساخت حساب دعوتی و ثبت لینک استفاده می‌شود.">
+          <AppFormField label="شماره موبایل">
             <template #default="{ id }">
               <AppInput
                 :id="id"
@@ -2509,7 +2525,7 @@ onBeforeUnmount(() => {
           </AppFormField>
 
           <div class="customer-edit-form-grid ui-v2-workspace-customer-form-grid">
-            <AppFormField label="حداقل مقدار معامله" hint="خالی بماند یعنی بدون محدودیت.">
+            <AppFormField label="حداقل مقدار معامله">
               <template #default="{ id }">
                 <AppInput
                   :id="id"
@@ -2518,7 +2534,7 @@ onBeforeUnmount(() => {
                 />
               </template>
             </AppFormField>
-            <AppFormField label="حداکثر مقدار معامله" hint="خالی بماند یعنی بدون محدودیت.">
+            <AppFormField label="حداکثر مقدار معامله">
               <template #default="{ id }">
                 <AppInput
                   :id="id"
@@ -2527,7 +2543,7 @@ onBeforeUnmount(() => {
                 />
               </template>
             </AppFormField>
-            <AppFormField label="حداکثر تعداد روزانه" hint="خالی بماند یعنی بدون محدودیت.">
+            <AppFormField label="حداکثر تعداد روزانه">
               <template #default="{ id }">
                 <AppInput
                   :id="id"
@@ -2536,7 +2552,7 @@ onBeforeUnmount(() => {
                 />
               </template>
             </AppFormField>
-            <AppFormField label="حداکثر حجم روزانه" hint="خالی بماند یعنی بدون محدودیت.">
+            <AppFormField label="حداکثر حجم روزانه">
               <template #default="{ id }">
                 <AppInput
                   :id="id"
@@ -2546,14 +2562,17 @@ onBeforeUnmount(() => {
               </template>
             </AppFormField>
           </div>
+          <p class="customer-meta-label ui-v2-workspace-customer-meta-label">
+            خالی یعنی بدون سقف
+          </p>
 
-          <AppCard
+          <div
             v-if="generatedCreateAccountName"
             class="customer-generated-account ui-v2-workspace-customer-generated-account"
           >
             <span class="customer-meta-label ui-v2-workspace-customer-meta-label">دعوت مشتری</span>
             <strong>آماده ثبت</strong>
-          </AppCard>
+          </div>
         </fieldset>
 
         <WorkspaceNotice
