@@ -136,7 +136,7 @@ Stage 11 فقط bundle نرمال‌شده و sensitive ciphertext را می‌�
 ## ترتیب release آینده
 
 1. build از worktree تمیز و label برابر Git SHA؛
-2. ثبت/انتقال همان digest برای هر دو میزبان؛
+2. ثبت/انتقال همان digest رجیستری یا Docker image ID محتواآدرس‌پذیر برای هر دو میزبان؛
 3. preflight path، secret و private bind؛
 4. receiver-first؛
 5. migration یک‌باره و idempotent؛

@@ -50,6 +50,7 @@ EXPECTED_RECEIVER = {
 }
 RELEASE_SHA = re.compile(r"^[0-9a-f]{8,64}$")
 IMMUTABLE_IMAGE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
+LOCAL_CONTENT_IMAGE = re.compile(r"^sha256:[0-9a-f]{64}$")
 SECRET_PARENT_UID = 0
 SECRET_PARENT_GID = 0
 SECRET_FILE_UID = 0
@@ -321,13 +322,17 @@ def audit_compose(document: Mapping[str, Any], *, role: str, fixture: bool) -> N
 
 
 def image_metadata(image: str, release_sha: str, *, fixture: bool) -> dict[str, Any]:
-    if not fixture and not IMMUTABLE_IMAGE.fullmatch(image):
+    registry_digest = IMMUTABLE_IMAGE.fullmatch(image)
+    local_content_id = LOCAL_CONTENT_IMAGE.fullmatch(image)
+    if not fixture and not (registry_digest or local_content_id):
         raise Stage3Error("release_image_must_be_digest_pinned")
     output = run(
         ["docker", "image", "inspect", image],
         label="image_inspect",
     )
     document = json.loads(output)[0]
+    if local_content_id and document.get("Id") != image:
+        raise Stage3Error("release_local_image_id_mismatch")
     labels = document.get("Config", {}).get("Labels", {}) or {}
     if labels.get("org.opencontainers.image.revision") != release_sha:
         raise Stage3Error("image_release_sha_label_mismatch")

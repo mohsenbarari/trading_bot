@@ -217,6 +217,39 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
             Path("/tmp/market-stage3-fixture"),
         )
 
+    def test_live_preflight_accepts_only_registry_digest_or_exact_local_image_id(self):
+        image_id = "sha256:" + ("a" * 64)
+        inspect_document = [
+            {
+                "Id": image_id,
+                "Size": 123,
+                "Architecture": "amd64",
+                "Os": "linux",
+                "RepoDigests": [],
+                "Config": {
+                    "User": "10001:10001",
+                    "Env": [],
+                    "Labels": {
+                        "org.opencontainers.image.revision": "b" * 40,
+                        "org.opencontainers.image.version": "stage13-shadow",
+                    },
+                },
+            }
+        ]
+        with patch.object(manager, "run", return_value=json.dumps(inspect_document)):
+            metadata = manager.image_metadata(image_id, "b" * 40, fixture=False)
+        self.assertEqual(metadata["image_id"], image_id)
+        with self.assertRaisesRegex(
+            manager.Stage3Error, "release_image_must_be_digest_pinned"
+        ):
+            manager.image_metadata("market-pipeline:mutable", "b" * 40, fixture=False)
+        inspect_document[0]["Id"] = "sha256:" + ("c" * 64)
+        with patch.object(manager, "run", return_value=json.dumps(inspect_document)):
+            with self.assertRaisesRegex(
+                manager.Stage3Error, "release_local_image_id_mismatch"
+            ):
+                manager.image_metadata(image_id, "b" * 40, fixture=False)
+
     def test_secret_contract_requires_root_only_parent_and_shared_runtime_group(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
