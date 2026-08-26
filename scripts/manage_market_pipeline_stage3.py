@@ -338,6 +338,25 @@ def audit_compose(document: Mapping[str, Any], *, role: str, fixture: bool) -> N
             # and query_only, which is the actual data-mutation boundary.
             if receiver_mounts[0].get("read_only") is True:
                 raise Stage3Error("compose_adapter_receiver_wal_mount_read_only")
+        if name == "market-processor":
+            prediction_path = environment.get("MARKET_PROCESSOR_PREDICTION_DB")
+            if prediction_path != (
+                "/var/lib/market-data/calibration/coin-groups/"
+                "prediction-ledger.sqlite3"
+            ):
+                raise Stage3Error("compose_processor_prediction_path_invalid")
+            calibration_mounts = [
+                volume
+                for volume in service.get("volumes", [])
+                if volume.get("target")
+                == "/var/lib/market-data/calibration/coin-groups"
+            ]
+            if len(calibration_mounts) != 1:
+                raise Stage3Error("compose_processor_calibration_mount_invalid")
+            if calibration_mounts[0].get("read_only") is True:
+                raise Stage3Error(
+                    "compose_processor_prediction_wal_mount_read_only"
+                )
 
 
 def image_metadata(image: str, release_sha: str, *, fixture: bool) -> dict[str, Any]:

@@ -202,6 +202,13 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
             "target: /var/lib/market-data/receiver", 1
         )[1].split("depends_on:", 1)[0]
         self.assertIn("read_only: false", receiver_mount)
+        processor = web.split("  market-processor:", 1)[1].split(
+            "  market-fact-sync-worker:", 1
+        )[0]
+        calibration_mount = processor.split(
+            "target: /var/lib/market-data/calibration/coin-groups", 1
+        )[1].split("depends_on:", 1)[0]
+        self.assertIn("read_only: false", calibration_mount)
 
     def test_adapter_wal_reader_mount_must_not_be_filesystem_read_only(self):
         base_service = {

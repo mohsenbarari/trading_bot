@@ -193,7 +193,10 @@ services:
       - type: bind
         source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/calibration/coin-groups
         target: /var/lib/market-data/calibration/coin-groups
-        read_only: true
+        # prediction-ledger.sqlite3 is updated by the snapshot receiver in WAL
+        # mode. The processor needs directory write access only for SQLite's
+        # shared-memory sidecar; both calibration connections remain mode=ro.
+        read_only: false
     depends_on:
       market-migration:
         condition: service_completed_successfully
