@@ -720,13 +720,24 @@ class TelegramCaptureProvider:
             self.reconciliation_truncated = True
             newest = newest[:maximum]
         for message in reversed(newest):
-            await self._capture_message(
-                client,
-                policy,
-                message,
-                backfill=True,
-                edited=getattr(message, "edit_date", None) is not None,
-            )
+            try:
+                await self._capture_message(
+                    client,
+                    policy,
+                    message,
+                    backfill=True,
+                    edited=getattr(message, "edit_date", None) is not None,
+                )
+            except CaptureRuntimeError as exc:
+                # Telegram channels legitimately contain service/media-only
+                # messages that have no model-consumable text. One such
+                # historical item must not poison reconciliation or prevent
+                # later valid market messages from becoming durable.
+                self.engine.state.note_quarantine(
+                    b"telegram-reconcile-event",
+                    exc,
+                    source_code=policy.source_code,
+                )
 
     async def run(self) -> None:
         try:

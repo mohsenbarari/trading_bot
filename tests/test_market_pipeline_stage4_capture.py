@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
 import sqlite3
 import tempfile
+import threading
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -135,6 +138,63 @@ class CaptureFixture(unittest.TestCase):
         self.assertEqual(
             rows[0]["producer"]["available_at_utc"], "2026-08-26T10:00:01.000000Z"
         )
+
+    def test_reconciliation_quarantines_media_only_message_and_continues(self):
+        now = telegram_capture.utc_now()
+        valid = SimpleNamespace(
+            id=102,
+            date=now - timedelta(seconds=1),
+            edit_date=None,
+            message="2,350.50",
+        )
+        media_only = SimpleNamespace(
+            id=101,
+            date=now - timedelta(seconds=2),
+            edit_date=None,
+            message="",
+            media=SimpleNamespace(),
+        )
+
+        class FakeClient:
+            async def iter_messages(self, _entity, *, limit):
+                self.limit = limit
+                for item in (valid, media_only):
+                    yield item
+
+        config = TelegramCaptureConfig(
+            contract="market_telegram_capture_config/1.0",
+            account="account1",
+            api_id=1,
+            api_hash="a" * 32,
+            session_filename="account1.session",
+            sources=tuple(
+                CaptureBinding(source_code=source, peer_id=-(index + 1))
+                for index, source in enumerate(
+                    sorted(capture.ACCOUNT_SOURCES["account1"])
+                )
+            ),
+        )
+        provider = telegram_capture.TelegramCaptureProvider(
+            config,
+            self.engine,
+            session_path=self.root / "account1.session",
+            hmac_key=None,
+            stop=threading.Event(),
+        )
+        provider._entity_by_source["XAUUSD"] = SimpleNamespace(forum=False)
+        client = FakeClient()
+        asyncio.run(provider._reconcile_source(client, SOURCE_POLICIES["XAUUSD"]))
+
+        self.assertEqual(
+            self.state.connection.execute(
+                "SELECT COUNT(*) FROM capture_seen"
+            ).fetchone()[0],
+            1,
+        )
+        quarantine = self.state.connection.execute(
+            "SELECT reason_code,occurrences FROM capture_quarantine"
+        ).fetchone()
+        self.assertEqual(tuple(quarantine), ("CAPTURE_MESSAGE_TEXT_INVALID", 1))
 
     def test_fsync_failure_keeps_outbox_and_restart_recovers_without_loss(self):
         moment = datetime(2026, 8, 26, 10, 0, tzinfo=UTC)
