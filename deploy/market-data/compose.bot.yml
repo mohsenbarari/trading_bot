@@ -54,7 +54,11 @@ services:
       - type: bind
         source: ${MARKET_BOT_DATA_ROOT:?MARKET_BOT_DATA_ROOT is required}/state/market-fact-receiver
         target: /var/lib/market-data/receiver
-        read_only: true
+        # SQLite WAL readers must be able to create/update the shared-memory
+        # sidecar in this directory.  The adapter connection itself remains
+        # mode=ro with PRAGMA query_only=ON, so the database is never writable
+        # through the application connection.
+        read_only: false
     depends_on:
       market-fact-receiver:
         condition: service_healthy

@@ -319,6 +319,25 @@ def audit_compose(document: Mapping[str, Any], *, role: str, fixture: bool) -> N
             if any(marker in upper for marker in ("TOKEN", "PASSWORD", "SECRET")):
                 if value not in {None, ""} and not upper.endswith("_FILE"):
                     raise Stage3Error("compose_plaintext_secret_environment_forbidden")
+        if name == "market-store-adapter":
+            receiver_path = environment.get("MARKET_PIPELINE_RECEIVER_DB_PATH")
+            if receiver_path != (
+                "/var/lib/market-data/receiver/market-fact-receiver/"
+                "market-fact-receiver.sqlite3"
+            ):
+                raise Stage3Error("compose_adapter_receiver_path_invalid")
+            receiver_mounts = [
+                volume
+                for volume in service.get("volumes", [])
+                if volume.get("target") == "/var/lib/market-data/receiver"
+            ]
+            if len(receiver_mounts) != 1:
+                raise Stage3Error("compose_adapter_receiver_mount_invalid")
+            # A live SQLite WAL reader needs write access to the directory for
+            # its -shm sidecar. The application connection is still mode=ro
+            # and query_only, which is the actual data-mutation boundary.
+            if receiver_mounts[0].get("read_only") is True:
+                raise Stage3Error("compose_adapter_receiver_wal_mount_read_only")
 
 
 def image_metadata(image: str, release_sha: str, *, fixture: bool) -> dict[str, Any]:

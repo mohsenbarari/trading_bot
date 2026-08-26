@@ -198,6 +198,58 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
         self.assertNotIn("market_bot_transport", web)
         self.assertEqual(web.count("ports:"), 1)
         self.assertEqual(bot.count("ports:"), 1)
+        receiver_mount = bot.split(
+            "target: /var/lib/market-data/receiver", 1
+        )[1].split("depends_on:", 1)[0]
+        self.assertIn("read_only: false", receiver_mount)
+
+    def test_adapter_wal_reader_mount_must_not_be_filesystem_read_only(self):
+        base_service = {
+            "user": "10001:10001",
+            "read_only": True,
+            "cap_drop": ["ALL"],
+            "security_opt": ["no-new-privileges:true"],
+            "profiles": ["bot"],
+            "environment": {
+                "MARKET_PIPELINE_RECEIVER_DB_PATH": (
+                    "/var/lib/market-data/receiver/market-fact-receiver/"
+                    "market-fact-receiver.sqlite3"
+                )
+            },
+            "volumes": [
+                {
+                    "type": "bind",
+                    "source": "/tmp/receiver",
+                    "target": "/var/lib/market-data/receiver",
+                    "read_only": False,
+                }
+            ],
+        }
+        services = {
+            name: {
+                **copy.deepcopy(base_service),
+                "profiles": ["bot"],
+                "ports": (
+                    [{"host_ip": "127.0.0.1", "target": 9443}]
+                    if name == "market-fact-receiver"
+                    else []
+                ),
+            }
+            for name in manager.EXPECTED_SERVICES["bot"]
+        }
+        services["market-fact-receiver"]["environment"] = {}
+        services["market-fact-receiver"]["volumes"] = []
+        services["coin-estimator"]["environment"] = {}
+        services["coin-estimator"]["volumes"] = []
+        services["estimator-snapshot-sender"]["environment"] = {}
+        services["estimator-snapshot-sender"]["volumes"] = []
+        manager.audit_compose({"services": services}, role="bot", fixture=True)
+        services["market-store-adapter"]["volumes"][0]["read_only"] = True
+        with self.assertRaisesRegex(
+            manager.Stage3Error,
+            "compose_adapter_receiver_wal_mount_read_only",
+        ):
+            manager.audit_compose({"services": services}, role="bot", fixture=True)
 
     def test_bind_and_path_guards_reject_public_or_broad_targets(self):
         self.assertEqual(
