@@ -1,6 +1,6 @@
 # Roadmap انتقال داده و Parse بازار روی شبکه خصوصی
 
-وضعیت: مرحله 0 تکمیل شده؛ مرحله 1 در حال اجرا و شبکه خصوصی provider ساخته شده است؛ cutover انجام نشده است
+وضعیت: مراحل 0 و 1 تکمیل شده‌اند؛ مرحله 2 هنوز آغاز نشده و cutover انجام نشده است
 
 تاریخ بازبینی: 2026-08-26
 
@@ -457,7 +457,16 @@ Gate:
 - delete protection خود Hetzner برای Network فعال شد؛
 - هیچ endpoint داده، route اضافه، public fallback، firewall rule، certificate، service یا sync عمومی در این زیرمرحله تغییر نکرد.
 
-موارد باقی‌مانده برای عبور از gate مرحله 1: endpoint خصوصی آزمایشی، HMAC/TLS و rotation، آزمون throughput/reconnect/packet-loss/clock-skew، policy دقیق firewall و rollback rehearsal.
+تکمیل gate مرحله 1 در 2026-08-26:
+
+- endpoint مصنوعی دوطرفه فقط روی IP خصوصی با peer allowlist و firewall موقت دقیق اجرا شد؛
+- TLS 1.3، CA/leaf validation، HMAC-SHA256 دوکلیدی، replay window، clock-skew و rotation پاس شدند؛
+- 200 درخواست 64 KiB در هر جهت حداقل 25.297 MiB/s و حداکثر p95 برابر 3.446 ms ثبت کردند؛
+- public exposure، bad credential، replay، route cut، firewall drop، packet loss، timeout، reconnect، restart و certificate rotation آزمایش شدند؛
+- rollback تمام listenerها، ruleهای موقت و secretهای `/run` را حذف کرد و شبکه خصوصی سالم باقی ماند؛
+- sync عمومی، serviceهای بازار و authority هیچ تغییری نکردند.
+
+گزارش و gate receipt: [COIN_MARKET_DATA_STAGE1_PRIVATE_NETWORK.md](./COIN_MARKET_DATA_STAGE1_PRIVATE_NETWORK.md)
 
 ### مرحله 2 — تثبیت contract، schema و storage engine
 
