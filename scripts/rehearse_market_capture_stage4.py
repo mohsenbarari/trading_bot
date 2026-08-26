@@ -172,7 +172,7 @@ def fixture_documents(now: datetime) -> dict[str, list[dict[str, Any]]]:
         )
 
     account1 = [
-        market("XAUUSD", 1, old),
+        market("XAUUSD", 1, old, received=old),
         market("XAUUSD", 2, now - timedelta(seconds=20)),
         market("USD_HERAT", 3, now - timedelta(seconds=18)),
         market("MELTED_PRIMARY_FLOW", 4, now - timedelta(seconds=16)),
