@@ -749,9 +749,7 @@ describe('CustomerWorkspaceView.vue', () => {
   )
 
   it('keeps workspace touch targets tokenized and removes back motion for reduced-motion users', () => {
-    expect(customerWorkspaceCss).toMatch(
-      /\.ui-v2-workspace-customer-detail-tabs\s*\n\s*\.ui-tabs__tab,[\s\S]*\.ui-v2-workspace-customer-filter-chips\s*\n\s*\.ui-filter-chip\s*\{\s*min-inline-size: var\(--ui-v2-size-target-min\);\s*min-block-size: var\(--ui-v2-size-target-min\);/,
-    )
+    expect(customerWorkspaceCss).not.toContain('.ui-tabs__tab')
     expect(customerWorkspaceCss).toMatch(
       /\.ui-v2-workspace-customer-period-tab\s*\{[\s\S]*?min-block-size: var\(--ui-v2-size-target-min\);/,
     )

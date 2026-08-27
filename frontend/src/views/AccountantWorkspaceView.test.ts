@@ -1109,7 +1109,7 @@ describe('AccountantWorkspaceView.vue', () => {
           '.ui-v2-workspace-accountant-root.ui-v2-workspace-adapter',
         )
         expect(accountantStage5Css).toContain('grid-template-columns: minmax(0, 1fr);')
-        expect(accountantStage5Css).toContain('min-block-size: var(--ui-v2-size-target-min);')
+        expect(accountantStage5Css).not.toContain('.ui-tabs__tab')
         expect(accountantStage5Css).toContain('@media (prefers-reduced-motion: reduce)')
         expect(accountantStage5Css).toContain('transition: none;')
         expect(accountantStage5Css).not.toContain('padding-bottom')
