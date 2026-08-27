@@ -496,6 +496,29 @@ receiver و adapter staging با image
 تا checkpoint adapter بدون lag عبور کرد. mode همچنان `PRIVATE_SHADOW` است و production،
 Product/WebApp authority و `PRIVATE_PRIMARY` تغییر نکردند.
 
+## اصلاح فشار RAM و retention دریافت Account1 — 2026-08-27
+
+ممیزی میزبان وب نشان داد `/tmp` یک `tmpfs` است و ۱۹ بستهٔ انتقال موقت pipeline با حجم
+`2,179,315,964` بایت مستقیماً RAM را اشغال کرده بودند. هیچ process، file handle یا
+container فعالی به آن‌ها وابسته نبود؛ پس از حذف، مصرف `/tmp` از `2.1G` به `1.9M` و
+حافظهٔ available میزبان از حدود `705MiB` به `2.7GiB` رسید. مسیر انتقال دائمی به
+`/var/tmp/trading-bot-market-pipeline-transfer` روی ext4 منتقل شد، retention یک‌ساعتهٔ
+`systemd-tmpfiles` نصب شد و release/image جدید بدون فایل میانی remote به‌صورت stream منتقل
+شد.
+
+سه OOM ساعتی Account1 نیز به retention قدیمی مربوط بود: spoolهای `69MiB` و `114MiB` با
+`readlines()` و لیست کامل رکوردهای نگه‌داشتنی هم‌زمان در RAM کپی می‌شدند. `main@51344aa9`
+startup index و compaction را record-by-record کرد، temporary ناقص را fail-closed پاک می‌کند
+و cache reply را برای Account1 حذف و برای Account2 روی ۵۰هزار entry محدود کرد. آزمون روی
+کپی واقعی ۱۶۵٬۹۶۵ رویدادی، داخل container با limit برابر `384MiB`، با peak RSS برابر
+`58,500KiB` و بدون OOM پاس شد؛ rehearsal کامل Stage 4 نیز crash/restart، single-owner،
+retention و cleanup را پاس کرد.
+
+فقط `market-capture-account1` با choreography تک‌مالک روی release مذکور rolling-replace
+شد. sequence از `166072` به `166280` ادامه یافت، outbox صفر، container restart صفر، owner
+قدیمی inactive و RSS اولیه `157.8MiB / 384MiB` بود. production، Product/WebApp authority،
+Account2 و سایر serviceهای shadow در این اقدام تغییر نکردند.
+
 ## rollback مجاز این مرحله
 
 rollback اختیار capture باید با حفظ کامل outbox/checkpoint/session انجام شود:
