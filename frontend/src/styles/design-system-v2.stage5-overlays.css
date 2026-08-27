@@ -6,24 +6,24 @@
   inset: 0;
   z-index: 9999;
   box-sizing: border-box;
-  padding: calc(var(--ui-v2-spacing-16) + env(safe-area-inset-top)) var(--ui-v2-spacing-16)
-    calc(var(--ui-v2-spacing-16) + env(safe-area-inset-bottom));
-  background: var(--ui-v2-color-surface-page);
+  padding: calc(16px + env(safe-area-inset-top)) 16px
+    calc(16px + env(safe-area-inset-bottom));
+  background: var(--ds-bg-page);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   :where(.ui-v2-workspace-overlay-panel, .ui-v2-workspace-confirm-backdrop > section) {
   box-sizing: border-box;
   width: 100%;
-  max-width: var(--ui-v2-layout-reading-max);
+  max-width: 72ch;
   max-height: 100%;
   overflow: hidden;
-  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
-  border-radius: var(--ui-v2-radius-panel);
-  background: var(--ui-v2-color-surface-card);
+  border: 1px solid var(--ds-native-hairline);
+  border-radius: var(--ds-radius-xl);
+  background: var(--ds-bg-card);
   box-shadow: none;
-  color: var(--ui-v2-color-text-primary);
-  font-family: var(--ui-v2-font-family);
+  color: var(--ds-text-primary);
+  font-family: var(--ds-font-sans, Vazirmatn, Tahoma, Arial, sans-serif);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -31,14 +31,14 @@
     .ui-v2-workspace-overlay-panel,
     .ui-v2-workspace-confirm-backdrop > section
   ):focus-visible {
-  outline: var(--ui-v2-stroke-focus) solid var(--ui-v2-color-border-focus);
-  outline-offset: var(--ui-v2-spacing-2);
+  outline: 3px solid var(--ds-primary-500);
+  outline-offset: 2px;
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-overlay-body {
   min-height: 0;
   overflow-y: auto;
-  padding: var(--ui-v2-spacing-16);
+  padding: 16px;
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -46,41 +46,41 @@
   position: static;
   display: grid;
   grid-template-columns: 1fr;
-  gap: var(--ui-v2-spacing-8);
-  margin-block-start: var(--ui-v2-spacing-16);
-  padding-block-start: var(--ui-v2-spacing-16);
-  border-block-start: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  gap: 8px;
+  margin-block-start: 16px;
+  padding-block-start: 16px;
+  border-block-start: 1px solid var(--ds-native-hairline);
   background: transparent;
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-inline-form-actions
   .ui-button {
-  min-height: var(--ui-v2-size-cta-min);
+  min-height: var(--ds-touch-target);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   :where(.ui-v2-workspace-overlay-actions, .ui-v2-workspace-confirm-backdrop > section > footer) {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: var(--ui-v2-spacing-8);
-  padding: var(--ui-v2-spacing-16);
-  border-block-start: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
-  background: var(--ui-v2-color-surface-card);
+  gap: 8px;
+  padding: 16px;
+  border-block-start: 1px solid var(--ds-native-hairline);
+  background: var(--ds-bg-card);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   :where(.ui-v2-workspace-overlay-actions, .ui-v2-workspace-confirm-backdrop > section > footer)
   .ui-button {
-  min-height: var(--ui-v2-size-cta-min);
+  min-height: var(--ds-touch-target);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-confirm-backdrop
   > section
   > header {
-  padding: var(--ui-v2-spacing-16);
-  border-block-end: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  padding: 16px;
+  border-block-end: 1px solid var(--ds-native-hairline);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -88,10 +88,10 @@
   > section
   > header
   h2 {
-  color: var(--ui-v2-color-text-strong);
-  font-size: var(--ui-v2-type-section-size);
-  font-weight: var(--ui-v2-font-weight-bold);
-  line-height: var(--ui-v2-type-section-line);
+  color: var(--ds-text-strong);
+  font-size: var(--ds-font-xl);
+  font-weight: 700;
+  line-height: 1.35;
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -99,7 +99,7 @@
   > section
   > header
   p {
-  color: var(--ui-v2-color-text-secondary);
-  font-size: var(--ui-v2-type-body-small-size);
-  line-height: var(--ui-v2-type-body-small-line);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-sm);
+  line-height: 1.4;
 }

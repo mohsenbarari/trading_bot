@@ -246,6 +246,10 @@ const promotableMembers = computed(() => {
     })
 })
 
+function formatMemberCount(value: unknown) {
+  return Number(value || 0).toLocaleString('fa-IR')
+}
+
 const pageTitle = computed(() => {
   switch (page.value) {
     case 'create':
@@ -271,7 +275,7 @@ const pageSubtitle = computed(() => {
       return 'کانال را بسازید و بعد اعضا و ادمین‌ها را مدیریت کنید.'
     case 'overview':
       return activeChannel.value
-        ? `${activeChannel.value.member_count.toLocaleString('fa-IR')} عضو فعال`
+        ? `${formatMemberCount(activeChannel.value.member_count)} عضو فعال`
         : 'یک کانال را برای مدیریت انتخاب کنید.'
     case 'members':
       return `${filteredMembers.value.length.toLocaleString('fa-IR')} عضو نمایش داده می‌شود`
@@ -1014,7 +1018,7 @@ onBeforeUnmount(() => {
               v-for="channel in existingChannels"
               :key="channel.id"
               :title="channel.title"
-              :description="channel.description || `${channel.member_count.toLocaleString('fa-IR')} عضو`"
+              :description="channel.description || `${formatMemberCount(channel.member_count)} عضو`"
               :meta="getChannelKindLabel(channel)"
               interactive
               @select="openChannel(channel)"
@@ -1084,7 +1088,7 @@ onBeforeUnmount(() => {
           </button>
           <div class="manager-preview-title">{{ activeChannel.title }}</div>
           <p v-if="activeChannel.description" class="manager-preview-description">{{ activeChannel.description }}</p>
-          <div class="manager-preview-meta">{{ activeChannel.member_count.toLocaleString('fa-IR') }} عضو</div>
+          <div class="manager-preview-meta">{{ formatMemberCount(activeChannel.member_count) }} عضو</div>
           <div v-if="canEditOverviewAvatar" class="avatar-tool-row compact centered-overview-tools">
             <AppButton type="button" variant="secondary" :disabled="avatarBusy" @click="triggerAvatarPicker">{{ avatarFileId ? 'تغییر عکس کانال' : 'افزودن عکس کانال' }}</AppButton>
             <AppButton v-if="avatarFileId" type="button" variant="danger" :disabled="avatarBusy" @click="clearAvatar">حذف عکس</AppButton>
@@ -1103,10 +1107,10 @@ onBeforeUnmount(() => {
         </div>
 
         <AppInsetGroup title="اعضا و دسترسی‌ها">
-          <AppListItem title="اعضای کانال" :meta="activeChannel.member_count.toLocaleString('fa-IR')" interactive @select="setPage('members')">
+          <AppListItem title="اعضای کانال" :meta="formatMemberCount(activeChannel.member_count)" interactive @select="setPage('members')">
             <template #leading><UsersRound :size="18" /></template>
             <template #trailing>
-              <span>{{ activeChannel.member_count.toLocaleString('fa-IR') }}</span>
+              <span>{{ formatMemberCount(activeChannel.member_count) }}</span>
               <ChevronLeft :size="18" aria-hidden="true" />
             </template>
           </AppListItem>

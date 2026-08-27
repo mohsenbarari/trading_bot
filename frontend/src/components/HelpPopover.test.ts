@@ -75,20 +75,16 @@ describe('HelpPopover.vue', () => {
     }
   })
 
-  it('keeps live profile surfaces free of HelpPopover', () => {
+  it('keeps live profile and operations surfaces free of HelpPopover', () => {
     const publicProfile = componentSource('PublicProfile.vue')
     const userProfile = componentSource('UserProfile.vue')
 
     expect(helpPopoverCalls(publicProfile)).toHaveLength(0)
     expect(helpPopoverCalls(userProfile)).toHaveLength(0)
+    expect(helpPopoverCalls(componentSource('CreateChannelView.vue'))).toHaveLength(0)
+    expect(helpPopoverCalls(componentSource('OwnerCustomerManagerModal.vue'))).toHaveLength(0)
+    expect(helpPopoverCalls(componentSource('OwnerAccountantManagerModal.vue'))).toHaveLength(0)
 
-    for (const protectedCaller of [
-      'CreateChannelView.vue',
-      'AdminMessagesView.vue',
-      'OwnerCustomerManagerModal.vue',
-      'OwnerAccountantManagerModal.vue',
-    ]) {
-      expect(componentSource(protectedCaller)).not.toContain('comfortable-target')
-    }
+    expect(componentSource('AdminMessagesView.vue')).not.toContain('comfortable-target')
   })
 })

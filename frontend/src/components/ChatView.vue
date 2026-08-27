@@ -71,6 +71,7 @@ import {
   getMessengerContextMenuStyle,
   type MessengerContextMenuModel,
 } from '../utils/messageContextMenuModel'
+import { useOverlayA11y } from './ui/useOverlayA11y'
 
 const loadChatSearchGlobalList = () => import('./chat/ChatSearchGlobalList.vue')
 
@@ -2452,6 +2453,16 @@ function closeSeenListModal() {
   seenListModal.value = { visible: false, isLoading: false, error: '', messageId: null, members: [] }
 }
 
+const seenListContainerRef = ref<HTMLElement | null>(null)
+const seenListOpen = computed(() => seenListModal.value.visible)
+const seenListDescription = computed(() => undefined as string | undefined)
+const { titleId: seenListTitleId } = useOverlayA11y({
+  open: seenListOpen,
+  description: seenListDescription,
+  containerRef: seenListContainerRef,
+  close: closeSeenListModal,
+})
+
 function closeCurrentOverlayThen(closeCurrent: () => void, openNext: () => void) {
   closeCurrent()
   void nextTick(() => {
@@ -4175,15 +4186,22 @@ defineExpose({
     />
 
     <div v-if="seenListModal.visible" class="seen-list-overlay" @click.self="closeSeenListModal">
-      <section class="seen-list-sheet" role="dialog" aria-modal="true" aria-label="بازدیدها">
+      <section
+        ref="seenListContainerRef"
+        class="seen-list-sheet"
+        role="dialog"
+        aria-modal="true"
+        :aria-labelledby="seenListTitleId"
+        tabindex="-1"
+      >
         <header class="seen-list-header">
-          <button type="button" class="seen-list-close" @click="closeSeenListModal" aria-label="بستن">
+          <button type="button" class="seen-list-close" @click="closeSeenListModal" aria-label="بستن بازدیدها">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
             </svg>
           </button>
-          <h2>بازدیدها</h2>
+          <h2 :id="seenListTitleId">بازدیدها</h2>
         </header>
 
         <div v-if="seenListModal.isLoading" class="seen-list-state">در حال دریافت...</div>
@@ -4394,6 +4412,7 @@ defineExpose({
   display: flex;
   align-items: center;
   gap: 12px;
+  min-height: 48px;
   padding: 10px 16px;
 }
 

@@ -108,7 +108,9 @@ function parseVariables(source: string) {
 describe('Design System V2 CSS contract', () => {
   it('keeps create-form actions in normal scroll flow instead of pinning them above keyboards', () => {
     const rules: import('postcss').Rule[] = []
-    postcss.parse(workspaceOverlayCss).walkRules((rule) => rules.push(rule))
+    postcss.parse(workspaceOverlayCss).walkRules((rule) => {
+      rules.push(rule)
+    })
     const inlineActionsRule = rules.find((rule) =>
       rule.selector.includes('.ui-v2-workspace-inline-form-actions'),
     )

@@ -1662,9 +1662,11 @@
     border: 1px solid var(--ds-border-medium);
     border-radius: var(--ds-radius-md);
     background: var(--ds-bg-inset);
-    display: inline-flex;
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 0.25rem;
+    width: 100%;
     overflow-x: auto;
   }
 
@@ -1723,6 +1725,8 @@
 
   .ui-search-field input {
     min-width: 0;
+    min-height: var(--ds-touch-target, 48px);
+    width: 100%;
     border: 0;
     outline: 0;
     background: transparent;
@@ -1822,6 +1826,8 @@
 
   .ui-number-stepper button {
     border: 0;
+    min-height: var(--ds-touch-target, 48px);
+    min-width: var(--ds-touch-target, 48px);
     background: var(--ds-bg-inset);
     color: var(--ds-text-secondary);
     display: inline-flex;
@@ -1832,6 +1838,7 @@
 
   .ui-number-stepper input {
     min-width: 0;
+    min-height: var(--ds-touch-target, 48px);
     border: 0;
     outline: 0;
     background: transparent;

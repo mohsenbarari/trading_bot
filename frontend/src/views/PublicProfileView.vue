@@ -143,9 +143,7 @@ onMounted(async () => {
   <AppPage>
     <div class="public-profile-view">
       <AppPageHeader
-        eyebrow="پروفایل عمومی"
         title="مشاهده پروفایل"
-        description="اطلاعات عمومی و راه‌های ارتباطی مجاز این کاربر را از این صفحه دنبال کنید."
       />
       <PublicProfile
         :key="profileViewKey"
