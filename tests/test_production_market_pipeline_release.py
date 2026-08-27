@@ -93,6 +93,10 @@ class ProductionMarketPipelineReleaseTests(unittest.TestCase):
         self.assertIn(
             "backup-and-migrate-production-market-pipeline-shadow", manifest
         )
+        self.assertIn("PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_ENABLED=0", manifest)
+        self.assertIn(
+            "rollout-production-market-pipeline-private-shadow", manifest
+        )
         self.assertIn("does not transfer/load the image", manifest)
 
     def test_capture_cutover_is_rejected_even_when_evidence_is_disabled(self) -> None:
@@ -219,6 +223,7 @@ printf '%s\n' "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256"
             self.assertIn("scripts/prepare_market_pipeline_release.py", names)
             self.assertIn("scripts/backup_market_pipeline_archive.py", names)
             self.assertIn("scripts/migrate_market_pipeline_archive.py", names)
+            self.assertIn("scripts/rollout_market_pipeline_shadow.py", names)
             self.assertIn("deploy/market-data/compose.web.yml", names)
             self.assertIn("deploy/market-data/compose.bot.yml", names)
             self.assertFalse(any(".env" in name or "session" in name for name in names))
@@ -273,6 +278,27 @@ validate_production_market_pipeline_migration_manifest
         )
         self.assertNotEqual(unsafe_root.returncode, 0)
         self.assertIn("protected backup base", unsafe_root.stderr)
+
+    def test_shadow_rollout_requires_migration_and_exact_confirmation(self) -> None:
+        no_migration = run_sourced(
+            """
+PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_ENABLED=1
+PRODUCTION_MARKET_PIPELINE_MIGRATION_REQUESTED=0
+validate_production_market_pipeline_shadow_rollout_manifest
+"""
+        )
+        self.assertNotEqual(no_migration.returncode, 0)
+        self.assertIn("requires backup/migration", no_migration.stderr)
+        wrong = run_sourced(
+            """
+PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_ENABLED=1
+PRODUCTION_MARKET_PIPELINE_MIGRATION_REQUESTED=1
+PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_CONFIRM=wrong
+validate_production_market_pipeline_shadow_rollout_manifest
+"""
+        )
+        self.assertNotEqual(wrong.returncode, 0)
+        self.assertIn("exact receiver-first confirmation", wrong.stderr)
 
     def test_initial_empty_offhost_receipt_is_deterministic_and_release_bound(self) -> None:
         with tempfile.TemporaryDirectory(prefix="market-offhost-receipt-") as temporary:
@@ -474,6 +500,10 @@ printf '%s\n' "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT_SHA256"
         )
         self.assertLess(
             run_release.index("prepare_market_pipeline_backup_and_migration"),
+            run_release.index("rollout_market_pipeline_private_shadow"),
+        )
+        self.assertLess(
+            run_release.index("rollout_market_pipeline_private_shadow"),
             run_release.index("begin_two_host_release_transaction"),
         )
         self.assertLess(
@@ -495,6 +525,23 @@ printf '%s\n' "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT_SHA256"
         self.assertIn("verify_market_pipeline_offhost_backup_receipt", migration)
         for forbidden in ("market-capture-account1", "market-capture-account2", "PRIVATE_PRIMARY"):
             self.assertNotIn(forbidden, migration)
+
+        rollout = source.split(
+            "rollout_market_pipeline_private_shadow() {", 1
+        )[1].split("\n}", 1)[0]
+        ordered = [
+            "market-fact-receiver",
+            "estimator-snapshot-receiver",
+            "market-processor",
+            "market-fact-sync-worker",
+            "market-store-adapter",
+            "coin-estimator",
+            "estimator-snapshot-sender",
+        ]
+        positions = [rollout.index(service) for service in ordered]
+        self.assertEqual(positions, sorted(positions))
+        for forbidden in ("market-capture-account1", "market-capture-account2", "market-capture-external"):
+            self.assertNotIn(forbidden, rollout)
 
 
 if __name__ == "__main__":

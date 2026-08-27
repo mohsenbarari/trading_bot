@@ -176,3 +176,14 @@ artifact را بدون فایل واسط remote به مسیر محافظت‌ش�
 هیچ capture یا Product service شروع نمی‌شود. شکست روی دیتابیس تازه فقط restart را غیرفعال و
 همان container را stop می‌کند؛ volume/state حذف یا down-migrate نمی‌شود. این گیت نیز پیش‌فرض
 خاموش است و روی production اجرا نشده است.
+
+## 13. rollout غیر-capture به‌ترتیب receiver-first — 2026-08-27
+
+گیت چهارم فقط هفت service غیر-capture را به‌ترتیب زیر می‌شناسد: receiver بات، receiver وب،
+processor و fact sender وب، سپس adapter/estimator/snapshot sender بات. هر service باید با image
+و SHA دقیق healthy شود تا service بعدی مجاز باشد. journalهای `0600` روی هر دو میزبان، container
+ID دقیق ساخته‌شده را نگه می‌دارند؛ exit guard فقط همان containerها را restart-disabled، stop و
+remove می‌کند و هیچ volume/state/database را حذف نمی‌کند. سه capture service و Product authority
+در تمام receiptها false هستند. برای جلوگیری از rollback ناقص، وجود runtime هدف از release قدیمی
+فعلاً fail-closed است و به upgrade gate جداگانه نیاز دارد. flag پیش‌فرض صفر است و این rollout
+روی production اجرا نشده است.

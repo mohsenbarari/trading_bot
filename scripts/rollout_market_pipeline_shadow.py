@@ -251,6 +251,21 @@ def _validate_journal(
             raise RolloutError("rollout_journal_service_schema_invalid")
         if row["state"] not in {"pending", "healthy", "rolled_back"}:
             raise RolloutError("rollout_journal_service_state_invalid")
+        if row["state"] == "pending":
+            if row["container_id"] is not None or row["created_by_release"] is not False:
+                raise RolloutError("rollout_journal_pending_owner_invalid")
+        elif (
+            not isinstance(row["container_id"], str)
+            or not re.fullmatch(r"[0-9a-f]{64}", row["container_id"])
+            or row["created_by_release"] is not True
+        ):
+            raise RolloutError("rollout_journal_created_owner_invalid")
+    if payload["status"] == "prepared" and any(row["state"] != "pending" for row in rows):
+        raise RolloutError("rollout_journal_prepared_state_invalid")
+    if payload["status"] == "PASS" and any(row["state"] != "healthy" for row in rows):
+        raise RolloutError("rollout_journal_pass_state_invalid")
+    if payload["status"] == "ROLLED_BACK" and any(row["state"] == "healthy" for row in rows):
+        raise RolloutError("rollout_journal_rollback_state_invalid")
 
 
 def prepare(
@@ -266,6 +281,15 @@ def prepare(
             payload, role=role, release_sha=release_sha, image_id=image_id,
             env_sha256=env_sha, project=project,
         )
+        if payload["status"] == "ROLLED_BACK":
+            if any(_ids(project, service) for service in ROLE_SERVICES[role]):
+                raise RolloutError("rollout_rolled_back_owner_reappeared")
+            for row in payload["services"]:
+                row.update(
+                    {"state": "pending", "container_id": None, "created_by_release": False}
+                )
+            payload["status"] = "prepared"
+            _write_journal(journal, payload)
         return payload
     for capture in CAPTURE_SERVICES:
         if _ids(project, capture, running=True):
@@ -322,11 +346,33 @@ def start_service(
         raise RolloutError("rollout_receiver_first_order_violation")
     row = rows[index]
     if row["state"] == "healthy":
-        _identity(
+        identity = _identity(
             row["container_id"], project=values["MARKET_PIPELINE_PROJECT_NAME"],
             service=service, image_id=image_id, release_sha=release_sha,
         )
+        if not identity["running"] or not identity["healthy"]:
+            raise RolloutError("rollout_resumed_service_not_healthy")
         return payload
+    if row["created_by_release"] and row["container_id"]:
+        current = _ids(values["MARKET_PIPELINE_PROJECT_NAME"], service)
+        if current != [row["container_id"]]:
+            raise RolloutError("rollout_interrupted_owner_mismatch")
+        for _attempt in range(60):
+            identity = _identity(
+                row["container_id"], project=values["MARKET_PIPELINE_PROJECT_NAME"],
+                service=service, image_id=image_id, release_sha=release_sha,
+            )
+            if identity["running"] and identity["healthy"]:
+                row["state"] = "healthy"
+                payload["status"] = (
+                    "PASS"
+                    if all(item["state"] == "healthy" for item in rows)
+                    else "in_progress"
+                )
+                _write_journal(journal, payload)
+                return payload
+            time.sleep(1)
+        raise RolloutError("rollout_interrupted_service_health_timeout")
     if _ids(values["MARKET_PIPELINE_PROJECT_NAME"], service):
         raise RolloutError("rollout_service_owner_appeared")
     payload["status"] = "in_progress"
@@ -392,6 +438,10 @@ def rollback(
     )
     for row in reversed(payload["services"]):
         container_id = row["container_id"]
+        if row["state"] == "rolled_back":
+            if _ids(values["MARKET_PIPELINE_PROJECT_NAME"], row["service"]):
+                raise RolloutError("rollout_rollback_owner_reappeared")
+            continue
         if not row["created_by_release"] or not container_id:
             continue
         current = _ids(values["MARKET_PIPELINE_PROJECT_NAME"], row["service"])

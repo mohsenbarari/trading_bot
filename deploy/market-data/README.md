@@ -72,6 +72,12 @@ controller رسمی گیت بعدی را فقط با confirmation مستقل ف�
 `already_current` باشد و فقط database مجاز است running بماند؛ capture و Product authority
 خاموش می‌مانند. شکست initial database باعث stop بدون حذف state می‌شود.
 
+گیت receiver-first بعدی از `scripts/rollout_market_pipeline_shadow.py` استفاده می‌کند و فقط
+receiverهای بات/وب، processor+fact sender وب و adapter+estimator+snapshot sender بات را شروع
+می‌کند. captureهای account1/account2/external در فهرست مجاز نیستند. journal دو میزبان rollback
+را به containerهای دقیق ساخته‌شده محدود می‌کند؛ volume/state/database حفظ می‌شوند. runtime
+قدیمی موجود به‌جای replace خودکار رد می‌شود تا upgrade/rollback مستقل آن طراحی شود.
+
 ## فایل‌ها
 
 - `Dockerfile`: image مشترک serviceها، Python 3.11 Bookworm pinned؛

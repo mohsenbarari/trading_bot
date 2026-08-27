@@ -51,6 +51,7 @@ PRODUCTION_COIN_SNAPSHOT_RELAY_DISABLE_CONFIRM_TEXT="disable-production-coin-inf
 PRODUCTION_MARKET_PIPELINE_EVIDENCE_CONFIRM_TEXT="prepare-production-market-pipeline-shadow-evidence"
 PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_CONFIRM_TEXT="load-and-preflight-production-market-pipeline-shadow-hosts"
 PRODUCTION_MARKET_PIPELINE_MIGRATION_CONFIRM_TEXT="backup-and-migrate-production-market-pipeline-shadow"
+PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_CONFIRM_TEXT="rollout-production-market-pipeline-private-shadow"
 PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE="coin-intelligence-production-snapshot-relay.service"
 PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER="coin-intelligence-production-snapshot-relay.timer"
 PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE_CANONICAL="/var/lib/trading-bot/production-release/coin-snapshot-relay-state.json"
@@ -124,6 +125,11 @@ PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT=""
 PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT_SHA256=""
 PRODUCTION_MARKET_PIPELINE_MIGRATION_RECEIPT=""
 PRODUCTION_MARKET_PIPELINE_MIGRATION_RECEIPT_SHA256=""
+PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_REQUESTED=0
+PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_GUARD_ARMED=0
+PRODUCTION_MARKET_PIPELINE_BOT_ROLLOUT_JOURNAL=""
+PRODUCTION_MARKET_PIPELINE_WEB_ROLLOUT_JOURNAL=""
+PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_RECEIPT=""
 
 usage() {
     cat <<'EOF'
@@ -714,6 +720,8 @@ load_manifest() {
     PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_ROOT="${PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_ROOT:-/root/secure-envs/trading-bot/market-pipeline-backups}"
     PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_ROOT="${PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_ROOT:-/root/secure-envs/trading-bot/market-pipeline-backups}"
     PRODUCTION_MARKET_PIPELINE_BACKUP_MAX_AGE_SECONDS="${PRODUCTION_MARKET_PIPELINE_BACKUP_MAX_AGE_SECONDS:-3600}"
+    PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_ENABLED="${PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_ENABLED:-0}"
+    PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_CONFIRM="${PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_CONFIRM:-}"
     PRODUCTION_COIN_INFERENCE_SOURCE_ROOT="${PRODUCTION_COIN_INFERENCE_SOURCE_ROOT:-/srv/trading-bot/production-data/coin-intelligence/private-gold-live}"
     PRODUCTION_COIN_INFERENCE_SOURCE_STORE="${PRODUCTION_COIN_INFERENCE_SOURCE_STORE:-$PRODUCTION_COIN_INFERENCE_SOURCE_ROOT/market/market.sqlite3}"
     PRODUCTION_COIN_INFERENCE_ESTIMATOR_ROOT="${PRODUCTION_COIN_INFERENCE_ESTIMATOR_ROOT:-/srv/trading-bot/production-data/coin-intelligence/estimator-live}"
@@ -1469,7 +1477,12 @@ validate_production_market_pipeline_host_preflight_manifest() {
 
 validate_production_market_pipeline_migration_manifest() {
     case "$PRODUCTION_MARKET_PIPELINE_MIGRATION_ENABLED" in
-        0) PRODUCTION_MARKET_PIPELINE_MIGRATION_REQUESTED=0; return 0 ;;
+        0)
+            PRODUCTION_MARKET_PIPELINE_MIGRATION_REQUESTED=0
+            [[ "${PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_ENABLED:-0}" == "0" ]] \
+                || die "Market Pipeline Shadow rollout requires backup/migration."
+            return 0
+            ;;
         1) PRODUCTION_MARKET_PIPELINE_MIGRATION_REQUESTED=1 ;;
         *) die "PRODUCTION_MARKET_PIPELINE_MIGRATION_ENABLED must be exactly 0 or 1." ;;
     esac
@@ -1493,6 +1506,22 @@ validate_production_market_pipeline_migration_manifest() {
             && "$(canonical_path "$backup_root")" == "$backup_root" ]] \
             || die "Market Pipeline backup roots must be canonical production paths under the protected backup base."
     done
+}
+
+validate_production_market_pipeline_shadow_rollout_manifest() {
+    case "$PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_ENABLED" in
+        0) PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_REQUESTED=0; return 0 ;;
+        1) PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_REQUESTED=1 ;;
+        *) die "PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_ENABLED must be exactly 0 or 1." ;;
+    esac
+    [[ "$PRODUCTION_MARKET_PIPELINE_MIGRATION_REQUESTED" == "1" ]] \
+        || die "Market Pipeline Shadow rollout requires backup/migration."
+    [[ "$PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_CONFIRM" == "$PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_CONFIRM_TEXT" ]] \
+        || die "Market Pipeline Shadow rollout requires the exact receiver-first confirmation."
+    [[ "$PRODUCTION_MARKET_PIPELINE_CAPTURE_CUTOVER_ENABLED" == "0" ]] \
+        || die "Market Pipeline Shadow rollout cannot authorize capture cutover."
+    [[ -f "$LOCAL_PROJECT_DIR/scripts/rollout_market_pipeline_shadow.py" ]] \
+        || die "Market Pipeline Shadow rollout helper is missing."
 }
 
 validate_production_coin_inference_activation_contract() {
@@ -2443,9 +2472,19 @@ production_coin_input_timer_exit_guard() {
     return "$status"
 }
 
+market_pipeline_shadow_rollout_exit_guard() {
+    local status="${1:-$?}"
+    if [[ "$status" != "0" \
+        && "$PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_GUARD_ARMED" == "1" ]]; then
+        rollback_market_pipeline_shadow_services || true
+    fi
+    return "$status"
+}
+
 production_release_exit_guard() {
     local status=$?
     trap - EXIT
+    market_pipeline_shadow_rollout_exit_guard "$status" || true
     two_host_release_exit_guard "$status" || true
     production_release_relay_exit_guard "$status" || true
     production_coin_input_timer_exit_guard "$status" || true
@@ -3209,6 +3248,7 @@ check_local() {
     validate_production_market_pipeline_evidence_manifest
     validate_production_market_pipeline_host_preflight_manifest
     validate_production_market_pipeline_migration_manifest
+    validate_production_market_pipeline_shadow_rollout_manifest
     log "Read-only local checks passed"
 }
 
@@ -3795,6 +3835,7 @@ prepare_market_pipeline_control_payload() {
         scripts/prepare_market_pipeline_release.py \
         scripts/backup_market_pipeline_archive.py \
         scripts/migrate_market_pipeline_archive.py \
+        scripts/rollout_market_pipeline_shadow.py \
         scripts/manage_market_pipeline_stage3.py \
         | tar -xf - -C "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR"
     [[ -z "$(find "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR" -type l -print -quit)" \
@@ -4690,6 +4731,201 @@ prepare_market_pipeline_backup_and_migration() {
         prepare_market_pipeline_archive_backup
     fi
     run_market_pipeline_archive_migration
+}
+
+market_pipeline_shadow_rollout_local() {
+    local command="$1" service="${2:-}"
+    local arguments=(
+        python3 "$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR/scripts/rollout_market_pipeline_shadow.py"
+        "$command" --role bot
+        --release-root "$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR"
+        --env-file "$LOCAL_MARKET_PIPELINE_BOT_ENV"
+        --journal "$PRODUCTION_MARKET_PIPELINE_BOT_ROLLOUT_JOURNAL"
+        --release-sha "$RELEASE_SHA"
+        --image-id "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID"
+        --confirm rollout-production-market-pipeline-private-shadow
+    )
+    [[ -z "$service" ]] || arguments+=(--service "$service")
+    "${arguments[@]}" >/dev/null
+}
+
+market_pipeline_shadow_rollout_remote() {
+    local command="$1" service="${2:-}" service_argument=""
+    [[ -z "$service" ]] || service_argument="--service '$service'"
+    ssh_iran "set -euo pipefail
+python3 '$REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR/scripts/rollout_market_pipeline_shadow.py' \\
+  '$command' --role web \\
+  --release-root '$REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR' \\
+  --env-file '$REMOTE_MARKET_PIPELINE_WEB_ENV' \\
+  --journal '$PRODUCTION_MARKET_PIPELINE_WEB_ROLLOUT_JOURNAL' \\
+  --release-sha '$RELEASE_SHA' \\
+  --image-id '$PRODUCTION_MARKET_PIPELINE_IMAGE_ID' \\
+  $service_argument \\
+  --confirm rollout-production-market-pipeline-private-shadow" >/dev/null
+}
+
+rollback_market_pipeline_shadow_services() {
+    local failed=0
+    [[ "$PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_GUARD_ARMED" == "1" ]] || return 0
+    market_pipeline_shadow_rollout_remote rollback || failed=1
+    market_pipeline_shadow_rollout_local rollback || failed=1
+    if [[ "$failed" == "0" ]]; then
+        PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_GUARD_ARMED=0
+        printf 'market_pipeline_shadow_rollout=rolled_back database_and_state_preserved=true capture_unchanged=true\n' >&2
+        return 0
+    fi
+    printf 'market_pipeline_shadow_rollout=rollback_incomplete journals_retained=true manual_recovery_required=true\n' >&2
+    return 1
+}
+
+write_market_pipeline_shadow_rollout_receipt() {
+    local destination="$1" web_journal_copy="$2"
+    python3 - "$destination" "$PRODUCTION_MARKET_PIPELINE_MIGRATION_RECEIPT" \
+        "$PRODUCTION_MARKET_PIPELINE_BOT_ROLLOUT_JOURNAL" "$web_journal_copy" \
+        "$RELEASE_SHA" "$PRODUCTION_RELEASE_TREE" \
+        "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
+        "$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE" <<'PY'
+from hashlib import sha256
+import json
+import os
+from pathlib import Path
+import sys
+
+destination, migration_path, bot_path, web_path = map(Path, sys.argv[1:5])
+release_sha, release_tree, image_id, image_signature = sys.argv[5:9]
+
+def digest(path: Path) -> str:
+    return sha256(path.read_bytes()).hexdigest()
+
+bot = json.loads(bot_path.read_text(encoding="utf-8"))
+web = json.loads(web_path.read_text(encoding="utf-8"))
+expected_services = {
+    "bot": [
+        "market-fact-receiver", "market-store-adapter", "coin-estimator",
+        "estimator-snapshot-sender",
+    ],
+    "web": [
+        "estimator-snapshot-receiver", "market-processor",
+        "market-fact-sync-worker",
+    ],
+}
+for role, document in (("bot", bot), ("web", web)):
+    if (
+        document.get("schema") != "market_pipeline_shadow_rollout/1.0"
+        or document.get("status") != "PASS"
+        or document.get("role") != role
+        or document.get("release_sha") != release_sha
+        or document.get("image_id") != image_id
+        or [row.get("service") for row in document.get("services", [])]
+           != expected_services[role]
+        or any(row.get("state") != "healthy" for row in document["services"])
+        or document.get("capture_services_started") is not False
+        or document.get("product_authority_changed") is not False
+        or document.get("private_shadow_only") is not True
+    ):
+        raise SystemExit(2)
+payload = {
+    "schema": "market_pipeline_two_host_shadow_rollout/1.0",
+    "status": "PASS",
+    "release_sha": release_sha,
+    "release_tree": release_tree,
+    "image_id": image_id,
+    "image_input_signature": image_signature,
+    "migration_receipt_sha256": digest(migration_path),
+    "rollout_journal_sha256": {"bot": digest(bot_path), "web": digest(web_path)},
+    "receiver_first": True,
+    "running_services": expected_services,
+    "capture_services_started": False,
+    "product_authority_changed": False,
+    "telegram_capture_cutover_authorized": False,
+    "private_shadow_only": True,
+    "rollback_state_deleted": False,
+    "secrets_disclosed": False,
+}
+candidate = destination.parent / f".{destination.name}.{os.getpid()}.tmp"
+flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+descriptor = os.open(candidate, flags, 0o600)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    if destination.exists() and destination.read_bytes() != candidate.read_bytes():
+        raise SystemExit(2)
+    os.replace(candidate, destination)
+    directory = os.open(destination.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+finally:
+    candidate.unlink(missing_ok=True)
+PY
+    chmod 0600 "$destination"
+}
+
+rollout_market_pipeline_private_shadow() {
+    [[ "$PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_REQUESTED" == "1" ]] || return 0
+    verify_market_pipeline_migration_receipt_file "$PRODUCTION_MARKET_PIPELINE_MIGRATION_RECEIPT" \
+        || die "Market Pipeline Shadow rollout requires the exact migration receipt."
+    verify_market_pipeline_migrated_database_current "$PRODUCTION_MARKET_PIPELINE_MIGRATION_RECEIPT" \
+        || die "Market Pipeline database is not at the receipted schema before rollout."
+    local bot_dir web_dir web_copy web_candidate remote_web_sha
+    bot_dir="$PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_ROOT/$RELEASE_SHA"
+    web_dir="$PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_ROOT/$RELEASE_SHA"
+    PRODUCTION_MARKET_PIPELINE_BOT_ROLLOUT_JOURNAL="$bot_dir/shadow-rollout-bot.json"
+    PRODUCTION_MARKET_PIPELINE_WEB_ROLLOUT_JOURNAL="$web_dir/shadow-rollout-web.json"
+    market_pipeline_shadow_rollout_local prepare \
+        || die "Market Pipeline bot Shadow rollout preparation failed."
+    market_pipeline_shadow_rollout_remote prepare \
+        || die "Market Pipeline web Shadow rollout preparation failed."
+    PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_GUARD_ARMED=1
+
+    market_pipeline_shadow_rollout_local start market-fact-receiver \
+        || die "Market Pipeline bot fact receiver failed."
+    market_pipeline_shadow_rollout_remote start estimator-snapshot-receiver \
+        || die "Market Pipeline web Snapshot receiver failed."
+    market_pipeline_shadow_rollout_remote start market-processor \
+        || die "Market Pipeline web processor failed."
+    market_pipeline_shadow_rollout_remote start market-fact-sync-worker \
+        || die "Market Pipeline web fact sender failed."
+    market_pipeline_shadow_rollout_local start market-store-adapter \
+        || die "Market Pipeline bot Store adapter failed."
+    market_pipeline_shadow_rollout_local start coin-estimator \
+        || die "Market Pipeline bot estimator failed."
+    market_pipeline_shadow_rollout_local start estimator-snapshot-sender \
+        || die "Market Pipeline bot Snapshot sender failed."
+    market_pipeline_shadow_rollout_local verify \
+        || die "Market Pipeline bot Shadow rollout verification failed."
+    market_pipeline_shadow_rollout_remote verify \
+        || die "Market Pipeline web Shadow rollout verification failed."
+
+    web_copy="$bot_dir/shadow-rollout-web.copy.json"
+    web_candidate="$bot_dir/.shadow-rollout-web.$$.incoming"
+    remote_web_sha="$(ssh_iran "sha256sum '$PRODUCTION_MARKET_PIPELINE_WEB_ROLLOUT_JOURNAL' | awk '{print \\$1}'")"
+    if ! ssh_iran "cat '$PRODUCTION_MARKET_PIPELINE_WEB_ROLLOUT_JOURNAL'" >"$web_candidate"; then
+        rm -f -- "$web_candidate"
+        die "Could not copy the web Shadow rollout journal to the bot host."
+    fi
+    chmod 0600 "$web_candidate"
+    sync -f "$web_candidate"
+    [[ "$(file_sha256 "$web_candidate")" == "$remote_web_sha" ]] \
+        || { rm -f -- "$web_candidate"; die "Web Shadow rollout journal digest mismatch."; }
+    if [[ -f "$web_copy" && ! -L "$web_copy" \
+        && "$(file_sha256 "$web_copy")" != "$remote_web_sha" ]]; then
+        rm -f -- "$web_candidate"
+        die "Existing web Shadow rollout journal copy differs for this release."
+    fi
+    mv -f -- "$web_candidate" "$web_copy"
+    sync -f "$bot_dir"
+    PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_RECEIPT="$bot_dir/shadow-rollout-receipt.json"
+    write_market_pipeline_shadow_rollout_receipt \
+        "$PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_RECEIPT" "$web_copy" \
+        || die "Market Pipeline combined Shadow rollout receipt failed."
+    log "Market Pipeline PRIVATE_SHADOW services are healthy receiver-first; all capture and Product authority remain unchanged."
 }
 
 iran_release_image_matches() {
@@ -7137,6 +7373,8 @@ run_release() {
     verify_frozen_release_source
     prepare_market_pipeline_backup_and_migration
     verify_frozen_release_source
+    rollout_market_pipeline_private_shadow
+    verify_frozen_release_source
     begin_two_host_release_transaction
     capture_production_coin_input_timer_recovery_state
     install_and_verify_production_coin_inputs
@@ -7163,6 +7401,7 @@ run_release() {
     healthcheck
     finalize_two_host_writer_restart_policies
     PRODUCTION_COIN_SNAPSHOT_RELAY_GUARD_ARMED=0
+    PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_GUARD_ARMED=0
     clear_production_coin_relay_recovery_marker
     clear_two_host_release_state
     if [[ "$PRODUCTION_COIN_INFERENCE_REQUESTED" == "1" ]]; then

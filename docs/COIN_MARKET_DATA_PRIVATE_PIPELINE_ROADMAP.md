@@ -4,8 +4,9 @@
 طراحی و rehearsal گذشته و backup عملیاتی آن باقی است. Docker foundation مرحله 3
 کامل است. قرارداد build/evidence و کد transfer/load/preflight دو میزبان به deploy رسمی
 متصل و offline تست شده، اما اجرای عملیاتی آن مجوز نگرفته است. ابزار backup/restore و migration
-دوپاس با گیت مستقل به controller رسمی متصل و offline تست شده‌اند؛ rollout receiver-first و
-rollback رسمی سرویس‌ها هنوز پیاده و اثبات نشده‌اند. Stage 11 فقط tooling و seed
+دوپاس و rollout غیر-capture به‌ترتیب receiver-first با گیت‌های مستقل به controller رسمی متصل
+و offline تست شده‌اند؛ اجرای production و upgrade/rollback از runtime قدیمی هنوز اثبات نشده
+است. Stage 11 فقط tooling و seed
 هفت‌روزه staging را دارد؛ import کامل تاریخچه
 باز است. Stage 12 از نظر offline سخت‌شده و در انتظار پنجره کامل بازار
 با pin پیش از بازشدن و seal پس از بسته‌شدن است. Stage 13-A قبلاً به‌صورت
