@@ -401,13 +401,55 @@ p95 فاصلهٔ دو snapshot برابر `20.707s` و p95 انتقال source �
 باقی ماند. نتیجهٔ رسمی همچنان `HOLD_FULL_OPEN_MARKET_SESSION_REQUIRED`،
 `full_market_session=false` و `cutover_performed=false` است.
 
+## اصلاح cadence و گیت latency پس از backfill
+
+پروفایل فقط‌خواندنی نشان داد ساخت یک snapshot روی Store backfillشده حدود `1.799s` طول
+می‌کشد، ولی loop قدیمی پس از پایان کار پنج ثانیهٔ کامل صبر می‌کرد؛ در نتیجه cadence واقعی
+به‌جای start-to-start پنج‌ثانیه‌ای، زمان ساخت به‌علاوهٔ پنج ثانیه بود. `main@4e6e9278`
+scheduler را start-to-start کرد و regression test افزود. اولین build این commit به‌درستی توسط
+runtime guard با `release_sha_image_revision_mismatch` رد شد، چون `SOURCE_SHA` در build خالی
+مانده بود؛ estimator فوراً به image سالم rollback شد، هیچ feed/authority تغییر نکرد و image
+بعدی با revision label و env داخلی صحیح ساخته شد.
+
+timeline ده‌نمونه‌ای این اصلاح با ۴۵ snapshot candidate، version gap صفر، pair skew p95 برابر
+`4.034s` و transfer p95 برابر `7.081s` ثبت شد. hash گزارش
+`5c61490bdc50c06d4f32883835c9f8e9d520f2c7d7e6dc1982ea6af803385d21` بود؛ latency
+بهبود جدی داشت ولی با اختلاف ۸۱ میلی‌ثانیه هنوز gate سخت هفت‌ثانیه‌ای را پاس نکرد.
+
+`main@f01c797d` interval را با بازهٔ fail-closed یک تا ۶۰ ثانیه قابل‌تنظیم کرد، درحالی‌که
+default پروژه و production پنج ثانیه ماند. آزمایش staging با interval چهار ثانیه transfer p95
+برابر `7.426s` داشت و به‌عنوان تنظیم نهایی پذیرفته نشد؛ artifact امضاشدهٔ آن با hash
+`bca312da4a2c51d6f7531e3e906b7670277e80e8d06f3bddd2d0380c4d4c6672` برای audit حفظ شد.
+پروفایل resource نشان داد estimator روی limit یک CPU به ۱۰۰٪ می‌رسد، درحالی‌که میزبان هشت
+هسته و ظرفیت حافظهٔ کافی داشت. compose-only `main@0f1a534b` budget estimator را مستقل و با
+default یک CPU قابل‌تنظیم کرد؛ فقط staging روی `1.5` CPU و interval پنج ثانیه قرار گرفت.
+
+گزارش نهایی این پیکربندی با hash
+`86dec80c934f12d4703eaf738fe1bb387e9f16ceac5be6564d0008c9f288fd2a` و key ID برابر
+`stage13-post-cpu15:f01c797d` مستقل verify شد:
+
+- ۱۰ snapshot محصول و ۴۹ snapshot candidate با version gap صفر و timeline کامل ثبت شد؛
+- transfer-to-snapshot p95 برابر `6.367s` بود و گیت هفت‌ثانیه‌ای را پاس کرد؛ pair skew
+  زمان‌بندی‌شده `9.493s` بود، بنابراین exact-as-of همچنان مرجع مقایسهٔ value است؛
+- هر ۱۴ rate حاضر و presence mismatch صفر بود. از ۱۴۰ مقایسهٔ exact-as-of، ۳۲ مورد exact،
+  ۱۱ مورد در ۵ bps، ۲۸ مورد در ۲۵ bps، ۴۴ مورد در ۱۰۰ bps و ۲۵ مورد بیرون ۱۰۰ bps بود؛
+- به‌علت value drift، oracle قدیمی private-gold و نبود full market session، recommendation
+  همچنان `HOLD_FULL_OPEN_MARKET_SESSION_REQUIRED` و `cutover_performed=false` ماند.
+
+runtime فعال estimator image
+`sha256:d1b123963b92a115b5c60660cb4b6e9ffcb7146574b0d5d16126692ee8e68829` با revision
+`f01c797dbaa5ce943debe7cd5c77c18c35ad6f1d`، interval پنج ثانیه، budget برابر ۱٫۵ CPU و
+health timeout هشت ثانیه است. env محافظت‌شده staging backup شد و چهار مقدار غیرحساس
+image/revision/interval/cpus از compose نهایی مستقل resolve شد. ۴۲ تست متمرکز داخل همین image
+با network خاموش پاس شد.
+
 در postcheck دیسک، snapshotهای موقت point-in-time، tar موقت image و کپی محلی export پس از
 تایید hash و import حذف شدند؛ نسخهٔ rollback روی میزبان وب حفظ شد. فضای آزاد میزبان بات از
-۵۵۷ مگابایت به حدود ۲٫۶ گیگابایت رسید. build cache بلااستفاده از حدود ۵٫۹ گیگابایت به ۳۹
-مگابایت کاهش یافت و ۱۵ image غیرفعال حذف شد؛ دو image فعال pipeline، همهٔ containerها،
-volumeها و worktree فعال UI دست‌نخورده ماندند. ۲۴ تست متمرکز backfill، adapter و timeline
-داخل image با network خاموش پاس شد؛ ۱۱ تست foundation/compose نیز برای اصلاح healthcheck
-سبز بود.
+۵۵۷ مگابایت به حدود ۲٫۳ گیگابایت رسید. build cache بلااستفاده از حدود ۵٫۹ گیگابایت به ۳۹
+مگابایت کاهش یافت؛ image آزمایشی cadence، build ناقص و buildهای قدیمی‌تر staging حذف شدند و
+فقط image فعال و یک rollback فوری staging حفظ شد. imageهای فعال pipeline، همهٔ containerها،
+volumeها و worktree فعال UI دست‌نخورده ماندند. آزمون‌های قبلی backfill/adapter/timeline و
+foundation/compose سبز ماندند و گیت image نهایی نیز ۴۲ تست متمرکز را پاس کرد.
 
 ## failure drill و اصلاحات حین استقرار
 

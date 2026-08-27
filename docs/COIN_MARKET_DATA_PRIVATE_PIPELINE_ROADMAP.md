@@ -1046,6 +1046,14 @@ Gate:
 - probe سه‌ثانیه‌ای estimator زیر ساخت snapshot روی Store بزرگ false-negative شد؛ compose
   `main@eb66dfdd` آن را بدون تغییر image یا منطق مدل به هشت ثانیه افزایش داد. پنج probe
   پیاپی پاس، restart صفر و ۱۴ rate تازه پس از recreate ثبت شد.
+- scheduler قدیمی پنج ثانیه را پس از پایان محاسبه صبر می‌کرد. `main@4e6e9278` cadence را
+  start-to-start کرد؛ سپس `main@f01c797d` interval را با default پنج ثانیه قابل‌تنظیم و
+  `main@0f1a534b` budget CPU estimator را مستقل کرد. staging با interval پنج ثانیه و ۱٫۵
+  CPU در گزارش امضاشده
+  `86dec80c934f12d4703eaf738fe1bb387e9f16ceac5be6564d0008c9f288fd2a` تعداد ۴۹
+  snapshot بدون version gap و transfer p95 برابر `6.367s` ثبت کرد؛ گیت latency پاس شد.
+  هر ۱۴ rate حاضر بود، اما ۲۵/۱۴۰ value بیرون ۱۰۰ bps و full market session ناقص ماند، پس
+  recommendation همچنان `HOLD_FULL_OPEN_MARKET_SESSION_REQUIRED` و cutover برابر false است.
 
 رسید عملیاتی: [COIN_MARKET_DATA_STAGE13_STAGING_SHADOW.md](./COIN_MARKET_DATA_STAGE13_STAGING_SHADOW.md)
 
