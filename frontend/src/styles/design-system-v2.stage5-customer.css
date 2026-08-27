@@ -7,16 +7,6 @@
   gap: var(--ui-v2-spacing-12);
 }
 
-:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
-  .ui-v2-workspace-customer-detail-tabs
-  .ui-tabs__tab,
-:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
-  .ui-v2-workspace-customer-filter-chips
-  .ui-filter-chip {
-  min-inline-size: var(--ui-v2-size-target-min);
-  min-block-size: var(--ui-v2-size-target-min);
-}
-
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-layout {
   display: grid;
   min-inline-size: 0;

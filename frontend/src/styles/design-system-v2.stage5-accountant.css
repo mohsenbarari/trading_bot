@@ -24,16 +24,6 @@
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
-  .ui-v2-workspace-accountant-detail-tabs
-  .ui-tabs__tab,
-:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
-  .ui-v2-workspace-accountant-filter-chips
-  .ui-filter-chip {
-  min-inline-size: var(--ui-v2-size-target-min);
-  min-block-size: var(--ui-v2-size-target-min);
-}
-
-:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-accountant-summary-badges {
   display: flex;
   flex-wrap: wrap;
