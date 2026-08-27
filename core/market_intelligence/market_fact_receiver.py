@@ -89,6 +89,30 @@ def initialize_receiver(connection: sqlite3.Connection) -> None:
         INSERT OR IGNORE INTO receiver_counters(
             singleton,accepted_count,duplicate_count,rejection_count
         ) VALUES(1,0,0,0);
+        CREATE TABLE IF NOT EXISTS receiver_status_counts (
+            singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+            delivery_count INTEGER NOT NULL CHECK(delivery_count >= 0),
+            fact_count INTEGER NOT NULL CHECK(fact_count >= 0)
+        );
+        CREATE TRIGGER IF NOT EXISTS receiver_delivery_count_insert
+        AFTER INSERT ON fact_deliveries
+        BEGIN
+          UPDATE receiver_status_counts
+          SET delivery_count=delivery_count+1
+          WHERE singleton=1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS receiver_fact_count_insert
+        AFTER INSERT ON fact_latest
+        BEGIN
+          UPDATE receiver_status_counts
+          SET fact_count=fact_count+1
+          WHERE singleton=1;
+        END;
+        INSERT OR IGNORE INTO receiver_status_counts(
+            singleton,delivery_count,fact_count
+        ) SELECT 1,
+            (SELECT COUNT(*) FROM fact_deliveries),
+            (SELECT COUNT(*) FROM fact_latest);
         CREATE TABLE IF NOT EXISTS transport_nonces (
             key_id TEXT NOT NULL,
             nonce TEXT NOT NULL,
@@ -329,15 +353,15 @@ def receiver_metrics(connection: sqlite3.Connection) -> dict[str, object]:
         "SELECT accepted_count,duplicate_count,rejection_count "
         "FROM receiver_counters WHERE singleton=1"
     ).fetchone()
+    status_counts = connection.execute(
+        "SELECT delivery_count,fact_count "
+        "FROM receiver_status_counts WHERE singleton=1"
+    ).fetchone()
     return {
         "schema": RECEIVER_SCHEMA,
         "streams": checkpoints,
-        "delivery_count": int(
-            connection.execute("SELECT COUNT(*) FROM fact_deliveries").fetchone()[0]
-        ),
-        "fact_count": int(
-            connection.execute("SELECT COUNT(*) FROM fact_latest").fetchone()[0]
-        ),
+        "delivery_count": int(status_counts[0]),
+        "fact_count": int(status_counts[1]),
         "accepted_count": int(counters[0]),
         "duplicate_count": int(counters[1]),
         "rejection_count": int(counters[2]),

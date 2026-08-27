@@ -10,6 +10,7 @@ from pydantic import TypeAdapter
 from core.market_intelligence.market_fact_receiver import (
     apply_fact_batch,
     connect_receiver,
+    receiver_metrics,
 )
 from core.market_intelligence.market_fact_projection import (
     MarketFactProjectionError,
@@ -92,6 +93,9 @@ class Stage8ReceiverTests(unittest.TestCase):
                     connection.execute("SELECT COUNT(*) FROM fact_deliveries").fetchone()[0],
                     2,
                 )
+                metrics = receiver_metrics(connection)
+                self.assertEqual(metrics["delivery_count"], 2)
+                self.assertEqual(metrics["fact_count"], 1)
             finally:
                 connection.close()
 
@@ -106,6 +110,47 @@ class Stage8ReceiverTests(unittest.TestCase):
                 )
             finally:
                 restarted.close()
+
+    def test_receiver_metrics_backfill_once_and_never_scan_growing_ledgers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "receiver.sqlite3"
+            connection = connect_receiver(path)
+            status, _ = apply_fact_batch(connection, batch_fixture())
+            self.assertEqual(status, 200)
+            connection.executescript(
+                """
+                DROP TRIGGER receiver_delivery_count_insert;
+                DROP TRIGGER receiver_fact_count_insert;
+                DROP TABLE receiver_status_counts;
+                """
+            )
+            connection.close()
+            upgraded = connect_receiver(path)
+            try:
+                metrics = receiver_metrics(upgraded)
+                self.assertEqual(metrics["delivery_count"], 1)
+                self.assertEqual(metrics["fact_count"], 1)
+                status, _ = apply_fact_batch(
+                    upgraded,
+                    revised_batch(
+                        delivery_sequence=2,
+                        revision=2,
+                        price="187600",
+                    ),
+                )
+                self.assertEqual(status, 200)
+                metrics = receiver_metrics(upgraded)
+                self.assertEqual(metrics["delivery_count"], 2)
+                self.assertEqual(metrics["fact_count"], 1)
+            finally:
+                upgraded.close()
+            implementation = (
+                Path(__file__).resolve().parents[1]
+                / "core/market_intelligence/market_fact_receiver.py"
+            ).read_text(encoding="utf-8")
+            metrics_body = implementation.split("def receiver_metrics", 1)[1]
+            self.assertNotIn("COUNT(*) FROM fact_deliveries", metrics_body)
+            self.assertNotIn("COUNT(*) FROM fact_latest", metrics_body)
 
     def test_coin_trade_projection_references_offer_and_preserves_negotiated_terms(self):
         with tempfile.TemporaryDirectory() as directory:
