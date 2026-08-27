@@ -1,0 +1,553 @@
+import { expect, type Page, type Request, type Route } from '@playwright/test'
+
+export type FixtureMode = 'normal' | 'empty' | 'error' | 'long-copy'
+
+export type RouteDiagnostics = {
+  unknownApis: string[]
+  unexpectedMutations: string[]
+  externalRequests: string[]
+  pageErrors: string[]
+  requestFailed: string[]
+  consoleErrors: string[]
+}
+
+export const CURRENT_USER = {
+  id: 9001,
+  account_name: 'native_app_v2_user',
+  full_name: 'کاربر تست UI',
+  role: 'مدیر ارشد',
+  account_status: 'active',
+  is_accountant: false,
+  is_customer: false,
+  customer_tier: null,
+  has_bot_access: true,
+  mobile_number: '09120000000',
+  address: 'تهران',
+}
+
+export const REGULAR_USER = {
+  ...CURRENT_USER,
+  id: 9002,
+  account_name: 'native_app_v2_regular',
+  full_name: 'کاربر عادی تست',
+  role: 'عادی',
+}
+
+export const CUSTOMER_RELATION = {
+  id: 13,
+  owner_user_id: 9001,
+  customer_user_id: 33,
+  customer_account_name: 'customer13',
+  invitation_account_name: null,
+  mobile_number: '09123333333',
+  management_name: 'مشتری پذیرش',
+  customer_tier: 'tier1',
+  commission_rate: null,
+  min_trade_quantity: null,
+  max_trade_quantity: null,
+  max_daily_trades: 2,
+  max_daily_commodity_volume: null,
+  status: 'active',
+  registration_link: null,
+  expires_at: null,
+  activated_at: '2026-01-04T10:00:00Z',
+  deleted_at: null,
+  created_at: '2026-01-03T10:00:00Z',
+}
+
+export const ACCOUNTANT_RELATION = {
+  id: 13,
+  owner_user_id: 9001,
+  accountant_user_id: 44,
+  accountant_account_name: 'accountant13',
+  global_account_name: 'accountant13',
+  relation_display_name: 'حسابدار پذیرش',
+  mobile_number: '09124444444',
+  duty_description: 'ثبت اسناد',
+  status: 'active',
+  created_at: '2026-01-03T10:00:00Z',
+}
+
+const FIXED_TIME = '2026-08-14T12:00:00.000Z'
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
+const REGISTRATION_CONTEXT = {
+  account_name: 'invitee_sample',
+  mobile_number: 'synthetic-mobile',
+  role: 'عادی',
+  expires_at: FIXED_TIME,
+  kind: 'invitation',
+  progress: 'context_ready',
+  requires_otp: true,
+}
+
+export function createDiagnostics(): RouteDiagnostics {
+  return {
+    unknownApis: [],
+    unexpectedMutations: [],
+    externalRequests: [],
+    pageErrors: [],
+    requestFailed: [],
+    consoleErrors: [],
+  }
+}
+
+export function isAllowedMutation(pathname: string, method: string) {
+  if (pathname === '/api/sessions/verify' && method === 'POST') return true
+  if (pathname === '/api/auth/refresh' && method === 'POST') return true
+  if (method === 'POST' && pathname.startsWith('/api/auth/registration-context')) return true
+  if (method === 'PATCH' && /^\/api\/notifications\/\d+\/read$/u.test(pathname)) return true
+  return false
+}
+
+function isLocalHost(hostname: string) {
+  return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '[::1]'
+}
+
+function isKnownTelegramBootstrap(url: URL) {
+  return url.hostname === 'telegram.org' && url.pathname === '/js/telegram-web-app.js'
+}
+
+function isRealtimeSocket(url: URL) {
+  return url.pathname === '/api/realtime/ws'
+}
+
+export function resolveKnownApi(
+  method: string,
+  pathname: string,
+  mode: FixtureMode = 'normal',
+  viewer = CURRENT_USER,
+): { status: number; body: unknown } | null {
+  const empty = mode === 'empty'
+  const error = mode === 'error'
+  const longCopy = mode === 'long-copy'
+  const list = <T>(item: T): T[] => (empty ? [] : [item])
+
+  if (MUTATING_METHODS.has(method) && !isAllowedMutation(pathname, method)) {
+    return null
+  }
+
+  if (pathname === '/api/auth/me' || pathname === '/api/auth/me/') {
+    if (error) return { status: 200, body: viewer }
+    return {
+      status: 200,
+      body: longCopy
+        ? {
+            ...viewer,
+            full_name: 'کاربر تست با نام بسیار بلند فارسی برای شکست خط عنوان پروفایل',
+            account_name: 'unbroken_ltr_accountnamewithoutspaces_9001',
+            address: 'تهران خیابان ولیعصر با نام بسیار بلند فارسی برای شکست خط نشانی',
+          }
+        : viewer,
+    }
+  }
+  if (pathname === '/api/sessions/verify') return { status: 200, body: { ok: true } }
+  if (pathname === '/api/auth/refresh') return { status: 200, body: { access_token: 'native-v2-refresh', token_type: 'bearer' } }
+  if (pathname === '/api/auth/switchable-users') return { status: 200, body: [] }
+  if (pathname === '/api/auth/me/offer-overtime') {
+    return { status: 200, body: { offer_overtime_minutes: viewer.is_accountant ? 0 : 3 } }
+  }
+  if (pathname.startsWith('/api/auth/registration-context')) {
+    if (pathname.endsWith('/clear')) return { status: 204, body: {} }
+    if (pathname.endsWith('/otp/request') || pathname.endsWith('/otp/verify') || pathname.endsWith('/complete')) {
+      return { status: 410, body: { detail: 'expired' } }
+    }
+    return { status: 200, body: REGISTRATION_CONTEXT }
+  }
+
+  if (pathname === '/api/chat/poll') {
+    return {
+      status: 200,
+      body: {
+        conversations_with_unread: [],
+        muted_conversation_ids: [],
+        unread_chats_count: 0,
+        total_unread_mentions: 0,
+      },
+    }
+  }
+  if (pathname === '/api/chat/conversations' || pathname === '/api/chat/conversations/') {
+    return { status: 200, body: list({
+      id: 6001,
+      other_user_id: 33,
+      other_user_name: longCopy ? 'گفتگوی بسیار بلند فارسی برای شکست خط عنوان' : 'گفتگوی نمونه',
+      last_message_content: 'پیام مصنوعی پذیرش',
+      last_message_type: 'text',
+      last_message_at: FIXED_TIME,
+      unread_count: 0,
+      room_kind: 'direct',
+      can_send: true,
+    }) }
+  }
+  if (pathname === '/api/chat/channels' || pathname === '/api/chat/channels/') {
+    return { status: 200, body: list({
+      id: 21,
+      title: longCopy ? 'کانال بسیار بلند فارسی برای بررسی شکست خط' : 'کانال پذیرش',
+      username: 'native_channel',
+      is_owner: true,
+      member_count: 0,
+    }) }
+  }
+  if (/^\/api\/chat\/channels\/\d+$/u.test(pathname)) {
+    return { status: 200, body: { id: 21, title: 'کانال پذیرش', username: 'native_channel', is_owner: true, member_count: 0 } }
+  }
+  if (/^\/api\/chat\/channels\/\d+\/members$/u.test(pathname)) return { status: 200, body: [] }
+  if (pathname === '/api/chat/channels/invite-candidates') return { status: 200, body: { items: [], total: 0 } }
+  if (/^\/api\/chat\/messages\/\d+$/u.test(pathname)) return { status: 200, body: [] }
+  if (/^\/api\/chat\/rooms\/\d+\/messages$/u.test(pathname)) return { status: 200, body: [] }
+  if (/^\/api\/chat\/(direct|rooms)\/\d+\/pinned-message$/u.test(pathname)) return { status: 200, body: null }
+  if (pathname === '/api/chat/search') return { status: 200, body: [] }
+  if (/^\/api\/chat\/rooms\/\d+\/messages\/\d+\/seen$/u.test(pathname)) return { status: 200, body: [] }
+  if (/^\/api\/chat\/groups\/\d+$/u.test(pathname)) {
+    return { status: 200, body: { id: 9, title: 'گروه پذیرش', members: [] } }
+  }
+  if (pathname === '/api/chat/groups/member-candidates') return { status: 200, body: [] }
+
+  if (pathname === '/api/notifications/unread-count') return { status: 200, body: 0 }
+  if (pathname === '/api/notifications/' || pathname === '/api/notifications') {
+    if (error) return { status: 500, body: { detail: 'notifications unavailable' } }
+    return { status: 200, body: list({
+      id: 7001,
+      title: 'اعلان نمونه',
+      body: 'متن مصنوعی اعلان',
+      is_read: false,
+      created_at: FIXED_TIME,
+      kind: 'trade',
+      category: 'trade',
+    }) }
+  }
+  if (pathname === '/api/notifications/preferences') {
+    return { status: 200, body: { market_offer_push_enabled: true } }
+  }
+  if (pathname === '/api/notifications/push/public-key') {
+    return { status: 200, body: { enabled: false, public_key: null, missing: [] } }
+  }
+  if (/^\/api\/notifications\/\d+\/read$/u.test(pathname) && method === 'PATCH') {
+    return { status: 200, body: { ok: true } }
+  }
+
+  if (pathname === '/api/sessions/recovery/pending') return { status: 200, body: [] }
+  if (pathname === '/api/sessions/login-requests/pending') return { status: 200, body: [] }
+  if (pathname === '/api/sessions/active') {
+    if (error) return { status: 500, body: { detail: 'sessions unavailable' } }
+    return {
+      status: 200,
+      body: list({
+        id: 'native-v2-session',
+        device_name: longCopy ? 'دستگاه مرورگر آزمایشی با نام بسیار بلند فارسی' : 'Acceptance Browser',
+        platform: 'web',
+        is_current: true,
+        is_primary: true,
+        created_at: FIXED_TIME,
+        last_active_at: FIXED_TIME,
+        last_seen_at: FIXED_TIME,
+      }),
+    }
+  }
+
+  if (pathname === '/api/trades/overtime-requests/pending-owner') return { status: 200, body: [] }
+  if (pathname === '/api/trades/overtime-requests/pending-requester') return { status: 200, body: [] }
+  if (pathname === '/api/trades/my') return { status: 200, body: [] }
+  if (pathname === '/api/trades/my/page') {
+    return { status: 200, body: { items: [], next_cursor: null, has_more: false } }
+  }
+  if (/^\/api\/trades\/with\/\d+$/u.test(pathname)) return { status: 200, body: [] }
+
+  if (/^\/api\/users-public\/\d+$/u.test(pathname)) {
+    const id = Number(pathname.split('/')[3])
+    return {
+      status: 200,
+      body: {
+        id,
+        full_name: id === viewer.id
+          ? (longCopy ? 'کاربر تست با نام بسیار بلند فارسی برای شکست خط عنوان پروفایل' : viewer.full_name)
+          : `کاربر ${id}`,
+        account_name: id === viewer.id
+          ? (longCopy ? 'unbroken_ltr_accountnamewithoutspaces_9001' : viewer.account_name)
+          : `user_${id}`,
+        role: id === viewer.id ? viewer.role : 'عادی',
+        account_status: 'active',
+        mobile_number: id === viewer.id ? '09120000000' : '09123333333',
+        address: id === viewer.id
+          ? (longCopy ? 'تهران خیابان ولیعصر با نام بسیار بلند فارسی برای شکست خط نشانی' : 'تهران')
+          : 'اصفهان',
+        avatar_file_id: null,
+        last_seen_at: FIXED_TIME,
+        created_at_jalali: '۱۴۰۵/۰۵/۲۳',
+        trades_count: 0,
+        accountant_relations: [],
+        customer_relations: [],
+      },
+    }
+  }
+  if (/^\/api\/users-public\/\d+\/project-users$/u.test(pathname)) {
+    return { status: 200, body: { items: [], total: 0, limit: 25, offset: 0 } }
+  }
+  if (pathname === '/api/users-public/search') return { status: 200, body: [] }
+
+  if (pathname === '/api/users/' || pathname === '/api/users') {
+    if (error) return { status: 500, body: { detail: 'users unavailable' } }
+    return { status: 200, body: list(viewer) }
+  }
+  if (/^\/api\/users\/\d+$/u.test(pathname)) {
+    const id = Number(pathname.split('/')[3])
+    return { status: 200, body: id === viewer.id ? viewer : { ...REGULAR_USER, id } }
+  }
+
+  if (pathname === '/api/blocks/status') {
+    return {
+      status: 200,
+      body: {
+        can_block: false,
+        can_block_now: false,
+        max_blocked: 0,
+        current_blocked: 0,
+        remaining: 0,
+        reason_code: null,
+        reason_message: null,
+      },
+    }
+  }
+  if (/^\/api\/blocks\/check\/\d+$/u.test(pathname)) {
+    return { status: 200, body: { is_blocked_by_me: false } }
+  }
+
+  if (pathname === '/api/config') {
+    return { status: 200, body: { bot_username: 'synthetic_bot', telegram_bot_username: 'synthetic_bot' } }
+  }
+  if (pathname === '/api/web-push/status') {
+    return { status: 200, body: { enabled: false, supported: false } }
+  }
+  if (pathname === '/api/web-push/vapid-public-key') {
+    return { status: 200, body: { enabled: false, public_key: null } }
+  }
+
+  if (pathname === '/api/offers/page') {
+    return { status: 200, body: { items: [], next_cursor: null, has_more: false, page_size: 0 } }
+  }
+  if (pathname === '/api/offers/my' || pathname === '/api/offers/my/repeatable') return { status: 200, body: [] }
+  if (pathname === '/api/offers/' || pathname === '/api/offers') return { status: 200, body: [] }
+  if (pathname === '/api/offers/market-history') return { status: 200, body: [] }
+
+  if (pathname === '/api/commodities/' || pathname === '/api/commodities') {
+    return { status: 200, body: list({ id: 1, name: 'طلای آب‌شده', aliases: [] }) }
+  }
+
+  if (pathname === '/api/trading-settings/') {
+    return {
+      status: 200,
+      body: {
+        offer_min_quantity: 1,
+        offer_max_quantity: 1000,
+        lot_min_size: 5,
+        lot_max_count: 5,
+        offer_expiry_minutes: 60,
+        invitation_expiry_days: 7,
+        market_schedule_enabled: true,
+        market_timezone: 'Asia/Tehran',
+        market_open_time_local: '10:00',
+        market_close_time_local: '18:00',
+        market_closed_weekdays: [4],
+      },
+    }
+  }
+  if (pathname === '/api/trading-settings/market-state') {
+    return {
+      status: 200,
+      body: {
+        is_open: true,
+        active_web_notice_visible: false,
+        offers_since_last_open: 0,
+        last_transition_at: null,
+        next_transition_at: null,
+      },
+    }
+  }
+  if (pathname === '/api/trading-settings/market-overrides') return { status: 200, body: [] }
+
+  if (pathname === '/api/admin-messages/market/current') return { status: 200, body: null }
+  if (pathname === '/api/admin-messages/market/history') return { status: 200, body: [] }
+  if (pathname === '/api/admin-messages/broadcasts/history') return { status: 200, body: [] }
+
+  if (pathname === '/api/invitations/pending' || pathname === '/api/invitations/' || pathname === '/api/invitations') {
+    return { status: 200, body: list({
+      id: 8001,
+      account_name: 'invitee_sample',
+      mobile_number: 'synthetic-mobile',
+      role: 'عادی',
+      web_link: '/i/uiux-baseline',
+      web_short_link: '/i/uiux-baseline',
+      bot_available: false,
+      web_available: true,
+      state: 'pending',
+      expires_at: FIXED_TIME,
+      created_at: FIXED_TIME,
+    }) }
+  }
+  if (/^\/api\/invitations\/lookup\/[^/]+$/u.test(pathname)) {
+    return {
+      status: 200,
+      body: {
+        token: 'synthInv',
+        valid: true,
+        state: 'pending',
+        bot_available: false,
+        web_available: true,
+        web_short_link: '/i/uiux-baseline',
+        expires_at: FIXED_TIME,
+      },
+    }
+  }
+
+  if (pathname === '/api/customers/owner-relations') {
+    if (error) return { status: 500, body: { detail: 'customers unavailable' } }
+    return { status: 200, body: list({
+      ...CUSTOMER_RELATION,
+      management_name: longCopy
+        ? 'مشتری پذیرش با نام بسیار بلند فارسی برای شکست خط ردیف'
+        : CUSTOMER_RELATION.management_name,
+    }) }
+  }
+  if (/^\/api\/customers\/owner-relations\/\d+$/u.test(pathname)) {
+    return { status: 200, body: CUSTOMER_RELATION }
+  }
+  if (/^\/api\/customers\/owner-relations\/\d+\/sessions$/u.test(pathname)) return { status: 200, body: [] }
+  if (/^\/api\/customers\/owner-relations\/\d+\/trade-stats$/u.test(pathname)) {
+    return {
+      status: 200,
+      body: {
+        relation_id: 13,
+        customer_user_id: 33,
+        period_days: 7,
+        from_date: FIXED_TIME,
+        to_date: FIXED_TIME,
+        trade_count: 0,
+        total_quantity: 0,
+        commission_profit_toman: 0,
+        commodities: [],
+      },
+    }
+  }
+
+  if (pathname === '/api/accountants/owner-relations') {
+    if (error) return { status: 500, body: { detail: 'accountants unavailable' } }
+    return { status: 200, body: list({
+      ...ACCOUNTANT_RELATION,
+      relation_display_name: longCopy
+        ? 'حسابدار پذیرش با نام بسیار بلند فارسی برای شکست خط ردیف'
+        : ACCOUNTANT_RELATION.relation_display_name,
+    }) }
+  }
+  if (/^\/api\/accountants\/owner-relations\/\d+$/u.test(pathname)) {
+    return { status: 200, body: ACCOUNTANT_RELATION }
+  }
+  if (/^\/api\/accountants\/owner-relations\/\d+\/sessions$/u.test(pathname)) return { status: 200, body: [] }
+
+  return null
+}
+
+export async function attachDiagnostics(page: Page, diagnostics: RouteDiagnostics) {
+  page.on('pageerror', (error) => {
+    const text = error.message
+    if (/\/api\/realtime\/ws/i.test(text)) return
+    if (/due to access control checks/i.test(text) && /\/api\//i.test(text)) return
+    diagnostics.pageErrors.push(text)
+  })
+  page.on('console', (message) => {
+    if (message.type() !== 'error') return
+    const text = message.text()
+    if (/Chunk load failed; attempting one bounded hard reload/i.test(text)) return
+    if (/\/api\/realtime\/ws/i.test(text)) return
+    if (/WebSocket Error/i.test(text)) return
+    if (/Failed to load resource: the server responded with a status of (403|405|500|599)/i.test(text)) return
+    if (/Viewport argument key .* not recognized/i.test(text)) return
+    if (/downloadable font: download failed/i.test(text)) return
+    diagnostics.consoleErrors.push(text)
+  })
+  page.on('requestfailed', (request) => {
+    const url = new URL(request.url())
+    if (isRealtimeSocket(url)) return
+    const failure = request.failure()?.errorText || ''
+    if (/ERR_ABORTED|NS_BINDING_ABORTED|Load request cancelled/i.test(failure)) return
+    diagnostics.requestFailed.push(`${request.method()} ${url.pathname} ${failure}`)
+  })
+  page.on('request', (request: Request) => {
+    const url = new URL(request.url())
+    if (isLocalHost(url.hostname)) return
+    if (isKnownTelegramBootstrap(url)) return
+    diagnostics.externalRequests.push(`${request.method()} ${request.url()}`)
+  })
+}
+
+export type FixtureController = {
+  mode: FixtureMode
+  viewer: typeof CURRENT_USER
+}
+
+export async function installFailClosedApi(
+  page: Page,
+  diagnostics: RouteDiagnostics,
+  options: { mode?: FixtureMode; viewer?: typeof CURRENT_USER } = {},
+): Promise<FixtureController> {
+  const controller: FixtureController = {
+    mode: options.mode ?? 'normal',
+    viewer: options.viewer ?? CURRENT_USER,
+  }
+
+  await page.route('https://telegram.org/js/telegram-web-app.js', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/javascript',
+      body: 'window.Telegram=window.Telegram||{WebApp:{ready(){},expand(){},close(){}}};',
+    })
+  })
+
+  await page.route('**/api/**', async (route: Route) => {
+    const request = route.request()
+    const url = new URL(request.url())
+    if (isRealtimeSocket(url)) {
+      await route.fallback()
+      return
+    }
+
+    const pathname = url.pathname
+    const method = request.method()
+    const known = resolveKnownApi(method, pathname, controller.mode, controller.viewer)
+    if (known) {
+      await route.fulfill({
+        status: known.status,
+        contentType: 'application/json',
+        body: JSON.stringify(known.body),
+      })
+      return
+    }
+
+    if (MUTATING_METHODS.has(method) && !isAllowedMutation(pathname, method)) {
+      diagnostics.unexpectedMutations.push(`${method} ${pathname}`)
+      await route.fulfill({
+        status: 405,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'unexpected mutation blocked' }),
+      })
+      return
+    }
+
+    diagnostics.unknownApis.push(`${method} ${pathname}`)
+    await route.fulfill({
+      status: 599,
+      contentType: 'application/json',
+      body: JSON.stringify({ detail: 'unknown api' }),
+    })
+  })
+
+  return controller
+}
+
+export function expectCleanDiagnostics(diagnostics: RouteDiagnostics, label: string) {
+  expect(diagnostics.unknownApis, `${label}: unknown API`).toEqual([])
+  expect(diagnostics.unexpectedMutations, `${label}: unexpected mutation`).toEqual([])
+  expect(diagnostics.externalRequests, `${label}: external request`).toEqual([])
+  expect(diagnostics.pageErrors, `${label}: pageerror`).toEqual([])
+  expect(diagnostics.requestFailed, `${label}: requestfailed`).toEqual([])
+  expect(diagnostics.consoleErrors, `${label}: console error`).toEqual([])
+}
