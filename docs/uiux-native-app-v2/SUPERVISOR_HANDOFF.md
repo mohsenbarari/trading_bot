@@ -6,7 +6,73 @@
 شاخه: فقط `candidate/webapp-native-app-v2`
 حکم جاری: `BLOCKED — NATIVE APP V2 REMAINS IN CORRECTION`
 
-`vue-tsc -p tsconfig.app.json --noEmit` داخل `MarketView.vue` چهار خطای نوع دارد. فایل‌های بازار محصولی لمس نشدند. تا exit 0 این فرمان، حکم READY مجاز نیست.
+گیت TypeScript این track تفاضلی است: `vue-tsc` کامل می‌تواند EXIT 2 بماند اگر و فقط اگر fingerprint خطاهای `MarketView.vue` دقیقاً برابر مبنای محافظت‌شده باشد و خطای تازه یا غیر Market صفر باشد. ادعا نشود که `vue-tsc` سبز است.
+
+---
+
+## Checkpoint ادامه — ۲۰۲۶-۰۸-۲۷ پس از commitهای اصلاح
+
+| مورد | مقدار مستقل |
+|---|---|
+| شاخه | `candidate/webapp-native-app-v2` |
+| HEAD این checkpoint | `32d1f1488d5d25a773dc61f51d81d8588e783ce7` |
+| درخت | `ca58633e6918ee1ec8f988cb90e4c56e278e6d96` |
+| شروع این ادامه | `da0dc34a` / درخت `8c17d7f0` |
+| merge-base با `main` | `581396c6791fa9e1fdae9894d3bb56ffbd06f136` |
+| فاصله | ۴۳ جلو / ۱۲ عقب |
+| `main` / `origin/main` | `51344aa9f7953d223c71b53a62e58bca952e8c71` |
+| `git diff --name-only HEAD...main -- frontend/` | خالی |
+| تصمیم merge | انجام نشد؛ commitهای جدید main فقط estimator، market-data، docs و قوانین Cursor است |
+| `MarketView.vue` | `6eea08979c7a91ae4ea5f96939165c28459f2729fb6a4c4c75f15f169c80e608` |
+| `OffersList.vue` | `9a58458142f8b0213ce6a853b152a5b04ef93d6f87f8f98e6cb1f37d2b2c086c` |
+| vue-tsc | EXIT 2؛ ۴ خطای Market دقیقاً برابر مبنای `da0dc34a` |
+| messenger visual | ۸۵ فایل، ۱٬۲۹۰٬۷۴۷ بایت، sha `129d8a455ba2ce2af2b8c562103163099a47aa920cfb02dd4446e4b5be26ec58` |
+
+کار باقی برای حکم READY:
+
+1. ماتریس کامل Chromium/Firefox/WebKit بدون شکست سلول
+2. هدف‌های کمی زیر ۴۸px (نمونه: جزئیات مشتری، زیرپیکسل `48x48` گزارش‌شده)
+3. ممیزی بصری پس از settle واقعی، نه روی overlay بارگذاری
+4. E2E کامل Chromium و خانواده‌های حساس Firefox/WebKit روی HEAD نهایی
+5. vitest کامل بدون timeout محیطی
+6. commit اسناد پس از سبز شدن گیت‌ها
+
+---
+
+## Checkpoint ادامهٔ اصلاح — ۲۰۲۶-۰۸-۲۷ ۱۶:۳۰
+
+این نقطه برای ازسرگیری پس از compaction است. به گزارش قبلی اعتماد نکن؛ اعداد را از Git دوباره بخوان.
+
+| مورد | مقدار مستقل در شروع این ادامه |
+|---|---|
+| شاخه | `candidate/webapp-native-app-v2` |
+| HEAD | `da0dc34a444987e70ddbbf6fc3c3524a6f1f6ab5` |
+| درخت | `8c17d7f056069b6922f31f0499a2c1f44d62f0c7` |
+| worktree | پاک؛ staged خالی؛ `.mimosa/` غایب |
+| merge-base با `main` | `581396c6791fa9e1fdae9894d3bb56ffbd06f136` |
+| فاصله با `main` / `origin/main` | ۳۷ جلو / ۸ عقب |
+| `main` و `origin/main` | `a44d8fb269af490551cd9bcabea258341e12a65c` |
+| `git diff --name-only HEAD...main -- frontend/` | خالی |
+| تصمیم merge | انجام نشد؛ هشت commit عقب‌مانده فقط estimator/market-data/docs است |
+| `MarketView.vue` | `6eea08979c7a91ae4ea5f96939165c28459f2729fb6a4c4c75f15f169c80e608` |
+| `OffersList.vue` | `9a58458142f8b0213ce6a853b152a5b04ef93d6f87f8f98e6cb1f37d2b2c086c` |
+| `git diff main -- MarketView.vue OffersList.vue` | خالی |
+
+کار باقی در همین ادامه، به ترتیب اجباری:
+
+1. fail-close سه spec با `json({})`
+2. ماتریس سلول‌به‌سلول ۲۹ مسیر × viewport × state
+3. قرارداد ۴۸×۴۸، scroller، main/h1، CTA، overflow
+4. soft keyboard و safe-area واقعی
+5. reduced-motion و zoom اندازه‌گیری‌شده
+6. stateهای hold / retry / offline / stale / long
+7. flatten CreateChannel
+8. موجودی کامل overlay
+9. ممیزی بصری روی بیلد تازه در `/tmp`
+10. گیت‌های نهایی فقط روی HEAD پس از آخرین commit
+
+---
+
 
 ---
 
