@@ -271,6 +271,49 @@ timeline واقعی ده‌نمونه‌ای پس از این اصلاح با re
 - recommendation نهایی همان `HOLD_FULL_OPEN_MARKET_SESSION_REQUIRED` ماند و هیچ cutover
   انجام نشد.
 
+## پنجره فعال بازار 2026-08-27
+
+پس از بازشدن آبشده، هرات، اونس و تتر، یک timeline تازه از
+`2026-08-27T05:34Z` تا `06:07Z` اجرا شد. گزارش با hash
+`2fca275f83d9dbe0e1ce1b7fe699a5493ababfda4153f50b062900788e044828` و key ID برابر
+`stage13-open-market:a79183d3` امضا و مستقل verify شد. artifact redacted با mode `0600` در
+`/srv/trading-bot/staging-data/coin-intelligence/private-pipeline-shadow/backups-staging/stage13-open-market-input-20260827T0534Z-a79183d3.json`
+قرار دارد. نتیجه:
+
+- ۶۰ snapshot تازهٔ محصول با ۳۱۴ snapshot candidate مقایسه شد؛ version gap صفر و
+  `snapshot_timeline_complete=true` بود؛
+- p95 فاصلهٔ زمانی جفت snapshotها `5.707s` و p95 انتقال source تازه تا snapshot بعدی
+  `6.869s` بود؛ بنابراین transport/adapter در این window گیت هفت‌ثانیه‌ای را پاس کرد؛
+- XAU در تمام ۶۰ نمونه حداکثر ۲۵ bps و USDT حداکثر ۵ bps فاصله داشت. هرات امروز حداکثر
+  ۲۵ bps بود؛ Herat cash و فردایی چند نمونه تا ۱۰۰ bps داشتند ولی هیچ نمونه‌ای بیش از
+  ۱۰۰ bps نبود؛
+- آبشدهٔ عمومی فردایی در همهٔ نمونه‌ها حداکثر ۲۵ bps، physical unspecified دقیقاً برابر و
+  paper unspecified فقط در یک نمونه تا ۱۰۰ bps بود. book امروز در هر دو مسیر stale و بیش
+  از ۱۰۰ bps متفاوت بود و evidence پذیرش بازار زنده محسوب نمی‌شود؛
+- lane قدیمی private-gold در تمام window stale بود، درحالی‌که candidate برای bookهای
+  فردایی داده تازه داشت. بنابراین اختلاف private-gold نشان‌دهندهٔ توقف oracle قدیمی و
+  پوشش زندهٔ بیشتر candidate است، نه مدرک parser parity؛
+- محصول ۱۴ rate و candidate فقط ۱۰ rate داشت. candidate برای `IMAM/CASH`،
+  `HALF_BAHAR/CASH` و هر دو settlement یک‌گرمی به‌درستی abstain کرد. Store جدید facts سکه
+  را از `2026-08-26T07:56Z` دارد، اما پوشش آبشدهٔ لازم برای anchor transfer از حدود
+  `13:15Z` همان روز آغاز شده است؛ anchorهای محصول حدود ۱٫۸ تا ۶٫۸ روز قدمت داشتند. در نتیجه
+  چهار absence و بخشی از drift rate ناشی از نبود backfill نقطه‌زمانی هم‌راستای سکه و
+  آبشده در Store جدید است، نه از دست‌رفتن انتقال زنده؛
+- تاریخچهٔ فعلی گروه‌ها از ۹ ژوئن تا ۲۶ اوت، شامل ۱۷٬۷۹۴ آفر و ۱٬۳۰۲ معامله، روی میزبان
+  بات موجود است و برای anchorهای مفقود نیز نمونه دارد. این تاریخچه باید همراه با underlying
+  همان timestamp و حداقل در horizon هفت‌روزهٔ موتور نرخ، به staging جدید backfill شود؛
+- postcheck بات ۱۰۱٬۰۱۷ delivery با status `APPLIED`، صفر rejection و ۱۰ checkpoint stream
+  داشت. هر چهار service بات و هر هفت service وب/data healthy، restart-zero و همچنان روی
+  imageهای قبلی بودند؛
+- `full_market_session=false`، `cutover_performed=false` و recommendation نهایی
+  `HOLD_FULL_OPEN_MARKET_SESSION_REQUIRED` ماند.
+
+بازپخش تک‌مالک parser/lifecycle برای همین window با mount فقط‌خواندنی امتحان شد و پیش از
+ساخت artifact با `database_backup_failed` متوقف شد، زیرا SQLite WAL برای online backup به
+دسترسی write روی فایل هماهنگی نیاز داشت. مجوز write روی دیتابیس زنده باز نشد و هیچ artifact
+ناقصی باقی نماند. اجرای بعدی باید با snapshotهای موقت محافظت‌شده و پاک‌سازی قطعی انجام شود؛
+این کار مستقل از timeline موفق بالاست و هیچ مجوز ضمنی برای cutover ایجاد نمی‌کند.
+
 گیت کد شامل ۸۶ تست متمرکز روی host و ۷۴ تست سازگار داخل image با network خاموش بود و همه
 سبز شدند. دو تست shell استقرار که وجود `curl` را فرض می‌کنند فقط روی host اجرا و پاس شدند و
 جزء runtime image بازار نیستند.

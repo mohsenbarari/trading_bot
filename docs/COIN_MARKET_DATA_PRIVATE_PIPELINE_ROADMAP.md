@@ -1014,6 +1014,17 @@ Gate:
   همگی حداکثر ۲۵ bps فاصله داشتند و هرات فردایی/سه aggregate دقیقاً برابر بودند، اما drift
   private-gold و نبود همهٔ نرخ‌های coin در بازار آرام، gate بازار باز را باز نگه داشت. نتیجه
   رسمی `HOLD_FULL_OPEN_MARKET_SESSION_REQUIRED` و `cutover_performed=false` است.
+- پنجره فعال بعدی در 2026-08-27 تعداد ۶۰ snapshot محصول و ۳۱۴ snapshot candidate را بدون
+  version gap ثبت کرد؛ p95 انتقال `6.869s` بود و transport gate را پاس کرد. XAU حداکثر
+  ۲۵ bps، USDT حداکثر ۵ bps و bookهای فعال Herat/آبشده عمومی بدون اختلاف بیش از ۱۰۰ bps
+  بودند. lane
+  قدیمی private-gold در تمام window stale ولی candidate فردایی زنده بود، پس baseline قدیمی
+  برای parser/value آن oracle معتبر نیست. candidate فقط ۱۰ rate در برابر ۱۴ rate محصول
+  داشت: `IMAM/CASH`، `HALF_BAHAR/CASH` و هر دو rate یک‌گرمی به‌علت نبود تاریخچهٔ هم‌زمان
+  anchor سکه و underlying آبشده fail-closed شدند. پیش از هر cutover، تاریخچهٔ سکه و driverها
+  باید point-in-time و دست‌کم در horizon هفت‌روزهٔ موتور نرخ به Store جدید backfill و سپس
+  parser/lifecycle تک‌مالک و یک جلسه کامل بازار باز تکرار شود. recommendation همچنان
+  `HOLD_FULL_OPEN_MARKET_SESSION_REQUIRED` و cutover برابر false است.
 
 رسید عملیاتی: [COIN_MARKET_DATA_STAGE13_STAGING_SHADOW.md](./COIN_MARKET_DATA_STAGE13_STAGING_SHADOW.md)
 
