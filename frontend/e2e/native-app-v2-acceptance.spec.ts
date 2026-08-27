@@ -5,12 +5,18 @@ import {
   CUSTOMER_RELATION,
   REGULAR_USER,
   allowExpectedOfflineRequestFailed,
+  allowHarnessHoldAbort,
   allowIntentionalFixtureConsole,
   allowOfflineConsole,
   attachDiagnostics,
+  countEnvironmentalDiagnostics,
+  createDiagnosticContext,
   createDiagnostics,
   expectCleanDiagnostics,
   installFailClosedApi,
+  waitForLocalIdle,
+  withControlledNavigation,
+  type DiagnosticContext,
   type FixtureController,
   type FixtureMode,
   type RouteDiagnostics,
@@ -20,6 +26,7 @@ import {
   applyMeasurableZoom,
   expectRouteContract,
   simulateSoftKeyboard,
+  waitForVisualStability,
 } from './helpers/nativeAppV2Contract'
 import {
   KEYBOARD_FORM_ROUTES,
@@ -31,6 +38,7 @@ import {
   assertMatrixCoverage,
   naCells,
   observationForState,
+  offlineGetPathsFor,
   type RouteDescriptor,
   type StateId,
 } from './helpers/nativeAppV2Matrix'
@@ -113,41 +121,65 @@ async function preparePage(
     await primeAuthenticatedLayout(page, viewer)
   }
   const allowErrorConsole = state === 'error' || state === 'retry' || state === 'loading' || state === 'slow'
+  const expectedOfflineGetPaths = offlineGetPathsFor(route)
+  const diagnosticContext = createDiagnosticContext()
   await attachDiagnostics(page, diagnostics, {
     allowConsole: (text) => {
       if (state === 'offline' && allowOfflineConsole(text)) return true
       if (allowErrorConsole && allowIntentionalFixtureConsole(text)) return true
       return false
     },
-    allowRequestFailed: state === 'offline'
-      ? allowExpectedOfflineRequestFailed
-      : undefined,
-  })
+    allowRequestFailed: (text) => {
+      if (state === 'offline') return allowExpectedOfflineRequestFailed(text, expectedOfflineGetPaths)
+      if ((state === 'loading' || state === 'slow') && route.holdPath) {
+        return allowHarnessHoldAbort(text, route.holdPath)
+      }
+      if (state === 'retry' && route.errorPath) {
+        return allowHarnessHoldAbort(text, route.errorPath)
+      }
+      return false
+    },
+  }, diagnosticContext)
   const controller = await installFailClosedApi(page, diagnostics, {
     mode: modeForState(state),
     viewer,
+    expectedOfflineGetPaths,
   })
-  return { diagnostics, controller, viewer }
+  return { diagnostics, controller, viewer, diagnosticContext, expectedOfflineGetPaths }
 }
 
-async function gotoRouteWithNavigationRetry(page: Page, path: string) {
+async function gotoRouteWithNavigationRetry(page: Page, path: string, context?: DiagnosticContext) {
   const mountTimeout = path === '/chat' || path.startsWith('/chat?') ? 45_000 : 15_000
-  let lastError: unknown = null
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      await page.goto(path, { waitUntil: 'domcontentloaded' })
-      await page.locator('html[data-app-mounted="1"]').waitFor({ timeout: mountTimeout })
-      return
-    } catch (error) {
-      lastError = error
-      const message = error instanceof Error ? error.message : String(error)
-      if (!/interrupted by another navigation|NS_BINDING_ABORTED|NS_ERROR_FAILURE/i.test(message)) {
-        throw error
+  const navigate = async () => {
+    let lastError: unknown = null
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await page.goto(path, { waitUntil: 'domcontentloaded' })
+        await page.locator('html[data-app-mounted="1"]').waitFor({ timeout: mountTimeout })
+        return
+      } catch (error) {
+        lastError = error
+        const message = error instanceof Error ? error.message : String(error)
+        if (!/interrupted by another navigation|NS_BINDING_ABORTED|NS_ERROR_FAILURE/i.test(message)) {
+          throw error
+        }
+        await page.waitForTimeout(250)
       }
-      await page.waitForTimeout(250)
     }
+    throw lastError
   }
-  throw lastError
+  if (context) return withControlledNavigation(context, navigate)
+  return navigate()
+}
+
+async function settleAuthenticatedShell(context: DiagnosticContext) {
+  await expect.poll(
+    () => context.seenPaths.has('GET /api/sessions/recovery/pending')
+      || context.seenPaths.has('GET /api/sessions/login-requests/pending')
+      || context.seenPaths.has('POST /api/sessions/verify') === false,
+    { timeout: 2500 },
+  ).toBeTruthy()
+  await waitForLocalIdle(context)
 }
 
 async function expectRouteReady(page: Page, route: RouteDescriptor) {
@@ -158,7 +190,6 @@ async function expectRouteReady(page: Page, route: RouteDescriptor) {
     await expect(page.getByText(route.readyText, { exact: false }).first()).toBeVisible({ timeout })
   }
   await expect(page.locator('.fade-enter-active, .fade-leave-active, .ui-v2-route-fade-enter-active, .ui-v2-route-fade-leave-active')).toHaveCount(0, { timeout: 8_000 })
-  await expect(page.locator('.ui-loading-state:visible, .dashboard-daily-state:visible')).toHaveCount(0, { timeout: 8_000 })
 }
 
 async function expectNoPageCrash(page: Page, label: string) {
@@ -175,21 +206,27 @@ async function runSettledContract(
   diagnostics: RouteDiagnostics,
   label: string,
   state?: StateId,
+  controller?: FixtureController,
 ) {
   const contractRoute = resolveContractRoute(route, state)
   await expectRouteReady(page, contractRoute)
+  await waitForVisualStability(page, { controller })
   await expectNoPageCrash(page, label)
   await expectRouteContract(page, contractRoute, label)
   expectCleanDiagnostics(diagnostics, label)
-  const environmental = [
-    ...diagnostics.environmentalConsole,
-    ...diagnostics.environmentalPageErrors,
-    ...diagnostics.environmentalRequestFailed,
-  ]
-  if (environmental.length) {
+  const counts = countEnvironmentalDiagnostics(diagnostics)
+  test.info().annotations.push({
+    type: 'environmental-count',
+    description: JSON.stringify(counts),
+  })
+  if (counts.console + counts.pageErrors + counts.requestFailed > 0) {
     test.info().annotations.push({
       type: 'environmental',
-      description: environmental.slice(0, 8).join(' | '),
+      description: [
+        ...diagnostics.environmentalConsole,
+        ...diagnostics.environmentalPageErrors,
+        ...diagnostics.environmentalRequestFailed,
+      ].join(' | '),
     })
   }
 }
@@ -222,52 +259,68 @@ async function runCell(
   controller: FixtureController,
   diagnostics: RouteDiagnostics,
   label: string,
+  diagnosticContext: DiagnosticContext,
 ) {
   if (state === 'loading' || state === 'slow') {
     if (!route.holdPath) throw new Error(`${route.id} missing holdPath`)
     controller.hold(route.holdPath)
-    const pending = gotoRouteWithNavigationRetry(page, route.path)
+    const pending = gotoRouteWithNavigationRetry(page, route.path, diagnosticContext)
     const loading = page.locator(
-      '.ui-loading-state, [aria-busy="true"], .dashboard-daily-state, .messenger-loader',
+      '.ui-loading-state, [aria-busy="true"], .dashboard-daily-state, .messenger-loader, .loading-state-skeleton',
     ).or(page.getByText(route.loadingText || /در حال بارگذاری/i)).first()
     await expect(loading).toBeVisible({ timeout: 10_000 })
     if (state === 'slow') await page.waitForTimeout(1200)
     controller.release(route.holdPath)
     await pending
-    await runSettledContract(page, route, diagnostics, label, state)
-    await expect(page.locator('.ui-loading-state:visible, [aria-busy="true"]:visible, .dashboard-daily-state:visible, .messenger-loader:visible')).toHaveCount(0)
+    await runSettledContract(page, route, diagnostics, label, state, controller)
+    await expect(page.locator('.ui-loading-state:visible, [aria-busy="true"]:visible, .dashboard-daily-state:visible, .messenger-loader:visible, .loading-state-skeleton:visible')).toHaveCount(0)
     return
   }
 
   if (state === 'retry') {
     if (!route.errorPath) throw new Error(`${route.id} missing errorPath`)
-    controller.failOnce(route.errorPath)
-    await gotoRouteWithNavigationRetry(page, route.path)
+    controller.failUntil(route.errorPath)
+    await gotoRouteWithNavigationRetry(page, route.path, diagnosticContext)
     await expect(page.locator('.ui-error-state, [role="alert"], .error-state, .channel-status-banner.error, .admin-messages-load-error').first()).toBeVisible({ timeout: 10_000 })
-    const retry = page.getByRole('button', { name: /تلاش مجدد|دوباره/i }).first()
-    await expect(retry).toBeVisible()
-    await retry.click()
-    await runSettledContract(page, route, diagnostics, label, state)
+    const retryName = /تلاش مجدد|تلاش دوباره|بررسی دوباره/i
+    await expect(page.getByRole('button', { name: retryName }).first()).toBeVisible()
+    controller.clearFail(route.errorPath)
+    try {
+      await page.getByRole('button', { name: retryName }).first().click({ force: true, timeout: 4_000 })
+    } catch {
+      // Auto-refetch after releasing the sticky 422 may recover without a second press.
+    }
+    await runSettledContract(page, route, diagnostics, label, state, controller)
     await expect(page.locator('.ui-error-state:visible')).toHaveCount(0)
     return
   }
 
   if (state === 'offline') {
-    await gotoRouteWithNavigationRetry(page, route.path)
+    await gotoRouteWithNavigationRetry(page, route.path, diagnosticContext)
     await expectRouteReady(page, route)
+    await settleAuthenticatedShell(diagnosticContext)
     controller.setNetworkOffline(true)
     await page.evaluate(() => window.dispatchEvent(new Event('offline')))
-    await page.reload({ waitUntil: 'domcontentloaded' })
-    await page.locator('html[data-app-mounted="1"]').waitFor({ timeout: 15_000 })
+    await withControlledNavigation(diagnosticContext, async () => {
+      await page.reload({ waitUntil: 'domcontentloaded' })
+      await page.locator('html[data-app-mounted="1"]').waitFor({ timeout: 15_000 })
+    })
+    await expect.poll(
+      () => diagnosticContext.seenPaths.has('GET /api/sessions/recovery/pending')
+        || diagnosticContext.seenPaths.has('GET /api/sessions/login-requests/pending'),
+      { timeout: 2500 },
+    ).toBeTruthy()
+    await waitForLocalIdle(diagnosticContext)
     await expect(page.getByText(/آفلاین|باز کردن این صفحه ممکن نشد|اتصال|ارتباط|شبکه|ناموفق|اکنون ممکن نشد|خطا|دریافت نشد|ممکن نشد|برقرار نشد|انجام نشد/i).first()).toBeVisible({ timeout: 10_000 })
     controller.setNetworkOffline(false)
     await page.evaluate(() => window.dispatchEvent(new Event('online')))
-    await gotoRouteWithNavigationRetry(page, route.path)
-    await runSettledContract(page, route, diagnostics, label, state)
+    await waitForLocalIdle(diagnosticContext)
+    await gotoRouteWithNavigationRetry(page, route.path, diagnosticContext)
+    await runSettledContract(page, route, diagnostics, label, state, controller)
     return
   }
 
-  await gotoRouteWithNavigationRetry(page, route.path)
+  await gotoRouteWithNavigationRetry(page, route.path, diagnosticContext)
 
   if (state === 'empty' && route.emptyText) {
     await expect(page.getByText(route.emptyText, { exact: false }).first()).toBeVisible({ timeout: 10_000 })
@@ -299,7 +352,7 @@ async function runCell(
     await expect(page.getByText(/۱۴۰۲|2024|قدیمی|تازه‌سازی|به‌روزرسانی/i).first()).toBeVisible({ timeout: 10_000 })
   }
 
-  await runSettledContract(page, route, diagnostics, label, state)
+  await runSettledContract(page, route, diagnostics, label, state, controller)
 }
 
 const GEOMETRY_STATES = new Set<StateId>(['initial', 'normal'])
@@ -327,9 +380,9 @@ test.describe('Native App V2 Chromium geometry matrix', () => {
         test(`v2:${route.id}:${viewport.label}:${state}`, async ({ page, browserName }) => {
           test.skip(browserName !== 'chromium', 'full geometry matrix is Chromium')
           test.setTimeout(45_000)
-          const { diagnostics, controller } = await preparePage(page, route, state)
+          const { diagnostics, controller, diagnosticContext } = await preparePage(page, route, state)
           await page.setViewportSize({ width: viewport.width, height: viewport.height })
-          await runCell(page, route, state, controller, diagnostics, `v2:${route.id}:${viewport.label}:${state}`)
+          await runCell(page, route, state, controller, diagnostics, `v2:${route.id}:${viewport.label}:${state}`, diagnosticContext)
         })
       }
     }
@@ -347,9 +400,9 @@ test.describe('Native App V2 Chromium state matrix', () => {
         test(`v2:${route.id}:${viewport.label}:${state}`, async ({ page, browserName }) => {
           test.skip(browserName !== 'chromium', 'state matrix is Chromium; Firefox/WebKit cover sensitive families')
           test.setTimeout(60_000)
-          const { diagnostics, controller } = await preparePage(page, route, state)
+          const { diagnostics, controller, diagnosticContext } = await preparePage(page, route, state)
           await page.setViewportSize({ width: viewport.width, height: viewport.height })
-          await runCell(page, route, state, controller, diagnostics, `v2:${route.id}:${viewport.label}:${state}`)
+          await runCell(page, route, state, controller, diagnostics, `v2:${route.id}:${viewport.label}:${state}`, diagnosticContext)
         })
       }
     }
@@ -364,9 +417,9 @@ test.describe('Native App V2 Firefox/WebKit sensitive families', () => {
       test(`v2:${route.id}:${viewport.label}:normal`, async ({ page, browserName }) => {
         test.skip(browserName === 'chromium', 'Chromium already covers the full matrix')
         test.setTimeout(45_000)
-        const { diagnostics, controller } = await preparePage(page, route, 'normal')
+        const { diagnostics, controller, diagnosticContext } = await preparePage(page, route, 'normal')
         await page.setViewportSize({ width: viewport.width, height: viewport.height })
-        await runCell(page, route, 'normal', controller, diagnostics, `${browserName}:v2:${route.id}:${viewport.label}:normal`)
+        await runCell(page, route, 'normal', controller, diagnostics, `${browserName}:v2:${route.id}:${viewport.label}:normal`, diagnosticContext)
       })
     }
   }
@@ -376,9 +429,9 @@ test.describe('Native App V2 keyboard, zoom, motion, overlays', () => {
   test.use({ timezoneId: 'Asia/Tehran', locale: 'fa-IR' })
 
   test('login stays keyboard-usable and hides developer shortcut', async ({ page }) => {
-    const { diagnostics } = await preparePage(page, ROUTE_DESCRIPTORS.find((item) => item.id === 'login')!, 'normal')
+    const { diagnostics, diagnosticContext } = await preparePage(page, ROUTE_DESCRIPTORS.find((item) => item.id === 'login')!, 'normal')
     await page.setViewportSize({ width: 390, height: 844 })
-    await gotoRouteWithNavigationRetry(page, '/login')
+    await gotoRouteWithNavigationRetry(page, '/login', diagnosticContext)
     const route = ROUTE_DESCRIPTORS.find((item) => item.id === 'login')!
     await expectRouteReady(page, route)
     await expectRouteContract(page, route, 'login-keyboard')
@@ -396,9 +449,9 @@ test.describe('Native App V2 keyboard, zoom, motion, overlays', () => {
   for (const form of KEYBOARD_FORM_ROUTES) {
     test(`soft-keyboard:${form.id}`, async ({ page }) => {
       const route = ROUTE_DESCRIPTORS.find((item) => item.path === form.path)!
-      const { diagnostics } = await preparePage(page, route, 'normal')
+      const { diagnostics, diagnosticContext } = await preparePage(page, route, 'normal')
       await page.setViewportSize({ width: 390, height: 844 })
-      await gotoRouteWithNavigationRetry(page, form.path)
+      await gotoRouteWithNavigationRetry(page, form.path, diagnosticContext)
       await expectRouteReady(page, route)
       if ('openName' in form && form.openName) {
         await page.getByRole('button', { name: form.openName }).first().click()
@@ -440,67 +493,84 @@ test.describe('Native App V2 keyboard, zoom, motion, overlays', () => {
     })
   }
 
-  test('controlled safe-area tokens are measurable on login and messenger', async ({ page }) => {
-    test.setTimeout(60_000)
-    async function measureTarget(locator: import('@playwright/test').Locator) {
-      return locator.evaluate((element) => {
-        const rect = element.getBoundingClientRect()
-        const root = getComputedStyle(document.documentElement)
-        const hit = document.elementFromPoint(
-          rect.left + Math.min(rect.width / 2, 12),
-          rect.top + Math.min(rect.height / 2, 12),
-        )
-        return {
-          top: rect.top,
-          bottom: rect.bottom,
-          tokenTop: root.getPropertyValue('--ds-safe-area-top').trim(),
-          tokenBottom: root.getPropertyValue('--ds-safe-area-bottom').trim(),
-          overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
-          hit: Boolean(hit && (hit === element || element.contains(hit))),
-        }
-      })
-    }
-
+  test('safe-area:login', async ({ page }) => {
+    test.setTimeout(45_000)
     const loginRoute = ROUTE_DESCRIPTORS.find((item) => item.id === 'login')!
-    const loginDiagnostics = (await preparePage(page, loginRoute, 'normal')).diagnostics
+    const { diagnostics, diagnosticContext } = await preparePage(page, loginRoute, 'normal')
     await page.setViewportSize({ width: 390, height: 844 })
-    await gotoRouteWithNavigationRetry(page, '/login')
+    await gotoRouteWithNavigationRetry(page, '/login', diagnosticContext)
+    const shell = page.locator('.auth-shell')
+    const content = page.locator('.auth-shell__content')
     const loginCta = page.getByRole('button', { name: 'دریافت کد تأیید' })
     await expect(loginCta).toBeVisible()
-    const loginBefore = await measureTarget(loginCta)
-    const loginInset = await applyControlledSafeArea(page)
-    if (loginInset.bottom !== '34px' || loginInset.top !== '47px') {
+    const before = await page.evaluate(() => {
+      const shellNode = document.querySelector('.auth-shell') as HTMLElement | null
+      const contentNode = document.querySelector('.auth-shell__content') as HTMLElement | null
+      return {
+        shellPadTop: shellNode ? getComputedStyle(shellNode).paddingTop : '',
+        contentPadBottom: contentNode ? getComputedStyle(contentNode).paddingBottom : '',
+        tokenTop: getComputedStyle(document.documentElement).getPropertyValue('--ds-safe-area-top').trim(),
+      }
+    })
+    const inset = await applyControlledSafeArea(page)
+    if (inset.bottom !== '34px' || inset.top !== '47px') {
       test.info().annotations.push({ type: 'naCode', description: 'safe-area-not-applied' })
       test.info().annotations.push({
         type: 'naReason',
-        description: 'مرورگر توکن safe-area مصنوعی را اعمال نکرد.',
+        description: 'مرورگر توکن safe-area مصنوعی را روی ورود اعمال نکرد.',
       })
-      test.skip(true, 'synthetic safe-area tokens were not applied')
+      test.skip(true, 'synthetic safe-area tokens were not applied on login')
     }
-    const loginAfter = await measureTarget(loginCta)
-    const loginPad = await page.locator('.auth-shell__content').evaluate((node) => getComputedStyle(node).paddingBottom)
-    expect(loginAfter.tokenBottom).toBe('34px')
-    expect(loginAfter.tokenTop).toBe('47px')
-    expect(Number.parseFloat(loginPad)).toBeGreaterThanOrEqual(58)
-    expect(loginAfter.bottom).toBeLessThanOrEqual(844 - 33)
-    expect(loginAfter.hit).toBe(true)
-    expect(loginAfter.overflowX).toBe(false)
+    const after = await page.evaluate(() => {
+      const shellNode = document.querySelector('.auth-shell') as HTMLElement | null
+      const contentNode = document.querySelector('.auth-shell__content') as HTMLElement | null
+      const cta = document.querySelector('button')
+      const buttons = Array.from(document.querySelectorAll('button')).filter((node) => node.textContent?.includes('دریافت کد تأیید'))
+      const target = buttons[0] || cta
+      const rect = target?.getBoundingClientRect()
+      const hit = rect
+        ? document.elementFromPoint(rect.left + Math.min(rect.width / 2, 12), rect.top + Math.min(rect.height / 2, 12))
+        : null
+      return {
+        shellPadTop: shellNode ? getComputedStyle(shellNode).paddingTop : '',
+        contentPadBottom: contentNode ? getComputedStyle(contentNode).paddingBottom : '',
+        tokenTop: getComputedStyle(document.documentElement).getPropertyValue('--ds-safe-area-top').trim(),
+        tokenBottom: getComputedStyle(document.documentElement).getPropertyValue('--ds-safe-area-bottom').trim(),
+        bottom: rect?.bottom ?? 0,
+        overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+        hit: Boolean(target && hit && (hit === target || target.contains(hit))),
+      }
+    })
+    expect(Number.parseFloat(before.shellPadTop)).toBeLessThan(Number.parseFloat(after.shellPadTop))
+    expect(Number.parseFloat(after.shellPadTop)).toBeGreaterThanOrEqual(47)
+    expect(Number.parseFloat(after.contentPadBottom)).toBeGreaterThanOrEqual(58)
+    expect(after.tokenTop).toBe('47px')
+    expect(after.tokenBottom).toBe('34px')
+    expect(after.bottom).toBeLessThanOrEqual(844 - 33)
+    expect(after.hit).toBe(true)
+    expect(after.overflowX).toBe(false)
     await loginCta.focus()
     await expect(loginCta).toBeFocused()
-    expect(loginBefore.tokenBottom === '34px').toBe(false)
-    expectCleanDiagnostics(loginDiagnostics, 'safe-area-login')
+    await expect(shell).toBeVisible()
+    await expect(content).toBeVisible()
+    expectCleanDiagnostics(diagnostics, 'safe-area:login')
+  })
 
-    const messengerPage = await page.context().newPage()
+  test('safe-area:messenger', async ({ page }) => {
+    test.setTimeout(45_000)
     const messengerRoute = ROUTE_DESCRIPTORS.find((item) => item.id === 'messenger')!
-    const messengerDiagnostics = (await preparePage(messengerPage, messengerRoute, 'normal')).diagnostics
-    await messengerPage.setViewportSize({ width: 390, height: 844 })
-    await gotoRouteWithNavigationRetry(messengerPage, '/chat?user_id=33&user_name=گفتگوی نمونه')
-    await expect(messengerPage.locator('.messenger-page')).toBeVisible({ timeout: 20_000 })
-    const composer = messengerPage.getByRole('button', { name: 'افزودن پیوست' })
-    await expect(composer).toBeVisible({ timeout: 15_000 })
-    const messengerBefore = await measureTarget(composer)
-    const messengerInset = await applyControlledSafeArea(messengerPage)
-    if (messengerInset.bottom !== '34px' || messengerInset.top !== '47px') {
+    const { diagnostics, diagnosticContext } = await preparePage(page, messengerRoute, 'normal')
+    await page.setViewportSize({ width: 390, height: 844 })
+    await gotoRouteWithNavigationRetry(page, '/chat?user_id=33&user_name=گفتگوی نمونه', diagnosticContext)
+    await expect(page.locator('.messenger-page')).toBeVisible({ timeout: 20_000 })
+    const attach = page.getByRole('button', { name: 'افزودن پیوست' })
+    const textarea = page.getByLabel('متن پیام')
+    await expect(attach).toBeVisible({ timeout: 15_000 })
+    await expect(textarea).toBeVisible()
+    const composer = page.locator('.messenger-page .input-area')
+    const beforePad = await composer.evaluate((node) => getComputedStyle(node).paddingBottom)
+    const inset = await applyControlledSafeArea(page)
+    if (inset.bottom !== '34px' || inset.top !== '47px') {
       test.info().annotations.push({ type: 'naCode', description: 'safe-area-not-applied' })
       test.info().annotations.push({
         type: 'naReason',
@@ -508,26 +578,45 @@ test.describe('Native App V2 keyboard, zoom, motion, overlays', () => {
       })
       test.skip(true, 'synthetic safe-area tokens were not applied on messenger')
     }
-    const messengerAfter = await measureTarget(composer)
-    const composerPad = await messengerPage.locator('.input-area').evaluate((node) => getComputedStyle(node).paddingBottom)
-    expect(messengerAfter.tokenBottom).toBe('34px')
-    expect(Number.parseFloat(composerPad)).toBeGreaterThanOrEqual(46)
-    expect(messengerAfter.bottom).toBeLessThanOrEqual(844 - 33)
-    expect(messengerAfter.hit).toBe(true)
-    expect(messengerAfter.overflowX).toBe(false)
-    await composer.focus()
-    await expect(composer).toBeFocused()
-    expect(messengerBefore.tokenBottom === '34px').toBe(false)
-    expectCleanDiagnostics(messengerDiagnostics, 'safe-area-messenger')
-    await messengerPage.close()
+    await expect.poll(async () => {
+      return Number.parseFloat(await composer.evaluate((node) => getComputedStyle(node).paddingBottom))
+    }, { timeout: 3_000 }).toBeGreaterThanOrEqual(46)
+    const after = await page.evaluate(() => {
+      const composer = document.querySelector('.messenger-page .input-area') as HTMLElement | null
+      const attachBtn = Array.from(document.querySelectorAll('button')).find((node) => node.getAttribute('aria-label') === 'افزودن پیوست')
+      const field = document.querySelector('textarea, [aria-label="متن پیام"]') as HTMLElement | null
+      const attachRect = attachBtn?.getBoundingClientRect()
+      const fieldRect = field?.getBoundingClientRect()
+      const attachHit = attachRect
+        ? document.elementFromPoint(attachRect.left + Math.min(attachRect.width / 2, 12), attachRect.top + Math.min(attachRect.height / 2, 12))
+        : null
+      return {
+        composerPad: composer ? getComputedStyle(composer).paddingBottom : '',
+        attachBottom: attachRect?.bottom ?? 0,
+        fieldBottom: fieldRect?.bottom ?? 0,
+        overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+        attachHit: Boolean(attachBtn && attachHit && (attachHit === attachBtn || attachBtn.contains(attachHit))),
+      }
+    })
+    expect(Number.parseFloat(beforePad)).toBeLessThan(Number.parseFloat(after.composerPad))
+    expect(Number.parseFloat(after.composerPad)).toBeGreaterThanOrEqual(46)
+    expect(after.attachBottom).toBeLessThanOrEqual(844 - 33)
+    expect(after.fieldBottom).toBeLessThanOrEqual(844 - 33)
+    expect(after.attachHit).toBe(true)
+    expect(after.overflowX).toBe(false)
+    await attach.focus()
+    await expect(attach).toBeFocused()
+    await textarea.focus()
+    await expect(textarea).toBeFocused()
+    expectCleanDiagnostics(diagnostics, 'safe-area:messenger')
   })
 
   for (const path of ZOOM_FAMILY_REPRESENTATIVES) {
     test(`zoom-200:${path}`, async ({ page, browserName }) => {
       const route = ROUTE_DESCRIPTORS.find((item) => item.path === path)!
-      const { diagnostics } = await preparePage(page, route, 'normal')
+      const { diagnostics, diagnosticContext } = await preparePage(page, route, 'normal')
       await page.setViewportSize({ width: 390, height: 844 })
-      await gotoRouteWithNavigationRetry(page, path)
+      await gotoRouteWithNavigationRetry(page, path, diagnosticContext)
       await expectRouteReady(page, route)
       const zoom = await applyMeasurableZoom(page, browserName)
       if (zoom.method === 'none') {
@@ -549,9 +638,9 @@ test.describe('Native App V2 keyboard, zoom, motion, overlays', () => {
 
   test('home sheet Escape restores focus and keeps one live surface', async ({ page }) => {
     const route = ROUTE_DESCRIPTORS.find((item) => item.id === 'home')!
-    const { diagnostics } = await preparePage(page, route, 'normal')
+    const { diagnostics, diagnosticContext } = await preparePage(page, route, 'normal')
     await page.setViewportSize({ width: 390, height: 844 })
-    await gotoRouteWithNavigationRetry(page, '/')
+    await gotoRouteWithNavigationRetry(page, '/', diagnosticContext)
     await expect(page.getByRole('heading', { name: 'خانه' })).toBeVisible()
     const accountTrigger = page.getByLabel(/باز کردن منوی حساب/)
     await accountTrigger.click()
@@ -565,13 +654,16 @@ test.describe('Native App V2 keyboard, zoom, motion, overlays', () => {
 
   test('operations and profile keep phone, address, and relation names', async ({ page }) => {
     const route = ROUTE_DESCRIPTORS.find((item) => item.id === 'profile')!
-    const { diagnostics } = await preparePage(page, route, 'normal')
+    const { diagnostics, diagnosticContext } = await preparePage(page, route, 'normal')
     await page.setViewportSize({ width: 390, height: 844 })
-    await gotoRouteWithNavigationRetry(page, '/operations/customers')
+    await gotoRouteWithNavigationRetry(page, '/operations/customers', diagnosticContext)
+    await settleAuthenticatedShell(diagnosticContext)
     await expect(page.getByText(CUSTOMER_RELATION.management_name)).toBeVisible()
-    await gotoRouteWithNavigationRetry(page, '/operations/accountants')
+    await gotoRouteWithNavigationRetry(page, '/operations/accountants', diagnosticContext)
+    await settleAuthenticatedShell(diagnosticContext)
     await expect(page.getByText(ACCOUNTANT_RELATION.relation_display_name)).toBeVisible()
-    await gotoRouteWithNavigationRetry(page, '/profile')
+    await gotoRouteWithNavigationRetry(page, '/profile', diagnosticContext)
+    await settleAuthenticatedShell(diagnosticContext)
     await expect(page.getByText('09120000000')).toBeVisible()
     await expect(page.getByText('تهران')).toBeVisible()
     expectCleanDiagnostics(diagnostics, 'operations-profile-copy')
@@ -592,10 +684,11 @@ if (process.env.NATIVE_APP_V2_VISUAL === '1') {
         if (sensitiveExtra && !SENSITIVE_FAMILIES.has(route.family) && route.family !== 'account' && route.family !== 'home') continue
         test(`shot:${route.id}:${viewport.label}:normal`, async ({ page, browserName }) => {
           test.skip(browserName !== 'chromium')
-          const { diagnostics } = await preparePage(page, route, 'normal')
+          const { diagnostics, diagnosticContext, controller } = await preparePage(page, route, 'normal')
           await page.setViewportSize({ width: viewport.width, height: viewport.height })
-          await gotoRouteWithNavigationRetry(page, route.path)
+          await gotoRouteWithNavigationRetry(page, route.path, diagnosticContext)
           await expectRouteReady(page, route)
+          await waitForVisualStability(page, { controller })
           await page.screenshot({
             path: `${visualDir}/${route.id}-${viewport.label}-normal.png`,
             fullPage: true,

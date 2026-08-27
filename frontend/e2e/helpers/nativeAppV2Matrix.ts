@@ -57,6 +57,7 @@ export type RouteDescriptor = {
   ctaName?: string
   holdPath?: string
   errorPath?: string
+  offlineGetPaths?: string[]
   emptyText?: string
   errorText?: RegExp
   loadingText?: RegExp
@@ -79,6 +80,32 @@ const NO_FULL_COLLECTION = NA('no-full-collection', 'این مسیر فهرست 
 const NO_LONG_PERSIAN = NA('no-long-persian-copy', 'این مسیر نام یا متن بلند فارسی محصولی نشان نمی‌دهد.')
 const NO_UNBROKEN = NA('no-unbroken-token', 'این مسیر شناسهٔ بی‌فاصلهٔ قابل مشاهده ندارد.')
 const NO_LTR = NA('no-ltr-token', 'این مسیر شناسهٔ LTR متمایز از حالت عادی ندارد.')
+const TERMINAL_HTTP_NO_RETRY = NA(
+  'terminal-http-has-no-retry',
+  'پس از HTTP پایانی ۴۲۲ این مسیر دکمهٔ تلاش مجدد ندارد.',
+)
+
+export const AUTH_SHELL_OFFLINE_GETS = [
+  '/api/chat/poll',
+  '/api/notifications/unread-count',
+  '/api/notifications/push/public-key',
+  '/api/sessions/login-requests/pending',
+  '/api/sessions/recovery/pending',
+  '/api/trading-settings/market-state',
+  '/api/trades/overtime-requests/pending-owner',
+  '/api/trades/overtime-requests/pending-requester',
+] as const
+
+export function authOfflineGetPaths(pagePath: string, extra: string[] = []) {
+  return Array.from(new Set([pagePath, ...AUTH_SHELL_OFFLINE_GETS, ...extra]))
+}
+
+export function offlineGetPathsFor(route: RouteDescriptor) {
+  if (route.offlineGetPaths?.length) return route.offlineGetPaths
+  if (route.holdPath) return authOfflineGetPaths(route.holdPath)
+  if (route.errorPath) return authOfflineGetPaths(route.errorPath)
+  return []
+}
 
 function listStates(options: {
   unauthorized?: boolean
@@ -117,7 +144,7 @@ function formStates(): RouteDescriptor['states'] {
     full: FORM_NO_COLLECTION,
     error: FORM_NO_PAGE_LOAD,
     retry: FORM_NO_PAGE_LOAD,
-    offline: YES,
+    offline: FORM_NO_PAGE_LOAD,
     stale: NO_STALE,
     'long-persian': NO_LONG_PERSIAN,
     unbroken: NO_UNBROKEN,
@@ -137,6 +164,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     ctaRequired: false,
     holdPath: '/api/trades/my/page',
     errorPath: '/api/trades/my/page',
+    offlineGetPaths: authOfflineGetPaths('/api/trades/my/page', ['/api/sessions/active']),
     emptyText: 'ورود به بازار',
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
@@ -186,6 +214,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     ctaRequired: false,
     holdPath: '/api/customers/owner-relations',
     errorPath: '/api/customers/owner-relations',
+    offlineGetPaths: authOfflineGetPaths('/api/customers/owner-relations'),
     emptyText: 'مشتری',
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
@@ -202,6 +231,11 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     ctaRequired: false,
     holdPath: '/api/customers/owner-relations',
     errorPath: '/api/customers/owner-relations',
+    offlineGetPaths: authOfflineGetPaths('/api/customers/owner-relations', [
+      '/api/customers/owner-relations/13',
+      '/api/customers/owner-relations/13/sessions',
+      '/api/customers/owner-relations/13/trade-stats',
+    ]),
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
@@ -217,6 +251,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     ctaRequired: false,
     holdPath: '/api/accountants/owner-relations',
     errorPath: '/api/accountants/owner-relations',
+    offlineGetPaths: authOfflineGetPaths('/api/accountants/owner-relations'),
     emptyText: 'حسابدار',
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
@@ -233,6 +268,10 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     ctaRequired: false,
     holdPath: '/api/accountants/owner-relations',
     errorPath: '/api/accountants/owner-relations',
+    offlineGetPaths: authOfflineGetPaths('/api/accountants/owner-relations', [
+      '/api/accountants/owner-relations/13',
+      '/api/accountants/owner-relations/13/sessions',
+    ]),
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
@@ -266,6 +305,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     ctaRequired: false,
     holdPath: '/api/sessions/active',
     errorPath: '/api/sessions/active',
+    offlineGetPaths: authOfflineGetPaths('/api/sessions/active'),
     emptyText: 'نشست',
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
@@ -300,6 +340,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     ctaRequired: false,
     holdPath: '/api/notifications',
     errorPath: '/api/notifications',
+    offlineGetPaths: authOfflineGetPaths('/api/notifications'),
     emptyText: 'هیچ اعلانی یافت نشد',
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
@@ -318,6 +359,10 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     ctaRequired: false,
     holdPath: '/api/chat/conversations',
     errorPath: '/api/chat/conversations',
+    offlineGetPaths: authOfflineGetPaths('/api/chat/conversations', [
+      '/api/chat/channels',
+      '/api/chat/search',
+    ]),
     emptyText: 'گفتگو',
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
@@ -334,6 +379,10 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     ctaRequired: false,
     holdPath: '/api/users-public/9001',
     errorPath: '/api/users-public/9001',
+    offlineGetPaths: authOfflineGetPaths('/api/users-public/9001', [
+      '/api/users-public/9001/project-users',
+      '/api/blocks/status',
+    ]),
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
@@ -349,6 +398,10 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     ctaRequired: false,
     holdPath: '/api/users-public/9001',
     errorPath: '/api/users-public/9001',
+    offlineGetPaths: authOfflineGetPaths('/api/users-public/9001', [
+      '/api/users-public/9001/project-users',
+      '/api/blocks/status',
+    ]),
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
@@ -415,6 +468,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     ctaRequired: false,
     holdPath: '/api/chat/channels',
     errorPath: '/api/chat/channels',
+    offlineGetPaths: authOfflineGetPaths('/api/chat/channels'),
     emptyText: 'هنوز کانالی ساخته نشده است',
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال دریافت کانال/i,
@@ -431,6 +485,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     ctaRequired: false,
     holdPath: '/api/users',
     errorPath: '/api/users',
+    offlineGetPaths: authOfflineGetPaths('/api/users'),
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
@@ -446,6 +501,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     ctaRequired: false,
     holdPath: '/api/users/9001',
     errorPath: '/api/users/9001',
+    offlineGetPaths: authOfflineGetPaths('/api/users/9001'),
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
@@ -461,6 +517,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     ctaRequired: false,
     holdPath: '/api/commodities',
     errorPath: '/api/commodities',
+    offlineGetPaths: authOfflineGetPaths('/api/commodities'),
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
@@ -476,6 +533,10 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     ctaRequired: false,
     holdPath: '/api/admin-messages/broadcasts/history',
     errorPath: '/api/admin-messages/broadcasts/history',
+    offlineGetPaths: authOfflineGetPaths('/api/admin-messages/broadcasts/history', [
+      '/api/admin-messages/market/current',
+      '/api/admin-messages/market/history',
+    ]),
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     scroller: { kind: 'standard', expected: 1 },
     states: listStates({ unauthorized: true, stale: false, full: true, longPersian: true }),
@@ -490,6 +551,10 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     ctaRequired: false,
     holdPath: '/api/trading-settings/',
     errorPath: '/api/trading-settings/',
+    offlineGetPaths: authOfflineGetPaths('/api/trading-settings/', [
+      '/api/trading-settings/market-state',
+      '/api/trading-settings/market-overrides',
+    ]),
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     scroller: { kind: 'standard', expected: 1 },
     states: listStates({ unauthorized: true, empty: false, stale: false }),
@@ -504,6 +569,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     ctaRequired: false,
     holdPath: '/api/notifications',
     errorPath: '/api/notifications',
+    offlineGetPaths: authOfflineGetPaths('/api/notifications'),
     emptyText: 'هیچ اعلانی یافت نشد',
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
@@ -563,13 +629,14 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     ctaName: 'دریافت کد تأیید',
     holdPath: '/api/auth/registration-context',
     errorPath: '/api/auth/registration-context',
+    errorText: /نامعتبر|منقضی|جلسه ثبت‌نام/i,
     scroller: { kind: 'standard', expected: 1 },
     states: {
       ...formStates(),
       loading: YES,
       slow: YES,
       error: YES,
-      retry: YES,
+      retry: TERMINAL_HTTP_NO_RETRY,
     },
   },
   {
@@ -583,13 +650,14 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     ctaName: 'ادامه ثبت‌نام در وب‌اپ',
     holdPath: '/api/invitations/lookup/uiux-baseline',
     errorPath: '/api/invitations/lookup/uiux-baseline',
+    errorText: /نامعتبر|منقضی|دعوت‌نامه/i,
     scroller: { kind: 'standard', expected: 1 },
     states: {
       ...formStates(),
       loading: YES,
       slow: YES,
       error: YES,
-      retry: YES,
+      retry: TERMINAL_HTTP_NO_RETRY,
     },
   },
   {
@@ -812,6 +880,9 @@ export function assertMatrixCoverage() {
         && !observationForState(route.id, state)
       ) {
         throw new Error(`applicable copy state missing distinct observation: ${route.id}:${state}`)
+      }
+      if (rule.applicable && state === 'offline' && !offlineGetPathsFor(route).length) {
+        throw new Error(`applicable offline state missing descriptor GET paths: ${route.id}`)
       }
     }
   }

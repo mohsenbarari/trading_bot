@@ -3,9 +3,11 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import {
   attachDiagnostics,
+  createDiagnosticContext,
   createDiagnostics,
   expectCleanDiagnostics,
   installFailClosedApi,
+  withControlledNavigation,
 } from './helpers/nativeAppV2Api'
 import { overlayInventoryGaps } from './helpers/nativeAppV2Overlays'
 import {
@@ -54,13 +56,16 @@ test.describe('Native App V2 overlay keyboard contracts', () => {
         address: 'تهران',
       }))
     }, createJwt())
-    await attachDiagnostics(page, diagnostics)
+    const context = createDiagnosticContext()
+    await attachDiagnostics(page, diagnostics, {}, context)
     await installFailClosedApi(page, diagnostics, {
       extraAllowedMutation: (pathname, method) => method === 'POST' && /^\/api\/chat\/read\/\d+$/u.test(pathname),
     })
     await page.setViewportSize({ width: 390, height: 844 })
-    await page.goto(path, { waitUntil: 'domcontentloaded' })
-    await page.locator('html[data-app-mounted="1"]').waitFor({ timeout: 15_000 })
+    await withControlledNavigation(context, async () => {
+      await page.goto(path, { waitUntil: 'domcontentloaded' })
+      await page.locator('html[data-app-mounted="1"]').waitFor({ timeout: 15_000 })
+    })
     return diagnostics
   }
 

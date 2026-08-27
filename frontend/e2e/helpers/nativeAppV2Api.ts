@@ -96,10 +96,55 @@ export const ACCOUNTANT_RELATION = {
 const FIXED_TIME = '2026-08-14T12:00:00.000Z'
 export const STALE_TIME = '2024-01-01T00:00:00.000Z'
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+export const TERMINAL_LIST_HTTP_STATUS = 422
 const FIXTURE_LIST_FAILURE = { detail: 'دریافت فهرست ناموفق بود' }
 
 function failList() {
-  return { status: 425, body: FIXTURE_LIST_FAILURE }
+  // 425 is not a contractual status for these list/auth endpoints.
+  // Register treats 425 as retryable; apiFetch infinite-retries 5xx.
+  // 422 is a terminal unprocessable status in Register and Invite contracts
+  // and is returned by apiFetch without the 5xx reconnect loop.
+  return { status: TERMINAL_LIST_HTTP_STATUS, body: FIXTURE_LIST_FAILURE }
+}
+
+export type DiagnosticContext = {
+  controlledNavigation: boolean
+  localInFlight: number
+  seenPaths: Set<string>
+}
+
+export function createDiagnosticContext(): DiagnosticContext {
+  return {
+    controlledNavigation: false,
+    localInFlight: 0,
+    seenPaths: new Set(),
+  }
+}
+
+export async function waitForLocalIdle(context: DiagnosticContext, timeoutMs = 10_000) {
+  const started = Date.now()
+  let quietSince = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    if (context.localInFlight <= 0) {
+      if (Date.now() - quietSince >= 250) return
+    } else {
+      quietSince = Date.now()
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  throw new Error(`local requests still in flight: ${context.localInFlight}`)
+}
+
+export async function withControlledNavigation<T>(
+  context: DiagnosticContext,
+  run: () => Promise<T>,
+): Promise<T> {
+  context.controlledNavigation = true
+  try {
+    return await run()
+  } finally {
+    context.controlledNavigation = false
+  }
 }
 
 export function isSessionKeepalivePath(pathname: string) {
@@ -315,7 +360,7 @@ export function resolveKnownApi(
 
   if (pathname === '/api/notifications/unread-count') return { status: 200, body: 0 }
   if (pathname === '/api/notifications/' || pathname === '/api/notifications') {
-    if (error) return { status: 425, body: { detail: 'notifications unavailable' } }
+    if (error) return failList()
     return { status: 200, body: list({
       id: 7001,
       title: longCopy ? 'اعلان با عنوان بسیار بلند فارسی برای شکست خط' : 'اعلان نمونه',
@@ -349,7 +394,7 @@ export function resolveKnownApi(
   if (pathname === '/api/sessions/recovery/pending') return { status: 200, body: [] }
   if (pathname === '/api/sessions/login-requests/pending') return { status: 200, body: [] }
   if (pathname === '/api/sessions/active') {
-    if (error) return { status: 425, body: { detail: 'sessions unavailable' } }
+    if (error) return failList()
     return {
       status: 200,
       body: list({
@@ -411,7 +456,7 @@ export function resolveKnownApi(
   if (pathname === '/api/users-public/search') return { status: 200, body: [] }
 
   if (pathname === '/api/users/' || pathname === '/api/users') {
-    if (error) return { status: 425, body: { detail: 'users unavailable' } }
+    if (error) return failList()
     return { status: 200, body: list({
       ...viewerBody,
       customer_management_name: longCopy ? LONG_PERSIAN_FULL_NAME : undefined,
@@ -566,7 +611,7 @@ export function resolveKnownApi(
   }
 
   if (pathname === '/api/customers/owner-relations') {
-    if (error) return { status: 425, body: { detail: 'customers unavailable' } }
+    if (error) return failList()
     return { status: 200, body: list({
       ...CUSTOMER_RELATION,
       management_name: longCopy
@@ -612,7 +657,7 @@ export function resolveKnownApi(
   }
 
   if (pathname === '/api/accountants/owner-relations') {
-    if (error) return { status: 425, body: { detail: 'accountants unavailable' } }
+    if (error) return failList()
     return { status: 200, body: list({
       ...ACCOUNTANT_RELATION,
       relation_display_name: longCopy
@@ -645,36 +690,35 @@ export function resolveKnownApi(
   return null
 }
 
+function isAbortFailure(failure: string) {
+  return /ERR_ABORTED|NS_BINDING_ABORTED|Load request cancelled/i.test(failure)
+}
+
 function isEnvironmentalConsole(text: string) {
-  if (/Failed to fetch dynamically imported module: \S+/i.test(text)) return true
-  if (/Chunk load failed; attempting one bounded hard reload/i.test(text)) return true
-  if (/\/api\/realtime\/ws/i.test(text)) return true
-  if (/^WebSocket Error: Event$/i.test(text)) return true
-  if (/^WebSocket Error: JSHandle@object$/i.test(text)) return true
-  if (/Viewport argument key .* not recognized/i.test(text)) return true
-  if (/downloadable font: download failed/i.test(text)) return true
-  return false
+  return /Viewport argument key .* not recognized/i.test(text)
+}
+
+export function countEnvironmentalDiagnostics(diagnostics: RouteDiagnostics) {
+  return {
+    console: diagnostics.environmentalConsole.length,
+    pageErrors: diagnostics.environmentalPageErrors.length,
+    requestFailed: diagnostics.environmentalRequestFailed.length,
+    requestFailedByPath: diagnostics.environmentalRequestFailed.reduce<Record<string, number>>((acc, line) => {
+      const path = line.split(' ')[1] || line
+      acc[path] = (acc[path] || 0) + 1
+      return acc
+    }, {}),
+  }
 }
 
 export async function attachDiagnostics(
   page: Page,
   diagnostics: RouteDiagnostics,
   policy: DiagnosticPolicy = {},
+  context: DiagnosticContext = createDiagnosticContext(),
 ) {
   page.on('pageerror', (error) => {
     const text = error.message
-    if (/Failed to fetch dynamically imported module: \S+/i.test(text)) {
-      diagnostics.environmentalPageErrors.push(text)
-      return
-    }
-    if (/\/api\/realtime\/ws/i.test(text)) {
-      diagnostics.environmentalPageErrors.push(text)
-      return
-    }
-    if (/due to access control checks/i.test(text) && /\/api\/realtime\/ws/i.test(text)) {
-      diagnostics.environmentalPageErrors.push(text)
-      return
-    }
     if (policy.allowPageError?.(text)) return
     diagnostics.pageErrors.push(text)
   })
@@ -688,29 +732,47 @@ export async function attachDiagnostics(
     if (policy.allowConsole?.(text)) return
     diagnostics.consoleErrors.push(text)
   })
-  page.on('requestfailed', (request) => {
+  const trackLocal = (request: Request) => {
     const url = new URL(request.url())
-    const failure = request.failure()?.errorText || ''
-    const line = `${request.method()} ${url.pathname} ${failure}`
-    if (isRealtimeSocket(url)) {
-      diagnostics.environmentalRequestFailed.push(line)
-      return
-    }
-    if (/ERR_ABORTED|NS_BINDING_ABORTED|Load request cancelled/i.test(failure)) {
-      if (!MUTATING_METHODS.has(request.method()) || isSessionKeepalivePath(url.pathname)) {
-        diagnostics.environmentalRequestFailed.push(line)
-        return
-      }
-    }
-    if (policy.allowRequestFailed?.(line)) return
-    diagnostics.requestFailed.push(line)
-  })
+    return isLocalHost(url.hostname) && !isRealtimeSocket(url)
+  }
   page.on('request', (request: Request) => {
     const url = new URL(request.url())
+    if (trackLocal(request)) {
+      context.localInFlight += 1
+      context.seenPaths.add(`${request.method()} ${url.pathname}`)
+    }
     if (isLocalHost(url.hostname)) return
     if (isKnownTelegramBootstrap(url)) return
     diagnostics.externalRequests.push(`${request.method()} ${request.url()}`)
   })
+  page.on('requestfinished', (request) => {
+    if (trackLocal(request)) context.localInFlight = Math.max(0, context.localInFlight - 1)
+  })
+  page.on('requestfailed', (request) => {
+    if (trackLocal(request)) context.localInFlight = Math.max(0, context.localInFlight - 1)
+    const url = new URL(request.url())
+    const failure = request.failure()?.errorText || ''
+    const line = `${request.method()} ${url.pathname} ${failure}`
+    const keepaliveAbort = isAbortFailure(failure)
+      && !MUTATING_METHODS.has(request.method())
+      && isSessionKeepalivePath(url.pathname)
+    const controlledNavigationAbort = request.isNavigationRequest()
+      && isAbortFailure(failure)
+      && context.controlledNavigation
+    if (keepaliveAbort || controlledNavigationAbort) {
+      diagnostics.environmentalRequestFailed.push(line)
+      return
+    }
+    if (policy.allowRequestFailed?.(line)) return
+    diagnostics.requestFailed.push(line)
+  })
+}
+
+export type WebSocketMockStatus = {
+  ok: boolean
+  endpoint: '/api/realtime/ws'
+  reason?: string
 }
 
 export type FixtureController = {
@@ -718,12 +780,17 @@ export type FixtureController = {
   viewer: typeof CURRENT_USER
   extraKnown?: KnownApiResolver
   extraAllowedMutation?: (pathname: string, method: string) => boolean
+  expectedOfflineGetPaths: string[]
   holds: Map<string, ReturnType<typeof createDeferred>>
   failNext: Map<string, number>
+  failSticky: Set<string>
   abortNetwork: boolean
+  websocketMock: WebSocketMockStatus
   hold(pathname: string): ReturnType<typeof createDeferred>
   release(pathname: string): void
   failOnce(pathname: string): void
+  failUntil(pathname: string): void
+  clearFail(pathname: string): void
   setNetworkOffline(value: boolean): void
 }
 
@@ -732,6 +799,31 @@ export type FailClosedOptions = {
   viewer?: typeof CURRENT_USER
   extraKnown?: KnownApiResolver
   extraAllowedMutation?: (pathname: string, method: string) => boolean
+  expectedOfflineGetPaths?: string[]
+}
+
+export async function installRealtimeWebSocketMock(page: Page): Promise<WebSocketMockStatus> {
+  if (typeof page.routeWebSocket !== 'function') {
+    return {
+      ok: false,
+      endpoint: '/api/realtime/ws',
+      reason: 'page.routeWebSocket is not available in this Playwright runtime',
+    }
+  }
+  try {
+    await page.routeWebSocket(/\/api\/realtime\/ws(?:\?|$)/, (ws) => {
+      ws.onMessage((message) => {
+        if (message === 'ping') ws.send('pong')
+      })
+    })
+    return { ok: true, endpoint: '/api/realtime/ws' }
+  } catch (error) {
+    return {
+      ok: false,
+      endpoint: '/api/realtime/ws',
+      reason: error instanceof Error ? error.message : String(error),
+    }
+  }
 }
 
 export async function installFailClosedApi(
@@ -744,9 +836,12 @@ export async function installFailClosedApi(
     viewer: options.viewer ?? CURRENT_USER,
     extraKnown: options.extraKnown,
     extraAllowedMutation: options.extraAllowedMutation,
+    expectedOfflineGetPaths: options.expectedOfflineGetPaths ?? [],
     holds: new Map(),
     failNext: new Map(),
+    failSticky: new Set(),
     abortNetwork: false,
+    websocketMock: await installRealtimeWebSocketMock(page),
     hold(pathname: string) {
       const existing = this.holds.get(pathname)
       if (existing) return existing
@@ -761,6 +856,13 @@ export async function installFailClosedApi(
     },
     failOnce(pathname: string) {
       this.failNext.set(pathname, (this.failNext.get(pathname) || 0) + 1)
+    },
+    failUntil(pathname: string) {
+      this.failSticky.add(pathname)
+    },
+    clearFail(pathname: string) {
+      this.failSticky.delete(pathname)
+      this.failNext.delete(pathname)
     },
     setNetworkOffline(value: boolean) {
       this.abortNetwork = value
@@ -785,18 +887,34 @@ export async function installFailClosedApi(
 
     const pathname = url.pathname
     const method = request.method()
-    if (controller.abortNetwork && !isSessionKeepalivePath(pathname)) {
+    if (MUTATING_METHODS.has(method) && !isAllowedMutation(pathname, method, controller.extraAllowedMutation)) {
+      diagnostics.unexpectedMutations.push(`${method} ${pathname}`)
+      await route.fulfill({
+        status: 405,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'unexpected mutation blocked' }),
+      })
+      return
+    }
+    if (
+      controller.abortNetwork
+      && !MUTATING_METHODS.has(method)
+      && !isSessionKeepalivePath(pathname)
+    ) {
       await route.abort('internetdisconnected')
       return
     }
     const hold = [...controller.holds.entries()].find(([key]) => pathIsHeld(pathname, key))
     if (hold) await hold[1].promise
 
+    const stickyFail = [...controller.failSticky].find((key) => pathEquals(pathname, key) || pathIsHeld(pathname, key))
     const failCount = [...controller.failNext.entries()].find(([key]) => pathEquals(pathname, key))
-    if (failCount && failCount[1] > 0) {
-      controller.failNext.set(failCount[0], failCount[1] - 1)
+    if (stickyFail || (failCount && failCount[1] > 0)) {
+      if (failCount && failCount[1] > 0) {
+        controller.failNext.set(failCount[0], failCount[1] - 1)
+      }
       await route.fulfill({
-        status: 425,
+        status: TERMINAL_LIST_HTTP_STATUS,
         contentType: 'application/json',
         body: JSON.stringify(FIXTURE_LIST_FAILURE),
       })
@@ -814,16 +932,6 @@ export async function installFailClosedApi(
       return
     }
 
-    if (MUTATING_METHODS.has(method) && !isAllowedMutation(pathname, method, controller.extraAllowedMutation)) {
-      diagnostics.unexpectedMutations.push(`${method} ${pathname}`)
-      await route.fulfill({
-        status: 405,
-        contentType: 'application/json',
-        body: JSON.stringify({ detail: 'unexpected mutation blocked' }),
-      })
-      return
-    }
-
     diagnostics.unknownApis.push(`${method} ${pathname}`)
     await route.fulfill({
       status: 599,
@@ -836,21 +944,35 @@ export async function installFailClosedApi(
 }
 
 export function allowIntentionalFixtureConsole(text: string) {
-  return /intentional fixture failure|دریافت فهرست ناموفق بود|Failed to load resource: the server responded with a status of 425/i.test(text)
+  return /intentional fixture failure|دریافت فهرست ناموفق بود|Failed to load resource: the server responded with a status of 422/i.test(text)
 }
 
 export function allowOfflineConsole(text: string) {
-  return /ERR_INTERNET_DISCONNECTED|NS_ERROR_NET_|net::ERR_INTERNET_DISCONNECTED|internetdisconnected/i.test(text)
+  return /ERR_INTERNET_DISCONNECTED|NS_ERROR_NET_|net::ERR_INTERNET_DISCONNECTED|internetdisconnected|Failed to load market runtime state/i.test(text)
 }
 
-export function allowExpectedOfflineRequestFailed(text: string) {
-  const match = /^(GET|HEAD|POST|PUT|PATCH|DELETE) (\S+) (.+)$/.exec(text)
+export function allowHarnessHoldAbort(text: string, holdPath?: string) {
+  if (!holdPath) return false
+  const match = /^(GET|HEAD) (\S+) (.+)$/.exec(text)
+  if (!match) return false
+  if (!isAbortFailure(match[3])) return false
+  return pathEquals(match[2], holdPath) || pathIsHeld(match[2], holdPath)
+}
+
+export function isDisconnectFailure(failure: string) {
+  return /ERR_INTERNET_DISCONNECTED|internetdisconnected|NS_ERROR_NET_|NS_ERROR_FAILURE/i.test(failure)
+}
+
+export function allowExpectedOfflineRequestFailed(
+  text: string,
+  allowedGetPaths: readonly string[],
+) {
+  const match = /^(GET|HEAD) (\S+) (.+)$/.exec(text)
   if (!match) return false
   const pathname = match[2]
   const failure = match[3]
-  if (!pathname.startsWith('/api/')) return false
-  if (isSessionKeepalivePath(pathname)) return false
-  return /ERR_INTERNET_DISCONNECTED|internetdisconnected|NS_ERROR_NET_|NS_ERROR_FAILURE/i.test(failure)
+  if (!isDisconnectFailure(failure)) return false
+  return allowedGetPaths.some((key) => pathEquals(pathname, key) || pathIsHeld(pathname, key))
 }
 
 export function expectCleanDiagnostics(diagnostics: RouteDiagnostics, label: string) {

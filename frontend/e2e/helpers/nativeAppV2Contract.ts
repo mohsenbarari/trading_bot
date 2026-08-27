@@ -1,5 +1,120 @@
 import { expect, type Page } from '@playwright/test'
+import type { FixtureController } from './nativeAppV2Api'
 import type { RouteDescriptor } from './nativeAppV2Matrix'
+
+export const VISUAL_SETTLE_BLOCKERS = [
+  // AppLoadingState
+  '.ui-loading-state:visible',
+  // MessengerLoadingScreen + MessengerView/ChatRoomContainer
+  '.messenger-loader:visible',
+  '.loading-spinner:visible',
+  '.loading-container:visible',
+  // PublicProfile / route loading cards
+  '.loading-state-skeleton:visible',
+  '.dashboard-daily-state:visible',
+  '.ds-loading-state:visible',
+  '.ds-spinner:visible',
+  // App.vue reconnect + Auth waiting steps
+  '.app-connection-banner:visible',
+  '.ui-v2-connection-banner:visible',
+  '.ui-v2-auth-login-spinner:visible',
+  '.ui-button__spinner:visible',
+  '.telegram-connect-panel__spinner:visible',
+  // in-place busy overlays
+  '.avatar-busy-overlay:visible',
+  '.profile-avatar-busy:visible',
+  '.skeleton-box:visible',
+  '[aria-busy="true"]:visible',
+  // route transition leftovers
+  '.fade-enter-active',
+  '.fade-leave-active',
+  '.ui-v2-route-fade-enter-active',
+  '.ui-v2-route-fade-leave-active',
+].join(', ')
+
+export async function waitForVisualStability(
+  page: Page,
+  options: { controller?: FixtureController; allowLoaders?: boolean } = {},
+) {
+  if (options.controller && options.controller.holds.size > 0) {
+    throw new Error(`held requests remain: ${[...options.controller.holds.keys()].join(', ')}`)
+  }
+
+  if (!options.allowLoaders) {
+    await expect(page.locator(VISUAL_SETTLE_BLOCKERS)).toHaveCount(0, { timeout: 12_000 })
+  }
+
+  const probe = await page.evaluate(async () => {
+    const isLive = (element: Element) => {
+      if (!(element instanceof HTMLElement)) return false
+      if (element.closest('[hidden], [inert], [aria-hidden="true"]')) return false
+      const style = window.getComputedStyle(element)
+      const rect = element.getBoundingClientRect()
+      return style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && Number(style.opacity || '1') > 0
+        && rect.width > 0
+        && rect.height > 0
+    }
+    const snapshot = () => {
+      const liveScopes = Array.from(document.querySelectorAll('.app-route-v2-scope')).filter(isLive)
+      const liveMains = Array.from(document.querySelectorAll('main, [role="main"]')).filter(isLive)
+      const outgoing = Array.from(document.querySelectorAll(
+        '.fade-leave-active, .ui-v2-route-fade-leave-active, .fade-leave-to, .ui-v2-route-fade-leave-to',
+      )).filter(isLive)
+      const runningTransitions = Array.from(document.querySelectorAll<HTMLElement>('main, [role="main"], .app-route-v2-scope, .app-route-scroll'))
+        .filter(isLive)
+        .flatMap((element) => {
+          const style = window.getComputedStyle(element)
+          return `${style.transitionDuration},${style.animationDuration}`
+            .split(',')
+            .map((item) => Number.parseFloat(item) || 0)
+            .filter((value) => value > 0.08)
+        })
+      const root = (document.querySelector('.app-route-v2-scope, main, [role="main"]') as HTMLElement | null)
+        || document.documentElement
+      const rect = root.getBoundingClientRect()
+      const hasLiveSurface = liveScopes.length === 1 || (liveScopes.length === 0 && liveMains.length === 1)
+      return {
+        liveScopes: liveScopes.length,
+        liveMains: liveMains.length,
+        outgoing: outgoing.length,
+        runningTransitions,
+        geometry: `${Math.round(rect.width)}x${Math.round(rect.height)}@${Math.round(rect.top)}`,
+        hasLiveSurface,
+      }
+    }
+    const nextFrame = () => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve())
+    })
+    const deadline = performance.now() + 8000
+    let last = snapshot()
+    let stableFrames = 0
+    while (performance.now() < deadline && (stableFrames < 3 || !last.hasLiveSurface || last.outgoing > 0 || last.runningTransitions.length > 0)) {
+      await nextFrame()
+      const next = snapshot()
+      if (next.hasLiveSurface && next.outgoing === 0 && next.runningTransitions.length === 0 && next.geometry === last.geometry) {
+        stableFrames += 1
+      } else {
+        stableFrames = 0
+      }
+      last = next
+    }
+    return {
+      ...last,
+      stableFrames,
+    }
+  })
+
+  if (probe.liveScopes > 0) {
+    expect(probe.liveScopes, 'exactly one live route scope').toBe(1)
+  } else {
+    expect(probe.liveMains, 'exactly one live main when route scope is unscoped').toBe(1)
+  }
+  expect(probe.outgoing, 'outgoing/stale route surfaces').toEqual(0)
+  expect(probe.runningTransitions, 'active transitions after settle').toEqual([])
+  expect(probe.stableFrames, `root geometry stable across frames (${probe.geometry})`).toBeGreaterThanOrEqual(3)
+}
 
 type ContractProbe = {
   mainCount: number
