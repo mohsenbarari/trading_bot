@@ -17,6 +17,7 @@ from core.market_intelligence.capture_event_adapter import (
 )
 from core.market_intelligence.coin_group_staging import connect_coin_group_staging
 from core.market_intelligence.market_contracts import derive_event_key
+from core.market_intelligence.market_fact_projection import initialize_export_ledger
 from core.market_intelligence.market_store import connect_market_store, initialize_market_store
 
 
@@ -214,6 +215,10 @@ class CaptureEventAdapterTests(unittest.TestCase):
             )
         )
         self._project()
+        retracted_before = self.market.execute(
+            "SELECT inserted_at_utc FROM market_observations "
+            "WHERE source_code='XAUUSD' AND price_value='4631.20'"
+        ).fetchone()[0]
         self.assertEqual(
             [
                 row["price_num"]
@@ -237,10 +242,67 @@ class CaptureEventAdapterTests(unittest.TestCase):
             )
         )
         self._project()
+        retracted_after = self.market.execute(
+            "SELECT inserted_at_utc,quality_state FROM market_observations "
+            "WHERE source_code='XAUUSD' AND price_value='4631.20'"
+        ).fetchone()
+        self.assertEqual(retracted_after["quality_state"], "REJECTED")
+        self.assertNotEqual(retracted_after["inserted_at_utc"], retracted_before)
         row = self.market.execute(
             "SELECT price_num,event_time_utc FROM market_observations WHERE source_code='XAUUSD' AND quality_state='ELIGIBLE'"
         ).fetchone()
         self.assertEqual((row["price_num"], row["event_time_utc"]), (4630.1, "2026-08-24T10:00:01Z"))
+
+    def test_never_exported_dependency_retraction_does_not_requeue(self) -> None:
+        self._stage_market(
+            market_event(
+                13,
+                source="XAUUSD",
+                text="4630.10",
+                message_id=13,
+                published="2026-08-24T10:00:01Z",
+                available="2026-08-24T10:00:02Z",
+            )
+        )
+        self._project()
+        row = self.market.execute(
+            "SELECT event_key,inserted_at_utc FROM market_observations "
+            "WHERE source_code='XAUUSD'"
+        ).fetchone()
+        initialize_export_ledger(self.market)
+        self.market.execute(
+            "INSERT INTO market_fact_export_ledger VALUES(?,?,?,?,?,?,?,?)",
+            (
+                row["event_key"],
+                row["inserted_at_utc"],
+                "REJECTED",
+                None,
+                None,
+                "market_fact_projection_offer_dependency_missing",
+                1,
+                row["inserted_at_utc"],
+            ),
+        )
+        self.market.commit()
+        self._stage_market(
+            market_event(
+                14,
+                source="XAUUSD",
+                text=None,
+                event_type="message_deleted",
+                message_id=13,
+                published=None,
+                available="2026-08-24T10:02:01Z",
+            )
+        )
+        self._project("2026-08-24T10:02:02Z")
+        after = self.market.execute(
+            "SELECT quality_state,inserted_at_utc FROM market_observations "
+            "WHERE event_key=?",
+            (row["event_key"],),
+        ).fetchone()
+        self.assertEqual(after["quality_state"], "REJECTED")
+        self.assertEqual(after["inserted_at_utc"], row["inserted_at_utc"])
 
     def test_group_reply_chain_projects_trade_and_delete_retracts_it(self) -> None:
         self._stage_group(group_event(20, text="امام فروش فردا 190000 / 5 تا", message_id=1, sender="owner00000000001"))
@@ -343,7 +405,7 @@ class CaptureEventAdapterTests(unittest.TestCase):
         row = self.staging.execute(
             "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
         ).fetchone()
-        self.assertEqual(row["schema_version"], 5)
+        self.assertEqual(row["schema_version"], 6)
         self.assertEqual(
             self.staging.execute(
                 "SELECT COUNT(*) FROM capture_market_message_revisions"
@@ -355,6 +417,84 @@ class CaptureEventAdapterTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM capture_primary_trade_deadlines"
             ).fetchone()[0],
             1,
+        )
+
+    def test_schema_v5_schedules_private_and_targeted_group_repair(self) -> None:
+        self._stage_market(
+            market_event(
+                40,
+                source="MELTED_PRIMARY_FLOW",
+                text="95,000,000 فروش 5 تا بدون حواله",
+                message_id=40,
+            )
+        )
+        self._project("2026-08-24T10:00:10Z")
+        self.staging.execute(
+            """
+            UPDATE capture_primary_trade_outcomes
+            SET status='FULL',finalized_at_utc='2026-08-24T10:00:20Z',
+                executed_quantity=5,remaining_quantity=0,
+                evidence_event_id='fixture-evidence'
+            WHERE source_id='MELTED_PRIMARY_FLOW' AND message_id=40
+            """
+        )
+        self._stage_group(
+            group_event(
+                41,
+                text="امام فروش فردا 190000 / 5 تا",
+                message_id=41,
+                sender="owner00000000041",
+            )
+        )
+        self.staging.execute("DELETE FROM capture_dirty_market_messages")
+        self.staging.execute("DELETE FROM capture_dirty_groups")
+        self.staging.execute(
+            "UPDATE capture_adapter_metadata SET schema_version=5 WHERE singleton=1"
+        )
+        self.staging.commit()
+
+        initialize_capture_adapter(self.staging)
+
+        self.assertEqual(
+            self.staging.execute(
+                "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
+            ).fetchone()[0],
+            6,
+        )
+        self.assertEqual(
+            self.staging.execute(
+                "SELECT message_id FROM capture_dirty_market_messages"
+            ).fetchone()[0],
+            40,
+        )
+        self.assertEqual(
+            self.staging.execute(
+                "SELECT COUNT(*) FROM capture_dirty_groups"
+            ).fetchone()[0],
+            0,
+        )
+        self.assertIsNotNone(
+            self.staging.execute(
+                "SELECT 1 FROM capture_projection_reconciliations "
+                "WHERE completed_at_utc IS NULL"
+            ).fetchone()
+        )
+
+        report = self._project("2026-08-24T20:00:00Z")
+        self.assertIsNotNone(report.group_pipeline)
+        assert report.group_pipeline is not None
+        self.assertEqual(report.group_pipeline.staged_messages_seen, 1)
+        self.assertIsNotNone(
+            self.market.execute(
+                "SELECT 1 FROM market_observations "
+                "WHERE source_code='GROUP_1' AND event_type='OFFER'"
+            ).fetchone()
+        )
+        self.assertIsNotNone(
+            self.staging.execute(
+                "SELECT 1 FROM capture_projection_reconciliations "
+                "WHERE completed_at_utc IS NOT NULL"
+            ).fetchone()
         )
 
     def test_primary_partial_trade_finalizes_at_deadline_without_new_event(self) -> None:

@@ -1,20 +1,25 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from hashlib import sha256
 import json
 import os
 from pathlib import Path
 import sqlite3
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from core.market_intelligence.private_coin_processor import (
     CoinProcessorError,
     CoinProcessorPaths,
+    _load_causal_inputs,
     _paths,
     process_coin_spool_cycle,
 )
+from core.market_intelligence.capture_event_adapter import initialize_capture_adapter
+from core.market_intelligence.coin_group_staging import connect_coin_group_staging
 
 
 def event(
@@ -194,6 +199,68 @@ class MarketPipelineStage5CoinProcessorTests(unittest.TestCase):
                 )
             finally:
                 connection.close()
+
+    def test_cutover_reconciliation_loads_historical_anchors_without_dirty_group(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            paths = self._fixture(Path(directory))
+            record = event(
+                15,
+                group=1,
+                message_id=15,
+                text="امام نقدی فروش 190000 / 1 تا",
+                sender="a" * 16,
+                second=0,
+            )
+            (paths.spool_directory / "events-2026-08-24.jsonl").write_text(
+                json.dumps(record, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            process_coin_spool_cycle(
+                paths=paths,
+                mode="fixture",
+                now_utc="2026-08-24T10:02:00Z",
+            )
+            staging = connect_coin_group_staging(paths.staging_database)
+            try:
+                staging.execute("DELETE FROM capture_dirty_groups")
+                staging.execute(
+                    "UPDATE capture_adapter_metadata SET schema_version=5 "
+                    "WHERE singleton=1"
+                )
+                staging.commit()
+                initialize_capture_adapter(staging)
+                self.assertEqual(
+                    staging.execute(
+                        "SELECT COUNT(*) FROM capture_dirty_groups"
+                    ).fetchone()[0],
+                    0,
+                )
+                paths = replace(
+                    paths,
+                    prediction_database=Path(directory) / "prediction.sqlite3",
+                )
+                loaded = SimpleNamespace(
+                    anchors=("anchor",), rows_seen=1, rows_rejected=0
+                )
+                with patch(
+                    "core.market_intelligence.private_coin_processor."
+                    "load_coin_prediction_anchors",
+                    return_value=loaded,
+                ) as loader:
+                    _feedback, anchors, stats = _load_causal_inputs(
+                        staging,
+                        paths,
+                        mode="fixture",
+                        as_of_utc="2026-08-24T10:02:01Z",
+                    )
+                self.assertEqual(anchors, ("anchor",))
+                self.assertEqual(stats["anchors"], 1)
+                self.assertEqual(
+                    loader.call_args.kwargs["earliest_event_time_utc"],
+                    "2026-08-24T10:00:00Z",
+                )
+            finally:
+                staging.close()
 
     def test_live_paths_require_both_causal_sidecars(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -52,6 +52,31 @@ def initialize_export_ledger(connection: sqlite3.Connection) -> None:
     )
 
 
+def _pending_export_rows(
+    market: sqlite3.Connection,
+    *,
+    max_rows: int,
+) -> list[sqlite3.Row]:
+    return market.execute(
+        """
+        SELECT o.*
+        FROM market_observations o
+        LEFT JOIN market_fact_export_ledger l ON l.event_key=o.event_key
+        WHERE l.event_key IS NULL
+           OR l.observation_inserted_at_utc<>o.inserted_at_utc
+           OR (
+                l.status='REJECTED'
+                AND instr(COALESCE(l.reason_code,''),'fact_payload_hash_mismatch')>0
+              )
+        ORDER BY o.event_time_utc,
+                 CASE o.event_type WHEN 'OFFER' THEN 0 WHEN 'TRADE' THEN 1 ELSE 2 END,
+                 o.event_key
+        LIMIT ?
+        """,
+        (max_rows,),
+    ).fetchall()
+
+
 def _quality(value: str) -> str:
     return {
         "ELIGIBLE": "ELIGIBLE",
@@ -254,19 +279,7 @@ def export_market_store_facts(
 ) -> ExportReport:
     initialize_export_ledger(market)
     allowed = load_source_registry().by_code()
-    rows = market.execute(
-        """
-        SELECT o.*
-        FROM market_observations o
-        LEFT JOIN market_fact_export_ledger l ON l.event_key=o.event_key
-        WHERE (l.event_key IS NULL OR l.observation_inserted_at_utc<>o.inserted_at_utc)
-        ORDER BY o.event_time_utc,
-                 CASE o.event_type WHEN 'OFFER' THEN 0 WHEN 'TRADE' THEN 1 ELSE 2 END,
-                 o.event_key
-        LIMIT ?
-        """,
-        (max_rows,),
-    ).fetchall()
+    rows = _pending_export_rows(market, max_rows=max_rows)
     published = unchanged = rejected = 0
     for index, row in enumerate(rows):
         event_key = bytes(row["event_key"]).hex()

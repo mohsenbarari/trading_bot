@@ -25,6 +25,7 @@ from .capture_event_adapter import (
     CaptureEventContractError,
     decode_capture_event,
     initialize_capture_adapter,
+    projection_reconciliation_pending,
     project_capture_changes,
     record_capture_rejection,
     stage_capture_event,
@@ -562,7 +563,12 @@ def _load_causal_inputs(
         "SELECT 1 FROM capture_dirty_groups WHERE available_at_utc<=? LIMIT 1",
         (as_of_utc,),
     ).fetchone()
-    if earliest is None or paths.prediction_database is None or dirty is None:
+    reconciliation_pending = projection_reconciliation_pending(staging)
+    if (
+        earliest is None
+        or paths.prediction_database is None
+        or (dirty is None and not reconciliation_pending)
+    ):
         anchors: tuple = ()
         anchor_stats = {"rows_seen": 0, "rows_rejected": 0, "anchors": 0}
     else:
@@ -571,8 +577,13 @@ def _load_causal_inputs(
             seconds=MAX_REPLY_AGE_SECONDS
         )
         earliest_stamp = datetime.fromisoformat(str(earliest).replace("Z", "+00:00"))
+        anchor_start = (
+            earliest_stamp
+            if reconciliation_pending
+            else max(active_lower, earliest_stamp)
+        )
         bounded_earliest = (
-            max(active_lower, earliest_stamp)
+            anchor_start
             .replace(microsecond=0)
             .isoformat()
             .replace("+00:00", "Z")

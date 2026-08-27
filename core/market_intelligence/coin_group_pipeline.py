@@ -848,6 +848,7 @@ def process_coin_group_staging(
     parser_feedback: Mapping[bytes, CoinGroupParserFeedback] | None = None,
     reconciliation_horizon_utc: datetime | str | None = None,
     included_message_keys: frozenset[tuple[int, int]] | None = None,
+    reconcile_missing_current_facts: bool = True,
 ) -> CoinGroupPipelineReport:
     """Process current staging idempotently in one caller-owned Store transaction.
 
@@ -1145,11 +1146,15 @@ def process_coin_group_staging(
         trade_facts += int(
             _upsert_if_semantically_changed(market_connection, observation)
         )
-    retracted_facts = _reconcile_missing_current_facts(
-        market_connection,
-        active_event_keys=active_event_keys,
-        staging_horizon_utc=reconciliation_horizon,
-        available_at_utc=as_of,
+    retracted_facts = (
+        _reconcile_missing_current_facts(
+            market_connection,
+            active_event_keys=active_event_keys,
+            staging_horizon_utc=reconciliation_horizon,
+            available_at_utc=as_of,
+        )
+        if reconcile_missing_current_facts
+        else 0
     )
     return CoinGroupPipelineReport(
         staged_messages_seen=len(messages),

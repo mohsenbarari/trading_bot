@@ -17,6 +17,8 @@ from core.market_intelligence.market_fact_receiver import (
 )
 from core.market_intelligence.market_fact_projection import (
     MarketFactProjectionError,
+    _pending_export_rows,
+    initialize_export_ledger,
     observation_payload,
 )
 from core.market_intelligence.market_fact_archive import _normalize_fact_payload
@@ -467,6 +469,62 @@ class Stage8ReceiverTests(unittest.TestCase):
 
 
 class Stage8TransportTests(unittest.TestCase):
+    def test_known_payload_hash_rejection_is_selected_for_one_time_retry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            market = connect_market_store(Path(directory) / "market.sqlite3")
+            initialize_market_store(market)
+            initialize_export_ledger(market)
+            event_key = derive_event_key("stage8", "retry-hash")
+            upsert_observation(
+                market,
+                MarketObservation(
+                    event_key=event_key,
+                    source_code="GROUP_1",
+                    source_family="GROUP",
+                    event_time_utc="2026-08-26T05:00:00Z",
+                    available_at_utc="2026-08-26T05:00:01Z",
+                    instrument="COIN_IMAM",
+                    market_label="GROUP_COIN_IMAM",
+                    settlement_term="CASH",
+                    trade_form="PHYSICAL",
+                    event_type="OFFER",
+                    side="SELL",
+                    price="187500",
+                    price_unit="PROJECT_THOUSAND_TOMAN",
+                    currency="TOMAN",
+                    quantity="5",
+                    quantity_unit="COIN_COUNT",
+                    parser_version="stage8-test-v1",
+                ),
+            )
+            inserted = market.execute(
+                "SELECT inserted_at_utc FROM market_observations WHERE event_key=?",
+                (event_key,),
+            ).fetchone()[0]
+            market.execute(
+                "INSERT INTO market_fact_export_ledger VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    event_key,
+                    inserted,
+                    "REJECTED",
+                    None,
+                    None,
+                    "fact_payload_hash_mismatch",
+                    1,
+                    inserted,
+                ),
+            )
+            market.commit()
+
+            self.assertEqual(len(_pending_export_rows(market, max_rows=10)), 1)
+            market.execute(
+                "UPDATE market_fact_export_ledger "
+                "SET reason_code='market_fact_projection_offer_dependency_missing'"
+            )
+            market.commit()
+            self.assertEqual(_pending_export_rows(market, max_rows=10), [])
+            market.close()
+
     def test_sparse_review_trade_payload_hashes_as_validated_contract(self):
         sparse = {
             "kind": "COIN_TRADE",
