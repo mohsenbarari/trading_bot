@@ -1306,11 +1306,12 @@ def _project_primary_row(
         if evidence is not None:
             candidates = private_gold_observations(
                 PrivateGoldOfferInput(
-                    source_event_id=(
-                        _primary_source_event_id(int(row["message_id"]))
-                        + ":trade:"
-                        + decision.evidence_event_id
-                    ),
+                    # The lifecycle outcome must retain the immutable root
+                    # offer identity.  The evidence revision remains in the
+                    # trade attributes; using it as the source identity would
+                    # derive an unrelated root_offer_event_key and make the
+                    # archive correctly reject the orphaned outcome.
+                    source_event_id=_primary_source_event_id(int(row["message_id"])),
                     published_at_utc=decision.published_at_utc,
                     available_at_utc=decision.available_at_utc,
                     edited_at_utc=decision.event_time_utc,

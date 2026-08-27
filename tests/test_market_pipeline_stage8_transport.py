@@ -19,6 +19,7 @@ from core.market_intelligence.market_fact_projection import (
     MarketFactProjectionError,
     observation_payload,
 )
+from core.market_intelligence.market_fact_archive import _normalize_fact_payload
 from core.market_intelligence.market_contracts import MarketObservation, derive_event_key
 from core.market_intelligence.market_store import (
     connect_market_store,
@@ -466,6 +467,19 @@ class Stage8ReceiverTests(unittest.TestCase):
 
 
 class Stage8TransportTests(unittest.TestCase):
+    def test_sparse_review_trade_payload_hashes_as_validated_contract(self):
+        sparse = {
+            "kind": "COIN_TRADE",
+            "offer_fact_id": "a" * 64,
+            "outcome": "AMBIGUOUS",
+        }
+
+        normalized = _normalize_fact_payload(sparse)
+
+        self.assertNotEqual(content_hash(sparse), content_hash(normalized))
+        self.assertIsNone(normalized.agreed_price_value)
+        self.assertIsNone(normalized.agreed_quantity_value)
+
     def test_hmac_exact_body_gzip_and_persistent_replay_guard(self):
         key = b"k" * 32
         document = {"fact": "x" * 70_000}

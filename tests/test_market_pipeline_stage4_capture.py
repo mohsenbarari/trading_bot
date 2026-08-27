@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
 import os
@@ -466,6 +467,45 @@ class CaptureFixture(unittest.TestCase):
 
 
 class CaptureContractTests(unittest.TestCase):
+    def test_market_revision_identity_covers_pinned_and_silent_metadata(self):
+        published = datetime(2026, 8, 26, 10, 0, tzinfo=UTC)
+        baseline = snapshot(1, published=published)
+        policy = SOURCE_POLICIES["MELTED_AGGREGATE"]
+
+        original = build_market_event(
+            policy,
+            baseline,
+            event_type="message_created",
+            received_at=published + timedelta(seconds=1),
+            backfill=False,
+        )
+        pinned = build_market_event(
+            policy,
+            replace(baseline, pinned=True),
+            event_type="message_created",
+            received_at=published + timedelta(seconds=2),
+            backfill=True,
+        )
+        silent = build_market_event(
+            policy,
+            replace(baseline, silent=True),
+            event_type="message_created",
+            received_at=published + timedelta(seconds=3),
+            backfill=True,
+        )
+
+        self.assertEqual(len({original["event_id"], pinned["event_id"], silent["event_id"]}), 3)
+        self.assertEqual(
+            len(
+                {
+                    original["message"]["revision_sha256"],
+                    pinned["message"]["revision_sha256"],
+                    silent["message"]["revision_sha256"],
+                }
+            ),
+            3,
+        )
+
     def test_marked_group_identity_normalizes_for_anonymous_admin_detection(self):
         self.assertEqual(
             telegram_capture._bare_peer_id(-1_001_234_567_890), 1_234_567_890

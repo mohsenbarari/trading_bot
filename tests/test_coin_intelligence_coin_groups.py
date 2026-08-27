@@ -304,6 +304,40 @@ class CoinGroupParserTests(unittest.TestCase):
         cash = parse_coin_group_offers(self.source("10 تا ربع نقدی ف۵۱۵۰۰۰"))[0]
         self.assertEqual(cash.settlement_term, "CASH")
 
+    def test_single_offer_split_across_visual_lines_is_collapsed_as_fallback(self) -> None:
+        parsed = parse_coin_group_offers(
+            self.source("10 تا ربع نقدی\nف ۵۱.۹۰۰")
+        )
+
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(
+            (
+                parsed[0].commodity_code,
+                parsed[0].quantity,
+                parsed[0].side,
+                parsed[0].price_project_thousand_toman,
+            ),
+            ("QUARTER_BAHAR", 10, "SELL", 51_900),
+        )
+
+        separate_incomplete_offers = parse_coin_group_offers(
+            self.source("10 تا امام\nخ 210\n20 تا نیم\nف 110")
+        )
+        self.assertEqual(separate_incomplete_offers, [])
+
+    def test_explicit_low_price_family_accepts_duplicated_terminal_zero(self) -> None:
+        parsed = parse_coin_group_offers(self.source("10 تا ربع ف ۵۱۹۰۰۰۰"))
+
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(
+            (parsed[0].commodity_code, parsed[0].price_project_thousand_toman),
+            ("QUARTER_BAHAR", 51_900),
+        )
+
+        unnamed = parse_coin_group_offers(self.source("10 تا 2144000 خ"))
+        self.assertEqual(len(unnamed), 1)
+        self.assertEqual(unnamed[0].price_project_thousand_toman, 214_400)
+
     def test_payment_timing_is_conditional(self) -> None:
         for text in (
             "امام ف 188900 / 5 تا حساب شب",

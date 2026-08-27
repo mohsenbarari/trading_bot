@@ -7,12 +7,23 @@ from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from typing import Any, Mapping
 
+from pydantic import TypeAdapter
+
 from .private_pipeline_contracts import (
     FactPayload,
     MarketFactV1,
     content_hash,
     load_source_registry,
 )
+
+
+_FACT_PAYLOAD_ADAPTER = TypeAdapter(FactPayload)
+
+
+def _normalize_fact_payload(
+    payload: FactPayload | Mapping[str, Any],
+) -> FactPayload:
+    return _FACT_PAYLOAD_ADAPTER.validate_python(payload)
 
 
 class MarketFactArchiveError(RuntimeError):
@@ -215,15 +226,18 @@ def build_and_publish_fact(
     source = load_source_registry().by_code().get(source_code)
     if source is None:
         raise MarketFactArchiveError("market_fact_archive_source_unknown")
-    payload_kind = str(
-        payload.kind if hasattr(payload, "kind") else payload.get("kind", "")
-    )
+    # Hash the validated contract representation, not a potentially sparse
+    # caller mapping.  Pydantic materializes optional ``None`` fields when it
+    # builds MarketFactV1; hashing the sparse input first made REVIEW/REJECTED
+    # coin trades fail the fact_payload_hash invariant.
+    normalized_payload = _normalize_fact_payload(payload)
+    payload_kind = str(normalized_payload.kind)
     fact_id = stable_fact_id(
         source_code=source_code,
         event_key=event_key,
         fact_kind=payload_kind,
     )
-    payload_digest = content_hash(payload)
+    payload_digest = content_hash(normalized_payload)
     occurred = _utc(occurred_at_utc)
     available = _utc(available_at_utc)
     persisted = datetime.now(timezone.utc)
@@ -277,7 +291,7 @@ def build_and_publish_fact(
             quality_state=quality_state,
             quality_reason_codes=quality_reason_codes,
             payload_hash=payload_digest,
-            payload=payload,
+            payload=normalized_payload,
         )
         retention_class, purge_after = _retention(source_code, persisted)
         envelope = fact.model_dump(mode="json")

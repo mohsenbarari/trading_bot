@@ -228,6 +228,8 @@ def _revision(snapshot: TelegramMessageSnapshot) -> str:
         "forwarded": snapshot.is_forwarded,
         "via_bot": snapshot.via_bot,
         "post": snapshot.post,
+        "silent": snapshot.silent,
+        "pinned": snapshot.pinned,
         "noforwards": snapshot.noforwards,
     }
     return sha256(_canonical_json(material).encode("utf-8")).hexdigest()
