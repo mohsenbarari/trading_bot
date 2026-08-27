@@ -761,7 +761,7 @@ async function sendBlockRequest(restrictedUntil: string) {
     action: 'block',
     body: { trading_restricted_until: restrictedUntil },
     expected: {
-      trading_restricted_until: (value) => isSameDateTime(value, restrictedUntil),
+      trading_restricted_until: (value: unknown) => isSameDateTime(value, restrictedUntil),
     },
     fallbackError: 'اعمال مسدودیت ناموفق بود.',
   });
@@ -809,7 +809,7 @@ async function saveLimitations() {
       max_daily_requests: body.max_daily_requests,
       limitations_expire_at: expireAt === null
         ? null
-        : (value) => isSameDateTime(value, expireAt),
+        : (value: unknown) => isSameDateTime(value, expireAt),
     },
     fallbackError: 'ذخیره محدودیت‌ها ناموفق بود.',
   });
@@ -823,9 +823,9 @@ async function saveLimitations() {
 
 function openLimitationsModal() {
     if (!canPerformSensitiveAdminActions.value || isUserMutationBusy.value) return;
-    limitMaxTrades.value = props.user.max_daily_trades;
-    limitMaxCommodities.value = props.user.max_active_commodities;
-    limitMaxRequests.value = props.user.max_daily_requests;
+    limitMaxTrades.value = props.user.max_daily_trades ?? null;
+    limitMaxCommodities.value = props.user.max_active_commodities ?? null;
+    limitMaxRequests.value = props.user.max_daily_requests ?? null;
     // We don't easily know the duration from expire_at, so reset duration to default
     limitDurationMinutes.value = 0;
     customLimitDate.value = ''; // Reset custom date
@@ -1104,11 +1104,11 @@ async function confirmPendingAction() {
       method: 'POST',
       validate: (receipt) => isRecord(receipt)
         && Number.isInteger(receipt.terminated_sessions)
-        && receipt.terminated_sessions >= 0,
+        && Number(receipt.terminated_sessions) >= 0,
       fallbackError: 'پایان دادن به نشست‌های فعال ناموفق بود.',
     });
     if (result.outcome === 'success') {
-      const terminatedSessions = (result.receipt as UserRecord).terminated_sessions as number;
+      const terminatedSessions = Number((result.receipt as Record<string, unknown>).terminated_sessions);
       setActionSuccess(terminatedSessions > 0
         ? `${terminatedSessions} نشست پایان یافت.`
         : 'نشست فعالی برای پایان دادن وجود نداشت.');

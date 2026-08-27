@@ -89,8 +89,8 @@ describe('chatMediaDimensions', () => {
 
     const normalized = normalizeTimelineMediaDimensions(groups)
 
-    expect((normalized[0].items[0] as Message).media_aspect_ratio).toBe(2)
-    expect((normalized[0].items[1] as Message).media_aspect_ratio).toBeUndefined()
-    expect((normalized[0].items[2] as any).messages[0].media_aspect_ratio).toBeCloseTo(16 / 9)
+    expect((normalized[0]!.items[0] as Message).media_aspect_ratio).toBe(2)
+    expect((normalized[0]!.items[1] as Message).media_aspect_ratio).toBeUndefined()
+    expect((normalized[0]!.items[2] as any).messages[0].media_aspect_ratio).toBeCloseTo(16 / 9)
   })
 })

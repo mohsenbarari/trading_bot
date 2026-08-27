@@ -30,8 +30,8 @@ describe('chatVirtualTimeline', () => {
     ])
 
     expect(rows.map(row => row.key)).toEqual(['date:امروز', 'message:1', 'message:2'])
-    expect(rows[0].type).toBe('date')
-    expect(rows[1].type).toBe('message')
+    expect(rows[0]!.type).toBe('date')
+    expect(rows[1]!.type).toBe('message')
   })
 
   it('estimates known and fallback media rows using reserved aspect ratios', () => {

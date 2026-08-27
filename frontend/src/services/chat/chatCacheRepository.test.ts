@@ -28,7 +28,7 @@ describe('chatCacheRepository', () => {
     }], [])
 
     const cached = await readCachedConversations({ userId: 5, schemaVersion: 1 })
-    expect(cached?.conversations[0].other_user_name).toBe('علی')
+    expect(cached?.conversations[0]?.other_user_name).toBe('علی')
 
     await clearCachedConversations({ userId: 5, schemaVersion: 1 })
     expect(await readCachedConversations({ userId: 5, schemaVersion: 1 })).toBeNull()

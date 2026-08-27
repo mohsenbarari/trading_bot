@@ -151,7 +151,7 @@ describe('DashboardDailySections.vue', () => {
     ])
     const tradeRows = wrapper.findAll('.dashboard-trades__table tbody tr')
     expect(tradeRows).toHaveLength(2)
-    expect(tradeRows[0].findAll('th, td')).toHaveLength(11)
+    expect(tradeRows[0]!.findAll('th, td')).toHaveLength(11)
     expect(wrapper.findAll('.dashboard-trades__table thead th')).toHaveLength(11)
     expect(wrapper.get('.dashboard-trades__scroller').attributes()).toMatchObject({
       role: 'region',

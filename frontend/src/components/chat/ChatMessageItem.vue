@@ -731,7 +731,7 @@ const docFileUrl = computed(() => {
   return `${baseUrl}/api/chat/files/${fileId}?token=${token}`
 })
 const documentIntentBusy = ref(false)
-let documentIntentBusyTimer: ReturnType<typeof window.setTimeout> | null = null
+let documentIntentBusyTimer: number | null = null
 const isCachedDownloading = computed(() => Boolean(
   documentIntentBusy.value
   || (docFileId.value && cachedDownloadingFiles[docFileId.value!]),
@@ -774,7 +774,7 @@ function beginDocumentIntentBusy() {
   documentIntentBusyTimer = window.setTimeout(() => {
     documentIntentBusy.value = false
     documentIntentBusyTimer = null
-  }, 1200)
+  }, 1200) as unknown as number
 }
 
 function canPrimeDocumentIntentBusy() {
@@ -1433,8 +1433,8 @@ const albumLayoutItems = computed(() => {
       previewUrl,
       hasResolvedMedia: Boolean(resolvedMediaUrl),
       type: message.message_type,
-      width: dimensions.width,
-      height: dimensions.height,
+      width: dimensions.width ?? undefined,
+      height: dimensions.height ?? undefined,
       aspectRatio: dimensions.aspectRatio,
     }
   })

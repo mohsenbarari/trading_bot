@@ -442,19 +442,19 @@ describe('OwnerAccountantManagerModal.vue', () => {
 
     await wrapper.get('.accountant-detail-topbar .ghost-btn').trigger('click')
     await flushPromises()
-    await wrapper.findAll('.accountant-settings-btn')[1].trigger('click')
+    await wrapper.findAll('.accountant-settings-btn')[1]!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('مهلت این دعوت به پایان رسیده است.')
 
     await wrapper.get('.accountant-detail-topbar .ghost-btn').trigger('click')
     await flushPromises()
-    await wrapper.findAll('.accountant-settings-btn')[2].trigger('click')
+    await wrapper.findAll('.accountant-settings-btn')[2]!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('این دعوت توسط مالک لغو شده است.')
 
     await wrapper.get('.accountant-detail-topbar .ghost-btn').trigger('click')
     await flushPromises()
-    await wrapper.findAll('.accountant-settings-btn')[3].trigger('click')
+    await wrapper.findAll('.accountant-settings-btn')[3]!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('این رابطه حذف شده است.')
   })

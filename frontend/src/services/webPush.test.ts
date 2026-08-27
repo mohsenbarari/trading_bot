@@ -116,8 +116,8 @@ describe('webPush service', () => {
         method: 'POST',
       }),
     )
-    expect(webPushMocks.apiFetch.mock.invocationCallOrder[0]).toBeLessThan(
-      requestPermission.mock.invocationCallOrder[0],
+    expect(webPushMocks.apiFetch.mock.invocationCallOrder[0]!).toBeLessThan(
+      requestPermission.mock.invocationCallOrder[0]!,
     )
   })
 

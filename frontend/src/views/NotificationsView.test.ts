@@ -6,6 +6,9 @@ import { flushPromises, mount } from '@vue/test-utils'
 import NotificationsView from './NotificationsView.vue'
 import { useNotificationStore } from '../stores/notifications'
 import type { NormalizedAppNotification } from '../types/notifications'
+import type { NotificationHistoryResult } from '../stores/notifications'
+
+const OPEN_CENTER_RESULT: NotificationHistoryResult = { ok: true, count: 0 }
 
 const routerPushMock = vi.fn()
 const routerReplaceMock = vi.fn()
@@ -56,7 +59,7 @@ describe('NotificationsView.vue', () => {
   it('renders the loading state while the notification history is still fetching', async () => {
     const store = useNotificationStore()
     store.isLoadingHistory = true
-    vi.spyOn(store, 'openNotificationCenter').mockImplementation(async () => {})
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue(OPEN_CENTER_RESULT)
 
     const wrapper = mount(NotificationsView)
 
@@ -69,7 +72,7 @@ describe('NotificationsView.vue', () => {
     const store = useNotificationStore()
     store.hasLoadedHistory = true
     store.historyStatus = 'success'
-    const openNotificationCenterSpy = vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+    const openNotificationCenterSpy = vi.spyOn(store, 'openNotificationCenter').mockResolvedValue(OPEN_CENTER_RESULT)
 
     const wrapper = mount(NotificationsView)
     await flushPromises()
@@ -148,7 +151,7 @@ describe('NotificationsView.vue', () => {
   it('shows only the enable action when push notifications are inactive', async () => {
     webPushMocks.getWebPushStatus.mockResolvedValueOnce({ state: 'unsubscribed' })
     const store = useNotificationStore()
-    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue(OPEN_CENTER_RESULT)
 
     const wrapper = mount(NotificationsView)
     await flushPromises()
@@ -179,7 +182,7 @@ describe('NotificationsView.vue', () => {
   ] as const)('renders the truthful browser Push state %s', async (state, label) => {
     webPushMocks.getWebPushStatus.mockResolvedValueOnce({ state })
     const store = useNotificationStore()
-    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue(OPEN_CENTER_RESULT)
 
     const wrapper = mount(NotificationsView)
     await flushPromises()
@@ -207,7 +210,7 @@ describe('NotificationsView.vue', () => {
       },
     ]
 
-    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue(OPEN_CENTER_RESULT)
 
     const wrapper = mount(NotificationsView)
     await flushPromises()
@@ -248,7 +251,7 @@ describe('NotificationsView.vue', () => {
       },
     ]
 
-    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue(OPEN_CENTER_RESULT)
 
     const wrapper = mount(NotificationsView)
     await flushPromises()
@@ -293,7 +296,7 @@ describe('NotificationsView.vue', () => {
       },
     ]
 
-    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue(OPEN_CENTER_RESULT)
 
     const wrapper = mount(NotificationsView, { attachTo: document.body })
     await flushPromises()
@@ -306,7 +309,7 @@ describe('NotificationsView.vue', () => {
     expect(chips()[0]!.attributes('id')).toBe('notifications-category-trade-tab')
     expect(chips()[0]!.attributes('aria-controls')).toBe('notifications-category-trade-panel')
 
-    chips()[0]!.element.focus()
+    ;(chips()[0]!.element as HTMLElement).focus()
     await chips()[0]!.trigger('keydown', { key: 'ArrowLeft' })
     await flushPromises()
     expect(document.activeElement).toBe(chips()[1]!.element)
@@ -351,7 +354,7 @@ describe('NotificationsView.vue', () => {
     ]
     store.appNotifications = hostileNotifications
 
-    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue(OPEN_CENTER_RESULT)
 
     const wrapper = mount(NotificationsView)
     await flushPromises()
@@ -412,7 +415,7 @@ describe('NotificationsView.vue', () => {
         route: '/recovery-target',
       },
     ]
-    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue(OPEN_CENTER_RESULT)
     routerResolveMock.mockImplementation((path: string) => {
       if (path === '/recovery-target') {
         return {
@@ -482,7 +485,7 @@ describe('NotificationsView.vue', () => {
         route: '/market',
       },
     ]
-    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue(OPEN_CENTER_RESULT)
     routerPushMock.mockImplementationOnce(async () => {
       routerCurrentRouteMock.value = {
         name: 'system-recovery',
@@ -524,7 +527,7 @@ describe('NotificationsView.vue', () => {
       },
     ] as any
 
-    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue(OPEN_CENTER_RESULT)
 
     const wrapper = mount(NotificationsView)
     await flushPromises()
@@ -570,7 +573,7 @@ describe('NotificationsView.vue', () => {
         is_read: true,
       },
     ]
-    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue(OPEN_CENTER_RESULT)
 
     const wrapper = mount(NotificationsView)
     await flushPromises()
@@ -636,7 +639,7 @@ describe('NotificationsView.vue', () => {
       },
     ]
     store.appNotifications = hostileRouteNotifications
-    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue(OPEN_CENTER_RESULT)
 
     const wrapper = mount(NotificationsView)
     await flushPromises()
@@ -677,7 +680,7 @@ describe('NotificationsView.vue', () => {
       },
     ]
 
-    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue(OPEN_CENTER_RESULT)
 
     const wrapper = mount(NotificationsView)
     await flushPromises()
@@ -733,7 +736,7 @@ describe('NotificationsView.vue', () => {
       },
     ]
 
-    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue(OPEN_CENTER_RESULT)
 
     const wrapper = mount(NotificationsView)
     await flushPromises()
@@ -773,7 +776,7 @@ describe('NotificationsView.vue', () => {
       },
     ]
 
-    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue(OPEN_CENTER_RESULT)
 
     const wrapper = mount(NotificationsView)
     await flushPromises()

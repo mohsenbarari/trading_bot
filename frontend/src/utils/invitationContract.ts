@@ -93,27 +93,28 @@ function canonicalInvitationBotLink(...candidates: Array<string | null | undefin
 }
 
 export function normalizeInvitationContract(
-  payload: InvitationContractPayload,
+  payload: InvitationContractPayload | unknown,
 ): NormalizedInvitationContract {
-  const state = payload.state || 'pending'
+  const record = payload && typeof payload === 'object' ? payload as InvitationContractPayload : {}
+  const state = record.state || 'pending'
   const pending = state === 'pending'
-  const botLink = canonicalInvitationBotLink(payload.bot_link, payload.link)
+  const botLink = canonicalInvitationBotLink(record.bot_link, record.link)
   const webLink = canonicalInvitationWebLink(
-    payload.web_short_link,
-    payload.short_link,
-    payload.web_link,
+    record.web_short_link,
+    record.short_link,
+    record.web_link,
   )
 
   return {
-    token: pending ? payload.token || '' : '',
-    created: typeof payload.created === 'boolean' ? payload.created : null,
-    botLink: pending && payload.bot_available !== false ? botLink : '',
-    webLink: pending && payload.web_available !== false ? webLink : '',
-    botAvailable: pending && payload.bot_available !== false,
-    webAvailable: pending && payload.web_available !== false,
+    token: pending ? record.token || '' : '',
+    created: typeof record.created === 'boolean' ? record.created : null,
+    botLink: pending && record.bot_available !== false ? botLink : '',
+    webLink: pending && record.web_available !== false ? webLink : '',
+    botAvailable: pending && record.bot_available !== false,
+    webAvailable: pending && record.web_available !== false,
     state,
-    smsStatus: payload.sms_status || null,
-    expiresAt: payload.expires_at || '',
+    smsStatus: record.sms_status || null,
+    expiresAt: record.expires_at || '',
   }
 }
 

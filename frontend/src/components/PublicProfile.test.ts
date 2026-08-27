@@ -219,7 +219,7 @@ describe('PublicProfile.vue', () => {
     const actionCardRule = publicProfileSource.match(/\.profile-action-card\s*\{([\s\S]*?)\n\}/)?.[1]
     const miniTradeRule = Array.from(
       publicProfileSource.matchAll(/\.mini-trade-card\s*\{([\s\S]*?)\n\}/g),
-    ).find(([, rule]) => rule.includes('transition: background 0.18s ease;'))
+    ).find((match) => match[1]?.includes('transition: background 0.18s ease;'))
     const miniTradeReducedMotionRule = publicProfileSource.match(
       /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.mini-trade-card\s*\{\s*transition:\s*none;\s*\}\s*\}/,
     )?.[0]
@@ -1103,7 +1103,7 @@ describe('PublicProfile.vue', () => {
     await flushPromises()
 
     expect(wrapper.get('label[for="project-users-directory-search"]').text()).toBe('جستجوی همکاران پروژه')
-    expect(wrapper.get('input#project-users-directory-search').exists()).toBe(true)
+    expect(wrapper.find('input#project-users-directory-search').exists()).toBe(true)
 
     await wrapper.get('.project-users-search').trigger('submit')
     await flushPromises()

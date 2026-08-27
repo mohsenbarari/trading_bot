@@ -866,7 +866,7 @@ describe('AdminView.vue', () => {
     await nextTick()
     await flushPromises()
     expect(wrapper.get('.user-profile-stub').text()).toBe('latest-user')
-    expect((adminViewMocks.apiFetchMock.mock.calls[0][1] as RequestInit).signal?.aborted).toBe(true)
+    expect((adminViewMocks.apiFetchMock.mock.calls[0]![1] as RequestInit).signal?.aborted).toBe(true)
 
     resolveFirst!(responseOf({ id: 61, account_name: 'stale-user' }))
     await flushPromises()
@@ -883,7 +883,7 @@ describe('AdminView.vue', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    const detailSignal = (adminViewMocks.apiFetchMock.mock.calls[0][1] as RequestInit).signal
+    const detailSignal = (adminViewMocks.apiFetchMock.mock.calls[0]![1] as RequestInit).signal
     const vm = getAdminViewVm(wrapper)
     vm.handleNavigate('manage_users')
     await flushPromises()

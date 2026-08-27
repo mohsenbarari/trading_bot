@@ -596,7 +596,7 @@ describe('CustomerWorkspaceView.vue', () => {
         status: 'pending',
         web_short_link: 'https://example.test/i/CUST0021',
         activated_at: null,
-      }),
+      }) as unknown as Record<string, unknown>,
     )
     await createRequest
     await flushPromises()
@@ -1358,14 +1358,14 @@ describe('CustomerWorkspaceView.vue', () => {
 
     expect(staleSignal.aborted).toBe(true)
     expect(
-      vm.customerState.relations.value.find((relation: { id: number }) => relation.id === 11)
+      vm.customerState.relations.value.find((relation: { id: number }) => relation.id === 11)!
         .max_daily_trades,
     ).toBe(9)
     staleRefresh.resolve(staleSnapshot)
     await refreshRequest
     await flushPromises()
     expect(
-      vm.customerState.relations.value.find((relation: { id: number }) => relation.id === 11)
+      vm.customerState.relations.value.find((relation: { id: number }) => relation.id === 11)!
         .max_daily_trades,
     ).toBe(9)
   })
@@ -1431,7 +1431,7 @@ describe('CustomerWorkspaceView.vue', () => {
     staleTrades.resolve([makeTrade(1, 'پاسخ قدیمی')])
     await flushPromises()
     expect(
-      tradesVm.detailTrades.map((trade: { counterparty_name: string }) => trade.counterparty_name),
+      tradesVm.detailTrades.map((trade) => trade.counterparty_name),
     ).toEqual(['پاسخ جاری'])
     expect(tradesVm.detailTradesLoading).toBe(false)
     tradesWrapper.unmount()
@@ -1459,8 +1459,8 @@ describe('CustomerWorkspaceView.vue', () => {
     await flushPromises()
     staleStats.resolve(makeStats(11, 7, 7))
     await flushPromises()
-    expect(statsVm.detailStats.period_days).toBe(30)
-    expect(statsVm.detailStats.trade_count).toBe(30)
+    expect(statsVm.detailStats!.period_days).toBe(30)
+    expect(statsVm.detailStats!.trade_count).toBe(30)
     expect(statsVm.detailStatsLoading).toBe(false)
     statsWrapper.unmount()
 
@@ -1583,7 +1583,7 @@ describe('CustomerWorkspaceView.vue', () => {
     await limitsRequest
     await flushPromises()
 
-    expect(limitsVm.activeRelation.id).toBe(13)
+    expect(limitsVm.activeRelation!.id).toBe(13)
     expect(limitsVm.customerState.detailEditForm.max_daily_trades).toBe('2')
     expect(limitsVm.limitsNotice).toBe('')
     expect(limitsVm.isLimitsReviewOpen).toBe(false)
@@ -1616,7 +1616,7 @@ describe('CustomerWorkspaceView.vue', () => {
     await terminationRequest
     await flushPromises()
 
-    expect(sessionsVm.activeRelation.id).toBe(13)
+    expect(sessionsVm.activeRelation!.id).toBe(13)
     expect(sessionsVm.sessionNotice).toBe('')
     expect(sessionsVm.detailSessions.map((session: { id: string }) => session.id)).toContain(
       'session-1',
@@ -1643,7 +1643,7 @@ describe('CustomerWorkspaceView.vue', () => {
     await deleteRequest
     await flushPromises()
 
-    expect(deleteVm.activeRelation.id).toBe(13)
+    expect(deleteVm.activeRelation!.id).toBe(13)
     expect(deleteVm.listActionNotice).toBe('')
     expect(customerWorkspaceMocks.routerPushMock).not.toHaveBeenCalled()
   })
@@ -1786,7 +1786,7 @@ describe('CustomerWorkspaceView.vue', () => {
 
     const wrapper = mount(CustomerWorkspaceView, { attachTo: routeScroll })
     expect(wrapper.find('.workspace-relation-list').exists()).toBe(false)
-    pendingRelations.resolve([makeCustomerRelation()])
+    pendingRelations.resolve([makeCustomerRelation() as unknown as Record<string, unknown>])
     await flushPromises()
     await flushPromises()
 

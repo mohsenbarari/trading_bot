@@ -285,7 +285,7 @@ describe('LoginView.vue', () => {
       'recovery_approved',
       'recovery_rejected',
       'recovery_expired',
-    ]) {
+    ] as const) {
       vm.step = status
       await flushPromises()
       const container = wrapper.get('[data-auth-status-step]')

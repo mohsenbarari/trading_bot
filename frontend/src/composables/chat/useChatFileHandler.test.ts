@@ -133,9 +133,11 @@ describe('useChatFileHandler.ts', () => {
   it('marks uncached files as downloading before IndexedDB cache lookup completes', async () => {
     const fileHandler = await import('./useChatFileHandler')
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
-    let resolveCacheRead: ((value: unknown) => void) | null = null
-    localforageInstance.getItem.mockImplementationOnce(() => new Promise((resolve) => {
-      resolveCacheRead = resolve
+    let resolveCacheRead = (_value: {} | null) => {}
+    localforageInstance.getItem.mockImplementationOnce(() => new Promise<{} | null>((resolve) => {
+      resolveCacheRead = (value) => {
+        resolve(value)
+      }
     }))
     const fetchMock = vi.fn(async () => ({
       ok: true,

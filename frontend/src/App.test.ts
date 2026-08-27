@@ -78,7 +78,9 @@ function reducedMotionSelectors(source: string) {
   const selectors: string[] = []
   postcss.parse(source).walkAtRules('media', (rule) => {
     if (rule.params !== '(prefers-reduced-motion: reduce)') return
-    rule.walkRules((nestedRule) => selectors.push(...nestedRule.selectors))
+    rule.walkRules((nestedRule) => {
+      selectors.push(...nestedRule.selectors)
+    })
   })
   return selectors
 }

@@ -81,7 +81,11 @@ const sectionMetaByKey: Record<string, { title: string; description: string }> =
     description: 'مشاهده و ویرایش تنظیمات کاربر منتخب',
   },
 }
-const currentSectionMeta = computed(() => sectionMetaByKey[currentSection.value] || sectionMetaByKey.menu)
+const currentSectionMeta = computed(() => (
+  sectionMetaByKey[currentSection.value]
+  ?? sectionMetaByKey.menu
+  ?? { title: 'مرکز مدیریت', description: '' }
+))
 const isUserDirectoryProfileSubview = computed(() => currentSection.value === 'user_profile')
 const adminSubviewReturnLabel = computed(() =>
   isUserDirectoryProfileSubview.value ? 'بازگشت به فهرست کاربران' : 'بازگشت به پنل مدیریت',
@@ -170,7 +174,7 @@ function parseUserDirectoryScroll(value: unknown) {
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0
 }
 
-function buildUserDirectoryRouteQuery(scroll = userDirectoryScrollTop.value) {
+function buildUserDirectoryRouteQuery(scroll = userDirectoryScrollTop.value): Record<string, string> {
   const normalizedScroll = parseUserDirectoryScroll(scroll)
   return normalizedScroll > 0 ? { scroll: String(normalizedScroll) } : {}
 }
@@ -267,6 +271,10 @@ function captureUserDirectoryScroll(syncRoute = true) {
 
   userDirectoryScrollTop.value = nextScroll
   if (syncRoute) syncUserDirectoryRouteQuery()
+}
+
+function handleUserDirectoryScroll() {
+  captureUserDirectoryScroll()
 }
 
 function restoreUserDirectoryScroll(releaseWhenLoaded = false) {
@@ -613,7 +621,7 @@ onMounted(() => {
   syncRouteToSection()
   void nextTick(() => {
     userDirectoryScrollTarget = resolveUserDirectoryScrollTarget()
-    userDirectoryScrollTarget?.addEventListener('scroll', captureUserDirectoryScroll, {
+    userDirectoryScrollTarget?.addEventListener('scroll', handleUserDirectoryScroll, {
       passive: true,
     })
     restoreUserDirectoryScroll()
@@ -787,7 +795,7 @@ onUnmounted(() => {
   isMenuUserDirectoryNavigationPending = false
   cancelRouteUserProfileRequest()
   clearUserDirectoryScrollRestore()
-  userDirectoryScrollTarget?.removeEventListener('scroll', captureUserDirectoryScroll)
+  userDirectoryScrollTarget?.removeEventListener('scroll', handleUserDirectoryScroll)
   userDirectoryScrollTarget = null
   clearBackStack()
 })

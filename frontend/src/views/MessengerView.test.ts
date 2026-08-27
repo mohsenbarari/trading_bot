@@ -215,7 +215,7 @@ describe('MessengerView.vue', () => {
     await flushPromises()
 
     expect(pushBackStateMock).toHaveBeenCalledTimes(1)
-    const baseBackCallback = pushBackStateMock.mock.calls[0][0]
+    const baseBackCallback = pushBackStateMock.mock.calls[0]![0]
     expect(baseBackCallback).toBeTypeOf('function')
 
     baseBackCallback()

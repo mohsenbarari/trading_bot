@@ -3,7 +3,7 @@ import { ref } from 'vue'
 
 const props = withDefaults(
   defineProps<{
-    modelValue?: string | number
+    modelValue?: string | number | null
     invalid?: boolean
     modelModifiers?: {
       number?: boolean
@@ -52,7 +52,7 @@ defineExpose({ focus, scrollIntoView })
     ref="inputRef"
     class="ui-input"
     :class="{ 'is-invalid': invalid }"
-    :value="modelValue"
+    :value="modelValue ?? ''"
     :aria-invalid="invalid || undefined"
     @input="handleInput"
   />

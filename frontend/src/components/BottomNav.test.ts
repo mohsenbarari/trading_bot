@@ -158,7 +158,7 @@ describe('BottomNav.vue', () => {
 
     await wrapper.get('.fab-btn').trigger('click')
     expect(wrapper.find('.fab-nav').exists()).toBe(true)
-    ;(wrapper.vm as unknown as { navItems: Array<{ disabled: boolean }> }).navItems[0].disabled =
+    ;(wrapper.vm as unknown as { navItems: Array<{ disabled: boolean }> }).navItems[0]!.disabled =
       true
     const storeModule = await import('../stores/notifications')
     const notificationStore = storeModule.useNotificationStore()
@@ -507,7 +507,7 @@ describe('BottomNav.vue', () => {
     })
 
     await flushPromises()
-    ;(wrapper.vm as unknown as { navItems: Array<{ disabled: boolean }> }).navItems[0].disabled =
+    ;(wrapper.vm as unknown as { navItems: Array<{ disabled: boolean }> }).navItems[0]!.disabled =
       true
     await nextTick()
 

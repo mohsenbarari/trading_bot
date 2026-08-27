@@ -60,7 +60,7 @@ function remainingFromPayload(
 
 function requesterDecisionStarted(
   payload: OvertimeRequestPublicPayload | null | undefined,
-): boolean {
+): payload is OvertimeRequestPublicPayload {
   return Boolean(
     payload?.is_actionable
     || payload?.presented_at

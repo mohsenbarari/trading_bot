@@ -110,7 +110,10 @@ const goBack = async () => {
 }
 
 const formatTime = (ts: unknown) => {
-  return formatIranTime(ts)
+  if (typeof ts === 'string' || typeof ts === 'number' || ts instanceof Date || ts == null) {
+    return formatIranTime(ts)
+  }
+  return ''
 }
 
 type ParsedNotificationLine = {
@@ -304,7 +307,7 @@ onMounted(async () => {
               v-else-if="pushState === 'error'"
               class="push-status-retry"
               variant="secondary"
-              :loading="pushState === 'checking'"
+              :loading="false"
               @click="refreshPushState"
             >
               <template #icon>

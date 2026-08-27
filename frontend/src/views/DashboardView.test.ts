@@ -14,10 +14,7 @@ import {
   currentUserSummary,
 } from '../utils/currentUser'
 // @ts-expect-error The production guard helper is intentionally shipped as plain ESM.
-import {
-  DASHBOARD_MARKET_REGION_SHA256,
-  dashboardMarketRegionEvidence,
-} from '../../scripts/lib/stage3-protected-region-guard.mjs'
+import { DASHBOARD_MARKET_REGION_SHA256, dashboardMarketRegionEvidence } from '../../scripts/lib/stage3-protected-region-guard.mjs'
 
 const dashboardViewMocks = vi.hoisted(() => ({
   routerPushMock: vi.fn(),
@@ -139,7 +136,7 @@ describe('DashboardView.vue Stage 4 Home contract', () => {
     expect(wrapper.get('.dashboard-identity-error').text()).toContain(
       'دریافت اطلاعات خانه انجام نشد',
     )
-    expect(wrapper.get('main.dashboard-page').exists()).toBe(true)
+    expect(wrapper.find('main.dashboard-page').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('private transport detail')
     expect(wrapper.text()).not.toContain('اینترنت')
     expect(wrapper.findComponent(PWAInstallOverlay).exists()).toBe(false)

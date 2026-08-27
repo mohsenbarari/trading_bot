@@ -168,9 +168,14 @@ function resetMediaZoom() {
   lastStageTap = null
 }
 
-function setLightboxVideoRef(msgId: number, element: Element | null) {
-  if (element instanceof HTMLVideoElement) {
-    lightboxVideoRefs.set(msgId, element)
+function setLightboxVideoRef(msgId: number, element: unknown) {
+  const node = element instanceof Element
+    ? element
+    : element && typeof element === 'object' && '$el' in element
+      ? (element as { $el: unknown }).$el
+      : null
+  if (node instanceof HTMLVideoElement) {
+    lightboxVideoRefs.set(msgId, node)
     return
   }
 

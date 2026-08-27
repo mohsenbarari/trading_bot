@@ -39,7 +39,7 @@ describe('profile presentation primitives', () => {
     expect(publicHeader.get('[data-test="profile-avatar-readonly"]').text()).toContain('م')
     expect(publicHeader.find('[data-test="profile-avatar-trigger"]').exists()).toBe(false)
     expect(adminHeader.get('.header-title').text()).toBe('حساب نمونه')
-    expect(selfHeader.get('h1.profile-identity-title').exists()).toBe(true)
+    expect(selfHeader.find('h1.profile-identity-title').exists()).toBe(true)
     expect(adminHeader.get('.profile-nav-back').attributes('aria-label')).toBe('بازگشت به لیست کاربران')
 
     const loadingHeader = mount(ProfileIdentityHeader, {
@@ -49,7 +49,7 @@ describe('profile presentation primitives', () => {
       },
     })
     expect(loadingHeader.get('h1.profile-identity-title').find('div').exists()).toBe(false)
-    expect(loadingHeader.get('h1.profile-identity-title span.skeleton-box').exists()).toBe(true)
+    expect(loadingHeader.find('h1.profile-identity-title span.skeleton-box').exists()).toBe(true)
 
     const nestedAdminTitle = mount(ProfileIdentityHeader, {
       props: {

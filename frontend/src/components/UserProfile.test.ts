@@ -148,7 +148,7 @@ async function cancelDialog(wrapper: VueWrapper) {
 
 function expectDialogKeepsSafeCopy(wrapper: VueWrapper, rawDetail: string) {
   const dialog = wrapper.get('.ui-confirm-dialog')
-  expect(dialog.exists()).toBe(true)
+  expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
   expect(dialog.text()).toContain('تأیید نشد')
   expect(dialog.text()).not.toContain(rawDetail)
   expect(dialog.text()).not.toContain('owner12')
