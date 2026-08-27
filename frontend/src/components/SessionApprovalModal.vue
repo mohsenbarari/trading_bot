@@ -17,7 +17,7 @@ const portalScopeValue = computed(() =>
 const portalMotionStyle = computed(() =>
   props.v2Portal
     ? {
-        transitionDuration: 'var(--ds-transition-fast)',
+        transitionDuration: 'var(--ui-v2-motion-state)',
         transitionProperty: 'opacity',
       }
     : undefined,
