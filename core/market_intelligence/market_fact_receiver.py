@@ -166,9 +166,12 @@ def _initialize_payload_compaction(connection: sqlite3.Connection) -> None:
         )
     connection.executescript(
         """
-        CREATE INDEX IF NOT EXISTS fact_deliveries_uncompacted_idx
-        ON fact_deliveries(stream_id,delivery_sequence,received_at_utc)
-        WHERE payload_compacted_at_utc IS NULL;
+        CREATE TABLE IF NOT EXISTS receiver_compaction_cursors (
+            stream_id TEXT PRIMARY KEY,
+            highest_examined_sequence INTEGER NOT NULL
+                CHECK(highest_examined_sequence>=0),
+            updated_at_utc TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS receiver_compaction_status (
             singleton INTEGER PRIMARY KEY CHECK(singleton=1),
             compacted_delivery_count INTEGER NOT NULL
@@ -281,31 +284,71 @@ def compact_consumed_payloads(
             raise ReceiverCompactionError("receiver_compaction_checkpoint_invalid")
 
     candidates: list[sqlite3.Row] = []
+    cursor_updates: dict[str, int] = {}
+    scanned_rows = 0
     connection.execute("BEGIN IMMEDIATE")
     try:
         for stream_id in sorted(applied_checkpoints):
-            remaining = max_rows - len(candidates)
+            remaining = max_rows - scanned_rows
             if remaining <= 0:
                 break
-            candidates.extend(
-                connection.execute(
-                    """
-                    SELECT rowid,fact_id,fact_revision
-                    FROM fact_deliveries
-                    WHERE stream_id=? AND delivery_sequence<=?
-                      AND received_at_utc<=?
-                      AND payload_compacted_at_utc IS NULL
-                    ORDER BY delivery_sequence
-                    LIMIT ?
-                    """,
-                    (
-                        stream_id,
-                        int(applied_checkpoints[stream_id]),
-                        cutoff,
-                        remaining,
-                    ),
-                ).fetchall()
+            cursor_row = connection.execute(
+                "SELECT highest_examined_sequence "
+                "FROM receiver_compaction_cursors WHERE stream_id=?",
+                (stream_id,),
+            ).fetchone()
+            cursor = int(cursor_row[0]) if cursor_row else 0
+            if int(applied_checkpoints[stream_id]) < cursor:
+                raise ReceiverCompactionError(
+                    "receiver_compaction_watermark_regression"
+                )
+            rows = connection.execute(
+                """
+                SELECT rowid,delivery_sequence,fact_id,fact_revision,
+                       received_at_utc,payload_compacted_at_utc
+                FROM fact_deliveries
+                WHERE stream_id=? AND delivery_sequence>?
+                  AND delivery_sequence<=?
+                ORDER BY delivery_sequence
+                LIMIT ?
+                """,
+                (
+                    stream_id,
+                    cursor,
+                    int(applied_checkpoints[stream_id]),
+                    remaining,
+                ),
+            ).fetchall()
+            examined = cursor
+            for row in rows:
+                scanned_rows += 1
+                # received_at is assigned in the same transaction that
+                # advances this stream's contiguous delivery sequence.  Stop
+                # at the first row still inside the safety window so a cursor
+                # never skips payload that is not yet eligible.
+                if str(row["received_at_utc"]) > cutoff:
+                    break
+                examined = int(row["delivery_sequence"])
+                if row["payload_compacted_at_utc"] is None:
+                    candidates.append(row)
+            if examined > cursor:
+                cursor_updates[stream_id] = examined
+        connection.executemany(
+            """
+            INSERT INTO receiver_compaction_cursors(
+                stream_id,highest_examined_sequence,updated_at_utc
+            ) VALUES(?,?,?)
+            ON CONFLICT(stream_id) DO UPDATE SET
+                highest_examined_sequence=excluded.highest_examined_sequence,
+                updated_at_utc=excluded.updated_at_utc
+            WHERE excluded.highest_examined_sequence>=
+                  receiver_compaction_cursors.highest_examined_sequence
+            """,
+            (
+                (stream_id, sequence, compacted_at)
+                for stream_id, sequence in cursor_updates.items()
             )
+        )
         if not candidates:
             connection.commit()
             return ReceiverCompactionReport(0, 0)

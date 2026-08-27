@@ -177,6 +177,28 @@ class Stage8ReceiverTests(unittest.TestCase):
             metrics = receiver_metrics(connection)
             self.assertEqual(metrics["compacted_delivery_count"], 2)
             self.assertEqual(metrics["compacted_fact_count"], 0)
+            cursor = connection.execute(
+                "SELECT highest_examined_sequence "
+                "FROM receiver_compaction_cursors WHERE stream_id=?",
+                (stream_id,),
+            ).fetchone()
+            self.assertEqual(int(cursor[0]), 2)
+
+            # Sequence 3 is consumed but still inside the safety window, so
+            # neither its payload nor the durable compaction cursor advances.
+            recent = compact_consumed_payloads(
+                connection,
+                applied_checkpoints={stream_id: 3},
+                now=datetime(2026, 8, 27, tzinfo=timezone.utc),
+                retention_seconds=3_600,
+            )
+            self.assertEqual(recent.delivery_payloads, 0)
+            cursor = connection.execute(
+                "SELECT highest_examined_sequence "
+                "FROM receiver_compaction_cursors WHERE stream_id=?",
+                (stream_id,),
+            ).fetchone()
+            self.assertEqual(int(cursor[0]), 2)
 
             with self.assertRaisesRegex(
                 ReceiverCompactionError,
