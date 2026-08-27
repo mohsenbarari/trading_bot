@@ -1222,6 +1222,9 @@ SLOها بعد از baseline خصوصی می‌توانند فقط سخت‌گی
 - curated permanent facts: بدون حذف خودکار تا تصویب policy آینده؛
 - rejected/quarantine: retention جدا و قابل تنظیم، بدون متن نامرتبط؛
 - outbox delivered rows: bounded operational retention پس از checkpoint/backup؛
+- کپی payload در inbox گیرنده: فقط پس از checkpoint پایدار adapter و گذشت سه روز
+  redacted می‌شود؛ metadata هویتی stream/sequence/fact/revision/hash برای replay،
+  duplicate و conflict دائمی می‌ماند و عقب‌گرد watermark به‌صورت fail-closed رد می‌شود؛
 - model input bindings: برای replay و audit دائمی یا مطابق retention مصوب model ledger؛
 - backup روی volume جدا از active database؛
 - container layer و image جای backup داده نیستند؛

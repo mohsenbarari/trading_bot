@@ -13,10 +13,15 @@ from core.market_intelligence.market_fact_adapter import (
     adapter_metrics,
     initialize_adapter_store,
     normalize_feed_mode,
+    publish_adapter_watermark,
     run_adapter_cycle,
     select_estimator_feeds,
 )
-from core.market_intelligence.market_fact_receiver import apply_fact_batch, connect_receiver
+from core.market_intelligence.market_fact_receiver import (
+    apply_fact_batch,
+    compact_consumed_payloads,
+    connect_receiver,
+)
 from core.market_intelligence.market_input_materializer import materialize_input_snapshot
 from core.market_intelligence.market_store import connect_market_store
 from core.market_intelligence.private_pipeline_contracts import content_hash
@@ -109,6 +114,63 @@ class Stage9AdapterTests(unittest.TestCase):
     def _receive(self, batch: dict[str, object]) -> None:
         status, response = apply_fact_batch(self.receiver, batch)
         self.assertEqual((status, response.get("status")), (200, "ACK"))
+
+    def test_compaction_watermark_is_durable_and_never_regresses(self):
+        path = Path(self.directory.name) / "adapter-watermark.json"
+        checkpoints = {"market.fact.coin.group.1": 2}
+        self.assertTrue(publish_adapter_watermark(path, checkpoints))
+        self.assertFalse(publish_adapter_watermark(path, checkpoints))
+        document = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(document["streams"], checkpoints)
+        self.assertEqual(
+            document["schema"],
+            "market_fact_adapter_watermark/1.0",
+        )
+        with self.assertRaisesRegex(
+            MarketFactAdapterError,
+            "market_fact_adapter_watermark_regression",
+        ):
+            publish_adapter_watermark(
+                path,
+                {"market.fact.coin.group.1": 1},
+            )
+
+    def test_adapter_fails_closed_if_payload_was_compacted_ahead_of_store(self):
+        stream = "market.fact.coin.group.1"
+        offer = _fact(
+            991,
+            source_code="GROUP_1",
+            stream_id=stream,
+            source_sequence=1,
+            payload={
+                "kind": "COIN_OFFER",
+                "group_code": 1,
+                "instrument": "COIN_IMAM",
+                "side": "SELL",
+                "settlement": "CASH",
+                "trade_form": "PHYSICAL",
+                "offered_price_value": "187500",
+                "price_unit": "PROJECT_THOUSAND_TOMAN",
+                "quantity_value": "1",
+                "quantity_unit": "COIN_COUNT",
+            },
+        )
+        self._receive(_batch(991, stream_id=stream, deliveries=[(1, offer)]))
+        self.receiver.execute(
+            "UPDATE fact_deliveries SET received_at_utc=?",
+            ("2026-08-20T00:00:00Z",),
+        )
+        compact_consumed_payloads(
+            self.receiver,
+            applied_checkpoints={stream: 1},
+            now=datetime(2026, 8, 27, tzinfo=timezone.utc),
+            retention_seconds=3_600,
+        )
+        with self.assertRaisesRegex(
+            MarketFactAdapterError,
+            "market_fact_adapter_payload_compacted_before_checkpoint",
+        ):
+            run_adapter_cycle(self.receiver, self.market)
 
     def test_coin_trade_uses_root_dimensions_and_exact_negotiated_terms(self):
         stream = "market.fact.coin.group.1"
