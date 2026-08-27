@@ -40,6 +40,18 @@ seed اولیه فقط با `export_market_calibration_seed.py` و از ستون
 
 دایرکتوری والد secret باید `root:root 0700` و فایل‌های مصرفی باید `root:10001 0440` باشند. PostgreSQL با UID/GID `70:70` فقط supplemental group `10001` می‌گیرد؛ بنابراین همان فایل password برای migration/runtime قابل خواندن است، بدون root container یا world-readable secret.
 
+## Evidence رسمی release (بدون deploy)
+
+`scripts/prepare_market_pipeline_release.py` دو source نقش‌محور خارج Git را بررسی و envهای
+release-bound می‌سازد. sourceها فقط topology و مسیر secret هستند؛ image، Git SHA، mode، feed
+و primary authority را controller رسمی تزریق می‌کند. فعال‌سازی evidence در manifest production
+به confirmation دقیق نیاز دارد و فقط image/receipt/env pair را آماده می‌کند. این مرحله image را
+به وب منتقل یا load نمی‌کند، migration/service اجرا نمی‌کند و هیچ Telegram session یا Product
+authority را تغییر نمی‌دهد. نمونه sourceها:
+
+- `web.production-source.env.example`؛
+- `bot.production-source.env.example`.
+
 ## فایل‌ها
 
 - `Dockerfile`: image مشترک serviceها، Python 3.11 Bookworm pinned؛

@@ -13,6 +13,8 @@ PRODUCTION_COIN_SNAPSHOT_RELAY_SCRIPT="$PROJECT_DIR/scripts/relay_production_coi
 PRODUCTION_COIN_SNAPSHOT_RELAY_INSTALLER="$PROJECT_DIR/scripts/install_production_coin_inference_snapshot_relay.sh"
 PRODUCTION_COIN_INPUT_TIMER_INSTALLER="$PROJECT_DIR/scripts/install_coin_intelligence_input_timers.sh"
 PRODUCTION_COIN_READINESS_SCRIPT="$PROJECT_DIR/scripts/check_production_coin_inference_readiness.py"
+MARKET_PIPELINE_RELEASE_PREPARER="$PROJECT_DIR/scripts/prepare_market_pipeline_release.py"
+MARKET_PIPELINE_FOUNDATION_MANAGER="$PROJECT_DIR/scripts/manage_market_pipeline_stage3.py"
 TELEGRAM_QUEUE_PRODUCTION_CUTOVER_SCRIPT="$PROJECT_DIR/scripts/cutover_telegram_delivery_queue_production.py"
 TELEGRAM_BOT_SPLIT_PREFLIGHT_SCRIPT="$PROJECT_DIR/scripts/telegram_bot_split_preflight.py"
 # The production release controller currently owns the combined `all` bot
@@ -45,6 +47,7 @@ FOREIGN_COMPOSE_PROJECT_NAME=""
 COMPOSE_PROJECT_NAME=""
 PRODUCTION_COIN_SNAPSHOT_RELAY_CONFIRM_TEXT="publish-production-coin-inference-snapshot"
 PRODUCTION_COIN_SNAPSHOT_RELAY_DISABLE_CONFIRM_TEXT="disable-production-coin-inference-snapshot"
+PRODUCTION_MARKET_PIPELINE_EVIDENCE_CONFIRM_TEXT="prepare-production-market-pipeline-shadow-evidence"
 PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE="coin-intelligence-production-snapshot-relay.service"
 PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER="coin-intelligence-production-snapshot-relay.timer"
 PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE_CANONICAL="/var/lib/trading-bot/production-release/coin-snapshot-relay-state.json"
@@ -100,6 +103,13 @@ PRODUCTION_RELEASE_SCHEMA_HEAD=""
 PRODUCTION_FOREIGN_TARGET_BINDING_SHA256=""
 PRODUCTION_IRAN_TARGET_BINDING_SHA256=""
 PRODUCTION_COIN_INFERENCE_REQUESTED=0
+PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=0
+PRODUCTION_MARKET_PIPELINE_IMAGE_ID=""
+PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE=""
+PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT=""
+PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT_SHA256=""
+PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT=""
+PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT_SHA256=""
 
 usage() {
     cat <<'EOF'
@@ -675,6 +685,12 @@ load_manifest() {
     PRODUCTION_COIN_INFERENCE_RELAY_ENABLED="${PRODUCTION_COIN_INFERENCE_RELAY_ENABLED:-0}"
     PRODUCTION_COIN_INFERENCE_RELAY_CONFIRM="${PRODUCTION_COIN_INFERENCE_RELAY_CONFIRM:-}"
     PRODUCTION_COIN_INFERENCE_RELAY_DISABLE_CONFIRM="${PRODUCTION_COIN_INFERENCE_RELAY_DISABLE_CONFIRM:-}"
+    PRODUCTION_MARKET_PIPELINE_RELEASE_EVIDENCE_ENABLED="${PRODUCTION_MARKET_PIPELINE_RELEASE_EVIDENCE_ENABLED:-0}"
+    PRODUCTION_MARKET_PIPELINE_RELEASE_EVIDENCE_CONFIRM="${PRODUCTION_MARKET_PIPELINE_RELEASE_EVIDENCE_CONFIRM:-}"
+    PRODUCTION_MARKET_PIPELINE_WEB_ENV_SOURCE_PATH="${PRODUCTION_MARKET_PIPELINE_WEB_ENV_SOURCE_PATH:-}"
+    PRODUCTION_MARKET_PIPELINE_BOT_ENV_SOURCE_PATH="${PRODUCTION_MARKET_PIPELINE_BOT_ENV_SOURCE_PATH:-}"
+    PRODUCTION_MARKET_PIPELINE_PROJECT_NAME="${PRODUCTION_MARKET_PIPELINE_PROJECT_NAME:-market-private-pipeline-production}"
+    PRODUCTION_MARKET_PIPELINE_CAPTURE_CUTOVER_ENABLED="${PRODUCTION_MARKET_PIPELINE_CAPTURE_CUTOVER_ENABLED:-0}"
     PRODUCTION_COIN_INFERENCE_SOURCE_ROOT="${PRODUCTION_COIN_INFERENCE_SOURCE_ROOT:-/srv/trading-bot/production-data/coin-intelligence/private-gold-live}"
     PRODUCTION_COIN_INFERENCE_SOURCE_STORE="${PRODUCTION_COIN_INFERENCE_SOURCE_STORE:-$PRODUCTION_COIN_INFERENCE_SOURCE_ROOT/market/market.sqlite3}"
     PRODUCTION_COIN_INFERENCE_ESTIMATOR_ROOT="${PRODUCTION_COIN_INFERENCE_ESTIMATOR_ROOT:-/srv/trading-bot/production-data/coin-intelligence/estimator-live}"
@@ -713,6 +729,11 @@ load_manifest() {
     LOCAL_IRAN_SOURCE_PAYLOAD_DIR="$RELEASE_TMP_DIR/iran-source-payload"
     LOCAL_IRAN_SOURCE_PAYLOAD_MANIFEST="$RELEASE_TMP_DIR/iran-source-payload.sha256"
     REMOTE_IRAN_SOURCE_PAYLOAD_MANIFEST="$REMOTE_RELEASE_STATE_DIR/iran-source-payload.sha256"
+    PRODUCTION_MARKET_PIPELINE_RELEASE_DIR="$RELEASE_TMP_DIR/market-pipeline"
+    PRODUCTION_MARKET_PIPELINE_WEB_ENV="$PRODUCTION_MARKET_PIPELINE_RELEASE_DIR/web.release.env"
+    PRODUCTION_MARKET_PIPELINE_BOT_ENV="$PRODUCTION_MARKET_PIPELINE_RELEASE_DIR/bot.release.env"
+    PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT="$RELEASE_ARTIFACT_DIR/market-pipeline-image-prebuild-receipt.json"
+    PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT="$RELEASE_ARTIFACT_DIR/market-pipeline-release-pair-receipt.json"
 }
 
 ssh_iran() {
@@ -1346,6 +1367,38 @@ validate_production_coin_relay_manifest() {
     esac
     [[ -f "$PRODUCTION_COIN_SNAPSHOT_RELAY_SCRIPT" ]] || die "Production coin Snapshot relay script is missing."
     [[ -f "$PRODUCTION_COIN_SNAPSHOT_RELAY_INSTALLER" ]] || die "Production coin Snapshot relay installer is missing."
+}
+
+validate_production_market_pipeline_evidence_manifest() {
+    case "$PRODUCTION_MARKET_PIPELINE_RELEASE_EVIDENCE_ENABLED" in
+        0)
+            PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=0
+            [[ "$PRODUCTION_MARKET_PIPELINE_CAPTURE_CUTOVER_ENABLED" == "0" ]] \
+                || die "Market Pipeline Telegram capture cutover is not an authority surface of the formal release yet."
+            return 0
+            ;;
+        1) PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=1 ;;
+        *) die "PRODUCTION_MARKET_PIPELINE_RELEASE_EVIDENCE_ENABLED must be exactly 0 or 1." ;;
+    esac
+    [[ "$PRODUCTION_MARKET_PIPELINE_RELEASE_EVIDENCE_CONFIRM" == "$PRODUCTION_MARKET_PIPELINE_EVIDENCE_CONFIRM_TEXT" ]] \
+        || die "Market Pipeline release evidence requires the exact shadow-only confirmation."
+    [[ "$PRODUCTION_MARKET_PIPELINE_CAPTURE_CUTOVER_ENABLED" == "0" ]] \
+        || die "Market Pipeline release evidence cannot authorize Telegram capture cutover."
+    [[ -f "$MARKET_PIPELINE_RELEASE_PREPARER" \
+        && -f "$MARKET_PIPELINE_FOUNDATION_MANAGER" \
+        && -f "$LOCAL_PROJECT_DIR/deploy/market-data/Dockerfile" ]] \
+        || die "Market Pipeline formal release tooling is incomplete."
+    [[ "$PRODUCTION_MARKET_PIPELINE_WEB_ENV_SOURCE_PATH" == /* \
+        && "$PRODUCTION_MARKET_PIPELINE_BOT_ENV_SOURCE_PATH" == /* \
+        && "$PRODUCTION_MARKET_PIPELINE_WEB_ENV_SOURCE_PATH" != "$PRODUCTION_MARKET_PIPELINE_BOT_ENV_SOURCE_PATH" ]] \
+        || die "Market Pipeline web/bot topology sources must be distinct absolute paths."
+    [[ "$PRODUCTION_MARKET_PIPELINE_PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]{2,62}$ ]] \
+        || die "Market Pipeline Compose project name is invalid."
+    python3 "$MARKET_PIPELINE_RELEASE_PREPARER" check-sources \
+        --web-source "$PRODUCTION_MARKET_PIPELINE_WEB_ENV_SOURCE_PATH" \
+        --bot-source "$PRODUCTION_MARKET_PIPELINE_BOT_ENV_SOURCE_PATH" >/dev/null \
+        || die "Market Pipeline topology source contract failed."
+    log "Read-only Market Pipeline topology source contract passed (shadow evidence only)."
 }
 
 validate_production_coin_inference_activation_contract() {
@@ -3051,6 +3104,7 @@ check_local() {
         || die "Immutable production runtime env source must be canonical, owner-controlled, non-symlink, and mode 0600."
     validate_production_coin_inference_activation_contract
     validate_production_coin_relay_manifest
+    validate_production_market_pipeline_evidence_manifest
     log "Read-only local checks passed"
 }
 
@@ -3477,6 +3531,208 @@ build_image_bundle_signature() {
     } | sha256sum | cut -d' ' -f1
 }
 
+market_pipeline_image_input_signature() {
+    {
+        printf 'signature_scope=%s\n' "market-pipeline-immutable-runtime-image-v1"
+        printf 'platform=%s\n' "linux/amd64"
+        git -C "$LOCAL_PROJECT_DIR" ls-tree -r "$RELEASE_SHA" -- \
+            core/__init__.py \
+            core/market_intelligence \
+            config/market_data_sources.v1.json \
+            contracts/market_data \
+            deploy/market-data/Dockerfile \
+            deploy/market-data/requirements.lock \
+            deploy/market-data/migrations
+    } | sha256sum | awk '{print $1}'
+}
+
+write_market_pipeline_image_receipt() {
+    local image_id="$1" input_signature="$2" image_reference="$3"
+    local identity
+    identity="$(docker image inspect --format '{{.Id}}|{{.Os}}/{{.Architecture}}|{{.Config.User}}|{{index .Config.Labels "org.opencontainers.image.revision"}}|{{index .Config.Labels "io.gold-trade.release.tree"}}|{{index .Config.Labels "io.gold-trade.release.input-signature"}}' "$image_reference")"
+    [[ "$identity" == "$image_id|linux/amd64|10001:10001|$RELEASE_SHA|$PRODUCTION_RELEASE_TREE|$input_signature" ]] \
+        || die "Market Pipeline image OCI identity does not match the exact release."
+    install -d -m 0700 -- "$RELEASE_ARTIFACT_DIR"
+    python3 - "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT" "$RELEASE_SHA" \
+        "$PRODUCTION_RELEASE_TREE" "$image_id" "$input_signature" <<'PY'
+import json
+import os
+from pathlib import Path
+import sys
+
+destination = Path(sys.argv[1])
+payload = {
+    "schema": "market_pipeline_image_release/1.0",
+    "environment": "production",
+    "release_sha": sys.argv[2],
+    "release_tree": sys.argv[3],
+    "image_id": sys.argv[4],
+    "input_signature": sys.argv[5],
+    "platform": "linux/amd64",
+    "runtime_user": "10001:10001",
+    "transport": "ssh_stream_then_verify_content_id",
+    "secrets_disclosed": False,
+}
+candidate = destination.parent / f".{destination.name}.{os.getpid()}.tmp"
+flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+descriptor = os.open(candidate, flags, 0o600)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(candidate, destination)
+    directory = os.open(destination.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+finally:
+    candidate.unlink(missing_ok=True)
+PY
+    chmod 0600 "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT"
+    PRODUCTION_MARKET_PIPELINE_IMAGE_ID="$image_id"
+    PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE="$input_signature"
+    PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT_SHA256="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT")"
+}
+
+build_market_pipeline_release_image() {
+    [[ "$PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED" == "1" ]] || return 0
+    [[ "$LOCAL_HOST_ARCH" == "amd64" && "$IRAN_HOST_ARCH" == "amd64" ]] \
+        || die "Market Pipeline release currently requires linux/amd64 on both hosts."
+    local image_reference="market_pipeline_release:$RELEASE_SHA"
+    local input_signature source_date_epoch existing_identity image_id
+    input_signature="$(market_pipeline_image_input_signature)"
+    [[ "$input_signature" =~ ^[0-9a-f]{64}$ ]] \
+        || die "Market Pipeline image input signature is invalid."
+    source_date_epoch="$(git -C "$LOCAL_PROJECT_DIR" show -s --format=%ct "$RELEASE_SHA")"
+    existing_identity="$(docker image inspect --format '{{.Id}}|{{.Os}}/{{.Architecture}}|{{.Config.User}}|{{index .Config.Labels "org.opencontainers.image.revision"}}|{{index .Config.Labels "io.gold-trade.release.tree"}}|{{index .Config.Labels "io.gold-trade.release.input-signature"}}' "$image_reference" 2>/dev/null || true)"
+    if [[ "$IRAN_FORCE_RELEASE_REFRESH" == "1" \
+        || "$existing_identity" != sha256:*"|linux/amd64|10001:10001|$RELEASE_SHA|$PRODUCTION_RELEASE_TREE|$input_signature" ]]; then
+        log "Building the exact Market Pipeline image on the repository authority host"
+        docker build --platform linux/amd64 \
+            --build-arg "SOURCE_DATE_EPOCH=$source_date_epoch" \
+            --build-arg "SOURCE_SHA=$RELEASE_SHA" \
+            --build-arg "SOURCE_TREE=$PRODUCTION_RELEASE_TREE" \
+            --build-arg "IMAGE_INPUT_SIGNATURE=$input_signature" \
+            --build-arg "IMAGE_VERSION=production-private-shadow" \
+            -f "$LOCAL_PROJECT_DIR/deploy/market-data/Dockerfile" \
+            -t "$image_reference" "$LOCAL_PROJECT_DIR"
+    else
+        log "Market Pipeline image already matches the exact release inputs; skipping rebuild."
+    fi
+    image_id="$(docker image inspect --format '{{.Id}}' "$image_reference")"
+    [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] \
+        || die "Market Pipeline image content ID is invalid."
+    write_market_pipeline_image_receipt "$image_id" "$input_signature" "$image_reference"
+}
+
+load_market_pipeline_image_receipt() {
+    [[ -f "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT" \
+        && ! -L "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT" ]] \
+        || die "Market Pipeline image receipt is missing. Prepare release evidence first."
+    local loaded
+    loaded="$(python3 - "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT" \
+        "$RELEASE_SHA" "$PRODUCTION_RELEASE_TREE" <<'PY'
+import json
+import re
+from pathlib import Path
+import sys
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+expected_fixed = {
+    "schema": "market_pipeline_image_release/1.0",
+    "environment": "production",
+    "release_sha": sys.argv[2],
+    "release_tree": sys.argv[3],
+    "platform": "linux/amd64",
+    "runtime_user": "10001:10001",
+    "transport": "ssh_stream_then_verify_content_id",
+    "secrets_disclosed": False,
+}
+if any(payload.get(key) != value for key, value in expected_fixed.items()):
+    raise SystemExit(2)
+if set(payload) != {*expected_fixed, "image_id", "input_signature"}:
+    raise SystemExit(2)
+if not re.fullmatch(r"sha256:[0-9a-f]{64}", str(payload.get("image_id") or "")):
+    raise SystemExit(2)
+if not re.fullmatch(r"[0-9a-f]{64}", str(payload.get("input_signature") or "")):
+    raise SystemExit(2)
+print(payload["image_id"], payload["input_signature"])
+PY
+)" || die "Market Pipeline image receipt is malformed or belongs to another release."
+    read -r PRODUCTION_MARKET_PIPELINE_IMAGE_ID \
+        PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE <<<"$loaded"
+    PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT_SHA256="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT")"
+    [[ -f "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT" \
+        && ! -L "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT" ]] \
+        || die "Market Pipeline release pair receipt is missing."
+    PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT_SHA256="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT")"
+}
+
+verify_market_pipeline_release_evidence() {
+    [[ "$PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED" == "1" ]] || return 0
+    local input_signature identity image_reference
+    if [[ -z "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
+        || -z "$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE" \
+        || -z "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT_SHA256" \
+        || -z "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT_SHA256" ]]; then
+        load_market_pipeline_image_receipt
+    fi
+    input_signature="$(market_pipeline_image_input_signature)"
+    image_reference="market_pipeline_release:$RELEASE_SHA"
+    [[ -f "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT" \
+        && ! -L "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT" \
+        && "$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT")" == "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT_SHA256" \
+        && -f "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT" \
+        && ! -L "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT" \
+        && "$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT")" == "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT_SHA256" ]] \
+        || die "Market Pipeline release evidence is missing or drifted."
+    identity="$(docker image inspect --format '{{.Id}}|{{.Os}}/{{.Architecture}}|{{.Config.User}}|{{index .Config.Labels "org.opencontainers.image.revision"}}|{{index .Config.Labels "io.gold-trade.release.tree"}}|{{index .Config.Labels "io.gold-trade.release.input-signature"}}' "$image_reference")"
+    [[ "$identity" == "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID|linux/amd64|10001:10001|$RELEASE_SHA|$PRODUCTION_RELEASE_TREE|$input_signature" \
+        && "$input_signature" == "$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE" ]] \
+        || die "Market Pipeline release image drifted from its receipt."
+    python3 "$MARKET_PIPELINE_RELEASE_PREPARER" verify-pair \
+        --web-source "$PRODUCTION_MARKET_PIPELINE_WEB_ENV_SOURCE_PATH" \
+        --bot-source "$PRODUCTION_MARKET_PIPELINE_BOT_ENV_SOURCE_PATH" \
+        --web-env "$PRODUCTION_MARKET_PIPELINE_WEB_ENV" \
+        --bot-env "$PRODUCTION_MARKET_PIPELINE_BOT_ENV" \
+        --receipt "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT" \
+        --release-sha "$RELEASE_SHA" \
+        --release-tree "$PRODUCTION_RELEASE_TREE" \
+        --image-id "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
+        --image-input-signature "$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE" >/dev/null \
+        || die "Market Pipeline rendered role pair failed release verification."
+}
+
+prepare_market_pipeline_release_evidence() {
+    [[ "$PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED" == "1" ]] || return 0
+    build_market_pipeline_release_image
+    install -d -m 0700 -- "$PRODUCTION_MARKET_PIPELINE_RELEASE_DIR" "$RELEASE_ARTIFACT_DIR"
+    rm -f -- \
+        "$PRODUCTION_MARKET_PIPELINE_WEB_ENV" \
+        "$PRODUCTION_MARKET_PIPELINE_BOT_ENV" \
+        "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT"
+    python3 "$MARKET_PIPELINE_RELEASE_PREPARER" render-pair \
+        --web-source "$PRODUCTION_MARKET_PIPELINE_WEB_ENV_SOURCE_PATH" \
+        --bot-source "$PRODUCTION_MARKET_PIPELINE_BOT_ENV_SOURCE_PATH" \
+        --web-env "$PRODUCTION_MARKET_PIPELINE_WEB_ENV" \
+        --bot-env "$PRODUCTION_MARKET_PIPELINE_BOT_ENV" \
+        --receipt "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT" \
+        --release-sha "$RELEASE_SHA" \
+        --release-tree "$PRODUCTION_RELEASE_TREE" \
+        --image-id "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
+        --image-input-signature "$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE" \
+        --project-name "$PRODUCTION_MARKET_PIPELINE_PROJECT_NAME" >/dev/null \
+        || die "Market Pipeline release-bound env rendering failed."
+    PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT_SHA256="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT")"
+    verify_market_pipeline_release_evidence
+    log "Prepared exact Market Pipeline image/env receipts; no host, service, database, or authority was changed."
+}
+
 iran_release_image_matches() {
     local expected_signature="$1"
     [[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' trading_bot_base_iran 2>/dev/null || true)" == "$RELEASE_SHA" \
@@ -3663,6 +3919,7 @@ verify_prepared_release_artifacts() {
         && "$PRODUCTION_IRAN_SOURCE_PAYLOAD_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ \
         && "$(file_sha256 "$LOCAL_IRAN_SOURCE_PAYLOAD_MANIFEST")" == "$PRODUCTION_IRAN_SOURCE_PAYLOAD_MANIFEST_SHA256" ]] \
         || die "Committed Iran source payload evidence is missing or drifted."
+    verify_market_pipeline_release_evidence
     log "Verified prebuilt frontend, wheel caches, and exact foreign/Iran image receipts."
 }
 
@@ -3671,6 +3928,7 @@ prepare_release_evidence_artifacts() {
     write_iran_image_build_receipt
     verify_iran_image_build_receipt
     prebuild_foreign_release_image
+    prepare_market_pipeline_release_evidence
     prepare_committed_iran_source_payload
     verify_prepared_release_artifacts
     log "Prepared release evidence artifacts without touching services or databases."

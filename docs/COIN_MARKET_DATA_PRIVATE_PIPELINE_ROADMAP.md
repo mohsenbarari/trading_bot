@@ -2,8 +2,9 @@
 
 وضعیت: roadmap ناتمام است. مراحل 0 و 1 بسته‌اند؛ Stage 2 از نظر
 طراحی و rehearsal گذشته و backup عملیاتی آن باقی است. Docker foundation مرحله 3
-کامل است، اما اتصال market-data به deploy رسمی پروژه هنوز پیاده و اثبات نشده
-است. Stage 11 فقط tooling و seed هفت‌روزه staging را دارد؛ import کامل تاریخچه
+کامل است. قرارداد build و evidence به deploy رسمی پروژه متصل شده، اما transfer/load،
+preflight دو میزبان، backup/migration، rollout receiver-first و rollback رسمی هنوز
+پیاده و اثبات نشده‌اند. Stage 11 فقط tooling و seed هفت‌روزه staging را دارد؛ import کامل تاریخچه
 باز است. Stage 12 از نظر offline سخت‌شده و در انتظار پنجره کامل بازار
 با pin پیش از بازشدن و seal پس از بسته‌شدن است. Stage 13-A قبلاً به‌صورت
 دستی/خارج از deploy رسمی در `PRIVATE_SHADOW` اجرا شده؛ `PRODUCT` و
@@ -589,13 +590,19 @@ Gate:
 
 وضعیت gate فعلی:
 
-- foundation، Compose و rehearsal گذشته‌اند، اما بند 7 و Stage 3 بسته نیستند؛
+- foundation، Compose و rehearsal گذشته‌اند، اما بند 7 و Stage 3 هنوز بسته نیستند؛
 - deploy رسمی production همچنان ریپازیتوری/build را روی سرور بات مالک می‌داند؛
   foreign را اول deploy، payload را از exact committed Git archive و imageها را همان‌جا
   build می‌کند، سپس artifact پین‌شده را به سرور وب/ایران می‌فرستد؛ سرور
-  وب نباید release image را build/pull کند. اما این جریان و deploy staging هنوز image جداگانه
-  market-data، Composeهای دو میزبان، migration، pre/postcheck، receipt و rollback آنها را
-  orchestrate نمی‌کند؛
+  وب نباید release image را build/pull کند. لایهٔ evidence رسمی اکنون image مستقل را از
+  همان commit با `release_sha`، tree، input signature، content ID و OCI label قطعی روی
+  سرور بات می‌سازد؛ دو source topology امن را به envهای release-bound با
+  `PRIVATE_SHADOW`، primary gate خاموش و receipt بدون secret تبدیل می‌کند. این لایه
+  هیچ transfer/load، host preflight، migration، service start، Product switch یا Telegram
+  authority switch انجام نمی‌دهد و capture cutover را صریحاً رد می‌کند؛
+- deploy رسمی production/staging هنوز transfer/load همان content ID، preflight واقعی دو
+  میزبان، backup مستقل archive، migration دوباره‌پذیر، rollout receiver-first، postcheck و
+  rollback آنها را orchestrate نمی‌کند؛
 - Stage 13-A جایگزین این gate نیست، چون استقرارش دستی/خارج از چرخه رسمی بود؛
 - بستن Stage 3 به پیاده‌سازی و rehearsal همین جریان بدون deploy عملیاتی و
   سپس مجوز جداگانه برای استقرار نیاز دارد.

@@ -32,12 +32,16 @@ RUN mkdir -p /rootfs/var/lib/market-data/state \
 FROM ${PYTHON_BASE_IMAGE} AS runtime
 
 ARG SOURCE_SHA
+ARG SOURCE_TREE
+ARG IMAGE_INPUT_SIGNATURE
 ARG IMAGE_VERSION=stage5-coin-parser-shadow
 
 LABEL org.opencontainers.image.title="Trading Bot Private Market Pipeline" \
       org.opencontainers.image.description="Docker-native private market data pipeline" \
       org.opencontainers.image.revision="${SOURCE_SHA}" \
-      org.opencontainers.image.version="${IMAGE_VERSION}"
+      org.opencontainers.image.version="${IMAGE_VERSION}" \
+      io.gold-trade.release.tree="${SOURCE_TREE}" \
+      io.gold-trade.release.input-signature="${IMAGE_INPUT_SIGNATURE}"
 
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \

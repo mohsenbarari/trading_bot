@@ -114,3 +114,26 @@ TLS/HMAC live در این fixture فعال نشد؛ primitives آن در Gate م
 Gateهای image reproducibility، secret scan، Compose isolation، non-root/read-only runtime، persistence، single-writer، migration idempotency، synthetic transport و rollback همگی PASS هستند.
 
 مرحله بعد، Stage 4 است: capture پایدار، durable append، reconciliation، edit/delete/reply metadata و retention سه‌روزه. authority فعلی تا gate live و مجوز cutover دست‌نخورده می‌ماند.
+
+## 10. الحاق evidence به release رسمی — 2026-08-27
+
+اولین بخش بند 7 بدون هیچ deploy یا تغییر runtime به controller رسمی production متصل شد:
+
+- image مستقل فقط روی میزبان مالک repository و از clean/pushed `main` ساخته می‌شود؛
+- OCI revision، Git tree، input signature منابعی که Dockerfile واقعاً copy می‌کند، platform
+  `linux/amd64`، user `10001:10001` و Docker content ID در receipt مقید می‌شوند؛
+- sourceهای نقش وب و بات فقط topology و مسیر secret دارند و باید در parent `0700` با mode
+  `0600` باشند؛ shell expansion، plaintext secret، public/wrong-role bind، `/tmp` و اختلاف
+  topology دو نقش fail-closed است؛
+- image/SHA/mode/feed/authority داخل source پذیرفته نمی‌شود. renderer رسمی دقیقاً
+  `live + PRIVATE_SHADOW + allow_primary=0 + expected_lane=PRIVATE_SHADOW` را تزریق می‌کند؛
+- receipt زوج env فقط digest، data root، private peer/bind، port و نام contractهای secret را
+  نگه می‌دارد و هیچ path یا مقدار secret را افشا نمی‌کند؛
+- evidence فقط با flag و confirmation دقیق opt-in می‌شود و capture cutover حتی در این حالت
+  رد می‌شود؛
+- hookهای prepare/verify به همان release evidence محصول اضافه شده‌اند، ولی هیچ انتقال image،
+  نصب env، backup/migration، Compose start، توقف owner یا promotion در این زیرمرحله وجود ندارد.
+
+بنابراین وضعیت Stage 3 هنوز باز است. گام بعدی، انتقال streamشده و verify همان content ID روی
+وب، preflight واقعی هر دو میزبان، backup و migration، سپس rollout receiver-first بدون capture
+و بدون Product authority است. handoff تلگرام gate و مجوز مستقل بعدی خواهد بود.
