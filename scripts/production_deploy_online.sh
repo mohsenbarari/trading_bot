@@ -48,6 +48,7 @@ COMPOSE_PROJECT_NAME=""
 PRODUCTION_COIN_SNAPSHOT_RELAY_CONFIRM_TEXT="publish-production-coin-inference-snapshot"
 PRODUCTION_COIN_SNAPSHOT_RELAY_DISABLE_CONFIRM_TEXT="disable-production-coin-inference-snapshot"
 PRODUCTION_MARKET_PIPELINE_EVIDENCE_CONFIRM_TEXT="prepare-production-market-pipeline-shadow-evidence"
+PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_CONFIRM_TEXT="load-and-preflight-production-market-pipeline-shadow-hosts"
 PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE="coin-intelligence-production-snapshot-relay.service"
 PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER="coin-intelligence-production-snapshot-relay.timer"
 PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE_CANONICAL="/var/lib/trading-bot/production-release/coin-snapshot-relay-state.json"
@@ -110,6 +111,10 @@ PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT=""
 PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT_SHA256=""
 PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT=""
 PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT_SHA256=""
+PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_REQUESTED=0
+PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT=""
+PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT_SHA256=""
+PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256=""
 
 usage() {
     cat <<'EOF'
@@ -691,6 +696,10 @@ load_manifest() {
     PRODUCTION_MARKET_PIPELINE_BOT_ENV_SOURCE_PATH="${PRODUCTION_MARKET_PIPELINE_BOT_ENV_SOURCE_PATH:-}"
     PRODUCTION_MARKET_PIPELINE_PROJECT_NAME="${PRODUCTION_MARKET_PIPELINE_PROJECT_NAME:-market-private-pipeline-production}"
     PRODUCTION_MARKET_PIPELINE_CAPTURE_CUTOVER_ENABLED="${PRODUCTION_MARKET_PIPELINE_CAPTURE_CUTOVER_ENABLED:-0}"
+    PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_ENABLED="${PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_ENABLED:-0}"
+    PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_CONFIRM="${PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_CONFIRM:-}"
+    PRODUCTION_MARKET_PIPELINE_MIN_FREE_MIB="${PRODUCTION_MARKET_PIPELINE_MIN_FREE_MIB:-2048}"
+    PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR="${PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR:-/srv/trading-bot/market-pipeline-releases}"
     PRODUCTION_COIN_INFERENCE_SOURCE_ROOT="${PRODUCTION_COIN_INFERENCE_SOURCE_ROOT:-/srv/trading-bot/production-data/coin-intelligence/private-gold-live}"
     PRODUCTION_COIN_INFERENCE_SOURCE_STORE="${PRODUCTION_COIN_INFERENCE_SOURCE_STORE:-$PRODUCTION_COIN_INFERENCE_SOURCE_ROOT/market/market.sqlite3}"
     PRODUCTION_COIN_INFERENCE_ESTIMATOR_ROOT="${PRODUCTION_COIN_INFERENCE_ESTIMATOR_ROOT:-/srv/trading-bot/production-data/coin-intelligence/estimator-live}"
@@ -734,6 +743,13 @@ load_manifest() {
     PRODUCTION_MARKET_PIPELINE_BOT_ENV="$PRODUCTION_MARKET_PIPELINE_RELEASE_DIR/bot.release.env"
     PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT="$RELEASE_ARTIFACT_DIR/market-pipeline-image-prebuild-receipt.json"
     PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT="$RELEASE_ARTIFACT_DIR/market-pipeline-release-pair-receipt.json"
+    PRODUCTION_MARKET_PIPELINE_BOT_PREFLIGHT_RECEIPT="$RELEASE_ARTIFACT_DIR/market-pipeline-bot-host-preflight.json"
+    PRODUCTION_MARKET_PIPELINE_WEB_PREFLIGHT_RECEIPT="$RELEASE_ARTIFACT_DIR/market-pipeline-web-host-preflight.json"
+    PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT="$RELEASE_ARTIFACT_DIR/market-pipeline-two-host-preflight-receipt.json"
+    PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR="$PRODUCTION_MARKET_PIPELINE_RELEASE_DIR/control-payload"
+    PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST="$PRODUCTION_MARKET_PIPELINE_RELEASE_DIR/control-payload.sha256"
+    REMOTE_MARKET_PIPELINE_RELEASE_STATE_DIR="/var/lib/trading-bot/production-release/market-pipeline"
+    REMOTE_MARKET_PIPELINE_WEB_ENV=""
 }
 
 ssh_iran() {
@@ -1399,6 +1415,30 @@ validate_production_market_pipeline_evidence_manifest() {
         --bot-source "$PRODUCTION_MARKET_PIPELINE_BOT_ENV_SOURCE_PATH" >/dev/null \
         || die "Market Pipeline topology source contract failed."
     log "Read-only Market Pipeline topology source contract passed (shadow evidence only)."
+}
+
+validate_production_market_pipeline_host_preflight_manifest() {
+    case "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_ENABLED" in
+        0) PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_REQUESTED=0; return 0 ;;
+        1) PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_REQUESTED=1 ;;
+        *) die "PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_ENABLED must be exactly 0 or 1." ;;
+    esac
+    [[ "$PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED" == "1" ]] \
+        || die "Two-host Market Pipeline preflight requires exact release evidence."
+    [[ "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_CONFIRM" == "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_CONFIRM_TEXT" ]] \
+        || die "Two-host Market Pipeline preflight requires the exact load-and-preflight confirmation."
+    [[ "$PRODUCTION_MARKET_PIPELINE_CAPTURE_CUTOVER_ENABLED" == "0" ]] \
+        || die "Two-host Market Pipeline preflight cannot authorize Telegram capture cutover."
+    [[ "$PRODUCTION_MARKET_PIPELINE_MIN_FREE_MIB" =~ ^[0-9]+$ \
+        && "$PRODUCTION_MARKET_PIPELINE_MIN_FREE_MIB" -ge 1024 \
+        && "$PRODUCTION_MARKET_PIPELINE_MIN_FREE_MIB" -le 1048576 ]] \
+        || die "Market Pipeline minimum free space must be an integer from 1024 to 1048576 MiB."
+    [[ "$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR" =~ ^/[A-Za-z0-9._/-]+$ \
+        && "$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR" != /tmp \
+        && "$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR" != /tmp/* \
+        && "$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR" != *staging* \
+        && "$(canonical_path "$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR")" == "$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR" ]] \
+        || die "Market Pipeline release base must be a canonical non-staging disk path outside /tmp."
 }
 
 validate_production_coin_inference_activation_contract() {
@@ -2899,6 +2939,14 @@ ensure_local_tools() {
     need_cmd md5sum
     need_cmd sha256sum
     need_cmd sed
+    if [[ "${PRODUCTION_MARKET_PIPELINE_RELEASE_EVIDENCE_ENABLED:-0}" == "1" ]]; then
+        need_cmd tar
+    fi
+    if [[ "${PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_ENABLED:-0}" == "1" ]]; then
+        need_cmd ip
+        need_cmd df
+        need_cmd timeout
+    fi
 }
 
 ensure_clean_release_tree() {
@@ -3105,6 +3153,7 @@ check_local() {
     validate_production_coin_inference_activation_contract
     validate_production_coin_relay_manifest
     validate_production_market_pipeline_evidence_manifest
+    validate_production_market_pipeline_host_preflight_manifest
     log "Read-only local checks passed"
 }
 
@@ -3673,6 +3722,53 @@ PY
     PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT_SHA256="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT")"
 }
 
+prepare_market_pipeline_control_payload() {
+    [[ "$PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED" == "1" ]] || return 0
+    case "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR:$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST" in
+        "$PRODUCTION_MARKET_PIPELINE_RELEASE_DIR"/*:"$PRODUCTION_MARKET_PIPELINE_RELEASE_DIR"/*) ;;
+        *) die "Market Pipeline control payload escaped the private release directory." ;;
+    esac
+    rm -rf -- "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR"
+    rm -f -- "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST"
+    install -d -m 0700 -- "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR"
+    git -C "$LOCAL_PROJECT_DIR" archive --format=tar "$RELEASE_SHA" -- \
+        deploy/market-data/Dockerfile \
+        deploy/market-data/requirements.lock \
+        deploy/market-data/compose.yml \
+        deploy/market-data/compose.web.yml \
+        deploy/market-data/compose.bot.yml \
+        scripts/manage_market_pipeline_stage3.py \
+        | tar -xf - -C "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR"
+    [[ -z "$(find "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR" -type l -print -quit)" \
+        && -z "$(find "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR" ! -type f ! -type d -print -quit)" ]] \
+        || die "Market Pipeline control payload contains an unsupported filesystem entry."
+    (
+        cd "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR"
+        find . -type f -print0 | LC_ALL=C sort -z | xargs -r -0 sha256sum
+    ) >"$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST"
+    chmod 0600 "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST"
+    [[ -s "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST" ]] \
+        || die "Market Pipeline control payload manifest is empty."
+    PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST")"
+}
+
+verify_market_pipeline_control_payload() {
+    [[ "$PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED" == "1" ]] || return 0
+    if [[ -z "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256" ]]; then
+        [[ -f "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST" \
+            && ! -L "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST" ]] \
+            || die "Market Pipeline control payload manifest is missing."
+        PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST")"
+    fi
+    [[ "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ \
+        && "$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST")" == "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256" ]] \
+        || die "Market Pipeline control payload manifest drifted."
+    (
+        cd "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR"
+        sha256sum -c "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST" >/dev/null
+    ) || die "Market Pipeline control payload contents drifted."
+}
+
 verify_market_pipeline_release_evidence() {
     [[ "$PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED" == "1" ]] || return 0
     local input_signature identity image_reference
@@ -3706,12 +3802,14 @@ verify_market_pipeline_release_evidence() {
         --image-id "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
         --image-input-signature "$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE" >/dev/null \
         || die "Market Pipeline rendered role pair failed release verification."
+    verify_market_pipeline_control_payload
 }
 
 prepare_market_pipeline_release_evidence() {
     [[ "$PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED" == "1" ]] || return 0
     build_market_pipeline_release_image
     install -d -m 0700 -- "$PRODUCTION_MARKET_PIPELINE_RELEASE_DIR" "$RELEASE_ARTIFACT_DIR"
+    prepare_market_pipeline_control_payload
     rm -f -- \
         "$PRODUCTION_MARKET_PIPELINE_WEB_ENV" \
         "$PRODUCTION_MARKET_PIPELINE_BOT_ENV" \
@@ -3731,6 +3829,334 @@ prepare_market_pipeline_release_evidence() {
     PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT_SHA256="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT")"
     verify_market_pipeline_release_evidence
     log "Prepared exact Market Pipeline image/env receipts; no host, service, database, or authority was changed."
+}
+
+install_market_pipeline_control_release_local() {
+    local release_dir="$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR/$RELEASE_SHA"
+    local incoming="$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR/.$RELEASE_SHA.incoming"
+    validate_remote_shell_path "$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR" \
+        "Market Pipeline release base"
+    install -d -m 0700 -- "$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR"
+    [[ -d "$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR" \
+        && ! -L "$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR" \
+        && "$(stat -c '%u' "$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR")" == "$(id -u)" \
+        && "$(stat -c '%a' "$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR")" == "700" ]] \
+        || die "Local Market Pipeline release base is not owner-controlled mode 0700."
+    if [[ -d "$release_dir" && ! -L "$release_dir" ]]; then
+        [[ -f "$release_dir/control-payload.sha256" \
+            && "$(file_sha256 "$release_dir/control-payload.sha256")" == "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256" \
+            && "$(file_sha256 "$release_dir/bot.release.env")" == "$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_BOT_ENV")" \
+            && "$(file_sha256 "$release_dir/market-pipeline-image-prebuild-receipt.json")" == "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT_SHA256" \
+            && "$(file_sha256 "$release_dir/market-pipeline-release-pair-receipt.json")" == "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT_SHA256" ]] \
+            || die "Existing local Market Pipeline release directory does not match this release."
+        (cd "$release_dir" && sha256sum -c control-payload.sha256 >/dev/null) \
+            || die "Existing local Market Pipeline control payload contents drifted."
+        LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR="$release_dir"
+        LOCAL_MARKET_PIPELINE_BOT_ENV="$release_dir/bot.release.env"
+        return 0
+    fi
+    [[ ! -e "$release_dir" && ! -L "$release_dir" ]] \
+        || die "Local Market Pipeline release path exists but is not a regular directory."
+    rm -rf -- "$incoming"
+    install -d -m 0700 -- "$incoming"
+    rsync -a --delete "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR/" "$incoming/"
+    install -m 0600 -- "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST" "$incoming/control-payload.sha256"
+    install -m 0600 -- "$PRODUCTION_MARKET_PIPELINE_BOT_ENV" "$incoming/bot.release.env"
+    install -m 0600 -- "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT" "$incoming/market-pipeline-image-prebuild-receipt.json"
+    install -m 0600 -- "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT" "$incoming/market-pipeline-release-pair-receipt.json"
+    (
+        cd "$incoming"
+        sha256sum -c control-payload.sha256 >/dev/null
+    ) || die "Local installed Market Pipeline control payload failed verification."
+    fsync_file_and_parent "$incoming/control-payload.sha256"
+    fsync_file_and_parent "$incoming/bot.release.env"
+    mv -- "$incoming" "$release_dir"
+    sync -f "$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR"
+    LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR="$release_dir"
+    LOCAL_MARKET_PIPELINE_BOT_ENV="$release_dir/bot.release.env"
+}
+
+install_market_pipeline_control_release_remote() {
+    local release_dir="$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR/$RELEASE_SHA"
+    local incoming="$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR/.$RELEASE_SHA.incoming"
+    local web_env_sha image_receipt_sha pair_receipt_sha
+    web_env_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_WEB_ENV")"
+    image_receipt_sha="$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT_SHA256"
+    pair_receipt_sha="$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT_SHA256"
+    ssh_iran "set -euo pipefail
+base='$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR'
+resolved=\"\$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=False))' \"\$base\")\"
+[ \"\$resolved\" = \"\$base\" ] || exit 50
+if [ -e \"\$base\" ]; then
+  [ -d \"\$base\" ] && [ ! -L \"\$base\" ] || exit 51
+fi" || die "Remote Market Pipeline release base is non-canonical or unsafe."
+    if ssh_iran "test -d '$release_dir' && test ! -L '$release_dir'"; then
+        ssh_iran "set -euo pipefail
+[ \"\$(sha256sum '$release_dir/control-payload.sha256' | awk '{print \$1}')\" = '$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256' ]
+[ \"\$(sha256sum '$release_dir/web.release.env' | awk '{print \$1}')\" = '$web_env_sha' ]
+[ \"\$(sha256sum '$release_dir/market-pipeline-image-prebuild-receipt.json' | awk '{print \$1}')\" = '$image_receipt_sha' ]
+[ \"\$(sha256sum '$release_dir/market-pipeline-release-pair-receipt.json' | awk '{print \$1}')\" = '$pair_receipt_sha' ]
+(cd '$release_dir' && sha256sum -c control-payload.sha256 >/dev/null)" \
+            || die "Existing remote Market Pipeline release directory does not match this release."
+        REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR="$release_dir"
+        REMOTE_MARKET_PIPELINE_WEB_ENV="$release_dir/web.release.env"
+        return 0
+    fi
+    ssh_iran "test ! -e '$release_dir' && test ! -L '$release_dir'" \
+        || die "Remote Market Pipeline release path exists but is not a regular directory."
+    ssh_iran "set -euo pipefail
+base='$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR'
+incoming='$incoming'
+install -d -m 0700 -- \"\$base\"
+[ -d \"\$base\" ] && [ ! -L \"\$base\" ] && [ \"\$(stat -c '%u' \"\$base\")\" = 0 ] && [ \"\$(stat -c '%a' \"\$base\")\" = 700 ] || exit 51
+rm -rf -- \"\$incoming\"
+install -d -m 0700 -- \"\$incoming\""
+    run_iran_transfer rsync -a --delete \
+        -e "${RSYNC_IRAN_SSH[*]}" \
+        "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR/" \
+        "$IRAN_SSH_TARGET:$incoming/"
+    scp_iran "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST" \
+        "$IRAN_SSH_TARGET:$incoming/control-payload.sha256"
+    scp_iran "$PRODUCTION_MARKET_PIPELINE_WEB_ENV" \
+        "$IRAN_SSH_TARGET:$incoming/web.release.env"
+    scp_iran "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT" \
+        "$IRAN_SSH_TARGET:$incoming/market-pipeline-image-prebuild-receipt.json"
+    scp_iran "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT" \
+        "$IRAN_SSH_TARGET:$incoming/market-pipeline-release-pair-receipt.json"
+    ssh_iran "set -euo pipefail
+release_dir='$release_dir'
+incoming='$incoming'
+chmod 0600 -- \
+  \"\$incoming/control-payload.sha256\" \
+  \"\$incoming/web.release.env\" \
+  \"\$incoming/market-pipeline-image-prebuild-receipt.json\" \
+  \"\$incoming/market-pipeline-release-pair-receipt.json\"
+[ \"\$(sha256sum \"\$incoming/control-payload.sha256\" | awk '{print \$1}')\" = '$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256' ]
+[ \"\$(sha256sum \"\$incoming/web.release.env\" | awk '{print \$1}')\" = '$web_env_sha' ]
+[ \"\$(sha256sum \"\$incoming/market-pipeline-image-prebuild-receipt.json\" | awk '{print \$1}')\" = '$image_receipt_sha' ]
+[ \"\$(sha256sum \"\$incoming/market-pipeline-release-pair-receipt.json\" | awk '{print \$1}')\" = '$pair_receipt_sha' ]
+(cd \"\$incoming\" && sha256sum -c control-payload.sha256 >/dev/null)
+sync -f \"\$incoming/control-payload.sha256\"
+sync -f \"\$incoming/web.release.env\"
+mv -- \"\$incoming\" \"\$release_dir\"
+sync -f '$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR'"
+    REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR="$release_dir"
+    REMOTE_MARKET_PIPELINE_WEB_ENV="$release_dir/web.release.env"
+}
+
+market_pipeline_require_local_free_space() {
+    local path="$1" label="$2" available_kib required_kib
+    [[ -d "$path" && ! -L "$path" ]] || die "$label path is missing or unsafe: $path"
+    available_kib="$(df -Pk "$path" | awk 'NR==2 {print $4}')"
+    required_kib=$((PRODUCTION_MARKET_PIPELINE_MIN_FREE_MIB * 1024))
+    [[ "$available_kib" =~ ^[0-9]+$ && "$available_kib" -ge "$required_kib" ]] \
+        || die "$label has less than the required Market Pipeline free space."
+}
+
+market_pipeline_verify_local_host_contract() {
+    local data_root bind_ip docker_root
+    data_root="$(read_env_value "$LOCAL_MARKET_PIPELINE_BOT_ENV" MARKET_BOT_DATA_ROOT)"
+    bind_ip="$(read_env_value "$LOCAL_MARKET_PIPELINE_BOT_ENV" MARKET_PRIVATE_BIND_IP)"
+    docker_root="$(docker info --format '{{.DockerRootDir}}')"
+    ip -4 -o addr show | awk '{print $4}' | cut -d/ -f1 | grep -Fxq "$bind_ip" \
+        || die "Market Pipeline bot private bind IP is not assigned on the authority host."
+    market_pipeline_require_local_free_space "$data_root" "Market Pipeline bot data root"
+    market_pipeline_require_local_free_space "$docker_root" "Market Pipeline local Docker root"
+}
+
+market_pipeline_verify_remote_host_contract() {
+    ssh_iran "set -euo pipefail
+. '$REMOTE_MARKET_PIPELINE_WEB_ENV'
+required_kib='$((PRODUCTION_MARKET_PIPELINE_MIN_FREE_MIB * 1024))'
+[ -d \"\$MARKET_WEB_DATA_ROOT\" ] && [ ! -L \"\$MARKET_WEB_DATA_ROOT\" ] || exit 61
+ip -4 -o addr show | awk '{print \$4}' | cut -d/ -f1 | grep -Fxq \"\$MARKET_PRIVATE_BIND_IP\" || exit 62
+docker_root=\"\$(docker info --format '{{.DockerRootDir}}')\"
+for path in \"\$MARKET_WEB_DATA_ROOT\" \"\$docker_root\"; do
+  available_kib=\"\$(df -Pk \"\$path\" | awk 'NR==2 {print \$4}')\"
+  [ -n \"\$available_kib\" ] && [ \"\$available_kib\" -ge \"\$required_kib\" ] || exit 63
+done" || die "Market Pipeline web host private-bind/data-root/disk contract failed."
+}
+
+load_market_pipeline_image_remote() {
+    local expected_identity remote_identity
+    expected_identity="$PRODUCTION_MARKET_PIPELINE_IMAGE_ID|linux/amd64|10001:10001|$RELEASE_SHA|$PRODUCTION_RELEASE_TREE|$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE"
+    remote_identity="$(ssh_iran "docker image inspect --format '{{.Id}}|{{.Os}}/{{.Architecture}}|{{.Config.User}}|{{index .Config.Labels \"org.opencontainers.image.revision\"}}|{{index .Config.Labels \"io.gold-trade.release.tree\"}}|{{index .Config.Labels \"io.gold-trade.release.input-signature\"}}' '$PRODUCTION_MARKET_PIPELINE_IMAGE_ID' 2>/dev/null || true")"
+    if [[ "$remote_identity" != "$expected_identity" ]]; then
+        log "Streaming the exact Market Pipeline image to the web host without a transfer file"
+        if ! docker image save "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
+            | timeout --signal=TERM --kill-after=15s "${IRAN_TRANSFER_TIMEOUT_SECONDS}s" \
+                "${SSH_IRAN_CMD[@]}" "$IRAN_SSH_TARGET" "docker image load >/dev/null"; then
+            die "Market Pipeline image stream/load failed."
+        fi
+        remote_identity="$(ssh_iran "docker image inspect --format '{{.Id}}|{{.Os}}/{{.Architecture}}|{{.Config.User}}|{{index .Config.Labels \"org.opencontainers.image.revision\"}}|{{index .Config.Labels \"io.gold-trade.release.tree\"}}|{{index .Config.Labels \"io.gold-trade.release.input-signature\"}}' '$PRODUCTION_MARKET_PIPELINE_IMAGE_ID'")"
+    fi
+    [[ "$remote_identity" == "$expected_identity" ]] \
+        || die "Market Pipeline image content/OCI identity differs between the two hosts."
+}
+
+run_market_pipeline_two_host_preflight() {
+    local bot_data_root web_preflight_sha bot_preflight_sha web_env_sha bot_env_sha
+    bot_data_root="$(read_env_value "$LOCAL_MARKET_PIPELINE_BOT_ENV" MARKET_BOT_DATA_ROOT)"
+    (
+        set -a
+        # The release renderer accepts only shell-safe literal values.
+        # shellcheck disable=SC1090
+        source "$LOCAL_MARKET_PIPELINE_BOT_ENV"
+        set +a
+        python3 "$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR/scripts/manage_market_pipeline_stage3.py" preflight \
+            --role bot \
+            --root "$bot_data_root" \
+            --image "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
+            --release-sha "$RELEASE_SHA"
+    ) >"$PRODUCTION_MARKET_PIPELINE_BOT_PREFLIGHT_RECEIPT" \
+        || die "Market Pipeline bot host preflight failed."
+    chmod 0600 "$PRODUCTION_MARKET_PIPELINE_BOT_PREFLIGHT_RECEIPT"
+    ssh_iran "set -euo pipefail
+set -a
+. '$REMOTE_MARKET_PIPELINE_WEB_ENV'
+set +a
+python3 '$REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR/scripts/manage_market_pipeline_stage3.py' preflight \
+  --role web \
+  --root \"\$MARKET_WEB_DATA_ROOT\" \
+  --image '$PRODUCTION_MARKET_PIPELINE_IMAGE_ID' \
+  --release-sha '$RELEASE_SHA'" >"$PRODUCTION_MARKET_PIPELINE_WEB_PREFLIGHT_RECEIPT" \
+        || die "Market Pipeline web host preflight failed."
+    chmod 0600 "$PRODUCTION_MARKET_PIPELINE_WEB_PREFLIGHT_RECEIPT"
+    bot_preflight_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_BOT_PREFLIGHT_RECEIPT")"
+    web_preflight_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_WEB_PREFLIGHT_RECEIPT")"
+    bot_env_sha="$(file_sha256 "$LOCAL_MARKET_PIPELINE_BOT_ENV")"
+    web_env_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_WEB_ENV")"
+    python3 - "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT" \
+        "$PRODUCTION_MARKET_PIPELINE_BOT_PREFLIGHT_RECEIPT" \
+        "$PRODUCTION_MARKET_PIPELINE_WEB_PREFLIGHT_RECEIPT" \
+        "$RELEASE_SHA" "$PRODUCTION_RELEASE_TREE" \
+        "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
+        "$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE" \
+        "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256" \
+        "$bot_env_sha" "$web_env_sha" "$bot_preflight_sha" "$web_preflight_sha" <<'PY'
+import json
+import os
+from pathlib import Path
+import sys
+
+destination = Path(sys.argv[1])
+bot = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+web = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
+for role, document in (("bot", bot), ("web", web)):
+    if document.get("status") != "pass" or document.get("role") != role:
+        raise SystemExit(2)
+    inventory = document.get("inventory") or {}
+    image = inventory.get("image") or {}
+    if image.get("image_id") != sys.argv[6] or image.get("revision") != sys.argv[4]:
+        raise SystemExit(2)
+payload = {
+    "schema": "market_pipeline_two_host_preflight/1.0",
+    "environment": "production",
+    "release_sha": sys.argv[4],
+    "release_tree": sys.argv[5],
+    "image_id": sys.argv[6],
+    "image_input_signature": sys.argv[7],
+    "control_payload_manifest_sha256": sys.argv[8],
+    "role_env_sha256": {"bot": sys.argv[9], "web": sys.argv[10]},
+    "host_preflight_sha256": {"bot": sys.argv[11], "web": sys.argv[12]},
+    "private_shadow_only": True,
+    "image_loaded_on_both_hosts": True,
+    "services_started": False,
+    "database_mutated": False,
+    "product_authority_changed": False,
+    "telegram_capture_cutover_authorized": False,
+    "secrets_disclosed": False,
+}
+candidate = destination.parent / f".{destination.name}.{os.getpid()}.tmp"
+flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+descriptor = os.open(candidate, flags, 0o600)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(candidate, destination)
+    directory = os.open(destination.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+finally:
+    candidate.unlink(missing_ok=True)
+PY
+    chmod 0600 "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT"
+    PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT_SHA256="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT")"
+}
+
+prepare_market_pipeline_two_host_preflight() {
+    [[ "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_REQUESTED" == "1" ]] || return 0
+    verify_market_pipeline_release_evidence
+    install_market_pipeline_control_release_local
+    install_market_pipeline_control_release_remote
+    market_pipeline_verify_local_host_contract
+    market_pipeline_verify_remote_host_contract
+    load_market_pipeline_image_remote
+    run_market_pipeline_two_host_preflight
+    verify_market_pipeline_two_host_preflight_receipt
+    log "Market Pipeline exact image is loaded and both hosts passed preflight; no service/database/authority changed."
+}
+
+verify_market_pipeline_two_host_preflight_receipt() {
+    [[ "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_REQUESTED" == "1" ]] || return 0
+    if [[ -z "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT_SHA256" ]]; then
+        [[ -f "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT" \
+            && ! -L "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT" ]] \
+            || die "Market Pipeline two-host preflight receipt is missing."
+        PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT_SHA256="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT")"
+    fi
+    [[ "$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT")" == "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT_SHA256" ]] \
+        || die "Market Pipeline two-host preflight receipt drifted."
+    python3 - "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT" \
+        "$RELEASE_SHA" "$PRODUCTION_RELEASE_TREE" \
+        "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
+        "$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE" \
+        "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256" \
+        "$LOCAL_MARKET_PIPELINE_BOT_ENV" "$PRODUCTION_MARKET_PIPELINE_WEB_ENV" \
+        "$PRODUCTION_MARKET_PIPELINE_BOT_PREFLIGHT_RECEIPT" \
+        "$PRODUCTION_MARKET_PIPELINE_WEB_PREFLIGHT_RECEIPT" <<'PY'
+from hashlib import sha256
+import json
+from pathlib import Path
+import sys
+
+def digest(path: str) -> str:
+    return sha256(Path(path).read_bytes()).hexdigest()
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+expected = {
+    "schema": "market_pipeline_two_host_preflight/1.0",
+    "environment": "production",
+    "release_sha": sys.argv[2],
+    "release_tree": sys.argv[3],
+    "image_id": sys.argv[4],
+    "image_input_signature": sys.argv[5],
+    "control_payload_manifest_sha256": sys.argv[6],
+    "role_env_sha256": {"bot": digest(sys.argv[7]), "web": digest(sys.argv[8])},
+    "host_preflight_sha256": {"bot": digest(sys.argv[9]), "web": digest(sys.argv[10])},
+    "private_shadow_only": True,
+    "image_loaded_on_both_hosts": True,
+    "services_started": False,
+    "database_mutated": False,
+    "product_authority_changed": False,
+    "telegram_capture_cutover_authorized": False,
+    "secrets_disclosed": False,
+}
+if payload != expected:
+    raise SystemExit(2)
+PY
+    local expected_identity remote_identity
+    expected_identity="$PRODUCTION_MARKET_PIPELINE_IMAGE_ID|linux/amd64|10001:10001|$RELEASE_SHA|$PRODUCTION_RELEASE_TREE|$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE"
+    remote_identity="$(ssh_iran "docker image inspect --format '{{.Id}}|{{.Os}}/{{.Architecture}}|{{.Config.User}}|{{index .Config.Labels \"org.opencontainers.image.revision\"}}|{{index .Config.Labels \"io.gold-trade.release.tree\"}}|{{index .Config.Labels \"io.gold-trade.release.input-signature\"}}' '$PRODUCTION_MARKET_PIPELINE_IMAGE_ID'")"
+    [[ "$remote_identity" == "$expected_identity" ]] \
+        || die "Remote Market Pipeline image drifted after host preflight."
 }
 
 iran_release_image_matches() {
@@ -6173,6 +6599,8 @@ run_release() {
     load_images
     verify_foreign_image_build_receipt
     verify_release_evidence_gate
+    verify_frozen_release_source
+    prepare_market_pipeline_two_host_preflight
     verify_frozen_release_source
     begin_two_host_release_transaction
     capture_production_coin_input_timer_recovery_state

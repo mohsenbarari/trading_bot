@@ -137,3 +137,23 @@ Gateهای image reproducibility، secret scan، Compose isolation، non-root/re
 بنابراین وضعیت Stage 3 هنوز باز است. گام بعدی، انتقال streamشده و verify همان content ID روی
 وب، preflight واقعی هر دو میزبان، backup و migration، سپس rollout receiver-first بدون capture
 و بدون Product authority است. handoff تلگرام gate و مجوز مستقل بعدی خواهد بود.
+
+## 11. انتقال و preflight رسمی دو میزبان — 2026-08-27
+
+لایهٔ دوم نیز با opt-in و confirmation مستقل به controller رسمی اضافه شد:
+
+- payload کنترلی فقط شامل سه Compose، Dockerfile/lock و manager است، مستقیماً از Git archive
+  همان SHA ساخته و با manifest فایل‌به‌فایل کنترل می‌شود؛ env/example/session داخل آن نیست؛
+- release directory هر دو میزبان پایدار، SHA-scoped، `0700`، tamper-evident و خارج `/tmp`
+  است؛ retry فقط همان artifact دقیق را می‌پذیرد؛
+- پیش از quiesce writerهای محصول، فضای آزاد data root و Docker root (پیش‌فرض حداقل ۲ GiB)،
+  حضور private bind IP و preflight واقعی owner/mode path و secret بررسی می‌شود؛
+- image فقط از Docker store سرور بات stream می‌شود؛ فایل tar محلی/remote ساخته نمی‌شود و وب
+  build/pull نمی‌کند. content ID، platform، user، revision، tree و input signature پس از load
+  دوباره تطبیق داده می‌شوند؛
+- receipt نهایی digest دو env، دو preflight و control payload را ثبت می‌کند و صریحاً
+  `services_started=false`، `database_mutated=false`، Product/capture authority خاموش است؛
+- اجرای production این gate هنوز انجام نشده و flagهای manifest پیش‌فرض صفر مانده‌اند.
+
+گام باز Stage 3 اکنون backup/restore-proof archive، migration دوپاس، rollout receiver-first،
+postcheck و rollback به release directory/image قبلی بدون حذف state است.

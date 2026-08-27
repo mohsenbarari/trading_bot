@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 import os
 from pathlib import Path
 import subprocess
@@ -83,6 +84,10 @@ class ProductionMarketPipelineReleaseTests(unittest.TestCase):
         )
         self.assertIn("PRODUCTION_MARKET_PIPELINE_CAPTURE_CUTOVER_ENABLED=0", manifest)
         self.assertIn("prepare-production-market-pipeline-shadow-evidence", manifest)
+        self.assertIn("PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_ENABLED=0", manifest)
+        self.assertIn(
+            "load-and-preflight-production-market-pipeline-shadow-hosts", manifest
+        )
         self.assertIn("does not transfer/load the image", manifest)
 
     def test_capture_cutover_is_rejected_even_when_evidence_is_disabled(self) -> None:
@@ -138,6 +143,157 @@ printf '%s\n' "$PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED"
             )
             self.assertEqual(accepted.returncode, 0, accepted.stderr + accepted.stdout)
             self.assertTrue(accepted.stdout.rstrip().endswith("1"))
+
+    def test_host_preflight_requires_evidence_exact_confirmation_and_disk_floor(self) -> None:
+        no_evidence = run_sourced(
+            """
+PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_ENABLED=1
+PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=0
+validate_production_market_pipeline_host_preflight_manifest
+"""
+        )
+        self.assertNotEqual(no_evidence.returncode, 0)
+        self.assertIn("requires exact release evidence", no_evidence.stderr)
+        wrong_confirmation = run_sourced(
+            """
+PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_ENABLED=1
+PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=1
+PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_CONFIRM=wrong
+PRODUCTION_MARKET_PIPELINE_CAPTURE_CUTOVER_ENABLED=0
+PRODUCTION_MARKET_PIPELINE_MIN_FREE_MIB=2048
+PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR=/srv/trading-bot/market-pipeline-releases
+validate_production_market_pipeline_host_preflight_manifest
+"""
+        )
+        self.assertNotEqual(wrong_confirmation.returncode, 0)
+        self.assertIn("exact load-and-preflight confirmation", wrong_confirmation.stderr)
+        low_disk_floor = run_sourced(
+            """
+PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_ENABLED=1
+PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=1
+PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_CONFIRM=load-and-preflight-production-market-pipeline-shadow-hosts
+PRODUCTION_MARKET_PIPELINE_CAPTURE_CUTOVER_ENABLED=0
+PRODUCTION_MARKET_PIPELINE_MIN_FREE_MIB=512
+PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR=/srv/trading-bot/market-pipeline-releases
+validate_production_market_pipeline_host_preflight_manifest
+"""
+        )
+        self.assertNotEqual(low_disk_floor.returncode, 0)
+        self.assertIn("minimum free space", low_disk_floor.stderr)
+
+    def test_control_payload_is_commit_exact_minimal_and_tamper_evident(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="market-control-payload-") as temporary:
+            root = Path(temporary)
+            release_dir = root / "release"
+            payload = release_dir / "control-payload"
+            manifest = release_dir / "control-payload.sha256"
+            result = run_sourced(
+                """
+PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=1
+PRODUCTION_MARKET_PIPELINE_RELEASE_DIR="$2"
+PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR="$3"
+PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST="$4"
+LOCAL_PROJECT_DIR="$5"
+RELEASE_SHA="$(git -C "$5" rev-parse HEAD)"
+prepare_market_pipeline_control_payload
+verify_market_pipeline_control_payload
+printf '%s\n' "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256"
+""",
+                str(release_dir),
+                str(payload),
+                str(manifest),
+                str(REPO_ROOT),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            names = {
+                path.relative_to(payload).as_posix()
+                for path in payload.rglob("*")
+                if path.is_file()
+            }
+            self.assertIn("scripts/manage_market_pipeline_stage3.py", names)
+            self.assertIn("deploy/market-data/compose.web.yml", names)
+            self.assertIn("deploy/market-data/compose.bot.yml", names)
+            self.assertFalse(any(".env" in name or "session" in name for name in names))
+            target = payload / "deploy/market-data/compose.yml"
+            target.write_text(target.read_text(encoding="utf-8") + "# drift\n", encoding="utf-8")
+            tampered = run_sourced(
+                """
+PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=1
+PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR="$2"
+PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST="$3"
+PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256="$4"
+verify_market_pipeline_control_payload
+""",
+                str(payload),
+                str(manifest),
+                result.stdout.strip().splitlines()[-1],
+            )
+            self.assertNotEqual(tampered.returncode, 0)
+            self.assertIn("contents drifted", tampered.stderr)
+
+    def test_local_release_directory_is_atomic_idempotent_and_tamper_evident(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="market-stable-release-") as temporary:
+            root = Path(temporary)
+            payload = root / "payload"
+            payload.mkdir(mode=0o700)
+            control = payload / "control.txt"
+            control.write_text("committed-control\n", encoding="utf-8")
+            manifest = root / "control-payload.sha256"
+            manifest.write_text(
+                f"{sha256(control.read_bytes()).hexdigest()}  ./control.txt\n",
+                encoding="utf-8",
+            )
+            manifest.chmod(0o600)
+            bot_env = root / "bot.env"
+            image_receipt = root / "image.json"
+            pair_receipt = root / "pair.json"
+            for path, body in (
+                (bot_env, "MARKET_PIPELINE_FEED_MODE=PRIVATE_SHADOW\n"),
+                (image_receipt, '{"image":"exact"}\n'),
+                (pair_receipt, '{"pair":"exact"}\n'),
+            ):
+                path.write_text(body, encoding="utf-8")
+                path.chmod(0o600)
+            stable = root / "stable-releases"
+            release_sha = "a" * 40
+            body = """
+PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR="$2"
+RELEASE_SHA="$3"
+PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR="$4"
+PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST="$5"
+PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256="$6"
+PRODUCTION_MARKET_PIPELINE_BOT_ENV="$7"
+PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT="$8"
+PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT="$9"
+PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT_SHA256="${10}"
+PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT_SHA256="${11}"
+install_market_pipeline_control_release_local
+printf '%s\n' "$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR"
+"""
+            arguments = (
+                str(stable),
+                release_sha,
+                str(payload),
+                str(manifest),
+                sha256(manifest.read_bytes()).hexdigest(),
+                str(bot_env),
+                str(image_receipt),
+                str(pair_receipt),
+                sha256(image_receipt.read_bytes()).hexdigest(),
+                sha256(pair_receipt.read_bytes()).hexdigest(),
+            )
+            first = run_sourced(body, *arguments)
+            self.assertEqual(first.returncode, 0, first.stderr + first.stdout)
+            installed = stable / release_sha
+            self.assertTrue(installed.is_dir())
+            self.assertEqual(installed.stat().st_mode & 0o777, 0o700)
+            self.assertEqual((installed / "control.txt").read_bytes(), control.read_bytes())
+            second = run_sourced(body, *arguments)
+            self.assertEqual(second.returncode, 0, second.stderr + second.stdout)
+            (installed / "control.txt").write_text("tampered\n", encoding="utf-8")
+            rejected = run_sourced(body, *arguments)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("contents drifted", rejected.stderr)
 
     def test_image_receipt_is_exact_release_bound_and_secret_free(self) -> None:
         with tempfile.TemporaryDirectory(prefix="market-image-receipt-") as temporary:
@@ -203,6 +359,23 @@ printf '%s\n' "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT_SHA256"
         )[1].split("\n}", 1)[0]
         for forbidden in ("ssh_iran", "docker save", "docker load", "compose up", "systemctl"):
             self.assertNotIn(forbidden, market_prepare)
+
+        run_release = source.split("run_release() {", 1)[1].split("\n}", 1)[0]
+        self.assertLess(
+            run_release.index("prepare_market_pipeline_two_host_preflight"),
+            run_release.index("begin_two_host_release_transaction"),
+        )
+        self.assertLess(
+            run_release.index("prepare_market_pipeline_two_host_preflight"),
+            run_release.index("quiesce_two_host_writers_for_migration"),
+        )
+        load_image = source.split("load_market_pipeline_image_remote() {", 1)[1].split(
+            "\n}", 1
+        )[0]
+        self.assertIn('docker image save "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID"', load_image)
+        self.assertIn('"${SSH_IRAN_CMD[@]}" "$IRAN_SSH_TARGET"', load_image)
+        self.assertNotIn("/tmp", load_image)
+        self.assertNotIn("docker image save -o", load_image)
 
 
 if __name__ == "__main__":

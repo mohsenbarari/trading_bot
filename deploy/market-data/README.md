@@ -52,6 +52,12 @@ authority را تغییر نمی‌دهد. نمونه sourceها:
 - `web.production-source.env.example`؛
 - `bot.production-source.env.example`.
 
+gate دوم اختیاری، payload کنترلی commit-exact را در
+`/srv/trading-bot/market-pipeline-releases/<SHA>` روی هر دو میزبان نگه می‌دارد، image را مستقیم
+از Docker store بات به `docker load` وب stream می‌کند و پس از تطبیق content ID، preflight واقعی
+دو نقش را اجرا می‌کند. این gate نیز service یا migration اجرا نمی‌کند؛ حداقل فضای آزاد پیش‌فرض
+۲ GiB است و هیچ artifact انتقالی در `/tmp` یا `/var/tmp` نمی‌سازد.
+
 ## فایل‌ها
 
 - `Dockerfile`: image مشترک serviceها، Python 3.11 Bookworm pinned؛

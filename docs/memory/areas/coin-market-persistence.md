@@ -13,5 +13,4 @@
 - `PRIVATE_PRIMARY` and Product/WebApp authority require open-market parity plus approval; a release-bound verifier authenticates schedule/model/transport/failure receipts.
 - Adapter caps 500/cycle with per-stream cursors/causal merge. Receiver redacts payload after checkpoint+3d while preserving stream/sequence/fact/revision/hash; watermark regression fails closed.
 - Account1 stores no live reply IDs; Account2 is bounded. Never stage in `/tmp`; use streaming or expiring `/var/tmp/trading-bot-market-pipeline-transfer`.
-- Product deploy carrying source is not market deployment; image/Compose/migration/session/health/rollback need an explicit receiver-first path under its production lock.
-- Formal evidence is opt-in/non-operational: bot builds exact SHA/tree/signature/content-ID and renders secure role sources into `PRIVATE_SHADOW`, Primary-off envs. It never transfers/loads, migrates/starts, changes Product or authorizes capture cutover.
+- Market release gates are opt-in: bot binds image/env to SHA/tree/signature/content-ID and `PRIVATE_SHADOW`; host preflight installs SHA-scoped control files, streams the same ID and checks disk/private/path/secret. Neither starts/migrates/promotes/cuts over capture; receiver-first rollback remains required.

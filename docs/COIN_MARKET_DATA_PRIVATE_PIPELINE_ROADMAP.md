@@ -2,9 +2,10 @@
 
 وضعیت: roadmap ناتمام است. مراحل 0 و 1 بسته‌اند؛ Stage 2 از نظر
 طراحی و rehearsal گذشته و backup عملیاتی آن باقی است. Docker foundation مرحله 3
-کامل است. قرارداد build و evidence به deploy رسمی پروژه متصل شده، اما transfer/load،
-preflight دو میزبان، backup/migration، rollout receiver-first و rollback رسمی هنوز
-پیاده و اثبات نشده‌اند. Stage 11 فقط tooling و seed هفت‌روزه staging را دارد؛ import کامل تاریخچه
+کامل است. قرارداد build/evidence و کد transfer/load/preflight دو میزبان به deploy رسمی
+متصل و offline تست شده، اما اجرای عملیاتی آن مجوز نگرفته و backup/migration، rollout
+receiver-first و rollback رسمی هنوز پیاده و اثبات نشده‌اند. Stage 11 فقط tooling و seed
+هفت‌روزه staging را دارد؛ import کامل تاریخچه
 باز است. Stage 12 از نظر offline سخت‌شده و در انتظار پنجره کامل بازار
 با pin پیش از بازشدن و seal پس از بسته‌شدن است. Stage 13-A قبلاً به‌صورت
 دستی/خارج از deploy رسمی در `PRIVATE_SHADOW` اجرا شده؛ `PRODUCT` و
@@ -600,9 +601,13 @@ Gate:
   `PRIVATE_SHADOW`، primary gate خاموش و receipt بدون secret تبدیل می‌کند. این لایه
   هیچ transfer/load، host preflight، migration، service start، Product switch یا Telegram
   authority switch انجام نمی‌دهد و capture cutover را صریحاً رد می‌کند؛
-- deploy رسمی production/staging هنوز transfer/load همان content ID، preflight واقعی دو
-  میزبان، backup مستقل archive، migration دوباره‌پذیر، rollout receiver-first، postcheck و
-  rollback آنها را orchestrate نمی‌کند؛
+- لایهٔ opt-in دوم پیش از quiesce محصول، payload کنترلی حداقلی و commit-exact را در release
+  directory پایدار هر دو میزبان نصب می‌کند، image را بدون فایل میانی stream/load و content ID
+  و OCI identity را تطبیق می‌دهد؛ سپس path/secret/private-bind/disk/Compose را روی هر دو
+  میزبان بررسی و receipt بدون secret می‌سازد. این مسیر offline تست شده ولی روی production
+  اجرا نشده است و هیچ service/database/authority را تغییر نمی‌دهد؛
+- deploy رسمی production/staging هنوز backup مستقل archive، migration دوباره‌پذیر، rollout
+  receiver-first، postcheck و rollback آنها را orchestrate نمی‌کند؛
 - Stage 13-A جایگزین این gate نیست، چون استقرارش دستی/خارج از چرخه رسمی بود؛
 - بستن Stage 3 به پیاده‌سازی و rehearsal همین جریان بدون deploy عملیاتی و
   سپس مجوز جداگانه برای استقرار نیاز دارد.
