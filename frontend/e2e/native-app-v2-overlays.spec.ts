@@ -123,14 +123,10 @@ test.describe('Native App V2 overlay keyboard contracts', () => {
   })
 
   test('messenger conversation menu Escape restores trigger without mutation', async ({ page }) => {
-    const diagnostics = await boot(page, '/chat?user_id=42&user_name=peer')
+    const diagnostics = await boot(page, '/chat?user_id=33&user_name=گفتگوی نمونه')
     await expect(page.locator('.messenger-page')).toBeVisible({ timeout: 20_000 })
     const menuTrigger = page.getByRole('button', { name: 'گزینه‌های گفتگو' }).first()
-    if (await menuTrigger.count() === 0) {
-      test.info().annotations.push({ type: 'overlay.naReason', description: 'direct thread chrome not mounted in this fixture' })
-      expectCleanDiagnostics(diagnostics, 'conversation-menu-na')
-      return
-    }
+    await expect(menuTrigger).toBeVisible({ timeout: 15_000 })
     await menuTrigger.click()
     await expect(page.locator('#chat-header-menu:visible')).toBeVisible()
     await page.keyboard.press('Escape')
@@ -153,12 +149,10 @@ test.describe('Native App V2 overlay keyboard contracts', () => {
   })
 
   test('attachment sheet opens from composer without unexpected mutation', async ({ page }) => {
-    const diagnostics = await boot(page, '/chat?user_id=42&user_name=peer')
-    const attach = page.getByRole('button', { name: /پیوست|ضمیمه|افزودن/ }).first()
-    if (await attach.count() === 0) {
-      test.info().annotations.push({ type: 'overlay.naReason', description: 'composer attach control not mounted without live thread chrome' })
-      return
-    }
+    const diagnostics = await boot(page, '/chat?user_id=33&user_name=گفتگوی نمونه')
+    await expect(page.locator('.messenger-page')).toBeVisible({ timeout: 20_000 })
+    const attach = page.getByRole('button', { name: 'افزودن پیوست' }).first()
+    await expect(attach).toBeVisible({ timeout: 15_000 })
     await attach.click()
     await expect(page.getByRole('dialog').first()).toBeVisible()
     await page.keyboard.press('Escape')
@@ -183,12 +177,8 @@ test.describe('Native App V2 overlay keyboard contracts', () => {
     const diagnostics = await boot(page, '/account/storage')
     const route = ROUTE_DESCRIPTORS.find((item) => item.id === 'account-storage')!
     await expect(page.getByText(route.readyText)).toBeVisible({ timeout: 15_000 })
-    const danger = page.getByRole('button', { name: /حذف|پاک کردن|خروج/ }).first()
-    if (await danger.count() === 0) {
-      test.info().annotations.push({ type: 'overlay.naReason', description: 'storage has no destructive control in current fixture' })
-      expectCleanDiagnostics(diagnostics, 'storage-confirm-na')
-      return
-    }
+    const danger = page.getByRole('button', { name: 'پاک‌کردن فایل‌های محلی' })
+    await expect(danger).toBeVisible({ timeout: 15_000 })
     await danger.click()
     const dialog = page.getByRole('dialog').first()
     await expect(dialog).toBeVisible()

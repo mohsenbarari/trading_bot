@@ -75,11 +75,19 @@ const PUBLIC_NO_FORBIDDEN = NA('public-route', 'مسیر عمومی مقصد و�
 const HUB_ALWAYS_ROWS = NA('hub-always-populated', 'هاب همیشه ردیف ناوبری دارد و empty محصولی ندارد.')
 const RECOVERY_LOCAL = NA('local-recovery', 'بازیابی مسیر ناشناخته محلی است و درخواست فهرست ندارد.')
 const SHARE_NO_PAYLOAD = NA('share-target-empty-is-normal', 'بدون payload اشتراک، حالت عادی همان پیام آماده نشدن است.')
+const NO_FULL_COLLECTION = NA('no-full-collection', 'این مسیر فهرست پر متمایز از حالت عادی ندارد.')
+const NO_LONG_PERSIAN = NA('no-long-persian-copy', 'این مسیر نام یا متن بلند فارسی محصولی نشان نمی‌دهد.')
+const NO_UNBROKEN = NA('no-unbroken-token', 'این مسیر شناسهٔ بی‌فاصلهٔ قابل مشاهده ندارد.')
+const NO_LTR = NA('no-ltr-token', 'این مسیر شناسهٔ LTR متمایز از حالت عادی ندارد.')
 
 function listStates(options: {
   unauthorized?: boolean
   stale?: boolean
   empty?: boolean
+  full?: boolean
+  longPersian?: boolean
+  unbroken?: boolean
+  ltr?: boolean
 }): RouteDescriptor['states'] {
   return {
     initial: YES,
@@ -87,14 +95,14 @@ function listStates(options: {
     slow: YES,
     empty: options.empty === false ? HUB_ALWAYS_ROWS : YES,
     normal: YES,
-    full: YES,
+    full: options.full ? YES : NO_FULL_COLLECTION,
     error: YES,
     retry: YES,
     offline: YES,
     stale: options.stale ? YES : NO_STALE,
-    'long-persian': YES,
-    unbroken: YES,
-    ltr: YES,
+    'long-persian': options.longPersian ? YES : NO_LONG_PERSIAN,
+    unbroken: options.unbroken ? YES : NO_UNBROKEN,
+    ltr: options.ltr ? YES : NO_LTR,
     unauthorized: options.unauthorized ? YES : NO_FORBIDDEN,
   }
 }
@@ -111,9 +119,9 @@ function formStates(): RouteDescriptor['states'] {
     retry: FORM_NO_PAGE_LOAD,
     offline: YES,
     stale: NO_STALE,
-    'long-persian': YES,
-    unbroken: YES,
-    ltr: YES,
+    'long-persian': NO_LONG_PERSIAN,
+    unbroken: NO_UNBROKEN,
+    ltr: NO_LTR,
     unauthorized: PUBLIC_NO_FORBIDDEN,
   }
 }
@@ -182,7 +190,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
-    states: listStates({ unauthorized: true, stale: false }),
+    states: listStates({ unauthorized: true, stale: false, full: true, longPersian: true }),
   },
   {
     id: 'customer-detail',
@@ -197,7 +205,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
-    states: listStates({ unauthorized: true, stale: false, empty: false }),
+    states: listStates({ unauthorized: true, stale: false, empty: false, longPersian: true }),
   },
   {
     id: 'accountants',
@@ -213,7 +221,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
-    states: listStates({ unauthorized: true, stale: false }),
+    states: listStates({ unauthorized: true, stale: false, full: true, longPersian: true }),
   },
   {
     id: 'accountant-detail',
@@ -228,7 +236,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
-    states: listStates({ unauthorized: true, stale: false, empty: false }),
+    states: listStates({ unauthorized: true, stale: false, empty: false, longPersian: true }),
   },
   {
     id: 'account',
@@ -262,7 +270,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
-    states: listStates({ stale: true }),
+    states: listStates({ stale: true, full: true, longPersian: true }),
   },
   {
     id: 'account-storage',
@@ -296,7 +304,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
-    states: listStates({ stale: false }),
+    states: listStates({ stale: false, full: true, longPersian: true }),
   },
   {
     id: 'messenger',
@@ -314,7 +322,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'messenger', expectedMin: 1, documentScrollForbidden: true },
-    states: listStates({ stale: false }),
+    states: listStates({ stale: false, full: true, longPersian: true }),
   },
   {
     id: 'public-profile',
@@ -329,7 +337,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
-    states: listStates({ empty: false, stale: true }),
+    states: listStates({ empty: false, stale: true, longPersian: true, unbroken: true, ltr: true }),
   },
   {
     id: 'profile',
@@ -344,7 +352,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
-    states: listStates({ empty: false, stale: true }),
+    states: listStates({ empty: false, stale: true, longPersian: true, unbroken: true, ltr: true }),
   },
   {
     id: 'settings',
@@ -411,7 +419,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال دریافت کانال/i,
     scroller: { kind: 'standard', expected: 1 },
-    states: listStates({ unauthorized: true, stale: false }),
+    states: listStates({ unauthorized: true, stale: false, full: true, longPersian: true }),
   },
   {
     id: 'admin-users',
@@ -426,7 +434,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
-    states: listStates({ unauthorized: true, stale: false }),
+    states: listStates({ unauthorized: true, stale: false, full: true, longPersian: true }),
   },
   {
     id: 'admin-user-profile',
@@ -441,7 +449,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
-    states: listStates({ unauthorized: true, empty: false, stale: false }),
+    states: listStates({ unauthorized: true, empty: false, stale: false, longPersian: true, unbroken: true, ltr: true }),
   },
   {
     id: 'admin-commodities',
@@ -456,7 +464,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
-    states: listStates({ unauthorized: true, stale: false }),
+    states: listStates({ unauthorized: true, stale: false, full: true, longPersian: true }),
   },
   {
     id: 'admin-messages',
@@ -470,7 +478,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     errorPath: '/api/admin-messages/broadcasts/history',
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     scroller: { kind: 'standard', expected: 1 },
-    states: listStates({ unauthorized: true, stale: false }),
+    states: listStates({ unauthorized: true, stale: false, full: true, longPersian: true }),
   },
   {
     id: 'admin-system',
@@ -500,7 +508,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
-    states: listStates({ stale: false }),
+    states: listStates({ stale: false, full: true, longPersian: true }),
   },
   {
     id: 'share-receive',
@@ -523,9 +531,9 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
       retry: SHARE_NO_PAYLOAD,
       offline: SHARE_NO_PAYLOAD,
       stale: NO_STALE,
-      'long-persian': YES,
-      unbroken: YES,
-      ltr: YES,
+      'long-persian': NO_LONG_PERSIAN,
+      unbroken: NO_UNBROKEN,
+      ltr: NO_LTR,
       unauthorized: NO_FORBIDDEN,
     },
   },
@@ -604,9 +612,9 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
       retry: RECOVERY_LOCAL,
       offline: RECOVERY_LOCAL,
       stale: NO_STALE,
-      'long-persian': YES,
-      unbroken: YES,
-      ltr: YES,
+      'long-persian': NO_LONG_PERSIAN,
+      unbroken: NO_UNBROKEN,
+      ltr: NO_LTR,
       unauthorized: PUBLIC_NO_FORBIDDEN,
     },
   },
@@ -692,6 +700,52 @@ export const KEYBOARD_FORM_ROUTES = [
   },
 ] as const
 
+export const STATE_OBSERVATIONS: Partial<Record<StateId, Partial<Record<string, string>>>> = {
+  full: {
+    customers: 'مشتری دوم پذیرش',
+    accountants: 'حسابدار دوم پذیرش',
+    'account-security': 'نشست دوم پذیرش',
+    'account-notifications': 'اعلان دوم پذیرش',
+    messenger: 'گفتگوی دوم پذیرش',
+    'admin-channels': 'کانال دوم پذیرش',
+    'admin-users': 'کاربر دوم پذیرش',
+    'admin-commodities': 'کالای دوم پذیرش',
+    'admin-messages': 'پیام دوم همگانی',
+    notifications: 'اعلان دوم پذیرش',
+  },
+  'long-persian': {
+    customers: 'نام بسیار بلند فارسی',
+    'customer-detail': 'نام بسیار بلند فارسی',
+    accountants: 'نام بسیار بلند فارسی',
+    'accountant-detail': 'نام بسیار بلند فارسی',
+    'account-security': 'نام بسیار بلند فارسی',
+    'account-notifications': 'عنوان بسیار بلند فارسی',
+    messenger: 'گفتگوی بسیار بلند فارسی',
+    'public-profile': 'نام بسیار بلند فارسی',
+    profile: 'نام بسیار بلند فارسی',
+    'admin-channels': 'کانال بسیار بلند فارسی',
+    'admin-users': 'نام بسیار بلند فارسی',
+    'admin-user-profile': 'نام بسیار بلند فارسی',
+    'admin-commodities': 'نام بسیار بلند فارسی',
+    'admin-messages': 'متن بسیار بلند فارسی',
+    notifications: 'عنوان بسیار بلند فارسی',
+  },
+  unbroken: {
+    'public-profile': 'unbroken_ltr_accountnamewithoutspaces_9001',
+    profile: 'unbroken_ltr_accountnamewithoutspaces_9001',
+    'admin-user-profile': 'unbroken_ltr_accountnamewithoutspaces_9001',
+  },
+  ltr: {
+    'public-profile': 'ltr_account_9001',
+    profile: 'ltr_account_9001',
+    'admin-user-profile': 'ltr_account_9001',
+  },
+}
+
+export function observationForState(routeId: string, state: StateId) {
+  return STATE_OBSERVATIONS[state]?.[routeId]
+}
+
 export type MatrixCell = {
   id: string
   route: RouteDescriptor
@@ -751,6 +805,13 @@ export function assertMatrixCoverage() {
       const rule = route.states[state]
       if (!rule.applicable && (!rule.naCode || !rule.naReason)) {
         throw new Error(`N/A without machine-readable reason: ${route.id}:${state}`)
+      }
+      if (
+        rule.applicable
+        && (state === 'full' || state === 'long-persian' || state === 'unbroken' || state === 'ltr')
+        && !observationForState(route.id, state)
+      ) {
+        throw new Error(`applicable copy state missing distinct observation: ${route.id}:${state}`)
       }
     }
   }

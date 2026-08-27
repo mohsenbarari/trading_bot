@@ -4,6 +4,7 @@ import {
   CURRENT_USER,
   CUSTOMER_RELATION,
   REGULAR_USER,
+  allowExpectedOfflineRequestFailed,
   allowIntentionalFixtureConsole,
   allowOfflineConsole,
   attachDiagnostics,
@@ -29,6 +30,7 @@ import {
   ZOOM_FAMILY_REPRESENTATIVES,
   assertMatrixCoverage,
   naCells,
+  observationForState,
   type RouteDescriptor,
   type StateId,
 } from './helpers/nativeAppV2Matrix'
@@ -79,7 +81,10 @@ async function clearAuthenticatedLayout(page: Page) {
 function modeForState(state: StateId): FixtureMode {
   if (state === 'empty') return 'empty'
   if (state === 'error') return 'error'
-  if (state === 'full' || state === 'long-persian' || state === 'unbroken' || state === 'ltr') return 'long-copy'
+  if (state === 'full') return 'full'
+  if (state === 'long-persian') return 'long-persian'
+  if (state === 'unbroken') return 'unbroken'
+  if (state === 'ltr') return 'ltr'
   if (state === 'stale') return 'stale'
   return 'normal'
 }
@@ -115,7 +120,7 @@ async function preparePage(
       return false
     },
     allowRequestFailed: state === 'offline'
-      ? () => true
+      ? allowExpectedOfflineRequestFailed
       : undefined,
   })
   const controller = await installFailClosedApi(page, diagnostics, {
@@ -176,21 +181,36 @@ async function runSettledContract(
   await expectNoPageCrash(page, label)
   await expectRouteContract(page, contractRoute, label)
   expectCleanDiagnostics(diagnostics, label)
+  const environmental = [
+    ...diagnostics.environmentalConsole,
+    ...diagnostics.environmentalPageErrors,
+    ...diagnostics.environmentalRequestFailed,
+  ]
+  if (environmental.length) {
+    test.info().annotations.push({
+      type: 'environmental',
+      description: environmental.slice(0, 8).join(' | '),
+    })
+  }
 }
 
 function resolveContractRoute(route: RouteDescriptor, state?: StateId): RouteDescriptor {
-  const longCopyTitle = 'unbroken_ltr_accountnamewithoutspaces_9001'
-  if (
-    !state
-    || !['full', 'long-persian', 'unbroken', 'ltr'].includes(state)
-  ) {
-    return route
+  if (!state) return route
+  if (state === 'unbroken') {
+    if (route.id === 'profile' || route.id === 'public-profile') {
+      return { ...route, h1: 'unbroken_ltr_accountnamewithoutspaces_9001' }
+    }
+    if (route.id === 'admin-user-profile') {
+      return { ...route, readyText: 'unbroken_ltr_accountnamewithoutspaces_9001' }
+    }
   }
-  if (route.id === 'profile' || route.id === 'public-profile') {
-    return { ...route, h1: longCopyTitle }
-  }
-  if (route.id === 'admin-user-profile') {
-    return { ...route, readyText: longCopyTitle }
+  if (state === 'ltr') {
+    if (route.id === 'profile' || route.id === 'public-profile') {
+      return { ...route, h1: 'ltr_account_9001' }
+    }
+    if (route.id === 'admin-user-profile') {
+      return { ...route, readyText: 'ltr_account_9001' }
+    }
   }
   return route
 }
@@ -265,16 +285,15 @@ async function runCell(
     expectCleanDiagnostics(diagnostics, label)
     return
   }
-  if (state === 'long-persian' || state === 'full') {
-    if (['profile', 'public-profile', 'customers', 'accountants', 'messenger'].includes(route.id)) {
-      await expect(page.getByText(/نام بسیار بلند فارسی|بسیار بلند فارسی/)).toBeVisible()
+  if (state === 'full' || state === 'long-persian' || state === 'unbroken' || state === 'ltr') {
+    const observation = observationForState(route.id, state)
+    if (!observation) {
+      throw new Error(`${route.id}:${state} is applicable but has no distinct observation`)
     }
-  }
-  if (state === 'unbroken' || state === 'ltr') {
-    if (['profile', 'public-profile', 'admin-user-profile'].includes(route.id)) {
-      await expect(page.getByText('unbroken_ltr_accountnamewithoutspaces_9001').first()).toBeVisible()
-      await expect(page.getByText('09120000000').first()).toBeVisible()
+    if (route.id === 'admin-messages') {
+      await page.locator('[data-test="message-mode-chat"]').click()
     }
+    await expect(page.getByText(observation, { exact: false }).first()).toBeVisible({ timeout: 10_000 })
   }
   if (state === 'stale') {
     await expect(page.getByText(/۱۴۰۲|2024|قدیمی|تازه‌سازی|به‌روزرسانی/i).first()).toBeVisible({ timeout: 10_000 })
@@ -422,19 +441,85 @@ test.describe('Native App V2 keyboard, zoom, motion, overlays', () => {
   }
 
   test('controlled safe-area tokens are measurable on login and messenger', async ({ page }) => {
-    const route = ROUTE_DESCRIPTORS.find((item) => item.id === 'login')!
-    const { diagnostics } = await preparePage(page, route, 'normal')
+    test.setTimeout(60_000)
+    async function measureTarget(locator: import('@playwright/test').Locator) {
+      return locator.evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        const root = getComputedStyle(document.documentElement)
+        const hit = document.elementFromPoint(
+          rect.left + Math.min(rect.width / 2, 12),
+          rect.top + Math.min(rect.height / 2, 12),
+        )
+        return {
+          top: rect.top,
+          bottom: rect.bottom,
+          tokenTop: root.getPropertyValue('--ds-safe-area-top').trim(),
+          tokenBottom: root.getPropertyValue('--ds-safe-area-bottom').trim(),
+          overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+          hit: Boolean(hit && (hit === element || element.contains(hit))),
+        }
+      })
+    }
+
+    const loginRoute = ROUTE_DESCRIPTORS.find((item) => item.id === 'login')!
+    const loginDiagnostics = (await preparePage(page, loginRoute, 'normal')).diagnostics
     await page.setViewportSize({ width: 390, height: 844 })
     await gotoRouteWithNavigationRetry(page, '/login')
-    const inset = await applyControlledSafeArea(page)
-    expect(inset.bottom).toBe('34px')
-    expect(inset.top).toBe('47px')
-    const bottom = await page.evaluate(() => {
-      const submit = document.querySelector('button')
-      return submit?.getBoundingClientRect().bottom || 0
-    })
-    expect(bottom).toBeLessThanOrEqual(844)
-    expectCleanDiagnostics(diagnostics, 'safe-area-login')
+    const loginCta = page.getByRole('button', { name: 'دریافت کد تأیید' })
+    await expect(loginCta).toBeVisible()
+    const loginBefore = await measureTarget(loginCta)
+    const loginInset = await applyControlledSafeArea(page)
+    if (loginInset.bottom !== '34px' || loginInset.top !== '47px') {
+      test.info().annotations.push({ type: 'naCode', description: 'safe-area-not-applied' })
+      test.info().annotations.push({
+        type: 'naReason',
+        description: 'مرورگر توکن safe-area مصنوعی را اعمال نکرد.',
+      })
+      test.skip(true, 'synthetic safe-area tokens were not applied')
+    }
+    const loginAfter = await measureTarget(loginCta)
+    const loginPad = await page.locator('.auth-shell__content').evaluate((node) => getComputedStyle(node).paddingBottom)
+    expect(loginAfter.tokenBottom).toBe('34px')
+    expect(loginAfter.tokenTop).toBe('47px')
+    expect(Number.parseFloat(loginPad)).toBeGreaterThanOrEqual(58)
+    expect(loginAfter.bottom).toBeLessThanOrEqual(844 - 33)
+    expect(loginAfter.hit).toBe(true)
+    expect(loginAfter.overflowX).toBe(false)
+    await loginCta.focus()
+    await expect(loginCta).toBeFocused()
+    expect(loginBefore.tokenBottom === '34px').toBe(false)
+    expectCleanDiagnostics(loginDiagnostics, 'safe-area-login')
+
+    const messengerPage = await page.context().newPage()
+    const messengerRoute = ROUTE_DESCRIPTORS.find((item) => item.id === 'messenger')!
+    const messengerDiagnostics = (await preparePage(messengerPage, messengerRoute, 'normal')).diagnostics
+    await messengerPage.setViewportSize({ width: 390, height: 844 })
+    await gotoRouteWithNavigationRetry(messengerPage, '/chat?user_id=33&user_name=گفتگوی نمونه')
+    await expect(messengerPage.locator('.messenger-page')).toBeVisible({ timeout: 20_000 })
+    const composer = messengerPage.getByRole('button', { name: 'افزودن پیوست' })
+    await expect(composer).toBeVisible({ timeout: 15_000 })
+    const messengerBefore = await measureTarget(composer)
+    const messengerInset = await applyControlledSafeArea(messengerPage)
+    if (messengerInset.bottom !== '34px' || messengerInset.top !== '47px') {
+      test.info().annotations.push({ type: 'naCode', description: 'safe-area-not-applied' })
+      test.info().annotations.push({
+        type: 'naReason',
+        description: 'مرورگر توکن safe-area مصنوعی را روی پیام‌رسان اعمال نکرد.',
+      })
+      test.skip(true, 'synthetic safe-area tokens were not applied on messenger')
+    }
+    const messengerAfter = await measureTarget(composer)
+    const composerPad = await messengerPage.locator('.input-area').evaluate((node) => getComputedStyle(node).paddingBottom)
+    expect(messengerAfter.tokenBottom).toBe('34px')
+    expect(Number.parseFloat(composerPad)).toBeGreaterThanOrEqual(46)
+    expect(messengerAfter.bottom).toBeLessThanOrEqual(844 - 33)
+    expect(messengerAfter.hit).toBe(true)
+    expect(messengerAfter.overflowX).toBe(false)
+    await composer.focus()
+    await expect(composer).toBeFocused()
+    expect(messengerBefore.tokenBottom === '34px').toBe(false)
+    expectCleanDiagnostics(messengerDiagnostics, 'safe-area-messenger')
+    await messengerPage.close()
   })
 
   for (const path of ZOOM_FAMILY_REPRESENTATIVES) {
@@ -446,14 +531,17 @@ test.describe('Native App V2 keyboard, zoom, motion, overlays', () => {
       await expectRouteReady(page, route)
       const zoom = await applyMeasurableZoom(page, browserName)
       if (zoom.method === 'none') {
+        test.info().annotations.push({ type: 'naCode', description: 'browser-has-no-measurable-page-scale-api' })
         test.info().annotations.push({
-          type: 'zoom.naReason',
-          description: 'naReason=browser-has-no-measurable-page-scale-api',
+          type: 'naReason',
+          description: 'این مرورگر زوم ۲۰۰٪ را اعمال و اندازه‌گیری نکرد.',
         })
-        expect(zoom.method).toBe('none')
-        return
+        test.skip(true, 'zoom was not applied or measured')
       }
       if (zoom.method === 'cdp-page-scale') expect(zoom.scale).toBeCloseTo(2, 1)
+      if (zoom.method === 'css-zoom') {
+        expect(zoom.applied === '2' || zoom.applied === '2.0').toBe(true)
+      }
       await expectRouteContract(page, route, `zoom-200:${path}`)
       expectCleanDiagnostics(diagnostics, `zoom-200:${path}`)
     })

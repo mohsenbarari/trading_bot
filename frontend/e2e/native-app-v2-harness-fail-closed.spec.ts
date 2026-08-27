@@ -3,6 +3,7 @@ import {
   attachDiagnostics,
   createDiagnostics,
   expectCleanDiagnostics,
+  allowExpectedOfflineRequestFailed,
   installFailClosedApi,
   isAllowedMutation,
   resolveKnownApi,
@@ -73,10 +74,10 @@ test.describe('Native App V2 fail-closed harness contract', () => {
 
   test('error mode fails list resources and keeps identity alive', () => {
     expect(resolveKnownApi('GET', '/api/auth/me', 'error')?.status).toBe(200)
-    expect(resolveKnownApi('GET', '/api/trades/my/page', 'error')?.status).toBe(500)
-    expect(resolveKnownApi('GET', '/api/chat/channels', 'error')?.status).toBe(500)
-    expect(resolveKnownApi('GET', '/api/chat/conversations', 'error')?.status).toBe(500)
-    expect(resolveKnownApi('GET', '/api/commodities', 'error')?.status).toBe(500)
+    expect(resolveKnownApi('GET', '/api/trades/my/page', 'error')?.status).toBe(425)
+    expect(resolveKnownApi('GET', '/api/chat/channels', 'error')?.status).toBe(425)
+    expect(resolveKnownApi('GET', '/api/chat/conversations', 'error')?.status).toBe(425)
+    expect(resolveKnownApi('GET', '/api/commodities', 'error')?.status).toBe(425)
     expect(pathEquals('/api/chat/channels/', '/api/chat/channels')).toBe(true)
     expect(pathEquals('/api/chat/channels/21', '/api/chat/channels')).toBe(false)
   })
@@ -87,5 +88,25 @@ test.describe('Native App V2 fail-closed harness contract', () => {
     expect(me.account_name).toBe('unbroken_ltr_accountnamewithoutspaces_9001')
     expect(admin.account_name).toBe('unbroken_ltr_accountnamewithoutspaces_9001')
     expect(admin.mobile_number).toBe('09120000000')
+  })
+
+  test('copy modes stamp distinct observable fixture fields', () => {
+    const longName = resolveKnownApi('GET', '/api/auth/me', 'long-persian')?.body as { full_name: string; account_name: string }
+    const unbroken = resolveKnownApi('GET', '/api/auth/me', 'unbroken')?.body as { account_name: string }
+    const ltr = resolveKnownApi('GET', '/api/auth/me', 'ltr')?.body as { account_name: string }
+    const full = resolveKnownApi('GET', '/api/chat/conversations', 'full')?.body as Array<{ other_user_name: string }>
+    expect(longName.full_name).toContain('بسیار بلند فارسی')
+    expect(longName.account_name).toBe('native_app_v2_user')
+    expect(unbroken.account_name).toBe('unbroken_ltr_accountnamewithoutspaces_9001')
+    expect(ltr.account_name).toBe('ltr_account_9001')
+    expect(full).toHaveLength(2)
+    expect(full[1]?.other_user_name).toBe('گفتگوی دوم پذیرش')
+  })
+
+  test('offline request-failed allow-list is path-scoped', () => {
+    expect(allowExpectedOfflineRequestFailed('GET /api/chat/conversations net::ERR_INTERNET_DISCONNECTED')).toBe(true)
+    expect(allowExpectedOfflineRequestFailed('GET /api/auth/me net::ERR_INTERNET_DISCONNECTED')).toBe(false)
+    expect(allowExpectedOfflineRequestFailed('GET /assets/index.js net::ERR_INTERNET_DISCONNECTED')).toBe(false)
+    expect(allowExpectedOfflineRequestFailed('GET /api/chat/conversations some-other-error')).toBe(false)
   })
 })

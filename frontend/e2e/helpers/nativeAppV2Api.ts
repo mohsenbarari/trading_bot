@@ -1,6 +1,15 @@
 import { expect, type Page, type Request, type Route } from '@playwright/test'
 
-export type FixtureMode = 'normal' | 'empty' | 'error' | 'long-copy' | 'stale'
+export type FixtureMode =
+  | 'normal'
+  | 'empty'
+  | 'error'
+  | 'long-copy'
+  | 'long-persian'
+  | 'full'
+  | 'unbroken'
+  | 'ltr'
+  | 'stale'
 
 export type KnownApiResolver = (
   method: string,
@@ -22,6 +31,9 @@ export type RouteDiagnostics = {
   pageErrors: string[]
   requestFailed: string[]
   consoleErrors: string[]
+  environmentalConsole: string[]
+  environmentalPageErrors: string[]
+  environmentalRequestFailed: string[]
 }
 
 export const CURRENT_USER = {
@@ -87,10 +99,10 @@ const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 const FIXTURE_LIST_FAILURE = { detail: 'دریافت فهرست ناموفق بود' }
 
 function failList() {
-  return { status: 500, body: FIXTURE_LIST_FAILURE }
+  return { status: 425, body: FIXTURE_LIST_FAILURE }
 }
 
-function isSessionKeepalivePath(pathname: string) {
+export function isSessionKeepalivePath(pathname: string) {
   return (
     pathname === '/api/auth/me'
     || pathname === '/api/auth/me/'
@@ -129,6 +141,9 @@ export function createDiagnostics(): RouteDiagnostics {
     pageErrors: [],
     requestFailed: [],
     consoleErrors: [],
+    environmentalConsole: [],
+    environmentalPageErrors: [],
+    environmentalRequestFailed: [],
   }
 }
 
@@ -166,12 +181,20 @@ function isRealtimeSocket(url: URL) {
   return url.pathname === '/api/realtime/ws'
 }
 
-function longCopyViewer(viewer: typeof CURRENT_USER) {
+export const UNBROKEN_ACCOUNT_NAME = 'unbroken_ltr_accountnamewithoutspaces_9001'
+export const LTR_ACCOUNT_NAME = 'ltr_account_9001'
+export const LONG_PERSIAN_FULL_NAME = 'کاربر تست با نام بسیار بلند فارسی برای شکست خط عنوان پروفایل'
+export const LONG_PERSIAN_ADDRESS = 'تهران خیابان ولیعصر با نام بسیار بلند فارسی برای شکست خط نشانی'
+
+function copyViewer(viewer: typeof CURRENT_USER, mode: FixtureMode) {
+  const longPersian = mode === 'long-copy' || mode === 'long-persian'
+  const unbroken = mode === 'unbroken' || mode === 'long-copy'
+  const ltr = mode === 'ltr'
   return {
     ...viewer,
-    full_name: 'کاربر تست با نام بسیار بلند فارسی برای شکست خط عنوان پروفایل',
-    account_name: 'unbroken_ltr_accountnamewithoutspaces_9001',
-    address: 'تهران خیابان ولیعصر با نام بسیار بلند فارسی برای شکست خط نشانی',
+    full_name: longPersian ? LONG_PERSIAN_FULL_NAME : viewer.full_name,
+    account_name: ltr ? LTR_ACCOUNT_NAME : unbroken ? UNBROKEN_ACCOUNT_NAME : viewer.account_name,
+    address: longPersian ? LONG_PERSIAN_ADDRESS : viewer.address,
   }
 }
 
@@ -183,10 +206,16 @@ export function resolveKnownApi(
 ): { status: number; body: unknown } | null {
   const empty = mode === 'empty'
   const error = mode === 'error'
-  const longCopy = mode === 'long-copy'
+  const longCopy = mode === 'long-copy' || mode === 'long-persian'
+  const full = mode === 'full'
   const stale = mode === 'stale'
   const stamp = stale ? STALE_TIME : FIXED_TIME
-  const list = <T>(item: T): T[] => (empty ? [] : [item])
+  const viewerBody = copyViewer(viewer, mode)
+  const list = <T>(item: T, extra?: T): T[] => {
+    if (empty) return []
+    if (full) return extra ? [item, extra] : [item, { ...item }]
+    return [item]
+  }
 
   if (MUTATING_METHODS.has(method) && !isAllowedMutation(pathname, method)) {
     return null
@@ -196,7 +225,7 @@ export function resolveKnownApi(
     if (error) return { status: 200, body: viewer }
     return {
       status: 200,
-      body: longCopy ? longCopyViewer(viewer) : viewer,
+      body: viewerBody,
     }
   }
   if (pathname === '/api/sessions/verify') return { status: 200, body: { ok: true } }
@@ -239,6 +268,16 @@ export function resolveKnownApi(
       unread_count: 0,
       room_kind: 'direct',
       can_send: true,
+    }, {
+      id: 6002,
+      other_user_id: 34,
+      other_user_name: 'گفتگوی دوم پذیرش',
+      last_message_content: 'پیام مصنوعی پذیرش',
+      last_message_type: 'text',
+      last_message_at: stamp,
+      unread_count: 0,
+      room_kind: 'direct',
+      can_send: true,
     }) }
   }
   if (pathname === '/api/chat/channels' || pathname === '/api/chat/channels/') {
@@ -247,6 +286,12 @@ export function resolveKnownApi(
       id: 21,
       title: longCopy ? 'کانال بسیار بلند فارسی برای بررسی شکست خط' : 'کانال پذیرش',
       username: 'native_channel',
+      is_owner: true,
+      member_count: 0,
+    }, {
+      id: 22,
+      title: 'کانال دوم پذیرش',
+      username: 'native_channel_two',
       is_owner: true,
       member_count: 0,
     }) }
@@ -270,11 +315,21 @@ export function resolveKnownApi(
 
   if (pathname === '/api/notifications/unread-count') return { status: 200, body: 0 }
   if (pathname === '/api/notifications/' || pathname === '/api/notifications') {
-    if (error) return { status: 500, body: { detail: 'notifications unavailable' } }
+    if (error) return { status: 425, body: { detail: 'notifications unavailable' } }
     return { status: 200, body: list({
       id: 7001,
-      title: 'اعلان نمونه',
-      body: 'متن مصنوعی اعلان',
+      title: longCopy ? 'اعلان با عنوان بسیار بلند فارسی برای شکست خط' : 'اعلان نمونه',
+      body: longCopy ? 'اعلان با عنوان بسیار بلند فارسی برای شکست خط' : 'متن مصنوعی اعلان',
+      content: longCopy ? 'اعلان با عنوان بسیار بلند فارسی برای شکست خط' : 'متن مصنوعی اعلان',
+      is_read: false,
+      created_at: stamp,
+      kind: 'trade',
+      category: 'trade',
+    }, {
+      id: 7002,
+      title: 'اعلان دوم پذیرش',
+      body: 'اعلان دوم پذیرش',
+      content: 'اعلان دوم پذیرش',
       is_read: false,
       created_at: stamp,
       kind: 'trade',
@@ -294,7 +349,7 @@ export function resolveKnownApi(
   if (pathname === '/api/sessions/recovery/pending') return { status: 200, body: [] }
   if (pathname === '/api/sessions/login-requests/pending') return { status: 200, body: [] }
   if (pathname === '/api/sessions/active') {
-    if (error) return { status: 500, body: { detail: 'sessions unavailable' } }
+    if (error) return { status: 425, body: { detail: 'sessions unavailable' } }
     return {
       status: 200,
       body: list({
@@ -303,6 +358,15 @@ export function resolveKnownApi(
         platform: 'web',
         is_current: true,
         is_primary: true,
+        created_at: stamp,
+        last_active_at: stamp,
+        last_seen_at: stamp,
+      }, {
+        id: 'native-v2-session-2',
+        device_name: 'نشست دوم پذیرش',
+        platform: 'web',
+        is_current: false,
+        is_primary: false,
         created_at: stamp,
         last_active_at: stamp,
         last_seen_at: stamp,
@@ -326,18 +390,12 @@ export function resolveKnownApi(
       status: 200,
       body: {
         id,
-        full_name: id === viewer.id
-          ? (longCopy ? 'کاربر تست با نام بسیار بلند فارسی برای شکست خط عنوان پروفایل' : viewer.full_name)
-          : `کاربر ${id}`,
-        account_name: id === viewer.id
-          ? (longCopy ? 'unbroken_ltr_accountnamewithoutspaces_9001' : viewer.account_name)
-          : `user_${id}`,
+        full_name: id === viewer.id ? viewerBody.full_name : `کاربر ${id}`,
+        account_name: id === viewer.id ? viewerBody.account_name : `user_${id}`,
         role: id === viewer.id ? viewer.role : 'عادی',
         account_status: 'active',
-        mobile_number: id === viewer.id ? '09120000000' : '09123333333',
-        address: id === viewer.id
-          ? (longCopy ? 'تهران خیابان ولیعصر با نام بسیار بلند فارسی برای شکست خط نشانی' : 'تهران')
-          : 'اصفهان',
+        mobile_number: id === viewer.id ? viewerBody.mobile_number : '09123333333',
+        address: id === viewer.id ? viewerBody.address : 'اصفهان',
         avatar_file_id: null,
         last_seen_at: stamp,
         created_at_jalali: stale ? '۱۴۰۲/۱۰/۱۱' : '۱۴۰۵/۰۵/۲۳',
@@ -353,14 +411,21 @@ export function resolveKnownApi(
   if (pathname === '/api/users-public/search') return { status: 200, body: [] }
 
   if (pathname === '/api/users/' || pathname === '/api/users') {
-    if (error) return { status: 500, body: { detail: 'users unavailable' } }
-    return { status: 200, body: list(viewer) }
+    if (error) return { status: 425, body: { detail: 'users unavailable' } }
+    return { status: 200, body: list({
+      ...viewerBody,
+      customer_management_name: longCopy ? LONG_PERSIAN_FULL_NAME : undefined,
+    }, {
+      ...REGULAR_USER,
+      customer_management_name: 'کاربر دوم پذیرش',
+      full_name: 'کاربر دوم پذیرش',
+    }) }
   }
   if (/^\/api\/users\/\d+$/u.test(pathname)) {
     if (error) return failList()
     const id = Number(pathname.split('/')[3])
     if (id === viewer.id) {
-      return { status: 200, body: longCopy ? longCopyViewer(viewer) : viewer }
+      return { status: 200, body: viewerBody }
     }
     return { status: 200, body: { ...REGULAR_USER, id } }
   }
@@ -402,7 +467,10 @@ export function resolveKnownApi(
 
   if (pathname === '/api/commodities/' || pathname === '/api/commodities') {
     if (error) return failList()
-    return { status: 200, body: list({ id: 1, name: 'طلای آب‌شده', aliases: [] }) }
+    return { status: 200, body: list(
+      { id: 1, name: longCopy ? 'طلای آب‌شده با نام بسیار بلند فارسی' : 'طلای آب‌شده', aliases: [] },
+      { id: 2, name: 'کالای دوم پذیرش', aliases: [] },
+    ) }
   }
 
   if (pathname === '/api/trading-settings/' || pathname === '/api/trading-settings') {
@@ -442,7 +510,28 @@ export function resolveKnownApi(
   if (pathname === '/api/admin-messages/market/history') return { status: 200, body: [] }
   if (pathname === '/api/admin-messages/broadcasts/history') {
     if (error) return failList()
-    return { status: 200, body: [] }
+    return {
+      status: 200,
+      body: list({
+        id: 2,
+        content: longCopy ? 'پیام همگانی با متن بسیار بلند فارسی برای شکست خط' : 'پیام همگانی پذیرش',
+        target_groups: ['users'],
+        recipient_count: 4,
+        published_at: stamp,
+        created_at: stamp,
+        created_by_id: 9001,
+        created_by_name: viewerBody.full_name,
+      }, {
+        id: 3,
+        content: 'پیام دوم همگانی',
+        target_groups: ['users'],
+        recipient_count: 2,
+        published_at: stamp,
+        created_at: stamp,
+        created_by_id: 9001,
+        created_by_name: viewer.full_name,
+      }),
+    }
   }
 
   if (pathname === '/api/invitations/pending' || pathname === '/api/invitations/' || pathname === '/api/invitations') {
@@ -477,17 +566,32 @@ export function resolveKnownApi(
   }
 
   if (pathname === '/api/customers/owner-relations') {
-    if (error) return { status: 500, body: { detail: 'customers unavailable' } }
+    if (error) return { status: 425, body: { detail: 'customers unavailable' } }
     return { status: 200, body: list({
       ...CUSTOMER_RELATION,
       management_name: longCopy
         ? 'مشتری پذیرش با نام بسیار بلند فارسی برای شکست خط ردیف'
         : CUSTOMER_RELATION.management_name,
+    }, {
+      ...CUSTOMER_RELATION,
+      id: 14,
+      customer_user_id: 35,
+      customer_account_name: 'customer14',
+      management_name: 'مشتری دوم پذیرش',
+      mobile_number: '09123555555',
     }) }
   }
   if (/^\/api\/customers\/owner-relations\/\d+$/u.test(pathname)) {
     if (error) return failList()
-    return { status: 200, body: CUSTOMER_RELATION }
+    return {
+      status: 200,
+      body: {
+        ...CUSTOMER_RELATION,
+        management_name: longCopy
+          ? 'مشتری پذیرش با نام بسیار بلند فارسی برای شکست خط ردیف'
+          : CUSTOMER_RELATION.management_name,
+      },
+    }
   }
   if (/^\/api\/customers\/owner-relations\/\d+\/sessions$/u.test(pathname)) return { status: 200, body: [] }
   if (/^\/api\/customers\/owner-relations\/\d+\/trade-stats$/u.test(pathname)) {
@@ -508,17 +612,33 @@ export function resolveKnownApi(
   }
 
   if (pathname === '/api/accountants/owner-relations') {
-    if (error) return { status: 500, body: { detail: 'accountants unavailable' } }
+    if (error) return { status: 425, body: { detail: 'accountants unavailable' } }
     return { status: 200, body: list({
       ...ACCOUNTANT_RELATION,
       relation_display_name: longCopy
         ? 'حسابدار پذیرش با نام بسیار بلند فارسی برای شکست خط ردیف'
         : ACCOUNTANT_RELATION.relation_display_name,
+    }, {
+      ...ACCOUNTANT_RELATION,
+      id: 14,
+      accountant_user_id: 45,
+      accountant_account_name: 'accountant14',
+      global_account_name: 'accountant14',
+      relation_display_name: 'حسابدار دوم پذیرش',
+      mobile_number: '09124555555',
     }) }
   }
   if (/^\/api\/accountants\/owner-relations\/\d+$/u.test(pathname)) {
     if (error) return failList()
-    return { status: 200, body: ACCOUNTANT_RELATION }
+    return {
+      status: 200,
+      body: {
+        ...ACCOUNTANT_RELATION,
+        relation_display_name: longCopy
+          ? 'حسابدار پذیرش با نام بسیار بلند فارسی برای شکست خط ردیف'
+          : ACCOUNTANT_RELATION.relation_display_name,
+      },
+    }
   }
   if (/^\/api\/accountants\/owner-relations\/\d+\/sessions$/u.test(pathname)) return { status: 200, body: [] }
 
@@ -526,10 +646,11 @@ export function resolveKnownApi(
 }
 
 function isEnvironmentalConsole(text: string) {
-  if (/Failed to fetch dynamically imported module/i.test(text)) return true
+  if (/Failed to fetch dynamically imported module: \S+/i.test(text)) return true
   if (/Chunk load failed; attempting one bounded hard reload/i.test(text)) return true
   if (/\/api\/realtime\/ws/i.test(text)) return true
-  if (/WebSocket Error/i.test(text)) return true
+  if (/^WebSocket Error: Event$/i.test(text)) return true
+  if (/^WebSocket Error: JSHandle@object$/i.test(text)) return true
   if (/Viewport argument key .* not recognized/i.test(text)) return true
   if (/downloadable font: download failed/i.test(text)) return true
   return false
@@ -542,26 +663,47 @@ export async function attachDiagnostics(
 ) {
   page.on('pageerror', (error) => {
     const text = error.message
-    if (/Failed to fetch dynamically imported module/i.test(text)) return
-    if (/\/api\/realtime\/ws/i.test(text)) return
-    if (/due to access control checks/i.test(text) && /\/api\//i.test(text)) return
+    if (/Failed to fetch dynamically imported module: \S+/i.test(text)) {
+      diagnostics.environmentalPageErrors.push(text)
+      return
+    }
+    if (/\/api\/realtime\/ws/i.test(text)) {
+      diagnostics.environmentalPageErrors.push(text)
+      return
+    }
+    if (/due to access control checks/i.test(text) && /\/api\/realtime\/ws/i.test(text)) {
+      diagnostics.environmentalPageErrors.push(text)
+      return
+    }
     if (policy.allowPageError?.(text)) return
     diagnostics.pageErrors.push(text)
   })
   page.on('console', (message) => {
     if (message.type() !== 'error') return
     const text = message.text()
-    if (isEnvironmentalConsole(text)) return
+    if (isEnvironmentalConsole(text)) {
+      diagnostics.environmentalConsole.push(text)
+      return
+    }
     if (policy.allowConsole?.(text)) return
     diagnostics.consoleErrors.push(text)
   })
   page.on('requestfailed', (request) => {
     const url = new URL(request.url())
-    if (isRealtimeSocket(url)) return
     const failure = request.failure()?.errorText || ''
-    if (/ERR_ABORTED|NS_BINDING_ABORTED|Load request cancelled/i.test(failure)) return
-    if (policy.allowRequestFailed?.(`${request.method()} ${url.pathname} ${failure}`)) return
-    diagnostics.requestFailed.push(`${request.method()} ${url.pathname} ${failure}`)
+    const line = `${request.method()} ${url.pathname} ${failure}`
+    if (isRealtimeSocket(url)) {
+      diagnostics.environmentalRequestFailed.push(line)
+      return
+    }
+    if (/ERR_ABORTED|NS_BINDING_ABORTED|Load request cancelled/i.test(failure)) {
+      if (!MUTATING_METHODS.has(request.method()) || isSessionKeepalivePath(url.pathname)) {
+        diagnostics.environmentalRequestFailed.push(line)
+        return
+      }
+    }
+    if (policy.allowRequestFailed?.(line)) return
+    diagnostics.requestFailed.push(line)
   })
   page.on('request', (request: Request) => {
     const url = new URL(request.url())
@@ -654,7 +796,7 @@ export async function installFailClosedApi(
     if (failCount && failCount[1] > 0) {
       controller.failNext.set(failCount[0], failCount[1] - 1)
       await route.fulfill({
-        status: 500,
+        status: 425,
         contentType: 'application/json',
         body: JSON.stringify(FIXTURE_LIST_FAILURE),
       })
@@ -694,11 +836,21 @@ export async function installFailClosedApi(
 }
 
 export function allowIntentionalFixtureConsole(text: string) {
-  return /intentional fixture failure|دریافت فهرست ناموفق بود|Failed to load resource: the server responded with a status of 500/i.test(text)
+  return /intentional fixture failure|دریافت فهرست ناموفق بود|Failed to load resource: the server responded with a status of 425/i.test(text)
 }
 
 export function allowOfflineConsole(text: string) {
-  return /ERR_INTERNET_DISCONNECTED|Failed to load resource|NS_ERROR_NET_|net::ERR_/i.test(text)
+  return /ERR_INTERNET_DISCONNECTED|NS_ERROR_NET_|net::ERR_INTERNET_DISCONNECTED|internetdisconnected/i.test(text)
+}
+
+export function allowExpectedOfflineRequestFailed(text: string) {
+  const match = /^(GET|HEAD|POST|PUT|PATCH|DELETE) (\S+) (.+)$/.exec(text)
+  if (!match) return false
+  const pathname = match[2]
+  const failure = match[3]
+  if (!pathname.startsWith('/api/')) return false
+  if (isSessionKeepalivePath(pathname)) return false
+  return /ERR_INTERNET_DISCONNECTED|internetdisconnected|NS_ERROR_NET_|NS_ERROR_FAILURE/i.test(failure)
 }
 
 export function expectCleanDiagnostics(diagnostics: RouteDiagnostics, label: string) {

@@ -257,6 +257,7 @@ export async function applyMeasurableZoom(page: Page, browserName: string) {
     const zoom = await page.evaluate(() => ({
       scale: window.visualViewport?.scale ?? 1,
       width: window.visualViewport?.width ?? window.innerWidth,
+      applied: String(window.visualViewport?.scale ?? 1),
       method: 'cdp-page-scale',
     }))
     return zoom
