@@ -1120,6 +1120,7 @@
   .ui-search-field:focus-within,
   .ui-number-stepper:focus-within,
   .ui-tabs__tab:focus-visible,
+  .ui-action-overflow__item:focus-visible,
   .ui-input:focus-visible {
     outline: 0;
     border-color: var(--ds-primary-500);

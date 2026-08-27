@@ -894,4 +894,61 @@ describe('ui primitives', () => {
     expect(overflow.find('[role="menu"]').exists()).toBe(false)
     overflow.unmount()
   })
+
+  it('makes the overflow menu keyboard-complete without nested unnamed controls', async () => {
+    const overflow = mount(AppActionOverflow, {
+      attachTo: document.body,
+      props: {
+        actions: [
+          { id: 'copy-web', label: 'کپی لینک وب' },
+          { id: 'inspect', label: 'بررسی', disabled: true },
+          { id: 'cancel', label: 'لغو دعوت', tone: 'danger' },
+        ],
+      },
+      slots: {
+        default: '<button type="button" class="ui-button">بررسی دعوت</button>',
+      },
+    })
+
+    const trigger = overflow.get('button[aria-label="بیشتر"]').element as HTMLButtonElement
+    trigger.focus()
+    await trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    await nextTick()
+    await nextTick()
+
+    const menu = overflow.get('[role="menu"]')
+    expect(menu.attributes('aria-label')).toBe('بیشتر')
+    const items = overflow.findAll('[role="menuitem"]')
+    expect(items).toHaveLength(3)
+    expect(document.activeElement).toBe(items[0]!.element)
+    const overflowCss = readFileSync(resolve(process.cwd(), 'src/assets/main.css'), 'utf8')
+    expect(overflowCss).toMatch(/\.ui-action-overflow__item\s*\{[\s\S]*?min-height:\s*var\(--ds-native-row-min-height/)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    await nextTick()
+    expect(document.activeElement).toBe(items[2]!.element)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }))
+    await nextTick()
+    expect(document.activeElement).toBe(items[0]!.element)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+    await nextTick()
+    expect(document.activeElement).toBe(items[2]!.element)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
+    await nextTick()
+    expect(document.activeElement).toBe(items[0]!.element)
+
+    await items[1]!.trigger('click')
+    expect(overflow.emitted('select')).toBeUndefined()
+    expect(overflow.find('[role="menu"]').exists()).toBe(true)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await nextTick()
+    expect(overflow.find('[role="menu"]').exists()).toBe(false)
+    expect(document.activeElement).toBe(trigger)
+
+    overflow.unmount()
+  })
 })
