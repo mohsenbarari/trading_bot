@@ -25,13 +25,23 @@ import sys
 import time
 from typing import Any, Mapping, Sequence
 
-from scripts.prepare_market_pipeline_release import (
-    DYNAMIC_VALUES,
-    IMAGE_ID,
-    RELEASE_SHA,
-    parse_env,
-    validate_source,
-)
+if __package__:
+    from scripts.prepare_market_pipeline_release import (
+        DYNAMIC_VALUES,
+        IMAGE_ID,
+        RELEASE_SHA,
+        parse_env,
+        validate_source,
+    )
+else:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from scripts.prepare_market_pipeline_release import (
+        DYNAMIC_VALUES,
+        IMAGE_ID,
+        RELEASE_SHA,
+        parse_env,
+        validate_source,
+    )
 
 
 POSTGRES_IMAGE = (
@@ -709,12 +719,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             document = verify_receipt(
                 maximum_age_seconds=args.maximum_age_seconds, **common
             )
+        artifact = document.get("backup")
         print(
             json.dumps(
                 {
                     "status": "pass",
                     "backup_status": document["status"],
                     "release_sha": document["release_sha"],
+                    "artifact_name": (
+                        Path(str(artifact["path"])).name
+                        if isinstance(artifact, dict)
+                        else None
+                    ),
+                    "artifact_sha256": (
+                        artifact["sha256"] if isinstance(artifact, dict) else None
+                    ),
+                    "artifact_size_bytes": (
+                        artifact["size_bytes"] if isinstance(artifact, dict) else None
+                    ),
                     "database_mutated": False,
                     "services_started": False,
                     "secrets_disclosed": False,
