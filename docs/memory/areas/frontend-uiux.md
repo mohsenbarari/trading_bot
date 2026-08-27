@@ -4,7 +4,7 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Decisions
 
-- 2026-08-27 | Native Feel V2 correction on `candidate/webapp-native-app-v2` from `951ca9f0`, merged local main `581396c6`. Verdict: READY FOR INDEPENDENT NATIVE UI REVIEW, not owner-approved. Dev quick-login is opt-in only via `VITE_STAGING_DEV_LOGIN`. Confirm chrome uses `backdrop-class`. Workspace relation helpers fail closed. Login tests use static import + `vi.hoisted`. Market hero hash `f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860` stays frozen. Messenger visual hash frozen; ChatView script matches `951ca9f0`; albums stay `album_id`+`album_index`. Remaining: dual-token nav hooks, messenger landmark, invite `.copy-btn`, market/channel HelpPopover. Vitest 1980×2. Playwright 42 pass / 6 skip.
+- 2026-08-27 | Native Feel V2 on `candidate/webapp-native-app-v2` is `BLOCKED — CORRECTION REQUIRED`; owner aesthetic sign-off is not a gate. Independent review found dual live token systems, nested workspace cards, missing/duplicate landmarks, incomplete messenger overlay accessibility, permissive E2E mocks and red project type-check. Market and messenger behavior remain frozen; no merge/deploy until correction plus independent browser, accessibility and technical gates pass.
 - 2026-08-22 | Market is owner-frozen; feed, meter, overtime, calendar confirm, and delivery interiors stay unchanged without explicit owner scope.
 - 2026-08-21 | Native standardization V1 receipts on `main` `428dd1a0` stay historical. Production/Sites stay untouched.
 - 2026-08-20 | Native means installed PWA: 48px back, bottom primary CTA, shared destructive dialog, keyboard-safe forms, and grouped lists. Today trades stay a horizontal row.

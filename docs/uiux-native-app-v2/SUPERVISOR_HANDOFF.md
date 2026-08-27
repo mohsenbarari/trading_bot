@@ -4,8 +4,8 @@
 
 تاریخ: ۲۰۲۶-۰۸-۲۷
 شاخهٔ کار: فقط `candidate/webapp-native-app-v2`
-حکم این سند: `READY FOR INDEPENDENT NATIVE UI REVIEW`
-معنی حکم: ماشین و ماتریس نماینده اجرا شد. بازبینی انسان هنوز انجام نشده. owner-approved یا production-ready نیست.
+حکم جاری: `BLOCKED — CORRECTION REQUIRED`
+معنی حکم: ممیزی مستقل پس از اجرای ماشین انجام شد و مانع‌های واقعی در semantics، token convergence، overlay accessibility و صداقت ماتریس یافت. مرجع حکم جاری `INDEPENDENT_AUDIT.md` است؛ این سند جزئیات بازاعتبارسنجی Cursor را نگه می‌دارد.
 
 ---
 
@@ -181,4 +181,4 @@ Warning پیش‌نمایش: ۶ بار `vite ws proxy` / `EPIPE`. قطع websock
 
 ننویس: owner-approved، production-ready، آمادهٔ پوش/ادغام/استقرار.
 
-اقدام بعدی ناظر: بازبینی مستقل ظاهر بومی غیر بازار روی همین candidate؛ بدون پوش.
+اقدام بعدی: اصلاح مرحله‌ای مانع‌های `INDEPENDENT_AUDIT.md` روی همین candidate، سپس بازاجرای gate مستقل؛ بدون push یا deploy تا حکم تازه.

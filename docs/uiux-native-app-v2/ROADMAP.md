@@ -43,7 +43,7 @@ V1 هندسهٔ ۴۸ پیکسل را بست و خیلی از مسیرها را �
 - Market کاملاً خارج است
 - WCAG 2.2 AA
 
-بین فازها توقف یا تأیید مالک لازم نیست. بازبینی مالک فقط در پایان و در staging است.
+بین فازها توقف یا تأیید مالک لازم نیست. تأیید زیبایی مالک gate پایان نیست؛ ممیزی مستقل کد، مرورگر، دسترس‌پذیری و یکپارچگی زبان طراحی باید پایان track را تأیید کند.
 
 ## مرز قطعی
 
@@ -302,17 +302,17 @@ Gate:
 | فاز | وضعیت |
 |---|---|
 | ۰ قرارداد و ممیزی | complete |
-| ۱ foundation | implementation-complete |
-| ۲ پوسته | implementation-complete |
-| ۳ خانه | implementation-complete |
-| ۴ حساب | implementation-complete |
-| ۵ پروفایل | implementation-complete |
-| ۶ عملیات | implementation-complete |
-| ۷ مدیریت | implementation-complete |
-| ۸ احراز | implementation-complete |
-| ۹ پیام‌رسان | implementation-complete |
-| ۱۰ overlay | implementation-complete |
-| ۱۱ پذیرش | complete — READY FOR INDEPENDENT NATIVE UI REVIEW after supervisor correction revalidation; not owner-approved |
+| ۱ foundation | correction-required — primitive overflow و token convergence باز است |
+| ۲ پوسته | correction-required — landmarkهای مسیر کامل نیست |
+| ۳ خانه | partial — Market منجمد و chrome غیر Market قابل حفظ است |
+| ۴ حساب | correction-required — زیرصفحه‌ها و متن/کارت‌ها همگرا نیستند |
+| ۵ پروفایل | correction-required — semantic و قاب‌بندی باز است |
+| ۶ عملیات | correction-required — adapter دوگانه و کارت تودرتو باز است |
+| ۷ مدیریت | correction-required — h1، دعوت و کانال باز است |
+| ۸ احراز | partial — حالت‌های اصلی منسجم‌اند؛ ماتریس کامل نشده است |
+| ۹ پیام‌رسان | correction-required — landmark و overlay accessibility باز است |
+| ۱۰ overlay | correction-required — همه overlayهای زنده به قرارداد مشترک نرسیده‌اند |
+| ۱۱ پذیرش | blocked — `INDEPENDENT_AUDIT.md`؛ نه آمادهٔ merge و نه deploy |
 
 ## ماتریس پذیرش
 
