@@ -434,7 +434,8 @@ function discardManagerBackState() {
 }
 
 function setError(error: unknown, fallback: string) {
-  errorMessage.value = error instanceof Error ? error.message : fallback
+  const raw = error instanceof Error ? error.message.trim() : ''
+  errorMessage.value = !raw || raw === 'NetworkError' ? fallback : raw
 }
 
 function resetSelection() {
@@ -582,7 +583,7 @@ async function loadExistingChannels() {
 
   isLoadingChannels.value = true
   try {
-    const data = await apiFetchJson('/api/chat/channels') as ChannelRoom[]
+    const data = await apiFetchJson('/api/chat/channels', { retryNetwork: false }) as ChannelRoom[]
     existingChannels.value = Array.isArray(data) ? data : []
     writeChatManagerCache(cacheKey, existingChannels.value)
   } catch (error) {
@@ -590,6 +591,12 @@ async function loadExistingChannels() {
   } finally {
     isLoadingChannels.value = false
   }
+}
+
+async function retryLoadExistingChannels() {
+  errorMessage.value = ''
+  invalidateChatManagerCache(getChannelListCacheKey())
+  await loadExistingChannels()
 }
 
 async function loadMembers() {
@@ -955,6 +962,7 @@ defineExpose({
   toggleUser,
   handleToggleSelectAll,
   loadExistingChannels,
+  retryLoadExistingChannels,
   loadMembers,
   loadCandidates,
   createChannel,
@@ -995,7 +1003,19 @@ onBeforeUnmount(() => {
     </header>
 
     <div class="manager-body">
-      <div v-if="errorMessage" class="channel-status-banner error">{{ errorMessage }}</div>
+      <div v-if="errorMessage" class="channel-status-banner error" role="alert">
+        <span>{{ errorMessage }}</span>
+        <AppButton
+          v-if="page === 'home'"
+          type="button"
+          size="sm"
+          variant="secondary"
+          :loading="isLoadingChannels"
+          @click="retryLoadExistingChannels"
+        >
+          تلاش دوباره
+        </AppButton>
+      </div>
       <div v-if="successMessage" class="channel-status-banner success">{{ successMessage }}</div>
 
       <template v-if="page === 'home'">
@@ -1012,7 +1032,7 @@ onBeforeUnmount(() => {
 
         <AppInsetGroup title="کانال‌های موجود">
           <AppLoadingState v-if="isLoadingChannels" label="در حال دریافت کانال‌ها" />
-          <AppEmptyState v-else-if="existingChannels.length === 0" title="هنوز کانالی ساخته نشده است" />
+          <AppEmptyState v-else-if="existingChannels.length === 0 && !errorMessage" title="هنوز کانالی ساخته نشده است" />
           <template v-else>
             <AppListItem
               v-for="channel in existingChannels"
@@ -1449,6 +1469,8 @@ onBeforeUnmount(() => {
   background: rgba(254, 242, 242, 0.95);
   color: #b91c1c;
   border: 1px solid rgba(248, 113, 113, 0.18);
+  flex-wrap: wrap;
+  justify-content: space-between;
 }
 
 .channel-status-banner.success {

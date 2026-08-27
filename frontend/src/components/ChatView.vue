@@ -4111,7 +4111,7 @@ defineExpose({
     </div>
 
     <!-- Error -->
-    <div v-else-if="error" class="error-state">
+    <div v-else-if="error" class="error-state" role="alert">
       <p>{{ error }}</p>
       <button type="button" @click="error = ''; loadConversations()">تلاش مجدد</button>
     </div>

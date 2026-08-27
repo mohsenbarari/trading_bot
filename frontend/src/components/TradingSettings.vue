@@ -13,6 +13,7 @@ const props = defineProps<{
 
 const loading = ref(true)
 const saving = ref(false)
+const settingsLoadFailed = ref(false)
 const message = ref('')
 const messageType = ref<'success' | 'danger'>('success')
 const viewportToast = ref<{ type: 'success' | 'danger'; text: string } | null>(null)
@@ -181,7 +182,7 @@ const fetchApi = async (method: string, endpoint: string, body: any = null) => {
   if (body) {
     options.body = JSON.stringify(body)
   }
-  const response = await apiFetch(`/api${endpoint}`, options)
+  const response = await apiFetch(`/api${endpoint}`, { ...options, retryNetwork: false })
   if (!response.ok) {
     const error = await response.json()
     throw new Error(error.detail || 'خطا در ارتباط با سرور')
@@ -213,10 +214,12 @@ const applySettingsResponse = (data: Record<string, any>) => {
 const loadSettings = async () => {
   try {
     loading.value = true
+    settingsLoadFailed.value = false
     const data = await fetchApi('GET', '/trading-settings/')
     applySettingsResponse(data)
     form.value = {} // پاک کردن فرم بعد از لود جدید
   } catch (error) {
+    settingsLoadFailed.value = true
     message.value = 'خطا در بارگذاری تنظیمات'
     messageType.value = 'danger'
   } finally {
@@ -434,8 +437,18 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else class="settings-container">
-      <div v-if="message" class="ds-message" :class="messageType">
-        {{ message }}
+      <div v-if="message" class="ds-message" :class="messageType" :role="messageType === 'danger' ? 'alert' : 'status'">
+        <span>{{ message }}</span>
+        <AppButton
+          v-if="settingsLoadFailed"
+          type="button"
+          class="settings-load-retry"
+          variant="secondary"
+          :loading="loading"
+          @click="loadSettings"
+        >
+          تلاش دوباره
+        </AppButton>
       </div>
 
       <!-- دعوت‌نامه -->
@@ -907,6 +920,27 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.ds-message {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: var(--ds-native-row-min-height, 48px);
+  padding: 0.75rem 0.9rem;
+  border-radius: 12px;
+}
+
+.ds-message.danger {
+  background: rgba(254, 242, 242, 0.96);
+  color: #b91c1c;
+}
+
+.ds-message.success {
+  background: rgba(240, 253, 244, 0.96);
+  color: #047857;
 }
 
 .settings-viewport-toast {

@@ -38,11 +38,11 @@ export const NATIVE_APP_ADMIN_MESSAGES_REQUIRED_MARKERS = Object.freeze([
   'history-item--compact',
 ])
 export const NATIVE_APP_ADMIN_MESSAGES_VISUAL_SHA256 =
-  '01fbceddc03bf04067c48ad83ef8ab4be2ce0f3c9c182e8fa80e584416705122'
+  '26253addeacac8e2a74b73bb506f6b40cdc56816dc3ba8431b4af7b91766d7a0'
 
 export const NATIVE_APP_TRADING_SETTINGS_VISUAL_KIND = 'native-app-trading-settings-visual-v1'
 export const NATIVE_APP_TRADING_SETTINGS_VISUAL_SHA256 =
-  '8e88ff4917b5eff0ced6e5099f771423aaccc58e20cda65071b05db18d0efdd7'
+  '66e2ab2137d6ea37d5f8580ded4d93a2b5fa65898a9749ec1e6809694e204164'
 
 export const STAGE4_SHARED_DEPENDENCY_ISOLATION_PATHS = Object.freeze([
   'frontend/src/App.vue',
@@ -633,9 +633,9 @@ export const NATIVE_APP_MESSENGER_VISUAL_REQUIRED_MARKERS = Object.freeze([
 
 export const NATIVE_APP_MESSENGER_VISUAL_EVIDENCE = Object.freeze({
   count: 85,
-  contentBytes: 1290747,
+  contentBytes: 1291472,
   pathSetSha256: 'f6af1f961e45d785ba9c752ee670643571086c6a946843807fe6f581d11aea58',
-  sha256: '129d8a455ba2ce2af2b8c562103163099a47aa920cfb02dd4446e4b5be26ec58',
+  sha256: 'b1c9da655fae4ccdb00f9a7e8412f7ec8a7efe9873999e911fafd8e13811cbff',
 })
 
 const RUNTIME_SOURCE_EXTENSION = /\.(?:css|[cm]?[jt]sx?|vue)$/

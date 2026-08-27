@@ -971,6 +971,51 @@ describe('CreateChannelView.vue', () => {
     vi.useRealTimers()
   })
 
+  it('retries the channel list from the home error banner', async () => {
+    apiFetchJsonMock
+      .mockRejectedValueOnce(new Error('channels unavailable'))
+      .mockResolvedValueOnce([
+        {
+          id: 21,
+          type: 'channel',
+          title: 'کانال پذیرش',
+          description: '',
+          avatar_file_id: null,
+          created_by_id: 1,
+          is_system: false,
+          is_mandatory: false,
+          member_count: 0,
+          created_at: '2026-05-12T10:00:00',
+        },
+      ])
+
+    const CreateChannelView = (await import('./CreateChannelView.vue')).default
+    const wrapper = mount(CreateChannelView, {
+      props: {
+        apiBaseUrl: '',
+        jwtToken: 'token',
+        currentUserId: 1,
+        showCloseButton: false,
+      },
+      global: {
+        directives: { ripple: {} },
+        stubs: { transition: false },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('channels unavailable')
+    const retry = wrapper.findAll('button').find((button) => button.text().includes('تلاش دوباره'))
+    expect(retry).toBeTruthy()
+    await retry!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('کانال پذیرش')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
   it('guards open-current-channel without an active channel, then discards back state before emitting and keeps back-triggered close from popping again', async () => {
     apiFetchJsonMock.mockResolvedValue([])
 

@@ -53,6 +53,7 @@ const isPublishingMarket = ref(false)
 const isPublishingBroadcast = ref(false)
 const isClearingMarketPin = ref(false)
 const isLoading = ref(false)
+const broadcastLoadError = ref('')
 const marketComposerInputRef = ref<{
   focus: (options?: FocusOptions) => void
   scrollIntoView: (arg?: boolean | ScrollIntoViewOptions) => void
@@ -110,11 +111,12 @@ function handlePanelKeydown(event: KeyboardEvent, panel: 'market' | 'chat') {
 
 async function loadDashboard() {
   isLoading.value = true
+  broadcastLoadError.value = ''
   try {
     const [currentRes, marketRes, broadcastRes] = await Promise.all([
-      apiFetch('/api/admin-messages/market/current'),
-      apiFetch('/api/admin-messages/market/history?limit=50'),
-      apiFetch('/api/admin-messages/broadcasts/history?limit=50'),
+      apiFetch('/api/admin-messages/market/current', { retryNetwork: false }),
+      apiFetch('/api/admin-messages/market/history?limit=50', { retryNetwork: false }),
+      apiFetch('/api/admin-messages/broadcasts/history?limit=50', { retryNetwork: false }),
     ])
     activeMarketMessage.value = currentRes.ok ? await currentRes.json().catch(() => null) : null
     isMarketPinExpanded.value = false
@@ -123,7 +125,11 @@ async function loadDashboard() {
     }
     if (broadcastRes.ok) {
       broadcastHistory.value = await broadcastRes.json()
+    } else {
+      broadcastLoadError.value = 'دریافت تاریخچه پیام‌های چت ممکن نشد. دوباره تلاش کنید.'
     }
+  } catch {
+    broadcastLoadError.value = 'دریافت تاریخچه پیام‌های چت ممکن نشد. دوباره تلاش کنید.'
   } finally {
     isLoading.value = false
   }
@@ -272,6 +278,17 @@ onMounted(loadDashboard)
       >
         <Megaphone :size="16" />
         <span>ارسال پیام در چت</span>
+      </AppButton>
+    </div>
+
+    <div
+      v-if="broadcastLoadError"
+      class="admin-messages-load-error"
+      role="alert"
+    >
+      <p>{{ broadcastLoadError }}</p>
+      <AppButton type="button" variant="secondary" :loading="isLoading" @click="loadDashboard">
+        تلاش دوباره
       </AppButton>
     </div>
 
@@ -959,6 +976,25 @@ onMounted(loadDashboard)
 .alert.success {
   color: #047857;
   background: rgba(220, 252, 231, 0.92);
+}
+
+.admin-messages-load-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: var(--ds-native-row-min-height, 48px);
+  padding: 0.82rem 0.9rem;
+  border-radius: 16px;
+  color: #b91c1c;
+  background: rgba(254, 226, 226, 0.92);
+}
+
+.admin-messages-load-error p {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 850;
 }
 
 .composer-actions {
