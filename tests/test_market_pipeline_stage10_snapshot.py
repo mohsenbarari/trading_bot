@@ -9,14 +9,19 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from core.market_intelligence import estimator_snapshot_receiver_service
+from core.market_intelligence import (
+    estimator_snapshot_receiver_service,
+    estimator_snapshot_runtime,
+)
 from core.market_intelligence.estimator_snapshot_receiver import (
     apply_estimator_snapshot,
     connect_snapshot_receiver,
     read_web_snapshot_view,
 )
 from core.market_intelligence.estimator_snapshot_runtime import (
+    SnapshotPublishResult,
     publish_estimator_snapshot,
+    run_coin_estimator_service,
     send_latest_snapshot,
 )
 from core.market_intelligence.market_fact_adapter import (
@@ -350,6 +355,50 @@ class Stage10SnapshotTests(unittest.TestCase):
         self.assertEqual(result, 0)
         health = json.loads((self.root / "live-state" / "health.json").read_text())
         self.assertEqual(health["status"], "live-ready")
+
+    def test_estimator_service_keeps_start_to_start_inference_cadence(self):
+        class OneCycleStop:
+            def __init__(self):
+                self.waits: list[float] = []
+
+            def is_set(self):
+                return bool(self.waits)
+
+            def wait(self, seconds):
+                self.waits.append(float(seconds))
+                return True
+
+        stop = OneCycleStop()
+        published = SnapshotPublishResult(
+            snapshot_id="a" * 64,
+            snapshot_version=1,
+            input_snapshot_hash="b" * 64,
+            status="OK",
+            recovered_pending=False,
+        )
+        with patch.dict(
+            "os.environ", {"MARKET_PIPELINE_FEED_MODE": "PRIVATE_SHADOW"}, clear=False
+        ), patch.object(
+            estimator_snapshot_runtime,
+            "publish_estimator_snapshot",
+            return_value=published,
+        ), patch.object(
+            estimator_snapshot_runtime.time,
+            "monotonic",
+            side_effect=(100.0, 101.8),
+        ), patch(
+            "core.market_intelligence.private_pipeline_foundation.atomic_json_write"
+        ):
+            result = run_coin_estimator_service(
+                role="coin-estimator",
+                mode="live",
+                release_sha="c" * 40,
+                state_directory=self.root / "cadence-state",
+                stop=stop,
+            )
+        self.assertEqual(result, 0)
+        self.assertEqual(len(stop.waits), 1)
+        self.assertAlmostEqual(stop.waits[0], 3.2, places=6)
 
 
 if __name__ == "__main__":

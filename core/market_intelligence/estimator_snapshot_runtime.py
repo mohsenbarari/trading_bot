@@ -443,6 +443,7 @@ def run_coin_estimator_service(
     started = _stamp()
     latest: SnapshotPublishResult | None = None
     while not stop.is_set():
+        cycle_started = time.monotonic()
         if feed_mode != "LEGACY":
             latest = publish_estimator_snapshot(
                 market_store_path=os.environ.get(
@@ -472,7 +473,8 @@ def run_coin_estimator_service(
                 "latest": asdict(latest) if latest else None,
             },
         )
-        stop.wait(DEFAULT_INFERENCE_SECONDS if feed_mode != "LEGACY" else 1.0)
+        interval = DEFAULT_INFERENCE_SECONDS if feed_mode != "LEGACY" else 1.0
+        stop.wait(max(0.0, interval - (time.monotonic() - cycle_started)))
     return 0
 
 
