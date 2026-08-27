@@ -337,6 +337,90 @@ class CaptureFixture(unittest.TestCase):
         self.assertNotIn("old raw", audit)
         self.assertIn('"purged_records":1', audit)
 
+    def test_spool_repair_and_retention_never_buffer_whole_files(self):
+        now = datetime(2026, 8, 26, 12, 0, tzinfo=UTC)
+        for message_id in range(100, 300):
+            moment = now - timedelta(days=4 if message_id < 200 else 1)
+            self.engine.accept(
+                market_document(
+                    "XAUUSD",
+                    message_id,
+                    published=moment,
+                    received=moment,
+                    text="x" * 4096,
+                ),
+                now=moment,
+            )
+
+        original_open = Path.open
+
+        class NoBulkRead:
+            def __init__(self, handle):
+                self.handle = handle
+
+            def __enter__(self):
+                self.handle.__enter__()
+                return self
+
+            def __exit__(self, *args):
+                return self.handle.__exit__(*args)
+
+            def __iter__(self):
+                return iter(self.handle)
+
+            def __getattr__(self, name):
+                return getattr(self.handle, name)
+
+            def readlines(self, *_args, **_kwargs):
+                raise AssertionError("capture spool must not bulk-read a file")
+
+        def guarded_open(path, *args, **kwargs):
+            handle = original_open(path, *args, **kwargs)
+            mode = str(args[0] if args else kwargs.get("mode", "r"))
+            return NoBulkRead(handle) if "b" in mode else handle
+
+        with patch.object(Path, "open", guarded_open):
+            repaired = capture.DurableEventSpool(
+                self.root / "capture", account="account1"
+            )
+            report = repaired.purge(now=now)
+
+        self.assertEqual(report["purged_records"], 100)
+        self.assertEqual(len(repaired.event_ids), 100)
+
+    def test_live_reply_cache_skips_account1_and_is_bounded_for_account2(self):
+        config = TelegramCaptureConfig(
+            contract="market_telegram_capture_config/1.0",
+            account="account1",
+            api_id=1,
+            api_hash="a" * 32,
+            session_filename="account1.session",
+            sources=tuple(
+                CaptureBinding(source_code=source, peer_id=-(index + 1))
+                for index, source in enumerate(
+                    sorted(capture.ACCOUNT_SOURCES["account1"])
+                )
+            ),
+        )
+        provider = telegram_capture.TelegramCaptureProvider(
+            config,
+            self.engine,
+            session_path=self.root / "account1.session",
+            hmac_key=None,
+            stop=threading.Event(),
+        )
+        provider._remember_live_reply_parent(SOURCE_POLICIES["XAUUSD"], 1)
+        self.assertEqual(provider._live_seen, set())
+
+        with patch.object(telegram_capture, "LIVE_REPLY_CACHE_MAX_ENTRIES", 2):
+            provider._remember_live_reply_parent(SOURCE_POLICIES["GROUP_1"], 1)
+            provider._remember_live_reply_parent(SOURCE_POLICIES["GROUP_1"], 2)
+            provider._remember_live_reply_parent(SOURCE_POLICIES["GROUP_1"], 3)
+        self.assertEqual(
+            provider._live_seen,
+            {("GROUP_1", 2), ("GROUP_1", 3)},
+        )
+
     def test_partial_tail_is_repaired_but_corrupt_middle_fails_closed(self):
         moment = datetime(2026, 8, 26, 10, 0, tzinfo=UTC)
         self.engine.accept(

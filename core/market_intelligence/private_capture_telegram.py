@@ -9,6 +9,7 @@ image cannot create a second Telegram session owner.
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
@@ -37,6 +38,7 @@ from .private_capture import (
 CAPTURE_CONFIG_CONTRACT = "market_telegram_capture_config/1.0"
 AUTHORITY_MARKER_CONTRACT = "market_capture_authority/1.0"
 SESSION_FILE_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{2,48}\.session$")
+LIVE_REPLY_CACHE_MAX_ENTRIES = 50_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -603,6 +605,7 @@ class TelegramCaptureProvider:
         self._entity_by_source: dict[str, object] = {}
         self._peer_by_runtime_id: dict[int, SourcePolicy] = dict(self._policy_by_peer)
         self._live_seen: set[tuple[str, int]] = set()
+        self._live_seen_order: deque[tuple[str, int]] = deque()
         self.reconciliation_truncated = False
         self._fatal: BaseException | None = None
         self._ready_for_live_updates = False
@@ -617,6 +620,19 @@ class TelegramCaptureProvider:
         except (TypeError, ValueError):
             return None
         return self._peer_by_runtime_id.get(normalized)
+
+    def _remember_live_reply_parent(self, policy: SourcePolicy, message_id: int) -> None:
+        # Account1 channels never consult this reply cache. Keeping their
+        # high-frequency quote IDs here caused unbounded resident growth.
+        if policy.account != "account2":
+            return
+        key = (policy.source_code, int(message_id))
+        if key in self._live_seen:
+            return
+        if len(self._live_seen_order) >= LIVE_REPLY_CACHE_MAX_ENTRIES:
+            self._live_seen.discard(self._live_seen_order.popleft())
+        self._live_seen.add(key)
+        self._live_seen_order.append(key)
 
     async def _capture_message(
         self,
@@ -703,7 +719,7 @@ class TelegramCaptureProvider:
             )
         self.engine.accept(document)
         if not backfill:
-            self._live_seen.add((policy.source_code, snapshot.message_id))
+            self._remember_live_reply_parent(policy, snapshot.message_id)
 
     async def _reconcile_source(self, client: object, policy: SourcePolicy) -> None:
         entity = self._entity_by_source[policy.source_code]

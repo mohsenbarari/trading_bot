@@ -151,3 +151,19 @@ Stage 11 فقط bundle نرمال‌شده و sensitive ciphertext را می‌�
 8. authority switch با مجوز مستقل؛
 9. postcheck و soak؛
 10. rollback فقط با pin digest قبلی و بدون حذف volume/checkpoint/outbox.
+
+## فضای موقت انتقال release
+
+فایل image/release هرگز نباید در `/tmp` میزبان ساخته یا کپی شود؛ `/tmp` روی میزبان وب
+`tmpfs` است و هر byte آن RAM مصرف می‌کند. مسیر موقت مجاز، disk-backed و محدود زیر است:
+
+```bash
+sudo scripts/install_market_pipeline_transfer_workspace.sh
+```
+
+این فرمان `/var/tmp/trading-bot-market-pipeline-transfer` را با مالکیت `root:root` و mode
+`0700` می‌سازد و پاک‌سازی محتوای قدیمی‌تر از یک ساعت را به `systemd-tmpfiles` می‌سپارد.
+انتقال ترجیحاً باید stream شود (`docker save | ssh docker load`) تا فایل remote ساخته نشود؛
+اگر ابزار انتقال به فایل نیاز دارد فقط همین مسیر مجاز است و پس از verify/import باید همان
+فایل را در trap موفقیت یا شکست حذف کند. releaseهای commit-bound و rollback فقط در مسیر
+پایدار `/srv/trading-bot/market-pipeline-releases` نگه‌داری می‌شوند، نه در فضای موقت.

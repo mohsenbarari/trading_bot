@@ -735,15 +735,28 @@ class DurableEventSpool:
         for path in self._event_files():
             offset = 0
             with path.open("rb") as handle:
-                rows = handle.readlines()
-            for index, raw in enumerate(rows):
-                if len(raw) > MAX_RECORD_BYTES + 1:
-                    raise CaptureSpoolCorruption("capture_spool_record_too_large")
-                complete = raw.endswith(b"\n")
-                try:
-                    document = json.loads(raw)
-                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                    if index == len(rows) - 1 and not complete:
+                while True:
+                    raw = handle.readline(MAX_RECORD_BYTES + 2)
+                    if not raw:
+                        break
+                    if len(raw) > MAX_RECORD_BYTES + 1:
+                        raise CaptureSpoolCorruption("capture_spool_record_too_large")
+                    complete = raw.endswith(b"\n")
+                    try:
+                        document = json.loads(raw)
+                    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                        if not complete:
+                            self._quarantine_tail(path, offset, raw)
+                            descriptor = os.open(path, os.O_WRONLY)
+                            try:
+                                os.ftruncate(descriptor, offset)
+                                os.fsync(descriptor)
+                            finally:
+                                os.close(descriptor)
+                            fsync_directory(self.directory)
+                            break
+                        raise CaptureSpoolCorruption("capture_spool_corrupt_middle") from exc
+                    if not complete:
                         self._quarantine_tail(path, offset, raw)
                         descriptor = os.open(path, os.O_WRONLY)
                         try:
@@ -753,26 +766,17 @@ class DurableEventSpool:
                             os.close(descriptor)
                         fsync_directory(self.directory)
                         break
-                    raise CaptureSpoolCorruption("capture_spool_corrupt_middle") from exc
-                if not complete:
-                    self._quarantine_tail(path, offset, raw)
-                    descriptor = os.open(path, os.O_WRONLY)
-                    try:
-                        os.ftruncate(descriptor, offset)
-                        os.fsync(descriptor)
-                    finally:
-                        os.close(descriptor)
-                    fsync_directory(self.directory)
-                    break
-                event_id = str(document.get("event_id") or "")
-                sequence = int((document.get("producer") or {}).get("capture_sequence") or 0)
-                if not event_id or event_id in self.event_ids:
-                    raise CaptureSpoolCorruption("capture_spool_event_identity_invalid")
-                if sequence <= self.max_sequence:
-                    raise CaptureSpoolCorruption("capture_spool_sequence_not_monotonic")
-                self.event_ids.add(event_id)
-                self.max_sequence = sequence
-                offset += len(raw)
+                    event_id = str(document.get("event_id") or "")
+                    sequence = int(
+                        (document.get("producer") or {}).get("capture_sequence") or 0
+                    )
+                    if not event_id or event_id in self.event_ids:
+                        raise CaptureSpoolCorruption("capture_spool_event_identity_invalid")
+                    if sequence <= self.max_sequence:
+                        raise CaptureSpoolCorruption("capture_spool_sequence_not_monotonic")
+                    self.event_ids.add(event_id)
+                    self.max_sequence = sequence
+                    offset += len(raw)
 
     def append(
         self, document: Mapping[str, Any], *, now: datetime | None = None
@@ -814,42 +818,51 @@ class DurableEventSpool:
         cutoff = now - RAW_RETENTION
         purged_files = purged_records = compacted_files = 0
         for path in self._event_files():
-            kept: list[bytes] = []
-            original = 0
-            with path.open("rb") as handle:
-                for raw in handle:
-                    original += 1
-                    document = json.loads(raw)
-                    available = parse_utc(
-                        (document.get("producer") or {}).get("available_at_utc"),
-                        field="capture_retention_available_at_utc",
-                    )
-                    if available >= cutoff:
-                        kept.append(raw)
-            removed = original - len(kept)
-            if removed <= 0:
-                continue
-            purged_records += removed
-            if not kept:
-                path.unlink()
-                fsync_directory(self.directory)
-                purged_files += 1
-                continue
             temporary = path.with_name(f".{path.name}.retention.tmp")
             descriptor = os.open(
                 temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
             )
+            original = kept = 0
             try:
-                for raw in kept:
-                    view = memoryview(raw)
-                    while view:
-                        written = os.write(descriptor, view)
-                        if written <= 0:
-                            raise OSError("capture_retention_short_write")
-                        view = view[written:]
+                with path.open("rb") as handle:
+                    for raw in handle:
+                        original += 1
+                        document = json.loads(raw)
+                        available = parse_utc(
+                            (document.get("producer") or {}).get(
+                                "available_at_utc"
+                            ),
+                            field="capture_retention_available_at_utc",
+                        )
+                        if available < cutoff:
+                            continue
+                        kept += 1
+                        view = memoryview(raw)
+                        while view:
+                            written = os.write(descriptor, view)
+                            if written <= 0:
+                                raise OSError("capture_retention_short_write")
+                            view = view[written:]
                 os.fsync(descriptor)
+            except BaseException:
+                try:
+                    temporary.unlink(missing_ok=True)
+                finally:
+                    fsync_directory(self.directory)
+                raise
             finally:
                 os.close(descriptor)
+            removed = original - kept
+            if removed <= 0:
+                temporary.unlink()
+                continue
+            purged_records += removed
+            if kept == 0:
+                temporary.unlink()
+                path.unlink()
+                fsync_directory(self.directory)
+                purged_files += 1
+                continue
             os.replace(temporary, path)
             fsync_directory(self.directory)
             compacted_files += 1
