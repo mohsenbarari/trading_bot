@@ -1020,36 +1020,12 @@ describe('CreateChannelView.vue', () => {
     expect(popBackStateMock).not.toHaveBeenCalled()
   })
 
-  it('anchors the two floating channel HelpPopovers to local card containing blocks', () => {
-    const popovers = createChannelSource.match(/<HelpPopover\b[\s\S]*?\/>/g) || []
-    const cards = [...createChannelSource.matchAll(/<AppSectionCard\b[\s\S]*?<\/AppSectionCard>/g)].map(
-      (match) => match[0],
-    )
-    const helpCards = cards.filter((card) => /\bcard-with-help\b/.test(card))
-    const placementRule = createChannelSource.match(
-      /\.manager-section-card\.card-with-help\s*\{([^}]+)\}/,
-    )?.[1]
-
-    expect(popovers).toHaveLength(2)
-    expect(helpCards).toHaveLength(2)
-    expect(helpCards[0]).toContain('button-test="channel-home-help"')
-    expect(helpCards[0]).toContain('note-test="channel-home-help-note"')
-    expect(helpCards[0]).toContain('label="راهنمای ساخت کانال"')
-    expect(helpCards[1]).toContain('button-test="channel-create-preview-help"')
-    expect(helpCards[1]).toContain('note-test="channel-create-preview-help-note"')
-    expect(helpCards[1]).toContain('label="راهنمای پیش‌نمایش کانال"')
-
-    for (const card of helpCards) {
-      const nested = card.match(/<HelpPopover\b[\s\S]*?\/>/g) || []
-      expect(nested).toHaveLength(1)
-      expect(nested[0]).toMatch(/^\s*<HelpPopover\s+floating\b/)
-      expect(nested[0]).not.toMatch(/comfortableTarget/)
-    }
-
-    expect(placementRule).toBeDefined()
-    expect(placementRule).toContain('position: relative;')
-    expect(placementRule).toContain('padding-left: 4rem;')
-    expect(placementRule).not.toMatch(/overflow\s*:\s*visible/)
+  it('keeps the live channel manager free of HelpPopover and nested web cards', () => {
+    expect(createChannelSource).not.toContain('HelpPopover')
+    expect(createChannelSource).not.toContain('card-with-help')
+    expect(createChannelSource).not.toContain('manager-section-card')
+    expect(createChannelSource).toContain('AppInsetGroup')
+    expect(createChannelSource).not.toContain('<main')
   })
 
 })

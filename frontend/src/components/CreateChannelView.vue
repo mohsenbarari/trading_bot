@@ -2,7 +2,6 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import ChatUserListRow from './chat/ChatUserListRow.vue'
-import HelpPopover from './HelpPopover.vue'
 import {
   AppBackButton,
   AppButton,
@@ -11,6 +10,7 @@ import {
   AppFormField,
   AppIconButton,
   AppInput,
+  AppInsetGroup,
   AppListItem,
   AppLoadingState,
   AppSectionCard,
@@ -34,7 +34,6 @@ import {
 import {
   Check,
   ChevronLeft,
-  Info,
   Loader2,
   LogOut,
   PencilLine,
@@ -974,7 +973,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="channel-admin-shell">
+  <section
+    class="channel-admin-shell"
+    :class="showCloseButton ? 'channel-admin-shell--sheet' : 'channel-admin-shell--page'"
+  >
     <input ref="avatarInput" type="file" accept="image/*" class="hidden-avatar-input" @change="handleAvatarSelected" />
     <header class="channel-admin-header">
       <AppBackButton label="بازگشت" :disabled="!canGoBack" @click="handleManagerBack()" />
@@ -993,16 +995,7 @@ onBeforeUnmount(() => {
       <div v-if="successMessage" class="channel-status-banner success">{{ successMessage }}</div>
 
       <template v-if="page === 'home'">
-        <AppSectionCard class="manager-section-card card-with-help" title="ساخت کانال جدید">
-          <template #actions>
-            <HelpPopover
-              floating
-              button-test="channel-home-help"
-              note-test="channel-home-help-note"
-              label="راهنمای ساخت کانال"
-              text="کانال اختیاری را بسازید، اعضا را دعوت کنید و نقش ادمین‌ها را از همین بخش مدیریت کنید."
-            />
-          </template>
+        <AppInsetGroup title="ساخت کانال جدید">
           <AppListItem title="کانال جدید" interactive @select="openCreatePage">
             <template #leading>
               <UsersRound :size="18" />
@@ -1011,12 +1004,12 @@ onBeforeUnmount(() => {
               <ChevronLeft :size="18" aria-hidden="true" />
             </template>
           </AppListItem>
-        </AppSectionCard>
+        </AppInsetGroup>
 
-        <AppSectionCard class="manager-section-card" title="کانال‌های موجود">
+        <AppInsetGroup title="کانال‌های موجود">
           <AppLoadingState v-if="isLoadingChannels" label="در حال دریافت کانال‌ها" />
           <AppEmptyState v-else-if="existingChannels.length === 0" title="هنوز کانالی ساخته نشده است" />
-          <div v-else class="manager-action-list">
+          <template v-else>
             <AppListItem
               v-for="channel in existingChannels"
               :key="channel.id"
@@ -1031,21 +1024,12 @@ onBeforeUnmount(() => {
                 <ChevronLeft :size="18" aria-hidden="true" />
               </template>
             </AppListItem>
-          </div>
-        </AppSectionCard>
+          </template>
+        </AppInsetGroup>
       </template>
 
       <template v-else-if="page === 'create'">
-        <AppSectionCard class="manager-section-card manager-preview-card card-with-help" title="پیش‌نمایش کانال">
-          <template #actions>
-            <HelpPopover
-              floating
-              button-test="channel-create-preview-help"
-              note-test="channel-create-preview-help-note"
-              label="راهنمای پیش‌نمایش کانال"
-              text="نام و توضیح روشن کمک می‌کند صفحه معرفی کانال کامل‌تر باشد. توضیح کانال پس از ثبت به اعضا نمایش داده می‌شود."
-            />
-          </template>
+        <section class="channel-identity" aria-label="پیش‌نمایش کانال">
           <div class="manager-avatar">
             <img v-if="channelAvatarUrl" :src="channelAvatarUrl" :alt="title || 'کانال جدید'" class="hero-avatar-image" />
             <template v-else>{{ getAvatarInitial(title || 'کانال') }}</template>
@@ -1055,12 +1039,12 @@ onBeforeUnmount(() => {
           <AppStatusBadge tone="info">{{ description.trim() ? 'آماده برای ساخت' : 'بدون توضیحات' }}</AppStatusBadge>
           <p v-if="description.trim()" class="manager-preview-description">{{ description.trim() }}</p>
           <div class="avatar-tool-row">
-            <AppButton type="button" size="sm" variant="secondary" :disabled="avatarBusy" @click="triggerAvatarPicker">{{ avatarFileId ? 'تغییر عکس کانال' : 'افزودن عکس کانال' }}</AppButton>
-            <AppButton v-if="avatarFileId" type="button" size="sm" variant="danger" :disabled="avatarBusy" @click="clearAvatar">حذف عکس</AppButton>
+            <AppButton type="button" variant="secondary" :disabled="avatarBusy" @click="triggerAvatarPicker">{{ avatarFileId ? 'تغییر عکس کانال' : 'افزودن عکس کانال' }}</AppButton>
+            <AppButton v-if="avatarFileId" type="button" variant="danger" :disabled="avatarBusy" @click="clearAvatar">حذف عکس</AppButton>
           </div>
-        </AppSectionCard>
+        </section>
 
-        <AppSectionCard class="manager-section-card" title="مشخصات کانال">
+        <AppSectionCard title="مشخصات کانال">
           <AppFormField label="نام کانال">
             <template #default="{ id }">
               <AppInput id="channel-title" v-model="title" :maxlength="255" placeholder="مثلاً اطلاعیه‌های ویژه" />
@@ -1083,15 +1067,14 @@ onBeforeUnmount(() => {
       </template>
 
       <template v-else-if="page === 'overview' && activeChannel">
-        <AppSectionCard class="manager-section-card manager-preview-card" title="نمای کلی کانال" :description="activeChannel.description || undefined">
-          <template #actions>
-            <AppStatusBadge :tone="currentChannelKindTone">{{ getChannelKindLabel(activeChannel) }}</AppStatusBadge>
-          </template>
+        <section class="channel-identity" aria-label="نمای کلی کانال">
+          <AppStatusBadge :tone="currentChannelKindTone">{{ getChannelKindLabel(activeChannel) }}</AppStatusBadge>
           <button
             type="button"
             class="manager-avatar"
             :class="{ 'editable-avatar': canEditOverviewAvatar }"
             :disabled="!canEditOverviewAvatar || avatarBusy"
+            :aria-label="canEditOverviewAvatar ? 'ویرایش عکس کانال' : activeChannel.title"
             @click="canEditOverviewAvatar ? triggerAvatarPicker() : undefined"
           >
             <img v-if="channelAvatarUrl" :src="channelAvatarUrl" :alt="activeChannel.title" class="hero-avatar-image" />
@@ -1100,15 +1083,16 @@ onBeforeUnmount(() => {
             <span v-else-if="canEditOverviewAvatar" class="avatar-edit-badge">ویرایش</span>
           </button>
           <div class="manager-preview-title">{{ activeChannel.title }}</div>
+          <p v-if="activeChannel.description" class="manager-preview-description">{{ activeChannel.description }}</p>
           <div class="manager-preview-meta">{{ activeChannel.member_count.toLocaleString('fa-IR') }} عضو</div>
           <div v-if="canEditOverviewAvatar" class="avatar-tool-row compact centered-overview-tools">
-            <AppButton type="button" size="sm" variant="secondary" :disabled="avatarBusy" @click="triggerAvatarPicker">{{ avatarFileId ? 'تغییر عکس کانال' : 'افزودن عکس کانال' }}</AppButton>
-            <AppButton v-if="avatarFileId" type="button" size="sm" variant="danger" :disabled="avatarBusy" @click="clearAvatar">حذف عکس</AppButton>
+            <AppButton type="button" variant="secondary" :disabled="avatarBusy" @click="triggerAvatarPicker">{{ avatarFileId ? 'تغییر عکس کانال' : 'افزودن عکس کانال' }}</AppButton>
+            <AppButton v-if="avatarFileId" type="button" variant="danger" :disabled="avatarBusy" @click="clearAvatar">حذف عکس</AppButton>
           </div>
           <div v-if="canOpenCurrentChannelInMessenger" class="hero-actions">
-            <AppButton type="button" size="sm" variant="secondary" @click="openCurrentChannelInMessenger">باز کردن در پیام‌رسان</AppButton>
+            <AppButton type="button" variant="secondary" @click="openCurrentChannelInMessenger">باز کردن در پیام‌رسان</AppButton>
           </div>
-        </AppSectionCard>
+        </section>
 
         <div v-if="typeof currentUserId === 'number' && !currentUserMembership" class="channel-status-banner warning">شما عضو فعال این کانال نیستید. تا قبل از اضافه شدن، این کانال در فهرست گفتگوهای شما دیده نمی‌شود.</div>
         <div v-else-if="typeof currentUserId === 'number' && currentUserMembership && !currentUserCanPostInCurrentChannel" class="channel-status-banner info">شما عضو این کانال هستید اما فقط ادمین‌های کانال امکان ارسال پست دارند.</div>
@@ -1118,57 +1102,51 @@ onBeforeUnmount(() => {
           <strong>{{ currentChannelRoleLabel }}</strong>
         </div>
 
-        <AppSectionCard class="manager-section-card" title="اعضا و دسترسی‌ها">
-          <div class="manager-action-list">
-            <AppListItem title="اعضای کانال" :meta="activeChannel.member_count.toLocaleString('fa-IR')" interactive @select="setPage('members')">
-              <template #leading><UsersRound :size="18" /></template>
-              <template #trailing>
-                <span>{{ activeChannel.member_count.toLocaleString('fa-IR') }}</span>
-                <ChevronLeft :size="18" aria-hidden="true" />
-              </template>
-            </AppListItem>
-            <AppListItem v-if="!isMembershipManagementLocked" title="مدیریت ادمین‌ها" :meta="activeAdminCount.toLocaleString('fa-IR')" interactive @select="setPage('admins')">
-              <template #leading><Shield :size="18" /></template>
-              <template #trailing>
-                <span>{{ activeAdminCount.toLocaleString('fa-IR') }}</span>
-                <ChevronLeft :size="18" aria-hidden="true" />
-              </template>
-            </AppListItem>
-            <AppListItem v-if="!isMembershipManagementLocked" title="افزودن عضو" interactive @select="setPage('add-members')">
-              <template #leading><UserPlus :size="18" /></template>
-              <template #trailing>
-                <ChevronLeft :size="18" aria-hidden="true" />
-              </template>
-            </AppListItem>
-          </div>
-        </AppSectionCard>
+        <AppInsetGroup title="اعضا و دسترسی‌ها">
+          <AppListItem title="اعضای کانال" :meta="activeChannel.member_count.toLocaleString('fa-IR')" interactive @select="setPage('members')">
+            <template #leading><UsersRound :size="18" /></template>
+            <template #trailing>
+              <span>{{ activeChannel.member_count.toLocaleString('fa-IR') }}</span>
+              <ChevronLeft :size="18" aria-hidden="true" />
+            </template>
+          </AppListItem>
+          <AppListItem v-if="!isMembershipManagementLocked" title="مدیریت ادمین‌ها" :meta="activeAdminCount.toLocaleString('fa-IR')" interactive @select="setPage('admins')">
+            <template #leading><Shield :size="18" /></template>
+            <template #trailing>
+              <span>{{ activeAdminCount.toLocaleString('fa-IR') }}</span>
+              <ChevronLeft :size="18" aria-hidden="true" />
+            </template>
+          </AppListItem>
+          <AppListItem v-if="!isMembershipManagementLocked" title="افزودن عضو" interactive @select="setPage('add-members')">
+            <template #leading><UserPlus :size="18" /></template>
+            <template #trailing>
+              <ChevronLeft :size="18" aria-hidden="true" />
+            </template>
+          </AppListItem>
+        </AppInsetGroup>
 
-        <AppSectionCard class="manager-section-card" title="تنظیمات">
-          <div class="manager-action-list">
-            <AppListItem title="تنظیمات کانال" interactive @select="setPage('edit')">
-              <template #leading><PencilLine :size="18" /></template>
-              <template #trailing>
-                <ChevronLeft :size="18" aria-hidden="true" />
-              </template>
-            </AppListItem>
-          </div>
-        </AppSectionCard>
+        <AppInsetGroup title="تنظیمات">
+          <AppListItem title="تنظیمات کانال" interactive @select="setPage('edit')">
+            <template #leading><PencilLine :size="18" /></template>
+            <template #trailing>
+              <ChevronLeft :size="18" aria-hidden="true" />
+            </template>
+          </AppListItem>
+        </AppInsetGroup>
 
-        <AppSectionCard v-if="currentUserMembership && !isMembershipManagementLocked" class="manager-section-card" title="خروج و حذف" :description="currentChannelExitSubtitle" tone="danger">
-          <div class="manager-action-list">
-            <AppListItem :title="currentChannelExitLabel" :description="currentChannelExitSubtitle" interactive :disabled="isSaving" @select="unfollowCurrentChannel">
-              <template #leading><LogOut :size="18" /></template>
-              <template #trailing>
-                <ChevronLeft :size="18" aria-hidden="true" />
-              </template>
-            </AppListItem>
-          </div>
-        </AppSectionCard>
+        <AppInsetGroup v-if="currentUserMembership && !isMembershipManagementLocked" title="خروج و حذف">
+          <AppListItem :title="currentChannelExitLabel" :description="currentChannelExitSubtitle" interactive :disabled="isSaving" @select="unfollowCurrentChannel">
+            <template #leading><LogOut :size="18" /></template>
+            <template #trailing>
+              <ChevronLeft :size="18" aria-hidden="true" />
+            </template>
+          </AppListItem>
+        </AppInsetGroup>
       </template>
 
       <template v-else-if="page === 'members'">
         <div class="search-shell slim">
-          <AppInput v-model="memberQuery" type="text" class="search-input" placeholder="جستجو در اعضای کانال..." />
+          <AppInput v-model="memberQuery" type="text" class="search-input" placeholder="جستجو در اعضای کانال..." aria-label="جستجو در اعضای کانال" />
         </div>
 
         <AppLoadingState v-if="isLoadingMembers" class="state-box" label="در حال دریافت اعضای کانال..." />
@@ -1209,7 +1187,7 @@ onBeforeUnmount(() => {
 
       <template v-else-if="page === 'admins' && !isMembershipManagementLocked">
         <div class="search-shell slim">
-          <AppInput v-model="adminQuery" type="text" class="search-input" placeholder="جستجو در ادمین‌ها و اعضا..." />
+          <AppInput v-model="adminQuery" type="text" class="search-input" placeholder="جستجو در ادمین‌ها و اعضا..." aria-label="جستجو در ادمین‌ها و اعضا" />
         </div>
 
         <section class="section-shell">
@@ -1289,7 +1267,7 @@ onBeforeUnmount(() => {
 
       <template v-else-if="page === 'add-members' && !isMembershipManagementLocked && activeChannel">
         <div class="search-shell">
-          <AppInput v-model="candidateQuery" type="text" class="search-input" placeholder="جستجو با نام، اکانت یا موبایل..." :disabled="selectAllActiveUsers" />
+          <AppInput v-model="candidateQuery" type="text" class="search-input" placeholder="جستجو با نام، اکانت یا موبایل..." aria-label="جستجو با نام، اکانت یا موبایل" :disabled="selectAllActiveUsers" />
         </div>
 
         <label class="select-all-toggle" :class="{ active: selectAllActiveUsers }">
@@ -1331,7 +1309,7 @@ onBeforeUnmount(() => {
       </template>
 
       <template v-else-if="page === 'edit' && activeChannel">
-        <AppSectionCard class="manager-section-card" title="تنظیمات کانال">
+        <AppSectionCard title="تنظیمات کانال">
           <div class="avatar-editor-block">
             <div class="manager-avatar small-editor">
               <img v-if="channelAvatarUrl" :src="channelAvatarUrl" :alt="activeChannel.title" class="hero-avatar-image" />
@@ -1339,14 +1317,9 @@ onBeforeUnmount(() => {
               <div v-if="avatarBusy" class="avatar-busy-overlay"><Loader2 :size="20" class="spin" /></div>
             </div>
             <div class="avatar-tool-row compact">
-              <AppButton type="button" size="sm" variant="secondary" :disabled="avatarBusy" @click="triggerAvatarPicker">{{ avatarFileId ? 'تغییر عکس کانال' : 'افزودن عکس کانال' }}</AppButton>
-              <AppButton v-if="avatarFileId" type="button" size="sm" variant="danger" :disabled="avatarBusy" @click="clearAvatar">حذف عکس</AppButton>
+              <AppButton type="button" variant="secondary" :disabled="avatarBusy" @click="triggerAvatarPicker">{{ avatarFileId ? 'تغییر عکس کانال' : 'افزودن عکس کانال' }}</AppButton>
+              <AppButton v-if="avatarFileId" type="button" variant="danger" :disabled="avatarBusy" @click="clearAvatar">حذف عکس</AppButton>
             </div>
-          </div>
-
-          <div class="info-strip">
-            <Info :size="16" />
-            <span>از این بخش می‌توانید نام و توضیحات کانال را ویرایش کنید.</span>
           </div>
 
           <AppFormField label="نام کانال">
@@ -1377,13 +1350,22 @@ onBeforeUnmount(() => {
 .channel-admin-shell {
   width: 100%;
   min-height: 0;
-  max-height: min(88vh, 880px);
   overflow: hidden;
   display: flex;
   flex-direction: column;
   direction: rtl;
-  background: var(--messenger-manager-shell-bg, linear-gradient(180deg, #f7fafc 0%, #edf3f8 100%));
-  border-radius: var(--messenger-radius-sheet, 28px);
+  background: var(--ds-native-grouped-bg, #f2f2f7);
+}
+
+.channel-admin-shell--sheet {
+  max-height: min(88vh, 880px);
+  border-radius: var(--ds-inset-group-radius, 12px);
+}
+
+.channel-admin-shell--page {
+  max-height: none;
+  border-radius: 0;
+  background: transparent;
 }
 
 .channel-admin-header {
@@ -1391,9 +1373,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 12px;
   padding: 14px 16px;
-  background: var(--messenger-panel-glass-bg, rgba(255, 255, 255, 0.92));
-  backdrop-filter: blur(16px);
-  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  background: var(--ds-bg-card, #fff);
+  border-bottom: 1px solid var(--ds-native-hairline, rgba(60, 60, 67, 0.12));
 }
 
 .channel-admin-header-btn {
@@ -1453,13 +1434,13 @@ onBeforeUnmount(() => {
 .state-box,
 .selection-banner,
 .manager-role-strip,
-.info-strip,
 .select-all-toggle {
-  border-radius: 18px;
+  border-radius: var(--ds-inset-group-radius, 12px);
   padding: 12px 14px;
   display: flex;
   align-items: center;
   gap: 10px;
+  min-height: var(--ds-native-row-min-height, 48px);
 }
 
 .channel-status-banner.error {
@@ -1480,8 +1461,7 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(245, 158, 11, 0.18);
 }
 
-.channel-status-banner.info,
-.info-strip {
+.channel-status-banner.info {
   background: rgba(239, 246, 255, 0.96);
   color: #1d4ed8;
   border: 1px solid rgba(59, 130, 246, 0.16);
@@ -1608,21 +1588,19 @@ onBeforeUnmount(() => {
   cursor: default;
 }
 
-.manager-section-card,
 .section-shell {
-  border-radius: var(--messenger-radius-sheet, 28px);
-  background: rgba(255, 255, 255, 0.88);
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+  border-radius: var(--ds-inset-group-radius, 12px);
+  background: var(--ds-bg-card, #fff);
+  overflow: hidden;
 }
 
-.manager-section-card.card-with-help {
-  position: relative;
-  padding-left: 4rem;
-}
-
-.manager-preview-card {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(236, 245, 255, 0.94));
+.channel-identity {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px 4px;
+  text-align: center;
 }
 
 .manager-avatar,
