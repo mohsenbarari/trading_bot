@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, toRef } from 'vue'
+import { computed, ref, toRef, type CSSProperties } from 'vue'
 import AppButton from './AppButton.vue'
 import { useOverlayA11y } from './useOverlayA11y'
 
 type ClassValue = string | string[] | Record<string, boolean>
+type OverlayInitialFocus = 'first' | 'container'
 
 const props = withDefaults(
   defineProps<{
@@ -14,8 +15,16 @@ const props = withDefaults(
     showClose?: boolean
     closeOnBackdrop?: boolean
     closeOnEscape?: boolean
+    busy?: boolean
+    initialFocus?: OverlayInitialFocus
+    trapProgrammaticFocus?: boolean
+    describedByExtra?: string
+    titleClass?: ClassValue
+    headerClass?: ClassValue
     teleportTo?: string | HTMLElement
     backdropClass?: ClassValue
+    backdropStyle?: CSSProperties
+    backdropAttrs?: Record<string, string | undefined>
     panelClass?: ClassValue
     bodyClass?: ClassValue
     actionsClass?: ClassValue
@@ -26,8 +35,16 @@ const props = withDefaults(
     showClose: true,
     closeOnBackdrop: true,
     closeOnEscape: true,
+    busy: false,
+    initialFocus: 'first',
+    trapProgrammaticFocus: false,
+    describedByExtra: '',
+    titleClass: '',
+    headerClass: '',
     teleportTo: 'body',
     backdropClass: '',
+    backdropStyle: undefined,
+    backdropAttrs: () => ({}),
     panelClass: '',
     bodyClass: '',
     actionsClass: '',
@@ -46,6 +63,13 @@ const { titleId, descriptionId, ariaDescriptionId } = useOverlayA11y({
   containerRef,
   close: () => emit('close'),
   closeOnEscape: toRef(props, 'closeOnEscape'),
+  initialFocus: toRef(props, 'initialFocus'),
+  trapProgrammaticFocus: toRef(props, 'trapProgrammaticFocus'),
+})
+
+const describedByValue = computed(() => {
+  const ids = [ariaDescriptionId.value, props.describedByExtra].filter((id): id is string => Boolean(id))
+  return ids.length ? ids.join(' ') : undefined
 })
 
 function handleBackdropClick() {
@@ -61,6 +85,8 @@ function handleBackdropClick() {
       v-if="open"
       class="ui-sheet-backdrop"
       :class="backdropClass"
+      :style="backdropStyle"
+      v-bind="backdropAttrs"
       @click.self="handleBackdropClick"
     >
       <section
@@ -70,12 +96,13 @@ function handleBackdropClick() {
         role="dialog"
         aria-modal="true"
         :aria-labelledby="titleId"
-        :aria-describedby="ariaDescriptionId"
+        :aria-describedby="describedByValue"
+        :aria-busy="busy ? 'true' : 'false'"
         tabindex="-1"
       >
-        <header class="ui-bottom-sheet__header">
+        <header class="ui-bottom-sheet__header" :class="headerClass">
           <div>
-            <h2 :id="titleId">{{ title }}</h2>
+            <h2 :id="titleId" :class="titleClass">{{ title }}</h2>
             <p v-if="description" :id="descriptionId">{{ description }}</p>
           </div>
           <AppButton v-if="showClose" variant="ghost" size="sm" @click="$emit('close')">{{

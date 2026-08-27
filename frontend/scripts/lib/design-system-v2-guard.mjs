@@ -1703,20 +1703,23 @@ function isApprovedStage4ActivationBoundary({ path: sourcePath, source }) {
   }
 
   if (sourcePath === 'src/components/SessionApprovalModal.vue') {
-    const scopeBindings = [...source.matchAll(/:data-ui-system\s*=\s*["']portalScopeValue["']/g)]
-    const modalRoot =
-      /<div\b(?=[^>]*\bv-if\s*=\s*["']showModal["'])(?=[^>]*:data-ui-system\s*=\s*["']portalScopeValue["'])[^>]*>/.test(
-        source,
-      )
+    const backdropBindings = [...source.matchAll(/:backdrop-attrs\s*=\s*["']sessionBackdropAttrs["']/g)]
+    const sheetRoot = /<AppBottomSheet\b(?=[^>]*:open\s*=\s*["']sheetOpen["'])(?=[^>]*:backdrop-attrs\s*=\s*["']sessionBackdropAttrs["'])/.test(
+      source,
+    )
+    const bindsPortalOnBackdrop = /['"]data-ui-system['"]\s*:\s*portalScopeValue/.test(source)
     const hasRawScope = /\bdata-ui-system\s*=\s*["']v2(?:-portal)?["']/.test(source)
     if (
-      scopeBindings.length !== 1 ||
-      !modalRoot ||
+      backdropBindings.length !== 1 ||
+      !sheetRoot ||
+      !bindsPortalOnBackdrop ||
       hasRawScope ||
       !/\bv2Portal\??\s*:\s*boolean\b/.test(source) ||
       !/\bv2Portal\s*:\s*false\b/.test(source) ||
       !/\bportalScopeValue\b/.test(source) ||
       !/\bprops\.v2Portal\b/.test(source) ||
+      !/:show-close\s*=\s*["']false["']/.test(source) ||
+      !/:close-on-escape\s*=\s*["']false["']/.test(source) ||
       !/\bUI_DESIGN_SYSTEM_PORTAL_SCOPE_VALUE\b/.test(source) ||
       !/from\s+["'][^"']*uiDesignSystemScope["']/.test(source)
     ) {
@@ -1724,7 +1727,8 @@ function isApprovedStage4ActivationBoundary({ path: sourcePath, source }) {
     }
 
     const withoutApprovedPortalBinding = source
-      .replace(/:data-ui-system\s*=\s*["']portalScopeValue["']/g, '')
+      .replace(/:backdrop-attrs\s*=\s*["']sessionBackdropAttrs["']/g, '')
+      .replace(/['"]data-ui-system['"]\s*:\s*portalScopeValue(?:\.value)?/g, '')
       .replace(/\bUI_DESIGN_SYSTEM_PORTAL_SCOPE_VALUE\b/g, '')
     return sourceActivationEvidence(sourcePath, withoutApprovedPortalBinding) === null
   }

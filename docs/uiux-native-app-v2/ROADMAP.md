@@ -311,7 +311,7 @@ Gate:
 | ۷ مدیریت | implementation-complete |
 | ۸ احراز | implementation-complete |
 | ۹ پیام‌رسان | implementation-complete |
-| ۱۰ overlay | pending |
+| ۱۰ overlay | implementation-complete |
 | ۱۱ پذیرش | pending |
 
 ## ماتریس پذیرش

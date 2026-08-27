@@ -3,7 +3,7 @@
   "track": "native-app-feel-v2",
   "branch": "candidate/webapp-native-app-v2",
   "baseCommit": "951ca9f0",
-  "status": "phases-1-7-9-implemented-audit-cleaned",
+  "status": "phases-1-10-implemented",
   "ownerScoresAtStart": {
     "unification": 80,
     "simplification": 70,
@@ -24,9 +24,9 @@
     {
       "id": "shell",
       "routes": ["shared"],
-      "status": "partial-tab-bar-web-leftovers",
-      "phase": 2,
-      "gaps": ["dual-token-nav", "tiny-tab-labels", "messenger-fab-nav", "session-overtime-pwa-chrome"]
+      "status": "native-overlays-tab-bar-catalog-hooks",
+      "phase": 10,
+      "gaps": ["dual-token-nav-catalog-hooks"]
     },
     {
       "id": "home",

@@ -904,8 +904,9 @@ describe('UIUX v2 route policy guard', () => {
           "import { UI_DESIGN_SYSTEM_PORTAL_SCOPE_VALUE } from './ui/uiDesignSystemScope'",
           'const props = withDefaults(defineProps<{ v2Portal?: boolean }>(), { v2Portal: false })',
           'const portalScopeValue = computed(() => props.v2Portal ? UI_DESIGN_SYSTEM_PORTAL_SCOPE_VALUE : undefined)',
+          "const sessionBackdropAttrs = computed(() => ({ 'data-ui-system': portalScopeValue.value }))",
           '</script>',
-          '<template><Teleport to="body"><div v-if="showModal" :data-ui-system="portalScopeValue" /></Teleport></template>',
+          '<template><AppBottomSheet :open="sheetOpen" :show-close="false" :close-on-escape="false" :backdrop-attrs="sessionBackdropAttrs" /></template>',
         ].join('\n'),
       },
       {

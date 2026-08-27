@@ -167,7 +167,7 @@ watch(
     <AppDesignSystemScope
       v-if="isFirstRouteReady && isStandardAuthenticatedShell && isAppConnecting"
       as="aside"
-      class="ui-v2-connection-banner"
+      class="ui-v2-connection-banner app-connection-banner"
       role="status"
       aria-live="polite"
     >
@@ -297,6 +297,15 @@ watch(
 
 .app-authenticated-shell-v2 {
   display: contents;
+}
+
+.app-connection-banner {
+  min-height: var(--ds-native-row-min-height, 48px);
+  padding-inline: var(--ds-page-padding, 16px);
+  background: var(--ds-warning-50, #fffbeb);
+  color: var(--ds-primary-800, #92400e);
+  font-size: var(--ds-font-sm);
+  font-weight: 700;
 }
 
 .app-route-scroll--no-daily-nav {

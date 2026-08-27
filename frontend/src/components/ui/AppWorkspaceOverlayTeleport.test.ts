@@ -74,4 +74,49 @@ describe('workspace overlay teleport target', () => {
 
     wrapper.unmount()
   })
+
+  it('can focus the sheet container first and keep programmatic focus inside', async () => {
+    const openingControl = document.createElement('button')
+    openingControl.textContent = 'باز کردن'
+    document.body.append(openingControl)
+    openingControl.focus()
+
+    const wrapper = mount(AppBottomSheet, {
+      props: {
+        open: true,
+        title: 'درخواست ورود جدید',
+        description: 'آیا اجازه ورود از این دستگاه را می‌دهید؟',
+        showClose: false,
+        closeOnBackdrop: false,
+        closeOnEscape: false,
+        initialFocus: 'container',
+        trapProgrammaticFocus: true,
+        describedByExtra: 'sheet-instruction',
+      },
+      slots: {
+        default: '<p id="sheet-instruction">بدون انتخاب بسته نمی‌شود</p><button>رد</button><button>تایید</button>',
+      },
+      attachTo: document.body,
+    })
+    await nextTick()
+    await nextTick()
+
+    const dialog = document.body.querySelector<HTMLElement>('.ui-bottom-sheet')
+    const actions = Array.from(dialog?.querySelectorAll('button') ?? [])
+    expect(document.activeElement).toBe(dialog)
+    expect(actions).toHaveLength(2)
+    expect(dialog?.getAttribute('aria-describedby')?.split(' ')).toHaveLength(2)
+
+    const outsideControl = document.createElement('button')
+    document.body.append(outsideControl)
+    outsideControl.focus()
+    expect(document.activeElement).toBe(dialog)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(wrapper.emitted('close')).toBeUndefined()
+
+    wrapper.unmount()
+    openingControl.remove()
+    outsideControl.remove()
+  })
 })
