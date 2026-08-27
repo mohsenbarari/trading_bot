@@ -1497,13 +1497,6 @@ onBeforeUnmount(() => {
                       ? 'حذف رابطه حسابدار'
                       : 'حذف حساب حسابدار'
                 "
-                :description="
-                  activeRelation.status === 'pending'
-                    ? 'رابطه و دعوت در انتظار را لغو و رزرو هویت را آزاد کنید.'
-                    : isOrphanActiveRelation
-                      ? 'این رابطه حساب کاربری زنده‌ای ندارد و بدون حذف زنجیره‌ای حساب برداشته می‌شود.'
-                      : 'حذف حساب یک اقدام بازگشت‌ناپذیر با پیامدهای امنیتی و تجاری است.'
-                "
               >
                 <div class="accountant-danger-card ui-v2-workspace-accountant-danger-card">
                   <ShieldAlert :size="22" />
@@ -1517,15 +1510,7 @@ onBeforeUnmount(() => {
                             : `حذف حساب ${getRelationTitle(activeRelation)}`
                       }}
                     </strong>
-                    <p>
-                      {{
-                        activeRelation.status === 'pending'
-                          ? 'رابطه و دعوت در انتظار لغو، لینک ثبت‌نام بی‌اعتبار و رزرو هویت و نام کاربری آزاد می‌شود. چون حسابی فعال نشده، حذف زنجیره‌ای حساب، نشست، آفر یا روابط فعال اجرا نمی‌شود.'
-                          : isOrphanActiveRelation
-                            ? 'فقط همین رابطه حذف می‌شود؛ حساب، نشست، آفر، دعوت یا روابط دیگری به‌صورت زنجیره‌ای حذف نمی‌شوند.'
-                            : 'دسترسی وب و ربات پایان می‌یابد؛ همه نشست‌های فعال پایان می‌یابند؛ آفرهای فعال منقضی و دعوت‌های در انتظار مرتبط لغو می‌شوند؛ همه روابط باز مشتری یا حسابدارِ متعلق یا متصل بسته می‌شوند؛ حساب‌های وابسته فعالِ متعلق ممکن است به‌صورت بازگشتی حذف شوند و سابقه معاملات حفظ می‌شود.'
-                      }}
-                    </p>
+                    <p v-if="isOrphanActiveRelation">فقط همین رابطه حذف می‌شود.</p>
                   </div>
                 </div>
                 <WorkspaceFormActions action-class="accountant-inline-actions ui-v2-workspace-accountant-inline-actions">
@@ -1868,3 +1853,24 @@ onBeforeUnmount(() => {
     </component>
   </div>
 </template>
+
+<style scoped>
+.accountant-danger-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: var(--ds-touch-target, 48px);
+  color: var(--ds-text-primary);
+}
+
+.accountant-danger-card strong {
+  font-size: var(--ds-font-md);
+  font-weight: 700;
+}
+
+.accountant-danger-card p {
+  margin: 4px 0 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-sm);
+}
+</style>

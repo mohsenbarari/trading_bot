@@ -2226,7 +2226,8 @@ function handleHistoryPresetChipChange(value: string) {
               :message="tradeHistoryEmptyText"
               role="status"
             />
-            <div v-else class="history-list">
+            <AppInsetGroup v-else class="history-list-group">
+              <div class="history-list">
                 <div v-for="trade in mutualTrades" :key="trade.id" class="mini-trade-card">
                     <div class="trade-row">
                         <span class="trade-date">{{ trade.created_at }}</span>
@@ -2291,7 +2292,8 @@ function handleHistoryPresetChipChange(value: string) {
                     @click.stop="loadMoreMutualTrades"
                   >{{ isHistoryLoadingMore ? 'در حال دریافت...' : 'نمایش معاملات بیشتر' }}</AppButton>
                 </div>
-            </div>
+              </div>
+            </AppInsetGroup>
           </div>
       </ProfileTradeHistory>
 
@@ -2885,27 +2887,6 @@ function handleHistoryPresetChipChange(value: string) {
   flex: 0 0 auto;
 }
 
-.profile-action-card__copy {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.18rem;
-}
-
-.profile-action-card__label {
-  flex: 1;
-  min-width: 0;
-}
-
-.profile-action-card__note {
-  font-size: 0.72rem;
-  line-height: 1.55;
-  font-weight: 600;
-  color: var(--ds-text-secondary);
-}
-
 .message-menu-btn,
 :deep(.message-menu-btn) {
   background: transparent !important;
@@ -2971,6 +2952,10 @@ function handleHistoryPresetChipChange(value: string) {
 }
 
 
+
+.history-list-group {
+  margin-top: 12px;
+}
 
 .history-list {
     display: flex;
@@ -3164,6 +3149,10 @@ function handleHistoryPresetChipChange(value: string) {
     border-radius: 0;
     box-shadow: inset 0 -1px 0 var(--ds-native-hairline);
     transition: background 0.18s ease;
+}
+
+.history-list .mini-trade-card:last-child {
+  box-shadow: none;
 }
 
 .mini-trade-card:active {

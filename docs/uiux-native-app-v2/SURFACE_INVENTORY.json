@@ -53,9 +53,9 @@
     {
       "id": "profiles",
       "routes": ["/profile", "/users/:id", "/admin/users/:id"],
-      "status": "native-grouped-with-listed-gaps",
+      "status": "native-grouped-profile",
       "phase": 5,
-      "gaps": ["mini-trade-cards", "action-row-copy"]
+      "gaps": []
     },
     {
       "id": "operations",
@@ -69,8 +69,7 @@
       "status": "native-lists-workspace-adapter-left",
       "phase": 6,
       "gaps": [
-        "ui-v2-workspace-adapter",
-        "verbose-danger-copy"
+        "ui-v2-workspace-adapter"
       ]
     },
     {

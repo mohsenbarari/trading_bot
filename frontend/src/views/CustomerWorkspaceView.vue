@@ -2195,16 +2195,11 @@ onBeforeUnmount(() => {
               <AppDangerZone
                 v-if="canDeleteAccount"
                 title="اقدامات حساس مشتری"
-                description="حذف حساب دائمی است؛ پیامدهای کامل و تأیید تقویت‌شده در گام بعد نمایش داده می‌شود."
               >
                 <div class="customer-danger-card ui-v2-workspace-customer-danger-card">
                   <ShieldAlert :size="22" />
                   <div>
                     <strong>حذف حساب</strong>
-                    <p>
-                      این اقدام فقط قطع یک رابطه نیست؛ پیش از ادامه، پیامدهای حساب و حفظ تاریخچه
-                      معاملات را دقیق بخوانید.
-                    </p>
                   </div>
                 </div>
                 <WorkspaceFormActions action-class="customer-inline-actions ui-v2-workspace-customer-inline-actions">
@@ -2216,16 +2211,11 @@ onBeforeUnmount(() => {
               <AppDangerZone
                 v-else
                 title="بستن رابطه مشتری"
-                description="برای این رابطه حساب فعال ثبت نشده است؛ این اقدام فقط خود رابطه را می‌بندد."
               >
                 <div class="customer-danger-card ui-v2-workspace-customer-danger-card">
                   <ShieldAlert :size="22" />
                   <div>
                     <strong>بستن رابطه بدون حذف حساب</strong>
-                    <p>
-                      رزرو هویت مرتبط آزاد می‌شود؛ چون حساب زنده‌ای وجود ندارد، آبشار حذف حساب فعال
-                      اجرا نمی‌شود.
-                    </p>
                   </div>
                 </div>
                 <WorkspaceFormActions action-class="customer-inline-actions ui-v2-workspace-customer-inline-actions">
@@ -2604,3 +2594,18 @@ onBeforeUnmount(() => {
     </component>
   </div>
 </template>
+
+<style scoped>
+.customer-danger-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--ds-touch-target, 48px);
+  color: var(--ds-text-primary);
+}
+
+.customer-danger-card strong {
+  font-size: var(--ds-font-md);
+  font-weight: 700;
+}
+</style>
