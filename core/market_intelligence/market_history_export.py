@@ -83,9 +83,15 @@ def _projection_failure_code(source_code: str, exc: Exception) -> str:
         location = "_".join(str(item) for item in error.get("loc", ())) or "record"
         error_type = re.sub(r"[^a-z0-9_]+", "_", str(error.get("type", "invalid")))
         return f"history_export_projection_failed:{source_code}:{location}:{error_type}"
+    sqlite_name = (
+        str(getattr(exc, "sqlite_errorname", "")).lower()
+        if isinstance(exc, sqlite3.Error)
+        else ""
+    )
+    suffix = sqlite_name or type(exc).__name__.lower()
     return (
         "history_export_projection_failed:"
-        f"{source_code}:{type(exc).__name__.lower()}"
+        f"{source_code}:{suffix}"
     )
 
 
@@ -175,6 +181,10 @@ def _connect_union_view(
     connection = sqlite3.connect(":memory:")
     connection.row_factory = sqlite3.Row
     try:
+        # Large quote streams require a sort. Keep its temporary B-tree in
+        # bounded process memory so a hardened container does not depend on a
+        # writable or oversized root filesystem /tmp.
+        connection.execute("PRAGMA temp_store=MEMORY")
         _attach_observation_union(
             connection,
             schema="source",

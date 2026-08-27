@@ -10,6 +10,7 @@ from core.market_intelligence.market_contracts import MarketObservation, derive_
 from core.market_intelligence.market_history_backfill import _scan_forbidden
 from core.market_intelligence.market_history_export import (
     MarketHistoryExportError,
+    _projection_failure_code,
     export_market_history,
 )
 from core.market_intelligence.market_history_operations import (
@@ -24,6 +25,14 @@ from core.market_intelligence.market_store import (
 
 
 class MarketHistoryExportTests(unittest.TestCase):
+    def test_sqlite_failure_code_keeps_payload_out_of_operator_output(self):
+        error = __import__("sqlite3").OperationalError("database or disk is full")
+        error.sqlite_errorname = "SQLITE_FULL"
+        self.assertEqual(
+            _projection_failure_code("WALLEX_PUBLIC_API", error),
+            "history_export_projection_failed:WALLEX_PUBLIC_API:sqlite_full",
+        )
+
     def _observation(self, *, key: bytes, source: str, when: datetime, **changes):
         values = {
             "event_key": key,
