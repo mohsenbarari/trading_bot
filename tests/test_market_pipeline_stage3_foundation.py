@@ -215,6 +215,7 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
         )[0]
         self.assertIn("timeout: 8s", estimator)
         self.assertIn("MARKET_PIPELINE_ESTIMATOR_INTERVAL_SECONDS", estimator)
+        self.assertIn("MARKET_PIPELINE_ESTIMATOR_CPUS", estimator)
         processor = web.split("  market-processor:", 1)[1].split(
             "  market-fact-sync-worker:", 1
         )[0]

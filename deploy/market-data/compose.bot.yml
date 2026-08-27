@@ -82,6 +82,7 @@ services:
       service: market-runtime-base
     profiles: [bot]
     command: [service, --role, coin-estimator]
+    cpus: ${MARKET_PIPELINE_ESTIMATOR_CPUS:-1.0}
     environment:
       MARKET_PIPELINE_FEED_MODE: ${MARKET_PIPELINE_FEED_MODE:-LEGACY}
       MARKET_PIPELINE_ESTIMATOR_INTERVAL_SECONDS: ${MARKET_PIPELINE_ESTIMATOR_INTERVAL_SECONDS:-5}
