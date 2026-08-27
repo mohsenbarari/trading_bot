@@ -84,6 +84,32 @@ export const ACCOUNTANT_RELATION = {
 const FIXED_TIME = '2026-08-14T12:00:00.000Z'
 export const STALE_TIME = '2024-01-01T00:00:00.000Z'
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+const FIXTURE_LIST_FAILURE = { detail: 'دریافت فهرست ناموفق بود' }
+
+function failList() {
+  return { status: 500, body: FIXTURE_LIST_FAILURE }
+}
+
+function isSessionKeepalivePath(pathname: string) {
+  return (
+    pathname === '/api/auth/me'
+    || pathname === '/api/auth/me/'
+    || pathname === '/api/sessions/verify'
+    || pathname === '/api/auth/refresh'
+  )
+}
+
+export function pathEquals(pathname: string, key: string) {
+  if (pathname === key) return true
+  if (key.endsWith('/')) return pathname === key.slice(0, -1)
+  return pathname === `${key}/`
+}
+
+export function pathIsHeld(pathname: string, key: string) {
+  if (pathEquals(pathname, key)) return true
+  const prefix = key.endsWith('/') ? key : `${key}/`
+  return pathname.startsWith(prefix)
+}
 
 const REGISTRATION_CONTEXT = {
   account_name: 'invitee_sample',
@@ -182,6 +208,9 @@ export function resolveKnownApi(
     if (pathname.endsWith('/otp/request') || pathname.endsWith('/otp/verify') || pathname.endsWith('/complete')) {
       return { status: 410, body: { detail: 'expired' } }
     }
+    if (error && (pathname === '/api/auth/registration-context' || pathname === '/api/auth/registration-context/')) {
+      return failList()
+    }
     return { status: 200, body: REGISTRATION_CONTEXT }
   }
 
@@ -197,6 +226,7 @@ export function resolveKnownApi(
     }
   }
   if (pathname === '/api/chat/conversations' || pathname === '/api/chat/conversations/') {
+    if (error) return failList()
     return { status: 200, body: list({
       id: 6001,
       other_user_id: 33,
@@ -210,6 +240,7 @@ export function resolveKnownApi(
     }) }
   }
   if (pathname === '/api/chat/channels' || pathname === '/api/chat/channels/') {
+    if (error) return failList()
     return { status: 200, body: list({
       id: 21,
       title: longCopy ? 'کانال بسیار بلند فارسی برای بررسی شکست خط' : 'کانال پذیرش',
@@ -281,11 +312,13 @@ export function resolveKnownApi(
   if (pathname === '/api/trades/overtime-requests/pending-requester') return { status: 200, body: [] }
   if (pathname === '/api/trades/my') return { status: 200, body: [] }
   if (pathname === '/api/trades/my/page') {
+    if (error) return failList()
     return { status: 200, body: { items: [], next_cursor: null, has_more: false } }
   }
   if (/^\/api\/trades\/with\/\d+$/u.test(pathname)) return { status: 200, body: [] }
 
   if (/^\/api\/users-public\/\d+$/u.test(pathname)) {
+    if (error) return failList()
     const id = Number(pathname.split('/')[3])
     return {
       status: 200,
@@ -322,6 +355,7 @@ export function resolveKnownApi(
     return { status: 200, body: list(viewer) }
   }
   if (/^\/api\/users\/\d+$/u.test(pathname)) {
+    if (error) return failList()
     const id = Number(pathname.split('/')[3])
     return { status: 200, body: id === viewer.id ? viewer : { ...REGULAR_USER, id } }
   }
@@ -362,10 +396,12 @@ export function resolveKnownApi(
   if (pathname === '/api/offers/market-history') return { status: 200, body: [] }
 
   if (pathname === '/api/commodities/' || pathname === '/api/commodities') {
+    if (error) return failList()
     return { status: 200, body: list({ id: 1, name: 'طلای آب‌شده', aliases: [] }) }
   }
 
-  if (pathname === '/api/trading-settings/') {
+  if (pathname === '/api/trading-settings/' || pathname === '/api/trading-settings') {
+    if (error) return failList()
     return {
       status: 200,
       body: {
@@ -399,7 +435,10 @@ export function resolveKnownApi(
 
   if (pathname === '/api/admin-messages/market/current') return { status: 200, body: null }
   if (pathname === '/api/admin-messages/market/history') return { status: 200, body: [] }
-  if (pathname === '/api/admin-messages/broadcasts/history') return { status: 200, body: [] }
+  if (pathname === '/api/admin-messages/broadcasts/history') {
+    if (error) return failList()
+    return { status: 200, body: [] }
+  }
 
   if (pathname === '/api/invitations/pending' || pathname === '/api/invitations/' || pathname === '/api/invitations') {
     return { status: 200, body: list({
@@ -417,6 +456,7 @@ export function resolveKnownApi(
     }) }
   }
   if (/^\/api\/invitations\/lookup\/[^/]+$/u.test(pathname)) {
+    if (error) return failList()
     return {
       status: 200,
       body: {
@@ -441,6 +481,7 @@ export function resolveKnownApi(
     }) }
   }
   if (/^\/api\/customers\/owner-relations\/\d+$/u.test(pathname)) {
+    if (error) return failList()
     return { status: 200, body: CUSTOMER_RELATION }
   }
   if (/^\/api\/customers\/owner-relations\/\d+\/sessions$/u.test(pathname)) return { status: 200, body: [] }
@@ -471,6 +512,7 @@ export function resolveKnownApi(
     }) }
   }
   if (/^\/api\/accountants\/owner-relations\/\d+$/u.test(pathname)) {
+    if (error) return failList()
     return { status: 200, body: ACCOUNTANT_RELATION }
   }
   if (/^\/api\/accountants\/owner-relations\/\d+\/sessions$/u.test(pathname)) return { status: 200, body: [] }
@@ -596,20 +638,20 @@ export async function installFailClosedApi(
 
     const pathname = url.pathname
     const method = request.method()
-    if (controller.abortNetwork) {
+    if (controller.abortNetwork && !isSessionKeepalivePath(pathname)) {
       await route.abort('internetdisconnected')
       return
     }
-    const hold = [...controller.holds.entries()].find(([key]) => pathname === key || pathname.startsWith(`${key}/`))
+    const hold = [...controller.holds.entries()].find(([key]) => pathIsHeld(pathname, key))
     if (hold) await hold[1].promise
 
-    const failCount = [...controller.failNext.entries()].find(([key]) => pathname === key || pathname.startsWith(`${key}/`))
+    const failCount = [...controller.failNext.entries()].find(([key]) => pathEquals(pathname, key))
     if (failCount && failCount[1] > 0) {
       controller.failNext.set(failCount[0], failCount[1] - 1)
       await route.fulfill({
         status: 500,
         contentType: 'application/json',
-        body: JSON.stringify({ detail: 'intentional fixture failure' }),
+        body: JSON.stringify(FIXTURE_LIST_FAILURE),
       })
       return
     }
@@ -647,7 +689,11 @@ export async function installFailClosedApi(
 }
 
 export function allowIntentionalFixtureConsole(text: string) {
-  return /intentional fixture failure|Failed to load resource: the server responded with a status of 500/i.test(text)
+  return /intentional fixture failure|دریافت فهرست ناموفق بود|Failed to load resource: the server responded with a status of 500/i.test(text)
+}
+
+export function allowOfflineConsole(text: string) {
+  return /ERR_INTERNET_DISCONNECTED|Failed to load resource|NS_ERROR_NET_|net::ERR_/i.test(text)
 }
 
 export function expectCleanDiagnostics(diagnostics: RouteDiagnostics, label: string) {

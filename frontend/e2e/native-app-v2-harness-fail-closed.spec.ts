@@ -6,6 +6,7 @@ import {
   installFailClosedApi,
   isAllowedMutation,
   resolveKnownApi,
+  pathEquals,
 } from './helpers/nativeAppV2Api'
 
 test.describe('Native App V2 fail-closed harness contract', () => {
@@ -68,5 +69,15 @@ test.describe('Native App V2 fail-closed harness contract', () => {
     expect(isAllowedMutation('/api/users/9001', 'DELETE')).toBe(false)
     expect(isAllowedMutation('/api/sessions/verify', 'POST')).toBe(true)
     expect(isAllowedMutation('/api/chat/activity', 'POST')).toBe(true)
+  })
+
+  test('error mode fails list resources and keeps identity alive', () => {
+    expect(resolveKnownApi('GET', '/api/auth/me', 'error')?.status).toBe(200)
+    expect(resolveKnownApi('GET', '/api/trades/my/page', 'error')?.status).toBe(500)
+    expect(resolveKnownApi('GET', '/api/chat/channels', 'error')?.status).toBe(500)
+    expect(resolveKnownApi('GET', '/api/chat/conversations', 'error')?.status).toBe(500)
+    expect(resolveKnownApi('GET', '/api/commodities', 'error')?.status).toBe(500)
+    expect(pathEquals('/api/chat/channels/', '/api/chat/channels')).toBe(true)
+    expect(pathEquals('/api/chat/channels/21', '/api/chat/channels')).toBe(false)
   })
 })

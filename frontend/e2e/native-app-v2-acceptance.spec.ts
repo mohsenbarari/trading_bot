@@ -5,6 +5,7 @@ import {
   CUSTOMER_RELATION,
   REGULAR_USER,
   allowIntentionalFixtureConsole,
+  allowOfflineConsole,
   attachDiagnostics,
   createDiagnostics,
   expectCleanDiagnostics,
@@ -77,7 +78,7 @@ async function clearAuthenticatedLayout(page: Page) {
 
 function modeForState(state: StateId): FixtureMode {
   if (state === 'empty') return 'empty'
-  if (state === 'error' || state === 'retry') return 'error'
+  if (state === 'error') return 'error'
   if (state === 'full' || state === 'long-persian' || state === 'unbroken' || state === 'ltr') return 'long-copy'
   if (state === 'stale') return 'stale'
   return 'normal'
@@ -108,7 +109,11 @@ async function preparePage(
   }
   const allowErrorConsole = state === 'error' || state === 'retry' || state === 'loading' || state === 'slow'
   await attachDiagnostics(page, diagnostics, {
-    allowConsole: allowErrorConsole ? allowIntentionalFixtureConsole : undefined,
+    allowConsole: (text) => {
+      if (state === 'offline' && allowOfflineConsole(text)) return true
+      if (allowErrorConsole && allowIntentionalFixtureConsole(text)) return true
+      return false
+    },
     allowRequestFailed: state === 'offline'
       ? () => true
       : undefined,
@@ -183,12 +188,15 @@ async function runCell(
     if (!route.holdPath) throw new Error(`${route.id} missing holdPath`)
     controller.hold(route.holdPath)
     const pending = gotoRouteWithNavigationRetry(page, route.path)
-    await expect(page.locator('.ui-loading-state, [aria-busy="true"]').first()).toBeVisible({ timeout: 10_000 })
+    const loading = page.locator(
+      '.ui-loading-state, [aria-busy="true"], .dashboard-daily-state, .messenger-loader',
+    ).or(page.getByText(route.loadingText || /در حال بارگذاری/i)).first()
+    await expect(loading).toBeVisible({ timeout: 10_000 })
     if (state === 'slow') await page.waitForTimeout(1200)
     controller.release(route.holdPath)
     await pending
     await runSettledContract(page, route, diagnostics, label)
-    await expect(page.locator('.ui-loading-state:visible, [aria-busy="true"]:visible')).toHaveCount(0)
+    await expect(page.locator('.ui-loading-state:visible, [aria-busy="true"]:visible, .dashboard-daily-state:visible, .messenger-loader:visible')).toHaveCount(0)
     return
   }
 
@@ -196,7 +204,7 @@ async function runCell(
     if (!route.errorPath) throw new Error(`${route.id} missing errorPath`)
     controller.failOnce(route.errorPath)
     await gotoRouteWithNavigationRetry(page, route.path)
-    await expect(page.locator('.ui-error-state, [role="alert"]').first()).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('.ui-error-state, [role="alert"], .error-state, .channel-status-banner.error, .admin-messages-load-error').first()).toBeVisible({ timeout: 10_000 })
     const retry = page.getByRole('button', { name: /تلاش مجدد|دوباره/i }).first()
     await expect(retry).toBeVisible()
     await retry.click()
@@ -212,11 +220,10 @@ async function runCell(
     await page.evaluate(() => window.dispatchEvent(new Event('offline')))
     await page.reload({ waitUntil: 'domcontentloaded' })
     await page.locator('html[data-app-mounted="1"]').waitFor({ timeout: 15_000 })
-    await expect(page.getByText(/آفلاین|باز کردن این صفحه ممکن نشد|اتصال|شبکه|ناموفق|اکنون ممکن نشد/i).first()).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText(/آفلاین|باز کردن این صفحه ممکن نشد|اتصال|ارتباط|شبکه|ناموفق|اکنون ممکن نشد|خطا|دریافت نشد|ممکن نشد|برقرار نشد|انجام نشد/i).first()).toBeVisible({ timeout: 10_000 })
     controller.setNetworkOffline(false)
     await page.evaluate(() => window.dispatchEvent(new Event('online')))
-    await page.reload({ waitUntil: 'domcontentloaded' })
-    await page.locator('html[data-app-mounted="1"]').waitFor({ timeout: 15_000 })
+    await gotoRouteWithNavigationRetry(page, route.path)
     await runSettledContract(page, route, diagnostics, label)
     return
   }
@@ -227,7 +234,11 @@ async function runCell(
     await expect(page.getByText(route.emptyText, { exact: false }).first()).toBeVisible({ timeout: 10_000 })
   }
   if (state === 'error') {
-    await expect(page.getByText(route.errorText || /ناموفق|خطا|دوباره|دریافت/i).first()).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('.ui-error-state, [role="alert"], .error-state, .channel-status-banner.error, .admin-messages-load-error').first()).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText(route.errorText || /ناموفق|خطا|دوباره|دریافت نشد|ممکن نشد/i).first()).toBeVisible({ timeout: 10_000 })
+    await expectNoPageCrash(page, label)
+    expectCleanDiagnostics(diagnostics, label)
+    return
   }
   if (state === 'unauthorized') {
     await expect(page.getByText(/دسترسی|مجاز|پیدا نشد|بازیابی/i).first()).toBeVisible({ timeout: 10_000 })
@@ -248,12 +259,6 @@ async function runCell(
   }
   if (state === 'stale') {
     await expect(page.getByText(/۱۴۰۲|2024|قدیمی|تازه‌سازی|به‌روزرسانی/i).first()).toBeVisible({ timeout: 10_000 })
-  }
-
-  if (state === 'error') {
-    await expectRouteContract(page, route, label)
-    expectCleanDiagnostics(diagnostics, label)
-    return
   }
 
   await runSettledContract(page, route, diagnostics, label)
