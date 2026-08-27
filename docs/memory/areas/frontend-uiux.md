@@ -4,7 +4,7 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Decisions
 
-- 2026-08-27 | Native App V2 on `candidate/webapp-native-app-v2` stays `BLOCKED`. Full `vue-tsc` EXIT 2 is only the frozen Market fingerprint. CreateChannel is inset-grouped. E2E is fail-closed with a per-cell matrix; 48px, scroller, keyboard, and zoom probes exist, but the full 29-route cell run is not green. No merge, push, or deploy.
+- 2026-08-27 | Native App V2 on `candidate/webapp-native-app-v2` stays `BLOCKED`. Chromium geometry is 290/290 green; tabs/chips now 48px except Market-frozen. State matrix, Firefox/WebKit, and final HEAD gates remain. No merge, push, or deploy.
 - 2026-08-22 | Market is owner-frozen; feed, meter, overtime, calendar confirm, and delivery interiors stay unchanged without explicit owner scope.
 - 2026-08-21 | Native standardization V1 receipts on `main` `428dd1a0` stay historical. Production/Sites stay untouched.
 - 2026-08-20 | Native means installed PWA: 48px back, bottom primary CTA, shared destructive dialog, keyboard-safe forms, and grouped lists. Today trades stay a horizontal row.

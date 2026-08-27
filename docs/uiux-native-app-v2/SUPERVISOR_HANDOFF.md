@@ -10,32 +10,28 @@
 
 ---
 
-## Checkpoint ادامه — ۲۰۲۶-۰۸-۲۷ پس از commitهای اصلاح
+## Checkpoint ادامه — ۲۰۲۶-۰۸-۲۷ پس از هدف ۴۸px و settle
 
 | مورد | مقدار مستقل |
 |---|---|
 | شاخه | `candidate/webapp-native-app-v2` |
-| HEAD این checkpoint | `32d1f1488d5d25a773dc61f51d81d8588e783ce7` |
-| درخت | `ca58633e6918ee1ec8f988cb90e4c56e278e6d96` |
-| شروع این ادامه | `da0dc34a` / درخت `8c17d7f0` |
+| HEAD این checkpoint | `5f77a02a1d7d5db694b9bfc45c4a6cdeac3cf0b5` |
+| درخت | `b2feb6611a0a85a9571831a2b30e9b81bc794551` |
 | merge-base با `main` | `581396c6791fa9e1fdae9894d3bb56ffbd06f136` |
-| فاصله | ۴۳ جلو / ۱۲ عقب |
-| `main` / `origin/main` | `51344aa9f7953d223c71b53a62e58bca952e8c71` |
+| فاصله | ۴۶ جلو / ۱۳ عقب |
+| `main` / `origin/main` | `6a51231ea3d1a842420e520365ba0af614f75095` |
 | `git diff --name-only HEAD...main -- frontend/` | خالی |
-| تصمیم merge | انجام نشد؛ commitهای جدید main فقط estimator، market-data، docs و قوانین Cursor است |
+| تصمیم merge | انجام نشد؛ commitهای جدید main فقط estimator، گیرنده، docs است |
 | `MarketView.vue` | `6eea08979c7a91ae4ea5f96939165c28459f2729fb6a4c4c75f15f169c80e608` |
 | `OffersList.vue` | `9a58458142f8b0213ce6a853b152a5b04ef93d6f87f8f98e6cb1f37d2b2c086c` |
-| vue-tsc | EXIT 2؛ ۴ خطای Market دقیقاً برابر مبنای `da0dc34a` |
-| messenger visual | ۸۵ فایل، ۱٬۲۹۰٬۷۴۷ بایت، sha `129d8a455ba2ce2af2b8c562103163099a47aa920cfb02dd4446e4b5be26ec58` |
+| هندسه Chromium | ۲۹۰ سلول `initial/normal` در ۵ عرض، همه سبز با `--workers=1` |
+| تصویر پس از settle | ۱۴۵ PNG در `/tmp/native-app-v2-visual-settle`، digest `fb180ca42f4c63cffd08871f7e4004f1097c3835dc719e270dfdb3ce0593c9d1` |
 
 کار باقی برای حکم READY:
 
-1. ماتریس کامل Chromium/Firefox/WebKit بدون شکست سلول
-2. هدف‌های کمی زیر ۴۸px (نمونه: جزئیات مشتری، زیرپیکسل `48x48` گزارش‌شده)
-3. ممیزی بصری پس از settle واقعی، نه روی overlay بارگذاری
-4. E2E کامل Chromium و خانواده‌های حساس Firefox/WebKit روی HEAD نهایی
-5. vitest کامل بدون timeout محیطی
-6. commit اسناد پس از سبز شدن گیت‌ها
+1. ماتریس کامل state (loading/error/retry/offline/…) و Firefox/WebKit خانواده‌های حساس
+2. گیت‌های نهایی فقط روی HEAD پس از آخرین commit: vitest کامل، vue-tsc تفاضلی، build، guard، E2E کامل
+3. اگر تصویر پس از settle هنوز overlay بارگذاری نشان داد، منبع غیر `.ui-loading-state` را اصلاح کن
 
 ---
 
