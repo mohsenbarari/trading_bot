@@ -403,8 +403,11 @@ p95 فاصلهٔ دو snapshot برابر `20.707s` و p95 انتقال source �
 
 در postcheck دیسک، snapshotهای موقت point-in-time، tar موقت image و کپی محلی export پس از
 تایید hash و import حذف شدند؛ نسخهٔ rollback روی میزبان وب حفظ شد. فضای آزاد میزبان بات از
-۵۵۷ مگابایت به ۲٫۷ گیگابایت رسید. ۲۴ تست متمرکز backfill، adapter و timeline نیز داخل image
-با network خاموش پاس شد؛ ۱۱ تست foundation/compose نیز برای اصلاح healthcheck سبز بود.
+۵۵۷ مگابایت به حدود ۲٫۶ گیگابایت رسید. build cache بلااستفاده از حدود ۵٫۹ گیگابایت به ۳۹
+مگابایت کاهش یافت و ۱۵ image غیرفعال حذف شد؛ دو image فعال pipeline، همهٔ containerها،
+volumeها و worktree فعال UI دست‌نخورده ماندند. ۲۴ تست متمرکز backfill، adapter و timeline
+داخل image با network خاموش پاس شد؛ ۱۱ تست foundation/compose نیز برای اصلاح healthcheck
+سبز بود.
 
 ## failure drill و اصلاحات حین استقرار
 
