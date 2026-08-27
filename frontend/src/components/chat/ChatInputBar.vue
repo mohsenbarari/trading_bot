@@ -1341,7 +1341,7 @@ const sendMessage = () => {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  padding: 8px 12px calc(12px + env(safe-area-inset-bottom, 0px)) 12px;
+  padding: 8px 12px calc(12px + var(--ds-safe-area-bottom, env(safe-area-inset-bottom, 0px))) 12px;
   background: var(--messenger-surface-panel, #ffffff);
   gap: 0;
   border-top: none;

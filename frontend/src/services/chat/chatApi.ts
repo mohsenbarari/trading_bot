@@ -10,7 +10,7 @@ import type { ErrorPolicyContext } from '../../utils/httpErrorPolicy'
 
 export type ChatApiFetcher = <T = unknown>(
   endpoint: string,
-  options?: RequestInit & { retryNetwork?: boolean },
+  options?: RequestInit,
   errorContext?: ErrorPolicyContext,
 ) => Promise<T>
 
@@ -25,7 +25,7 @@ export interface SendTextMessagePayload {
 }
 
 export async function fetchChatConversations(fetcher: ChatApiFetcher = defaultFetcher) {
-  return await fetcher<Conversation[]>('/chat/conversations', { retryNetwork: false }, {
+  return await fetcher<Conversation[]>('/chat/conversations', {}, {
     surface: 'messenger',
     scope: 'list',
     operation: 'load-list',

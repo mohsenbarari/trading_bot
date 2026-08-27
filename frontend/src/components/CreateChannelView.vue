@@ -583,7 +583,7 @@ async function loadExistingChannels() {
 
   isLoadingChannels.value = true
   try {
-    const data = await apiFetchJson('/api/chat/channels', { retryNetwork: false }) as ChannelRoom[]
+    const data = await apiFetchJson('/api/chat/channels') as ChannelRoom[]
     existingChannels.value = Array.isArray(data) ? data : []
     writeChatManagerCache(cacheKey, existingChannels.value)
   } catch (error) {

@@ -85,7 +85,7 @@ const progressLabel = computed(() =>
   min-width: 0;
   min-height: 100%;
   overflow-x: clip;
-  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: var(--ds-safe-area-top, env(safe-area-inset-top, 0px));
   background: var(--ds-native-grouped-bg, #f2f2f7);
   color: var(--ds-text-primary);
 }
@@ -110,7 +110,7 @@ const progressLabel = computed(() =>
 .auth-shell__content {
   flex: 1 1 auto;
   padding-inline: var(--ds-page-padding, 16px);
-  padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(24px + var(--ds-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
 }
 
 .auth-shell__heading h1 {

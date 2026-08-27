@@ -109,30 +109,42 @@ function handlePanelKeydown(event: KeyboardEvent, panel: 'market' | 'chat') {
   selectPanel(panelOptions[nextIndex]!.key)
 }
 
+async function readJsonIfOk(response: Response) {
+  if (!response.ok) return null
+  try {
+    return await response.json()
+  } catch {
+    return null
+  }
+}
+
 async function loadDashboard() {
   isLoading.value = true
   broadcastLoadError.value = ''
-  try {
-    const [currentRes, marketRes, broadcastRes] = await Promise.all([
-      apiFetch('/api/admin-messages/market/current', { retryNetwork: false }),
-      apiFetch('/api/admin-messages/market/history?limit=50', { retryNetwork: false }),
-      apiFetch('/api/admin-messages/broadcasts/history?limit=50', { retryNetwork: false }),
-    ])
-    activeMarketMessage.value = currentRes.ok ? await currentRes.json().catch(() => null) : null
+  const [currentResult, marketResult, broadcastResult] = await Promise.allSettled([
+    apiFetch('/api/admin-messages/market/current'),
+    apiFetch('/api/admin-messages/market/history?limit=50'),
+    apiFetch('/api/admin-messages/broadcasts/history?limit=50'),
+  ])
+  if (currentResult.status === 'fulfilled') {
+    activeMarketMessage.value = await readJsonIfOk(currentResult.value)
     isMarketPinExpanded.value = false
-    if (marketRes.ok) {
-      marketHistory.value = await marketRes.json()
-    }
-    if (broadcastRes.ok) {
-      broadcastHistory.value = await broadcastRes.json()
+  }
+  if (marketResult.status === 'fulfilled') {
+    const history = await readJsonIfOk(marketResult.value)
+    if (history) marketHistory.value = history
+  }
+  if (broadcastResult.status === 'fulfilled') {
+    const history = await readJsonIfOk(broadcastResult.value)
+    if (history) {
+      broadcastHistory.value = history
     } else {
       broadcastLoadError.value = 'دریافت تاریخچه پیام‌های چت ممکن نشد. دوباره تلاش کنید.'
     }
-  } catch {
+  } else {
     broadcastLoadError.value = 'دریافت تاریخچه پیام‌های چت ممکن نشد. دوباره تلاش کنید.'
-  } finally {
-    isLoading.value = false
   }
+  isLoading.value = false
 }
 
 function focusMarketComposer() {
@@ -425,6 +437,7 @@ onMounted(loadDashboard)
             data-test="market-composer-input"
             rows="7"
             placeholder="متن پیام بازار..."
+            aria-label="متن پیام بازار"
           />
           <div v-if="marketError" class="alert error">{{ marketError }}</div>
           <div v-if="marketSuccess" class="alert success">{{ marketSuccess }}</div>
@@ -452,7 +465,7 @@ onMounted(loadDashboard)
             </div>
             <span class="history-badge">{{ selectedBroadcastLabels.join('، ') || 'بدون انتخاب' }}</span>
           </div>
-          <AppTextarea v-model="broadcastContent" class="message-textarea" rows="7" placeholder="متن پیام همگانی..." />
+          <AppTextarea v-model="broadcastContent" class="message-textarea" rows="7" placeholder="متن پیام همگانی..." aria-label="متن پیام همگانی" />
 
           <div class="audience-panel">
             <div class="audience-header">

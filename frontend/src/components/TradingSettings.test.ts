@@ -152,9 +152,9 @@ describe('TradingSettings.vue', () => {
     const wrapper = await mountTradingSettings()
     await flushPromises()
 
-    expect(tradingSettingsMocks.apiFetchMock).toHaveBeenCalledWith('/api/trading-settings/', { method: 'GET', retryNetwork: false })
-    expect(tradingSettingsMocks.apiFetchMock).toHaveBeenCalledWith('/api/trading-settings/market-state', { method: 'GET', retryNetwork: false })
-    expect(tradingSettingsMocks.apiFetchMock).toHaveBeenCalledWith('/api/trading-settings/market-overrides', { method: 'GET', retryNetwork: false })
+    expect(tradingSettingsMocks.apiFetchMock).toHaveBeenCalledWith('/api/trading-settings/', { method: 'GET' })
+    expect(tradingSettingsMocks.apiFetchMock).toHaveBeenCalledWith('/api/trading-settings/market-state', { method: 'GET' })
+    expect(tradingSettingsMocks.apiFetchMock).toHaveBeenCalledWith('/api/trading-settings/market-overrides', { method: 'GET' })
     expect(wrapper.text()).toContain('امنیت و نشست‌ها')
     expect(wrapper.text()).toContain('برنامه بازار')
 
@@ -389,7 +389,7 @@ describe('TradingSettings.vue', () => {
     confirmButton!.click()
     await flushPromises()
 
-    expect(tradingSettingsMocks.apiFetchMock).toHaveBeenCalledWith('/api/trading-settings/reset', { method: 'POST', retryNetwork: false })
+    expect(tradingSettingsMocks.apiFetchMock).toHaveBeenCalledWith('/api/trading-settings/reset', { method: 'POST' })
     expect(wrapper.text()).toContain('تنظیمات به مقادیر پیش‌فرض بازنشانی شد')
     expect(wrapper.get('.settings-viewport-toast--success').text()).toBe('تنظیمات به مقادیر پیش‌فرض بازنشانی شد')
     expect(document.body.querySelector('.ui-confirm-dialog')).toBeNull()

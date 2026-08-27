@@ -858,7 +858,7 @@ describe('useChatMessages', () => {
     subject.startPolling()
     vi.advanceTimersByTime(30000)
     await flushPromises()
-    expect(messageMocks.apiFetchJson).toHaveBeenCalledWith('/api/chat/conversations', { retryNetwork: false }, expect.objectContaining({
+    expect(messageMocks.apiFetchJson).toHaveBeenCalledWith('/api/chat/conversations', {}, expect.objectContaining({
       surface: 'messenger',
       scope: 'list',
       operation: 'load-list',

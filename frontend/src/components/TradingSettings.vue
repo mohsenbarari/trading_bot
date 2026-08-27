@@ -182,7 +182,7 @@ const fetchApi = async (method: string, endpoint: string, body: any = null) => {
   if (body) {
     options.body = JSON.stringify(body)
   }
-  const response = await apiFetch(`/api${endpoint}`, { ...options, retryNetwork: false })
+  const response = await apiFetch(`/api${endpoint}`, options)
   if (!response.ok) {
     const error = await response.json()
     throw new Error(error.detail || 'خطا در ارتباط با سرور')
