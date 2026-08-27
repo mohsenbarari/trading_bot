@@ -13,12 +13,14 @@ const props = withDefaults(defineProps<{
   busy?: boolean
   error?: string
   confirmDisabled?: boolean
+  backdropClass?: string
 }>(), {
   confirmLabel: 'تأیید',
   cancelLabel: 'انصراف',
   tone: 'warning',
   busy: false,
   confirmDisabled: false,
+  backdropClass: '',
 })
 
 const toneLabel = computed(() => (props.tone === 'danger' ? 'اقدام حساس' : 'نیازمند تایید'))
@@ -42,7 +44,7 @@ const { titleId, descriptionId, ariaDescriptionId } = useOverlayA11y({
 
 <template>
   <Teleport to="body" defer>
-    <div v-if="open" class="ui-dialog-backdrop">
+    <div v-if="open" class="ui-dialog-backdrop" :class="backdropClass">
       <section
         ref="containerRef"
         class="ui-confirm-dialog"
