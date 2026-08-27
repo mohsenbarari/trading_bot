@@ -80,4 +80,12 @@ test.describe('Native App V2 fail-closed harness contract', () => {
     expect(pathEquals('/api/chat/channels/', '/api/chat/channels')).toBe(true)
     expect(pathEquals('/api/chat/channels/21', '/api/chat/channels')).toBe(false)
   })
+
+  test('long-copy mode stamps the viewer account name on identity and admin profile', () => {
+    const me = resolveKnownApi('GET', '/api/auth/me', 'long-copy')?.body as { account_name: string }
+    const admin = resolveKnownApi('GET', '/api/users/9001', 'long-copy')?.body as { account_name: string; mobile_number: string }
+    expect(me.account_name).toBe('unbroken_ltr_accountnamewithoutspaces_9001')
+    expect(admin.account_name).toBe('unbroken_ltr_accountnamewithoutspaces_9001')
+    expect(admin.mobile_number).toBe('09120000000')
+  })
 })

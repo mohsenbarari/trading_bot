@@ -166,6 +166,15 @@ function isRealtimeSocket(url: URL) {
   return url.pathname === '/api/realtime/ws'
 }
 
+function longCopyViewer(viewer: typeof CURRENT_USER) {
+  return {
+    ...viewer,
+    full_name: 'کاربر تست با نام بسیار بلند فارسی برای شکست خط عنوان پروفایل',
+    account_name: 'unbroken_ltr_accountnamewithoutspaces_9001',
+    address: 'تهران خیابان ولیعصر با نام بسیار بلند فارسی برای شکست خط نشانی',
+  }
+}
+
 export function resolveKnownApi(
   method: string,
   pathname: string,
@@ -187,14 +196,7 @@ export function resolveKnownApi(
     if (error) return { status: 200, body: viewer }
     return {
       status: 200,
-      body: longCopy
-        ? {
-            ...viewer,
-            full_name: 'کاربر تست با نام بسیار بلند فارسی برای شکست خط عنوان پروفایل',
-            account_name: 'unbroken_ltr_accountnamewithoutspaces_9001',
-            address: 'تهران خیابان ولیعصر با نام بسیار بلند فارسی برای شکست خط نشانی',
-          }
-        : viewer,
+      body: longCopy ? longCopyViewer(viewer) : viewer,
     }
   }
   if (pathname === '/api/sessions/verify') return { status: 200, body: { ok: true } }
@@ -357,7 +359,10 @@ export function resolveKnownApi(
   if (/^\/api\/users\/\d+$/u.test(pathname)) {
     if (error) return failList()
     const id = Number(pathname.split('/')[3])
-    return { status: 200, body: id === viewer.id ? viewer : { ...REGULAR_USER, id } }
+    if (id === viewer.id) {
+      return { status: 200, body: longCopy ? longCopyViewer(viewer) : viewer }
+    }
+    return { status: 200, body: { ...REGULAR_USER, id } }
   }
 
   if (pathname === '/api/blocks/status') {

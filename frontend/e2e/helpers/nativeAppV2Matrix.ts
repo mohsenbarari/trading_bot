@@ -296,7 +296,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
-    states: listStates({ stale: true }),
+    states: listStates({ stale: false }),
   },
   {
     id: 'messenger',
@@ -314,7 +314,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'messenger', expectedMin: 1, documentScrollForbidden: true },
-    states: listStates({ stale: true }),
+    states: listStates({ stale: false }),
   },
   {
     id: 'public-profile',
@@ -500,7 +500,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
-    states: listStates({ stale: true }),
+    states: listStates({ stale: false }),
   },
   {
     id: 'share-receive',

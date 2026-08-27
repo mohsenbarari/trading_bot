@@ -169,11 +169,30 @@ async function runSettledContract(
   route: RouteDescriptor,
   diagnostics: RouteDiagnostics,
   label: string,
+  state?: StateId,
 ) {
-  await expectRouteReady(page, route)
+  const contractRoute = resolveContractRoute(route, state)
+  await expectRouteReady(page, contractRoute)
   await expectNoPageCrash(page, label)
-  await expectRouteContract(page, route, label)
+  await expectRouteContract(page, contractRoute, label)
   expectCleanDiagnostics(diagnostics, label)
+}
+
+function resolveContractRoute(route: RouteDescriptor, state?: StateId): RouteDescriptor {
+  const longCopyTitle = 'unbroken_ltr_accountnamewithoutspaces_9001'
+  if (
+    !state
+    || !['full', 'long-persian', 'unbroken', 'ltr'].includes(state)
+  ) {
+    return route
+  }
+  if (route.id === 'profile' || route.id === 'public-profile') {
+    return { ...route, h1: longCopyTitle }
+  }
+  if (route.id === 'admin-user-profile') {
+    return { ...route, readyText: longCopyTitle }
+  }
+  return route
 }
 
 async function runCell(
@@ -195,7 +214,7 @@ async function runCell(
     if (state === 'slow') await page.waitForTimeout(1200)
     controller.release(route.holdPath)
     await pending
-    await runSettledContract(page, route, diagnostics, label)
+    await runSettledContract(page, route, diagnostics, label, state)
     await expect(page.locator('.ui-loading-state:visible, [aria-busy="true"]:visible, .dashboard-daily-state:visible, .messenger-loader:visible')).toHaveCount(0)
     return
   }
@@ -208,7 +227,7 @@ async function runCell(
     const retry = page.getByRole('button', { name: /تلاش مجدد|دوباره/i }).first()
     await expect(retry).toBeVisible()
     await retry.click()
-    await runSettledContract(page, route, diagnostics, label)
+    await runSettledContract(page, route, diagnostics, label, state)
     await expect(page.locator('.ui-error-state:visible')).toHaveCount(0)
     return
   }
@@ -224,7 +243,7 @@ async function runCell(
     controller.setNetworkOffline(false)
     await page.evaluate(() => window.dispatchEvent(new Event('online')))
     await gotoRouteWithNavigationRetry(page, route.path)
-    await runSettledContract(page, route, diagnostics, label)
+    await runSettledContract(page, route, diagnostics, label, state)
     return
   }
 
@@ -253,15 +272,15 @@ async function runCell(
   }
   if (state === 'unbroken' || state === 'ltr') {
     if (['profile', 'public-profile', 'admin-user-profile'].includes(route.id)) {
-      await expect(page.getByText('unbroken_ltr_accountnamewithoutspaces_9001')).toBeVisible()
-      await expect(page.getByText('09120000000')).toBeVisible()
+      await expect(page.getByText('unbroken_ltr_accountnamewithoutspaces_9001').first()).toBeVisible()
+      await expect(page.getByText('09120000000').first()).toBeVisible()
     }
   }
   if (state === 'stale') {
     await expect(page.getByText(/۱۴۰۲|2024|قدیمی|تازه‌سازی|به‌روزرسانی/i).first()).toBeVisible({ timeout: 10_000 })
   }
 
-  await runSettledContract(page, route, diagnostics, label)
+  await runSettledContract(page, route, diagnostics, label, state)
 }
 
 const GEOMETRY_STATES = new Set<StateId>(['initial', 'normal'])
