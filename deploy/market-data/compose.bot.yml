@@ -107,7 +107,10 @@ services:
     healthcheck:
       test: [CMD, python, -m, core.market_intelligence.private_pipeline_foundation, healthcheck, --role, coin-estimator]
       interval: 10s
-      timeout: 3s
+      # Building a point-in-time snapshot can keep the single-CPU estimator
+      # busy on a large WAL-backed Store while the independent Python probe
+      # waits for CPU.  The durable health document remains O(1) to read.
+      timeout: 8s
       retries: 3
       start_period: 10s
     networks:
