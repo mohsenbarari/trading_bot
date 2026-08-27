@@ -4,7 +4,34 @@
 
 تاریخ: ۲۰۲۶-۰۸-۲۷
 شاخه: فقط `candidate/webapp-native-app-v2`
-حکم جاری: `BLOCKED — NATIVE APP V2 REMAINS IN CORRECTION`
+حکم جاری: `NATIVE APP V2 CORRECTIONS COMPLETE — READY FOR INDEPENDENT INTEGRATION REVIEW`
+
+`FULL VUE-TSC EXIT 2 — EXACT FROZEN MARKET BASELINE ONLY; ZERO NEW OR NON-MARKET TYPE ERRORS`
+
+---
+
+## Checkpoint نهایی ادامه — ۲۰۲۶-۰۸-۲۷
+
+شواهد محصول روی `4c5e8136` جمع شد. این سند آخرین commit شاخه است؛ گیت‌های ارزان را بعد از همین commit دوباره بخوان.
+
+| مورد | مقدار |
+|---|---|
+| شاخه | `candidate/webapp-native-app-v2` |
+| HEAD محصول | `4c5e813656cd891494e4fcb8565ecdf540e0e11d` |
+| merge-base با `main` | `581396c6791fa9e1fdae9894d3bb56ffbd06f136` |
+| فاصله هنگام جمع شواهد | ۵۳ جلو / ۱۳ عقب |
+| `git diff --name-only HEAD...main -- frontend/` | خالی |
+| تصمیم merge | انجام نشد |
+| `MarketView.vue` | `6eea08979c7a91ae4ea5f96939165c28459f2729fb6a4c4c75f15f169c80e608` |
+| `OffersList.vue` | `9a58458142f8b0213ce6a853b152a5b04ef93d6f87f8f98e6cb1f37d2b2c086c` |
+| هندسه Chromium | ۲۹۰ سلول `initial/normal` |
+| ماتریس state Chromium | ۴۶۲ / ۴۶۲ |
+| Firefox/WebKit حساس | ۸۸ / ۸۸؛ ثبت‌نام بعد از اصلاح مرحله ۱ دوباره سبز شد |
+| صفحه‌کلید / زوم / overlay | ۳۵ / ۳۵ |
+| Vitest | ۱۶۹ پرونده / ۱۹۸۴ تست |
+| تصویر | ۱۴۵ PNG در `/tmp/native-app-v2-visual-settle`، digest `378fb999ce9a6eb788eb3fb169929163c21cf30324ffafe094ed56d5d4191b60` |
+| بیلد موقت | `/tmp/native-app-v2-prod-build`، ۱۷۰ فایل، digest `2803e6396b3ca18d6be73c3230329c46dbdb30063f0efe33e912fda330b9a38a` |
+| پوش / ادغام / استقرار | انجام نشد |
 
 گیت TypeScript این track تفاضلی است: `vue-tsc` کامل می‌تواند EXIT 2 بماند اگر و فقط اگر fingerprint خطاهای `MarketView.vue` دقیقاً برابر مبنای محافظت‌شده باشد و خطای تازه یا غیر Market صفر باشد. ادعا نشود که `vue-tsc` سبز است.
 

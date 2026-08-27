@@ -313,8 +313,8 @@ Gate:
 | ۷ مدیریت | partial — h1 زیرمسیر و کانال بدون main تودرتو؛ HelpPopover بازار قفل است |
 | ۸ احراز | partial — ورود و بازیابی در ماتریس fail-closed پوشش دارند |
 | ۹ پیام‌رسان | partial — overlayها dialog/focus دارند؛ رفتار و آلبوم قفل است |
-| ۱۰ overlay | partial — قرارداد مشترک روی overlayهای زنده اعمال شد؛ همه stateها visually کامل نیست |
-| ۱۱ پذیرش | blocked — `vue-tsc` داخل MarketView قرمز است؛ حکم READY مجاز نیست |
+| ۱۰ overlay | partial — قرارداد مشترک روی overlayهای زنده اعمال شد؛ صفحه‌کلید و Escape سبز است |
+| ۱۱ پذیرش | ready-for-independent-review — ماتریس و گیت‌ها روی candidate پاس؛ `vue-tsc` فقط مبنای منجمد Market |
 
 ## ماتریس پذیرش
 
