@@ -3,7 +3,7 @@
   "track": "native-app-feel-v2",
   "branch": "candidate/webapp-native-app-v2",
   "baseCommit": "951ca9f0",
-  "status": "phases-1-10-implemented",
+  "status": "ready-for-independent-native-ui-review",
   "ownerScoresAtStart": {
     "unification": 80,
     "simplification": 70,

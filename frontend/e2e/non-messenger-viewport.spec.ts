@@ -426,34 +426,30 @@ test.describe('Non-messenger responsive viewport matrix', () => {
         const trigger = page.locator('.dashboard-account-menu__trigger')
         await trigger.click()
 
-        const menu = page.getByRole('menu', { name: 'گزینه‌های حساب کاربری' })
-        const profileAction = menu.getByRole('menuitem', { name: 'پروفایل' })
-        const logoutAction = menu.getByRole('menuitem', { name: 'خروج' })
-        await expect(menu).toBeVisible()
+        const sheet = page.getByRole('dialog', { name: 'حساب' })
+        const profileAction = sheet.getByRole('menuitem', { name: 'پروفایل' })
+        const logoutAction = sheet.getByRole('menuitem', { name: 'خروج' })
+        await expect(sheet).toBeVisible()
         await expect(profileAction).toBeVisible()
         await expect(logoutAction).toBeVisible()
 
         const geometry = await page.evaluate(() => {
-          const triggerElement = document.querySelector<HTMLElement>(
-            '.dashboard-account-menu__trigger',
-          )
-          const menuElement = document.querySelector<HTMLElement>('#dashboard-account-menu')
+          const sheetElement = document.querySelector<HTMLElement>('.dashboard-account-sheet')
+          const backdropElement = sheetElement?.closest<HTMLElement>('.ui-sheet-backdrop')
           const actions = Array.from(
-            menuElement?.querySelectorAll<HTMLElement>('[role="menuitem"]') || [],
+            sheetElement?.querySelectorAll<HTMLElement>('[role="menuitem"]') || [],
           )
 
-          if (!triggerElement || !menuElement || actions.length !== 2) return null
+          if (!sheetElement || !backdropElement || actions.length !== 2) return null
 
-          const triggerRect = triggerElement.getBoundingClientRect()
-          const menuRect = menuElement.getBoundingClientRect()
+          const sheetRect = sheetElement.getBoundingClientRect()
           return {
-            menuPosition: getComputedStyle(menuElement).position,
-            opensBelowTrigger: menuRect.top >= triggerRect.bottom,
+            backdropPosition: getComputedStyle(backdropElement).position,
             insideViewport:
-              menuRect.left >= 0 &&
-              menuRect.right <= window.innerWidth &&
-              menuRect.top >= 0 &&
-              menuRect.bottom <= window.innerHeight,
+              sheetRect.left >= 0 &&
+              sheetRect.right <= window.innerWidth &&
+              sheetRect.top >= 0 &&
+              sheetRect.bottom <= window.innerHeight,
             actionsHitTestThemselves: actions.every((action) => {
               const rect = action.getBoundingClientRect()
               const hit = document.elementFromPoint(
@@ -466,10 +462,13 @@ test.describe('Non-messenger responsive viewport matrix', () => {
         })
 
         expect(geometry).not.toBeNull()
-        expect(geometry?.menuPosition).toBe('absolute')
-        expect(geometry?.opensBelowTrigger).toBe(true)
+        expect(geometry?.backdropPosition).toBe('fixed')
         expect(geometry?.insideViewport).toBe(true)
         expect(geometry?.actionsHitTestThemselves).toBe(true)
+
+        await page.keyboard.press('Escape')
+        await expect(sheet).toBeHidden()
+        await expect(trigger).toBeFocused()
       },
     )
   }
