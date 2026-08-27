@@ -468,6 +468,34 @@ foundation/compose سبز ماندند و گیت image نهایی نیز ۴۲ ت
 
 گیت آزمون نهایی شامل ۶۹ تست متمرکز روی host و ۴۴ تست مرتبط داخل image بود و همه سبز شدند.
 
+## محدودسازی رشد receiver و postcheck دیسک — 2026-08-27
+
+ممیزی دیسک نشان داد receiver حدود ۵۱۲ هزار delivery را با دو کپی payload نگه می‌داشت،
+درحالی‌که adapter فقط یک sequence عقب بود. Market Store و ledger دائمی دست‌نخورده ماندند؛
+سیاست جدید فقط کپی عملیاتی payload را پس از checkpoint یکنواخت adapter و safety window
+سه‌روزه redacted می‌کند و metadata کامل stream/sequence/fact/revision/hash را برای replay،
+duplicate و conflict دائماً نگه می‌دارد. عقب‌گرد watermark و مشاهدهٔ payload فشرده‌شده جلوتر
+از checkpoint هر دو fail-closed هستند.
+
+تلاش نخست `main@44662621` پس از افزودن دو ستون nullable، هنگام ساخت index بزرگ زیر tmpfs
+محدود کانتینر fail شد؛ هیچ payload حذف یا compact نشد. receiver فوراً به image سالم قبلی
+rollback و با restart صفر healthy شد. پیاده‌سازی `main@c5c09753` index را با cursor کوچک
+per-stream جایگزین کرد و ۱۹ تست مستقیم image برای migration، retention، lost-ACK، revision،
+watermark و adapter پاس شدند.
+
+پیش از deploy، backup آنلاین receiver با `quick_check=ok` ساخته و با mode `0600` در
+`backups-staging/receiver-retention-44662621-20260827T131513Z/receiver.sqlite3.gz` نگه‌داری
+شد؛ اندازهٔ فشرده `205170038` بایت و SHA-256 آن
+`4b03f526f1a0514fa04a16cc96c8ac6de0b145826036507cc686cff2b10c453d` است.
+
+receiver و adapter staging با image
+`sha256:a047c7f6a3429c957789cc34dd530eabcc63d2061b24abfc89448539d292f73c`
+و revision `c5c097539e8bb8d53b6a752b94b23985cbad2037` healthy/restart-zero شدند. health نهایی
+`payload_compaction.status=READY`، retention برابر `259200s`، compacted اولیه صفر، rejection
+و duplicate صفر، ۱۰ stream و lag کل/بیشینه صفر بود. در postcheck بعدی ۲۷ delivery تازه نیز
+تا checkpoint adapter بدون lag عبور کرد. mode همچنان `PRIVATE_SHADOW` است و production،
+Product/WebApp authority و `PRIVATE_PRIMARY` تغییر نکردند.
+
 ## rollback مجاز این مرحله
 
 rollback اختیار capture باید با حفظ کامل outbox/checkpoint/session انجام شود:
