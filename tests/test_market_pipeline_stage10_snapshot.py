@@ -377,7 +377,12 @@ class Stage10SnapshotTests(unittest.TestCase):
             recovered_pending=False,
         )
         with patch.dict(
-            "os.environ", {"MARKET_PIPELINE_FEED_MODE": "PRIVATE_SHADOW"}, clear=False
+            "os.environ",
+            {
+                "MARKET_PIPELINE_FEED_MODE": "PRIVATE_SHADOW",
+                "MARKET_PIPELINE_ESTIMATOR_INTERVAL_SECONDS": "4",
+            },
+            clear=False,
         ), patch.object(
             estimator_snapshot_runtime,
             "publish_estimator_snapshot",
@@ -398,7 +403,28 @@ class Stage10SnapshotTests(unittest.TestCase):
             )
         self.assertEqual(result, 0)
         self.assertEqual(len(stop.waits), 1)
-        self.assertAlmostEqual(stop.waits[0], 3.2, places=6)
+        self.assertAlmostEqual(stop.waits[0], 2.2, places=6)
+
+    def test_estimator_service_rejects_invalid_inference_interval(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "MARKET_PIPELINE_FEED_MODE": "PRIVATE_SHADOW",
+                "MARKET_PIPELINE_ESTIMATOR_INTERVAL_SECONDS": "0",
+            },
+            clear=False,
+        ):
+            with self.assertRaisesRegex(
+                estimator_snapshot_runtime.EstimatorSnapshotRuntimeError,
+                "coin_estimator_interval_invalid",
+            ):
+                run_coin_estimator_service(
+                    role="coin-estimator",
+                    mode="live",
+                    release_sha="c" * 40,
+                    state_directory=self.root / "invalid-cadence-state",
+                    stop=threading.Event(),
+                )
 
 
 if __name__ == "__main__":

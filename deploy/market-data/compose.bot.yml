@@ -84,6 +84,7 @@ services:
     command: [service, --role, coin-estimator]
     environment:
       MARKET_PIPELINE_FEED_MODE: ${MARKET_PIPELINE_FEED_MODE:-LEGACY}
+      MARKET_PIPELINE_ESTIMATOR_INTERVAL_SECONDS: ${MARKET_PIPELINE_ESTIMATOR_INTERVAL_SECONDS:-5}
       MARKET_PIPELINE_PRIVATE_MARKET_STORE_PATH: /var/lib/market-data/market-store/market-store.sqlite
       MARKET_PIPELINE_ESTIMATOR_SNAPSHOT_PATH: /var/lib/market-data/snapshots/latest-estimator-snapshot.json
     volumes:

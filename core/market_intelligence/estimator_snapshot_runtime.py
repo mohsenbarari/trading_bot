@@ -49,6 +49,20 @@ class EstimatorSnapshotRuntimeError(RuntimeError):
     """Payload-free estimator/sender failure."""
 
 
+def _inference_interval_seconds() -> float:
+    raw = os.environ.get(
+        "MARKET_PIPELINE_ESTIMATOR_INTERVAL_SECONDS",
+        str(DEFAULT_INFERENCE_SECONDS),
+    ).strip()
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise EstimatorSnapshotRuntimeError("coin_estimator_interval_invalid") from exc
+    if not 1.0 <= value <= 60.0:
+        raise EstimatorSnapshotRuntimeError("coin_estimator_interval_invalid")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class SnapshotPublishResult:
     snapshot_id: str
@@ -438,6 +452,7 @@ def run_coin_estimator_service(
     feed_mode = os.environ.get("MARKET_PIPELINE_FEED_MODE", "LEGACY").strip().upper()
     if feed_mode not in {"LEGACY", "PRIVATE_SHADOW", "PRIVATE_PRIMARY"}:
         raise EstimatorSnapshotRuntimeError("coin_estimator_feed_mode_invalid")
+    inference_interval_seconds = _inference_interval_seconds()
     from .private_pipeline_foundation import atomic_json_write
 
     started = _stamp()
@@ -469,11 +484,12 @@ def run_coin_estimator_service(
                 "updated_at_utc": _stamp(),
                 "status": "live-ready",
                 "feed_mode": feed_mode,
+                "inference_interval_seconds": inference_interval_seconds,
                 "publishing_private_snapshot": feed_mode != "LEGACY",
                 "latest": asdict(latest) if latest else None,
             },
         )
-        interval = DEFAULT_INFERENCE_SECONDS if feed_mode != "LEGACY" else 1.0
+        interval = inference_interval_seconds if feed_mode != "LEGACY" else 1.0
         stop.wait(max(0.0, interval - (time.monotonic() - cycle_started)))
     return 0
 
