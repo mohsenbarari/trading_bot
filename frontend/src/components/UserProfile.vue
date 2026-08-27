@@ -7,13 +7,11 @@ import {
   Bell,
   Check,
   ChevronLeft,
-  Clock,
   Pencil,
   RotateCcw,
   Settings,
   Trash2,
   Undo2,
-  Users,
 } from 'lucide-vue-next';
 import { ActionContractError, useActionState } from '../composables/useActionState';
 import { useUserProfileTiming } from '../composables/useUserProfileTiming';
@@ -1194,58 +1192,61 @@ async function confirmPendingAction() {
           <span class="value" :class="{ 'text-red': isRestricted }">{{ restrictionText }}</span>
       </div>
 
-      <!-- تایمر شمارش معکوس مسدودیت -->
-      <div v-if="isRestricted && countdownRestriction" class="countdown-box restriction-countdown">
-          <span class="countdown-icon" aria-hidden="true"><Clock :size="15" /></span>
-          <span class="countdown-label">زمان باقی‌مانده مسدودیت:</span>
-          <span class="countdown-value">{{ countdownRestriction }}</span>
-      </div>
-
-      <!-- نمایش محدودیت‌ها -->
-      <div v-if="user.max_daily_trades || user.max_active_commodities || user.max_daily_requests" class="limitations-box">
-          <h4><AlertTriangle :size="17" aria-hidden="true" /> محدودیت‌های فعال:</h4>
-          <div v-if="user.max_daily_trades" class="limit-item">
-              <span>مجموع معاملات:</span> <span class="usage-ratio">{{ user.trades_count ?? 0 }} / {{ user.max_daily_trades }}</span>
-          </div>
-          <div v-if="user.max_active_commodities" class="limit-item">
-              <span>مجموع کالا:</span> <span class="usage-ratio">{{ user.commodities_traded_count ?? 0 }} / {{ user.max_active_commodities }}</span>
-          </div>
-          <div v-if="user.max_daily_requests" class="limit-item">
-              <span>مجموع لفظ:</span> <span class="usage-ratio">{{ user.channel_messages_count ?? 0 }} / {{ user.max_daily_requests }}</span>
-          </div>
-          <div v-if="user.limitations_expire_at" class="limit-expiry">
-              <span>انقضا:</span> <span>{{ user.limitations_expire_at_jalali }}</span>
-          </div>
-          <!-- تایمر شمارش معکوس محدودیت -->
-          <div v-if="countdownLimitation" class="countdown-inline">
-              <span class="countdown-icon" aria-hidden="true"><Clock :size="15" /></span>
-              <span class="countdown-label">باقی‌مانده:</span>
-              <span class="countdown-value">{{ countdownLimitation }}</span>
-          </div>
-      </div>
-
-          <div v-if="showCustomerContext" class="limitations-box customer-context-box">
-            <h4><Users :size="17" aria-hidden="true" /> اطلاعات مشتری</h4>
-            <div class="limit-item">
-              <span>نام مدیریتی:</span>
-              <span>
-                <CustomerNameWithBadge
-                  v-if="user.customer_management_name"
-                  :name="user.customer_management_name"
-                  compact
-                />
-                <template v-else>---</template>
-              </span>
-            </div>
-            <div class="limit-item">
-              <span>مالک:</span>
-              <span>{{ user.customer_owner_account_name || '---' }}</span>
-            </div>
-            <div class="limit-item">
-              <span>سطح مشتری:</span>
-              <span>{{ getCustomerTierLabel(user.customer_tier) }}</span>
-            </div>
-          </div>
+      <AppListItem
+        v-if="isRestricted && countdownRestriction"
+        class="restriction-countdown"
+        title="زمان باقی‌مانده مسدودیت"
+        :meta="countdownRestriction"
+      />
+      <AppListItem
+        v-if="user.max_daily_trades"
+        title="مجموع معاملات"
+        :meta="`${user.trades_count ?? 0} / ${user.max_daily_trades}`"
+      />
+      <AppListItem
+        v-if="user.max_active_commodities"
+        title="مجموع کالا"
+        :meta="`${user.commodities_traded_count ?? 0} / ${user.max_active_commodities}`"
+      />
+      <AppListItem
+        v-if="user.max_daily_requests"
+        title="مجموع لفظ"
+        :meta="`${user.channel_messages_count ?? 0} / ${user.max_daily_requests}`"
+      />
+      <AppListItem
+        v-if="user.limitations_expire_at"
+        title="انقضای محدودیت"
+        :meta="user.limitations_expire_at_jalali"
+      />
+      <AppListItem
+        v-if="countdownLimitation"
+        title="باقی‌مانده محدودیت"
+        :meta="countdownLimitation"
+      />
+      <p v-if="showCustomerContext" class="profile-details-heading">اطلاعات مشتری</p>
+      <AppListItem
+        v-if="showCustomerContext"
+        title="نام مدیریتی"
+      >
+        <template #trailing>
+          <CustomerNameWithBadge
+            v-if="user.customer_management_name"
+            :name="user.customer_management_name"
+            compact
+          />
+          <template v-else>---</template>
+        </template>
+      </AppListItem>
+      <AppListItem
+        v-if="showCustomerContext"
+        title="مالک"
+        :meta="user.customer_owner_account_name || '---'"
+      />
+      <AppListItem
+        v-if="showCustomerContext"
+        title="سطح مشتری"
+        :meta="getCustomerTierLabel(user.customer_tier)"
+      />
 
     </AppInsetGroup>
 

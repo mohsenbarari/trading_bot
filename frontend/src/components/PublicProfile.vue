@@ -2830,50 +2830,14 @@ function handleHistoryPresetChipChange(value: string) {
   color: var(--ds-text-secondary);
 }
 
-.profile-action-card {
-  width: 100%;
-  min-height: var(--ds-native-row-min-height, 48px);
-  padding: 0.75rem 1rem;
-  font-size: var(--ds-font-md);
-  font-weight: 650;
-  background: transparent;
-  color: var(--ds-text-primary);
-  border: 0;
-  border-radius: 0;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 0.72rem;
-  transition: background 0.18s ease;
-  text-align: right;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.profile-action-card:hover {
-  background: var(--ds-bg-hover);
-}
-
-.profile-action-card:active {
-  transform: none;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .profile-nav-back,
-  .address-edit-trigger,
-  .profile-action-card {
+  .address-edit-trigger {
     transition: none;
   }
 }
 
-.profile-action-card:disabled,
-.profile-action-card--disabled {
-  cursor: not-allowed;
-  opacity: 0.78;
-  transform: none;
-}
-
-.profile-action-card__icon {
+:deep(.profile-action-card__icon) {
   display: inline-flex;
   align-items: center;
   justify-content: center;

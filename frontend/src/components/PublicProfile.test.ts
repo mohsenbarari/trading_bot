@@ -25,7 +25,15 @@ const profileIdentityHeaderSource = readFileSync(
   resolve(process.cwd(), 'src/components/profile/ProfileIdentityHeader.vue'),
   'utf8',
 )
-const publicProfileSource = [publicProfileFileSource, profileIdentityHeaderSource].join('\n\n')
+const profileActionsSource = readFileSync(
+  resolve(process.cwd(), 'src/components/profile/ProfileActions.vue'),
+  'utf8',
+)
+const publicProfileSource = [
+  publicProfileFileSource,
+  profileIdentityHeaderSource,
+  profileActionsSource,
+].join('\n\n')
 
 vi.mock('../utils/chatFiles', () => ({
   buildChatFileUrl: buildChatFileUrlMock,
@@ -224,7 +232,10 @@ describe('PublicProfile.vue', () => {
     expect(publicProfileSource).toMatch(/\.profile-action-card:active\s*\{\s*transform:\s*none;/)
     expect(publicProfileSource).toMatch(/\.mini-trade-card:active\s*\{\s*transform:\s*none;/)
     expect(publicProfileSource).toMatch(
-      /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.profile-nav-back,\s*\.address-edit-trigger,\s*\.profile-action-card\s*\{\s*transition:\s*none;\s*\}/,
+      /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.profile-nav-back,\s*\.address-edit-trigger\s*\{\s*transition:\s*none;\s*\}/,
+    )
+    expect(profileActionsSource).toMatch(
+      /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.profile-action-card\s*\{\s*transition:\s*none;\s*\}/,
     )
     expect(miniTradeReducedMotionRule).toBeTruthy()
     expect(publicProfileSource.indexOf(miniTradeReducedMotionRule!)).toBeGreaterThan(

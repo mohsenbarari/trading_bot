@@ -65,6 +65,7 @@ const emit = defineEmits<{
   border-radius: 0;
   background: transparent;
   box-shadow: none;
+  transition: background 0.18s ease;
 }
 
 .profile-action-card:active {
@@ -73,5 +74,11 @@ const emit = defineEmits<{
 
 .profile-action-card--disabled {
   opacity: 0.72;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .profile-action-card {
+    transition: none;
+  }
 }
 </style>

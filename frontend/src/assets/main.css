@@ -1983,13 +1983,8 @@
     transition: background 0.18s ease, box-shadow 0.18s ease;
   }
 
-  .ui-list-item--interactive:hover {
+  .ui-list-item--interactive:active:not(:disabled) {
     background: var(--ds-bg-hover);
-  }
-
-  .ui-list-item--card.ui-list-item--interactive:hover {
-    border-color: var(--ds-primary-500);
-    box-shadow: var(--ds-focus-ring);
   }
 
   .ui-list-item--interactive:focus-visible {

@@ -511,6 +511,23 @@ describe('ui primitives', () => {
     trigger.remove()
   })
 
+  it('applies an official backdrop class without leaking attributes onto the teleport fragment', async () => {
+    const dialog = mount(AppConfirmDialog, {
+      props: {
+        open: true,
+        title: 'تأیید',
+        message: 'ادامه داده شود؟',
+        backdropClass: 'ui-v2-workspace-confirm-backdrop',
+      },
+      attachTo: document.body,
+    })
+    await nextTick()
+    const portalBackdrop = document.body.querySelector<HTMLElement>('.ui-dialog-backdrop')
+    expect(portalBackdrop?.classList.contains('ui-v2-workspace-confirm-backdrop')).toBe(true)
+    expect(dialog.attributes('class')).toBeUndefined()
+    dialog.unmount()
+  })
+
   it('renders page, workspace, master-detail, toolbar, and page header primitives', () => {
     const page = mount(AppPage, {
       props: { narrow: true },
@@ -811,6 +828,7 @@ describe('ui primitives', () => {
       /\.ui-disclosure__leading\s*\{[\s\S]*?width:\s*var\(--ds-native-row-min-height\)/,
     )
     expect(css).not.toMatch(/\.ui-list-item--interactive:hover\s*\{[\s\S]*?transform:\s*translateY/)
+    expect(css).not.toMatch(/\.ui-list-item--interactive:hover\s*\{\s*background:/)
 
     const longLabel = 'کپی لینک تلگرام و بررسی دعوت باز مشتری'
     const button = mount(AppButton, {
