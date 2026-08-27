@@ -158,6 +158,19 @@ def initialize_adapter_store(connection: sqlite3.Connection) -> None:
             applied_at_utc TEXT NOT NULL,
             PRIMARY KEY(stream_id,delivery_sequence)
         );
+        CREATE TABLE IF NOT EXISTS private_fact_adapter_status_counts (
+            status TEXT PRIMARY KEY CHECK(status IN ('APPLIED','AUDIT_ONLY','REJECTED')),
+            delivery_count INTEGER NOT NULL CHECK(delivery_count>=0)
+        );
+        INSERT OR IGNORE INTO private_fact_adapter_status_counts(status,delivery_count)
+        VALUES ('APPLIED',0),('AUDIT_ONLY',0),('REJECTED',0);
+        CREATE TRIGGER IF NOT EXISTS private_fact_adapter_delivery_count_insert
+        AFTER INSERT ON private_fact_adapter_deliveries
+        BEGIN
+          UPDATE private_fact_adapter_status_counts
+          SET delivery_count=delivery_count+1
+          WHERE status=NEW.status;
+        END;
         CREATE TABLE IF NOT EXISTS private_fact_adapter_projections (
             fact_id TEXT PRIMARY KEY,
             stream_id TEXT NOT NULL,
@@ -203,6 +216,20 @@ def initialize_adapter_store(connection: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS private_fact_adapter_rejections_time_idx
         ON private_fact_adapter_rejections(rejected_at_utc);
+        """
+    )
+    # Existing stores predate the insert trigger. Reconcile once at owner
+    # startup; steady-state health updates then read three constant-size rows
+    # instead of rescanning the permanently growing delivery ledger.
+    connection.execute(
+        """
+        UPDATE private_fact_adapter_status_counts
+        SET delivery_count=(
+          SELECT COUNT(*)
+          FROM private_fact_adapter_deliveries
+          WHERE private_fact_adapter_deliveries.status=
+                private_fact_adapter_status_counts.status
+        )
         """
     )
     connection.commit()
@@ -885,9 +912,9 @@ def adapter_metrics(connection: sqlite3.Connection) -> dict[str, object]:
         ).fetchall()
     }
     counts = {
-        str(row["status"]): int(row["count"])
+        str(row["status"]): int(row["delivery_count"])
         for row in connection.execute(
-            "SELECT status,COUNT(*) AS count FROM private_fact_adapter_deliveries GROUP BY status"
+            "SELECT status,delivery_count FROM private_fact_adapter_status_counts"
         ).fetchall()
     }
     return {

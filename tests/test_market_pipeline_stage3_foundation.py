@@ -202,6 +202,10 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
             "target: /var/lib/market-data/receiver", 1
         )[1].split("depends_on:", 1)[0]
         self.assertIn("read_only: false", receiver_mount)
+        adapter = bot.split("  market-store-adapter:", 1)[1].split(
+            "  coin-estimator:", 1
+        )[0]
+        self.assertIn("timeout: 8s", adapter)
         processor = web.split("  market-processor:", 1)[1].split(
             "  market-fact-sync-worker:", 1
         )[0]

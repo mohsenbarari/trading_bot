@@ -10,6 +10,7 @@ from unittest.mock import patch
 from core.market_intelligence.coin_rate_engine import build_coin_rate_estimates
 from core.market_intelligence.market_fact_adapter import (
     MarketFactAdapterError,
+    adapter_metrics,
     initialize_adapter_store,
     normalize_feed_mode,
     run_adapter_cycle,
@@ -209,6 +210,50 @@ class Stage9AdapterTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(int(projection["fact_revision"]), 2)
         self.assertEqual(bytes(projection["event_key"]).hex(), str(offer["event_key"]))
+
+    def test_adapter_metrics_use_durable_insert_counts_and_reconcile_on_restart(self):
+        stream = "market.fact.coin.group.1"
+        offer = _fact(
+            12,
+            source_code="GROUP_1",
+            stream_id=stream,
+            source_sequence=1,
+            payload={
+                "kind": "COIN_OFFER",
+                "group_code": 1,
+                "instrument": "COIN_IMAM",
+                "side": "BUY",
+                "settlement": "CASH",
+                "trade_form": "PHYSICAL",
+                "offered_price_value": "187500",
+                "price_unit": "PROJECT_THOUSAND_TOMAN",
+                "quantity_value": "1",
+                "quantity_unit": "COIN_COUNT",
+            },
+        )
+        self._receive(_batch(12, stream_id=stream, deliveries=[(1, offer)]))
+        self.assertEqual(run_adapter_cycle(self.receiver, self.market).applied, 1)
+        self.assertEqual(adapter_metrics(self.market)["applied_count"], 1)
+
+        # Simulate an older store whose ledger existed before the trigger.
+        self.market.execute(
+            "UPDATE private_fact_adapter_status_counts SET delivery_count=0"
+        )
+        self.market.commit()
+        initialize_adapter_store(self.market)
+        statements: list[str] = []
+        self.market.set_trace_callback(statements.append)
+        metrics = adapter_metrics(self.market)
+        self.market.set_trace_callback(None)
+        self.assertEqual(metrics["applied_count"], 1)
+        self.assertEqual(metrics["rejected_count"], 0)
+        self.assertFalse(
+            any(
+                "COUNT(*)" in statement
+                and "private_fact_adapter_deliveries" in statement
+                for statement in statements
+            )
+        )
 
     def test_malformed_unit_is_rejected_and_next_fact_advances(self):
         stream = "market.fact.melted-aggregate"

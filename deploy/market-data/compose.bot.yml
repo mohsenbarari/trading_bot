@@ -65,7 +65,9 @@ services:
     healthcheck:
       test: [CMD, python, -m, core.market_intelligence.private_pipeline_foundation, healthcheck, --role, market-store-adapter]
       interval: 10s
-      timeout: 3s
+      # During a bounded catch-up batch the single-CPU adapter can keep useful
+      # forward progress while the Python health probe competes for CPU.
+      timeout: 8s
       retries: 3
       start_period: 10s
     networks:
