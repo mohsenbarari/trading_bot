@@ -157,3 +157,14 @@ Gateهای image reproducibility، secret scan، Compose isolation، non-root/re
 
 گام باز Stage 3 اکنون backup/restore-proof archive، migration دوپاس، rollout receiver-first،
 postcheck و rollback به release directory/image قبلی بدون حذف state است.
+
+## 12. ابزار backup/restore مستقل — 2026-08-27
+
+`scripts/backup_market_pipeline_archive.py` اکنون قرارداد backup پیش از migration را پیاده
+می‌کند: دیتابیس موجود فقط با runtime identity و schema معتبر پذیرفته می‌شود، dump سفارشی
+PostgreSQL اتمیک و root-only است، restore-smoke در container بدون شبکه اجرا می‌شود و
+schema/table/fact count را آشتی می‌دهد. datastore کاملاً خالی receipt جداگانه
+`INITIAL_EMPTY` دارد و datastore نیمه‌ساخته fail-closed است. receipt به release/image/env مقید
+است و backup موجود را نیازمند کپی verified روی میزبان دوم اعلام می‌کند. این ابزار به‌تنهایی
+هیچ service، database، authority یا capture owner را تغییر نمی‌دهد و هنوز روی production اجرا
+نشده است.

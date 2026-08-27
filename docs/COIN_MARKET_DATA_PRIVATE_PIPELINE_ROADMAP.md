@@ -3,8 +3,9 @@
 وضعیت: roadmap ناتمام است. مراحل 0 و 1 بسته‌اند؛ Stage 2 از نظر
 طراحی و rehearsal گذشته و backup عملیاتی آن باقی است. Docker foundation مرحله 3
 کامل است. قرارداد build/evidence و کد transfer/load/preflight دو میزبان به deploy رسمی
-متصل و offline تست شده، اما اجرای عملیاتی آن مجوز نگرفته و backup/migration، rollout
-receiver-first و rollback رسمی هنوز پیاده و اثبات نشده‌اند. Stage 11 فقط tooling و seed
+متصل و offline تست شده، اما اجرای عملیاتی آن مجوز نگرفته است. ابزار مستقل backup/restore
+آماده و offline تست شده ولی اتصال آن به controller، migration دوپاس، rollout receiver-first و
+rollback رسمی هنوز پیاده و اثبات نشده‌اند. Stage 11 فقط tooling و seed
 هفت‌روزه staging را دارد؛ import کامل تاریخچه
 باز است. Stage 12 از نظر offline سخت‌شده و در انتظار پنجره کامل بازار
 با pin پیش از بازشدن و seal پس از بسته‌شدن است. Stage 13-A قبلاً به‌صورت

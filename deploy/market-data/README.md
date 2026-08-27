@@ -58,6 +58,14 @@ gate دوم اختیاری، payload کنترلی commit-exact را در
 دو نقش را اجرا می‌کند. این gate نیز service یا migration اجرا نمی‌کند؛ حداقل فضای آزاد پیش‌فرض
 ۲ GiB است و هیچ artifact انتقالی در `/tmp` یا `/var/tmp` نمی‌سازد.
 
+ابزار `scripts/backup_market_pipeline_archive.py` گیت مستقل پیش از migration است. برای DB
+موجود، runtime دقیق PostgreSQL را bind می‌کند، `pg_dump -Fc` را در مسیر root-only خارج از
+data root می‌سازد و آن را در container موقت بدون network restore می‌کند. schema/table/fact
+count باید reconcile شود و منابع موقت بعد از cleanup نباید باقی بمانند. datastore کاملاً خالی
+فقط receipt `INITIAL_EMPTY` می‌گیرد؛ حالت نیمه‌ساخته یا DB بدون schema بازار رد می‌شود. backup
+موجود باید پیش از migration با SHA-256 یکسان روی میزبان دوم نگه‌داری شود. این ابزار transport
+یا migration/service start انجام نمی‌دهد.
+
 ## فایل‌ها
 
 - `Dockerfile`: image مشترک serviceها، Python 3.11 Bookworm pinned؛
@@ -170,9 +178,9 @@ artifact باقی‌مانده را نمی‌پذیرد؛ sort بزرگ SQLite �
 1. build از worktree تمیز و label برابر Git SHA؛
 2. ثبت/انتقال همان digest رجیستری یا Docker image ID محتواآدرس‌پذیر برای هر دو میزبان؛
 3. preflight path، secret و private bind؛
-4. receiver-first؛
-5. migration یک‌باره و idempotent؛
-6. writerها بدون authority switch؛
+4. backup/restore-smoke و کپی verified روی failure domain دوم؛
+5. migration یک‌باره و اجرای دوم `already_current`؛
+6. receiver-first و سپس writerها، بدون authority switch؛
 7. shadow/parity؛
 8. authority switch با مجوز مستقل؛
 9. postcheck و soak؛
