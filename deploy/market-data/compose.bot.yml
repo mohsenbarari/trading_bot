@@ -28,7 +28,10 @@ services:
     healthcheck:
       test: [CMD, python, -m, core.market_intelligence.private_pipeline_foundation, healthcheck, --role, market-fact-receiver]
       interval: 10s
-      timeout: 3s
+      # A large, valid backfill can keep the single-CPU receiver busy in a
+      # durable SQLite commit while the Python probe starts. Metrics are O(1),
+      # but process startup still needs the same bounded allowance as adapter.
+      timeout: 8s
       retries: 3
       start_period: 10s
     networks:
