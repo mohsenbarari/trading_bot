@@ -185,10 +185,10 @@ describe('PublicProfile.vue', () => {
   it('keeps profile-header tracks shrinkable on narrow devices', () => {
     const headerRule = publicProfileSource.match(/\.profile-header-row\s*\{([\s\S]*?)\n\}/)?.[1]
 
-    expect(headerRule).toContain(
-      'grid-template-columns: minmax(4rem, 5.5rem) minmax(0, 1fr) minmax(3rem, 5.5rem);',
-    )
+    expect(headerRule).toContain('display: flex;')
+    expect(headerRule).toContain('flex-direction: column;')
     expect(headerRule).toContain('min-width: 0;')
+    expect(headerRule).not.toMatch(/grid-template-columns/)
     expect(publicProfileSource).toMatch(/\.profile-header-row\s*>\s*\*\s*\{\s*min-width:\s*0;/)
   })
 

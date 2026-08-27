@@ -990,7 +990,12 @@ onBeforeUnmount(() => {
     :class="showCloseButton ? 'channel-admin-shell--sheet' : 'channel-admin-shell--page'"
   >
     <input ref="avatarInput" type="file" accept="image/*" class="hidden-avatar-input" @change="handleAvatarSelected" />
-    <header class="channel-admin-header">
+    <header
+      v-if="showCloseButton || canGoBack"
+      class="channel-admin-header"
+      :class="{ 'channel-admin-header--page': !showCloseButton }"
+      data-test="channel-page-header"
+    >
       <AppBackButton label="بازگشت" :disabled="!canGoBack" @click="handleManagerBack()" />
       <div class="header-copy">
         <h2>{{ pageTitle }}</h2>
@@ -1380,8 +1385,15 @@ onBeforeUnmount(() => {
 
 .channel-admin-shell--page {
   max-height: none;
+  overflow: visible;
   border-radius: 0;
   background: transparent;
+}
+
+.channel-admin-shell--page .manager-body {
+  flex: none;
+  overflow: visible;
+  padding: 0;
 }
 
 .channel-admin-header {
@@ -1391,6 +1403,12 @@ onBeforeUnmount(() => {
   padding: 14px 16px;
   background: var(--ds-bg-card, #fff);
   border-bottom: 1px solid var(--ds-native-hairline, rgba(60, 60, 67, 0.12));
+}
+
+.channel-admin-header--page {
+  padding: 0 0 0.25rem;
+  background: transparent;
+  border-bottom: 0;
 }
 
 .channel-admin-header-btn {
@@ -1418,13 +1436,17 @@ onBeforeUnmount(() => {
 .header-copy h2 {
   margin: 0;
   font-size: 1rem;
-  font-weight: 900;
-  color: #0f172a;
+  font-weight: 800;
+  color: var(--ds-text-primary);
+}
+
+.channel-admin-header--page .header-copy h2 {
+  font-size: var(--ds-native-title-size, 1.7rem);
 }
 
 .header-copy span {
-  color: #64748b;
-  font-size: 0.78rem;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-sm);
 }
 
 .header-spacer {
@@ -1450,7 +1472,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 12px 16px 16px;
+  padding: 4px 0 8px;
 }
 
 .channel-status-banner,
@@ -1493,31 +1515,31 @@ onBeforeUnmount(() => {
 
 .selection-banner {
   justify-content: space-between;
-  background: var(--ds-bg-card, #fff);
+  background: var(--ds-bg-card);
   border: 1px solid var(--ds-native-hairline, rgba(60, 60, 67, 0.12));
-  color: #0f172a;
+  color: var(--ds-text-primary);
   font-weight: 800;
 }
 
 .manager-role-strip {
   justify-content: space-between;
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  color: #64748b;
+  background: var(--ds-bg-card);
+  border: 1px solid var(--ds-native-hairline, rgba(60, 60, 67, 0.12));
+  color: var(--ds-text-secondary);
   font-size: 0.82rem;
   font-weight: 800;
 }
 
 .manager-role-strip strong {
-  color: #0f172a;
+  color: var(--ds-text-primary);
   font-size: 0.86rem;
 }
 
 .select-all-toggle {
   justify-content: space-between;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  color: #334155;
+  background: var(--ds-bg-card);
+  border: 1px solid var(--ds-native-hairline, rgba(60, 60, 67, 0.12));
+  color: var(--ds-text-primary);
   cursor: pointer;
 }
 
@@ -1642,13 +1664,13 @@ onBeforeUnmount(() => {
 
 .manager-preview-title {
   font-size: 1.18rem;
-  font-weight: 900;
-  color: #0f172a;
+  font-weight: 800;
+  color: var(--ds-text-primary);
 }
 
 .manager-preview-meta,
 .manager-preview-description {
-  color: #64748b;
+  color: var(--ds-text-secondary);
   font-size: var(--ds-font-meta);
 }
 

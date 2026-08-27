@@ -2373,7 +2373,7 @@ function handleHistoryPresetChipChange(value: string) {
 
 .profile-content--own {
   gap: 0.75rem;
-  padding-top: 4px;
+  padding-top: 0;
 }
 
 .profile-content .profile-section,
@@ -2391,15 +2391,11 @@ function handleHistoryPresetChipChange(value: string) {
 }
 
 .profile-header-row {
-  /*
-   * Keep the title track explicitly shrinkable. A bare `1fr` has an automatic
-   * minimum, so a long account name could widen the whole route at 360px and
-   * push the back control outside the viewport.
-   */
-  grid-template-columns: minmax(4rem, 5.5rem) minmax(0, 1fr) minmax(3rem, 5.5rem);
-  align-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   min-width: 0;
-  padding-bottom: 24px;
+  padding-bottom: 1rem;
 }
 
 .profile-header-row > * {
@@ -2513,15 +2509,12 @@ function handleHistoryPresetChipChange(value: string) {
 }
 
 .profile-presence-status--own {
-  position: absolute;
-  top: 68px;
-  left: 0;
-  right: 0;
+  position: static;
   margin: 0;
   min-height: 1.1rem;
   font-size: 0.76rem;
   line-height: 1.45;
-  text-align: center;
+  text-align: start;
 }
 
 .profile-presence-status--header {

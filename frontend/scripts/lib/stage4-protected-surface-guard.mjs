@@ -633,9 +633,9 @@ export const NATIVE_APP_MESSENGER_VISUAL_REQUIRED_MARKERS = Object.freeze([
 
 export const NATIVE_APP_MESSENGER_VISUAL_EVIDENCE = Object.freeze({
   count: 85,
-  contentBytes: 1291425,
+  contentBytes: 1292059,
   pathSetSha256: 'f6af1f961e45d785ba9c752ee670643571086c6a946843807fe6f581d11aea58',
-  sha256: 'c953c15f5fc9d8ecd838d6f83a4af4e137f7af4e73f29f411a3e3e194f0db598',
+  sha256: '466798f7bd57a3b0874fc559677af7d21685981e5e08c2fd518e3aff5d298b1f',
 })
 
 const RUNTIME_SOURCE_EXTENSION = /\.(?:css|[cm]?[jt]sx?|vue)$/

@@ -1073,6 +1073,9 @@ describe('CreateChannelView.vue', () => {
     expect(createChannelSource).toContain('AppInsetGroup')
     expect(createChannelSource).not.toContain('<main')
     expect(createChannelSource).not.toContain(':hover:not(:disabled)')
+    expect(createChannelSource).toContain('v-if="showCloseButton || canGoBack"')
+    expect(createChannelSource).toContain('channel-admin-header--page')
+    expect(createChannelSource).toContain('.channel-admin-shell--page .manager-body')
   })
 
 })

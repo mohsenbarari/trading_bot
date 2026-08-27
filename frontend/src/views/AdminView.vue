@@ -822,20 +822,19 @@ onUnmounted(() => {
             />
             <h1 class="admin-subview-title">{{ currentSectionMeta.title }}</h1>
           </div>
-          <AppSectionCard class="admin-subview-card">
+          <CreateChannelView
+            v-if="currentSection === 'create_channel'"
+            :apiBaseUrl="apiBaseUrl"
+            :jwtToken="jwtToken"
+            @open-public-profile="handleOpenPublicProfile"
+          />
+          <AppSectionCard v-else class="admin-subview-card">
 
             <transition name="fade" mode="out-in">
               <CreateInvitationView
                 v-if="currentSection === 'create_invitation'"
                 :apiBaseUrl="apiBaseUrl"
                 :jwtToken="jwtToken"
-              />
-
-              <CreateChannelView
-                v-else-if="currentSection === 'create_channel'"
-                :apiBaseUrl="apiBaseUrl"
-                :jwtToken="jwtToken"
-                @open-public-profile="handleOpenPublicProfile"
               />
 
               <CommodityManager

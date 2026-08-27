@@ -95,6 +95,7 @@ describe('profile presentation primitives', () => {
     })
 
     expect(presence.classes()).toContain('profile-presence-status--own')
+    expect(presence.attributes('style') || '').not.toContain('absolute')
     expect(summary.get('[aria-label="خلاصه وضعیت پروفایل"]').text()).toContain('عضویت')
     expect(summary.text()).toContain('پروفایل مشتری')
     expect(summary.text()).not.toContain('سطح')
