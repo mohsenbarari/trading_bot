@@ -134,6 +134,7 @@ def _snapshot(
         grouped_id=None,
         sender_id=sender_id,
         sender_kind="user" if sender_id is not None else "unknown",
+        sender_display_name=("Fixture User" if sender_id is not None else None),
         is_forwarded=False,
         via_bot=False,
         post=False,

@@ -103,6 +103,8 @@ class CaptureEvent:
     parser_profile: str | None = None
     entities_json: str = "[]"
     sender_identity: str | None = None
+    sender_telegram_id: str | None = None
+    sender_display_name: str | None = None
     reply_to_message_id: int | None = None
 
 
@@ -425,7 +427,11 @@ def decode_market_channel_event(record: object) -> CaptureEvent:
 
 def decode_coin_group_event(record: object) -> CaptureEvent:
     envelope = _mapping(record, field="coin_capture_envelope")
-    if envelope.get("schema") != "coin_group_event" or str(envelope.get("schema_version")) != "2.0":
+    schema_version = str(envelope.get("schema_version"))
+    if (
+        envelope.get("schema") != "coin_group_event"
+        or schema_version not in {"2.0", "2.1"}
+    ):
         raise CaptureEventContractError("coin_capture_schema_unsupported")
     event_type = str(envelope.get("event_type") or "")
     if event_type not in _GROUP_EVENT_TYPES:
@@ -444,6 +450,8 @@ def decode_coin_group_event(record: object) -> CaptureEvent:
     available = _stamp(producer.get("available_at_utc"), field="coin_capture_available_at_utc")
     reply_to = None
     sender = None
+    sender_telegram_id = None
+    sender_display_name = None
     if not deleted:
         reply = _mapping(message.get("reply"), field="coin_capture_reply")
         status = str(reply.get("status") or "")
@@ -454,6 +462,23 @@ def decode_coin_group_event(record: object) -> CaptureEvent:
         sender_payload = _mapping(message.get("sender"), field="coin_capture_sender")
         raw_sender = str(sender_payload.get("peer_id") or "").strip()
         sender = raw_sender or None
+        raw_telegram_id = str(sender_payload.get("telegram_id") or "").strip()
+        if raw_telegram_id:
+            if not re.fullmatch(r"[1-9][0-9]{0,19}", raw_telegram_id):
+                raise CaptureEventContractError("coin_capture_sender_telegram_id_invalid")
+            sender_telegram_id = raw_telegram_id
+        raw_display_name = sender_payload.get("display_name")
+        if raw_display_name is not None:
+            if not isinstance(raw_display_name, str):
+                raise CaptureEventContractError("coin_capture_sender_name_invalid")
+            sender_display_name = " ".join(raw_display_name.split()) or None
+            if (
+                sender_display_name is not None
+                and len(sender_display_name.encode("utf-8")) > 512
+            ):
+                raise CaptureEventContractError("coin_capture_sender_name_invalid")
+        if schema_version == "2.1" and sender and sender_telegram_id is None:
+            raise CaptureEventContractError("coin_capture_sender_telegram_id_missing")
     event = CaptureEvent(
         stream="coin",
         event_id=_event_id(envelope.get("event_id")),
@@ -467,6 +492,8 @@ def decode_coin_group_event(record: object) -> CaptureEvent:
         is_forwarded=bool(message.get("is_forwarded", False)),
         is_backfill=bool(message.get("is_backfill", False)),
         sender_identity=sender,
+        sender_telegram_id=sender_telegram_id,
+        sender_display_name=sender_display_name,
         reply_to_message_id=reply_to,
     )
     _validate_time_order(event)
@@ -1063,6 +1090,8 @@ def _apply_group_message(connection: sqlite3.Connection, event: CaptureEvent) ->
             text=event.text,
             reply_to_message_id=event.reply_to_message_id,
             sender_identity=event.sender_identity,
+            sender_telegram_id=event.sender_telegram_id,
+            sender_display_name=event.sender_display_name,
             edited_at_utc=event.edited_at_utc,
         ),
         staged_at_utc=event.available_at_utc,

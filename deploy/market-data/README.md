@@ -16,7 +16,7 @@
 - `market-processor` هر سه spool و نه source را با بودجه مستقل مصرف می‌کند و فقط
   Market Store و input ledger در حالت shadow می‌سازد؛
 - PostgreSQL archive/outbox، Fact sender/receiver، adapter بات، estimator snapshot و مسیر
-  برگشت WebApp پیاده و در Docker آزمایش شده‌اند؛ migration مستقل اکنون version 2 و ۲۶ جدول است؛
+  برگشت WebApp پیاده و در Docker آزمایش شده‌اند؛ migration مستقل اکنون version 3 و ۲۸ جدول است؛
 - importer تاریخچه و parity report امضاشده آماده‌اند، ولی import واقعی، deploy و authority
   switch هنوز انجام نشده است.
 
@@ -122,6 +122,23 @@ config زنده یک secret JSON با contract برابر
 `MELTED_PRIMARY_FLOW`, `MELTED_AGGREGATE`, `MELTED_FLOW`, `USD_HERAT`, `XAUUSD` و
 Account 2 باید دقیقاً `GROUP_1`, `GROUP_2` را bind کند. peer ID و API credential فقط
 داخل همان secret خارج Git می‌مانند. HMAC هویت فرستنده Account 2 secret جداگانه است.
+نسخه 2.1 رویداد گروه، شناسه تلگرام و نام نمایشی را فقط تا مرز processor حمل می‌کند؛
+نسخه دائمی هر دو مقدار با کلید مستقل `market_research_encryption_key` در PostgreSQL وب
+رمز می‌شود و هرگز وارد Fact، transport بات، log یا heartbeat نمی‌شود. متن خام متناظر با
+factهای پنج منبع پژوهشی نیز با همان کلید و بدون message/link/channel metadata نگه‌داری
+می‌شود. دو کانال عمومی آبشده از migration 3 آرشیو دائمی‌اند؛ envelopeهای ACKشده outbox
+پس از هفت روز و فقط پشت checkpoint به `{}` فشرده می‌شوند.
+پیش‌نمایش backfill محلی و بدون نمایش محتوای حساس با دستور زیر انجام می‌شود؛ افزودن
+`--apply` فقط پس از migration و نصب secret مجاز است و ورودی‌های هم‌پوشان را idempotent
+مصرف می‌کند:
+
+```bash
+python -m core.market_intelligence.market_research_backfill \
+  --capture-db /var/lib/market-data/state/market-processor/capture-staging.sqlite3
+```
+
+captureهای قدیمی گروه فقط peer HMAC و نام `null` دارند؛ بنابراین شناسه و نام واقعی آن
+بخش از تاریخچه قابل بازسازی نیست و آرشیو هویت از اولین رویداد نسخه 2.1 کامل می‌شود.
 در cutover، همان HMAC key فعال capture فعلی باید به secret جدید منتقل شود؛ تولید کلید
 تازه branchهای reply نزدیک cutover را از هم جدا می‌کند و ممنوع است.
 

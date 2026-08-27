@@ -136,11 +136,17 @@ Telegram/API
 | هرات (`طوفان هریرود`) | بله | quote/offer/trade normalization | بله | facts | USD/Herat input |
 | اونس (`نرخ انس کهکشان`) | بله | XAU quote normalization | بله، event-driven | fact + consumed feature | XAU و regime |
 | تتر Wallex | API | MID/quote normalization | بله، poll موفق | fact + consumed feature | trend/regime/fallback |
-| نقدی بازار (`abshdh`) | بله | melted aggregate | خیر؛ raw سه‌روزه | facts زنده لازم | fallback/flow فعلی |
-| نقدی پله (`NaghdP`) | بله | melted flow/trade | خیر؛ raw سه‌روزه | facts زنده لازم | fallback/order flow |
+| نقدی بازار (`abshdh`) | بله | melted aggregate | بله؛ متن خام منتخب + facts | facts زنده لازم | fallback/flow و پژوهش |
+| نقدی پله (`NaghdP`) | بله | melted flow/trade | بله؛ متن خام منتخب + facts | facts زنده لازم | fallback/order flow و پژوهش |
 | بورس | بعداً | بعداً | بعداً | بعداً | خارج از این roadmap |
 
 نام‌های نمایشی بالا فقط برای traceability طراحی‌اند. قرارداد runtime از `source_code` ثابت و allowlist‌شده استفاده می‌کند و وابسته به عنوان قابل تغییر کانال نیست.
+
+تصمیم تکمیلی 2026-08-27: PostgreSQL وب/داده مرجع واحد پژوهشی است. برای دو گروه سکه،
+متن خام آفر، factهای parse‌شده، گروه 1/2 و شناسه/نام آفر‌دهنده و درخواست‌دهنده نگه‌داری
+می‌شود. برای آبشده، `PRIVATE_GOLD_CHANNEL`، `MELTED_AGGREGATE` و `MELTED_FLOW` مستقل
+می‌مانند. raw و هویت فقط رمز‌شده‌اند؛ Telegram message/link/channel metadata و payload
+انتقالی دائمی نمی‌شوند. تصمیم قبلیِ transient بودن دو کانال عمومی از این تاریخ منسوخ است.
 
 ## 5. قرارداد داده دائمی
 
@@ -732,7 +738,8 @@ Gate:
 - generic edit به‌عنوان معامله ثبت نمی‌شود؛
 - revision ناقص یا inconsistent به AMBIGUOUS می‌رود؛
 - `final_price/final_quantity` در schema/code/API وجود ندارد؛
-- دو کانال عمومی آبشده وارد archive دائمی نمی‌شوند.
+- دو کانال عمومی آبشده طبق تصمیم 2026-08-27 وارد archive دائمی می‌شوند؛ عبارت تاریخی
+  «وارد نمی‌شوند» در receipt مرحله 6 فقط وضعیت همان اجرای قدیمی را توصیف می‌کند.
 
 نتیجه اجرا در 2026-08-26:
 
@@ -1315,10 +1322,11 @@ SLOها بعد از baseline خصوصی می‌توانند فقط سخت‌گی
 
 ## 12. Backup، بازیابی و retention
 
-- raw spool: سه روز؛
+- raw spool: سه روز؛ متن خام منتخب پژوهشی پیش از purge، رمز‌شده و دائمی می‌شود؛
 - curated permanent facts: بدون حذف خودکار تا تصویب policy آینده؛
 - rejected/quarantine: retention جدا و قابل تنظیم، بدون متن نامرتبط؛
-- outbox delivered rows: bounded operational retention پس از checkpoint/backup؛
+- outbox delivered envelope: هفت روز پس از ACK و فقط پشت checkpoint؛ سپس payload
+  redacted و sequence/fact/revision/hash حفظ می‌شود؛
 - کپی payload در inbox گیرنده: فقط پس از checkpoint پایدار adapter و گذشت سه روز
   redacted می‌شود؛ metadata هویتی stream/sequence/fact/revision/hash برای replay،
   duplicate و conflict دائمی می‌ماند و عقب‌گرد watermark به‌صورت fail-closed رد می‌شود؛

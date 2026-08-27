@@ -59,6 +59,7 @@ from .private_gold import PRIVATE_GOLD_PARSER_VERSION
 from .private_gold_trade_revisions import PRIVATE_GOLD_TRADE_REVISION_VERSION
 from .private_pipeline_foundation import atomic_json_write, utc_text
 from .public_telegram.parser import PARSER_VERSION as PUBLIC_MARKET_PARSER_VERSION
+from .research_archive import ResearchArchiveError, ResearchArchiveKey
 
 
 PROCESSOR_HEARTBEAT_SCHEMA = "market_processor/4.0"
@@ -666,6 +667,24 @@ def _archive_connection():
         raise CoinProcessorError("market_processor_archive_unavailable") from exc
 
 
+def _research_archive_key() -> ResearchArchiveKey | None:
+    if os.environ.get("MARKET_RESEARCH_ARCHIVE_ENABLED", "0").strip() != "1":
+        return None
+    path = Path(
+        os.environ.get(
+            "MARKET_RESEARCH_ENCRYPTION_KEY_FILE",
+            "/run/secrets/market_research_encryption_key",
+        )
+    )
+    key_id = os.environ.get(
+        "MARKET_RESEARCH_ENCRYPTION_KEY_ID", "market-research:v1"
+    ).strip()
+    try:
+        return ResearchArchiveKey.from_file(path, key_id=key_id)
+    except ResearchArchiveError as exc:
+        raise CoinProcessorError(str(exc)) from exc
+
+
 def process_coin_spool_cycle(
     *,
     paths: CoinProcessorPaths,
@@ -775,10 +794,16 @@ def process_coin_spool_cycle(
         corpus.commit()
         archive_report = None
         if os.environ.get("MARKET_PROCESSOR_ARCHIVE_ENABLED", "0").strip() == "1":
+            research_key = _research_archive_key()
             archive = _archive_connection()
             try:
                 with archive:
-                    archive_report = export_market_store_facts(market, archive)
+                    archive_report = export_market_store_facts(
+                        market,
+                        archive,
+                        capture_staging=staging,
+                        research_key=research_key,
+                    )
                 # Advance the local export ledger only after PostgreSQL has
                 # committed the fact and outbox item in one transaction.
                 market.commit()
@@ -837,6 +862,15 @@ def process_coin_spool_cycle(
         "archive_published": archive_report.published if archive_report else 0,
         "archive_unchanged": archive_report.unchanged if archive_report else 0,
         "archive_rejected": archive_report.rejected if archive_report else 0,
+        "research_contexts_required": (
+            archive_report.research_contexts_required if archive_report else 0
+        ),
+        "research_contexts_archived": (
+            archive_report.research_contexts_archived if archive_report else 0
+        ),
+        "research_contexts_unavailable": (
+            archive_report.research_contexts_unavailable if archive_report else 0
+        ),
     }
 
 

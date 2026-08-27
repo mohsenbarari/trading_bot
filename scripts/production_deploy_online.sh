@@ -4651,8 +4651,8 @@ set -a
 . '$REMOTE_MARKET_PIPELINE_WEB_ENV'
 set +a
 query() { docker exec '$expected_id' psql -X -v ON_ERROR_STOP=1 -At -U \"\$MARKET_POSTGRES_USER\" -d \"\$MARKET_POSTGRES_DB\" -c \"\$1\"; }
-[ \"\$(query \"SELECT string_agg(version::text, ',' ORDER BY version) FROM market_data.schema_migrations\")\" = 1,2 ]
-[ \"\$(query \"SELECT count(*) FROM information_schema.tables WHERE table_schema='market_data'\")\" = 26 ]
+[ \"\$(query \"SELECT string_agg(version::text, ',' ORDER BY version) FROM market_data.schema_migrations\")\" = 1,2,3 ]
+[ \"\$(query \"SELECT count(*) FROM information_schema.tables WHERE table_schema='market_data'\")\" = 28 ]
 facts=\"\$(query \"SELECT count(*) FROM market_data.market_facts\")\"
 [[ \"\$facts\" =~ ^[0-9]+$ ]] && [ \"\$facts\" -ge '$expected_facts' ]
 mapfile -t services < <(docker ps \\

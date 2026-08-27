@@ -194,7 +194,7 @@ class MarketHistoryExportTests(unittest.TestCase):
                 _scan_forbidden(bundle)
             modes = {item["source_code"]: item["retention_mode"] for item in manifest["bundles"]}
             self.assertEqual(modes["GROUP_1"], "PERMANENT_ARCHIVE")
-            self.assertEqual(modes["MELTED_FLOW"], "TRANSIENT_SEED")
+            self.assertEqual(modes["MELTED_FLOW"], "PERMANENT_ARCHIVE")
 
             second = protected / "second"
             repeated = export_market_history(

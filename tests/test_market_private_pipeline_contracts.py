@@ -123,8 +123,8 @@ class MarketPrivatePipelineContractTests(unittest.TestCase):
         self.assertEqual(set(sources), expected)
         self.assertTrue(sources["GROUP_1"].permanent_archive)
         self.assertTrue(sources["XAUUSD"].permanent_archive)
-        self.assertFalse(sources["MELTED_AGGREGATE"].permanent_archive)
-        self.assertFalse(sources["MELTED_FLOW"].permanent_archive)
+        self.assertTrue(sources["MELTED_AGGREGATE"].permanent_archive)
+        self.assertTrue(sources["MELTED_FLOW"].permanent_archive)
         self.assertFalse(sources["IME_REALTIME_BOARD"].capture_enabled)
         self.assertEqual(sources["GROUP_2"].raw_retention_seconds, 259_200)
 

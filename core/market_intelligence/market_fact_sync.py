@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import random
@@ -36,6 +36,9 @@ MAX_BATCH_DOCUMENT_BYTES = 768 * 1024
 DEFAULT_FLUSH_SECONDS = 0.25
 MAX_BACKOFF_SECONDS = 30.0
 ALERT_AFTER_ATTEMPTS = 8
+OUTBOX_ENVELOPE_RETENTION = timedelta(days=7)
+OUTBOX_COMPACTION_INTERVAL_SECONDS = 300.0
+OUTBOX_COMPACTION_BATCH_SIZE = 10_000
 
 
 class MarketFactSyncError(RuntimeError):
@@ -348,6 +351,50 @@ def outbox_metrics(connection) -> dict[str, object]:
     }
 
 
+def compact_acknowledged_outbox(
+    connection,
+    *,
+    now: datetime | None = None,
+    retention: timedelta = OUTBOX_ENVELOPE_RETENTION,
+    batch_size: int = OUTBOX_COMPACTION_BATCH_SIZE,
+) -> int:
+    """Redact delivered envelopes only behind the durable stream checkpoint."""
+
+    if retention.total_seconds() < 86_400 or not 1 <= batch_size <= 100_000:
+        raise MarketFactSyncError("market_fact_outbox_compaction_policy_invalid")
+    cutoff = (now or _utc_now()) - retention
+    with connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                WITH eligible AS (
+                    SELECT o.ctid
+                    FROM market_data.market_fact_outbox AS o
+                    JOIN market_data.market_fact_delivery_checkpoints AS c
+                      ON c.stream_id=o.stream_id
+                    LEFT JOIN market_data.market_fact_dead_letters AS d
+                      ON d.stream_id=o.stream_id
+                     AND d.delivery_sequence=o.delivery_sequence
+                     AND d.repaired_at_utc IS NULL
+                    WHERE o.acknowledged_at_utc IS NOT NULL
+                      AND o.acknowledged_at_utc < %s
+                      AND o.delivery_sequence <= c.highest_contiguous_sequence
+                      AND o.envelope_compacted_at_utc IS NULL
+                      AND d.delivery_sequence IS NULL
+                    ORDER BY o.acknowledged_at_utc,o.stream_id,o.delivery_sequence
+                    LIMIT %s
+                )
+                UPDATE market_data.market_fact_outbox AS o
+                SET envelope='{}'::jsonb,
+                    envelope_compacted_at_utc=clock_timestamp()
+                FROM eligible
+                WHERE o.ctid=eligible.ctid
+                """,
+                (cutoff, batch_size),
+            )
+            return max(0, int(cursor.rowcount or 0))
+
+
 def repair_dead_letter(connection, *, stream_id: str, delivery_sequence: int) -> None:
     """Re-arm exactly the blocked stream head without deleting audit evidence."""
 
@@ -505,6 +552,8 @@ def run_market_fact_sync_service(
     connection = _postgres_connection()
     aggregate = {"sent": 0, "acknowledged": 0, "duplicates": 0, "rejected": 0}
     ack_latencies: deque[float] = deque(maxlen=512)
+    last_compaction = 0.0
+    compacted_envelopes = 0
 
     def sender(document: Mapping[str, object]) -> tuple[int, Mapping[str, object]]:
         if mode != "live" or tls is None:
@@ -533,6 +582,10 @@ def run_market_fact_sync_service(
                 aggregate[field] += int(cycle.get(field, 0) or 0)
             if cycle.get("ack_latency_ms") is not None:
                 ack_latencies.append(float(cycle["ack_latency_ms"]))
+            monotonic_now = time.monotonic()
+            if monotonic_now - last_compaction >= OUTBOX_COMPACTION_INTERVAL_SECONDS:
+                compacted_envelopes += compact_acknowledged_outbox(connection)
+                last_compaction = monotonic_now
             metrics = outbox_metrics(connection)
             ordered_latencies = sorted(ack_latencies)
 
@@ -564,6 +617,7 @@ def run_market_fact_sync_service(
                     "ack_latency_p95_ms": latency_percentile(0.95),
                     "ack_latency_p99_ms": latency_percentile(0.99),
                     "ack_latency_sample_count": len(ack_latencies),
+                    "compacted_outbox_envelopes": compacted_envelopes,
                     **aggregate,
                     **metrics,
                 },

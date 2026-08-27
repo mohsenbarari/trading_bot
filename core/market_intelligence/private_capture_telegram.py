@@ -118,6 +118,7 @@ class TelegramMessageSnapshot:
     grouped_id: int | None
     sender_id: int | None
     sender_kind: str
+    sender_display_name: str | None
     is_forwarded: bool
     via_bot: bool
     post: bool
@@ -407,7 +408,7 @@ def build_group_event(
         topic_id = parent
     return {
         "schema": "coin_group_event",
-        "schema_version": "2.0",
+        "schema_version": "2.1",
         "event_id": _stable_uuid7(occurred, identity),
         "event_type": event_type,
         "occurred_at_utc": utc_text(occurred),
@@ -421,7 +422,12 @@ def build_group_event(
             "sender": {
                 "peer_id": _sender_identity(hmac_key, snapshot.sender_id),
                 "kind": snapshot.sender_kind,
-                "display_name": None,
+                "telegram_id": (
+                    str(_bare_peer_id(snapshot.sender_id))
+                    if snapshot.sender_id is not None
+                    else None
+                ),
+                "display_name": snapshot.sender_display_name,
             },
             "reply": {
                 "status": reply_status,
@@ -442,7 +448,7 @@ def build_group_event(
         },
         "producer": {
             "name": "coin_group_capture",
-            "version": "3.0.0-docker",
+            "version": "3.1.0-docker",
             "available_at_utc": utc_text(available),
         },
     }
@@ -489,7 +495,7 @@ def build_deleted_event(
         }
     return {
         "schema": "coin_group_event",
-        "schema_version": "2.0",
+        "schema_version": "2.1",
         "event_id": _stable_hash_id(
             "cge2_", f"coin_group_event|delete|{policy.source_code}|{message_id}"
         ),
@@ -499,7 +505,7 @@ def build_deleted_event(
         "message": {"message_id": str(message_id)},
         "producer": {
             "name": "coin_group_capture",
-            "version": "3.0.0-docker",
+            "version": "3.1.0-docker",
             "available_at_utc": utc_text(received),
         },
     }
@@ -512,7 +518,32 @@ def _safe_type(value: object) -> str | None:
     return name if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,95}", name) else "Unknown"
 
 
-def snapshot_from_telethon(message: object, *, is_forum: bool) -> TelegramMessageSnapshot:
+def _display_name(sender: object | None) -> str | None:
+    if sender is None:
+        return None
+    parts = [
+        str(value).strip()
+        for value in (
+            getattr(sender, "first_name", None),
+            getattr(sender, "last_name", None),
+        )
+        if str(value or "").strip()
+    ]
+    candidate = " ".join(parts) or str(getattr(sender, "title", None) or "").strip()
+    if not candidate:
+        return None
+    normalized = " ".join(candidate.split())
+    while len(normalized.encode("utf-8")) > 512:
+        normalized = normalized[:-1]
+    return normalized or None
+
+
+def snapshot_from_telethon(
+    message: object,
+    *,
+    is_forum: bool,
+    sender_entity: object | None = None,
+) -> TelegramMessageSnapshot:
     published = _aware(getattr(message, "date", None), field="telegram_message_date")
     if published is None:
         raise CaptureRuntimeError("telegram_message_date_missing")
@@ -533,7 +564,7 @@ def snapshot_from_telethon(message: object, *, is_forum: bool) -> TelegramMessag
             }
         )
     reply = getattr(message, "reply_to", None)
-    sender = getattr(message, "sender", None)
+    sender = sender_entity if sender_entity is not None else getattr(message, "sender", None)
     sender_id = getattr(message, "sender_id", None)
     sender_kind = "unknown"
     if sender_id is not None:
@@ -571,6 +602,7 @@ def snapshot_from_telethon(message: object, *, is_forum: bool) -> TelegramMessag
         ),
         sender_id=int(sender_id) if sender_id is not None else None,
         sender_kind=sender_kind,
+        sender_display_name=_display_name(sender),
         is_forwarded=getattr(message, "fwd_from", None) is not None,
         via_bot=getattr(message, "via_bot_id", None) is not None,
         post=bool(getattr(message, "post", False)),
@@ -646,9 +678,22 @@ class TelegramCaptureProvider:
         edited: bool,
         parent_depth: int = 0,
     ) -> None:
+        sender_entity = getattr(message, "sender", None)
+        if (
+            policy.account == "account2"
+            and sender_entity is None
+            and getattr(message, "sender_id", None) is not None
+        ):
+            try:
+                sender_entity = await message.get_sender()  # type: ignore[attr-defined]
+            except Exception:  # Telegram entity lookup is non-critical enrichment.
+                # Identity is still retained when Telegram supplies sender_id;
+                # a missing display-name lookup must not interrupt capture.
+                sender_entity = None
         snapshot = snapshot_from_telethon(
             message,
             is_forum=bool(getattr(self._entity_by_source[policy.source_code], "forum", False)),
+            sender_entity=sender_entity,
         )
         entity_id = getattr(self._entity_by_source[policy.source_code], "id", None)
         if (

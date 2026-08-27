@@ -58,6 +58,7 @@ def snapshot(
         grouped_id=None,
         sender_id=sender_id,
         sender_kind="user" if sender_id is not None else "unknown",
+        sender_display_name=("Test User" if sender_id is not None else None),
         is_forwarded=False,
         via_bot=False,
         post=False,
@@ -536,6 +537,9 @@ class CaptureContractTests(unittest.TestCase):
         self.assertEqual(decoded.reply_to_message_id, 1)
         self.assertEqual(decoded.edited_at_utc, "2026-08-26T10:00:02Z")
         self.assertRegex(decoded.sender_identity or "", r"^[0-9a-f]{16}$")
+        self.assertEqual(decoded.sender_telegram_id, "7001")
+        self.assertEqual(decoded.sender_display_name, "Test User")
+        self.assertEqual(group["schema_version"], "2.1")
         deleted = build_deleted_event(
             SOURCE_POLICIES["GROUP_1"], message_id=2, received_at=published
         )

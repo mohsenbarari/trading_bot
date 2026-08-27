@@ -176,12 +176,16 @@ services:
       MARKET_PROCESSOR_PREDICTION_DB: /var/lib/market-data/calibration/coin-groups/prediction-ledger.sqlite3
       MARKET_PROCESSOR_INTERVAL_SECONDS: ${MARKET_PROCESSOR_INTERVAL_SECONDS:-1}
       MARKET_PROCESSOR_ARCHIVE_ENABLED: "1"
+      MARKET_RESEARCH_ARCHIVE_ENABLED: ${MARKET_RESEARCH_ARCHIVE_ENABLED:-1}
+      MARKET_RESEARCH_ENCRYPTION_KEY_FILE: /run/secrets/market_research_encryption_key
+      MARKET_RESEARCH_ENCRYPTION_KEY_ID: ${MARKET_RESEARCH_ENCRYPTION_KEY_ID:-market-research:v1}
       MARKET_POSTGRES_HOST: market-database
       MARKET_POSTGRES_USER: ${MARKET_POSTGRES_USER:-market_data}
       MARKET_POSTGRES_DB: ${MARKET_POSTGRES_DB:-market_archive}
       MARKET_POSTGRES_PASSWORD_FILE: /run/secrets/market_postgres_password
     secrets:
       - market_postgres_password
+      - market_research_encryption_key
     volumes:
       - type: bind
         source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/state/market-processor
@@ -309,6 +313,8 @@ secrets:
     file: ${MARKET_CAPTURE_ACCOUNT2_CONFIG_FILE:?MARKET_CAPTURE_ACCOUNT2_CONFIG_FILE is required}
   market_capture_account2_hmac:
     file: ${MARKET_CAPTURE_ACCOUNT2_HMAC_FILE:?MARKET_CAPTURE_ACCOUNT2_HMAC_FILE is required}
+  market_research_encryption_key:
+    file: ${MARKET_RESEARCH_ENCRYPTION_KEY_FILE:?MARKET_RESEARCH_ENCRYPTION_KEY_FILE is required}
   market_transport_ca:
     file: ${MARKET_TRANSPORT_CA_FILE:?MARKET_TRANSPORT_CA_FILE is required}
   market_web_transport_cert:

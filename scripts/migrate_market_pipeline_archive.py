@@ -19,12 +19,19 @@ else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from scripts import backup_market_pipeline_archive as backup
 
+from core.market_intelligence.private_pipeline_foundation import (
+    MARKET_SCHEMA_TABLE_COUNT,
+    MARKET_SCHEMA_VERSION,
+)
+
 
 CONFIRMATION = "run-production-market-pipeline-archive-migration"
 RESULT_SCHEMA = "market_pipeline_migration_receipt/1.0"
 POSTGRES_IMAGE = backup.POSTGRES_IMAGE
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
+MARKET_SCHEMA_VERSIONS = list(range(1, MARKET_SCHEMA_VERSION + 1))
+MARKET_SCHEMA_VERSIONS_TEXT = ",".join(str(item) for item in MARKET_SCHEMA_VERSIONS)
 
 
 class MigrationError(RuntimeError):
@@ -152,8 +159,8 @@ def _migration_result(output: str, *, second: bool) -> dict[str, Any]:
     if (
         set(payload) != {"status", "version", "table_count"}
         or payload.get("status") not in expected_status
-        or payload.get("version") != 2
-        or payload.get("table_count") != 26
+        or payload.get("version") != MARKET_SCHEMA_VERSION
+        or payload.get("table_count") != MARKET_SCHEMA_TABLE_COUNT
     ):
         raise MigrationError("migration_pass_contract_invalid")
     return payload
@@ -192,8 +199,8 @@ def validate_receipt(
         "host_preflight_receipt_sha256": host_preflight_receipt_sha256,
         "source_backup_receipt_sha256": source_backup_receipt_sha256,
         "web_role_env_sha256": web_role_env_sha256,
-        "schema_versions": [1, 2],
-        "table_count": 26,
+        "schema_versions": MARKET_SCHEMA_VERSIONS,
+        "table_count": MARKET_SCHEMA_TABLE_COUNT,
         "running_services": ["market-database"],
         "private_shadow_only": True,
         "product_authority_changed": False,
@@ -219,9 +226,14 @@ def validate_receipt(
         or not isinstance(first, dict)
         or set(first) != {"status", "version", "table_count"}
         or first.get("status") not in {"applied", "already_current"}
-        or first.get("version") != 2
-        or first.get("table_count") != 26
-        or second != {"status": "already_current", "version": 2, "table_count": 26}
+        or first.get("version") != MARKET_SCHEMA_VERSION
+        or first.get("table_count") != MARKET_SCHEMA_TABLE_COUNT
+        or second
+        != {
+            "status": "already_current",
+            "version": MARKET_SCHEMA_VERSION,
+            "table_count": MARKET_SCHEMA_TABLE_COUNT,
+        }
     ):
         raise MigrationError("migration_receipt_contract_invalid")
     created = payload.get("database_container_created")
@@ -384,7 +396,11 @@ def run_migration(
                 "SELECT count(*) FROM market_data.market_facts",
             )
         )
-        if versions != "1,2" or table_count != 26 or fact_count < 0:
+        if (
+            versions != MARKET_SCHEMA_VERSIONS_TEXT
+            or table_count != MARKET_SCHEMA_TABLE_COUNT
+            or fact_count < 0
+        ):
             raise MigrationError("migration_database_reconciliation_mismatch")
         if _running_services(project) != ["market-database"]:
             raise MigrationError("migration_unexpected_market_service_running")
@@ -404,7 +420,7 @@ def run_migration(
             "after": after,
             "first_pass": first,
             "second_pass": second,
-            "schema_versions": [1, 2],
+            "schema_versions": MARKET_SCHEMA_VERSIONS,
             "table_count": table_count,
             "fact_count": fact_count,
             "database_mutated": created or first["status"] == "applied",

@@ -39,6 +39,9 @@ from scripts.manage_market_pipeline_stage3 import (
     inventory,
     prepare_path_contract,
 )
+from core.market_intelligence.private_pipeline_foundation import (
+    MARKET_SCHEMA_TABLE_COUNT,
+)
 
 
 DOCKERFILE = REPO_ROOT / "deploy" / "market-data" / "Dockerfile"
@@ -132,6 +135,7 @@ def fixture_environment(
         "MARKET_CAPTURE_ACCOUNT1_CONFIG_FILE": secrets_root / "account1-config",
         "MARKET_CAPTURE_ACCOUNT2_CONFIG_FILE": secrets_root / "account2-config",
         "MARKET_CAPTURE_ACCOUNT2_HMAC_FILE": secrets_root / "account2-hmac",
+        "MARKET_RESEARCH_ENCRYPTION_KEY_FILE": secrets_root / "research-archive-key",
         "MARKET_TRANSPORT_CA_FILE": secrets_root / "transport-ca",
         "MARKET_WEB_TRANSPORT_CERT_FILE": secrets_root / "web-cert",
         "MARKET_WEB_TRANSPORT_KEY_FILE": secrets_root / "web-key",
@@ -165,6 +169,7 @@ def prepare_fixture_root(root: Path) -> None:
     write_secret(secrets_root / "account1-config", "{}")
     write_secret(secrets_root / "account2-config", "{}")
     write_secret(secrets_root / "account2-hmac", secrets.token_hex(32))
+    write_secret(secrets_root / "research-archive-key", secrets.token_hex(64))
     for name in (
         "transport-ca",
         "web-cert",
@@ -367,7 +372,9 @@ def wait_healthy(
         if ready:
             return
         time.sleep(0.5)
-    raise RehearsalError(f"{role}_health_timeout")
+    raise RehearsalError(
+        f"{role}_health_timeout:" + compose_state_summary(role, project, environment)
+    )
 
 
 def compose_state_summary(
@@ -653,7 +660,7 @@ def run_rehearsal() -> dict[str, Any]:
         wait_healthy("bot", project, bot_services, environment)
 
         table_count = database_table_count(project, environment)
-        if table_count != 26:
+        if table_count != MARKET_SCHEMA_TABLE_COUNT:
             raise RehearsalError("market_schema_table_count_mismatch")
         second_migration = command(
             [*compose("web", project), "run", "--rm", "market-migration"],
@@ -725,7 +732,7 @@ def run_rehearsal() -> dict[str, Any]:
             "bot", project, "market-fact-receiver", rollback_environment
         ) != rollback_id:
             raise RehearsalError("rollback_image_not_active")
-        if database_table_count(project, rollback_environment) != 26:
+        if database_table_count(project, rollback_environment) != MARKET_SCHEMA_TABLE_COUNT:
             raise RehearsalError("rollback_schema_compatibility_failed")
         if not verify_market_store(market_store, release_sha):
             raise RehearsalError("rollback_lost_market_store")

@@ -14,6 +14,11 @@ from .market_fact_archive import (
     stable_fact_id,
 )
 from .private_pipeline_contracts import load_source_registry
+from .research_archive import (
+    ResearchArchiveKey,
+    archive_fact_research_context,
+    research_contexts_for_rows,
+)
 
 
 PROJECTION_VERSION = "market-fact-projection-v1"
@@ -31,6 +36,9 @@ class ExportReport:
     published: int
     unchanged: int
     rejected: int
+    research_contexts_required: int = 0
+    research_contexts_archived: int = 0
+    research_contexts_unavailable: int = 0
 
 
 def initialize_export_ledger(connection: sqlite3.Connection) -> None:
@@ -276,10 +284,28 @@ def export_market_store_facts(
     archive_connection,
     *,
     max_rows: int = MAX_EXPORT_PER_CYCLE,
+    capture_staging: sqlite3.Connection | None = None,
+    research_key: ResearchArchiveKey | None = None,
 ) -> ExportReport:
     initialize_export_ledger(market)
     allowed = load_source_registry().by_code()
     rows = _pending_export_rows(market, max_rows=max_rows)
+    research_sources = {
+        "GROUP_1",
+        "GROUP_2",
+        "PRIVATE_GOLD_CHANNEL",
+        "MELTED_AGGREGATE",
+        "MELTED_FLOW",
+    }
+    research_required = sum(
+        str(row["source_code"]) in research_sources for row in rows
+    )
+    contexts = (
+        research_contexts_for_rows(capture_staging, rows)
+        if capture_staging is not None and research_key is not None
+        else {}
+    )
+    research_archived = 0
     published = unchanged = rejected = 0
     for index, row in enumerate(rows):
         event_key = bytes(row["event_key"]).hex()
@@ -308,6 +334,16 @@ def export_market_store_facts(
                         quality_reason_codes=_reason_codes(row, _attributes(row)),
                         payload=payload,
                     )
+                    context = contexts.get(bytes(row["event_key"]))
+                    if context is not None and research_key is not None:
+                        archive_fact_research_context(
+                            cursor,
+                            fact_id=result.fact.fact_id,
+                            fact_revision=result.fact.fact_revision,
+                            context=context,
+                            key=research_key,
+                        )
+                        research_archived += 1
                 except BaseException:
                     cursor.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
                     raise
@@ -349,4 +385,7 @@ def export_market_store_facts(
         published=published,
         unchanged=unchanged,
         rejected=rejected,
+        research_contexts_required=research_required,
+        research_contexts_archived=research_archived,
+        research_contexts_unavailable=max(0, research_required - research_archived),
     )

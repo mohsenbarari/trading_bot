@@ -57,8 +57,8 @@ class MigrateMarketPipelineArchiveTests(unittest.TestCase):
         )
         migration_outputs = iter(
             (
-                '{"status":"applied","version":2,"table_count":26}',
-                '{"status":"already_current","version":2,"table_count":26}',
+                '{"status":"applied","version":3,"table_count":28}',
+                '{"status":"already_current","version":3,"table_count":28}',
             )
         )
 
@@ -67,9 +67,9 @@ class MigrateMarketPipelineArchiveTests(unittest.TestCase):
                 return next(migration_outputs)
             sql = arguments[-1]
             if "string_agg" in sql:
-                return "1,2"
+                return "1,2,3"
             if "information_schema.tables" in sql:
-                return "26"
+                return "28"
             if "market_facts" in sql:
                 return "9"
             raise AssertionError((label, arguments))
@@ -159,7 +159,7 @@ class MigrateMarketPipelineArchiveTests(unittest.TestCase):
     def test_invalid_second_pass_is_rejected(self) -> None:
         with self.assertRaisesRegex(migration.MigrationError, "contract_invalid"):
             migration._migration_result(
-                '{"status":"applied","version":2,"table_count":26}', second=True
+                '{"status":"applied","version":3,"table_count":28}', second=True
             )
 
     def test_failed_initial_migration_stops_created_database_without_deleting_state(self) -> None:

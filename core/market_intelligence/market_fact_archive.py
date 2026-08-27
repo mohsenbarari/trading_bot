@@ -250,7 +250,10 @@ def build_and_publish_fact(
         cursor.execute(
             """
             SELECT source_sequence,fact_revision,encode(payload_hash,'hex'),
-                   encode(event_key,'hex'),stream_id
+                   encode(event_key,'hex'),stream_id,
+                   encode(origin_event_key,'hex'),source_code,occurred_at_utc,
+                   available_at_utc,persisted_at_utc,parser_version,
+                   quality_state,quality_reason_codes,payload
             FROM market_data.market_facts
             WHERE fact_id=decode(%s,'hex')
             FOR UPDATE
@@ -259,12 +262,25 @@ def build_and_publish_fact(
         )
         existing = cursor.fetchone()
         if existing is not None and str(existing[2]) == payload_digest:
-            cursor.execute(
-                "SELECT envelope FROM market_data.market_fact_outbox "
-                "WHERE fact_id=decode(%s,'hex') AND fact_revision=%s",
-                (fact_id, int(existing[1])),
+            fact = MarketFactV1(
+                contract="market_fact/1.0",
+                fact_id=fact_id,
+                event_key=str(existing[3]),
+                origin_event_key=str(existing[5]),
+                source_code=str(existing[6]),
+                stream_id=str(existing[4]),
+                source_sequence=int(existing[0]),
+                occurred_at_utc=existing[7],
+                available_at_utc=existing[8],
+                persisted_at_utc=existing[9],
+                schema_version="1.0",
+                parser_version=str(existing[10]),
+                fact_revision=int(existing[1]),
+                quality_state=str(existing[11]),
+                quality_reason_codes=tuple(existing[12] or ()),
+                payload_hash=str(existing[2]),
+                payload=_normalize_fact_payload(existing[13]),
             )
-            fact = MarketFactV1.model_validate(cursor.fetchone()[0])
             return PublishedFact(fact=fact, delivery_sequence=None, changed=False)
         if existing is None:
             source_sequence = _next_source_sequence(cursor, source.fact_stream_id)

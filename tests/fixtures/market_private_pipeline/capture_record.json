@@ -1,7 +1,7 @@
 {
   "contract": "market_capture_record/1.0",
   "upstream_schema": "coin_group_event",
-  "upstream_schema_version": "2.0",
+  "upstream_schema_version": "2.1",
   "event_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "upstream_event_id": "018fe12a-0000-7000-8000-000000000001",
   "source_code": "GROUP_1",
