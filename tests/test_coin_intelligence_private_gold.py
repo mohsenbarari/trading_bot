@@ -173,9 +173,18 @@ class PrivateGoldMinuteAggregationTests(unittest.TestCase):
             "text": text,
         }
         values.update(changes)
+        previous_id = int(
+            self.connection.execute(
+                "SELECT COALESCE(MAX(id),0) FROM market_observations"
+            ).fetchone()[0]
+        )
         ingest_private_gold_offer(
             self.connection,
             PrivateGoldOfferInput(**values),  # type: ignore[arg-type]
+        )
+        self.connection.execute(
+            "UPDATE market_observations SET inserted_at_utc=? WHERE id>?",
+            (str(values["available_at_utc"]), previous_id),
         )
         self.connection.commit()
 
@@ -194,6 +203,10 @@ class PrivateGoldMinuteAggregationTests(unittest.TestCase):
             paper_variant="NORMAL",
             minute_utc="2026-08-04T10:00:00Z",
             available_at_utc="2026-08-04T10:01:00Z",
+        )
+        self.connection.execute(
+            "UPDATE market_observations SET inserted_at_utc=? WHERE id=?",
+            ("2026-08-04T10:01:00Z", aggregate_id),
         )
         self.connection.commit()
 

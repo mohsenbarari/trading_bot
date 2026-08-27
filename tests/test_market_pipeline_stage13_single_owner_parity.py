@@ -28,6 +28,7 @@ from core.market_intelligence.single_owner_parity import (
     _copy_exact_prefix,
     compare_facts,
     compare_market_stores,
+    compare_snapshots,
     exclusive_existing_lock,
     read_private_key,
     run_single_owner_parity,
@@ -128,8 +129,14 @@ class SingleOwnerParityTests(unittest.TestCase):
         self.now = datetime.now(timezone.utc).replace(microsecond=0)
         self.when = self.now - timedelta(minutes=1)
         day = self.when.date().isoformat()
+        old_market = market_event(self.now - timedelta(minutes=10))
+        old_market["event_id"] = "70000000-0000-7000-8000-000000000002"
+        old_market["message"]["message_id"] = "987654320"
         (self.market_spool / f"events-{day}.jsonl").write_text(
-            json.dumps(market_event(self.when), ensure_ascii=False) + "\n",
+            json.dumps(old_market, ensure_ascii=False)
+            + "\n"
+            + json.dumps(market_event(self.when), ensure_ascii=False)
+            + "\n",
             encoding="utf-8",
         )
         (self.coin_spool / f"events-{day}.jsonl").write_text(
@@ -180,6 +187,12 @@ class SingleOwnerParityTests(unittest.TestCase):
             self.assertEqual((path.stat().st_mode & 0o777), 0o600)
         report = json.loads((artifact / "report.json").read_text(encoding="utf-8"))
         self.assertTrue(verify_parity_report(report, key=SIGNING_KEY))
+        self.assertEqual(report["capture_complete_record_count"], 3)
+        self.assertEqual(report["capture_window_record_count"], 2)
+        self.assertEqual(report["replay_record_count"], 2)
+        for lane in report["lanes"].values():
+            self.assertEqual(lane["ingest_counters"]["records"], 2)
+            self.assertEqual(lane["ingest_counters"]["stale_market_skipped"], 0)
         tampered = deepcopy(report)
         tampered["capture_window_record_count"] += 1
         self.assertFalse(verify_parity_report(tampered, key=SIGNING_KEY))
@@ -357,9 +370,53 @@ class SingleOwnerParityTests(unittest.TestCase):
                 "FACT_UNIT_MISMATCH": 1,
             },
         )
+        self.assertEqual(
+            result["difference_counts_by_source"]["CANDIDATE_FACT_ADDED"],
+            {"XAUUSD": 1},
+        )
+        self.assertEqual(
+            result["difference_counts_by_instrument"]["FACT_UNIT_MISMATCH"],
+            {"COIN_IMAM": 1},
+        )
         serialized = json.dumps(result)
         self.assertNotIn("188600", serialized)
         self.assertNotIn("199999", serialized)
+
+    def test_external_snapshot_metadata_is_not_a_consumed_value_mismatch(self):
+        signal = {
+            "status": "FRESH",
+            "price_unit": "USD_PER_TROY_OUNCE",
+            "latest_price": 4630.1,
+            "weighted_median_price": 4630.0,
+            "mean_price": 4630.0,
+            "median_price": 4630.0,
+            "minimum_price": 4629.9,
+            "maximum_price": 4630.1,
+            "observation_count": 5,
+        }
+        baseline = {"signals": {"XAUUSD": signal}, "rates": {"items": []}}
+        candidate = deepcopy(baseline)
+        candidate["signals"]["XAUUSD"]["observation_count"] = 7
+        metadata = compare_snapshots(baseline, candidate, same_fact_inputs=False)
+        self.assertEqual(metadata["severity_1_count"], 0)
+        self.assertEqual(metadata["severity_2_count"], 1)
+        self.assertEqual(
+            metadata["issues"][0]["code"], "SNAPSHOT_METADATA_MISMATCH"
+        )
+        schema = deepcopy(candidate)
+        del schema["signals"]["XAUUSD"]["mean_price"]
+        schema_result = compare_snapshots(baseline, schema, same_fact_inputs=False)
+        self.assertEqual(schema_result["severity_1_count"], 0)
+        self.assertEqual(
+            schema_result["issues"][0]["code"],
+            "SNAPSHOT_VALUE_SCHEMA_MISMATCH",
+        )
+        candidate["signals"]["XAUUSD"]["latest_price"] = 4631.0
+        value = compare_snapshots(baseline, candidate, same_fact_inputs=False)
+        self.assertEqual(value["severity_1_count"], 1)
+        self.assertEqual(
+            value["issues"][0]["code"], "CONSUMED_EXTERNAL_VALUE_MISMATCH"
+        )
 
 
 if __name__ == "__main__":

@@ -138,8 +138,16 @@ class Stage10SnapshotTests(unittest.TestCase):
             (103, xau_stream, xau),
             (104, usdt_stream, usdt),
         ):
-            self._receive_fact(number, stream, fact)
-        report = run_adapter_cycle(self.fact_receiver, self.market)
+            with patch(
+                "core.market_intelligence.market_fact_receiver._utc_now",
+                return_value=datetime(2026, 8, 26, 5, 0, 5, tzinfo=timezone.utc),
+            ):
+                self._receive_fact(number, stream, fact)
+        with patch(
+            "core.market_intelligence.market_store._utc_now",
+            return_value="2026-08-26T05:00:05.000000Z",
+        ):
+            report = run_adapter_cycle(self.fact_receiver, self.market)
         self.assertEqual((report.applied, report.rejected), (4, 0))
         self.market.commit()
 
@@ -201,6 +209,34 @@ class Stage10SnapshotTests(unittest.TestCase):
         self.assertTrue(rows)
         self.assertTrue(all(row[0] == "MAIN_ONLINE" for row in rows))
         self.assertTrue(all(int(row[3]) % 1000 == 0 for row in rows))
+
+    def test_live_publish_never_precedes_a_consumed_transfer(self):
+        output = self.root / "bot" / "live-timestamp.json"
+        publish_estimator_snapshot(
+            market_store_path=self.market_path,
+            state_path=self.root / "live-timestamp-state.sqlite3",
+            output_path=output,
+            feed_mode="PRIVATE_SHADOW",
+        )
+        document = json.loads(output.read_text(encoding="utf-8"))
+        generated = datetime.fromisoformat(
+            str(document["generated_at_utc"]).replace("Z", "+00:00")
+        )
+        observed = [
+            item for item in document["inputs"] if item["freshness"] != "MISSING"
+        ]
+
+        self.assertIn(".", str(document["generated_at_utc"]))
+        self.assertTrue(observed)
+        self.assertTrue(
+            all(
+                datetime.fromisoformat(
+                    str(item["transferred_at_utc"]).replace("Z", "+00:00")
+                )
+                <= generated
+                for item in observed
+            )
+        )
 
     def test_monotonic_guard_duplicate_and_stale_route_cut(self):
         first = self._publish()

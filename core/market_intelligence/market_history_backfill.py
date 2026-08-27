@@ -17,7 +17,15 @@ from pathlib import Path
 import re
 from typing import Any, Literal, Mapping, Sequence
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from .market_fact_archive import (
     MarketFactArchiveError,
@@ -172,11 +180,17 @@ class HistoryFactRecordV1(_Contract):
         return values
 
     @model_validator(mode="after")
-    def validate_semantics(self) -> "HistoryFactRecordV1":
+    def validate_semantics(self, info: ValidationInfo) -> "HistoryFactRecordV1":
         if self.available_at_utc < self.occurred_at_utc:
             raise ValueError("availability_before_occurrence")
         source = load_source_registry().by_code().get(self.source_code)
-        if source is None or not source.permanent_archive or not source.transfer_to_bot:
+        allow_transient = bool(
+            isinstance(info.context, Mapping)
+            and info.context.get("allow_transient_seed") is True
+        )
+        if source is None or not source.transfer_to_bot:
+            raise ValueError("history_source_not_permanent_and_transferable")
+        if not source.permanent_archive and not allow_transient:
             raise ValueError("history_source_not_permanent_and_transferable")
         if self.payload.kind not in source.allowed_fact_kinds:
             raise ValueError("fact_kind_not_allowed_for_source")
@@ -204,6 +218,9 @@ class HistoryImportBundleV1(_Contract):
     contract: Literal["market_history_bundle/1.0"]
     source_code: Code
     source_system: Code
+    retention_mode: Literal["PERMANENT_ARCHIVE", "TRANSIENT_SEED"] = (
+        "PERMANENT_ARCHIVE"
+    )
     source_artifact_hash: Hex64
     records: tuple[dict[str, Any], ...] = Field(min_length=1)
 
@@ -212,19 +229,30 @@ class HistoryImportBundleV1(_Contract):
         if self.source_artifact_hash != content_hash(self.records):
             raise ValueError("source_artifact_hash_mismatch")
         source = load_source_registry().by_code().get(self.source_code)
-        if source is None or not source.permanent_archive or not source.transfer_to_bot:
+        if source is None or not source.transfer_to_bot:
             raise ValueError("history_bundle_source_not_permanent_and_transferable")
+        if self.retention_mode == "PERMANENT_ARCHIVE" and not source.permanent_archive:
+            raise ValueError("history_bundle_source_not_permanent_and_transferable")
+        if self.retention_mode == "TRANSIENT_SEED" and source.permanent_archive:
+            raise ValueError("history_bundle_transient_source_must_not_be_permanent")
         return self
 
 
 def build_bundle(
-    *, source_code: str, source_system: str, records: Sequence[Mapping[str, Any]]
+    *,
+    source_code: str,
+    source_system: str,
+    records: Sequence[Mapping[str, Any]],
+    retention_mode: Literal["PERMANENT_ARCHIVE", "TRANSIENT_SEED"] = (
+        "PERMANENT_ARCHIVE"
+    ),
 ) -> HistoryImportBundleV1:
     copied = tuple(dict(item) for item in records)
     return HistoryImportBundleV1(
         contract="market_history_bundle/1.0",
         source_code=source_code,
         source_system=source_system,
+        retention_mode=retention_mode,
         source_artifact_hash=content_hash(copied),
         records=copied,
     )
@@ -444,9 +472,20 @@ def import_history_bundle(connection, bundle_value: Mapping[str, Any]) -> dict[s
         record_hash = _safe_record_hash(raw)
         try:
             _scan_forbidden(raw)
-            record = HistoryFactRecordV1.model_validate(raw)
+            record = HistoryFactRecordV1.model_validate(
+                raw,
+                context={
+                    "allow_transient_seed": bundle.retention_mode
+                    == "TRANSIENT_SEED"
+                },
+            )
             if record.source_code != bundle.source_code:
                 raise HistoryBackfillError("SOURCE_MISMATCH")
+            if bundle.retention_mode == "TRANSIENT_SEED" and (
+                record.encrypted_raw_text is not None
+                or record.encrypted_participants
+            ):
+                raise HistoryBackfillError("TRANSIENT_SEED_SENSITIVE_DATA_FORBIDDEN")
             parsed.append((position, record_hash, record))
         except Exception as exc:  # row isolation is intentional
             invalid.append((position, record_hash, _reason_from_exception(exc)))

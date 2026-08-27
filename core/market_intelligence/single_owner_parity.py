@@ -261,12 +261,19 @@ def build_capture_manifest(
     identity_key: bytes,
     window_start: datetime,
     window_end: datetime,
-) -> tuple[dict[str, Any], str]:
+    replay_root: Path,
+) -> tuple[dict[str, Any], str, dict[str, Path]]:
     items: list[dict[str, Any]] = []
     duplicate_refs: Counter[str] = Counter()
     partial_tail_count = 0
     total_complete = 0
     frozen_digest = hmac.new(identity_key, b"frozen-spools-v1\0", sha256)
+    replay_directories: dict[str, Path] = {}
+    for stream in ("market", "coin"):
+        directory = replay_root / stream
+        directory.mkdir(parents=True, mode=0o700)
+        os.chmod(directory, 0o700)
+        replay_directories[stream] = directory
     for stream, path, _device, _inode, expected_size in frozen_records:
         frozen_digest.update(stream.encode("ascii") + b"\0")
         frozen_digest.update(path.name.encode("ascii") + b"\0")
@@ -275,46 +282,52 @@ def build_capture_manifest(
             raise SingleOwnerParityError("frozen_spool_size_changed")
         frozen_digest.update(len(data).to_bytes(8, "big"))
         frozen_digest.update(data)
-        lines = data.splitlines(keepends=True)
-        for index, raw in enumerate(lines):
-            if not raw.endswith(b"\n"):
-                if index != len(lines) - 1:
-                    raise SingleOwnerParityError("capture_spool_incomplete_middle_record")
-                partial_tail_count += 1
-                continue
-            if len(raw) > MAX_RECORD_BYTES:
-                raise SingleOwnerParityError("capture_spool_complete_record_too_large")
-            total_complete += 1
-            try:
-                decoded = json.loads(raw.decode("utf-8"))
-                event = decode_capture_event(decoded, stream=stream)
-            except (UnicodeDecodeError, json.JSONDecodeError, CaptureEventContractError) as exc:
-                raise SingleOwnerParityError("capture_spool_complete_record_invalid") from exc
-            available = _utc(event.available_at_utc, field="capture_available_at")
-            occurred_value = (
-                event.edited_at_utc
-                if event.event_type == "message_edited" and event.edited_at_utc
-                else event.event_time_utc
-            ) or event.available_at_utc
-            occurred = _utc(occurred_value, field="capture_occurred_at")
-            if not (window_start <= available <= window_end):
-                continue
-            event_ref = _hmac_ref(
-                identity_key,
-                b"capture-event-v1",
-                f"{stream}:{event.event_id}".encode("utf-8"),
-            )
-            duplicate_refs[event_ref] += 1
-            items.append(
-                {
-                    "event_ref": event_ref,
-                    "stream": stream,
-                    "source_code": event.source_id,
-                    "event_type": event.event_type,
-                    "occurred_at_utc": _stamp(occurred),
-                    "available_at_utc": _stamp(available),
-                }
-            )
+        replay_path = replay_directories[stream] / path.name
+        with replay_path.open("xb") as replay_handle:
+            lines = data.splitlines(keepends=True)
+            for index, raw in enumerate(lines):
+                if not raw.endswith(b"\n"):
+                    if index != len(lines) - 1:
+                        raise SingleOwnerParityError("capture_spool_incomplete_middle_record")
+                    partial_tail_count += 1
+                    continue
+                if len(raw) > MAX_RECORD_BYTES:
+                    raise SingleOwnerParityError("capture_spool_complete_record_too_large")
+                total_complete += 1
+                try:
+                    decoded = json.loads(raw.decode("utf-8"))
+                    event = decode_capture_event(decoded, stream=stream)
+                except (UnicodeDecodeError, json.JSONDecodeError, CaptureEventContractError) as exc:
+                    raise SingleOwnerParityError("capture_spool_complete_record_invalid") from exc
+                available = _utc(event.available_at_utc, field="capture_available_at")
+                occurred_value = (
+                    event.edited_at_utc
+                    if event.event_type == "message_edited" and event.edited_at_utc
+                    else event.event_time_utc
+                ) or event.available_at_utc
+                occurred = _utc(occurred_value, field="capture_occurred_at")
+                if not (window_start <= available <= window_end):
+                    continue
+                replay_handle.write(raw)
+                event_ref = _hmac_ref(
+                    identity_key,
+                    b"capture-event-v1",
+                    f"{stream}:{event.event_id}".encode("utf-8"),
+                )
+                duplicate_refs[event_ref] += 1
+                items.append(
+                    {
+                        "event_ref": event_ref,
+                        "stream": stream,
+                        "source_code": event.source_id,
+                        "event_type": event.event_type,
+                        "occurred_at_utc": _stamp(occurred),
+                        "available_at_utc": _stamp(available),
+                    }
+                )
+            replay_handle.flush()
+            os.fsync(replay_handle.fileno())
+        replay_path.chmod(0o400)
     items.sort(
         key=lambda item: (
             item["available_at_utc"],
@@ -329,11 +342,18 @@ def build_capture_manifest(
         "frozen_file_count": len(frozen_records),
         "complete_record_count": total_complete,
         "window_record_count": len(items),
+        "replay_record_count": len(items),
         "duplicate_event_count": sum(max(0, count - 1) for count in duplicate_refs.values()),
         "partial_tail_count": partial_tail_count,
         "events": items,
     }
-    return manifest, frozen_digest.hexdigest()
+    for directory in replay_directories.values():
+        descriptor = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    return manifest, frozen_digest.hexdigest(), replay_directories
 
 
 def code_identity(code_root: Path) -> dict[str, Any]:
@@ -378,6 +398,34 @@ def _minimal_environment() -> dict[str, str]:
     }
 
 
+_FROZEN_INGEST_PROGRAM = r"""
+import importlib.util
+from datetime import datetime as RealDateTime
+import sys
+
+code_root, script_path, frozen_now, *arguments = sys.argv[1:]
+sys.path.insert(0, code_root)
+spec = importlib.util.spec_from_file_location("single_owner_lane_ingest", script_path)
+if spec is None or spec.loader is None:
+    raise SystemExit(91)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+fixed = RealDateTime.fromisoformat(frozen_now.replace("Z", "+00:00"))
+
+
+class FrozenDateTime(RealDateTime):
+    @classmethod
+    def now(cls, tz=None):
+        if tz is None:
+            return fixed.replace(tzinfo=None)
+        return fixed.astimezone(tz)
+
+
+module.datetime = FrozenDateTime
+raise SystemExit(module.main(arguments))
+"""
+
+
 def run_lane_ingest(
     *,
     code_root: Path,
@@ -387,11 +435,10 @@ def run_lane_ingest(
     coin_spool_dir: Path,
     maximum_records: int,
     timeout_seconds: int,
+    replay_as_of_utc: str,
 ) -> dict[str, int]:
     script = code_root / "scripts" / "ingest_capture_event_spools.py"
-    command = [
-        str(python_executable),
-        str(script),
+    ingest_arguments = [
         "--runtime-root",
         str(runtime_root),
         "--market-spool-dir",
@@ -400,6 +447,15 @@ def run_lane_ingest(
         str(coin_spool_dir),
         "--maximum-records",
         str(maximum_records),
+    ]
+    command = [
+        str(python_executable),
+        "-c",
+        _FROZEN_INGEST_PROGRAM,
+        str(code_root),
+        str(script),
+        replay_as_of_utc,
+        *ingest_arguments,
     ]
     try:
         completed = subprocess.run(
@@ -475,45 +531,26 @@ def compare_market_stores(
         candidate_count = int(
             connection.execute("SELECT COUNT(*) FROM candidate.market_observations").fetchone()[0]
         )
-        common_count = int(
-            connection.execute(
-                "SELECT COUNT(*) FROM main.market_observations b "
-                "JOIN candidate.market_observations c ON c.event_key=b.event_key"
-            ).fetchone()[0]
-        )
-        predicates = {
-            "FACT_UNIT_MISMATCH": (
-                1,
-                "b.price_unit IS NOT c.price_unit OR b.currency IS NOT c.currency "
-                "OR b.quantity_unit IS NOT c.quantity_unit",
-            ),
-            "FACT_LIFECYCLE_MISMATCH": (
-                2,
-                "b.event_type IS NOT c.event_type OR b.quality_state IS NOT c.quality_state "
-                "OR b.is_conditional IS NOT c.is_conditional",
-            ),
-            "FACT_PARSER_MISMATCH": (
-                2,
-                "b.source_code IS NOT c.source_code OR b.source_family IS NOT c.source_family "
-                "OR b.instrument IS NOT c.instrument OR b.market_label IS NOT c.market_label "
-                "OR b.settlement_term IS NOT c.settlement_term OR b.trade_form IS NOT c.trade_form "
-                "OR b.side IS NOT c.side OR b.price_num IS NOT c.price_num "
-                "OR b.quantity_num IS NOT c.quantity_num",
-            ),
-        }
+        common_count = 0
         counts: Counter[str] = Counter()
         severity_counts: Counter[int] = Counter()
+        sources: dict[str, Counter[str]] = {}
+        instruments: dict[str, Counter[str]] = {}
         issues: list[dict[str, Any]] = []
 
-        def add_rows(code: str, severity: int, sql: str, parameters: Sequence[object] = ()) -> None:
-            count = int(connection.execute(f"SELECT COUNT(*) FROM ({sql})", parameters).fetchone()[0])
-            if count:
-                counts[code] += count
-                severity_counts[severity] += count
-            remaining = max(0, issue_limit - len(issues))
-            if not remaining:
-                return
-            for row in connection.execute(f"{sql} LIMIT ?", (*parameters, remaining)).fetchall():
+        def record(
+            code: str,
+            severity: int,
+            row: sqlite3.Row,
+            *,
+            source_code: str,
+            instrument: str,
+        ) -> None:
+            counts[code] += 1
+            severity_counts[severity] += 1
+            sources.setdefault(code, Counter())[source_code] += 1
+            instruments.setdefault(code, Counter())[instrument] += 1
+            if len(issues) < issue_limit:
                 raw = row[0]
                 key_bytes = bytes(raw) if isinstance(raw, (bytes, bytearray, memoryview)) else str(raw).encode("utf-8")
                 issues.append(
@@ -524,28 +561,94 @@ def compare_market_stores(
                     }
                 )
 
-        add_rows(
-            "CANDIDATE_FACT_MISSING",
-            2,
-            "SELECT b.event_key FROM main.market_observations b "
+        for row in connection.execute(
+            "SELECT b.event_key,b.source_code,b.instrument FROM main.market_observations b "
             "LEFT JOIN candidate.market_observations c ON c.event_key=b.event_key "
             "WHERE c.event_key IS NULL ORDER BY b.event_key",
-        )
-        add_rows(
-            "CANDIDATE_FACT_ADDED",
-            2,
-            "SELECT c.event_key FROM candidate.market_observations c "
+        ):
+            record(
+                "CANDIDATE_FACT_MISSING",
+                2,
+                row,
+                source_code=str(row[1]),
+                instrument=str(row[2]),
+            )
+        for row in connection.execute(
+            "SELECT c.event_key,c.source_code,c.instrument FROM candidate.market_observations c "
             "LEFT JOIN main.market_observations b ON b.event_key=c.event_key "
             "WHERE b.event_key IS NULL ORDER BY c.event_key",
-        )
-        for code, (severity, predicate) in predicates.items():
-            add_rows(
-                code,
-                severity,
-                "SELECT b.event_key FROM main.market_observations b "
-                "JOIN candidate.market_observations c ON c.event_key=b.event_key "
-                f"WHERE {predicate} ORDER BY b.event_key",
+        ):
+            record(
+                "CANDIDATE_FACT_ADDED",
+                2,
+                row,
+                source_code=str(row[1]),
+                instrument=str(row[2]),
             )
+        common_rows = connection.execute(
+            """
+            SELECT b.event_key,
+                   b.source_code,b.source_family,b.instrument,b.market_label,
+                   b.settlement_term,b.trade_form,b.event_type,b.side,b.price_num,
+                   b.price_unit,b.currency,b.quantity_num,b.quantity_unit,
+                   b.quality_state,b.is_conditional,
+                   c.source_code,c.source_family,c.instrument,c.market_label,
+                   c.settlement_term,c.trade_form,c.event_type,c.side,c.price_num,
+                   c.price_unit,c.currency,c.quantity_num,c.quantity_unit,
+                   c.quality_state,c.is_conditional
+            FROM main.market_observations b
+            JOIN candidate.market_observations c ON c.event_key=b.event_key
+            ORDER BY b.event_key
+            """
+        )
+        for row in common_rows:
+            common_count += 1
+            source_code = str(row[16])
+            instrument = str(row[18])
+            if (row[10], row[11], row[13]) != (row[25], row[26], row[28]):
+                record(
+                    "FACT_UNIT_MISMATCH",
+                    1,
+                    row,
+                    source_code=source_code,
+                    instrument=instrument,
+                )
+            if (row[7], row[14], row[15]) != (row[22], row[29], row[30]):
+                record(
+                    "FACT_LIFECYCLE_MISMATCH",
+                    2,
+                    row,
+                    source_code=source_code,
+                    instrument=instrument,
+                )
+            if (
+                row[1],
+                row[2],
+                row[3],
+                row[4],
+                row[5],
+                row[6],
+                row[8],
+                row[9],
+                row[12],
+            ) != (
+                row[16],
+                row[17],
+                row[18],
+                row[19],
+                row[20],
+                row[21],
+                row[23],
+                row[24],
+                row[27],
+            ):
+                record(
+                    "FACT_PARSER_MISMATCH",
+                    2,
+                    row,
+                    source_code=source_code,
+                    instrument=instrument,
+                )
     except sqlite3.Error as exc:
         raise SingleOwnerParityError("lane_fact_compare_failed") from exc
     finally:
@@ -555,6 +658,13 @@ def compare_market_stores(
         "candidate_fact_count": candidate_count,
         "common_fact_count": common_count,
         "difference_counts": dict(sorted(counts.items())),
+        "difference_counts_by_source": {
+            code: dict(sorted(values.items())) for code, values in sorted(sources.items())
+        },
+        "difference_counts_by_instrument": {
+            code: dict(sorted(values.items()))
+            for code, values in sorted(instruments.items())
+        },
         "issue_count": sum(counts.values()),
         "severity_1_count": severity_counts[1],
         "severity_2_count": severity_counts[2],
@@ -668,18 +778,62 @@ def compare_snapshots(
     candidate_signals = candidate.get("signals", {})
     signal_names = sorted(set(baseline_signals) | set(candidate_signals))
     signal_mismatches = 0
+    signal_value_mismatches = 0
+    signal_value_schema_mismatches = 0
+    value_fields = (
+        "status",
+        "price_unit",
+        "latest_price",
+        "weighted_median_price",
+        "mean_price",
+        "median_price",
+        "minimum_price",
+        "maximum_price",
+    )
     for name in signal_names:
         if content_hash(baseline_signals.get(name)) == content_hash(candidate_signals.get(name)):
             continue
         signal_mismatches += 1
+        left = baseline_signals.get(name)
+        right = candidate_signals.get(name)
+        left_fields = (
+            {field for field in value_fields if field in left}
+            if isinstance(left, Mapping)
+            else set()
+        )
+        right_fields = (
+            {field for field in value_fields if field in right}
+            if isinstance(right, Mapping)
+            else set()
+        )
+        shared_fields = left_fields & right_fields
+        left_values = (
+            {field: left.get(field) for field in shared_fields}
+            if isinstance(left, Mapping)
+            else None
+        )
+        right_values = (
+            {field: right.get(field) for field in shared_fields}
+            if isinstance(right, Mapping)
+            else None
+        )
+        value_mismatch = content_hash(left_values) != content_hash(right_values)
+        value_schema_mismatch = left_fields != right_fields
+        signal_value_mismatches += int(value_mismatch)
+        signal_value_schema_mismatches += int(value_schema_mismatch)
+        external = name in {"XAUUSD", "USDT_IRT"}
         issues.append(
             {
                 "code": (
-                    "CONSUMED_EXTERNAL_MISMATCH"
-                    if name in {"XAUUSD", "USDT_IRT"}
+                    "CONSUMED_EXTERNAL_VALUE_MISMATCH"
+                    if external and value_mismatch
+                    else "SNAPSHOT_VALUE_SCHEMA_MISMATCH"
+                    if value_schema_mismatch
+                    else "SNAPSHOT_METADATA_MISMATCH"
+                    if external
                     else "SNAPSHOT_FEATURE_MISMATCH"
                 ),
-                "severity": 1 if name in {"XAUUSD", "USDT_IRT"} else 2,
+                "severity": 1 if external and value_mismatch else 2,
                 "component": name,
             }
         )
@@ -715,6 +869,8 @@ def compare_snapshots(
     return {
         "signal_count": len(signal_names),
         "signal_mismatch_count": signal_mismatches,
+        "signal_value_mismatch_count": signal_value_mismatches,
+        "signal_value_schema_mismatch_count": signal_value_schema_mismatches,
         "rate_count": len(set(baseline_rates) | set(candidate_rates)),
         "rate_mismatch_count": rate_mismatches,
         "same_fact_inputs": same_fact_inputs,
@@ -791,16 +947,17 @@ def run_single_owner_parity(
             seed = temporary_path / "seed"
             sqlite_online_backup(baseline_market, seed / "market.sqlite3")
             sqlite_online_backup(baseline_staging, seed / "capture.sqlite3")
-        frozen, frozen_records = freeze_spools(
+        _frozen, frozen_records = freeze_spools(
             market_spool_dir=market_spool_dir,
             coin_spool_dir=coin_spool_dir,
             destination_root=temporary_path,
         )
-        manifest, frozen_input_hmac = build_capture_manifest(
+        manifest, frozen_input_hmac, replay_spools = build_capture_manifest(
             frozen_records,
             identity_key=identity_key,
             window_start=start,
             window_end=end,
+            replay_root=temporary_path / "replay",
         )
         lanes: dict[str, dict[str, Any]] = {}
         lane_runtimes: dict[str, Path] = {}
@@ -815,10 +972,11 @@ def run_single_owner_parity(
                 code_root=code_root,
                 python_executable=python_path,
                 runtime_root=runtime,
-                market_spool_dir=frozen["market"],
-                coin_spool_dir=frozen["coin"],
+                market_spool_dir=replay_spools["market"],
+                coin_spool_dir=replay_spools["coin"],
                 maximum_records=maximum_records,
                 timeout_seconds=subprocess_timeout_seconds,
+                replay_as_of_utc=_stamp(end),
             )
             activity_count, versions = _lane_fact_activity(
                 runtime / "market" / "market.sqlite3",
@@ -836,7 +994,7 @@ def run_single_owner_parity(
             lane_runtimes["candidate"] / "market" / "market.sqlite3",
             identity_key=identity_key,
         )
-        snapshot_evaluation_at = _stamp(datetime.now(timezone.utc))
+        snapshot_evaluation_at = _stamp(end)
         for lane_name in ("baseline", "candidate"):
             lane_snapshots[lane_name] = build_lane_snapshot(
                 code_root=lane_code_roots[lane_name],
@@ -866,6 +1024,7 @@ def run_single_owner_parity(
             "snapshot_evaluation_at_utc": snapshot_evaluation_at,
             "capture_manifest_hash": content_hash(manifest),
             "capture_window_record_count": manifest["window_record_count"],
+            "replay_record_count": manifest["replay_record_count"],
             "capture_complete_record_count": manifest["complete_record_count"],
             "capture_duplicate_event_count": manifest["duplicate_event_count"],
             "capture_partial_tail_count": manifest["partial_tail_count"],

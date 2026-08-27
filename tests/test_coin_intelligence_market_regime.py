@@ -56,10 +56,11 @@ class CanonicalMarketRegimeTests(unittest.TestCase):
             else "PROJECT_THOUSAND_TOMAN"
         )
         stamp = at.isoformat().replace("+00:00", "Z")
+        event_key = derive_event_key("market-regime-test", self.sequence)
         upsert_observation(
             self.connection,
             MarketObservation(
-                event_key=derive_event_key("market-regime-test", self.sequence),
+                event_key=event_key,
                 source_code=source_code,
                 source_family=source_family,
                 event_time_utc=stamp,
@@ -76,6 +77,10 @@ class CanonicalMarketRegimeTests(unittest.TestCase):
                 quantity_unit=None,
                 currency="USD" if instrument == "XAUUSD" else "TOMAN",
             ),
+        )
+        self.connection.execute(
+            "UPDATE market_observations SET inserted_at_utc=? WHERE event_key=?",
+            (stamp, event_key),
         )
 
     def series(

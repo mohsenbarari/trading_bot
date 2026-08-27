@@ -986,11 +986,45 @@ Gate:
   ناهم‌ارز است؛ بنابراین parity زنده بعدی باید eventهای یک capture owner را پس از capture به
   دو projection ایزوله fan-out کند و هرگز session تلگرام دوم نسازد.
 - هارنس تک‌مالک version-pinned برای همین fan-out ساخته شد: یک prefix ثابت از spool زنده و
-  یک SQLite seed سازگار به دو lane مستقل replay می‌شود؛ final facts، snapshot و rate بدون
-  ماندگاری raw/identity/price اختلاف مقایسه و report امضاشده تولید می‌شود. append-race،
+  یک SQLite seed سازگار به دو lane مستقل replay می‌شود؛ بعد از اعتبارسنجی کامل prefix فقط
+  eventهای window با `now/as_of` ثابت مشترک وارد هر دو lane می‌شوند. final facts، snapshot
+  و rate بدون ماندگاری raw/identity/price اختلاف مقایسه و report امضاشده تولید می‌شود. append-race،
   corrupt complete record، writer-lock، tamper، redaction و cleanup در تست پوشش داده شدند.
+  اختلاف fact بر اساس source/instrument داخلی aggregate می‌شود و XAU/USDT value mismatch
+  از metadata/cadence و value-schema mismatch جداست تا severity-1 کاذب ساخته نشود.
   این rehearsal همیشه `HOLD_STAGE12_LIVE_PARITY_REQUIRED` است و اجرای staging آن هیچ feed،
   owner یا cutover را تغییر نمی‌دهد.
+- rehearsal نهایی تک‌مالک با `main@50aea41d` تعداد ۱٬۲۱۶ event window را در هر دو lane
+  بدون duplicate/reject/stale پردازش کرد. candidate هر ۱٬۲۱۵ quote واقعی XAU را حفظ کرد،
+  baseline قدیمی فقط cadence compactشده را داشت، unit/parser/lifecycle mismatch صفر و هر
+  ۱۴ rate برابر بود. اختلاف XAU و schema جدید `mean_price` باعث ماندن gate در HOLD شد؛
+  window آرام بازار جای session کامل گروه/آبشده/هرات را نمی‌گیرد.
+- adapter پس از یک backlog واقعی به‌علت full-table sort/fetch و tmpfs محدود متوقف شد؛
+  `main@fd665759` خواندن را به cursorهای per-stream و merge bounded پانصدتایی تبدیل کرد.
+  preflight هشت‌مگابایتی پاس شد و ۱۰ stream زنده با ۵۱٬۲۸۹ delivery، lag/duplicate/rejection
+  صفر بازیابی شدند.
+- timeline اولیه یک race علّی میان timestamp ارزیابی و اولین SELECT نشان داد. اصلاح
+  `main@d2b79298` cutoff زمان ورود محلی، pin شدن read snapshot پیش از تعیین زمان زنده،
+  `generated_at` زیرثانیه و guard قطعی `transferred_at <= generated_at` را اضافه کرد؛ window
+  اقتصادی anchor قدیمی نیز از knowledge cutoff فعلی جدا شد.
+- چهار service بات با release جدید و همچنان `PRIVATE_SHADOW` healthy/restart-zero شدند؛ وب
+  snapshot تازه را `FRESH` گرفت و هیچ authority یا feed اصلی تغییر نکرد.
+- timeline امضاشده ده snapshot product و ۵۵ snapshot بدون version gap را ثبت کرد؛ p95
+  pair skew برابر `4.114s` و transfer-to-snapshot برابر `6.788s` بود. XAU/USDT point و mean
+  همگی حداکثر ۲۵ bps فاصله داشتند و هرات فردایی/سه aggregate دقیقاً برابر بودند، اما drift
+  private-gold و نبود همهٔ نرخ‌های coin در بازار آرام، gate بازار باز را باز نگه داشت. نتیجه
+  رسمی `HOLD_FULL_OPEN_MARKET_SESSION_REQUIRED` و `cutover_performed=false` است.
+- پنجره فعال بعدی در 2026-08-27 تعداد ۶۰ snapshot محصول و ۳۱۴ snapshot candidate را بدون
+  version gap ثبت کرد؛ p95 انتقال `6.869s` بود و transport gate را پاس کرد. XAU حداکثر
+  ۲۵ bps، USDT حداکثر ۵ bps و bookهای فعال Herat/آبشده عمومی بدون اختلاف بیش از ۱۰۰ bps
+  بودند. lane
+  قدیمی private-gold در تمام window stale ولی candidate فردایی زنده بود، پس baseline قدیمی
+  برای parser/value آن oracle معتبر نیست. candidate فقط ۱۰ rate در برابر ۱۴ rate محصول
+  داشت: `IMAM/CASH`، `HALF_BAHAR/CASH` و هر دو rate یک‌گرمی به‌علت نبود تاریخچهٔ هم‌زمان
+  anchor سکه و underlying آبشده fail-closed شدند. پیش از هر cutover، تاریخچهٔ سکه و driverها
+  باید point-in-time و دست‌کم در horizon هفت‌روزهٔ موتور نرخ به Store جدید backfill و سپس
+  parser/lifecycle تک‌مالک و یک جلسه کامل بازار باز تکرار شود. recommendation همچنان
+  `HOLD_FULL_OPEN_MARKET_SESSION_REQUIRED` و cutover برابر false است.
 
 رسید عملیاتی: [COIN_MARKET_DATA_STAGE13_STAGING_SHADOW.md](./COIN_MARKET_DATA_STAGE13_STAGING_SHADOW.md)
 

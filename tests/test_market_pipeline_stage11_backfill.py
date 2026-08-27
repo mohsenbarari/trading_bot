@@ -84,6 +84,40 @@ class MarketPipelineStage11BackfillTests(unittest.TestCase):
                 records=[record],
             )
 
+    def test_transient_seed_is_explicit_and_never_accepts_permanent_source(self):
+        record = coin_record(source_code="MELTED_FLOW")
+        record["payload"] = {
+            "kind": "OBSERVATION",
+            "instrument": "MELTED_GOLD",
+            "event_type": "OFFER",
+            "side": "SELL",
+            "settlement": "CASH",
+            "trade_form": "PHYSICAL",
+            "price_value": "100000000",
+            "price_unit": "TOMAN_PER_MESGHAL_750",
+            "currency": "TOMAN",
+        }
+        parsed = HistoryFactRecordV1.model_validate(
+            record,
+            context={"allow_transient_seed": True},
+        )
+        bundle = build_bundle(
+            source_code="MELTED_FLOW",
+            source_system="LEGACY_MARKET_STORE",
+            retention_mode="TRANSIENT_SEED",
+            records=[parsed.model_dump(mode="json")],
+        )
+        self.assertEqual(bundle.retention_mode, "TRANSIENT_SEED")
+        with self.assertRaisesRegex(
+            ValidationError, "history_bundle_transient_source_must_not_be_permanent"
+        ):
+            build_bundle(
+                source_code="GROUP_1",
+                source_system="LEGACY_MARKET_STORE",
+                retention_mode="TRANSIENT_SEED",
+                records=[coin_record()],
+            )
+
     def test_forbidden_urls_credentials_and_plain_envelope_are_rejected(self):
         for field, value in (
             ("message_link", "https://t.me/example/1"),

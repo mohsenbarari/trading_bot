@@ -106,6 +106,10 @@ class ExternalMarketSnapshotTests(unittest.TestCase):
                 ExternalQuoteInput(source_event_id="coin", price=1_825_000_000, **common)
             ),
         )
+        self.connection.execute(
+            "UPDATE market_observations SET inserted_at_utc=?",
+            (common["available_at_utc"],),
+        )
         self.connection.commit()
 
         snapshot = build_market_snapshot(

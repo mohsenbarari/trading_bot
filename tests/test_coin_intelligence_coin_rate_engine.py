@@ -23,15 +23,20 @@ class CoinRateEngineTests(unittest.TestCase):
         self.tempdir.cleanup()
 
     def add(self, key: str, *, instrument: str, price: int, unit: str, at: str, settlement: str, form: str, event_type: str = "QUOTE", is_conditional: bool = False, source_code: str = "TEST_RATE") -> None:
+        event_key = derive_event_key("rate-engine", key)
         upsert_observation(
             self.connection,
             MarketObservation(
-                event_key=derive_event_key("rate-engine", key), source_code=source_code, source_family="MANUAL_REVIEW",
+                event_key=event_key, source_code=source_code, source_family="MANUAL_REVIEW",
                 event_time_utc=at, available_at_utc=at, instrument=instrument, market_label="TEST_RATE",
                 settlement_term=settlement, trade_form=form, event_type=event_type, side="MID",
                 price=Decimal(price), price_unit=unit, quantity=None, quantity_unit=None,
                 is_conditional=is_conditional,
             ),
+        )
+        self.connection.execute(
+            "UPDATE market_observations SET inserted_at_utc=? WHERE event_key=?",
+            (at, event_key),
         )
 
     def rate(self, code: str, settlement: str):
@@ -43,6 +48,26 @@ class CoinRateEngineTests(unittest.TestCase):
             for item in build_coin_rate_estimates(self.connection, as_of_utc=at)
             if item.commodity_code == code and item.settlement_term == settlement
         )
+
+    def test_rate_excludes_fact_inserted_after_evaluation_time(self) -> None:
+        self.add(
+            "late-local-insert",
+            instrument="MELTED_GOLD_PRIVATE",
+            price=80_300_000,
+            unit="TOMAN_PER_MESGHAL_750",
+            at="2026-08-04T10:09:30Z",
+            settlement="TODAY",
+            form="PHYSICAL",
+        )
+        self.connection.execute(
+            "UPDATE market_observations SET inserted_at_utc=?",
+            ("2026-08-04T10:10:00.000001Z",),
+        )
+        self.connection.commit()
+
+        rate = self.rate("BAHAR", "CASH")
+
+        self.assertEqual((rate.status, rate.reason), ("NO_DATA", "NO_FRESH_MELTED"))
 
     def test_low_date_uses_physical_melted_without_any_coin_offer(self) -> None:
         self.add("gold", instrument="MELTED_GOLD_PRIVATE", price=80_300_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:09:30Z", settlement="TODAY", form="PHYSICAL")

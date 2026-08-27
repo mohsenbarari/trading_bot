@@ -5,10 +5,12 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from core.market_intelligence.coin_rate_engine import build_coin_rate_estimates
 from core.market_intelligence.market_fact_adapter import (
     MarketFactAdapterError,
+    adapter_metrics,
     initialize_adapter_store,
     normalize_feed_mode,
     run_adapter_cycle,
@@ -92,8 +94,14 @@ class Stage9AdapterTests(unittest.TestCase):
         self.market_path = root / "market.sqlite3"
         self.market = connect_market_store(self.market_path)
         initialize_adapter_store(self.market)
+        self.market_clock = patch(
+            "core.market_intelligence.market_store._utc_now",
+            return_value="2026-08-26T05:00:04.000000Z",
+        )
+        self.market_clock.start()
 
     def tearDown(self) -> None:
+        self.market_clock.stop()
         self.market.close()
         self.receiver.close()
         self.directory.cleanup()
@@ -202,6 +210,50 @@ class Stage9AdapterTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(int(projection["fact_revision"]), 2)
         self.assertEqual(bytes(projection["event_key"]).hex(), str(offer["event_key"]))
+
+    def test_adapter_metrics_use_durable_insert_counts_and_reconcile_on_restart(self):
+        stream = "market.fact.coin.group.1"
+        offer = _fact(
+            12,
+            source_code="GROUP_1",
+            stream_id=stream,
+            source_sequence=1,
+            payload={
+                "kind": "COIN_OFFER",
+                "group_code": 1,
+                "instrument": "COIN_IMAM",
+                "side": "BUY",
+                "settlement": "CASH",
+                "trade_form": "PHYSICAL",
+                "offered_price_value": "187500",
+                "price_unit": "PROJECT_THOUSAND_TOMAN",
+                "quantity_value": "1",
+                "quantity_unit": "COIN_COUNT",
+            },
+        )
+        self._receive(_batch(12, stream_id=stream, deliveries=[(1, offer)]))
+        self.assertEqual(run_adapter_cycle(self.receiver, self.market).applied, 1)
+        self.assertEqual(adapter_metrics(self.market)["applied_count"], 1)
+
+        # Simulate an older store whose ledger existed before the trigger.
+        self.market.execute(
+            "UPDATE private_fact_adapter_status_counts SET delivery_count=0"
+        )
+        self.market.commit()
+        initialize_adapter_store(self.market)
+        statements: list[str] = []
+        self.market.set_trace_callback(statements.append)
+        metrics = adapter_metrics(self.market)
+        self.market.set_trace_callback(None)
+        self.assertEqual(metrics["applied_count"], 1)
+        self.assertEqual(metrics["rejected_count"], 0)
+        self.assertFalse(
+            any(
+                "COUNT(*)" in statement
+                and "private_fact_adapter_deliveries" in statement
+                for statement in statements
+            )
+        )
 
     def test_malformed_unit_is_rejected_and_next_fact_advances(self):
         stream = "market.fact.melted-aggregate"
@@ -404,6 +456,99 @@ class Stage9AdapterTests(unittest.TestCase):
         )
         self.assertEqual((rollback.primary_store, rollback.shadow_store), (legacy, None))
         self.assertTrue(rollback.private_capture_continues)
+
+    def test_large_inbox_selection_is_bounded_and_causal_per_stream(self):
+        xau_stream = "market.fact.xauusd"
+        usdt_stream = "market.fact.wallex-usdt"
+        xau_1 = _fact(
+            101,
+            source_code="XAUUSD",
+            stream_id=xau_stream,
+            source_sequence=1,
+            payload={
+                "kind": "EXTERNAL_QUOTE",
+                "instrument": "XAUUSD",
+                "quote_kind": "MID",
+                "price_value": "3400",
+                "price_unit": "USD_PER_TROY_OUNCE",
+                "currency": "USD",
+            },
+        )
+        xau_2 = _fact(
+            102,
+            source_code="XAUUSD",
+            stream_id=xau_stream,
+            source_sequence=2,
+            payload={
+                **xau_1["payload"],
+                "price_value": "3401",
+            },
+        )
+        xau_2["payload_hash"] = content_hash(xau_2["payload"])
+        usdt = _fact(
+            103,
+            source_code="WALLEX_PUBLIC_API",
+            stream_id=usdt_stream,
+            source_sequence=1,
+            payload={
+                "kind": "EXTERNAL_QUOTE",
+                "instrument": "USDT_IRT",
+                "quote_kind": "MID",
+                "price_value": "97000",
+                "price_unit": "TOMAN_PER_USDT",
+                "currency": "TOMAN",
+            },
+        )
+        self._receive(
+            _batch(101, stream_id=xau_stream, deliveries=[(1, xau_1), (2, xau_2)])
+        )
+        self._receive(_batch(102, stream_id=usdt_stream, deliveries=[(1, usdt)]))
+        # A replay can make receipt timestamps non-monotonic.  The adapter must
+        # still expose each stream's sequence N before N+1.
+        self.receiver.execute(
+            "UPDATE fact_deliveries SET received_at_utc=? "
+            "WHERE stream_id=? AND delivery_sequence=1",
+            ("2026-08-26T05:00:10Z", xau_stream),
+        )
+        self.receiver.execute(
+            "UPDATE fact_deliveries SET received_at_utc=? "
+            "WHERE stream_id=? AND delivery_sequence=2",
+            ("2026-08-26T05:00:00Z", xau_stream),
+        )
+        self.receiver.execute(
+            "UPDATE fact_deliveries SET received_at_utc=? WHERE stream_id=?",
+            ("2026-08-26T05:00:05Z", usdt_stream),
+        )
+        statements: list[str] = []
+        self.receiver.set_trace_callback(statements.append)
+        first = run_adapter_cycle(self.receiver, self.market, max_deliveries=2)
+        self.receiver.set_trace_callback(None)
+        second = run_adapter_cycle(self.receiver, self.market, max_deliveries=2)
+
+        self.assertEqual((first.selected, first.applied), (2, 2))
+        self.assertEqual((second.selected, second.applied), (1, 1))
+        checkpoints = dict(
+            self.market.execute(
+                "SELECT stream_id,highest_delivery_sequence "
+                "FROM private_fact_adapter_checkpoints"
+            ).fetchall()
+        )
+        self.assertEqual(checkpoints, {usdt_stream: 1, xau_stream: 2})
+        normalized = [" ".join(statement.split()).upper() for statement in statements]
+        self.assertTrue(
+            any(
+                "WHERE STREAM_ID=" in statement
+                and "DELIVERY_SEQUENCE>" in statement
+                and "LIMIT" in statement
+                for statement in normalized
+            )
+        )
+        self.assertFalse(
+            any(
+                "FROM FACT_DELIVERIES ORDER BY RECEIVED_AT_UTC" in statement
+                for statement in normalized
+            )
+        )
 
 
 if __name__ == "__main__":
