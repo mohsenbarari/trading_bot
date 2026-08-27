@@ -3,7 +3,7 @@
   display: grid;
   grid-template-areas: 'master';
   grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
+  gap: var(--ui-v2-spacing-16);
   align-items: start;
   min-width: 0;
 }
@@ -20,7 +20,7 @@
   .ui-v2-workspace-accountant-relation-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--ui-v2-spacing-12);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -29,7 +29,7 @@
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-accountant-filter-chips
   > button {
-  min-block-size: var(--ds-touch-target);
+  min-block-size: var(--ui-v2-size-target-min);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -37,7 +37,7 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--ui-v2-spacing-8);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -47,22 +47,22 @@
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-accountant-detail-list {
   display: grid;
-  gap: 12px;
+  gap: var(--ui-v2-spacing-12);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-accountant-list-group {
   display: grid;
-  gap: 8px;
+  gap: var(--ui-v2-spacing-8);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-accountant-list-group
   h3 {
   margin: 0;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-sm);
-  line-height: 1.4;
-  font-weight: 700;
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-label-medium-size);
+  line-height: var(--ui-v2-type-label-medium-line);
+  font-weight: var(--ui-v2-font-weight-bold);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-accountant-list-badges,
@@ -71,7 +71,7 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-start;
-  gap: 4px;
+  gap: var(--ui-v2-spacing-4);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -79,11 +79,11 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
-  gap: 12px;
-  padding: 4px 0 12px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+  gap: var(--ui-v2-spacing-12);
+  padding: var(--ui-v2-spacing-4) var(--ui-v2-spacing-2) var(--ui-v2-spacing-12);
+  border: var(--ui-v2-stroke-standard) solid transparent;
+  border-radius: var(--ui-v2-radius-card);
+  background: var(--ui-v2-color-surface-page);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -98,19 +98,19 @@
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-accountant-detail-header
   h2 {
-  color: var(--ds-text-strong);
-  font-size: var(--ds-font-xl);
-  line-height: 1.35;
-  font-weight: 700;
+  color: var(--ui-v2-color-text-strong);
+  font-size: var(--ui-v2-type-section-size);
+  line-height: var(--ui-v2-type-section-line);
+  font-weight: var(--ui-v2-font-weight-bold);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-accountant-detail-header
   p {
-  margin-top: 4px;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-sm);
-  line-height: 1.4;
+  margin-top: var(--ui-v2-spacing-4);
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -122,11 +122,11 @@
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-accountant-meta-label {
   display: block;
-  margin-bottom: 4px;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-xs);
-  line-height: 1.35;
-  font-weight: 600;
+  margin-bottom: var(--ui-v2-spacing-4);
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-label-small-size);
+  line-height: var(--ui-v2-type-label-small-line);
+  font-weight: var(--ui-v2-font-weight-semibold);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -135,10 +135,10 @@
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-accountant-detail-list
   strong {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-base);
-  line-height: 1.5;
-  font-weight: 700;
+  color: var(--ui-v2-color-text-primary);
+  font-size: var(--ui-v2-type-body-medium-size);
+  line-height: var(--ui-v2-type-body-medium-line);
+  font-weight: var(--ui-v2-font-weight-bold);
   word-break: break-word;
 }
 
@@ -147,23 +147,23 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--ui-v2-spacing-12);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-accountant-detail-toolbar
   strong {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-base);
-  line-height: 1.5;
-  font-weight: 700;
+  color: var(--ui-v2-color-text-primary);
+  font-size: var(--ui-v2-type-body-medium-size);
+  line-height: var(--ui-v2-type-body-medium-line);
+  font-weight: var(--ui-v2-font-weight-bold);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-accountant-danger-card {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 12px;
+  gap: var(--ui-v2-spacing-12);
   align-items: start;
 }
 
@@ -179,19 +179,19 @@
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-accountant-danger-card
   strong {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-base);
-  line-height: 1.5;
-  font-weight: 700;
+  color: var(--ui-v2-color-text-primary);
+  font-size: var(--ui-v2-type-body-medium-size);
+  line-height: var(--ui-v2-type-body-medium-line);
+  font-weight: var(--ui-v2-font-weight-bold);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-accountant-danger-card
   p {
-  margin-top: 4px;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-sm);
-  line-height: 1.4;
+  margin-top: var(--ui-v2-spacing-4);
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -201,7 +201,7 @@
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-accountant-generated-account {
   display: grid;
-  gap: 12px;
+  gap: var(--ui-v2-spacing-12);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -214,26 +214,26 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--ui-v2-spacing-8);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-accountant-pending-card-header
   p {
-  margin: 4px 0 0;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-sm);
-  line-height: 1.4;
+  margin: var(--ui-v2-spacing-4) 0 0;
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-accountant-pending-deadline,
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-accountant-pending-sms-status {
-  margin: 8px 0 0;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-xs);
-  line-height: 1.35;
+  margin: var(--ui-v2-spacing-8) 0 0;
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-label-small-size);
+  line-height: var(--ui-v2-type-label-small-line);
 }
 
 @media (min-width: 900px) {
@@ -247,7 +247,7 @@
 
   :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-accountant-layout {
     grid-template-areas: 'master detail';
-    grid-template-columns: minmax(220px, 4fr) minmax(0, 6fr);
+    grid-template-columns: minmax(var(--ui-v2-layout-card-min), 4fr) minmax(0, 6fr);
   }
 
   :where([data-ui-system='v2'], [data-ui-system='v2-portal'])

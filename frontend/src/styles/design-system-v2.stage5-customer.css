@@ -4,7 +4,7 @@
   .ui-v2-workspace-customer-relation-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--ui-v2-spacing-12);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -13,13 +13,13 @@
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-filter-chips
   > button {
-  min-block-size: var(--ds-touch-target);
+  min-block-size: var(--ui-v2-size-target-min);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-layout {
   display: grid;
   min-inline-size: 0;
-  gap: 16px;
+  gap: var(--ui-v2-spacing-16);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -27,28 +27,28 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--ui-v2-spacing-8);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-list-controls,
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-detail-shell,
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-detail-list {
   display: grid;
-  gap: 12px;
+  gap: var(--ui-v2-spacing-12);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-list-group {
   display: grid;
-  gap: 8px;
+  gap: var(--ui-v2-spacing-8);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-list-group
   h3 {
   margin: 0;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-sm);
-  font-weight: 600;
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-label-medium-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-list-badges,
@@ -57,7 +57,7 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 4px;
+  gap: var(--ui-v2-spacing-4);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -65,11 +65,11 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
-  gap: 12px;
-  padding: 4px 0 12px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+  gap: var(--ui-v2-spacing-12);
+  padding: var(--ui-v2-spacing-4) var(--ui-v2-spacing-2) var(--ui-v2-spacing-12);
+  border: var(--ui-v2-stroke-standard) solid transparent;
+  border-radius: var(--ui-v2-radius-card);
+  background: var(--ui-v2-color-surface-page);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -84,18 +84,18 @@
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-detail-header
   h2 {
-  color: var(--ds-text-strong);
-  font-size: var(--ds-font-xl);
-  font-weight: 700;
+  color: var(--ui-v2-color-text-strong);
+  font-size: var(--ui-v2-type-section-size);
+  font-weight: var(--ui-v2-font-weight-bold);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-detail-header
   p {
-  margin-block-start: 4px;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-sm);
-  line-height: 1.4;
+  margin-block-start: var(--ui-v2-spacing-4);
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-detail-grid {
@@ -112,10 +112,10 @@
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-meta-label {
   display: block;
-  margin-block-end: 4px;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-xs);
-  font-weight: 500;
+  margin-block-end: var(--ui-v2-spacing-4);
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-label-small-size);
+  font-weight: var(--ui-v2-font-weight-medium);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -124,9 +124,9 @@
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-stats-commodities
   strong {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-base);
-  font-weight: 600;
+  color: var(--ui-v2-color-text-primary);
+  font-size: var(--ui-v2-type-card-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
   word-break: break-word;
 }
 
@@ -135,41 +135,41 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--ui-v2-spacing-12);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-detail-toolbar
   strong {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-base);
-  font-weight: 600;
+  color: var(--ui-v2-color-text-primary);
+  font-size: var(--ui-v2-type-card-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-period-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--ui-v2-spacing-8);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-period-tab {
-  min-block-size: var(--ds-touch-target);
-  padding: 8px 12px;
-  border: 1px solid var(--ds-native-hairline);
-  border-radius: var(--ds-radius-full);
-  background: var(--ds-bg-card);
-  color: var(--ds-text-secondary);
+  min-block-size: var(--ui-v2-size-target-min);
+  padding: var(--ui-v2-spacing-8) var(--ui-v2-spacing-12);
+  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  border-radius: var(--ui-v2-radius-full);
+  background: var(--ui-v2-color-surface-card);
+  color: var(--ui-v2-color-text-secondary);
   cursor: pointer;
   font: inherit;
-  font-size: var(--ds-font-sm);
-  font-weight: 600;
+  font-size: var(--ui-v2-type-label-medium-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-period-tab--active {
-  border-color: var(--ds-primary-500);
-  background: var(--ds-primary-100);
-  color: var(--ds-primary-700);
+  border-color: var(--ui-v2-color-border-focus);
+  background: var(--ui-v2-color-surface-brand-soft);
+  color: var(--ui-v2-color-text-action);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -181,7 +181,7 @@
   .ui-v2-workspace-customer-stats-commodities
   ul {
   display: grid;
-  gap: 8px;
+  gap: var(--ui-v2-spacing-8);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -193,16 +193,16 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-sm);
+  gap: var(--ui-v2-spacing-12);
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-danger-card {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
-  gap: 12px;
+  gap: var(--ui-v2-spacing-12);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -217,18 +217,18 @@
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-danger-card
   strong {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-base);
-  font-weight: 600;
+  color: var(--ui-v2-color-text-primary);
+  font-size: var(--ui-v2-type-card-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-danger-card
   p {
-  margin-block-start: 4px;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-sm);
-  line-height: 1.4;
+  margin-block-start: var(--ui-v2-spacing-4);
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-edit-card,
@@ -240,7 +240,7 @@
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-generated-account {
   display: grid;
-  gap: 12px;
+  gap: var(--ui-v2-spacing-12);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -255,15 +255,15 @@
   .ui-v2-workspace-customer-create-fieldset
   legend {
   padding: 0;
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-base);
-  font-weight: 600;
+  color: var(--ui-v2-color-text-primary);
+  font-size: var(--ui-v2-type-card-size);
+  font-weight: var(--ui-v2-font-weight-semibold);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-form-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
+  gap: var(--ui-v2-spacing-12);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -276,16 +276,16 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--ui-v2-spacing-8);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-pending-header
   p {
-  margin: 4px 0 0;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-sm);
-  line-height: 1.4;
+  margin: var(--ui-v2-spacing-4) 0 0;
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-pending-card,
@@ -296,31 +296,31 @@
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-financial-actions {
   display: grid;
-  gap: 8px;
+  gap: var(--ui-v2-spacing-8);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-pending-deadline {
   margin: 0;
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-sm);
-  font-weight: 500;
-  line-height: 1.4;
+  color: var(--ui-v2-color-text-primary);
+  font-size: var(--ui-v2-type-label-medium-size);
+  font-weight: var(--ui-v2-font-weight-medium);
+  line-height: var(--ui-v2-type-label-medium-line);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-pending-danger {
-  padding-block-start: 12px;
-  border-block-start: 1px solid var(--ds-native-hairline);
+  padding-block-start: var(--ui-v2-spacing-12);
+  border-block-start: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-financial-review
   > p {
   margin: 0;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-sm);
-  line-height: 1.4;
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -328,24 +328,24 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--ui-v2-spacing-8);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-financial-table {
-  border: 1px solid var(--ds-native-hairline);
+  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
   border-spacing: 0;
-  border-radius: var(--ds-radius-lg);
-  background: var(--ds-bg-card);
+  border-radius: var(--ui-v2-radius-container);
+  background: var(--ui-v2-color-surface-card);
   table-layout: fixed;
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-financial-caption {
-  margin-block-end: 8px;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-xs);
-  font-weight: 500;
+  margin-block-end: var(--ui-v2-spacing-8);
+  color: var(--ui-v2-color-text-secondary);
+  font-size: var(--ui-v2-type-label-small-size);
+  font-weight: var(--ui-v2-font-weight-medium);
   text-align: start;
 }
 
@@ -355,11 +355,11 @@
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-financial-table
   td {
-  padding: 8px 12px;
+  padding: var(--ui-v2-spacing-8) var(--ui-v2-spacing-12);
   text-align: start;
   vertical-align: middle;
-  font-size: var(--ds-font-xs);
-  line-height: 1.35;
+  font-size: var(--ui-v2-type-label-small-size);
+  line-height: var(--ui-v2-type-label-small-line);
   overflow-wrap: anywhere;
 }
 
@@ -367,9 +367,9 @@
   .ui-v2-workspace-customer-financial-table
   thead
   th {
-  background: var(--ds-bg-subtle);
-  color: var(--ds-text-secondary);
-  font-weight: 500;
+  background: var(--ui-v2-color-surface-subtle);
+  color: var(--ui-v2-color-text-secondary);
+  font-weight: var(--ui-v2-font-weight-medium);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -384,24 +384,24 @@
   tr
   + tr
   td {
-  border-block-start: 1px solid var(--ds-native-hairline);
+  border-block-start: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-financial-table
   tbody
   th {
-  color: var(--ds-text-primary);
-  font-weight: 600;
+  color: var(--ui-v2-color-text-primary);
+  font-weight: var(--ui-v2-font-weight-semibold);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-financial-table
   tbody
   td:last-child {
-  background: var(--ds-primary-100);
-  color: var(--ds-primary-700);
-  font-weight: 600;
+  background: var(--ui-v2-color-surface-brand-soft);
+  color: var(--ui-v2-color-text-action);
+  font-weight: var(--ui-v2-font-weight-semibold);
 }
 
 @media (max-width: 430px) {
@@ -440,8 +440,8 @@
     thead {
     position: absolute;
     overflow: hidden;
-    inline-size: 1px;
-    block-size: 1px;
+    inline-size: var(--ui-v2-stroke-standard);
+    block-size: var(--ui-v2-stroke-standard);
     white-space: nowrap;
   }
 
@@ -449,7 +449,7 @@
     .ui-v2-workspace-customer-financial-table
     tbody {
     display: grid;
-    gap: 8px;
+    gap: var(--ui-v2-spacing-8);
   }
 
   :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -458,9 +458,9 @@
     tr {
     display: grid;
     overflow: hidden;
-    border: 1px solid var(--ds-native-hairline);
-    border-radius: var(--ds-radius-sm);
-    background: var(--ds-bg-card);
+    border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+    border-radius: var(--ui-v2-radius-compact);
+    background: var(--ui-v2-color-surface-card);
   }
 
   :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -484,7 +484,7 @@
     td {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 8px;
+    gap: var(--ui-v2-spacing-8);
   }
 
   :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -492,7 +492,7 @@
     tbody
     td
     + td {
-    border-block-start: 1px solid var(--ds-native-hairline);
+    border-block-start: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
   }
 
   :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -500,8 +500,8 @@
     tbody
     td::before {
     content: attr(data-label);
-    color: var(--ds-text-secondary);
-    font-weight: 500;
+    color: var(--ui-v2-color-text-secondary);
+    font-weight: var(--ui-v2-font-weight-medium);
   }
 }
 
@@ -518,10 +518,10 @@
     .ui-v2-workspace-customer-layout--detail {
     grid-template-columns:
       minmax(
-        220px,
+        var(--ui-v2-layout-card-min),
         calc(
-          220px + 32px + 32px +
-            32px + 32px + 32px
+          var(--ui-v2-layout-card-min) + var(--ui-v2-spacing-32) + var(--ui-v2-spacing-32) +
+            var(--ui-v2-spacing-32) + var(--ui-v2-spacing-32) + var(--ui-v2-spacing-32)
         )
       )
       minmax(0, 1fr);
@@ -546,8 +546,8 @@
     .ui-v2-workspace-customer-layout--detail
     .ui-v2-workspace-customer-relation-list {
     max-block-size: calc(
-      220px + 220px + 220px +
-        20px
+      var(--ui-v2-layout-card-min) + var(--ui-v2-layout-card-min) + var(--ui-v2-layout-card-min) +
+        var(--ui-v2-spacing-20)
     );
     overflow-y: auto;
     overscroll-behavior: contain;

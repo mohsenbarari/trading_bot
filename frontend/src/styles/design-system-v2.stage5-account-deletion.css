@@ -7,9 +7,9 @@
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  padding: calc(16px + env(safe-area-inset-top)) 16px
-    calc(16px + env(safe-area-inset-bottom));
-  background: var(--ds-bg-page);
+  padding: calc(var(--ui-v2-spacing-16) + env(safe-area-inset-top)) var(--ui-v2-spacing-16)
+    calc(var(--ui-v2-spacing-16) + env(safe-area-inset-bottom));
+  background: var(--ui-v2-color-surface-page);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -17,22 +17,22 @@
   box-sizing: border-box;
   display: flex;
   width: 100%;
-  max-width: 72ch;
+  max-width: var(--ui-v2-layout-reading-max);
   max-height: 100%;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--ds-native-hairline);
-  border-radius: var(--ds-radius-xl);
-  background: var(--ds-bg-page);
+  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  border-radius: var(--ui-v2-radius-panel);
+  background: var(--ui-v2-color-surface-page);
   box-shadow: none;
-  color: var(--ds-text-primary);
-  font-family: var(--ds-font-sans, Vazirmatn, Tahoma, Arial, sans-serif);
+  color: var(--ui-v2-color-text-primary);
+  font-family: var(--ui-v2-font-family);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-account-deletion-dialog:focus-visible {
-  outline: 3px solid var(--ds-primary-500);
-  outline-offset: 2px;
+  outline: var(--ui-v2-stroke-focus) solid var(--ui-v2-color-border-focus);
+  outline-offset: var(--ui-v2-spacing-2);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -41,12 +41,12 @@
     .ui-v2-workspace-account-deletion-dialog__body,
     .ui-v2-workspace-account-deletion-dialog__actions
   ) {
-  padding: 16px;
+  padding: var(--ui-v2-spacing-16);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-account-deletion-dialog__header {
-  border-block-end: 1px solid var(--ds-native-hairline);
+  border-block-end: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -58,70 +58,70 @@
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-account-deletion-dialog__header
   h2 {
-  color: var(--ds-danger-700);
-  font-size: var(--ds-font-xl);
-  font-weight: 700;
-  line-height: 1.35;
+  color: var(--ui-v2-color-status-danger);
+  font-size: var(--ui-v2-type-section-size);
+  font-weight: var(--ui-v2-font-weight-bold);
+  line-height: var(--ui-v2-type-section-line);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-account-deletion-dialog__header
   p {
-  margin-block-start: 4px;
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-base);
-  line-height: 1.5;
+  margin-block-start: var(--ui-v2-spacing-4);
+  color: var(--ui-v2-color-text-primary);
+  font-size: var(--ui-v2-type-body-medium-size);
+  line-height: var(--ui-v2-type-body-medium-line);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-account-deletion-dialog__body {
   display: grid;
   min-height: 0;
-  gap: 12px;
+  gap: var(--ui-v2-spacing-12);
   overflow-y: auto;
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-account-deletion-dialog__consequences {
   display: grid;
-  gap: 8px;
+  gap: var(--ui-v2-spacing-8);
   margin: 0;
-  padding: 12px 32px 12px
-    12px;
-  border-radius: var(--ds-inset-group-radius);
-  background: var(--ds-danger-50);
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-sm);
-  line-height: 1.4;
+  padding: var(--ui-v2-spacing-12) var(--ui-v2-spacing-32) var(--ui-v2-spacing-12)
+    var(--ui-v2-spacing-12);
+  border-radius: var(--ui-v2-radius-card);
+  background: var(--ui-v2-color-status-danger-bg);
+  color: var(--ui-v2-color-text-primary);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-account-deletion-dialog__consequences
   li::marker {
-  color: var(--ds-danger-700);
+  color: var(--ui-v2-color-status-danger);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-account-deletion-dialog__acknowledgement {
   display: flex;
-  min-height: var(--ds-touch-target);
+  min-height: var(--ui-v2-size-target-min);
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border: 1px solid var(--ds-native-hairline);
-  border-radius: var(--ds-control-radius);
-  background: var(--ds-bg-subtle);
-  font-size: var(--ds-font-sm);
-  line-height: 1.4;
+  gap: var(--ui-v2-spacing-8);
+  padding: var(--ui-v2-spacing-8) var(--ui-v2-spacing-12);
+  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  border-radius: var(--ui-v2-radius-control);
+  background: var(--ui-v2-color-surface-subtle);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-account-deletion-dialog__acknowledgement
   input[type='checkbox'] {
-  width: 24px;
-  height: 24px;
+  width: var(--ui-v2-icon-size-large);
+  height: var(--ui-v2-icon-size-large);
   flex: 0 0 auto;
-  accent-color: var(--ds-danger-600);
+  accent-color: var(--ui-v2-color-action-danger);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -130,27 +130,27 @@
     .ui-v2-workspace-account-deletion-dialog__status
   ) {
   margin: 0;
-  color: var(--ds-danger-700);
-  font-size: var(--ds-font-sm);
-  line-height: 1.4;
+  color: var(--ui-v2-color-status-danger);
+  font-size: var(--ui-v2-type-body-small-size);
+  line-height: var(--ui-v2-type-body-small-line);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-account-deletion-dialog__status {
-  color: var(--ds-text-secondary);
+  color: var(--ui-v2-color-text-secondary);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-account-deletion-dialog__actions {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 8px;
-  border-block-start: 1px solid var(--ds-native-hairline);
-  background: var(--ds-bg-card);
+  gap: var(--ui-v2-spacing-8);
+  border-block-start: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  background: var(--ui-v2-color-surface-card);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-account-deletion-dialog__actions
   .ui-button {
-  min-height: var(--ds-touch-target);
+  min-height: var(--ui-v2-size-cta-min);
 }
