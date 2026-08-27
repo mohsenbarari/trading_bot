@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import time
 from typing import Any, Mapping, Sequence
 
 from .market_history_backfill import (
@@ -320,6 +321,10 @@ def _run_import(args: argparse.Namespace) -> dict[str, Any]:
     connection = _database_connection()
     imported = duplicates = quarantined = 0
     no_op_bundles = 0
+    throttled_bundles = 0
+    delay = float(args.inter_bundle_delay_seconds)
+    if not 0 <= delay <= 60:
+        raise MarketHistoryOperationError("history_operation_bundle_delay_invalid")
     try:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -338,6 +343,9 @@ def _run_import(args: argparse.Namespace) -> dict[str, Any]:
             no_op_bundles += int(bool(result["no_op"]))
             if int(result["quarantined_revision_count"]) != 0:
                 raise MarketHistoryOperationError("history_operation_quarantine_nonzero")
+            if delay > 0 and not result["no_op"]:
+                throttled_bundles += 1
+                time.sleep(delay)
         if args.verify_idempotent_replay:
             for path in validated.bundle_paths:
                 result = import_history_bundle(
@@ -360,6 +368,8 @@ def _run_import(args: argparse.Namespace) -> dict[str, Any]:
         "duplicate_revision_count": duplicates,
         "quarantined_revision_count": quarantined,
         "preexisting_no_op_bundle_count": no_op_bundles,
+        "throttled_bundle_count": throttled_bundles,
+        "inter_bundle_delay_seconds": delay,
         "idempotent_replay_verified": bool(args.verify_idempotent_replay),
     }
 
@@ -391,6 +401,7 @@ def build_parser() -> argparse.ArgumentParser:
     importer.add_argument("--backup-receipt", required=True)
     importer.add_argument("--confirm-staging-project", required=True)
     importer.add_argument("--verify-idempotent-replay", action="store_true")
+    importer.add_argument("--inter-bundle-delay-seconds", type=float, default=0.0)
     importer.set_defaults(handler=_run_import)
     return parser
 
