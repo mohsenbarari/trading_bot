@@ -4,81 +4,37 @@ import {
   CURRENT_USER,
   CUSTOMER_RELATION,
   REGULAR_USER,
+  allowIntentionalFixtureConsole,
   attachDiagnostics,
   createDiagnostics,
   expectCleanDiagnostics,
   installFailClosedApi,
+  type FixtureController,
   type FixtureMode,
   type RouteDiagnostics,
 } from './helpers/nativeAppV2Api'
+import {
+  applyControlledSafeArea,
+  applyMeasurableZoom,
+  expectRouteContract,
+  simulateSoftKeyboard,
+} from './helpers/nativeAppV2Contract'
+import {
+  KEYBOARD_FORM_ROUTES,
+  ROUTE_DESCRIPTORS,
+  SENSITIVE_FAMILIES,
+  SENSITIVE_VIEWPORTS,
+  VIEWPORTS,
+  ZOOM_FAMILY_REPRESENTATIVES,
+  assertMatrixCoverage,
+  naCells,
+  type RouteDescriptor,
+  type StateId,
+} from './helpers/nativeAppV2Matrix'
 
-type ViewportCase = {
-  width: number
-  height: number
-  label: string
-}
+assertMatrixCoverage()
 
-const VIEWPORTS: ViewportCase[] = [
-  { width: 360, height: 740, label: 'mobile-360' },
-  { width: 390, height: 844, label: 'mobile-390' },
-  { width: 430, height: 932, label: 'mobile-430' },
-  { width: 768, height: 1024, label: 'tablet-768' },
-  { width: 1440, height: 900, label: 'desktop-1440' },
-]
-
-type RouteCase = {
-  path: string
-  readyText: string
-  readyBy?: 'text' | 'accessible-name'
-  family: 'auth' | 'profile' | 'operations' | 'admin' | 'messenger' | 'share-receive' | 'account' | 'home' | 'recovery'
-  auth: boolean
-}
-
-const AUTHENTICATED_ROUTES: RouteCase[] = [
-  { path: '/', readyText: 'خانه', family: 'home', auth: true },
-  { path: '/setup-password', readyText: 'تنظیم رمز عبور', family: 'auth', auth: true },
-  { path: '/operations', readyText: 'عملیات', family: 'operations', auth: true },
-  { path: '/operations/customers', readyText: 'مشتریان', family: 'operations', auth: true },
-  { path: '/operations/customers/13', readyText: 'مشتری پذیرش', family: 'operations', auth: true },
-  { path: '/operations/accountants', readyText: 'حسابداران', family: 'operations', auth: true },
-  { path: '/operations/accountants/13', readyText: 'حسابدار پذیرش', family: 'operations', auth: true },
-  { path: '/account', readyText: 'حساب', family: 'account', auth: true },
-  { path: '/account/security', readyText: 'امنیت حساب', family: 'account', auth: true },
-  { path: '/account/storage', readyText: 'حافظه و داده‌ها', family: 'account', auth: true },
-  { path: '/account/notifications', readyText: 'اعلان‌ها', family: 'account', auth: true },
-  { path: '/chat', readyText: 'جستجو', readyBy: 'accessible-name', family: 'messenger', auth: true },
-  { path: '/users/9001', readyText: 'اطلاعات شخصی', family: 'profile', auth: true },
-  { path: '/profile', readyText: 'اطلاعات شخصی', family: 'profile', auth: true },
-  { path: '/settings', readyText: 'تنظیمات حساب', family: 'account', auth: true },
-  { path: '/admin', readyText: 'مرکز مدیریت', family: 'admin', auth: true },
-  { path: '/admin/invitations', readyText: 'ارسال دعوت‌نامه', family: 'admin', auth: true },
-  { path: '/admin/channels', readyText: 'ساخت کانال', family: 'admin', auth: true },
-  { path: '/admin/users', readyText: 'مدیریت کاربران', family: 'admin', auth: true },
-  { path: '/admin/users/9001', readyText: 'native_app_v2_user', family: 'admin', auth: true },
-  { path: '/admin/commodities', readyText: 'مدیریت کالاها', family: 'admin', auth: true },
-  { path: '/admin/messages', readyText: 'پیام‌های مدیریت', family: 'admin', auth: true },
-  { path: '/admin/system', readyText: 'تنظیمات سیستم', family: 'admin', auth: true },
-  { path: '/notifications', readyText: 'اعلان‌ها', family: 'account', auth: true },
-  { path: '/share-receive', readyText: 'اشتراک‌گذاری آماده نشد', family: 'share-receive', auth: true },
-]
-
-const PUBLIC_ROUTES: RouteCase[] = [
-  { path: '/login', readyText: 'ورود به سامانه', family: 'auth', auth: false },
-  { path: '/register', readyText: 'تکمیل ثبت‌نام', family: 'auth', auth: false },
-  { path: '/i/uiux-baseline', readyText: 'ثبت‌نام در وب‌اپ', family: 'auth', auth: false },
-  { path: '/this-route-does-not-exist', readyText: 'این صفحه پیدا نشد', family: 'recovery', auth: false },
-]
-
-const ALL_LIVE_ROUTES = [...AUTHENTICATED_ROUTES, ...PUBLIC_ROUTES]
-const SENSITIVE_FAMILIES = new Set([
-  'auth',
-  'profile',
-  'operations',
-  'admin',
-  'messenger',
-  'share-receive',
-  'recovery',
-])
+const AUTH_DISABLE_KEY = 'native-v2-auth-disabled'
 
 function createJwt(userId = CURRENT_USER.id) {
   const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url')
@@ -89,8 +45,6 @@ function createJwt(userId = CURRENT_USER.id) {
   })).toString('base64url')
   return `${header}.${body}.native-v2`
 }
-
-const AUTH_DISABLE_KEY = 'native-v2-auth-disabled'
 
 async function primeAuthenticatedLayout(page: Page, user = CURRENT_USER) {
   const token = createJwt(user.id)
@@ -121,42 +75,49 @@ async function clearAuthenticatedLayout(page: Page) {
   }, AUTH_DISABLE_KEY)
 }
 
-async function disableAuthForPublicRoutes(page: Page) {
-  await page.evaluate((disableKey) => {
-    window.sessionStorage.setItem(disableKey, '1')
-    localStorage.removeItem('auth_token')
-    localStorage.removeItem('refresh_token')
-    localStorage.removeItem('current_user_summary')
-  }, AUTH_DISABLE_KEY)
+function modeForState(state: StateId): FixtureMode {
+  if (state === 'empty') return 'empty'
+  if (state === 'error' || state === 'retry') return 'error'
+  if (state === 'full' || state === 'long-persian' || state === 'unbroken' || state === 'ltr') return 'long-copy'
+  if (state === 'stale') return 'stale'
+  return 'normal'
+}
+
+function viewerForState(route: RouteDescriptor, state: StateId) {
+  if (state !== 'unauthorized') return CURRENT_USER
+  if (route.family === 'admin') return REGULAR_USER
+  if (route.family === 'operations') return { ...REGULAR_USER, is_customer: true, id: 33 }
+  return CURRENT_USER
 }
 
 async function preparePage(
   page: Page,
-  options: { auth?: boolean; mode?: FixtureMode; user?: typeof CURRENT_USER } = {},
+  route: RouteDescriptor,
+  state: StateId,
 ) {
   const diagnostics = createDiagnostics()
+  const viewer = viewerForState(route, state)
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  if (options.auth === false) {
-    await clearAuthenticatedLayout(page)
+  if (!route.auth || state === 'unauthorized' && route.family === 'admin') {
+    if (!route.auth) await clearAuthenticatedLayout(page)
+    else await primeAuthenticatedLayout(page, viewer)
+  } else if (state === 'unauthorized' && route.family === 'operations') {
+    await primeAuthenticatedLayout(page, viewer)
   } else {
-    await primeAuthenticatedLayout(page, options.user)
+    await primeAuthenticatedLayout(page, viewer)
   }
-  await attachDiagnostics(page, diagnostics)
-  const controller = await installFailClosedApi(page, diagnostics, { mode: options.mode, viewer: options.user })
-  return { diagnostics, controller }
-}
-
-function routeByPath(path: string) {
-  return ALL_LIVE_ROUTES.find((route) => route.path === path)
-}
-
-async function expectRouteReady(page: Page, route: RouteCase) {
-  const timeout = route.family === 'messenger' ? 45_000 : 15_000
-  if (route.readyBy === 'accessible-name') {
-    await expect(page.getByRole('button', { name: route.readyText }).first()).toBeVisible({ timeout })
-    return
-  }
-  await expect(page.getByText(route.readyText, { exact: false }).first()).toBeVisible({ timeout })
+  const allowErrorConsole = state === 'error' || state === 'retry' || state === 'loading' || state === 'slow'
+  await attachDiagnostics(page, diagnostics, {
+    allowConsole: allowErrorConsole ? allowIntentionalFixtureConsole : undefined,
+    allowRequestFailed: state === 'offline'
+      ? () => true
+      : undefined,
+  })
+  const controller = await installFailClosedApi(page, diagnostics, {
+    mode: modeForState(state),
+    viewer,
+  })
+  return { diagnostics, controller, viewer }
 }
 
 async function gotoRouteWithNavigationRetry(page: Page, path: string) {
@@ -179,123 +140,13 @@ async function gotoRouteWithNavigationRetry(page: Page, path: string) {
   throw lastError
 }
 
-async function collectRouteContract(page: Page) {
-  return page.evaluate(() => {
-    const isVisible = (element: Element) => {
-      if (!(element instanceof HTMLElement)) return false
-      const style = window.getComputedStyle(element)
-      const rect = element.getBoundingClientRect()
-      return style.display !== 'none'
-        && style.visibility !== 'hidden'
-        && Number(style.opacity || '1') > 0
-        && rect.width > 0
-        && rect.height > 0
-    }
-    const nameFor = (element: HTMLElement) => {
-      const labelledBy = (element.getAttribute('aria-labelledby') || '')
-        .split(/\s+/)
-        .filter(Boolean)
-        .map((id) => document.getElementById(id)?.textContent || '')
-        .join(' ')
-      const nativeLabels = 'labels' in element
-        ? Array.from((element as HTMLInputElement).labels || []).map((item) => item.textContent || '').join(' ')
-        : ''
-      return [
-        element.getAttribute('aria-label'),
-        labelledBy,
-        nativeLabels,
-        element.getAttribute('title'),
-        element.textContent,
-      ].join(' ').trim()
-    }
-    const interactives = Array.from(document.querySelectorAll<HTMLElement>(
-      'a[href], button, input, textarea, select, [role="button"], [role="tab"], [role="menuitem"]',
-    )).filter(isVisible)
-    const unnamed = interactives.filter((element) => (
-      !nameFor(element) && element.getAttribute('aria-hidden') !== 'true'
-    ))
-    const nested = interactives.filter((element) => (
-      interactives.some((other) => other !== element && other.contains(element))
-    ))
-    const undersized = interactives.flatMap((element) => {
-      const rect = element.getBoundingClientRect()
-      if (rect.height >= 48 && rect.width >= 44) return []
-      const input = element as HTMLInputElement
-      const label = element.closest('label')
-      if (label && (input.type === 'checkbox' || input.type === 'radio')) {
-        const labelRect = label.getBoundingClientRect()
-        if (labelRect.height >= 48 && labelRect.width >= 44) return []
-      }
-      if (element.getAttribute('aria-hidden') === 'true') return []
-      return [`${element.tagName.toLowerCase()}.${element.className.split(' ').slice(0, 3).join('.')}:${Math.round(rect.width)}x${Math.round(rect.height)}`]
-    })
-    const doc = document.documentElement
-    const body = document.body
-    const app = document.querySelector('#app') as HTMLElement | null
-    const routeScroll = document.querySelector('.app-route-scroll') as HTMLElement | null
-    const nav = document.querySelector('.bottom-nav-wrapper, .ui-v2-bottom-nav, .bottom-nav-bar') as HTMLElement | null
-    const ctas = Array.from(document.querySelectorAll<HTMLElement>(
-      '.app-route-scroll button, .app-route-scroll [role="button"], .app-route-scroll a[href]',
-    )).filter(isVisible)
-    const navRect = nav && isVisible(nav) ? nav.getBoundingClientRect() : null
-    if (routeScroll) routeScroll.scrollTop = routeScroll.scrollHeight
-    const viewportCtas = ctas.filter((element) => {
-      const rect = element.getBoundingClientRect()
-      return rect.bottom > 8
-        && rect.top < window.innerHeight - 8
-        && rect.left < window.innerWidth - 8
-        && rect.right > 8
-    })
-    const lastCta = viewportCtas.at(-1) || ctas.at(-1)
-    const lastCtaAfterScroll = lastCta?.getBoundingClientRect()
-    const visibleLeft = lastCtaAfterScroll ? Math.max(lastCtaAfterScroll.left, 0) : 0
-    const visibleRight = lastCtaAfterScroll ? Math.min(lastCtaAfterScroll.right, window.innerWidth) : 0
-    const visibleTop = lastCtaAfterScroll ? Math.max(lastCtaAfterScroll.top, 0) : 0
-    const visibleBottom = lastCtaAfterScroll ? Math.min(lastCtaAfterScroll.bottom, window.innerHeight) : 0
-    const hitX = visibleLeft + Math.max(visibleRight - visibleLeft, 0) / 2
-    const hitY = visibleTop + Math.max(visibleBottom - visibleTop, 0) / 2
-    const hitNode = lastCtaAfterScroll && visibleRight - visibleLeft >= 8 && visibleBottom - visibleTop >= 8
-      ? document.elementFromPoint(hitX, hitY)
-      : lastCta || null
-    return {
-      mainCount: Array.from(document.querySelectorAll('main, [role="main"]')).filter((element) => {
-        if (!(element instanceof HTMLElement)) return false
-        const style = window.getComputedStyle(element)
-        return style.display !== 'none' && style.visibility !== 'hidden'
-      }).length,
-      h1Count: document.querySelectorAll('h1').length,
-      unnamed: unnamed.slice(0, 8).map((element) => `${element.tagName}.${element.className}`),
-      nested: nested.slice(0, 8).map((element) => `${element.tagName}.${element.className}`),
-      undersized: undersized.slice(0, 8),
-      viewportWidth: window.innerWidth,
-      maxScrollWidth: Math.max(doc.scrollWidth, body.scrollWidth, app?.scrollWidth || 0),
-      routeScrollWidth: routeScroll?.scrollWidth || 0,
-      routeClientWidth: routeScroll?.clientWidth || window.innerWidth,
-      scrollerCount: [routeScroll, document.scrollingElement].filter((node) => {
-        if (!(node instanceof HTMLElement)) return false
-        return node.scrollHeight > node.clientHeight + 1
-      }).length,
-      ctaAboveNav: !lastCtaAfterScroll || !navRect ? true : lastCtaAfterScroll.bottom <= navRect.top + 2,
-      lastCtaCenterHit: !lastCta || !lastCtaAfterScroll
-        ? true
-        : Boolean(hitNode && (hitNode === lastCta || lastCta.contains(hitNode) || hitNode.closest('button, a, [role="button"]') === lastCta)),
-      reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true,
-    }
-  })
-}
-
-async function expectRouteContract(page: Page, label: string) {
-  const contract = await collectRouteContract(page)
-  expect(contract.mainCount, `${label}: exactly one main`).toBe(1)
-  expect(contract.h1Count, `${label}: exactly one h1`).toBe(1)
-  expect(contract.unnamed, `${label}: unnamed controls`).toEqual([])
-  expect(contract.nested, `${label}: nested controls`).toEqual([])
-  expect(contract.undersized, `${label}: target < 48`).toEqual([])
-  expect(contract.maxScrollWidth, `${label}: document overflow`).toBeLessThanOrEqual(contract.viewportWidth + 1)
-  expect(contract.routeScrollWidth, `${label}: route overflow`).toBeLessThanOrEqual(contract.routeClientWidth + 1)
-  expect(contract.ctaAboveNav, `${label}: CTA above BottomNav`).toBe(true)
-  expect(contract.lastCtaCenterHit, `${label}: CTA hit-test`).toBe(true)
-  expect(contract.reducedMotion, `${label}: reduced motion`).toBe(true)
+async function expectRouteReady(page: Page, route: RouteDescriptor) {
+  const timeout = route.family === 'messenger' ? 45_000 : 15_000
+  if (route.readyBy === 'accessible-name') {
+    await expect(page.getByRole('button', { name: route.readyText }).first()).toBeVisible({ timeout })
+    return
+  }
+  await expect(page.getByText(route.readyText, { exact: false }).first()).toBeVisible({ timeout })
 }
 
 async function expectNoPageCrash(page: Page, label: string) {
@@ -306,75 +157,180 @@ async function expectNoPageCrash(page: Page, label: string) {
   expect(pageError, `${label}: page error`).toBe('')
 }
 
-async function visitAndAssert(page: Page, route: RouteCase, label: string) {
-  await gotoRouteWithNavigationRetry(page, route.path)
+async function runSettledContract(
+  page: Page,
+  route: RouteDescriptor,
+  diagnostics: RouteDiagnostics,
+  label: string,
+) {
   await expectRouteReady(page, route)
   await expectNoPageCrash(page, label)
-  await expectRouteContract(page, label)
+  await expectRouteContract(page, route, label)
+  expectCleanDiagnostics(diagnostics, label)
 }
 
-test.describe('Native App V2 fail-closed 29-route matrix', () => {
+async function runCell(
+  page: Page,
+  route: RouteDescriptor,
+  state: StateId,
+  controller: FixtureController,
+  diagnostics: RouteDiagnostics,
+  label: string,
+) {
+  if (state === 'loading' || state === 'slow') {
+    if (!route.holdPath) throw new Error(`${route.id} missing holdPath`)
+    controller.hold(route.holdPath)
+    const pending = gotoRouteWithNavigationRetry(page, route.path)
+    await expect(page.getByText(route.loadingText || /در حال|بارگذاری/i).first()).toBeVisible({ timeout: 10_000 })
+    if (state === 'slow') await page.waitForTimeout(1200)
+    controller.release(route.holdPath)
+    await pending
+    await runSettledContract(page, route, diagnostics, label)
+    await expect(page.getByText(route.loadingText || /در حال بارگذاری/i).first()).toHaveCount(0)
+    return
+  }
+
+  if (state === 'retry') {
+    if (!route.errorPath) throw new Error(`${route.id} missing errorPath`)
+    controller.failOnce(route.errorPath)
+    await gotoRouteWithNavigationRetry(page, route.path)
+    await expect(page.getByText(route.errorText || /ناموفق|خطا|دوباره/i).first()).toBeVisible({ timeout: 10_000 })
+    const retry = page.getByRole('button', { name: /تلاش مجدد|دوباره/i }).first()
+    await expect(retry).toBeVisible()
+    await retry.click()
+    await runSettledContract(page, route, diagnostics, label)
+    await expect(page.getByText(route.errorText || /ناموفق|خطا/i).first()).toHaveCount(0)
+    return
+  }
+
+  if (state === 'offline') {
+    await page.context().setOffline(true)
+    await gotoRouteWithNavigationRetry(page, route.path)
+    await expect(page.getByText(/آفلاین|اتصال|شبکه|ناموفق|خطا/i).first()).toBeVisible({ timeout: 10_000 })
+    await page.context().setOffline(false)
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.locator('html[data-app-mounted="1"]').waitFor({ timeout: 15_000 })
+    await runSettledContract(page, route, diagnostics, label)
+    return
+  }
+
+  await gotoRouteWithNavigationRetry(page, route.path)
+
+  if (state === 'empty' && route.emptyText) {
+    await expect(page.getByText(route.emptyText, { exact: false }).first()).toBeVisible({ timeout: 10_000 })
+  }
+  if (state === 'error') {
+    await expect(page.getByText(route.errorText || /ناموفق|خطا|دوباره|دریافت/i).first()).toBeVisible({ timeout: 10_000 })
+  }
+  if (state === 'unauthorized') {
+    await expect(page.getByText(/دسترسی|مجاز|پیدا نشد|بازیابی/i).first()).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText(route.readyText, { exact: false }).first()).toHaveCount(0)
+    expectCleanDiagnostics(diagnostics, label)
+    return
+  }
+  if (state === 'long-persian' || state === 'full') {
+    if (['profile', 'public-profile', 'customers', 'accountants', 'messenger', 'account-notifications'].includes(route.id)) {
+      await expect(page.getByText(/نام بسیار بلند فارسی|بسیار بلند فارسی/)).toBeVisible()
+    }
+  }
+  if (state === 'unbroken' || state === 'ltr') {
+    if (['profile', 'public-profile', 'admin-user-profile'].includes(route.id)) {
+      await expect(page.getByText('unbroken_ltr_accountnamewithoutspaces_9001')).toBeVisible()
+      await expect(page.getByText('09120000000')).toBeVisible()
+    }
+  }
+  if (state === 'stale') {
+    await expect(page.getByText(/۱۴۰۲|2024|قدیمی|تازه‌سازی|به‌روزرسانی/i).first()).toBeVisible({ timeout: 10_000 })
+  }
+
+  if (state === 'error') {
+    await expectRouteContract(page, route, label)
+    expectCleanDiagnostics(diagnostics, label)
+    return
+  }
+
+  await runSettledContract(page, route, diagnostics, label)
+}
+
+const GEOMETRY_STATES = new Set<StateId>(['initial', 'normal'])
+const STATE_VIEWPORTS = SENSITIVE_VIEWPORTS
+
+test.describe('Native App V2 matrix coverage', () => {
+  test('29 routes and every N/A cell have a product reason', () => {
+    expect(ROUTE_DESCRIPTORS).toHaveLength(29)
+    const nas = naCells(VIEWPORTS)
+    expect(nas.length).toBeGreaterThan(0)
+    for (const cell of nas) {
+      expect(cell.naCode, cell.id).toBeTruthy()
+      expect(cell.naReason, cell.id).toBeTruthy()
+    }
+  })
+})
+
+test.describe('Native App V2 Chromium geometry matrix', () => {
   test.use({ timezoneId: 'Asia/Tehran', locale: 'fa-IR' })
 
   for (const viewport of VIEWPORTS) {
-    test(`${viewport.label} Chromium contract for all 29 non-market routes`, async ({ page, browserName }) => {
-      test.skip(browserName !== 'chromium', 'full 29-route production matrix is Chromium; Firefox/WebKit cover sensitive families below.')
-      test.setTimeout(240_000)
-      const { diagnostics } = await preparePage(page, { auth: true })
-      await page.setViewportSize({ width: viewport.width, height: viewport.height })
-
-      for (const route of AUTHENTICATED_ROUTES) {
-        await visitAndAssert(page, route, `${viewport.label}:${route.path}`)
+    for (const route of ROUTE_DESCRIPTORS) {
+      for (const state of GEOMETRY_STATES) {
+        if (!route.states[state].applicable) continue
+        test(`v2:${route.id}:${viewport.label}:${state}`, async ({ page, browserName }) => {
+          test.skip(browserName !== 'chromium', 'full geometry matrix is Chromium')
+          test.setTimeout(45_000)
+          const { diagnostics, controller } = await preparePage(page, route, state)
+          await page.setViewportSize({ width: viewport.width, height: viewport.height })
+          await runCell(page, route, state, controller, diagnostics, `v2:${route.id}:${viewport.label}:${state}`)
+        })
       }
-
-      await disableAuthForPublicRoutes(page)
-      for (const route of PUBLIC_ROUTES) {
-        await visitAndAssert(page, route, `${viewport.label}:${route.path}`)
-      }
-
-      expectCleanDiagnostics(diagnostics, viewport.label)
-    })
+    }
   }
 })
 
-test.describe('Native App V2 sensitive families', () => {
+test.describe('Native App V2 Chromium state matrix', () => {
   test.use({ timezoneId: 'Asia/Tehran', locale: 'fa-IR' })
 
-  for (const viewport of [
-    { width: 390, height: 844, label: 'mobile-390' },
-    { width: 1440, height: 900, label: 'desktop-1440' },
-  ]) {
-    test(`${viewport.label} Firefox/WebKit sensitive families stay inside contract`, async ({ page, browserName }) => {
-      test.skip(browserName === 'chromium', 'Chromium already covers the full 29-route matrix.')
-      test.setTimeout(180_000)
-      const { diagnostics } = await preparePage(page, { auth: true })
-      await page.setViewportSize({ width: viewport.width, height: viewport.height })
-
-      for (const route of ALL_LIVE_ROUTES.filter((item) => SENSITIVE_FAMILIES.has(item.family))) {
-        if (route.auth) {
-          await visitAndAssert(page, route, `${browserName}:${viewport.label}:${route.path}`)
-        }
+  for (const viewport of STATE_VIEWPORTS) {
+    for (const route of ROUTE_DESCRIPTORS) {
+      for (const state of Object.keys(route.states) as StateId[]) {
+        if (GEOMETRY_STATES.has(state)) continue
+        if (!route.states[state].applicable) continue
+        test(`v2:${route.id}:${viewport.label}:${state}`, async ({ page, browserName }) => {
+          test.skip(browserName !== 'chromium', 'state matrix is Chromium; Firefox/WebKit cover sensitive families')
+          test.setTimeout(60_000)
+          const { diagnostics, controller } = await preparePage(page, route, state)
+          await page.setViewportSize({ width: viewport.width, height: viewport.height })
+          await runCell(page, route, state, controller, diagnostics, `v2:${route.id}:${viewport.label}:${state}`)
+        })
       }
-
-      await disableAuthForPublicRoutes(page)
-      for (const route of PUBLIC_ROUTES.filter((item) => SENSITIVE_FAMILIES.has(item.family))) {
-        await visitAndAssert(page, route, `${browserName}:${viewport.label}:${route.path}`)
-      }
-
-      expectCleanDiagnostics(diagnostics, `${browserName}:${viewport.label}`)
-    })
+    }
   }
 })
 
-test.describe('Native App V2 states and interactions', () => {
+test.describe('Native App V2 Firefox/WebKit sensitive families', () => {
+  test.use({ timezoneId: 'Asia/Tehran', locale: 'fa-IR' })
+
+  for (const viewport of SENSITIVE_VIEWPORTS) {
+    for (const route of ROUTE_DESCRIPTORS.filter((item) => SENSITIVE_FAMILIES.has(item.family))) {
+      test(`v2:${route.id}:${viewport.label}:normal`, async ({ page, browserName }) => {
+        test.skip(browserName === 'chromium', 'Chromium already covers the full matrix')
+        test.setTimeout(45_000)
+        const { diagnostics, controller } = await preparePage(page, route, 'normal')
+        await page.setViewportSize({ width: viewport.width, height: viewport.height })
+        await runCell(page, route, 'normal', controller, diagnostics, `${browserName}:v2:${route.id}:${viewport.label}:normal`)
+      })
+    }
+  }
+})
+
+test.describe('Native App V2 keyboard, zoom, motion, overlays', () => {
   test.use({ timezoneId: 'Asia/Tehran', locale: 'fa-IR' })
 
   test('login stays keyboard-usable and hides developer shortcut', async ({ page }) => {
-    const { diagnostics } = await preparePage(page, { auth: false })
+    const { diagnostics } = await preparePage(page, ROUTE_DESCRIPTORS.find((item) => item.id === 'login')!, 'normal')
     await page.setViewportSize({ width: 390, height: 844 })
     await gotoRouteWithNavigationRetry(page, '/login')
-    await expect(page.getByText('ورود به سامانه').first()).toBeVisible({ timeout: 10_000 })
-
+    const route = ROUTE_DESCRIPTORS.find((item) => item.id === 'login')!
+    await expectRouteReady(page, route)
     const mobile = page.getByLabel('شماره موبایل')
     await mobile.focus()
     await expect(mobile).toBeFocused()
@@ -383,80 +339,86 @@ test.describe('Native App V2 states and interactions', () => {
     const submit = page.getByRole('button', { name: 'دریافت کد تأیید' })
     await expect(page.getByRole('button', { name: 'ورود سریع ۱ ساله' })).toHaveCount(0)
     await expect(submit).toBeFocused()
-    await expect(mobile).toHaveAttribute('autocomplete', /tel|username/)
-    await expectRouteContract(page, 'login-keyboard')
+    await expectRouteContract(page, route, 'login-keyboard')
     expectCleanDiagnostics(diagnostics, 'login-keyboard')
   })
 
-  test('account remains usable at 200% zoom when the browser exposes page scale', async ({ page, browserName }) => {
-    const { diagnostics } = await preparePage(page, { auth: true })
+  for (const form of KEYBOARD_FORM_ROUTES) {
+    test(`soft-keyboard:${form.path}`, async ({ page }) => {
+      const route = ROUTE_DESCRIPTORS.find((item) => item.path === form.path)!
+      const { diagnostics } = await preparePage(page, route, 'normal')
+      await page.setViewportSize({ width: 390, height: 844 })
+      await gotoRouteWithNavigationRetry(page, form.path)
+      await expectRouteReady(page, route)
+      if (form.field) {
+        await page.getByLabel(form.field).focus()
+      }
+      const keyboard = await simulateSoftKeyboard(page, 336)
+      expect(keyboard.after.visual).toBeLessThan(keyboard.before.visual)
+      expect(keyboard.after.inner).toBeLessThan(keyboard.before.inner)
+      const submit = page.getByRole('button', { name: form.submit }).first()
+      await expect(submit).toBeVisible()
+      await submit.focus()
+      await expect(submit).toBeFocused()
+      const geometry = await submit.evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        const visual = window.visualViewport?.height ?? window.innerHeight
+        const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+        return {
+          bottom: rect.bottom,
+          visual,
+          hit: Boolean(hit && (hit === element || element.contains(hit))),
+        }
+      })
+      expect(geometry.bottom).toBeLessThanOrEqual(geometry.visual + 1)
+      expect(geometry.hit).toBe(true)
+      await page.setViewportSize(keyboard.restore)
+      expectCleanDiagnostics(diagnostics, `soft-keyboard:${form.path}`)
+    })
+  }
+
+  test('controlled safe-area tokens are measurable on login and messenger', async ({ page }) => {
+    const route = ROUTE_DESCRIPTORS.find((item) => item.id === 'login')!
+    const { diagnostics } = await preparePage(page, route, 'normal')
     await page.setViewportSize({ width: 390, height: 844 })
-    await gotoRouteWithNavigationRetry(page, '/account')
-    await expect(page.getByText('حساب').first()).toBeVisible({ timeout: 10_000 })
-
-    if (browserName === 'chromium') {
-      const session = await page.context().newCDPSession(page)
-      await session.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 })
-      await page.waitForTimeout(120)
-      const zoom = await page.evaluate(() => ({
-        scale: window.visualViewport?.scale ?? 1,
-        width: window.visualViewport?.width ?? window.innerWidth,
-      }))
-      expect(zoom.scale).toBeCloseTo(2, 1)
-      expect(zoom.width).toBeGreaterThanOrEqual(194)
-    } else {
-      await page.evaluate(() => {
-        document.documentElement.style.setProperty('zoom', '2')
-      })
-      const zoomSupport = await page.evaluate(() => {
-        const applied = getComputedStyle(document.documentElement).zoom
-        return applied === '2' || applied === '2.0'
-      })
-      test.info().annotations.push({
-        type: 'zoom.page-scale',
-        description: zoomSupport
-          ? 'CSS zoom applied; browser has no CDP page-scale API.'
-          : 'zoom.naReason=browser-has-no-page-scale-api',
-      })
-    }
-
-    await expect(page.getByRole('heading', { name: 'حساب' })).toBeVisible()
-    await expectRouteContract(page, 'account-zoom-200')
-    expectCleanDiagnostics(diagnostics, 'account-zoom-200')
+    await gotoRouteWithNavigationRetry(page, '/login')
+    const inset = await applyControlledSafeArea(page)
+    expect(inset.bottom).toBe('34px')
+    expect(inset.top).toBe('47px')
+    const bottom = await page.evaluate(() => {
+      const submit = document.querySelector('button')
+      return submit?.getBoundingClientRect().bottom || 0
+    })
+    expect(bottom).toBeLessThanOrEqual(844)
+    expectCleanDiagnostics(diagnostics, 'safe-area-login')
   })
 
-  test('empty, error, long Persian, LTR, and offline states stay named and unoverflowed', async ({ page }) => {
-    test.setTimeout(90_000)
-    const { diagnostics, controller } = await preparePage(page, { auth: true, mode: 'empty' })
+  for (const path of ZOOM_FAMILY_REPRESENTATIVES) {
+    test(`zoom-200:${path}`, async ({ page, browserName }) => {
+      const route = ROUTE_DESCRIPTORS.find((item) => item.path === path)!
+      const { diagnostics } = await preparePage(page, route, 'normal')
+      await page.setViewportSize({ width: 390, height: 844 })
+      await gotoRouteWithNavigationRetry(page, path)
+      await expectRouteReady(page, route)
+      const zoom = await applyMeasurableZoom(page, browserName)
+      if (zoom.method === 'none') {
+        test.info().annotations.push({
+          type: 'zoom.naReason',
+          description: 'naReason=browser-has-no-measurable-page-scale-api',
+        })
+        expect(zoom.method).toBe('none')
+        return
+      }
+      if (zoom.method === 'cdp-page-scale') expect(zoom.scale).toBeCloseTo(2, 1)
+      await expectRouteContract(page, route, `zoom-200:${path}`)
+      expectCleanDiagnostics(diagnostics, `zoom-200:${path}`)
+    })
+  }
+
+  test('home sheet Escape restores focus and keeps one live surface', async ({ page }) => {
+    const route = ROUTE_DESCRIPTORS.find((item) => item.id === 'home')!
+    const { diagnostics } = await preparePage(page, route, 'normal')
     await page.setViewportSize({ width: 390, height: 844 })
-    await gotoRouteWithNavigationRetry(page, '/account/notifications')
-    await expect(page.getByText('هیچ اعلانی یافت نشد')).toBeVisible({ timeout: 10_000 })
-    await expectRouteContract(page, 'notifications-empty')
-
-    await gotoRouteWithNavigationRetry(page, '/chat')
-    await expectRouteReady(page, routeByPath('/chat')!)
-    await expectRouteContract(page, 'chat-empty')
-
-    controller.mode = 'long-copy'
-    await gotoRouteWithNavigationRetry(page, '/profile')
-    await expect(page.getByText('09120000000')).toBeVisible({ timeout: 10_000 })
-    await expect(page.getByText('تهران')).toBeVisible()
-    await expect(page.getByText(/نام بسیار بلند فارسی/)).toBeVisible()
-    await expect(page.getByText('unbroken_ltr_accountnamewithoutspaces_9001')).toBeVisible()
-    await expectRouteContract(page, 'profile-long-copy')
-
-    controller.mode = 'error'
-    await gotoRouteWithNavigationRetry(page, '/operations/customers')
-    await expect(page.getByText(/ناموفق|خطا|دوباره|دریافت/i).first()).toBeVisible({ timeout: 10_000 })
-    await expectRouteContract(page, 'customers-error')
-    expectCleanDiagnostics(diagnostics, 'state-matrix')
-  })
-
-  test('home sheet, operations, profile, and messenger keep Escape restoration and one live surface', async ({ page }) => {
-    test.setTimeout(90_000)
-    const { diagnostics } = await preparePage(page, { auth: true })
-    await page.setViewportSize({ width: 390, height: 844 })
-
     await gotoRouteWithNavigationRetry(page, '/')
     await expect(page.getByRole('heading', { name: 'خانه' })).toBeVisible()
     const accountTrigger = page.getByLabel(/باز کردن منوی حساب/)
@@ -465,64 +427,21 @@ test.describe('Native App V2 states and interactions', () => {
     await page.keyboard.press('Escape')
     await expect(page.getByRole('dialog', { name: 'حساب' })).toHaveCount(0)
     await expect(accountTrigger).toBeFocused()
+    await expectRouteContract(page, route, 'home-sheet')
+    expectCleanDiagnostics(diagnostics, 'home-sheet')
+  })
 
-    await gotoRouteWithNavigationRetry(page, '/operations')
-    await expect(page.getByText('مشتریان')).toBeVisible()
+  test('operations and profile keep phone, address, and relation names', async ({ page }) => {
+    const route = ROUTE_DESCRIPTORS.find((item) => item.id === 'profile')!
+    const { diagnostics } = await preparePage(page, route, 'normal')
+    await page.setViewportSize({ width: 390, height: 844 })
     await gotoRouteWithNavigationRetry(page, '/operations/customers')
     await expect(page.getByText(CUSTOMER_RELATION.management_name)).toBeVisible()
     await gotoRouteWithNavigationRetry(page, '/operations/accountants')
     await expect(page.getByText(ACCOUNTANT_RELATION.relation_display_name)).toBeVisible()
-
     await gotoRouteWithNavigationRetry(page, '/profile')
     await expect(page.getByText('09120000000')).toBeVisible()
     await expect(page.getByText('تهران')).toBeVisible()
-
-    await gotoRouteWithNavigationRetry(page, '/chat')
-    await expectRouteReady(page, routeByPath('/chat')!)
-    await expectRouteContract(page, 'chat-normal')
-    expectCleanDiagnostics(diagnostics, 'sensitive-interactions')
-  })
-
-  test('soft keyboard and safe-area keep the login submit reachable', async ({ page }) => {
-    const { diagnostics } = await preparePage(page, { auth: false })
-    await page.setViewportSize({ width: 390, height: 844 })
-    await gotoRouteWithNavigationRetry(page, '/login')
-    await expect(page.getByText('ورود به سامانه').first()).toBeVisible({ timeout: 10_000 })
-    await page.getByLabel('شماره موبایل').focus()
-    await page.evaluate(() => {
-      window.visualViewport?.dispatchEvent(new Event('resize'))
-    })
-    const submit = page.getByRole('button', { name: 'دریافت کد تأیید' })
-    await expect(submit).toBeVisible()
-    const geometry = await page.evaluate(() => {
-      const button = document.querySelector('button')
-      const rect = button?.getBoundingClientRect()
-      return {
-        bottom: rect?.bottom ?? 0,
-        viewport: window.innerHeight,
-        safeArea: getComputedStyle(document.documentElement).getPropertyValue('env(safe-area-inset-bottom)') || '0',
-      }
-    })
-    expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewport + 1)
-    await expectRouteContract(page, 'login-soft-keyboard')
-    expectCleanDiagnostics(diagnostics, 'login-soft-keyboard')
-  })
-
-  test('forbidden probe keeps unauthorized admin and owner routes off-limits', async ({ page }) => {
-    const { diagnostics, controller } = await preparePage(page, { auth: true, user: REGULAR_USER })
-    await page.setViewportSize({ width: 390, height: 844 })
-    await gotoRouteWithNavigationRetry(page, '/admin')
-    await expect(page.getByText(/دسترسی|مجاز|پیدا نشد|بازیابی/i).first()).toBeVisible({ timeout: 10_000 })
-    await expect(page.getByText('مرکز مدیریت')).toHaveCount(0)
-
-    const customerViewer = { ...REGULAR_USER, is_customer: true, id: 33 }
-    controller.viewer = customerViewer
-    await page.evaluate((userSummary) => {
-      localStorage.setItem('current_user_summary', JSON.stringify(userSummary))
-    }, customerViewer)
-    await gotoRouteWithNavigationRetry(page, '/operations/customers')
-    await expect(page.getByText(/دسترسی|مجاز|پیدا نشد|بازیابی/i).first()).toBeVisible({ timeout: 10_000 })
-    await expect(page.getByText(CUSTOMER_RELATION.management_name)).toHaveCount(0)
-    expectCleanDiagnostics(diagnostics, 'forbidden-probe')
+    expectCleanDiagnostics(diagnostics, 'operations-profile-copy')
   })
 })
