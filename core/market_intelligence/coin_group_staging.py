@@ -56,11 +56,13 @@ class StagedCoinGroupMessage:
     text: str
     reply_to_message_id: int | None
     sender_digest: bytes | None
-    sender_telegram_id: str | None
-    sender_display_name: str | None
     edited_at_utc: str | None
     revision: int
     expires_at_utc: str
+    # Research identity is additive metadata.  Keep it optional and append-only
+    # in the constructor contract so older parser/linker callers remain valid.
+    sender_telegram_id: str | None = None
+    sender_display_name: str | None = None
 
 
 _SCHEMA = """

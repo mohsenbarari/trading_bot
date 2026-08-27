@@ -36,6 +36,7 @@ from core.market_intelligence.coin_group_feedback import (  # noqa: E402
 )
 from core.market_intelligence.coin_group_staging import (  # noqa: E402
     COIN_GROUP_STAGING_SCHEMA_VERSION,
+    initialize_coin_group_staging,
 )
 from core.market_intelligence.coin_group_trades import (  # noqa: E402
     COIN_GROUP_TRADE_LINKER_VERSION,
@@ -137,11 +138,12 @@ def _open_read_only(path: Path, *, immutable: bool) -> sqlite3.Connection:
     return connection
 
 
-def _verify_staging(connection: sqlite3.Connection) -> None:
+def _verify_staging(connection: sqlite3.Connection) -> int:
     row = connection.execute(
         "SELECT schema_version FROM coin_group_staging_metadata WHERE singleton=1"
     ).fetchone()
-    if row is None or int(row["schema_version"]) != COIN_GROUP_STAGING_SCHEMA_VERSION:
+    schema_version = int(row["schema_version"]) if row is not None else 0
+    if schema_version not in {1, COIN_GROUP_STAGING_SCHEMA_VERSION}:
         raise ProductionShapeAuditError("coin_group_staging_schema_mismatch")
     columns = {
         str(row["name"])
@@ -160,6 +162,44 @@ def _verify_staging(connection: sqlite3.Connection) -> None:
     }
     if not required.issubset(columns):
         raise ProductionShapeAuditError("coin_group_staging_columns_mismatch")
+    return schema_version
+
+
+def _clone_staging_in_memory(source: sqlite3.Connection) -> sqlite3.Connection:
+    """Clone only bounded staging rows; raw text never leaves process memory."""
+
+    target = sqlite3.connect(":memory:")
+    target.row_factory = sqlite3.Row
+    initialize_coin_group_staging(target)
+    source_columns = {
+        str(row["name"])
+        for row in source.execute("PRAGMA table_info(coin_group_staged_messages)")
+    }
+    identity_select = (
+        "sender_telegram_id,sender_display_name"
+        if {"sender_telegram_id", "sender_display_name"}.issubset(source_columns)
+        else "NULL AS sender_telegram_id,NULL AS sender_display_name"
+    )
+    rows = source.execute(
+        "SELECT group_number,message_id,event_time_utc,available_at_utc,"
+        "edited_at_utc,reply_to_message_id,sender_digest,"
+        f"{identity_select},message_text,content_digest,revision,"
+        "first_staged_at_utc,last_staged_at_utc,expires_at_utc "
+        "FROM coin_group_staged_messages ORDER BY event_time_utc,group_number,message_id"
+    )
+    target.executemany(
+        """
+        INSERT INTO coin_group_staged_messages(
+          group_number,message_id,event_time_utc,available_at_utc,edited_at_utc,
+          reply_to_message_id,sender_digest,sender_telegram_id,sender_display_name,
+          message_text,content_digest,revision,first_staged_at_utc,
+          last_staged_at_utc,expires_at_utc
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (tuple(row) for row in rows),
+    )
+    target.commit()
+    return target
 
 
 def _as_utc(value: str) -> datetime:
@@ -447,8 +487,10 @@ def _run(args: argparse.Namespace) -> int:
     market.execute("BEGIN")
     candidate = sqlite3.connect(":memory:")
     candidate.row_factory = sqlite3.Row
+    replay_staging: sqlite3.Connection | None = None
     try:
-        _verify_staging(staging)
+        staging_schema_version = _verify_staging(staging)
+        replay_staging = _clone_staging_in_memory(staging)
         verify_market_store_read_only(market)
         minimum, as_of = _snapshot_bounds(staging)
         source_inventory = _source_inventory(staging)
@@ -467,7 +509,7 @@ def _run(args: argparse.Namespace) -> int:
         )
         baseline = _facts(candidate, minimum_event_time_utc=minimum)
         report = process_coin_group_staging(
-            staging,
+            replay_staging,
             candidate,
             as_of_utc=as_of,
             additional_anchors=prediction_load.anchors,
@@ -490,6 +532,8 @@ def _run(args: argparse.Namespace) -> int:
         if staging.total_changes or market.total_changes:
             raise ProductionShapeAuditError("production_connection_reported_changes")
     finally:
+        if replay_staging is not None:
+            replay_staging.close()
         candidate.close()
         market.close()
         staging.close()
@@ -512,6 +556,7 @@ def _run(args: argparse.Namespace) -> int:
         "parser_version": COIN_GROUP_PARSER_VERSION,
         "trade_linker_version": COIN_GROUP_TRADE_LINKER_VERSION,
         "pipeline_version": COIN_GROUP_PIPELINE_VERSION,
+        "source_staging_schema_version": staging_schema_version,
         "source_inventory": source_inventory,
         "first_pass": first_pass,
         "baseline": _fact_inventory(baseline),
