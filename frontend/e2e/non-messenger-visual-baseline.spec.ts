@@ -1,6 +1,12 @@
-import { expect, test, type Page, type Route } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
+import {
+  attachDiagnostics,
+  createDiagnostics,
+  expectCleanDiagnostics,
+  installFailClosedApi,
+} from './helpers/nativeAppV2Api'
 
 const shouldRunBaseline = process.env.UI_UX_BASELINE === '1'
 const shouldRunA11ySmoke = process.env.UI_UX_A11Y === '1'
@@ -132,142 +138,57 @@ async function clearAuthenticatedLayout(page: Page) {
   })
 }
 
-async function installApiMocks(page: Page) {
-  await page.route('**/api/**', async (route: Route) => {
-    const request = route.request()
-    const url = new URL(request.url())
-    const path = url.pathname
-    const method = request.method()
-
-    const json = (body: unknown, status = 200) =>
-      route.fulfill({
-        status,
-        contentType: 'application/json',
-        body: JSON.stringify(body),
-      })
-
-    if (path === '/api/auth/me') {
-      return json(CURRENT_USER)
-    }
-    if (path === `/api/users-public/${CURRENT_USER.id}`) {
-      return json({
-        id: CURRENT_USER.id,
-        account_name: CURRENT_USER.account_name,
-        mobile_number: '09120000000',
-        address: 'تهران، خیابان نمونه، پلاک ۱۲',
-        created_at: fixedNow,
-        trades_count: 0,
-        last_seen_at: fixedNow,
-      })
-    }
-    if (path === '/api/invitations/lookup/uiux-baseline') {
-      return json({
-        valid: true,
-        state: 'pending',
-        token: 'uiux-baseline-token',
-        bot_available: true,
-        web_available: true,
-        expires_at: null,
-      })
-    }
-    if (path === '/api/config') {
-      return json({ bot_username: 'uiux_baseline_bot' })
-    }
-    if (path === '/api/sessions/verify') {
-      return json({ ok: true })
-    }
-    if (path === '/api/chat/poll') {
-      return json({
-        conversations_with_unread: [],
-        muted_conversation_ids: [],
-        unread_chats_count: 0,
-        total_unread_mentions: 0,
-      })
-    }
-    if (path === '/api/notifications/' && method === 'GET') {
-      return json([])
-    }
-    if (path === '/api/notifications/mark-all-read') {
-      return json({ ok: true })
-    }
-    if (path === '/api/sessions/active') {
-      return json([
-        {
-          id: 'uiux-session',
-          device_name: 'Baseline Browser',
-          platform: 'web',
-          is_current: true,
-          created_at: fixedNow,
-          last_seen_at: fixedNow,
-        },
-      ])
-    }
-    if (path === '/api/trades/my') {
-      return json([])
-    }
-    if (path === '/api/trades/my/page') {
-      return json({ items: [], next_cursor: null, has_more: false })
-    }
-    if (/^\/api\/users-public\/\d+\/project-users$/.test(path)) {
-      return json([])
-    }
-    if (path === '/api/auth/switchable-users') {
-      return json([])
-    }
-    if (path === '/api/offers/page' && method === 'GET') {
-      return json({ items: [], next_cursor: null, has_more: false, page_size: 0 })
-    }
-    if (path === '/api/offers/my') {
-      return json([])
-    }
-    if (path === '/api/commodities/') {
-      return json([{ id: 1, name: 'طلای آب‌شده', aliases: ['آبشده'] }])
-    }
-    if (path === '/api/trading-settings/') {
-      return json({
-        offer_min_quantity: 1,
-        offer_max_quantity: 1000,
-        lot_min_size: 5,
-        lot_max_count: 5,
-        offer_expiry_minutes: 60,
-        invitation_expiry_days: 7,
-        market_schedule_enabled: true,
-        market_timezone: 'Asia/Tehran',
-        market_open_time_local: '10:00',
-        market_close_time_local: '18:00',
-        market_closed_weekdays: [4],
-      })
-    }
-    if (path === '/api/trading-settings/market-state') {
-      return json({
-        is_open: true,
-        active_web_notice_visible: false,
-        offers_since_last_open: 0,
-        last_transition_at: null,
-        next_transition_at: null,
-      })
-    }
-    if (path === '/api/trading-settings/market-overrides') {
-      return json([])
-    }
-    if (path === '/api/admin-messages/market/current') {
-      return json(null)
-    }
-    if (path === '/api/invitations/pending') {
-      return json([])
-    }
-    if (path === '/api/customers/owner-relations') {
-      return json([])
-    }
-    if (path === '/api/accountants/owner-relations') {
-      return json([])
-    }
-    if (path.startsWith('/api/invitations/') || path.startsWith('/api/register/')) {
-      return json({ ok: true })
-    }
-
-    return json({})
+async function installVisualBaselineHarness(page: Page) {
+  const diagnostics = createDiagnostics()
+  await attachDiagnostics(page, diagnostics)
+  await installFailClosedApi(page, diagnostics, {
+    mode: 'empty',
+    viewer: CURRENT_USER,
+    extraKnown: (method, pathname) => {
+      if (pathname === '/api/auth/me' && method === 'GET') {
+        return { status: 200, body: CURRENT_USER }
+      }
+      if (pathname === `/api/users-public/${CURRENT_USER.id}` && method === 'GET') {
+        return {
+          status: 200,
+          body: {
+            id: CURRENT_USER.id,
+            account_name: CURRENT_USER.account_name,
+            mobile_number: '09120000000',
+            address: 'تهران، خیابان نمونه، پلاک ۱۲',
+            created_at: fixedNow,
+            trades_count: 0,
+            last_seen_at: fixedNow,
+          },
+        }
+      }
+      if (pathname === '/api/invitations/lookup/uiux-baseline' && method === 'GET') {
+        return {
+          status: 200,
+          body: {
+            token: 'uiux-baseline-token',
+            valid: true,
+            state: 'pending',
+            bot_available: true,
+            web_available: true,
+            web_short_link: '/i/uiux-baseline',
+            expires_at: null,
+          },
+        }
+      }
+      if (pathname === '/api/config' && method === 'GET') {
+        return { status: 200, body: { bot_username: 'uiux_baseline_bot', telegram_bot_username: 'uiux_baseline_bot' } }
+      }
+      if (pathname === '/api/notifications/mark-all-read' && method === 'POST') {
+        return { status: 200, body: { ok: true } }
+      }
+      return null
+    },
+    extraAllowedMutation: (pathname, method) => (
+      method === 'POST' && pathname === '/api/notifications/mark-all-read'
+    ),
   })
+  return diagnostics
 }
 
 async function gotoRouteWithNavigationRetry(page: Page, path: string) {
@@ -341,7 +262,7 @@ test.describe('Non-messenger visual baseline harness', () => {
     for (const route of ROUTES) {
       test(`${viewport.label}:${route.label}`, async ({ page }) => {
         await installDeterministicRuntime(page)
-        await installApiMocks(page)
+        const diagnostics = await installVisualBaselineHarness(page)
         if (route.authenticated) {
           await primeAuthenticatedLayout(page)
         } else {
@@ -377,6 +298,7 @@ test.describe('Non-messenger visual baseline harness', () => {
           fullPage: true,
           maxDiffPixelRatio: 0.005,
         })
+        expectCleanDiagnostics(diagnostics, `${viewport.label}:${route.label}`)
       })
     }
   }

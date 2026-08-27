@@ -1,4 +1,10 @@
-import { expect, test, type Page, type Route } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
+import {
+  attachDiagnostics,
+  createDiagnostics,
+  expectCleanDiagnostics,
+  installFailClosedApi,
+} from './helpers/nativeAppV2Api'
 
 type MessengerMode = 'empty' | 'direct'
 
@@ -69,70 +75,79 @@ async function primeMessengerSession(page: Page) {
   }, { accessToken: token, userSummary: CURRENT_USER })
 }
 
-async function installMessengerFixtures(page: Page, mode: MessengerMode) {
-  await page.route('**/api/**', async (route: Route) => {
-    const request = route.request()
-    const url = new URL(request.url())
-    const path = url.pathname
-    const json = (body: unknown, status = 200) => route.fulfill({
-      status,
-      contentType: 'application/json',
-      body: JSON.stringify(body),
-    })
-
-    if (path === '/api/auth/me') return json(CURRENT_USER)
-    if (path === `/api/users-public/${DIRECT_USER.id}`) return json(DIRECT_USER)
-    if (path === '/api/chat/conversations') {
-      return json(mode === 'empty' ? [] : [{
-        id: 81,
-        other_user_id: DIRECT_USER.id,
-        other_user_name: DIRECT_USER.full_name,
-        other_user_is_deleted: false,
-        last_message_content: 'پیام نمونه برای سنجش خوانایی و تراکم مناسب ردیف گفتگو',
-        last_message_type: 'text',
-        last_message_at: '2026-08-20T18:31:00.000Z',
-        unread_count: 1,
-        unread_mention_count: 0,
-        other_user_last_seen_at: DIRECT_USER.last_seen_at,
-        room_kind: 'direct',
-        can_send: true,
-        is_muted: false,
-        is_pinned: true,
-        pinned_at: '2026-08-20T18:31:00.000Z',
-        pin_order: 1,
-      }])
-    }
-    if (path === `/api/chat/messages/${DIRECT_USER.id}`) {
-      return json([{
-        id: 901,
-        sender_id: DIRECT_USER.id,
-        receiver_id: CURRENT_USER.id,
-        content: 'این یک پیام نمونهٔ فارسی برای بررسی خوانایی، شکست متن و فاصله‌گذاری حباب است.',
-        message_type: 'text',
-        is_read: false,
-        is_deleted: false,
-        reactions: [{ emoji: '👍', user_id: CURRENT_USER.id }],
-        created_at: '2026-08-20T18:31:00.000Z',
-      }])
-    }
-    if (path === `/api/chat/read/${DIRECT_USER.id}` && request.method() === 'POST') return json({ ok: true })
-    if (path === `/api/chat/direct/${DIRECT_USER.id}/pinned-message`) return json({ message: null })
-    if (path === '/api/chat/poll') {
-      return json({
-        conversations_with_unread: [],
-        muted_conversation_ids: [],
-        unread_chats_count: mode === 'direct' ? 1 : 0,
-        total_unread_mentions: 0,
-      })
-    }
-    if (path === '/api/notifications/') return json([])
-    if (path === '/api/sessions/recovery/pending') return json([])
-    if (path === '/api/sessions/login-requests/pending') return json([])
-    if (path === '/api/trading-settings/market-state') {
-      return json({ is_open: true, active_web_notice_visible: false })
-    }
-    return json({})
+async function installMessengerHarness(page: Page, mode: MessengerMode) {
+  const diagnostics = createDiagnostics()
+  await attachDiagnostics(page, diagnostics)
+  await installFailClosedApi(page, diagnostics, {
+    viewer: CURRENT_USER,
+    extraKnown: (method, pathname) => {
+      if (pathname === '/api/auth/me' && method === 'GET') return { status: 200, body: CURRENT_USER }
+      if (pathname === `/api/users-public/${DIRECT_USER.id}` && method === 'GET') {
+        return { status: 200, body: DIRECT_USER }
+      }
+      if ((pathname === '/api/chat/conversations' || pathname === '/api/chat/conversations/') && method === 'GET') {
+        return {
+          status: 200,
+          body: mode === 'empty' ? [] : [{
+            id: 81,
+            other_user_id: DIRECT_USER.id,
+            other_user_name: DIRECT_USER.full_name,
+            other_user_is_deleted: false,
+            last_message_content: 'پیام نمونه برای سنجش خوانایی و تراکم مناسب ردیف گفتگو',
+            last_message_type: 'text',
+            last_message_at: '2026-08-20T18:31:00.000Z',
+            unread_count: 1,
+            unread_mention_count: 0,
+            other_user_last_seen_at: DIRECT_USER.last_seen_at,
+            room_kind: 'direct',
+            can_send: true,
+            is_muted: false,
+            is_pinned: true,
+            pinned_at: '2026-08-20T18:31:00.000Z',
+            pin_order: 1,
+          }],
+        }
+      }
+      if (pathname === `/api/chat/messages/${DIRECT_USER.id}` && method === 'GET') {
+        return {
+          status: 200,
+          body: [{
+            id: 901,
+            sender_id: DIRECT_USER.id,
+            receiver_id: CURRENT_USER.id,
+            content: 'این یک پیام نمونهٔ فارسی برای بررسی خوانایی، شکست متن و فاصله‌گذاری حباب است.',
+            message_type: 'text',
+            is_read: false,
+            is_deleted: false,
+            reactions: [{ emoji: '👍', user_id: CURRENT_USER.id }],
+            created_at: '2026-08-20T18:31:00.000Z',
+          }],
+        }
+      }
+      if (pathname === `/api/chat/read/${DIRECT_USER.id}` && method === 'POST') {
+        return { status: 200, body: { ok: true } }
+      }
+      if (pathname === `/api/chat/direct/${DIRECT_USER.id}/pinned-message` && method === 'GET') {
+        return { status: 200, body: { message: null } }
+      }
+      if (pathname === '/api/chat/poll' && method === 'GET') {
+        return {
+          status: 200,
+          body: {
+            conversations_with_unread: [],
+            muted_conversation_ids: [],
+            unread_chats_count: mode === 'direct' ? 1 : 0,
+            total_unread_mentions: 0,
+          },
+        }
+      }
+      return null
+    },
+    extraAllowedMutation: (pathname, method) => (
+      method === 'POST' && pathname === `/api/chat/read/${DIRECT_USER.id}`
+    ),
   })
+  return diagnostics
 }
 
 async function expectNativeMessengerIntegrity(page: Page, label: string) {
@@ -175,7 +190,7 @@ async function expectNativeMessengerIntegrity(page: Page, label: string) {
       viewportWidth: window.innerWidth,
       unnamed,
       nested,
-      undersized: targets.filter((item) => item.width < 47 || item.height < 47),
+      undersized: targets.filter((item) => item.width < 48 || item.height < 48),
       fontFamily: root ? getComputedStyle(root).fontFamily : '',
       direction: document.documentElement.dir,
     }
@@ -195,20 +210,14 @@ for (const viewport of [
 ]) {
   for (const mode of ['empty', 'direct'] as const) {
     test(`${viewport.label}:${mode} keeps messenger native, named, and contained`, async ({ page, browserName }) => {
-      const diagnostics: string[] = []
       const compatibilityDiagnostics: string[] = []
-      page.on('pageerror', (error) => diagnostics.push(`page:${error.message}`))
       page.on('console', (message) => {
-        if (message.type() !== 'error') return
-        const text = message.text()
-        if (text === 'Viewport argument key "interactive-widget" not recognized and ignored.') {
-          compatibilityDiagnostics.push(text)
-          return
+        if (message.text() === 'Viewport argument key "interactive-widget" not recognized and ignored.') {
+          compatibilityDiagnostics.push(message.text())
         }
-        diagnostics.push(`console:${text}`)
       })
       await primeMessengerSession(page)
-      await installMessengerFixtures(page, mode)
+      const diagnostics = await installMessengerHarness(page, mode)
       await page.emulateMedia({ reducedMotion: 'reduce' })
       await page.setViewportSize(viewport)
       const query = mode === 'direct'
@@ -229,7 +238,7 @@ for (const viewport of [
         await expect(menuTrigger).toBeFocused()
       }
       await expectNativeMessengerIntegrity(page, `${viewport.label}:${mode}`)
-      expect(diagnostics).toEqual([])
+      expectCleanDiagnostics(diagnostics, `${viewport.label}:${mode}`)
       expect(compatibilityDiagnostics).toHaveLength(browserName === 'webkit' ? 1 : 0)
     })
   }
@@ -237,13 +246,8 @@ for (const viewport of [
 
 test('mobile:direct remains usable at 200% page zoom', async ({ page, browserName }) => {
   test.skip(browserName !== 'chromium', 'CDP page-scale verification is Chromium-specific.')
-  const diagnostics: string[] = []
-  page.on('pageerror', (error) => diagnostics.push(`page:${error.message}`))
-  page.on('console', (message) => {
-    if (message.type() === 'error') diagnostics.push(`console:${message.text()}`)
-  })
   await primeMessengerSession(page)
-  await installMessengerFixtures(page, 'direct')
+  const diagnostics = await installMessengerHarness(page, 'direct')
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto(`/chat?user_id=${DIRECT_USER.id}&user_name=${encodeURIComponent(DIRECT_USER.full_name)}`, {
@@ -264,5 +268,5 @@ test('mobile:direct remains usable at 200% page zoom', async ({ page, browserNam
   expect(zoom.width).toBeGreaterThanOrEqual(194)
   expect(zoom.height).toBeGreaterThanOrEqual(421)
   await expectNativeMessengerIntegrity(page, 'mobile:direct:zoom-200')
-  expect(diagnostics).toEqual([])
+  expectCleanDiagnostics(diagnostics, 'mobile:direct:zoom-200')
 })

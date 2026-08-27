@@ -1,4 +1,10 @@
-import { expect, test, type Page, type Route } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
+import {
+  attachDiagnostics,
+  createDiagnostics,
+  expectCleanDiagnostics,
+  installFailClosedApi,
+} from './helpers/nativeAppV2Api'
 
 type ViewportCase = {
   width: number
@@ -65,115 +71,26 @@ async function primeAuthenticatedLayout(page: Page) {
   })
 }
 
-async function installApiMocks(page: Page) {
-  await page.route('**/api/**', async (route: Route) => {
-    const request = route.request()
-    const url = new URL(request.url())
-    const path = url.pathname
-    const method = request.method()
-
-    const json = (body: unknown, status = 200) =>
-      route.fulfill({
-        status,
-        contentType: 'application/json',
-        body: JSON.stringify(body),
-      })
-
-    if (path === '/api/auth/me') {
-      return json(CURRENT_USER)
-    }
-    if (path === '/api/sessions/verify') {
-      return json({ ok: true })
-    }
-    if (path === '/api/chat/poll') {
-      return json({
-        conversations_with_unread: [],
-        muted_conversation_ids: [],
-        unread_chats_count: 0,
-        total_unread_mentions: 0,
-      })
-    }
-    if (path === '/api/notifications/' && method === 'GET') {
-      return json([])
-    }
-    if (path === '/api/notifications/mark-all-read') {
-      return json({ ok: true })
-    }
-    if (path === '/api/sessions/active') {
-      return json([
-        {
-          id: 'stage10-session',
-          device_name: 'Viewport Browser',
-          platform: 'web',
-          is_current: true,
-          created_at: new Date().toISOString(),
-          last_seen_at: new Date().toISOString(),
-        },
-      ])
-    }
-    if (path === '/api/trades/my') {
-      return json([])
-    }
-    if (path === '/api/trades/my/page') {
-      return json({ items: [], next_cursor: null, has_more: false })
-    }
-    if (/^\/api\/users-public\/\d+\/project-users$/.test(path)) {
-      return json({ items: [], total: 0, limit: 25, offset: 0 })
-    }
-    if (path === '/api/auth/switchable-users') {
-      return json([])
-    }
-    if (path === '/api/offers/page' && method === 'GET') {
-      return json({ items: [], next_cursor: null, has_more: false, page_size: 0 })
-    }
-    if (path === '/api/offers/my') {
-      return json([])
-    }
-    if (path === '/api/commodities/') {
-      return json([{ id: 1, name: 'طلای آب‌شده' }])
-    }
-    if (path === '/api/trading-settings/') {
-      return json({
-        offer_min_quantity: 1,
-        offer_max_quantity: 1000,
-        lot_min_size: 5,
-        lot_max_count: 5,
-        offer_expiry_minutes: 60,
-        invitation_expiry_days: 7,
-        market_schedule_enabled: true,
-        market_timezone: 'Asia/Tehran',
-        market_open_time_local: '10:00',
-        market_close_time_local: '18:00',
-        market_closed_weekdays: [4],
-      })
-    }
-    if (path === '/api/trading-settings/market-state') {
-      return json({
-        is_open: true,
-        active_web_notice_visible: false,
-        offers_since_last_open: 0,
-        last_transition_at: null,
-        next_transition_at: null,
-      })
-    }
-    if (path === '/api/trading-settings/market-overrides') {
-      return json([])
-    }
-    if (path === '/api/admin-messages/market/current') {
-      return json(null)
-    }
-    if (path === '/api/invitations/pending') {
-      return json([])
-    }
-    if (path === '/api/customers/owner-relations') {
-      return json([])
-    }
-    if (path === '/api/accountants/owner-relations') {
-      return json([])
-    }
-
-    return json({})
+async function installViewportHarness(page: Page) {
+  const diagnostics = createDiagnostics()
+  await attachDiagnostics(page, diagnostics)
+  await installFailClosedApi(page, diagnostics, {
+    mode: 'empty',
+    viewer: CURRENT_USER,
+    extraKnown: (method, pathname) => {
+      if (pathname === '/api/auth/me' && method === 'GET') {
+        return { status: 200, body: CURRENT_USER }
+      }
+      if (pathname === '/api/notifications/mark-all-read' && method === 'POST') {
+        return { status: 200, body: { ok: true } }
+      }
+      return null
+    },
+    extraAllowedMutation: (pathname, method) => (
+      method === 'POST' && pathname === '/api/notifications/mark-all-read'
+    ),
   })
+  return diagnostics
 }
 
 async function gotoRouteWithNavigationRetry(page: Page, path: string) {
@@ -392,11 +309,11 @@ async function expectLastControlClearOfBottomChrome(page: Page, label: string) {
 test.describe('Non-messenger responsive viewport matrix', () => {
   test.beforeEach(async ({ page }) => {
     await primeAuthenticatedLayout(page)
-    await installApiMocks(page)
   })
 
   for (const viewport of VIEWPORTS) {
     test(`${viewport.label} keeps core non-messenger routes inside viewport`, async ({ page }) => {
+      const diagnostics = await installViewportHarness(page)
       await page.setViewportSize({ width: viewport.width, height: viewport.height })
 
       for (const route of ROUTES) {
@@ -408,6 +325,7 @@ test.describe('Non-messenger responsive viewport matrix', () => {
           await expectLastControlClearOfBottomChrome(page, `${viewport.label}:${route.label}`)
         }
       }
+      expectCleanDiagnostics(diagnostics, viewport.label)
     })
   }
 
@@ -418,6 +336,7 @@ test.describe('Non-messenger responsive viewport matrix', () => {
     test(
       `${viewport.label} keeps dashboard account actions visible and clickable`,
       async ({ page }) => {
+        const diagnostics = await installViewportHarness(page)
         await page.setViewportSize({ width: viewport.width, height: viewport.height })
         await gotoRouteWithNavigationRetry(page, '/')
         await expect(page.getByText('ورود به بازار').first()).toBeVisible({ timeout: 10_000 })
@@ -469,6 +388,7 @@ test.describe('Non-messenger responsive viewport matrix', () => {
         await page.keyboard.press('Escape')
         await expect(sheet).toBeHidden()
         await expect(trigger).toBeFocused()
+        expectCleanDiagnostics(diagnostics, `${viewport.label}:account-sheet`)
       },
     )
   }

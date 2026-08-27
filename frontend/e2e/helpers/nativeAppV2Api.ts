@@ -1,6 +1,19 @@
 import { expect, type Page, type Request, type Route } from '@playwright/test'
 
-export type FixtureMode = 'normal' | 'empty' | 'error' | 'long-copy'
+export type FixtureMode = 'normal' | 'empty' | 'error' | 'long-copy' | 'stale'
+
+export type KnownApiResolver = (
+  method: string,
+  pathname: string,
+  mode: FixtureMode,
+  viewer: typeof CURRENT_USER,
+) => { status: number; body: unknown } | null
+
+export type DiagnosticPolicy = {
+  allowConsole?: (text: string) => boolean
+  allowPageError?: (text: string) => boolean
+  allowRequestFailed?: (text: string) => boolean
+}
 
 export type RouteDiagnostics = {
   unknownApis: string[]
@@ -69,6 +82,7 @@ export const ACCOUNTANT_RELATION = {
 }
 
 const FIXED_TIME = '2026-08-14T12:00:00.000Z'
+export const STALE_TIME = '2024-01-01T00:00:00.000Z'
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
 const REGISTRATION_CONTEXT = {
@@ -92,12 +106,25 @@ export function createDiagnostics(): RouteDiagnostics {
   }
 }
 
-export function isAllowedMutation(pathname: string, method: string) {
+export function isAllowedMutation(
+  pathname: string,
+  method: string,
+  extra?: (pathname: string, method: string) => boolean,
+) {
   if (pathname === '/api/sessions/verify' && method === 'POST') return true
   if (pathname === '/api/auth/refresh' && method === 'POST') return true
   if (method === 'POST' && pathname.startsWith('/api/auth/registration-context')) return true
+  if (method === 'POST' && /^\/api\/chat\/read\/\d+$/u.test(pathname)) return true
   if (method === 'PATCH' && /^\/api\/notifications\/\d+\/read$/u.test(pathname)) return true
-  return false
+  return extra?.(pathname, method) === true
+}
+
+function createDeferred() {
+  let resolve = () => {}
+  const promise = new Promise<void>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
 }
 
 function isLocalHost(hostname: string) {
@@ -121,6 +148,8 @@ export function resolveKnownApi(
   const empty = mode === 'empty'
   const error = mode === 'error'
   const longCopy = mode === 'long-copy'
+  const stale = mode === 'stale'
+  const stamp = stale ? STALE_TIME : FIXED_TIME
   const list = <T>(item: T): T[] => (empty ? [] : [item])
 
   if (MUTATING_METHODS.has(method) && !isAllowedMutation(pathname, method)) {
@@ -173,7 +202,7 @@ export function resolveKnownApi(
       other_user_name: longCopy ? 'گفتگوی بسیار بلند فارسی برای شکست خط عنوان' : 'گفتگوی نمونه',
       last_message_content: 'پیام مصنوعی پذیرش',
       last_message_type: 'text',
-      last_message_at: FIXED_TIME,
+      last_message_at: stamp,
       unread_count: 0,
       room_kind: 'direct',
       can_send: true,
@@ -194,6 +223,7 @@ export function resolveKnownApi(
   if (/^\/api\/chat\/channels\/\d+\/members$/u.test(pathname)) return { status: 200, body: [] }
   if (pathname === '/api/chat/channels/invite-candidates') return { status: 200, body: { items: [], total: 0 } }
   if (/^\/api\/chat\/messages\/\d+$/u.test(pathname)) return { status: 200, body: [] }
+  if (method === 'POST' && /^\/api\/chat\/read\/\d+$/u.test(pathname)) return { status: 200, body: { ok: true } }
   if (/^\/api\/chat\/rooms\/\d+\/messages$/u.test(pathname)) return { status: 200, body: [] }
   if (/^\/api\/chat\/(direct|rooms)\/\d+\/pinned-message$/u.test(pathname)) return { status: 200, body: null }
   if (pathname === '/api/chat/search') return { status: 200, body: [] }
@@ -211,7 +241,7 @@ export function resolveKnownApi(
       title: 'اعلان نمونه',
       body: 'متن مصنوعی اعلان',
       is_read: false,
-      created_at: FIXED_TIME,
+      created_at: stamp,
       kind: 'trade',
       category: 'trade',
     }) }
@@ -238,9 +268,9 @@ export function resolveKnownApi(
         platform: 'web',
         is_current: true,
         is_primary: true,
-        created_at: FIXED_TIME,
-        last_active_at: FIXED_TIME,
-        last_seen_at: FIXED_TIME,
+        created_at: stamp,
+        last_active_at: stamp,
+        last_seen_at: stamp,
       }),
     }
   }
@@ -272,8 +302,8 @@ export function resolveKnownApi(
           ? (longCopy ? 'تهران خیابان ولیعصر با نام بسیار بلند فارسی برای شکست خط نشانی' : 'تهران')
           : 'اصفهان',
         avatar_file_id: null,
-        last_seen_at: FIXED_TIME,
-        created_at_jalali: '۱۴۰۵/۰۵/۲۳',
+        last_seen_at: stamp,
+        created_at_jalali: stale ? '۱۴۰۲/۱۰/۱۱' : '۱۴۰۵/۰۵/۲۳',
         trades_count: 0,
         accountant_relations: [],
         customer_relations: [],
@@ -380,8 +410,8 @@ export function resolveKnownApi(
       bot_available: false,
       web_available: true,
       state: 'pending',
-      expires_at: FIXED_TIME,
-      created_at: FIXED_TIME,
+      expires_at: stamp,
+      created_at: stamp,
     }) }
   }
   if (/^\/api\/invitations\/lookup\/[^/]+$/u.test(pathname)) {
@@ -394,7 +424,7 @@ export function resolveKnownApi(
         bot_available: false,
         web_available: true,
         web_short_link: '/i/uiux-baseline',
-        expires_at: FIXED_TIME,
+        expires_at: stamp,
       },
     }
   }
@@ -419,8 +449,8 @@ export function resolveKnownApi(
         relation_id: 13,
         customer_user_id: 33,
         period_days: 7,
-        from_date: FIXED_TIME,
-        to_date: FIXED_TIME,
+        from_date: stamp,
+        to_date: stamp,
         trade_count: 0,
         total_quantity: 0,
         commission_profit_toman: 0,
@@ -446,22 +476,32 @@ export function resolveKnownApi(
   return null
 }
 
-export async function attachDiagnostics(page: Page, diagnostics: RouteDiagnostics) {
+function isEnvironmentalConsole(text: string) {
+  if (/Chunk load failed; attempting one bounded hard reload/i.test(text)) return true
+  if (/\/api\/realtime\/ws/i.test(text)) return true
+  if (/WebSocket Error/i.test(text)) return true
+  if (/Viewport argument key .* not recognized/i.test(text)) return true
+  if (/downloadable font: download failed/i.test(text)) return true
+  return false
+}
+
+export async function attachDiagnostics(
+  page: Page,
+  diagnostics: RouteDiagnostics,
+  policy: DiagnosticPolicy = {},
+) {
   page.on('pageerror', (error) => {
     const text = error.message
     if (/\/api\/realtime\/ws/i.test(text)) return
     if (/due to access control checks/i.test(text) && /\/api\//i.test(text)) return
+    if (policy.allowPageError?.(text)) return
     diagnostics.pageErrors.push(text)
   })
   page.on('console', (message) => {
     if (message.type() !== 'error') return
     const text = message.text()
-    if (/Chunk load failed; attempting one bounded hard reload/i.test(text)) return
-    if (/\/api\/realtime\/ws/i.test(text)) return
-    if (/WebSocket Error/i.test(text)) return
-    if (/Failed to load resource: the server responded with a status of (403|405|500|599)/i.test(text)) return
-    if (/Viewport argument key .* not recognized/i.test(text)) return
-    if (/downloadable font: download failed/i.test(text)) return
+    if (isEnvironmentalConsole(text)) return
+    if (policy.allowConsole?.(text)) return
     diagnostics.consoleErrors.push(text)
   })
   page.on('requestfailed', (request) => {
@@ -469,6 +509,7 @@ export async function attachDiagnostics(page: Page, diagnostics: RouteDiagnostic
     if (isRealtimeSocket(url)) return
     const failure = request.failure()?.errorText || ''
     if (/ERR_ABORTED|NS_BINDING_ABORTED|Load request cancelled/i.test(failure)) return
+    if (policy.allowRequestFailed?.(`${request.method()} ${url.pathname} ${failure}`)) return
     diagnostics.requestFailed.push(`${request.method()} ${url.pathname} ${failure}`)
   })
   page.on('request', (request: Request) => {
@@ -482,16 +523,49 @@ export async function attachDiagnostics(page: Page, diagnostics: RouteDiagnostic
 export type FixtureController = {
   mode: FixtureMode
   viewer: typeof CURRENT_USER
+  extraKnown?: KnownApiResolver
+  extraAllowedMutation?: (pathname: string, method: string) => boolean
+  holds: Map<string, ReturnType<typeof createDeferred>>
+  failNext: Map<string, number>
+  hold(pathname: string): ReturnType<typeof createDeferred>
+  release(pathname: string): void
+  failOnce(pathname: string): void
+}
+
+export type FailClosedOptions = {
+  mode?: FixtureMode
+  viewer?: typeof CURRENT_USER
+  extraKnown?: KnownApiResolver
+  extraAllowedMutation?: (pathname: string, method: string) => boolean
 }
 
 export async function installFailClosedApi(
   page: Page,
   diagnostics: RouteDiagnostics,
-  options: { mode?: FixtureMode; viewer?: typeof CURRENT_USER } = {},
+  options: FailClosedOptions = {},
 ): Promise<FixtureController> {
   const controller: FixtureController = {
     mode: options.mode ?? 'normal',
     viewer: options.viewer ?? CURRENT_USER,
+    extraKnown: options.extraKnown,
+    extraAllowedMutation: options.extraAllowedMutation,
+    holds: new Map(),
+    failNext: new Map(),
+    hold(pathname: string) {
+      const existing = this.holds.get(pathname)
+      if (existing) return existing
+      const deferred = createDeferred()
+      this.holds.set(pathname, deferred)
+      return deferred
+    },
+    release(pathname: string) {
+      const deferred = this.holds.get(pathname)
+      deferred?.resolve()
+      this.holds.delete(pathname)
+    },
+    failOnce(pathname: string) {
+      this.failNext.set(pathname, (this.failNext.get(pathname) || 0) + 1)
+    },
   }
 
   await page.route('https://telegram.org/js/telegram-web-app.js', async (route) => {
@@ -512,7 +586,22 @@ export async function installFailClosedApi(
 
     const pathname = url.pathname
     const method = request.method()
-    const known = resolveKnownApi(method, pathname, controller.mode, controller.viewer)
+    const hold = [...controller.holds.entries()].find(([key]) => pathname === key || pathname.startsWith(`${key}/`))
+    if (hold) await hold[1].promise
+
+    const failCount = [...controller.failNext.entries()].find(([key]) => pathname === key || pathname.startsWith(`${key}/`))
+    if (failCount && failCount[1] > 0) {
+      controller.failNext.set(failCount[0], failCount[1] - 1)
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'intentional fixture failure' }),
+      })
+      return
+    }
+
+    const extra = controller.extraKnown?.(method, pathname, controller.mode, controller.viewer)
+    const known = extra ?? resolveKnownApi(method, pathname, controller.mode, controller.viewer)
     if (known) {
       await route.fulfill({
         status: known.status,
@@ -522,7 +611,7 @@ export async function installFailClosedApi(
       return
     }
 
-    if (MUTATING_METHODS.has(method) && !isAllowedMutation(pathname, method)) {
+    if (MUTATING_METHODS.has(method) && !isAllowedMutation(pathname, method, controller.extraAllowedMutation)) {
       diagnostics.unexpectedMutations.push(`${method} ${pathname}`)
       await route.fulfill({
         status: 405,
@@ -541,6 +630,10 @@ export async function installFailClosedApi(
   })
 
   return controller
+}
+
+export function allowIntentionalFixtureConsole(text: string) {
+  return /intentional fixture failure|Failed to load resource: the server responded with a status of 500/i.test(text)
 }
 
 export function expectCleanDiagnostics(diagnostics: RouteDiagnostics, label: string) {
