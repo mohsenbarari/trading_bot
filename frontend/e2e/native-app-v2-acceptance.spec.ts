@@ -144,9 +144,11 @@ async function expectRouteReady(page: Page, route: RouteDescriptor) {
   const timeout = route.family === 'messenger' ? 45_000 : 15_000
   if (route.readyBy === 'accessible-name') {
     await expect(page.getByRole('button', { name: route.readyText }).first()).toBeVisible({ timeout })
-    return
+  } else {
+    await expect(page.getByText(route.readyText, { exact: false }).first()).toBeVisible({ timeout })
   }
-  await expect(page.getByText(route.readyText, { exact: false }).first()).toBeVisible({ timeout })
+  await expect(page.locator('.fade-enter-active, .fade-leave-active')).toHaveCount(0, { timeout: 8_000 })
+  await expect(page.locator('.ui-loading-state:visible')).toHaveCount(0, { timeout: 8_000 })
 }
 
 async function expectNoPageCrash(page: Page, label: string) {
@@ -450,3 +452,32 @@ test.describe('Native App V2 keyboard, zoom, motion, overlays', () => {
     expectCleanDiagnostics(diagnostics, 'operations-profile-copy')
   })
 })
+
+if (process.env.NATIVE_APP_V2_VISUAL === '1') {
+  const visualDir = process.env.NATIVE_APP_V2_VISUAL_DIR || '/tmp/native-app-v2-visual'
+  test.describe('Native App V2 visual contact sheet', () => {
+    test.use({ timezoneId: 'Asia/Tehran', locale: 'fa-IR' })
+    const shotViewports = [
+      ...VIEWPORTS.filter((item) => item.width === 390 || item.width === 1440),
+      ...VIEWPORTS.filter((item) => item.width === 360 || item.width === 430 || item.width === 768),
+    ]
+    for (const viewport of shotViewports) {
+      for (const route of ROUTE_DESCRIPTORS) {
+        const sensitiveExtra = viewport.width === 360 || viewport.width === 430 || viewport.width === 768
+        if (sensitiveExtra && !SENSITIVE_FAMILIES.has(route.family) && route.family !== 'account' && route.family !== 'home') continue
+        test(`shot:${route.id}:${viewport.label}:normal`, async ({ page, browserName }) => {
+          test.skip(browserName !== 'chromium')
+          const { diagnostics } = await preparePage(page, route, 'normal')
+          await page.setViewportSize({ width: viewport.width, height: viewport.height })
+          await gotoRouteWithNavigationRetry(page, route.path)
+          await expectRouteReady(page, route)
+          await page.screenshot({
+            path: `${visualDir}/${route.id}-${viewport.label}-normal.png`,
+            fullPage: true,
+          })
+          expectCleanDiagnostics(diagnostics, `shot:${route.id}:${viewport.label}`)
+        })
+      }
+    }
+  })
+}

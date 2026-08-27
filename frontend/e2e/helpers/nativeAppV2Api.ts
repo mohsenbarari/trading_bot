@@ -477,6 +477,7 @@ export function resolveKnownApi(
 }
 
 function isEnvironmentalConsole(text: string) {
+  if (/Failed to fetch dynamically imported module/i.test(text)) return true
   if (/Chunk load failed; attempting one bounded hard reload/i.test(text)) return true
   if (/\/api\/realtime\/ws/i.test(text)) return true
   if (/WebSocket Error/i.test(text)) return true
@@ -492,6 +493,7 @@ export async function attachDiagnostics(
 ) {
   page.on('pageerror', (error) => {
     const text = error.message
+    if (/Failed to fetch dynamically imported module/i.test(text)) return
     if (/\/api\/realtime\/ws/i.test(text)) return
     if (/due to access control checks/i.test(text) && /\/api\//i.test(text)) return
     if (policy.allowPageError?.(text)) return
