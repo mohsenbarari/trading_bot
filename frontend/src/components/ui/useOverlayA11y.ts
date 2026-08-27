@@ -18,6 +18,7 @@ type OverlayA11yOptions = {
   close: () => void
   closeOnEscape?: Ref<boolean>
   initialFocus?: Ref<OverlayInitialFocus>
+  initialFocusRef?: Ref<HTMLElement | null>
   trapProgrammaticFocus?: Ref<boolean>
 }
 
@@ -38,6 +39,12 @@ export function useOverlayA11y(options: OverlayA11yOptions) {
   }
 
   function focusInitialTarget() {
+    const preferred = options.initialFocusRef?.value
+    if (preferred && preferred.isConnected && !preferred.hasAttribute('disabled')) {
+      preferred.focus({ preventScroll: true })
+      return
+    }
+
     const container = options.containerRef.value
     if (options.initialFocus?.value === 'container') {
       container?.focus({ preventScroll: true })

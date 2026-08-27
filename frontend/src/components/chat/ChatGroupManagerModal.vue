@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, toRef, watch } from 'vue'
+import { useOverlayA11y } from '../ui/useOverlayA11y'
 import ChatUserListRow from './ChatUserListRow.vue'
 import { AppBackButton } from '../ui'
 import { apiFetch, apiFetchJson } from '../../utils/auth'
@@ -460,6 +461,14 @@ function requestClose(fromBack = false) {
   emit('close')
 }
 
+const dialogRef = ref<HTMLElement | null>(null)
+const { titleId, descriptionId, ariaDescriptionId } = useOverlayA11y({
+  open: toRef(props, 'show'),
+  description: computed(() => pageSubtitle.value || undefined),
+  containerRef: dialogRef,
+  close: () => requestClose(),
+})
+
 function pushManagerBackState() {
   if (!props.show || managerBackStateActive.value) return
   managerBackStateActive.value = true
@@ -771,13 +780,22 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
   <Teleport to="body">
     <Transition name="group-manager-fade">
       <div v-if="show" class="group-manager-overlay" @click="requestClose()">
-        <section class="group-manager-shell" @click.stop>
+        <section
+          ref="dialogRef"
+          class="group-manager-shell"
+          role="dialog"
+          aria-modal="true"
+          :aria-labelledby="titleId"
+          :aria-describedby="ariaDescriptionId"
+          tabindex="-1"
+          @click.stop
+        >
           <input ref="avatarInput" type="file" accept="image/*" class="hidden-avatar-input" @change="handleAvatarSelected" />
           <header class="manager-header">
             <AppBackButton label="بازگشت" @click="handleBack()" />
             <div class="header-copy">
-              <h3>{{ pageTitle }}</h3>
-              <span>{{ pageSubtitle }}</span>
+              <h2 :id="titleId">{{ pageTitle }}</h2>
+              <span :id="descriptionId">{{ pageSubtitle }}</span>
             </div>
             <button type="button" class="header-icon-btn" aria-label="بستن مدیریت اتاق" @click="requestClose()">
               <X :size="20" />
@@ -790,7 +808,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 
             <template v-if="isCreateMode && page === 'select-members'">
               <div class="search-shell">
-                <input v-model="directoryQuery" type="text" class="search-input" placeholder="جستجو با نام، اکانت یا موبایل..." />
+                <input v-model="directoryQuery" type="search" class="search-input" placeholder="جستجو با نام، اکانت یا موبایل..." aria-label="جستجو با نام، اکانت یا موبایل" />
               </div>
 
               <div class="selection-banner">
@@ -956,7 +974,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 
             <template v-else-if="page === 'members'">
               <div class="search-shell slim">
-                <input v-model="memberQuery" type="text" class="search-input" placeholder="جستجو در اعضای گروه..." />
+                <input v-model="memberQuery" type="search" class="search-input" placeholder="جستجو در اعضای گروه..." aria-label="جستجو در اعضای گروه" />
               </div>
 
               <div class="telegram-list">
@@ -994,7 +1012,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 
             <template v-else-if="page === 'admins'">
               <div class="search-shell slim">
-                <input v-model="adminQuery" type="text" class="search-input" placeholder="جستجو در ادمین‌ها و اعضا..." />
+                <input v-model="adminQuery" type="search" class="search-input" placeholder="جستجو در ادمین‌ها و اعضا..." aria-label="جستجو در ادمین‌ها و اعضا" />
               </div>
 
               <section class="section-shell">
@@ -1070,7 +1088,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 
             <template v-else-if="page === 'add-members'">
               <div class="search-shell">
-                <input v-model="directoryQuery" type="text" class="search-input" placeholder="جستجو با نام، اکانت یا موبایل..." />
+                <input v-model="directoryQuery" type="search" class="search-input" placeholder="جستجو با نام، اکانت یا موبایل..." aria-label="جستجو با نام، اکانت یا موبایل" />
               </div>
 
               <div class="selection-banner">
@@ -1222,6 +1240,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
   gap: 3px;
 }
 
+.header-copy h2,
 .header-copy h3 {
   margin: 0;
   font-size: 1rem;

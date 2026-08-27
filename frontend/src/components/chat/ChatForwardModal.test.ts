@@ -1,4 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ChatForwardModal from './ChatForwardModal.vue'
@@ -84,5 +85,53 @@ describe('ChatForwardModal.vue', () => {
     await wrapper.find('.forward-target-item').trigger('click')
 
     expect(wrapper.get('.selected-chip .target-chip.role-customer').text()).toBe('مشتری')
+  })
+
+  it('opens as a labelled dialog, focuses search, and restores focus on Escape', async () => {
+    const trigger = document.createElement('button')
+    trigger.type = 'button'
+    trigger.textContent = 'باز کردن هدایت'
+    document.body.appendChild(trigger)
+    trigger.focus()
+
+    chatForwardModalMocks.apiFetchJson.mockResolvedValue([])
+    const wrapper = mount(ChatForwardModal, {
+      attachTo: document.body,
+      props: {
+        showForwardModal: true,
+        sortedConversations: [],
+        includeChannels: true,
+        includeGroups: true,
+      },
+      global: {
+        stubs: {
+          transition: false,
+        },
+      },
+    })
+    await flushPromises()
+    await nextTick()
+
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')
+    const search = document.body.querySelector<HTMLInputElement>('.forward-search-input')
+    const closeBtn = document.body.querySelector<HTMLButtonElement>('button.close-btn')
+    expect(dialog?.getAttribute('aria-modal')).toBe('true')
+    expect(dialog?.getAttribute('aria-labelledby')).toBeTruthy()
+    expect(dialog?.getAttribute('aria-describedby')).toBeTruthy()
+    expect(closeBtn?.getAttribute('aria-label')).toBe('بستن هدایت پیام')
+    expect(closeBtn?.getAttribute('type')).toBe('button')
+    expect(search?.getAttribute('aria-label')).toContain('جستجو')
+    expect(document.activeElement).toBe(search)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+    expect(wrapper.emitted('close')).toBeTruthy()
+
+    await wrapper.setProps({ showForwardModal: false })
+    await flushPromises()
+    expect(document.activeElement).toBe(trigger)
+
+    wrapper.unmount()
+    trigger.remove()
   })
 })

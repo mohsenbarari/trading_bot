@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
+import { useOverlayA11y } from '../ui/useOverlayA11y'
 import type { CSSProperties } from 'vue'
 
 type LightboxItem = {
@@ -365,6 +366,24 @@ function handleMediaTap() {
 function closeAlbumDownloadSheet() {
   isAlbumDownloadSheetOpen.value = false
 }
+
+const lightboxRef = ref<HTMLElement | null>(null)
+const albumSheetRef = ref<HTMLElement | null>(null)
+const isLightboxOpen = computed(() => Boolean(props.lightboxMedia && currentItem.value))
+const lightboxEscape = computed(() => !isAlbumDownloadSheetOpen.value)
+const { titleId: lightboxTitleId } = useOverlayA11y({
+  open: isLightboxOpen,
+  description: computed(() => undefined),
+  containerRef: lightboxRef,
+  close: () => emit('close'),
+  closeOnEscape: lightboxEscape,
+})
+const { titleId: albumSheetTitleId, descriptionId: albumSheetDescriptionId, ariaDescriptionId: albumSheetDescription } = useOverlayA11y({
+  open: isAlbumDownloadSheetOpen,
+  description: computed(() => 'انتخاب فایل‌های آلبوم برای دانلود'),
+  containerRef: albumSheetRef,
+  close: closeAlbumDownloadSheet,
+})
 
 function handleOverlayClick() {
   if (isAlbumDownloadSheetOpen.value) {
@@ -767,7 +786,17 @@ function handleTouchEnd(event: TouchEvent) {
 <template>
   <Teleport to="body">
     <Transition name="lightbox">
-      <div v-if="lightboxMedia && currentItem" class="lightbox-overlay" @click="handleOverlayClick">
+      <div
+        v-if="lightboxMedia && currentItem"
+        ref="lightboxRef"
+        class="lightbox-overlay"
+        role="dialog"
+        aria-modal="true"
+        :aria-labelledby="lightboxTitleId"
+        tabindex="-1"
+        @click="handleOverlayClick"
+      >
+        <h2 :id="lightboxTitleId" class="sr-only">نمایش رسانه</h2>
         <div class="lightbox-shell">
           <div class="lightbox-toolbar" @click.stop>
             <div class="lightbox-actions">
@@ -809,7 +838,7 @@ function handleTouchEnd(event: TouchEvent) {
                     </button>
                   </div>
                 </div>
-                <button class="lightbox-btn close" @click.stop="emit('close')" title="بستن">
+                <button type="button" class="lightbox-btn close" @click.stop="emit('close')" aria-label="بستن نمایش رسانه" title="بستن">
                   <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                 </button>
               </div>
@@ -918,13 +947,22 @@ function handleTouchEnd(event: TouchEvent) {
           </div>
 
           <div v-if="lightboxMedia && isAlbumDownloadSheetOpen" class="album-download-backdrop" @click.stop="closeAlbumDownloadSheet">
-            <div class="album-download-sheet" @click.stop>
+            <div
+              ref="albumSheetRef"
+              class="album-download-sheet"
+              role="dialog"
+              aria-modal="true"
+              :aria-labelledby="albumSheetTitleId"
+              :aria-describedby="albumSheetDescription"
+              tabindex="-1"
+              @click.stop
+            >
               <div class="album-download-header">
                 <div>
-                  <div class="album-download-title">دانلود آلبوم</div>
-                  <div class="album-download-subtitle">{{ selectedAlbumDownloadCount }} از {{ lightboxMedia.items.length }} مدیا انتخاب شده</div>
+                  <h3 :id="albumSheetTitleId" class="album-download-title">دانلود آلبوم</h3>
+                  <div :id="albumSheetDescriptionId" class="album-download-subtitle">{{ selectedAlbumDownloadCount }} از {{ lightboxMedia.items.length }} مدیا انتخاب شده</div>
                 </div>
-                <button class="album-download-close" @click.stop="closeAlbumDownloadSheet" title="بستن">
+                <button type="button" class="album-download-close" @click.stop="closeAlbumDownloadSheet" aria-label="بستن دانلود آلبوم" title="بستن">
                   <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                 </button>
               </div>

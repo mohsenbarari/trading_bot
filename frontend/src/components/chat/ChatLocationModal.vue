@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed, ref } from 'vue'
+import { useOverlayA11y } from '../ui/useOverlayA11y'
 import 'leaflet/dist/leaflet.css'
 import { LMap, LTileLayer } from '@vue-leaflet/vue-leaflet'
 
@@ -38,6 +39,15 @@ const locationKey = computed(() => (
 
 const tileUrl = computed(() => 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
 
+const dialogRef = ref<HTMLElement | null>(null)
+const isOpen = computed(() => Boolean(normalizedLocation.value))
+const { titleId } = useOverlayA11y({
+  open: isOpen,
+  description: computed(() => undefined),
+  containerRef: dialogRef,
+  close: () => emit('close'),
+})
+
 function openExternalMap() {
   if (!normalizedLocation.value) return
   window.open(`https://www.google.com/maps?q=${normalizedLocation.value.lat},${normalizedLocation.value.lng}`, '_blank')
@@ -49,9 +59,17 @@ function openExternalMap() {
   <Teleport to="body">
     <Transition name="fade">
       <div v-if="normalizedLocation" class="location-overlay" @click="emit('close')">
-        <div class="location-content" @click.stop>
+        <div
+          ref="dialogRef"
+          class="location-content"
+          role="dialog"
+          aria-modal="true"
+          :aria-labelledby="titleId"
+          tabindex="-1"
+          @click.stop
+        >
           <div class="location-header">
-            <span class="location-title" style="flex:1">موقعیت مکانی</span>
+            <h2 :id="titleId" class="location-title" style="flex:1">موقعیت مکانی</h2>
             
             <button type="button" class="header-btn" aria-label="باز کردن در برنامهٔ نقشه" title="باز کردن در برنامه‌ی دیگر" @click="openExternalMap" style="margin-left: 8px;">
                <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
@@ -122,6 +140,7 @@ function openExternalMap() {
   border-bottom: 1px solid #e5e7eb;
 }
 .location-title {
+  margin: 0;
   font-weight: 600;
   font-size: 16px;
   color: #111827;

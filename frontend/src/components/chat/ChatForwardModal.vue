@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, toRef, watch } from 'vue'
+import { useOverlayA11y } from '../ui/useOverlayA11y'
 import { apiFetchJson } from '../../utils/auth'
 import type { ChatForwardTarget, ChatRoleKind, Conversation } from '../../types/chat'
 import { getChatRoleBadgeClass } from '../../utils/chatRoleBadges'
@@ -48,6 +49,8 @@ const emit = defineEmits<{
 }>()
 
 const searchQuery = ref('')
+const dialogRef = ref<HTMLElement | null>(null)
+const searchInputRef = ref<HTMLInputElement | null>(null)
 const isLoading = ref(false)
 const loadError = ref('')
 const allUsers = ref<ForwardUser[]>([])
@@ -312,31 +315,56 @@ function confirmForward() {
   if (selectedList.value.length === 0) return
   emit('forward-to', selectedList.value)
 }
+
+const forwardDescription = computed(() =>
+  selectedCount.value > 0
+    ? `تا ۱۰ مقصد را انتخاب کنید (${selectedCount.value}/${MAX_FORWARD_TARGETS})`
+    : 'تا ۱۰ مقصد را انتخاب کنید',
+)
+
+const { titleId, descriptionId, ariaDescriptionId } = useOverlayA11y({
+  open: toRef(props, 'showForwardModal'),
+  description: forwardDescription,
+  containerRef: dialogRef,
+  close: () => emit('close'),
+  initialFocusRef: searchInputRef,
+})
 </script>
 
 <template>
   <Teleport to="body">
     <Transition name="modal-slide">
       <div v-if="showForwardModal" class="forward-modal-overlay" @click="emit('close')">
-        <div class="forward-modal" @click.stop>
+        <div
+          ref="dialogRef"
+          class="forward-modal"
+          role="dialog"
+          aria-modal="true"
+          :aria-labelledby="titleId"
+          :aria-describedby="ariaDescriptionId"
+          tabindex="-1"
+          @click.stop
+        >
           <div class="forward-modal-header">
             <div class="header-copy">
-              <h3>هدایت پیام</h3>
-              <p>
+              <h3 :id="titleId">هدایت پیام</h3>
+              <p :id="descriptionId">
                 تا ۱۰ مقصد را انتخاب کنید
                 <span v-if="selectedCount > 0" class="header-count" :class="{ 'is-flash': limitFlash }">
                   ({{ selectedCount }}/{{ MAX_FORWARD_TARGETS }})
                 </span>
               </p>
             </div>
-            <button class="close-btn" @click="emit('close')">✕</button>
+            <button type="button" class="close-btn" aria-label="بستن هدایت پیام" @click="emit('close')">✕</button>
           </div>
 
           <div v-if="selectedList.length > 0" class="forward-modal-chips">
             <button
               v-for="target in selectedList"
               :key="target.kind + '-' + target.id"
+              type="button"
               class="selected-chip"
+              :aria-label="`حذف ${target.title} از مقصدها`"
               @click="removeSelected(target.kind + '-' + target.id)"
             >
               <span class="chip-title">{{ target.title }}</span>
@@ -352,9 +380,11 @@ function confirmForward() {
 
           <div class="forward-modal-search">
             <input
+              ref="searchInputRef"
               v-model="searchQuery"
-              type="text"
+              type="search"
               :placeholder="searchPlaceholder"
+              :aria-label="searchPlaceholder"
               class="forward-search-input"
             />
           </div>
@@ -364,7 +394,7 @@ function confirmForward() {
 
             <div v-else-if="loadError && filteredTargets.length === 0" class="forward-modal-state error">
               <span>{{ loadError }}</span>
-              <button class="retry-btn" @click="loadForwardUsers">تلاش مجدد</button>
+              <button type="button" class="retry-btn" @click="loadForwardUsers">تلاش مجدد</button>
             </div>
 
             <div v-else-if="filteredTargets.length === 0" class="forward-modal-state empty">
@@ -377,6 +407,7 @@ function confirmForward() {
                 <button
                   v-for="target in recentTargets"
                   :key="target.key"
+                  type="button"
                   class="forward-target-item"
                   :class="{ 'is-selected': isTargetSelected(target), 'is-disabled': !canAddMore && !isTargetSelected(target) }"
                   @click="toggleTarget(target)"
@@ -405,6 +436,7 @@ function confirmForward() {
                 <button
                   v-for="target in otherTargets"
                   :key="target.key"
+                  type="button"
                   class="forward-target-item"
                   :class="{ 'is-selected': isTargetSelected(target), 'is-disabled': !canAddMore && !isTargetSelected(target) }"
                   @click="toggleTarget(target)"
@@ -432,6 +464,7 @@ function confirmForward() {
 
           <div class="forward-modal-footer">
             <button
+              type="button"
               class="forward-send-btn"
               :disabled="selectedCount === 0"
               @click="confirmForward"
@@ -555,7 +588,8 @@ function confirmForward() {
   border-radius: 999px;
   background: #f59e0b;
   color: white;
-  padding: 10px 18px;
+  min-height: var(--ds-native-row-min-height, 48px);
+  padding: 0 18px;
   font: inherit;
   cursor: pointer;
 }
@@ -573,6 +607,7 @@ function confirmForward() {
 
 .forward-target-item {
   width: 100%;
+  min-height: var(--ds-native-row-min-height, 48px);
   border: none;
   background: transparent;
   display: flex;
@@ -631,7 +666,8 @@ function confirmForward() {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
+  min-height: var(--ds-native-row-min-height, 48px);
+  padding: 0 12px;
   border-radius: 999px;
   border: 1px solid #f59e0b;
   background: #ecfdf5;
@@ -697,6 +733,16 @@ function confirmForward() {
 .forward-send-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .forward-send-btn:not(:disabled):active {
+    transform: none;
+  }
+
+  .header-count.is-flash {
+    animation: none;
+  }
 }
 
 .forward-send-btn:not(:disabled):active {
