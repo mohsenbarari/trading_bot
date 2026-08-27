@@ -308,13 +308,13 @@ Gate:
 | ۲ پوسته | partial — یک main و یک h1 روی ۲۹ مسیر غیر بازار برقرار است |
 | ۳ خانه | partial — chrome غیر Market هم‌زبان است؛ ویجت بازار منجمد است |
 | ۴ حساب | partial — هاب حساب مرجع داخلی است؛ زیرصفحه‌ها grouped مانده‌اند |
-| ۵ پروفایل | partial — heading بارگذاری معتبر است؛ تلفن و آدرس مرئی مانده‌اند |
+| ۵ پروفایل | partial — last-visit در جریان هدر است؛ تلفن و آدرس مرئی مانده‌اند؛ track تمام نشده |
 | ۶ عملیات | partial — inset زنده است؛ هوک `ui-v2-workspace-*` برای تست باقی است |
-| ۷ مدیریت | partial — h1 زیرمسیر و کانال بدون main تودرتو؛ HelpPopover بازار قفل است |
+| ۷ مدیریت | partial — CreateChannel inset است و کارت تو در کارت ندارد؛ HelpPopover بازار قفل است |
 | ۸ احراز | partial — ورود و بازیابی در ماتریس fail-closed پوشش دارند |
 | ۹ پیام‌رسان | partial — overlayها dialog/focus دارند؛ رفتار و آلبوم قفل است |
 | ۱۰ overlay | partial — قرارداد مشترک روی overlayهای زنده اعمال شد؛ صفحه‌کلید و Escape سبز است |
-| ۱۱ پذیرش | ready-for-independent-review — پس از اصلاح retry/harness/docs؛ ماتریس executed/N/A جدا؛ `vue-tsc` فقط مبنای منجمد Market |
+| ۱۱ پذیرش | گیت‌های این دور اجرا شد؛ حکم در `SUPERVISOR_HANDOFF.md` است. فازهای ۱–۱۰ همچنان partial‌اند و track تمام نشده است |
 
 ## ماتریس پذیرش
 
