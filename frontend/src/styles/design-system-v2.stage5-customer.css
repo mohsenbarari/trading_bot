@@ -9,10 +9,11 @@
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-detail-tabs
-  > button,
+  .ui-tabs__tab,
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
   .ui-v2-workspace-customer-filter-chips
-  > button {
+  .ui-filter-chip {
+  min-inline-size: var(--ui-v2-size-target-min);
   min-block-size: var(--ui-v2-size-target-min);
 }
 

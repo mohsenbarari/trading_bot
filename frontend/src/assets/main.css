@@ -1672,7 +1672,9 @@
 
   .ui-tabs__tab,
   .ui-filter-chip {
-    min-height: var(--ds-native-row-min-height);
+    box-sizing: border-box;
+    min-width: var(--ds-touch-target, 48px);
+    min-height: var(--ds-touch-target, 48px);
     border: 1px solid transparent;
     border-radius: calc(var(--ds-radius-md) - 4px);
     background: transparent;
@@ -1687,6 +1689,7 @@
 
   .app-route-scroll--market-frozen .ui-tabs__tab,
   .app-route-scroll--market-frozen .ui-filter-chip {
+    min-width: 0;
     min-height: 40px;
   }
 

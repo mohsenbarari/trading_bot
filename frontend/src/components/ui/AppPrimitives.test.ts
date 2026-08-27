@@ -824,6 +824,8 @@ describe('ui primitives', () => {
     expect(css).not.toMatch(/--ds-page-padding:\s*14px/)
     expect(css).toMatch(/\.ui-button\s*\{[\s\S]*?white-space:\s*normal/)
     expect(css).toMatch(/\.ui-list-item\s*\{[\s\S]*?min-height:\s*var\(--ds-native-row-min-height/)
+    expect(css).toMatch(/\.ui-tabs__tab,\s*\n\s*\.ui-filter-chip\s*\{[\s\S]*?min-width:\s*var\(--ds-touch-target, 48px\)/)
+    expect(css).toMatch(/\.app-route-scroll--market-frozen \.ui-tabs__tab,[\s\S]*?min-width:\s*0/)
     expect(css).toMatch(
       /\.ui-disclosure__leading\s*\{[\s\S]*?width:\s*var\(--ds-native-row-min-height\)/,
     )
