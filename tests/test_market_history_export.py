@@ -15,6 +15,7 @@ from core.market_intelligence.market_history_export import (
 )
 from core.market_intelligence.market_history_operations import (
     MarketHistoryOperationError,
+    build_parser,
     validate_export_directory,
 )
 from core.market_intelligence.market_store import (
@@ -25,6 +26,24 @@ from core.market_intelligence.market_store import (
 
 
 class MarketHistoryExportTests(unittest.TestCase):
+    def test_import_throttle_is_explicit_and_bounded_by_the_operation(self):
+        args = build_parser().parse_args(
+            [
+                "import-staging",
+                "--directory",
+                "/protected/history",
+                "--expected-manifest-sha256",
+                "1" * 64,
+                "--backup-receipt",
+                "/protected/backup.dump",
+                "--confirm-staging-project",
+                "market-private-pipeline-stage13-shadow",
+                "--inter-bundle-delay-seconds",
+                "5",
+            ]
+        )
+        self.assertEqual(args.inter_bundle_delay_seconds, 5.0)
+
     def test_sqlite_failure_code_keeps_payload_out_of_operator_output(self):
         error = __import__("sqlite3").OperationalError("database or disk is full")
         error.sqlite_errorname = "SQLITE_FULL"
