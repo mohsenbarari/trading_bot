@@ -30,7 +30,7 @@
       "status": "correction-required",
       "phase": 10,
       "protection": "test-locked-ui-v2-bottom-nav-hooks",
-      "gaps": ["dual-token-nav-catalog-hooks", "route-landmark-contract-incomplete"],
+      "gaps": ["dual-token-nav-catalog-hooks"],
       "consciousGaps": ["market-fab-44px-owner-locked"],
       "evidence": ["frontend/src/components/BottomNav.test.ts", "npm run guard:ui"],
       "outOfScope": ["/market"]
@@ -80,7 +80,7 @@
       "status": "correction-required",
       "phase": 5,
       "protection": "phone-and-address-remain-visible",
-      "gaps": ["admin-profile-mutation-dialogs-not-sheet", "profile-loading-heading-invalid-markup", "profile-framing-not-fully-unified"],
+      "gaps": ["admin-profile-mutation-dialogs-not-sheet", "profile-framing-not-fully-unified"],
       "consciousGaps": ["mini-trade-card-class-kept-for-tests"],
       "evidence": [
         "frontend/src/components/UserProfile.test.ts",
@@ -102,7 +102,7 @@
       "status": "correction-required",
       "phase": 6,
       "protection": "invitation-relation-session-mutation-unchanged",
-      "gaps": ["ui-v2-workspace-adapter", "nested-workspace-section-inset-frames", "action-overflow-keyboard-contract"],
+      "gaps": ["ui-v2-workspace-adapter-hooks-test-locked"],
       "consciousGaps": ["OwnerCustomerManagerModal-off-live-path", "OwnerAccountantManagerModal-off-live-path"],
       "evidence": [
         "frontend/src/views/OperationsView.test.ts",
@@ -133,8 +133,7 @@
       "gaps": [
         "invite-copy-buttons-test-locked",
         "admin-messages-market-help-locked",
-        "admin-subroutes-missing-h1",
-        "create-channel-duplicate-main-and-nested-cards"
+        "create-channel-outer-frame-still-card-like"
       ],
       "consciousGaps": ["calendar-exception-window-confirm"],
       "evidence": ["npm run guard:ui"],
@@ -167,14 +166,14 @@
       "status": "correction-required",
       "phase": 9,
       "protection": "album_id-album_index-legacy-default-script-frozen",
-      "gaps": ["messenger-single-main-landmark-frozen", "share-receive-main-landmark-missing", "forward-and-media-overlay-a11y-incomplete"],
+      "gaps": ["create-channel-outer-frame-still-card-like"],
       "consciousGaps": [
         "native-app-messenger-visual-v1-hash",
-        "create-channel-help-popover-count-2"
+        "admin-messages-market-help-locked"
       ],
       "evidence": [
-        "native-app-messenger-visual-v1 1288789 bytes",
-        "ChatView script sha256 match vs 951ca9f0"
+        "native-app-messenger-visual-v1 1295859 bytes",
+        "frontend/e2e/native-app-v2-acceptance.spec.ts"
       ],
       "outOfScope": ["websocket", "upload", "album-detection"]
     },

@@ -1,184 +1,120 @@
-# گزارش نظارت — Native App Feel V2 (بازاعتبارسنجی)
+# گزارش اجرای اصلاح Native App Feel V2
 
-مخاطب: ایجنت ناظر مستقل. ادعای اجرا را باور نکن مگر با شاهد فایل، `git diff`، یا اجرای تست.
+مخاطب: ناظر مستقل. ادعای سبز بودن را فقط با Git، تست و مرورگر بسنج.
 
 تاریخ: ۲۰۲۶-۰۸-۲۷
-شاخهٔ کار: فقط `candidate/webapp-native-app-v2`
-حکم جاری: `BLOCKED — CORRECTION REQUIRED`
-معنی حکم: ممیزی مستقل پس از اجرای ماشین انجام شد و مانع‌های واقعی در semantics، token convergence، overlay accessibility و صداقت ماتریس یافت. مرجع حکم جاری `INDEPENDENT_AUDIT.md` است؛ این سند جزئیات بازاعتبارسنجی Cursor را نگه می‌دارد.
+شاخه: فقط `candidate/webapp-native-app-v2`
+حکم جاری: `BLOCKED — NATIVE APP V2 REMAINS IN CORRECTION`
+
+`vue-tsc -p tsconfig.app.json --noEmit` داخل `MarketView.vue` چهار خطای نوع دارد. فایل‌های بازار محصولی لمس نشدند. تا exit 0 این فرمان، حکم READY مجاز نیست.
 
 ---
 
-## یافته‌های ناظر که این دور را شروع کرد
+## Binding پیش از این دور اصلاح
 
-`BLOCKED — CORRECTION AND REVALIDATION REQUIRED`
-
-- اتصال گیت کهنه بود؛ `main` جلو رفته بود
-- ورود توسعه با hostname/IP خصوصی تشخیص داده می‌شد
-- خطای TypeScript candidate-added روی `CustomerRelation | null`
-- هشدار Vue: `class` روی `AppConfirmDialog` با root fragment
-- flake تست LoginView در suite کامل
-- زبان بومی ناقص (هاور، عملیات، پروفایل، متن)
-- `.mimosa/` و `SUPERVISOR_HANDOFF.md` آنترک بودند
-
-به گزارش قبلی اعتماد نشد. کد، گیت، گارد، `vue-tsc`، Vitest و مرورگر دوباره سنجیده شد.
-
----
-
-## اصلاحات این دور
-
-| مورد | نتیجه |
-|---|---|
-| Login dev shortcut | فقط `VITE_STAGING_DEV_LOGIN=true\|1`؛ پیش‌فرض خاموش؛ localhost و `10.*`/`172.*`/`192.168.*` منفی |
-| CustomerRelation null | fail-closed در helperها؛ بدون `!`؛ تست focused |
-| AppConfirmDialog | `backdropClass` رسمی؛ workspace با `backdrop-class` |
-| Login flake | import ایستا + `vi.hoisted`؛ بدون `resetModules` سراسری؛ بدون افزایش timeout سراسری |
-| هاور | chrome تزئینی hover ردیف حذف شد |
-| `/operations` | `AppInsetGroup` + `AppListItem` |
-| پروفایل | CSS مردهٔ `.profile-action-card` حذف؛ محدودیت‌ها inset؛ شماره/آدرس حذف نشد |
-| متن | «در حال دریافت پرونده مشتری» |
-| TypeScript UserProfile | `limitations_expire_at_jalali ?? undefined` |
-
----
-
-## Binding تازه (پس از آخرین merge)
-
-ثبت آغازین ناظر دیگر معتبر نیست. مقادیر واقعی پایان این دور:
+شروع این دور روی HEAD قبلی track بود، نه binding کهنهٔ ناظر `c6ddc5af`.
 
 | مورد | مقدار |
 |---|---|
 | شاخه | `candidate/webapp-native-app-v2` |
-| HEAD | بعد از کامیت مستندات همین دور ثبت شود |
-| مبنای track | `951ca9f0` |
-| local main ادغام‌شده | `581396c6791fa9e1fdae9894d3bb56ffbd06f136` |
-| origin/main | `255f8f70` — جدّ دور است؛ برای نظارت track از `951ca9f0..HEAD` استفاده کن |
-| ahead/behind نسبت به local main | ۲۴ / ۰ در لحظهٔ پیش از کامیت مستندات |
-| upstream | ندارد؛ پوش نشده |
+| HEAD شروع | `64755d10fc3d3e03149114435a8a51c48ef1634a` |
+| درخت شروع | `77208bc57f869b4f0ac420fe5df9fc420cdcb3e9` |
+| merge-base با `main` | `581396c6791fa9e1fdae9894d3bb56ffbd06f136` |
+| فاصله با local `main` در شروع | ۳۱ جلو / ۸ عقب |
+| `main` مشاهده‌شده | `a44d8fb269af490551cd9bcabea258341e12a65c` |
+| `origin/main` | `255f8f70589cf3781fbe7f24e1101d8a8f873dcc` |
+| worktree شروع | کثیف از اصلاحات همین track؛ `.mimosa/` آنترک |
 
-`main` چند بار حین کار جلو رفت. هر بار فقط داخل candidate با merge commit (`--no-ff`) ادغام شد. rebase/squash/force نشد.
-
-mergeهای این دور (همه فقط backend/market-data):
-
-1. `e9138367` `feat(market-data): add safe staged history backfill`
-2. `1e0ab0f4` `fix(market-data): bound history export temp storage`
-3. `16d268c5` `fix(market-data): keep receiver health metrics constant-time`
-4. `e37aa09d` `feat(market-data): throttle staging history import`
-5. `581396c6` `fix(market-data): tolerate bounded receiver commit load`
-
-تعاش فایلی با UI candidate خالی بود. تعارض سطح محافظت‌شده رخ نداد.
+هشت commit عقب‌ماندهٔ `main` فقط estimator/market-data و سند است. merge-tree تعارض UI یا Market نداشت. برای جلوگیری از drift این track ادغام نشد.
 
 ---
 
-## شمارش تست
+## Binding پس از آخرین commit مستندات
 
-### گارد UI
+مقادیر را پس از commit همین فایل با Git دوباره بخوان. جدول زیر پیش‌نویس لحظهٔ نگارش است و در commit پیام ثبت می‌شود.
 
-`npm run guard:ui` پاس.
+| مورد | مقدار ثبت‌شده هنگام نگارش |
+|---|---|
+| HEAD محصولی پیش از docs | `aaec89a7b260b4ef012dafd8e8fc586483f002b4` |
+| درخت محصولی | پس از `aaec89a7` |
+| upstream | ندارد؛ پوش نشده |
 
-هش قهرمان بازار خانه: `f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860`
-`native-app-messenger-visual-v1`: ۸۵ فایل، ۱۲۸۸۷۸۹ بایت.
+---
 
-### Vitest
+## Commitهای این دور اصلاح
 
-دو اجرای کامل متوالی با همان فرمان `npx vitest run --maxWorkers=3`:
+از `64755d10` به بعد، بدون amend و بدون بازنویسی تاریخچه:
 
-| اجرا | فایل | تست | شکست | timeout | مدت |
-|---|---|---|---|---|---|
-| ۱ | ۱۶۹ | ۱۹۸۰ | ۰ | ۰ | ۱۸۴٫۳۶ث |
-| ۲ | ۱۶۹ | ۱۹۸۰ | ۰ | ۰ | ۱۸۹٫۰۵ث |
+1. `becb9e19` — بستن سوراخ‌های TypeScript غیر Market بدون تضعیف tsconfig
+2. `f760de07` — HelpPopover زنده، seen-list، و تلاش همگرایی سطح عملیات
+3. `b9b44e8e` — E2E fail-closed و ماتریس ۲۹ مسیر
+4. `6dfb3e4f` — بازگرداندن توکن کاتالوگ `--ui-v2-*` و خارج کردن `main.css` از scope گارد V2
+5. `aaec89a7` — بازگرداندن motion نشست تأیید به `--ui-v2-motion-state`
+6. همین commit اسناد — ثبت واقعیت blocked
 
-`--maxWorkers=3` افزایش timeout نیست. علت: تست بازار `OffersList` در isolation حدود ۳٫۶ثانیه است و زیر بار موازی پیش‌فرض یک‌بار در ۱۰ثانیه timeout شد. محصول Market دست نخورد.
+Commitهای پیش از این دور که مانع‌های audit را بسته بودند: `ddf42ccb` overflow، `59e0cadb` landmark، `6ac2254a` inset، `e6318dab` کانال، `64755d10` overlay.
 
-هشدار `extraneous non-props attribute` مربوط به dialog: صفر.
+---
 
-سایر stderr: مسیرهای خطای تعمدی (PublicProfile history، AttachmentMenu camera، ChatView). شکست تست نیستند.
+## اصلاح یافته‌های audit مستقل
 
-### vue-tsc
+| یافتهٔ `INDEPENDENT_AUDIT.md` | نتیجه |
+|---|---|
+| AppActionOverflow بدون keyboard | بسته در `ddf42ccb` |
+| h1 مدیریت، دو main کانال، نبود main چت/اشتراک | بسته در `59e0cadb` |
+| adapter و کارت تودرتو عملیات | کاهش‌یافته؛ هوک `ui-v2-workspace-*` برای تست ماند |
+| overlay پیام‌رسان بدون dialog/focus | بسته برای overlayهای زندهٔ شناخته‌شده |
+| CreateChannel HelpPopover و main تودرتو | HelpPopover و main تودرتو حذف شد؛ قاب بیرونی هنوز کمی کارت‌مانند است |
+| div داخل h1 پروفایل | بسته |
+| mock عمومی `json({})` در پذیرش | بسته در harness جدید؛ سه spec قدیمی هنوز `json({})` دارند |
+| ROADMAP/inventory زود complete شده بودند | اصلاح شد؛ فاز ۱۱ blocked مانده |
 
-فرمان یکسان: `vue-tsc -p tsconfig.app.json --noEmit`
-main از shadow خارج worktree با همان `node_modules` candidate (بدون symlink داخل main).
+---
 
-پس از نرمال‌سازی مسیر و حذف شماره خط: ۶۴ تشخیص در هر طرف.
-خطای محصولی candidate-added: صفر.
-اختلاف باقی: `DashboardView.test.ts` برای import همان `.mjs` گارد Stage 3؛ candidate `TS7016` و main `TS2307`. ارثی است، نه اصلاح Market.
+## گیت‌های اندازه‌گیری‌شده روی درخت محصولی `aaec89a7`
 
-### بیلد
+این اعداد پیش از commit اسناد است. پس از docs باید `vue-tsc`، `guard:ui` و `memory-custodian check` دوباره اجرا شوند.
 
-`FRONTEND_BUILD_OUT_DIR=/tmp/native-app-v2-supervisor-dist npm run build`
-EXIT 0. `mini_app_dist` دست نخورد.
-حجم ۵٫۹M / ۱۷۱ فایل.
-digest درخت: `2cb4b2f304935e3205dee62fa870ebbd228c38761c5ddbc4915c0345c1f9e44b`
+| گیت | نتیجه |
+|---|---|
+| `vue-tsc -p tsconfig.app.json --noEmit` | EXIT 2؛ فقط `MarketView.vue` خطوط ۸۲۵، ۹۶۱، ۹۶۲، ۱۲۷۱ |
+| `npm run guard:ui` | PASS پس از `6dfb3e4f` |
+| Vitest کامل `--maxWorkers=3` پیش از بازگرداندن motion نشست | ۴ شکست در `SessionApprovalModal.test.ts`؛ پس از `aaec89a7` همان فایل ۵/۵ سبز. اجرای کامل پس از docs لازم است |
+| بیلد `/tmp/native-app-v2-prod-6dfb3e4f` | EXIT 0؛ ۱۷۰ فایل؛ ۵٬۷۲۷٬۱۰۹ بایت؛ digest `9c1f245693bd280f122dec5f518e5c0941b932acca7fcb6957caf28b77897e2f` |
+| E2E Chromium preview | ۱۱ pass، ۲ skip مکمل FF/WK |
+| E2E Firefox/WebKit خانوادهٔ حساس | ۴ pass |
+| `git diff --check` | پاک روی تغییرات این دور |
+| Market `MarketView.vue` | `6eea08979c7a91ae4ea5f96939165c28459f2729fb6a4c4c75f15f169c80e608` |
+| Market `OffersList.vue` | `9a58458142f8b0213ce6a853b152a5b04ef93d6f87f8f98e6cb1f37d2b2c086c` |
+| پیام‌رسان visual | ۸۵ فایل، ۱٬۲۹۵٬۸۵۹ بایت، sha `c440623fb6053b353a080b3c0b7506566d4e345f27ddf166c8ea350fd1d92028` |
 
-### مرورگر (همان بیلد)
+Skipهای ماتریس پذیرش فقط مکمل مرورگرند، نه پنهان‌کردن شکست محصول.
 
-`CI=1` + preview روی ۴۱۷۳.
+---
 
-| نتیجه | تعداد | توضیح |
-|---|---|---|
-| pass | ۴۲ | remaining-route + ماتریس ۲۹ مسیر Chromium + خانواده‌های حساس هر سه مرورگر + ورود |
-| skip | ۶ | پایین |
-| fail | ۰ | |
+## برگهٔ تماس موقت
 
-ماتریس نماینده است؛ Cartesian کامل نقش×عرض×حالت نیست.
+خارج مخزن: `/tmp/native-app-v2-visual`
+۶۲ تصویر مسیر + HTML؛ digest `fc569ee17cc988b11290d101651ddb350b87e6d635d1b2dcc5cf4f5fbc08afb9`.
 
-Skipها:
-
-| شناسه | تعداد | علت |
-|---|---|---|
-| BR-MATRIX-001 | ۴ | ماتریس ۲۹ مسیر فقط Chromium؛ Firefox/WebKit خانوادهٔ حساس را می‌پوشانند |
-| CDP zoom | ۲ | زوم ۲۰۰٪ فقط Chromium |
-
-Skip داخل تست پاس‌شده (نه `test.skip`):
-
-| شناسه | مسیر | علت |
-|---|---|---|
-| NAV-MAIN-001 | `/chat` `/share-receive` `/admin/channels` | landmark تکی بدون drift هش visual پیام‌رسان ممکن نیست |
-| EXT-001 | همه | `telegram.org/js/telegram-web-app.js` وابستگی از پیش موجود Mini App است |
-
-Warning پیش‌نمایش: ۶ بار `vite ws proxy` / `EPIPE`. قطع websocket پیش‌نمایش است، نه درخواست محصولی جدید.
+بازبینی دستی: حساب، عملیات، ورود و پروفایل به زبان grouped نزدیک‌اند. کانال هنوز قاب بیرونی کارت‌مانند دارد. ویجت بازار خانه دست‌نخورده دیده شد.
 
 ---
 
 ## حفاظت
 
-- `MarketView.vue` و `OffersList.vue` نسبت به local main اختلاف ندارند
-- confirm تقویم: `TradingSettings.vue:300` همان `آیا از حذف این استثنای تقویمی مطمئن هستید؟`
-- HelpPopover بازار در AdminMessages: ۳؛ کانال: ۲؛ PublicProfile: ۰
-- دو `.copy-btn` در CreateInvitation
-- `album_id` + `album_index` زنده‌اند؛ rollout legacy-default
-- `<script setup>` در `ChatView.vue` نسبت به `951ca9f0` بایت‌به‌بایت یکسان است
-- Session V2 Escape-dismiss ممنوع مانده
-- `main` و worktree آن ویرایش نشد
+- `main` ویرایش نشد
+- پوش، merge، deploy، Figma و Sites انجام نشد
+- backend / schema / API تغییر نکرد
+- رفتار پیام‌رسان، آلبوم و `expected_action` دست نخورد
+- `.mimosa/` آنترک ماند و commit نشد
 
 ---
 
-## `.mimosa`
+## کار باقی
 
-متعلق به پروژه نیست. hook موقت Codex با قرارداد `mimosa-stop-continuation/v1`.
-
-- ساخته‌شده: ۲۰۲۶-۰۸-۲۷ حدود ۰۶:۵۵ UTC
-- پایان دور: حدود ۱۰۰۰۴ فایل، ۲۱۳M (در طول نشست رشد کرد)
-- در تاریخچهٔ گیت نیست
-- stage/commit/archive نشد
-- در زمان نشست حذف نشد
-
----
-
-## محدودیت باقی
-
-- هوک‌های قفل تست `ui-v2-*`
-- landmark تکی immersive پیام‌رسان
-- HelpPopover بازار و کانال
-- دو دکمهٔ copy دعوت
-- ماشهٔ حساب خانه هنوز disclosure سفارشی است
-- `vue-tsc` ارثی main صفر نیست
-- ماتریس مرورگر Cartesian کامل نیست
-- `.mimosa` محلی است و پاک‌سازی‌اش کار محصول نیست
-
----
-
-## حکم ممنوع برای ناظر بعدی
-
-ننویس: owner-approved، production-ready، آمادهٔ پوش/ادغام/استقرار.
-
-اقدام بعدی: اصلاح مرحله‌ای مانع‌های `INDEPENDENT_AUDIT.md` روی همین candidate، سپس بازاجرای gate مستقل؛ بدون push یا deploy تا حکم تازه.
+1. سبز کردن `vue-tsc` بدون ویرایش محصول Market؛ فعلاً ممکن نیست
+2. حذف `json({})` از سه spec قدیمی viewport/visual
+3. کاهش قاب بیرونی CreateChannel تا زبان inset خالص
+4. ممیزی بصری تمام overlay و stateهای کند/آفلاین روی بیلد تازه پس از docs
+5. اجرای Vitest کامل روی HEAD نهایی

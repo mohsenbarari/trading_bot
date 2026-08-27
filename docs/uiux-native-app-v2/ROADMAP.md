@@ -299,20 +299,22 @@ Gate:
 
 ## وضعیت فازها
 
+وضعیت زیر پس از دور اصلاح ۲۰۲۶-۰۸-۲۷ است. هیچ فازی complete اعلام نمی‌شود مگر gate همان فاز واقعاً پاس شده باشد.
+
 | فاز | وضعیت |
 |---|---|
 | ۰ قرارداد و ممیزی | complete |
-| ۱ foundation | correction-required — primitive overflow و token convergence باز است |
-| ۲ پوسته | correction-required — landmarkهای مسیر کامل نیست |
-| ۳ خانه | partial — Market منجمد و chrome غیر Market قابل حفظ است |
-| ۴ حساب | correction-required — زیرصفحه‌ها و متن/کارت‌ها همگرا نیستند |
-| ۵ پروفایل | correction-required — semantic و قاب‌بندی باز است |
-| ۶ عملیات | correction-required — adapter دوگانه و کارت تودرتو باز است |
-| ۷ مدیریت | correction-required — h1، دعوت و کانال باز است |
-| ۸ احراز | partial — حالت‌های اصلی منسجم‌اند؛ ماتریس کامل نشده است |
-| ۹ پیام‌رسان | correction-required — landmark و overlay accessibility باز است |
-| ۱۰ overlay | correction-required — همه overlayهای زنده به قرارداد مشترک نرسیده‌اند |
-| ۱۱ پذیرش | blocked — `INDEPENDENT_AUDIT.md`؛ نه آمادهٔ merge و نه deploy |
+| ۱ foundation | partial — AppActionOverflow keyboard-complete است؛ کاتالوگ V2 همچنان `--ui-v2-*` است |
+| ۲ پوسته | partial — یک main و یک h1 روی ۲۹ مسیر غیر بازار برقرار است |
+| ۳ خانه | partial — chrome غیر Market هم‌زبان است؛ ویجت بازار منجمد است |
+| ۴ حساب | partial — هاب حساب مرجع داخلی است؛ زیرصفحه‌ها grouped مانده‌اند |
+| ۵ پروفایل | partial — heading بارگذاری معتبر است؛ تلفن و آدرس مرئی مانده‌اند |
+| ۶ عملیات | partial — inset زنده است؛ هوک `ui-v2-workspace-*` برای تست باقی است |
+| ۷ مدیریت | partial — h1 زیرمسیر و کانال بدون main تودرتو؛ HelpPopover بازار قفل است |
+| ۸ احراز | partial — ورود و بازیابی در ماتریس fail-closed پوشش دارند |
+| ۹ پیام‌رسان | partial — overlayها dialog/focus دارند؛ رفتار و آلبوم قفل است |
+| ۱۰ overlay | partial — قرارداد مشترک روی overlayهای زنده اعمال شد؛ همه stateها visually کامل نیست |
+| ۱۱ پذیرش | blocked — `vue-tsc` داخل MarketView قرمز است؛ حکم READY مجاز نیست |
 
 ## ماتریس پذیرش
 
