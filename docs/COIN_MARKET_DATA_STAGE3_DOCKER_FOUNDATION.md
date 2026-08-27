@@ -168,3 +168,11 @@ schema/table/fact count را آشتی می‌دهد. datastore کاملاً خا
 است و backup موجود را نیازمند کپی verified روی میزبان دوم اعلام می‌کند. این ابزار به‌تنهایی
 هیچ service، database، authority یا capture owner را تغییر نمی‌دهد و هنوز روی production اجرا
 نشده است.
+
+گیت سوم controller با flag و confirmation مستقل، receipt بالا را روی وب دوباره verify می‌کند،
+artifact را بدون فایل واسط remote به مسیر محافظت‌شدهٔ بات stream و digest/size را دوطرفه تطبیق
+می‌دهد. سپس فقط `market-database` را با `--no-recreate` آماده می‌کند و migration را دو بار
+اجرا می‌کند؛ pass دوم باید دقیقاً `already_current` و schema/table count برابر `2/26` باشد.
+هیچ capture یا Product service شروع نمی‌شود. شکست روی دیتابیس تازه فقط restart را غیرفعال و
+همان container را stop می‌کند؛ volume/state حذف یا down-migrate نمی‌شود. این گیت نیز پیش‌فرض
+خاموش است و روی production اجرا نشده است.

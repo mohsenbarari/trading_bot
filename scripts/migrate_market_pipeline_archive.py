@@ -159,6 +159,91 @@ def _migration_result(output: str, *, second: bool) -> dict[str, Any]:
     return payload
 
 
+def validate_receipt(
+    payload: Mapping[str, Any],
+    *,
+    release_sha: str,
+    release_tree: str,
+    image_id: str,
+    image_input_signature: str,
+    offhost_receipt_sha256: str,
+    host_preflight_receipt_sha256: str,
+    source_backup_receipt_sha256: str,
+    web_role_env_sha256: str,
+) -> None:
+    expected_keys = {
+        "schema", "status", "release_sha", "release_tree", "image_id",
+        "image_input_signature", "offhost_backup_receipt_sha256",
+        "host_preflight_receipt_sha256", "source_backup_receipt_sha256",
+        "web_role_env_sha256", "backup_status", "before", "after",
+        "first_pass", "second_pass", "schema_versions", "table_count",
+        "fact_count", "database_mutated", "database_container_created",
+        "running_services", "private_shadow_only", "product_authority_changed",
+        "telegram_capture_cutover_authorized", "secrets_disclosed",
+    }
+    identity = {
+        "schema": RESULT_SCHEMA,
+        "status": "PASS",
+        "release_sha": release_sha,
+        "release_tree": release_tree,
+        "image_id": image_id,
+        "image_input_signature": image_input_signature,
+        "offhost_backup_receipt_sha256": offhost_receipt_sha256,
+        "host_preflight_receipt_sha256": host_preflight_receipt_sha256,
+        "source_backup_receipt_sha256": source_backup_receipt_sha256,
+        "web_role_env_sha256": web_role_env_sha256,
+        "schema_versions": [1, 2],
+        "table_count": 26,
+        "running_services": ["market-database"],
+        "private_shadow_only": True,
+        "product_authority_changed": False,
+        "telegram_capture_cutover_authorized": False,
+        "secrets_disclosed": False,
+    }
+    if set(payload) != expected_keys or any(payload.get(k) != v for k, v in identity.items()):
+        raise MigrationError("migration_receipt_identity_invalid")
+    before, after = payload.get("before"), payload.get("after")
+    first, second = payload.get("first_pass"), payload.get("second_pass")
+    if (
+        payload.get("backup_status") not in {"PASS", "INITIAL_EMPTY"}
+        or not isinstance(payload.get("fact_count"), int)
+        or payload["fact_count"] < 0
+        or not isinstance(before, dict)
+        or set(before) != {"container_id", "running"}
+        or not isinstance(after, dict)
+        or set(after) != {"container_id", "running", "healthy", "image"}
+        or not HEX64.fullmatch(str(after.get("container_id") or ""))
+        or after.get("running") is not True
+        or after.get("healthy") is not True
+        or after.get("image") != POSTGRES_IMAGE
+        or not isinstance(first, dict)
+        or set(first) != {"status", "version", "table_count"}
+        or first.get("status") not in {"applied", "already_current"}
+        or first.get("version") != 2
+        or first.get("table_count") != 26
+        or second != {"status": "already_current", "version": 2, "table_count": 26}
+    ):
+        raise MigrationError("migration_receipt_contract_invalid")
+    created = payload.get("database_container_created")
+    if payload["backup_status"] == "PASS":
+        source_valid = (
+            created is False
+            and before.get("running") is True
+            and before.get("container_id") == after.get("container_id")
+        )
+    else:
+        source_valid = created is True and before == {
+            "container_id": None,
+            "running": False,
+        }
+    if (
+        not source_valid
+        or payload.get("database_mutated")
+        is not (created is True or first["status"] == "applied")
+    ):
+        raise MigrationError("migration_receipt_transition_invalid")
+
+
 def _query(container_id: str, user: str, database: str, sql: str) -> str:
     return _text(
         [
@@ -242,11 +327,11 @@ def run_migration(
             [*compose, "up", "-d", "--no-deps", "--no-recreate", "market-database"],
             label="migration_database_start",
         )
+        created = status == "INITIAL_EMPTY"
         after_ids = _container_ids(project)
         if len(after_ids) != 1:
             raise MigrationError("migration_database_owner_count_invalid")
         after_id = after_ids[0]
-        created = status == "INITIAL_EMPTY"
         if not created and after_id != before["container_id"]:
             raise MigrationError("migration_database_recreated_unexpectedly")
         after: dict[str, Any] = {}
@@ -303,7 +388,7 @@ def run_migration(
             raise MigrationError("migration_database_reconciliation_mismatch")
         if _running_services(project) != ["market-database"]:
             raise MigrationError("migration_unexpected_market_service_running")
-        return {
+        result = {
             "schema": RESULT_SCHEMA,
             "status": "PASS",
             "release_sha": release_sha,
@@ -330,18 +415,42 @@ def run_migration(
             "telegram_capture_cutover_authorized": False,
             "secrets_disclosed": False,
         }
-    except Exception:
+        validate_receipt(
+            result,
+            release_sha=release_sha,
+            release_tree=release_tree,
+            image_id=image_id,
+            image_input_signature=image_input_signature,
+            offhost_receipt_sha256=offhost_receipt_sha256,
+            host_preflight_receipt_sha256=host_preflight_receipt_sha256,
+            source_backup_receipt_sha256=backup.file_digest(backup_receipt),
+            web_role_env_sha256=backup.file_digest(env_file),
+        )
+        return result
+    except Exception as exc:
         if created and after_id:
-            _run(
+            restart_result = _run(
                 ["docker", "update", "--restart=no", after_id],
                 label="migration_failure_restart_disable",
                 allow_failure=True,
             )
-            _run(
+            stop_result = _run(
                 ["docker", "stop", "-t", "30", after_id],
                 label="migration_failure_database_stop",
                 allow_failure=True,
             )
+            cleanup_complete = False
+            if restart_result.returncode == 0 and stop_result.returncode == 0:
+                document = _inspect(after_id)
+                cleanup_complete = (
+                    document.get("State", {}).get("Running") is False
+                    and document.get("HostConfig", {})
+                    .get("RestartPolicy", {})
+                    .get("Name")
+                    == "no"
+                )
+            if not cleanup_complete:
+                raise MigrationError("migration_failure_cleanup_incomplete") from exc
         raise
 
 

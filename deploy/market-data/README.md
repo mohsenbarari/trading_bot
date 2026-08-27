@@ -66,6 +66,12 @@ count باید reconcile شود و منابع موقت بعد از cleanup نب�
 موجود باید پیش از migration با SHA-256 یکسان روی میزبان دوم نگه‌داری شود. این ابزار transport
 یا migration/service start انجام نمی‌دهد.
 
+controller رسمی گیت بعدی را فقط با confirmation مستقل فعال می‌کند: receipt/artifact verified
+روی میزبان بات نگه‌داری می‌شود، سپس `scripts/migrate_market_pipeline_archive.py` فقط database
+را با `--no-recreate` آماده و migration را دو بار اجرا می‌کند. اجرای دوم باید
+`already_current` باشد و فقط database مجاز است running بماند؛ capture و Product authority
+خاموش می‌مانند. شکست initial database باعث stop بدون حذف state می‌شود.
+
 ## فایل‌ها
 
 - `Dockerfile`: image مشترک serviceها، Python 3.11 Bookworm pinned؛

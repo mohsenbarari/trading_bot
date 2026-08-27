@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from hashlib import sha256
 import os
 from pathlib import Path
@@ -87,6 +88,10 @@ class ProductionMarketPipelineReleaseTests(unittest.TestCase):
         self.assertIn("PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_ENABLED=0", manifest)
         self.assertIn(
             "load-and-preflight-production-market-pipeline-shadow-hosts", manifest
+        )
+        self.assertIn("PRODUCTION_MARKET_PIPELINE_MIGRATION_ENABLED=0", manifest)
+        self.assertIn(
+            "backup-and-migrate-production-market-pipeline-shadow", manifest
         )
         self.assertIn("does not transfer/load the image", manifest)
 
@@ -211,6 +216,9 @@ printf '%s\n' "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256"
                 if path.is_file()
             }
             self.assertIn("scripts/manage_market_pipeline_stage3.py", names)
+            self.assertIn("scripts/prepare_market_pipeline_release.py", names)
+            self.assertIn("scripts/backup_market_pipeline_archive.py", names)
+            self.assertIn("scripts/migrate_market_pipeline_archive.py", names)
             self.assertIn("deploy/market-data/compose.web.yml", names)
             self.assertIn("deploy/market-data/compose.bot.yml", names)
             self.assertFalse(any(".env" in name or "session" in name for name in names))
@@ -230,6 +238,105 @@ verify_market_pipeline_control_payload
             )
             self.assertNotEqual(tampered.returncode, 0)
             self.assertIn("contents drifted", tampered.stderr)
+
+    def test_migration_gate_requires_preflight_confirmation_and_protected_roots(self) -> None:
+        no_preflight = run_sourced(
+            """
+PRODUCTION_MARKET_PIPELINE_MIGRATION_ENABLED=1
+PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_REQUESTED=0
+validate_production_market_pipeline_migration_manifest
+"""
+        )
+        self.assertNotEqual(no_preflight.returncode, 0)
+        self.assertIn("requires successful two-host preflight", no_preflight.stderr)
+        wrong_confirmation = run_sourced(
+            """
+PRODUCTION_MARKET_PIPELINE_MIGRATION_ENABLED=1
+PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_REQUESTED=1
+PRODUCTION_MARKET_PIPELINE_MIGRATION_CONFIRM=wrong
+validate_production_market_pipeline_migration_manifest
+"""
+        )
+        self.assertNotEqual(wrong_confirmation.returncode, 0)
+        self.assertIn("exact backup-and-migrate confirmation", wrong_confirmation.stderr)
+        unsafe_root = run_sourced(
+            """
+PRODUCTION_MARKET_PIPELINE_MIGRATION_ENABLED=1
+PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_REQUESTED=1
+PRODUCTION_MARKET_PIPELINE_MIGRATION_CONFIRM=backup-and-migrate-production-market-pipeline-shadow
+PRODUCTION_MARKET_PIPELINE_CAPTURE_CUTOVER_ENABLED=0
+PRODUCTION_MARKET_PIPELINE_BACKUP_MAX_AGE_SECONDS=3600
+PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_ROOT=/tmp/market-backups
+PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_ROOT=/root/secure-envs/trading-bot/market-pipeline-backups
+validate_production_market_pipeline_migration_manifest
+"""
+        )
+        self.assertNotEqual(unsafe_root.returncode, 0)
+        self.assertIn("protected backup base", unsafe_root.stderr)
+
+    def test_initial_empty_offhost_receipt_is_deterministic_and_release_bound(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="market-offhost-receipt-") as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            web_env = root / "web.env"
+            preflight = root / "preflight.json"
+            source = root / "source.json"
+            destination = root / "offhost-copy-receipt.json"
+            web_env.write_text("release-bound-web-env\n", encoding="utf-8")
+            preflight.write_text('{"status":"pass"}\n', encoding="utf-8")
+            web_env.chmod(0o600)
+            preflight.chmod(0o600)
+            payload = {
+                "schema": "market_pipeline_backup_restore/1.0",
+                "status": "INITIAL_EMPTY",
+                "created_at_utc": datetime.now(timezone.utc).isoformat().replace(
+                    "+00:00", "Z"
+                ),
+                "release_sha": "a" * 40,
+                "release_tree": "b" * 40,
+                "image_id": "sha256:" + "c" * 64,
+                "image_input_signature": "d" * 64,
+                "role_env_sha256": sha256(web_env.read_bytes()).hexdigest(),
+                "source": {"database_initialized": False},
+                "backup": None,
+                "restore_smoke": {"status": "NOT_APPLICABLE"},
+                "off_host_copy_required": False,
+                "database_mutated": False,
+                "services_started": False,
+                "secrets_disclosed": False,
+            }
+            source.write_text(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="utf-8",
+            )
+            source.chmod(0o600)
+            body = """
+RELEASE_SHA="$(printf 'a%.0s' {1..40})"
+PRODUCTION_RELEASE_TREE="$(printf 'b%.0s' {1..40})"
+PRODUCTION_MARKET_PIPELINE_IMAGE_ID="sha256:$(printf 'c%.0s' {1..64})"
+PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE="$(printf 'd%.0s' {1..64})"
+PRODUCTION_MARKET_PIPELINE_WEB_ENV="$2"
+PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT="$3"
+PRODUCTION_MARKET_PIPELINE_BACKUP_MAX_AGE_SECONDS=3600
+write_market_pipeline_offhost_backup_receipt "$4" "$5" -
+sha256sum "$5" | awk '{print $1}'
+write_market_pipeline_offhost_backup_receipt "$4" "$5" -
+sha256sum "$5" | awk '{print $1}'
+"""
+            result = run_sourced(
+                body,
+                str(web_env),
+                str(preflight),
+                str(source),
+                str(destination),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            digests = result.stdout.strip().splitlines()
+            self.assertEqual(digests[-1], digests[-2])
+            receipt = json.loads(destination.read_text(encoding="utf-8"))
+            self.assertEqual(receipt["backup_status"], "INITIAL_EMPTY")
+            self.assertEqual(receipt["off_host_copy_status"], "NOT_APPLICABLE")
+            self.assertFalse(receipt["product_authority_changed"])
 
     def test_local_release_directory_is_atomic_idempotent_and_tamper_evident(self) -> None:
         with tempfile.TemporaryDirectory(prefix="market-stable-release-") as temporary:
@@ -363,6 +470,10 @@ printf '%s\n' "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT_SHA256"
         run_release = source.split("run_release() {", 1)[1].split("\n}", 1)[0]
         self.assertLess(
             run_release.index("prepare_market_pipeline_two_host_preflight"),
+            run_release.index("prepare_market_pipeline_backup_and_migration"),
+        )
+        self.assertLess(
+            run_release.index("prepare_market_pipeline_backup_and_migration"),
             run_release.index("begin_two_host_release_transaction"),
         )
         self.assertLess(
@@ -376,6 +487,14 @@ printf '%s\n' "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT_SHA256"
         self.assertIn('"${SSH_IRAN_CMD[@]}" "$IRAN_SSH_TARGET"', load_image)
         self.assertNotIn("/tmp", load_image)
         self.assertNotIn("docker image save -o", load_image)
+
+        migration = source.split(
+            "run_market_pipeline_archive_migration() {", 1
+        )[1].split("\n}", 1)[0]
+        self.assertIn("scripts/migrate_market_pipeline_archive.py", migration)
+        self.assertIn("verify_market_pipeline_offhost_backup_receipt", migration)
+        for forbidden in ("market-capture-account1", "market-capture-account2", "PRIVATE_PRIMARY"):
+            self.assertNotIn(forbidden, migration)
 
 
 if __name__ == "__main__":

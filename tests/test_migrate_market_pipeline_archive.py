@@ -33,6 +33,7 @@ def _document() -> dict[str, object]:
     return {
         "Id": CONTAINER_ID,
         "State": {"Running": True, "Health": {"Status": "healthy"}},
+        "HostConfig": {"RestartPolicy": {"Name": "on-failure"}},
         "Config": {
             "Image": migration.POSTGRES_IMAGE,
             "Labels": {
@@ -130,12 +131,77 @@ class MigrateMarketPipelineArchiveTests(unittest.TestCase):
         self.assertFalse(result["database_container_created"])
         self.assertEqual(result["before"]["container_id"], CONTAINER_ID)
         self.assertEqual(result["after"]["container_id"], CONTAINER_ID)
+        migration.validate_receipt(
+            result,
+            release_sha=RELEASE_SHA,
+            release_tree=RELEASE_TREE,
+            image_id=IMAGE_ID,
+            image_input_signature=IMAGE_SIGNATURE,
+            offhost_receipt_sha256="f" * 64,
+            host_preflight_receipt_sha256="1" * 64,
+            source_backup_receipt_sha256="2" * 64,
+            web_role_env_sha256="2" * 64,
+        )
+        result["running_services"] = ["market-database", "market-capture-account1"]
+        with self.assertRaisesRegex(migration.MigrationError, "identity_invalid"):
+            migration.validate_receipt(
+                result,
+                release_sha=RELEASE_SHA,
+                release_tree=RELEASE_TREE,
+                image_id=IMAGE_ID,
+                image_input_signature=IMAGE_SIGNATURE,
+                offhost_receipt_sha256="f" * 64,
+                host_preflight_receipt_sha256="1" * 64,
+                source_backup_receipt_sha256="2" * 64,
+                web_role_env_sha256="2" * 64,
+            )
 
     def test_invalid_second_pass_is_rejected(self) -> None:
         with self.assertRaisesRegex(migration.MigrationError, "contract_invalid"):
             migration._migration_result(
                 '{"status":"applied","version":2,"table_count":26}', second=True
             )
+
+    def test_failed_initial_migration_stops_created_database_without_deleting_state(self) -> None:
+        run_mock = mock.Mock(
+            return_value=subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        )
+        stopped = _document()
+        stopped["State"] = {"Running": False, "Health": {"Status": "unhealthy"}}
+        stopped["HostConfig"] = {"RestartPolicy": {"Name": "no"}}
+        with (
+            mock.patch.object(migration.backup, "validate_release_env", return_value=_values()),
+            mock.patch.object(
+                migration.backup,
+                "verify_receipt",
+                return_value={
+                    "status": "INITIAL_EMPTY",
+                    "source": {"database_initialized": False},
+                },
+            ),
+            mock.patch.object(migration, "_container_ids", side_effect=[[], [CONTAINER_ID]]),
+            mock.patch.object(migration, "_running_services", return_value=[]),
+            mock.patch.object(migration, "_inspect", side_effect=[_document(), stopped]),
+            mock.patch.object(migration, "_run", run_mock),
+            mock.patch.object(migration, "_text", return_value="not-json"),
+        ):
+            with self.assertRaisesRegex(migration.MigrationError, "output_invalid"):
+                migration.run_migration(
+                    release_root=Path("/srv/release"),
+                    env_file=Path("/srv/web.env"),
+                    backup_receipt=Path("/root/backup.json"),
+                    release_sha=RELEASE_SHA,
+                    release_tree=RELEASE_TREE,
+                    image_id=IMAGE_ID,
+                    image_input_signature=IMAGE_SIGNATURE,
+                    offhost_receipt_sha256="f" * 64,
+                    host_preflight_receipt_sha256="1" * 64,
+                    backup_maximum_age_seconds=3600,
+                )
+        commands = [call.args[0] for call in run_mock.call_args_list]
+        self.assertTrue(any(command[:3] == ["docker", "update", "--restart=no"] for command in commands))
+        self.assertTrue(any(command[:2] == ["docker", "stop"] for command in commands))
+        self.assertFalse(any(command[:3] == ["docker", "volume", "rm"] for command in commands))
 
     def test_source_has_no_capture_start_or_destructive_storage_command(self) -> None:
         source = Path(migration.__file__).read_text(encoding="utf-8")

@@ -15,6 +15,7 @@ PRODUCTION_COIN_INPUT_TIMER_INSTALLER="$PROJECT_DIR/scripts/install_coin_intelli
 PRODUCTION_COIN_READINESS_SCRIPT="$PROJECT_DIR/scripts/check_production_coin_inference_readiness.py"
 MARKET_PIPELINE_RELEASE_PREPARER="$PROJECT_DIR/scripts/prepare_market_pipeline_release.py"
 MARKET_PIPELINE_FOUNDATION_MANAGER="$PROJECT_DIR/scripts/manage_market_pipeline_stage3.py"
+MARKET_PIPELINE_BACKUP_TOOL="$PROJECT_DIR/scripts/backup_market_pipeline_archive.py"
 TELEGRAM_QUEUE_PRODUCTION_CUTOVER_SCRIPT="$PROJECT_DIR/scripts/cutover_telegram_delivery_queue_production.py"
 TELEGRAM_BOT_SPLIT_PREFLIGHT_SCRIPT="$PROJECT_DIR/scripts/telegram_bot_split_preflight.py"
 # The production release controller currently owns the combined `all` bot
@@ -49,6 +50,7 @@ PRODUCTION_COIN_SNAPSHOT_RELAY_CONFIRM_TEXT="publish-production-coin-inference-s
 PRODUCTION_COIN_SNAPSHOT_RELAY_DISABLE_CONFIRM_TEXT="disable-production-coin-inference-snapshot"
 PRODUCTION_MARKET_PIPELINE_EVIDENCE_CONFIRM_TEXT="prepare-production-market-pipeline-shadow-evidence"
 PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_CONFIRM_TEXT="load-and-preflight-production-market-pipeline-shadow-hosts"
+PRODUCTION_MARKET_PIPELINE_MIGRATION_CONFIRM_TEXT="backup-and-migrate-production-market-pipeline-shadow"
 PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE="coin-intelligence-production-snapshot-relay.service"
 PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER="coin-intelligence-production-snapshot-relay.timer"
 PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE_CANONICAL="/var/lib/trading-bot/production-release/coin-snapshot-relay-state.json"
@@ -115,6 +117,13 @@ PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_REQUESTED=0
 PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT=""
 PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT_SHA256=""
 PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256=""
+PRODUCTION_MARKET_PIPELINE_MIGRATION_REQUESTED=0
+PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT=""
+PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT_SHA256=""
+PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT=""
+PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT_SHA256=""
+PRODUCTION_MARKET_PIPELINE_MIGRATION_RECEIPT=""
+PRODUCTION_MARKET_PIPELINE_MIGRATION_RECEIPT_SHA256=""
 
 usage() {
     cat <<'EOF'
@@ -700,6 +709,11 @@ load_manifest() {
     PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_CONFIRM="${PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_CONFIRM:-}"
     PRODUCTION_MARKET_PIPELINE_MIN_FREE_MIB="${PRODUCTION_MARKET_PIPELINE_MIN_FREE_MIB:-2048}"
     PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR="${PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR:-/srv/trading-bot/market-pipeline-releases}"
+    PRODUCTION_MARKET_PIPELINE_MIGRATION_ENABLED="${PRODUCTION_MARKET_PIPELINE_MIGRATION_ENABLED:-0}"
+    PRODUCTION_MARKET_PIPELINE_MIGRATION_CONFIRM="${PRODUCTION_MARKET_PIPELINE_MIGRATION_CONFIRM:-}"
+    PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_ROOT="${PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_ROOT:-/root/secure-envs/trading-bot/market-pipeline-backups}"
+    PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_ROOT="${PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_ROOT:-/root/secure-envs/trading-bot/market-pipeline-backups}"
+    PRODUCTION_MARKET_PIPELINE_BACKUP_MAX_AGE_SECONDS="${PRODUCTION_MARKET_PIPELINE_BACKUP_MAX_AGE_SECONDS:-3600}"
     PRODUCTION_COIN_INFERENCE_SOURCE_ROOT="${PRODUCTION_COIN_INFERENCE_SOURCE_ROOT:-/srv/trading-bot/production-data/coin-intelligence/private-gold-live}"
     PRODUCTION_COIN_INFERENCE_SOURCE_STORE="${PRODUCTION_COIN_INFERENCE_SOURCE_STORE:-$PRODUCTION_COIN_INFERENCE_SOURCE_ROOT/market/market.sqlite3}"
     PRODUCTION_COIN_INFERENCE_ESTIMATOR_ROOT="${PRODUCTION_COIN_INFERENCE_ESTIMATOR_ROOT:-/srv/trading-bot/production-data/coin-intelligence/estimator-live}"
@@ -748,6 +762,9 @@ load_manifest() {
     PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT="$RELEASE_ARTIFACT_DIR/market-pipeline-two-host-preflight-receipt.json"
     PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR="$PRODUCTION_MARKET_PIPELINE_RELEASE_DIR/control-payload"
     PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST="$PRODUCTION_MARKET_PIPELINE_RELEASE_DIR/control-payload.sha256"
+    PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT="$RELEASE_ARTIFACT_DIR/market-pipeline-backup-source-receipt.json"
+    PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT="$RELEASE_ARTIFACT_DIR/market-pipeline-backup-offhost-receipt.json"
+    PRODUCTION_MARKET_PIPELINE_MIGRATION_RECEIPT="$RELEASE_ARTIFACT_DIR/market-pipeline-migration-receipt.json"
     REMOTE_MARKET_PIPELINE_RELEASE_STATE_DIR="/var/lib/trading-bot/production-release/market-pipeline"
     REMOTE_MARKET_PIPELINE_WEB_ENV=""
 }
@@ -1391,6 +1408,8 @@ validate_production_market_pipeline_evidence_manifest() {
             PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=0
             [[ "$PRODUCTION_MARKET_PIPELINE_CAPTURE_CUTOVER_ENABLED" == "0" ]] \
                 || die "Market Pipeline Telegram capture cutover is not an authority surface of the formal release yet."
+            [[ "${PRODUCTION_MARKET_PIPELINE_MIGRATION_ENABLED:-0}" == "0" ]] \
+                || die "Market Pipeline backup/migration requires exact release evidence."
             return 0
             ;;
         1) PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=1 ;;
@@ -1402,6 +1421,8 @@ validate_production_market_pipeline_evidence_manifest() {
         || die "Market Pipeline release evidence cannot authorize Telegram capture cutover."
     [[ -f "$MARKET_PIPELINE_RELEASE_PREPARER" \
         && -f "$MARKET_PIPELINE_FOUNDATION_MANAGER" \
+        && -f "$MARKET_PIPELINE_BACKUP_TOOL" \
+        && -f "$LOCAL_PROJECT_DIR/scripts/migrate_market_pipeline_archive.py" \
         && -f "$LOCAL_PROJECT_DIR/deploy/market-data/Dockerfile" ]] \
         || die "Market Pipeline formal release tooling is incomplete."
     [[ "$PRODUCTION_MARKET_PIPELINE_WEB_ENV_SOURCE_PATH" == /* \
@@ -1419,7 +1440,12 @@ validate_production_market_pipeline_evidence_manifest() {
 
 validate_production_market_pipeline_host_preflight_manifest() {
     case "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_ENABLED" in
-        0) PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_REQUESTED=0; return 0 ;;
+        0)
+            PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_REQUESTED=0
+            [[ "${PRODUCTION_MARKET_PIPELINE_MIGRATION_ENABLED:-0}" == "0" ]] \
+                || die "Market Pipeline backup/migration requires successful two-host preflight."
+            return 0
+            ;;
         1) PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_REQUESTED=1 ;;
         *) die "PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_ENABLED must be exactly 0 or 1." ;;
     esac
@@ -1439,6 +1465,34 @@ validate_production_market_pipeline_host_preflight_manifest() {
         && "$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR" != *staging* \
         && "$(canonical_path "$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR")" == "$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR" ]] \
         || die "Market Pipeline release base must be a canonical non-staging disk path outside /tmp."
+}
+
+validate_production_market_pipeline_migration_manifest() {
+    case "$PRODUCTION_MARKET_PIPELINE_MIGRATION_ENABLED" in
+        0) PRODUCTION_MARKET_PIPELINE_MIGRATION_REQUESTED=0; return 0 ;;
+        1) PRODUCTION_MARKET_PIPELINE_MIGRATION_REQUESTED=1 ;;
+        *) die "PRODUCTION_MARKET_PIPELINE_MIGRATION_ENABLED must be exactly 0 or 1." ;;
+    esac
+    [[ "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_REQUESTED" == "1" ]] \
+        || die "Market Pipeline backup/migration requires successful two-host preflight."
+    [[ "$PRODUCTION_MARKET_PIPELINE_MIGRATION_CONFIRM" == "$PRODUCTION_MARKET_PIPELINE_MIGRATION_CONFIRM_TEXT" ]] \
+        || die "Market Pipeline backup/migration requires the exact backup-and-migrate confirmation."
+    [[ "$PRODUCTION_MARKET_PIPELINE_CAPTURE_CUTOVER_ENABLED" == "0" ]] \
+        || die "Market Pipeline backup/migration cannot authorize Telegram capture cutover."
+    [[ "$PRODUCTION_MARKET_PIPELINE_BACKUP_MAX_AGE_SECONDS" =~ ^[0-9]+$ \
+        && "$PRODUCTION_MARKET_PIPELINE_BACKUP_MAX_AGE_SECONDS" -ge 300 \
+        && "$PRODUCTION_MARKET_PIPELINE_BACKUP_MAX_AGE_SECONDS" -le 86400 ]] \
+        || die "Market Pipeline backup maximum age must be an integer from 300 to 86400 seconds."
+    local backup_root
+    for backup_root in \
+        "$PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_ROOT" \
+        "$PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_ROOT"
+    do
+        [[ "$backup_root" =~ ^/root/secure-envs/trading-bot/market-pipeline-backups(/[A-Za-z0-9._-]+)*$ \
+            && "$backup_root" != *staging* \
+            && "$(canonical_path "$backup_root")" == "$backup_root" ]] \
+            || die "Market Pipeline backup roots must be canonical production paths under the protected backup base."
+    done
 }
 
 validate_production_coin_inference_activation_contract() {
@@ -3154,6 +3208,7 @@ check_local() {
     validate_production_coin_relay_manifest
     validate_production_market_pipeline_evidence_manifest
     validate_production_market_pipeline_host_preflight_manifest
+    validate_production_market_pipeline_migration_manifest
     log "Read-only local checks passed"
 }
 
@@ -3737,6 +3792,9 @@ prepare_market_pipeline_control_payload() {
         deploy/market-data/compose.yml \
         deploy/market-data/compose.web.yml \
         deploy/market-data/compose.bot.yml \
+        scripts/prepare_market_pipeline_release.py \
+        scripts/backup_market_pipeline_archive.py \
+        scripts/migrate_market_pipeline_archive.py \
         scripts/manage_market_pipeline_stage3.py \
         | tar -xf - -C "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR"
     [[ -z "$(find "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR" -type l -print -quit)" \
@@ -4157,6 +4215,481 @@ PY
     remote_identity="$(ssh_iran "docker image inspect --format '{{.Id}}|{{.Os}}/{{.Architecture}}|{{.Config.User}}|{{index .Config.Labels \"org.opencontainers.image.revision\"}}|{{index .Config.Labels \"io.gold-trade.release.tree\"}}|{{index .Config.Labels \"io.gold-trade.release.input-signature\"}}' '$PRODUCTION_MARKET_PIPELINE_IMAGE_ID'")"
     [[ "$remote_identity" == "$expected_identity" ]] \
         || die "Remote Market Pipeline image drifted after host preflight."
+}
+
+write_market_pipeline_offhost_backup_receipt() {
+    local source_receipt="$1" destination="$2" local_artifact="$3"
+    local source_sha web_env_sha preflight_sha
+    source_sha="$(file_sha256 "$source_receipt")"
+    web_env_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_WEB_ENV")"
+    preflight_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT")"
+    python3 - "$destination" "$source_receipt" "$local_artifact" \
+        "$RELEASE_SHA" "$PRODUCTION_RELEASE_TREE" \
+        "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
+        "$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE" \
+        "$source_sha" "$web_env_sha" "$preflight_sha" \
+        "$PRODUCTION_MARKET_PIPELINE_BACKUP_MAX_AGE_SECONDS" <<'PY'
+from datetime import datetime, timedelta, timezone
+from hashlib import sha256
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+
+destination = Path(sys.argv[1])
+source_path = Path(sys.argv[2])
+artifact_argument = sys.argv[3]
+release_sha, release_tree, image_id, image_signature = sys.argv[4:8]
+source_sha, web_env_sha, preflight_sha = sys.argv[8:11]
+maximum_age_seconds = int(sys.argv[11])
+
+def digest(path: Path) -> str:
+    value = sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            value.update(chunk)
+    return value.hexdigest()
+
+def secure_file(path: Path) -> None:
+    info = path.lstat()
+    if (
+        path.is_symlink()
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.geteuid()
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or info.st_nlink != 1
+    ):
+        raise SystemExit(2)
+
+secure_file(source_path)
+if digest(source_path) != source_sha:
+    raise SystemExit(2)
+source = json.loads(source_path.read_text(encoding="utf-8"))
+common_keys = {
+    "schema", "status", "created_at_utc", "release_sha", "release_tree",
+    "image_id", "image_input_signature", "role_env_sha256", "source",
+    "backup", "restore_smoke", "off_host_copy_required", "database_mutated",
+    "services_started", "secrets_disclosed",
+}
+expected_identity = {
+    "schema": "market_pipeline_backup_restore/1.0",
+    "release_sha": release_sha,
+    "release_tree": release_tree,
+    "image_id": image_id,
+    "image_input_signature": image_signature,
+    "role_env_sha256": web_env_sha,
+    "database_mutated": False,
+    "services_started": False,
+    "secrets_disclosed": False,
+}
+if set(source) != common_keys or any(source.get(k) != v for k, v in expected_identity.items()):
+    raise SystemExit(2)
+try:
+    created = datetime.fromisoformat(
+        str(source["created_at_utc"]).replace("Z", "+00:00")
+    ).astimezone(timezone.utc)
+except (KeyError, TypeError, ValueError):
+    raise SystemExit(2)
+now = datetime.now(timezone.utc)
+if created > now + timedelta(seconds=30) or now - created > timedelta(
+    seconds=maximum_age_seconds
+):
+    raise SystemExit(2)
+
+status = source.get("status")
+artifact = None
+copy_status = "NOT_APPLICABLE"
+if status == "PASS":
+    source_artifact = source.get("backup")
+    restore = source.get("restore_smoke")
+    source_database = source.get("source")
+    if (
+        not isinstance(source_artifact, dict)
+        or set(source_artifact) != {"path", "sha256", "size_bytes", "format"}
+        or source_artifact.get("format") != "postgres_custom"
+        or not isinstance(restore, dict)
+        or restore.get("status") != "PASS"
+        or restore.get("cleanup_status") != "PASS"
+        or not isinstance(source_database, dict)
+        or restore.get("schema_versions") != source_database.get("schema_versions")
+        or restore.get("table_count") != source_database.get("table_count")
+        or restore.get("fact_count") != source_database.get("fact_count")
+        or source.get("off_host_copy_required") is not True
+    ):
+        raise SystemExit(2)
+    local_path = Path(artifact_argument)
+    secure_file(local_path)
+    source_name = Path(str(source_artifact.get("path") or "")).name
+    if (
+        local_path.parent != destination.parent
+        or local_path.name != source_name
+        or not re.fullmatch(
+            r"market-archive-before-[0-9a-f]{12}-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}\.dump",
+            local_path.name,
+        )
+        or digest(local_path) != source_artifact.get("sha256")
+        or local_path.stat().st_size != source_artifact.get("size_bytes")
+    ):
+        raise SystemExit(2)
+    artifact = {
+        "name": local_path.name,
+        "sha256": source_artifact["sha256"],
+        "size_bytes": source_artifact["size_bytes"],
+        "bot_copy_path": str(local_path),
+    }
+    copy_status = "PASS"
+elif status == "INITIAL_EMPTY":
+    if (
+        artifact_argument != "-"
+        or source.get("source") != {"database_initialized": False}
+        or source.get("backup") is not None
+        or source.get("restore_smoke") != {"status": "NOT_APPLICABLE"}
+        or source.get("off_host_copy_required") is not False
+    ):
+        raise SystemExit(2)
+else:
+    raise SystemExit(2)
+
+payload = {
+    "schema": "market_pipeline_backup_offhost_copy/1.0",
+    "status": "PASS",
+    "verified_at_utc": source["created_at_utc"],
+    "release_sha": release_sha,
+    "release_tree": release_tree,
+    "image_id": image_id,
+    "image_input_signature": image_signature,
+    "web_role_env_sha256": web_env_sha,
+    "host_preflight_receipt_sha256": preflight_sha,
+    "source_backup_receipt_sha256": source_sha,
+    "backup_status": status,
+    "artifact": artifact,
+    "off_host_copy_status": copy_status,
+    "database_mutated": False,
+    "services_started": False,
+    "product_authority_changed": False,
+    "telegram_capture_cutover_authorized": False,
+    "secrets_disclosed": False,
+}
+candidate = destination.parent / f".{destination.name}.{os.getpid()}.tmp"
+flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+descriptor = os.open(candidate, flags, 0o600)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    if destination.exists() and destination.read_bytes() != candidate.read_bytes():
+        raise SystemExit(2)
+    os.replace(candidate, destination)
+    directory = os.open(destination.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+finally:
+    candidate.unlink(missing_ok=True)
+PY
+    chmod 0600 "$destination"
+}
+
+verify_market_pipeline_offhost_backup_receipt() {
+    local bot_backup_dir artifact_path prior_sha current_sha
+    bot_backup_dir="$PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_ROOT/$RELEASE_SHA"
+    PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT="$bot_backup_dir/web-source-receipt.json"
+    PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT="$bot_backup_dir/offhost-copy-receipt.json"
+    [[ -d "$bot_backup_dir" && ! -L "$bot_backup_dir" \
+        && "$(stat -c '%u:%a' "$bot_backup_dir")" == "$(id -u):700" \
+        && -f "$PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT" \
+        && ! -L "$PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT" \
+        && "$(stat -c '%u:%a' "$PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT")" == "$(id -u):600" \
+        && -f "$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT" \
+        && ! -L "$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT" \
+        && "$(stat -c '%u:%a' "$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT")" == "$(id -u):600" ]] \
+        || return 1
+    artifact_path="$(python3 - "$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT" <<'PY'
+import json
+from pathlib import Path
+import sys
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+if payload.get("schema") != "market_pipeline_backup_offhost_copy/1.0":
+    raise SystemExit(2)
+artifact = payload.get("artifact")
+if artifact is None:
+    print("-")
+elif isinstance(artifact, dict) and isinstance(artifact.get("bot_copy_path"), str):
+    print(artifact["bot_copy_path"])
+else:
+    raise SystemExit(2)
+PY
+)" || return 1
+    prior_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT")"
+    write_market_pipeline_offhost_backup_receipt \
+        "$PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT" \
+        "$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT" \
+        "$artifact_path" \
+        || return 1
+    current_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT")"
+    [[ "$current_sha" == "$prior_sha" ]] || return 1
+    PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT_SHA256="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT")"
+    PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT_SHA256="$current_sha"
+}
+
+prepare_market_pipeline_archive_backup() {
+    [[ "$PRODUCTION_MARKET_PIPELINE_MIGRATION_REQUESTED" == "1" ]] || return 0
+    verify_market_pipeline_two_host_preflight_receipt
+    local web_backup_dir bot_backup_dir remote_receipt remote_output metadata
+    local backup_status artifact_name artifact_sha artifact_size remote_artifact
+    local local_artifact receipt_candidate artifact_candidate remote_artifact_identity
+    web_backup_dir="$PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_ROOT/$RELEASE_SHA"
+    bot_backup_dir="$PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_ROOT/$RELEASE_SHA"
+    remote_receipt="$web_backup_dir/market-pipeline-backup-receipt.json"
+    validate_remote_shell_path "$web_backup_dir" "Market Pipeline web backup directory"
+    validate_remote_shell_path "$bot_backup_dir" "Market Pipeline bot backup directory"
+    remote_output="$(ssh_iran "set -euo pipefail
+umask 077
+install -d -m 0700 '$PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_ROOT' '$web_backup_dir'
+[ ! -L '$web_backup_dir' ]
+[ \"\$(stat -c '%u:%a' '$web_backup_dir')\" = \"\$(id -u):700\" ]
+cd '$REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR'
+if [ ! -f '$remote_receipt' ]; then
+  [ -z \"\$(find '$web_backup_dir' -mindepth 1 -maxdepth 1 -print -quit)\" ]
+  python3 scripts/backup_market_pipeline_archive.py create \\
+    --env-file '$REMOTE_MARKET_PIPELINE_WEB_ENV' \\
+    --backup-dir '$web_backup_dir' \\
+    --receipt '$remote_receipt' \\
+    --release-sha '$RELEASE_SHA' \\
+    --release-tree '$PRODUCTION_RELEASE_TREE' \\
+    --image-id '$PRODUCTION_MARKET_PIPELINE_IMAGE_ID' \\
+    --image-input-signature '$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE' \\
+    --confirm create-production-market-pipeline-archive-backup >/dev/null
+fi
+python3 scripts/backup_market_pipeline_archive.py verify \\
+  --env-file '$REMOTE_MARKET_PIPELINE_WEB_ENV' \\
+  --receipt '$remote_receipt' \\
+  --release-sha '$RELEASE_SHA' \\
+  --release-tree '$PRODUCTION_RELEASE_TREE' \\
+  --image-id '$PRODUCTION_MARKET_PIPELINE_IMAGE_ID' \\
+  --image-input-signature '$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE' \\
+  --maximum-age-seconds '$PRODUCTION_MARKET_PIPELINE_BACKUP_MAX_AGE_SECONDS'")" \
+        || die "Market Pipeline archive backup/restore-smoke failed on the web host."
+    metadata="$(python3 -c 'import json,sys
+p=json.loads(sys.stdin.read())
+if p.get("status") != "pass" or p.get("secrets_disclosed") is not False: raise SystemExit(2)
+values=[p.get("backup_status"),p.get("artifact_name"),p.get("artifact_sha256"),p.get("artifact_size_bytes")]
+print("\\t".join("-" if v is None else str(v) for v in values))' <<<"$remote_output")" \
+        || die "Market Pipeline web backup metadata was invalid."
+    IFS=$'\t' read -r backup_status artifact_name artifact_sha artifact_size <<<"$metadata"
+    [[ "$backup_status" == "PASS" || "$backup_status" == "INITIAL_EMPTY" ]] \
+        || die "Market Pipeline web backup returned an unsupported status."
+
+    install -d -m 0700 -- "$PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_ROOT" "$bot_backup_dir"
+    [[ -d "$bot_backup_dir" && ! -L "$bot_backup_dir" \
+        && "$(stat -c '%u:%a' "$bot_backup_dir")" == "$(id -u):700" ]] \
+        || die "Market Pipeline bot backup directory is not owner-controlled mode 0700."
+    PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT="$bot_backup_dir/web-source-receipt.json"
+    PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT="$bot_backup_dir/offhost-copy-receipt.json"
+    receipt_candidate="$bot_backup_dir/.web-source-receipt.$$.incoming"
+    if ! ssh_iran "cat '$remote_receipt'" >"$receipt_candidate"; then
+        rm -f -- "$receipt_candidate"
+        die "Could not stream the Market Pipeline backup receipt to the bot host."
+    fi
+    chmod 0600 "$receipt_candidate"
+    sync -f "$receipt_candidate"
+    if [[ -f "$PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT" \
+        && "$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT")" != "$(file_sha256 "$receipt_candidate")" ]]; then
+        rm -f -- "$receipt_candidate"
+        die "Existing bot-host Market Pipeline backup receipt differs for this release."
+    fi
+    mv -f -- "$receipt_candidate" "$PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT"
+    sync -f "$bot_backup_dir"
+    PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT_SHA256="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT")"
+
+    local_artifact="-"
+    if [[ "$backup_status" == "PASS" ]]; then
+        [[ "$artifact_name" =~ ^market-archive-before-[0-9a-f]{12}-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}\.dump$ \
+            && "$artifact_sha" =~ ^[0-9a-f]{64}$ \
+            && "$artifact_size" =~ ^[1-9][0-9]*$ ]] \
+            || die "Market Pipeline backup artifact identity was invalid."
+        remote_artifact="$web_backup_dir/$artifact_name"
+        local_artifact="$bot_backup_dir/$artifact_name"
+        if [[ -f "$local_artifact" && ! -L "$local_artifact" ]]; then
+            [[ "$(file_sha256 "$local_artifact")" == "$artifact_sha" \
+                && "$(stat -c '%s' "$local_artifact")" == "$artifact_size" \
+                && "$(stat -c '%u:%a' "$local_artifact")" == "$(id -u):600" ]] \
+                || die "Existing bot-host Market Pipeline backup artifact drifted."
+        else
+            [[ ! -e "$local_artifact" && ! -L "$local_artifact" ]] \
+                || die "Bot-host Market Pipeline backup artifact path is unsafe."
+            artifact_candidate="$bot_backup_dir/.$artifact_name.$$.incoming"
+            if ! ssh_iran "cat '$remote_artifact'" >"$artifact_candidate"; then
+                rm -f -- "$artifact_candidate"
+                die "Could not stream the Market Pipeline archive backup to the bot host."
+            fi
+            chmod 0600 "$artifact_candidate"
+            sync -f "$artifact_candidate"
+            [[ "$(file_sha256 "$artifact_candidate")" == "$artifact_sha" \
+                && "$(stat -c '%s' "$artifact_candidate")" == "$artifact_size" ]] \
+                || { rm -f -- "$artifact_candidate"; die "Streamed Market Pipeline backup digest/size mismatch."; }
+            mv -- "$artifact_candidate" "$local_artifact"
+            sync -f "$bot_backup_dir"
+        fi
+        remote_artifact_identity="$(ssh_iran "sha256sum '$remote_artifact' | awk '{print \\$1}'; stat -c '%s' '$remote_artifact'")"
+        [[ "$remote_artifact_identity" == "$artifact_sha"$'\n'"$artifact_size" ]] \
+            || die "Web-host Market Pipeline backup changed during off-host copy."
+    else
+        [[ "$artifact_name" == "-" && "$artifact_sha" == "-" && "$artifact_size" == "-" ]] \
+            || die "INITIAL_EMPTY Market Pipeline backup unexpectedly advertised an artifact."
+    fi
+    write_market_pipeline_offhost_backup_receipt \
+        "$PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT" \
+        "$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT" \
+        "$local_artifact" \
+        || die "Could not record verified Market Pipeline off-host backup evidence."
+    PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT_SHA256="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT")"
+    log "Market Pipeline archive backup is restore-proven and retained on the bot host; no migration/service/authority changed."
+}
+
+verify_market_pipeline_migration_receipt_file() {
+    local receipt="$1" source_sha offhost_sha preflight_sha web_env_sha
+    [[ -f "$receipt" && ! -L "$receipt" \
+        && "$(stat -c '%u:%a' "$receipt")" == "$(id -u):600" ]] \
+        || return 1
+    source_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT")"
+    offhost_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT")"
+    preflight_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT")"
+    web_env_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_WEB_ENV")"
+    PYTHONPATH="$LOCAL_PROJECT_DIR" python3 - "$receipt" \
+        "$RELEASE_SHA" "$PRODUCTION_RELEASE_TREE" \
+        "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
+        "$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE" \
+        "$offhost_sha" "$preflight_sha" "$source_sha" "$web_env_sha" <<'PY'
+import json
+from pathlib import Path
+import sys
+from scripts.migrate_market_pipeline_archive import validate_receipt
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+validate_receipt(
+    payload,
+    release_sha=sys.argv[2],
+    release_tree=sys.argv[3],
+    image_id=sys.argv[4],
+    image_input_signature=sys.argv[5],
+    offhost_receipt_sha256=sys.argv[6],
+    host_preflight_receipt_sha256=sys.argv[7],
+    source_backup_receipt_sha256=sys.argv[8],
+    web_role_env_sha256=sys.argv[9],
+)
+PY
+}
+
+verify_market_pipeline_migrated_database_current() {
+    local receipt="$1" expected_fields expected_id expected_facts remote_fields
+    local remote_id remote_facts
+    expected_fields="$(python3 - "$receipt" <<'PY'
+import json
+from pathlib import Path
+import sys
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(f'{payload["after"]["container_id"]}\t{payload["fact_count"]}')
+PY
+)" || return 1
+    IFS=$'\t' read -r expected_id expected_facts <<<"$expected_fields"
+    remote_fields="$(ssh_iran "set -euo pipefail
+mapfile -t ids < <(docker ps -q --no-trunc \\
+  --filter label=com.docker.compose.project='$PRODUCTION_MARKET_PIPELINE_PROJECT_NAME' \\
+  --filter label=com.docker.compose.service=market-database)
+[ \"\${#ids[@]}\" -eq 1 ] && [ \"\${ids[0]}\" = '$expected_id' ]
+[ \"\$(docker inspect --format '{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}|{{.Config.Image}}' '$expected_id')\" = 'true|healthy|postgres:15-alpine@sha256:fe0737ba566a2c5b2a28f34433c0a423261900ec17b9bf7ad115e1aae7e57f1b' ]
+set -a
+. '$REMOTE_MARKET_PIPELINE_WEB_ENV'
+set +a
+query() { docker exec '$expected_id' psql -X -v ON_ERROR_STOP=1 -At -U \"\$MARKET_POSTGRES_USER\" -d \"\$MARKET_POSTGRES_DB\" -c \"\$1\"; }
+[ \"\$(query \"SELECT string_agg(version::text, ',' ORDER BY version) FROM market_data.schema_migrations\")\" = 1,2 ]
+[ \"\$(query \"SELECT count(*) FROM information_schema.tables WHERE table_schema='market_data'\")\" = 26 ]
+facts=\"\$(query \"SELECT count(*) FROM market_data.market_facts\")\"
+[[ \"\$facts\" =~ ^[0-9]+$ ]] && [ \"\$facts\" -ge '$expected_facts' ]
+mapfile -t services < <(docker ps \\
+  --filter label=com.docker.compose.project='$PRODUCTION_MARKET_PIPELINE_PROJECT_NAME' \\
+  --format '{{.Label \"com.docker.compose.service\"}}' | LC_ALL=C sort -u)
+[ \"\${#services[@]}\" -eq 1 ] && [ \"\${services[0]}\" = market-database ]
+printf '%s\\t%s\\n' '$expected_id' \"\$facts\"")" || return 1
+    IFS=$'\t' read -r remote_id remote_facts <<<"$remote_fields"
+    [[ "$remote_id" == "$expected_id" \
+        && "$remote_facts" =~ ^[0-9]+$ \
+        && "$remote_facts" -ge "$expected_facts" ]]
+}
+
+run_market_pipeline_archive_migration() {
+    verify_market_pipeline_offhost_backup_receipt \
+        || die "Verified Market Pipeline off-host backup evidence is required before migration."
+    local bot_backup_dir web_backup_dir remote_backup_receipt migration_output
+    local candidate destination existing_sha
+    bot_backup_dir="$PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_ROOT/$RELEASE_SHA"
+    web_backup_dir="$PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_ROOT/$RELEASE_SHA"
+    remote_backup_receipt="$web_backup_dir/market-pipeline-backup-receipt.json"
+    destination="$bot_backup_dir/migration-receipt.json"
+    migration_output="$(ssh_iran "set -euo pipefail
+cd '$REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR'
+python3 scripts/migrate_market_pipeline_archive.py \\
+  --release-root '$REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR' \\
+  --env-file '$REMOTE_MARKET_PIPELINE_WEB_ENV' \\
+  --backup-receipt '$remote_backup_receipt' \\
+  --release-sha '$RELEASE_SHA' \\
+  --release-tree '$PRODUCTION_RELEASE_TREE' \\
+  --image-id '$PRODUCTION_MARKET_PIPELINE_IMAGE_ID' \\
+  --image-input-signature '$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE' \\
+  --offhost-receipt-sha256 '$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT_SHA256' \\
+  --host-preflight-receipt-sha256 '$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT_SHA256' \\
+  --backup-maximum-age-seconds '$PRODUCTION_MARKET_PIPELINE_BACKUP_MAX_AGE_SECONDS' \\
+  --confirm run-production-market-pipeline-archive-migration")" \
+        || die "Market Pipeline archive migration failed; a newly-created database is stopped without deleting state."
+    candidate="$bot_backup_dir/.migration-receipt.$$.incoming"
+    printf '%s\n' "$migration_output" >"$candidate"
+    chmod 0600 "$candidate"
+    sync -f "$candidate"
+    verify_market_pipeline_migration_receipt_file "$candidate" \
+        || { rm -f -- "$candidate"; die "Market Pipeline migration receipt contract failed."; }
+    if [[ -f "$destination" && ! -L "$destination" ]]; then
+        existing_sha="$(file_sha256 "$destination")"
+        [[ "$existing_sha" == "$(file_sha256 "$candidate")" ]] \
+            || { rm -f -- "$candidate"; die "Existing Market Pipeline migration receipt differs for this release."; }
+    fi
+    mv -f -- "$candidate" "$destination"
+    sync -f "$bot_backup_dir"
+    PRODUCTION_MARKET_PIPELINE_MIGRATION_RECEIPT="$destination"
+    PRODUCTION_MARKET_PIPELINE_MIGRATION_RECEIPT_SHA256="$(file_sha256 "$destination")"
+    verify_market_pipeline_migrated_database_current "$destination" \
+        || die "Market Pipeline database drifted immediately after migration."
+    log "Market Pipeline migration passed twice; only its database is running and capture/Product authority remain off."
+}
+
+prepare_market_pipeline_backup_and_migration() {
+    [[ "$PRODUCTION_MARKET_PIPELINE_MIGRATION_REQUESTED" == "1" ]] || return 0
+    local bot_backup_dir existing_migration
+    bot_backup_dir="$PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_ROOT/$RELEASE_SHA"
+    existing_migration="$bot_backup_dir/migration-receipt.json"
+    if [[ -f "$existing_migration" && ! -L "$existing_migration" ]]; then
+        verify_market_pipeline_offhost_backup_receipt \
+            || die "Existing Market Pipeline migration lost its bound off-host backup evidence."
+        verify_market_pipeline_migration_receipt_file "$existing_migration" \
+            || die "Existing Market Pipeline migration receipt drifted."
+        verify_market_pipeline_migrated_database_current "$existing_migration" \
+            || die "Existing Market Pipeline migrated database drifted."
+        PRODUCTION_MARKET_PIPELINE_MIGRATION_RECEIPT="$existing_migration"
+        PRODUCTION_MARKET_PIPELINE_MIGRATION_RECEIPT_SHA256="$(file_sha256 "$existing_migration")"
+        log "Resumed from the exact verified Market Pipeline migration receipt; no migration was rerun."
+        return 0
+    fi
+    if ! verify_market_pipeline_offhost_backup_receipt; then
+        prepare_market_pipeline_archive_backup
+    fi
+    run_market_pipeline_archive_migration
 }
 
 iran_release_image_matches() {
@@ -6601,6 +7134,8 @@ run_release() {
     verify_release_evidence_gate
     verify_frozen_release_source
     prepare_market_pipeline_two_host_preflight
+    verify_frozen_release_source
+    prepare_market_pipeline_backup_and_migration
     verify_frozen_release_source
     begin_two_host_release_transaction
     capture_production_coin_input_timer_recovery_state

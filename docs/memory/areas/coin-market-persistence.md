@@ -14,4 +14,4 @@
 - Adapter caps 500/cycle with per-stream cursors/causal merge. Receiver redacts payload after checkpoint+3d while preserving stream/sequence/fact/revision/hash; watermark regression fails closed.
 - Account1 stores no live reply IDs; Account2 is bounded. Never stage in `/tmp`; use streaming.
 - Market release gates are opt-in: bot binds image/env to SHA/tree/signature/content-ID and `PRIVATE_SHADOW`; host preflight installs SHA-scoped controls, streams the same ID and checks disk/private/path/secret. Neither starts/migrates/promotes/cuts over capture.
-- Archive migration requires bound root-only `pg_dump -Fc`, no-network restore reconciliation and verified bot-host copy. Empty stores may use `INITIAL_EMPTY`; partial/unversioned stores fail closed. Backup tooling never starts/migrates/transports.
+- Archive migration requires bound root-only `pg_dump -Fc`, no-network restore, verified bot copy, then two passes with second `already_current`. Empty stores may use `INITIAL_EMPTY`; partial/unversioned fail closed. Only DB may start; capture/Product stay off.

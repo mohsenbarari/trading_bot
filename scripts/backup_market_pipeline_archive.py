@@ -449,7 +449,7 @@ def restore_smoke(artifact: Path, source: Mapping[str, Any]) -> dict[str, Any]:
                 _assert_restore_resource_absent("volume", volume)
         except BackupError as exc:
             cleanup_error = exc
-        if cleanup_error is not None and sys.exc_info()[0] is None:
+        if cleanup_error is not None:
             raise cleanup_error
 
 
