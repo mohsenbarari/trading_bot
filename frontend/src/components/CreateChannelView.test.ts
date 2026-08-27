@@ -157,7 +157,7 @@ describe('CreateChannelView.vue', () => {
     await membersEntry!.trigger('click')
     await flushPromises()
 
-    expect(wrapper.get('.search-input').classes()).toContain('ui-input')
+    expect(wrapper.get('.ui-search-field input').attributes('type')).toBe('search')
 
     const memberRow = wrapper.findAll('.chat-user-row').find((row) => row.text().includes('Member Two'))
     expect(memberRow).toBeTruthy()
@@ -305,8 +305,8 @@ describe('CreateChannelView.vue', () => {
     await avatarInput.trigger('change')
     await flushPromises()
 
-    await wrapper.get('#channel-title').setValue('Fresh Channel')
-    await wrapper.get('#channel-description').setValue('Created here')
+    await wrapper.get('input[placeholder="مثلاً اطلاعیه‌های ویژه"]').setValue('Fresh Channel')
+    await wrapper.get('textarea[placeholder="چند خط کوتاه درباره موضوع کانال"]').setValue('Created here')
 
     const createButton = wrapper.findAll('button').find((button) => button.text().includes('ساخت کانال'))
     expect(createButton).toBeTruthy()
@@ -317,7 +317,7 @@ describe('CreateChannelView.vue', () => {
     expect(uploadAvatarImageMock).toHaveBeenCalledTimes(1)
     expect(wrapper.emitted('refresh-conversations')).toHaveLength(1)
     expect(wrapper.text()).toContain('افزودن عضو')
-    expect(wrapper.get('.search-input').classes()).toContain('ui-input')
+    expect(wrapper.get('.ui-search-field input').attributes('type')).toBe('search')
 
     const candidateRow = wrapper.findAll('.chat-user-row').find((row) => row.text().includes('Member Two'))
     expect(candidateRow).toBeTruthy()
@@ -452,8 +452,8 @@ describe('CreateChannelView.vue', () => {
     const removeAvatarButton = wrapper.findAll('button').find((button) => button.text().includes('حذف عکس'))
     expect(removeAvatarButton).toBeTruthy()
     await removeAvatarButton!.trigger('click')
-    await wrapper.get('#edit-channel-title').setValue('Renamed Channel')
-    await wrapper.get('#edit-channel-description').setValue('Updated channel details')
+    await wrapper.get('input[placeholder="نام کانال"]').setValue('Renamed Channel')
+    await wrapper.get('textarea[placeholder="توضیحات کانال برای اعضا"]').setValue('Updated channel details')
 
     const saveButton = wrapper.findAll('button').find((button) => button.text().includes('ذخیره تغییرات'))
     expect(saveButton).toBeTruthy()
@@ -475,7 +475,7 @@ describe('CreateChannelView.vue', () => {
     await adminsEntry!.trigger('click')
     await flushPromises()
 
-    expect(wrapper.get('.search-input').classes()).toContain('ui-input')
+    expect(wrapper.get('.ui-search-field input').attributes('type')).toBe('search')
 
     const promoteButton = wrapper.findAll('.channel-member-action').find((button) => button.text().includes('ارتقا به ادمین'))
     expect(promoteButton).toBeTruthy()
@@ -639,7 +639,7 @@ describe('CreateChannelView.vue', () => {
     vm.page = 'add-members'
     await flushPromises()
     expect(wrapper.get('.select-all-toggle input').classes()).toContain('ui-checkbox')
-    expect(wrapper.get('.state-box.ui-empty-state').text()).toContain('کاربری برای دعوت باقی نمانده است.')
+    expect(wrapper.get('.ui-empty-state').text()).toContain('کاربری برای دعوت باقی نمانده است.')
 
     vm.activeChannel = { ...channel, is_mandatory: true }
     await vm.loadCandidates('x')
@@ -1024,8 +1024,10 @@ describe('CreateChannelView.vue', () => {
     expect(createChannelSource).not.toContain('HelpPopover')
     expect(createChannelSource).not.toContain('card-with-help')
     expect(createChannelSource).not.toContain('manager-section-card')
+    expect(createChannelSource).not.toContain('AppSectionCard')
     expect(createChannelSource).toContain('AppInsetGroup')
     expect(createChannelSource).not.toContain('<main')
+    expect(createChannelSource).not.toContain(':hover:not(:disabled)')
   })
 
 })
