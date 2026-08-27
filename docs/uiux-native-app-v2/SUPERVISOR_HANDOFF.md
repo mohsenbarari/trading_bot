@@ -1,209 +1,154 @@
-# گزارش اجرای اصلاح Native App Feel V2
+# حکم جاری Native App Feel V2
 
-مخاطب: ناظر مستقل. ادعای سبز بودن را فقط با Git، تست و مرورگر بسنج.
+مخاطب: ناظر مستقل. فقط همین بخش authoritative است.
+Checkpointهای قدیمی فقط در بخش `HISTORICAL / SUPERSEDED` همین پرونده‌اند و وضعیت جاری نیستند.
 
-تاریخ: ۲۰۲۶-۰۸-۲۷
+تاریخ شواهد: ۲۰۲۶-۰۸-۲۷
 شاخه: فقط `candidate/webapp-native-app-v2`
-حکم جاری: `NATIVE APP V2 CORRECTIONS COMPLETE — READY FOR INDEPENDENT INTEGRATION REVIEW`
 
-`FULL VUE-TSC EXIT 2 — EXACT FROZEN MARKET BASELINE ONLY; ZERO NEW OR NON-MARKET TYPE ERRORS`
+## حکم جاری
+
+`READY FOR INDEPENDENT INTEGRATION REVIEW`
+
+حکم ممنوع صادر نشد: owner-approved و production-ready.
+
+`vue-tsc` سبز اعلام نمی‌شود. اجرای کامل EXIT 2 است و فقط چهار خطای منجمد Market مجاز است.
+
+Annotation یا early-return داخل pass شمرده نشد.
 
 ---
 
-## Checkpoint نهایی ادامه — ۲۰۲۶-۰۸-۲۷
-
-شواهد محصول روی `4c5e8136` جمع شد. این سند آخرین commit شاخه است؛ گیت‌های ارزان را بعد از همین commit دوباره بخوان.
+## Binding پس از commit اصلاح harness
 
 | مورد | مقدار |
 |---|---|
 | شاخه | `candidate/webapp-native-app-v2` |
-| HEAD محصول | `4c5e813656cd891494e4fcb8565ecdf540e0e11d` |
-| merge-base با `main` | `581396c6791fa9e1fdae9894d3bb56ffbd06f136` |
-| فاصله هنگام جمع شواهد | ۵۳ جلو / ۱۳ عقب |
-| `git diff --name-only HEAD...main -- frontend/` | خالی |
+| HEAD harness | `9248a3f730aebe392b4c2e2ced3903c7394d57ce` |
+| درخت harness | `ab07c96e797ae5bb86d5a8dd85fd2c3b3aad8d6b` |
+| commit محصولی همین دور | `cc19f5d0` |
+| merge-base با `origin/main` | `581396c6791fa9e1fdae9894d3bb56ffbd06f136` |
+| فاصله با `origin/main` هنگام نگارش | ۵۶ جلو / ۲۱ عقب |
+| `git diff --name-only $(git merge-base HEAD origin/main) origin/main -- frontend` | خالی |
 | تصمیم merge | انجام نشد |
+| پوش / deploy / Figma / Sites | انجام نشد |
 | `MarketView.vue` | `6eea08979c7a91ae4ea5f96939165c28459f2729fb6a4c4c75f15f169c80e608` |
 | `OffersList.vue` | `9a58458142f8b0213ce6a853b152a5b04ef93d6f87f8f98e6cb1f37d2b2c086c` |
-| هندسه Chromium | ۲۹۰ سلول `initial/normal` |
-| ماتریس state Chromium | ۴۶۲ / ۴۶۲ |
-| Firefox/WebKit حساس | ۸۸ / ۸۸؛ ثبت‌نام بعد از اصلاح مرحله ۱ دوباره سبز شد |
-| صفحه‌کلید / زوم / overlay | ۳۵ / ۳۵ |
-| Vitest | ۱۶۹ پرونده / ۱۹۸۴ تست |
-| تصویر | ۱۴۵ PNG در `/tmp/native-app-v2-visual-settle`، digest `378fb999ce9a6eb788eb3fb169929163c21cf30324ffafe094ed56d5d4191b60` |
-| بیلد موقت | `/tmp/native-app-v2-prod-build`، ۱۷۰ فایل، digest `2803e6396b3ca18d6be73c3230329c46dbdb30063f0efe33e912fda330b9a38a` |
-| پوش / ادغام / استقرار | انجام نشد |
 
-گیت TypeScript این track تفاضلی است: `vue-tsc` کامل می‌تواند EXIT 2 بماند اگر و فقط اگر fingerprint خطاهای `MarketView.vue` دقیقاً برابر مبنای محافظت‌شده باشد و خطای تازه یا غیر Market صفر باشد. ادعا نشود که `vue-tsc` سبز است.
+پس از commit همین پرونده، HEAD و درخت را دوباره از Git بخوان.
 
 ---
 
-## Checkpoint ادامه — ۲۰۲۶-۰۸-۲۷ پس از هدف ۴۸px و settle
+## شمار اجرا — نه annotation
 
-| مورد | مقدار مستقل |
-|---|---|
-| شاخه | `candidate/webapp-native-app-v2` |
-| HEAD این checkpoint | `5f77a02a1d7d5db694b9bfc45c4a6cdeac3cf0b5` |
-| درخت | `b2feb6611a0a85a9571831a2b30e9b81bc794551` |
-| merge-base با `main` | `581396c6791fa9e1fdae9894d3bb56ffbd06f136` |
-| فاصله | ۴۶ جلو / ۱۳ عقب |
-| `main` / `origin/main` | `6a51231ea3d1a842420e520365ba0af614f75095` |
-| `git diff --name-only HEAD...main -- frontend/` | خالی |
-| تصمیم merge | انجام نشد؛ commitهای جدید main فقط estimator، گیرنده، docs است |
-| `MarketView.vue` | `6eea08979c7a91ae4ea5f96939165c28459f2729fb6a4c4c75f15f169c80e608` |
-| `OffersList.vue` | `9a58458142f8b0213ce6a853b152a5b04ef93d6f87f8f98e6cb1f37d2b2c086c` |
-| هندسه Chromium | ۲۹۰ سلول `initial/normal` در ۵ عرض، همه سبز با `--workers=1` |
-| تصویر پس از settle | ۱۴۵ PNG در `/tmp/native-app-v2-visual-settle`، digest `fb180ca42f4c63cffd08871f7e4004f1097c3835dc719e270dfdb3ce0593c9d1` |
+| دسته | مرورگر | executed | passed | N/A رسمی | skipped | failed | harness-deferred |
+|---|---|---:|---:|---:|---:|---:|---:|
+| هندسه `initial/normal` | Chromium | ۲۹۰ | ۲۹۰ | ۰ سلول تست | ۰ | ۰ | ۰ |
+| ماتریس state | Chromium | ۳۰۶ | ۳۰۶ | ۳۹۰ سلول توصیف‌گر در ۲ عرض | ۰ | ۰ | ۰ |
+| مکمل خانوادهٔ حساس | Chromium | ۰ | ۰ | ۰ | ۴۴ | ۰ | ۰ |
+| خانوادهٔ حساس `normal` | Firefox | ۴۴ | ۴۴ | ۰ | ۰ | ۰ | ۰ |
+| خانوادهٔ حساس `normal` | WebKit | ۴۴ | ۴۴ | ۰ | ۰ | ۰ | ۰ |
+| صفحه‌کلید / sheet / کپی عملیات | Chromium | ۱۳ | ۱۳ | ۰ | ۰ | ۰ | ۰ |
+| صفحه‌کلید / sheet / کپی عملیات | Firefox | ۱۳ | ۱۳ | ۰ | ۰ | ۰ | ۰ |
+| صفحه‌کلید / sheet / کپی عملیات | WebKit | ۱۳ | ۱۳ | ۰ | ۰ | ۰ | ۰ |
+| safe-area اندازه‌گیری‌شده | Chromium | ۱ | ۱ | ۰ | ۰ | ۰ | ۰ |
+| safe-area اندازه‌گیری‌شده | Firefox | ۱ | ۱ | ۰ | ۰ | ۰ | ۰ |
+| safe-area اندازه‌گیری‌شده | WebKit | ۱ | ۱ | ۰ | ۰ | ۰ | ۰ |
+| زوم ۲۰۰٪ اندازه‌گیری‌شده | Chromium | ۷ | ۷ | ۰ | ۰ | ۰ | ۰ |
+| زوم ۲۰۰٪ اندازه‌گیری‌شده | Firefox | ۷ | ۷ | ۰ | ۰ | ۰ | ۰ |
+| زوم ۲۰۰٪ اندازه‌گیری‌شده | WebKit | ۷ | ۷ | ۰ | ۰ | ۰ | ۰ |
+| overlayهای applicable اجراشده | Chromium | ۷ | ۷ | موجودی Market جدا | ۰ | ۰ | ۰ |
+| overlayهای applicable اجراشده | Firefox | ۷ | ۷ | موجودی Market جدا | ۰ | ۰ | ۰ |
+| overlayهای applicable اجراشده | WebKit | ۷ | ۷ | موجودی Market جدا | ۰ | ۰ | ۰ |
+| fail-closed harness | Chromium | ۹ | ۹ | ۰ | ۰ | ۰ | ۰ |
+| پوشش ۲۹ مسیر / دلیل N/A | Chromium | ۱ | ۱ | ۰ | ۰ | ۰ | ۰ |
 
-کار باقی برای حکم READY:
+جمع Chromium همین سه spec: ۶۳۳ passed + ۴۴ skipped مکمل Firefox/WebKit.
+جمع Firefox/WebKit خانواده‌های حساس و قراردادهای اندازه‌گیری‌شده: ۷۲ + ۷۲ passed؛ skipped زوم صفر چون `css-zoom` واقعاً اعمال و اندازه‌گیری شد.
 
-1. ماتریس کامل state (loading/error/retry/offline/…) و Firefox/WebKit خانواده‌های حساس
-2. گیت‌های نهایی فقط روی HEAD پس از آخرین commit: vitest کامل، vue-tsc تفاضلی، build، guard، E2E کامل
-3. اگر تصویر پس از settle هنوز overlay بارگذاری نشان داد، منبع غیر `.ui-loading-state` را اصلاح کن
+N/A ماتریس state سلول تست جدا نیست؛ فقط سلول applicable اجرا شد. یکتای مسیر+حالت N/A: ۱۹۵. در دو عرض حساس: ۳۹۰ سلول توصیف‌گر.
 
----
+کدهای N/A:
 
-## Checkpoint ادامهٔ اصلاح — ۲۰۲۶-۰۸-۲۷ ۱۶:۳۰
-
-این نقطه برای ازسرگیری پس از compaction است. به گزارش قبلی اعتماد نکن؛ اعداد را از Git دوباره بخوان.
-
-| مورد | مقدار مستقل در شروع این ادامه |
-|---|---|
-| شاخه | `candidate/webapp-native-app-v2` |
-| HEAD | `da0dc34a444987e70ddbbf6fc3c3524a6f1f6ab5` |
-| درخت | `8c17d7f056069b6922f31f0499a2c1f44d62f0c7` |
-| worktree | پاک؛ staged خالی؛ `.mimosa/` غایب |
-| merge-base با `main` | `581396c6791fa9e1fdae9894d3bb56ffbd06f136` |
-| فاصله با `main` / `origin/main` | ۳۷ جلو / ۸ عقب |
-| `main` و `origin/main` | `a44d8fb269af490551cd9bcabea258341e12a65c` |
-| `git diff --name-only HEAD...main -- frontend/` | خالی |
-| تصمیم merge | انجام نشد؛ هشت commit عقب‌مانده فقط estimator/market-data/docs است |
-| `MarketView.vue` | `6eea08979c7a91ae4ea5f96939165c28459f2729fb6a4c4c75f15f169c80e608` |
-| `OffersList.vue` | `9a58458142f8b0213ce6a853b152a5b04ef93d6f87f8f98e6cb1f37d2b2c086c` |
-| `git diff main -- MarketView.vue OffersList.vue` | خالی |
-
-کار باقی در همین ادامه، به ترتیب اجباری:
-
-1. fail-close سه spec با `json({})`
-2. ماتریس سلول‌به‌سلول ۲۹ مسیر × viewport × state
-3. قرارداد ۴۸×۴۸، scroller، main/h1، CTA، overflow
-4. soft keyboard و safe-area واقعی
-5. reduced-motion و zoom اندازه‌گیری‌شده
-6. stateهای hold / retry / offline / stale / long
-7. flatten CreateChannel
-8. موجودی کامل overlay
-9. ممیزی بصری روی بیلد تازه در `/tmp`
-10. گیت‌های نهایی فقط روی HEAD پس از آخرین commit
+| naCode | تعداد سلول در ۲ عرض حساس | دلیل کوتاه |
+|---|---:|---|
+| `hub-always-populated` | ۷۲ | هاب همیشه ردیف دارد |
+| `no-ltr-token` | ۵۲ | شناسهٔ LTR محصولی ندارد |
+| `no-stale-resource` | ۵۲ | منبع stale/refresh ندارد |
+| `no-unbroken-token` | ۵۲ | شناسهٔ بی‌فاصله ندارد |
+| `no-long-persian-copy` | ۲۸ | متن بلند فارسی محصولی ندارد |
+| `no-page-load-resource` | ۲۸ | بار صفحه به فهرست شبکه وابسته نیست |
+| `no-full-collection` | ۲۴ | فهرست پر متمایز ندارد |
+| `not-authorization-gated` | ۲۴ | برای کاربر نشست‌دار ممنوع نیست |
+| `no-collection-surface` | ۲۰ | فرم است نه فهرست |
+| `local-recovery` | ۱۴ | بازیابی محلی است |
+| `share-target-empty-is-normal` | ۱۴ | بدون payload همان حالت عادی است |
+| `public-route` | ۱۰ | مسیر عمومی مقصد ورود است |
 
 ---
 
-
----
-
-## Binding پیش از این دور اصلاح
-
-شروع این دور روی HEAD قبلی track بود، نه binding کهنهٔ ناظر `c6ddc5af`.
-
-| مورد | مقدار |
-|---|---|
-| شاخه | `candidate/webapp-native-app-v2` |
-| HEAD شروع | `64755d10fc3d3e03149114435a8a51c48ef1634a` |
-| درخت شروع | `77208bc57f869b4f0ac420fe5df9fc420cdcb3e9` |
-| merge-base با `main` | `581396c6791fa9e1fdae9894d3bb56ffbd06f136` |
-| فاصله با local `main` در شروع | ۳۱ جلو / ۸ عقب |
-| `main` مشاهده‌شده | `a44d8fb269af490551cd9bcabea258341e12a65c` |
-| `origin/main` | `255f8f70589cf3781fbe7f24e1101d8a8f873dcc` |
-| worktree شروع | کثیف از اصلاحات همین track؛ `.mimosa/` آنترک |
-
-هشت commit عقب‌ماندهٔ `main` فقط estimator/market-data و سند است. merge-tree تعارض UI یا Market نداشت. برای جلوگیری از drift این track ادغام نشد.
-
----
-
-## Binding پس از آخرین commit مستندات
-
-مقادیر را پس از commit همین فایل با Git دوباره بخوان. جدول زیر پیش‌نویس لحظهٔ نگارش است و در commit پیام ثبت می‌شود.
-
-| مورد | مقدار ثبت‌شده هنگام نگارش |
-|---|---|
-| HEAD محصولی پیش از docs | `aaec89a7b260b4ef012dafd8e8fc586483f002b4` |
-| درخت محصولی | پس از `aaec89a7` |
-| upstream | ندارد؛ پوش نشده |
-
----
-
-## Commitهای این دور اصلاح
-
-از `64755d10` به بعد، بدون amend و بدون بازنویسی تاریخچه:
-
-1. `becb9e19` — بستن سوراخ‌های TypeScript غیر Market بدون تضعیف tsconfig
-2. `f760de07` — HelpPopover زنده، seen-list، و تلاش همگرایی سطح عملیات
-3. `b9b44e8e` — E2E fail-closed و ماتریس ۲۹ مسیر
-4. `6dfb3e4f` — بازگرداندن توکن کاتالوگ `--ui-v2-*` و خارج کردن `main.css` از scope گارد V2
-5. `aaec89a7` — بازگرداندن motion نشست تأیید به `--ui-v2-motion-state`
-6. همین commit اسناد — ثبت واقعیت blocked
-
-Commitهای پیش از این دور که مانع‌های audit را بسته بودند: `ddf42ccb` overflow، `59e0cadb` landmark، `6ac2254a` inset، `e6318dab` کانال، `64755d10` overlay.
-
----
-
-## اصلاح یافته‌های audit مستقل
-
-| یافتهٔ `INDEPENDENT_AUDIT.md` | نتیجه |
-|---|---|
-| AppActionOverflow بدون keyboard | بسته در `ddf42ccb` |
-| h1 مدیریت، دو main کانال، نبود main چت/اشتراک | بسته در `59e0cadb` |
-| adapter و کارت تودرتو عملیات | کاهش‌یافته؛ هوک `ui-v2-workspace-*` برای تست ماند |
-| overlay پیام‌رسان بدون dialog/focus | بسته برای overlayهای زندهٔ شناخته‌شده |
-| CreateChannel HelpPopover و main تودرتو | HelpPopover و main تودرتو حذف شد؛ قاب بیرونی هنوز کمی کارت‌مانند است |
-| div داخل h1 پروفایل | بسته |
-| mock عمومی `json({})` در پذیرش | بسته در harness جدید؛ سه spec قدیمی هنوز `json({})` دارند |
-| ROADMAP/inventory زود complete شده بودند | اصلاح شد؛ فاز ۱۱ blocked مانده |
-
----
-
-## گیت‌های اندازه‌گیری‌شده روی درخت محصولی `aaec89a7`
-
-این اعداد پیش از commit اسناد است. پس از docs باید `vue-tsc`، `guard:ui` و `memory-custodian check` دوباره اجرا شوند.
+## گیت‌های غیر مرورگر
 
 | گیت | نتیجه |
 |---|---|
-| `vue-tsc -p tsconfig.app.json --noEmit` | EXIT 2؛ فقط `MarketView.vue` خطوط ۸۲۵، ۹۶۱، ۹۶۲، ۱۲۷۱ |
-| `npm run guard:ui` | PASS پس از `6dfb3e4f` |
-| Vitest کامل `--maxWorkers=3` پیش از بازگرداندن motion نشست | ۴ شکست در `SessionApprovalModal.test.ts`؛ پس از `aaec89a7` همان فایل ۵/۵ سبز. اجرای کامل پس از docs لازم است |
-| بیلد `/tmp/native-app-v2-prod-6dfb3e4f` | EXIT 0؛ ۱۷۰ فایل؛ ۵٬۷۲۷٬۱۰۹ بایت؛ digest `9c1f245693bd280f122dec5f518e5c0941b932acca7fcb6957caf28b77897e2f` |
-| E2E Chromium preview | ۱۱ pass، ۲ skip مکمل FF/WK |
-| E2E Firefox/WebKit خانوادهٔ حساس | ۴ pass |
-| `git diff --check` | پاک روی تغییرات این دور |
-| Market `MarketView.vue` | `6eea08979c7a91ae4ea5f96939165c28459f2729fb6a4c4c75f15f169c80e608` |
-| Market `OffersList.vue` | `9a58458142f8b0213ce6a853b152a5b04ef93d6f87f8f98e6cb1f37d2b2c086c` |
-| پیام‌رسان visual | ۸۵ فایل، ۱٬۲۹۵٬۸۵۹ بایت، sha `c440623fb6053b353a080b3c0b7506566d4e345f27ddf166c8ea350fd1d92028` |
+| `git diff --check` | پاک |
+| Vitest متمرکز فایل‌های تغییرکرده | ۹۰ passed |
+| Vitest کامل `--maxWorkers=1` | ۱۶۹ پرونده / ۱۹۸۶ تست passed |
+| `vue-tsc -p tsconfig.app.json --noEmit` | EXIT 2؛ فقط `MarketView.vue:825 TS2345`، `961 TS18048`، `962 TS18048`، `1271 TS2322` |
+| بیلد موقت | `/tmp/native-app-v2-prod-build-correction`؛ ۱۷۰ فایل؛ digest `ad80fed2ad7b957abe6189e01a10626742f2581ef16b6fd8227e665028f6187e` |
+| `npm run guard:ui` | PASS |
+| `memory-custodian check` | OK پس از به‌روزرسانی memory |
 
-Skipهای ماتریس پذیرش فقط مکمل مرورگرند، نه پنهان‌کردن شکست محصول.
+تشخیص اجباری روی سلول‌های executed: unknown API = 0، unexpected mutation = 0، external request = 0، unexpected console = 0، unexpected request failure = 0، page error = 0.
 
----
-
-## برگهٔ تماس موقت
-
-خارج مخزن: `/tmp/native-app-v2-visual`
-۶۲ تصویر مسیر + HTML؛ digest `fc569ee17cc988b11290d101651ddb350b87e6d635d1b2dcc5cf4f5fbc08afb9`.
-
-بازبینی دستی: حساب، عملیات، ورود و پروفایل به زبان grouped نزدیک‌اند. کانال هنوز قاب بیرونی کارت‌مانند دارد. ویجت بازار خانه دست‌نخورده دیده شد.
+شکست‌های محیطی جدا شمارش می‌شوند: سوکت `/api/realtime/ws`، `WebSocket Error: Event` در Chromium، `WebSocket Error: JSHandle@object` در Firefox، abort نوع GET/HEAD هنگام ناوبری، و abort keepalive روی `/api/sessions/verify` و `/api/auth/me`. mutation غیر keepalive اگر abort شود تست را قرمز می‌کند.
 
 ---
 
-## حفاظت
+## گارد منجمد
 
-- `main` ویرایش نشد
-- پوش، merge، deploy، Figma و Sites انجام نشد
-- backend / schema / API تغییر نکرد
-- رفتار پیام‌رسان، آلبوم و `expected_action` دست نخورد
-- `.mimosa/` آنترک ماند و commit نشد
+| سطح | مقدار |
+|---|---|
+| Stage 4 baseline AdminMessages | `5572589b83a8a07776d5b983777a14a91e2104f9577fa76960df5a54562a431a` بازنویسی نشد |
+| visual AdminMessages | `aeb33b605830cedd6cdd6e93b70cd973252d5e0ab27b555f2a21ebd62a8dfb38` از منبع نهایی |
+| Stage 4 baseline TradingSettings | `509dd32235e1cb98aa164940cf7722604f16b6518f7387699554bf3a828ecfaa` بازنویسی نشد |
+| visual TradingSettings | `1d7831ebedd3e09f6ce8a21aedb8b9d7b35fc1135a5d27fa101cf25d2eedaf5f` از منبع نهایی |
+| messenger visual | ۸۵ فایل، ۱٬۲۹۱٬۴۲۵ بایت، pathSet `f6af1f961e45d785ba9c752ee670643571086c6a946843807fe6f581d11aea58`، sha `c953c15f5fc9d8ecd838d6f83a4af4e137f7af4e73f29f411a3e3e194f0db598` |
+| MarketView / OffersList | byte-for-byte منجمد |
 
 ---
 
-## کار باقی
+## رفتار شبکه و ثبت‌نام
 
-1. سبز کردن `vue-tsc` بدون ویرایش محصول Market؛ فعلاً ممکن نیست
-2. حذف `json({})` از سه spec قدیمی viewport/visual
-3. کاهش قاب بیرونی CreateChannel تا زبان inset خالص
-4. ممیزی بصری تمام overlay و stateهای کند/آفلاین روی بیلد تازه پس از docs
-5. اجرای Vitest کامل روی HEAD نهایی
+`retryNetwork: false` از مسیر زندهٔ `fetchChatConversations`، بارگذاری کانال، سه GET پیام مدیریت، و helper تنظیمات حذف شد.
+خطای Market در پیام مدیریت دیگر تاریخچهٔ چت را خراب نمی‌کند و یک شکست نتیجهٔ موفق خواهر را دور نمی‌اندازد.
+
+`WebRegister` اتصال تلگرام را فقط در `step === 4` نشان می‌دهد. `stepForContext` فقط ۱|۲|۳ برمی‌گرداند؛ مرحلهٔ ۴ فقط پس از تکمیل با `can_connect_telegram`. تست واحد مراحل ۱ تا ۴ را ثابت کرد. این fall-through است نه تغییر workflow.
+
+---
+
+## تصویر
+
+خارج مخزن: `/tmp/native-app-v2-visual-correction`
+۱۴۵ PNG از بیلد نهایی؛ digest `1bd0a21399c69a6d363e870f59e5248f8f6023cd57e90acb5057b24b57857199`.
+PNG داخل Git نیست.
+
+---
+
+## باقی‌ماندهٔ کوچک
+
+- چهار خطای منجمد `vue-tsc` در Market؛ خارج از این track
+- سه spec قدیمی غیر این harness ممکن است هنوز `json({})` داشته باشند؛ داخل ماتریس Native App V2 نیستند
+- قاب CreateChannel هنوز کاملاً inset خالص نیست؛ flatten انجام شده
+- Vitest موازی (`--maxWorkers=3`) دو تست ChatView را timeout/race کرد؛ همان پرونده با worker=1 و اجرای کامل تک‌کارگر سبز است
+
+---
+
+## HISTORICAL / SUPERSEDED
+
+متن‌های زیر وضعیت جاری نیستند. پروندهٔ جدا برای تاریخچه در این پوشه gitignore است؛ بنابراین بایگانی فشرده همین‌جاست.
+
+- Checkpointهای `4c5e8136` / `5f77a02a` / `da0dc34a` / `aaec89a7` و حکم READY قبلی **منسوخ**اند.
+- ادعای جاری بودن `json({})` در harness Native App V2 **منسوخ** است؛ سه spec این track دیگر `json({})` ندارند.
+- ادعای «کار باقی: fail-close و ماتریس و Vitest کامل» به‌عنوان وضعیت امروز **منسوخ** است.
+- شمار state ۴۶۲/۴۶۲ بدون N/A جدا **منسوخ** است؛ شمار جاری executed/N/A در جدول بالا است.
+- `vue-tsc` هیچ‌گاه در این track سبز اعلام نشود.
