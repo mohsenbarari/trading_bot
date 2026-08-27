@@ -1216,7 +1216,7 @@ async function confirmPendingAction() {
       <AppListItem
         v-if="user.limitations_expire_at"
         title="انقضای محدودیت"
-        :meta="user.limitations_expire_at_jalali"
+        :meta="user.limitations_expire_at_jalali ?? undefined"
       />
       <AppListItem
         v-if="countdownLimitation"

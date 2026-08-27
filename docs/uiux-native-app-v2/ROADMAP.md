@@ -312,7 +312,7 @@ Gate:
 | ۸ احراز | implementation-complete |
 | ۹ پیام‌رسان | implementation-complete |
 | ۱۰ overlay | implementation-complete |
-| ۱۱ پذیرش | complete — READY FOR INDEPENDENT NATIVE UI REVIEW |
+| ۱۱ پذیرش | complete — READY FOR INDEPENDENT NATIVE UI REVIEW after supervisor correction revalidation; not owner-approved |
 
 ## ماتریس پذیرش
 

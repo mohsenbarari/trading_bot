@@ -138,3 +138,15 @@
 - `AppBackButton` ۴۸ پیکسل
 - drill-in موبایل مشتری/حسابدار
 - قرارداد قفل Market و آلبوم پیام‌رسان
+
+## اصلاح ۲۰۲۶-۰۸-۲۷ پس از حکم ناظر
+
+یافته‌های شروع بالا تاریخی می‌مانند. پس از اصلاح candidate:
+
+- هاور تزئینی ردیف از `main.css` برداشته شد؛ `:active` و `:focus-visible` ماند
+- `/operations` دیگر `WorkspaceActionTile` زنده ندارد؛ فهرست inset است
+- `.profile-action-card` در `PublicProfile` مرده بود و حذف شد
+- ورود سریع توسعه فقط با `VITE_STAGING_DEV_LOGIN` روشن می‌شود
+- `AppConfirmDialog` کلاس پس‌زمینه را از `backdrop-class` می‌گیرد
+- متن بارگذاری مشتری کوتاه شد؛ confirm حقوقی دست نخورد
+- gapهای باقی: هوک `ui-v2-*` قفل تست، landmark تکی پیام‌رسان، HelpPopover بازار/کانال، دو `.copy-btn` دعوت، ویجت بازار خانه

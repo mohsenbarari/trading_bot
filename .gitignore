@@ -57,6 +57,7 @@ docs/uiux-native-app-v2/*
 !docs/uiux-native-app-v2/AUDIT.md
 !docs/uiux-native-app-v2/EXCLUSIONS.md
 !docs/uiux-native-app-v2/SURFACE_INVENTORY.json
+!docs/uiux-native-app-v2/SUPERVISOR_HANDOFF.md
 !docs/AUTOMATED_TEST_CHECKLIST.md
 !docs/COIN_OFFER_CONDITION_ANNOTATION_GUIDE.md
 !docs/COIN_OFFER_CONDITION_CALIBRATION_REPORT_20260820.md

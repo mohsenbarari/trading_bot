@@ -3,6 +3,7 @@
   "track": "native-app-feel-v2",
   "branch": "candidate/webapp-native-app-v2",
   "baseCommit": "951ca9f0",
+  "mergedMain": "581396c6791fa9e1fdae9894d3bb56ffbd06f136",
   "status": "ready-for-independent-native-ui-review",
   "ownerScoresAtStart": {
     "unification": 80,
@@ -24,17 +25,32 @@
     {
       "id": "shell",
       "routes": ["shared"],
+      "liveSurfaces": ["BottomNav", "AppBottomSheet", "connection-banner"],
+      "primitives": ["AppBottomSheet", "AppListItem", "--ds-*"],
       "status": "native-overlays-tab-bar-catalog-hooks",
       "phase": 10,
-      "gaps": ["dual-token-nav-catalog-hooks"]
+      "protection": "test-locked-ui-v2-bottom-nav-hooks",
+      "gaps": ["dual-token-nav-catalog-hooks"],
+      "consciousGaps": ["market-fab-44px-owner-locked"],
+      "evidence": ["frontend/src/components/BottomNav.test.ts", "npm run guard:ui"],
+      "outOfScope": ["/market"]
     },
     {
       "id": "home",
       "routes": ["/"],
+      "liveSurfaces": ["DashboardView", "DashboardDailySections"],
+      "primitives": ["AppBottomSheet", "AppListItem", "AppInsetGroup"],
       "status": "native-chrome-around-frozen-market",
       "phase": 3,
+      "protection": "home-market-widget-hash-frozen",
       "protectedInteriors": ["home-market-widget"],
-      "gaps": []
+      "gaps": ["home-account-trigger-is-custom-disclosure"],
+      "consciousGaps": ["today-trades-stay-horizontal-row", "home-market-widget"],
+      "evidence": [
+        "frontend/src/views/DashboardView.test.ts",
+        "f25c01dac38db208517047ffc0f2458e2c89868e988a6d7f68749221db106860"
+      ],
+      "outOfScope": ["home-market-widget"]
     },
     {
       "id": "account-settings",
@@ -46,16 +62,31 @@
         "/notifications",
         "/settings"
       ],
+      "liveSurfaces": ["AccountHubView", "SettingsView", "NotificationsView"],
+      "primitives": ["AppInsetGroup", "AppListItem", "AppPage"],
       "status": "native-grouped-account-family",
       "phase": 4,
-      "gaps": []
+      "protection": "overtime-and-session-behavior-frozen",
+      "gaps": ["storage-and-notification-copy-still-verbose"],
+      "consciousGaps": ["overtime-preference-interior"],
+      "evidence": ["frontend/e2e/native-app-v2-acceptance.spec.ts"],
+      "outOfScope": []
     },
     {
       "id": "profiles",
       "routes": ["/profile", "/users/:id", "/admin/users/:id"],
+      "liveSurfaces": ["PublicProfile", "UserProfile", "ProfileActions"],
+      "primitives": ["AppInsetGroup", "AppListItem", "ProfileIdentityHeader"],
       "status": "native-grouped-profile",
       "phase": 5,
-      "gaps": []
+      "protection": "phone-and-address-remain-visible",
+      "gaps": ["admin-profile-mutation-dialogs-not-sheet"],
+      "consciousGaps": ["mini-trade-card-class-kept-for-tests"],
+      "evidence": [
+        "frontend/src/components/UserProfile.test.ts",
+        "frontend/src/components/PublicProfile.test.ts"
+      ],
+      "outOfScope": []
     },
     {
       "id": "operations",
@@ -66,11 +97,19 @@
         "/operations/accountants",
         "/operations/accountants/:relationId"
       ],
+      "liveSurfaces": ["OperationsView", "CustomerWorkspaceView", "AccountantWorkspaceView"],
+      "primitives": ["AppInsetGroup", "AppListItem", "AppConfirmDialog"],
       "status": "native-lists-workspace-adapter-left",
       "phase": 6,
-      "gaps": [
-        "ui-v2-workspace-adapter"
-      ]
+      "protection": "invitation-relation-session-mutation-unchanged",
+      "gaps": ["ui-v2-workspace-adapter"],
+      "consciousGaps": ["OwnerCustomerManagerModal-off-live-path", "OwnerAccountantManagerModal-off-live-path"],
+      "evidence": [
+        "frontend/src/views/OperationsView.test.ts",
+        "frontend/src/views/CustomerWorkspaceView.test.ts",
+        "frontend/src/views/AccountantWorkspaceView.test.ts"
+      ],
+      "outOfScope": []
     },
     {
       "id": "administration",
@@ -82,8 +121,11 @@
         "/admin/messages",
         "/admin/system"
       ],
+      "liveSurfaces": ["AdminView", "CreateInvitationView", "AdminMessagesView", "TradingSettings"],
+      "primitives": ["AppInsetGroup", "AppListItem", "AppPage"],
       "status": "menu-native-interiors-partial",
       "phase": 7,
+      "protection": "calendar-confirm-and-market-interiors-frozen",
       "protectedInteriors": [
         "admin-messages-market-delivery",
         "trading-settings-market-controls"
@@ -91,7 +133,10 @@
       "gaps": [
         "invite-copy-buttons-test-locked",
         "admin-messages-market-help-locked"
-      ]
+      ],
+      "consciousGaps": ["calendar-exception-window-confirm"],
+      "evidence": ["npm run guard:ui"],
+      "outOfScope": ["market-delivery-interiors"]
     },
     {
       "id": "public-auth-recovery",
@@ -102,23 +147,46 @@
         "/register",
         "/:pathMatch(.*)*"
       ],
+      "liveSurfaces": ["LoginView", "AuthFlowShell", "SetupPassword", "InviteLanding"],
+      "primitives": ["AuthFlowShell", "AppFormField", "AppInput", "AppButton"],
       "status": "native-grouped-auth-shell",
       "phase": 8,
-      "gaps": []
+      "protection": "otp-and-recovery-behavior-unchanged",
+      "gaps": ["ui-v2-auth-hooks-test-locked"],
+      "consciousGaps": ["dev-quick-login-opt-in-only"],
+      "evidence": ["frontend/src/views/LoginView.test.ts"],
+      "outOfScope": ["OTP", "recovery-identity"]
     },
     {
       "id": "messenger",
       "routes": ["/chat", "/admin/channels", "/share-receive"],
+      "liveSurfaces": ["ChatView", "ChatShell", "CreateChannelView", "ShareReceiveView"],
+      "primitives": ["ChatShell", "messenger-design-tokens"],
       "status": "aligned-native",
       "phase": 9,
-      "gaps": []
+      "protection": "album_id-album_index-legacy-default-script-frozen",
+      "gaps": ["messenger-single-main-landmark-frozen"],
+      "consciousGaps": [
+        "native-app-messenger-visual-v1-hash",
+        "create-channel-help-popover-count-2"
+      ],
+      "evidence": [
+        "native-app-messenger-visual-v1 1288789 bytes",
+        "ChatView script sha256 match vs 951ca9f0"
+      ],
+      "outOfScope": ["websocket", "upload", "album-detection"]
     },
     {
       "id": "market",
       "routes": ["/market"],
       "status": "excluded-owner-locked",
       "phase": null,
-      "protectedInteriors": ["entire-route"]
+      "protection": "entire-route",
+      "protectedInteriors": ["entire-route"],
+      "gaps": ["owner-locked-entire-route"],
+      "consciousGaps": ["entire-route"],
+      "evidence": ["git diff main -- MarketView.vue OffersList.vue empty"],
+      "outOfScope": ["entire-route"]
     }
   ]
 }

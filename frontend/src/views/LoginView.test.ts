@@ -1,13 +1,24 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import LoginView from './LoginView.vue'
 
-const routerPushMock = vi.fn()
-const routeMock = { query: {} as Record<string, string> }
-const setupExpiryTimerMock = vi.fn()
-const apiFetchMock = vi.fn()
-const pushBackStateMock = vi.fn()
-const popBackStateMock = vi.fn()
-const clearBackStackMock = vi.fn()
+const {
+  routerPushMock,
+  routeMock,
+  setupExpiryTimerMock,
+  apiFetchMock,
+  pushBackStateMock,
+  popBackStateMock,
+  clearBackStackMock,
+} = vi.hoisted(() => ({
+  routerPushMock: vi.fn(),
+  routeMock: { query: {} as Record<string, string> },
+  setupExpiryTimerMock: vi.fn(),
+  apiFetchMock: vi.fn(),
+  pushBackStateMock: vi.fn(),
+  popBackStateMock: vi.fn(),
+  clearBackStackMock: vi.fn(),
+}))
 const originalOTPCredential = (window as any).OTPCredential
 const originalNavigatorCredentials = navigator.credentials
 const originalWindowLocation = window.location
@@ -69,12 +80,6 @@ async function requestOtpFromMobileStep(wrapper: ReturnType<typeof mount>) {
 }
 
 describe('LoginView.vue', () => {
-  let DefaultLoginView: typeof import('./LoginView.vue').default
-
-  beforeAll(async () => {
-    DefaultLoginView = (await import('./LoginView.vue')).default
-  })
-
   beforeEach(() => {
     routerPushMock.mockReset()
     routeMock.query = {}
@@ -115,9 +120,8 @@ describe('LoginView.vue', () => {
   })
 
   it('keeps the primary action below the form so login reads as an installed app', () => {
-    // Shared module from beforeAll avoids resetModules + SFC recompile.
-    // attachTo leaked the tree and was unnecessary for these class assertions.
-    const wrapper = mount(DefaultLoginView)
+    // Static import avoids SFC recompile; attachTo leaked the tree and is unused here.
+    const wrapper = mount(LoginView)
 
     expect(wrapper.get('.ui-v2-auth-login-body').text()).toContain(
       'کد ابتدا در تلگرام و در صورت نیاز با پیامک می‌آید.',
@@ -131,8 +135,6 @@ describe('LoginView.vue', () => {
   it('moves to the OTP step after a successful OTP request', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeJsonResponse({ method: 'telegram' }) as any)
-    const LoginView = (await import('./LoginView.vue')).default
-
     const wrapper = mount(LoginView, { attachTo: document.body })
     expect(wrapper.findAll('main')).toHaveLength(1)
     await wrapper.get('input[type="tel"]').setValue('09123456789')
@@ -152,7 +154,6 @@ describe('LoginView.vue', () => {
 
   it('shows and consumes the fixed local logout receipt after the hard login redirect', async () => {
     sessionStorage.setItem('stage4_local_logout_result_v1', 'local-only')
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     expect(wrapper.get('[data-local-logout-notice]').text()).toContain(
@@ -172,7 +173,6 @@ describe('LoginView.vue', () => {
         expires_in: 120,
       }) as any,
     )
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09125555555')
@@ -193,7 +193,6 @@ describe('LoginView.vue', () => {
         resolveRequest = resolve
       }) as any,
     )
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09121111111')
@@ -222,7 +221,6 @@ describe('LoginView.vue', () => {
         resolveVerify = resolve
       }) as any,
     )
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123333333')
@@ -256,7 +254,6 @@ describe('LoginView.vue', () => {
         }) as any,
       )
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView, { attachTo: document.body })
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
@@ -277,7 +274,6 @@ describe('LoginView.vue', () => {
   })
 
   it('moves focus to every approval and recovery status transition', async () => {
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView, { attachTo: document.body })
     const vm = wrapper.vm as unknown as LoginViewTestVm
 
@@ -310,7 +306,6 @@ describe('LoginView.vue', () => {
         }) as any,
       )
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
@@ -338,7 +333,6 @@ describe('LoginView.vue', () => {
       .mockResolvedValueOnce(makeFetchResponse({ status: 'registration_required' }))
       .mockResolvedValueOnce(makeFetchResponse({ status: 'registration_required' }))
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
@@ -377,7 +371,6 @@ describe('LoginView.vue', () => {
         }),
       )
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
@@ -407,7 +400,6 @@ describe('LoginView.vue', () => {
         makeFetchResponse({ detail: 'registration context missing' }, false, 410),
       )
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
@@ -447,7 +439,6 @@ describe('LoginView.vue', () => {
       return fetch(url, options) as any
     })
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
@@ -498,7 +489,6 @@ describe('LoginView.vue', () => {
       return fetch(url, options)
     })
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
@@ -548,7 +538,6 @@ describe('LoginView.vue', () => {
       return fetch(url, options)
     })
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
     await wrapper.get('input[type="tel"]').setValue('09121111111')
     await requestOtpFromMobileStep(wrapper)
@@ -599,7 +588,6 @@ describe('LoginView.vue', () => {
       ) as any,
     )
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     await wrapper.get('button.ui-button').trigger('click')
@@ -649,7 +637,6 @@ describe('LoginView.vue', () => {
       )
       .mockResolvedValueOnce(makeJsonResponse({ status: 'rejected' }) as any)
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
@@ -696,7 +683,6 @@ describe('LoginView.vue', () => {
         }) as any,
       )
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
     await wrapper.get('input[type="tel"]').setValue('09123456789')
     await requestOtpFromMobileStep(wrapper)
@@ -735,7 +721,6 @@ describe('LoginView.vue', () => {
       }) as any,
     )
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
     await wrapper.get('input[type="tel"]').setValue('09123456789')
     await requestOtpFromMobileStep(wrapper)
@@ -769,7 +754,6 @@ describe('LoginView.vue', () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeJsonResponse({ access_token: 'restored-access' }) as any)
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
     await flushPromises()
     expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(true)
@@ -792,8 +776,6 @@ describe('LoginView.vue', () => {
   it('fails closed for malformed or expired persisted OTP attempts', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-12T04:00:00.000Z'))
-    const LoginView = (await import('./LoginView.vue')).default
-
     sessionStorage.setItem('login_otp_attempt_v1', '{malformed-json')
     const malformedWrapper = mount(LoginView)
     await flushPromises()
@@ -827,7 +809,6 @@ describe('LoginView.vue', () => {
         expiresAt: '2026-07-12T05:02:00.000Z',
       }),
     )
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
     await flushPromises()
     const vm = wrapper.vm as any
@@ -871,7 +852,6 @@ describe('LoginView.vue', () => {
           sms_fallback_at: new Date(Date.now() + 40_000).toISOString(),
         }) as any,
       )
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
     await wrapper.get('input[type="tel"]').setValue('09123456789')
     await requestOtpFromMobileStep(wrapper)
@@ -890,7 +870,6 @@ describe('LoginView.vue', () => {
     fetchMock.mockResolvedValueOnce(
       makeJsonResponse({ detail: 'لطفاً ۴۵ ثانیه صبر کنید' }, false, 429) as any,
     )
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
     await wrapper.get('input[type="tel"]').setValue('09123456789')
     await requestOtpFromMobileStep(wrapper)
@@ -922,7 +901,6 @@ describe('LoginView.vue', () => {
         429,
       ) as any,
     )
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
     await wrapper.get('input[type="tel"]').setValue('09123456789')
     await requestOtpFromMobileStep(wrapper)
@@ -938,8 +916,6 @@ describe('LoginView.vue', () => {
 
   it('explains completed registration on the existing OTP login surface', async () => {
     routeMock.query = { registration: 'complete' }
-    const LoginView = (await import('./LoginView.vue')).default
-
     const wrapper = mount(LoginView)
 
     expect(wrapper.text()).toContain('ثبت‌نام قبلاً تکمیل شده است')
@@ -981,7 +957,6 @@ describe('LoginView.vue', () => {
       return fetch(url, options) as any
     })
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
@@ -1030,7 +1005,6 @@ describe('LoginView.vue', () => {
       )
       .mockResolvedValueOnce(makeJsonResponse({ status: 'cancelled' }) as any)
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
@@ -1090,7 +1064,6 @@ describe('LoginView.vue', () => {
         }) as any,
       )
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
@@ -1163,7 +1136,6 @@ describe('LoginView.vue', () => {
         }) as any,
       )
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
@@ -1245,7 +1217,6 @@ describe('LoginView.vue', () => {
       return fetch(url, options) as any
     })
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
@@ -1352,7 +1323,7 @@ describe('LoginView.vue', () => {
       },
     })
 
-    const wrapper = mount(DefaultLoginView)
+    const wrapper = mount(LoginView)
     expect(wrapper.text()).not.toContain('ورود سریع ۱ ساله')
     wrapper.unmount()
   })
@@ -1365,7 +1336,6 @@ describe('LoginView.vue', () => {
       userChoice: Promise.resolve({ outcome: 'accepted' }),
     }
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     expect(wrapper.text()).not.toContain('نصب اپلیکیشن')
@@ -1389,7 +1359,6 @@ describe('LoginView.vue', () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeJsonResponse({ detail: '' }, false, 500) as any)
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
@@ -1428,7 +1397,6 @@ describe('LoginView.vue', () => {
       .mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any)
       .mockResolvedValueOnce(makeJsonResponse({ unexpected: true }) as any)
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
     await wrapper.get('input[type="tel"]').setValue('09123456789')
     await requestOtpFromMobileStep(wrapper)
@@ -1454,7 +1422,6 @@ describe('LoginView.vue', () => {
         throw new SyntaxError('Unexpected token at position 0')
       },
     } as any)
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
     await wrapper.get('input[type="tel"]').setValue('09124444444')
     await requestOtpFromMobileStep(wrapper)
@@ -1475,7 +1442,6 @@ describe('LoginView.vue', () => {
         replace: replaceSpy,
       },
     })
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
     const vm = wrapper.vm as any
 
@@ -1506,7 +1472,6 @@ describe('LoginView.vue', () => {
         }) as any,
       )
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
@@ -1600,7 +1565,6 @@ describe('LoginView.vue', () => {
       )
       .mockResolvedValueOnce(makeJsonResponse({ detail: '' }, false, 500) as any)
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
@@ -1694,7 +1658,6 @@ describe('LoginView.vue', () => {
       return fetch(url, options) as any
     })
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
     const vm = wrapper.vm as any
     vm.loginRequestId = 'req-approved-without-token'
@@ -1748,7 +1711,6 @@ describe('LoginView.vue', () => {
         get: vi.fn(async () => ({ code: '12345' })),
       },
     })
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
     const deferredPrompt = {
@@ -1781,7 +1743,6 @@ describe('LoginView.vue', () => {
     vi.useFakeTimers()
     const fetchMock = vi.mocked(fetch)
 
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
     const vm = wrapper.vm as any
 
@@ -1884,7 +1845,6 @@ describe('LoginView.vue', () => {
         }),
       },
     })
-    const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
     const vm = wrapper.vm as any
 
