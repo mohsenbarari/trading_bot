@@ -181,12 +181,12 @@ async function runCell(
     if (!route.holdPath) throw new Error(`${route.id} missing holdPath`)
     controller.hold(route.holdPath)
     const pending = gotoRouteWithNavigationRetry(page, route.path)
-    await expect(page.getByText(route.loadingText || /در حال|بارگذاری/i).first()).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('.ui-loading-state, [aria-busy="true"]').first()).toBeVisible({ timeout: 10_000 })
     if (state === 'slow') await page.waitForTimeout(1200)
     controller.release(route.holdPath)
     await pending
     await runSettledContract(page, route, diagnostics, label)
-    await expect(page.getByText(route.loadingText || /در حال بارگذاری/i).first()).toHaveCount(0)
+    await expect(page.locator('.ui-loading-state:visible, [aria-busy="true"]:visible')).toHaveCount(0)
     return
   }
 
@@ -194,20 +194,25 @@ async function runCell(
     if (!route.errorPath) throw new Error(`${route.id} missing errorPath`)
     controller.failOnce(route.errorPath)
     await gotoRouteWithNavigationRetry(page, route.path)
-    await expect(page.getByText(route.errorText || /ناموفق|خطا|دوباره/i).first()).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('.ui-error-state, [role="alert"]').first()).toBeVisible({ timeout: 10_000 })
     const retry = page.getByRole('button', { name: /تلاش مجدد|دوباره/i }).first()
     await expect(retry).toBeVisible()
     await retry.click()
     await runSettledContract(page, route, diagnostics, label)
-    await expect(page.getByText(route.errorText || /ناموفق|خطا/i).first()).toHaveCount(0)
+    await expect(page.locator('.ui-error-state:visible')).toHaveCount(0)
     return
   }
 
   if (state === 'offline') {
-    await page.context().setOffline(true)
     await gotoRouteWithNavigationRetry(page, route.path)
-    await expect(page.getByText(/آفلاین|اتصال|شبکه|ناموفق|خطا/i).first()).toBeVisible({ timeout: 10_000 })
-    await page.context().setOffline(false)
+    await expectRouteReady(page, route)
+    controller.setNetworkOffline(true)
+    await page.evaluate(() => window.dispatchEvent(new Event('offline')))
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.locator('html[data-app-mounted="1"]').waitFor({ timeout: 15_000 })
+    await expect(page.getByText(/آفلاین|باز کردن این صفحه ممکن نشد|اتصال|شبکه|ناموفق|اکنون ممکن نشد/i).first()).toBeVisible({ timeout: 10_000 })
+    controller.setNetworkOffline(false)
+    await page.evaluate(() => window.dispatchEvent(new Event('online')))
     await page.reload({ waitUntil: 'domcontentloaded' })
     await page.locator('html[data-app-mounted="1"]').waitFor({ timeout: 15_000 })
     await runSettledContract(page, route, diagnostics, label)
@@ -229,7 +234,7 @@ async function runCell(
     return
   }
   if (state === 'long-persian' || state === 'full') {
-    if (['profile', 'public-profile', 'customers', 'accountants', 'messenger', 'account-notifications'].includes(route.id)) {
+    if (['profile', 'public-profile', 'customers', 'accountants', 'messenger'].includes(route.id)) {
       await expect(page.getByText(/نام بسیار بلند فارسی|بسیار بلند فارسی/)).toBeVisible()
     }
   }

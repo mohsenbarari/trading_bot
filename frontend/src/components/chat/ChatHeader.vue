@@ -274,7 +274,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Megaphone, MoreVertical, Search, Shield, UsersRound } from 'lucide-vue-next'
 import AppBackButton from '../ui/AppBackButton.vue'
 import { discardBackState, popBackState, pushBackState } from '../../composables/useBackButton'
@@ -378,6 +378,20 @@ const closeMenuAndRestoreFocus = () => {
   closeMenu()
   void nextTick(() => menuTriggerRef.value?.focus())
 }
+
+function onDocumentMenuKeydown(event: KeyboardEvent) {
+  if (!isMenuOpen.value || event.key !== 'Escape') return
+  event.preventDefault()
+  closeMenuAndRestoreFocus()
+}
+
+onMounted(() => {
+  document.addEventListener('keydown', onDocumentMenuKeydown)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onDocumentMenuKeydown)
+})
 
 const closeMenuForAction = () => {
   if (menuBackStateActive.value) {

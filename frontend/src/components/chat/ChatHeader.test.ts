@@ -854,6 +854,13 @@ describe('ChatHeader.vue', () => {
     expect(wrapper.find('#chat-header-menu').exists()).toBe(false)
     expect(document.activeElement).toBe(trigger.element)
 
+    await trigger.trigger('click')
+    await flushPromises()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+    expect(wrapper.find('#chat-header-menu').exists()).toBe(false)
+    expect(document.activeElement).toBe(trigger.element)
+
     await wrapper.setProps({ isSelectionMode: true })
     expect(wrapper.get('button[aria-label="لغو انتخاب پیام‌ها"]').attributes('type')).toBe('button')
     wrapper.unmount()

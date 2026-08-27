@@ -527,9 +527,11 @@ export type FixtureController = {
   extraAllowedMutation?: (pathname: string, method: string) => boolean
   holds: Map<string, ReturnType<typeof createDeferred>>
   failNext: Map<string, number>
+  abortNetwork: boolean
   hold(pathname: string): ReturnType<typeof createDeferred>
   release(pathname: string): void
   failOnce(pathname: string): void
+  setNetworkOffline(value: boolean): void
 }
 
 export type FailClosedOptions = {
@@ -551,6 +553,7 @@ export async function installFailClosedApi(
     extraAllowedMutation: options.extraAllowedMutation,
     holds: new Map(),
     failNext: new Map(),
+    abortNetwork: false,
     hold(pathname: string) {
       const existing = this.holds.get(pathname)
       if (existing) return existing
@@ -565,6 +568,9 @@ export async function installFailClosedApi(
     },
     failOnce(pathname: string) {
       this.failNext.set(pathname, (this.failNext.get(pathname) || 0) + 1)
+    },
+    setNetworkOffline(value: boolean) {
+      this.abortNetwork = value
     },
   }
 
@@ -586,6 +592,10 @@ export async function installFailClosedApi(
 
     const pathname = url.pathname
     const method = request.method()
+    if (controller.abortNetwork) {
+      await route.abort('internetdisconnected')
+      return
+    }
     const hold = [...controller.holds.entries()].find(([key]) => pathname === key || pathname.startsWith(`${key}/`))
     if (hold) await hold[1].promise
 
