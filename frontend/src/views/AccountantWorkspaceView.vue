@@ -746,10 +746,10 @@ async function copyRegistrationLink(relation: AccountantRelation) {
 
 function openConfirmDialog(
   kind: ConfirmAction,
-  relation: AccountantRelation,
+  relation: AccountantRelation | null,
   session: AccountantSessionSummary | null = null,
 ) {
-  if (isConfirmBusy.value) return
+  if (!relation || isConfirmBusy.value) return
   if (kind === 'cancel-invitation' && relation.status !== 'pending') return
   const relationAccountantUserId = getLiveAccountantUserId(relation)
   if (
@@ -948,7 +948,8 @@ async function handleConfirmAction() {
   }
 }
 
-function getRelationTitle(relation: AccountantRelation) {
+function getRelationTitle(relation: AccountantRelation | null): string {
+  if (!relation) return ''
   return (
     relation.relation_display_name ||
     relation.accountant_account_name ||
@@ -1260,7 +1261,7 @@ onBeforeUnmount(() => {
           <AppLoadingState
             v-else-if="!hasLoadedRelations && isLoading"
             class="accountant-detail-loading"
-            label="در حال ساخت پرونده حسابدار"
+            label="در حال دریافت پرونده حسابدار"
           />
           <AppEmptyState
             v-else-if="!activeRelation && hasLoadedRelations"
@@ -1445,7 +1446,7 @@ onBeforeUnmount(() => {
               </WorkspaceNotice>
               <AppLoadingState
                 v-if="detailSessionsLoading && !detailSessions.length"
-                label="در حال ساخت فهرست نشست‌ها"
+                label="در حال دریافت نشست‌ها"
               />
               <AppEmptyState
                 v-else-if="!detailSessionsError && !detailSessions.length"
@@ -1603,7 +1604,7 @@ onBeforeUnmount(() => {
           <AppLoadingState
             v-if="isLoading && !hasLoadedRelations"
             class="accountant-list-loading"
-            label="در حال ساخت فهرست حسابداران"
+            label="در حال دریافت فهرست حسابداران"
           />
           <AppEmptyState
             v-if="hasLoadedRelations && !accountantState.orderedRelations.value.length"
@@ -1725,7 +1726,7 @@ onBeforeUnmount(() => {
       <div id="accountant-workspace-overlay-host" class="ui-v2-workspace-overlay-host" />
 
       <AppConfirmDialog
-        class="ui-v2-workspace-confirm-backdrop"
+        backdrop-class="ui-v2-workspace-confirm-backdrop"
         :open="isConfirmDialogOpen && confirmAction !== 'delete-account'"
         :title="confirmTitle"
         :message="confirmMessage"

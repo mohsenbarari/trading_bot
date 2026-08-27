@@ -119,6 +119,7 @@ type CustomerWorkspaceTestVm = {
   detailTradesLoading: boolean
   isCreatePanelOpen: boolean
   isCreateSubmitting: boolean
+  isConfirmDialogOpen: boolean
   isLimitsReviewOpen: boolean
   limitsNotice: string
   listActionNotice: string
@@ -1879,5 +1880,23 @@ describe('CustomerWorkspaceView.vue', () => {
       name: 'operations-customers',
       query: {},
     })
+  })
+
+  it('fails closed when confirm helpers receive no customer relation', async () => {
+    customerWorkspaceMocks.fetchOwnerCustomerRelationsMock.mockResolvedValueOnce([])
+    customerWorkspaceMocks.routeState.params = {}
+    customerWorkspaceMocks.routeState.query = {}
+
+    const wrapper = mount(CustomerWorkspaceView)
+    await flushPromises()
+    const vm = getCustomerWorkspaceVm(wrapper)
+
+    vm.openConfirmDialog('cancel-invitation', null)
+    vm.openAccountDeletionDialog(null)
+
+    expect(vm.isConfirmDialogOpen).toBe(false)
+    expect(hasBodyDialog('.ui-confirm-dialog')).toBe(false)
+    expect(hasBodyDialog('.ui-v2-workspace-account-deletion-dialog')).toBe(false)
+    expect(customerWorkspaceMocks.deleteOwnerCustomerRelationMock).not.toHaveBeenCalled()
   })
 })

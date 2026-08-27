@@ -1110,10 +1110,10 @@ async function copyRegistrationLink(relation: CustomerRelation, surface: 'bot' |
 
 function openConfirmDialog(
   kind: 'terminate-session' | 'cancel-invitation' | 'close-relation',
-  relation: CustomerRelation,
+  relation: CustomerRelation | null,
   session: CustomerSessionSummary | null = null,
 ) {
-  if (isConfirmBusy.value) return
+  if (!relation || isConfirmBusy.value) return
   if (
     kind === 'terminate-session' &&
     (relation.status !== 'active' ||
@@ -1148,8 +1148,9 @@ function openConfirmDialog(
   isConfirmDialogOpen.value = true
 }
 
-function openAccountDeletionDialog(relation: CustomerRelation) {
+function openAccountDeletionDialog(relation: CustomerRelation | null) {
   if (
+    !relation ||
     isConfirmBusy.value ||
     relation.status !== 'active' ||
     !relation.customer_user_id ||
@@ -1322,7 +1323,8 @@ async function handleConfirmAction() {
   }
 }
 
-function getRelationTitle(relation: CustomerRelation) {
+function getRelationTitle(relation: CustomerRelation | null): string {
+  if (!relation) return ''
   return (
     relation.management_name ||
     relation.customer_account_name ||
@@ -1331,7 +1333,8 @@ function getRelationTitle(relation: CustomerRelation) {
   )
 }
 
-function getRelationDescription(relation: CustomerRelation) {
+function getRelationDescription(relation: CustomerRelation | null): string {
+  if (!relation) return ''
   return maskMobile(relation.mobile_number) || 'شماره ثبت نشده'
 }
 
@@ -1389,7 +1392,8 @@ function handlePendingInviteOverflow(relation: CustomerRelation, id: string) {
   }
 }
 
-function detailInviteCopyActions(relation: CustomerRelation) {
+function detailInviteCopyActions(relation: CustomerRelation | null) {
+  if (!relation) return []
   const actions: { id: string; label: string }[] = []
   if (invitationRelationLink(relation, 'web')) {
     actions.push({
@@ -1412,7 +1416,8 @@ function detailInviteCopyActions(relation: CustomerRelation) {
   return actions
 }
 
-function handleDetailInviteCopy(relation: CustomerRelation, id: string) {
+function handleDetailInviteCopy(relation: CustomerRelation | null, id: string) {
+  if (!relation) return
   if (id === 'bot') {
     void copyRegistrationLink(relation, 'bot')
     return
@@ -1659,7 +1664,7 @@ onBeforeUnmount(() => {
           </WorkspaceNotice>
           <AppLoadingState
             v-else-if="!hasLoadedRelations && isLoading"
-            label="در حال دریافت ساختار پرونده مشتری"
+            label="در حال دریافت پرونده مشتری"
           />
           <AppEmptyState
             v-else-if="!activeRelation && hasLoadedRelations"
@@ -2415,7 +2420,7 @@ onBeforeUnmount(() => {
       <div id="customer-workspace-overlay-host" class="ui-v2-workspace-overlay-host" />
 
       <AppConfirmDialog
-        class="ui-v2-workspace-confirm-backdrop"
+        backdrop-class="ui-v2-workspace-confirm-backdrop"
         :open="isConfirmDialogOpen"
         :title="confirmTitle"
         :message="confirmMessage"

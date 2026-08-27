@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 const routerPushMock = vi.fn()
@@ -69,8 +69,13 @@ async function requestOtpFromMobileStep(wrapper: ReturnType<typeof mount>) {
 }
 
 describe('LoginView.vue', () => {
+  let DefaultLoginView: typeof import('./LoginView.vue').default
+
+  beforeAll(async () => {
+    DefaultLoginView = (await import('./LoginView.vue')).default
+  })
+
   beforeEach(() => {
-    vi.resetModules()
     routerPushMock.mockReset()
     routeMock.query = {}
     setupExpiryTimerMock.mockReset()
@@ -109,15 +114,18 @@ describe('LoginView.vue', () => {
     Object.defineProperty(window, 'location', { configurable: true, value: originalWindowLocation })
   })
 
-  it('keeps the primary action below the form so login reads as an installed app', async () => {
-    const LoginView = (await import('./LoginView.vue')).default
-    const wrapper = mount(LoginView, { attachTo: document.body })
+  it('keeps the primary action below the form so login reads as an installed app', () => {
+    // Shared module from beforeAll avoids resetModules + SFC recompile.
+    // attachTo leaked the tree and was unnecessary for these class assertions.
+    const wrapper = mount(DefaultLoginView)
 
     expect(wrapper.get('.ui-v2-auth-login-body').text()).toContain(
       'کد ابتدا در تلگرام و در صورت نیاز با پیامک می‌آید.',
     )
     expect(wrapper.get('.ui-v2-auth-login-actions').text()).toContain('دریافت کد تأیید')
     expect(wrapper.get('.ui-v2-public-header').text()).toContain('سامانه معاملات')
+    expect(wrapper.text()).not.toContain('ورود سریع ۱ ساله')
+    wrapper.unmount()
   })
 
   it('moves to the OTP step after a successful OTP request', async () => {
@@ -1281,9 +1289,11 @@ describe('LoginView.vue', () => {
       return fetch(url, options) as any
     })
     localStorage.setItem('suspended_refresh_token', 'stale-token')
+    vi.stubEnv('VITE_STAGING_DEV_LOGIN', 'true')
+    vi.resetModules()
 
-    const LoginView = (await import('./LoginView.vue')).default
-    const wrapper = mount(LoginView)
+    const LoginViewWithDevLogin = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginViewWithDevLogin)
 
     await findButtonByText(wrapper, 'ورود سریع ۱ ساله').trigger('click')
     await flushPromises()
@@ -1308,6 +1318,7 @@ describe('LoginView.vue', () => {
 
   it('shows developer quick-login on staging builds with public hostnames', async () => {
     vi.stubEnv('VITE_STAGING_DEV_LOGIN', 'true')
+    vi.resetModules()
     Object.defineProperty(window, 'location', {
       configurable: true,
       value: {
@@ -1317,11 +1328,32 @@ describe('LoginView.vue', () => {
       },
     })
 
-    const LoginView = (await import('./LoginView.vue')).default
-    const wrapper = mount(LoginView)
+    const LoginViewWithDevLogin = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginViewWithDevLogin)
 
     expect(wrapper.text()).toContain('ورود سریع ۱ ساله')
 
+    wrapper.unmount()
+  })
+
+  it.each([
+    'localhost',
+    '127.0.0.1',
+    '10.0.0.12',
+    '172.16.4.8',
+    '192.168.1.20',
+  ])('hides developer quick-login on %s unless the staging flag is set', (hostname) => {
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        ...originalWindowLocation,
+        hostname,
+        href: `http://${hostname}/login`,
+      },
+    })
+
+    const wrapper = mount(DefaultLoginView)
+    expect(wrapper.text()).not.toContain('ورود سریع ۱ ساله')
     wrapper.unmount()
   })
 
