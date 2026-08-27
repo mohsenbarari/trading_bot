@@ -23,7 +23,7 @@ const scopeAttributes = computed(() => (
 <template>
   <AppSectionCard
     v-bind="scopeAttributes"
-    class="ds-workspace-section"
+    class="ds-workspace-section ds-workspace-section--plain"
     :class="[
       `ds-workspace-section--${tone}`,
       {
@@ -43,3 +43,30 @@ const scopeAttributes = computed(() => (
     <slot />
   </AppSectionCard>
 </template>
+
+<style scoped>
+.ds-workspace-section.ui-section-card,
+.ds-workspace-section--primary,
+.ds-workspace-section--success,
+.ds-workspace-section--warning,
+.ds-workspace-section--danger {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.ds-workspace-section :deep(.ui-section-card__header) {
+  padding: 0 1rem 0.4rem;
+  border: 0;
+}
+
+.ds-workspace-section :deep(.ui-section-card__body) {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
+}
+</style>

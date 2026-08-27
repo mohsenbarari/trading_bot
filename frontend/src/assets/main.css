@@ -469,11 +469,35 @@
   }
 
   .ds-workspace-toolbar,
-  .ds-workspace-section,
   .ds-danger-zone {
     background: var(--ds-bg-card);
     border: 1px solid var(--ds-native-hairline);
     border-radius: 12px;
+  }
+
+  .ds-workspace.ui-v2-workspace-adapter {
+    width: min(100%, var(--ds-workspace-max-width));
+    max-width: none;
+    margin-inline: auto;
+    gap: var(--ds-workspace-gap);
+  }
+
+  .ds-workspace--stack.ui-v2-workspace-adapter {
+    max-width: var(--ds-workspace-narrow-width);
+  }
+
+  .ds-workspace.ui-v2-workspace-adapter .ui-v2-workspace-adapter__heading h1 {
+    color: var(--ds-text-primary);
+    font-size: var(--ds-native-title-size);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+  }
+
+  .ds-workspace.ui-v2-workspace-adapter .ui-v2-workspace-adapter__heading p {
+    color: var(--ds-text-muted);
+    font-size: var(--ds-font-sm);
+    line-height: 1.8;
   }
 
   .ds-workspace-header {
