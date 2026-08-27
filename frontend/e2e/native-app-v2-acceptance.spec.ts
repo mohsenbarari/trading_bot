@@ -362,6 +362,7 @@ test.describe('Native App V2 keyboard, zoom, motion, overlays', () => {
     await gotoRouteWithNavigationRetry(page, '/login')
     const route = ROUTE_DESCRIPTORS.find((item) => item.id === 'login')!
     await expectRouteReady(page, route)
+    await expectRouteContract(page, route, 'login-keyboard')
     const mobile = page.getByLabel('شماره موبایل')
     await mobile.focus()
     await expect(mobile).toBeFocused()
@@ -370,7 +371,6 @@ test.describe('Native App V2 keyboard, zoom, motion, overlays', () => {
     const submit = page.getByRole('button', { name: 'دریافت کد تأیید' })
     await expect(page.getByRole('button', { name: 'ورود سریع ۱ ساله' })).toHaveCount(0)
     await expect(submit).toBeFocused()
-    await expectRouteContract(page, route, 'login-keyboard')
     expectCleanDiagnostics(diagnostics, 'login-keyboard')
   })
 
@@ -393,6 +393,9 @@ test.describe('Native App V2 keyboard, zoom, motion, overlays', () => {
         if ('typeIntoField' in form && form.typeIntoField) {
           await field.fill(form.typeIntoField)
         }
+      }
+      if ('confirmField' in form && form.confirmField && 'confirmValue' in form && form.confirmValue) {
+        await page.getByLabel(form.confirmField).first().fill(form.confirmValue)
       }
       const keyboard = await simulateSoftKeyboard(page, 336)
       expect(keyboard.after.visual).toBeLessThan(keyboard.before.visual)

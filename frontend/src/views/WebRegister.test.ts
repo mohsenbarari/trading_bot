@@ -387,6 +387,7 @@ describe('WebRegister.vue', () => {
     expect(wrapper.text()).toContain('نام حساب')
     expect(wrapper.text()).toContain('مهلت ثبت‌نام')
     expect(wrapper.text()).toContain('مرحله ۱ از ۳')
+    expect(wrapper.text()).not.toContain('اتصال تلگرام')
     expect(wrapper.find('[data-ui-pwa]').exists()).toBe(false)
     await wrapper.get('button').trigger('click')
     await flushPromises()

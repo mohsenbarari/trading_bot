@@ -635,9 +635,17 @@ export const ZOOM_FAMILY_REPRESENTATIVES = [
 
 export const KEYBOARD_FORM_ROUTES = [
   { id: 'login', path: '/login', field: 'شماره موبایل', submit: 'دریافت کد تأیید' },
-  { id: 'register', path: '/register', field: 'شماره موبایل', submit: 'دریافت کد تأیید' },
+  { id: 'register', path: '/register', field: null, submit: 'دریافت کد تأیید' },
   { id: 'invite-landing', path: '/i/uiux-baseline', field: null, submit: 'ادامه ثبت‌نام در وب‌اپ' },
-  { id: 'setup-password', path: '/setup-password', field: 'رمز عبور جدید', submit: 'ثبت و ورود' },
+  {
+    id: 'setup-password',
+    path: '/setup-password',
+    field: 'رمز عبور جدید',
+    submit: 'ثبت و ورود',
+    typeIntoField: 'Abcdefg1!',
+    confirmField: 'تکرار رمز عبور جدید',
+    confirmValue: 'Abcdefg1!',
+  },
   {
     id: 'customer-invite',
     path: '/operations/customers',

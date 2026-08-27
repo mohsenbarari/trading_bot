@@ -719,7 +719,7 @@ async function skipTelegramConnect() {
           <p class="ui-v2-auth-register-privacy">نشانی در پروفایل عمومی نمایش داده نمی‌شود.</p>
         </template>
 
-        <template v-else>
+        <template v-else-if="step === 4">
           <div
             ref="completionStatus"
             class="ui-v2-auth-register-guidance"
