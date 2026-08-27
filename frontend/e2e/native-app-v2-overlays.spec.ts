@@ -77,10 +77,20 @@ test.describe('Native App V2 overlay keyboard contracts', () => {
           const style = getComputedStyle(element)
           const box = element.getBoundingClientRect()
           if (style.display === 'none' || box.width === 0) return false
+          const labelledBy = (element.getAttribute('aria-labelledby') || '')
+            .split(/\s+/)
+            .filter(Boolean)
+            .map((id) => document.getElementById(id)?.textContent || '')
+            .join(' ')
+          const nativeLabels = 'labels' in element
+            ? Array.from((element as HTMLInputElement).labels || []).map((item) => item.textContent || '').join(' ')
+            : ''
           const nameText = [
             element.getAttribute('aria-label'),
-            element.textContent,
+            labelledBy,
+            nativeLabels,
             element.getAttribute('title'),
+            element.textContent,
           ].join(' ').trim()
           return !nameText
         })
@@ -154,6 +164,19 @@ test.describe('Native App V2 overlay keyboard contracts', () => {
     await page.keyboard.press('Escape')
     await expect(page.getByRole('dialog')).toHaveCount(0)
     expectCleanDiagnostics(diagnostics, 'attachment-menu')
+  })
+
+  test('customer invitation sheet traps focus and restores trigger on Escape', async ({ page }) => {
+    const diagnostics = await boot(page, '/operations/customers')
+    await expect(page.getByRole('heading', { name: 'مشتریان', exact: true })).toBeVisible({ timeout: 15_000 })
+    const trigger = page.getByRole('button', { name: 'افزودن مشتری' }).first()
+    await trigger.click()
+    const dialog = await expectDialogContract(page, 'افزودن مشتری')
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog', { name: 'افزودن مشتری' })).toHaveCount(0)
+    await expect(trigger).toBeFocused()
+    expect(dialog).toBeTruthy()
+    expectCleanDiagnostics(diagnostics, 'customer-invite-sheet')
   })
 
   test('storage confirm dialog names the destructive action', async ({ page }) => {

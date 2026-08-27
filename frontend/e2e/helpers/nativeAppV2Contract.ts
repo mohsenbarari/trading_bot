@@ -159,7 +159,8 @@ export async function collectRouteContract(page: Page, route: RouteDescriptor): 
       nested: nested.slice(0, 8).map((element) => `${element.tagName}.${element.className}`),
       undersized: undersized.slice(0, 8).map((element) => {
         const rect = element.getBoundingClientRect()
-        return `${element.tagName}:${Math.round(rect.width)}x${Math.round(rect.height)}`
+        const label = nameFor(element).replace(/\s+/g, ' ').slice(0, 40)
+        return `${element.tagName}.${String(element.className).split(' ')[0]}:${rect.width.toFixed(2)}x${rect.height.toFixed(2)}:${label}`
       }),
       overflow,
       scrollerCount: designated.length,

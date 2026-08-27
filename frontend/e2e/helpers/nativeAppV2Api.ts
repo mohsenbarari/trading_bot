@@ -115,6 +115,7 @@ export function isAllowedMutation(
   if (pathname === '/api/auth/refresh' && method === 'POST') return true
   if (method === 'POST' && pathname.startsWith('/api/auth/registration-context')) return true
   if (method === 'POST' && /^\/api\/chat\/read\/\d+$/u.test(pathname)) return true
+  if (method === 'POST' && pathname === '/api/chat/activity') return true
   if (method === 'PATCH' && /^\/api\/notifications\/\d+\/read$/u.test(pathname)) return true
   return extra?.(pathname, method) === true
 }
@@ -224,6 +225,7 @@ export function resolveKnownApi(
   if (pathname === '/api/chat/channels/invite-candidates') return { status: 200, body: { items: [], total: 0 } }
   if (/^\/api\/chat\/messages\/\d+$/u.test(pathname)) return { status: 200, body: [] }
   if (method === 'POST' && /^\/api\/chat\/read\/\d+$/u.test(pathname)) return { status: 200, body: { ok: true } }
+  if (method === 'POST' && pathname === '/api/chat/activity') return { status: 200, body: { ok: true } }
   if (/^\/api\/chat\/rooms\/\d+\/messages$/u.test(pathname)) return { status: 200, body: [] }
   if (/^\/api\/chat\/(direct|rooms)\/\d+\/pinned-message$/u.test(pathname)) return { status: 200, body: null }
   if (pathname === '/api/chat/search') return { status: 200, body: [] }

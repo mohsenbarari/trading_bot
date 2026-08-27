@@ -621,10 +621,54 @@ export const ZOOM_FAMILY_REPRESENTATIVES = [
 ] as const
 
 export const KEYBOARD_FORM_ROUTES = [
-  { path: '/login', field: 'شماره موبایل', submit: 'دریافت کد تأیید' },
-  { path: '/register', field: 'شماره موبایل', submit: 'دریافت کد تأیید' },
-  { path: '/i/uiux-baseline', field: null, submit: 'ادامه ثبت‌نام در وب‌اپ' },
-  { path: '/setup-password', field: 'رمز عبور جدید', submit: 'ثبت و ورود' },
+  { id: 'login', path: '/login', field: 'شماره موبایل', submit: 'دریافت کد تأیید' },
+  { id: 'register', path: '/register', field: 'شماره موبایل', submit: 'دریافت کد تأیید' },
+  { id: 'invite-landing', path: '/i/uiux-baseline', field: null, submit: 'ادامه ثبت‌نام در وب‌اپ' },
+  { id: 'setup-password', path: '/setup-password', field: 'رمز عبور جدید', submit: 'ثبت و ورود' },
+  {
+    id: 'customer-invite',
+    path: '/operations/customers',
+    field: 'نام مدیریتی',
+    submit: 'ثبت دعوت مشتری',
+    openName: 'افزودن مشتری',
+  },
+  {
+    id: 'customer-edit',
+    path: '/operations/customers/13',
+    field: 'حداقل مقدار معامله',
+    submit: 'مرور تغییرات',
+    tabName: 'محدودیت‌ها',
+  },
+  {
+    id: 'accountant-invite',
+    path: '/operations/accountants',
+    field: 'نام نمایشی رابطه',
+    submit: 'ثبت دعوت حسابدار',
+    openName: 'افزودن حسابدار',
+  },
+  {
+    id: 'accountant-edit',
+    path: '/operations/accountants/13',
+    field: 'شرح وظیفه',
+    submit: 'ذخیره تغییرات',
+    tabName: 'شرح وظیفه',
+  },
+  {
+    id: 'create-channel',
+    path: '/admin/channels',
+    field: 'نام کانال',
+    submit: 'ساخت کانال',
+    openName: 'کانال جدید',
+    typeIntoField: 'کانال آزمایشی',
+  },
+  {
+    id: 'messenger-composer',
+    path: '/chat',
+    field: 'متن پیام',
+    submit: 'ارسال پیام',
+    openName: 'گفتگوی نمونه',
+    typeIntoField: 'آ',
+  },
 ] as const
 
 export type MatrixCell = {

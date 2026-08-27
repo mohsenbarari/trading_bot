@@ -67,5 +67,6 @@ test.describe('Native App V2 fail-closed harness contract', () => {
     expect(resolveKnownApi('GET', '/api/this-endpoint-does-not-exist-native-v2')).toBeNull()
     expect(isAllowedMutation('/api/users/9001', 'DELETE')).toBe(false)
     expect(isAllowedMutation('/api/sessions/verify', 'POST')).toBe(true)
+    expect(isAllowedMutation('/api/chat/activity', 'POST')).toBe(true)
   })
 })

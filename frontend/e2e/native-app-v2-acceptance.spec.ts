@@ -147,8 +147,8 @@ async function expectRouteReady(page: Page, route: RouteDescriptor) {
   } else {
     await expect(page.getByText(route.readyText, { exact: false }).first()).toBeVisible({ timeout })
   }
-  await expect(page.locator('.fade-enter-active, .fade-leave-active')).toHaveCount(0, { timeout: 8_000 })
-  await expect(page.locator('.ui-loading-state:visible')).toHaveCount(0, { timeout: 8_000 })
+  await expect(page.locator('.fade-enter-active, .fade-leave-active, .ui-v2-route-fade-enter-active, .ui-v2-route-fade-leave-active')).toHaveCount(0, { timeout: 8_000 })
+  await expect(page.locator('.ui-loading-state:visible, .dashboard-daily-state:visible')).toHaveCount(0, { timeout: 8_000 })
 }
 
 async function expectNoPageCrash(page: Page, label: string) {
@@ -351,14 +351,24 @@ test.describe('Native App V2 keyboard, zoom, motion, overlays', () => {
   })
 
   for (const form of KEYBOARD_FORM_ROUTES) {
-    test(`soft-keyboard:${form.path}`, async ({ page }) => {
+    test(`soft-keyboard:${form.id}`, async ({ page }) => {
       const route = ROUTE_DESCRIPTORS.find((item) => item.path === form.path)!
       const { diagnostics } = await preparePage(page, route, 'normal')
       await page.setViewportSize({ width: 390, height: 844 })
       await gotoRouteWithNavigationRetry(page, form.path)
       await expectRouteReady(page, route)
+      if ('openName' in form && form.openName) {
+        await page.getByRole('button', { name: form.openName }).first().click()
+      }
+      if ('tabName' in form && form.tabName) {
+        await page.getByRole('tab', { name: form.tabName }).click()
+      }
       if (form.field) {
-        await page.getByLabel(form.field).focus()
+        const field = page.getByLabel(form.field).first()
+        await field.focus()
+        if ('typeIntoField' in form && form.typeIntoField) {
+          await field.fill(form.typeIntoField)
+        }
       }
       const keyboard = await simulateSoftKeyboard(page, 336)
       expect(keyboard.after.visual).toBeLessThan(keyboard.before.visual)
@@ -380,7 +390,7 @@ test.describe('Native App V2 keyboard, zoom, motion, overlays', () => {
       expect(geometry.bottom).toBeLessThanOrEqual(geometry.visual + 1)
       expect(geometry.hit).toBe(true)
       await page.setViewportSize(keyboard.restore)
-      expectCleanDiagnostics(diagnostics, `soft-keyboard:${form.path}`)
+      expectCleanDiagnostics(diagnostics, `soft-keyboard:${form.id}`)
     })
   }
 
