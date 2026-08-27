@@ -812,7 +812,7 @@ onUnmounted(() => {
               :label="adminSubviewReturnLabel"
               @click="handleAdminSubviewReturn"
             />
-            <h2 class="admin-subview-title">{{ currentSectionMeta.title }}</h2>
+            <h1 class="admin-subview-title">{{ currentSectionMeta.title }}</h1>
           </div>
           <AppSectionCard class="admin-subview-card">
 

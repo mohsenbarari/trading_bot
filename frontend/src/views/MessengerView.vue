@@ -155,9 +155,11 @@ function handleBack() {
 <template>
   <div
     class="messenger-page"
+    role="main"
     :data-messenger-ui-version="messengerRolloutSurface.uiVersion"
     :data-messenger-rollout-mode="messengerRolloutSurface.rolloutMode"
   >
+    <h1 class="sr-only">پیام‌رسان</h1>
     <div v-if="loading" class="loading-container">
       <div class="loading-spinner"></div>
     </div>

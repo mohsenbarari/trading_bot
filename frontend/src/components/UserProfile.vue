@@ -1143,6 +1143,7 @@ async function confirmPendingAction() {
       :display-name="userDisplayName"
       :avatar-initial="userDisplayName.slice(0, 1)"
       :hide-back-button="!isAdminView"
+      :title-tag="isAdminView ? 'p' : 'h1'"
       back-label="بازگشت به لیست کاربران"
       @back="$emit('navigate', 'manage_users')"
     >

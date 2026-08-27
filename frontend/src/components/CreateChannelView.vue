@@ -988,7 +988,7 @@ onBeforeUnmount(() => {
       <div v-else class="header-spacer"></div>
     </header>
 
-    <main class="manager-body">
+    <div class="manager-body">
       <div v-if="errorMessage" class="channel-status-banner error">{{ errorMessage }}</div>
       <div v-if="successMessage" class="channel-status-banner success">{{ successMessage }}</div>
 
@@ -1369,7 +1369,7 @@ onBeforeUnmount(() => {
           </AppButton>
         </AppSectionCard>
       </template>
-    </main>
+    </div>
   </section>
 </template>
 

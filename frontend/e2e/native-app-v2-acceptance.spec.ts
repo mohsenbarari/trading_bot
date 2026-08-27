@@ -271,22 +271,14 @@ async function expectNoHorizontalOverflow(page: Page, label: string) {
   expect(metrics.maxScrollWidth, `${label}: horizontal overflow`).toBeLessThanOrEqual(metrics.viewportWidth + 1)
 }
 
-const MAIN_LANDMARK_SKIP_PATHS = new Set(['/chat', '/share-receive', '/admin/channels'])
-
 async function expectSingleMain(page: Page, label: string) {
   const count = await page.locator('main, [role="main"]').count()
   expect(count, `${label}: exactly one main`).toBe(1)
 }
 
-async function expectSingleMainOrDocumentSkip(page: Page, path: string, label: string) {
-  if (MAIN_LANDMARK_SKIP_PATHS.has(path)) {
-    test.info().annotations.push({
-      type: 'skip',
-      description: `${path}: NAV-MAIN-001 messenger/share/channel landmark is frozen; /chat and /share-receive have no <main>, /admin/channels already has manager-body <main> plus shell and cannot be changed without visual-hash drift`,
-    })
-    return
-  }
-  await expectSingleMain(page, label)
+async function expectSingleH1(page: Page, label: string) {
+  const count = await page.locator('h1').count()
+  expect(count, `${label}: exactly one h1`).toBe(1)
 }
 
 async function expectNoPageError(page: Page, label: string) {
@@ -458,7 +450,8 @@ test.describe('Native App V2 29-route contract matrix', () => {
         const label = `${viewport.label}:${route.path}`
         await gotoRouteWithNavigationRetry(page, route.path)
         await expectRouteReady(page, route)
-        await expectSingleMainOrDocumentSkip(page, route.path, label)
+        await expectSingleMain(page, label)
+        await expectSingleH1(page, label)
         await expectNoHorizontalOverflow(page, label)
         await expectNamedControls(page, label)
         await expectNoPageError(page, label)
@@ -470,7 +463,8 @@ test.describe('Native App V2 29-route contract matrix', () => {
         const label = `${viewport.label}:${route.path}`
         await gotoRouteWithNavigationRetry(page, route.path)
         await expectRouteReady(page, route)
-        await expectSingleMainOrDocumentSkip(page, route.path, label)
+        await expectSingleMain(page, label)
+        await expectSingleH1(page, label)
         await expectNoHorizontalOverflow(page, label)
         await expectNamedControls(page, label)
         await expectNoPageError(page, label)

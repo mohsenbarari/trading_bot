@@ -15,6 +15,7 @@ withDefaults(defineProps<{
   hideBackButton?: boolean
   backLabel?: string
   loading?: boolean
+  titleTag?: 'h1' | 'p'
 }>(), {
   avatarUrl: null,
   avatarInitial: '',
@@ -26,6 +27,7 @@ withDefaults(defineProps<{
   hideBackButton: false,
   backLabel: 'بازگشت',
   loading: false,
+  titleTag: 'h1',
 })
 
 const emit = defineEmits<{
@@ -44,13 +46,17 @@ const emit = defineEmits<{
     />
     <div v-else class="header-back-spacer" aria-hidden="true"></div>
     <div class="header-title">
-      <h1 v-if="displayName">
+      <component :is="titleTag" v-if="displayName" class="profile-identity-title">
         <slot name="title">{{ displayName }}</slot>
-      </h1>
-      <h1 v-else-if="loading" class="skeleton-text-header">
-        <div class="skeleton-box" style="width: 120px; height: 24px;"></div>
-      </h1>
-      <h1 v-else>پروفایل</h1>
+      </component>
+      <component
+        :is="titleTag"
+        v-else-if="loading"
+        class="profile-identity-title skeleton-text-header"
+      >
+        <span class="skeleton-box" style="width: 120px; height: 24px;"></span>
+      </component>
+      <component :is="titleTag" v-else class="profile-identity-title">پروفایل</component>
     </div>
     <div class="header-spacer">
       <div v-if="displayName || avatarUrl || editable || loading" class="profile-avatar-stack profile-avatar-stack--header">
@@ -106,7 +112,7 @@ const emit = defineEmits<{
   min-width: 0;
 }
 
-.header-title h1 {
+.header-title .profile-identity-title {
   margin: 0;
   color: var(--ds-text-primary);
   font-size: var(--ds-native-title-size, 1.7rem);

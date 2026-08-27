@@ -784,7 +784,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
             </button>
           </header>
 
-          <main class="manager-body">
+          <div class="manager-body">
             <div v-if="errorMessage" class="flash-box error">{{ errorMessage }}</div>
             <div v-if="successMessage" class="flash-box success">{{ successMessage }}</div>
 
@@ -1137,7 +1137,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                 </button>
               </section>
             </template>
-          </main>
+          </div>
 
           <footer v-if="isCreateMode && page === 'details'" class="manager-footer">
             <button type="button" class="secondary-btn" @click="handleBack()">بازگشت به انتخاب اعضا</button>

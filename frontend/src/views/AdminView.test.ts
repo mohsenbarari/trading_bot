@@ -176,12 +176,16 @@ describe('AdminView.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('مرکز مدیریت')
+    expect(wrapper.findAll('h1')).toHaveLength(1)
+    expect(wrapper.get('h1').text()).toBe('مرکز مدیریت')
     await wrapper.get('.admin-panel-action.primary').trigger('click')
     await flushPromises()
 
     expect(adminViewMocks.pushBackStateMock).toHaveBeenCalledTimes(1)
     expect(adminViewMocks.routerPushMock).toHaveBeenCalledWith({ name: 'admin-invitations' })
     expect(wrapper.text()).toContain('ارسال دعوت‌نامه')
+    expect(wrapper.findAll('h1')).toHaveLength(1)
+    expect(wrapper.get('h1').text()).toBe('ارسال دعوت‌نامه')
     expect(wrapper.find('.admin-subview-card.ui-section-card').exists()).toBe(true)
     expect(wrapper.get('.admin-subview-return').classes()).toContain('ui-back-button')
     expect(wrapper.get('.admin-subview-return').attributes('aria-label')).toBe(

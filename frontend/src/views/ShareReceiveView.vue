@@ -1,5 +1,6 @@
 <template>
-  <div class="share-receive-root">
+  <div class="share-receive-root" role="main">
+    <h1 class="sr-only">دریافت اشتراک</h1>
     <!-- Loading / error states (rare; modal takes over on success) -->
     <div v-if="loading" class="state-overlay">
       <AppLoadingState label="در حال آماده‌سازی" />
