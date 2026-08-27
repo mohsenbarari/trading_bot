@@ -318,6 +318,88 @@ timeline واقعی ده‌نمونه‌ای پس از این اصلاح با re
 سبز شدند. دو تست shell استقرار که وجود `curl` را فرض می‌کنند فقط روی host اجرا و پاس شدند و
 جزء runtime image بازار نیستند.
 
+## replay تک‌مالک، backfill هفت‌روزه و postcheck
+
+پس از تهیه snapshotهای point-in-time محافظت‌شده، replay تک‌مالک ناموفق قبلی با همان ورودی
+freeze‌شده تکرار شد. اجرای
+`stage13-single-owner-run-20260827T0625Z` تعداد ۲٬۳۴۴ رکورد window را در هر دو lane بدون
+duplicate یا partial tail پردازش کرد. گزارش با hash
+`8002b89e4f5e27ee4ab48fa222a80582a141b89b584f3d5be17c44627bfd05f4` ثبت شد و نتیجهٔ
+redacted آن چنین بود:
+
+- baseline تعداد ۵۴۱٬۳۸۵ و candidate تعداد ۵۴۲٬۴۲۵ fact داشت و ۵۴۱٬۳۷۰ fact مشترک بود؛
+- ۱٬۰۵۵ fact اضافه و ۱۵ fact مفقود candidate همگی XAU بودند و به تفاوت مصوب cadence، یعنی
+  حفظ quoteهای واقعی در candidate در برابر compaction قدیمی، محدود شدند؛
+- ۵۹۹ lifecycle mismatch به private-gold محدود بود: ۵۳۷ مورد کانال و ۶۲ مورد projection
+  دقیقه‌ای. دو parser mismatch نیز فقط در projection دقیقه‌ای private-gold بود؛ هیچ mismatch
+  parser یا lifecycle برای دو گروه سکه ثبت نشد. این موارد auto-accept نشدند و gate را باز
+  نکردند؛
+- هر ۱۴ rate برابر بود، اما اختلاف consumed XAU و ۱۷ اختلاف schema جدید `mean_price` باعث
+  باقی‌ماندن recommendation روی `HOLD_STAGE12_LIVE_PARITY_REQUIRED` شد؛
+- `cutover_performed=false` و raw artifact ماندگار نشد.
+
+برای رفع چهار absence نرخ سکه، ابزار backfill fail-closed در commitهای `e9138367`،
+`1e0ab0f4`، `16d268c5`، `e37aa09d` و `581396c6` اضافه و سخت‌سازی شد. export فقط بازهٔ
+هفت‌روزه تا cutoff اولیهٔ هر source را گرفت، eventهای موجود candidate را با denylist کنار
+گذاشت و منابع آبشدهٔ عمومی را فقط seed گذرای Store دانست، نه تاریخچهٔ دائمی. نتیجهٔ export:
+
+| source | revision |
+| --- | ---: |
+| `GROUP_1` | ۱٬۴۱۶ |
+| `GROUP_2` | ۳٬۴۹۷ |
+| `PRIVATE_GOLD_CHANNEL` | ۴۵٬۸۵۹ |
+| `PRIVATE_GOLD_PAPER_MINUTE` | ۷٬۴۱۶ |
+| `USD_HERAT` | ۱۰٬۸۵۲ |
+| `XAUUSD` | ۲٬۶۲۷ |
+| `WALLEX_PUBLIC_API` | ۱۶۰٬۵۵۱ |
+| `MELTED_AGGREGATE` | ۶۶٬۹۵۶ |
+| `MELTED_FLOW` | ۵۶٬۹۷۴ |
+| **جمع** | **۳۵۶٬۱۴۸** |
+
+پنج event از `MELTED_FLOW` که از قبل در candidate وجود داشت کنار گذاشته شد. ۵۳۵ outcome قدیمی
+private-gold که هیچ root قابل‌اثباتی در تاریخچه نداشت نیز با reason code صریح حذف شد؛ ۱۴۵
+outcome لینک‌شده حفظ شد و هیچ outcome گروه سکه مجاز به حذف نبود. manifest تعداد ۱۸۲ bundle
+داشت و SHA-256 آن برابر
+`bb8c7b83d80fbd9e4e02aa9b3868ee570fc6cdd6c3f42c1d5fcebafcc2c58fa7` بود. نسخهٔ
+محافظت‌شدهٔ export و backup پایگاه روی میزبان وب در مسیر
+`/srv/trading-bot/market-data-staging-shadow/backups-staging/stage13-history-backfill-20260827T073711Z`
+باقی ماند. SHA-256 فایل `postgres-before-import.dump` برابر
+`fe9f6e1a761afabf11eaee9b397c33da7deff0e3d5fce086da574a4d7e19890b` است.
+
+import در staging با delay ده‌ثانیه‌ای میان bundleهای جدید اجرا شد تا receiver و disk زیر بار
+bounded بمانند. هر ۱۸۲ bundle در status `RECONCILED` و هر ۳۵۶٬۱۴۸ item ثبت شد؛ failed و
+quarantine صفر بود. به‌علت resume امن اجرا، ۳۵۴٬۶۲۵ revision جدید و ۱٬۵۲۳ revision تکراری
+تشخیص داده شد و replay دوم `idempotent_replay_verified=true` را ثبت کرد. outbox در پایان صفر،
+dead-letter صفر و worker انتقال healthy بود.
+
+در سمت بات، metrics receiver و adapter به شمارنده‌های پایدار O(1) تبدیل شد تا healthcheck زیر
+commit load تاریخچه full-table scan نکند. receiver با release `16d268c5` و health timeout
+هشت‌ثانیه‌ای release `581396c6` اجرا شد. postcheck تعداد ۴۸۲٬۲۰۹ delivery را روی ۱۰ stream
+با lag، rejection، duplicate و dead-letter صفر نشان داد؛ چهار service بات healthy و
+restart-zero ماندند. feed در تمام عملیات `PRIVATE_SHADOW` بود و WebApp/product authority،
+production و `PRIVATE_PRIMARY` تغییر نکردند.
+
+پس از تخلیهٔ کامل صف، timeline ده‌نمونه‌ای تازه با ۲۴ snapshot candidate، version gap صفر و
+hash
+`42132dba8cee21050d095eed53418ac45790a58ce38be20c689dc3d58fa1141c`
+امضا و مستقل verify شد. هر ۱۴ rate در تمام نمونه‌ها حاضر بود و presence mismatch صفر شد؛ در
+۱۴۰ مقایسه ۴۹ مورد exact، شش مورد در ۵ bps، ۲۵ مورد در ۲۵ bps، ۳۴ مورد در ۱۰۰ bps و ۲۶
+مورد بیرون ۱۰۰ bps بود. موارد بیرون ۱۰۰ bps به `HALF_BAHAR/TOMORROW`،
+`ONE_GRAM/TOMORROW` و `QUARTER_BAHAR/CASH` محدود بود. چهار ورودی فردایی private-gold در
+محصول قدیمی حدود ۱۷۱٬۷۰۳ تا ۱۷۲٬۰۰۶ ثانیه stale ولی در candidate تازه بود؛ بنابراین آن
+oracle برای value parity این book معتبر نیست.
+
+p95 فاصلهٔ دو snapshot برابر `20.707s` و p95 انتقال source تازه تا snapshot برابر
+`10.673s` بود و گیت هفت‌ثانیه‌ای این window را پاس نکرد. گزارش با mode `0600` در
+`/srv/trading-bot/staging-data/coin-intelligence/private-pipeline-shadow/backups-staging/stage13-post-backfill-input-20260827T0910Z-16d268c5.json`
+باقی ماند. نتیجهٔ رسمی همچنان `HOLD_FULL_OPEN_MARKET_SESSION_REQUIRED`،
+`full_market_session=false` و `cutover_performed=false` است.
+
+در postcheck دیسک، snapshotهای موقت point-in-time، tar موقت image و کپی محلی export پس از
+تایید hash و import حذف شدند؛ نسخهٔ rollback روی میزبان وب حفظ شد. فضای آزاد میزبان بات از
+۵۵۷ مگابایت به ۲٫۷ گیگابایت رسید. ۲۴ تست متمرکز backfill، adapter و timeline نیز داخل image
+با network خاموش پاس شد.
+
 ## failure drill و اصلاحات حین استقرار
 
 - قطع ۱۲ ثانیه‌ای Fact receiver باعث backlog موقت ۳۳تایی شد؛ پس از بازگشت، صف بدون

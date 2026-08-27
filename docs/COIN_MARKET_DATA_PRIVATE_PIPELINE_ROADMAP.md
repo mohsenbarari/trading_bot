@@ -1025,6 +1025,24 @@ Gate:
   باید point-in-time و دست‌کم در horizon هفت‌روزهٔ موتور نرخ به Store جدید backfill و سپس
   parser/lifecycle تک‌مالک و یک جلسه کامل بازار باز تکرار شود. recommendation همچنان
   `HOLD_FULL_OPEN_MARKET_SESSION_REQUIRED` و cutover برابر false است.
+- replay تک‌مالک بعدی با ۲٬۳۴۴ رکورد window، duplicate/partial-tail صفر و hash
+  `8002b89e4f5e27ee4ab48fa222a80582a141b89b584f3d5be17c44627bfd05f4` اجرا شد.
+  اختلاف‌های fact به cadence مصوب XAU و lifecycle private-gold محدود بود؛ دو parser mismatch
+  فقط در projection دقیقه‌ای private-gold ثبت شد و هیچ mismatch دو گروه سکه وجود نداشت. هر
+  ۱۴ rate برابر بود، اما XAU consumed-value و schema جدید همچنان gate را در HOLD نگه داشت.
+- backfill نقطه‌زمانی هفت‌روزه با ۳۵۶٬۱۴۸ revision در ۱۸۲ bundle و manifest SHA-256 برابر
+  `bb8c7b83d80fbd9e4e02aa9b3868ee570fc6cdd6c3f42c1d5fcebafcc2c58fa7` به staging
+  وارد شد. import و replay دوم idempotent، failed/quarantine/dead-letter صفر و outbox پس از
+  drain صفر بود؛ adapter/receiver روی ۱۰ stream بدون rejection یا duplicate باقی ماندند.
+- timeline پس از backfill هر ۱۴ rate را در هر ۱۰ نمونه و بدون presence mismatch ثبت کرد، پس
+  مشکل چهار خروجی مفقود رفع شد. بااین‌حال ۲۶ مورد از ۱۴۰ مقایسه بیرون ۱۰۰ bps بود؛ oracle
+  قدیمی private-gold حدود ۴۷٫۷ ساعت stale و candidate تازه بود. p95 انتقال `10.673s` نیز
+  گیت هفت‌ثانیه‌ای را پاس نکرد. گزارش امضاشده با hash
+  `42132dba8cee21050d095eed53418ac45790a58ce38be20c689dc3d58fa1141c`،
+  `HOLD_FULL_OPEN_MARKET_SESSION_REQUIRED` و `cutover_performed=false` ثبت شد.
+- snapshotها و image tar موقت پس از تایید import پاک شدند و backup/export محافظت‌شده روی
+  میزبان وب باقی ماند. staging در تمام عملیات `PRIVATE_SHADOW` بود؛ WebApp/product authority،
+  production و primary feed تغییر نکردند.
 
 رسید عملیاتی: [COIN_MARKET_DATA_STAGE13_STAGING_SHADOW.md](./COIN_MARKET_DATA_STAGE13_STAGING_SHADOW.md)
 
