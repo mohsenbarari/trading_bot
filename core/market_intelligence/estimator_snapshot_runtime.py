@@ -28,9 +28,10 @@ from .private_market_transport import (
 from .private_pipeline_contracts import (
     EstimatorInputHealthV1,
     EstimatorInputTraceV1,
-    EstimatorRateV1,
-    EstimatorSnapshotV1,
+    EstimatorRateV2,
+    EstimatorSnapshotV2,
     content_hash,
+    estimator_snapshot_id,
 )
 
 
@@ -38,11 +39,6 @@ ESTIMATOR_RUNTIME_SCHEMA = "coin_estimator_runtime/1.0"
 SNAPSHOT_SENDER_SCHEMA = "estimator_snapshot_sender/1.0"
 DEFAULT_INFERENCE_SECONDS = 5.0
 _CODE = re.compile(r"[^A-Z0-9_]+")
-_CONFIDENCE = {
-    "HIGH": 0.95,
-    "MEDIUM": 0.75,
-    "LOW_PAPER_FALLBACK": 0.55,
-}
 
 
 class EstimatorSnapshotRuntimeError(RuntimeError):
@@ -117,6 +113,24 @@ def _decimal_text(value: object | None) -> str | None:
     return rendered or "0"
 
 
+def _estimator_market_regime(value: object) -> str:
+    """Translate Product regime labels to the estimator wire vocabulary."""
+
+    normalized = str(value or "UNKNOWN").strip().upper()
+    try:
+        return {
+            "NORMAL": "RANGE",
+            "UP": "UP",
+            "DOWN": "DOWN",
+            "VOLATILE": "SHOCK",
+            "UNKNOWN": "UNKNOWN",
+        }[normalized]
+    except KeyError as exc:
+        raise EstimatorSnapshotRuntimeError(
+            "estimator_snapshot_market_regime_invalid"
+        ) from exc
+
+
 def initialize_estimator_state(connection: sqlite3.Connection) -> None:
     connection.executescript(
         """
@@ -139,10 +153,91 @@ def initialize_estimator_state(connection: sqlite3.Connection) -> None:
           last_reason_code TEXT,
           updated_at_utc TEXT NOT NULL
         );
-        INSERT OR IGNORE INTO estimator_snapshot_sender_state
-        VALUES(1,0,NULL,0,NULL,strftime('%Y-%m-%dT%H:%M:%SZ','now'));
+        CREATE TABLE IF NOT EXISTS estimator_snapshot_sender_transitions (
+          transition_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          from_feed_mode TEXT NOT NULL,
+          to_feed_mode TEXT NOT NULL,
+          snapshot_version INTEGER NOT NULL CHECK(snapshot_version>0),
+          snapshot_id TEXT NOT NULL,
+          transitioned_at_utc TEXT NOT NULL,
+          UNIQUE(to_feed_mode,snapshot_id)
+        );
+        INSERT OR IGNORE INTO estimator_snapshot_sender_state(
+          singleton,acknowledged_version,acknowledged_snapshot_id,
+          attempt_count,last_reason_code,updated_at_utc
+        ) VALUES(1,0,NULL,0,NULL,strftime('%Y-%m-%dT%H:%M:%SZ','now'));
         """
     )
+    publication_columns = {
+        str(row[1]) for row in connection.execute(
+            "PRAGMA table_info(estimator_snapshot_publications)"
+        )
+    }
+    for name, declaration in (
+        ("contract", "TEXT"),
+        ("quarantined_at_utc", "TEXT"),
+        ("quarantine_reason", "TEXT"),
+    ):
+        if name not in publication_columns:
+            connection.execute(
+                f"ALTER TABLE estimator_snapshot_publications "
+                f"ADD COLUMN {name} {declaration}"
+            )
+    sender_columns = {
+        str(row[1]) for row in connection.execute(
+            "PRAGMA table_info(estimator_snapshot_sender_state)"
+        )
+    }
+    for name in ("acknowledged_contract", "acknowledged_feed_mode"):
+        if name not in sender_columns:
+            connection.execute(
+                f"ALTER TABLE estimator_snapshot_sender_state ADD COLUMN {name} TEXT"
+            )
+
+    # Expand-only upgrade: preserve every historical row and its version, but
+    # prevent an incompatible or malformed pending V1 payload from blocking
+    # V2 publication forever.  Quarantined rows remain auditable and continue
+    # to hold the monotonic version floor.
+    pending_rows = connection.execute(
+        "SELECT snapshot_version,payload_json,contract,published_at_utc,"
+        "quarantined_at_utc FROM estimator_snapshot_publications"
+    ).fetchall()
+    for row in pending_rows:
+        contract = str(row["contract"] or "").strip()
+        malformed = False
+        if not contract:
+            try:
+                payload = json.loads(str(row["payload_json"]))
+                if not isinstance(payload, Mapping):
+                    raise TypeError("pending_payload_not_object")
+                contract = str(payload.get("contract") or "").strip()
+            except (TypeError, json.JSONDecodeError):
+                malformed = True
+                contract = "MALFORMED"
+            connection.execute(
+                "UPDATE estimator_snapshot_publications SET contract=? "
+                "WHERE snapshot_version=?",
+                (contract, int(row["snapshot_version"])),
+            )
+        if (
+            row["published_at_utc"] is None
+            and row["quarantined_at_utc"] is None
+            and contract != "estimator_snapshot/2.0"
+        ):
+            connection.execute(
+                "UPDATE estimator_snapshot_publications "
+                "SET quarantined_at_utc=?,quarantine_reason=? "
+                "WHERE snapshot_version=?",
+                (
+                    _stamp(),
+                    (
+                        "PENDING_PAYLOAD_MALFORMED"
+                        if malformed
+                        else "PENDING_CONTRACT_UNSUPPORTED"
+                    ),
+                    int(row["snapshot_version"]),
+                ),
+            )
     connection.commit()
 
 
@@ -229,7 +324,7 @@ def build_estimator_snapshot(
     snapshot_version: int,
     feed_mode: str,
     generated_at_utc: datetime | None = None,
-) -> EstimatorSnapshotV1:
+) -> EstimatorSnapshotV2:
     if feed_mode not in {"PRIVATE_SHADOW", "PRIVATE_PRIMARY"}:
         raise EstimatorSnapshotRuntimeError("estimator_snapshot_feed_mode_invalid")
     generated_at = _precise_utc(generated_at_utc or as_of_utc)
@@ -238,20 +333,47 @@ def build_estimator_snapshot(
     input_snapshot_hash = content_hash(
         [item.model_dump(mode="json") for item in traces]
     )
-    rates: list[EstimatorRateV1] = []
+    rates: list[EstimatorRateV2] = []
     for item in market["rates"]["items"]:
-        if item["status"] != "ESTIMATED":
-            continue
+        status = str(item["status"])
+        underlying_source = item.get("underlying_source")
+        reason = item.get("reason")
         rates.append(
-            EstimatorRateV1(
+            EstimatorRateV2(
                 instrument="COIN_" + str(item["commodity_code"]),
                 settlement=str(item["settlement_term"]),
-                value=str(item["estimated_project_price"]),
+                status=status,
+                value=(
+                    str(item["estimated_project_price"])
+                    if item["estimated_project_price"] is not None
+                    else None
+                ),
                 unit="PROJECT_THOUSAND_TOMAN",
-                lower_bound=str(item["lower_project_price"]),
-                upper_bound=str(item["upper_project_price"]),
-                confidence=_CONFIDENCE.get(str(item["confidence"]), 0.5),
+                lower_bound=(
+                    str(item["lower_project_price"])
+                    if item["lower_project_price"] is not None
+                    else None
+                ),
+                upper_bound=(
+                    str(item["upper_project_price"])
+                    if item["upper_project_price"] is not None
+                    else None
+                ),
+                confidence=str(item["confidence"]),
                 method=_code(item["method"], fallback="UNKNOWN_METHOD"),
+                reason_code=(
+                    _code(reason, fallback="NO_DATA_REASON_UNAVAILABLE")
+                    if status == "NO_DATA"
+                    else None
+                ),
+                underlying_source=(
+                    _code(underlying_source, fallback="UNKNOWN_SOURCE")
+                    if underlying_source is not None
+                    else None
+                ),
+                underlying_age_seconds=item.get("underlying_age_seconds"),
+                anchor_age_seconds=item.get("anchor_age_seconds"),
+                market_regime=_estimator_market_regime(item["market_regime"]),
             )
         )
     health = tuple(
@@ -264,9 +386,10 @@ def build_estimator_snapshot(
         )
         for trace in traces
     )
-    status = "OK" if rates else "SAFE_NO_DATA"
-    identity = {
-        "contract": "estimator_snapshot_identity/1.0",
+    estimated_count = sum(rate.status == "ESTIMATED" for rate in rates)
+    status = "OK" if estimated_count else "SAFE_NO_DATA"
+    payload = {
+        "contract": "estimator_snapshot/2.0",
         "snapshot_version": snapshot_version,
         "generated_at_utc": _precise_stamp(generated_at),
         "input_snapshot_hash": input_snapshot_hash,
@@ -276,20 +399,10 @@ def build_estimator_snapshot(
         "rates": [item.model_dump(mode="json") for item in rates],
         "health": [item.model_dump(mode="json") for item in health],
         "inputs": [item.model_dump(mode="json") for item in traces],
+        "reason_codes": ([] if estimated_count else ["NO_ESTIMATED_COIN_RATES"]),
     }
-    return EstimatorSnapshotV1(
-        contract="estimator_snapshot/1.0",
-        snapshot_id=content_hash(identity),
-        snapshot_version=snapshot_version,
-        generated_at_utc=generated_at,
-        input_snapshot_hash=input_snapshot_hash,
-        model_version=COIN_RATE_ENGINE_VERSION,
-        feed_mode=feed_mode,
-        status=status,
-        rates=tuple(rates),
-        health=health,
-        inputs=traces,
-        reason_codes=(() if rates else ("NO_ESTIMATED_COIN_RATES",)),
+    return EstimatorSnapshotV2.model_validate(
+        {**payload, "snapshot_id": estimator_snapshot_id(payload)}
     )
 
 
@@ -306,9 +419,20 @@ def publish_estimator_snapshot(
     state = sqlite3.connect(state_path)
     state.row_factory = sqlite3.Row
     initialize_estimator_state(state)
+    with state:
+        state.execute(
+            "UPDATE estimator_snapshot_publications "
+            "SET quarantined_at_utc=?,quarantine_reason='PENDING_FEED_MODE_MISMATCH' "
+            "WHERE published_at_utc IS NULL AND quarantined_at_utc IS NULL "
+            "AND contract='estimator_snapshot/2.0' AND feed_mode<>?",
+            (_stamp(), feed_mode),
+        )
     pending = state.execute(
         "SELECT * FROM estimator_snapshot_publications "
-        "WHERE published_at_utc IS NULL ORDER BY snapshot_version LIMIT 1"
+        "WHERE published_at_utc IS NULL AND quarantined_at_utc IS NULL "
+        "AND contract='estimator_snapshot/2.0' AND feed_mode=? "
+        "ORDER BY snapshot_version LIMIT 1",
+        (feed_mode,),
     ).fetchone()
     recovered = pending is not None
     if pending is None:
@@ -344,7 +468,11 @@ def publish_estimator_snapshot(
         payload_json = snapshot.model_dump_json()
         with state:
             state.execute(
-                "INSERT INTO estimator_snapshot_publications VALUES(?,?,?,?,?,?,NULL)",
+                "INSERT INTO estimator_snapshot_publications("
+                "snapshot_version,snapshot_id,feed_mode,input_snapshot_hash,"
+                "payload_json,created_at_utc,published_at_utc,contract,"
+                "quarantined_at_utc,quarantine_reason"
+                ") VALUES(?,?,?,?,?,?,NULL,'estimator_snapshot/2.0',NULL,NULL)",
                 (
                     version,
                     snapshot.snapshot_id,
@@ -356,7 +484,7 @@ def publish_estimator_snapshot(
             )
     else:
         payload_json = str(pending["payload_json"])
-        snapshot = EstimatorSnapshotV1.model_validate_json(payload_json)
+        snapshot = EstimatorSnapshotV2.model_validate_json(payload_json)
     try:
         atomic_json_write(Path(output_path), json.loads(payload_json))
         with state:
@@ -385,19 +513,33 @@ def send_latest_snapshot(
     *,
     snapshot_path: Path | str,
     state_path: Path | str,
+    expected_feed_mode: str,
     send: Callable[[Mapping[str, object]], tuple[int, Mapping[str, object]]],
 ) -> SnapshotSendResult:
-    snapshot = EstimatorSnapshotV1.model_validate_json(
+    snapshot = EstimatorSnapshotV2.model_validate_json(
         Path(snapshot_path).read_text(encoding="utf-8")
     )
+    if expected_feed_mode not in {"PRIVATE_SHADOW", "PRIVATE_PRIMARY"}:
+        raise EstimatorSnapshotRuntimeError("snapshot_sender_expected_feed_mode_invalid")
+    if snapshot.feed_mode != expected_feed_mode:
+        raise EstimatorSnapshotRuntimeError("snapshot_sender_artifact_feed_mode_mismatch")
     state = sqlite3.connect(state_path)
     state.row_factory = sqlite3.Row
     initialize_estimator_state(state)
     row = state.execute(
-        "SELECT acknowledged_version,acknowledged_snapshot_id "
+        "SELECT acknowledged_version,acknowledged_snapshot_id,"
+        "acknowledged_contract,acknowledged_feed_mode "
         "FROM estimator_snapshot_sender_state WHERE singleton=1"
     ).fetchone()
     acknowledged = int(row["acknowledged_version"])
+    acknowledged_contract = str(row["acknowledged_contract"] or "")
+    acknowledged_feed_mode = str(row["acknowledged_feed_mode"] or "")
+    if acknowledged and acknowledged_contract not in {
+        "",
+        "estimator_snapshot/2.0",
+    }:
+        state.close()
+        raise EstimatorSnapshotRuntimeError("snapshot_sender_contract_mismatch")
     if snapshot.snapshot_version < acknowledged:
         state.close()
         raise EstimatorSnapshotRuntimeError("snapshot_sender_version_regression")
@@ -434,11 +576,30 @@ def send_latest_snapshot(
         state.close()
         raise EstimatorSnapshotRuntimeError("snapshot_sender_ack_invalid")
     with state:
+        if acknowledged_feed_mode and acknowledged_feed_mode != snapshot.feed_mode:
+            state.execute(
+                "INSERT OR IGNORE INTO estimator_snapshot_sender_transitions("
+                "from_feed_mode,to_feed_mode,snapshot_version,snapshot_id,"
+                "transitioned_at_utc) VALUES(?,?,?,?,?)",
+                (
+                    acknowledged_feed_mode,
+                    snapshot.feed_mode,
+                    snapshot.snapshot_version,
+                    snapshot.snapshot_id,
+                    _stamp(),
+                ),
+            )
         state.execute(
             "UPDATE estimator_snapshot_sender_state SET acknowledged_version=?,"
             "acknowledged_snapshot_id=?,attempt_count=0,last_reason_code=NULL,"
-            "updated_at_utc=? WHERE singleton=1",
-            (snapshot.snapshot_version, snapshot.snapshot_id, _stamp()),
+            "updated_at_utc=?,acknowledged_contract='estimator_snapshot/2.0',"
+            "acknowledged_feed_mode=? WHERE singleton=1",
+            (
+                snapshot.snapshot_version,
+                snapshot.snapshot_id,
+                _stamp(),
+                snapshot.feed_mode,
+            ),
         )
     state.close()
     return SnapshotSendResult("ACKNOWLEDGED", snapshot.snapshot_id, snapshot.snapshot_version)
@@ -510,19 +671,35 @@ def run_estimator_snapshot_sender_service(
             "/var/lib/market-data/snapshots/latest-estimator-snapshot.json",
         )
     )
-    host = os.environ.get("MARKET_SNAPSHOT_RECEIVER_HOST", "").strip()
-    port = int(os.environ.get("MARKET_SNAPSHOT_RECEIVER_PORT", "9443"))
-    key_id = os.environ.get("MARKET_HMAC_ACTIVE_KEY_ID", "active-v1").strip()
-    hmac_key = read_key(
-        os.environ.get("MARKET_HMAC_ACTIVE_PATH", "/run/secrets/market_hmac_active")
-    )
-    tls = client_tls_context(
-        ca=os.environ.get("MARKET_TRANSPORT_CA_PATH", "/run/secrets/market_transport_ca"),
-        cert=os.environ.get("MARKET_TRANSPORT_CERT_PATH", "/run/secrets/market_bot_transport_cert"),
-        key=os.environ.get("MARKET_TRANSPORT_KEY_PATH", "/run/secrets/market_bot_transport_key"),
-    )
-    if feed_mode != "LEGACY" and not host:
-        raise EstimatorSnapshotRuntimeError("snapshot_sender_private_host_required")
+    host = ""
+    port = 9443
+    key_id = ""
+    hmac_key = b""
+    tls = None
+    if feed_mode != "LEGACY":
+        host = os.environ.get("MARKET_SNAPSHOT_RECEIVER_HOST", "").strip()
+        port = int(os.environ.get("MARKET_SNAPSHOT_RECEIVER_PORT", "9443"))
+        key_id = os.environ.get("MARKET_HMAC_ACTIVE_KEY_ID", "active-v1").strip()
+        hmac_key = read_key(
+            os.environ.get(
+                "MARKET_HMAC_ACTIVE_PATH", "/run/secrets/market_hmac_active"
+            )
+        )
+        tls = client_tls_context(
+            ca=os.environ.get(
+                "MARKET_TRANSPORT_CA_PATH", "/run/secrets/market_transport_ca"
+            ),
+            cert=os.environ.get(
+                "MARKET_TRANSPORT_CERT_PATH",
+                "/run/secrets/market_bot_transport_cert",
+            ),
+            key=os.environ.get(
+                "MARKET_TRANSPORT_KEY_PATH",
+                "/run/secrets/market_bot_transport_key",
+            ),
+        )
+        if not host:
+            raise EstimatorSnapshotRuntimeError("snapshot_sender_private_host_required")
     started = _stamp()
     latest = SnapshotSendResult("IDLE", None, 0)
     failures = 0
@@ -532,6 +709,7 @@ def run_estimator_snapshot_sender_service(
                 latest = send_latest_snapshot(
                     snapshot_path=snapshot_path,
                     state_path=state_directory / "sender-state.sqlite3",
+                    expected_feed_mode=feed_mode,
                     send=lambda document: post_document(
                         host=host,
                         port=port,
@@ -546,6 +724,9 @@ def run_estimator_snapshot_sender_service(
                 failures = 0
             except (EstimatorSnapshotRuntimeError, MarketTransportError, OSError):
                 failures += 1
+        elif feed_mode != "LEGACY":
+            failures += 1
+            latest = SnapshotSendResult("SNAPSHOT_MISSING", None, 0)
         atomic_json_write(
             state_directory / "health.json",
             {

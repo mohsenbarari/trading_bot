@@ -7,13 +7,16 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from core.market_intelligence.private_pipeline_contracts import (
+    ESTIMATOR_RATE_GRID_V1,
     EstimatorSnapshotV1,
+    EstimatorSnapshotV2,
     MarketCaptureRecordV1,
     MarketFactBatchV1,
     MarketFactDeliveryV1,
     MarketFactV1,
     batch_items_hash,
     content_hash,
+    estimator_snapshot_id,
     exported_schemas,
     load_source_registry,
 )
@@ -27,12 +30,52 @@ def fixture(name):
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
 
+def estimator_snapshot_fixture():
+    rates = []
+    for index, (instrument, settlement) in enumerate(ESTIMATOR_RATE_GRID_V1):
+        center = 187_450 - index * 5_000
+        rates.append(
+            {
+                "instrument": instrument,
+                "settlement": settlement,
+                "status": "ESTIMATED",
+                "value": str(center),
+                "unit": "PROJECT_THOUSAND_TOMAN",
+                "lower_bound": str(center - 500),
+                "upper_bound": str(center + 500),
+                "confidence": "HIGH",
+                "method": "WEIGHTED_BOOK",
+                "reason_code": None,
+                "underlying_source": "PRIVATE_PHYSICAL_TODAY",
+                "underlying_age_seconds": 4.0,
+                "anchor_age_seconds": 30.0,
+                "market_regime": "RANGE",
+            }
+        )
+    payload = {
+        "contract": "estimator_snapshot/2.0",
+        "snapshot_version": 1,
+        "generated_at_utc": "2026-08-26T05:00:05Z",
+        "input_snapshot_hash": content_hash([]),
+        "model_version": "fixture-model-v1",
+        "feed_mode": "PRIVATE_SHADOW",
+        "status": "OK",
+        "rates": rates,
+        "health": [],
+        "inputs": [],
+        "reason_codes": [],
+    }
+    payload["snapshot_id"] = estimator_snapshot_id(payload)
+    return payload
+
+
 class MarketPrivatePipelineContractTests(unittest.TestCase):
     def test_fixture_contracts_and_exported_schemas_are_current(self):
         MarketCaptureRecordV1.model_validate(fixture("capture_record.json"))
         MarketFactV1.model_validate(fixture("market_fact.json"))
         MarketFactBatchV1.model_validate(fixture("market_fact_batch.json"))
         EstimatorSnapshotV1.model_validate(fixture("estimator_snapshot.json"))
+        EstimatorSnapshotV2.model_validate(estimator_snapshot_fixture())
 
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
@@ -183,10 +226,23 @@ class MarketPrivatePipelineContractTests(unittest.TestCase):
         )
 
     def test_safe_no_data_cannot_carry_rates(self):
-        snapshot = fixture("estimator_snapshot.json")
+        snapshot = estimator_snapshot_fixture()
         snapshot["status"] = "SAFE_NO_DATA"
         with self.assertRaises(ValidationError):
-            EstimatorSnapshotV1.model_validate(snapshot)
+            EstimatorSnapshotV2.model_validate(snapshot)
+
+    def test_v1_and_v2_reject_cross_version_documents(self):
+        legacy = fixture("estimator_snapshot.json")
+        current = estimator_snapshot_fixture()
+        with self.assertRaises(ValidationError):
+            EstimatorSnapshotV2.model_validate(legacy)
+        with self.assertRaises(ValidationError):
+            EstimatorSnapshotV1.model_validate(current)
+
+    def test_v1_keeps_its_published_toman_per_coin_unit(self):
+        legacy = fixture("estimator_snapshot.json")
+        legacy["rates"][0]["unit"] = "TOMAN_PER_COIN"
+        EstimatorSnapshotV1.model_validate(legacy)
 
 
 if __name__ == "__main__":

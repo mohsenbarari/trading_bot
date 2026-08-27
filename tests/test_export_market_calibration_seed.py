@@ -121,10 +121,17 @@ class ExportMarketCalibrationSeedTests(unittest.TestCase):
             )
             self.assertEqual(
                 prediction.execute(
-                    "SELECT model_id,commodity,estimated_price_toman "
+                    "SELECT model_id,commodity,estimated_price_toman,authority_epoch "
                     "FROM coin_estimate_predictions"
                 ).fetchone(),
-                ("MAIN_ONLINE", "امام", 188000000),
+                ("MAIN_ONLINE", "امام", 188000000, "LEGACY_BASELINE"),
+            )
+            self.assertEqual(
+                prediction.execute(
+                    "SELECT active_epoch,active_feed_mode "
+                    "FROM coin_estimate_prediction_authority"
+                ).fetchone(),
+                ("LEGACY_BASELINE", "LEGACY_BASELINE"),
             )
         finally:
             feedback.close()
@@ -141,6 +148,95 @@ class ExportMarketCalibrationSeedTests(unittest.TestCase):
                 destination_root=Path("/tmp/market-calibration-export"),
                 as_of=datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc),
             )
+
+    def test_authority_aware_primary_source_is_never_relabelled_as_legacy(self) -> None:
+        predictions = sqlite3.connect(self.predictions)
+        try:
+            predictions.execute(
+                "ALTER TABLE coin_estimate_predictions ADD COLUMN authority_epoch TEXT"
+            )
+            predictions.execute(
+                "UPDATE coin_estimate_predictions SET authority_epoch='PRIVATE_PRIMARY:model-v1'"
+            )
+            predictions.execute(
+                "CREATE TABLE coin_estimate_prediction_authority("
+                "singleton INTEGER PRIMARY KEY,active_epoch TEXT NOT NULL,"
+                "active_feed_mode TEXT NOT NULL,updated_at_utc TEXT NOT NULL)"
+            )
+            predictions.execute(
+                "INSERT INTO coin_estimate_prediction_authority VALUES(1,?,?,?)",
+                (
+                    "PRIVATE_PRIMARY:model-v1",
+                    "PRIVATE_PRIMARY",
+                    "2026-08-26T11:00:00Z",
+                ),
+            )
+            predictions.commit()
+        finally:
+            predictions.close()
+
+        with self.assertRaisesRegex(
+            CalibrationSeedError, "calibration_prediction_authority_not_legacy"
+        ):
+            export_seed(
+                feedback_source=self.feedback,
+                prediction_source=self.predictions,
+                destination_root=self.destination,
+                as_of=datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc),
+            )
+
+    def test_authority_aware_export_filters_primary_and_namespaces_seed_ids(self) -> None:
+        predictions = sqlite3.connect(self.predictions)
+        try:
+            predictions.execute(
+                "ALTER TABLE coin_estimate_predictions ADD COLUMN authority_epoch TEXT"
+            )
+            predictions.execute(
+                "UPDATE coin_estimate_predictions SET authority_epoch='LEGACY_BASELINE'"
+            )
+            predictions.execute(
+                "INSERT INTO coin_estimate_predictions VALUES(?,?,?,?,?,?,?,?,?)",
+                (
+                    4,
+                    "2026-08-26T10:10:00Z",
+                    "2026-08-26T10:10:01Z",
+                    "MAIN_ONLINE",
+                    "امام",
+                    "CASH",
+                    999_000_000,
+                    "private",
+                    "PRIVATE_PRIMARY:model-v1",
+                ),
+            )
+            predictions.execute(
+                "CREATE TABLE coin_estimate_prediction_authority("
+                "singleton INTEGER PRIMARY KEY,active_epoch TEXT NOT NULL,"
+                "active_feed_mode TEXT NOT NULL,updated_at_utc TEXT NOT NULL)"
+            )
+            predictions.execute(
+                "INSERT INTO coin_estimate_prediction_authority VALUES(1,?,?,?)",
+                ("LEGACY_BASELINE", "LEGACY_BASELINE", "2026-08-26T11:00:00Z"),
+            )
+            predictions.commit()
+        finally:
+            predictions.close()
+
+        receipt = export_seed(
+            feedback_source=self.feedback,
+            prediction_source=self.predictions,
+            destination_root=self.destination,
+            as_of=datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc),
+        )
+        self.assertEqual(receipt["prediction_rows"], 1)
+        exported = sqlite3.connect(self.destination / "prediction-ledger.sqlite3")
+        try:
+            row = exported.execute(
+                "SELECT id,estimated_price_toman,authority_epoch "
+                "FROM coin_estimate_predictions"
+            ).fetchone()
+        finally:
+            exported.close()
+        self.assertEqual(row, (-1, 188_000_000, "LEGACY_BASELINE"))
 
 
 if __name__ == "__main__":

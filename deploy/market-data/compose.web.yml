@@ -193,9 +193,11 @@ services:
       - type: bind
         source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/calibration/coin-groups
         target: /var/lib/market-data/calibration/coin-groups
-        # prediction-ledger.sqlite3 is updated by the snapshot receiver in WAL
-        # mode. The processor needs directory write access only for SQLite's
-        # shared-memory sidecar; both calibration connections remain mode=ro.
+        # prediction-ledger.sqlite3 is updated only for explicitly promoted
+        # PRIVATE_PRIMARY snapshots; Shadow snapshots never feed parser
+        # anchors. The processor needs directory write access only for
+        # SQLite's shared-memory sidecar; both calibration connections remain
+        # mode=ro.
         read_only: false
     depends_on:
       market-migration:
@@ -257,6 +259,9 @@ services:
       MARKET_PIPELINE_LISTEN_HOST: 0.0.0.0
       MARKET_PIPELINE_LISTEN_PORT: "9443"
       MARKET_PIPELINE_ALLOWED_PEER_IP: ${MARKET_BOT_PRIVATE_IP:?MARKET_BOT_PRIVATE_IP is required}
+      MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY: ${MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY:-0}
+      MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE: ${MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE:-PRIVATE_SHADOW}
+      MARKET_PIPELINE_SNAPSHOT_STALE_AFTER_SECONDS: ${MARKET_PIPELINE_SNAPSHOT_STALE_AFTER_SECONDS:-30}
       MARKET_PIPELINE_SNAPSHOT_ROOT: /var/lib/market-data/snapshots
       MARKET_PIPELINE_CALIBRATION_ROOT: /var/lib/market-data/calibration/coin-groups
     secrets:

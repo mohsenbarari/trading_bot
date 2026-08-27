@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
 import math
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Mapping
 
 if TYPE_CHECKING:
@@ -19,9 +20,11 @@ if TYPE_CHECKING:
 
 from core.market_intelligence.coin_inference import CANONICAL_COMMODITY_NAMES
 from core.market_intelligence.market_contracts import normalize_utc
-from core.market_intelligence.market_snapshot import (
-    AtomicMarketSnapshotProvider,
-    MarketSnapshotUnavailable,
+from core.market_intelligence.market_snapshot import AtomicMarketSnapshotProvider
+from core.market_intelligence.product_snapshot_reader import (
+    ProductSnapshotReader,
+    ProductSnapshotUnavailable,
+    configured_product_snapshot_authority_path,
 )
 from core.offer_settlement import normalize_settlement_type
 
@@ -104,6 +107,24 @@ def _observe(decision: OfferModelPriceGuardDecision) -> OfferModelPriceGuardDeci
         settlement=decision.settlement_term or "unknown",
     )
     return decision
+
+
+@lru_cache(maxsize=16)
+def _product_snapshot_reader(
+    legacy_path: str,
+    private_shadow_path: str,
+    private_primary_path: str,
+    mode: str,
+    maximum_age_seconds: int,
+) -> ProductSnapshotReader:
+    return ProductSnapshotReader(
+        legacy_path=legacy_path,
+        private_shadow_path=private_shadow_path or None,
+        private_primary_path=private_primary_path or None,
+        mode=mode,
+        maximum_age_seconds=maximum_age_seconds,
+        legacy_provider_factory=AtomicMarketSnapshotProvider,
+    )
 
 
 def _utc(value: datetime | str, *, field_name: str) -> datetime:
@@ -352,9 +373,7 @@ async def evaluate_offer_model_price_guard(
 
     if not bool(getattr(runtime_settings, "offer_model_price_guard_enabled", False)):
         return _abstain("FEATURE_DISABLED")
-    snapshot_path = str(
-        getattr(runtime_settings, "coin_intelligence_inference_snapshot_path", "") or ""
-    ).strip()
+    snapshot_path = configured_product_snapshot_authority_path(runtime_settings)
     if not snapshot_path:
         return _observe(_abstain("SNAPSHOT_PATH_UNCONFIGURED"))
 
@@ -363,12 +382,42 @@ async def evaluate_offer_model_price_guard(
     commodity = await db.get(Commodity, int(commodity_id))
     if commodity is None:
         return _observe(_abstain("COMMODITY_NOT_FOUND"))
-    try:
-        snapshot = AtomicMarketSnapshotProvider(snapshot_path).load()
-    except MarketSnapshotUnavailable:
-        return _observe(_abstain("SNAPSHOT_UNAVAILABLE"))
-
     current_time = now_utc or datetime.now(timezone.utc)
+    maximum_age = int(
+        getattr(
+            runtime_settings,
+            "offer_model_price_guard_max_snapshot_age_seconds",
+            OFFER_MODEL_PRICE_GUARD_DEFAULT_MAXIMUM_SNAPSHOT_AGE_SECONDS,
+        )
+    )
+    try:
+        snapshot = _product_snapshot_reader(
+            snapshot_path,
+            str(
+                getattr(
+                    runtime_settings,
+                    "product_estimator_private_shadow_snapshot_path",
+                    "",
+                )
+                or ""
+            ).strip(),
+            str(
+                getattr(
+                    runtime_settings,
+                    "product_estimator_private_primary_snapshot_path",
+                    "",
+                )
+                or ""
+            ).strip(),
+            str(
+                getattr(runtime_settings, "product_estimator_snapshot_mode", "LEGACY")
+                or "LEGACY"
+            ),
+            maximum_age,
+        ).load(now_utc=current_time).snapshot
+    except ProductSnapshotUnavailable as exc:
+        return _observe(_abstain(exc.reason_code))
+
     evaluation = market_evaluation
     if evaluation is None:
         schedule_evaluator = evaluate_current_market_schedule
@@ -387,13 +436,6 @@ async def evaluate_offer_model_price_guard(
                 exc_info=True,
             )
             return _observe(_abstain("MARKET_SCHEDULE_UNAVAILABLE"))
-    maximum_age = int(
-        getattr(
-            runtime_settings,
-            "offer_model_price_guard_max_snapshot_age_seconds",
-            OFFER_MODEL_PRICE_GUARD_DEFAULT_MAXIMUM_SNAPSHOT_AGE_SECONDS,
-        )
-    )
     market_opened_at = None
     if bool(getattr(evaluation, "is_open", False)):
         market_opened_at = getattr(evaluation, "current_transition_at", None)

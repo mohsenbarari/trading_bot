@@ -77,6 +77,7 @@ class CoinInferencePreviewApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((result.status, result.candidates[0].commodity_id, db.commits, db.rollbacks), ("AUTO_SELECT", 71, 1, 0))
         observe.assert_awaited_once()
         self.assertEqual(observe.await_args.kwargs["source_surface"], "WEBAPP")
+        self.assertEqual(observe.await_args.kwargs["snapshot_reader"].mode, "LEGACY")
         self.assertRegex(result.decision_key, r"^[a-f0-9]{64}$")
 
     async def test_valid_abstention_is_returned_not_replaced_by_default_imam(self) -> None:

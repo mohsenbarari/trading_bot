@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hashlib
 import json
@@ -16,8 +16,9 @@ from .estimator_snapshot_receiver import (
     SNAPSHOT_RECEIVER_SCHEMA,
     EstimatorSnapshotReceiverError,
     apply_estimator_snapshot,
+    compact_snapshot_receiver,
     connect_snapshot_receiver,
-    read_web_snapshot_view,
+    read_published_web_snapshot_view,
     record_snapshot_rejection,
     snapshot_receiver_metrics,
 )
@@ -39,6 +40,15 @@ class EstimatorSnapshotReceiverServiceError(RuntimeError):
     """Safe service failure."""
 
 
+def _health_status(metrics: Mapping[str, object]) -> str:
+    readiness = str(metrics.get("snapshot_readiness") or "INVALID")
+    if readiness == "READY":
+        return "live-ready"
+    if readiness in {"MISSING", "PENDING"}:
+        return "live-starting"
+    return "live-degraded"
+
+
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -53,6 +63,9 @@ class _Server(ThreadingHTTPServer):
         events_path: Path,
         allowed_peer_ip: str,
         keys: Mapping[str, bytes],
+        allow_private_primary: bool,
+        expected_lane: str,
+        stale_after_seconds: int,
     ) -> None:
         self.database_path = database_path
         self.snapshot_root = snapshot_root
@@ -60,6 +73,9 @@ class _Server(ThreadingHTTPServer):
         self.events_path = events_path
         self.allowed_peer_ip = allowed_peer_ip
         self.keys = dict(keys)
+        self.allow_private_primary = bool(allow_private_primary)
+        self.expected_lane = expected_lane
+        self.stale_after_seconds = int(stale_after_seconds)
         super().__init__(address, _Handler)
 
 
@@ -102,10 +118,15 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == HEALTH_PATH:
             connection = connect_snapshot_receiver(self.receiver.database_path)
             try:
-                metrics = snapshot_receiver_metrics(connection)
+                metrics = snapshot_receiver_metrics(
+                    connection,
+                    expected_lane=self.receiver.expected_lane,
+                    stale_after_seconds=self.receiver.stale_after_seconds,
+                    snapshot_root=self.receiver.snapshot_root,
+                )
             finally:
                 connection.close()
-            self._respond(200, {"status": "live-ready", **metrics})
+            self._respond(200, {"status": _health_status(metrics), **metrics})
             return
         if self.path.startswith(SNAPSHOT_CURRENT_PATH):
             lane = (
@@ -119,7 +140,15 @@ class _Handler(BaseHTTPRequestHandler):
                 else "latest-private-shadow.json"
             )
             try:
-                view = read_web_snapshot_view(self.receiver.snapshot_root / filename)
+                connection = connect_snapshot_receiver(self.receiver.database_path)
+                try:
+                    view = read_published_web_snapshot_view(
+                        connection,
+                        self.receiver.snapshot_root / filename,
+                        feed_mode=lane,
+                    )
+                finally:
+                    connection.close()
             except EstimatorSnapshotReceiverError:
                 self._respond(503, {"status": "UNAVAILABLE", "reason_code": "SNAPSHOT_MISSING"})
                 return
@@ -175,6 +204,7 @@ class _Handler(BaseHTTPRequestHandler):
                 snapshot_root=self.receiver.snapshot_root,
                 publication_events_path=self.receiver.events_path,
                 prediction_ledger_path=self.receiver.prediction_ledger_path,
+                allow_private_primary=self.receiver.allow_private_primary,
             )
             if status != 200:
                 record_snapshot_rejection(
@@ -197,6 +227,39 @@ def run_estimator_snapshot_receiver_service(
     peer = os.environ.get("MARKET_PIPELINE_ALLOWED_PEER_IP", "").strip()
     if not peer:
         raise EstimatorSnapshotReceiverServiceError("snapshot_receiver_peer_required")
+    primary_setting = os.environ.get(
+        "MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY", "0"
+    ).strip()
+    if primary_setting not in {"0", "1"}:
+        raise EstimatorSnapshotReceiverServiceError(
+            "snapshot_receiver_primary_authority_invalid"
+        )
+    allow_private_primary = primary_setting == "1"
+    expected_lane = os.environ.get(
+        "MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE", "PRIVATE_SHADOW"
+    ).strip().upper()
+    if expected_lane not in {"PRIVATE_SHADOW", "PRIVATE_PRIMARY"}:
+        raise EstimatorSnapshotReceiverServiceError(
+            "snapshot_receiver_expected_lane_invalid"
+        )
+    if expected_lane == "PRIVATE_PRIMARY" and not allow_private_primary:
+        raise EstimatorSnapshotReceiverServiceError(
+            "snapshot_receiver_primary_lane_not_authorized"
+        )
+    try:
+        stale_after_seconds = int(
+            os.environ.get(
+                "MARKET_PIPELINE_SNAPSHOT_STALE_AFTER_SECONDS", "30"
+            )
+        )
+    except ValueError as exc:
+        raise EstimatorSnapshotReceiverServiceError(
+            "snapshot_receiver_stale_after_invalid"
+        ) from exc
+    if not 1 <= stale_after_seconds <= 900:
+        raise EstimatorSnapshotReceiverServiceError(
+            "snapshot_receiver_stale_after_invalid"
+        )
     snapshot_root = Path(
         os.environ.get("MARKET_PIPELINE_SNAPSHOT_ROOT", "/var/lib/market-data/snapshots")
     )
@@ -235,19 +298,39 @@ def run_estimator_snapshot_receiver_service(
         events_path=state_directory / "snapshot-publication-events.jsonl",
         allowed_peer_ip=peer,
         keys=keys,
+        allow_private_primary=allow_private_primary,
+        expected_lane=expected_lane,
+        stale_after_seconds=stale_after_seconds,
     )
     server.socket = tls.wrap_socket(server.socket, server_side=True)
     server.timeout = 0.25
     from .private_pipeline_foundation import atomic_json_write
 
     started = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    next_compaction_at = datetime.min.replace(tzinfo=timezone.utc)
+    retention: Mapping[str, int] = {}
     try:
         while not stop.is_set():
+            observed_at = datetime.now(timezone.utc)
             connection = connect_snapshot_receiver(database_path)
             try:
-                metrics = snapshot_receiver_metrics(connection)
+                if observed_at >= next_compaction_at:
+                    retention = compact_snapshot_receiver(
+                        connection, now_utc=observed_at
+                    )
+                    next_compaction_at = observed_at.replace(microsecond=0) + timedelta(
+                        minutes=1
+                    )
+                metrics = snapshot_receiver_metrics(
+                    connection,
+                    now_utc=observed_at,
+                    expected_lane=expected_lane,
+                    stale_after_seconds=stale_after_seconds,
+                    snapshot_root=snapshot_root,
+                )
             finally:
                 connection.close()
+            health_status = _health_status(metrics)
             atomic_json_write(
                 state_directory / "health.json",
                 {
@@ -257,9 +340,11 @@ def run_estimator_snapshot_receiver_service(
                     "release_sha": release_sha,
                     "pid": os.getpid(),
                     "started_at_utc": started,
-                    "updated_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                    "status": "live-ready",
+                    "updated_at_utc": observed_at.isoformat().replace("+00:00", "Z"),
+                    "status": health_status,
                     "private_transport_only": True,
+                    "private_primary_allowed": allow_private_primary,
+                    "retention": dict(retention),
                     **metrics,
                 },
             )

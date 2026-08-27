@@ -22,21 +22,22 @@ from .market_history_backfill import (
 )
 from .market_history_export import (
     EXPORT_CONTRACT,
+    MAX_BUNDLE_BYTES,
+    MAX_BUNDLES,
+    MAX_MANIFEST_BYTES,
     MarketHistoryExportError,
     export_market_history,
 )
 from .private_pipeline_contracts import content_hash
 
 
-MAX_MANIFEST_BYTES = 4 * 1024 * 1024
-MAX_BUNDLE_BYTES = 64 * 1024 * 1024
-MAX_BUNDLES = 4_096
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 BUNDLE_NAME_PATTERN = re.compile(
     r"^[a-z][a-z0-9_]{2,63}-[0-9]{4}-[0-9a-f]{16}\.json$"
 )
 STAGING_PROJECT = "market-private-pipeline-stage13-shadow"
 PROTECTED_EXPORT_CONFIRMATION = "WRITE_PROTECTED_HISTORY_EXPORT"
+MEMORY_FILESYSTEM_TYPES = frozenset({"tmpfs", "ramfs", "devtmpfs"})
 
 
 class MarketHistoryOperationError(RuntimeError):
@@ -50,6 +51,45 @@ class ValidatedExport:
     bundle_count: int
     source_counts: dict[str, int]
     bundle_paths: tuple[Path, ...]
+
+
+def _mount_path(value: str) -> Path:
+    decoded = value
+    for escaped, plain in (
+        ("\\040", " "),
+        ("\\011", "\t"),
+        ("\\012", "\n"),
+        ("\\134", "\\"),
+    ):
+        decoded = decoded.replace(escaped, plain)
+    return Path(decoded)
+
+
+def _filesystem_type(path: Path) -> str:
+    """Resolve the Linux mount backing ``path``; fail closed if unknown."""
+
+    resolved = path.resolve(strict=False)
+    try:
+        lines = Path("/proc/self/mountinfo").read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as exc:
+        raise MarketHistoryOperationError(
+            "history_operation_temporary_filesystem_unverified"
+        ) from exc
+    matches: list[tuple[int, str]] = []
+    for line in lines:
+        try:
+            before, after = line.split(" - ", 1)
+            mount = _mount_path(before.split()[4]).resolve(strict=False)
+            filesystem = after.split()[0]
+        except (IndexError, ValueError, OSError):
+            continue
+        if resolved == mount or mount in resolved.parents:
+            matches.append((len(mount.parts), filesystem))
+    if not matches:
+        raise MarketHistoryOperationError(
+            "history_operation_temporary_filesystem_unverified"
+        )
+    return max(matches)[1]
 
 
 def _read_json(path: Path, *, maximum_bytes: int) -> dict[str, Any]:
@@ -264,6 +304,17 @@ def _verify_staging_guard(backup_receipt: Path, confirmation: str) -> None:
 
 def _run_export(args: argparse.Namespace) -> dict[str, Any]:
     output = Path(args.output_directory) if args.output_directory else None
+    temporary_directory = Path(args.temporary_directory)
+    resolved_temporary_directory = temporary_directory.resolve()
+    if (
+        resolved_temporary_directory == Path("/tmp")
+        or Path("/tmp") in resolved_temporary_directory.parents
+        or _filesystem_type(resolved_temporary_directory)
+        in MEMORY_FILESYSTEM_TYPES
+    ):
+        raise MarketHistoryOperationError(
+            "history_operation_tmpfs_temporary_directory_forbidden"
+        )
     if output is not None and args.confirm_protected_output != PROTECTED_EXPORT_CONFIRMATION:
         raise MarketHistoryOperationError("history_operation_export_confirmation_invalid")
     if args.exclusion_store is None:
@@ -271,6 +322,7 @@ def _run_export(args: argparse.Namespace) -> dict[str, Any]:
     report = export_market_history(
         source_store=Path(args.source_store),
         exclusion_store=Path(args.exclusion_store),
+        temporary_directory=temporary_directory,
         source_codes=args.source,
         window_start_utc=args.window_start_utc,
         window_end_utc=args.window_end_utc,
@@ -380,6 +432,7 @@ def build_parser() -> argparse.ArgumentParser:
     export = subparsers.add_parser("export")
     export.add_argument("--source-store", required=True)
     export.add_argument("--exclusion-store", required=True)
+    export.add_argument("--temporary-directory", required=True)
     export.add_argument("--source", action="append", required=True)
     export.add_argument("--window-start-utc", required=True)
     export.add_argument("--window-end-utc", required=True)

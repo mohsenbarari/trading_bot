@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
@@ -20,8 +21,14 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.market_intelligence.private_pipeline_contracts import content_hash
+from core.market_intelligence.coin_rate_engine import COIN_SPECS
 from core.market_intelligence.shadow_parity import (
+    CAPTURE_SOURCE_INVENTORY,
+    FAILURE_DRILLS,
+    FALLBACK_CAPTURE_SOURCES,
+    capture_manifest_hash,
     compare_shadow_lanes,
+    feature_evidence_snapshot_hash,
     sign_parity_report,
     verify_parity_report,
     write_private_json,
@@ -33,6 +40,8 @@ class Stage12RehearsalError(RuntimeError):
 
 
 START = datetime(2026, 8, 26, 5, 0, tzinfo=timezone.utc)
+END = START + timedelta(hours=2)
+SESSION_ID = "STAGE12_OFFLINE_REHEARSAL"
 MODEL_HASH = sha256(b"stage12-same-model-artifact").hexdigest()
 
 
@@ -110,11 +119,16 @@ def _lane(role: str, count: int) -> dict[str, Any]:
     )
     captures: list[dict[str, Any]] = []
     facts: list[dict[str, Any]] = []
+    features: list[dict[str, Any]] = []
+    estimates: list[dict[str, Any]] = []
+    snapshot_versions: list[dict[str, Any]] = []
     for index in range(count):
         key = f"{index + 1:064x}"
-        occurred = START + timedelta(seconds=index)
+        offset = (int((END - START).total_seconds()) - 6) * index // max(1, count - 1)
+        occurred = START + timedelta(seconds=offset)
         available = occurred + timedelta(milliseconds=20)
         dimensions = _dimensions(index)
+        snapshot_at = occurred + timedelta(seconds=4 + (index % 20) / 10)
         captures.append(
             {
                 "event_key": key,
@@ -137,60 +151,135 @@ def _lane(role: str, count: int) -> dict[str, Any]:
                 "available_at_utc": available.isoformat(),
                 "parsed_at_utc": (occurred + timedelta(milliseconds=100)).isoformat(),
                 "transferred_at_utc": (occurred + timedelta(milliseconds=250)).isoformat(),
-                "next_snapshot_at_utc": (
-                    occurred + timedelta(seconds=4 + (index % 20) / 10)
-                ).isoformat(),
+                "next_snapshot_at_utc": snapshot_at.isoformat(),
             }
         )
-    evaluation = START + timedelta(seconds=count + 10)
-    features = [
+        snapshot_versions.append(
+            {
+                "snapshot_version": index + 1,
+                "evaluation_at_utc": snapshot_at.isoformat(),
+            }
+        )
+        snapshot_features = [
+            {
+                "evaluation_at_utc": snapshot_at.isoformat(),
+                "component": "XAUUSD",
+                "point_value": "3400.25",
+                "mean_value": "3400.20",
+                "unit": "USD_PER_TROY_OUNCE",
+                "sample_count": 8,
+                "source_event_key": key,
+                "freshness": "FRESH",
+            },
+            {
+                "evaluation_at_utc": snapshot_at.isoformat(),
+                "component": "USDT_IRT",
+                "point_value": "96000",
+                "mean_value": "95990",
+                "unit": "TOMAN_PER_USDT",
+                "sample_count": 9,
+                "source_event_key": key,
+                "freshness": "FRESH",
+            },
+        ]
+        features.extend(snapshot_features)
+        input_hash = feature_evidence_snapshot_hash(snapshot_features)
+        for rate_index, instrument in enumerate(COIN_SPECS):
+            for settlement in ("CASH", "TOMORROW"):
+                no_data = instrument == "ONE_GRAM" and settlement == "TOMORROW"
+                center = 188_700 + rate_index * 100
+                estimates.append(
+                    {
+                        "evaluation_at_utc": snapshot_at.isoformat(),
+                        "model_artifact_hash": MODEL_HASH,
+                        "input_snapshot_hash": input_hash,
+                        "instrument": "COIN_" + instrument,
+                        "settlement": settlement,
+                        "status": "NO_DATA" if no_data else "ESTIMATED",
+                        "value": None if no_data else str(center),
+                        "lower_bound": None if no_data else str(center - 700),
+                        "upper_bound": None if no_data else str(center + 300),
+                        "reason_code": "NO_SAFE_ANCHOR" if no_data else None,
+                        "unit": "PROJECT_THOUSAND_TOMAN",
+                        "confidence": "NONE" if no_data else "HIGH",
+                        "method": "NO_SAFE_ANCHOR" if no_data else "WEIGHTED_BOOK",
+                        "underlying_source": (
+                            None if no_data else "PRIVATE_PHYSICAL_TODAY"
+                        ),
+                        "underlying_age_seconds": None if no_data else 1.0,
+                        "anchor_age_seconds": None if no_data else 30.0,
+                        "market_regime": "NORMAL",
+                    }
+                )
+    capture_counts = Counter(item["source_code"] for item in captures)
+    capture_inventory = [
         {
-            "evaluation_at_utc": evaluation.isoformat(),
-            "component": "XAUUSD",
-            "point_value": "3400.25",
-            "mean_value": "3400.20",
-            "unit": "USD_PER_TROY_OUNCE",
-            "sample_count": 8,
-            "source_event_key": f"{5:064x}",
-            "freshness": "FRESH",
-        },
-        {
-            "evaluation_at_utc": evaluation.isoformat(),
-            "component": "USDT_IRT",
-            "point_value": "96000",
-            "mean_value": "95990",
-            "unit": "TOMAN_PER_USDT",
-            "sample_count": 9,
-            "source_event_key": f"{6:064x}",
-            "freshness": "FRESH",
-        },
+            "source_code": source,
+            "captured_event_count": capture_counts.get(source, 0),
+            "healthy": True,
+            "observed_at_utc": END.isoformat(),
+            "zero_event_reason": (
+                "FALLBACK_NOT_SELECTED"
+                if source in FALLBACK_CAPTURE_SOURCES and not capture_counts.get(source, 0)
+                else None
+            ),
+        }
+        for source in sorted(CAPTURE_SOURCE_INVENTORY)
     ]
-    input_hash = content_hash(features)
     return {
         "contract": "market_shadow_lane/1.0",
         "lane": role,
+        "session_id": SESSION_ID,
         "window_start_utc": START.isoformat(),
-        "window_end_utc": evaluation.isoformat(),
+        "window_end_utc": END.isoformat(),
         "capture_manifest_complete": True,
         "model_artifact_hash": MODEL_HASH,
         "captures": captures,
+        "capture_prefix": {
+            "contract": "market_immutable_capture_prefix/1.0",
+            "capture_authority": "NEW_SINGLE_OWNER_CAPTURE",
+            "session_id": SESSION_ID,
+            "pinned_at_utc": (START - timedelta(minutes=1)).isoformat(),
+            "sealed_at_utc": (END + timedelta(minutes=1)).isoformat(),
+            "byte_range_start": 0,
+            "byte_range_end": len(captures) * 100,
+            "prefix_event_count": len(captures),
+            "ordered_manifest_hash": capture_manifest_hash(captures),
+            "seed_receipt_hash": content_hash({"session_id": SESSION_ID, "seed": 1}),
+            "sealed_byte_range_hash": content_hash(
+                {"session_id": SESSION_ID, "events": len(captures)}
+            ),
+            "single_owner_receipt_hash": content_hash(
+                {"session_id": SESSION_ID, "owners": 1}
+            ),
+            "sequence_health_receipt_hash": content_hash(
+                {"session_id": SESSION_ID, "sequence_gaps": 0}
+            ),
+            "reconciliation_receipt_hash": content_hash(
+                {"session_id": SESSION_ID, "reconciliation_gaps": 0}
+            ),
+            "unresolved_sequence_gap_count": 0,
+            "unresolved_reconciliation_gap_count": 0,
+        },
+        "capture_inventory": capture_inventory,
         "facts": facts,
         "features": features,
-        "estimates": [
-            {
-                "evaluation_at_utc": evaluation.isoformat(),
-                "model_artifact_hash": MODEL_HASH,
-                "input_snapshot_hash": input_hash,
-                "instrument": "COIN_IMAM",
-                "settlement": "CASH",
-                "value": "188700",
-                "lower_bound": "188000",
-                "upper_bound": "189000",
-            }
-        ],
+        "snapshot_versions": snapshot_versions,
+        "estimates": estimates,
         "transport": {
             "unresolved_sequence_gap_count": 0,
-            "duplicate_eligible_fact_count": 0,
+            "duplicate_eligible_fact_count": 0 if role == "PRIVATE_SHADOW" else None,
+            "duplicate_evidence": (
+                "DELIVERY_LEDGER" if role == "PRIVATE_SHADOW" else "NOT_APPLICABLE"
+            ),
+            "duplicate_evidence_receipt_hash": (
+                content_hash({"session_id": SESSION_ID, "ledger_rows": len(facts)})
+                if role == "PRIVATE_SHADOW"
+                else None
+            ),
+            "duplicate_evidence_row_count": (
+                len(facts) if role == "PRIVATE_SHADOW" else None
+            ),
             "rejected_delivery_count": 0,
             "receiver_checkpoint_count": 6 if role == "PRIVATE_SHADOW" else 0,
         },
@@ -198,17 +287,44 @@ def _lane(role: str, count: int) -> dict[str, Any]:
 
 
 def _soak() -> dict[str, Any]:
+    receipts = []
+    for index, drill in enumerate(sorted(FAILURE_DRILLS)):
+        started = START + timedelta(seconds=30 + index * 10)
+        receipts.append(
+            {
+                "drill": drill,
+                "session_id": SESSION_ID,
+                "receipt_hash": sha256(drill.encode("ascii")).hexdigest(),
+                "started_at_utc": started.isoformat(),
+                "completed_at_utc": (started + timedelta(seconds=5)).isoformat(),
+                "passed": True,
+            }
+        )
     return {
         "contract": "market_failure_soak/1.0",
+        "session_id": SESSION_ID,
         "evidence_mode": "HISTORICAL_REPLAY",
         "started_at_utc": START.isoformat(),
-        "completed_at_utc": (START + timedelta(hours=2)).isoformat(),
+        "completed_at_utc": END.isoformat(),
         "full_market_session": False,
         "receiver_restart_passed": True,
         "route_partition_passed": True,
         "lost_ack_passed": True,
         "rollback_passed": True,
         "disk_failure_passed": True,
+        "market_schedule": {
+            "contract": "market_session_schedule/1.0",
+            "session_id": SESSION_ID,
+            "schedule_id": "TEHRAN_MARKET_REHEARSAL",
+            "schedule_version": "SCHEDULE_V1",
+            "timezone_name": "Asia/Tehran",
+            "official_open_at_utc": START.isoformat(),
+            "official_close_at_utc": END.isoformat(),
+            "schedule_receipt_hash": sha256(
+                f"{START.isoformat()}:{END.isoformat()}".encode("ascii")
+            ).hexdigest(),
+        },
+        "drill_receipts": receipts,
     }
 
 
@@ -219,7 +335,7 @@ def _compare(legacy: dict[str, Any], private: dict[str, Any], labels=()):
 
 
 def run(count: int) -> dict[str, Any]:
-    legacy = _lane("LEGACY", count)
+    legacy = _lane("REFERENCE_PROJECTION", count)
     private = _lane("PRIVATE_SHADOW", count)
     clean = _compare(legacy, private)
     if clean["severity_1_count"] or clean["severity_2_count"]:

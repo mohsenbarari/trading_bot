@@ -125,6 +125,10 @@ from core.market_intelligence.coin_inference_selection import (
     CoinInferenceSelectionRejected,
     revalidate_coin_inference_selection,
 )
+from core.market_intelligence.product_snapshot_reader import (
+    configured_product_snapshot_authority_path,
+    product_snapshot_reader_from_settings,
+)
 from core.market_intelligence.coin_inference_outcome import (
     CoinInferenceAcceptedSelection,
     append_coin_inference_accepted_selection,
@@ -327,7 +331,7 @@ def _coin_inference_preview_path_or_error() -> str:
             status_code=status.HTTP_404_NOT_FOUND,
             detail="قابلیت آزمایشی تشخیص کالا فعال نیست.",
         )
-    snapshot_path = (settings.coin_intelligence_inference_snapshot_path or "").strip()
+    snapshot_path = configured_product_snapshot_authority_path(settings)
     if not snapshot_path:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -342,13 +346,22 @@ def _coin_inference_selection_path_or_error() -> str:
             status_code=status.HTTP_409_CONFLICT,
             detail="انتخاب قیمت‌محور کالا در حال حاضر فعال نیست.",
         )
-    snapshot_path = (settings.coin_intelligence_inference_snapshot_path or "").strip()
+    snapshot_path = configured_product_snapshot_authority_path(settings)
     if not snapshot_path:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="دادهٔ محلی تشخیص کالا آماده نیست؛ نام کالا را وارد کنید.",
         )
     return snapshot_path
+
+
+def _configured_product_snapshot_reader():
+    return product_snapshot_reader_from_settings(
+        settings,
+        maximum_age_seconds=getattr(
+            settings, "product_estimator_snapshot_max_age_seconds", 120
+        ),
+    )
 
 
 def _catalog_inference_shadow_payload(
@@ -401,7 +414,7 @@ async def _shadow_inference_for_implicit_commodity(
 
     if not settings.coin_intelligence_inference_preview_enabled:
         return None
-    snapshot_path = (settings.coin_intelligence_inference_snapshot_path or "").strip()
+    snapshot_path = configured_product_snapshot_authority_path(settings)
     if not snapshot_path:
         return {
             "mode": "SHADOW_ONLY",
@@ -421,6 +434,7 @@ async def _shadow_inference_for_implicit_commodity(
             settlement_term=settlement,
             source_surface="WEBAPP",
             now_utc=datetime.now(timezone.utc),
+            snapshot_reader=_configured_product_snapshot_reader(),
         )
         await db.commit()
         return _catalog_inference_shadow_payload(
@@ -459,7 +473,7 @@ async def _selection_inference_for_missing_commodity(
 ) -> dict[str, object]:
     """Create a selectable, audited decision without creating an Offer."""
 
-    snapshot_path = (settings.coin_intelligence_inference_snapshot_path or "").strip()
+    snapshot_path = configured_product_snapshot_authority_path(settings)
     if not snapshot_path:
         return {
             "mode": "SELECTABLE",
@@ -490,6 +504,7 @@ async def _selection_inference_for_missing_commodity(
             force_confirmation=not bool(
                 getattr(settings, "coin_intelligence_inference_auto_selection_enabled", False)
             ),
+            snapshot_reader=_configured_product_snapshot_reader(),
         )
         await db.commit()
         return _catalog_inference_shadow_payload(
@@ -546,6 +561,7 @@ async def _revalidate_webapp_commodity_inference(
             settlement_term=settlement,
             source_surface="WEBAPP",
             now_utc=datetime.now(timezone.utc),
+            snapshot_reader=_configured_product_snapshot_reader(),
         )
     except CoinInferenceSelectionRejected as exc:
         log_trading_event(
@@ -1591,6 +1607,7 @@ async def preview_coin_commodity_inference(
             settlement_term=settlement,
             source_surface="WEBAPP",
             now_utc=datetime.now(timezone.utc),
+            snapshot_reader=_configured_product_snapshot_reader(),
         )
         await db.commit()
     except HTTPException:

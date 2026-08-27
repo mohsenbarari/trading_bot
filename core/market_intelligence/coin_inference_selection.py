@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .coin_catalog import CatalogCoinCommodityCandidate, CatalogCoinCommodityInference, resolve_coin_inference_against_catalog
 from .coin_inference import infer_coin_commodity_from_published_snapshot, normalize_coin_inference_candidate_scope
 from .coin_inference_audit import load_coin_inference_audit
+from .product_snapshot_reader import ProductSnapshotReader
 
 
 class CoinInferenceSelectionRejected(ValueError):
@@ -46,6 +47,7 @@ async def revalidate_coin_inference_selection(
     settlement_term: str,
     source_surface: str,
     now_utc: datetime | None = None,
+    snapshot_reader: ProductSnapshotReader | None = None,
 ) -> CoinInferenceSelectionRevalidation:
     """Re-evaluate a displayed decision against the latest local snapshot.
 
@@ -95,6 +97,7 @@ async def revalidate_coin_inference_selection(
             settlement_term=settlement,
             now_utc=now_utc or datetime.now(timezone.utc),
             candidate_scope=candidate_scope,
+            snapshot_reader=snapshot_reader,
         )
         fresh_decision = await resolve_coin_inference_against_catalog(db, fresh_ranker_decision)
     except CoinInferenceSelectionRejected:

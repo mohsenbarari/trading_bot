@@ -32,10 +32,11 @@ choreography cutover و بعد از توقف owner میزبان ساخته می�
 اتمیک در مسیر `calibration/coin-groups` منتشر شوند؛ DB در حال نوشتن legacy مستقیم mount
 نمی‌شود.
 seed اولیه فقط با `export_market_calibration_seed.py` و از ستون‌های allowlist‌شده ساخته
-می‌شود؛ کپی کامل SQLite تولیدی ممنوع است. پس از شروع shadow، receiver وب هر estimator
-snapshot امضاشده را با transaction اتمیک به ledger اختصاصی single-writer/WAL می‌افزاید و
-فقط ۲۴ ساعت را نگه می‌دارد. processor این ledger محلی را query-only می‌خواند؛ DB زندهٔ
-legacy هرگز mount نمی‌شود و parser به snapshot ثابت روز deployment وابسته نمی‌ماند.
+می‌شود؛ کپی کامل SQLite تولیدی ممنوع است. در Shadow، estimator snapshot فقط در lane
+ایزولهٔ Shadow منتشر می‌شود و حق refresh کردن prediction ledger مصرفی parser را ندارد.
+آن ledger فقط از seed قابل ممیزی و سپس، بعد از مجوز مستقل Primary، از snapshotهای
+`PRIVATE_PRIMARY` به‌روز می‌شود. processor آن را query-only می‌خواند؛ DB زندهٔ legacy
+هرگز mount نمی‌شود و هیچ snapshot ثابت روز deployment نیز نباید بی‌قید زمان مصرف شود.
 
 دایرکتوری والد secret باید `root:root 0700` و فایل‌های مصرفی باید `root:10001 0440` باشند. PostgreSQL با UID/GID `70:70` فقط supplemental group `10001` می‌گیرد؛ بنابراین همان فایل password برای migration/runtime قابل خواندن است، بدون root container یا world-readable secret.
 
@@ -135,9 +136,16 @@ python3 scripts/rehearse_market_shadow_stage12.py --events 1000
 ```
 
 Stage 11 فقط bundle نرمال‌شده و sensitive ciphertext را می‌پذیرد؛ seed بات raw یا identity
-ندارد. Stage 12 بدون capture manifest کامل، snapshot timeline واقعی، report HMAC-signed و
-یک جلسه کامل بازار باز هرگز promotion توصیه نمی‌کند. نتیجه offline فعلی
-`HOLD_LIVE_OPEN_MARKET_REQUIRED` است.
+ندارد. Stage 12 بدون capture manifest کامل، snapshot timeline واقعی، report HMAC-signed،
+یک جلسه کامل بازار باز و verifier مستقل receiptهای release-bound هرگز promotion
+توصیه نمی‌کند. نتیجه replay آفلاین فعلی `HOLD_LIVE_OPEN_MARKET_REQUIRED` است؛
+evidence زنده تا پیاده‌شدن verifier با `TRUSTED_LIVE_ATTESTATION_UNAVAILABLE` و
+`HOLD_BLOCKING_PARITY_FINDINGS` متوقف می‌شود.
+
+export عملیاتی Stage 11 باید `--temporary-directory` را به یک دایرکتوری خالی، محافظت‌شده،
+متعلق به همان کاربر اجرا، با mode `0700` و واقع بر دیسک بدهد. این scratch نباید `/tmp` باشد و هیچ اجرای هم‌زمان یا
+artifact باقی‌مانده را نمی‌پذیرد؛ sort بزرگ SQLite در RAM یا tmpfs برای backfill کامل مجاز
+نیست.
 
 ## ترتیب release آینده
 

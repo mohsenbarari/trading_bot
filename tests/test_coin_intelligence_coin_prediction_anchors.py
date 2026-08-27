@@ -115,6 +115,73 @@ def test_prediction_ledger_rejects_missing_schema() -> None:
             )
 
 
+def test_prediction_ledger_reads_only_the_selected_authority_epoch() -> None:
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "predictions.sqlite3"
+        connection = sqlite3.connect(path)
+        connection.executescript(
+            """
+            CREATE TABLE coin_estimate_predictions(
+              id INTEGER PRIMARY KEY,
+              prediction_time_utc TEXT NOT NULL,
+              created_at_utc TEXT NOT NULL,
+              model_id TEXT NOT NULL,
+              commodity TEXT NOT NULL,
+              settlement TEXT NOT NULL,
+              estimated_price_toman INTEGER NOT NULL,
+              authority_epoch TEXT NOT NULL
+            );
+            CREATE TABLE coin_estimate_prediction_authority(
+              singleton INTEGER PRIMARY KEY,
+              active_epoch TEXT NOT NULL,
+              active_feed_mode TEXT NOT NULL,
+              updated_at_utc TEXT NOT NULL
+            );
+            INSERT INTO coin_estimate_prediction_authority
+            VALUES(1,'PRIVATE_PRIMARY:model-v2','PRIVATE_PRIMARY',
+                   '2026-08-16T10:09:01Z');
+            """
+        )
+        connection.executemany(
+            "INSERT INTO coin_estimate_predictions VALUES(?,?,?,?,?,?,?,?)",
+            (
+                (
+                    1,
+                    "2026-08-16T10:08:00Z",
+                    "2026-08-16T10:08:01Z",
+                    "MAIN_ONLINE",
+                    "امام",
+                    "TOMORROW",
+                    180_000_000,
+                    "LEGACY_BASELINE",
+                ),
+                (
+                    2,
+                    "2026-08-16T10:09:00Z",
+                    "2026-08-16T10:09:01Z",
+                    "MAIN_ONLINE",
+                    "امام",
+                    "TOMORROW",
+                    188_000_000,
+                    "PRIVATE_PRIMARY:model-v2",
+                ),
+            ),
+        )
+        connection.commit()
+        connection.close()
+
+        loaded = load_coin_prediction_anchors(
+            path,
+            earliest_event_time_utc="2026-08-16T10:10:00Z",
+            as_of_utc="2026-08-16T10:11:00Z",
+        )
+
+        assert loaded.rows_seen == 1
+        assert [item.price_project_thousand_toman for item in loaded.anchors] == [
+            188_000
+        ]
+
+
 def test_prediction_family_envelopes_admit_current_ranges_but_reject_swaps() -> None:
     assert _project_price(112_000_000, commodity_code="HALF_BAHAR") == 112_000
     assert _project_price(60_000_000, commodity_code="QUARTER_BAHAR") == 60_000

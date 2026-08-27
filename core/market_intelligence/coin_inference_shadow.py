@@ -33,6 +33,7 @@ from .coin_inference import (
 )
 from .coin_inference_audit import CoinInferenceAuditCommand, append_coin_inference_audit
 from .market_snapshot import AtomicMarketSnapshotProvider, MarketSnapshotUnavailable
+from .product_snapshot_reader import ProductSnapshotReader, ProductSnapshotUnavailable
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +124,7 @@ async def observe_coin_inference_shadow(
     now_utc: datetime | None = None,
     candidate_scope: str = "ALL",
     force_confirmation: bool = False,
+    snapshot_reader: ProductSnapshotReader | None = None,
 ) -> CoinInferenceShadowObservation:
     """Rank, catalog-resolve, and append one shadow decision without commit.
 
@@ -133,8 +135,12 @@ async def observe_coin_inference_shadow(
 
     now = now_utc or datetime.now(timezone.utc)
     try:
-        snapshot = AtomicMarketSnapshotProvider(snapshot_path).load()
-    except MarketSnapshotUnavailable:
+        snapshot = (
+            snapshot_reader.load(now_utc=now).snapshot
+            if snapshot_reader is not None
+            else AtomicMarketSnapshotProvider(snapshot_path).load()
+        )
+    except (ProductSnapshotUnavailable, MarketSnapshotUnavailable):
         # Preserve the established unavailable-Snapshot abstention contract
         # without retrying the same unavailable path or accidentally loading a
         # newer Snapshot for the same decision.
@@ -153,6 +159,11 @@ async def observe_coin_inference_shadow(
             price_project_thousand_toman=submitted_project_price,
             settlement_term=settlement_term,
             now_utc=now,
+            maximum_snapshot_age_seconds=(
+                snapshot_reader.maximum_age_seconds
+                if snapshot_reader is not None
+                else 120
+            ),
             candidate_scope=candidate_scope,
         )
     dominant_underlying_source, market_regime = _snapshot_market_context(snapshot, ranker_result)
