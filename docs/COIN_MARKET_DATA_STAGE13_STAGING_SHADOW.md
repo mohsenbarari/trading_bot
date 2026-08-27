@@ -379,6 +379,12 @@ commit load تاریخچه full-table scan نکند. receiver با release `16d2
 restart-zero ماندند. feed در تمام عملیات `PRIVATE_SHADOW` بود و WebApp/product authority،
 production و `PRIVATE_PRIMARY` تغییر نکردند.
 
+پس از تخلیه، estimator با وجود تولید snapshot تازه در probe مستقل سه‌ثانیه‌ای false-negative
+شد؛ ساخت point-in-time snapshot روی Store بزرگ، CPU تک‌هسته‌ای آن را موقتاً اشغال می‌کرد.
+release compose-only `eb66dfdd` timeout probe را مانند receiver/adapter به هشت ثانیه افزایش
+داد و regression test اضافه کرد. فقط `coin-estimator` staging با همان image و runtime revision
+`1cd6e02a` recreate شد؛ پنج healthcheck پیاپی پاس، restart صفر و خروجی ۱۴نرخی تازه ماند.
+
 پس از تخلیهٔ کامل صف، timeline ده‌نمونه‌ای تازه با ۲۴ snapshot candidate، version gap صفر و
 hash
 `42132dba8cee21050d095eed53418ac45790a58ce38be20c689dc3d58fa1141c`
@@ -398,7 +404,7 @@ p95 فاصلهٔ دو snapshot برابر `20.707s` و p95 انتقال source �
 در postcheck دیسک، snapshotهای موقت point-in-time، tar موقت image و کپی محلی export پس از
 تایید hash و import حذف شدند؛ نسخهٔ rollback روی میزبان وب حفظ شد. فضای آزاد میزبان بات از
 ۵۵۷ مگابایت به ۲٫۷ گیگابایت رسید. ۲۴ تست متمرکز backfill، adapter و timeline نیز داخل image
-با network خاموش پاس شد.
+با network خاموش پاس شد؛ ۱۱ تست foundation/compose نیز برای اصلاح healthcheck سبز بود.
 
 ## failure drill و اصلاحات حین استقرار
 

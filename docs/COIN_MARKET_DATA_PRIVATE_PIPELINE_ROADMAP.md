@@ -1043,6 +1043,9 @@ Gate:
 - snapshotها و image tar موقت پس از تایید import پاک شدند و backup/export محافظت‌شده روی
   میزبان وب باقی ماند. staging در تمام عملیات `PRIVATE_SHADOW` بود؛ WebApp/product authority،
   production و primary feed تغییر نکردند.
+- probe سه‌ثانیه‌ای estimator زیر ساخت snapshot روی Store بزرگ false-negative شد؛ compose
+  `main@eb66dfdd` آن را بدون تغییر image یا منطق مدل به هشت ثانیه افزایش داد. پنج probe
+  پیاپی پاس، restart صفر و ۱۴ rate تازه پس از recreate ثبت شد.
 
 رسید عملیاتی: [COIN_MARKET_DATA_STAGE13_STAGING_SHADOW.md](./COIN_MARKET_DATA_STAGE13_STAGING_SHADOW.md)
 
