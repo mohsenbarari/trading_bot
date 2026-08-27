@@ -466,15 +466,25 @@ def inspect_result(root: Path) -> dict[str, Any]:
                 "PRAGMA table_info(capture_primary_trade_outcomes)"
             ).fetchall()
         }
-        input_components = {
-            str(row["feature_role"]): dict(row)
-            for row in market.execute(
-                "SELECT feature_role,consumed_value,consumed_unit,sample_count,"
-                "selection_method FROM input_snapshot_components"
-            ).fetchall()
-        }
         input_snapshots = int(
             market.execute("SELECT COUNT(*) FROM input_snapshots").fetchone()[0]
+        )
+        latest_snapshot = market.execute(
+            "SELECT input_snapshot_hash FROM input_snapshots "
+            "ORDER BY window_end_utc DESC,created_at_utc DESC LIMIT 1"
+        ).fetchone()
+        input_components = (
+            {
+                str(row["feature_role"]): dict(row)
+                for row in market.execute(
+                    "SELECT feature_role,consumed_value,consumed_unit,sample_count,"
+                    "selection_method FROM input_snapshot_components "
+                    "WHERE input_snapshot_hash=?",
+                    (latest_snapshot[0],),
+                ).fetchall()
+            }
+            if latest_snapshot is not None
+            else {}
         )
     finally:
         staging.close()
@@ -518,7 +528,7 @@ def inspect_result(root: Path) -> dict[str, Any]:
         "BINANCE_PAXG_PUBLIC_API",
     }:
         raise Stage5RehearsalError("processor_source_inventory_gate_failed")
-    if input_snapshots != 1 or set(input_components) != {
+    if input_snapshots < 1 or set(input_components) != {
         "USDT_IRT_90S_POINT",
         "USDT_IRT_90S_MEAN",
         "XAUUSD_90S_POINT",
