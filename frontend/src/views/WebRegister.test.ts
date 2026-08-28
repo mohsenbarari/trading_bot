@@ -406,6 +406,7 @@ describe('WebRegister.vue', () => {
     expect(wrapper.text()).toContain('مهلت ثبت‌نام')
     expect(wrapper.text()).toContain('مرحله ۳ از ۳')
     expect(wrapper.text()).not.toContain('اتصال تلگرام')
+    expect(wrapper.text()).not.toContain('نشانی در پروفایل عمومی نمایش داده نمی‌شود')
     await wrapper
       .get('textarea[autocomplete="street-address"]')
       .setValue('تهران، خیابان مثال، پلاک ۱۲۳')

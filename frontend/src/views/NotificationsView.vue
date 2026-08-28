@@ -316,7 +316,7 @@ onMounted(async () => {
               بررسی دوباره
             </AppButton>
           </div>
-          <p class="push-device-scope">این تنظیم فقط برای همین مرورگر و دستگاه است.</p>
+          <p class="push-device-scope">فقط برای همین مرورگر.</p>
           <p v-if="pushActionMessage" class="push-action-message" role="status" aria-live="polite">
             {{ pushActionMessage }}
           </p>

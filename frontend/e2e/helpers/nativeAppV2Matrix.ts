@@ -386,7 +386,7 @@ export const ROUTE_DESCRIPTORS: RouteDescriptor[] = [
     errorText: /ناموفق|خطا|دوباره|دریافت/i,
     loadingText: /در حال|بارگذاری/i,
     scroller: { kind: 'standard', expected: 1 },
-    states: listStates({ empty: false, stale: true, longPersian: true, unbroken: true, ltr: true }),
+    states: listStates({ empty: false, stale: false, longPersian: true, unbroken: true, ltr: true }),
   },
   {
     id: 'profile',

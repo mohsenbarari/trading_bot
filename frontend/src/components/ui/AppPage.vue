@@ -15,6 +15,5 @@ withDefaults(defineProps<{
 <style scoped>
 .ui-page {
   min-width: 0;
-  max-width: 100%;
 }
 </style>

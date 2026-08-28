@@ -188,7 +188,7 @@ describe('NotificationsView.vue', () => {
     await flushPromises()
 
     expect(wrapper.get('.push-section').text()).toContain(label)
-    expect(wrapper.get('.push-device-scope').text()).toContain('همین مرورگر و دستگاه')
+    expect(wrapper.get('.push-device-scope').text()).toBe('فقط برای همین مرورگر.')
     expect(wrapper.find('.push-enable-btn').exists()).toBe(
       state === 'permission-default' || state === 'unsubscribed',
     )

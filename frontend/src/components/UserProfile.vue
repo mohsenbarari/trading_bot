@@ -156,9 +156,9 @@ const isSensitiveAdminTargetReadOnly = computed(() => (
 ));
 const adminReadOnlyMessage = computed(() => {
   if (isAdminSelfTarget.value) {
-    return 'تنظیمات حساس حساب خودتان فقط برای مشاهده است؛ تغییر آن از این مسیر مجاز نیست.';
+    return 'این حساب فقط قابل مشاهده است.';
   }
-  return 'تنظیمات حساس مدیر ارشد هم‌سطح فقط برای مشاهده است؛ تغییر آن از این مسیر مجاز نیست.';
+  return 'این مدیر فقط قابل مشاهده است.';
 });
 const canPerformSensitiveAdminActions = computed(() => (
   Boolean(props.isAdminView) && !isSensitiveAdminTargetReadOnly.value

@@ -27,6 +27,18 @@
   box-shadow: none;
 }
 
+/* The invitation outcome receives programmatic focus for screen-reader
+ * announcement. It is not keyboard-tabbable, so a viewport-sized focus ring
+ * would communicate a false interactive target. */
+[data-ui-system='v2'][data-ui-system='v2'][data-ui-system='v2']
+  [data-invite-outcome][tabindex='-1']:focus-visible,
+[data-ui-system='v2-portal'][data-ui-system='v2-portal'][data-ui-system='v2-portal']
+  [data-invite-outcome][tabindex='-1']:focus-visible {
+  outline: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-motion-micro {
   transition-duration: var(--ui-v2-motion-micro);
 }
@@ -1201,11 +1213,18 @@
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) :where(.ui-page, .ui-workspace) {
   width: 100%;
-  max-width: var(--ui-v2-layout-content-max);
   gap: var(--ui-v2-spacing-16);
   margin-inline: auto;
   padding: var(--ui-v2-spacing-20) var(--ui-v2-spacing-16)
     calc(var(--ui-v2-size-bottom-nav) + var(--ui-v2-spacing-32) + env(safe-area-inset-bottom));
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-page {
+  max-width: var(--ui-v2-layout-reading-max);
+}
+
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-workspace {
+  max-width: var(--ui-v2-layout-content-max);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])
@@ -1536,6 +1555,10 @@
   margin-inline: auto;
 }
 
+:where([data-ui-system='v2'], [data-ui-system='v2-portal']).ui-v2-workspace-adapter.ui-workspace--narrow {
+  max-width: var(--ui-v2-layout-reading-max);
+}
+
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-adapter__header {
   display: grid;
   min-width: 0;
@@ -1716,7 +1739,7 @@
 
 @media (max-width: 430px) {
   :where([data-ui-system='v2'], [data-ui-system='v2-portal']) :where(.ui-page, .ui-workspace) {
-    padding-inline: var(--ui-v2-spacing-12);
+    padding-inline: var(--ui-v2-spacing-16);
   }
 
   :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-page-header:not(.ui-page-header--has-back) {

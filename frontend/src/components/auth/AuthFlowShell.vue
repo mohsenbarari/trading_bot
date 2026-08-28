@@ -81,7 +81,6 @@ const progressLabel = computed(() =>
 <style scoped>
 .auth-shell {
   box-sizing: border-box;
-  width: 100%;
   min-width: 0;
   min-height: 100%;
   overflow-x: clip;

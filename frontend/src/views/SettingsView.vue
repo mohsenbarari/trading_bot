@@ -185,7 +185,7 @@ const sessionAuthority = computed<ActionFeedback>(() => {
     return {
       tone: 'success',
       title: 'این دستگاه، نشست اصلی است',
-      message: 'این دستگاه طبق پاسخ سرور اجازه پایان دادن به نشست‌های دیگر را دارد.',
+      message: 'می‌توانید نشست‌های دیگر را از این دستگاه پایان دهید.',
     }
   }
   return {
@@ -858,7 +858,7 @@ watch(
           v-else-if="isStorageRoute"
           class="settings-section-card settings-storage-card"
           title="فایل‌های پیام‌رسان این دستگاه"
-          description="پیام‌ها، تنظیمات حساب و فایل‌های روی سرور تغییر نمی‌کنند."
+          description="فقط فایل‌های ذخیره‌شده روی این دستگاه پاک می‌شوند."
         >
           <div class="storage-card">
             <div class="storage-info">
@@ -930,7 +930,7 @@ watch(
       v-if="storageDialogOpen"
       :open="storageDialogOpen"
       title="پاک‌کردن فایل‌های محلی"
-      message="فقط فایل‌های ذخیره‌شده پیام‌رسان روی همین دستگاه حذف می‌شوند. پیام‌ها، تنظیمات حساب و فایل‌های روی سرور تغییر نمی‌کنند. لغو یا Escape هیچ تغییری ایجاد نمی‌کند."
+      message="فقط فایل‌های این دستگاه حذف می‌شوند؛ پیام‌ها و حساب تغییری نمی‌کنند."
       confirm-label="تأیید پاک‌سازی"
       cancel-label="انصراف"
       tone="danger"

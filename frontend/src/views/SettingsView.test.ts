@@ -634,14 +634,14 @@ describe('SettingsView.vue', () => {
     const wrapper = await mountSettingsView('account-storage')
 
     expect(wrapper.get('.settings-storage-card').text()).toContain(
-      'پیام‌ها، تنظیمات حساب و فایل‌های روی سرور تغییر نمی‌کنند',
+      'فقط فایل‌های ذخیره‌شده روی این دستگاه پاک می‌شوند',
     )
     await wrapper.get('.storage-clear-btn').trigger('click')
     expect(settingsViewMocks.clearStorageFileCacheMock).not.toHaveBeenCalled()
     const dialog = bodyConfirmDialog()
     expect(dialog.contains(document.activeElement)).toBe(true)
-    expect(dialog.textContent).toContain('روی همین دستگاه')
-    expect(dialog.textContent).toContain('لغو یا Escape هیچ تغییری ایجاد نمی‌کند')
+    expect(dialog.textContent).toContain('فقط فایل‌های این دستگاه حذف می‌شوند')
+    expect(dialog.textContent).toContain('پیام‌ها و حساب تغییری نمی‌کنند')
     expect(dialog.textContent).not.toContain('trading-bot-chat-files')
     expect(dialog.textContent).not.toContain('localforage')
 

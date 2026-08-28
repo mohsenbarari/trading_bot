@@ -1090,7 +1090,7 @@ describe('UserProfile.vue authoritative admin actions', () => {
       viewerRole: 'مدیر میانی',
     })
 
-    expect(wrapper.get('.admin-sensitive-readonly').text()).toContain('حساب خودتان')
+    expect(wrapper.get('.admin-sensitive-readonly').text()).toBe('این حساب فقط قابل مشاهده است.')
     expect(wrapper.find('.sessions-config-box').exists()).toBe(false)
     expect(wrapper.find('.settings-btn').exists()).toBe(false)
     expect(wrapper.find('.delete-btn').exists()).toBe(false)
@@ -1106,7 +1106,7 @@ describe('UserProfile.vue authoritative admin actions', () => {
       viewerRole: 'مدیر ارشد',
     })
 
-    expect(wrapper.get('.admin-sensitive-readonly').text()).toContain('مدیر ارشد هم‌سطح')
+    expect(wrapper.get('.admin-sensitive-readonly').text()).toBe('این مدیر فقط قابل مشاهده است.')
     expect(wrapper.find('.sessions-config-box').exists()).toBe(false)
     expect(wrapper.find('.settings-btn').exists()).toBe(false)
     expect(wrapper.find('.delete-btn').exists()).toBe(false)

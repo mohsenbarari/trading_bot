@@ -102,13 +102,13 @@ const tradeCountLabel = computed(() => `${formatNumber(trades.value.length)} م�
 const coworkersMetaLabel = computed(() => {
   if (!coworkersAvailable.value) return 'محدود'
   if (coworkersLoading.value) return 'در حال دریافت'
-  if (!coworkersLoaded.value) return 'برای مشاهده باز کنید'
+  if (!coworkersLoaded.value) return ''
   if (coworkersError.value) return 'خطا'
   return `${formatNumber(coworkers.value.length)} همکار`
 })
 const commoditiesMetaLabel = computed(() => {
   if (commoditiesLoading.value) return 'در حال دریافت'
-  if (!commoditiesLoaded.value) return 'برای مشاهده باز کنید'
+  if (!commoditiesLoaded.value) return ''
   if (commoditiesError.value) return 'خطا'
   return `${formatNumber(commodities.value.length)} کالا`
 })
@@ -552,7 +552,9 @@ onUnmounted(() => {
           aria-label="به‌روزرسانی معاملات امروز"
           @click="loadTodayTrades()"
         >
-          <RefreshCw :size="16" aria-hidden="true" />
+          <template #icon>
+            <RefreshCw :size="16" aria-hidden="true" />
+          </template>
           به‌روزرسانی
         </AppButton>
       </div>
@@ -638,7 +640,7 @@ onUnmounted(() => {
     >
       <template #leading><UsersRound :size="21" /></template>
       <template #meta>
-        <AppStatusBadge tone="info">{{ coworkersMetaLabel }}</AppStatusBadge>
+        <AppStatusBadge v-if="coworkersMetaLabel" tone="info">{{ coworkersMetaLabel }}</AppStatusBadge>
         <ChevronDown
           :size="18"
           class="dashboard-disclosure-chevron"
@@ -721,7 +723,7 @@ onUnmounted(() => {
     >
       <template #leading><PackageCheck :size="21" /></template>
       <template #meta>
-        <AppStatusBadge tone="info">{{ commoditiesMetaLabel }}</AppStatusBadge>
+        <AppStatusBadge v-if="commoditiesMetaLabel" tone="info">{{ commoditiesMetaLabel }}</AppStatusBadge>
         <ChevronDown
           :size="18"
           class="dashboard-disclosure-chevron"

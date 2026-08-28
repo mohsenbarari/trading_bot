@@ -431,16 +431,28 @@ export function resolveKnownApi(
   if (/^\/api\/users-public\/\d+$/u.test(pathname)) {
     if (error) return failList()
     const id = Number(pathname.split('/')[3])
+    const target = id === CURRENT_USER.id
+      ? copyViewer(CURRENT_USER, mode)
+      : id === REGULAR_USER.id
+        ? copyViewer(REGULAR_USER, mode)
+        : {
+            ...REGULAR_USER,
+            id,
+            full_name: longCopy ? LONG_PERSIAN_FULL_NAME : `کاربر ${id}`,
+            account_name: `user_${id}`,
+            mobile_number: '09123333333',
+            address: longCopy ? LONG_PERSIAN_ADDRESS : 'اصفهان',
+          }
     return {
       status: 200,
       body: {
         id,
-        full_name: id === viewer.id ? viewerBody.full_name : `کاربر ${id}`,
-        account_name: id === viewer.id ? viewerBody.account_name : `user_${id}`,
-        role: id === viewer.id ? viewer.role : 'عادی',
+        full_name: target.full_name,
+        account_name: target.account_name,
+        role: target.role,
         account_status: 'active',
-        mobile_number: id === viewer.id ? viewerBody.mobile_number : '09123333333',
-        address: id === viewer.id ? viewerBody.address : 'اصفهان',
+        mobile_number: target.mobile_number,
+        address: target.address,
         avatar_file_id: null,
         last_seen_at: stamp,
         created_at_jalali: stale ? '۱۴۰۲/۱۰/۱۱' : '۱۴۰۵/۰۵/۲۳',

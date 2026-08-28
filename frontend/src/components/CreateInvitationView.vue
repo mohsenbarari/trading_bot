@@ -392,7 +392,7 @@ function normalizeMobile(mobile: string): string {
 <template>
   <div class="invitation-manager">
     <form class="invitation-form" @submit.prevent="createInvite" autocomplete="off">
-      <AppFormField class="form-group" id="account_name" label="نام کاربری (Account Name)">
+      <AppFormField class="form-group" id="account_name" label="نام کاربری">
         <AppInput v-model="invite.account_name" id="account_name" type="text" placeholder="مثلاً alireza" required />
       </AppFormField>
       <AppFormField class="form-group" id="mobile_number" label="شماره موبایل (ایران)">

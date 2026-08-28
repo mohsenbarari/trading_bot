@@ -17,6 +17,14 @@ const workspaceOverlayCss = readFileSync(
   path.resolve(process.cwd(), 'src/styles/design-system-v2.stage5-overlays.css'),
   'utf8',
 )
+const appPageSource = readFileSync(
+  path.resolve(process.cwd(), 'src/components/ui/AppPage.vue'),
+  'utf8',
+)
+const authFlowShellSource = readFileSync(
+  path.resolve(process.cwd(), 'src/components/auth/AuthFlowShell.vue'),
+  'utf8',
+)
 
 const expectedCanonicalVariables: Record<string, string> = {
   '--ui-v2-neutral-ink-950': '#0f233c',
@@ -127,6 +135,31 @@ describe('Design System V2 CSS contract', () => {
     expect(declarations.position).not.toMatch(/fixed|sticky/)
     expect(workspaceOverlayCss).toContain('.ui-v2-workspace-overlay-body')
     expect(workspaceOverlayCss).toContain('overflow-y: auto')
+  })
+
+  it('keeps live page and stack-workspace widths on the native product scale', () => {
+    expect(componentCss).toMatch(
+      /\[data-ui-system='v2'\][\s\S]*\.ui-page\s*\{\s*max-width:\s*var\(--ui-v2-layout-reading-max\);/,
+    )
+    expect(componentCss).toMatch(
+      /\.ui-v2-workspace-adapter\.ui-workspace--narrow\s*\{\s*max-width:\s*var\(--ui-v2-layout-reading-max\);/,
+    )
+    expect(componentCss).toMatch(
+      /@media \(max-width: 430px\)[\s\S]*padding-inline:\s*var\(--ui-v2-spacing-16\);/,
+    )
+    const appPageRule = appPageSource.match(/\.ui-page\s*\{([\s\S]*?)\}/)?.[1] ?? ''
+    const authShellRule = authFlowShellSource.match(/\.auth-shell\s*\{([\s\S]*?)\}/)?.[1] ?? ''
+    expect(appPageRule).not.toMatch(/^\s*max-width:/m)
+    expect(authShellRule).not.toMatch(/^\s*width:/m)
+  })
+
+  it('does not paint a page-sized focus ring around programmatically focused invitation outcomes', () => {
+    expect(componentCss).toMatch(
+      /\[data-invite-outcome\]\[tabindex='-1'\]:focus-visible\s*\{[\s\S]*?outline:\s*none;/,
+    )
+    expect(componentCss).toMatch(
+      /\[data-invite-outcome\]\[tabindex='-1'\]:focus-visible\s*\{[\s\S]*?box-shadow:\s*none;/,
+    )
   })
 
   it('contains the exact 65 canonical Figma variables', () => {

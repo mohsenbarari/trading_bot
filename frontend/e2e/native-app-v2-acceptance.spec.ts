@@ -98,6 +98,7 @@ function modeForState(state: StateId): FixtureMode {
 }
 
 function viewerForState(route: RouteDescriptor, state: StateId) {
+  if (route.id === 'public-profile') return REGULAR_USER
   if (state !== 'unauthorized') return CURRENT_USER
   if (route.family === 'admin') return REGULAR_USER
   if (route.family === 'operations') return { ...REGULAR_USER, is_customer: true, id: 33 }
@@ -668,6 +669,18 @@ test.describe('Native App V2 keyboard, zoom, motion, overlays', () => {
     await expect(page.getByText('تهران')).toBeVisible()
     expectCleanDiagnostics(diagnostics, 'operations-profile-copy')
   })
+
+  test('another member sees the project-visible phone and address on a public profile', async ({ page }) => {
+    const route = ROUTE_DESCRIPTORS.find((item) => item.id === 'public-profile')!
+    const { diagnostics, diagnosticContext } = await preparePage(page, route, 'normal')
+    await page.setViewportSize({ width: 390, height: 844 })
+    await gotoRouteWithNavigationRetry(page, route.path, diagnosticContext)
+    await settleAuthenticatedShell(diagnosticContext)
+    await expect(page.getByRole('heading', { name: 'native_app_v2_user' })).toBeVisible()
+    await expect(page.getByText('09120000000')).toBeVisible()
+    await expect(page.getByText('تهران')).toBeVisible()
+    expectCleanDiagnostics(diagnostics, 'public-profile-peer-visibility')
+  })
 })
 
 if (process.env.NATIVE_APP_V2_VISUAL === '1') {
@@ -688,7 +701,17 @@ if (process.env.NATIVE_APP_V2_VISUAL === '1') {
           await page.setViewportSize({ width: viewport.width, height: viewport.height })
           await gotoRouteWithNavigationRetry(page, route.path, diagnosticContext)
           await expectRouteReady(page, route)
+          await waitForLocalIdle(diagnosticContext)
           await waitForVisualStability(page, { controller })
+          await page.waitForTimeout(300)
+          await waitForLocalIdle(diagnosticContext)
+          await waitForVisualStability(page, { controller })
+          const initialScroll = await page.evaluate(() => ({
+            document: window.scrollY,
+            route: document.querySelector<HTMLElement>('.app-route-scroll')?.scrollTop ?? 0,
+          }))
+          expect(initialScroll.document, `shot:${route.id}:${viewport.label}: document starts at top`).toBeLessThanOrEqual(1)
+          expect(initialScroll.route, `shot:${route.id}:${viewport.label}: route starts at top`).toBeLessThanOrEqual(1)
           await page.screenshot({
             path: `${visualDir}/${route.id}-${viewport.label}-normal.png`,
             fullPage: true,

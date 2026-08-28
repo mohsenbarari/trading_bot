@@ -716,7 +716,6 @@ async function skipTelegramConnect() {
               />
             </template>
           </AppFormField>
-          <p class="ui-v2-auth-register-privacy">نشانی در پروفایل عمومی نمایش داده نمی‌شود.</p>
         </template>
 
         <template v-else-if="step === 4">
