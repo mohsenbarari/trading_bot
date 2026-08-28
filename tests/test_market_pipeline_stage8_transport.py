@@ -1,4 +1,5 @@
 import copy
+from datetime import datetime, timezone
 import json
 import sqlite3
 import tempfile
@@ -8,14 +9,19 @@ from pathlib import Path
 from pydantic import TypeAdapter
 
 from core.market_intelligence.market_fact_receiver import (
+    ReceiverCompactionError,
     apply_fact_batch,
+    compact_consumed_payloads,
     connect_receiver,
     receiver_metrics,
 )
 from core.market_intelligence.market_fact_projection import (
     MarketFactProjectionError,
+    _pending_export_rows,
+    initialize_export_ledger,
     observation_payload,
 )
+from core.market_intelligence.market_fact_archive import _normalize_fact_payload
 from core.market_intelligence.market_contracts import MarketObservation, derive_event_key
 from core.market_intelligence.market_store import (
     connect_market_store,
@@ -60,6 +66,155 @@ def revised_batch(*, delivery_sequence: int, revision: int, price: str):
 
 
 class Stage8ReceiverTests(unittest.TestCase):
+    def test_receiver_schema_upgrade_adds_compaction_columns_in_place(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "receiver.sqlite3"
+            legacy = sqlite3.connect(path)
+            legacy.executescript(
+                """
+                CREATE TABLE fact_deliveries (
+                    stream_id TEXT NOT NULL,
+                    delivery_sequence INTEGER NOT NULL,
+                    fact_id TEXT NOT NULL,
+                    fact_revision INTEGER NOT NULL,
+                    payload_hash TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    received_at_utc TEXT NOT NULL,
+                    PRIMARY KEY(stream_id,delivery_sequence),
+                    UNIQUE(fact_id,fact_revision)
+                );
+                CREATE TABLE fact_latest (
+                    fact_id TEXT PRIMARY KEY,
+                    stream_id TEXT NOT NULL,
+                    source_sequence INTEGER NOT NULL,
+                    fact_revision INTEGER NOT NULL,
+                    payload_hash TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    received_at_utc TEXT NOT NULL,
+                    UNIQUE(stream_id,source_sequence)
+                );
+                """
+            )
+            legacy.close()
+            upgraded = connect_receiver(path)
+            try:
+                for table in ("fact_deliveries", "fact_latest"):
+                    columns = {
+                        str(row[1])
+                        for row in upgraded.execute(
+                            f"PRAGMA table_info({table})"
+                        ).fetchall()
+                    }
+                    self.assertIn("payload_compacted_at_utc", columns)
+            finally:
+                upgraded.close()
+
+    def test_consumed_payload_compaction_preserves_replay_and_revision_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            connection = connect_receiver(Path(directory) / "receiver.sqlite3")
+            first = batch_fixture()
+            stream_id = first["stream_id"]
+            self.assertEqual(apply_fact_batch(connection, first)[0], 200)
+            second = revised_batch(
+                delivery_sequence=2,
+                revision=2,
+                price="187600",
+            )
+            self.assertEqual(apply_fact_batch(connection, second)[0], 200)
+            connection.execute(
+                "UPDATE fact_deliveries SET received_at_utc=?",
+                ("2026-08-20T00:00:00Z",),
+            )
+
+            first_report = compact_consumed_payloads(
+                connection,
+                applied_checkpoints={stream_id: 1},
+                now=datetime(2026, 8, 27, tzinfo=timezone.utc),
+                retention_seconds=3_600,
+            )
+            self.assertEqual(
+                (first_report.delivery_payloads, first_report.latest_payloads),
+                (1, 0),
+            )
+            deliveries = connection.execute(
+                "SELECT delivery_sequence,payload_json,payload_compacted_at_utc "
+                "FROM fact_deliveries ORDER BY delivery_sequence"
+            ).fetchall()
+            self.assertEqual(deliveries[0]["payload_json"], "")
+            self.assertIsNotNone(deliveries[0]["payload_compacted_at_utc"])
+            self.assertNotEqual(deliveries[1]["payload_json"], "")
+
+            # Lost-ACK replay remains an exact duplicate after redaction.
+            status, replay = apply_fact_batch(connection, first)
+            self.assertEqual(status, 200)
+            self.assertEqual(replay["duplicate_count"], 1)
+
+            second_report = compact_consumed_payloads(
+                connection,
+                applied_checkpoints={stream_id: 2},
+                now=datetime(2026, 8, 27, tzinfo=timezone.utc),
+                retention_seconds=3_600,
+            )
+            self.assertEqual(
+                (second_report.delivery_payloads, second_report.latest_payloads),
+                (1, 1),
+            )
+            latest = connection.execute(
+                "SELECT payload_json,payload_compacted_at_utc FROM fact_latest"
+            ).fetchone()
+            self.assertEqual(latest["payload_json"], "")
+            self.assertIsNotNone(latest["payload_compacted_at_utc"])
+
+            # A later parser revision rehydrates the current latest payload.
+            third = revised_batch(
+                delivery_sequence=3,
+                revision=3,
+                price="187700",
+            )
+            self.assertEqual(apply_fact_batch(connection, third)[0], 200)
+            latest = connection.execute(
+                "SELECT payload_json,payload_compacted_at_utc FROM fact_latest"
+            ).fetchone()
+            self.assertNotEqual(latest["payload_json"], "")
+            self.assertIsNone(latest["payload_compacted_at_utc"])
+            metrics = receiver_metrics(connection)
+            self.assertEqual(metrics["compacted_delivery_count"], 2)
+            self.assertEqual(metrics["compacted_fact_count"], 0)
+            cursor = connection.execute(
+                "SELECT highest_examined_sequence "
+                "FROM receiver_compaction_cursors WHERE stream_id=?",
+                (stream_id,),
+            ).fetchone()
+            self.assertEqual(int(cursor[0]), 2)
+
+            # Sequence 3 is consumed but still inside the safety window, so
+            # neither its payload nor the durable compaction cursor advances.
+            recent = compact_consumed_payloads(
+                connection,
+                applied_checkpoints={stream_id: 3},
+                now=datetime(2026, 8, 27, tzinfo=timezone.utc),
+                retention_seconds=3_600,
+            )
+            self.assertEqual(recent.delivery_payloads, 0)
+            cursor = connection.execute(
+                "SELECT highest_examined_sequence "
+                "FROM receiver_compaction_cursors WHERE stream_id=?",
+                (stream_id,),
+            ).fetchone()
+            self.assertEqual(int(cursor[0]), 2)
+
+            with self.assertRaisesRegex(
+                ReceiverCompactionError,
+                "receiver_compaction_checkpoint_invalid",
+            ):
+                compact_consumed_payloads(
+                    connection,
+                    applied_checkpoints={stream_id: 4},
+                    now=datetime(2026, 8, 27, tzinfo=timezone.utc),
+                    retention_seconds=3_600,
+                )
+            connection.close()
+
     def test_lost_ack_replay_and_revision_are_durable_and_idempotent(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "receiver.sqlite3"
@@ -314,6 +469,75 @@ class Stage8ReceiverTests(unittest.TestCase):
 
 
 class Stage8TransportTests(unittest.TestCase):
+    def test_known_payload_hash_rejection_is_selected_for_one_time_retry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            market = connect_market_store(Path(directory) / "market.sqlite3")
+            initialize_market_store(market)
+            initialize_export_ledger(market)
+            event_key = derive_event_key("stage8", "retry-hash")
+            upsert_observation(
+                market,
+                MarketObservation(
+                    event_key=event_key,
+                    source_code="GROUP_1",
+                    source_family="GROUP",
+                    event_time_utc="2026-08-26T05:00:00Z",
+                    available_at_utc="2026-08-26T05:00:01Z",
+                    instrument="COIN_IMAM",
+                    market_label="GROUP_COIN_IMAM",
+                    settlement_term="CASH",
+                    trade_form="PHYSICAL",
+                    event_type="OFFER",
+                    side="SELL",
+                    price="187500",
+                    price_unit="PROJECT_THOUSAND_TOMAN",
+                    currency="TOMAN",
+                    quantity="5",
+                    quantity_unit="COIN_COUNT",
+                    parser_version="stage8-test-v1",
+                ),
+            )
+            inserted = market.execute(
+                "SELECT inserted_at_utc FROM market_observations WHERE event_key=?",
+                (event_key,),
+            ).fetchone()[0]
+            market.execute(
+                "INSERT INTO market_fact_export_ledger VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    event_key,
+                    inserted,
+                    "REJECTED",
+                    None,
+                    None,
+                    "fact_payload_hash_mismatch",
+                    1,
+                    inserted,
+                ),
+            )
+            market.commit()
+
+            self.assertEqual(len(_pending_export_rows(market, max_rows=10)), 1)
+            market.execute(
+                "UPDATE market_fact_export_ledger "
+                "SET reason_code='market_fact_projection_offer_dependency_missing'"
+            )
+            market.commit()
+            self.assertEqual(_pending_export_rows(market, max_rows=10), [])
+            market.close()
+
+    def test_sparse_review_trade_payload_hashes_as_validated_contract(self):
+        sparse = {
+            "kind": "COIN_TRADE",
+            "offer_fact_id": "a" * 64,
+            "outcome": "AMBIGUOUS",
+        }
+
+        normalized = _normalize_fact_payload(sparse)
+
+        self.assertNotEqual(content_hash(sparse), content_hash(normalized))
+        self.assertIsNone(normalized.agreed_price_value)
+        self.assertIsNone(normalized.agreed_quantity_value)
+
     def test_hmac_exact_body_gzip_and_persistent_replay_guard(self):
         key = b"k" * 32
         document = {"fact": "x" * 70_000}

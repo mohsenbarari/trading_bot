@@ -7,12 +7,23 @@ from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from typing import Any, Mapping
 
+from pydantic import TypeAdapter
+
 from .private_pipeline_contracts import (
     FactPayload,
     MarketFactV1,
     content_hash,
     load_source_registry,
 )
+
+
+_FACT_PAYLOAD_ADAPTER = TypeAdapter(FactPayload)
+
+
+def _normalize_fact_payload(
+    payload: FactPayload | Mapping[str, Any],
+) -> FactPayload:
+    return _FACT_PAYLOAD_ADAPTER.validate_python(payload)
 
 
 class MarketFactArchiveError(RuntimeError):
@@ -215,15 +226,18 @@ def build_and_publish_fact(
     source = load_source_registry().by_code().get(source_code)
     if source is None:
         raise MarketFactArchiveError("market_fact_archive_source_unknown")
-    payload_kind = str(
-        payload.kind if hasattr(payload, "kind") else payload.get("kind", "")
-    )
+    # Hash the validated contract representation, not a potentially sparse
+    # caller mapping.  Pydantic materializes optional ``None`` fields when it
+    # builds MarketFactV1; hashing the sparse input first made REVIEW/REJECTED
+    # coin trades fail the fact_payload_hash invariant.
+    normalized_payload = _normalize_fact_payload(payload)
+    payload_kind = str(normalized_payload.kind)
     fact_id = stable_fact_id(
         source_code=source_code,
         event_key=event_key,
         fact_kind=payload_kind,
     )
-    payload_digest = content_hash(payload)
+    payload_digest = content_hash(normalized_payload)
     occurred = _utc(occurred_at_utc)
     available = _utc(available_at_utc)
     persisted = datetime.now(timezone.utc)
@@ -236,7 +250,10 @@ def build_and_publish_fact(
         cursor.execute(
             """
             SELECT source_sequence,fact_revision,encode(payload_hash,'hex'),
-                   encode(event_key,'hex'),stream_id
+                   encode(event_key,'hex'),stream_id,
+                   encode(origin_event_key,'hex'),source_code,occurred_at_utc,
+                   available_at_utc,persisted_at_utc,parser_version,
+                   quality_state,quality_reason_codes,payload
             FROM market_data.market_facts
             WHERE fact_id=decode(%s,'hex')
             FOR UPDATE
@@ -245,12 +262,25 @@ def build_and_publish_fact(
         )
         existing = cursor.fetchone()
         if existing is not None and str(existing[2]) == payload_digest:
-            cursor.execute(
-                "SELECT envelope FROM market_data.market_fact_outbox "
-                "WHERE fact_id=decode(%s,'hex') AND fact_revision=%s",
-                (fact_id, int(existing[1])),
+            fact = MarketFactV1(
+                contract="market_fact/1.0",
+                fact_id=fact_id,
+                event_key=str(existing[3]),
+                origin_event_key=str(existing[5]),
+                source_code=str(existing[6]),
+                stream_id=str(existing[4]),
+                source_sequence=int(existing[0]),
+                occurred_at_utc=existing[7],
+                available_at_utc=existing[8],
+                persisted_at_utc=existing[9],
+                schema_version="1.0",
+                parser_version=str(existing[10]),
+                fact_revision=int(existing[1]),
+                quality_state=str(existing[11]),
+                quality_reason_codes=tuple(existing[12] or ()),
+                payload_hash=str(existing[2]),
+                payload=_normalize_fact_payload(existing[13]),
             )
-            fact = MarketFactV1.model_validate(cursor.fetchone()[0])
             return PublishedFact(fact=fact, delivery_sequence=None, changed=False)
         if existing is None:
             source_sequence = _next_source_sequence(cursor, source.fact_stream_id)
@@ -277,7 +307,7 @@ def build_and_publish_fact(
             quality_state=quality_state,
             quality_reason_codes=quality_reason_codes,
             payload_hash=payload_digest,
-            payload=payload,
+            payload=normalized_payload,
         )
         retention_class, purge_after = _retention(source_code, persisted)
         envelope = fact.model_dump(mode="json")

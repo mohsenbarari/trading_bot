@@ -30,6 +30,7 @@ from .private_pipeline_contracts import MarketFactV1, load_source_registry
 
 ADAPTER_SCHEMA = "market_fact_adapter/1.0"
 ADAPTER_VERSION = "market-fact-adapter-v1"
+ADAPTER_WATERMARK_SCHEMA = "market_fact_adapter_watermark/1.0"
 FEED_MODES = frozenset({"LEGACY", "PRIVATE_SHADOW", "PRIVATE_PRIMARY"})
 MAX_DELIVERIES_PER_CYCLE = 500
 MAX_ADAPTER_STREAMS = 128
@@ -88,6 +89,68 @@ def normalize_feed_mode(value: str | None) -> str:
     if mode not in FEED_MODES:
         raise MarketFactAdapterError("market_fact_adapter_feed_mode_invalid")
     return mode
+
+
+def publish_adapter_watermark(
+    path: Path | str,
+    checkpoints: Mapping[str, int],
+) -> bool:
+    """Publish a monotonic payload-free checkpoint for receiver compaction."""
+
+    normalized: dict[str, int] = {}
+    for stream_id, sequence in checkpoints.items():
+        if (
+            not isinstance(stream_id, str)
+            or not stream_id
+            or isinstance(sequence, bool)
+            or not isinstance(sequence, int)
+            or sequence < 0
+        ):
+            raise MarketFactAdapterError("market_fact_adapter_watermark_invalid")
+        normalized[stream_id] = sequence
+    if len(normalized) > MAX_ADAPTER_STREAMS:
+        raise MarketFactAdapterError("market_fact_adapter_stream_limit_exceeded")
+
+    target = Path(path)
+    if target.exists():
+        try:
+            current = json.loads(target.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise MarketFactAdapterError(
+                "market_fact_adapter_watermark_unreadable"
+            ) from exc
+        if (
+            not isinstance(current, dict)
+            or current.get("schema") != ADAPTER_WATERMARK_SCHEMA
+            or not isinstance(current.get("streams"), dict)
+        ):
+            raise MarketFactAdapterError("market_fact_adapter_watermark_invalid")
+        old_streams = current["streams"]
+        for stream_id, old_sequence in old_streams.items():
+            if (
+                stream_id not in normalized
+                or isinstance(old_sequence, bool)
+                or not isinstance(old_sequence, int)
+                or old_sequence < 0
+                or normalized[stream_id] < old_sequence
+            ):
+                raise MarketFactAdapterError(
+                    "market_fact_adapter_watermark_regression"
+                )
+        if old_streams == normalized:
+            return False
+
+    from .private_pipeline_foundation import atomic_json_write
+
+    atomic_json_write(
+        target,
+        {
+            "schema": ADAPTER_WATERMARK_SCHEMA,
+            "updated_at_utc": utc_text(),
+            "streams": normalized,
+        },
+    )
+    return True
 
 
 def select_estimator_feeds(
@@ -724,6 +787,10 @@ def apply_received_delivery(
         ):
             raise MarketFactAdapterError("market_fact_adapter_delivery_conflict")
         return "DUPLICATE"
+    if row["payload_compacted_at_utc"] is not None:
+        raise MarketFactAdapterError(
+            "market_fact_adapter_payload_compacted_before_checkpoint"
+        )
     if sequence != checkpoint + 1:
         raise MarketFactAdapterError("market_fact_adapter_sequence_gap")
 
@@ -857,7 +924,7 @@ def _select_pending_deliveries(
             cursor = receiver.execute(
                 """
                 SELECT stream_id,delivery_sequence,fact_id,fact_revision,payload_hash,
-                       payload_json,received_at_utc
+                       payload_json,received_at_utc,payload_compacted_at_utc
                 FROM fact_deliveries
                 WHERE stream_id=? AND delivery_sequence>?
                 ORDER BY delivery_sequence
@@ -948,10 +1015,18 @@ def run_market_fact_adapter_service(
             "/var/lib/market-data/receiver/market-fact-receiver/market-fact-receiver.sqlite3",
         )
     )
+    receiver_watermark_path = receiver_path.with_name(
+        "adapter-consumption-watermark.json"
+    )
     market = connect_market_store(market_path)
     initialize_adapter_store(market)
     from .private_pipeline_foundation import atomic_json_write
 
+    # Validate the persisted watermark before reading any inbox payload.  A
+    # Market Store restored behind a previously compacted watermark must stop
+    # for explicit recovery instead of treating redacted rows as malformed.
+    initial_metrics = adapter_metrics(market)
+    publish_adapter_watermark(receiver_watermark_path, initial_metrics["streams"])
     started = utc_text()
     try:
         while not stop.is_set():
@@ -963,6 +1038,7 @@ def run_market_fact_adapter_service(
                 finally:
                     receiver.close()
             metrics = adapter_metrics(market)
+            publish_adapter_watermark(receiver_watermark_path, metrics["streams"])
             atomic_json_write(
                 state_directory / "health.json",
                 {

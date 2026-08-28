@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import sqlite3
@@ -17,6 +18,19 @@ from .private_pipeline_contracts import (
 
 
 RECEIVER_SCHEMA = "market_fact_receiver/1.0"
+ADAPTER_WATERMARK_SCHEMA = "market_fact_adapter_watermark/1.0"
+DEFAULT_PAYLOAD_RETENTION_SECONDS = 259_200
+MAX_COMPACTION_BATCH_ROWS = 10_000
+
+
+class ReceiverCompactionError(RuntimeError):
+    """A downstream watermark cannot safely authorize payload compaction."""
+
+
+@dataclass(frozen=True, slots=True)
+class ReceiverCompactionReport:
+    delivery_payloads: int
+    latest_payloads: int
 
 
 def _utc_now() -> datetime:
@@ -50,6 +64,7 @@ def initialize_receiver(connection: sqlite3.Connection) -> None:
             payload_hash TEXT NOT NULL,
             payload_json TEXT NOT NULL,
             received_at_utc TEXT NOT NULL,
+            payload_compacted_at_utc TEXT,
             PRIMARY KEY(stream_id, delivery_sequence),
             UNIQUE(fact_id, fact_revision)
         );
@@ -61,6 +76,7 @@ def initialize_receiver(connection: sqlite3.Connection) -> None:
             payload_hash TEXT NOT NULL,
             payload_json TEXT NOT NULL,
             received_at_utc TEXT NOT NULL,
+            payload_compacted_at_utc TEXT,
             UNIQUE(stream_id, source_sequence)
         );
         CREATE TABLE IF NOT EXISTS fact_checkpoints (
@@ -124,6 +140,244 @@ def initialize_receiver(connection: sqlite3.Connection) -> None:
         ON transport_nonces(expires_at_epoch);
         """
     )
+    _initialize_payload_compaction(connection)
+
+
+def _column_names(connection: sqlite3.Connection, table: str) -> set[str]:
+    return {
+        str(row[1])
+        for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+    }
+
+
+def _initialize_payload_compaction(connection: sqlite3.Connection) -> None:
+    """Upgrade old receiver databases without rebuilding their large ledgers."""
+
+    if "payload_compacted_at_utc" not in _column_names(
+        connection, "fact_deliveries"
+    ):
+        connection.execute(
+            "ALTER TABLE fact_deliveries "
+            "ADD COLUMN payload_compacted_at_utc TEXT"
+        )
+    if "payload_compacted_at_utc" not in _column_names(connection, "fact_latest"):
+        connection.execute(
+            "ALTER TABLE fact_latest ADD COLUMN payload_compacted_at_utc TEXT"
+        )
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS receiver_compaction_cursors (
+            stream_id TEXT PRIMARY KEY,
+            highest_examined_sequence INTEGER NOT NULL
+                CHECK(highest_examined_sequence>=0),
+            updated_at_utc TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS receiver_compaction_status (
+            singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+            compacted_delivery_count INTEGER NOT NULL
+                CHECK(compacted_delivery_count>=0),
+            compacted_fact_count INTEGER NOT NULL
+                CHECK(compacted_fact_count>=0),
+            last_compacted_at_utc TEXT
+        );
+        INSERT OR IGNORE INTO receiver_compaction_status(
+            singleton,compacted_delivery_count,compacted_fact_count,
+            last_compacted_at_utc
+        ) VALUES(1,0,0,NULL);
+        CREATE TRIGGER IF NOT EXISTS receiver_delivery_compacted
+        AFTER UPDATE OF payload_compacted_at_utc ON fact_deliveries
+        WHEN OLD.payload_compacted_at_utc IS NULL
+             AND NEW.payload_compacted_at_utc IS NOT NULL
+        BEGIN
+          UPDATE receiver_compaction_status
+          SET compacted_delivery_count=compacted_delivery_count+1,
+              last_compacted_at_utc=NEW.payload_compacted_at_utc
+          WHERE singleton=1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS receiver_fact_compacted
+        AFTER UPDATE OF payload_compacted_at_utc ON fact_latest
+        WHEN OLD.payload_compacted_at_utc IS NULL
+             AND NEW.payload_compacted_at_utc IS NOT NULL
+        BEGIN
+          UPDATE receiver_compaction_status
+          SET compacted_fact_count=compacted_fact_count+1,
+              last_compacted_at_utc=NEW.payload_compacted_at_utc
+          WHERE singleton=1;
+        END;
+        CREATE TRIGGER IF NOT EXISTS receiver_fact_rehydrated
+        AFTER UPDATE OF payload_compacted_at_utc ON fact_latest
+        WHEN OLD.payload_compacted_at_utc IS NOT NULL
+             AND NEW.payload_compacted_at_utc IS NULL
+        BEGIN
+          UPDATE receiver_compaction_status
+          SET compacted_fact_count=compacted_fact_count-1
+          WHERE singleton=1;
+        END;
+        """
+    )
+
+
+def load_adapter_watermark(path: Path | str) -> dict[str, int]:
+    """Load the adapter's durable, payload-free consumption watermark."""
+
+    try:
+        document = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ReceiverCompactionError("receiver_compaction_watermark_unavailable") from exc
+    if not isinstance(document, dict) or document.get("schema") != ADAPTER_WATERMARK_SCHEMA:
+        raise ReceiverCompactionError("receiver_compaction_watermark_invalid")
+    streams = document.get("streams")
+    if not isinstance(streams, dict) or len(streams) > 128:
+        raise ReceiverCompactionError("receiver_compaction_watermark_invalid")
+    normalized: dict[str, int] = {}
+    for stream_id, sequence in streams.items():
+        if (
+            not isinstance(stream_id, str)
+            or not stream_id
+            or isinstance(sequence, bool)
+            or not isinstance(sequence, int)
+            or sequence < 0
+        ):
+            raise ReceiverCompactionError("receiver_compaction_watermark_invalid")
+        normalized[stream_id] = sequence
+    return normalized
+
+
+def compact_consumed_payloads(
+    connection: sqlite3.Connection,
+    *,
+    applied_checkpoints: Mapping[str, int],
+    now: datetime | None = None,
+    retention_seconds: int = DEFAULT_PAYLOAD_RETENTION_SECONDS,
+    max_rows: int = 2_000,
+) -> ReceiverCompactionReport:
+    """Redact consumed payload copies while preserving transport identity forever.
+
+    The adapter's permanent Market Store owns the economic history.  The
+    receiver keeps stream/sequence/fact/revision/hash metadata so lost-ACK
+    replay and conflict detection remain exact after payload compaction.
+    """
+
+    if not 3_600 <= retention_seconds <= 604_800:
+        raise ReceiverCompactionError("receiver_compaction_retention_invalid")
+    if not 1 <= max_rows <= MAX_COMPACTION_BATCH_ROWS:
+        raise ReceiverCompactionError("receiver_compaction_batch_invalid")
+    current = (now or _utc_now()).astimezone(timezone.utc)
+    cutoff = (current - timedelta(seconds=retention_seconds)).isoformat().replace(
+        "+00:00", "Z"
+    )
+    compacted_at = current.isoformat().replace("+00:00", "Z")
+    receiver_checkpoints = {
+        str(row["stream_id"]): int(row["highest_contiguous_sequence"])
+        for row in connection.execute(
+            "SELECT stream_id,highest_contiguous_sequence FROM fact_checkpoints"
+        ).fetchall()
+    }
+    for stream_id, sequence in applied_checkpoints.items():
+        if (
+            stream_id not in receiver_checkpoints
+            or isinstance(sequence, bool)
+            or not isinstance(sequence, int)
+            or sequence < 0
+            or sequence > receiver_checkpoints[stream_id]
+        ):
+            raise ReceiverCompactionError("receiver_compaction_checkpoint_invalid")
+
+    candidates: list[sqlite3.Row] = []
+    cursor_updates: dict[str, int] = {}
+    scanned_rows = 0
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        for stream_id in sorted(applied_checkpoints):
+            remaining = max_rows - scanned_rows
+            if remaining <= 0:
+                break
+            cursor_row = connection.execute(
+                "SELECT highest_examined_sequence "
+                "FROM receiver_compaction_cursors WHERE stream_id=?",
+                (stream_id,),
+            ).fetchone()
+            cursor = int(cursor_row[0]) if cursor_row else 0
+            if int(applied_checkpoints[stream_id]) < cursor:
+                raise ReceiverCompactionError(
+                    "receiver_compaction_watermark_regression"
+                )
+            rows = connection.execute(
+                """
+                SELECT rowid,delivery_sequence,fact_id,fact_revision,
+                       received_at_utc,payload_compacted_at_utc
+                FROM fact_deliveries
+                WHERE stream_id=? AND delivery_sequence>?
+                  AND delivery_sequence<=?
+                ORDER BY delivery_sequence
+                LIMIT ?
+                """,
+                (
+                    stream_id,
+                    cursor,
+                    int(applied_checkpoints[stream_id]),
+                    remaining,
+                ),
+            ).fetchall()
+            examined = cursor
+            for row in rows:
+                scanned_rows += 1
+                # received_at is assigned in the same transaction that
+                # advances this stream's contiguous delivery sequence.  Stop
+                # at the first row still inside the safety window so a cursor
+                # never skips payload that is not yet eligible.
+                if str(row["received_at_utc"]) > cutoff:
+                    break
+                examined = int(row["delivery_sequence"])
+                if row["payload_compacted_at_utc"] is None:
+                    candidates.append(row)
+            if examined > cursor:
+                cursor_updates[stream_id] = examined
+        connection.executemany(
+            """
+            INSERT INTO receiver_compaction_cursors(
+                stream_id,highest_examined_sequence,updated_at_utc
+            ) VALUES(?,?,?)
+            ON CONFLICT(stream_id) DO UPDATE SET
+                highest_examined_sequence=excluded.highest_examined_sequence,
+                updated_at_utc=excluded.updated_at_utc
+            WHERE excluded.highest_examined_sequence>=
+                  receiver_compaction_cursors.highest_examined_sequence
+            """,
+            (
+                (stream_id, sequence, compacted_at)
+                for stream_id, sequence in cursor_updates.items()
+            )
+        )
+        if not candidates:
+            connection.commit()
+            return ReceiverCompactionReport(0, 0)
+        connection.executemany(
+            """
+            UPDATE fact_deliveries
+            SET payload_json='',payload_compacted_at_utc=?
+            WHERE rowid=? AND payload_compacted_at_utc IS NULL
+            """,
+            ((compacted_at, int(row["rowid"])) for row in candidates),
+        )
+        latest_cursor = connection.executemany(
+            """
+            UPDATE fact_latest
+            SET payload_json='',payload_compacted_at_utc=?
+            WHERE fact_id=? AND fact_revision=?
+              AND payload_compacted_at_utc IS NULL
+            """,
+            (
+                (compacted_at, str(row["fact_id"]), int(row["fact_revision"]))
+                for row in candidates
+            ),
+        )
+        latest_count = latest_cursor.rowcount
+        connection.commit()
+    except BaseException:
+        connection.rollback()
+        raise
+    return ReceiverCompactionReport(len(candidates), latest_count)
 
 
 def _rejected_ack(
@@ -289,7 +543,8 @@ def apply_fact_batch(
                     fact_revision=excluded.fact_revision,
                     payload_hash=excluded.payload_hash,
                     payload_json=excluded.payload_json,
-                    received_at_utc=excluded.received_at_utc
+                    received_at_utc=excluded.received_at_utc,
+                    payload_compacted_at_utc=NULL
                 """,
                 (
                     fact.fact_id,
@@ -357,6 +612,10 @@ def receiver_metrics(connection: sqlite3.Connection) -> dict[str, object]:
         "SELECT delivery_count,fact_count "
         "FROM receiver_status_counts WHERE singleton=1"
     ).fetchone()
+    compaction = connection.execute(
+        "SELECT compacted_delivery_count,compacted_fact_count,last_compacted_at_utc "
+        "FROM receiver_compaction_status WHERE singleton=1"
+    ).fetchone()
     return {
         "schema": RECEIVER_SCHEMA,
         "streams": checkpoints,
@@ -365,4 +624,7 @@ def receiver_metrics(connection: sqlite3.Connection) -> dict[str, object]:
         "accepted_count": int(counters[0]),
         "duplicate_count": int(counters[1]),
         "rejection_count": int(counters[2]),
+        "compacted_delivery_count": int(compaction[0]),
+        "compacted_fact_count": int(compaction[1]),
+        "last_compacted_at_utc": compaction[2],
     }

@@ -1,7 +1,18 @@
 # اتصال staging به مدل تخمین کالا
 
+## وضعیت و مرز این سند
+
+این runbook مسیر تاریخی Snapshot محصول staging را توضیح می‌دهد؛ جایگزین
+deploy رسمی pipeline جدید market-data نیست. authority محصول فعلاً
+`LEGACY` می‌ماند و `PRIVATE_PRIMARY` بدون مجوز صریح ممنوع است. این
+نام‌گذاری Product به‌معنای وجود live legacy collector نیست: capture تک‌مالک
+جدید تنها منبع live `GROUP_1`، `GROUP_2` و `PRIVATE_GOLD_CHANNEL` است؛
+DB/snapshot قدیمی فقط historical seed/regression است و نباید gate باشد.
+
+این بازنگری هیچ installer، deploy، restart، marker یا authority switchی اجرا نمی‌کند.
+
 این اتصال فقط برای staging است. Snapshot مدل از خروجی اتمیک و تازهٔ publisher
-خوانده می‌شود؛ collector جدیدی راه نمی‌افتد و پایگاه یا سرویس production هیچ‌گاه
+خوانده می‌شود؛ این runbook owner دیگری برای capture راه نمی‌اندازد و پایگاه یا سرویس production هیچ‌گاه
 نوشته نمی‌شود.
 
 ## قرارداد ایمن
@@ -48,10 +59,20 @@ python scripts/sync_staging_commodity_catalog.py \
 پس از apply باید هر دو peer با کلید طبیعی برابر، backlog باز صفر و اجرای دوبارهٔ
 ابزار بدون addition باشد. manifest موقت نباید commit شود.
 
-## relay و deploy
+## relay تاریخی و gap اتصال به deploy رسمی
 
-روی سرور staging بات، ابتدا installer رسمی publisher و سپس installer relay اجرا
-می‌شود. نصب publisher فقط با محیط `staging` و تأیید دقیق زیر مجاز است؛ واحدها را
+فرایند رسمی production ریپازیتوری و build authority را روی سرور بات نگه
+می‌دارد، foreign را اول deploy می‌کند و source payload/imageهای متصل به همان
+Git SHA را به سرور وب/ایران می‌فرستد. وجود فایل‌های `deploy/market-data`
+در payload به‌معنای deployment آنها نیست. در وضع موجود، اسکریپت‌های رسمی
+staging/production هنوز image جداگانه market-data را build/ship/load نمی‌کنند،
+`compose.web.yml`/`compose.bot.yml` را orchestrate نمی‌کنند و migration، digest
+receipt، rollout order و rollback آن را نمی‌بندند. بنابراین Stage 3 «اتصال به
+deploy رسمی» هنوز باز است.
+
+فرمان‌های زیر فقط دستورالعمل مسیر تاریخی publisher/relay هستند و نباید بدون
+مجوز جداگانه اجرا شوند. روی سرور staging بات، publisher فقط با محیط
+`staging` و تأیید دقیق زیر مجاز است؛ واحدها را
 پیش از جایگزینی بررسی و نسخهٔ پشتیبان می‌گیرد، نصب را اتمیک انجام می‌دهد و اگر
 اجرای publisher، اعتبار Snapshot یا وضعیت timer شکست بخورد واحدها و وضعیت timer
 قبلی را برمی‌گرداند. هیچ credentialای در unit نوشته نمی‌شود و این installer هیچ
@@ -71,8 +92,9 @@ scripts/deploy_staging.sh check
 `SuccessExitStatus` پنهان شود. installer بعد از اجرای unit، Snapshot را با سقف
 ثابت ۱۲۰ ثانیه بررسی می‌کند و فقط `FRESH` یا `FRESH_NO_DATA` را می‌پذیرد.
 
-deploy رسمی هر peer فقط در صورت Snapshot تازهٔ rate-ready یا Snapshot تازه و
-ساختاریافتهٔ `NO_DATA` ادامه می‌یابد. متغیرهای staging:
+deploy فعلی محصول این Snapshot تاریخی را فقط در صورت rate-ready تازه یا
+`NO_DATA` تازه می‌پذیرد؛ این check، pipeline جدید را deploy نمی‌کند. متغیرهای
+staging تاریخی:
 
 ```text
 STAGING_COIN_INFERENCE_PREVIEW_ENABLED=true
@@ -87,6 +109,8 @@ Compose پوشهٔ والد این فایل‌ها را read-only mount می‌�
 مستقیم فایل می‌تواند کانتینر را روی inode قدیمی و Snapshot منقضی نگه دارد.
 
 ## معیار پذیرش
+
+این معیارها فقط برای مسیر Snapshot تاریخی‌اند و Stage 3 جدید را نمی‌بندند:
 
 1. کاتالوگ هفت‌گانه و تمام aliasهای production در هر دو staging موجود باشد.
 2. digest و زمان Snapshot در دو host برابر و تازه باشد.

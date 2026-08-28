@@ -13,6 +13,55 @@ from core.market_intelligence.market_snapshot import MarketSnapshotUnavailable
 
 
 class CoinInferenceShadowObservationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_private_reader_freshness_limit_reaches_actual_ranker(self) -> None:
+        db = SimpleNamespace()
+        snapshot = {"rates": {"items": []}, "market_regime": {}}
+        reader = SimpleNamespace(
+            maximum_age_seconds=300,
+            load=lambda **_kwargs: SimpleNamespace(snapshot=snapshot),
+        )
+        ranker_result = SimpleNamespace(
+            settlement_term="CASH",
+            candidates=(),
+        )
+        decision = CatalogCoinCommodityInference(
+            status="ABSTAIN",
+            settlement_term="CASH",
+            candidates=(),
+            snapshot_generated_at_utc=None,
+            snapshot_receipt=None,
+            reason="NO_CANDIDATES",
+        )
+        with (
+            patch(
+                "core.market_intelligence.coin_inference_shadow.infer_coin_commodity",
+                return_value=ranker_result,
+            ) as infer,
+            patch(
+                "core.market_intelligence.coin_inference_shadow.resolve_coin_inference_against_catalog",
+                new=AsyncMock(return_value=decision),
+            ),
+            patch(
+                "core.market_intelligence.coin_inference_shadow.append_coin_inference_audit",
+                new=AsyncMock(),
+            ),
+        ):
+            await observe_coin_inference_shadow(
+                db,
+                snapshot_path="/unused/legacy.json",
+                submitted_project_price=186_800,
+                settlement_term="CASH",
+                source_surface="WEBAPP",
+                snapshot_reader=reader,
+            )
+
+        self.assertEqual(
+            infer.await_args.kwargs["maximum_snapshot_age_seconds"]
+            if isinstance(infer, AsyncMock)
+            else infer.call_args.kwargs["maximum_snapshot_age_seconds"],
+            300,
+        )
+
     async def test_observation_uses_one_snapshot_decision_and_defers_commit(self) -> None:
         db = SimpleNamespace()
         decision = CatalogCoinCommodityInference(

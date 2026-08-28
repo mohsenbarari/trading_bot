@@ -18,7 +18,7 @@ from typing import Iterable, Mapping, Sequence
 from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 
 
-COIN_GROUP_PARSER_VERSION = "coin-group-rules-v9-field-evidence"
+COIN_GROUP_PARSER_VERSION = "coin-group-rules-v10-reviewed-fallbacks"
 _DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 _ARABIC_LETTERS = str.maketrans({"ي": "ی", "ى": "ی", "ك": "ک"})
 # Dot and slash are genuine thousands separators when they are attached to
@@ -274,6 +274,14 @@ def _price_candidates(
                 values.append((raw // 10, 0.80))
         elif length == 7 and raw % 10 == 0:
             values.append((raw // 10, 0.72))
+            if raw % 100 == 0 and commodity is not None:
+                # A duplicated terminal zero also appears in otherwise
+                # explicit low-price coin offers.  Keep this interpretation
+                # weaker than the canonical scale so family bounds or causal
+                # same-time context must disambiguate it.  An unnamed seven-
+                # digit Imam quote must retain its canonical /10 scale rather
+                # than becoming ambiguous with an unrelated low-price family.
+                values.append((raw // 100, 0.70))
         elif length == 4:
             values.extend(((raw * 10, 0.72), (raw * 100, 0.70)))
         elif length == 3:
@@ -520,6 +528,18 @@ def _offer_segments(value: str) -> list[str]:
     )
 
 
+def _can_collapse_offer_lines(lines: Sequence[str]) -> bool:
+    """Allow only one incomplete offer to span visual lines."""
+
+    normalized = tuple(_text(line) for line in lines if _text(line))
+    if len(normalized) < 2:
+        return False
+    side_lines = sum(_side(line) is not None for line in normalized)
+    quantity_lines = sum(_explicit_quantity(line)[0] is not None for line in normalized)
+    commodity_lines = sum(_commodity(line) is not None for line in normalized)
+    return side_lines == 1 and quantity_lines == 1 and commodity_lines <= 1
+
+
 def parse_coin_group_offers(
     source: CoinGroupMessageInput,
     *,
@@ -532,71 +552,79 @@ def parse_coin_group_offers(
     whole = _text(source.text)
     if not whole or _NON_OFFER.search(whole):
         return []
-    results: list[ParsedCoinGroupOffer] = []
     lines = [item for item in str(source.text).splitlines() if _text(item)] or [whole]
-    segments = [segment for line in lines for segment in _offer_segments(line)]
-    for text in segments:
-        if _THURSDAY.search(text):
-            continue
-        commodity = _commodity(text)
-        side = _side(text)
-        year_spans = [match.span() for match in _YEAR_TOKEN.finditer(text)]
-        year_spans.extend(
-            match.span(1) for match in _LOW_DATE_FLOOR_TOKEN.finditer(text)
-        )
-        quantity, quantity_spans = _explicit_quantity(text)
-        remaining_numbers = [
-            match
-            for match in _NUMBER.finditer(text)
-            if not _spans_overlap(match.span(1), (*quantity_spans, *year_spans))
-        ]
-        if commodity is not None and len(remaining_numbers) >= 2:
-            # `86` is a prevalent mint-year annotation.  Treat it as metadata
-            # only beside an explicit commodity and another price token, so a
-            # genuine shorthand quote of 86 is not discarded.
+    batches = [[segment for line in lines for segment in _offer_segments(line)]]
+    if _can_collapse_offer_lines(lines):
+        # Some clients split one offer across visual lines (instrument/quantity
+        # then price/side).  Preserve the established per-line interpretation
+        # first and only collapse the message when it produced no offer at all.
+        batches.append(_offer_segments(whole))
+    for segments in batches:
+        results: list[ParsedCoinGroupOffer] = []
+        for text in segments:
+            if _THURSDAY.search(text):
+                continue
+            commodity = _commodity(text)
+            side = _side(text)
+            year_spans = [match.span() for match in _YEAR_TOKEN.finditer(text)]
             year_spans.extend(
-                match.span(1)
-                for match in remaining_numbers
-                if re.sub(r"\D", "", match.group(1)) == "86"
+                match.span(1) for match in _LOW_DATE_FLOOR_TOKEN.finditer(text)
             )
-        price, price_spans = _price(
-            text,
-            (*quantity_spans, *year_spans),
-            commodity,
-            price_context,
-        )
-        if quantity is None and price is not None:
-            quantity, quantity_spans = _bare_quantity(
+            quantity, quantity_spans = _explicit_quantity(text)
+            remaining_numbers = [
+                match
+                for match in _NUMBER.finditer(text)
+                if not _spans_overlap(match.span(1), (*quantity_spans, *year_spans))
+            ]
+            if commodity is not None and len(remaining_numbers) >= 2:
+                # `86` is a prevalent mint-year annotation.  Treat it as metadata
+                # only beside an explicit commodity and another price token, so a
+                # genuine shorthand quote of 86 is not discarded.
+                year_spans.extend(
+                    match.span(1)
+                    for match in remaining_numbers
+                    if re.sub(r"\D", "", match.group(1)) == "86"
+                )
+            price, price_spans = _price(
                 text,
-                (*year_spans, *price_spans),
+                (*quantity_spans, *year_spans),
+                commodity,
+                price_context,
             )
-        if side is None or quantity is None or price is None:
-            continue
-        trade_form, settlement = _dimensions(text)
-        # A syntactically complete explicit offer is usable immediately.  The
-        # resolver may still reject an explicit commodity when authoritative,
-        # strictly-prior evidence proves a real price-book conflict, but a
-        # missing market anchor is not itself ambiguity in a parsed message.
-        quality_state = "ELIGIBLE" if commodity is not None else "PENDING_REVIEW"
-        reason = (
-            "UNNAMED_COMMODITY_REQUIRES_POINT_IN_TIME_PRICE_RESOLUTION"
-            if commodity is None
-            else "EXPLICIT_COMMODITY_PARSED_WITH_COMPLETE_REQUIRED_FIELDS"
-        )
-        results.append(
-            ParsedCoinGroupOffer(
-                commodity_code=commodity,
-                price_project_thousand_toman=price,
-                quantity=quantity,
-                side=side,
-                settlement_term=settlement,
-                trade_form=trade_form,
-                is_conditional=bool(_CONDITIONAL.search(text)),
-                quality_state=quality_state,
-                resolution_reason=reason,
+            if quantity is None and price is not None:
+                quantity, quantity_spans = _bare_quantity(
+                    text,
+                    (*year_spans, *price_spans),
+                )
+            if side is None or quantity is None or price is None:
+                continue
+            trade_form, settlement = _dimensions(text)
+            # A syntactically complete explicit offer is usable immediately.  The
+            # resolver may still reject an explicit commodity when authoritative,
+            # strictly-prior evidence proves a real price-book conflict, but a
+            # missing market anchor is not itself ambiguity in a parsed message.
+            quality_state = "ELIGIBLE" if commodity is not None else "PENDING_REVIEW"
+            reason = (
+                "UNNAMED_COMMODITY_REQUIRES_POINT_IN_TIME_PRICE_RESOLUTION"
+                if commodity is None
+                else "EXPLICIT_COMMODITY_PARSED_WITH_COMPLETE_REQUIRED_FIELDS"
             )
-        )
-    return results
+            results.append(
+                ParsedCoinGroupOffer(
+                    commodity_code=commodity,
+                    price_project_thousand_toman=price,
+                    quantity=quantity,
+                    side=side,
+                    settlement_term=settlement,
+                    trade_form=trade_form,
+                    is_conditional=bool(_CONDITIONAL.search(text)),
+                    quality_state=quality_state,
+                    resolution_reason=reason,
+                )
+            )
+        if results:
+            return results
+    return []
 
 
 def coin_group_offer_observations(source: CoinGroupMessageInput) -> list[MarketObservation]:

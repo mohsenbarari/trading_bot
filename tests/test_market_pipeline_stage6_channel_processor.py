@@ -178,7 +178,8 @@ class MarketPipelineStage6ChannelProcessorTests(unittest.TestCase):
                     "ORDER BY event_time_utc"
                 ).fetchall()
                 private = market.execute(
-                    "SELECT event_type,price_value,quantity_value FROM market_observations "
+                    "SELECT event_key,event_type,price_value,quantity_value,attributes_json "
+                    "FROM market_observations "
                     "WHERE source_code='PRIVATE_GOLD_CHANNEL' "
                     "AND quality_state='ELIGIBLE' ORDER BY event_type"
                 ).fetchall()
@@ -195,6 +196,10 @@ class MarketPipelineStage6ChannelProcessorTests(unittest.TestCase):
             self.assertEqual(
                 [(row["event_type"], row["price_value"], row["quantity_value"]) for row in private],
                 [("OFFER", "95000000", "10"), ("TRADE", "95000000", "4")],
+            )
+            self.assertEqual(
+                json.loads(private[1]["attributes_json"])["root_offer_event_key"],
+                bytes(private[0]["event_key"]).hex(),
             )
             self.assertNotIn("final_price", outcome_columns)
             self.assertNotIn("final_quantity", outcome_columns)

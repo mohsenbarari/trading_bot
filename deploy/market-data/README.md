@@ -16,7 +16,7 @@
 - `market-processor` هر سه spool و نه source را با بودجه مستقل مصرف می‌کند و فقط
   Market Store و input ledger در حالت shadow می‌سازد؛
 - PostgreSQL archive/outbox، Fact sender/receiver، adapter بات، estimator snapshot و مسیر
-  برگشت WebApp پیاده و در Docker آزمایش شده‌اند؛ migration مستقل اکنون version 2 و ۲۶ جدول است؛
+  برگشت WebApp پیاده و در Docker آزمایش شده‌اند؛ migration مستقل اکنون version 3 و ۲۸ جدول است؛
 - importer تاریخچه و parity report امضاشده آماده‌اند، ولی import واقعی، deploy و authority
   switch هنوز انجام نشده است.
 
@@ -32,12 +32,51 @@ choreography cutover و بعد از توقف owner میزبان ساخته می�
 اتمیک در مسیر `calibration/coin-groups` منتشر شوند؛ DB در حال نوشتن legacy مستقیم mount
 نمی‌شود.
 seed اولیه فقط با `export_market_calibration_seed.py` و از ستون‌های allowlist‌شده ساخته
-می‌شود؛ کپی کامل SQLite تولیدی ممنوع است. پس از شروع shadow، receiver وب هر estimator
-snapshot امضاشده را با transaction اتمیک به ledger اختصاصی single-writer/WAL می‌افزاید و
-فقط ۲۴ ساعت را نگه می‌دارد. processor این ledger محلی را query-only می‌خواند؛ DB زندهٔ
-legacy هرگز mount نمی‌شود و parser به snapshot ثابت روز deployment وابسته نمی‌ماند.
+می‌شود؛ کپی کامل SQLite تولیدی ممنوع است. در Shadow، estimator snapshot فقط در lane
+ایزولهٔ Shadow منتشر می‌شود و حق refresh کردن prediction ledger مصرفی parser را ندارد.
+آن ledger فقط از seed قابل ممیزی و سپس، بعد از مجوز مستقل Primary، از snapshotهای
+`PRIVATE_PRIMARY` به‌روز می‌شود. processor آن را query-only می‌خواند؛ DB زندهٔ legacy
+هرگز mount نمی‌شود و هیچ snapshot ثابت روز deployment نیز نباید بی‌قید زمان مصرف شود.
 
 دایرکتوری والد secret باید `root:root 0700` و فایل‌های مصرفی باید `root:10001 0440` باشند. PostgreSQL با UID/GID `70:70` فقط supplemental group `10001` می‌گیرد؛ بنابراین همان فایل password برای migration/runtime قابل خواندن است، بدون root container یا world-readable secret.
+
+## Evidence رسمی release (بدون deploy)
+
+`scripts/prepare_market_pipeline_release.py` دو source نقش‌محور خارج Git را بررسی و envهای
+release-bound می‌سازد. sourceها فقط topology و مسیر secret هستند؛ image، Git SHA، mode، feed
+و primary authority را controller رسمی تزریق می‌کند. فعال‌سازی evidence در manifest production
+به confirmation دقیق نیاز دارد و فقط image/receipt/env pair را آماده می‌کند. این مرحله image را
+به وب منتقل یا load نمی‌کند، migration/service اجرا نمی‌کند و هیچ Telegram session یا Product
+authority را تغییر نمی‌دهد. نمونه sourceها:
+
+- `web.production-source.env.example`؛
+- `bot.production-source.env.example`.
+
+gate دوم اختیاری، payload کنترلی commit-exact را در
+`/srv/trading-bot/market-pipeline-releases/<SHA>` روی هر دو میزبان نگه می‌دارد، image را مستقیم
+از Docker store بات به `docker load` وب stream می‌کند و پس از تطبیق content ID، preflight واقعی
+دو نقش را اجرا می‌کند. این gate نیز service یا migration اجرا نمی‌کند؛ حداقل فضای آزاد پیش‌فرض
+۲ GiB است و هیچ artifact انتقالی در `/tmp` یا `/var/tmp` نمی‌سازد.
+
+ابزار `scripts/backup_market_pipeline_archive.py` گیت مستقل پیش از migration است. برای DB
+موجود، runtime دقیق PostgreSQL را bind می‌کند، `pg_dump -Fc` را در مسیر root-only خارج از
+data root می‌سازد و آن را در container موقت بدون network restore می‌کند. schema/table/fact
+count باید reconcile شود و منابع موقت بعد از cleanup نباید باقی بمانند. datastore کاملاً خالی
+فقط receipt `INITIAL_EMPTY` می‌گیرد؛ حالت نیمه‌ساخته یا DB بدون schema بازار رد می‌شود. backup
+موجود باید پیش از migration با SHA-256 یکسان روی میزبان دوم نگه‌داری شود. این ابزار transport
+یا migration/service start انجام نمی‌دهد.
+
+controller رسمی گیت بعدی را فقط با confirmation مستقل فعال می‌کند: receipt/artifact verified
+روی میزبان بات نگه‌داری می‌شود، سپس `scripts/migrate_market_pipeline_archive.py` فقط database
+را با `--no-recreate` آماده و migration را دو بار اجرا می‌کند. اجرای دوم باید
+`already_current` باشد و فقط database مجاز است running بماند؛ capture و Product authority
+خاموش می‌مانند. شکست initial database باعث stop بدون حذف state می‌شود.
+
+گیت receiver-first بعدی از `scripts/rollout_market_pipeline_shadow.py` استفاده می‌کند و فقط
+receiverهای بات/وب، processor+fact sender وب و adapter+estimator+snapshot sender بات را شروع
+می‌کند. captureهای account1/account2/external در فهرست مجاز نیستند. journal دو میزبان rollback
+را به containerهای دقیق ساخته‌شده محدود می‌کند؛ volume/state/database حفظ می‌شوند. runtime
+قدیمی موجود به‌جای replace خودکار رد می‌شود تا upgrade/rollback مستقل آن طراحی شود.
 
 ## فایل‌ها
 
@@ -83,6 +122,23 @@ config زنده یک secret JSON با contract برابر
 `MELTED_PRIMARY_FLOW`, `MELTED_AGGREGATE`, `MELTED_FLOW`, `USD_HERAT`, `XAUUSD` و
 Account 2 باید دقیقاً `GROUP_1`, `GROUP_2` را bind کند. peer ID و API credential فقط
 داخل همان secret خارج Git می‌مانند. HMAC هویت فرستنده Account 2 secret جداگانه است.
+نسخه 2.1 رویداد گروه، شناسه تلگرام و نام نمایشی را فقط تا مرز processor حمل می‌کند؛
+نسخه دائمی هر دو مقدار با کلید مستقل `market_research_encryption_key` در PostgreSQL وب
+رمز می‌شود و هرگز وارد Fact، transport بات، log یا heartbeat نمی‌شود. متن خام متناظر با
+factهای پنج منبع پژوهشی نیز با همان کلید و بدون message/link/channel metadata نگه‌داری
+می‌شود. دو کانال عمومی آبشده از migration 3 آرشیو دائمی‌اند؛ envelopeهای ACKشده outbox
+پس از هفت روز و فقط پشت checkpoint به `{}` فشرده می‌شوند.
+پیش‌نمایش backfill محلی و بدون نمایش محتوای حساس با دستور زیر انجام می‌شود؛ افزودن
+`--apply` فقط پس از migration و نصب secret مجاز است و ورودی‌های هم‌پوشان را idempotent
+مصرف می‌کند:
+
+```bash
+python -m core.market_intelligence.market_research_backfill \
+  --capture-db /var/lib/market-data/state/market-processor/capture-staging.sqlite3
+```
+
+captureهای قدیمی گروه فقط peer HMAC و نام `null` دارند؛ بنابراین شناسه و نام واقعی آن
+بخش از تاریخچه قابل بازسازی نیست و آرشیو هویت از اولین رویداد نسخه 2.1 کامل می‌شود.
 در cutover، همان HMAC key فعال capture فعلی باید به secret جدید منتقل شود؛ تولید کلید
 تازه branchهای reply نزدیک cutover را از هم جدا می‌کند و ممنوع است.
 
@@ -135,19 +191,42 @@ python3 scripts/rehearse_market_shadow_stage12.py --events 1000
 ```
 
 Stage 11 فقط bundle نرمال‌شده و sensitive ciphertext را می‌پذیرد؛ seed بات raw یا identity
-ندارد. Stage 12 بدون capture manifest کامل، snapshot timeline واقعی، report HMAC-signed و
-یک جلسه کامل بازار باز هرگز promotion توصیه نمی‌کند. نتیجه offline فعلی
-`HOLD_LIVE_OPEN_MARKET_REQUIRED` است.
+ندارد. Stage 12 بدون capture manifest کامل، snapshot timeline واقعی، report HMAC-signed،
+یک جلسه کامل بازار باز و verifier مستقل receiptهای release-bound هرگز promotion
+توصیه نمی‌کند. نتیجه replay آفلاین فعلی `HOLD_LIVE_OPEN_MARKET_REQUIRED` است؛
+evidence زنده تا پیاده‌شدن verifier با `TRUSTED_LIVE_ATTESTATION_UNAVAILABLE` و
+`HOLD_BLOCKING_PARITY_FINDINGS` متوقف می‌شود.
+
+export عملیاتی Stage 11 باید `--temporary-directory` را به یک دایرکتوری خالی، محافظت‌شده،
+متعلق به همان کاربر اجرا، با mode `0700` و واقع بر دیسک بدهد. این scratch نباید `/tmp` باشد و هیچ اجرای هم‌زمان یا
+artifact باقی‌مانده را نمی‌پذیرد؛ sort بزرگ SQLite در RAM یا tmpfs برای backfill کامل مجاز
+نیست.
 
 ## ترتیب release آینده
 
 1. build از worktree تمیز و label برابر Git SHA؛
 2. ثبت/انتقال همان digest رجیستری یا Docker image ID محتواآدرس‌پذیر برای هر دو میزبان؛
 3. preflight path، secret و private bind؛
-4. receiver-first؛
-5. migration یک‌باره و idempotent؛
-6. writerها بدون authority switch؛
+4. backup/restore-smoke و کپی verified روی failure domain دوم؛
+5. migration یک‌باره و اجرای دوم `already_current`؛
+6. receiver-first و سپس writerها، بدون authority switch؛
 7. shadow/parity؛
 8. authority switch با مجوز مستقل؛
 9. postcheck و soak؛
 10. rollback فقط با pin digest قبلی و بدون حذف volume/checkpoint/outbox.
+
+## فضای موقت انتقال release
+
+فایل image/release هرگز نباید در `/tmp` میزبان ساخته یا کپی شود؛ `/tmp` روی میزبان وب
+`tmpfs` است و هر byte آن RAM مصرف می‌کند. مسیر موقت مجاز، disk-backed و محدود زیر است:
+
+```bash
+sudo scripts/install_market_pipeline_transfer_workspace.sh
+```
+
+این فرمان `/var/tmp/trading-bot-market-pipeline-transfer` را با مالکیت `root:root` و mode
+`0700` می‌سازد و پاک‌سازی محتوای قدیمی‌تر از یک ساعت را به `systemd-tmpfiles` می‌سپارد.
+انتقال ترجیحاً باید stream شود (`docker save | ssh docker load`) تا فایل remote ساخته نشود؛
+اگر ابزار انتقال به فایل نیاز دارد فقط همین مسیر مجاز است و پس از verify/import باید همان
+فایل را در trap موفقیت یا شکست حذف کند. releaseهای commit-bound و rollback فقط در مسیر
+پایدار `/srv/trading-bot/market-pipeline-releases` نگه‌داری می‌شوند، نه در فضای موقت.

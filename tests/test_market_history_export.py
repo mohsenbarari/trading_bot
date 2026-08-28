@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -5,7 +7,9 @@ import stat
 import tempfile
 from datetime import datetime, timedelta, timezone
 import unittest
+from unittest.mock import patch
 
+from core.market_intelligence import market_history_export
 from core.market_intelligence.market_contracts import MarketObservation, derive_event_key
 from core.market_intelligence.market_history_backfill import _scan_forbidden
 from core.market_intelligence.market_history_export import (
@@ -160,6 +164,9 @@ class MarketHistoryExportTests(unittest.TestCase):
             protected = root / "protected"
             protected.mkdir(mode=0o700)
             os.chmod(protected, 0o700)
+            scratch = protected / "scratch"
+            scratch.mkdir(mode=0o700)
+            os.chmod(scratch, 0o700)
             first = protected / "first"
             report = export_market_history(
                 source_store=source_path,
@@ -170,7 +177,9 @@ class MarketHistoryExportTests(unittest.TestCase):
                 maximum_bundle_records=1,
                 output_directory=first,
                 exclusion_store=exclusion_path,
+                temporary_directory=scratch,
             )
+            self.assertEqual(list(scratch.iterdir()), [])
             self.assertEqual(report.source_counts, {"GROUP_1": 2, "MELTED_FLOW": 1})
             self.assertEqual(report.excluded_existing_counts["MELTED_FLOW"], 1)
             self.assertEqual(report.bundle_count, 3)
@@ -185,7 +194,7 @@ class MarketHistoryExportTests(unittest.TestCase):
                 _scan_forbidden(bundle)
             modes = {item["source_code"]: item["retention_mode"] for item in manifest["bundles"]}
             self.assertEqual(modes["GROUP_1"], "PERMANENT_ARCHIVE")
-            self.assertEqual(modes["MELTED_FLOW"], "TRANSIENT_SEED")
+            self.assertEqual(modes["MELTED_FLOW"], "PERMANENT_ARCHIVE")
 
             second = protected / "second"
             repeated = export_market_history(
@@ -197,11 +206,42 @@ class MarketHistoryExportTests(unittest.TestCase):
                 maximum_bundle_records=1,
                 output_directory=second,
                 exclusion_store=exclusion_path,
+                temporary_directory=scratch,
             )
+            self.assertEqual(list(scratch.iterdir()), [])
             self.assertEqual(report.manifest_sha256, repeated.manifest_sha256)
             validated = validate_export_directory(first)
             self.assertEqual(validated.manifest_sha256, report.manifest_sha256)
             self.assertEqual(validated.record_count, 3)
+
+            common = {
+                "source_store": source_path,
+                "source_codes": ("GROUP_1", "MELTED_FLOW"),
+                "window_start_utc": start,
+                "window_end_utc": start + timedelta(hours=1),
+                "source_cutoffs_utc": {},
+                "maximum_bundle_records": 1,
+                "exclusion_store": exclusion_path,
+                "temporary_directory": scratch,
+            }
+            with patch.object(market_history_export, "MAX_BUNDLES", 2):
+                with self.assertRaisesRegex(
+                    MarketHistoryExportError,
+                    "history_export_bundle_count_exceeded",
+                ):
+                    export_market_history(**common)
+            with patch.object(market_history_export, "MAX_BUNDLE_BYTES", 100):
+                with self.assertRaisesRegex(
+                    MarketHistoryExportError,
+                    "history_export_bundle_bytes_exceeded",
+                ):
+                    export_market_history(**common)
+            with patch.object(market_history_export, "MAX_MANIFEST_BYTES", 100):
+                with self.assertRaisesRegex(
+                    MarketHistoryExportError,
+                    "history_export_manifest_bytes_exceeded",
+                ):
+                    export_market_history(**common)
 
             unexpected = first / "unexpected.json"
             unexpected.write_text("{}", encoding="utf-8")
@@ -232,6 +272,9 @@ class MarketHistoryExportTests(unittest.TestCase):
                     )
                 connection.commit()
                 connection.close()
+            scratch = root / "scratch"
+            scratch.mkdir(mode=0o700)
+            os.chmod(scratch, 0o700)
             report = export_market_history(
                 source_store=source_path,
                 exclusion_store=exclusion_path,
@@ -240,7 +283,9 @@ class MarketHistoryExportTests(unittest.TestCase):
                 window_end_utc="2026-08-25T09:00:00Z",
                 source_cutoffs_utc={},
                 output_directory=root / "output",
+                temporary_directory=scratch,
             )
+            self.assertEqual(list(scratch.iterdir()), [])
             item = report.manifest["bundles"][0]
             bundle = json.loads(
                 ((root / "output") / item["file"]).read_text(encoding="utf-8")
@@ -249,6 +294,114 @@ class MarketHistoryExportTests(unittest.TestCase):
             self.assertLessEqual(len(record["parser_version"]), 96)
             self.assertTrue(record["parser_version"].startswith("legacy-parser-sha256:"))
             self.assertIn("PARSER_VERSION_NORMALIZED", record["quality_reason_codes"])
+
+    def test_operational_temp_store_requires_empty_protected_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source_path = root / "source.sqlite3"
+            exclusion_path = root / "exclusion.sqlite3"
+            when = datetime(2026, 8, 25, 8, 0, tzinfo=timezone.utc)
+            for path in (source_path, exclusion_path):
+                connection = connect_market_store(path)
+                initialize_market_store(connection)
+                if path == source_path:
+                    upsert_observation(
+                        connection,
+                        self._observation(
+                            key=derive_event_key("history-export", "disk-temp"),
+                            source="GROUP_1",
+                            when=when,
+                        ),
+                    )
+                connection.commit()
+                connection.close()
+            scratch = root / "scratch"
+            scratch.mkdir(mode=0o700)
+            os.chmod(scratch, 0o700)
+            (scratch / "leftover").write_bytes(b"incomplete-prior-run")
+            with self.assertRaisesRegex(
+                MarketHistoryExportError,
+                "history_export_temporary_directory_invalid",
+            ):
+                export_market_history(
+                    source_store=source_path,
+                    exclusion_store=exclusion_path,
+                    source_codes=("GROUP_1",),
+                    window_start_utc=when - timedelta(minutes=1),
+                    window_end_utc=when + timedelta(minutes=1),
+                    source_cutoffs_utc={},
+                    temporary_directory=scratch,
+                )
+
+    def test_export_cli_requires_disk_backed_temporary_directory(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                build_parser().parse_args(
+                    [
+                        "export",
+                        "--source-store",
+                        "/protected/source.sqlite3",
+                        "--exclusion-store",
+                        "/protected/exclusion.sqlite3",
+                        "--source",
+                        "GROUP_1",
+                        "--window-start-utc",
+                        "2026-08-25T07:00:00Z",
+                        "--window-end-utc",
+                        "2026-08-25T09:00:00Z",
+                    ]
+                )
+
+    def test_export_cli_rejects_host_tmp_scratch(self):
+        args = build_parser().parse_args(
+            [
+                "export",
+                "--source-store",
+                "/protected/source.sqlite3",
+                "--exclusion-store",
+                "/protected/exclusion.sqlite3",
+                "--temporary-directory",
+                "/tmp/history-export-scratch",
+                "--source",
+                "GROUP_1",
+                "--window-start-utc",
+                "2026-08-25T07:00:00Z",
+                "--window-end-utc",
+                "2026-08-25T09:00:00Z",
+            ]
+        )
+        with self.assertRaisesRegex(
+            MarketHistoryOperationError,
+            "history_operation_tmpfs_temporary_directory_forbidden",
+        ):
+            args.handler(args)
+
+    def test_export_cli_rejects_non_tmp_memory_filesystem(self):
+        args = build_parser().parse_args(
+            [
+                "export",
+                "--source-store",
+                "/protected/source.sqlite3",
+                "--exclusion-store",
+                "/protected/exclusion.sqlite3",
+                "--temporary-directory",
+                "/protected/scratch",
+                "--source",
+                "GROUP_1",
+                "--window-start-utc",
+                "2026-08-25T07:00:00Z",
+                "--window-end-utc",
+                "2026-08-25T09:00:00Z",
+            ]
+        )
+        with patch(
+            "core.market_intelligence.market_history_operations._filesystem_type",
+            return_value="tmpfs",
+        ), self.assertRaisesRegex(
+            MarketHistoryOperationError,
+            "history_operation_tmpfs_temporary_directory_forbidden",
+        ):
+            args.handler(args)
 
     def test_unlinked_private_gold_outcome_requires_explicit_audited_omission(self):
         with tempfile.TemporaryDirectory() as temporary:

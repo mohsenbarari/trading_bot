@@ -210,6 +210,12 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
             "  market-store-adapter:", 1
         )[0]
         self.assertIn("timeout: 8s", receiver)
+        estimator = bot.split("  coin-estimator:", 1)[1].split(
+            "  estimator-snapshot-sender:", 1
+        )[0]
+        self.assertIn("timeout: 8s", estimator)
+        self.assertIn("MARKET_PIPELINE_ESTIMATOR_INTERVAL_SECONDS", estimator)
+        self.assertIn("MARKET_PIPELINE_ESTIMATOR_CPUS", estimator)
         processor = web.split("  market-processor:", 1)[1].split(
             "  market-fact-sync-worker:", 1
         )[0]

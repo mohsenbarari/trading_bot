@@ -12,14 +12,17 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from hashlib import blake2b
 from pathlib import Path
+import re
 import sqlite3
 
 from .market_contracts import MarketStoreContractError, normalize_utc
 
 
-COIN_GROUP_STAGING_SCHEMA_VERSION = 1
+COIN_GROUP_STAGING_SCHEMA_VERSION = 2
 COIN_GROUP_STAGING_RETENTION = timedelta(days=3)
 _MAX_MESSAGE_TEXT_BYTES = 32 * 1024
+_MAX_DISPLAY_NAME_BYTES = 512
+_TELEGRAM_ID = re.compile(r"^[1-9][0-9]{0,19}$")
 
 
 class CoinGroupStagingError(RuntimeError):
@@ -37,6 +40,8 @@ class CoinGroupStagingMessage:
     text: str
     reply_to_message_id: int | None = None
     sender_identity: str | None = None
+    sender_telegram_id: str | None = None
+    sender_display_name: str | None = None
     edited_at_utc: datetime | str | None = None
 
 
@@ -54,6 +59,10 @@ class StagedCoinGroupMessage:
     edited_at_utc: str | None
     revision: int
     expires_at_utc: str
+    # Research identity is additive metadata.  Keep it optional and append-only
+    # in the constructor contract so older parser/linker callers remain valid.
+    sender_telegram_id: str | None = None
+    sender_display_name: str | None = None
 
 
 _SCHEMA = """
@@ -73,6 +82,8 @@ CREATE TABLE IF NOT EXISTS coin_group_staged_messages (
     edited_at_utc TEXT,
     reply_to_message_id INTEGER CHECK(reply_to_message_id IS NULL OR reply_to_message_id > 0),
     sender_digest BLOB CHECK(sender_digest IS NULL OR length(sender_digest) = 32),
+    sender_telegram_id TEXT,
+    sender_display_name TEXT,
     message_text TEXT NOT NULL,
     content_digest BLOB NOT NULL CHECK(length(content_digest) = 32),
     revision INTEGER NOT NULL CHECK(revision > 0),
@@ -86,6 +97,18 @@ CREATE INDEX IF NOT EXISTS idx_coin_group_staged_messages_expiry
     ON coin_group_staged_messages(expires_at_utc);
 CREATE INDEX IF NOT EXISTS idx_coin_group_staged_messages_reply
     ON coin_group_staged_messages(group_number, reply_to_message_id);
+
+CREATE TABLE IF NOT EXISTS coin_group_fact_research_context (
+    event_key BLOB PRIMARY KEY CHECK(length(event_key) BETWEEN 16 AND 64),
+    group_number INTEGER NOT NULL CHECK(group_number IN (1,2)),
+    root_message_id INTEGER NOT NULL CHECK(root_message_id > 0),
+    requester_message_id INTEGER CHECK(
+        requester_message_id IS NULL OR requester_message_id > 0
+    ),
+    expires_at_utc TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_coin_group_fact_research_expiry
+    ON coin_group_fact_research_context(expires_at_utc);
 """
 
 
@@ -115,6 +138,8 @@ def _content_digest(
     edited_at_utc: str | None,
     reply_to_message_id: int | None,
     sender_digest: bytes | None,
+    sender_telegram_id: str | None,
+    sender_display_name: str | None,
     text: str,
 ) -> bytes:
     digest = blake2b(digest_size=32, person=b"coin-group-stg1")
@@ -126,6 +151,8 @@ def _content_digest(
         edited_at_utc or "",
         str(reply_to_message_id or ""),
         sender_digest or b"",
+        sender_telegram_id or "",
+        sender_display_name or "",
         text,
     ):
         encoded = value if isinstance(value, bytes) else str(value).encode("utf-8")
@@ -189,13 +216,53 @@ def initialize_coin_group_staging(connection: sqlite3.Connection) -> None:
     metadata = connection.execute(
         "SELECT schema_version FROM coin_group_staging_metadata WHERE singleton = 1"
     ).fetchone()
+    if metadata is not None and int(metadata["schema_version"]) == 1:
+        connection.executescript(
+            """
+            ALTER TABLE coin_group_staged_messages
+              ADD COLUMN sender_telegram_id TEXT;
+            ALTER TABLE coin_group_staged_messages
+              ADD COLUMN sender_display_name TEXT;
+            CREATE TABLE coin_group_fact_research_context (
+                event_key BLOB PRIMARY KEY CHECK(length(event_key) BETWEEN 16 AND 64),
+                group_number INTEGER NOT NULL CHECK(group_number IN (1,2)),
+                root_message_id INTEGER NOT NULL CHECK(root_message_id > 0),
+                requester_message_id INTEGER CHECK(
+                    requester_message_id IS NULL OR requester_message_id > 0
+                ),
+                expires_at_utc TEXT NOT NULL
+            );
+            CREATE INDEX idx_coin_group_fact_research_expiry
+                ON coin_group_fact_research_context(expires_at_utc);
+            UPDATE coin_group_staging_metadata
+               SET schema_version=2
+             WHERE singleton=1;
+            """
+        )
+        connection.commit()
+        metadata = connection.execute(
+            "SELECT schema_version FROM coin_group_staging_metadata WHERE singleton = 1"
+        ).fetchone()
     if metadata is None or int(metadata["schema_version"]) != COIN_GROUP_STAGING_SCHEMA_VERSION:
         raise CoinGroupStagingError("coin_group_staging_schema_upgrade_required")
 
 
 def _normalized_input(
     message: CoinGroupStagingMessage,
-) -> tuple[int, int, str, str, str | None, int | None, bytes | None, str, bytes, str]:
+) -> tuple[
+    int,
+    int,
+    str,
+    str,
+    str | None,
+    int | None,
+    bytes | None,
+    str | None,
+    str | None,
+    str,
+    bytes,
+    str,
+]:
     try:
         group_number = int(message.group_number)
         message_id = int(message.message_id)
@@ -229,6 +296,15 @@ def _normalized_input(
     if not text or len(text.encode("utf-8")) > _MAX_MESSAGE_TEXT_BYTES:
         raise CoinGroupStagingError("coin_group_staging_text_invalid")
     sender = _sender_digest(message.sender_identity)
+    telegram_id = str(message.sender_telegram_id or "").strip() or None
+    if telegram_id is not None and not _TELEGRAM_ID.fullmatch(telegram_id):
+        raise CoinGroupStagingError("coin_group_staging_sender_telegram_id_invalid")
+    display_name = " ".join(str(message.sender_display_name or "").split()) or None
+    if (
+        display_name is not None
+        and len(display_name.encode("utf-8")) > _MAX_DISPLAY_NAME_BYTES
+    ):
+        raise CoinGroupStagingError("coin_group_staging_sender_name_invalid")
     digest = _content_digest(
         group_number=group_number,
         message_id=message_id,
@@ -237,12 +313,27 @@ def _normalized_input(
         edited_at_utc=edited_at,
         reply_to_message_id=reply,
         sender_digest=sender,
+        sender_telegram_id=telegram_id,
+        sender_display_name=display_name,
         text=text,
     )
     expires = (_as_datetime(available_at) + COIN_GROUP_STAGING_RETENTION).replace(
         microsecond=0
     ).isoformat().replace("+00:00", "Z")
-    return group_number, message_id, event_time, available_at, edited_at, reply, sender, text, digest, expires
+    return (
+        group_number,
+        message_id,
+        event_time,
+        available_at,
+        edited_at,
+        reply,
+        sender,
+        telegram_id,
+        display_name,
+        text,
+        digest,
+        expires,
+    )
 
 
 def stage_coin_group_message(
@@ -265,6 +356,8 @@ def stage_coin_group_message(
         edited_at,
         reply,
         sender,
+        telegram_id,
+        display_name,
         text,
         digest,
         expires,
@@ -287,16 +380,19 @@ def stage_coin_group_message(
         """
         INSERT INTO coin_group_staged_messages(
             group_number, message_id, event_time_utc, available_at_utc,
-            edited_at_utc, reply_to_message_id, sender_digest, message_text,
+            edited_at_utc, reply_to_message_id, sender_digest,
+            sender_telegram_id, sender_display_name, message_text,
             content_digest, revision, first_staged_at_utc, last_staged_at_utc,
             expires_at_utc
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(group_number, message_id) DO UPDATE SET
             event_time_utc = excluded.event_time_utc,
             available_at_utc = excluded.available_at_utc,
             edited_at_utc = excluded.edited_at_utc,
             reply_to_message_id = excluded.reply_to_message_id,
             sender_digest = excluded.sender_digest,
+            sender_telegram_id = excluded.sender_telegram_id,
+            sender_display_name = excluded.sender_display_name,
             message_text = excluded.message_text,
             content_digest = excluded.content_digest,
             revision = excluded.revision,
@@ -305,7 +401,8 @@ def stage_coin_group_message(
         """,
         (
             group_number, message_id, event_time, available_at, edited_at,
-            reply, sender, text, digest, revision, staged_at, staged_at, expires,
+            reply, sender, telegram_id, display_name, text, digest, revision,
+            staged_at, staged_at, expires,
         ),
     )
     return True
@@ -331,7 +428,7 @@ def list_current_staged_coin_group_messages(
         f"""
         SELECT group_number, message_id, event_time_utc, available_at_utc,
                message_text, reply_to_message_id, sender_digest, edited_at_utc,
-               revision, expires_at_utc
+               sender_telegram_id, sender_display_name, revision, expires_at_utc
         FROM coin_group_staged_messages
         WHERE {' AND '.join(clauses)}
         ORDER BY event_time_utc ASC, message_id ASC
@@ -347,6 +444,16 @@ def list_current_staged_coin_group_messages(
             text=str(row["message_text"]),
             reply_to_message_id=(int(row["reply_to_message_id"]) if row["reply_to_message_id"] is not None else None),
             sender_digest=(bytes(row["sender_digest"]) if row["sender_digest"] is not None else None),
+            sender_telegram_id=(
+                str(row["sender_telegram_id"])
+                if row["sender_telegram_id"] is not None
+                else None
+            ),
+            sender_display_name=(
+                str(row["sender_display_name"])
+                if row["sender_display_name"] is not None
+                else None
+            ),
             edited_at_utc=(str(row["edited_at_utc"]) if row["edited_at_utc"] is not None else None),
             revision=int(row["revision"]),
             expires_at_utc=str(row["expires_at_utc"]),
@@ -391,7 +498,11 @@ def purge_expired_coin_group_staging(
     """Purge private text after the fixed retention horizon; caller commits."""
 
     as_of = normalize_utc(as_of_utc, field_name="coin_group_staging_as_of_utc")
+    context = connection.execute(
+        "DELETE FROM coin_group_fact_research_context WHERE expires_at_utc <= ?",
+        (as_of,),
+    )
     cursor = connection.execute(
         "DELETE FROM coin_group_staged_messages WHERE expires_at_utc <= ?", (as_of,)
     )
-    return max(0, int(cursor.rowcount))
+    return max(0, int(context.rowcount)) + max(0, int(cursor.rowcount))

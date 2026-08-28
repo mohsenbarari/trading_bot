@@ -148,8 +148,8 @@ class ProductionSnapshotRelayTests(unittest.TestCase):
                     event_key=derive_event_key("production-relay-test", source),
                     source_code=source,
                     source_family="GROUP",
-                    event_time_utc=self.now - timedelta(minutes=10 - index),
-                    available_at_utc=self.now - timedelta(minutes=10 - index),
+                    event_time_utc=self.now - timedelta(seconds=4 - index),
+                    available_at_utc=self.now - timedelta(seconds=4 - index),
                     instrument="COIN_IMAM",
                     market_label="COIN_MARKET",
                     settlement_term="CASH",
@@ -179,8 +179,8 @@ class ProductionSnapshotRelayTests(unittest.TestCase):
                 market_label="PRIVATE_GOLD_PHYSICAL",
                 settlement_term="TODAY",
                 trade_form="PHYSICAL",
-                event_type="QUOTE",
-                side="MID",
+                event_type="OFFER",
+                side="SELL",
                 price=80_300_000,
                 price_unit="TOMAN_PER_MESGHAL_750",
                 currency="TOMAN",
@@ -188,6 +188,18 @@ class ProductionSnapshotRelayTests(unittest.TestCase):
                 parser_version="production-relay-test-v1",
                 quality_state="ELIGIBLE",
                 quality_policy_version="production-relay-test-v1",
+            ),
+        )
+        # The production snapshot deliberately admits only rows durably known
+        # before its whole-second evaluation boundary.  Pin fixture knowledge
+        # to the preceding second instead of depending on test execution
+        # crossing a wall-clock second.
+        self.connection.execute(
+            "UPDATE market_observations SET inserted_at_utc=?",
+            (
+                (self.now - timedelta(seconds=1))
+                .isoformat(timespec="microseconds")
+                .replace("+00:00", "Z"),
             ),
         )
         for index, source in enumerate(
@@ -758,8 +770,18 @@ class ProductionSnapshotRelayTests(unittest.TestCase):
         self.assertEqual(iran.count(target), 1)
         self.assertEqual(foreign.count(container_snapshot), 2)
         self.assertEqual(iran.count(container_snapshot), 1)
-        self.assertEqual(foreign.count("read_only: true"), 2)
-        self.assertEqual(iran.count("read_only: true"), 1)
+        self.assertEqual(foreign.count("read_only: true"), 4)
+        self.assertEqual(iran.count("read_only: true"), 2)
+        self.assertEqual(
+            foreign.count("PRODUCT_ESTIMATOR_SNAPSHOT_MODE: ${PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE:-LEGACY}"),
+            2,
+        )
+        self.assertEqual(
+            iran.count("PRODUCT_ESTIMATOR_SNAPSHOT_MODE: ${PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE:-LEGACY}"),
+            1,
+        )
+        self.assertEqual(foreign.count("target: /app/runtime/product-estimator"), 2)
+        self.assertEqual(iran.count("target: /app/runtime/product-estimator"), 1)
         self.assertNotIn("COIN_INTELLIGENCE_INFERENCE_SNAPSHOT", foreign.split("sync_worker:", 1)[1])
         self.assertNotIn("COIN_INTELLIGENCE_INFERENCE_SNAPSHOT", iran.split("sync_worker:", 1)[1])
 

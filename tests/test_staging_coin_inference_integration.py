@@ -170,7 +170,8 @@ class StagingSnapshotRelayContractTests(TestCase):
             ),
             3,
         )
-        self.assertEqual(compose.count("read_only: true"), 3)
+        self.assertEqual(compose.count("read_only: true"), 6)
+        self.assertEqual(compose.count("target: /app/runtime/product-estimator"), 3)
         self.assertNotIn(
             "source: ${STAGING_COIN_INFERENCE_SNAPSHOT_HOST_PATH",
             compose,

@@ -134,6 +134,10 @@ from core.market_intelligence.coin_inference_selection import (
     CoinInferenceSelectionRejected,
     revalidate_coin_inference_selection,
 )
+from core.market_intelligence.product_snapshot_reader import (
+    configured_product_snapshot_authority_path,
+    product_snapshot_reader_from_settings,
+)
 from core.market_intelligence.coin_inference_outcome import (
     CoinInferenceAcceptedSelection,
     append_coin_inference_accepted_selection,
@@ -147,6 +151,15 @@ from core.market_intelligence.coin_inference import (
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+
+def _configured_product_snapshot_reader():
+    return product_snapshot_reader_from_settings(
+        settings,
+        maximum_age_seconds=getattr(
+            settings, "product_estimator_snapshot_max_age_seconds", 120
+        ),
+    )
 
 
 def _assert_legacy_repeat_offer_delivery_owner() -> None:
@@ -212,9 +225,7 @@ async def _text_offer_shadow_inference_summary(result: object) -> str | None:
         return None
     if getattr(result, "commodity_resolution", None) != "OMITTED":
         return None
-    snapshot_path = str(
-        getattr(settings, "coin_intelligence_inference_snapshot_path", "") or ""
-    ).strip()
+    snapshot_path = configured_product_snapshot_authority_path(settings)
     if not snapshot_path:
         return (
             "🔬 تشخیص آزمایشی کالا: Snapshot محلی آماده نیست؛ "
@@ -236,6 +247,7 @@ async def _text_offer_shadow_inference_summary(result: object) -> str | None:
                 submitted_project_price=int(getattr(result, "price")),
                 settlement_term=settlement_term,
                 source_surface="TELEGRAM_BOT",
+                snapshot_reader=_configured_product_snapshot_reader(),
             )
             await session.commit()
     except Exception as exc:
@@ -279,9 +291,7 @@ async def _text_offer_selection_observation(result: object):
 
     if not getattr(settings, "coin_intelligence_inference_selection_enabled", False):
         return None
-    snapshot_path = str(
-        getattr(settings, "coin_intelligence_inference_snapshot_path", "") or ""
-    ).strip()
+    snapshot_path = configured_product_snapshot_authority_path(settings)
     if not snapshot_path:
         return None
     settlement_value = getattr(result, "settlement_type", SettlementType.CASH.value)
@@ -310,6 +320,7 @@ async def _text_offer_selection_observation(result: object):
                 force_confirmation=not bool(
                     getattr(settings, "coin_intelligence_inference_auto_selection_enabled", False)
                 ),
+                snapshot_reader=_configured_product_snapshot_reader(),
             )
             await session.commit()
         return observation
@@ -1396,9 +1407,7 @@ async def _revalidate_bot_inferred_commodity(data: Mapping[str, object]) -> tupl
         return "رسید تشخیص کالا کامل نیست؛ لفظ را دوباره ثبت کنید.", None
     if not getattr(settings, "coin_intelligence_inference_selection_enabled", False):
         return "تشخیص قیمت‌محور کالا در حال حاضر فعال نیست؛ نام کالا را در لفظ وارد کنید.", None
-    snapshot_path = str(
-        getattr(settings, "coin_intelligence_inference_snapshot_path", "") or ""
-    ).strip()
+    snapshot_path = configured_product_snapshot_authority_path(settings)
     if not snapshot_path:
         return "دادهٔ لحظه‌ای تشخیص کالا آماده نیست؛ نام کالا را در لفظ وارد کنید.", None
     settlement_value = data.get("settlement_type", SettlementType.CASH.value)
@@ -1417,6 +1426,7 @@ async def _revalidate_bot_inferred_commodity(data: Mapping[str, object]) -> tupl
                 submitted_project_price=int(data.get("price") or 0),
                 settlement_term=settlement_term,
                 source_surface="TELEGRAM_BOT",
+                snapshot_reader=_configured_product_snapshot_reader(),
             )
     except CoinInferenceSelectionRejected as exc:
         logger.info(

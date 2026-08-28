@@ -9,6 +9,8 @@ services:
       MARKET_PIPELINE_LISTEN_HOST: 0.0.0.0
       MARKET_PIPELINE_LISTEN_PORT: "9443"
       MARKET_PIPELINE_ALLOWED_PEER_IP: ${MARKET_WEB_PRIVATE_IP:?MARKET_WEB_PRIVATE_IP is required}
+      MARKET_PIPELINE_RECEIVER_PAYLOAD_RETENTION_SECONDS: ${MARKET_PIPELINE_RECEIVER_PAYLOAD_RETENTION_SECONDS:-259200}
+      MARKET_PIPELINE_RECEIVER_COMPACTION_BATCH_ROWS: ${MARKET_PIPELINE_RECEIVER_COMPACTION_BATCH_ROWS:-2000}
     secrets:
       - market_transport_ca
       - market_bot_transport_cert
@@ -82,8 +84,10 @@ services:
       service: market-runtime-base
     profiles: [bot]
     command: [service, --role, coin-estimator]
+    cpus: ${MARKET_PIPELINE_ESTIMATOR_CPUS:-1.0}
     environment:
       MARKET_PIPELINE_FEED_MODE: ${MARKET_PIPELINE_FEED_MODE:-LEGACY}
+      MARKET_PIPELINE_ESTIMATOR_INTERVAL_SECONDS: ${MARKET_PIPELINE_ESTIMATOR_INTERVAL_SECONDS:-5}
       MARKET_PIPELINE_PRIVATE_MARKET_STORE_PATH: /var/lib/market-data/market-store/market-store.sqlite
       MARKET_PIPELINE_ESTIMATOR_SNAPSHOT_PATH: /var/lib/market-data/snapshots/latest-estimator-snapshot.json
     volumes:
@@ -107,7 +111,10 @@ services:
     healthcheck:
       test: [CMD, python, -m, core.market_intelligence.private_pipeline_foundation, healthcheck, --role, coin-estimator]
       interval: 10s
-      timeout: 3s
+      # Building a point-in-time snapshot can keep the single-CPU estimator
+      # busy on a large WAL-backed Store while the independent Python probe
+      # waits for CPU.  The durable health document remains O(1) to read.
+      timeout: 8s
       retries: 3
       start_period: 10s
     networks:

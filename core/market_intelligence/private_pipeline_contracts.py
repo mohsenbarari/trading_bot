@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
+import math
 from pathlib import Path
 from typing import Annotated, Any, Literal, Mapping, Sequence
 
@@ -41,6 +42,21 @@ DecimalText = Annotated[
 ]
 UnitCode = Annotated[str, StringConstraints(pattern=r"^[A-Z][A-Z0-9_]{1,63}$")]
 ReasonCode = Annotated[str, StringConstraints(pattern=r"^[A-Z][A-Z0-9_]{1,95}$")]
+
+ESTIMATOR_RATE_INSTRUMENTS_V1 = (
+    "COIN_IMAM",
+    "COIN_BAHAR",
+    "COIN_HALF_BAHAR",
+    "COIN_QUARTER_BAHAR",
+    "COIN_HALF_LOW_DATE",
+    "COIN_QUARTER_LOW_DATE",
+    "COIN_ONE_GRAM",
+)
+ESTIMATOR_RATE_GRID_V1 = tuple(
+    (instrument, settlement)
+    for settlement in ("CASH", "TOMORROW")
+    for instrument in ESTIMATOR_RATE_INSTRUMENTS_V1
+)
 
 QualityState = Literal["ELIGIBLE", "REVIEW", "REJECTED", "AUDIT_ONLY"]
 Side = Literal["BUY", "SELL", "MID", "UNKNOWN"]
@@ -488,6 +504,67 @@ class EstimatorRateV1(ContractModel):
     method: Code
 
 
+class EstimatorRateV2(ContractModel):
+    instrument: Code
+    settlement: Literal["CASH", "TOMORROW"]
+    status: Literal["ESTIMATED", "NO_DATA"]
+    value: DecimalText | None
+    unit: Literal["PROJECT_THOUSAND_TOMAN"]
+    lower_bound: DecimalText | None
+    upper_bound: DecimalText | None
+    confidence: Literal["HIGH", "MEDIUM", "LOW_PAPER_FALLBACK", "NONE"]
+    method: Code
+    reason_code: ReasonCode | None = None
+    underlying_source: Code | None = None
+    underlying_age_seconds: float | None = Field(default=None, ge=0)
+    anchor_age_seconds: float | None = Field(default=None, ge=0)
+    market_regime: Literal["RANGE", "UP", "DOWN", "SHOCK", "UNKNOWN"]
+
+    @model_validator(mode="after")
+    def validate_rate(self) -> "EstimatorRateV2":
+        if (self.instrument, self.settlement) not in ESTIMATOR_RATE_GRID_V1:
+            raise ValueError("estimator_rate_grid_cell_invalid")
+        prices = (self.value, self.lower_bound, self.upper_bound)
+        if self.status == "NO_DATA":
+            if any(value is not None for value in prices):
+                raise ValueError("no_data_rate_cannot_have_price")
+            if self.confidence != "NONE":
+                raise ValueError("no_data_rate_confidence_invalid")
+            if self.reason_code is None:
+                raise ValueError("no_data_rate_reason_required")
+            if self.anchor_age_seconds is not None:
+                raise ValueError("no_data_rate_anchor_forbidden")
+        else:
+            if any(value is None for value in prices):
+                raise ValueError("estimated_rate_prices_required")
+            numeric = tuple(int(value) for value in prices if value is not None)
+            if any(
+                str(value) != str(number) or number <= 0
+                for value, number in zip(prices, numeric)
+            ):
+                raise ValueError("estimated_rate_price_must_be_positive_integer")
+            if not numeric[1] <= numeric[0] <= numeric[2]:
+                raise ValueError("estimated_rate_interval_invalid")
+            if self.confidence == "NONE":
+                raise ValueError("estimated_rate_confidence_invalid")
+            if self.reason_code is not None:
+                raise ValueError("estimated_rate_reason_forbidden")
+            if self.underlying_source is None or self.underlying_age_seconds is None:
+                raise ValueError("estimated_rate_underlying_metadata_required")
+            if self.confidence == "HIGH" and self.anchor_age_seconds is None:
+                raise ValueError("high_confidence_rate_anchor_required")
+            if self.confidence == "MEDIUM" and self.anchor_age_seconds is not None:
+                raise ValueError("medium_confidence_rate_anchor_forbidden")
+        if (self.underlying_source is None) != (self.underlying_age_seconds is None):
+            raise ValueError("estimator_rate_underlying_metadata_incomplete")
+        if any(
+            value is not None and not math.isfinite(value)
+            for value in (self.underlying_age_seconds, self.anchor_age_seconds)
+        ):
+            raise ValueError("estimator_rate_age_must_be_finite")
+        return self
+
+
 class EstimatorInputHealthV1(ContractModel):
     component: Code
     status: Literal["FRESH", "STALE", "MISSING", "REJECTED"]
@@ -556,6 +633,22 @@ class EstimatorInputTraceV1(ContractModel):
         return self
 
 
+def estimator_snapshot_id(value: BaseModel | Mapping[str, Any]) -> str:
+    """Return the immutable identity of every snapshot field except its id."""
+
+    payload = (
+        value.model_dump(mode="json", exclude={"snapshot_id"})
+        if isinstance(value, BaseModel)
+        else {key: item for key, item in value.items() if key != "snapshot_id"}
+    )
+    return content_hash(
+        {
+            "contract": "estimator_snapshot_identity/1.0",
+            "snapshot": payload,
+        }
+    )
+
+
 class EstimatorSnapshotV1(ContractModel):
     contract: Literal["estimator_snapshot/1.0"]
     snapshot_id: Hex64
@@ -590,12 +683,67 @@ class EstimatorSnapshotV1(ContractModel):
         return self
 
 
+class EstimatorSnapshotV2(ContractModel):
+    contract: Literal["estimator_snapshot/2.0"]
+    snapshot_id: Hex64
+    snapshot_version: int = Field(ge=1)
+    generated_at_utc: AwareDatetime
+    input_snapshot_hash: Hex64
+    model_version: str = Field(min_length=1, max_length=128)
+    feed_mode: Literal["LEGACY", "PRIVATE_SHADOW", "PRIVATE_PRIMARY"] = "PRIVATE_SHADOW"
+    status: Literal["OK", "SAFE_NO_DATA", "FAILURE"]
+    rates: tuple[EstimatorRateV2, ...]
+    health: tuple[EstimatorInputHealthV1, ...]
+    inputs: tuple[EstimatorInputTraceV1, ...] = ()
+    reason_codes: tuple[ReasonCode, ...] = ()
+
+    @field_validator("generated_at_utc")
+    @classmethod
+    def normalize_timestamp(cls, value: datetime) -> datetime:
+        return _utc(value)
+
+    @model_validator(mode="after")
+    def validate_status(self) -> "EstimatorSnapshotV2":
+        grid = tuple((rate.instrument, rate.settlement) for rate in self.rates)
+        if grid != ESTIMATOR_RATE_GRID_V1:
+            raise ValueError("estimator_snapshot_rate_grid_invalid")
+        estimated_count = sum(rate.status == "ESTIMATED" for rate in self.rates)
+        if self.status == "OK" and estimated_count == 0:
+            raise ValueError("ok_snapshot_requires_estimated_rate")
+        if self.status in {"SAFE_NO_DATA", "FAILURE"} and estimated_count:
+            raise ValueError("non_ok_snapshot_cannot_publish_estimated_rate")
+        if self.status != "OK" and not self.reason_codes:
+            raise ValueError("non_ok_snapshot_reason_required")
+        if self.input_snapshot_hash != content_hash(
+            [item.model_dump(mode="json") for item in self.inputs]
+        ):
+            raise ValueError("estimator_input_snapshot_hash_mismatch")
+        for settlement in ("CASH", "TOMORROW"):
+            regimes = {
+                rate.market_regime
+                for rate in self.rates
+                if rate.settlement == settlement
+            }
+            if len(regimes) != 1:
+                raise ValueError("estimator_snapshot_market_regime_conflict")
+        if any(
+            item.transferred_at_utc is not None
+            and item.transferred_at_utc > self.generated_at_utc
+            for item in self.inputs
+        ):
+            raise ValueError("snapshot_input_transferred_after_generation")
+        if self.snapshot_id != estimator_snapshot_id(self):
+            raise ValueError("estimator_snapshot_id_mismatch")
+        return self
+
+
 SCHEMA_MODELS: Mapping[str, type[BaseModel]] = {
     "market_capture_record-1.0.schema.json": MarketCaptureRecordV1,
     "market_fact-1.0.schema.json": MarketFactV1,
     "market_fact_batch-1.0.schema.json": MarketFactBatchV1,
     "market_fact_ack-1.0.schema.json": MarketFactAckV1,
     "estimator_snapshot-1.0.schema.json": EstimatorSnapshotV1,
+    "estimator_snapshot-2.0.schema.json": EstimatorSnapshotV2,
     "market_source_registry-1.0.schema.json": SourceRegistryV1,
 }
 

@@ -7,8 +7,9 @@
 """
 import math
 import os
+from typing import Literal
 
-from pydantic import SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 __all__ = ["Settings", "settings"]
@@ -66,6 +67,14 @@ class Settings(BaseSettings):
     # promotes eligible cells.  This must never default to automatic choice.
     coin_intelligence_inference_auto_selection_enabled: bool = False
     coin_intelligence_inference_snapshot_path: str | None = None
+    # Product authority remains on the legacy Snapshot unless an explicit,
+    # separately deployed cutover selects PRIVATE_SHADOW or PRIVATE_PRIMARY.
+    product_estimator_snapshot_mode: Literal[
+        "LEGACY", "PRIVATE_SHADOW", "PRIVATE_PRIMARY"
+    ] = "LEGACY"
+    product_estimator_private_shadow_snapshot_path: str | None = None
+    product_estimator_private_primary_snapshot_path: str | None = None
+    product_estimator_snapshot_max_age_seconds: int = Field(default=120, ge=1, le=900)
     # Hard guard for only clearly outlying coin-offer prices.  It consumes the
     # same atomic estimator Snapshot but is independent from commodity and
     # condition-model selection.  Missing/stale evidence always fails open.
@@ -288,6 +297,26 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    @model_validator(mode="after")
+    def validate_product_estimator_snapshot_settings(self):
+        if self.product_estimator_snapshot_mode == "PRIVATE_PRIMARY":
+            if not str(
+                self.product_estimator_private_primary_snapshot_path or ""
+            ).strip():
+                raise ValueError(
+                    "private_primary_product_snapshot_path_required"
+                )
+        elif self.product_estimator_snapshot_mode == "PRIVATE_SHADOW":
+            if not str(self.coin_intelligence_inference_snapshot_path or "").strip():
+                raise ValueError("private_shadow_legacy_snapshot_path_required")
+            if not str(
+                self.product_estimator_private_shadow_snapshot_path or ""
+            ).strip():
+                raise ValueError(
+                    "private_shadow_product_snapshot_path_required"
+                )
+        return self
 
     @model_validator(mode="after")
     def validate_telegram_delivery_queue_settings(self):

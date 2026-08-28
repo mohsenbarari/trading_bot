@@ -63,7 +63,7 @@ class MarketPipelineStage11BackfillTests(unittest.TestCase):
             HistoryImportBundleV1.model_validate(changed)
 
     def test_record_contract_rejects_non_permanent_or_wrong_source(self):
-        record = coin_record(source_code="MELTED_FLOW")
+        record = coin_record(source_code="IME_REALTIME_BOARD")
         record["payload"] = {
             "kind": "OBSERVATION",
             "instrument": "MELTED_GOLD",
@@ -79,35 +79,12 @@ class MarketPipelineStage11BackfillTests(unittest.TestCase):
             HistoryFactRecordV1.model_validate(record)
         with self.assertRaisesRegex(ValidationError, "history_bundle_source_not_permanent"):
             build_bundle(
-                source_code="MELTED_FLOW",
+                source_code="IME_REALTIME_BOARD",
                 source_system="LEGACY_MARKET_STORE",
                 records=[record],
             )
 
-    def test_transient_seed_is_explicit_and_never_accepts_permanent_source(self):
-        record = coin_record(source_code="MELTED_FLOW")
-        record["payload"] = {
-            "kind": "OBSERVATION",
-            "instrument": "MELTED_GOLD",
-            "event_type": "OFFER",
-            "side": "SELL",
-            "settlement": "CASH",
-            "trade_form": "PHYSICAL",
-            "price_value": "100000000",
-            "price_unit": "TOMAN_PER_MESGHAL_750",
-            "currency": "TOMAN",
-        }
-        parsed = HistoryFactRecordV1.model_validate(
-            record,
-            context={"allow_transient_seed": True},
-        )
-        bundle = build_bundle(
-            source_code="MELTED_FLOW",
-            source_system="LEGACY_MARKET_STORE",
-            retention_mode="TRANSIENT_SEED",
-            records=[parsed.model_dump(mode="json")],
-        )
-        self.assertEqual(bundle.retention_mode, "TRANSIENT_SEED")
+    def test_transient_seed_never_accepts_permanent_source(self):
         with self.assertRaisesRegex(
             ValidationError, "history_bundle_transient_source_must_not_be_permanent"
         ):
@@ -187,6 +164,22 @@ class MarketPipelineStage11BackfillTests(unittest.TestCase):
             '${MARKET_STAGE11_IMAGE:?MARKET_STAGE11_IMAGE is required}', gate
         )
         self.assertNotIn("stage11-worktree", gate)
+
+    def test_research_migration_separates_encrypted_raw_from_normalized_facts(self):
+        migration = (
+            REPO_ROOT
+            / "deploy/market-data/migrations/0003_research_archive.up.sql"
+        ).read_text(encoding="utf-8")
+        self.assertIn("CREATE TABLE market_data.research_raw_messages", migration)
+        self.assertIn(
+            "CREATE TABLE market_data.research_fact_raw_messages", migration
+        )
+        self.assertIn("ciphertext BYTEA NOT NULL", migration)
+        self.assertNotIn("message_id BIGINT", migration)
+        self.assertIn("SET permanent_archive=TRUE", migration)
+        self.assertIn("envelope='{}'::jsonb", (
+            REPO_ROOT / "core/market_intelligence/market_fact_sync.py"
+        ).read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

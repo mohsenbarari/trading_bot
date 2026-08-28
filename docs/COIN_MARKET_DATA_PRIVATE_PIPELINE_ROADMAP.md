@@ -1,10 +1,20 @@
 # Roadmap انتقال داده و Parse بازار روی شبکه خصوصی
 
-وضعیت: مراحل 0 تا 11 تکمیل شده‌اند؛ Stage 12 از نظر offline کامل و در انتظار جلسه کامل
-بازار باز است؛ Stage 13-A در staging با `PRIVATE_SHADOW` مستقر شده و cutover اصلی انجام
-نشده است
+وضعیت: roadmap ناتمام است. مراحل 0 و 1 بسته‌اند؛ Stage 2 از نظر
+طراحی و rehearsal گذشته و backup عملیاتی آن باقی است. Docker foundation مرحله 3
+کامل است. قرارداد build/evidence و کد transfer/load/preflight دو میزبان به deploy رسمی
+متصل و offline تست شده، اما اجرای عملیاتی آن مجوز نگرفته است. ابزار backup/restore و migration
+دوپاس و rollout غیر-capture به‌ترتیب receiver-first با گیت‌های مستقل به controller رسمی متصل
+و offline تست شده‌اند؛ اجرای production و upgrade/rollback از runtime قدیمی هنوز اثبات نشده
+است. Stage 11 فقط tooling و seed
+هفت‌روزه staging را دارد؛ import کامل تاریخچه
+باز است. Stage 12 از نظر offline سخت‌شده و در انتظار پنجره کامل بازار
+با pin پیش از بازشدن و seal پس از بسته‌شدن است. Stage 13-A قبلاً به‌صورت
+دستی/خارج از deploy رسمی در `PRIVATE_SHADOW` اجرا شده؛ `PRODUCT` و
+`PRIVATE_PRIMARY` مجوز ندارند. این بازنگری هیچ deploy یا authority switchی انجام
+نمی‌دهد.
 
-تاریخ بازبینی: 2026-08-26
+تاریخ بازبینی: 2026-08-27
 
 مبنای بازنگری Docker: `main@315f7e6a`
 
@@ -77,11 +87,11 @@ Telegram/API
 14. آفرهای دو گروه سکه می‌توانند معامله‌ای با تعداد و قیمت توافقی متفاوت داشته باشند؛ این outcome باید جدا و دائمی ثبت شود.
 15. دو کانال عمومی آبشده برای مصرف زنده مدل قابل استفاده‌اند، اما تاریخچه دائمی نمی‌خواهند.
 16. بورس در این نسخه خارج از محدوده است، ولی schema و source registry باید افزودن آن را بدون بازطراحی ممکن کند.
-17. تمام اجزای جایگزین Market Intelligence از ابتدا Docker-native و بخشی از deploy رسمی پروژه هستند.
+17. تمام اجزای جایگزین Market Intelligence باید Docker-native و بخشی از deploy رسمی پروژه شوند؛ این اتصال هنوز کامل نیست.
 18. یک image immutable و متصل به Git SHA/digest می‌تواند چند command داشته باشد، اما هر مسئولیت process/service مستقل دارد؛ یک کانتینر یکپارچه ساخته نمی‌شود.
 19. کد و dependency داخل image است؛ database، spool، outbox، checkpoint، model artifact، Telegram session و secret داخل image نیست.
 20. SQLite فقط روی volume محلی و با single writer مجاز است؛ SQLite مشترک روی network filesystem ممنوع است.
-21. legacy host-native برای shadow و rollback موقت می‌ماند و فقط پس از container parity بازنشسته می‌شود.
+21. live legacy برای `GROUP_1`/`GROUP_2`/`PRIVATE_GOLD_CHANNEL` در دسترس نیست و نباید oracle، gate یا rollback زنده باشد. capture تک‌مالک جدید تنها منبع زنده است.
 22. یک Telegram session هرگز هم‌زمان توسط owner میزبان و owner کانتینری باز نمی‌شود.
 23. migration و deployment از الگوی expand/contract، preflight، health gate و rollback به image digest قبلی پیروی می‌کنند.
 
@@ -126,11 +136,17 @@ Telegram/API
 | هرات (`طوفان هریرود`) | بله | quote/offer/trade normalization | بله | facts | USD/Herat input |
 | اونس (`نرخ انس کهکشان`) | بله | XAU quote normalization | بله، event-driven | fact + consumed feature | XAU و regime |
 | تتر Wallex | API | MID/quote normalization | بله، poll موفق | fact + consumed feature | trend/regime/fallback |
-| نقدی بازار (`abshdh`) | بله | melted aggregate | خیر؛ raw سه‌روزه | facts زنده لازم | fallback/flow فعلی |
-| نقدی پله (`NaghdP`) | بله | melted flow/trade | خیر؛ raw سه‌روزه | facts زنده لازم | fallback/order flow |
+| نقدی بازار (`abshdh`) | بله | melted aggregate | بله؛ متن خام منتخب + facts | facts زنده لازم | fallback/flow و پژوهش |
+| نقدی پله (`NaghdP`) | بله | melted flow/trade | بله؛ متن خام منتخب + facts | facts زنده لازم | fallback/order flow و پژوهش |
 | بورس | بعداً | بعداً | بعداً | بعداً | خارج از این roadmap |
 
 نام‌های نمایشی بالا فقط برای traceability طراحی‌اند. قرارداد runtime از `source_code` ثابت و allowlist‌شده استفاده می‌کند و وابسته به عنوان قابل تغییر کانال نیست.
+
+تصمیم تکمیلی 2026-08-27: PostgreSQL وب/داده مرجع واحد پژوهشی است. برای دو گروه سکه،
+متن خام آفر، factهای parse‌شده، گروه 1/2 و شناسه/نام آفر‌دهنده و درخواست‌دهنده نگه‌داری
+می‌شود. برای آبشده، `PRIVATE_GOLD_CHANNEL`، `MELTED_AGGREGATE` و `MELTED_FLOW` مستقل
+می‌مانند. raw و هویت فقط رمز‌شده‌اند؛ Telegram message/link/channel metadata و payload
+انتقالی دائمی نمی‌شوند. تصمیم قبلیِ transient بودن دو کانال عمومی از این تاریخ منسوخ است.
 
 ## 5. قرارداد داده دائمی
 
@@ -288,7 +304,16 @@ Captureهای دو حساب جدا هستند. Parse، lifecycle و feature mate
 - deployment receiver-first، سپس sender، shadow و در آخر authority switch؛
 - migration به‌صورت one-shot container و قبل از شروع writer جدید؛
 - systemd فقط می‌تواند Docker/Compose stack را در boot فراخوانی کند؛ اجرای مستقیم Python جدید روی میزبان ممنوع است؛
-- host-native legacy تا پایان rollback window خارج از Compose باقی می‌ماند، اما هم‌زمان owner یک session یا writer یک store نمی‌شود.
+- در وضع موجود `compose.web.yml` و `compose.bot.yml` خارج از
+  چرخه رسمی staging/production هستند. حضور کد آنها در payload ریپازیتوری
+  به‌معنای build، transfer، migration، rollout یا rollback رسمی نیست؛
+- جریان هدف باید از همان Git SHA تمیز روی سرور بات image را بسازد،
+  digest/receipt را ثبت کند و artifact پین‌شده را به سرور وب برساند؛
+- owner میزبانی `coin-capture`/`market-channel-capture` legacy مستقل نیست؛
+  نسخه میزبانی همان سیستم جدید است. auto-return یا guard فرار روی
+  `/run` بعد از reboot می‌تواند owner دوم بسازد و rollback پایدار محسوب
+  نمی‌شود؛ rollback مرجح digest قبلی کانتینر و authority marker پایدار و
+  release-bound است.
 
 ### 7.3 داده و volume
 
@@ -323,7 +348,10 @@ Captureهای دو حساب جدا هستند. Parse، lifecycle و feature mate
 9. postcheck و soak؛
 10. ثبت release evidence.
 
-Rollback کد با pin کردن digest قبلی انجام می‌شود. schema migration باید expand/contract باشد تا image قبلی در rollback window قابل اجرا بماند. rollback هرگز volume، outbox، checkpoint یا capture history را حذف نمی‌کند.
+Rollback کد با pin کردن digest قبلی و authority marker پایدار انجام
+می‌شود. schema migration باید expand/contract باشد تا image قبلی در rollback
+window قابل اجرا بماند. rollback هرگز volume، outbox، checkpoint یا capture
+history را حذف نمی‌کند و به live legacy ناموجود برنمی‌گردد.
 
 ### 7.6 جابه‌جایی امن Telegram session
 
@@ -336,7 +364,10 @@ Rollback کد با pin کردن digest قبلی انجام می‌شود. schema
 5. gap/duplicate/heartbeat کنترل شود؛
 6. سپس live-ready اعلام شود.
 
-در rollback ابتدا container stop و lock آزاد می‌شود، بعد owner قبلی فعال می‌شود. اجرای overlap برای «کاهش downtime» ممنوع است؛ reconciliation راه پوشش فاصله است.
+در rollback ابتدا owner جاری stop و lock آزاد می‌شود، سپس container با digest
+قبلی و marker منطبق با همان release مالک می‌شود. بازگرداندن owner میزبانی
+همان capture جدید فقط fallback کنترل‌شده است، نه rollback پیش‌فرض. اجرای
+overlap ممنوع و reconciliation راه پوشش فاصله است.
 
 ## 8. قرارداد انتقال روی شبکه خصوصی
 
@@ -527,7 +558,7 @@ Gate:
 
 گزارش، ADR و gate receipt: [COIN_MARKET_DATA_STAGE2_CONTRACT_STORAGE.md](./COIN_MARKET_DATA_STAGE2_CONTRACT_STORAGE.md)
 
-### مرحله 3 — Docker foundation و اتصال به deploy پروژه
+### مرحله 3 — Docker foundation و اتصال به deploy پروژه (PARTIAL)
 
 اقدامات:
 
@@ -550,10 +581,11 @@ Gate:
 - SQLite روی volume محلی و single-writer است؛
 - serviceهای بدون نیاز inbound هیچ port منتشر نمی‌کنند؛
 - receiver فقط قابلیت bind به private endpoint تنظیم‌شده دارد؛
-- deploy و rollback rehearsal بدون data deletion موفق است؛
-- legacy host service هنوز authority اصلی و بدون تداخل است.
+- deploy رسمی و rollback rehearsal بدون data deletion از همان release bundle
+  موفق است؛
+- تنها یک owner جدید برای هر Telegram session و writer فعال است.
 
-نتیجه اجرا در 2026-08-26:
+نتیجه Docker foundation در 2026-08-26:
 
 - image مستقل pipeline روی Python 3.11 slim Bookworm با base/frontend digest و dependency hash ثابت ساخته شد؛
 - دو build بدون cache از commit یکسان byte-identical شدند و OCI revision با Git SHA تطبیق داده شد؛
@@ -564,6 +596,29 @@ Gate:
 - مالک دوم Telegram session و writer دوم SQLite حتی با state path متفاوت روی resource مشترک fail-closed شدند؛
 - filesystem/history secret scan سبز و cleanup container/network/image/temp کامل بود؛
 - `MARKET_PIPELINE_MODE=live` عمداً تا مراحل بعدی با exit 78 مسدود است؛ هیچ deploy، owner switch یا دست‌کاری runtime زنده انجام نشد.
+
+وضعیت gate فعلی:
+
+- foundation، Compose و rehearsal گذشته‌اند، اما بند 7 و Stage 3 هنوز بسته نیستند؛
+- deploy رسمی production همچنان ریپازیتوری/build را روی سرور بات مالک می‌داند؛
+  foreign را اول deploy، payload را از exact committed Git archive و imageها را همان‌جا
+  build می‌کند، سپس artifact پین‌شده را به سرور وب/ایران می‌فرستد؛ سرور
+  وب نباید release image را build/pull کند. لایهٔ evidence رسمی اکنون image مستقل را از
+  همان commit با `release_sha`، tree، input signature، content ID و OCI label قطعی روی
+  سرور بات می‌سازد؛ دو source topology امن را به envهای release-bound با
+  `PRIVATE_SHADOW`، primary gate خاموش و receipt بدون secret تبدیل می‌کند. این لایه
+  هیچ transfer/load، host preflight، migration، service start، Product switch یا Telegram
+  authority switch انجام نمی‌دهد و capture cutover را صریحاً رد می‌کند؛
+- لایهٔ opt-in دوم پیش از quiesce محصول، payload کنترلی حداقلی و commit-exact را در release
+  directory پایدار هر دو میزبان نصب می‌کند، image را بدون فایل میانی stream/load و content ID
+  و OCI identity را تطبیق می‌دهد؛ سپس path/secret/private-bind/disk/Compose را روی هر دو
+  میزبان بررسی و receipt بدون secret می‌سازد. این مسیر offline تست شده ولی روی production
+  اجرا نشده است و هیچ service/database/authority را تغییر نمی‌دهد؛
+- deploy رسمی production/staging هنوز backup مستقل archive، migration دوباره‌پذیر، rollout
+  receiver-first، postcheck و rollback آنها را orchestrate نمی‌کند؛
+- Stage 13-A جایگزین این gate نیست، چون استقرارش دستی/خارج از چرخه رسمی بود؛
+- بستن Stage 3 به پیاده‌سازی و rehearsal همین جریان بدون deploy عملیاتی و
+  سپس مجوز جداگانه برای استقرار نیاز دارد.
 
 گزارش و gate receipt: [COIN_MARKET_DATA_STAGE3_DOCKER_FOUNDATION.md](./COIN_MARKET_DATA_STAGE3_DOCKER_FOUNDATION.md)
 
@@ -607,9 +662,15 @@ Gate:
   HMAC موجود Account 2 و authority marker متصل به همان release fail-closed است؛
 - هیچ deploy، Telegram login، session copy، owner switch یا رویداد live انجام نشد.
 
+وضعیت runtime بعدی: capture تک‌مالک جدید اکنون تنها منبع live
+`GROUP_1`، `GROUP_2` و `PRIVATE_GOLD_CHANNEL` است. مسیر live قدیمی
+ناموجود است و هیچ توسعه، gate یا soakی نباید به آن وابسته باشد. unitهای
+host-native با نام‌های `coin-capture`/`market-channel-capture` هم نسخه‌ای از
+همین سیستم جدیدند، نه legacy oracle.
+
 گزارش و gate receipt: [COIN_MARKET_DATA_STAGE4_DURABLE_CAPTURE.md](./COIN_MARKET_DATA_STAGE4_DURABLE_CAPTURE.md)
 
-### مرحله 5 — انتقال Parser دو گروه سکه
+### مرحله 5 — انتقال Parser دو گروه سکه (offline complete؛ live gate باز)
 
 اقدامات:
 
@@ -637,7 +698,7 @@ Gate:
 - همه fixtureهای قطعی برابر label تاییدشده؛
 - موارد مبهم به‌جای حدس وارد REVIEW؛
 - parse موفق pending نمی‌ماند؛
-- تفاوت با parser فعلی برای هر event reason code دارد.
+- تفاوت دو projection از prefix مشترک برای هر event reason code دارد.
 
 نتیجه اجرا در 2026-08-26:
 
@@ -654,9 +715,12 @@ Gate:
 - SQLite sidecarها فقط snapshot اتمیک immutable هستند؛ DB زنده یا WAL مشترک mount نمی‌شود؛
 - هیچ deploy، Telegram session، PostgreSQL، product DB، authority switch یا cutover انجام نشد.
 
+خروجی offline بسته است، اما پذیرش عملیاتی هنوز به label تاییدشده و جلسه کامل
+بازار بر پایه همان capture جدید نیاز دارد؛ parser live قدیمی مرجع پذیرش نیست.
+
 گزارش و gate receipt: [COIN_MARKET_DATA_STAGE5_COIN_GROUP_PARSER.md](./COIN_MARKET_DATA_STAGE5_COIN_GROUP_PARSER.md)
 
-### مرحله 6 — Parser کانال‌ها و lifecycle آبشده خصوصی
+### مرحله 6 — Parser کانال‌ها و lifecycle آبشده خصوصی (offline complete؛ live gate باز)
 
 اقدامات:
 
@@ -674,7 +738,8 @@ Gate:
 - generic edit به‌عنوان معامله ثبت نمی‌شود؛
 - revision ناقص یا inconsistent به AMBIGUOUS می‌رود؛
 - `final_price/final_quantity` در schema/code/API وجود ندارد؛
-- دو کانال عمومی آبشده وارد archive دائمی نمی‌شوند.
+- دو کانال عمومی آبشده طبق تصمیم 2026-08-27 وارد archive دائمی می‌شوند؛ عبارت تاریخی
+  «وارد نمی‌شوند» در receipt مرحله 6 فقط وضعیت همان اجرای قدیمی را توصیف می‌کند.
 
 نتیجه اجرا در 2026-08-26:
 
@@ -691,6 +756,9 @@ Gate:
 - Docker gate با network بسته، هر هفت source، partial-tail/replay، lifecycle و cleanup
   کامل را از commit تمیز پاس کرد؛ هیچ deploy، session ownership یا model authority تغییر
   نکرد.
+
+اثبات lifecycle زنده آبشده خصوصی باید در پنجره Stage 12 از همان prefix
+تک‌مالک به دو projection برسد؛ DB یا snapshot قدیمی فقط regression/seed است.
 
 گزارش و gate receipt: [COIN_MARKET_DATA_STAGE6_CHANNEL_LIFECYCLE.md](./COIN_MARKET_DATA_STAGE6_CHANNEL_LIFECYCLE.md)
 
@@ -795,7 +863,8 @@ Gate:
 - هیچ Rial/Toman double conversion رخ نمی‌دهد؛
 - restart adapter idempotent است؛
 - snapshot model input قابل اتصال به source event است؛
-- rollback به legacy feed بدون از دست رفتن capture ممکن است.
+- rollback به digest و marker سالم قبلی بدون از دست رفتن capture ممکن است؛
+  stale legacy feed راه بازگشت زنده نیست.
 
 نتیجه اجرا در 2026-08-26:
 
@@ -850,11 +919,13 @@ Gate:
   view هیچ نرخ مستقلی محاسبه نمی‌کند و route cut را `STALE` نشان می‌دهد؛
 - hash bot، ACK و web view برابر بود؛ ۴۱ آزمون متمرکز، schema check و گیت کامل Docker با
   rollback/cleanup پاس شد؛
-- پیش‌فرض `LEGACY` ماند و هیچ deploy، cache/realtime عملیاتی یا WebApp authority تغییر نکرد.
+- پیش‌فرض authority محصول `LEGACY` ماند و هیچ deploy، cache/realtime عملیاتی
+  یا WebApp authority تغییر نکرد. این mode فقط مرز product cutover است؛ دادهٔ
+  کهنهٔ آن live oracle یا rollback feed نیست.
 
 گزارش و gate receipt: [COIN_MARKET_DATA_STAGE10_SNAPSHOT_RETURN.md](./COIN_MARKET_DATA_STAGE10_SNAPSHOT_RETURN.md)
 
-### مرحله 11 — Backfill و تجمیع تاریخچه
+### مرحله 11 — Backfill و تجمیع تاریخچه (PARTIAL)
 
 اقدامات:
 
@@ -889,8 +960,16 @@ Gate:
 - گیت ۶ source با ۱۰۰۶ رکورد، ۹۹۵ fact یکتا، ۱۰۰۰ revision، ۶ quarantine و import دوم
   no-op پاس شد؛ backup قبل/بعد restore و duplicate logical fact صفر بود؛
 - گیت بازگشتی Docker/Compose، migration second-pass، recreate، rollback و cleanup پاس شد؛
-- تاریخچه واقعی import و هیچ feed/authority/deploy تغییر نکرد؛ اجرای عملیاتی به cutover
-  مجوزدار موکول است.
+- این gate فقط importer/rehearsal را اثبات کرد و هیچ feed/authority/deployی را
+  تغییر نداد.
+
+وضعیت فعلی:
+
+- seed نقطه‌زمانی هفت‌روزه وارد staging شده و idempotency آن اثبات شده است؛
+- import تمام تاریخچه قابل بازیابی، backup قبل/بعد، count/range/hash reconciliation و
+  اثبات restore عملیاتی هنوز باقی است؛
+- DBها، dumpها و snapshotهای قدیمی فقط historical seed/regression هستند؛
+  freshness، capture-loss، parity زنده، gate یا rollback live را اثبات نمی‌کنند.
 
 گزارش و gate receipt: [COIN_MARKET_DATA_STAGE11_HISTORY_BACKFILL.md](./COIN_MARKET_DATA_STAGE11_HISTORY_BACKFILL.md)
 
@@ -898,24 +977,29 @@ Gate:
 
 اقدامات:
 
-1. legacy capture/parser/feed همچنان primary می‌ماند.
-2. pipeline وب→خصوصی→بات در shadow اجرا می‌شود.
-3. مقایسه event-by-event و feature-by-feature.
-4. مقایسه نرخ مدل با model artifact یکسان.
-5. طبقه‌بندی اختلاف به capture، parser، lifecycle، unit، timing یا transport.
-6. کالیبراسیون parser فقط با label تاییدشده.
-7. اجرای soak در بازار باز؛ SAFE_NO_DATA بازار بسته کافی نیست.
+1. capture تک‌مالک جدید تنها live authority می‌ماند؛ live legacy ناموجود است.
+2. پیش از ساعت رسمی بازشدن، ابتدای prefix با session/release/owner پین و پس از
+   بسته‌شدن، پایان byte-range و manifest آن seal می‌شود.
+3. همان prefix immutable به `REFERENCE_PROJECTION` ایزوله و candidate
+   `PRIVATE_SHADOW` فن‌اوت می‌شود؛ Telegram collector دوم وجود ندارد.
+4. مقایسه event/fact، feature، timeline و شبکه دقیق 14 نرخ با model artifact یکسان.
+5. طبقه‌بندی اختلاف به capture، parser، lifecycle، unit، timing، transport یا estimator.
+6. کالیبراسیون parser فقط با label تاییدشده؛ old DB/snapshot فقط regression/seed است.
+7. اجرای یک جلسه کامل بازار و failure soak با receipt؛ `SAFE_NO_DATA` بازار
+   بسته کافی نیست.
 
 معیارهای پذیرش:
 
 - capture loss برای رویدادهای قابل دریافت: صفر؛
+- prefix، inventory منبع، session و زمان‌بندی رسمی در هر دو projection یکسان؛
 - duplicate eligible fact: صفر؛
 - sequence gap حل‌نشده: صفر؛
 - XAU/USDT consumed values برای timestamp مشترک: برابر؛
 - اختلاف estimator ناشی از transport/schema: صفر؛
 - اختلاف parser فقط وقتی پذیرفته است که label انسانی بهبود مسیر جدید را تایید کند؛
 - source event تا snapshot بعدی مدل: p95 حداکثر 7 ثانیه؛
-- حداقل یک جلسه کامل بازار باز و یک failure soak موفق.
+- هر 14 سلول `ESTIMATED/NO_DATA` با reason و timeline پیوسته مقایسه شوند؛
+- حداقل یک جلسه کامل بازار باز و یک failure soak موفق با receipt.
 
 Gate:
 
@@ -924,21 +1008,34 @@ Gate:
 - promotion recommendation صریح؛
 - rollback rehearsal موفق.
 
-نتیجه پیاده‌سازی و گیت offline در 2026-08-26:
+نتیجه offline و وضعیت گیت:
 
 - collector فقط‌خواندنی و report امضاشده برای مقایسه capture/fact/feature/estimator/timing
   ساخته شد و اختلاف را در هفت دسته مصوب طبقه‌بندی می‌کند؛ parser/lifecycle بدون label
   انسانی تاییدشده قابل پذیرش نیست؛
-- replay برابر ۱۰۰۰ event در هر lane، صفر loss/duplicate/gap، برابری XAU/USDT، صفر
-  same-input estimator mismatch و p95 برابر ۵٫۸ ثانیه را ثبت کرد؛
-- ماتریس منفی، HMAC/tamper، ۲۸ آزمون متمرکز و گیت کامل Docker/rollback/cleanup پاس شد؛
-- این نتیجه جای جلسه واقعی بازار باز را نمی‌گیرد. هیچ deploy/cutover انجام نشد و توصیه رسمی
-  `HOLD_LIVE_OPEN_MARKET_REQUIRED` است؛ تکمیل Stage 12 به مجوز استقرار shadow و live soak
-  وابسته است.
+- replay هزاررکوردی و failure classification فقط شواهد regression هستند و جای
+  پنجره live را نمی‌گیرند؛
+- gate سخت‌شده، `LEGACY` را برای evidence live رد و فقط
+  `REFERENCE_PROJECTION` ایزوله از prefix capture جدید را می‌پذیرد؛
+- manifest/inventory، duplicate ledger، sequence/checkpoint، exact 14-rate grid، snapshot timeline،
+  official schedule، pre-open pin/post-close seal و receiptهای پنج failure drill fail-closed هستند؛
+- verifier مستقل و release-bound برای schedule، transport، model artifact و
+  failure-drill receipt هنوز وجود ندارد؛ در نتیجه evidence زنده حتی با assertionهای
+  مثبت operator، با `TRUSTED_LIVE_ATTESTATION_UNAVAILABLE` fail-closed می‌شود؛
+- اجرای پنجره کامل بازار و seal نهایی نیز هنوز باقی است. فقط پس از افزودن verifier
+  معتبر و عبور همه گیت‌ها خروجی `READY_FOR_EXPLICIT_PROMOTION_APPROVAL` ممکن است؛
+  آن هم cutover نیست؛
+- replay آفلاین فعلاً `HOLD_LIVE_OPEN_MARKET_REQUIRED` و evidence زنده
+  `HOLD_BLOCKING_PARITY_FINDINGS` است؛ هیچ deploy/cutover در این بازنگری انجام نشده است.
 
 گزارش و gate receipt: [COIN_MARKET_DATA_STAGE12_SHADOW_PARITY.md](./COIN_MARKET_DATA_STAGE12_SHADOW_PARITY.md)
 
 ### مرحله 13 — Cutover staging
+
+وضعیت: Stage 13-A به‌صورت دستی/خارج از deploy رسمی در shadow اجرا شده
+است؛ Stage 13 و `PRIVATE_PRIMARY` باز و بدون مجوز هستند. authority محصول فعلاً
+`LEGACY` می‌ماند؛ این به‌معنای وجود collector legacy زنده یا معتبربودن آن به‌عنوان
+oracle/rollback نیست.
 
 ترتیب:
 
@@ -947,13 +1044,15 @@ Gate:
 3. adapter در `PRIVATE_SHADOW`؛
 4. snapshot return؛
 5. تغییر feed مدل staging به `PRIVATE_PRIMARY`؛
-6. حفظ legacy در shadow؛
+6. حفظ `REFERENCE_PROJECTION` از همان prefix جدید در shadow؛
 7. soak و failure drill؛
 8. ثبت evidence و تصمیم ادامه/rollback.
 
 Rollback:
 
-- مدل به `LEGACY` برمی‌گردد؛
+- image، snapshot و authority marker به نسخه پین‌شده و سالم قبلی private pipeline
+  برمی‌گردند؛ اگر هیچ snapshot تازه و معتبری نیست، محصول باید
+  `STALE/NO_DATA` را fail-closed نشان دهد، نه نرخ legacy کهنه را؛
 - capture و archive وب ادامه دارد؛
 - outbox/checkpoint حذف یا reset نمی‌شود؛
 - snapshot آخر سالم حفظ و stale علامت‌گذاری می‌شود؛
@@ -967,23 +1066,26 @@ Gate:
 - disk-full/receiver restart/lost ACK آزمایش شده؛
 - تایید صریح برای production وجود دارد.
 
-نتیجه Stage 13-A در 2026-08-26:
+نتیجه Stage 13-A در 2026-08-26 (استقرار دستی/خارج از deploy رسمی):
 
 - image متصل به commit روی هر دو میزبان در rootهای ایزوله staging مستقر شد؛ تمام اجزای
   capture، processor، archive، انتقال facts، adapter، estimator و بازگشت snapshot در
   `PRIVATE_SHADOW` سالم هستند؛
-- اختیار زنده دو Telegram session به captureهای کانتینری تحویل شد و ownerهای میزبان بدون
-  حذف unit، session یا امکان rollback متوقف ماندند؛ guard موقت systemd مانع شروع دوباره
-  آن‌ها توسط timer قدیمی می‌شود؛
+- اختیار زنده دو Telegram session به captureهای کانتینری تحویل شد. unitهای
+  میزبانی `coin-capture`/`market-channel-capture` legacy مستقل نیستند؛ نسخه
+  میزبانی همان capture جدیدند. auto-return و guard موقت در `/run` اثبات
+  rollback پایدار نیستند؛ ازدست‌رفتن guard در reboot می‌تواند overlap مالک
+  بسازد و این مسیر باید با digest/marker اتمی جایگزین شود؛
 - صف facts در soak خالی، rejected/duplicate صفر و snapshot canonical دو میزبان برابر بود؛
   قطع receiver در هر جهت، restart دو capture و بازیابی صف/ACK موفق بود؛
 - یک payload تاریخی نامعتبر، SQLite WAL فقط‌خواندنی و outcome یتیم جدا و fail-closed شدند
   تا هیچ‌کدام loop زنده را متوقف نکند؛
-- این فقط استقرار shadow است: WebApp/product authority، `PRIVATE_PRIMARY`، production،
-  sync عمومی و retirement legacy تغییر نکردند؛ Stage 12/13 تا جلسه کامل بازار باز و گزارش
+- این فقط استقرار shadow دستی است: WebApp/product authority، `PRIVATE_PRIMARY`، production،
+  sync عمومی و retirement مسیرهای قبلی تغییر نکردند؛ Stage 12/13 تا جلسه
+  کامل بازار باز و گزارش
   parity امضاشده باز می‌مانند.
 - ممیزی overlap نشان داد lane قدیمی کانال خصوصی از روز قبل متوقف و cadence منابع بیرونی
-  ناهم‌ارز است؛ بنابراین parity زنده بعدی باید eventهای یک capture owner را پس از capture به
+  ناهم‌ارز است؛ بنابراین parity زنده بعدی باید eventهای یک capture owner جدید را پس از capture به
   دو projection ایزوله fan-out کند و هرگز session تلگرام دوم نسازد.
 - هارنس تک‌مالک version-pinned برای همین fan-out ساخته شد: یک prefix ثابت از spool زنده و
   یک SQLite seed سازگار به دو lane مستقل replay می‌شود؛ بعد از اعتبارسنجی کامل prefix فقط
@@ -1019,12 +1121,43 @@ Gate:
   ۲۵ bps، USDT حداکثر ۵ bps و bookهای فعال Herat/آبشده عمومی بدون اختلاف بیش از ۱۰۰ bps
   بودند. lane
   قدیمی private-gold در تمام window stale ولی candidate فردایی زنده بود، پس baseline قدیمی
-  برای parser/value آن oracle معتبر نیست. candidate فقط ۱۰ rate در برابر ۱۴ rate محصول
+  فقط artifact regression است و برای parser/value، live oracle یا gate معتبر نیست.
+  candidate فقط ۱۰ rate در برابر ۱۴ rate محصول
   داشت: `IMAM/CASH`، `HALF_BAHAR/CASH` و هر دو rate یک‌گرمی به‌علت نبود تاریخچهٔ هم‌زمان
   anchor سکه و underlying آبشده fail-closed شدند. پیش از هر cutover، تاریخچهٔ سکه و driverها
   باید point-in-time و دست‌کم در horizon هفت‌روزهٔ موتور نرخ به Store جدید backfill و سپس
   parser/lifecycle تک‌مالک و یک جلسه کامل بازار باز تکرار شود. recommendation همچنان
   `HOLD_FULL_OPEN_MARKET_SESSION_REQUIRED` و cutover برابر false است.
+- replay تک‌مالک بعدی با ۲٬۳۴۴ رکورد window، duplicate/partial-tail صفر و hash
+  `8002b89e4f5e27ee4ab48fa222a80582a141b89b584f3d5be17c44627bfd05f4` اجرا شد.
+  اختلاف‌های fact به cadence مصوب XAU و lifecycle private-gold محدود بود؛ دو parser mismatch
+  فقط در projection دقیقه‌ای private-gold ثبت شد و هیچ mismatch دو گروه سکه وجود نداشت. هر
+  ۱۴ rate برابر بود، اما XAU consumed-value و schema جدید همچنان gate را در HOLD نگه داشت.
+- backfill نقطه‌زمانی هفت‌روزه با ۳۵۶٬۱۴۸ revision در ۱۸۲ bundle و manifest SHA-256 برابر
+  `bb8c7b83d80fbd9e4e02aa9b3868ee570fc6cdd6c3f42c1d5fcebafcc2c58fa7` به staging
+  وارد شد. import و replay دوم idempotent، failed/quarantine/dead-letter صفر و outbox پس از
+  drain صفر بود؛ adapter/receiver روی ۱۰ stream بدون rejection یا duplicate باقی ماندند.
+- timeline پس از backfill هر ۱۴ rate را در هر ۱۰ نمونه و بدون presence mismatch ثبت کرد، پس
+  مشکل چهار خروجی مفقود رفع شد. بااین‌حال ۲۶ مورد از ۱۴۰ مقایسه بیرون ۱۰۰ bps بود؛ artifact
+  قدیمی private-gold حدود ۴۷٫۷ ساعت stale و candidate تازه بود، بنابراین
+  آن مقایسه live gate نیست. p95 انتقال `10.673s` نیز
+  گیت هفت‌ثانیه‌ای را پاس نکرد. گزارش امضاشده با hash
+  `42132dba8cee21050d095eed53418ac45790a58ce38be20c689dc3d58fa1141c`،
+  `HOLD_FULL_OPEN_MARKET_SESSION_REQUIRED` و `cutover_performed=false` ثبت شد.
+- snapshotها و image tar موقت پس از تایید import پاک شدند و backup/export محافظت‌شده روی
+  میزبان وب باقی ماند. staging در تمام عملیات `PRIVATE_SHADOW` بود؛ WebApp/product authority،
+  production و primary feed تغییر نکردند.
+- probe سه‌ثانیه‌ای estimator زیر ساخت snapshot روی Store بزرگ false-negative شد؛ compose
+  `main@eb66dfdd` آن را بدون تغییر image یا منطق مدل به هشت ثانیه افزایش داد. پنج probe
+  پیاپی پاس، restart صفر و ۱۴ rate تازه پس از recreate ثبت شد.
+- scheduler قدیمی پنج ثانیه را پس از پایان محاسبه صبر می‌کرد. `main@4e6e9278` cadence را
+  start-to-start کرد؛ سپس `main@f01c797d` interval را با default پنج ثانیه قابل‌تنظیم و
+  `main@0f1a534b` budget CPU estimator را مستقل کرد. staging با interval پنج ثانیه و ۱٫۵
+  CPU در گزارش امضاشده
+  `86dec80c934f12d4703eaf738fe1bb387e9f16ceac5be6564d0008c9f288fd2a` تعداد ۴۹
+  snapshot بدون version gap و transfer p95 برابر `6.367s` ثبت کرد؛ گیت latency پاس شد.
+  هر ۱۴ rate حاضر بود، اما ۲۵/۱۴۰ value بیرون ۱۰۰ bps و full market session ناقص ماند، پس
+  recommendation همچنان `HOLD_FULL_OPEN_MARKET_SESSION_REQUIRED` و cutover برابر false است.
 
 رسید عملیاتی: [COIN_MARKET_DATA_STAGE13_STAGING_SHADOW.md](./COIN_MARKET_DATA_STAGE13_STAGING_SHADOW.md)
 
@@ -1043,7 +1176,7 @@ Gate:
 7. گروه 2؛
 8. گروه 1؛
 9. تثبیت تمام streams؛
-10. legacy feed فقط shadow.
+10. `REFERENCE_PROJECTION` ایزوله از همان prefix جدید فقط shadow؛ live legacy ممنوع.
 
 Stop conditions:
 
@@ -1189,10 +1322,14 @@ SLOها بعد از baseline خصوصی می‌توانند فقط سخت‌گی
 
 ## 12. Backup، بازیابی و retention
 
-- raw spool: سه روز؛
+- raw spool: سه روز؛ متن خام منتخب پژوهشی پیش از purge، رمز‌شده و دائمی می‌شود؛
 - curated permanent facts: بدون حذف خودکار تا تصویب policy آینده؛
 - rejected/quarantine: retention جدا و قابل تنظیم، بدون متن نامرتبط؛
-- outbox delivered rows: bounded operational retention پس از checkpoint/backup؛
+- outbox delivered envelope: هفت روز پس از ACK و فقط پشت checkpoint؛ سپس payload
+  redacted و sequence/fact/revision/hash حفظ می‌شود؛
+- کپی payload در inbox گیرنده: فقط پس از checkpoint پایدار adapter و گذشت سه روز
+  redacted می‌شود؛ metadata هویتی stream/sequence/fact/revision/hash برای replay،
+  duplicate و conflict دائمی می‌ماند و عقب‌گرد watermark به‌صورت fail-closed رد می‌شود؛
 - model input bindings: برای replay و audit دائمی یا مطابق retention مصوب model ledger؛
 - backup روی volume جدا از active database؛
 - container layer و image جای backup داده نیستند؛
@@ -1201,15 +1338,17 @@ SLOها بعد از baseline خصوصی می‌توانند فقط سخت‌گی
 
 ## 13. Rollback سراسری
 
-Rollback هرگز capture یا archive وب را خاموش نمی‌کند. تنها authority مصرف مدل جابه‌جا می‌شود:
+Rollback هرگز capture یا archive وب را خاموش نمی‌کند. live legacy راه بازگشت نیست:
 
 1. freeze promotion؛
-2. مدل به آخرین feed سالم `LEGACY` برگردد؛
-3. snapshot وب stale/degraded را شفاف نشان دهد؛
+2. image، snapshot و authority marker به release پین‌شده و سالم قبلی private pipeline
+   برگردند؛
+3. snapshot وب stale/degraded یا `NO_DATA` را شفاف نشان دهد و مقدار کهنه را
+   تازه جلوه ندهد؛
 4. private outbox بدون حذف حفظ شود؛
 5. checkpoint از ACK پایین آورده نشود؛
 6. root cause با replay روی shadow بررسی شود؛
-7. بازگشت به private primary فقط بعد از parity مجدد.
+7. بازگشت به private primary فقط بعد از parity مجدد و مجوز صریح.
 
 برای مهاجرت sync عمومی، rollback فقط peer URL/route را به transport قبلی برمی‌گرداند؛ schema، change log و source sequence دست‌کاری نمی‌شوند.
 

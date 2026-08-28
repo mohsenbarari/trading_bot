@@ -38,6 +38,9 @@ EXPORT_CONTRACT = "market_history_export_manifest/1.0"
 EXPORT_VERSION = "market-history-export-v1"
 SOURCE_SYSTEM = "LEGACY_MARKET_STORE_V1"
 MAX_BUNDLE_RECORDS = 10_000
+MAX_MANIFEST_BYTES = 4 * 1024 * 1024
+MAX_BUNDLE_BYTES = 64 * 1024 * 1024
+MAX_BUNDLES = 4_096
 _SOURCE_CODE = re.compile(r"^[A-Z][A-Z0-9_]{2,63}$")
 _COMMON_COLUMNS = (
     "id",
@@ -177,14 +180,43 @@ def _connect_union_view(
     path: Path,
     *,
     exclusion_store: Path | None,
+    temporary_directory: Path | None,
 ) -> sqlite3.Connection:
     connection = sqlite3.connect(":memory:")
     connection.row_factory = sqlite3.Row
     try:
-        # Large quote streams require a sort. Keep its temporary B-tree in
-        # bounded process memory so a hardened container does not depend on a
-        # writable or oversized root filesystem /tmp.
-        connection.execute("PRAGMA temp_store=MEMORY")
+        if temporary_directory is None:
+            # Small offline fixtures may remain in memory. Operational exports
+            # must provide a protected disk-backed directory through the CLI;
+            # otherwise a full-history sort can consume the container limit.
+            connection.execute("PRAGMA temp_store=MEMORY")
+        else:
+            scratch = temporary_directory.resolve()
+            if (
+                not temporary_directory.is_absolute()
+                or temporary_directory.is_symlink()
+                or not scratch.is_dir()
+                or stat.S_IMODE(scratch.stat().st_mode) != 0o700
+                or scratch.stat().st_uid != os.geteuid()
+                or any(scratch.iterdir())
+            ):
+                raise MarketHistoryExportError(
+                    "history_export_temporary_directory_invalid"
+                )
+            connection.execute("PRAGMA temp_store=FILE")
+            escaped = str(scratch).replace("'", "''")
+            connection.execute(f"PRAGMA temp_store_directory='{escaped}'")
+            configured = connection.execute(
+                "PRAGMA temp_store_directory"
+            ).fetchone()
+            if (
+                connection.execute("PRAGMA temp_store").fetchone()[0] != 1
+                or configured is None
+                or Path(str(configured[0])).resolve() != scratch
+            ):
+                raise MarketHistoryExportError(
+                    "history_export_disk_temp_store_unavailable"
+                )
         _attach_observation_union(
             connection,
             schema="source",
@@ -370,11 +402,22 @@ def _protected_output_directory(path: Path) -> None:
     os.chmod(path, 0o700)
 
 
-def _write_private_json(path: Path, value: Mapping[str, Any]) -> str:
+def _private_json_payload(
+    value: Mapping[str, Any],
+    *,
+    maximum_bytes: int,
+    limit_reason: str,
+) -> bytes:
     payload = (
         json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         + "\n"
     ).encode("utf-8")
+    if len(payload) > maximum_bytes:
+        raise MarketHistoryExportError(limit_reason)
+    return payload
+
+
+def _write_private_payload(path: Path, payload: bytes) -> str:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         with os.fdopen(descriptor, "wb", closefd=False) as handle:
@@ -397,6 +440,7 @@ def export_market_history(
     maximum_bundle_records: int = 2_000,
     output_directory: Path | None = None,
     exclusion_store: Path | None = None,
+    temporary_directory: Path | None = None,
     allow_unlinked_private_gold_outcome_omission: bool = False,
 ) -> HistoryExportReport:
     """Validate and optionally write bounded, fact-only history bundles."""
@@ -422,12 +466,21 @@ def export_market_history(
     }
     if any(cutoffs[source] <= start for source in sources):
         raise MarketHistoryExportError("history_export_source_cutoff_invalid")
+    if (
+        output_directory is not None
+        and temporary_directory is not None
+        and output_directory.resolve() == temporary_directory.resolve()
+    ):
+        raise MarketHistoryExportError(
+            "history_export_output_and_temporary_directory_conflict"
+        )
     if output_directory is not None:
         _protected_output_directory(output_directory)
 
     connection = _connect_union_view(
         source_store,
         exclusion_store=exclusion_store,
+        temporary_directory=temporary_directory,
     )
     source_counts: dict[str, int] = {}
     minimums: dict[str, str] = {}
@@ -448,6 +501,13 @@ def export_market_history(
             retention_mode=retention_mode,
             records=records,
         ).model_dump(mode="json")
+        if len(files) >= MAX_BUNDLES:
+            raise MarketHistoryExportError("history_export_bundle_count_exceeded")
+        bundle_payload = _private_json_payload(
+            bundle,
+            maximum_bytes=MAX_BUNDLE_BYTES,
+            limit_reason="history_export_bundle_bytes_exceeded",
+        )
         artifact_hash = str(bundle["source_artifact_hash"])
         filename = f"{source.lower()}-{part:04d}-{artifact_hash[:16]}.json"
         item = {
@@ -458,8 +518,8 @@ def export_market_history(
             "source_artifact_hash": artifact_hash,
         }
         if output_directory is not None:
-            item["file_sha256"] = _write_private_json(
-                output_directory / filename, bundle
+            item["file_sha256"] = _write_private_payload(
+                output_directory / filename, bundle_payload
             )
         files.append(item)
 
@@ -534,6 +594,12 @@ def export_market_history(
     finally:
         connection.rollback()
         connection.close()
+    if temporary_directory is not None and any(
+        temporary_directory.resolve().iterdir()
+    ):
+        raise MarketHistoryExportError(
+            "history_export_temporary_directory_not_empty_after_close"
+        )
 
     manifest: dict[str, Any] = {
         "contract": EXPORT_CONTRACT,
@@ -554,8 +620,15 @@ def export_market_history(
         "bundles": files,
     }
     manifest_sha: str | None = None
+    manifest_payload = _private_json_payload(
+        manifest,
+        maximum_bytes=MAX_MANIFEST_BYTES,
+        limit_reason="history_export_manifest_bytes_exceeded",
+    )
     if output_directory is not None:
-        manifest_sha = _write_private_json(output_directory / "manifest.json", manifest)
+        manifest_sha = _write_private_payload(
+            output_directory / "manifest.json", manifest_payload
+        )
         directory_descriptor = os.open(output_directory, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(directory_descriptor)

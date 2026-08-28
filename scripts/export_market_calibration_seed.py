@@ -23,6 +23,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from core.market_intelligence.coin_prediction_anchors import (  # noqa: E402
+    PREDICTION_AUTHORITY_BASELINE_EPOCH,
+)
+
 
 FEEDBACK_COLUMNS = (
     "event_key",
@@ -178,16 +182,47 @@ def export_predictions(
     cutoff_utc: str,
     as_of_utc: str,
 ) -> int:
-    if not set(PREDICTION_COLUMNS).issubset(
-        _columns(source, "coin_estimate_predictions")
-    ):
+    prediction_columns = _columns(source, "coin_estimate_predictions")
+    if not set(PREDICTION_COLUMNS).issubset(prediction_columns):
         raise CalibrationSeedError("calibration_prediction_schema_invalid")
+    authority_aware = "authority_epoch" in prediction_columns
+    authority_clause = ""
+    authority_parameters: tuple[object, ...] = ()
+    if authority_aware:
+        authority_columns = _columns(
+            source, "coin_estimate_prediction_authority"
+        )
+        if not {
+            "singleton",
+            "active_epoch",
+            "active_feed_mode",
+            "updated_at_utc",
+        }.issubset(authority_columns):
+            raise CalibrationSeedError(
+                "calibration_prediction_authority_schema_invalid"
+            )
+        authority = source.execute(
+            "SELECT active_epoch,active_feed_mode "
+            "FROM coin_estimate_prediction_authority WHERE singleton=1"
+        ).fetchone()
+        if (
+            authority is None
+            or str(authority["active_feed_mode"]) != "LEGACY_BASELINE"
+            or str(authority["active_epoch"])
+            != PREDICTION_AUTHORITY_BASELINE_EPOCH
+        ):
+            raise CalibrationSeedError(
+                "calibration_prediction_authority_not_legacy"
+            )
+        authority_clause = "AND authority_epoch=? "
+        authority_parameters = (PREDICTION_AUTHORITY_BASELINE_EPOCH,)
     rows = source.execute(
         f"SELECT {','.join(PREDICTION_COLUMNS)} FROM coin_estimate_predictions "
         "WHERE model_id='MAIN_ONLINE' AND prediction_time_utc>=? "
         "AND prediction_time_utc<=? AND created_at_utc<=? "
+        f"{authority_clause}"
         "ORDER BY prediction_time_utc,id",
-        (cutoff_utc, as_of_utc, as_of_utc),
+        (cutoff_utc, as_of_utc, as_of_utc, *authority_parameters),
     ).fetchall()
 
     def write(output: sqlite3.Connection) -> int:
@@ -200,17 +235,39 @@ def export_predictions(
               model_id TEXT NOT NULL,
               commodity TEXT NOT NULL,
               settlement TEXT NOT NULL,
-              estimated_price_toman INTEGER NOT NULL
+              estimated_price_toman INTEGER NOT NULL,
+              authority_epoch TEXT NOT NULL
             );
             CREATE INDEX coin_estimate_predictions_causal_idx
             ON coin_estimate_predictions(model_id,prediction_time_utc,created_at_utc);
+            CREATE TABLE coin_estimate_prediction_authority(
+              singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+              active_epoch TEXT NOT NULL,
+              active_feed_mode TEXT NOT NULL CHECK(
+                active_feed_mode IN ('LEGACY_BASELINE','PRIVATE_PRIMARY')
+              ),
+              updated_at_utc TEXT NOT NULL
+            );
             """
         )
-        placeholders = ",".join("?" for _ in PREDICTION_COLUMNS)
+        output.execute(
+            "INSERT INTO coin_estimate_prediction_authority VALUES(1,?,?,?)",
+            ("LEGACY_BASELINE", "LEGACY_BASELINE", as_of_utc),
+        )
+        placeholders = ",".join("?" for _ in (*PREDICTION_COLUMNS, "authority_epoch"))
         output.executemany(
-            f"INSERT INTO coin_estimate_predictions({','.join(PREDICTION_COLUMNS)}) "
+            f"INSERT INTO coin_estimate_predictions("
+            f"{','.join((*PREDICTION_COLUMNS, 'authority_epoch'))}) "
             f"VALUES({placeholders})",
-            (tuple(row[column] for column in PREDICTION_COLUMNS) for row in rows),
+            (
+                # Calibration seeds occupy a deterministic negative namespace;
+                # live PRIVATE_PRIMARY snapshots use positive V1-compatible
+                # ids.  Source ids are not semantically referenced elsewhere.
+                (-position,)
+                + tuple(row[column] for column in PREDICTION_COLUMNS[1:])
+                + ("LEGACY_BASELINE",)
+                for position, row in enumerate(rows, start=1)
+            ),
         )
         return len(rows)
 

@@ -318,6 +318,139 @@ timeline واقعی ده‌نمونه‌ای پس از این اصلاح با re
 سبز شدند. دو تست shell استقرار که وجود `curl` را فرض می‌کنند فقط روی host اجرا و پاس شدند و
 جزء runtime image بازار نیستند.
 
+## replay تک‌مالک، backfill هفت‌روزه و postcheck
+
+پس از تهیه snapshotهای point-in-time محافظت‌شده، replay تک‌مالک ناموفق قبلی با همان ورودی
+freeze‌شده تکرار شد. اجرای
+`stage13-single-owner-run-20260827T0625Z` تعداد ۲٬۳۴۴ رکورد window را در هر دو lane بدون
+duplicate یا partial tail پردازش کرد. گزارش با hash
+`8002b89e4f5e27ee4ab48fa222a80582a141b89b584f3d5be17c44627bfd05f4` ثبت شد و نتیجهٔ
+redacted آن چنین بود:
+
+- baseline تعداد ۵۴۱٬۳۸۵ و candidate تعداد ۵۴۲٬۴۲۵ fact داشت و ۵۴۱٬۳۷۰ fact مشترک بود؛
+- ۱٬۰۵۵ fact اضافه و ۱۵ fact مفقود candidate همگی XAU بودند و به تفاوت مصوب cadence، یعنی
+  حفظ quoteهای واقعی در candidate در برابر compaction قدیمی، محدود شدند؛
+- ۵۹۹ lifecycle mismatch به private-gold محدود بود: ۵۳۷ مورد کانال و ۶۲ مورد projection
+  دقیقه‌ای. دو parser mismatch نیز فقط در projection دقیقه‌ای private-gold بود؛ هیچ mismatch
+  parser یا lifecycle برای دو گروه سکه ثبت نشد. این موارد auto-accept نشدند و gate را باز
+  نکردند؛
+- هر ۱۴ rate برابر بود، اما اختلاف consumed XAU و ۱۷ اختلاف schema جدید `mean_price` باعث
+  باقی‌ماندن recommendation روی `HOLD_STAGE12_LIVE_PARITY_REQUIRED` شد؛
+- `cutover_performed=false` و raw artifact ماندگار نشد.
+
+برای رفع چهار absence نرخ سکه، ابزار backfill fail-closed در commitهای `e9138367`،
+`1e0ab0f4`، `16d268c5`، `e37aa09d` و `581396c6` اضافه و سخت‌سازی شد. export فقط بازهٔ
+هفت‌روزه تا cutoff اولیهٔ هر source را گرفت، eventهای موجود candidate را با denylist کنار
+گذاشت و منابع آبشدهٔ عمومی را فقط seed گذرای Store دانست، نه تاریخچهٔ دائمی. نتیجهٔ export:
+
+| source | revision |
+| --- | ---: |
+| `GROUP_1` | ۱٬۴۱۶ |
+| `GROUP_2` | ۳٬۴۹۷ |
+| `PRIVATE_GOLD_CHANNEL` | ۴۵٬۸۵۹ |
+| `PRIVATE_GOLD_PAPER_MINUTE` | ۷٬۴۱۶ |
+| `USD_HERAT` | ۱۰٬۸۵۲ |
+| `XAUUSD` | ۲٬۶۲۷ |
+| `WALLEX_PUBLIC_API` | ۱۶۰٬۵۵۱ |
+| `MELTED_AGGREGATE` | ۶۶٬۹۵۶ |
+| `MELTED_FLOW` | ۵۶٬۹۷۴ |
+| **جمع** | **۳۵۶٬۱۴۸** |
+
+پنج event از `MELTED_FLOW` که از قبل در candidate وجود داشت کنار گذاشته شد. ۵۳۵ outcome قدیمی
+private-gold که هیچ root قابل‌اثباتی در تاریخچه نداشت نیز با reason code صریح حذف شد؛ ۱۴۵
+outcome لینک‌شده حفظ شد و هیچ outcome گروه سکه مجاز به حذف نبود. manifest تعداد ۱۸۲ bundle
+داشت و SHA-256 آن برابر
+`bb8c7b83d80fbd9e4e02aa9b3868ee570fc6cdd6c3f42c1d5fcebafcc2c58fa7` بود. نسخهٔ
+محافظت‌شدهٔ export و backup پایگاه روی میزبان وب در مسیر
+`/srv/trading-bot/market-data-staging-shadow/backups-staging/stage13-history-backfill-20260827T073711Z`
+باقی ماند. SHA-256 فایل `postgres-before-import.dump` برابر
+`fe9f6e1a761afabf11eaee9b397c33da7deff0e3d5fce086da574a4d7e19890b` است.
+
+import در staging با delay ده‌ثانیه‌ای میان bundleهای جدید اجرا شد تا receiver و disk زیر بار
+bounded بمانند. هر ۱۸۲ bundle در status `RECONCILED` و هر ۳۵۶٬۱۴۸ item ثبت شد؛ failed و
+quarantine صفر بود. به‌علت resume امن اجرا، ۳۵۴٬۶۲۵ revision جدید و ۱٬۵۲۳ revision تکراری
+تشخیص داده شد و replay دوم `idempotent_replay_verified=true` را ثبت کرد. outbox در پایان صفر،
+dead-letter صفر و worker انتقال healthy بود.
+
+در سمت بات، metrics receiver و adapter به شمارنده‌های پایدار O(1) تبدیل شد تا healthcheck زیر
+commit load تاریخچه full-table scan نکند. receiver با release `16d268c5` و health timeout
+هشت‌ثانیه‌ای release `581396c6` اجرا شد. postcheck تعداد ۴۸۲٬۲۰۹ delivery را روی ۱۰ stream
+با lag، rejection، duplicate و dead-letter صفر نشان داد؛ چهار service بات healthy و
+restart-zero ماندند. feed در تمام عملیات `PRIVATE_SHADOW` بود و WebApp/product authority،
+production و `PRIVATE_PRIMARY` تغییر نکردند.
+
+پس از تخلیه، estimator با وجود تولید snapshot تازه در probe مستقل سه‌ثانیه‌ای false-negative
+شد؛ ساخت point-in-time snapshot روی Store بزرگ، CPU تک‌هسته‌ای آن را موقتاً اشغال می‌کرد.
+release compose-only `eb66dfdd` timeout probe را مانند receiver/adapter به هشت ثانیه افزایش
+داد و regression test اضافه کرد. فقط `coin-estimator` staging با همان image و runtime revision
+`1cd6e02a` recreate شد؛ پنج healthcheck پیاپی پاس، restart صفر و خروجی ۱۴نرخی تازه ماند.
+
+پس از تخلیهٔ کامل صف، timeline ده‌نمونه‌ای تازه با ۲۴ snapshot candidate، version gap صفر و
+hash
+`42132dba8cee21050d095eed53418ac45790a58ce38be20c689dc3d58fa1141c`
+امضا و مستقل verify شد. هر ۱۴ rate در تمام نمونه‌ها حاضر بود و presence mismatch صفر شد؛ در
+۱۴۰ مقایسه ۴۹ مورد exact، شش مورد در ۵ bps، ۲۵ مورد در ۲۵ bps، ۳۴ مورد در ۱۰۰ bps و ۲۶
+مورد بیرون ۱۰۰ bps بود. موارد بیرون ۱۰۰ bps به `HALF_BAHAR/TOMORROW`،
+`ONE_GRAM/TOMORROW` و `QUARTER_BAHAR/CASH` محدود بود. چهار ورودی فردایی private-gold در
+محصول قدیمی حدود ۱۷۱٬۷۰۳ تا ۱۷۲٬۰۰۶ ثانیه stale ولی در candidate تازه بود؛ بنابراین آن
+oracle برای value parity این book معتبر نیست.
+
+p95 فاصلهٔ دو snapshot برابر `20.707s` و p95 انتقال source تازه تا snapshot برابر
+`10.673s` بود و گیت هفت‌ثانیه‌ای این window را پاس نکرد. گزارش با mode `0600` در
+`/srv/trading-bot/staging-data/coin-intelligence/private-pipeline-shadow/backups-staging/stage13-post-backfill-input-20260827T0910Z-16d268c5.json`
+باقی ماند. نتیجهٔ رسمی همچنان `HOLD_FULL_OPEN_MARKET_SESSION_REQUIRED`،
+`full_market_session=false` و `cutover_performed=false` است.
+
+## اصلاح cadence و گیت latency پس از backfill
+
+پروفایل فقط‌خواندنی نشان داد ساخت یک snapshot روی Store backfillشده حدود `1.799s` طول
+می‌کشد، ولی loop قدیمی پس از پایان کار پنج ثانیهٔ کامل صبر می‌کرد؛ در نتیجه cadence واقعی
+به‌جای start-to-start پنج‌ثانیه‌ای، زمان ساخت به‌علاوهٔ پنج ثانیه بود. `main@4e6e9278`
+scheduler را start-to-start کرد و regression test افزود. اولین build این commit به‌درستی توسط
+runtime guard با `release_sha_image_revision_mismatch` رد شد، چون `SOURCE_SHA` در build خالی
+مانده بود؛ estimator فوراً به image سالم rollback شد، هیچ feed/authority تغییر نکرد و image
+بعدی با revision label و env داخلی صحیح ساخته شد.
+
+timeline ده‌نمونه‌ای این اصلاح با ۴۵ snapshot candidate، version gap صفر، pair skew p95 برابر
+`4.034s` و transfer p95 برابر `7.081s` ثبت شد. hash گزارش
+`5c61490bdc50c06d4f32883835c9f8e9d520f2c7d7e6dc1982ea6af803385d21` بود؛ latency
+بهبود جدی داشت ولی با اختلاف ۸۱ میلی‌ثانیه هنوز gate سخت هفت‌ثانیه‌ای را پاس نکرد.
+
+`main@f01c797d` interval را با بازهٔ fail-closed یک تا ۶۰ ثانیه قابل‌تنظیم کرد، درحالی‌که
+default پروژه و production پنج ثانیه ماند. آزمایش staging با interval چهار ثانیه transfer p95
+برابر `7.426s` داشت و به‌عنوان تنظیم نهایی پذیرفته نشد؛ artifact امضاشدهٔ آن با hash
+`bca312da4a2c51d6f7531e3e906b7670277e80e8d06f3bddd2d0380c4d4c6672` برای audit حفظ شد.
+پروفایل resource نشان داد estimator روی limit یک CPU به ۱۰۰٪ می‌رسد، درحالی‌که میزبان هشت
+هسته و ظرفیت حافظهٔ کافی داشت. compose-only `main@0f1a534b` budget estimator را مستقل و با
+default یک CPU قابل‌تنظیم کرد؛ فقط staging روی `1.5` CPU و interval پنج ثانیه قرار گرفت.
+
+گزارش نهایی این پیکربندی با hash
+`86dec80c934f12d4703eaf738fe1bb387e9f16ceac5be6564d0008c9f288fd2a` و key ID برابر
+`stage13-post-cpu15:f01c797d` مستقل verify شد:
+
+- ۱۰ snapshot محصول و ۴۹ snapshot candidate با version gap صفر و timeline کامل ثبت شد؛
+- transfer-to-snapshot p95 برابر `6.367s` بود و گیت هفت‌ثانیه‌ای را پاس کرد؛ pair skew
+  زمان‌بندی‌شده `9.493s` بود، بنابراین exact-as-of همچنان مرجع مقایسهٔ value است؛
+- هر ۱۴ rate حاضر و presence mismatch صفر بود. از ۱۴۰ مقایسهٔ exact-as-of، ۳۲ مورد exact،
+  ۱۱ مورد در ۵ bps، ۲۸ مورد در ۲۵ bps، ۴۴ مورد در ۱۰۰ bps و ۲۵ مورد بیرون ۱۰۰ bps بود؛
+- به‌علت value drift، oracle قدیمی private-gold و نبود full market session، recommendation
+  همچنان `HOLD_FULL_OPEN_MARKET_SESSION_REQUIRED` و `cutover_performed=false` ماند.
+
+runtime فعال estimator image
+`sha256:d1b123963b92a115b5c60660cb4b6e9ffcb7146574b0d5d16126692ee8e68829` با revision
+`f01c797dbaa5ce943debe7cd5c77c18c35ad6f1d`، interval پنج ثانیه، budget برابر ۱٫۵ CPU و
+health timeout هشت ثانیه است. env محافظت‌شده staging backup شد و چهار مقدار غیرحساس
+image/revision/interval/cpus از compose نهایی مستقل resolve شد. ۴۲ تست متمرکز داخل همین image
+با network خاموش پاس شد.
+
+در postcheck دیسک، snapshotهای موقت point-in-time، tar موقت image و کپی محلی export پس از
+تایید hash و import حذف شدند؛ نسخهٔ rollback روی میزبان وب حفظ شد. فضای آزاد میزبان بات از
+۵۵۷ مگابایت به حدود ۲٫۳ گیگابایت رسید. build cache بلااستفاده از حدود ۵٫۹ گیگابایت به ۳۹
+مگابایت کاهش یافت؛ image آزمایشی cadence، build ناقص و buildهای قدیمی‌تر staging حذف شدند و
+فقط image فعال و یک rollback فوری staging حفظ شد. imageهای فعال pipeline، همهٔ containerها،
+volumeها و worktree فعال UI دست‌نخورده ماندند. آزمون‌های قبلی backfill/adapter/timeline و
+foundation/compose سبز ماندند و گیت image نهایی نیز ۴۲ تست متمرکز را پاس کرد.
+
 ## failure drill و اصلاحات حین استقرار
 
 - قطع ۱۲ ثانیه‌ای Fact receiver باعث backlog موقت ۳۳تایی شد؛ پس از بازگشت، صف بدون
@@ -334,6 +467,57 @@ timeline واقعی ده‌نمونه‌ای پس از این اصلاح با re
   factهای بعدی ادامه می‌یابند و FK database fail-closed باقی می‌ماند.
 
 گیت آزمون نهایی شامل ۶۹ تست متمرکز روی host و ۴۴ تست مرتبط داخل image بود و همه سبز شدند.
+
+## محدودسازی رشد receiver و postcheck دیسک — 2026-08-27
+
+ممیزی دیسک نشان داد receiver حدود ۵۱۲ هزار delivery را با دو کپی payload نگه می‌داشت،
+درحالی‌که adapter فقط یک sequence عقب بود. Market Store و ledger دائمی دست‌نخورده ماندند؛
+سیاست جدید فقط کپی عملیاتی payload را پس از checkpoint یکنواخت adapter و safety window
+سه‌روزه redacted می‌کند و metadata کامل stream/sequence/fact/revision/hash را برای replay،
+duplicate و conflict دائماً نگه می‌دارد. عقب‌گرد watermark و مشاهدهٔ payload فشرده‌شده جلوتر
+از checkpoint هر دو fail-closed هستند.
+
+تلاش نخست `main@44662621` پس از افزودن دو ستون nullable، هنگام ساخت index بزرگ زیر tmpfs
+محدود کانتینر fail شد؛ هیچ payload حذف یا compact نشد. receiver فوراً به image سالم قبلی
+rollback و با restart صفر healthy شد. پیاده‌سازی `main@c5c09753` index را با cursor کوچک
+per-stream جایگزین کرد و ۱۹ تست مستقیم image برای migration، retention، lost-ACK، revision،
+watermark و adapter پاس شدند.
+
+پیش از deploy، backup آنلاین receiver با `quick_check=ok` ساخته و با mode `0600` در
+`backups-staging/receiver-retention-44662621-20260827T131513Z/receiver.sqlite3.gz` نگه‌داری
+شد؛ اندازهٔ فشرده `205170038` بایت و SHA-256 آن
+`4b03f526f1a0514fa04a16cc96c8ac6de0b145826036507cc686cff2b10c453d` است.
+
+receiver و adapter staging با image
+`sha256:a047c7f6a3429c957789cc34dd530eabcc63d2061b24abfc89448539d292f73c`
+و revision `c5c097539e8bb8d53b6a752b94b23985cbad2037` healthy/restart-zero شدند. health نهایی
+`payload_compaction.status=READY`، retention برابر `259200s`، compacted اولیه صفر، rejection
+و duplicate صفر، ۱۰ stream و lag کل/بیشینه صفر بود. در postcheck بعدی ۲۷ delivery تازه نیز
+تا checkpoint adapter بدون lag عبور کرد. mode همچنان `PRIVATE_SHADOW` است و production،
+Product/WebApp authority و `PRIVATE_PRIMARY` تغییر نکردند.
+
+## اصلاح فشار RAM و retention دریافت Account1 — 2026-08-27
+
+ممیزی میزبان وب نشان داد `/tmp` یک `tmpfs` است و ۱۹ بستهٔ انتقال موقت pipeline با حجم
+`2,179,315,964` بایت مستقیماً RAM را اشغال کرده بودند. هیچ process، file handle یا
+container فعالی به آن‌ها وابسته نبود؛ پس از حذف، مصرف `/tmp` از `2.1G` به `1.9M` و
+حافظهٔ available میزبان از حدود `705MiB` به `2.7GiB` رسید. مسیر انتقال دائمی به
+`/var/tmp/trading-bot-market-pipeline-transfer` روی ext4 منتقل شد، retention یک‌ساعتهٔ
+`systemd-tmpfiles` نصب شد و release/image جدید بدون فایل میانی remote به‌صورت stream منتقل
+شد.
+
+سه OOM ساعتی Account1 نیز به retention قدیمی مربوط بود: spoolهای `69MiB` و `114MiB` با
+`readlines()` و لیست کامل رکوردهای نگه‌داشتنی هم‌زمان در RAM کپی می‌شدند. `main@51344aa9`
+startup index و compaction را record-by-record کرد، temporary ناقص را fail-closed پاک می‌کند
+و cache reply را برای Account1 حذف و برای Account2 روی ۵۰هزار entry محدود کرد. آزمون روی
+کپی واقعی ۱۶۵٬۹۶۵ رویدادی، داخل container با limit برابر `384MiB`، با peak RSS برابر
+`58,500KiB` و بدون OOM پاس شد؛ rehearsal کامل Stage 4 نیز crash/restart، single-owner،
+retention و cleanup را پاس کرد.
+
+فقط `market-capture-account1` با choreography تک‌مالک روی release مذکور rolling-replace
+شد. sequence از `166072` به `166280` ادامه یافت، outbox صفر، container restart صفر، owner
+قدیمی inactive و RSS اولیه `157.8MiB / 384MiB` بود. production، Product/WebApp authority،
+Account2 و سایر serviceهای shadow در این اقدام تغییر نکردند.
 
 ## rollback مجاز این مرحله
 

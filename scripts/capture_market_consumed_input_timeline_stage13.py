@@ -43,7 +43,7 @@ from core.market_intelligence.market_store import (
     connect_market_store_read_only,
     verify_market_store_read_only,
 )
-from core.market_intelligence.private_pipeline_contracts import EstimatorSnapshotV1
+from core.market_intelligence.private_pipeline_contracts import EstimatorSnapshotV2
 from core.market_intelligence.shadow_parity import (
     ShadowParityError,
     sign_parity_report,
@@ -78,7 +78,7 @@ def _outside_repository(path: Path) -> Path:
 
 def _load_candidate(path: Path) -> dict[str, Any]:
     try:
-        snapshot = EstimatorSnapshotV1.model_validate_json(
+        snapshot = EstimatorSnapshotV2.model_validate_json(
             path.read_text(encoding="utf-8")
         )
     except (OSError, UnicodeDecodeError, ValidationError) as exc:

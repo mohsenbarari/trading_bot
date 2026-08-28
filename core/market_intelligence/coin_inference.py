@@ -17,6 +17,10 @@ from core.pack_commodities import (
 from .coin_rate_engine import COIN_RATE_ENGINE_VERSION, COIN_SPECS
 from .market_contracts import normalize_utc
 from .market_snapshot import AtomicMarketSnapshotProvider, MarketSnapshotUnavailable, validate_market_snapshot
+from .product_snapshot_reader import (
+    ProductSnapshotReader,
+    ProductSnapshotUnavailable,
+)
 
 
 COIN_INFERENCE_VERSION = "coin-inference-v4"
@@ -271,12 +275,19 @@ def infer_coin_commodity_from_published_snapshot(
     now_utc: datetime | str,
     maximum_snapshot_age_seconds: int = 120,
     candidate_scope: str = COIN_INFERENCE_CANDIDATE_SCOPE_ALL,
+    snapshot_reader: ProductSnapshotReader | None = None,
 ) -> CoinCommodityInference:
     """Load once atomically and rank against that exact immutable snapshot."""
 
     try:
-        snapshot = AtomicMarketSnapshotProvider(snapshot_path).load()
-    except MarketSnapshotUnavailable:
+        snapshot = (
+            snapshot_reader.load(
+                now_utc=_utc(now_utc, name="coin_inference_now_utc")
+            ).snapshot
+            if snapshot_reader is not None
+            else AtomicMarketSnapshotProvider(snapshot_path).load()
+        )
+    except (ProductSnapshotUnavailable, MarketSnapshotUnavailable):
         settlement = str(settlement_term or "").upper()
         return _abstain(settlement, "SNAPSHOT_UNAVAILABLE")
     return infer_coin_commodity(
@@ -284,6 +295,10 @@ def infer_coin_commodity_from_published_snapshot(
         price_project_thousand_toman=price_project_thousand_toman,
         settlement_term=settlement_term,
         now_utc=now_utc,
-        maximum_snapshot_age_seconds=maximum_snapshot_age_seconds,
+        maximum_snapshot_age_seconds=(
+            snapshot_reader.maximum_age_seconds
+            if snapshot_reader is not None
+            else maximum_snapshot_age_seconds
+        ),
         candidate_scope=candidate_scope,
     )

@@ -22,6 +22,7 @@ from .coin_group_feedback import CoinGroupParserFeedback
 from .coin_group_pipeline import CoinGroupPipelineReport, process_coin_group_staging
 from .coin_group_resolution import CoinPriceAnchor
 from .coin_group_trades import MAX_REPLY_AGE_SECONDS
+from .coin_groups import CoinGroupMessageInput, parse_coin_group_offers
 from .coin_group_staging import (
     CoinGroupStagingMessage,
     delete_coin_group_staged_message,
@@ -49,8 +50,8 @@ from .public_telegram.parser import parse_public_message, should_ignore_public_m
 from .public_telegram.sources import source_for_code
 
 
-CAPTURE_ADAPTER_SCHEMA_VERSION = 5
-CAPTURE_ADAPTER_VERSION = "capture-event-adapter-v7-immutable-private-lifecycle"
+CAPTURE_ADAPTER_SCHEMA_VERSION = 6
+CAPTURE_ADAPTER_VERSION = "capture-event-adapter-v8-projection-reconciliation"
 CAPTURE_RAW_RETENTION = timedelta(days=3)
 COIN_GROUP_ACTIVE_REPLAY_WINDOW = timedelta(hours=6)
 MARKET_BACKFILL_REPLAY_WINDOW = timedelta(minutes=30)
@@ -79,6 +80,7 @@ _PRIMARY_SOURCE_CODE = "MELTED_PRIMARY_FLOW"
 _MARKET_SOURCE_CODES = _PUBLIC_SOURCE_CODES | {_PRIMARY_SOURCE_CODE}
 _GROUP_NUMBERS = {"GROUP_1": 1, "GROUP_2": 2}
 _RETRACTION_REASON = "CAPTURE_SOURCE_REVISION_NOT_CURRENT"
+_V8_RECONCILIATION_CODE = "V8_PRIVATE_ROOT_AND_COIN_PARSER_REPAIR"
 
 
 class CaptureEventContractError(RuntimeError):
@@ -101,6 +103,8 @@ class CaptureEvent:
     parser_profile: str | None = None
     entities_json: str = "[]"
     sender_identity: str | None = None
+    sender_telegram_id: str | None = None
+    sender_display_name: str | None = None
     reply_to_message_id: int | None = None
 
 
@@ -234,6 +238,12 @@ CREATE TABLE IF NOT EXISTS capture_dirty_groups (
     group_number INTEGER PRIMARY KEY CHECK(group_number IN (1,2)),
     available_at_utc TEXT NOT NULL,
     minimum_event_time_utc TEXT
+);
+
+CREATE TABLE IF NOT EXISTS capture_projection_reconciliations (
+    reconciliation_code TEXT PRIMARY KEY,
+    requested_at_utc TEXT NOT NULL,
+    completed_at_utc TEXT
 );
 
 CREATE TABLE IF NOT EXISTS capture_projection_keys (
@@ -417,7 +427,11 @@ def decode_market_channel_event(record: object) -> CaptureEvent:
 
 def decode_coin_group_event(record: object) -> CaptureEvent:
     envelope = _mapping(record, field="coin_capture_envelope")
-    if envelope.get("schema") != "coin_group_event" or str(envelope.get("schema_version")) != "2.0":
+    schema_version = str(envelope.get("schema_version"))
+    if (
+        envelope.get("schema") != "coin_group_event"
+        or schema_version not in {"2.0", "2.1"}
+    ):
         raise CaptureEventContractError("coin_capture_schema_unsupported")
     event_type = str(envelope.get("event_type") or "")
     if event_type not in _GROUP_EVENT_TYPES:
@@ -436,6 +450,8 @@ def decode_coin_group_event(record: object) -> CaptureEvent:
     available = _stamp(producer.get("available_at_utc"), field="coin_capture_available_at_utc")
     reply_to = None
     sender = None
+    sender_telegram_id = None
+    sender_display_name = None
     if not deleted:
         reply = _mapping(message.get("reply"), field="coin_capture_reply")
         status = str(reply.get("status") or "")
@@ -446,6 +462,23 @@ def decode_coin_group_event(record: object) -> CaptureEvent:
         sender_payload = _mapping(message.get("sender"), field="coin_capture_sender")
         raw_sender = str(sender_payload.get("peer_id") or "").strip()
         sender = raw_sender or None
+        raw_telegram_id = str(sender_payload.get("telegram_id") or "").strip()
+        if raw_telegram_id:
+            if not re.fullmatch(r"[1-9][0-9]{0,19}", raw_telegram_id):
+                raise CaptureEventContractError("coin_capture_sender_telegram_id_invalid")
+            sender_telegram_id = raw_telegram_id
+        raw_display_name = sender_payload.get("display_name")
+        if raw_display_name is not None:
+            if not isinstance(raw_display_name, str):
+                raise CaptureEventContractError("coin_capture_sender_name_invalid")
+            sender_display_name = " ".join(raw_display_name.split()) or None
+            if (
+                sender_display_name is not None
+                and len(sender_display_name.encode("utf-8")) > 512
+            ):
+                raise CaptureEventContractError("coin_capture_sender_name_invalid")
+        if schema_version == "2.1" and sender and sender_telegram_id is None:
+            raise CaptureEventContractError("coin_capture_sender_telegram_id_missing")
     event = CaptureEvent(
         stream="coin",
         event_id=_event_id(envelope.get("event_id")),
@@ -459,6 +492,8 @@ def decode_coin_group_event(record: object) -> CaptureEvent:
         is_forwarded=bool(message.get("is_forwarded", False)),
         is_backfill=bool(message.get("is_backfill", False)),
         sender_identity=sender,
+        sender_telegram_id=sender_telegram_id,
+        sender_display_name=sender_display_name,
         reply_to_message_id=reply_to,
     )
     _validate_time_order(event)
@@ -689,6 +724,55 @@ def initialize_capture_adapter(connection: sqlite3.Connection) -> None:
                SET schema_version=5
              WHERE singleton=1;
             """
+        )
+        connection.commit()
+        metadata = connection.execute(
+            "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
+        ).fetchone()
+    if metadata is not None and int(metadata[0]) == 5:
+        requested_at = _utc_now()
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS capture_projection_reconciliations (
+                reconciliation_code TEXT PRIMARY KEY,
+                requested_at_utc TEXT NOT NULL,
+                completed_at_utc TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO capture_projection_reconciliations(
+              reconciliation_code,requested_at_utc,completed_at_utc
+            ) VALUES(?,?,NULL)
+            """,
+            (_V8_RECONCILIATION_CODE, requested_at),
+        )
+        # Only rows with a confirmed lifecycle outcome need the private-root
+        # repair.  Reprojecting every high-volume offer would add avoidable
+        # cutover load without changing its immutable economics.
+        connection.execute(
+            """
+            INSERT INTO capture_dirty_market_messages(
+              source_id,message_id,event_time_utc,available_at_utc
+            )
+            SELECT current.source_id,current.message_id,current.event_time_utc,?
+            FROM capture_market_messages AS current
+            JOIN capture_primary_trade_outcomes AS outcome
+              ON outcome.source_id=current.source_id
+             AND outcome.message_id=current.message_id
+            WHERE current.source_id=? AND outcome.status IN ('FULL','PARTIAL')
+            ON CONFLICT(source_id,message_id) DO UPDATE SET
+              event_time_utc=excluded.event_time_utc,
+              available_at_utc=MAX(
+                excluded.available_at_utc,
+                capture_dirty_market_messages.available_at_utc
+              )
+            """,
+            (requested_at, _PRIMARY_SOURCE_CODE),
+        )
+        connection.execute(
+            "UPDATE capture_adapter_metadata SET schema_version=6 WHERE singleton=1"
         )
         connection.commit()
         metadata = connection.execute(
@@ -1006,6 +1090,8 @@ def _apply_group_message(connection: sqlite3.Connection, event: CaptureEvent) ->
             text=event.text,
             reply_to_message_id=event.reply_to_message_id,
             sender_identity=event.sender_identity,
+            sender_telegram_id=event.sender_telegram_id,
+            sender_display_name=event.sender_display_name,
             edited_at_utc=event.edited_at_utc,
         ),
         staged_at_utc=event.available_at_utc,
@@ -1071,7 +1157,8 @@ def record_capture_rejection(
 
 def _retract_fact(connection: sqlite3.Connection, event_key: bytes, available: str) -> int:
     row = connection.execute(
-        "SELECT quality_state,attributes_json,event_time_utc FROM market_observations WHERE event_key=?",
+        "SELECT quality_state,attributes_json,event_time_utc,inserted_at_utc "
+        "FROM market_observations WHERE event_key=?",
         (event_key,),
     ).fetchone()
     if row is None:
@@ -1085,16 +1172,59 @@ def _retract_fact(connection: sqlite3.Connection, event_key: bytes, available: s
     attributes["resolution_reason"] = _RETRACTION_REASON
     attributes["reconciled_by"] = CAPTURE_ADAPTER_VERSION
     safe_available = max(str(row["event_time_utc"]), available)
+    export_table = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND name='market_fact_export_ledger'"
+    ).fetchone()
+    export = (
+        connection.execute(
+            """
+            SELECT status,reason_code FROM market_fact_export_ledger
+            WHERE event_key=?
+            """,
+            (event_key,),
+        ).fetchone()
+        if export_table is not None
+        else None
+    )
+    never_exported_dependency = (
+        export is not None
+        and str(export["status"]) == "REJECTED"
+        and "market_fact_projection_offer_dependency_missing"
+        in str(export["reason_code"] or "")
+    )
+    inserted_at = (
+        str(row["inserted_at_utc"])
+        if never_exported_dependency
+        else _utc_now()
+    )
     connection.execute(
         """
         UPDATE market_observations
         SET available_at_utc=?,parse_confidence=0,quality_state='REJECTED',
-            quality_policy_version='capture-current-revision-v1',attributes_json=?
+            quality_policy_version='capture-current-revision-v1',attributes_json=?,
+            inserted_at_utc=?
         WHERE event_key=?
         """,
-        (safe_available, json.dumps(attributes, sort_keys=True, separators=(",", ":")), event_key),
+        (
+            safe_available,
+            json.dumps(attributes, sort_keys=True, separators=(",", ":")),
+            inserted_at,
+            event_key,
+        ),
     )
     return 1
+
+
+def projection_reconciliation_pending(connection: sqlite3.Connection) -> bool:
+    row = connection.execute(
+        """
+        SELECT 1 FROM capture_projection_reconciliations
+        WHERE reconciliation_code=? AND completed_at_utc IS NULL
+        """,
+        (_V8_RECONCILIATION_CODE,),
+    ).fetchone()
+    return row is not None
 
 
 def _projection_rows(connection: sqlite3.Connection, source_id: str, message_id: int) -> list[sqlite3.Row]:
@@ -1306,11 +1436,12 @@ def _project_primary_row(
         if evidence is not None:
             candidates = private_gold_observations(
                 PrivateGoldOfferInput(
-                    source_event_id=(
-                        _primary_source_event_id(int(row["message_id"]))
-                        + ":trade:"
-                        + decision.evidence_event_id
-                    ),
+                    # The lifecycle outcome must retain the immutable root
+                    # offer identity.  The evidence revision remains in the
+                    # trade attributes; using it as the source identity would
+                    # derive an unrelated root_offer_event_key and make the
+                    # archive correctly reject the orphaned outcome.
+                    source_event_id=_primary_source_event_id(int(row["message_id"])),
                     published_at_utc=decision.published_at_utc,
                     available_at_utc=decision.available_at_utc,
                     edited_at_utc=decision.event_time_utc,
@@ -1476,6 +1607,68 @@ def _bounded_group_reply_graph(
     return frozenset(included), cutoff
 
 
+def _missing_offer_reply_graph(
+    staging: sqlite3.Connection,
+    market: sqlite3.Connection,
+    *,
+    as_of_utc: str,
+) -> frozenset[tuple[int, int]]:
+    """Find only newly parseable roots and their captured reply descendants."""
+
+    rows = staging.execute(
+        """
+        SELECT group_number,message_id,event_time_utc,available_at_utc,
+               reply_to_message_id,message_text
+        FROM coin_group_staged_messages
+        WHERE available_at_utc<=? AND expires_at_utc>?
+        ORDER BY event_time_utc,group_number,message_id
+        """,
+        (as_of_utc, as_of_utc),
+    ).fetchall()
+    by_key = {
+        (int(row["group_number"]), int(row["message_id"])): row for row in rows
+    }
+    included: set[tuple[int, int]] = set()
+    for key, row in by_key.items():
+        try:
+            parsed = parse_coin_group_offers(
+                CoinGroupMessageInput(
+                    group_number=key[0],
+                    source_event_id=key[1],
+                    published_at_utc=str(row["event_time_utc"]),
+                    available_at_utc=str(row["available_at_utc"]),
+                    text=str(row["message_text"]),
+                )
+            )
+        except (TypeError, ValueError):
+            continue
+        missing = any(
+            market.execute(
+                "SELECT 1 FROM market_observations WHERE event_key=?",
+                (derive_event_key("coin-group-offer-v1", key[0], key[1], index),),
+            ).fetchone()
+            is None
+            for index in range(len(parsed))
+        )
+        if missing:
+            included.add(key)
+    if not included:
+        return frozenset()
+    changed = True
+    while changed:
+        changed = False
+        for key, row in by_key.items():
+            parent = (
+                (key[0], int(row["reply_to_message_id"]))
+                if row["reply_to_message_id"] is not None
+                else None
+            )
+            if key not in included and parent in included:
+                included.add(key)
+                changed = True
+    return frozenset(included)
+
+
 def project_capture_changes(
     staging: sqlite3.Connection,
     market: sqlite3.Connection,
@@ -1488,6 +1681,7 @@ def project_capture_changes(
 
     as_of = normalize_utc(as_of_utc, field_name="capture_projection_as_of_utc")
     initialize_market_store(market)
+    projection_reconciliation = projection_reconciliation_pending(staging)
     due_primary = staging.execute(
         """
         SELECT deadline.source_id,deadline.message_id,
@@ -1595,11 +1789,21 @@ def project_capture_changes(
         (as_of,),
     ).fetchall()
     group_report = None
-    if dirty_groups:
-        included_group_keys, group_cutoff = _bounded_group_reply_graph(
-            staging,
-            as_of_utc=as_of,
+    if dirty_groups or projection_reconciliation:
+        repair_group_keys = (
+            _missing_offer_reply_graph(staging, market, as_of_utc=as_of)
+            if projection_reconciliation
+            else frozenset()
         )
+        if dirty_groups:
+            included_group_keys, group_cutoff = _bounded_group_reply_graph(
+                staging,
+                as_of_utc=as_of,
+            )
+        else:
+            included_group_keys = frozenset()
+            group_cutoff = as_of
+        included_group_keys = included_group_keys | repair_group_keys
         dirty_horizon = min(
             (
                 str(row["minimum_event_time_utc"])
@@ -1608,19 +1812,30 @@ def project_capture_changes(
             ),
             default=group_cutoff,
         )
-        group_report = process_coin_group_staging(
-            staging,
-            market,
-            as_of_utc=as_of,
-            additional_anchors=group_additional_anchors,
-            parser_feedback=group_parser_feedback,
-            reconciliation_horizon_utc=max(group_cutoff, dirty_horizon),
-            included_message_keys=included_group_keys,
-        )
+        if included_group_keys:
+            group_report = process_coin_group_staging(
+                staging,
+                market,
+                as_of_utc=as_of,
+                additional_anchors=group_additional_anchors,
+                parser_feedback=group_parser_feedback,
+                reconciliation_horizon_utc=max(group_cutoff, dirty_horizon),
+                included_message_keys=included_group_keys,
+                reconcile_missing_current_facts=bool(dirty_groups),
+            )
         staging.executemany(
             "DELETE FROM capture_dirty_groups WHERE group_number=?",
             [(int(row["group_number"]),) for row in dirty_groups],
         )
+        if projection_reconciliation:
+            staging.execute(
+                """
+                UPDATE capture_projection_reconciliations
+                SET completed_at_utc=?
+                WHERE reconciliation_code=? AND completed_at_utc IS NULL
+                """,
+                (as_of, _V8_RECONCILIATION_CODE),
+            )
     raw_purged = purge_capture_staging(staging, as_of_utc=as_of)
     return CaptureProjectionReport(
         market_messages_reprojected=projected,

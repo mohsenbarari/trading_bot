@@ -249,6 +249,64 @@ def _source(message: StagedCoinGroupMessage) -> CoinGroupMessageInput:
     )
 
 
+def _remember_research_context(
+    staging: sqlite3.Connection,
+    *,
+    event_key: bytes,
+    root: StagedCoinGroupMessage,
+    requester_message_id: int | None = None,
+    requester_expires_at_utc: str | None = None,
+) -> None:
+    expires = max(root.expires_at_utc, requester_expires_at_utc or root.expires_at_utc)
+    staging.execute(
+        """
+        INSERT INTO coin_group_fact_research_context(
+          event_key,group_number,root_message_id,requester_message_id,
+          expires_at_utc
+        ) VALUES(?,?,?,?,?)
+        ON CONFLICT(event_key) DO UPDATE SET
+          root_message_id=excluded.root_message_id,
+          requester_message_id=excluded.requester_message_id,
+          expires_at_utc=excluded.expires_at_utc
+        """,
+        (
+            event_key,
+            root.group_number,
+            root.message_id,
+            requester_message_id,
+            expires,
+        ),
+    )
+
+
+def _actor_identity(message: StagedCoinGroupMessage) -> str | bytes | None:
+    return message.sender_telegram_id or message.sender_digest
+
+
+def _trade_requester(
+    trade: LinkedCoinGroupTrade,
+    *,
+    message_by_key: Mapping[tuple[int, int], StagedCoinGroupMessage],
+) -> StagedCoinGroupMessage | None:
+    root = message_by_key.get((trade.group_number, trade.root_offer_message_id))
+    if root is None:
+        return None
+    offerer = _actor_identity(root)
+    current_id: int | None = trade.confirmation_message_id
+    seen: set[int] = set()
+    candidates: list[StagedCoinGroupMessage] = []
+    while current_id is not None and current_id not in seen and len(seen) < 64:
+        seen.add(current_id)
+        current = message_by_key.get((trade.group_number, current_id))
+        if current is None or current.message_id == root.message_id:
+            break
+        identity = _actor_identity(current)
+        if identity is not None and (offerer is None or identity != offerer):
+            candidates.append(current)
+        current_id = current.reply_to_message_id
+    return candidates[0] if candidates else None
+
+
 def _syntax_fingerprint(
     text: str,
     *,
@@ -848,6 +906,7 @@ def process_coin_group_staging(
     parser_feedback: Mapping[bytes, CoinGroupParserFeedback] | None = None,
     reconciliation_horizon_utc: datetime | str | None = None,
     included_message_keys: frozenset[tuple[int, int]] | None = None,
+    reconcile_missing_current_facts: bool = True,
 ) -> CoinGroupPipelineReport:
     """Process current staging idempotently in one caller-owned Store transaction.
 
@@ -1000,6 +1059,11 @@ def process_coin_group_staging(
                         apply_economic_fields=False,
                     )
             active_event_keys.add(observation.event_key)
+            _remember_research_context(
+                staging_connection,
+                event_key=observation.event_key,
+                root=message,
+            )
             offer_facts += int(
                 _upsert_if_semantically_changed(market_connection, observation)
             )
@@ -1142,14 +1206,32 @@ def process_coin_group_staging(
                 pattern_calibrations_applied += 1
         reviewed_trade_observations.append(observation)
         active_event_keys.add(observation.event_key)
+        root_message = message_by_key.get(
+            (trade.group_number, trade.root_offer_message_id)
+        )
+        requester = _trade_requester(trade, message_by_key=message_by_key)
+        if root_message is not None:
+            _remember_research_context(
+                staging_connection,
+                event_key=observation.event_key,
+                root=root_message,
+                requester_message_id=(requester.message_id if requester else None),
+                requester_expires_at_utc=(
+                    requester.expires_at_utc if requester else None
+                ),
+            )
         trade_facts += int(
             _upsert_if_semantically_changed(market_connection, observation)
         )
-    retracted_facts = _reconcile_missing_current_facts(
-        market_connection,
-        active_event_keys=active_event_keys,
-        staging_horizon_utc=reconciliation_horizon,
-        available_at_utc=as_of,
+    retracted_facts = (
+        _reconcile_missing_current_facts(
+            market_connection,
+            active_event_keys=active_event_keys,
+            staging_horizon_utc=reconciliation_horizon,
+            available_at_utc=as_of,
+        )
+        if reconcile_missing_current_facts
+        else 0
     )
     return CoinGroupPipelineReport(
         staged_messages_seen=len(messages),

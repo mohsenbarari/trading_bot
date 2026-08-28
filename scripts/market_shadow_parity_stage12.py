@@ -57,19 +57,52 @@ def _secret(path: Path) -> bytes:
     return value
 
 
-def _snapshot_times(path: Path | None) -> dict[str, datetime]:
+def _snapshot_timeline(
+    path: Path | None,
+) -> tuple[dict[str, datetime], list[dict[str, Any]] | None]:
     if path is None:
-        return {}
+        return {}, None
     document = _json(path)
     if not isinstance(document, dict):
         raise ShadowParityError("snapshot_timeline_object_required")
-    return {str(key): _time(str(value)) for key, value in document.items()}
+    if "snapshots" not in document and "event_next_snapshot_at_utc" not in document:
+        return (
+            {str(key): _time(str(value)) for key, value in document.items()},
+            None,
+        )
+    if document.get("contract") != "market_snapshot_timeline/1.0":
+        raise ShadowParityError("snapshot_timeline_contract_invalid")
+    links = document.get("event_next_snapshot_at_utc")
+    snapshots = document.get("snapshots")
+    if not isinstance(links, dict) or not isinstance(snapshots, list):
+        raise ShadowParityError("snapshot_timeline_fields_invalid")
+    parsed_snapshots: list[dict[str, Any]] = []
+    for item in snapshots:
+        if not isinstance(item, dict):
+            raise ShadowParityError("snapshot_timeline_entry_invalid")
+        parsed_snapshots.append(
+            {
+                "snapshot_version": int(item.get("snapshot_version") or 0),
+                "evaluation_at_utc": _time(str(item.get("evaluation_at_utc"))),
+            }
+        )
+    return (
+        {str(key): _time(str(value)) for key, value in links.items()},
+        parsed_snapshots,
+    )
 
 
 def command_build(args: argparse.Namespace) -> dict[str, Any]:
     capture = _json(args.capture_manifest) if args.capture_manifest else None
     if capture is not None and not isinstance(capture, list):
         raise ShadowParityError("capture_manifest_array_required")
+    inventory = _json(args.capture_inventory) if args.capture_inventory else None
+    if inventory is not None and not isinstance(inventory, list):
+        raise ShadowParityError("capture_inventory_array_required")
+    prefix = _json(args.capture_prefix) if args.capture_prefix else None
+    if prefix is not None and not isinstance(prefix, dict):
+        raise ShadowParityError("capture_prefix_object_required")
+    snapshot_times, snapshot_versions = _snapshot_timeline(args.snapshot_timeline)
     lane = build_lane_evidence_from_market_store(
         market_store_path=args.market_store,
         lane=args.lane,
@@ -77,7 +110,11 @@ def command_build(args: argparse.Namespace) -> dict[str, Any]:
         window_end_utc=_time(args.window_end),
         model_artifact_hash=_hash_file(args.model_artifact),
         capture_manifest=capture,
-        snapshot_times=_snapshot_times(args.snapshot_timeline),
+        capture_prefix=prefix,
+        capture_inventory=inventory,
+        snapshot_times=snapshot_times,
+        snapshot_versions=snapshot_versions,
+        session_id=args.session_id,
     )
     document = lane.model_dump(mode="json")
     write_private_json(args.output, document)
@@ -89,6 +126,12 @@ def command_build(args: argparse.Namespace) -> dict[str, Any]:
         "feature_count": len(lane.features),
         "estimate_count": len(lane.estimates),
         "capture_manifest_complete": lane.capture_manifest_complete,
+        "capture_authority": (
+            lane.capture_prefix.capture_authority if lane.capture_prefix else "UNBOUND"
+        ),
+        "capture_inventory_count": len(lane.capture_inventory),
+        "snapshot_count": len(lane.snapshot_versions),
+        "session_id_present": lane.session_id != "UNBOUND",
         "cutover_performed": False,
     }
 
@@ -136,12 +179,19 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     build = sub.add_parser("build")
     build.add_argument("--market-store", type=Path, required=True)
-    build.add_argument("--lane", choices=("LEGACY", "PRIVATE_SHADOW"), required=True)
+    build.add_argument(
+        "--lane",
+        choices=("LEGACY", "REFERENCE_PROJECTION", "PRIVATE_SHADOW"),
+        required=True,
+    )
     build.add_argument("--window-start", required=True)
     build.add_argument("--window-end", required=True)
     build.add_argument("--model-artifact", type=Path, required=True)
     build.add_argument("--capture-manifest", type=Path)
+    build.add_argument("--capture-prefix", type=Path)
+    build.add_argument("--capture-inventory", type=Path)
     build.add_argument("--snapshot-timeline", type=Path)
+    build.add_argument("--session-id", default="UNBOUND")
     build.add_argument("--output", type=Path, required=True)
     build.add_argument("--acknowledge-no-cutover", action="store_true", required=True)
     compare = sub.add_parser("compare")

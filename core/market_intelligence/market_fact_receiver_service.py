@@ -9,12 +9,17 @@ import os
 from pathlib import Path
 import sqlite3
 import threading
+import time
 from typing import Mapping
 
 from .market_fact_receiver import (
+    DEFAULT_PAYLOAD_RETENTION_SECONDS,
     RECEIVER_SCHEMA,
+    ReceiverCompactionError,
     apply_fact_batch,
+    compact_consumed_payloads,
     connect_receiver,
+    load_adapter_watermark,
     receiver_metrics,
     record_rejection,
 )
@@ -33,6 +38,26 @@ from .private_market_transport import (
 
 class MarketFactReceiverServiceError(RuntimeError):
     """A safe receiver service failure."""
+
+
+def _bounded_integer(
+    name: str,
+    default: int,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except ValueError as exc:
+        raise MarketFactReceiverServiceError(
+            "market_fact_receiver_compaction_config_invalid"
+        ) from exc
+    if not minimum <= value <= maximum:
+        raise MarketFactReceiverServiceError(
+            "market_fact_receiver_compaction_config_invalid"
+        )
+    return value
 
 
 class _ReceiverServer(ThreadingHTTPServer):
@@ -214,6 +239,19 @@ def run_market_fact_receiver_service(
         ),
     )
     database_path = state_directory / "market-fact-receiver.sqlite3"
+    watermark_path = state_directory / "adapter-consumption-watermark.json"
+    retention_seconds = _bounded_integer(
+        "MARKET_PIPELINE_RECEIVER_PAYLOAD_RETENTION_SECONDS",
+        DEFAULT_PAYLOAD_RETENTION_SECONDS,
+        minimum=3_600,
+        maximum=604_800,
+    )
+    compaction_batch_rows = _bounded_integer(
+        "MARKET_PIPELINE_RECEIVER_COMPACTION_BATCH_ROWS",
+        2_000,
+        minimum=1,
+        maximum=10_000,
+    )
     probe = connect_receiver(database_path)
     probe.close()
     server = _ReceiverServer(
@@ -227,11 +265,51 @@ def run_market_fact_receiver_service(
     from .private_pipeline_foundation import atomic_json_write, utc_text
 
     started_at = utc_text()
+    last_compaction_check = 0.0
+    compaction_state: dict[str, object] = {
+        "status": "AWAITING_WATERMARK",
+        "retention_seconds": retention_seconds,
+        "last_delivery_payloads": 0,
+        "last_latest_payloads": 0,
+    }
 
     try:
         while not stop.is_set():
             connection = connect_receiver(database_path)
             try:
+                monotonic_now = time.monotonic()
+                if monotonic_now - last_compaction_check >= 5.0:
+                    last_compaction_check = monotonic_now
+                    try:
+                        watermark = load_adapter_watermark(watermark_path)
+                        report = compact_consumed_payloads(
+                            connection,
+                            applied_checkpoints=watermark,
+                            retention_seconds=retention_seconds,
+                            max_rows=compaction_batch_rows,
+                        )
+                        compaction_state = {
+                            "status": "READY",
+                            "retention_seconds": retention_seconds,
+                            "last_delivery_payloads": report.delivery_payloads,
+                            "last_latest_payloads": report.latest_payloads,
+                        }
+                    except ReceiverCompactionError as exc:
+                        compaction_state = {
+                            "status": "BLOCKED",
+                            "retention_seconds": retention_seconds,
+                            "reason_code": str(exc),
+                            "last_delivery_payloads": 0,
+                            "last_latest_payloads": 0,
+                        }
+                    except sqlite3.Error:
+                        compaction_state = {
+                            "status": "BLOCKED",
+                            "retention_seconds": retention_seconds,
+                            "reason_code": "receiver_compaction_storage_unavailable",
+                            "last_delivery_payloads": 0,
+                            "last_latest_payloads": 0,
+                        }
                 metrics = receiver_metrics(connection)
             finally:
                 connection.close()
@@ -248,6 +326,7 @@ def run_market_fact_receiver_service(
                     "status": "live-ready",
                     "durable_write": True,
                     "private_transport_only": True,
+                    "payload_compaction": compaction_state,
                     **metrics,
                 },
             )

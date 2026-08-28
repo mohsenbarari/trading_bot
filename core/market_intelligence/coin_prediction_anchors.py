@@ -18,6 +18,7 @@ from .market_contracts import MarketStoreContractError, normalize_utc
 
 PREDICTION_ANCHOR_MODEL_ID = "MAIN_ONLINE"
 PREDICTION_ANCHOR_BUCKET_SECONDS = 15 * 60
+PREDICTION_AUTHORITY_BASELINE_EPOCH = "LEGACY_BASELINE"
 _COMMODITY_CODES = {
     "امام": "IMAM",
     "بهار": "BAHAR",
@@ -130,17 +131,54 @@ def load_coin_prediction_anchors(
         }
         if not _REQUIRED_COLUMNS.issubset(columns):
             raise CoinPredictionAnchorError("coin_prediction_ledger_schema_invalid")
+        authority_filter = ""
+        parameters: tuple[object, ...]
+        if "authority_epoch" in columns:
+            authority_columns = {
+                str(row[1])
+                for row in connection.execute(
+                    "PRAGMA table_info(coin_estimate_prediction_authority)"
+                )
+            }
+            if not {
+                "singleton",
+                "active_epoch",
+                "active_feed_mode",
+                "updated_at_utc",
+            }.issubset(authority_columns):
+                raise CoinPredictionAnchorError(
+                    "coin_prediction_ledger_authority_schema_invalid"
+                )
+            authority = connection.execute(
+                "SELECT active_epoch FROM coin_estimate_prediction_authority "
+                "WHERE singleton=1"
+            ).fetchone()
+            if authority is None or not str(authority[0] or "").strip():
+                raise CoinPredictionAnchorError(
+                    "coin_prediction_ledger_authority_missing"
+                )
+            authority_filter = " AND authority_epoch=?"
+            parameters = (
+                PREDICTION_ANCHOR_MODEL_ID,
+                lower_utc,
+                as_of,
+                as_of,
+                str(authority[0]),
+            )
+        else:
+            parameters = (PREDICTION_ANCHOR_MODEL_ID, lower_utc, as_of, as_of)
         rows = connection.execute(
-            """
+            f"""
             SELECT id,prediction_time_utc,created_at_utc,commodity,settlement,
                    estimated_price_toman
             FROM coin_estimate_predictions
             WHERE model_id=?
               AND prediction_time_utc>=? AND prediction_time_utc<?
               AND created_at_utc<=?
+              {authority_filter}
             ORDER BY prediction_time_utc,id
             """,
-            (PREDICTION_ANCHOR_MODEL_ID, lower_utc, as_of, as_of),
+            parameters,
         ).fetchall()
     except CoinPredictionAnchorError:
         raise

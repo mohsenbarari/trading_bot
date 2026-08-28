@@ -9,14 +9,27 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from core.market_intelligence import estimator_snapshot_receiver_service
+from core.market_intelligence import (
+    estimator_snapshot_receiver,
+    estimator_snapshot_receiver_service,
+    estimator_snapshot_runtime,
+)
 from core.market_intelligence.estimator_snapshot_receiver import (
+    EstimatorSnapshotReceiverError,
+    activate_legacy_prediction_authority,
+    activate_private_prediction_authority,
     apply_estimator_snapshot,
+    compact_snapshot_receiver,
     connect_snapshot_receiver,
+    read_published_web_snapshot_view,
     read_web_snapshot_view,
+    snapshot_receiver_metrics,
+    update_prediction_ledger,
 )
 from core.market_intelligence.estimator_snapshot_runtime import (
+    SnapshotPublishResult,
     publish_estimator_snapshot,
+    run_coin_estimator_service,
     send_latest_snapshot,
 )
 from core.market_intelligence.market_fact_adapter import (
@@ -25,6 +38,10 @@ from core.market_intelligence.market_fact_adapter import (
 )
 from core.market_intelligence.market_fact_receiver import apply_fact_batch, connect_receiver
 from core.market_intelligence.market_store import connect_market_store
+from core.market_intelligence.private_pipeline_contracts import (
+    EstimatorSnapshotV2,
+    estimator_snapshot_id,
+)
 from tests.test_market_pipeline_stage9_adapter import _batch, _fact
 
 
@@ -151,26 +168,62 @@ class Stage10SnapshotTests(unittest.TestCase):
         self.assertEqual((report.applied, report.rejected), (4, 0))
         self.market.commit()
 
-    def _publish(self, at: str = "2026-08-26T05:00:10Z") -> dict[str, object]:
+    def _publish(
+        self,
+        at: str = "2026-08-26T05:00:10Z",
+        *,
+        feed_mode: str = "PRIVATE_SHADOW",
+    ) -> dict[str, object]:
         result = publish_estimator_snapshot(
             market_store_path=self.market_path,
             state_path=self.estimator_state,
             output_path=self.snapshot_path,
-            feed_mode="PRIVATE_SHADOW",
+            feed_mode=feed_mode,
             as_of_utc=datetime.fromisoformat(at.replace("Z", "+00:00")),
         )
         document = json.loads(self.snapshot_path.read_text(encoding="utf-8"))
         self.assertEqual(result.snapshot_id, document["snapshot_id"])
         return document
 
-    def _apply_web(self, document: dict[str, object]):
+    def _apply_web(
+        self,
+        document: dict[str, object],
+        *,
+        allow_private_primary: bool = False,
+        now_utc: datetime | None = None,
+    ):
+        if now_utc is None:
+            now_utc = datetime(2026, 8, 26, 5, 0, 20, tzinfo=timezone.utc)
         return apply_estimator_snapshot(
             self.web_receiver,
             document,
             snapshot_root=self.web_root,
             publication_events_path=self.events_path,
             prediction_ledger_path=self.prediction_ledger,
+            allow_private_primary=allow_private_primary,
+            now_utc=now_utc,
         )
+
+    def test_product_market_regime_is_translated_to_v2_wire_vocabulary(self):
+        translate = estimator_snapshot_runtime._estimator_market_regime
+        self.assertEqual(
+            {
+                value: translate(value)
+                for value in ("NORMAL", "UP", "DOWN", "VOLATILE", "UNKNOWN")
+            },
+            {
+                "NORMAL": "RANGE",
+                "UP": "UP",
+                "DOWN": "DOWN",
+                "VOLATILE": "SHOCK",
+                "UNKNOWN": "UNKNOWN",
+            },
+        )
+        with self.assertRaisesRegex(
+            estimator_snapshot_runtime.EstimatorSnapshotRuntimeError,
+            "estimator_snapshot_market_regime_invalid",
+        ):
+            translate("UNSUPPORTED")
 
     def test_hash_timing_inputs_and_web_view_are_one_authoritative_snapshot(self):
         document = self._publish()
@@ -198,6 +251,21 @@ class Stage10SnapshotTests(unittest.TestCase):
             (self.web_root / "cache-private_shadow.json").read_text(encoding="utf-8")
         )
         self.assertEqual(cache["snapshot_hash"], document["snapshot_id"])
+        self.assertFalse(self.prediction_ledger.exists())
+
+        primary = self._publish(
+            "2026-08-26T05:00:15Z", feed_mode="PRIVATE_PRIMARY"
+        )
+        denied, response = self._apply_web(primary)
+        self.assertEqual(
+            (denied, response["reason_code"]),
+            (403, "PRIVATE_PRIMARY_NOT_AUTHORIZED"),
+        )
+        self.assertFalse((self.web_root / "latest-private-primary.json").exists())
+        self.assertEqual(
+            self._apply_web(primary, allow_private_primary=True)[0],
+            200,
+        )
         ledger = sqlite3.connect(self.prediction_ledger)
         try:
             rows = ledger.execute(
@@ -209,6 +277,309 @@ class Stage10SnapshotTests(unittest.TestCase):
         self.assertTrue(rows)
         self.assertTrue(all(row[0] == "MAIN_ONLINE" for row in rows))
         self.assertTrue(all(int(row[3]) % 1000 == 0 for row in rows))
+
+    def test_receiver_preserves_subsecond_causality_for_primary_ledger(self):
+        primary = self._publish(
+            "2026-08-26T05:00:15.900000Z",
+            feed_mode="PRIVATE_PRIMARY",
+        )
+        self.prediction_ledger.parent.mkdir(parents=True)
+        legacy = sqlite3.connect(self.prediction_ledger)
+        try:
+            legacy.execute(
+                "CREATE TABLE coin_estimate_predictions("
+                "id INTEGER PRIMARY KEY,prediction_time_utc TEXT NOT NULL,"
+                "created_at_utc TEXT NOT NULL,model_id TEXT NOT NULL,"
+                "commodity TEXT NOT NULL,settlement TEXT NOT NULL,"
+                "estimated_price_toman INTEGER NOT NULL,"
+                "authority_epoch TEXT NOT NULL)"
+            )
+            legacy.execute(
+                "CREATE TABLE coin_estimate_prediction_authority("
+                "singleton INTEGER PRIMARY KEY,active_epoch TEXT NOT NULL,"
+                "active_feed_mode TEXT NOT NULL,updated_at_utc TEXT NOT NULL)"
+            )
+            legacy.execute(
+                "INSERT INTO coin_estimate_prediction_authority "
+                "VALUES(1,'LEGACY_BASELINE','LEGACY_BASELINE',?)",
+                ("2026-08-26T04:59:01Z",),
+            )
+            # This id would collide with the abandoned V2 formula
+            # version*1000+index, but not with the stable V1 namespace.
+            legacy.execute(
+                "INSERT INTO coin_estimate_predictions VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    1000,
+                    "2026-08-26T04:59:00Z",
+                    "2026-08-26T04:59:01Z",
+                    "MAIN_ONLINE",
+                    "امام",
+                    "CASH",
+                    1,
+                    "LEGACY_BASELINE",
+                ),
+            )
+            legacy.commit()
+        finally:
+            legacy.close()
+        status, _ = self._apply_web(
+            primary,
+            allow_private_primary=True,
+            now_utc=datetime(
+                2026, 8, 26, 5, 0, 15, 950000, tzinfo=timezone.utc
+            ),
+        )
+        self.assertEqual(status, 200)
+        ledger = sqlite3.connect(self.prediction_ledger)
+        try:
+            prediction_time, created_at = ledger.execute(
+                "SELECT prediction_time_utc,created_at_utc "
+                "FROM coin_estimate_predictions WHERE id=2001"
+            ).fetchone()
+            inserted = ledger.execute(
+                "SELECT COUNT(*) FROM coin_estimate_predictions WHERE id>=2001"
+            ).fetchone()[0]
+            active = ledger.execute(
+                "SELECT active_feed_mode FROM coin_estimate_prediction_authority"
+            ).fetchone()[0]
+        finally:
+            ledger.close()
+        self.assertEqual(
+            inserted,
+            sum(rate["status"] == "ESTIMATED" for rate in primary["rates"]),
+        )
+        self.assertEqual(active, "LEGACY_BASELINE")
+        activate_private_prediction_authority(
+            self.prediction_ledger,
+            EstimatorSnapshotV2.model_validate(primary),
+            activated_at_utc="2026-08-26T05:00:16Z",
+        )
+        self.assertGreaterEqual(
+            datetime.fromisoformat(created_at.replace("Z", "+00:00")),
+            datetime.fromisoformat(prediction_time.replace("Z", "+00:00")),
+        )
+
+        shadow = self._publish(
+            "2026-08-26T05:00:16Z",
+            feed_mode="PRIVATE_SHADOW",
+        )
+        self.assertEqual(self._apply_web(shadow)[0], 200)
+        # Receiving a delayed Shadow artifact must not change Product/parser
+        # authority.  Rollback is an explicit controller operation.
+        ledger = sqlite3.connect(self.prediction_ledger)
+        try:
+            active = ledger.execute(
+                "SELECT active_epoch,active_feed_mode "
+                "FROM coin_estimate_prediction_authority"
+            ).fetchone()
+        finally:
+            ledger.close()
+        self.assertEqual(active[1], "PRIVATE_PRIMARY")
+        activate_legacy_prediction_authority(self.prediction_ledger)
+        ledger = sqlite3.connect(self.prediction_ledger)
+        try:
+            active = ledger.execute(
+                "SELECT active_epoch,active_feed_mode "
+                "FROM coin_estimate_prediction_authority"
+            ).fetchone()
+        finally:
+            ledger.close()
+        self.assertEqual(active, ("LEGACY_BASELINE", "LEGACY_BASELINE"))
+
+    def test_failed_primary_view_publish_never_switches_prediction_authority(self):
+        primary = self._publish(
+            "2026-08-26T05:00:15Z",
+            feed_mode="PRIVATE_PRIMARY",
+        )
+        with patch(
+            "core.market_intelligence.private_pipeline_foundation.atomic_json_write",
+            side_effect=OSError("simulated_primary_view_failure"),
+        ):
+            with self.assertRaisesRegex(
+                OSError, "simulated_primary_view_failure"
+            ):
+                self._apply_web(primary, allow_private_primary=True)
+
+        ledger = sqlite3.connect(self.prediction_ledger)
+        try:
+            active = ledger.execute(
+                "SELECT active_epoch,active_feed_mode "
+                "FROM coin_estimate_prediction_authority"
+            ).fetchone()
+        finally:
+            ledger.close()
+        self.assertEqual(active, ("LEGACY_BASELINE", "LEGACY_BASELINE"))
+        self.assertFalse(
+            (self.web_root / "latest-private-primary.json").exists()
+        )
+
+    def test_prediction_ledger_id_collision_fails_without_silent_drop(self):
+        primary = EstimatorSnapshotV2.model_validate(
+            self._publish(feed_mode="PRIVATE_PRIMARY")
+        )
+        created_at = "2026-08-26T05:00:11Z"
+        inserted = update_prediction_ledger(
+            self.prediction_ledger,
+            primary,
+            created_at_utc=created_at,
+        )
+        self.assertGreater(inserted, 0)
+        ledger = sqlite3.connect(self.prediction_ledger)
+        try:
+            first_id = ledger.execute(
+                "SELECT MIN(id) FROM coin_estimate_predictions"
+            ).fetchone()[0]
+            ledger.execute(
+                "UPDATE coin_estimate_predictions SET commodity='CORRUPTED' WHERE id=?",
+                (first_id,),
+            )
+            ledger.commit()
+        finally:
+            ledger.close()
+
+        with self.assertRaisesRegex(
+            EstimatorSnapshotReceiverError, "prediction_ledger_id_collision"
+        ):
+            update_prediction_ledger(
+                self.prediction_ledger,
+                primary,
+                created_at_utc=created_at,
+            )
+        with self.assertRaisesRegex(
+            EstimatorSnapshotReceiverError,
+            "prediction_authority_primary_epoch_incomplete",
+        ):
+            activate_private_prediction_authority(
+                self.prediction_ledger,
+                primary,
+            )
+
+    def test_receiver_rejects_future_and_incompatible_model_before_effects(self):
+        future = self._publish()
+        status, response = self._apply_web(
+            future,
+            now_utc=datetime(
+                2026, 8, 26, 5, 0, 9, 999999, tzinfo=timezone.utc
+            ),
+        )
+        self.assertEqual((status, response["reason_code"]), (422, "SNAPSHOT_TIME_FUTURE"))
+        self.assertFalse((self.web_root / "latest-private-shadow.json").exists())
+
+        stale = self._publish("2026-08-26T05:00:11Z")
+        status, response = self._apply_web(
+            stale,
+            now_utc=datetime(2026, 8, 26, 5, 1, 12, tzinfo=timezone.utc),
+        )
+        self.assertEqual(
+            (status, response["reason_code"]),
+            (422, "SNAPSHOT_TIME_STALE"),
+        )
+
+        incompatible = dict(future)
+        incompatible["model_version"] = "unsupported-model"
+        incompatible["snapshot_id"] = estimator_snapshot_id(incompatible)
+        status, response = self._apply_web(incompatible)
+        self.assertEqual(
+            (status, response["reason_code"]),
+            (422, "MODEL_VERSION_UNSUPPORTED"),
+        )
+        self.assertFalse((self.web_root / "latest-private-shadow.json").exists())
+
+    def test_primary_rejects_ambiguous_nonempty_pre_authority_ledger(self):
+        primary = self._publish(feed_mode="PRIVATE_PRIMARY")
+        old_path = self.root / "calibration" / "old-ledger.sqlite3"
+        old_path.parent.mkdir(parents=True, exist_ok=True)
+        ledger = sqlite3.connect(old_path)
+        try:
+            ledger.execute(
+                "CREATE TABLE coin_estimate_predictions("
+                "id INTEGER PRIMARY KEY,prediction_time_utc TEXT NOT NULL,"
+                "created_at_utc TEXT NOT NULL,model_id TEXT NOT NULL,"
+                "commodity TEXT NOT NULL,settlement TEXT NOT NULL,"
+                "estimated_price_toman INTEGER NOT NULL)"
+            )
+            ledger.execute(
+                "INSERT INTO coin_estimate_predictions VALUES(?,?,?,?,?,?,?)",
+                (
+                    1,
+                    "2026-08-26T04:59:00Z",
+                    "2026-08-26T04:59:01Z",
+                    "MAIN_ONLINE",
+                    "امام",
+                    "CASH",
+                    187_000_000,
+                ),
+            )
+            ledger.commit()
+        finally:
+            ledger.close()
+        with self.assertRaisesRegex(
+            EstimatorSnapshotReceiverError,
+            "prediction_ledger_authority_migration_required",
+        ):
+            apply_estimator_snapshot(
+                self.web_receiver,
+                primary,
+                snapshot_root=self.web_root,
+                publication_events_path=self.events_path,
+                prediction_ledger_path=old_path,
+                allow_private_primary=True,
+                now_utc=datetime(2026, 8, 26, 5, 0, 20, tzinfo=timezone.utc),
+            )
+        self.assertFalse((self.web_root / "latest-private-primary.json").exists())
+
+    def test_shadow_snapshot_cannot_write_parser_prediction_anchor_ledger(self):
+        document = self._publish()
+        self.assertEqual(self._apply_web(document)[0], 200)
+        self.assertFalse(self.prediction_ledger.exists())
+
+        snapshot = EstimatorSnapshotV2.model_validate(document)
+        with self.assertRaisesRegex(
+            EstimatorSnapshotReceiverError,
+            "prediction_ledger_non_primary_snapshot_forbidden",
+        ):
+            # Call the lower-level writer as a regression guard: even a future
+            # caller may not accidentally bypass apply_estimator_snapshot.
+            update_prediction_ledger(
+                self.prediction_ledger,
+                snapshot,
+                created_at_utc="2026-08-26T05:00:11Z",
+            )
+
+    def test_receiver_rejects_v1_mixed_release_without_replacing_v2_view(self):
+        document = self._publish()
+        status, _ = self._apply_web(document)
+        self.assertEqual(status, 200)
+        path = self.web_root / "latest-private-shadow.json"
+        before = path.read_bytes()
+        legacy = {
+            "contract": "estimator_snapshot/1.0",
+            "snapshot_id": "d" * 64,
+            "snapshot_version": int(document["snapshot_version"]) + 1,
+            "generated_at_utc": document["generated_at_utc"],
+            "input_snapshot_hash": "e" * 64,
+            "model_version": "legacy-sender",
+            "feed_mode": "PRIVATE_SHADOW",
+            "status": "OK",
+            "rates": [
+                {
+                    "instrument": "COIN_IMAM",
+                    "settlement": "CASH",
+                    "value": "187450",
+                    "unit": "PROJECT_THOUSAND_TOMAN",
+                    "lower_bound": "186900",
+                    "upper_bound": "188000",
+                    "confidence": 0.91,
+                    "method": "WEIGHTED_BOOK",
+                }
+            ],
+            "health": [],
+            "inputs": [],
+            "reason_codes": [],
+        }
+        rejected, response = self._apply_web(legacy)
+        self.assertEqual((rejected, response["reason_code"]), (422, "CONTRACT_INVALID"))
+        self.assertEqual(path.read_bytes(), before)
 
     def test_live_publish_never_precedes_a_consumed_transfer(self):
         output = self.root / "bot" / "live-timestamp.json"
@@ -255,6 +626,215 @@ class Stage10SnapshotTests(unittest.TestCase):
         self.assertEqual(view["snapshot_hash"], second["snapshot_id"])
         self.assertEqual(view["transport_state"], "STALE")
 
+    def test_failed_view_publish_keeps_version_fence_and_recovers(self):
+        first = self._publish()
+        self.assertEqual(self._apply_web(first)[0], 200)
+        second = self._publish("2026-08-26T05:00:15Z")
+        with patch(
+            "core.market_intelligence.private_pipeline_foundation.atomic_json_write",
+            side_effect=OSError("simulated_view_failure"),
+        ):
+            with self.assertRaisesRegex(OSError, "simulated_view_failure"):
+                self._apply_web(second)
+
+        pending = self.web_receiver.execute(
+            "SELECT published_at_utc FROM estimator_snapshot_receipts "
+            "WHERE feed_mode='PRIVATE_SHADOW' AND snapshot_version=2"
+        ).fetchone()
+        self.assertIsNotNone(pending)
+        self.assertIsNone(pending[0])
+        self.assertEqual(
+            self.web_receiver.execute(
+                "SELECT COUNT(*) FROM estimator_snapshot_publication_outbox "
+                "WHERE delivered_at_utc IS NULL"
+            ).fetchone()[0],
+            1,
+        )
+        metrics = snapshot_receiver_metrics(
+            self.web_receiver,
+            now_utc=datetime(2026, 8, 26, 5, 0, 20, tzinfo=timezone.utc),
+            expected_lane="PRIVATE_SHADOW",
+            snapshot_root=self.web_root,
+        )
+        self.assertEqual(metrics["snapshot_readiness"], "PENDING")
+        self.assertFalse(metrics["snapshot_ready"])
+        with self.assertRaisesRegex(
+            EstimatorSnapshotReceiverError, "web_snapshot_publication_pending"
+        ):
+            read_published_web_snapshot_view(
+                self.web_receiver,
+                self.web_root / "latest-private-shadow.json",
+                feed_mode="PRIVATE_SHADOW",
+                now_utc=datetime(2026, 8, 26, 5, 0, 20, tzinfo=timezone.utc),
+            )
+        status, response = self._apply_web(first)
+        self.assertEqual(
+            (status, response["reason_code"]),
+            (409, "SNAPSHOT_VERSION_REGRESSION"),
+        )
+        status, response = self._apply_web(second)
+        self.assertEqual((status, response["duplicate"]), (200, True))
+        view = read_web_snapshot_view(
+            self.web_root / "latest-private-shadow.json",
+            now_utc=datetime(2026, 8, 26, 5, 0, 20, tzinfo=timezone.utc),
+        )
+        self.assertEqual(view["snapshot_version"], 2)
+        published_view = read_published_web_snapshot_view(
+            self.web_receiver,
+            self.web_root / "latest-private-shadow.json",
+            feed_mode="PRIVATE_SHADOW",
+            now_utc=datetime(2026, 8, 26, 5, 0, 20, tzinfo=timezone.utc),
+        )
+        self.assertEqual(published_view["snapshot_version"], 2)
+        self.assertEqual(
+            self.web_receiver.execute(
+                "SELECT COUNT(*) FROM estimator_snapshot_publication_outbox "
+                "WHERE delivered_at_utc IS NULL"
+            ).fetchone()[0],
+            0,
+        )
+
+    def test_event_append_completes_a_short_os_write(self):
+        event_path = self.root / "short-write" / "events.jsonl"
+        real_write = estimator_snapshot_receiver.os.write
+        calls = 0
+
+        def short_once(descriptor, payload):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return real_write(descriptor, payload[:7])
+            return real_write(descriptor, payload)
+
+        with patch.object(
+            estimator_snapshot_receiver.os,
+            "write",
+            side_effect=short_once,
+        ):
+            estimator_snapshot_receiver._fsync_append(
+                event_path,
+                {"event_id": "a" * 64, "status": "published"},
+            )
+
+        self.assertGreater(calls, 1)
+        self.assertEqual(
+            json.loads(event_path.read_text(encoding="utf-8"))["event_id"],
+            "a" * 64,
+        )
+
+    def test_snapshot_receiver_retention_is_bounded_and_keeps_latest_fence(self):
+        first = self._publish()
+        self.assertEqual(self._apply_web(first)[0], 200)
+        second = self._publish("2026-08-26T05:00:15Z")
+        self.assertEqual(self._apply_web(second)[0], 200)
+        self.web_receiver.execute(
+            "UPDATE estimator_snapshot_receipts SET published_at_utc=? "
+            "WHERE snapshot_version=1",
+            ("2026-08-10T05:00:00Z",),
+        )
+        self.web_receiver.execute(
+            "UPDATE estimator_snapshot_publication_outbox SET delivered_at_utc=? "
+            "WHERE snapshot_version=1",
+            ("2026-08-10T05:00:00Z",),
+        )
+        self.web_receiver.execute(
+            "UPDATE estimator_snapshot_receipts SET published_at_utc=? "
+            "WHERE snapshot_version=2",
+            ("2026-08-26T05:00:16Z",),
+        )
+        current_view_path = self.web_root / "latest-private-shadow.json"
+        current_view = json.loads(current_view_path.read_text(encoding="utf-8"))
+        current_view["published_at_utc"] = "2026-08-26T05:00:16Z"
+        current_view_path.write_text(
+            json.dumps(current_view, sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        self.web_receiver.execute(
+            "INSERT INTO estimator_snapshot_rejections"
+            "(reason_code,body_hash,rejected_at_utc) VALUES(?,?,?)",
+            ("OLD", "b" * 64, "2026-08-10T05:00:00Z"),
+        )
+
+        result = compact_snapshot_receiver(
+            self.web_receiver,
+            now_utc=datetime(2026, 8, 27, 4, 0, tzinfo=timezone.utc),
+        )
+        metrics = snapshot_receiver_metrics(
+            self.web_receiver,
+            now_utc=datetime(2026, 8, 26, 5, 0, 25, tzinfo=timezone.utc),
+            expected_lane="PRIVATE_SHADOW",
+            snapshot_root=self.web_root,
+        )
+
+        self.assertEqual(result["receipts_deleted"], 1)
+        self.assertEqual(result["rejections_deleted"], 1)
+        self.assertEqual(metrics["retained_receipt_count"], 1)
+        self.assertEqual(metrics["retained_full_payload_count"], 1)
+        self.assertEqual(metrics["lanes"]["PRIVATE_SHADOW"]["snapshot_version"], 2)
+        self.assertTrue(metrics["snapshot_ready"])
+
+        later = compact_snapshot_receiver(
+            self.web_receiver,
+            now_utc=datetime(2026, 8, 27, 6, 0, tzinfo=timezone.utc),
+        )
+        bounded = snapshot_receiver_metrics(self.web_receiver)
+        self.assertEqual(later["payloads_redacted"], 1)
+        self.assertEqual(bounded["retained_receipt_count"], 1)
+        self.assertEqual(bounded["retained_full_payload_count"], 0)
+
+    def test_receiver_readiness_uses_snapshot_generation_not_publish_time(self):
+        document = self._publish()
+        self.assertEqual(self._apply_web(document)[0], 200)
+
+        metrics = snapshot_receiver_metrics(
+            self.web_receiver,
+            now_utc=datetime(2026, 8, 26, 5, 1, 0, tzinfo=timezone.utc),
+            expected_lane="PRIVATE_SHADOW",
+            stale_after_seconds=30,
+            snapshot_root=self.web_root,
+        )
+
+        self.assertEqual(metrics["snapshot_readiness"], "STALE")
+        self.assertFalse(metrics["snapshot_ready"])
+
+    def test_view_written_before_event_failure_is_not_product_visible(self):
+        document = self._publish()
+        with patch.object(
+            estimator_snapshot_receiver,
+            "_fsync_append",
+            side_effect=OSError("simulated_event_failure"),
+        ):
+            with self.assertRaisesRegex(OSError, "simulated_event_failure"):
+                self._apply_web(document)
+
+        self.assertTrue((self.web_root / "latest-private-shadow.json").is_file())
+        metrics = snapshot_receiver_metrics(
+            self.web_receiver,
+            now_utc=datetime(2026, 8, 26, 5, 0, 20, tzinfo=timezone.utc),
+            expected_lane="PRIVATE_SHADOW",
+            snapshot_root=self.web_root,
+        )
+        self.assertEqual(metrics["snapshot_readiness"], "PENDING")
+        with self.assertRaisesRegex(
+            EstimatorSnapshotReceiverError, "web_snapshot_publication_pending"
+        ):
+            read_published_web_snapshot_view(
+                self.web_receiver,
+                self.web_root / "latest-private-shadow.json",
+                feed_mode="PRIVATE_SHADOW",
+                now_utc=datetime(2026, 8, 26, 5, 0, 20, tzinfo=timezone.utc),
+            )
+
+        status, response = self._apply_web(document)
+        self.assertEqual((status, response["duplicate"]), (200, True))
+        recovered = read_published_web_snapshot_view(
+            self.web_receiver,
+            self.web_root / "latest-private-shadow.json",
+            feed_mode="PRIVATE_SHADOW",
+            now_utc=datetime(2026, 8, 26, 5, 0, 20, tzinfo=timezone.utc),
+        )
+        self.assertEqual(recovered["snapshot_hash"], document["snapshot_id"])
+
     def test_lost_ack_replay_and_pending_atomic_publish_recover(self):
         document = self._publish()
         failed = False
@@ -271,14 +851,78 @@ class Stage10SnapshotTests(unittest.TestCase):
             send_latest_snapshot(
                 snapshot_path=self.snapshot_path,
                 state_path=self.sender_state,
+                expected_feed_mode="PRIVATE_SHADOW",
                 send=lost_ack,
             )
         sent = send_latest_snapshot(
             snapshot_path=self.snapshot_path,
             state_path=self.sender_state,
+            expected_feed_mode="PRIVATE_SHADOW",
             send=lost_ack,
         )
         self.assertEqual((sent.status, sent.snapshot_id), ("ACKNOWLEDGED", document["snapshot_id"]))
+
+    def test_sender_rejects_artifact_from_another_authority_lane(self):
+        self._publish(feed_mode="PRIVATE_PRIMARY")
+        calls = []
+        with self.assertRaisesRegex(
+            estimator_snapshot_runtime.EstimatorSnapshotRuntimeError,
+            "snapshot_sender_artifact_feed_mode_mismatch",
+        ):
+            send_latest_snapshot(
+                snapshot_path=self.snapshot_path,
+                state_path=self.sender_state,
+                expected_feed_mode="PRIVATE_SHADOW",
+                send=lambda document: calls.append(document),
+            )
+        self.assertEqual(calls, [])
+
+    def test_sender_allows_only_monotonic_audited_lane_transition(self):
+        shadow = self._publish(feed_mode="PRIVATE_SHADOW")
+
+        def acknowledge(document):
+            return 200, {
+                "status": "ACK",
+                "snapshot_id": document["snapshot_id"],
+                "snapshot_hash": document["snapshot_id"],
+                "snapshot_version": document["snapshot_version"],
+            }
+
+        send_latest_snapshot(
+            snapshot_path=self.snapshot_path,
+            state_path=self.sender_state,
+            expected_feed_mode="PRIVATE_SHADOW",
+            send=acknowledge,
+        )
+        primary = self._publish(
+            "2026-08-26T05:00:15Z",
+            feed_mode="PRIVATE_PRIMARY",
+        )
+        self.assertGreater(primary["snapshot_version"], shadow["snapshot_version"])
+        result = send_latest_snapshot(
+            snapshot_path=self.snapshot_path,
+            state_path=self.sender_state,
+            expected_feed_mode="PRIVATE_PRIMARY",
+            send=acknowledge,
+        )
+        self.assertEqual(result.status, "ACKNOWLEDGED")
+        state = sqlite3.connect(self.sender_state)
+        try:
+            transition = state.execute(
+                "SELECT from_feed_mode,to_feed_mode,snapshot_version,snapshot_id "
+                "FROM estimator_snapshot_sender_transitions"
+            ).fetchone()
+        finally:
+            state.close()
+        self.assertEqual(
+            transition,
+            (
+                "PRIVATE_SHADOW",
+                "PRIVATE_PRIMARY",
+                primary["snapshot_version"],
+                primary["snapshot_id"],
+            ),
+        )
 
         recovered_output = self.root / "bot" / "recovered.json"
         recovered_state = self.root / "recovered-state.sqlite3"
@@ -304,6 +948,61 @@ class Stage10SnapshotTests(unittest.TestCase):
         self.assertTrue(recovered.recovered_pending)
         recovered_document = json.loads(recovered_output.read_text(encoding="utf-8"))
         self.assertEqual(int(recovered_document["snapshot_version"]), 1)
+
+    def test_pending_v1_is_quarantined_without_reusing_its_version(self):
+        state_path = self.root / "legacy-pending-state.sqlite3"
+        state = sqlite3.connect(state_path)
+        state.executescript(
+            """
+            CREATE TABLE estimator_snapshot_publications (
+              snapshot_version INTEGER PRIMARY KEY,
+              snapshot_id TEXT NOT NULL UNIQUE,
+              feed_mode TEXT NOT NULL,
+              input_snapshot_hash TEXT NOT NULL,
+              payload_json TEXT NOT NULL,
+              created_at_utc TEXT NOT NULL,
+              published_at_utc TEXT
+            );
+            """
+        )
+        state.execute(
+            "INSERT INTO estimator_snapshot_publications VALUES(?,?,?,?,?,?,NULL)",
+            (
+                41,
+                "a" * 64,
+                "PRIVATE_SHADOW",
+                "b" * 64,
+                json.dumps({"contract": "estimator_snapshot/1.0"}),
+                "2026-08-26T04:59:59Z",
+            ),
+        )
+        state.commit()
+        state.close()
+
+        output = self.root / "bot" / "after-v1-upgrade.json"
+        result = publish_estimator_snapshot(
+            market_store_path=self.market_path,
+            state_path=state_path,
+            output_path=output,
+            feed_mode="PRIVATE_SHADOW",
+            as_of_utc=datetime(2026, 8, 26, 5, 0, 10, tzinfo=timezone.utc),
+        )
+
+        self.assertFalse(result.recovered_pending)
+        self.assertEqual(result.snapshot_version, 42)
+        upgraded = sqlite3.connect(state_path)
+        try:
+            legacy = upgraded.execute(
+                "SELECT contract,quarantine_reason,quarantined_at_utc "
+                "FROM estimator_snapshot_publications WHERE snapshot_version=41"
+            ).fetchone()
+        finally:
+            upgraded.close()
+        self.assertEqual(
+            legacy[:2],
+            ("estimator_snapshot/1.0", "PENDING_CONTRACT_UNSUPPORTED"),
+        )
+        self.assertTrue(legacy[2])
 
     def test_live_receiver_startup_writes_health_before_serving(self):
         stop = threading.Event()
@@ -349,7 +1048,78 @@ class Stage10SnapshotTests(unittest.TestCase):
             )
         self.assertEqual(result, 0)
         health = json.loads((self.root / "live-state" / "health.json").read_text())
-        self.assertEqual(health["status"], "live-ready")
+        self.assertEqual(health["status"], "live-starting")
+        self.assertEqual(health["snapshot_readiness"], "MISSING")
+
+    def test_estimator_service_keeps_start_to_start_inference_cadence(self):
+        class OneCycleStop:
+            def __init__(self):
+                self.waits: list[float] = []
+
+            def is_set(self):
+                return bool(self.waits)
+
+            def wait(self, seconds):
+                self.waits.append(float(seconds))
+                return True
+
+        stop = OneCycleStop()
+        published = SnapshotPublishResult(
+            snapshot_id="a" * 64,
+            snapshot_version=1,
+            input_snapshot_hash="b" * 64,
+            status="OK",
+            recovered_pending=False,
+        )
+        with patch.dict(
+            "os.environ",
+            {
+                "MARKET_PIPELINE_FEED_MODE": "PRIVATE_SHADOW",
+                "MARKET_PIPELINE_ESTIMATOR_INTERVAL_SECONDS": "4",
+            },
+            clear=False,
+        ), patch.object(
+            estimator_snapshot_runtime,
+            "publish_estimator_snapshot",
+            return_value=published,
+        ), patch.object(
+            estimator_snapshot_runtime.time,
+            "monotonic",
+            side_effect=(100.0, 101.8),
+        ), patch(
+            "core.market_intelligence.private_pipeline_foundation.atomic_json_write"
+        ):
+            result = run_coin_estimator_service(
+                role="coin-estimator",
+                mode="live",
+                release_sha="c" * 40,
+                state_directory=self.root / "cadence-state",
+                stop=stop,
+            )
+        self.assertEqual(result, 0)
+        self.assertEqual(len(stop.waits), 1)
+        self.assertAlmostEqual(stop.waits[0], 2.2, places=6)
+
+    def test_estimator_service_rejects_invalid_inference_interval(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "MARKET_PIPELINE_FEED_MODE": "PRIVATE_SHADOW",
+                "MARKET_PIPELINE_ESTIMATOR_INTERVAL_SECONDS": "0",
+            },
+            clear=False,
+        ):
+            with self.assertRaisesRegex(
+                estimator_snapshot_runtime.EstimatorSnapshotRuntimeError,
+                "coin_estimator_interval_invalid",
+            ):
+                run_coin_estimator_service(
+                    role="coin-estimator",
+                    mode="live",
+                    release_sha="c" * 40,
+                    state_directory=self.root / "invalid-cadence-state",
+                    stop=threading.Event(),
+                )
 
 
 if __name__ == "__main__":

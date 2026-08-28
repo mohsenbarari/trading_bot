@@ -20,6 +20,7 @@ from core.market_intelligence.market_store import (
     initialize_market_store,
     upsert_observation,
 )
+from core.market_intelligence.research_archive import research_contexts_for_rows
 
 
 class CoinGroupPipelineTests(unittest.TestCase):
@@ -47,6 +48,10 @@ class CoinGroupPipelineTests(unittest.TestCase):
                 text=text,
                 reply_to_message_id=reply,
                 sender_identity=sender,
+                sender_telegram_id=("7001" if sender == "offerer" else "7002"),
+                sender_display_name=(
+                    "Offerer User" if sender == "offerer" else "Buyer User"
+                ),
             ),
         )
 
@@ -99,6 +104,45 @@ class CoinGroupPipelineTests(unittest.TestCase):
         self.assertEqual([(row["event_type"], row["price_num"], row["quality_state"]) for row in facts], [("OFFER", 186_900.0, "ELIGIBLE"), ("TRADE", 186_800.0, "ELIGIBLE")])
         self.assertNotIn("offerer", facts[0]["attributes_json"])
         self.assertNotIn("message", facts[0]["attributes_json"])
+        contexts = self.staging.execute(
+            "SELECT event_key,root_message_id,requester_message_id "
+            "FROM coin_group_fact_research_context"
+        ).fetchall()
+        event_types = {
+            bytes(row["event_key"]): str(row["event_type"])
+            for row in self.market.execute(
+                "SELECT event_key,event_type FROM market_observations "
+                "WHERE source_code='GROUP_1'"
+            ).fetchall()
+        }
+        self.assertEqual(
+            sorted(
+                (
+                    event_types[bytes(row["event_key"])],
+                    int(row["root_message_id"]),
+                    (
+                        int(row["requester_message_id"])
+                        if row["requester_message_id"] is not None
+                        else None
+                    ),
+                )
+                for row in contexts
+            ),
+            [("OFFER", 1, None), ("TRADE", 1, 2)],
+        )
+        research = research_contexts_for_rows(
+            self.staging,
+            self.market.execute(
+                "SELECT event_key,source_code FROM market_observations "
+                "WHERE source_code='GROUP_1'"
+            ).fetchall(),
+        )
+        by_type = {
+            event_types[key]: value for key, value in research.items()
+        }
+        self.assertEqual(by_type["OFFER"].raw_text, "امام فروش فردا 186,900 / 5 تا")
+        self.assertEqual(by_type["OFFER"].actors["OFFERER"].telegram_id, "7001")
+        self.assertEqual(by_type["TRADE"].actors["REQUESTER"].telegram_id, "7002")
 
         first_timestamps = self.market.execute(
             """
