@@ -102,7 +102,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             requested_by=args.requested_by,
         )
     finally:
-        await redis_client.close()
+        await redis_client.aclose()
     return {
         "status": "completed",
         "operation_id": report.operation_id,

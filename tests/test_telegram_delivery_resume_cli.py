@@ -64,7 +64,7 @@ class TelegramDeliveryResumeCliTests(unittest.IsolatedAsyncioTestCase):
     async def test_output_is_redacted_and_redis_is_closed(self):
         redis_client = MagicMock()
         redis_client.ping = AsyncMock()
-        redis_client.close = AsyncMock()
+        redis_client.aclose = AsyncMock()
         limiter = object()
         report = MagicMock(
             operation_id=9,
@@ -106,7 +106,7 @@ class TelegramDeliveryResumeCliTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("channel:-100", repr(result))
         self.assertEqual(result["resumed_job_count"], 2)
         resume.assert_awaited_once()
-        redis_client.close.assert_awaited_once()
+        redis_client.aclose.assert_awaited_once()
 
     async def test_iran_stops_before_credentials_redis_or_database(self):
         with patch.object(

@@ -56,6 +56,7 @@ from core.services.telegram_delivery_queue_service import (
     telegram_delivery_database_now,
 )
 from core.services.telegram_delivery_reconciliation_service import (
+    inspect_telegram_delivery_reconciliation_health,
     reconcile_telegram_delivery_jobs,
 )
 from core.services.telegram_delivery_retention_service import (
@@ -131,6 +132,7 @@ _PROVIDER_OUTCOME_PERSISTENCE_RETRY_MAX_SECONDS = 5.0
 _DISPATCH_MARK_TRANSIENT_RETRY_ATTEMPTS = 3
 _DISPATCH_MARK_TRANSIENT_RETRY_BASE_SECONDS = 0.05
 _RETENTION_INTERVAL_SECONDS = 3600.0
+_RECONCILIATION_HEALTH_LOG_INTERVAL_SECONDS = 30.0
 # Provider responses that have been received but not yet committed are an
 # in-process fail-stop barrier.  Slots from the same role must not claim past a
 # known provider fact, and lease recovery must not race that fact into an
@@ -2010,7 +2012,11 @@ async def telegram_delivery_reconciliation_loop(
     result_feedbacks = {
         lane.bot_identity: lane.lifecycle_feedback.apply_delivery_result for lane in lanes
     }
+    next_health_log_at = 0.0
     while True:
+        health = None
+        monotonic_now = time.monotonic()
+        inspect_health = monotonic_now >= next_health_log_at
         async with AsyncSessionLocal() as db:
             report = await reconcile_telegram_delivery_jobs(
                 db,
@@ -2030,6 +2036,11 @@ async def telegram_delivery_reconciliation_loop(
                 ),
                 max_rows=_recover_limit(),
             )
+            if inspect_health:
+                health = await inspect_telegram_delivery_reconciliation_health(
+                    db,
+                    current_server=current_server(),
+                )
             await db.commit()
         if report.unresolved_count or report.configuration_blocked_count:
             logger.warning(
@@ -2040,6 +2051,31 @@ async def telegram_delivery_reconciliation_loop(
                     "unresolved_count": report.unresolved_count,
                     "configuration_blocked_count": report.configuration_blocked_count,
                     "pending_provider_outcome_count": report.pending_provider_outcome_count,
+                },
+            )
+        if inspect_health:
+            next_health_log_at = (
+                monotonic_now + _RECONCILIATION_HEALTH_LOG_INTERVAL_SECONDS
+            )
+        if health is not None and (
+            health.pending_reconcile_count
+            or health.ambiguous_count
+            or health.unresolved_count
+            or health.pending_provider_outcome_count
+        ):
+            logger.critical(
+                "Telegram delivery has a durable reconciliation blocker",
+                extra={
+                    "event": "telegram_delivery.reconciliation_blocker_active",
+                    "pending_reconcile_count": health.pending_reconcile_count,
+                    "ambiguous_count": health.ambiguous_count,
+                    "unresolved_count": health.unresolved_count,
+                    "pending_provider_outcome_count": health.pending_provider_outcome_count,
+                    "oldest_active_at": (
+                        health.oldest_active_at.isoformat()
+                        if health.oldest_active_at is not None
+                        else None
+                    ),
                 },
             )
         await asyncio.sleep(_worker_interval_seconds())

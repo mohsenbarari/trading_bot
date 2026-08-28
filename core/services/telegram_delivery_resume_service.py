@@ -27,6 +27,7 @@ from core.services.telegram_delivery_queue_service import (
     acquire_telegram_delivery_scope_locks,
 )
 from core.telegram_delivery_credentials import TelegramDeliveryCredentialRegistry
+from core.telegram_multi_publisher_contract import TELEGRAM_PUBLISHER_IDENTITIES
 from core.telegram_delivery_preflight import (
     TelegramDeliveryPreflightRateLimitedError,
     TelegramDeliveryPreflightReport,
@@ -121,7 +122,11 @@ def _normalize_requested_by(value: str) -> str:
     return normalized
 
 
-def _configured_scope(settings: Any) -> tuple[str, tuple[str, ...]]:
+def _configured_scope(
+    settings: Any,
+    *,
+    credential_registry: TelegramDeliveryCredentialRegistry,
+) -> tuple[str, tuple[str, ...]]:
     try:
         channel_id = int(getattr(settings, "channel_id", None))
         expected_channel_id = int(
@@ -138,7 +143,18 @@ def _configured_scope(settings: Any) -> tuple[str, tuple[str, ...]]:
     identities = [TELEGRAM_PRIMARY_BOT_IDENTITY]
     if bool(getattr(settings, "telegram_delivery_queue_channel_editor_enabled", False)):
         identities.append(TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY)
-    return f"channel:{channel_id}", tuple(identities)
+    configured_identities = tuple(credential_registry.bot_identities)
+    publisher_identities = tuple(
+        identity
+        for identity in TELEGRAM_PUBLISHER_IDENTITIES
+        if identity in configured_identities
+    )
+    expected_identities = tuple((*identities, *publisher_identities))
+    if configured_identities != expected_identities:
+        raise TelegramDeliveryResumeValidationError(
+            "telegram_resume_credential_roles_mismatch"
+        )
+    return f"channel:{channel_id}", configured_identities
 
 
 def _aware_now(now_factory: Callable[[], datetime]) -> datetime:
@@ -278,9 +294,24 @@ def _validate_full_preflight_report(
                 raise TelegramDeliveryResumeValidationError(
                     "telegram_resume_primary_permissions_missing"
                 )
-        elif permissions != {"can_manage_chat", "can_edit_messages"}:
+        elif identity.bot_identity == TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY:
+            if permissions != {"can_manage_chat", "can_edit_messages"}:
+                raise TelegramDeliveryResumeValidationError(
+                    "telegram_resume_editor_permissions_invalid"
+                )
+        elif identity.bot_identity in TELEGRAM_PUBLISHER_IDENTITIES:
+            if not {
+                "can_manage_chat",
+                "can_post_messages",
+                "can_edit_messages",
+                "can_delete_messages",
+            }.issubset(permissions):
+                raise TelegramDeliveryResumeValidationError(
+                    "telegram_resume_publisher_permissions_missing"
+                )
+        else:
             raise TelegramDeliveryResumeValidationError(
-                "telegram_resume_editor_permissions_invalid"
+                "telegram_resume_preflight_role_not_allowlisted"
             )
 
 
@@ -795,11 +826,10 @@ async def resume_configured_telegram_channel(
         )
     normalized_request_id = _normalize_request_id(request_id)
     normalized_requested_by = _normalize_requested_by(requested_by)
-    destination_key, bot_identities = _configured_scope(settings)
-    if credential_registry.bot_identities != bot_identities:
-        raise TelegramDeliveryResumeValidationError(
-            "telegram_resume_credential_roles_mismatch"
-        )
+    destination_key, bot_identities = _configured_scope(
+        settings,
+        credential_registry=credential_registry,
+    )
     clear_gate = getattr(
         dispatch_limiter,
         "clear_destination_gate_after_database_resume",

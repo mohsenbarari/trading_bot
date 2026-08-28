@@ -4,7 +4,11 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from core.services import telegram_delivery_resume_service as service
-from core.telegram_delivery_credentials import TelegramDeliveryCredentialRegistry
+from core.telegram_delivery_credentials import (
+    TelegramDeliveryCredentialRegistry,
+    TelegramPublisherLaneConfiguration,
+)
+from core.telegram_multi_publisher_contract import TELEGRAM_PUBLISHER_IDENTITIES
 from core.telegram_delivery_preflight import (
     TelegramDeliveryPreflightFailedError,
     TelegramDeliveryPreflightIdentityReport,
@@ -31,6 +35,21 @@ def _registry(*, editor_enabled: bool = False):
         primary_token="primary-secret",
         editor_enabled=editor_enabled,
         editor_token="editor-secret" if editor_enabled else None,
+    )
+
+
+def _publisher_registry():
+    return TelegramDeliveryCredentialRegistry.from_values(
+        primary_token="primary-secret",
+        editor_enabled=False,
+        publisher_lanes={
+            identity: TelegramPublisherLaneConfiguration(
+                token=f"{identity}-secret",
+                expected_bot_id=10_000 + index,
+                expected_username=f"{identity}_bot",
+            )
+            for index, identity in enumerate(TELEGRAM_PUBLISHER_IDENTITIES, start=1)
+        },
     )
 
 
@@ -67,6 +86,42 @@ def _preflight_report(*, editor_enabled: bool = False, identity_only: bool = Fal
         approved_bot_identities=tuple(roles),
         channel_fingerprint="channel-safe",
         identities=tuple(identities),
+    )
+
+
+def _publisher_preflight_report():
+    registry = _publisher_registry()
+    roles = registry.bot_identities
+    fingerprints = registry.fingerprints()
+    identities = tuple(
+        TelegramDeliveryPreflightIdentityReport(
+            bot_identity=role,
+            credential_fingerprint=fingerprints[role],
+            bot_fingerprint=f"bot-{role}",
+            channel_fingerprint="channel-safe",
+            member_status="administrator",
+            effective_permissions=(
+                (
+                    "can_manage_chat",
+                    "can_restrict_members",
+                    "can_post_messages",
+                    "can_edit_messages",
+                )
+                if role == "primary"
+                else (
+                    "can_manage_chat",
+                    "can_post_messages",
+                    "can_edit_messages",
+                    "can_delete_messages",
+                )
+            ),
+        )
+        for role in roles
+    )
+    return TelegramDeliveryPreflightReport(
+        approved_bot_identities=roles,
+        channel_fingerprint="channel-safe",
+        identities=identities,
     )
 
 
@@ -145,6 +200,58 @@ class TelegramDeliveryResumeServiceTests(unittest.IsolatedAsyncioTestCase):
             bot_identities=("primary", "channel_editor"),
         )
         complete.assert_awaited_once()
+
+    async def test_multi_publisher_resume_preflights_and_unlocks_every_active_lane(self):
+        limiter = self._limiter()
+        registry = _publisher_registry()
+        identities = registry.bot_identities
+        prepared = service._PreparedResume(
+            operation_id=17,
+            state=service.TELEGRAM_RESUME_REQUESTED,
+            destination_key="channel:-100123",
+            bot_identities=identities,
+            round_pause_job_ids=(31,),
+            round_pause_evidence_hash="a" * 64,
+            idempotent_replay=False,
+        )
+        preflight = AsyncMock(return_value=_publisher_preflight_report())
+        with patch.object(
+            service,
+            "_prepare_resume",
+            new=AsyncMock(return_value=prepared),
+        ) as prepare, patch.object(
+            service,
+            "_apply_database_resume",
+            new=AsyncMock(),
+        ), patch.object(
+            service,
+            "_complete_after_redis",
+            new=AsyncMock(return_value=_completed_report()),
+        ):
+            result = await service.resume_configured_telegram_channel(
+                session_factory=lambda: None,
+                current_server="foreign",
+                settings=_settings(),
+                credential_registry=registry,
+                dispatch_limiter=limiter,
+                request_id=REQUEST_ID,
+                requested_by="on-call-1",
+                preflight_runner=preflight,
+                now_factory=lambda: NOW,
+            )
+
+        self.assertEqual(result.state, service.TELEGRAM_RESUME_COMPLETED)
+        self.assertEqual(prepare.await_args.kwargs["bot_identities"], identities)
+        preflight.assert_awaited_once_with(
+            settings=_settings(),
+            credential_registry=registry,
+            bot_identities=identities,
+            identity_only_bot_identities=(),
+        )
+        limiter.clear_destination_gate_after_database_resume.assert_awaited_once_with(
+            "channel:-100123",
+            bot_identities=identities,
+        )
 
     async def test_identity_only_preflight_can_never_authorize_resume(self):
         limiter = self._limiter()
