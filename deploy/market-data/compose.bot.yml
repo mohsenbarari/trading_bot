@@ -144,7 +144,6 @@ services:
       - type: bind
         source: ${MARKET_BOT_DATA_ROOT:?MARKET_BOT_DATA_ROOT is required}/snapshots
         target: /var/lib/market-data/snapshots
-        read_only: true
     depends_on:
       coin-estimator:
         condition: service_healthy

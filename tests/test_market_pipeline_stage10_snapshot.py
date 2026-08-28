@@ -230,6 +230,10 @@ class Stage10SnapshotTests(unittest.TestCase):
         status, ack = self._apply_web(document)
         self.assertEqual((status, ack["status"]), (200, "ACK"))
         self.assertEqual(ack["snapshot_hash"], document["snapshot_id"])
+        self.assertEqual(
+            ack["web_view"]["snapshot_hash"],
+            document["snapshot_id"],
+        )
         view = read_web_snapshot_view(
             self.web_root / "latest-private-shadow.json",
             now_utc=datetime(2026, 8, 26, 5, 0, 20, tzinfo=timezone.utc),
@@ -861,6 +865,70 @@ class Stage10SnapshotTests(unittest.TestCase):
             send=lost_ack,
         )
         self.assertEqual((sent.status, sent.snapshot_id), ("ACKNOWLEDGED", document["snapshot_id"]))
+
+    def test_sender_persists_only_receiver_acknowledged_product_view(self):
+        document = self._publish()
+        local_view = self.root / "bot" / "latest-private-shadow.json"
+
+        sent = send_latest_snapshot(
+            snapshot_path=self.snapshot_path,
+            state_path=self.sender_state,
+            expected_feed_mode="PRIVATE_SHADOW",
+            send=lambda value: self._apply_web(dict(value)),
+            acknowledged_view_path=local_view,
+        )
+
+        self.assertEqual(sent.status, "ACKNOWLEDGED")
+        acknowledged = json.loads(local_view.read_text(encoding="utf-8"))
+        self.assertEqual(
+            (
+                acknowledged["contract"],
+                acknowledged["snapshot_hash"],
+                acknowledged["snapshot"]["snapshot_id"],
+            ),
+            (
+                "estimator_snapshot_web_view/1.0",
+                document["snapshot_id"],
+                document["snapshot_id"],
+            ),
+        )
+
+        # Losing only the local acknowledged projection must not make the raw
+        # estimator artifact authoritative.  The sender replays the same
+        # version, obtains the receiver-issued duplicate ACK, and repairs it.
+        local_view.unlink()
+        repaired = send_latest_snapshot(
+            snapshot_path=self.snapshot_path,
+            state_path=self.sender_state,
+            expected_feed_mode="PRIVATE_SHADOW",
+            send=lambda value: self._apply_web(dict(value)),
+            acknowledged_view_path=local_view,
+        )
+        self.assertEqual(repaired.status, "ACKNOWLEDGED")
+        self.assertTrue(local_view.is_file())
+
+    def test_sender_rejects_unbound_acknowledged_product_view(self):
+        document = self._publish()
+        local_view = self.root / "bot" / "latest-private-shadow.json"
+
+        def tampered_ack(value):
+            status, response = self._apply_web(dict(value))
+            response["web_view"] = dict(response["web_view"])
+            response["web_view"]["snapshot_hash"] = "0" * 64
+            return status, response
+
+        with self.assertRaisesRegex(
+            estimator_snapshot_runtime.EstimatorSnapshotRuntimeError,
+            "snapshot_sender_web_view_identity_mismatch",
+        ):
+            send_latest_snapshot(
+                snapshot_path=self.snapshot_path,
+                state_path=self.sender_state,
+                expected_feed_mode="PRIVATE_SHADOW",
+                send=tampered_ack,
+                acknowledged_view_path=local_view,
+            )
+        self.assertFalse(local_view.exists())
 
     def test_sender_rejects_artifact_from_another_authority_lane(self):
         self._publish(feed_mode="PRIVATE_PRIMARY")

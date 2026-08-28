@@ -515,6 +515,7 @@ def send_latest_snapshot(
     state_path: Path | str,
     expected_feed_mode: str,
     send: Callable[[Mapping[str, object]], tuple[int, Mapping[str, object]]],
+    acknowledged_view_path: Path | str | None = None,
 ) -> SnapshotSendResult:
     snapshot = EstimatorSnapshotV2.model_validate_json(
         Path(snapshot_path).read_text(encoding="utf-8")
@@ -543,12 +544,39 @@ def send_latest_snapshot(
     if snapshot.snapshot_version < acknowledged:
         state.close()
         raise EstimatorSnapshotRuntimeError("snapshot_sender_version_regression")
+    acknowledged_path = (
+        Path(acknowledged_view_path) if acknowledged_view_path is not None else None
+    )
+    acknowledged_view_is_current = False
+    if (
+        acknowledged_path is not None
+        and not acknowledged_path.is_symlink()
+        and acknowledged_path.is_file()
+    ):
+        try:
+            local_view = json.loads(acknowledged_path.read_text(encoding="utf-8"))
+            local_snapshot = EstimatorSnapshotV2.model_validate(local_view["snapshot"])
+            acknowledged_view_is_current = (
+                local_view.get("contract") == "estimator_snapshot_web_view/1.0"
+                and local_view.get("snapshot_hash") == snapshot.snapshot_id
+                and int(local_view.get("snapshot_version") or 0)
+                == snapshot.snapshot_version
+                and local_view.get("feed_mode") == snapshot.feed_mode
+                and local_snapshot.snapshot_id == snapshot.snapshot_id
+                and local_snapshot.snapshot_version == snapshot.snapshot_version
+                and local_snapshot.feed_mode == snapshot.feed_mode
+            )
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            acknowledged_view_is_current = False
     if snapshot.snapshot_version == acknowledged:
         if str(row["acknowledged_snapshot_id"] or "") != snapshot.snapshot_id:
             state.close()
             raise EstimatorSnapshotRuntimeError("snapshot_sender_version_conflict")
-        state.close()
-        return SnapshotSendResult("ALREADY_ACKNOWLEDGED", snapshot.snapshot_id, acknowledged)
+        if acknowledged_path is None or acknowledged_view_is_current:
+            state.close()
+            return SnapshotSendResult(
+                "ALREADY_ACKNOWLEDGED", snapshot.snapshot_id, acknowledged
+            )
     try:
         status, response = send(snapshot.model_dump(mode="json"))
     except BaseException:
@@ -575,6 +603,41 @@ def send_latest_snapshot(
             )
         state.close()
         raise EstimatorSnapshotRuntimeError("snapshot_sender_ack_invalid")
+    if acknowledged_path is not None:
+        web_view = response.get("web_view")
+        if not isinstance(web_view, Mapping):
+            state.close()
+            raise EstimatorSnapshotRuntimeError("snapshot_sender_web_view_missing")
+        try:
+            acknowledged_snapshot = EstimatorSnapshotV2.model_validate(
+                web_view["snapshot"]
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            state.close()
+            raise EstimatorSnapshotRuntimeError(
+                "snapshot_sender_web_view_invalid"
+            ) from exc
+        if (
+            web_view.get("contract") != "estimator_snapshot_web_view/1.0"
+            or web_view.get("snapshot_hash") != snapshot.snapshot_id
+            or int(web_view.get("snapshot_version") or 0)
+            != snapshot.snapshot_version
+            or web_view.get("feed_mode") != snapshot.feed_mode
+            or acknowledged_snapshot.snapshot_id != snapshot.snapshot_id
+            or acknowledged_snapshot.snapshot_version != snapshot.snapshot_version
+            or acknowledged_snapshot.feed_mode != snapshot.feed_mode
+        ):
+            state.close()
+            raise EstimatorSnapshotRuntimeError(
+                "snapshot_sender_web_view_identity_mismatch"
+            )
+        from .private_pipeline_foundation import atomic_json_write
+
+        try:
+            atomic_json_write(acknowledged_path, dict(web_view))
+        except OSError:
+            state.close()
+            raise
     with state:
         if acknowledged_feed_mode and acknowledged_feed_mode != snapshot.feed_mode:
             state.execute(
@@ -671,6 +734,19 @@ def run_estimator_snapshot_sender_service(
             "/var/lib/market-data/snapshots/latest-estimator-snapshot.json",
         )
     )
+    acknowledged_view_path = Path(
+        os.environ.get(
+            "MARKET_PIPELINE_ACKNOWLEDGED_SNAPSHOT_PATH",
+            str(
+                snapshot_path.parent
+                / (
+                    "latest-private-primary.json"
+                    if feed_mode == "PRIVATE_PRIMARY"
+                    else "latest-private-shadow.json"
+                )
+            ),
+        )
+    )
     host = ""
     port = 9443
     key_id = ""
@@ -720,6 +796,7 @@ def run_estimator_snapshot_sender_service(
                         tls_context=tls,
                         timeout_seconds=3.0,
                     ),
+                    acknowledged_view_path=acknowledged_view_path,
                 )
                 failures = 0
             except (EstimatorSnapshotRuntimeError, MarketTransportError, OSError):
@@ -740,6 +817,10 @@ def run_estimator_snapshot_sender_service(
                 "status": "live-ready" if failures < 8 else "live-degraded",
                 "feed_mode": feed_mode,
                 "private_transport_only": True,
+                "receiver_acknowledged_view_required": feed_mode != "LEGACY",
+                "receiver_acknowledged_view_present": (
+                    acknowledged_view_path.is_file() if feed_mode != "LEGACY" else False
+                ),
                 "consecutive_failures": failures,
                 "latest": asdict(latest),
             },

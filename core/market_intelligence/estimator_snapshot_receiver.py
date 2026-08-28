@@ -483,6 +483,31 @@ def _web_view(
     }
 
 
+def _acknowledgement(
+    snapshot: EstimatorSnapshotV2,
+    *,
+    duplicate: bool,
+    web_view: Mapping[str, object],
+) -> dict[str, object]:
+    """Return the receiver-issued view with the transport ACK.
+
+    The bot-side product consumer must never trust the estimator's raw local
+    artifact.  Returning the exact view published by the remote receiver lets
+    the sender persist an independently acknowledged, Product-readable copy.
+    mTLS authenticates the receiver and the identity fields below bind the
+    response to the submitted snapshot.
+    """
+
+    return {
+        "status": "ACK",
+        "snapshot_id": snapshot.snapshot_id,
+        "snapshot_hash": snapshot.snapshot_id,
+        "snapshot_version": snapshot.snapshot_version,
+        "duplicate": duplicate,
+        "web_view": dict(web_view),
+    }
+
+
 def apply_estimator_snapshot(
     connection: sqlite3.Connection,
     document: Mapping[str, object],
@@ -580,14 +605,13 @@ def apply_estimator_snapshot(
                     and outbox["delivered_at_utc"] is not None
                     and _published_view_matches(path, snapshot)
                 ):
+                    web_view = read_web_snapshot_view(path)
                     connection.commit()
-                    return 200, {
-                        "status": "ACK",
-                        "snapshot_id": snapshot.snapshot_id,
-                        "snapshot_hash": snapshot.snapshot_id,
-                        "snapshot_version": snapshot.snapshot_version,
-                        "duplicate": True,
-                    }
+                    return 200, _acknowledgement(
+                        snapshot,
+                        duplicate=True,
+                        web_view=web_view,
+                    )
             else:
                 received_at = _stamp(received_time)
                 published_at = _stamp()
@@ -681,13 +705,11 @@ def apply_estimator_snapshot(
         except BaseException:
             connection.rollback()
             raise
-        return 200, {
-            "status": "ACK",
-            "snapshot_id": snapshot.snapshot_id,
-            "snapshot_hash": snapshot.snapshot_id,
-            "snapshot_version": snapshot.snapshot_version,
-            "duplicate": duplicate,
-        }
+        return 200, _acknowledgement(
+            snapshot,
+            duplicate=duplicate,
+            web_view=view,
+        )
 
 
 def read_web_snapshot_view(
