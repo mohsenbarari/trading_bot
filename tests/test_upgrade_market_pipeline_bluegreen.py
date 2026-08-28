@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from scripts import upgrade_market_pipeline_bluegreen as upgrade
+from scripts import migrate_market_pipeline_archive as migration
 
 
 RELEASE = "a" * 40
@@ -17,6 +18,9 @@ IMAGE = "sha256:" + "b" * 64
 
 
 class MarketPipelineBlueGreenUpgradeTests(unittest.TestCase):
+    def test_postgres_image_binding_matches_migration_gate(self) -> None:
+        self.assertEqual(upgrade.POSTGRES_IMAGE, migration.POSTGRES_IMAGE)
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)

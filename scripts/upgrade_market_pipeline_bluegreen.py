@@ -26,12 +26,6 @@ import sys
 import time
 from typing import Any, Mapping, Sequence
 
-if __package__:
-    from scripts.migrate_market_pipeline_archive import POSTGRES_IMAGE
-else:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from scripts.migrate_market_pipeline_archive import POSTGRES_IMAGE
-
 
 CONFIRMATION = "upgrade-market-pipeline-bluegreen"
 SCHEMA = "market_pipeline_bluegreen_upgrade/1.0"
@@ -39,6 +33,10 @@ HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^(?:sha256:)?[0-9a-f]{64}$")
 PROJECT = re.compile(r"^[a-z0-9][a-z0-9_-]{2,62}$")
 AUTHORITY_CONTRACT = "market_capture_authority/1.0"
+POSTGRES_IMAGE = (
+    "postgres:15-alpine@sha256:"
+    "fe0737ba566a2c5b2a28f34433c0a423261900ec17b9bf7ad115e1aae7e57f1b"
+)
 
 ROLE_SERVICES = {
     "bot": (
