@@ -53,11 +53,18 @@ PROMOTION_REQUIRED_CHECKS = (
     "idempotent_duplicates_and_zero_rejected_dead_open_outbox",
     "receiver_publication_settled",
     "private_primary_snapshot_contract",
-    "fourteen_estimated_rates",
+    "complete_rate_grid_with_safe_one_gram_no_data",
     "effective_underlying_freshness",
     "bot_web_snapshot_identity_and_digest",
     "owner_authorized_backfill_scope_bound",
     "catchup_complete_and_live_tail_verified",
+)
+PROMOTION_RATE_GRID_SIZE = 14
+PROMOTION_SAFE_NO_DATA_CELLS = frozenset(
+    {
+        "COIN_ONE_GRAM:CASH",
+        "COIN_ONE_GRAM:TOMORROW",
+    }
 )
 AUTHORIZED_BACKFILL_NOT_BEFORE_UTC = "2026-08-25T09:33:00Z"
 AUTHORIZED_BACKFILL_SOURCE_CODES = (
@@ -76,6 +83,35 @@ APPROVED_UPDATES: Mapping[str, str] = {
     "PRODUCTION_OFFER_MODEL_PRICE_GUARD_ENABLED": "true",
     "PRODUCTION_COIN_INFERENCE_MAXIMUM_AGE_SECONDS": "120",
 }
+
+
+def promotion_snapshot_coverage_valid(snapshot: object) -> bool:
+    """Accept only a complete grid with bounded, explicit one-gram abstention."""
+
+    if not isinstance(snapshot, Mapping):
+        return False
+    estimated = snapshot.get("estimated_rate_count")
+    no_data = snapshot.get("safe_no_data_rate_count")
+    cells = snapshot.get("safe_no_data_cells")
+    if (
+        isinstance(estimated, bool)
+        or not isinstance(estimated, int)
+        or isinstance(no_data, bool)
+        or not isinstance(no_data, int)
+        or not isinstance(cells, list)
+        or any(not isinstance(cell, str) for cell in cells)
+    ):
+        return False
+    unique_cells = set(cells)
+    return (
+        len(unique_cells) == len(cells) == no_data
+        and unique_cells <= PROMOTION_SAFE_NO_DATA_CELLS
+        and estimated + no_data == PROMOTION_RATE_GRID_SIZE
+        and estimated
+        >= PROMOTION_RATE_GRID_SIZE - len(PROMOTION_SAFE_NO_DATA_CELLS)
+    )
+
+
 ROLLBACK_UPDATES: Mapping[str, str] = {
     "PRODUCTION_COIN_INFERENCE_PREVIEW_ENABLED": "false",
     "PRODUCTION_COIN_INFERENCE_SELECTION_ENABLED": "false",
@@ -337,7 +373,7 @@ def _promotion_binding(
         or snapshot.get("contract") != PROMOTION_SNAPSHOT_CONTRACT
         or snapshot.get("lane") != "PRIVATE_PRIMARY"
         or snapshot.get("status") != "OK"
-        or snapshot.get("estimated_rate_count") != 14
+        or not promotion_snapshot_coverage_valid(snapshot)
         or not _DIGEST_PATTERN.fullmatch(str(snapshot.get("snapshot_hash") or ""))
         or isinstance(snapshot.get("snapshot_version"), bool)
         or not isinstance(snapshot.get("snapshot_version"), int)

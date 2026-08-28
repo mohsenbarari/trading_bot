@@ -128,6 +128,7 @@ def _view(
     version: int = 7,
     no_data: bool = False,
     partial: bool = False,
+    sparse_one_gram: bool = False,
 ) -> dict[str, object]:
     document = _snapshot_document(
         lane="PRIVATE_PRIMARY",
@@ -148,6 +149,26 @@ def _view(
                 "reason_code": "NO_FRESH_MELTED",
                 "underlying_source": None,
                 "underlying_age_seconds": None,
+                "anchor_age_seconds": None,
+            }
+        )
+        document["snapshot_id"] = estimator_snapshot_id(document)
+    if sparse_one_gram:
+        rate = next(
+            item
+            for item in document["rates"]  # type: ignore[union-attr]
+            if item["instrument"] == "COIN_ONE_GRAM"  # type: ignore[index]
+            and item["settlement"] == "CASH"  # type: ignore[index]
+        )
+        rate.update(
+            {
+                "status": "NO_DATA",
+                "value": None,
+                "lower_bound": None,
+                "upper_bound": None,
+                "confidence": "NONE",
+                "method": verifier.SAFE_SPARSE_NO_DATA_METHOD,
+                "reason_code": verifier.SAFE_SPARSE_NO_DATA_REASON,
                 "anchor_age_seconds": None,
             }
         )
@@ -413,6 +434,8 @@ def test_pass_receipt_is_value_free_bound_and_owner_only(evidence: Evidence) -> 
     assert receipt["status"] == "PASS"
     assert receipt["stream_count"] == len(SEQUENCES)
     assert receipt["snapshot"]["estimated_rate_count"] == 14  # type: ignore[index]
+    assert receipt["snapshot"]["safe_no_data_rate_count"] == 0  # type: ignore[index]
+    assert receipt["snapshot"]["safe_no_data_cells"] == []  # type: ignore[index]
     assert receipt["catchup_verification"] == {
         "receipt_sha256": sha256(
             evidence.catchup_receipt.read_bytes()
@@ -499,6 +522,43 @@ def test_partial_rate_grid_is_rejected(evidence: Evidence) -> None:
         "health_snapshot_identity_invalid",
         "private_primary_estimated_rate_coverage_invalid",
     }
+
+
+def test_sparse_one_gram_anchor_absence_is_promotable(evidence: Evidence) -> None:
+    evidence.install_view(_view(sparse_one_gram=True))
+
+    receipt = evidence.verify("sparse-one-gram.json")
+
+    assert receipt["status"] == "PASS"
+    assert receipt["snapshot"]["estimated_rate_count"] == 13  # type: ignore[index]
+    assert receipt["snapshot"]["safe_no_data_rate_count"] == 1  # type: ignore[index]
+    assert receipt["snapshot"]["safe_no_data_cells"] == [  # type: ignore[index]
+        "COIN_ONE_GRAM:CASH"
+    ]
+
+
+def test_sparse_one_gram_without_fresh_underlying_is_rejected(
+    evidence: Evidence,
+) -> None:
+    view = _view(sparse_one_gram=True)
+    rate = next(
+        item
+        for item in view["snapshot"]["rates"]  # type: ignore[index]
+        if item["instrument"] == "COIN_ONE_GRAM"  # type: ignore[index]
+        and item["settlement"] == "CASH"  # type: ignore[index]
+    )
+    rate["underlying_source"] = None  # type: ignore[index]
+    rate["underlying_age_seconds"] = None  # type: ignore[index]
+    view["snapshot"]["snapshot_id"] = estimator_snapshot_id(  # type: ignore[index]
+        view["snapshot"]  # type: ignore[index]
+    )
+    view["snapshot_hash"] = view["snapshot"]["snapshot_id"]  # type: ignore[index]
+    evidence.install_view(view)
+
+    receipt = evidence.verify("sparse-one-gram-no-underlying.json")
+
+    assert receipt["status"] == "FAILED"
+    assert receipt["reason_code"] == "private_primary_estimated_rate_coverage_invalid"
 
 
 def test_safe_no_data_is_not_promotable(evidence: Evidence) -> None:

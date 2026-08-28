@@ -5,8 +5,10 @@ deploy متصل و offline تست شده است، اما رسید کامل اج�
 است. مجوز فوری مالک، staging، full-session و soak چندجلسه‌ای تاریخی را فقط
 برای این cutover حذف می‌کند. تا پاس‌شدن exact-release، backup/restore تازه و
 off-host رمزشده، migration دوباره‌پذیر، single-owner، catch-up/gap audit، اثبات
-مستقل زنجیرهٔ نه منبع الزامی، snapshot V2 تازه با ۱۴/۱۴ نرخ `ESTIMATED` و
-status=`OK`، و CAS نهایی، authority محصول باید `LEGACY` بماند. بندهای Stage
+مستقل زنجیرهٔ نه منبع الزامی، snapshot V2 تازه و کامل با status=`OK`، نرخ
+`ESTIMATED` برای داده‌های موجود و `NO_DATA` محدود یک‌گرمی فقط با دلیل
+`NO_SAFE_SAME_COMMODITY_ANCHOR`، و CAS نهایی، authority محصول باید `LEGACY`
+بماند. بندهای Stage
 12/13/14 در ادامه تاریخچهٔ حذف‌نشده‌اند؛ دستور جاری بند 17 و runbook مرتبط
 است. این بازنگری خودش deploy یا authority switch انجام نمی‌دهد.
 
@@ -1166,7 +1168,8 @@ Gate:
 فوری 2026-08-28] authorization اکنون در بند 17 ثبت است و ترتیب اجرای معتبر
 runbook جدید است. این جایگزینی تنها staging/full-session/soak تاریخی را برمی‌دارد؛
 exact-release، backup/restore/off-host، single-owner، catch-up، نه منبع الزامی به‌عنوان
-subset، snapshot V2 دقیق ۱۴/۱۴، CAS و rollback همچنان مانع‌های fail-closed هستند.
+subset، snapshot V2 با grid کامل و abstention محدود و اثبات‌شدهٔ یک‌گرمی، CAS
+و rollback همچنان مانع‌های fail-closed هستند.
 
 ترتیب:
 
@@ -1426,7 +1429,9 @@ rollback دقیق در
 مجوز فوری مالک در همان تاریخ، پیش‌نیاز staging، full-session و soak چندجلسه‌ای را فقط برای
 این cutover production حذف کرد. این override بندهای تاریخی Stage 12/13/14 را به‌عنوان شرط promotion
 کنار می‌گذارد، ولی release binding، reconciliation، backup/restore و off-host، single-owner،
-gap audit، catch-up، snapshot V2 تازه و دقیق ۱۴/۱۴ با status=`OK`، CAS و rollback را حفظ می‌کند.
+gap audit، catch-up، snapshot V2 تازه با grid کامل و status=`OK`، CAS و rollback
+را حفظ می‌کند. فقط سلول‌های یک‌گرمی می‌توانند در نبود طبیعی anchor هم‌کالا
+`NO_DATA` باشند؛ melted تازه، توالی پیوسته و صفر بودن quarantine/rejection همچنان الزامی است.
 
 قرارداد جاری اجرا:
 

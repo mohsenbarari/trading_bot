@@ -80,6 +80,8 @@ def _promotion_receipt(
                     "snapshot_hash": "a" * 64,
                     "snapshot_version": 1,
                     "estimated_rate_count": 14,
+                    "safe_no_data_rate_count": 0,
+                    "safe_no_data_cells": [],
                     "file_sha256": "b" * 64,
                     "snapshot_age_seconds": 1,
                     "publication_age_seconds": 1,
@@ -124,6 +126,30 @@ def _run(*args: str) -> SimpleNamespace:
     ):
         returncode = updater.main(arguments)
     return SimpleNamespace(returncode=returncode, stdout=stdout.getvalue(), stderr="")
+
+
+def test_private_primary_coverage_accepts_only_bounded_one_gram_no_data() -> None:
+    assert updater.promotion_snapshot_coverage_valid(
+        {
+            "estimated_rate_count": 13,
+            "safe_no_data_rate_count": 1,
+            "safe_no_data_cells": ["COIN_ONE_GRAM:CASH"],
+        }
+    )
+    assert not updater.promotion_snapshot_coverage_valid(
+        {
+            "estimated_rate_count": 13,
+            "safe_no_data_rate_count": 1,
+            "safe_no_data_cells": ["COIN_IMAM:CASH"],
+        }
+    )
+    assert not updater.promotion_snapshot_coverage_valid(
+        {
+            "estimated_rate_count": 13,
+            "safe_no_data_rate_count": 0,
+            "safe_no_data_cells": [],
+        }
+    )
 
 
 def test_plan_and_apply_are_cas_bound_atomic_private_and_value_free() -> None:

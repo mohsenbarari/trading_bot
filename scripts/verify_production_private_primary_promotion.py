@@ -167,12 +167,20 @@ CHECKS = (
     "idempotent_duplicates_and_zero_rejected_dead_open_outbox",
     "receiver_publication_settled",
     "private_primary_snapshot_contract",
-    "fourteen_estimated_rates",
+    "complete_rate_grid_with_safe_one_gram_no_data",
     "effective_underlying_freshness",
     "bot_web_snapshot_identity_and_digest",
     "owner_authorized_backfill_scope_bound",
     "catchup_complete_and_live_tail_verified",
 )
+SAFE_SPARSE_NO_DATA_CELLS = frozenset(
+    {
+        ("COIN_ONE_GRAM", "CASH"),
+        ("COIN_ONE_GRAM", "TOMORROW"),
+    }
+)
+SAFE_SPARSE_NO_DATA_METHOD = "ABSTAIN_NO_SAFE_SAME_COMMODITY_ANCHOR"
+SAFE_SPARSE_NO_DATA_REASON = "NO_SAFE_SAME_COMMODITY_ANCHOR"
 
 
 class PromotionVerificationError(RuntimeError):
@@ -554,6 +562,7 @@ def _sequence_map(value: object) -> dict[str, int]:
 def _validate_snapshot_identity(value: object) -> dict[str, object]:
     if not isinstance(value, Mapping) or set(value) != set(SNAPSHOT_IDENTITY_FIELDS):
         _fail("health_snapshot_identity_invalid")
+    estimated_rate_count = value.get("estimated_rate_count")
     if (
         value.get("contract") != WEB_VIEW_CONTRACT
         or not isinstance(value.get("snapshot_hash"), str)
@@ -561,7 +570,11 @@ def _validate_snapshot_identity(value: object) -> dict[str, object]:
         or not _positive(value.get("snapshot_version"))
         or value.get("feed_mode") != "PRIVATE_PRIMARY"
         or value.get("snapshot_status") != "OK"
-        or value.get("estimated_rate_count") != len(ESTIMATOR_RATE_GRID_V1)
+        or isinstance(estimated_rate_count, bool)
+        or not isinstance(estimated_rate_count, int)
+        or not len(ESTIMATOR_RATE_GRID_V1) - len(SAFE_SPARSE_NO_DATA_CELLS)
+        <= estimated_rate_count
+        <= len(ESTIMATOR_RATE_GRID_V1)
         or not isinstance(value.get("file_sha256"), str)
         or not HEX64.fullmatch(str(value.get("file_sha256")))
     ):
@@ -708,12 +721,26 @@ def _validate_snapshot(
         _fail("private_primary_stale_contract_invalid")
 
     estimated = [rate for rate in snapshot.rates if rate.status == "ESTIMATED"]
-    if len(snapshot.rates) != len(ESTIMATOR_RATE_GRID_V1) or len(estimated) != len(
-        ESTIMATOR_RATE_GRID_V1
-    ):
+    no_data = [rate for rate in snapshot.rates if rate.status == "NO_DATA"]
+    if len(snapshot.rates) != len(ESTIMATOR_RATE_GRID_V1):
+        _fail("private_primary_estimated_rate_coverage_invalid")
+    safe_no_data_cells: list[str] = []
+    for rate in no_data:
+        cell = (rate.instrument, rate.settlement)
+        if (
+            cell not in SAFE_SPARSE_NO_DATA_CELLS
+            or rate.method != SAFE_SPARSE_NO_DATA_METHOD
+            or rate.reason_code != SAFE_SPARSE_NO_DATA_REASON
+            or rate.underlying_source is None
+            or rate.underlying_age_seconds is None
+            or rate.anchor_age_seconds is not None
+        ):
+            _fail("private_primary_estimated_rate_coverage_invalid")
+        safe_no_data_cells.append(f"{rate.instrument}:{rate.settlement}")
+    if len(estimated) + len(no_data) != len(ESTIMATOR_RATE_GRID_V1):
         _fail("private_primary_estimated_rate_coverage_invalid")
     maximum_effective_underlying_age = 0.0
-    for rate in estimated:
+    for rate in (*estimated, *no_data):
         underlying_age = rate.underlying_age_seconds
         if (
             isinstance(underlying_age, bool)
@@ -737,6 +764,8 @@ def _validate_snapshot(
             "snapshot_hash": snapshot.snapshot_id,
             "snapshot_version": snapshot.snapshot_version,
             "estimated_rate_count": len(estimated),
+            "safe_no_data_rate_count": len(no_data),
+            "safe_no_data_cells": safe_no_data_cells,
             "file_sha256": digest,
             "snapshot_age_seconds": generated_age,
             "publication_age_seconds": publish_age,
@@ -862,6 +891,8 @@ def evaluate(
             or observed["snapshot_version"]
             != bot_snapshot_value["snapshot_version"]
             or observed["file_sha256"] != bot_snapshot_digest
+            or observed["estimated_rate_count"]
+            != bot_snapshot_value["estimated_rate_count"]
         ):
             _fail("health_snapshot_identity_mismatch")
 

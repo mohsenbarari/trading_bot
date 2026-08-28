@@ -70,7 +70,7 @@ PROMOTION_REQUIRED_CHECKS = (
     "idempotent_duplicates_and_zero_rejected_dead_open_outbox",
     "receiver_publication_settled",
     "private_primary_snapshot_contract",
-    "fourteen_estimated_rates",
+    "complete_rate_grid_with_safe_one_gram_no_data",
     "effective_underlying_freshness",
     "bot_web_snapshot_identity_and_digest",
     "owner_authorized_backfill_scope_bound",
@@ -685,7 +685,7 @@ def _validate_promotion_receipt(
         or snapshot.get("contract") != PROMOTION_SNAPSHOT_CONTRACT
         or snapshot.get("lane") != "PRIVATE_PRIMARY"
         or snapshot.get("status") != "OK"
-        or snapshot.get("estimated_rate_count") != 14
+        or not source_updater.promotion_snapshot_coverage_valid(snapshot)
         or not HEX64.fullmatch(str(snapshot.get("snapshot_hash") or ""))
         or isinstance(snapshot.get("snapshot_version"), bool)
         or not isinstance(snapshot.get("snapshot_version"), int)
