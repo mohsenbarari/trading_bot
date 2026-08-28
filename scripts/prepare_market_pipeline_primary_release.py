@@ -143,6 +143,43 @@ def _env_bytes(values: Mapping[str, str]) -> bytes:
     return "".join(f"{key}={values[key]}\n" for key in sorted(values)).encode()
 
 
+def derive_source(
+    *,
+    role: str,
+    rendered_env: Path,
+    source_env: Path,
+    research_key_file: Path | None = None,
+) -> dict[str, object]:
+    """Create a topology source from an existing release-bound env.
+
+    Only release-controlled values are removed.  The Web research key path may
+    be added explicitly because older Shadow releases predate that required
+    encrypted archive.  No secret value is read; only absolute file paths are
+    retained in the topology source.
+    """
+
+    if role not in {"web", "bot"}:
+        raise PrimaryReleaseError("primary_release_role_invalid")
+    values = parse_env(rendered_env, secure_input=True)
+    source = {key: value for key, value in values.items() if key not in DYNAMIC_VALUES}
+    if role == "web":
+        if research_key_file is None or not research_key_file.is_absolute():
+            raise PrimaryReleaseError("primary_release_research_key_path_required")
+        source["MARKET_RESEARCH_ENCRYPTION_KEY_FILE"] = str(research_key_file)
+    elif research_key_file is not None:
+        raise PrimaryReleaseError("primary_release_research_key_path_forbidden")
+    validate_source(role, source)
+    _atomic_write(source_env, _env_bytes(source), exclusive=True)
+    return {
+        "schema": "market_pipeline_primary_topology_source/1.0",
+        "role": role,
+        "rendered_env_sha256": _digest(rendered_env),
+        "source_env_sha256": _digest(source_env),
+        "dynamic_values_removed": sorted(DYNAMIC_VALUES.intersection(values)),
+        "secret_values_read": False,
+    }
+
+
 def render_pair(
     *,
     web_source: Path,
@@ -264,16 +301,23 @@ def verify_pair(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("render-pair", "verify-pair"))
-    parser.add_argument("--web-source", type=Path, required=True)
-    parser.add_argument("--bot-source", type=Path, required=True)
-    parser.add_argument("--web-env", type=Path, required=True)
-    parser.add_argument("--bot-env", type=Path, required=True)
-    parser.add_argument("--receipt", type=Path, required=True)
-    parser.add_argument("--release-sha", required=True)
-    parser.add_argument("--release-tree", required=True)
-    parser.add_argument("--image-id", required=True)
-    parser.add_argument("--project-name", required=True)
+    commands = parser.add_subparsers(dest="command", required=True)
+    derive = commands.add_parser("derive-source")
+    derive.add_argument("--role", choices=("web", "bot"), required=True)
+    derive.add_argument("--rendered-env", type=Path, required=True)
+    derive.add_argument("--source-env", type=Path, required=True)
+    derive.add_argument("--research-key-file", type=Path)
+    for name in ("render-pair", "verify-pair"):
+        command = commands.add_parser(name)
+        command.add_argument("--web-source", type=Path, required=True)
+        command.add_argument("--bot-source", type=Path, required=True)
+        command.add_argument("--web-env", type=Path, required=True)
+        command.add_argument("--bot-env", type=Path, required=True)
+        command.add_argument("--receipt", type=Path, required=True)
+        command.add_argument("--release-sha", required=True)
+        command.add_argument("--release-tree", required=True)
+        command.add_argument("--image-id", required=True)
+        command.add_argument("--project-name", required=True)
     parser.add_argument("--confirm", required=True)
     return parser
 
@@ -283,6 +327,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.confirm != CONFIRMATION:
             raise PrimaryReleaseError("primary_release_confirmation_invalid")
+        if args.command == "derive-source":
+            result = derive_source(
+                role=args.role,
+                rendered_env=args.rendered_env,
+                source_env=args.source_env,
+                research_key_file=args.research_key_file,
+            )
+            print(
+                json.dumps(
+                    {
+                        "status": "PASS",
+                        "schema": result["schema"],
+                        "role": result["role"],
+                        "secret_values_read": False,
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
         operation = render_pair if args.command == "render-pair" else verify_pair
         result = operation(
             web_source=args.web_source,

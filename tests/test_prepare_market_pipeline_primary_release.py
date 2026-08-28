@@ -64,6 +64,39 @@ class PrepareMarketPipelinePrimaryReleaseTests(unittest.TestCase):
         verified = primary.verify_pair(**self._arguments())
         self.assertEqual(verified, document)
 
+    def test_derive_source_strips_release_values_and_adds_only_web_key_path(self) -> None:
+        rendered = {
+            **_web_values(),
+            "MARKET_PIPELINE_IMAGE": IMAGE_ID,
+            "MARKET_PIPELINE_RELEASE_SHA": RELEASE_SHA,
+            "MARKET_PIPELINE_MODE": "live",
+            "MARKET_PIPELINE_PROJECT_NAME": "market-private-pipeline-stage13-shadow",
+            "MARKET_PIPELINE_FEED_MODE": "PRIVATE_SHADOW",
+            "MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY": "0",
+            "MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE": "PRIVATE_SHADOW",
+        }
+        rendered.pop("MARKET_RESEARCH_ENCRYPTION_KEY_FILE")
+        old_env = self.root / "old-web.env"
+        derived = self.root / "derived-web.source.env"
+        _write_source(old_env, rendered)
+
+        result = primary.derive_source(
+            role="web",
+            rendered_env=old_env,
+            source_env=derived,
+            research_key_file=Path(
+                "/srv/trading-bot/secure/market/research-archive.key"
+            ),
+        )
+
+        values = parse_env(derived, secure_input=True)
+        self.assertFalse(set(primary.DYNAMIC_VALUES).intersection(values))
+        self.assertEqual(
+            values["MARKET_RESEARCH_ENCRYPTION_KEY_FILE"],
+            "/srv/trading-bot/secure/market/research-archive.key",
+        )
+        self.assertFalse(result["secret_values_read"])
+
     def test_dynamic_authority_values_are_forbidden_in_source(self) -> None:
         values = _web_values()
         values["MARKET_PIPELINE_FEED_MODE"] = "PRIVATE_PRIMARY"
