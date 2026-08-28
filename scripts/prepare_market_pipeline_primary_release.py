@@ -24,8 +24,10 @@ if __package__:
         IMAGE_ID,
         PROJECT_NAME,
         RELEASE_SHA,
+        ReleaseContractError,
         _validate_pair,
         parse_env,
+        resolve_role_image_ids,
         validate_source,
     )
 else:
@@ -35,14 +37,17 @@ else:
         IMAGE_ID,
         PROJECT_NAME,
         RELEASE_SHA,
+        ReleaseContractError,
         _validate_pair,
         parse_env,
+        resolve_role_image_ids,
         validate_source,
     )
 
 
 CONFIRMATION = "render-market-pipeline-private-primary"
 SCHEMA = "market_pipeline_primary_release_pair/1.0"
+ROLE_IMAGE_SCHEMA = "market_pipeline_primary_release_pair/1.1"
 
 
 class PrimaryReleaseError(RuntimeError):
@@ -189,13 +194,21 @@ def render_pair(
     receipt: Path,
     release_sha: str,
     release_tree: str,
-    image_id: str,
+    image_id: str | None,
     project_name: str,
+    web_image_id: str | None = None,
+    bot_image_id: str | None = None,
 ) -> dict[str, object]:
     if not RELEASE_SHA.fullmatch(release_sha) or not RELEASE_SHA.fullmatch(release_tree):
         raise PrimaryReleaseError("primary_release_git_identity_invalid")
-    if not IMAGE_ID.fullmatch(image_id):
-        raise PrimaryReleaseError("primary_release_image_identity_invalid")
+    try:
+        image_ids = resolve_role_image_ids(
+            image_id=image_id,
+            web_image_id=web_image_id,
+            bot_image_id=bot_image_id,
+        )
+    except ReleaseContractError as exc:
+        raise PrimaryReleaseError("primary_release_image_identity_invalid") from exc
     if not PROJECT_NAME.fullmatch(project_name):
         raise PrimaryReleaseError("primary_release_project_name_invalid")
     sources = {
@@ -209,7 +222,7 @@ def render_pair(
             _rendered(
                 sources[role],
                 release_sha=release_sha,
-                image_id=image_id,
+                image_id=image_ids[role],
                 project_name=project_name,
             )
         )
@@ -218,11 +231,11 @@ def render_pair(
             "source_sha256": _digest(web_source if role == "web" else bot_source),
             "output_sha256": sha256(payload).hexdigest(),
         }
+    common_image = len(set(image_ids.values())) == 1
     document: dict[str, object] = {
-        "schema": SCHEMA,
+        "schema": SCHEMA if common_image else ROLE_IMAGE_SCHEMA,
         "release_sha": release_sha,
         "release_tree": release_tree,
-        "image_id": image_id,
         "project_name": project_name,
         "feed_mode": "PRIVATE_PRIMARY",
         "private_primary_allowed": True,
@@ -232,6 +245,10 @@ def render_pair(
         "roles": outputs,
         "secrets_disclosed": False,
     }
+    if common_image:
+        document["image_id"] = image_ids["web"]
+    else:
+        document["image_ids"] = image_ids
     _atomic_write(
         receipt,
         (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode(),
@@ -249,16 +266,33 @@ def verify_pair(
     receipt: Path,
     release_sha: str,
     release_tree: str,
-    image_id: str,
+    image_id: str | None,
     project_name: str,
+    web_image_id: str | None = None,
+    bot_image_id: str | None = None,
 ) -> dict[str, object]:
+    try:
+        image_ids = resolve_role_image_ids(
+            image_id=image_id,
+            web_image_id=web_image_id,
+            bot_image_id=bot_image_id,
+        )
+    except ReleaseContractError as exc:
+        raise PrimaryReleaseError("primary_release_image_identity_invalid") from exc
     document = json.loads(receipt.read_text(encoding="utf-8"))
-    if document.get("schema") != SCHEMA or any(
+    common_image = len(set(image_ids.values())) == 1
+    expected_schema = SCHEMA if common_image else ROLE_IMAGE_SCHEMA
+    expected_image_identity = (
+        {"image_id": image_ids["web"]}
+        if common_image
+        else {"image_ids": image_ids}
+    )
+    if document.get("schema") != expected_schema or any(
         document.get(key) != expected
         for key, expected in {
             "release_sha": release_sha,
             "release_tree": release_tree,
-            "image_id": image_id,
+            **expected_image_identity,
             "project_name": project_name,
             "feed_mode": "PRIVATE_PRIMARY",
             "private_primary_allowed": True,
@@ -281,7 +315,7 @@ def verify_pair(
         expected_values = _rendered(
             source_values,
             release_sha=release_sha,
-            image_id=image_id,
+            image_id=image_ids[role],
             project_name=project_name,
         )
         if values != expected_values:
@@ -316,7 +350,9 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--receipt", type=Path, required=True)
         command.add_argument("--release-sha", required=True)
         command.add_argument("--release-tree", required=True)
-        command.add_argument("--image-id", required=True)
+        command.add_argument("--image-id")
+        command.add_argument("--web-image-id")
+        command.add_argument("--bot-image-id")
         command.add_argument("--project-name", required=True)
     parser.add_argument("--confirm", required=True)
     return parser
@@ -357,6 +393,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             release_tree=args.release_tree,
             image_id=args.image_id,
             project_name=args.project_name,
+            web_image_id=args.web_image_id,
+            bot_image_id=args.bot_image_id,
         )
         print(
             json.dumps(

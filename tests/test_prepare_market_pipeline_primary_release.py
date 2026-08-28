@@ -8,9 +8,11 @@ import unittest
 from scripts import prepare_market_pipeline_primary_release as primary
 from scripts.prepare_market_pipeline_release import parse_env
 from tests.test_prepare_market_pipeline_release import (
+    BOT_IMAGE_ID,
     IMAGE_ID,
     RELEASE_SHA,
     RELEASE_TREE,
+    WEB_IMAGE_ID,
     _bot_values,
     _web_values,
     _write_source,
@@ -63,6 +65,30 @@ class PrepareMarketPipelinePrimaryReleaseTests(unittest.TestCase):
         self.assertNotIn("/srv/trading-bot/secure/market", self.receipt.read_text())
         verified = primary.verify_pair(**self._arguments())
         self.assertEqual(verified, document)
+
+    def test_primary_pair_accepts_role_local_content_ids(self) -> None:
+        arguments = self._arguments()
+        arguments.update(
+            image_id=None,
+            web_image_id=WEB_IMAGE_ID,
+            bot_image_id=BOT_IMAGE_ID,
+        )
+
+        document = primary.render_pair(**arguments)
+
+        self.assertEqual(document["schema"], primary.ROLE_IMAGE_SCHEMA)
+        self.assertEqual(
+            document["image_ids"], {"web": WEB_IMAGE_ID, "bot": BOT_IMAGE_ID}
+        )
+        self.assertEqual(
+            parse_env(self.web_env, secure_input=True)["MARKET_PIPELINE_IMAGE"],
+            WEB_IMAGE_ID,
+        )
+        self.assertEqual(
+            parse_env(self.bot_env, secure_input=True)["MARKET_PIPELINE_IMAGE"],
+            BOT_IMAGE_ID,
+        )
+        self.assertEqual(primary.verify_pair(**arguments), document)
 
     def test_derive_source_strips_release_values_and_adds_only_web_key_path(self) -> None:
         rendered = {

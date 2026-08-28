@@ -302,6 +302,32 @@ def _render_values(
     return rendered
 
 
+def resolve_role_image_ids(
+    *,
+    image_id: str | None,
+    web_image_id: str | None,
+    bot_image_id: str | None,
+) -> dict[str, str]:
+    """Resolve one logical build to the host-local immutable image IDs.
+
+    Docker engines can preserve identical config, RootFS and release labels
+    while exposing different local content IDs after ``docker load``.  The
+    release remains one build, but each role must be pinned to the ID its own
+    daemon actually resolves.  The legacy single-ID form stays supported.
+    """
+
+    if image_id is not None:
+        if web_image_id is not None or bot_image_id is not None:
+            raise ReleaseContractError("image_identity_forms_are_mutually_exclusive")
+        web_image_id = bot_image_id = image_id
+    if web_image_id is None or bot_image_id is None:
+        raise ReleaseContractError("role_image_ids_required")
+    for role, value in (("web", web_image_id), ("bot", bot_image_id)):
+        if not IMAGE_ID.fullmatch(value):
+            raise ReleaseContractError(f"{role}_image_id_invalid")
+    return {"web": web_image_id, "bot": bot_image_id}
+
+
 def _encode_env(values: Mapping[str, str]) -> bytes:
     return ("".join(f"{key}={values[key]}\n" for key in sorted(values))).encode("utf-8")
 
@@ -347,16 +373,21 @@ def render_pair(
     receipt: Path,
     release_sha: str,
     release_tree: str,
-    image_id: str,
+    image_id: str | None,
     image_input_signature: str,
     project_name: str,
+    web_image_id: str | None = None,
+    bot_image_id: str | None = None,
 ) -> dict[str, object]:
     if not RELEASE_SHA.fullmatch(release_sha):
         raise ReleaseContractError("release_sha_invalid")
     if not RELEASE_SHA.fullmatch(release_tree):
         raise ReleaseContractError("release_tree_invalid")
-    if not IMAGE_ID.fullmatch(image_id):
-        raise ReleaseContractError("image_id_invalid")
+    image_ids = resolve_role_image_ids(
+        image_id=image_id,
+        web_image_id=web_image_id,
+        bot_image_id=bot_image_id,
+    )
     if not re.fullmatch(r"[0-9a-f]{64}", image_input_signature):
         raise ReleaseContractError("image_input_signature_invalid")
     if not PROJECT_NAME.fullmatch(project_name):
@@ -372,18 +403,22 @@ def render_pair(
 
     web = _render_role(
         "web", web_source, web_output,
-        release_sha=release_sha, image_id=image_id, project_name=project_name,
+        release_sha=release_sha, image_id=image_ids["web"], project_name=project_name,
     )
     try:
         bot = _render_role(
             "bot", bot_source, bot_output,
-            release_sha=release_sha, image_id=image_id, project_name=project_name,
+            release_sha=release_sha, image_id=image_ids["bot"], project_name=project_name,
         )
+        common_image = len(set(image_ids.values())) == 1
         document: dict[str, object] = {
-            "schema": "market_pipeline_release_pair/1.0",
+            "schema": (
+                "market_pipeline_release_pair/1.0"
+                if common_image
+                else "market_pipeline_release_pair/1.1"
+            ),
             "release_sha": release_sha,
             "release_tree": release_tree,
-            "image_id": image_id,
             "image_input_signature": image_input_signature,
             "project_name": project_name,
             "authority": {
@@ -406,6 +441,10 @@ def render_pair(
             },
             "secrets_disclosed": False,
         }
+        if common_image:
+            document["image_id"] = image_ids["web"]
+        else:
+            document["image_ids"] = image_ids
         _write_atomic(
             receipt,
             (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8"),
@@ -458,20 +497,36 @@ def verify_pair(
     receipt: Path,
     release_sha: str,
     release_tree: str,
-    image_id: str,
+    image_id: str | None,
     image_input_signature: str,
+    web_image_id: str | None = None,
+    bot_image_id: str | None = None,
 ) -> dict[str, object]:
     try:
         document = json.loads(receipt.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ReleaseContractError("release_pair_receipt_invalid") from exc
+    image_ids = resolve_role_image_ids(
+        image_id=image_id,
+        web_image_id=web_image_id,
+        bot_image_id=bot_image_id,
+    )
+    common_image = len(set(image_ids.values())) == 1
     expected_identity = {
         "release_sha": release_sha,
         "release_tree": release_tree,
-        "image_id": image_id,
         "image_input_signature": image_input_signature,
     }
-    if document.get("schema") != "market_pipeline_release_pair/1.0" or any(
+    if common_image:
+        expected_identity["image_id"] = image_ids["web"]
+    else:
+        expected_identity["image_ids"] = image_ids
+    expected_schema = (
+        "market_pipeline_release_pair/1.0"
+        if common_image
+        else "market_pipeline_release_pair/1.1"
+    )
+    if document.get("schema") != expected_schema or any(
         document.get(key) != value for key, value in expected_identity.items()
     ):
         raise ReleaseContractError("release_pair_identity_mismatch")
@@ -491,7 +546,7 @@ def verify_pair(
         values = parse_env(output, secure_input=False)
         if values.get("MARKET_PIPELINE_RELEASE_SHA") != release_sha:
             raise ReleaseContractError("rendered_release_sha_mismatch")
-        if values.get("MARKET_PIPELINE_IMAGE") != image_id:
+        if values.get("MARKET_PIPELINE_IMAGE") != image_ids[role]:
             raise ReleaseContractError("rendered_image_id_mismatch")
         if values.get("MARKET_PIPELINE_MODE") != "live":
             raise ReleaseContractError("rendered_mode_mismatch")
@@ -525,7 +580,9 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--receipt", type=Path, required=True)
         command.add_argument("--release-sha", required=True)
         command.add_argument("--release-tree", required=True)
-        command.add_argument("--image-id", required=True)
+        command.add_argument("--image-id")
+        command.add_argument("--web-image-id")
+        command.add_argument("--bot-image-id")
         command.add_argument("--image-input-signature", required=True)
         if name == "render-pair":
             command.add_argument("--web-source", type=Path, required=True)
@@ -565,6 +622,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "release_sha": args.release_sha,
             "release_tree": args.release_tree,
             "image_id": args.image_id,
+            "web_image_id": args.web_image_id,
+            "bot_image_id": args.bot_image_id,
             "image_input_signature": args.image_input_signature,
         }
         if args.command == "render-pair":
@@ -586,7 +645,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "status": "pass",
                     "schema": document["schema"],
                     "release_sha": document["release_sha"],
-                    "image_id": document["image_id"],
+                    "image_ids": (
+                        document.get("image_ids")
+                        or {"web": document["image_id"], "bot": document["image_id"]}
+                    ),
                     "feed_mode": document["authority"]["feed_mode"],
                     "telegram_capture_cutover_authorized": False,
                     "secrets_disclosed": False,

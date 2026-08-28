@@ -13,6 +13,8 @@ from scripts import prepare_market_pipeline_release as release
 RELEASE_SHA = "a" * 40
 RELEASE_TREE = "b" * 40
 IMAGE_ID = "sha256:" + "c" * 64
+WEB_IMAGE_ID = "sha256:" + "e" * 64
+BOT_IMAGE_ID = "sha256:" + "f" * 64
 IMAGE_SIGNATURE = "d" * 64
 
 
@@ -118,6 +120,49 @@ class PrepareMarketPipelineReleaseTests(unittest.TestCase):
             release_sha=RELEASE_SHA,
             release_tree=RELEASE_TREE,
             image_id=IMAGE_ID,
+            image_input_signature=IMAGE_SIGNATURE,
+        )
+        self.assertEqual(verified, document)
+
+    def test_role_local_image_ids_remain_one_release_pair(self) -> None:
+        document = release.render_pair(
+            web_source=self.web_source,
+            bot_source=self.bot_source,
+            web_output=self.web_env,
+            bot_output=self.bot_env,
+            receipt=self.receipt,
+            release_sha=RELEASE_SHA,
+            release_tree=RELEASE_TREE,
+            image_id=None,
+            web_image_id=WEB_IMAGE_ID,
+            bot_image_id=BOT_IMAGE_ID,
+            image_input_signature=IMAGE_SIGNATURE,
+            project_name="market-private-pipeline-production",
+        )
+
+        self.assertEqual(document["schema"], "market_pipeline_release_pair/1.1")
+        self.assertEqual(
+            document["image_ids"], {"web": WEB_IMAGE_ID, "bot": BOT_IMAGE_ID}
+        )
+        self.assertEqual(
+            release.parse_env(self.web_env, secure_input=False)["MARKET_PIPELINE_IMAGE"],
+            WEB_IMAGE_ID,
+        )
+        self.assertEqual(
+            release.parse_env(self.bot_env, secure_input=False)["MARKET_PIPELINE_IMAGE"],
+            BOT_IMAGE_ID,
+        )
+        verified = release.verify_pair(
+            web_source=self.web_source,
+            bot_source=self.bot_source,
+            web_output=self.web_env,
+            bot_output=self.bot_env,
+            receipt=self.receipt,
+            release_sha=RELEASE_SHA,
+            release_tree=RELEASE_TREE,
+            image_id=None,
+            web_image_id=WEB_IMAGE_ID,
+            bot_image_id=BOT_IMAGE_ID,
             image_input_signature=IMAGE_SIGNATURE,
         )
         self.assertEqual(verified, document)
