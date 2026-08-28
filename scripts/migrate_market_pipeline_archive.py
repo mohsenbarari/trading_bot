@@ -19,15 +19,12 @@ else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from scripts import backup_market_pipeline_archive as backup
 
-from core.market_intelligence.private_pipeline_foundation import (
-    MARKET_SCHEMA_TABLE_COUNT,
-    MARKET_SCHEMA_VERSION,
-)
-
 
 CONFIRMATION = "run-production-market-pipeline-archive-migration"
 RESULT_SCHEMA = "market_pipeline_migration_receipt/1.0"
 POSTGRES_IMAGE = backup.POSTGRES_IMAGE
+MARKET_SCHEMA_VERSION = 3
+MARKET_SCHEMA_TABLE_COUNT = 28
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 MARKET_SCHEMA_VERSIONS = list(range(1, MARKET_SCHEMA_VERSION + 1))
@@ -70,6 +67,34 @@ def _compose(root: Path, env_file: Path) -> list[str]:
         "--profile",
         "web",
     ]
+
+
+def _validate_primary_target_env(
+    env_file: Path, *, release_sha: str, image_id: str
+) -> dict[str, str]:
+    values = backup.parse_env(env_file, secure_input=True)
+    source_values = {
+        key: value for key, value in values.items() if key not in backup.DYNAMIC_VALUES
+    }
+    backup.validate_source("web", source_values)
+    expected = {
+        "MARKET_PIPELINE_RELEASE_SHA": release_sha,
+        "MARKET_PIPELINE_IMAGE": image_id,
+        "MARKET_PIPELINE_MODE": "live",
+        "MARKET_PIPELINE_FEED_MODE": "PRIVATE_PRIMARY",
+        "MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY": "1",
+        "MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE": "PRIVATE_PRIMARY",
+    }
+    if any(values.get(key) != value for key, value in expected.items()):
+        raise MigrationError("migration_target_env_identity_mismatch")
+    project = values.get("MARKET_PIPELINE_PROJECT_NAME", "")
+    user = values.get("MARKET_POSTGRES_USER", "market_data")
+    database = values.get("MARKET_POSTGRES_DB", "market_archive")
+    if not backup.PROJECT_NAME.fullmatch(project):
+        raise MigrationError("migration_target_project_invalid")
+    if not backup.SAFE_SQL_ID.fullmatch(user) or not backup.SAFE_SQL_ID.fullmatch(database):
+        raise MigrationError("migration_target_database_identity_invalid")
+    return values
 
 
 def _container_ids(project: str) -> list[str]:
@@ -202,7 +227,6 @@ def validate_receipt(
         "schema_versions": MARKET_SCHEMA_VERSIONS,
         "table_count": MARKET_SCHEMA_TABLE_COUNT,
         "running_services": ["market-database"],
-        "private_shadow_only": True,
         "product_authority_changed": False,
         "telegram_capture_cutover_authorized": False,
         "secrets_disclosed": False,
@@ -239,17 +263,33 @@ def validate_receipt(
     created = payload.get("database_container_created")
     if payload["backup_status"] == "PASS":
         source_valid = (
-            created is False
-            and before.get("running") is True
-            and before.get("container_id") == after.get("container_id")
+            (
+                created is False
+                and before.get("running") is True
+                and before.get("container_id") == after.get("container_id")
+            )
+            or (
+                created is True
+                and before.get("running") is False
+                and isinstance(before.get("container_id"), str)
+                and HEX64.fullmatch(before["container_id"])
+                and before.get("container_id") != after.get("container_id")
+            )
         )
     else:
         source_valid = created is True and before == {
             "container_id": None,
             "running": False,
         }
+    bluegreen_transition = (
+        payload["backup_status"] == "PASS"
+        and created is True
+        and before.get("running") is False
+        and isinstance(before.get("container_id"), str)
+    )
     if (
         not source_valid
+        or payload.get("private_shadow_only") is not (not bluegreen_transition)
         or payload.get("database_mutated")
         is not (created is True or first["status"] == "applied")
     ):
@@ -282,6 +322,7 @@ def run_migration(
     *,
     release_root: Path,
     env_file: Path,
+    backup_env_file: Path | None = None,
     backup_receipt: Path,
     release_sha: str,
     release_tree: str,
@@ -291,11 +332,31 @@ def run_migration(
     host_preflight_receipt_sha256: str,
     backup_maximum_age_seconds: int,
 ) -> dict[str, Any]:
-    values = backup.validate_release_env(
-        env_file, release_sha=release_sha, image_id=image_id
-    )
+    bluegreen = backup_env_file is not None
+    if bluegreen:
+        values = _validate_primary_target_env(
+            env_file, release_sha=release_sha, image_id=image_id
+        )
+        source_values = backup.validate_release_env(
+            backup_env_file, release_sha=release_sha, image_id=image_id
+        )
+        if (
+            source_values["MARKET_PIPELINE_PROJECT_NAME"]
+            == values["MARKET_PIPELINE_PROJECT_NAME"]
+            or source_values["MARKET_WEB_DATA_ROOT"] != values["MARKET_WEB_DATA_ROOT"]
+            or source_values.get("MARKET_POSTGRES_USER", "market_data")
+            != values.get("MARKET_POSTGRES_USER", "market_data")
+            or source_values.get("MARKET_POSTGRES_DB", "market_archive")
+            != values.get("MARKET_POSTGRES_DB", "market_archive")
+        ):
+            raise MigrationError("migration_bluegreen_topology_invalid")
+    else:
+        source_values = values = backup.validate_release_env(
+            env_file, release_sha=release_sha, image_id=image_id
+        )
+    receipt_env = backup_env_file or env_file
     backup_document = backup.verify_receipt(
-        env_file=env_file,
+        env_file=receipt_env,
         receipt=backup_receipt,
         release_sha=release_sha,
         release_tree=release_tree,
@@ -308,25 +369,34 @@ def run_migration(
     ):
         raise MigrationError("migration_prerequisite_receipt_digest_invalid")
     project = values["MARKET_PIPELINE_PROJECT_NAME"]
+    source_project = source_values["MARKET_PIPELINE_PROJECT_NAME"]
     postgres_root = Path(values["MARKET_WEB_DATA_ROOT"]) / "postgres"
-    before_ids = _container_ids(project)
+    before_ids = _container_ids(source_project)
+    target_before_ids = _container_ids(project) if bluegreen else before_ids
     status = backup_document["status"]
     if status == "PASS":
         expected_id = str(backup_document["source"]["container_id"])
         if before_ids != [expected_id]:
             raise MigrationError("migration_source_database_identity_changed")
         before_identity = _database_identity(
-            _inspect(expected_id), project=project, postgres_root=postgres_root
+            _inspect(expected_id), project=source_project, postgres_root=postgres_root
         )
-        if not before_identity["running"] or not before_identity["healthy"]:
-            raise MigrationError("migration_source_database_not_healthy")
-        before = {"container_id": expected_id, "running": True}
+        if bluegreen:
+            if before_identity["running"] or target_before_ids:
+                raise MigrationError("migration_bluegreen_source_not_quiesced")
+            before = {"container_id": expected_id, "running": False}
+        else:
+            if not before_identity["running"] or not before_identity["healthy"]:
+                raise MigrationError("migration_source_database_not_healthy")
+            before = {"container_id": expected_id, "running": True}
     elif status == "INITIAL_EMPTY":
-        if before_ids:
+        if before_ids or target_before_ids:
             raise MigrationError("migration_initial_store_container_exists")
         before = {"container_id": None, "running": False}
     else:
         raise MigrationError("migration_backup_status_invalid")
+    if bluegreen and _running_services(source_project):
+        raise MigrationError("migration_bluegreen_source_project_running")
     if [service for service in _running_services(project) if service != "market-database"]:
         raise MigrationError("migration_other_market_service_running")
 
@@ -339,7 +409,7 @@ def run_migration(
             [*compose, "up", "-d", "--no-deps", "--no-recreate", "market-database"],
             label="migration_database_start",
         )
-        created = status == "INITIAL_EMPTY"
+        created = bluegreen or status == "INITIAL_EMPTY"
         after_ids = _container_ids(project)
         if len(after_ids) != 1:
             raise MigrationError("migration_database_owner_count_invalid")
@@ -426,7 +496,7 @@ def run_migration(
             "database_mutated": created or first["status"] == "applied",
             "database_container_created": created,
             "running_services": ["market-database"],
-            "private_shadow_only": True,
+            "private_shadow_only": not bluegreen,
             "product_authority_changed": False,
             "telegram_capture_cutover_authorized": False,
             "secrets_disclosed": False,
@@ -474,6 +544,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--release-root", type=Path, required=True)
     parser.add_argument("--env-file", type=Path, required=True)
+    parser.add_argument("--backup-env-file", type=Path)
     parser.add_argument("--backup-receipt", type=Path, required=True)
     parser.add_argument("--release-sha", required=True)
     parser.add_argument("--release-tree", required=True)
@@ -501,6 +572,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = run_migration(
             release_root=args.release_root,
             env_file=args.env_file,
+            backup_env_file=args.backup_env_file,
             backup_receipt=args.backup_receipt,
             release_sha=args.release_sha,
             release_tree=args.release_tree,

@@ -62,7 +62,9 @@
 
 ### C. Migration و base جدید
 
-- migration release-bound پروژهٔ جدید را با همان bind root بالا می‌آورد.
+- migration release-bound، receipt را با `backup-env-file` پروژهٔ قدیم و target را با env
+  `PRIVATE_PRIMARY` پروژهٔ جدید اعتبارسنجی می‌کند؛ دو پروژه باید متفاوت و data root و هویت
+  PostgreSQL باید دقیقاً یکسان باشند.
 - pass اول فقط `applied` یا `already_current` و pass دوم فقط `already_current` مجاز است.
 - فقط دیتابیس جدید باید در این نقطه روشن باشد.
 - rollout receiver-first برای bot و web اجرا شود؛ captureها هنوز ممنوع‌اند.
