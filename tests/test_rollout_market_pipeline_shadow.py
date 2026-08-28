@@ -121,6 +121,66 @@ class RolloutMarketPipelineShadowTests(unittest.TestCase):
             feed_mode="PRIVATE_PRIMARY",
         )
 
+    def test_primary_receiver_live_starting_unblocks_bootstrap_but_not_pass(self) -> None:
+        with (
+            mock.patch.object(
+                rollout,
+                "_validate_env",
+                return_value=_values("web", "PRIVATE_PRIMARY"),
+            ),
+            mock.patch.object(rollout, "_ids", return_value=[]),
+            mock.patch.object(
+                rollout,
+                "_run",
+                return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+            ),
+        ):
+            payload = rollout.prepare(
+                role="web",
+                release_root=self.root,
+                env_file=self.env,
+                journal=self.journal,
+                release_sha=RELEASE_SHA,
+                image_id=IMAGE_ID,
+                feed_mode="PRIVATE_PRIMARY",
+            )
+        row = payload["services"][0]
+        row.update(
+            {
+                "state": "starting",
+                "container_id": CONTAINER_ID,
+                "created_by_release": True,
+            }
+        )
+        payload["status"] = "in_progress"
+        rollout._write_journal(self.journal, payload)
+        with (
+            mock.patch.object(
+                rollout,
+                "_validate_env",
+                return_value=_values("web", "PRIVATE_PRIMARY"),
+            ),
+            mock.patch.object(rollout, "_ids", return_value=[CONTAINER_ID]),
+            mock.patch.object(
+                rollout,
+                "_identity",
+                return_value={"running": True, "healthy": False},
+            ),
+            mock.patch.object(rollout, "_primary_bootstrap_ready", return_value=True),
+        ):
+            result = rollout.start_service(
+                role="web",
+                release_root=self.root,
+                env_file=self.env,
+                journal=self.journal,
+                release_sha=RELEASE_SHA,
+                image_id=IMAGE_ID,
+                service="estimator-snapshot-receiver",
+                feed_mode="PRIVATE_PRIMARY",
+            )
+        self.assertEqual(result["services"][0]["state"], "bootstrap_ready")
+        self.assertEqual(result["status"], "in_progress")
+
     def test_adapter_cannot_start_before_fact_receiver(self) -> None:
         self._prepared()
         with mock.patch.object(rollout, "_validate_env", return_value=_values("bot")):

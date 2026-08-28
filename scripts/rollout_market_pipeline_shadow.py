@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -260,7 +261,9 @@ def _validate_journal(
     for row in rows:
         if set(row) != {"service", "state", "container_id", "created_by_release"}:
             raise RolloutError("rollout_journal_service_schema_invalid")
-        if row["state"] not in {"pending", "starting", "healthy", "rolled_back"}:
+        if row["state"] not in {
+            "pending", "starting", "bootstrap_ready", "healthy", "rolled_back"
+        }:
             raise RolloutError("rollout_journal_service_state_invalid")
         if row["state"] == "pending":
             clean_pending = (
@@ -348,6 +351,46 @@ def _sha256(path: Path) -> str:
     return sha256(path.read_bytes()).hexdigest()
 
 
+def _primary_bootstrap_ready(
+    values: Mapping[str, str], *, service: str, release_sha: str
+) -> bool:
+    if service != "estimator-snapshot-receiver":
+        return False
+    path = (
+        Path(values["MARKET_WEB_DATA_ROOT"])
+        / "state"
+        / service
+        / service
+        / "health.json"
+    )
+    try:
+        info = path.lstat()
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        updated = datetime.fromisoformat(
+            str(payload["updated_at_utc"]).replace("Z", "+00:00")
+        ).astimezone(timezone.utc)
+        age = (datetime.now(timezone.utc) - updated).total_seconds()
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+    return bool(
+        not path.is_symlink()
+        and stat.S_ISREG(info.st_mode)
+        and info.st_uid == 10001
+        and info.st_gid == 10001
+        and stat.S_IMODE(info.st_mode) == 0o600
+        and payload.get("schema") == "estimator_snapshot_receiver/1.0"
+        and payload.get("role") == service
+        and payload.get("mode") == "live"
+        and payload.get("release_sha") == release_sha
+        and payload.get("status") == "live-starting"
+        and payload.get("private_transport_only") is True
+        and payload.get("private_primary_allowed") is True
+        and payload.get("snapshot_readiness") in {"MISSING", "PENDING"}
+        and payload.get("expected_lane") == "PRIVATE_PRIMARY"
+        and 0 <= age <= 30
+    )
+
+
 def start_service(
     *, role: str, release_root: Path, env_file: Path, journal: Path,
     release_sha: str, image_id: str, service: str,
@@ -365,7 +408,9 @@ def start_service(
         raise RolloutError("rollout_service_not_authorized")
     index = order.index(service)
     rows = payload["services"]
-    if any(row["state"] != "healthy" for row in rows[:index]):
+    if any(
+        row["state"] not in {"healthy", "bootstrap_ready"} for row in rows[:index]
+    ):
         raise RolloutError("rollout_receiver_first_order_violation")
     row = rows[index]
     if row["state"] == "healthy":
@@ -385,8 +430,15 @@ def start_service(
                 row["container_id"], project=values["MARKET_PIPELINE_PROJECT_NAME"],
                 service=service, image_id=image_id, release_sha=release_sha,
             )
-            if identity["running"] and identity["healthy"]:
-                row["state"] = "healthy"
+            bootstrap_ready = (
+                feed_mode == "PRIVATE_PRIMARY"
+                and identity["running"]
+                and _primary_bootstrap_ready(
+                    values, service=service, release_sha=release_sha
+                )
+            )
+            if identity["running"] and (identity["healthy"] or bootstrap_ready):
+                row["state"] = "bootstrap_ready" if bootstrap_ready else "healthy"
                 payload["status"] = (
                     "PASS"
                     if all(item["state"] == "healthy" for item in rows)
@@ -416,8 +468,15 @@ def start_service(
             ids[0], project=values["MARKET_PIPELINE_PROJECT_NAME"], service=service,
             image_id=image_id, release_sha=release_sha,
         )
-        if identity["running"] and identity["healthy"]:
-            row["state"] = "healthy"
+        bootstrap_ready = (
+            feed_mode == "PRIVATE_PRIMARY"
+            and identity["running"]
+            and _primary_bootstrap_ready(
+                values, service=service, release_sha=release_sha
+            )
+        )
+        if identity["running"] and (identity["healthy"] or bootstrap_ready):
+            row["state"] = "bootstrap_ready" if bootstrap_ready else "healthy"
             payload["status"] = (
                 "PASS" if all(item["state"] == "healthy" for item in rows) else "in_progress"
             )
