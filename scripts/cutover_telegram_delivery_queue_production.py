@@ -64,6 +64,7 @@ from scripts.plan_telegram_delivery_queue_production import (
 )
 from scripts.run_production_backup import database_identity_sha256
 from scripts.scan_telegram_queue_artifacts import scan_paths
+from scripts import quiesce_production_legacy_market_collectors as market_handoff
 
 
 APPLY_CONFIRMATION = "CUTOVER PRODUCTION TELEGRAM DELIVERY TO QUEUE-V1"
@@ -73,6 +74,8 @@ RECONCILE_REDEPLOY_CONFIRMATION = (
 )
 ROLLBACK_CONFIRMATION = "ROLLBACK PRODUCTION TELEGRAM DELIVERY TO LEGACY"
 DEFAULT_ARTIFACT_DIR = Path("/root/secure-envs/trading-bot/queue-cutover-artifacts")
+FENCED_DEPLOY_SUPERVISOR = REPO_ROOT / "scripts/run_fenced_production_deploy.py"
+CONTROL_PAYLOAD_MANIFEST = REPO_ROOT / "control-payload.sha256"
 PREFLIGHT_MAXIMUM_AGE_SECONDS = 900
 ROLLBACK_RECEIPT_MAXIMUM_AGE_SECONDS = 86400
 FOREIGN_PROJECT = "trading_bot"
@@ -85,6 +88,34 @@ FOREIGN_CONTAINERS = {
     "bot": "trading_bot_bot",
     "db": "trading_bot_db",
 }
+
+PHASE_TERMINAL_STATES = frozenset(
+    {
+        "applied",
+        "redeployed",
+        "rolled_back",
+        "failed_recovered",
+        "interrupted_recovered",
+    }
+)
+PHASE_RECEIPT_STATES = PHASE_TERMINAL_STATES | {"recovery_failed"}
+
+
+def _process_start_identity(pid: int) -> tuple[str, str] | None:
+    """Return boot-id and Linux start ticks for one live process."""
+
+    try:
+        boot_id = Path("/proc/sys/kernel/random/boot_id").read_text(
+            encoding="utf-8"
+        ).strip()
+        value = Path(f"/proc/{int(pid)}/stat").read_text(encoding="utf-8")
+        fields = value[value.rindex(") ") + 2 :].split()
+        start_ticks = fields[19]
+    except (OSError, IndexError, ValueError):
+        return None
+    if not boot_id or not start_ticks.isdigit():
+        return None
+    return boot_id, start_ticks
 IRAN_CONTAINERS = {
     "app": "trading_bot_app",
     "sync": "trading_bot_sync_worker",
@@ -119,6 +150,89 @@ class SecureSourceBackup:
     original: bytes
 
 
+@dataclass(frozen=True, slots=True)
+class PrivatePrimaryDeployAttestation:
+    """Exact, value-free binding for a PRIVATE_PRIMARY deploy manifest.
+
+    The receipt path itself is needed by the official release script, while
+    Queue authority receipts retain only its SHA-256 path binding.  This keeps
+    the one-time Queue authority tied to the exact three command-line
+    arguments without copying an operator path into durable evidence.
+    """
+
+    manifest_sha256: str
+    receipt_path: Path
+    receipt_sha256: str
+
+
+def bind_private_primary_deploy_attestation(
+    manifest: Path,
+    *,
+    manifest_sha256: str,
+    receipt_path: Path,
+    receipt_sha256: str,
+) -> PrivatePrimaryDeployAttestation:
+    """Validate and bind the exact PRIVATE_PRIMARY deploy evidence.
+
+    This function is intentionally usable by a higher-level Product
+    transaction before it creates Queue deploy authority.  No payload values
+    are read into an environment or returned.
+    """
+
+    if not re.fullmatch(r"[0-9a-f]{64}", manifest_sha256 or ""):
+        raise ProductionCutoverError("BLOCKED_PRIVATE_PRIMARY_ATTESTATION")
+    if not re.fullmatch(r"[0-9a-f]{64}", receipt_sha256 or ""):
+        raise ProductionCutoverError("BLOCKED_PRIVATE_PRIMARY_ATTESTATION")
+    try:
+        manifest_metadata = manifest.lstat()
+        receipt_metadata = receipt_path.lstat()
+    except OSError:
+        raise ProductionCutoverError("BLOCKED_PRIVATE_PRIMARY_ATTESTATION") from None
+    if (
+        not manifest.is_absolute()
+        or manifest.is_symlink()
+        or not stat.S_ISREG(manifest_metadata.st_mode)
+        or manifest_metadata.st_uid not in {0, os.geteuid()}
+        or stat.S_IMODE(manifest_metadata.st_mode) & 0o022
+        or manifest_metadata.st_nlink != 1
+        or _sha256(manifest) != manifest_sha256
+        or not receipt_path.is_absolute()
+        or receipt_path.is_symlink()
+        or not stat.S_ISREG(receipt_metadata.st_mode)
+        or receipt_metadata.st_uid not in {0, os.geteuid()}
+        or stat.S_IMODE(receipt_metadata.st_mode) != 0o600
+        or receipt_metadata.st_nlink != 1
+        or _sha256(receipt_path) != receipt_sha256
+    ):
+        raise ProductionCutoverError("BLOCKED_PRIVATE_PRIMARY_ATTESTATION")
+    return PrivatePrimaryDeployAttestation(
+        manifest_sha256=manifest_sha256,
+        receipt_path=receipt_path,
+        receipt_sha256=receipt_sha256,
+    )
+
+
+def _private_primary_attestation_binding(
+    manifest: Path,
+    attestation: PrivatePrimaryDeployAttestation | None,
+) -> dict[str, str] | None:
+    if attestation is None:
+        return None
+    verified = bind_private_primary_deploy_attestation(
+        manifest,
+        manifest_sha256=attestation.manifest_sha256,
+        receipt_path=attestation.receipt_path,
+        receipt_sha256=attestation.receipt_sha256,
+    )
+    return {
+        "manifest_sha256": verified.manifest_sha256,
+        "receipt_path_sha256": hashlib.sha256(
+            str(verified.receipt_path).encode("utf-8")
+        ).hexdigest(),
+        "receipt_sha256": verified.receipt_sha256,
+    }
+
+
 class ExclusiveRunLock:
     def __init__(self, artifact_dir: Path) -> None:
         self.directory = _ensure_secure_artifact_dir(artifact_dir)
@@ -128,11 +242,23 @@ class ExclusiveRunLock:
         self.nonce = secrets.token_hex(32)
         self.device: int | None = None
         self.inode: int | None = None
+        self.adopted_market_maintenance: dict[str, Any] | None = None
+        self.binding_nonce_sha256: str | None = None
 
-    def acquire(self, *, allow_recovery_journal: Path | None = None) -> None:
+    def _assert_phase_journals_terminal(
+        self,
+        *,
+        allow_recovery_journal: Path | None = None,
+        allow_interrupted_journal: Path | None = None,
+    ) -> None:
         allowed = (
             allow_recovery_journal.resolve(strict=False)
             if allow_recovery_journal is not None
+            else None
+        )
+        interrupted = (
+            allow_interrupted_journal.resolve(strict=False)
+            if allow_interrupted_journal is not None
             else None
         )
         for journal in self.directory.glob("production-queue-phase-*.json"):
@@ -146,13 +272,93 @@ class ExclusiveRunLock:
                 and state == "recovery_failed"
             ):
                 continue
-            if state not in {
-                "applied",
-                "redeployed",
-                "rolled_back",
-                "failed_recovered",
-            }:
+            if (
+                interrupted is not None
+                and journal.resolve(strict=False) == interrupted
+                and state not in PHASE_TERMINAL_STATES
+            ):
+                continue
+            if state not in PHASE_TERMINAL_STATES:
                 raise ProductionCutoverError("BLOCKED_PENDING_PHASE_JOURNAL")
+
+    def _remove_proven_stale_owner(self) -> bool:
+        """Remove only a lock whose exact PID/start identity no longer exists."""
+
+        if not self.path.exists():
+            return False
+        if self.path.is_symlink():
+            raise ProductionCutoverError("BLOCKED_CONCURRENT_OR_INTERRUPTED_CUTOVER")
+        descriptor = os.open(
+            self.path,
+            os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+        )
+        try:
+            metadata = os.fstat(descriptor)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise ProductionCutoverError(
+                    "BLOCKED_CONCURRENT_OR_INTERRUPTED_CUTOVER"
+                ) from None
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            try:
+                payload = json.loads(os.read(descriptor, 8192).decode("utf-8"))
+            except (UnicodeDecodeError, ValueError):
+                raise ProductionCutoverError(
+                    "BLOCKED_STALE_LOCK_IDENTITY_UNPROVEN"
+                ) from None
+            pid = payload.get("owner_pid")
+            boot_id = str(payload.get("owner_boot_id") or "")
+            start_ticks = str(payload.get("owner_start_ticks") or "")
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != os.geteuid()
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+                or metadata.st_nlink != 1
+                or isinstance(pid, bool)
+                or not isinstance(pid, int)
+                or pid < 1
+                or not boot_id
+                or not start_ticks.isdigit()
+                or payload.get("device") != metadata.st_dev
+                or payload.get("inode") != metadata.st_ino
+            ):
+                raise ProductionCutoverError("BLOCKED_STALE_LOCK_IDENTITY_UNPROVEN")
+            if _process_start_identity(pid) == (boot_id, start_ticks):
+                raise ProductionCutoverError(
+                    "BLOCKED_CONCURRENT_OR_INTERRUPTED_CUTOVER"
+                )
+            path_metadata = self.path.lstat()
+            if (
+                path_metadata.st_dev != metadata.st_dev
+                or path_metadata.st_ino != metadata.st_ino
+            ):
+                raise ProductionCutoverError("BLOCKED_STALE_LOCK_IDENTITY_UNPROVEN")
+            self.path.unlink()
+            directory_fd = os.open(self.directory, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+            return True
+        finally:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
+
+    def acquire(
+        self,
+        *,
+        allow_recovery_journal: Path | None = None,
+        allow_interrupted_journal: Path | None = None,
+    ) -> None:
+        self._remove_proven_stale_owner()
+        _recover_terminal_receipt_journals(self.directory)
+        self._assert_phase_journals_terminal(
+            allow_recovery_journal=allow_recovery_journal,
+            allow_interrupted_journal=allow_interrupted_journal,
+        )
         try:
             descriptor = os.open(
                 self.path,
@@ -175,6 +381,16 @@ class ExclusiveRunLock:
                 "device": metadata.st_dev,
                 "inode": metadata.st_ino,
             }
+            identity = _process_start_identity(os.getpid())
+            if identity is None:
+                raise ProductionCutoverError("BLOCKED_RUN_LOCK_PROCESS_IDENTITY")
+            payload.update(
+                {
+                    "owner_pid": os.getpid(),
+                    "owner_boot_id": identity[0],
+                    "owner_start_ticks": identity[1],
+                }
+            )
             os.write(
                 descriptor,
                 (json.dumps(payload, sort_keys=True) + "\n").encode("utf-8"),
@@ -194,6 +410,157 @@ class ExclusiveRunLock:
         self.inode = metadata.st_ino
         self.held = True
 
+    def adopt_market_pipeline_maintenance(
+        self,
+        *,
+        journal: Path,
+        expected_journal_sha256: str,
+        expected_primary_verification_sha256: str,
+        release_sha: str,
+        allow_recovery_journal: Path | None = None,
+        allow_interrupted_journal: Path | None = None,
+    ) -> None:
+        """Atomically adopt the persistent PRIVATE_PRIMARY maintenance lock.
+
+        The blue/green transition intentionally leaves the ordinary production
+        operation-lock inode in place between commands.  Final Product
+        promotion adopts that same inode, so there is no unlock/relock race in
+        which another official deploy could start.
+        """
+
+        self._assert_phase_journals_terminal(
+            allow_recovery_journal=allow_recovery_journal,
+            allow_interrupted_journal=allow_interrupted_journal,
+        )
+        try:
+            journal_info = journal.lstat()
+            journal_payload = json.loads(journal.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ProductionCutoverError("BLOCKED_MARKET_MAINTENANCE_JOURNAL") from exc
+        if (
+            not re.fullmatch(r"[0-9a-f]{64}", expected_journal_sha256)
+            or _sha256(journal) != expected_journal_sha256
+            or journal.is_symlink()
+            or not stat.S_ISREG(journal_info.st_mode)
+            or journal_info.st_uid != os.geteuid()
+            or stat.S_IMODE(journal_info.st_mode) != 0o600
+            or journal_info.st_nlink != 1
+            or journal_payload.get("schema")
+            != "production_legacy_market_collector_handoff/1.1"
+            or journal_payload.get("host_role") != "bot"
+            or journal_payload.get("status") != "PRIMARY_COMMITTED"
+            or journal_payload.get("release_sha") != release_sha
+            or journal_payload.get("secrets_disclosed") is not False
+        ):
+            raise ProductionCutoverError("BLOCKED_MARKET_MAINTENANCE_JOURNAL")
+        maintenance = journal_payload.get("maintenance_lock")
+        if not isinstance(maintenance, dict):
+            raise ProductionCutoverError("BLOCKED_MARKET_MAINTENANCE_JOURNAL")
+        try:
+            descriptor = os.open(
+                self.path,
+                os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+            )
+        except OSError as exc:
+            raise ProductionCutoverError("BLOCKED_MARKET_MAINTENANCE_LOCK") from exc
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            metadata = os.fstat(descriptor)
+            lock_payload = json.loads(os.read(descriptor, 8192).decode("utf-8"))
+            if (
+                self.path.is_symlink()
+                or not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != os.geteuid()
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+                or metadata.st_nlink != 1
+                or lock_payload != maintenance
+                or maintenance.get("schema") != "market_pipeline_maintenance_lock/1.0"
+                or maintenance.get("environment") != "production"
+                or maintenance.get("release_sha") != release_sha
+                or not re.fullmatch(
+                    r"[0-9a-f]{64}", str(maintenance.get("nonce_sha256") or "")
+                )
+                or maintenance.get("journal_path_sha256")
+                != hashlib.sha256(str(journal).encode("utf-8")).hexdigest()
+                or maintenance.get("device") != metadata.st_dev
+                or maintenance.get("inode") != metadata.st_ino
+            ):
+                raise ProductionCutoverError("BLOCKED_MARKET_MAINTENANCE_LOCK")
+            try:
+                market_handoff.validate_committed_handoff(
+                    journal=journal,
+                    expected_journal_sha256=expected_journal_sha256,
+                    release_sha=release_sha,
+                    expected_primary_verification_sha256=(
+                        expected_primary_verification_sha256
+                    ),
+                    host_role="bot",
+                    expected_maintenance_lock=maintenance,
+                )
+            except market_handoff.CollectorHandoffError as exc:
+                raise ProductionCutoverError(
+                    "BLOCKED_MARKET_MAINTENANCE_JOURNAL"
+                ) from exc
+        except BaseException:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+            raise
+        self.adopted_market_maintenance = dict(maintenance)
+        self.binding_nonce_sha256 = str(maintenance["nonce_sha256"])
+        self.descriptor = descriptor
+        self.device = metadata.st_dev
+        self.inode = metadata.st_ino
+        self.held = True
+
+    def restore_adopted_market_pipeline_maintenance(self) -> None:
+        """Return an unsuccessful promotion to the durable maintenance state.
+
+        PRIVATE_PRIMARY capture ownership is already committed before Product
+        promotion starts.  A failed or incomplete Product transaction must
+        therefore leave the same operation-lock inode adoptable for a retry;
+        deleting it would create an unguarded, non-recoverable state.
+        """
+
+        original = self.adopted_market_maintenance
+        if (
+            not self.held
+            or self.descriptor is None
+            or original is None
+        ):
+            raise ProductionCutoverError("BLOCKED_MARKET_MAINTENANCE_RESTORE")
+        try:
+            metadata = os.fstat(self.descriptor)
+            path_metadata = self.path.lstat()
+            os.lseek(self.descriptor, 0, os.SEEK_SET)
+            current = json.loads(os.read(self.descriptor, 8192).decode("utf-8"))
+            expected = self.binding()
+            if (
+                self.path.is_symlink()
+                or not stat.S_ISREG(metadata.st_mode)
+                or not stat.S_ISREG(path_metadata.st_mode)
+                or metadata.st_uid != os.geteuid()
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+                or metadata.st_nlink != 1
+                or metadata.st_dev != expected["device"]
+                or metadata.st_ino != expected["inode"]
+                or path_metadata.st_dev != metadata.st_dev
+                or path_metadata.st_ino != metadata.st_ino
+                or current != original
+                or current.get("nonce_sha256") != expected["nonce_sha256"]
+            ):
+                raise ProductionCutoverError(
+                    "BLOCKED_MARKET_MAINTENANCE_RESTORE"
+                )
+        finally:
+            if self.descriptor is not None:
+                fcntl.flock(self.descriptor, fcntl.LOCK_UN)
+                os.close(self.descriptor)
+                self.descriptor = None
+            self.held = False
+            self.adopted_market_maintenance = None
+            self.binding_nonce_sha256 = None
+
     def binding(self) -> dict[str, Any]:
         if not self.held or self.descriptor is None:
             raise ProductionCutoverError("BLOCKED_QUEUE_DEPLOY_AUTHORITY")
@@ -201,7 +568,8 @@ class ExclusiveRunLock:
         if metadata.st_dev != self.device or metadata.st_ino != self.inode:
             raise ProductionCutoverError("BLOCKED_QUEUE_DEPLOY_AUTHORITY")
         return {
-            "nonce_sha256": hashlib.sha256(self.nonce.encode("utf-8")).hexdigest(),
+            "nonce_sha256": self.binding_nonce_sha256
+            or hashlib.sha256(self.nonce.encode("utf-8")).hexdigest(),
             "device": self.device,
             "inode": self.inode,
         }
@@ -240,6 +608,8 @@ class ExclusiveRunLock:
                     os.close(self.descriptor)
                     self.descriptor = None
                 self.held = False
+                self.adopted_market_maintenance = None
+                self.binding_nonce_sha256 = None
 
 
 class PhaseJournal:
@@ -251,6 +621,7 @@ class PhaseJournal:
         source_sha256: str,
         git_head: str,
         run_lock: ExclusiveRunLock,
+        recovery_source_backup: SecureSourceBackup | None = None,
     ) -> None:
         lock_binding = run_lock.binding()
         self.payload: dict[str, Any] = {
@@ -258,6 +629,7 @@ class PhaseJournal:
             "environment": "production",
             "command": command,
             "status": "prepared",
+            "state_history": [{"status": "prepared", "at": _utc_now()}],
             "created_at": _utc_now(),
             "updated_at": _utc_now(),
             "source_sha256": source_sha256,
@@ -265,6 +637,18 @@ class PhaseJournal:
             "run_lock": lock_binding,
             "secrets_disclosed": False,
         }
+        if recovery_source_backup is not None:
+            self.payload.update(
+                {
+                    "recovery_source_backup_file": recovery_source_backup.path.name,
+                    "recovery_source_backup_sha256": recovery_source_backup.sha256,
+                    "recovery_source_backup_path_sha256": hashlib.sha256(
+                        str(
+                            recovery_source_backup.path.resolve(strict=False)
+                        ).encode("utf-8")
+                    ).hexdigest(),
+                }
+            )
         self.path, _digest = _write_secure_json(
             artifact_dir, "production-queue-phase", self.payload
         )
@@ -273,12 +657,290 @@ class PhaseJournal:
         self.payload.update(facts)
         self.payload["status"] = status
         self.payload["updated_at"] = _utc_now()
+        history = self.payload.setdefault("state_history", [])
+        if not isinstance(history, list):
+            raise ProductionCutoverError("BLOCKED_PENDING_PHASE_JOURNAL")
+        history.append({"status": status, "at": self.payload["updated_at"]})
         rendered = (
             json.dumps(self.payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
         ).encode("utf-8")
         _atomic_write(self.path, rendered)
         if scan_paths([self.path]).get("status") != "clean":
             raise ProductionCutoverError("PHASE_JOURNAL_REDACTION_FAILED")
+
+    @classmethod
+    def adopt(cls, path: Path, *, run_lock: ExclusiveRunLock) -> "PhaseJournal":
+        journal = cls.__new__(cls)
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ProductionCutoverError("BLOCKED_PENDING_PHASE_JOURNAL") from exc
+        if (
+            path.is_symlink()
+            or not isinstance(payload, dict)
+            or payload.get("environment") != "production"
+            or payload.get("status") in PHASE_TERMINAL_STATES
+            or payload.get("secrets_disclosed") is not False
+        ):
+            raise ProductionCutoverError("BLOCKED_PENDING_PHASE_JOURNAL")
+        interrupted_bindings = payload.setdefault("interrupted_run_locks", [])
+        if not isinstance(interrupted_bindings, list):
+            raise ProductionCutoverError("BLOCKED_PENDING_PHASE_JOURNAL")
+        interrupted_bindings.append(payload.get("run_lock"))
+        payload["interrupted_run_lock"] = payload.get("run_lock")
+        payload["run_lock"] = run_lock.binding()
+        payload.setdefault(
+            "state_history",
+            [{"status": str(payload.get("status") or "unknown"), "at": _utc_now()}],
+        )
+        journal.path = path
+        journal.payload = payload
+        journal.update("interrupted_recovery_acquired")
+        return journal
+
+
+def _render_receipt(receipt: Mapping[str, Any]) -> bytes:
+    return (
+        json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+
+
+def _commit_terminal_receipt(
+    journal: PhaseJournal,
+    artifact_dir: Path,
+    *,
+    prefix: str,
+    receipt: Mapping[str, Any],
+    terminal_status: str,
+    **facts: Any,
+) -> tuple[Path, str]:
+    """WAL-bind a terminal receipt before publishing the receipt file."""
+
+    if terminal_status not in PHASE_RECEIPT_STATES:
+        raise ProductionCutoverError("PHASE_JOURNAL_TERMINAL_STATUS_INVALID")
+    secure = _ensure_secure_artifact_dir(artifact_dir)
+    path = secure / f"{prefix}-{secrets.token_hex(16)}.json"
+    body = _render_receipt(receipt)
+    digest = hashlib.sha256(body).hexdigest()
+    journal.update(
+        "terminal_receipt_pending",
+        terminal_status=terminal_status,
+        pending_receipt_file=path.name,
+        pending_receipt_sha256=digest,
+        pending_receipt_payload=dict(receipt),
+        **facts,
+    )
+    _atomic_write(path, body)
+    if scan_paths([path]).get("status") != "clean":
+        path.unlink(missing_ok=True)
+        raise ProductionCutoverError("RECEIPT_REDACTION_FAILED")
+    journal.payload.pop("pending_receipt_payload", None)
+    journal.payload.pop("terminal_status", None)
+    journal.payload.pop("pending_receipt_file", None)
+    journal.payload.pop("pending_receipt_sha256", None)
+    journal.update(
+        terminal_status,
+        receipt_file=path.name,
+        receipt_sha256=digest,
+        **facts,
+    )
+    return path, digest
+
+
+def _recover_terminal_receipt_journals(artifact_dir: Path) -> None:
+    """Finish a terminal receipt transaction left between its two fsyncs."""
+
+    secure = _ensure_secure_artifact_dir(artifact_dir)
+    for path in secure.glob("production-queue-phase-*.json"):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            raise ProductionCutoverError("BLOCKED_PENDING_PHASE_JOURNAL") from None
+        if payload.get("status") != "terminal_receipt_pending":
+            continue
+        terminal_status = str(payload.get("terminal_status") or "")
+        receipt_name = str(payload.get("pending_receipt_file") or "")
+        receipt_digest = str(payload.get("pending_receipt_sha256") or "")
+        receipt_payload = payload.get("pending_receipt_payload")
+        if (
+            terminal_status not in PHASE_RECEIPT_STATES
+            or Path(receipt_name).name != receipt_name
+            or not re.fullmatch(r"[0-9a-f]{64}", receipt_digest)
+            or not isinstance(receipt_payload, dict)
+        ):
+            raise ProductionCutoverError("BLOCKED_PENDING_PHASE_JOURNAL")
+        receipt_path = secure / receipt_name
+        body = _render_receipt(receipt_payload)
+        if hashlib.sha256(body).hexdigest() != receipt_digest:
+            raise ProductionCutoverError("BLOCKED_PENDING_PHASE_JOURNAL")
+        if receipt_path.exists():
+            if receipt_path.is_symlink() or _sha256(receipt_path) != receipt_digest:
+                raise ProductionCutoverError("BLOCKED_PENDING_PHASE_JOURNAL")
+        else:
+            _atomic_write(receipt_path, body)
+        if scan_paths([receipt_path]).get("status") != "clean":
+            raise ProductionCutoverError("RECEIPT_REDACTION_FAILED")
+        payload.pop("pending_receipt_payload", None)
+        payload.pop("terminal_status", None)
+        payload.pop("pending_receipt_file", None)
+        payload.pop("pending_receipt_sha256", None)
+        payload["status"] = terminal_status
+        payload["receipt_file"] = receipt_name
+        payload["receipt_sha256"] = receipt_digest
+        payload["updated_at"] = _utc_now()
+        history = payload.setdefault("state_history", [])
+        if not isinstance(history, list):
+            raise ProductionCutoverError("BLOCKED_PENDING_PHASE_JOURNAL")
+        history.append({"status": terminal_status, "at": payload["updated_at"]})
+        _atomic_write(path, _render_receipt(payload))
+        if scan_paths([path]).get("status") != "clean":
+            raise ProductionCutoverError("PHASE_JOURNAL_REDACTION_FAILED")
+
+
+def _pending_phase_journals(
+    artifact_dir: Path, *, command: str
+) -> list[tuple[Path, dict[str, Any]]]:
+    """Return the one exact interrupted transaction or fail closed."""
+
+    secure = _ensure_secure_artifact_dir(artifact_dir)
+    pending: list[tuple[Path, dict[str, Any]]] = []
+    for path in sorted(secure.glob("production-queue-phase-*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            metadata = path.lstat()
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            raise ProductionCutoverError("BLOCKED_PENDING_PHASE_JOURNAL") from None
+        if payload.get("status") in PHASE_TERMINAL_STATES:
+            continue
+        if (
+            path.is_symlink()
+            or not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_nlink != 1
+            or payload.get("schema_version") != 1
+            or payload.get("environment") != "production"
+            or payload.get("command") != command
+            or payload.get("secrets_disclosed") is not False
+        ):
+            raise ProductionCutoverError("BLOCKED_PENDING_PHASE_JOURNAL")
+        pending.append((path, payload))
+    if len(pending) > 1:
+        raise ProductionCutoverError("BLOCKED_PENDING_PHASE_JOURNAL")
+    return pending
+
+
+def _create_recovery_source_snapshot(
+    source: Path, secure_backup_dir: Path, *, expected_sha256: str
+) -> SecureSourceBackup:
+    """Persist the pre-command source required by kill recovery."""
+
+    if secure_backup_dir.is_symlink():
+        raise ProductionCutoverError("BLOCKED_SECURE_BACKUP_DIRECTORY")
+    directory = secure_backup_dir.resolve(strict=False)
+    if (
+        not directory.is_dir()
+        or directory.stat().st_uid != os.geteuid()
+        or stat.S_IMODE(directory.stat().st_mode) & 0o077
+        or directory == REPO_ROOT
+        or REPO_ROOT in directory.parents
+    ):
+        raise ProductionCutoverError("BLOCKED_SECURE_BACKUP_DIRECTORY")
+    original = source.read_bytes()
+    digest = hashlib.sha256(original).hexdigest()
+    if digest != expected_sha256:
+        raise ProductionCutoverError("BLOCKED_SOURCE_DRIFT")
+    descriptor, raw_path = tempfile.mkstemp(
+        prefix="telegram-queue-recovery-source-", suffix=".bak", dir=directory
+    )
+    path = Path(raw_path)
+    try:
+        os.fchmod(descriptor, 0o600)
+        os.write(descriptor, original)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    directory_fd = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+    return SecureSourceBackup(path=path, sha256=digest, original=original)
+
+
+def _load_recovery_source_snapshot(
+    payload: Mapping[str, Any], secure_backup_dir: Path
+) -> SecureSourceBackup:
+    directory = secure_backup_dir.resolve(strict=False)
+    name = str(payload.get("recovery_source_backup_file") or "")
+    digest = str(payload.get("recovery_source_backup_sha256") or "")
+    path_binding = str(payload.get("recovery_source_backup_path_sha256") or "")
+    if (
+        Path(name).name != name
+        or not re.fullmatch(r"[0-9a-f]{64}", digest)
+        or not re.fullmatch(r"[0-9a-f]{64}", path_binding)
+    ):
+        raise ProductionCutoverError("BLOCKED_INTERRUPTED_RECOVERY_SOURCE")
+    path = directory / name
+    try:
+        metadata = path.lstat()
+        original = path.read_bytes()
+    except OSError:
+        raise ProductionCutoverError("BLOCKED_INTERRUPTED_RECOVERY_SOURCE") from None
+    if (
+        secure_backup_dir.is_symlink()
+        or not directory.is_dir()
+        or directory.stat().st_uid != os.geteuid()
+        or stat.S_IMODE(directory.stat().st_mode) & 0o077
+        or directory == REPO_ROOT
+        or REPO_ROOT in directory.parents
+        or path.is_symlink()
+        or not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != os.geteuid()
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or metadata.st_nlink != 1
+        or hashlib.sha256(original).hexdigest() != digest
+        or hashlib.sha256(str(path.resolve(strict=False)).encode("utf-8")).hexdigest()
+        != path_binding
+    ):
+        raise ProductionCutoverError("BLOCKED_INTERRUPTED_RECOVERY_SOURCE")
+    return SecureSourceBackup(path=path, sha256=digest, original=original)
+
+
+def _update_source_from_recovery_snapshot(
+    source: Path,
+    backup: SecureSourceBackup,
+    updates: Mapping[str, str],
+    *,
+    expected_source_sha256: str,
+) -> dict[str, Any]:
+    if (
+        backup.sha256 != expected_source_sha256
+        or _sha256(backup.path) != backup.sha256
+        or backup.path.read_bytes() != backup.original
+        or _sha256(source) != expected_source_sha256
+    ):
+        raise ProductionCutoverError("BLOCKED_SOURCE_BACKUP_DIGEST")
+    updated = upsert_env_lines(
+        backup.original.decode("utf-8"), updates
+    ).encode("utf-8")
+    try:
+        _atomic_write(source, updated)
+    except BaseException:
+        _atomic_write(source, backup.original)
+        raise
+    return {
+        "status": "updated_atomically",
+        "backup_sha256": backup.sha256,
+        "source_before_sha256": expected_source_sha256,
+        "source_after_sha256": hashlib.sha256(updated).hexdigest(),
+        "backup_file": backup.path.name,
+        "backup_path_binding_sha256": hashlib.sha256(
+            str(backup.path.resolve(strict=False)).encode("utf-8")
+        ).hexdigest(),
+        "updated_keys": sorted(updates),
+        "secret_values_disclosed": False,
+    }
 
 
 class ImmutableSourceLock:
@@ -298,10 +960,20 @@ class ImmutableSourceLock:
         )
         try:
             metadata = os.fstat(descriptor)
+            try:
+                path_metadata = self.path.lstat()
+            except OSError as exc:
+                raise ProductionCutoverError(
+                    "BLOCKED_IMMUTABLE_SOURCE_LOCK"
+                ) from exc
             if (
-                metadata.st_uid != os.geteuid()
+                not stat.S_ISREG(metadata.st_mode)
+                or not stat.S_ISREG(path_metadata.st_mode)
+                or metadata.st_uid != os.geteuid()
                 or stat.S_IMODE(metadata.st_mode) != 0o600
                 or metadata.st_nlink != 1
+                or path_metadata.st_dev != metadata.st_dev
+                or path_metadata.st_ino != metadata.st_ino
             ):
                 raise ProductionCutoverError("BLOCKED_IMMUTABLE_SOURCE_LOCK")
             try:
@@ -458,6 +1130,7 @@ def _run_contained_process(
     cwd: Path,
     timeout: int | float,
     env: Mapping[str, str] | None = None,
+    pass_fds: tuple[int, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
     process = subprocess.Popen(
         args,
@@ -467,6 +1140,7 @@ def _run_contained_process(
         stderr=subprocess.PIPE,
         env=None if env is None else dict(env),
         start_new_session=True,
+        pass_fds=pass_fds,
     )
     process_group_id = process.pid
     try:
@@ -792,9 +1466,67 @@ def executor_inventory_from_observation(
 class ProductionOperations:
     """Production mutations used only after every static/read-only gate passes."""
 
-    def __init__(self, manifest: Path) -> None:
+    def __init__(self, manifest: Path, *, release_root: Path | None = None) -> None:
         self.manifest = manifest
+        explicit_release_root = release_root is not None
+        candidate_root = release_root or REPO_ROOT
+        try:
+            resolved_root = candidate_root.resolve(strict=True)
+            root_info = candidate_root.lstat()
+        except OSError as exc:
+            raise ProductionCutoverError(
+                "BLOCKED_PRODUCTION_RELEASE_ROOT"
+            ) from exc
+        if (
+            not candidate_root.is_absolute()
+            or candidate_root.is_symlink()
+            or resolved_root != candidate_root
+            or not stat.S_ISDIR(root_info.st_mode)
+        ):
+            raise ProductionCutoverError("BLOCKED_PRODUCTION_RELEASE_ROOT")
+        self.release_root = candidate_root
+        self._control_release_mode = (
+            explicit_release_root and REPO_ROOT != self.release_root
+        )
         self.manifest_values = parse_env_file(manifest)
+        if explicit_release_root:
+            project_text = str(
+                self.manifest_values.get("LOCAL_PROJECT_DIR") or ""
+            ).strip()
+            try:
+                project_root = Path(project_text)
+                project_resolved = project_root.resolve(strict=True)
+                project_info = project_root.lstat()
+            except OSError as exc:
+                raise ProductionCutoverError(
+                    "BLOCKED_PRODUCTION_RELEASE_ROOT"
+                ) from exc
+            if (
+                not project_root.is_absolute()
+                or project_root.is_symlink()
+                or project_resolved != self.release_root
+                or not stat.S_ISDIR(project_info.st_mode)
+            ):
+                raise ProductionCutoverError(
+                    "BLOCKED_PRODUCTION_RELEASE_ROOT"
+                )
+        for required_path in (
+            self.release_root / "scripts/production_deploy_online.sh",
+            REPO_ROOT / "scripts/production_deploy_online.sh",
+            FENCED_DEPLOY_SUPERVISOR,
+        ):
+            try:
+                required_info = required_path.lstat()
+            except OSError as exc:
+                raise ProductionCutoverError(
+                    "BLOCKED_PRODUCTION_RELEASE_ROOT"
+                ) from exc
+            if required_path.is_symlink() or not stat.S_ISREG(
+                required_info.st_mode
+            ):
+                raise ProductionCutoverError(
+                    "BLOCKED_PRODUCTION_RELEASE_ROOT"
+                )
         self.settings = resolve_deploy_settings(
             manifest_path=str(manifest), environ={}
         )
@@ -809,13 +1541,284 @@ class ProductionOperations:
         if not self.ssh_key.is_file() or stat.S_IMODE(self.ssh_key.stat().st_mode) & 0o077:
             raise ProductionCutoverError("BLOCKED_PRODUCTION_KEY_ONLY_SSH")
 
-    def _run(self, args: list[str], *, timeout: int = 120, env: Mapping[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    def _run(
+        self,
+        args: list[str],
+        *,
+        timeout: int = 120,
+        env: Mapping[str, str] | None = None,
+        pass_fds: tuple[int, ...] = (),
+    ) -> subprocess.CompletedProcess[str]:
         return _run_contained_process(
             args,
-            cwd=REPO_ROOT,
+            cwd=self.release_root,
             timeout=timeout,
             env=None if env is None else dict(env),
+            pass_fds=pass_fds,
         )
+
+    def _open_release_deploy_script(self) -> tuple[int, str]:
+        """Open the approved checkout script and bind it to the control copy."""
+
+        path = self.release_root / "scripts/production_deploy_online.sh"
+        control_copy = REPO_ROOT / "scripts/production_deploy_online.sh"
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            descriptor = os.open(path, flags)
+        except OSError as exc:
+            raise ProductionCutoverError(
+                "BLOCKED_PRODUCTION_DEPLOY_SCRIPT"
+            ) from exc
+        try:
+            before = os.fstat(descriptor)
+            path_info = path.lstat()
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or before.st_uid != os.geteuid()
+                or before.st_nlink != 1
+                or (path_info.st_dev, path_info.st_ino)
+                != (before.st_dev, before.st_ino)
+            ):
+                raise ProductionCutoverError(
+                    "BLOCKED_PRODUCTION_DEPLOY_SCRIPT"
+                )
+            hasher = hashlib.sha256()
+            offset = 0
+            while True:
+                chunk = os.pread(descriptor, 1024 * 1024, offset)
+                if not chunk:
+                    break
+                hasher.update(chunk)
+                offset += len(chunk)
+            after = os.fstat(descriptor)
+            if (
+                (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+                != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+                or offset != before.st_size
+                or _sha256(control_copy) != hasher.hexdigest()
+            ):
+                raise ProductionCutoverError(
+                    "BLOCKED_PRODUCTION_DEPLOY_SCRIPT"
+                )
+            return descriptor, hasher.hexdigest()
+        except BaseException:
+            os.close(descriptor)
+            raise
+
+    def _open_control_supervisor(self) -> tuple[int, str, Path]:
+        """Hold a manifest- or exact-Git-bound supervisor through execution."""
+
+        relative = "scripts/run_fenced_production_deploy.py"
+        supervisor_path = FENCED_DEPLOY_SUPERVISOR
+        expected_digest: str | None = None
+        control_release_mode = bool(
+            getattr(self, "_control_release_mode", False)
+        )
+        if control_release_mode and (
+            not CONTROL_PAYLOAD_MANIFEST.exists()
+            or CONTROL_PAYLOAD_MANIFEST.is_symlink()
+        ):
+            raise ProductionCutoverError(
+                "BLOCKED_PRODUCTION_DEPLOY_SUPERVISOR"
+            )
+        if control_release_mode:
+            try:
+                manifest_descriptor = os.open(
+                    CONTROL_PAYLOAD_MANIFEST,
+                    os.O_RDONLY
+                    | getattr(os, "O_CLOEXEC", 0)
+                    | getattr(os, "O_NOFOLLOW", 0),
+                )
+            except OSError as exc:
+                raise ProductionCutoverError(
+                    "BLOCKED_PRODUCTION_DEPLOY_SUPERVISOR"
+                ) from exc
+            try:
+                manifest_before = os.fstat(manifest_descriptor)
+                if (
+                    not stat.S_ISREG(manifest_before.st_mode)
+                    or manifest_before.st_uid != os.geteuid()
+                    or manifest_before.st_nlink != 1
+                    or bool(manifest_before.st_mode & 0o022)
+                    or not 0 < manifest_before.st_size <= 2_000_000
+                ):
+                    raise ProductionCutoverError(
+                        "BLOCKED_PRODUCTION_DEPLOY_SUPERVISOR"
+                    )
+                manifest_payload = os.pread(
+                    manifest_descriptor, manifest_before.st_size + 1, 0
+                )
+                manifest_after = os.fstat(manifest_descriptor)
+                if (
+                    len(manifest_payload) != manifest_before.st_size
+                    or (
+                        manifest_before.st_dev,
+                        manifest_before.st_ino,
+                        manifest_before.st_size,
+                        manifest_before.st_mtime_ns,
+                        manifest_before.st_ctime_ns,
+                    )
+                    != (
+                        manifest_after.st_dev,
+                        manifest_after.st_ino,
+                        manifest_after.st_size,
+                        manifest_after.st_mtime_ns,
+                        manifest_after.st_ctime_ns,
+                    )
+                ):
+                    raise ProductionCutoverError(
+                        "BLOCKED_PRODUCTION_DEPLOY_SUPERVISOR"
+                    )
+                for raw_line in manifest_payload.decode("utf-8").splitlines():
+                    digest, separator, name = raw_line.partition("  ./")
+                    if (
+                        not separator
+                        or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                        or name == relative and expected_digest is not None
+                    ):
+                        raise ProductionCutoverError(
+                            "BLOCKED_PRODUCTION_DEPLOY_SUPERVISOR"
+                        )
+                    if name == relative:
+                        expected_digest = digest
+            except (UnicodeDecodeError, ValueError) as exc:
+                raise ProductionCutoverError(
+                    "BLOCKED_PRODUCTION_DEPLOY_SUPERVISOR"
+                ) from exc
+            finally:
+                os.close(manifest_descriptor)
+        else:
+            # Standalone Queue-v1 recovery still runs from an approved clean
+            # checkout.  Bind to the exact Git object instead of requiring a
+            # control-release-only manifest that is absent in that mode.
+            supervisor_path = self.release_root / relative
+            git_environment = {
+                "GIT_CONFIG_GLOBAL": "/dev/null",
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "HOME": os.environ.get("HOME", "/root"),
+                "LANG": "C",
+                "LC_ALL": "C",
+                "PATH": "/usr/bin:/bin",
+            }
+            try:
+                head = subprocess.run(
+                    ["/usr/bin/git", "-C", str(self.release_root), "rev-parse", "HEAD"],
+                    check=True,
+                    capture_output=True,
+                    env=git_environment,
+                ).stdout.strip()
+                approved = subprocess.run(
+                    [
+                        "/usr/bin/git", "-C", str(self.release_root), "rev-parse",
+                        "refs/remotes/origin/main",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    env=git_environment,
+                ).stdout.strip()
+                branch = subprocess.run(
+                    [
+                        "/usr/bin/git", "-C", str(self.release_root),
+                        "symbolic-ref", "--short", "HEAD",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    env=git_environment,
+                ).stdout.strip()
+                porcelain = subprocess.run(
+                    [
+                        "/usr/bin/git", "-C", str(self.release_root), "status",
+                        "--porcelain=v1", "--untracked-files=all",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    env=git_environment,
+                ).stdout
+                git_payload = subprocess.run(
+                    [
+                        "/usr/bin/git", "-C", str(self.release_root), "show",
+                        f"HEAD:{relative}",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    env=git_environment,
+                ).stdout
+            except (OSError, subprocess.CalledProcessError) as exc:
+                raise ProductionCutoverError(
+                    "BLOCKED_PRODUCTION_DEPLOY_SUPERVISOR"
+                ) from exc
+            if (
+                head != approved
+                or branch != b"main"
+                or porcelain
+                or not re.fullmatch(rb"[0-9a-f]{40}", head)
+            ):
+                raise ProductionCutoverError(
+                    "BLOCKED_PRODUCTION_DEPLOY_SUPERVISOR"
+                )
+            expected_digest = hashlib.sha256(git_payload).hexdigest()
+        if expected_digest is None:
+            raise ProductionCutoverError(
+                "BLOCKED_PRODUCTION_DEPLOY_SUPERVISOR"
+            )
+
+        try:
+            descriptor = os.open(
+                supervisor_path,
+                os.O_RDONLY
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+            )
+        except OSError as exc:
+            raise ProductionCutoverError(
+                "BLOCKED_PRODUCTION_DEPLOY_SUPERVISOR"
+            ) from exc
+        try:
+            before = os.fstat(descriptor)
+            path_info = supervisor_path.lstat()
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or before.st_uid != os.geteuid()
+                or before.st_nlink != 1
+                or bool(before.st_mode & 0o022)
+                or (path_info.st_dev, path_info.st_ino)
+                != (before.st_dev, before.st_ino)
+            ):
+                raise ProductionCutoverError(
+                    "BLOCKED_PRODUCTION_DEPLOY_SUPERVISOR"
+                )
+            payload = os.pread(descriptor, before.st_size + 1, 0)
+            after = os.fstat(descriptor)
+            observed_digest = hashlib.sha256(payload).hexdigest()
+            if (
+                len(payload) != before.st_size
+                or observed_digest != expected_digest
+                or (
+                    before.st_dev,
+                    before.st_ino,
+                    before.st_size,
+                    before.st_mtime_ns,
+                    before.st_ctime_ns,
+                )
+                != (
+                    after.st_dev,
+                    after.st_ino,
+                    after.st_size,
+                    after.st_mtime_ns,
+                    after.st_ctime_ns,
+                )
+            ):
+                raise ProductionCutoverError(
+                    "BLOCKED_PRODUCTION_DEPLOY_SUPERVISOR"
+                )
+            return descriptor, observed_digest, supervisor_path
+        except BaseException:
+            os.close(descriptor)
+            raise
 
     def _docker(self, role: str, args: list[str], *, timeout: int = 120) -> subprocess.CompletedProcess[str]:
         if role == "foreign":
@@ -1007,7 +2010,7 @@ class ProductionOperations:
 
     def _compose_service_env(self, role: str, service: str) -> dict[str, str]:
         project_dir = (
-            str(self.manifest_values.get("LOCAL_PROJECT_DIR") or REPO_ROOT)
+            str(self.manifest_values.get("LOCAL_PROJECT_DIR") or self.release_root)
             if role == "foreign"
             else str(self.manifest_values.get("IRAN_PROJECT_DIR") or "")
         )
@@ -1301,10 +2304,252 @@ class ProductionOperations:
                 raise ProductionCutoverError("QUEUE_DRAIN_TIMEOUT")
             time.sleep(min(max(poll_seconds, 0.1), 5.0))
 
+    def private_primary_legacy_inputs_off(self) -> dict[str, object]:
+        """Revalidate that no legacy Product feed can restart after deploy."""
+
+        timers = (
+            "coin-group-event-telegram.timer",
+            "trading-bot-private-gold-collector.timer",
+            "coin-intelligence-production-snapshot-relay.timer",
+        )
+        services = (
+            "coin-group-event-telegram.service",
+            "trading-bot-private-gold-collector.service",
+            "coin-intelligence-production-snapshot-relay.service",
+        )
+        for unit in (*timers, *services):
+            active = self._host(
+                "foreign", ["systemctl", "is-active", "--quiet", unit]
+            )
+            if active.returncode == 0 or active.returncode not in {3, 4}:
+                raise ProductionCutoverError(
+                    "PRIVATE_PRIMARY_LEGACY_INPUT_ACTIVE"
+                )
+        for unit in timers:
+            enabled = self._host(
+                "foreign", ["systemctl", "is-enabled", "--quiet", unit]
+            )
+            if enabled.returncode == 0 or enabled.returncode not in {1, 4}:
+                raise ProductionCutoverError(
+                    "PRIVATE_PRIMARY_LEGACY_INPUT_ENABLED"
+                )
+        return {
+            "status": "verified",
+            "legacy_input_units_active": 0,
+            "legacy_input_timers_enabled": 0,
+            "unit_count": len(timers) + len(services),
+        }
+
+    def product_estimator_runtime_mode(
+        self, expected_mode: str
+    ) -> dict[str, object]:
+        """Prove the running Product consumers all expose one exact authority.
+
+        Reading the immutable source file is not sufficient before the final
+        compare-and-swap: an older or prematurely restarted container can be
+        running with a different environment.  This probe is deliberately
+        limited to the three Product consumers and returns no environment
+        values beyond the expected public mode.
+        """
+
+        if expected_mode not in {"LEGACY", "PRIVATE_PRIMARY"}:
+            raise ProductionCutoverError("BLOCKED_PRODUCT_RUNTIME_MODE")
+        consumers = (
+            ("foreign", FOREIGN_CONTAINERS["app"]),
+            ("foreign", FOREIGN_CONTAINERS["bot"]),
+            ("iran", IRAN_CONTAINERS["app"]),
+        )
+        for role, container in consumers:
+            if not self._running(role, container):
+                raise ProductionCutoverError("BLOCKED_PRODUCT_RUNTIME_MODE")
+            environment = self._container_env(role, container)
+            if environment.get("PRODUCT_ESTIMATOR_SNAPSHOT_MODE") != expected_mode:
+                raise ProductionCutoverError("BLOCKED_PRODUCT_RUNTIME_MODE")
+        return {
+            "status": "verified",
+            "mode": expected_mode,
+            "consumer_count": len(consumers),
+            "values_disclosed": False,
+        }
+
+    def private_primary_snapshot_identity(
+        self, *, expected_digest: str
+    ) -> dict[str, object]:
+        """Re-read the current bot/app and remote Product artifact identity."""
+
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_digest):
+            raise ProductionCutoverError(
+                "PRIVATE_PRIMARY_SNAPSHOT_IDENTITY_INVALID"
+            )
+        local_app = Path(
+            str(
+                self.manifest_values.get(
+                    "PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR"
+                )
+                or ""
+            )
+        )
+        local_bot = Path(
+            str(
+                self.manifest_values.get(
+                    "PRODUCTION_PRODUCT_ESTIMATOR_BOT_SNAPSHOT_HOST_DIR"
+                )
+                or ""
+            )
+        )
+        remote = Path(
+            str(
+                self.manifest_values.get(
+                    "PRODUCTION_PRODUCT_ESTIMATOR_IRAN_APP_SNAPSHOT_HOST_DIR"
+                )
+                or ""
+            )
+        )
+        if (
+            not local_app.is_absolute()
+            or local_app != local_bot
+            or not remote.is_absolute()
+            or any(".." in path.parts for path in (local_app, remote))
+        ):
+            raise ProductionCutoverError(
+                "PRIVATE_PRIMARY_SNAPSHOT_IDENTITY_INVALID"
+            )
+        local_path = local_app / "latest-private-primary.json"
+        remote_path = remote / "latest-private-primary.json"
+        def stable_local_digest() -> str:
+            flags = (
+                os.O_RDONLY
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+            )
+            try:
+                descriptor = os.open(local_path, flags)
+                try:
+                    before = os.fstat(descriptor)
+                    path_info = local_path.lstat()
+                    hasher = hashlib.sha256()
+                    while True:
+                        chunk = os.read(descriptor, 131072)
+                        if not chunk:
+                            break
+                        hasher.update(chunk)
+                    after = os.fstat(descriptor)
+                finally:
+                    os.close(descriptor)
+            except OSError:
+                raise ProductionCutoverError(
+                    "PRIVATE_PRIMARY_SNAPSHOT_IDENTITY_INVALID"
+                ) from None
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or before.st_nlink != 1
+                or (
+                    before.st_dev,
+                    before.st_ino,
+                    before.st_size,
+                    before.st_mtime_ns,
+                )
+                != (
+                    after.st_dev,
+                    after.st_ino,
+                    after.st_size,
+                    after.st_mtime_ns,
+                )
+                or (path_info.st_dev, path_info.st_ino)
+                != (before.st_dev, before.st_ino)
+            ):
+                raise ProductionCutoverError(
+                    "PRIVATE_PRIMARY_SNAPSHOT_IDENTITY_INVALID"
+                )
+            return hasher.hexdigest()
+
+        local_digest = stable_local_digest()
+        remote_result = self._host(
+            "iran", ["sha256sum", "--", str(remote_path)]
+        )
+        remote_tokens = (remote_result.stdout or "").strip().split()
+        if (
+            remote_result.returncode
+            or len(remote_tokens) != 2
+            or remote_tokens[0] != expected_digest
+            or remote_tokens[1] != str(remote_path)
+            or local_digest != expected_digest
+        ):
+            raise ProductionCutoverError(
+                "PRIVATE_PRIMARY_SNAPSHOT_IDENTITY_INVALID"
+            )
+        # A second descriptor-bound, no-follow read closes the remote-probe
+        # window without reintroducing pathname/symlink TOCTOU.
+        if stable_local_digest() != expected_digest:
+            raise ProductionCutoverError(
+                "PRIVATE_PRIMARY_SNAPSHOT_IDENTITY_INVALID"
+            )
+        return {
+            "status": "verified",
+            "snapshot_digest": expected_digest,
+            "consumer_artifact_count": 3,
+        }
+
+    def private_primary_publication_outbox_zero(self) -> dict[str, object]:
+        """Read the live receiver journal and require no unresolved publish."""
+
+        project = str(
+            self.manifest_values.get("PRODUCTION_MARKET_PIPELINE_PROJECT_NAME")
+            or ""
+        )
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{2,62}", project):
+            raise ProductionCutoverError(
+                "PRIVATE_PRIMARY_OUTBOX_READBACK_FAILED"
+            )
+        listed = self._docker(
+            "iran",
+            [
+                "ps",
+                "-q",
+                "--filter",
+                f"label=com.docker.compose.project={project}",
+                "--filter",
+                "label=com.docker.compose.service=estimator-snapshot-receiver",
+            ],
+        )
+        containers = [
+            line.strip()
+            for line in (listed.stdout or "").splitlines()
+            if line.strip()
+        ]
+        if listed.returncode or len(containers) != 1:
+            raise ProductionCutoverError(
+                "PRIVATE_PRIMARY_OUTBOX_READBACK_FAILED"
+            )
+        query = (
+            "import sqlite3; "
+            "c=sqlite3.connect('file:/var/lib/market-data/state/estimator-snapshot-receiver.sqlite3?mode=ro',uri=True); "
+            "c.execute('PRAGMA query_only=ON'); "
+            "print(c.execute(\"SELECT COUNT(*) FROM estimator_snapshot_publication_outbox WHERE feed_mode='PRIVATE_PRIMARY' AND delivered_at_utc IS NULL\").fetchone()[0]); "
+            "c.close()"
+        )
+        observed = self._docker(
+            "iran", ["exec", containers[0], "python3", "-c", query]
+        )
+        try:
+            count = int((observed.stdout or "").strip())
+        except ValueError:
+            raise ProductionCutoverError(
+                "PRIVATE_PRIMARY_OUTBOX_READBACK_FAILED"
+            ) from None
+        if observed.returncode or count != 0:
+            raise ProductionCutoverError(
+                "PRIVATE_PRIMARY_OUTBOX_NOT_DRAINED"
+            )
+        return {"status": "verified", "open_outbox": 0}
+
     def deploy_official(
         self,
         authority_path: Path | None = None,
         authority_digest: str | None = None,
+        *,
+        private_primary_attestation: PrivatePrimaryDeployAttestation | None = None,
+        inherited_lock_descriptors: tuple[int, int] | None = None,
     ) -> dict[str, Any]:
         # The production manifest is authoritative.  Inheriting an interactive
         # shell wholesale would let values such as COMPOSE_PROJECT_NAME or an
@@ -1317,20 +2562,169 @@ class ProductionOperations:
         }
         env["IRAN_CONNECTIVITY_MODE"] = "online"
         env["DEPLOY_MANIFEST"] = str(self.manifest)
+        env["PRODUCTION_RELEASE_ROOT_FD_EXEC_CONFIRM"] = (
+            "verified-release-root-fd-exec"
+        )
+        env["PRODUCTION_RELEASE_ROOT_FD_EXEC"] = str(self.release_root)
+        env["PRODUCTION_RELEASE_ROOT_FD_EXEC_SHA256"] = hashlib.sha256(
+            str(self.release_root).encode("utf-8")
+        ).hexdigest()
+        if (authority_path is None) != (not authority_digest):
+            raise ProductionCutoverError("BLOCKED_QUEUE_DEPLOY_AUTHORITY")
+        if private_primary_attestation is not None and authority_path is None:
+            raise ProductionCutoverError("BLOCKED_PRIVATE_PRIMARY_ATTESTATION")
+        if authority_path is not None and inherited_lock_descriptors is None:
+            raise ProductionCutoverError("BLOCKED_DEPLOY_FENCE_LOCKS_REQUIRED")
         if authority_path is not None and authority_digest:
             env["TELEGRAM_QUEUE_PRODUCTION_PHASE_RECEIPT"] = str(authority_path)
             env["TELEGRAM_QUEUE_PRODUCTION_PHASE_RECEIPT_SHA256"] = authority_digest
             env["PRODUCTION_SOURCE_LOCK_INHERITED_CONFIRM"] = (
                 "verified-cutover-held-lock"
             )
-        result = self._run(
-            ["bash", str(REPO_ROOT / "scripts/production_deploy_online.sh"), "--manifest", str(self.manifest), "release"],
-            timeout=7200,
-            env=env,
+        if private_primary_attestation is not None:
+            _private_primary_attestation_binding(
+                self.manifest, private_primary_attestation
+            )
+        deploy_script_fd, deploy_script_sha256 = (
+            self._open_release_deploy_script()
         )
-        if result.returncode:
-            raise ProductionCutoverError("OFFICIAL_PRODUCTION_DEPLOY_FAILED")
-        return {"status": "completed", "official_script": True, "output_retained": False}
+        argv = [
+            "bash",
+            f"/proc/self/fd/{deploy_script_fd}",
+            "--manifest",
+            str(self.manifest),
+        ]
+        if private_primary_attestation is not None:
+            argv.extend(
+                [
+                    "--private-primary-manifest-sha256",
+                    private_primary_attestation.manifest_sha256,
+                    "--private-primary-manifest-receipt",
+                    str(private_primary_attestation.receipt_path),
+                    "--private-primary-manifest-receipt-sha256",
+                    private_primary_attestation.receipt_sha256,
+                ]
+            )
+        argv.append("release")
+        try:
+            if authority_path is None or authority_digest is None:
+                result = self._run(
+                    argv,
+                    timeout=7200,
+                    env=env,
+                    pass_fds=(deploy_script_fd,),
+                )
+                if result.returncode:
+                    raise ProductionCutoverError(
+                        "OFFICIAL_PRODUCTION_DEPLOY_FAILED"
+                    )
+                return {
+                    "status": "completed",
+                    "official_script": True,
+                    "output_retained": False,
+                }
+            run_lock_fd, source_lock_fd = inherited_lock_descriptors
+            fence_path, fence_digest = _prepare_deploy_child_fence(
+                authority_path=authority_path,
+                authority_digest=authority_digest,
+                manifest=self.manifest,
+                command=argv,
+                run_lock_descriptor=run_lock_fd,
+                source_lock_descriptor=source_lock_fd,
+                deploy_script_sha256=deploy_script_sha256,
+            )
+            supervisor_fd, supervisor_sha256, supervisor_path = (
+                self._open_control_supervisor()
+            )
+            supervisor_argv = [
+                sys.executable,
+                f"/proc/self/fd/{supervisor_fd}",
+                "--journal",
+                str(fence_path),
+                "--expected-journal-sha256",
+                fence_digest,
+                "--run-lock-fd",
+                str(run_lock_fd),
+                "--source-lock-fd",
+                str(source_lock_fd),
+                "--deploy-script-fd",
+                str(deploy_script_fd),
+                "--expected-deploy-script-sha256",
+                deploy_script_sha256,
+                "--cwd",
+                str(self.release_root),
+                "--",
+                *argv,
+            ]
+            try:
+                result = self._run(
+                    supervisor_argv,
+                    timeout=7200,
+                    env=env,
+                    pass_fds=(
+                        run_lock_fd,
+                        source_lock_fd,
+                        deploy_script_fd,
+                        supervisor_fd,
+                    ),
+                )
+                supervisor_after = os.fstat(supervisor_fd)
+                supervisor_path_info = supervisor_path.lstat()
+                if (
+                    hashlib.sha256(
+                        os.pread(
+                            supervisor_fd,
+                            supervisor_after.st_size + 1,
+                            0,
+                        )
+                    ).hexdigest()
+                    != supervisor_sha256
+                    or (supervisor_after.st_dev, supervisor_after.st_ino)
+                    != (supervisor_path_info.st_dev, supervisor_path_info.st_ino)
+                ):
+                    raise ProductionCutoverError(
+                        "BLOCKED_PRODUCTION_DEPLOY_SUPERVISOR"
+                    )
+            finally:
+                os.close(supervisor_fd)
+            fence = _read_deploy_child_fence(
+                fence_path,
+                authority_digest=authority_digest,
+                expected_command=argv,
+            )
+            if result.returncode:
+                raise ProductionCutoverError(
+                    "OFFICIAL_PRODUCTION_DEPLOY_FAILED"
+                )
+            if (
+                fence.get("status") != "SUCCEEDED"
+                or fence.get("returncode") != 0
+                or fence.get("deploy_script_sha256")
+                != deploy_script_sha256
+            ):
+                raise ProductionCutoverError(
+                    "OFFICIAL_PRODUCTION_DEPLOY_FAILED"
+                )
+            readiness = fence.get("product_readiness")
+            if private_primary_attestation is not None and (
+                not isinstance(readiness, Mapping)
+                or readiness.get("consumer_count") != 3
+                or readiness.get("required_source_input_trace_count") != 9
+            ):
+                raise ProductionCutoverError(
+                    "OFFICIAL_PRIVATE_PRIMARY_READINESS_MISSING"
+                )
+            return {
+                "status": "completed",
+                "official_script": True,
+                "output_retained": False,
+                "deploy_fence_file": fence_path.name,
+                "deploy_fence_sha256": _sha256(fence_path),
+                "deploy_fence_status": "SUCCEEDED",
+                "product_readiness": readiness,
+            }
+        finally:
+            os.close(deploy_script_fd)
 
     def runtime_contract(self, source_values: Mapping[str, str], *, expected_owner: str) -> dict[str, Any]:
         if expected_owner not in {"legacy", "queue-v1"}:
@@ -1651,6 +3045,227 @@ def _require_secure_authority_file(
     return metadata
 
 
+def _descriptor_lock_binding(descriptor: int) -> dict[str, object]:
+    try:
+        metadata = os.fstat(descriptor)
+    except OSError as exc:
+        raise ProductionCutoverError("BLOCKED_DEPLOY_FENCE_LOCKS_REQUIRED") from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != os.geteuid()
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or metadata.st_nlink != 1
+    ):
+        raise ProductionCutoverError("BLOCKED_DEPLOY_FENCE_LOCKS_REQUIRED")
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as exc:
+        raise ProductionCutoverError("BLOCKED_DEPLOY_FENCE_LOCKS_REQUIRED") from exc
+    try:
+        descriptor_path = Path(
+            os.readlink(f"/proc/self/fd/{descriptor}")
+        ).resolve(strict=True)
+        path_metadata = descriptor_path.lstat()
+    except (OSError, RuntimeError):
+        raise ProductionCutoverError(
+            "BLOCKED_DEPLOY_FENCE_LOCKS_REQUIRED"
+        ) from None
+    if (
+        not descriptor_path.is_absolute()
+        or descriptor_path.is_symlink()
+        or not stat.S_ISREG(path_metadata.st_mode)
+        or (path_metadata.st_dev, path_metadata.st_ino)
+        != (metadata.st_dev, metadata.st_ino)
+    ):
+        raise ProductionCutoverError("BLOCKED_DEPLOY_FENCE_LOCKS_REQUIRED")
+    return {
+        "device": metadata.st_dev,
+        "inode": metadata.st_ino,
+        "path_sha256": hashlib.sha256(
+            str(descriptor_path).encode("utf-8")
+        ).hexdigest(),
+    }
+
+
+def _deploy_command_sha256(command: list[str]) -> str:
+    return hashlib.sha256(
+        json.dumps(command, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _prepare_deploy_child_fence(
+    *,
+    authority_path: Path,
+    authority_digest: str,
+    manifest: Path,
+    command: list[str],
+    run_lock_descriptor: int,
+    source_lock_descriptor: int,
+    deploy_script_sha256: str,
+) -> tuple[Path, str]:
+    artifact_dir = _ensure_secure_artifact_dir(authority_path.parent)
+    _require_secure_authority_file(
+        authority_path, artifact_dir, prefix="production-queue-deploy-authority-"
+    )
+    authority = _read_json_evidence(authority_path, authority_digest)
+    state_file = str(authority.get("state_file") or "")
+    journal_file = str(authority.get("journal_file") or "")
+    if (
+        Path(state_file).name != state_file
+        or Path(journal_file).name != journal_file
+        or not re.fullmatch(r"[0-9a-f]{64}", deploy_script_sha256)
+    ):
+        raise ProductionCutoverError("BLOCKED_DEPLOY_FENCE_BINDING")
+    state_path = artifact_dir / state_file
+    _require_secure_authority_file(
+        state_path, artifact_dir, prefix="production-queue-deploy-state-"
+    )
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise ProductionCutoverError("BLOCKED_DEPLOY_FENCE_BINDING") from None
+    if (
+        not isinstance(state, dict)
+        or state.get("status") != "issued"
+        or state.get("authority_file") != authority_path.name
+        or state.get("authority_sha256") != authority_digest
+        or state.get("journal_file") != journal_file
+        or state.get("deploy_fence_file") is not None
+    ):
+        raise ProductionCutoverError("BLOCKED_DEPLOY_FENCE_BINDING")
+    payload = {
+        "schema": "production_deploy_child_fence/1.0",
+        "status": "PREPARED",
+        "created_at_utc": _utc_now(),
+        "authority_file": authority_path.name,
+        "authority_sha256": authority_digest,
+        "journal_file": journal_file,
+        "git_head": authority.get("git_head"),
+        "source_sha256": authority.get("source_sha256"),
+        "manifest_sha256": _sha256(manifest),
+        "private_primary_required": (
+            authority.get("private_primary_manifest_attestation") is not None
+        ),
+        "command_sha256": _deploy_command_sha256(command),
+        "deploy_script_sha256": deploy_script_sha256,
+        "run_lock": _descriptor_lock_binding(run_lock_descriptor),
+        "source_lock": _descriptor_lock_binding(source_lock_descriptor),
+        "secrets_disclosed": False,
+    }
+    fence_path, fence_digest = _write_secure_json(
+        artifact_dir, "production-deploy-child-fence", payload
+    )
+    state["deploy_fence_file"] = fence_path.name
+    state["deploy_fence_sha256"] = fence_digest
+    _atomic_write(
+        state_path,
+        (json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n").encode(
+            "utf-8"
+        ),
+    )
+    return fence_path, fence_digest
+
+
+def _read_deploy_child_fence(
+    path: Path,
+    *,
+    authority_digest: str,
+    expected_command: list[str] | None = None,
+) -> dict[str, Any]:
+    artifact_dir = _ensure_secure_artifact_dir(path.parent)
+    _require_secure_authority_file(
+        path, artifact_dir, prefix="production-deploy-child-fence-"
+    )
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise ProductionCutoverError("BLOCKED_DEPLOY_FENCE_BINDING") from None
+    if (
+        not isinstance(value, dict)
+        or value.get("schema") != "production_deploy_child_fence/1.0"
+        or value.get("authority_sha256") != authority_digest
+        or value.get("status")
+        not in {"PREPARED", "RUNNING", "SUCCEEDED", "FAILED", "SUPERVISOR_FAILED"}
+        or value.get("secrets_disclosed") is not False
+        or not re.fullmatch(
+            r"[0-9a-f]{64}", str(value.get("deploy_script_sha256") or "")
+        )
+        or (
+            expected_command is not None
+            and value.get("command_sha256")
+            != _deploy_command_sha256(expected_command)
+        )
+    ):
+        raise ProductionCutoverError("BLOCKED_DEPLOY_FENCE_BINDING")
+    return value
+
+
+def reconcile_deploy_child_fence(
+    *,
+    artifact_dir: Path,
+    journal_path: Path,
+    expected_source_sha256: str,
+    expected_manifest_sha256: str,
+) -> dict[str, object] | None:
+    """Reconcile the last exact deploy child after controller interruption."""
+
+    secure_dir = _ensure_secure_artifact_dir(artifact_dir)
+    candidates: list[tuple[int, Path, dict[str, Any]]] = []
+    for path in secure_dir.glob("production-deploy-child-fence-*.json"):
+        _require_secure_authority_file(
+            path, secure_dir, prefix="production-deploy-child-fence-"
+        )
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raise ProductionCutoverError("BLOCKED_DEPLOY_FENCE_BINDING") from None
+        if (
+            isinstance(value, dict)
+            and value.get("journal_file") == journal_path.name
+            and value.get("source_sha256") == expected_source_sha256
+            and value.get("manifest_sha256") == expected_manifest_sha256
+        ):
+            candidates.append((path.stat().st_mtime_ns, path, value))
+    if not candidates:
+        return None
+    _mtime, path, value = max(candidates, key=lambda item: item[0])
+    authority_digest = str(value.get("authority_sha256") or "")
+    value = _read_deploy_child_fence(
+        path, authority_digest=authority_digest
+    )
+    status = str(value["status"])
+    if status == "RUNNING":
+        supervisor = value.get("supervisor")
+        identity = None
+        if isinstance(supervisor, Mapping):
+            pid = supervisor.get("pid")
+            if not isinstance(pid, bool) and isinstance(pid, int) and pid > 0:
+                identity = _process_start_identity(pid)
+        if (
+            isinstance(supervisor, Mapping)
+            and identity
+            == (
+                str(supervisor.get("boot_id") or ""),
+                str(supervisor.get("start_ticks") or ""),
+            )
+        ):
+            raise ProductionCutoverError("BLOCKED_DEPLOY_CHILD_ACTIVE")
+        raise ProductionCutoverError("BLOCKED_DEPLOY_CHILD_RESULT_AMBIGUOUS")
+    if status == "SUCCEEDED" and value.get("returncode") == 0:
+        return {
+            "status": "completed",
+            "official_script": True,
+            "output_retained": False,
+            "reconciled_from_child_fence": True,
+            "deploy_fence_file": path.name,
+            "deploy_fence_sha256": _sha256(path),
+            "product_readiness": value.get("product_readiness"),
+        }
+    if status in {"FAILED", "SUPERVISOR_FAILED", "PREPARED"}:
+        return {"status": "retry_allowed", "reconciled_from_child_fence": True}
+    raise ProductionCutoverError("BLOCKED_DEPLOY_FENCE_BINDING")
+
+
 def create_deploy_authority(
     artifact_dir: Path,
     source: Path,
@@ -1658,6 +3273,8 @@ def create_deploy_authority(
     *,
     run_lock: ExclusiveRunLock,
     journal: PhaseJournal,
+    deploy_manifest: Path | None = None,
+    private_primary_attestation: PrivatePrimaryDeployAttestation | None = None,
 ) -> tuple[Path, str]:
     secure_dir = _ensure_secure_artifact_dir(artifact_dir)
     lock_binding = run_lock.binding()
@@ -1669,6 +3286,11 @@ def create_deploy_authority(
         journal.path, secure_dir, prefix="production-queue-phase-"
     )
     target_owner = source_profile(parse_env_file(source))
+    if private_primary_attestation is not None and deploy_manifest is None:
+        raise ProductionCutoverError("BLOCKED_PRIVATE_PRIMARY_ATTESTATION")
+    attestation_binding = _private_primary_attestation_binding(
+        deploy_manifest or source, private_primary_attestation
+    )
     phase = (
         "queue-v1-official-deploy"
         if target_owner == "queue-v1"
@@ -1690,6 +3312,7 @@ def create_deploy_authority(
         "created_at": _utc_now(),
         "git_head": binding["head"],
         "source_sha256": _sha256(source),
+        "private_primary_manifest_attestation": attestation_binding,
         "handoff_nonce_sha256": handoff_nonce_sha256,
         "state_file": state_path.name,
         "run_lock": lock_binding,
@@ -1718,6 +3341,7 @@ def create_deploy_authority(
             "target_owner": target_owner,
             "git_head": binding["head"],
             "source_sha256": _sha256(source),
+            "private_primary_manifest_attestation": attestation_binding,
             "secrets_disclosed": False,
         }
         with os.fdopen(state_descriptor, "w", encoding="utf-8") as handle:
@@ -1746,6 +3370,7 @@ def verify_deploy_authority(
     authority_digest: str,
     *,
     expected_artifact_dir: Path = DEFAULT_ARTIFACT_DIR,
+    private_primary_attestation: PrivatePrimaryDeployAttestation | None = None,
 ) -> dict[str, Any]:
     artifact_dir = _ensure_secure_artifact_dir(expected_artifact_dir)
     _require_secure_authority_file(
@@ -1754,6 +3379,9 @@ def verify_deploy_authority(
     payload = _read_json_evidence(authority_path, authority_digest)
     age = (datetime.now(timezone.utc) - _parse_timestamp(payload.get("created_at"))).total_seconds()
     source, _ = _immutable_source(manifest)
+    expected_attestation_binding = _private_primary_attestation_binding(
+        manifest, private_primary_attestation
+    )
     binding = git_binding()
     state_file = str(payload.get("state_file") or "")
     journal_file = str(payload.get("journal_file") or "")
@@ -1834,6 +3462,8 @@ def verify_deploy_authority(
         or payload.get("target_owner") != observed_owner
         or payload.get("git_head") != binding.get("head")
         or payload.get("source_sha256") != _sha256(source)
+        or payload.get("private_primary_manifest_attestation")
+        != expected_attestation_binding
         or binding.get("branch") != "main"
         or binding.get("worktree") != "clean"
         or binding.get("head") != binding.get("origin_main")
@@ -1860,6 +3490,8 @@ def verify_deploy_authority(
         or state.get("target_owner") != observed_owner
         or state.get("git_head") != binding.get("head")
         or state.get("source_sha256") != _sha256(source)
+        or state.get("private_primary_manifest_attestation")
+        != expected_attestation_binding
     )
     if authority_exact:
         os.close(state_descriptor)
@@ -1878,6 +3510,9 @@ def verify_deploy_authority(
         "environment": "production",
         "phase": expected_phase,
         "target_owner": observed_owner,
+        "private_primary_manifest_attestation_bound": (
+            expected_attestation_binding is not None
+        ),
         "provider_mutations": 0,
         "secrets_disclosed": False,
     }
@@ -2082,6 +3717,256 @@ def verify_redeploy_preflight_evidence(
     }
 
 
+def _recover_interrupted_phase(
+    *,
+    command: str,
+    manifest: Path,
+    artifact_dir: Path,
+    binding: Mapping[str, str],
+    operations_factory: Callable[[Path], ProductionOperations],
+    recovery_backup_dir: Path | None = None,
+    private_primary_attestation: PrivatePrimaryDeployAttestation | None = None,
+    drain_timeout_seconds: int = 300,
+    drain_poll_seconds: float = 2.0,
+) -> dict[str, Any] | None:
+    """Inspect and close one exact nonterminal Queue phase idempotently.
+
+    A killed process may leave the durable phase journal and the release lock
+    behind at any mutation boundary.  Recovery always proves the old command's
+    pre-state from its source snapshot and current live ownership.  It never
+    guesses from a journal phase name alone.
+    """
+
+    pending = _pending_phase_journals(artifact_dir, command=command)
+    if not pending:
+        return None
+    path, original_payload = pending[0]
+    if (
+        original_payload.get("git_head") != binding.get("head")
+        or binding.get("branch") != "main"
+        or binding.get("worktree") != "clean"
+        or binding.get("head") != binding.get("origin_main")
+    ):
+        raise ProductionCutoverError("BLOCKED_INTERRUPTED_RECOVERY_BINDING")
+    try:
+        source, _manifest_values = _immutable_source(manifest)
+    except ReadinessBlocked as exc:
+        raise ProductionCutoverError(exc.code) from None
+    expected_source_digest = str(original_payload.get("source_sha256") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_source_digest):
+        raise ProductionCutoverError("BLOCKED_INTERRUPTED_RECOVERY_BINDING")
+    desired_owner = "legacy" if command == "apply" else "queue-v1"
+    snapshot: SecureSourceBackup | None = None
+    if recovery_backup_dir is not None:
+        snapshot = _load_recovery_source_snapshot(
+            original_payload, recovery_backup_dir
+        )
+        if snapshot.sha256 != expected_source_digest:
+            raise ProductionCutoverError("BLOCKED_INTERRUPTED_RECOVERY_SOURCE")
+    elif command != "redeploy":
+        raise ProductionCutoverError("BLOCKED_INTERRUPTED_RECOVERY_SOURCE")
+
+    ops = operations_factory(manifest)
+    run_lock = ExclusiveRunLock(artifact_dir)
+    if original_payload.get("status") == "recovery_failed":
+        run_lock.acquire(allow_recovery_journal=path)
+    else:
+        run_lock.acquire(allow_interrupted_journal=path)
+    try:
+        recovered_payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        run_lock.release()
+        raise ProductionCutoverError("BLOCKED_PENDING_PHASE_JOURNAL") from None
+    if recovered_payload.get("status") in PHASE_TERMINAL_STATES:
+        run_lock.release()
+        return {
+            "status": recovered_payload.get("status"),
+            "terminal_receipt_recovered": True,
+            "receipt_file": recovered_payload.get("receipt_file"),
+            "receipt_sha256": recovered_payload.get("receipt_sha256"),
+            "desired_owner": desired_owner,
+        }
+    source_lock = ImmutableSourceLock(source)
+    try:
+        source_lock.acquire()
+        journal = PhaseJournal.adopt(path, run_lock=run_lock)
+    except BaseException:
+        source_lock.release()
+        run_lock.release()
+        raise
+
+    receipt: dict[str, Any] = {
+        "schema_version": 1,
+        "environment": "production",
+        "command": f"recover-interrupted-{command}",
+        "status": "running",
+        "started_at": _utc_now(),
+        "git": dict(binding),
+        "interrupted_phase": original_payload.get("status"),
+        "journal_file": path.name,
+        "source_sha256_expected": expected_source_digest,
+        "desired_owner": desired_owner,
+        "steps": [],
+        "synthetic_customer_mutations": 0,
+        "secrets_disclosed": False,
+    }
+    try:
+        observed_source_digest = _sha256(source)
+        observed = ops.executor_inventory()
+        already_safe = (
+            observed_source_digest == expected_source_digest
+            and source_profile(parse_env_file(source)) == desired_owner
+            and observed.get("count") == 1
+            and observed.get("owner") == desired_owner
+            and observed.get("overlap") is False
+        )
+        if already_safe:
+            receipt["steps"].append(
+                {"name": "live_state_already_safe", "executor": observed}
+            )
+        else:
+            journal.update(
+                "interrupted_recovery_producers_quiescing",
+                interruption_recovery_required=True,
+            )
+            stopped = ops.stop_producers()
+            receipt["steps"].append(
+                {"name": "quiesce", "stopped_count": len(stopped)}
+            )
+            journal.update("interrupted_recovery_drain_waiting")
+            receipt["steps"].append(
+                {
+                    "name": "drain",
+                    "report": ops.wait_for_drain(
+                        drain_timeout_seconds, drain_poll_seconds
+                    ),
+                }
+            )
+            journal.update("interrupted_recovery_executor_stopping")
+            ops.stop_bot()
+            zero = ops.executor_inventory()
+            _assert_inventory(zero, count=0, owner=None)
+            if observed_source_digest != expected_source_digest:
+                if snapshot is None:
+                    raise ProductionCutoverError(
+                        "BLOCKED_INTERRUPTED_RECOVERY_SOURCE"
+                    )
+                journal.update(
+                    "interrupted_recovery_source_restoring",
+                    source_after_sha256=expected_source_digest,
+                )
+                _atomic_write(source, snapshot.original)
+                _require_source_digest(source, expected_source_digest)
+                receipt["steps"].append(
+                    {
+                        "name": "restore_pre_command_source",
+                        "source_sha256": expected_source_digest,
+                    }
+                )
+            if source_profile(parse_env_file(source)) != desired_owner:
+                raise ProductionCutoverError(
+                    "BLOCKED_INTERRUPTED_RECOVERY_SOURCE"
+                )
+            journal.update(
+                "interrupted_recovery_deploy_authorizing",
+                desired_owner=desired_owner,
+            )
+            authority, authority_digest = create_deploy_authority(
+                artifact_dir,
+                source,
+                binding,
+                run_lock=run_lock,
+                journal=journal,
+                deploy_manifest=(
+                    manifest if private_primary_attestation is not None else None
+                ),
+                private_primary_attestation=private_primary_attestation,
+            )
+            deploy = (
+                ops.deploy_official(
+                    authority,
+                    authority_digest,
+                    inherited_lock_descriptors=(
+                        int(run_lock.descriptor), int(source_lock.descriptor)
+                    ),
+                )
+                if private_primary_attestation is None
+                else ops.deploy_official(
+                    authority,
+                    authority_digest,
+                    private_primary_attestation=private_primary_attestation,
+                    inherited_lock_descriptors=(
+                        int(run_lock.descriptor), int(source_lock.descriptor)
+                    ),
+                )
+            )
+            receipt["steps"].append({"name": "deploy_safe_owner", "report": deploy})
+            observed = ops.executor_inventory()
+            _assert_inventory(observed, count=1, owner=desired_owner)
+
+        receipt["steps"].append(
+            {
+                "name": "runtime_role_contract",
+                "report": ops.runtime_contract(
+                    parse_env_file(source), expected_owner=desired_owner
+                ),
+            }
+        )
+        if desired_owner == "queue-v1":
+            values = parse_env_file(source)
+            receipt["steps"].append(
+                {
+                    "name": "queue_health",
+                    "report": ops.queue_health(
+                        str(values.get("POSTGRES_DB") or "")
+                    ),
+                }
+            )
+        receipt["status"] = "interrupted_recovered"
+        receipt["finished_at"] = _utc_now()
+        receipt_path, digest = _commit_terminal_receipt(
+            journal,
+            artifact_dir,
+            prefix=f"production-queue-{command}-interruption-recovery",
+            receipt=receipt,
+            terminal_status="interrupted_recovered",
+            recovered_from_status=original_payload.get("status"),
+        )
+        return {
+            "status": "interrupted_recovered",
+            "receipt_file": receipt_path.name,
+            "receipt_sha256": digest,
+            "desired_owner": desired_owner,
+        }
+    except BaseException as exc:
+        code = (
+            exc.code
+            if isinstance(exc, ProductionCutoverError)
+            else "INTERRUPTED_RECOVERY_FAILED"
+        )
+        receipt["status"] = "recovery_failed"
+        receipt["error_code"] = code
+        receipt["finished_at"] = _utc_now()
+        try:
+            _failed_path, digest = _commit_terminal_receipt(
+                journal,
+                artifact_dir,
+                prefix=f"production-queue-{command}-interruption-recovery-failed",
+                receipt=receipt,
+                terminal_status="recovery_failed",
+                error_code=code,
+                interruption_recovery_required=True,
+            )
+        except BaseException:
+            # The durable journal remains nonterminal and is therefore the
+            # sole exact authority for the next explicit recovery attempt.
+            raise ProductionCutoverError(code) from None
+        raise ProductionCutoverError(code, receipt_sha256=digest) from None
+    finally:
+        source_lock.release()
+        run_lock.release()
+
+
 def apply_cutover(
     *,
     manifest: Path,
@@ -2100,6 +3985,25 @@ def apply_cutover(
 ) -> dict[str, Any]:
     if confirmation != APPLY_CONFIRMATION:
         raise ProductionCutoverError("APPLY_CONFIRMATION_MISMATCH")
+    if (
+        operations_factory is ProductionOperations
+        and artifact_dir.resolve(strict=False) != DEFAULT_ARTIFACT_DIR
+    ):
+        raise ProductionCutoverError("BLOCKED_PRODUCTION_ARTIFACT_DIRECTORY")
+    if _pending_phase_journals(artifact_dir, command="apply"):
+        binding = git_binding()
+        interrupted = _recover_interrupted_phase(
+            command="apply",
+            manifest=manifest,
+            artifact_dir=artifact_dir,
+            binding=binding,
+            operations_factory=operations_factory,
+            recovery_backup_dir=secure_backup_dir,
+            drain_timeout_seconds=drain_timeout_seconds,
+            drain_poll_seconds=drain_poll_seconds,
+        )
+        if interrupted and interrupted.get("status") == "applied":
+            return {**interrupted, "secrets_disclosed": False}
     # Credential/source gates deliberately precede evidence, hosts, provider,
     # and every mutation.  Current production therefore remains safely
     # BLOCKED_CREDENTIALS.
@@ -2129,24 +4033,22 @@ def apply_cutover(
         raise ProductionCutoverError("BLOCKED_LIVE_PREFLIGHT")
     if live_preflight.get("source_sha256") != source_digest or _sha256(source) != source_digest:
         raise ProductionCutoverError("BLOCKED_SOURCE_DRIFT")
-    if (
-        operations_factory is ProductionOperations
-        and artifact_dir.resolve(strict=False) != DEFAULT_ARTIFACT_DIR
-    ):
-        raise ProductionCutoverError("BLOCKED_PRODUCTION_ARTIFACT_DIRECTORY")
-
     ops = operations_factory(manifest)
     run_lock = ExclusiveRunLock(artifact_dir)
     run_lock.acquire()
     source_lock = ImmutableSourceLock(source)
     try:
         source_lock.acquire()
+        recovery_source_backup = _create_recovery_source_snapshot(
+            source, secure_backup_dir, expected_sha256=source_digest
+        )
         journal = PhaseJournal(
             artifact_dir,
             command="apply",
             source_sha256=source_digest,
             git_head=binding["head"],
             run_lock=run_lock,
+            recovery_source_backup=recovery_source_backup,
         )
     except BaseException:
         source_lock.release()
@@ -2174,24 +4076,28 @@ def apply_cutover(
         _assert_inventory(initial, count=1, owner="legacy")
         receipt["executor_timeline"].append(initial)
         _require_source_digest(source, source_digest)
+        journal.update("producers_quiescing")
         stopped = ops.stop_producers()
         mutation_started = bool(stopped)
         journal.update("producers_quiesced", stopped_count=len(stopped))
         receipt["steps"].append({"name": "quiesce_both_producer_hosts", "stopped_count": len(stopped)})
+        journal.update("drain_waiting")
         drained = ops.wait_for_drain(drain_timeout_seconds, drain_poll_seconds)
         journal.update("drained")
         receipt["steps"].append({"name": "drain", "report": drained})
+        journal.update("executor_stopping")
         ops.stop_bot()
         zero = ops.executor_inventory()
         _assert_inventory(zero, count=0, owner=None)
         journal.update("zero_executor")
         receipt["executor_timeline"].append(zero)
-        source_backup, source_report = backup_and_update_source(
+        journal.update("source_switch_authorizing")
+        source_backup = recovery_source_backup
+        source_report = _update_source_from_recovery_snapshot(
             source,
-            secure_backup_dir,
+            source_backup,
             _queue_source_updates(source_values),
             expected_source_sha256=source_digest,
-            source_lock_held=True,
         )
         receipt["steps"].append({"name": "atomic_source_switch", "report": source_report})
         source_after_digest = str(source_report["source_after_sha256"])
@@ -2200,6 +4106,7 @@ def apply_cutover(
             source_after_sha256=source_report["source_after_sha256"],
             source_backup_sha256=source_backup.sha256,
         )
+        journal.update("deploy_authorizing", desired_owner="queue-v1")
         authority_path, authority_digest = create_deploy_authority(
             artifact_dir,
             source,
@@ -2211,7 +4118,13 @@ def apply_cutover(
         receipt["steps"].append(
             {
                 "name": "official_two_host_deploy",
-                "report": ops.deploy_official(authority_path, authority_digest),
+                "report": ops.deploy_official(
+                    authority_path,
+                    authority_digest,
+                    inherited_lock_descriptors=(
+                        int(run_lock.descriptor), int(source_lock.descriptor)
+                    ),
+                ),
             }
         )
         journal.update("deployed")
@@ -2224,10 +4137,13 @@ def apply_cutover(
         receipt["steps"].append({"name": "b2b_lane_read_only_probe", "report": ops.b2b_lane_probe()})
         receipt["status"] = "applied"
         receipt["finished_at"] = _utc_now()
-        receipt_path, digest = _write_redacted_receipt(
-            artifact_dir, "production-queue-cutover", receipt
+        receipt_path, digest = _commit_terminal_receipt(
+            journal,
+            artifact_dir,
+            prefix="production-queue-cutover",
+            receipt=receipt,
+            terminal_status="applied",
         )
-        journal.update("applied", receipt_sha256=digest)
         source_lock.release()
         run_lock.release()
         return {
@@ -2251,14 +4167,18 @@ def apply_cutover(
                 # A post-deploy failure may have restarted Queue producers and
                 # the Queue executor.  Re-enter the same guarded choreography;
                 # never restore Legacy underneath a live Queue executor.
+                journal.update("recovery_producers_quiescing")
                 recovery_stopped = ops.stop_producers()
                 recovery["quiesce"] = {"stopped_count": len(recovery_stopped)}
+                journal.update("recovery_drain_waiting")
                 recovery["drain"] = ops.wait_for_drain(
                     drain_timeout_seconds, drain_poll_seconds
                 )
+                journal.update("recovery_executor_stopping")
                 ops.stop_bot()
                 recovered_zero = ops.executor_inventory()
                 _assert_inventory(recovered_zero, count=0, owner=None)
+                journal.update("recovery_source_restoring")
                 recovery["source"] = restore_source_from_backup(
                     source,
                     source_backup,
@@ -2268,6 +4188,7 @@ def apply_cutover(
                     "recovery_source_switched",
                     source_after_sha256=_sha256(source),
                 )
+                journal.update("recovery_deploy_authorizing", desired_owner="legacy")
                 legacy_authority_path, legacy_authority_digest = (
                     create_deploy_authority(
                         artifact_dir,
@@ -2278,7 +4199,11 @@ def apply_cutover(
                     )
                 )
                 recovery["deploy"] = ops.deploy_official(
-                    legacy_authority_path, legacy_authority_digest
+                    legacy_authority_path,
+                    legacy_authority_digest,
+                    inherited_lock_descriptors=(
+                        int(run_lock.descriptor), int(source_lock.descriptor)
+                    ),
                 )
                 recovered_inventory = ops.executor_inventory()
                 _assert_inventory(recovered_inventory, count=1, owner="legacy")
@@ -2289,11 +4214,13 @@ def apply_cutover(
             else:
                 observed_executor = ops.executor_inventory()
                 if observed_executor.get("count") == 0:
+                    journal.update("recovery_executor_starting")
                     ops.start_bot()
                 else:
                     _assert_inventory(
                         observed_executor, count=1, owner="legacy"
                     )
+                journal.update("recovery_producers_resuming")
                 ops.resume_producers(stopped)
                 recovered_inventory = ops.executor_inventory()
                 _assert_inventory(recovered_inventory, count=1, owner="legacy")
@@ -2304,15 +4231,18 @@ def apply_cutover(
         receipt["error_code"] = code
         receipt["safe_recovery"] = recovery
         receipt["finished_at"] = _utc_now()
-        _failed_path, receipt_digest = _write_redacted_receipt(
-            artifact_dir, "production-queue-cutover-failed", receipt
-        )
-        journal.update(
+        terminal_status = (
             "failed_recovered"
             if recovery["status"]
             in {"restored_legacy", "not_required_before_mutation"}
-            else "recovery_failed",
-            receipt_sha256=receipt_digest,
+            else "recovery_failed"
+        )
+        _failed_path, receipt_digest = _commit_terminal_receipt(
+            journal,
+            artifact_dir,
+            prefix="production-queue-cutover-failed",
+            receipt=receipt,
+            terminal_status=terminal_status,
             error_code=code,
         )
         source_lock.release()
@@ -2330,6 +4260,7 @@ def redeploy_queue_v1(
     backup_digest: str,
     artifact_dir: Path,
     confirmation: str,
+    private_primary_attestation: PrivatePrimaryDeployAttestation | None = None,
     operations_factory: Callable[[Path], ProductionOperations] = ProductionOperations,
     preflight_runner: Callable[..., dict[str, Any]] = run_redeploy_preflight,
 ) -> dict[str, Any]:
@@ -2346,11 +4277,28 @@ def redeploy_queue_v1(
 
     if confirmation != REDEPLOY_CONFIRMATION:
         raise ProductionCutoverError("REDEPLOY_CONFIRMATION_MISMATCH")
-    source, _source_values, _manifest_values = _static_redeploy_gate(
+    if (
+        operations_factory is ProductionOperations
+        and artifact_dir.resolve(strict=False) != DEFAULT_ARTIFACT_DIR
+    ):
+        raise ProductionCutoverError("BLOCKED_PRODUCTION_ARTIFACT_DIRECTORY")
+    source, source_values, _manifest_values = _static_redeploy_gate(
         manifest,
         staging_env,
         backup_receipt=backup_receipt,
         backup_digest=backup_digest,
+    )
+    private_primary_required = (
+        str(
+            source_values.get("PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE")
+            or "LEGACY"
+        ).strip().upper()
+        == "PRIVATE_PRIMARY"
+    )
+    if private_primary_required != (private_primary_attestation is not None):
+        raise ProductionCutoverError("BLOCKED_PRIVATE_PRIMARY_ATTESTATION")
+    attestation_binding = _private_primary_attestation_binding(
+        manifest, private_primary_attestation
     )
     source_digest = _sha256(source)
     binding = git_binding()
@@ -2360,6 +4308,16 @@ def redeploy_queue_v1(
         or binding["head"] != binding["origin_main"]
     ):
         raise ProductionCutoverError("BLOCKED_CLEAN_PUSHED_MAIN")
+    interrupted = _recover_interrupted_phase(
+        command="redeploy",
+        manifest=manifest,
+        artifact_dir=artifact_dir,
+        binding=binding,
+        operations_factory=operations_factory,
+        private_primary_attestation=private_primary_attestation,
+    )
+    if interrupted and interrupted.get("status") == "redeployed":
+        return {**interrupted, "source_profile": "queue-v1", "secrets_disclosed": False}
     evidence = verify_redeploy_preflight_evidence(
         preflight_report,
         preflight_digest,
@@ -2384,12 +4342,6 @@ def redeploy_queue_v1(
         or _sha256(source) != source_digest
     ):
         raise ProductionCutoverError("BLOCKED_LIVE_REDEPLOY_PREFLIGHT")
-    if (
-        operations_factory is ProductionOperations
-        and artifact_dir.resolve(strict=False) != DEFAULT_ARTIFACT_DIR
-    ):
-        raise ProductionCutoverError("BLOCKED_PRODUCTION_ARTIFACT_DIRECTORY")
-
     ops = operations_factory(manifest)
     run_lock = ExclusiveRunLock(artifact_dir)
     run_lock.acquire()
@@ -2418,6 +4370,7 @@ def redeploy_queue_v1(
         "steps": [],
         "executor_timeline": [],
         "source_profile_changed": False,
+        "private_primary_manifest_attestation": attestation_binding,
         "synthetic_customer_mutations": 0,
         "secrets_disclosed": False,
     }
@@ -2427,19 +4380,42 @@ def redeploy_queue_v1(
         _assert_inventory(initial, count=1, owner="queue-v1")
         receipt["executor_timeline"].append(initial)
         _require_source_digest(source, source_digest)
-        journal.update("official_redeploy_authorizing")
+        journal.update(
+            "official_redeploy_authorizing",
+            private_primary_manifest_attestation=attestation_binding,
+        )
         authority_path, authority_digest = create_deploy_authority(
             artifact_dir,
             source,
             binding,
             run_lock=run_lock,
             journal=journal,
+            deploy_manifest=manifest,
+            private_primary_attestation=private_primary_attestation,
         )
         deploy_started = True
+        deploy_report = (
+            ops.deploy_official(
+                authority_path,
+                authority_digest,
+                inherited_lock_descriptors=(
+                    int(run_lock.descriptor), int(source_lock.descriptor)
+                ),
+            )
+            if private_primary_attestation is None
+            else ops.deploy_official(
+                authority_path,
+                authority_digest,
+                private_primary_attestation=private_primary_attestation,
+                inherited_lock_descriptors=(
+                    int(run_lock.descriptor), int(source_lock.descriptor)
+                ),
+            )
+        )
         receipt["steps"].append(
             {
                 "name": "official_two_host_redeploy",
-                "report": ops.deploy_official(authority_path, authority_digest),
+                "report": deploy_report,
             }
         )
         journal.update("redeployed_runtime")
@@ -2472,10 +4448,13 @@ def redeploy_queue_v1(
         )
         receipt["status"] = "redeployed"
         receipt["finished_at"] = _utc_now()
-        receipt_path, digest = _write_redacted_receipt(
-            artifact_dir, "production-queue-redeploy", receipt
+        receipt_path, digest = _commit_terminal_receipt(
+            journal,
+            artifact_dir,
+            prefix="production-queue-redeploy",
+            receipt=receipt,
+            terminal_status="redeployed",
         )
-        journal.update("redeployed", receipt_sha256=digest)
         source_lock.release()
         run_lock.release()
         return {
@@ -2508,10 +4487,27 @@ def redeploy_queue_v1(
                         binding,
                         run_lock=run_lock,
                         journal=journal,
+                        deploy_manifest=manifest,
+                        private_primary_attestation=private_primary_attestation,
                     )
                 )
-                recovery["deploy"] = ops.deploy_official(
-                    recovery_authority, recovery_authority_digest
+                recovery["deploy"] = (
+                    ops.deploy_official(
+                        recovery_authority,
+                        recovery_authority_digest,
+                        inherited_lock_descriptors=(
+                            int(run_lock.descriptor), int(source_lock.descriptor)
+                        ),
+                    )
+                    if private_primary_attestation is None
+                    else ops.deploy_official(
+                        recovery_authority,
+                        recovery_authority_digest,
+                        private_primary_attestation=private_primary_attestation,
+                        inherited_lock_descriptors=(
+                            int(run_lock.descriptor), int(source_lock.descriptor)
+                        ),
+                    )
                 )
                 recovered = ops.executor_inventory()
                 _assert_inventory(recovered, count=1, owner="queue-v1")
@@ -2529,16 +4525,17 @@ def redeploy_queue_v1(
         receipt["error_code"] = code
         receipt["safe_recovery"] = recovery
         receipt["finished_at"] = _utc_now()
-        _failed_path, digest = _write_redacted_receipt(
-            artifact_dir, "production-queue-redeploy-failed", receipt
+        terminal_status = (
+            "failed_recovered"
+            if recovery["status"] == "queue_v1_forward_reconciled"
+            else "recovery_failed"
         )
-        journal.update(
-            (
-                "failed_recovered"
-                if recovery["status"] == "queue_v1_forward_reconciled"
-                else "recovery_failed"
-            ),
-            receipt_sha256=digest,
+        _failed_path, digest = _commit_terminal_receipt(
+            journal,
+            artifact_dir,
+            prefix="production-queue-redeploy-failed",
+            receipt=receipt,
+            terminal_status=terminal_status,
             error_code=code,
         )
         source_lock.release()
@@ -2726,6 +4723,23 @@ def rollback_to_legacy(
 ) -> dict[str, Any]:
     if confirmation != ROLLBACK_CONFIRMATION:
         raise ProductionCutoverError("ROLLBACK_CONFIRMATION_MISMATCH")
+    if (
+        operations_factory is ProductionOperations
+        and artifact_dir.resolve(strict=False) != DEFAULT_ARTIFACT_DIR
+    ):
+        raise ProductionCutoverError("BLOCKED_PRODUCTION_ARTIFACT_DIRECTORY")
+    if _pending_phase_journals(artifact_dir, command="rollback"):
+        binding = git_binding()
+        interrupted = _recover_interrupted_phase(
+            command="rollback",
+            manifest=manifest,
+            artifact_dir=artifact_dir,
+            binding=binding,
+            operations_factory=operations_factory,
+            recovery_backup_dir=source_backup_path.parent,
+        )
+        if interrupted and interrupted.get("status") == "rolled_back":
+            return {**interrupted, "schema_downgrade": False}
     source, _ = _immutable_source(manifest)
     binding = git_binding()
     if binding["branch"] != "main" or binding["worktree"] != "clean" or binding["head"] != binding["origin_main"]:
@@ -2760,23 +4774,24 @@ def rollback_to_legacy(
         binding=binding,
     )
     backup = SecureSourceBackup(source_backup_path, source_backup_digest, original)
-    if (
-        operations_factory is ProductionOperations
-        and artifact_dir.resolve(strict=False) != DEFAULT_ARTIFACT_DIR
-    ):
-        raise ProductionCutoverError("BLOCKED_PRODUCTION_ARTIFACT_DIRECTORY")
     ops = operations_factory(manifest)
     run_lock = ExclusiveRunLock(artifact_dir)
     run_lock.acquire()
     source_lock = ImmutableSourceLock(source)
     try:
         source_lock.acquire()
+        recovery_source_backup = _create_recovery_source_snapshot(
+            source,
+            source_backup_path.parent,
+            expected_sha256=current_source_digest,
+        )
         journal = PhaseJournal(
             artifact_dir,
             command="rollback",
             source_sha256=current_source_digest,
             git_head=binding["head"],
             run_lock=run_lock,
+            recovery_source_backup=recovery_source_backup,
         )
     except BaseException:
         source_lock.release()
@@ -2801,16 +4816,20 @@ def rollback_to_legacy(
         _assert_inventory(initial, count=1, owner="queue-v1")
         receipt["executor_timeline"].append(initial)
         _require_source_digest(source, current_source_digest)
+        journal.update("producers_quiescing")
         stopped = ops.stop_producers()
         journal.update("producers_quiesced", stopped_count=len(stopped))
         receipt["steps"].append({"name": "quiesce_both_producer_hosts", "stopped_count": len(stopped)})
+        journal.update("drain_waiting")
         receipt["steps"].append({"name": "drain", "report": ops.wait_for_drain(300, 2.0)})
         journal.update("drained")
+        journal.update("executor_stopping")
         ops.stop_bot()
         zero = ops.executor_inventory()
         _assert_inventory(zero, count=0, owner=None)
         journal.update("zero_executor")
         receipt["executor_timeline"].append(zero)
+        journal.update("source_switch_authorizing")
         receipt["steps"].append(
             {
                 "name": "atomic_source_restore",
@@ -2822,6 +4841,7 @@ def rollback_to_legacy(
             }
         )
         journal.update("source_switched", source_after_sha256=source_backup_digest)
+        journal.update("deploy_authorizing", desired_owner="legacy")
         legacy_authority_path, legacy_authority_digest = create_deploy_authority(
             artifact_dir,
             source,
@@ -2833,7 +4853,11 @@ def rollback_to_legacy(
             {
                 "name": "official_forward_rollback_deploy",
                 "report": ops.deploy_official(
-                    legacy_authority_path, legacy_authority_digest
+                    legacy_authority_path,
+                    legacy_authority_digest,
+                    inherited_lock_descriptors=(
+                        int(run_lock.descriptor), int(source_lock.descriptor)
+                    ),
                 ),
             }
         )
@@ -2844,10 +4868,13 @@ def rollback_to_legacy(
         receipt["steps"].append({"name": "runtime_role_contract", "report": ops.runtime_contract(parse_env_file(source), expected_owner="legacy")})
         receipt["status"] = "rolled_back"
         receipt["finished_at"] = _utc_now()
-        receipt_path, digest = _write_redacted_receipt(
-            artifact_dir, "production-queue-rollback", receipt
+        receipt_path, digest = _commit_terminal_receipt(
+            journal,
+            artifact_dir,
+            prefix="production-queue-rollback",
+            receipt=receipt,
+            terminal_status="rolled_back",
         )
-        journal.update("rolled_back", receipt_sha256=digest)
         source_lock.release()
         run_lock.release()
         return {
@@ -2859,8 +4886,11 @@ def rollback_to_legacy(
     except BaseException as exc:
         code = exc.code if isinstance(exc, ProductionCutoverError) else "UNEXPECTED_ROLLBACK_FAILURE"
         try:
+            journal.update("recovery_producers_quiescing")
             recovery_stopped = ops.stop_producers()
+            journal.update("recovery_drain_waiting")
             ops.wait_for_drain(300, 2.0)
+            journal.update("recovery_executor_stopping")
             ops.stop_bot()
             recovery_zero = ops.executor_inventory()
             _assert_inventory(recovery_zero, count=0, owner=None)
@@ -2871,11 +4901,13 @@ def rollback_to_legacy(
             }:
                 raise ProductionCutoverError("BLOCKED_SOURCE_DRIFT")
             if observed_source_digest != current_source_digest:
+                journal.update("recovery_source_restoring")
                 _atomic_write(source, current_source)
             journal.update(
                 "recovery_source_switched",
                 source_after_sha256=_sha256(source),
             )
+            journal.update("recovery_deploy_authorizing", desired_owner="queue-v1")
             authority_path, authority_digest = create_deploy_authority(
                 artifact_dir,
                 source,
@@ -2883,7 +4915,13 @@ def rollback_to_legacy(
                 run_lock=run_lock,
                 journal=journal,
             )
-            ops.deploy_official(authority_path, authority_digest)
+            ops.deploy_official(
+                authority_path,
+                authority_digest,
+                inherited_lock_descriptors=(
+                    int(run_lock.descriptor), int(source_lock.descriptor)
+                ),
+            )
             recovered = ops.executor_inventory()
             _assert_inventory(recovered, count=1, owner="queue-v1")
             ops.runtime_contract(parse_env_file(source), expected_owner="queue-v1")
@@ -2894,12 +4932,15 @@ def rollback_to_legacy(
         receipt["error_code"] = code
         receipt["safe_recovery"] = recovery
         receipt["finished_at"] = _utc_now()
-        _failed_path, digest = _write_redacted_receipt(
-            artifact_dir, "production-queue-rollback-failed", receipt
+        terminal_status = (
+            "failed_recovered" if recovery == "queue_restored" else "recovery_failed"
         )
-        journal.update(
-            "failed_recovered" if recovery == "queue_restored" else "recovery_failed",
-            receipt_sha256=digest,
+        _failed_path, digest = _commit_terminal_receipt(
+            journal,
+            artifact_dir,
+            prefix="production-queue-rollback-failed",
+            receipt=receipt,
+            terminal_status=terminal_status,
             error_code=code,
         )
         source_lock.release()
@@ -2940,13 +4981,46 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--phase-journal-sha256", default="")
     parser.add_argument("--deploy-authority", type=Path)
     parser.add_argument("--deploy-authority-sha256", default="")
+    parser.add_argument("--private-primary-manifest-sha256", default="")
+    parser.add_argument("--private-primary-manifest-receipt", type=Path)
+    parser.add_argument(
+        "--private-primary-manifest-receipt-sha256", default=""
+    )
     parser.add_argument("--confirm", default="")
     return parser.parse_args(argv)
+
+
+def private_primary_deploy_attestation_from_args(
+    args: argparse.Namespace,
+) -> PrivatePrimaryDeployAttestation | None:
+    supplied = (
+        bool(args.private_primary_manifest_sha256),
+        args.private_primary_manifest_receipt is not None,
+        bool(args.private_primary_manifest_receipt_sha256),
+    )
+    if any(supplied) and not all(supplied):
+        raise ProductionCutoverError("BLOCKED_PRIVATE_PRIMARY_ATTESTATION")
+    if not any(supplied):
+        return None
+    return bind_private_primary_deploy_attestation(
+        args.manifest,
+        manifest_sha256=args.private_primary_manifest_sha256,
+        receipt_path=args.private_primary_manifest_receipt,
+        receipt_sha256=args.private_primary_manifest_receipt_sha256,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
+        private_primary_attestation = private_primary_deploy_attestation_from_args(
+            args
+        )
+        if (
+            private_primary_attestation is not None
+            and args.command not in {"redeploy", "verify-deploy-authority"}
+        ):
+            raise ProductionCutoverError("BLOCKED_PRIVATE_PRIMARY_ATTESTATION")
         if args.command == "plan":
             payload = {
                 "environment": "production",
@@ -3040,6 +5114,7 @@ def main(argv: list[str] | None = None) -> int:
                     backup_digest=args.backup_receipt_sha256,
                     artifact_dir=args.artifact_dir,
                     confirmation=args.confirm,
+                    private_primary_attestation=private_primary_attestation,
                 )
         elif args.command == "reconcile-redeploy-failure":
             if args.confirm != RECONCILE_REDEPLOY_CONFIRMATION:
@@ -3094,6 +5169,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.manifest,
                 args.deploy_authority,
                 args.deploy_authority_sha256,
+                expected_artifact_dir=args.artifact_dir,
+                private_primary_attestation=private_primary_attestation,
             )
     except (ProductionCutoverError, ReadinessBlocked) as exc:
         code = exc.code if hasattr(exc, "code") else str(exc)

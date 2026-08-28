@@ -11,6 +11,8 @@ import subprocess
 import tempfile
 import unittest
 
+from scripts import crypt_market_pipeline_backup as backup_crypt
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RELEASE_SCRIPT = REPO_ROOT / "scripts" / "production_deploy_online.sh"
@@ -55,6 +57,7 @@ def _write_source(path: Path, role: str) -> None:
             **common,
             "MARKET_PRIVATE_BIND_IP": "10.240.1.20",
             "MARKET_WEB_DATA_ROOT": "/srv/trading-bot/market-data-production",
+            "MARKET_PRODUCT_SNAPSHOT_ROOT": "/srv/trading-bot/market-data-production/snapshots",
             "MARKET_POSTGRES_PASSWORD_FILE": "/srv/trading-bot/secure/market/postgres-password",
             "MARKET_CAPTURE_ACCOUNT1_CONFIG_FILE": "/srv/trading-bot/secure/market/account1.json",
             "MARKET_CAPTURE_ACCOUNT2_CONFIG_FILE": "/srv/trading-bot/secure/market/account2.json",
@@ -68,6 +71,7 @@ def _write_source(path: Path, role: str) -> None:
             **common,
             "MARKET_PRIVATE_BIND_IP": "10.240.1.10",
             "MARKET_BOT_DATA_ROOT": "/srv/trading-bot/production-data/market-pipeline",
+            "MARKET_PRODUCT_SNAPSHOT_ROOT": "/srv/trading-bot/production-data/market-pipeline/snapshots",
             "MARKET_BOT_TRANSPORT_CERT_FILE": "/srv/trading-bot/secure/market/bot-cert.pem",
             "MARKET_BOT_TRANSPORT_KEY_FILE": "/srv/trading-bot/secure/market/bot-key.pem",
         }
@@ -226,6 +230,12 @@ printf '%s\n' "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256"
             self.assertIn("scripts/migrate_market_pipeline_archive.py", names)
             self.assertIn("scripts/rollout_market_pipeline_shadow.py", names)
             self.assertIn("scripts/upgrade_market_pipeline_bluegreen.py", names)
+            self.assertIn("scripts/prepare_market_pipeline_primary_release.py", names)
+            self.assertIn("scripts/audit_production_market_catchup.py", names)
+            self.assertIn("scripts/observe_production_private_primary.py", names)
+            self.assertIn("scripts/verify_production_private_primary_promotion.py", names)
+            self.assertIn("scripts/promote_production_private_primary_product.py", names)
+            self.assertIn("core/market_intelligence/private_capture.py", names)
             self.assertIn("deploy/market-data/compose.web.yml", names)
             self.assertIn("deploy/market-data/compose.bot.yml", names)
             self.assertFalse(any(".env" in name or "session" in name for name in names))
@@ -315,7 +325,7 @@ validate_production_market_pipeline_shadow_rollout_manifest
             web_env.chmod(0o600)
             preflight.chmod(0o600)
             payload = {
-                "schema": "market_pipeline_backup_restore/1.0",
+                "schema": "market_pipeline_backup_restore/1.2",
                 "status": "INITIAL_EMPTY",
                 "created_at_utc": datetime.now(timezone.utc).isoformat().replace(
                     "+00:00", "Z"
@@ -325,7 +335,9 @@ validate_production_market_pipeline_shadow_rollout_manifest
                 "image_id": "sha256:" + "c" * 64,
                 "image_input_signature": "d" * 64,
                 "role_env_sha256": sha256(web_env.read_bytes()).hexdigest(),
+                "backup_run_id": "1" * 16,
                 "source": {"database_initialized": False},
+                "source_after": {"database_initialized": False},
                 "backup": None,
                 "restore_smoke": {"status": "NOT_APPLICABLE"},
                 "off_host_copy_required": False,
@@ -366,6 +378,197 @@ sha256sum "$5" | awk '{print $1}'
             self.assertEqual(receipt["off_host_copy_status"], "NOT_APPLICABLE")
             self.assertFalse(receipt["product_authority_changed"])
 
+    def test_pass_offhost_receipt_binds_authenticated_ciphertext_and_full_restore(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="market-offhost-pass-") as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            web_env = root / "web.env"
+            preflight = root / "preflight.json"
+            plaintext = root / "market-archive-before-aaaaaaaaaaaa-20260828T120000Z-deadbeef.dump"
+            encrypted = root / f"{plaintext.name}.enc"
+            encryption_receipt = root / f"{plaintext.name}.encryption.json"
+            key = root / "backup.key"
+            source = root / "source.json"
+            destination = root / "offhost-copy-receipt.json"
+            web_env.write_text("release-bound-web-env\n", encoding="utf-8")
+            preflight.write_text('{"status":"pass"}\n', encoding="utf-8")
+            plaintext.write_bytes(b"synthetic-postgres-custom-backup")
+            key.write_text("42" * 32 + "\n", encoding="ascii")
+            for path in (web_env, preflight, plaintext, key):
+                path.chmod(0o600)
+            encryption = backup_crypt.encrypt(
+                source=plaintext,
+                destination=encrypted,
+                key_file=key,
+                receipt=encryption_receipt,
+            )
+            invariants = {
+                "schema_versions": [1, 2, 3],
+                "table_count": 2,
+                "fact_count": 7,
+                "table_row_counts": {"market_facts": 7, "market_offers": 3},
+                "sequence_values": {
+                    "market_facts_id_seq": {"last_value": 8, "is_called": True}
+                },
+                "schema_catalog_sha256": "e" * 64,
+                "schema_objects_sha256": "f" * 64,
+            }
+            payload = {
+                "schema": "market_pipeline_backup_restore/1.2",
+                "status": "PASS",
+                "created_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "release_sha": "a" * 40,
+                "release_tree": "b" * 40,
+                "image_id": "sha256:" + "c" * 64,
+                "image_input_signature": "d" * 64,
+                "role_env_sha256": sha256(web_env.read_bytes()).hexdigest(),
+                "backup_run_id": "1" * 16,
+                "source": {
+                    "container_id": "f" * 64,
+                    "database": "market_archive",
+                    "database_size_bytes": 1024,
+                    "database_identity_sha256": "1" * 64,
+                    **invariants,
+                },
+                "source_after": {
+                    "container_id": "f" * 64,
+                    "database": "market_archive",
+                    "database_size_bytes": 1024,
+                    "database_identity_sha256": "1" * 64,
+                    **invariants,
+                },
+                "backup": {
+                    "path": f"/secure/{plaintext.name}",
+                    "sha256": sha256(plaintext.read_bytes()).hexdigest(),
+                    "size_bytes": plaintext.stat().st_size,
+                    "format": "postgres_custom",
+                },
+                "restore_smoke": {"status": "PASS", **invariants, "cleanup_status": "PASS"},
+                "off_host_copy_required": True,
+                "database_mutated": False,
+                "services_started": False,
+                "secrets_disclosed": False,
+            }
+            source.write_text(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="utf-8",
+            )
+            source.chmod(0o600)
+            body = """
+RELEASE_SHA="$(printf 'a%.0s' {1..40})"
+PRODUCTION_RELEASE_TREE="$(printf 'b%.0s' {1..40})"
+PRODUCTION_MARKET_PIPELINE_IMAGE_ID="sha256:$(printf 'c%.0s' {1..64})"
+PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE="$(printf 'd%.0s' {1..64})"
+PRODUCTION_MARKET_PIPELINE_WEB_ENV="$2"
+PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT="$3"
+PRODUCTION_MARKET_PIPELINE_BACKUP_MAX_AGE_SECONDS=3600
+write_market_pipeline_offhost_backup_receipt "$4" "$5" "$6" "$7"
+"""
+            result = run_sourced(
+                body,
+                str(web_env),
+                str(preflight),
+                str(source),
+                str(destination),
+                str(encrypted),
+                str(encryption_receipt),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            receipt = json.loads(destination.read_text(encoding="utf-8"))
+            self.assertEqual(receipt["off_host_copy_status"], "PASS_ENCRYPTED_VERIFIED")
+            self.assertEqual(
+                receipt["artifact"]["ciphertext_sha256"],
+                encryption["ciphertext_sha256"],
+            )
+
+    def test_release_script_supports_stale_backup_refresh_and_historical_resume(self) -> None:
+        source = RELEASE_SCRIPT.read_text(encoding="utf-8")
+        prepare = source.split("prepare_market_pipeline_archive_backup() {", 1)[1].split("\n}", 1)[0]
+        resume = source.split("prepare_market_pipeline_backup_and_migration() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("--allow-stale", prepare)
+        self.assertIn("backup_market_pipeline_archive.py create", prepare)
+        self.assertIn("verify_market_pipeline_offhost_backup_receipt 0", resume)
+        self.assertIn("$remote_artifact.encryption.json", prepare)
+        self.assertIn("--refresh-complete", prepare)
+        self.assertIn("migration-state.json", prepare)
+        self.assertNotIn("find '$web_backup_dir'", prepare)
+
+    def test_migration_state_is_durable_exact_and_monotonic(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="market-migration-state-") as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            source = root / "source.json"
+            offhost = root / "offhost.json"
+            preflight = root / "preflight.json"
+            web_env = root / "web.env"
+            state = root / "migration-state.json"
+            for path, body in (
+                (source, '{"source":true}\n'),
+                (offhost, '{"offhost":true}\n'),
+                (preflight, '{"preflight":true}\n'),
+                (web_env, "release-bound-env\n"),
+            ):
+                path.write_text(body, encoding="utf-8")
+                path.chmod(0o600)
+            body = """
+RELEASE_SHA="$(printf 'a%.0s' {1..40})"
+PRODUCTION_RELEASE_TREE="$(printf 'b%.0s' {1..40})"
+PRODUCTION_MARKET_PIPELINE_IMAGE_ID="sha256:$(printf 'c%.0s' {1..64})"
+PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE="$(printf 'd%.0s' {1..64})"
+PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT="$2"
+PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT="$3"
+PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT="$4"
+PRODUCTION_MARKET_PIPELINE_WEB_ENV="$5"
+write_market_pipeline_bot_migration_state PREPARED "$6"
+write_market_pipeline_bot_migration_state APPLYING "$6"
+write_market_pipeline_bot_migration_state COMPLETE "$6" "$(printf 'e%.0s' {1..64})"
+cat "$6"
+"""
+            result = run_sourced(
+                body, str(source), str(offhost), str(preflight), str(web_env), str(state)
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            payload = json.loads(state.read_text(encoding="utf-8"))
+            self.assertEqual(payload["status"], "COMPLETE")
+            self.assertEqual(payload["receipt_sha256"], "e" * 64)
+            self.assertFalse(payload["secrets_disclosed"])
+            self.assertEqual(state.stat().st_mode & 0o777, 0o600)
+
+            payload["unexpected"] = "tamper"
+            state.write_text(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="utf-8",
+            )
+            state.chmod(0o600)
+            extra_field = run_sourced(
+                body, str(source), str(offhost), str(preflight), str(web_env), str(state)
+            )
+            self.assertNotEqual(extra_field.returncode, 0)
+            payload.pop("unexpected")
+            state.write_text(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="utf-8",
+            )
+            state.chmod(0o600)
+
+            source.write_text('{"drift":true}\n', encoding="utf-8")
+            rejected = run_sourced(
+                body, str(source), str(offhost), str(preflight), str(web_env), str(state)
+            )
+            self.assertNotEqual(rejected.returncode, 0)
+
+    def test_migration_uses_remote_durable_receipt_not_ssh_stdout(self) -> None:
+        source = RELEASE_SCRIPT.read_text(encoding="utf-8")
+        migration = source.split(
+            "run_market_pipeline_archive_migration() {", 1
+        )[1].split("\n}", 1)[0]
+        self.assertIn("write_market_pipeline_bot_migration_state PREPARED", migration)
+        self.assertIn("write_market_pipeline_bot_migration_state APPLYING", migration)
+        self.assertIn("--journal '$remote_journal'", migration)
+        self.assertIn("--receipt '$remote_receipt'", migration)
+        self.assertIn("cat '$remote_receipt'", migration)
+        self.assertNotIn("printf '%s\\n' \"$migration_output\"", migration)
+
     def test_local_release_directory_is_atomic_idempotent_and_tamper_evident(self) -> None:
         with tempfile.TemporaryDirectory(prefix="market-stable-release-") as temporary:
             root = Path(temporary)
@@ -380,10 +583,12 @@ sha256sum "$5" | awk '{print $1}'
             )
             manifest.chmod(0o600)
             bot_env = root / "bot.env"
+            web_env = root / "web.env"
             image_receipt = root / "image.json"
             pair_receipt = root / "pair.json"
             for path, body in (
                 (bot_env, "MARKET_PIPELINE_FEED_MODE=PRIVATE_SHADOW\n"),
+                (web_env, "MARKET_PIPELINE_FEED_MODE=PRIVATE_SHADOW\n"),
                 (image_receipt, '{"image":"exact"}\n'),
                 (pair_receipt, '{"pair":"exact"}\n'),
             ):
@@ -398,10 +603,11 @@ PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR="$4"
 PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST="$5"
 PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256="$6"
 PRODUCTION_MARKET_PIPELINE_BOT_ENV="$7"
-PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT="$8"
-PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT="$9"
-PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT_SHA256="${10}"
-PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT_SHA256="${11}"
+PRODUCTION_MARKET_PIPELINE_WEB_ENV="$8"
+PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT="$9"
+PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT="${10}"
+PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT_SHA256="${11}"
+PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT_SHA256="${12}"
 install_market_pipeline_control_release_local
 printf '%s\n' "$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR"
 """
@@ -412,6 +618,7 @@ printf '%s\n' "$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR"
                 str(manifest),
                 sha256(manifest.read_bytes()).hexdigest(),
                 str(bot_env),
+                str(web_env),
                 str(image_receipt),
                 str(pair_receipt),
                 sha256(image_receipt.read_bytes()).hexdigest(),

@@ -126,6 +126,19 @@ COMMON_RUNTIME_KEYS = (
     "PRODUCTION_COIN_INFERENCE_SNAPSHOT_PATH",
     "PRODUCTION_COIN_INFERENCE_MAXIMUM_AGE_SECONDS",
     "PRODUCTION_OFFER_MODEL_PRICE_GUARD_ENABLED",
+    # Product snapshot authority is an immutable-source decision. Compose
+    # consumes these host/container paths; never inherit them from a shell.
+    "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE",
+    "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MAX_AGE_SECONDS",
+    "PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR",
+    "PRODUCTION_PRODUCT_ESTIMATOR_BOT_SNAPSHOT_HOST_DIR",
+    "PRODUCTION_PRODUCT_ESTIMATOR_IRAN_APP_SNAPSHOT_HOST_DIR",
+    "PRODUCTION_PRODUCT_ESTIMATOR_APP_PRIVATE_SHADOW_SNAPSHOT_PATH",
+    "PRODUCTION_PRODUCT_ESTIMATOR_BOT_PRIVATE_SHADOW_SNAPSHOT_PATH",
+    "PRODUCTION_PRODUCT_ESTIMATOR_IRAN_APP_PRIVATE_SHADOW_SNAPSHOT_PATH",
+    "PRODUCTION_PRODUCT_ESTIMATOR_APP_PRIVATE_PRIMARY_SNAPSHOT_PATH",
+    "PRODUCTION_PRODUCT_ESTIMATOR_BOT_PRIVATE_PRIMARY_SNAPSHOT_PATH",
+    "PRODUCTION_PRODUCT_ESTIMATOR_IRAN_APP_PRIVATE_PRIMARY_SNAPSHOT_PATH",
 )
 
 TELEGRAM_PROVIDER_TOKEN_KEYS = frozenset(
@@ -219,6 +232,23 @@ OPTIONAL_RUNTIME_DEFAULTS = {
     ),
     "PRODUCTION_COIN_INFERENCE_MAXIMUM_AGE_SECONDS": "120",
     "PRODUCTION_OFFER_MODEL_PRICE_GUARD_ENABLED": "false",
+    "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE": "LEGACY",
+    "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MAX_AGE_SECONDS": "120",
+    "PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR": (
+        "/srv/trading-bot/production-data/coin-intelligence/production-runtime"
+    ),
+    "PRODUCTION_PRODUCT_ESTIMATOR_BOT_SNAPSHOT_HOST_DIR": (
+        "/srv/trading-bot/production-data/coin-intelligence/production-runtime"
+    ),
+    "PRODUCTION_PRODUCT_ESTIMATOR_IRAN_APP_SNAPSHOT_HOST_DIR": (
+        "/srv/trading-bot/production-data/coin-intelligence/production-runtime"
+    ),
+    "PRODUCTION_PRODUCT_ESTIMATOR_APP_PRIVATE_SHADOW_SNAPSHOT_PATH": "",
+    "PRODUCTION_PRODUCT_ESTIMATOR_BOT_PRIVATE_SHADOW_SNAPSHOT_PATH": "",
+    "PRODUCTION_PRODUCT_ESTIMATOR_IRAN_APP_PRIVATE_SHADOW_SNAPSHOT_PATH": "",
+    "PRODUCTION_PRODUCT_ESTIMATOR_APP_PRIVATE_PRIMARY_SNAPSHOT_PATH": "",
+    "PRODUCTION_PRODUCT_ESTIMATOR_BOT_PRIVATE_PRIMARY_SNAPSHOT_PATH": "",
+    "PRODUCTION_PRODUCT_ESTIMATOR_IRAN_APP_PRIVATE_PRIMARY_SNAPSHOT_PATH": "",
 }
 
 PERFORMANCE_RUNTIME_DEFAULTS = OrderedDict(
@@ -285,6 +315,16 @@ ROLE_POSTGRES_TUNING_DEFAULTS = {
         "POSTGRES_WAL_BUFFERS": "16MB",
     },
 }
+
+PRODUCTION_PRIVATE_PRIMARY_BOT_SNAPSHOT_ROOT = (
+    "/srv/trading-bot/production-data/market-pipeline/snapshots"
+)
+PRODUCTION_PRIVATE_PRIMARY_WEB_SNAPSHOT_ROOT = (
+    "/srv/trading-bot/market-data-production/snapshots"
+)
+PRODUCTION_PRIVATE_PRIMARY_CONTAINER_SNAPSHOT = (
+    "/app/runtime/product-estimator/latest-private-primary.json"
+)
 
 # With an immutable production source, process environment pollution must not
 # replace credentials, Queue identities, expected IDs/usernames, or inference
@@ -362,6 +402,41 @@ def validate_telegram_rollout_profile(values: dict[str, str]) -> None:
         raise SystemExit(
             "PRODUCTION_COIN_INFERENCE_MAXIMUM_AGE_SECONDS must be exactly 120"
         )
+    product_mode = str(
+        values.get("PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE") or "LEGACY"
+    ).strip().upper()
+    if product_mode not in {"LEGACY", "PRIVATE_SHADOW", "PRIVATE_PRIMARY"}:
+        raise SystemExit("PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE is invalid")
+    if str(
+        values.get("PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MAX_AGE_SECONDS") or ""
+    ).strip() != "120":
+        raise SystemExit(
+            "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MAX_AGE_SECONDS must be exactly 120"
+        )
+    if product_mode == "PRIVATE_PRIMARY":
+        expected = {
+            "PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR": (
+                PRODUCTION_PRIVATE_PRIMARY_BOT_SNAPSHOT_ROOT
+            ),
+            "PRODUCTION_PRODUCT_ESTIMATOR_BOT_SNAPSHOT_HOST_DIR": (
+                PRODUCTION_PRIVATE_PRIMARY_BOT_SNAPSHOT_ROOT
+            ),
+            "PRODUCTION_PRODUCT_ESTIMATOR_IRAN_APP_SNAPSHOT_HOST_DIR": (
+                PRODUCTION_PRIVATE_PRIMARY_WEB_SNAPSHOT_ROOT
+            ),
+            "PRODUCTION_PRODUCT_ESTIMATOR_APP_PRIVATE_PRIMARY_SNAPSHOT_PATH": (
+                PRODUCTION_PRIVATE_PRIMARY_CONTAINER_SNAPSHOT
+            ),
+            "PRODUCTION_PRODUCT_ESTIMATOR_BOT_PRIVATE_PRIMARY_SNAPSHOT_PATH": (
+                PRODUCTION_PRIVATE_PRIMARY_CONTAINER_SNAPSHOT
+            ),
+            "PRODUCTION_PRODUCT_ESTIMATOR_IRAN_APP_PRIVATE_PRIMARY_SNAPSHOT_PATH": (
+                PRODUCTION_PRIVATE_PRIMARY_CONTAINER_SNAPSHOT
+            ),
+        }
+        for key, required in expected.items():
+            if str(values.get(key) or "").strip() != required:
+                raise SystemExit(f"{key} does not match the production snapshot contract")
 
 
 def parse_args() -> argparse.Namespace:

@@ -262,7 +262,12 @@ def _validate_journal(
         if set(row) != {"service", "state", "container_id", "created_by_release"}:
             raise RolloutError("rollout_journal_service_schema_invalid")
         if row["state"] not in {
-            "pending", "starting", "bootstrap_ready", "healthy", "rolled_back"
+            "pending",
+            "create_prepared",
+            "starting",
+            "bootstrap_ready",
+            "healthy",
+            "rolled_back",
         }:
             raise RolloutError("rollout_journal_service_state_invalid")
         if row["state"] == "pending":
@@ -277,6 +282,23 @@ def _validate_journal(
             )
             if not clean_pending and not interrupted_legacy_start:
                 raise RolloutError("rollout_journal_pending_owner_invalid")
+        elif row["state"] == "create_prepared":
+            if (
+                row["container_id"] is not None
+                or row["created_by_release"] is not False
+            ):
+                raise RolloutError("rollout_journal_create_intent_owner_invalid")
+        elif row["state"] == "rolled_back":
+            clean_rollback = (
+                row["container_id"] is None and row["created_by_release"] is False
+            )
+            created_rollback = (
+                isinstance(row["container_id"], str)
+                and re.fullmatch(r"[0-9a-f]{64}", row["container_id"])
+                and row["created_by_release"] is True
+            )
+            if not clean_rollback and not created_rollback:
+                raise RolloutError("rollout_journal_rollback_owner_invalid")
         elif (
             not isinstance(row["container_id"], str)
             or not re.fullmatch(r"[0-9a-f]{64}", row["container_id"])
@@ -287,7 +309,9 @@ def _validate_journal(
         raise RolloutError("rollout_journal_prepared_state_invalid")
     if payload["status"] == "PASS" and any(row["state"] != "healthy" for row in rows):
         raise RolloutError("rollout_journal_pass_state_invalid")
-    if payload["status"] == "ROLLED_BACK" and any(row["state"] == "healthy" for row in rows):
+    if payload["status"] == "ROLLED_BACK" and any(
+        row["state"] != "rolled_back" for row in rows
+    ):
         raise RolloutError("rollout_journal_rollback_state_invalid")
 
 
@@ -421,6 +445,22 @@ def start_service(
         if not identity["running"] or not identity["healthy"]:
             raise RolloutError("rollout_resumed_service_not_healthy")
         return payload
+    if row["state"] == "create_prepared":
+        current = _ids(values["MARKET_PIPELINE_PROJECT_NAME"], service)
+        if len(current) > 1:
+            raise RolloutError("rollout_create_intent_owner_count_invalid")
+        if current:
+            _identity(
+                current[0],
+                project=values["MARKET_PIPELINE_PROJECT_NAME"],
+                service=service,
+                image_id=image_id,
+                release_sha=release_sha,
+            )
+            row["container_id"] = current[0]
+            row["created_by_release"] = True
+            row["state"] = "starting"
+            _write_journal(journal, payload)
     if row["created_by_release"] and row["container_id"]:
         current = _ids(values["MARKET_PIPELINE_PROJECT_NAME"], service)
         if current != [row["container_id"]]:
@@ -451,6 +491,7 @@ def start_service(
     if _ids(values["MARKET_PIPELINE_PROJECT_NAME"], service):
         raise RolloutError("rollout_service_owner_appeared")
     payload["status"] = "in_progress"
+    row["state"] = "create_prepared"
     _write_journal(journal, payload)
     _run(
         [*_compose(release_root, env_file, role), "up", "-d", "--no-deps", "--no-recreate", service],
@@ -459,6 +500,13 @@ def start_service(
     ids = _ids(values["MARKET_PIPELINE_PROJECT_NAME"], service)
     if len(ids) != 1:
         raise RolloutError("rollout_service_owner_count_invalid")
+    _identity(
+        ids[0],
+        project=values["MARKET_PIPELINE_PROJECT_NAME"],
+        service=service,
+        image_id=image_id,
+        release_sha=release_sha,
+    )
     row["container_id"] = ids[0]
     row["created_by_release"] = True
     row["state"] = "starting"
@@ -523,13 +571,42 @@ def rollback(
         env_sha256=_sha256(env_file), project=values["MARKET_PIPELINE_PROJECT_NAME"],
         feed_mode=feed_mode,
     )
+    if payload["status"] != "ROLLED_BACK":
+        payload["status"] = "in_progress"
+        _write_journal(journal, payload)
     for row in reversed(payload["services"]):
         container_id = row["container_id"]
         if row["state"] == "rolled_back":
             if _ids(values["MARKET_PIPELINE_PROJECT_NAME"], row["service"]):
                 raise RolloutError("rollout_rollback_owner_reappeared")
             continue
+        if row["state"] == "create_prepared":
+            current = _ids(
+                values["MARKET_PIPELINE_PROJECT_NAME"], row["service"]
+            )
+            if len(current) > 1:
+                raise RolloutError("rollout_rollback_owner_count_invalid")
+            if not current:
+                row["state"] = "rolled_back"
+                _write_journal(journal, payload)
+                continue
+            _identity(
+                current[0],
+                project=values["MARKET_PIPELINE_PROJECT_NAME"],
+                service=row["service"],
+                image_id=image_id,
+                release_sha=release_sha,
+            )
+            row["container_id"] = current[0]
+            row["created_by_release"] = True
+            row["state"] = "starting"
+            _write_journal(journal, payload)
+            container_id = current[0]
         if not row["created_by_release"] or not container_id:
+            if _ids(values["MARKET_PIPELINE_PROJECT_NAME"], row["service"]):
+                raise RolloutError("rollout_rollback_untracked_owner")
+            row["state"] = "rolled_back"
+            _write_journal(journal, payload)
             continue
         current = _ids(values["MARKET_PIPELINE_PROJECT_NAME"], row["service"])
         if current != [container_id]:
@@ -545,6 +622,9 @@ def rollback(
             raise RolloutError("rollout_rollback_cleanup_incomplete")
         row["state"] = "rolled_back"
         _write_journal(journal, payload)
+    for service in ROLE_SERVICES[role]:
+        if _ids(values["MARKET_PIPELINE_PROJECT_NAME"], service):
+            raise RolloutError("rollout_rollback_terminal_owner_present")
     payload["status"] = "ROLLED_BACK"
     _write_journal(journal, payload)
     return payload

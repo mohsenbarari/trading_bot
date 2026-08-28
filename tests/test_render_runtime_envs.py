@@ -613,6 +613,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
                 "PRODUCTION_COIN_INFERENCE_SELECTION_ENABLED": "false",
                 "PRODUCTION_COIN_INFERENCE_SNAPSHOT_CONTAINER_PATH": "/polluted/path.json",
                 "PRODUCTION_COIN_INFERENCE_SNAPSHOT_PATH": "/polluted/alias.json",
+                "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE": "PRIVATE_PRIMARY",
                 "DB_POOL_SIZE": "19",
             }
             with patch.dict(os.environ, pollution, clear=True):
@@ -640,6 +641,9 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             collected["PRODUCTION_COIN_INFERENCE_SNAPSHOT_PATH"],
             "/app/runtime/coin-inference/coin-rates.json",
         )
+        self.assertEqual(
+            collected["PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE"], "LEGACY"
+        )
         self.assertEqual(collected["DB_POOL_SIZE"], "19")
 
     def test_split_brain_source_profile_fails_closed(self):
@@ -666,6 +670,48 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             )
             with patch.dict(os.environ, {}, clear=True):
                 with self.assertRaisesRegex(SystemExit, "must be exactly 120"):
+                    collect_runtime_values(str(source_path))
+
+    def test_private_primary_requires_exact_production_snapshot_contract(self):
+        values = self.queue_values()
+        values.update(
+            {
+                "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE": "PRIVATE_PRIMARY",
+                "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MAX_AGE_SECONDS": "120",
+                "PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR": "/srv/trading-bot/production-data/market-pipeline/snapshots",
+                "PRODUCTION_PRODUCT_ESTIMATOR_BOT_SNAPSHOT_HOST_DIR": "/srv/trading-bot/production-data/market-pipeline/snapshots",
+                "PRODUCTION_PRODUCT_ESTIMATOR_IRAN_APP_SNAPSHOT_HOST_DIR": "/srv/trading-bot/market-data-production/snapshots",
+                "PRODUCTION_PRODUCT_ESTIMATOR_APP_PRIVATE_PRIMARY_SNAPSHOT_PATH": "/app/runtime/product-estimator/latest-private-primary.json",
+                "PRODUCTION_PRODUCT_ESTIMATOR_BOT_PRIVATE_PRIMARY_SNAPSHOT_PATH": "/app/runtime/product-estimator/latest-private-primary.json",
+                "PRODUCTION_PRODUCT_ESTIMATOR_IRAN_APP_PRIVATE_PRIMARY_SNAPSHOT_PATH": "/app/runtime/product-estimator/latest-private-primary.json",
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_path = Path(tmpdir) / "master.env"
+            source_path.write_text(
+                "\n".join(f"{key}={value}" for key, value in values.items()) + "\n",
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {}, clear=True):
+                collected = collect_runtime_values(str(source_path))
+        self.assertEqual(
+            collected["PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR"],
+            "/srv/trading-bot/production-data/market-pipeline/snapshots",
+        )
+
+        values["PRODUCTION_PRODUCT_ESTIMATOR_IRAN_APP_SNAPSHOT_HOST_DIR"] = (
+            "/srv/trading-bot/market-data-production/tampered"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_path = Path(tmpdir) / "master.env"
+            source_path.write_text(
+                "\n".join(f"{key}={value}" for key, value in values.items()) + "\n",
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {}, clear=True):
+                with self.assertRaisesRegex(
+                    SystemExit, "does not match the production snapshot contract"
+                ):
                     collect_runtime_values(str(source_path))
 
 

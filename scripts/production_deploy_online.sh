@@ -1,8 +1,21 @@
 #!/bin/bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [[ "${PRODUCTION_RELEASE_ROOT_FD_EXEC_CONFIRM:-}" == "verified-release-root-fd-exec" ]]; then
+    [[ "${BASH_SOURCE[0]}" =~ ^/proc/self/fd/[0-9]+$ ]] \
+        || { echo "Release-root FD bootstrap refused." >&2; exit 1; }
+    PROJECT_DIR="${PRODUCTION_RELEASE_ROOT_FD_EXEC:-}"
+    [[ "$PROJECT_DIR" == /* && -d "$PROJECT_DIR" && ! -L "$PROJECT_DIR" ]] \
+        || { echo "Release-root FD bootstrap refused." >&2; exit 1; }
+    [[ "$(readlink -e -- "$PROJECT_DIR")" == "$PROJECT_DIR" \
+        && "$(readlink -e -- "${BASH_SOURCE[0]}")" == "$PROJECT_DIR/scripts/production_deploy_online.sh" \
+        && "$(printf '%s' "$PROJECT_DIR" | sha256sum | awk '{print $1}')" == "${PRODUCTION_RELEASE_ROOT_FD_EXEC_SHA256:-}" ]] \
+        || { echo "Release-root FD bootstrap refused." >&2; exit 1; }
+    SCRIPT_DIR="$PROJECT_DIR/scripts"
+else
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
 RUNTIME_ENV_RENDERER="$PROJECT_DIR/scripts/render_runtime_envs.py"
 RELEASE_ARTIFACT_RENDERER="$PROJECT_DIR/scripts/render_release_artifacts.py"
 DEPLOYMENT_SURFACE_GUARD="$PROJECT_DIR/scripts/check_deployment_surface_guard.py"
@@ -13,9 +26,15 @@ PRODUCTION_COIN_SNAPSHOT_RELAY_SCRIPT="$PROJECT_DIR/scripts/relay_production_coi
 PRODUCTION_COIN_SNAPSHOT_RELAY_INSTALLER="$PROJECT_DIR/scripts/install_production_coin_inference_snapshot_relay.sh"
 PRODUCTION_COIN_INPUT_TIMER_INSTALLER="$PROJECT_DIR/scripts/install_coin_intelligence_input_timers.sh"
 PRODUCTION_COIN_READINESS_SCRIPT="$PROJECT_DIR/scripts/check_production_coin_inference_readiness.py"
+PRODUCTION_PRIVATE_PRIMARY_MANIFEST_PREPARER="$PROJECT_DIR/scripts/prepare_production_private_primary_manifest.py"
+PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_CONTROLLER="$PROJECT_DIR/scripts/run_production_private_primary_choreography.py"
+PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_LOCK="/root/secure-envs/trading-bot/release-control/private-primary-controller.lock"
+PRODUCTION_PRIVATE_PRIMARY_MANIFEST_SCHEMA_SOURCE="$PROJECT_DIR/deploy/production/online.env.example"
+PRODUCTION_PRIVATE_PRIMARY_MANIFEST_APPROVED_ROOT="/root/secure-envs/trading-bot/release-control"
 MARKET_PIPELINE_RELEASE_PREPARER="$PROJECT_DIR/scripts/prepare_market_pipeline_release.py"
 MARKET_PIPELINE_FOUNDATION_MANAGER="$PROJECT_DIR/scripts/manage_market_pipeline_stage3.py"
 MARKET_PIPELINE_BACKUP_TOOL="$PROJECT_DIR/scripts/backup_market_pipeline_archive.py"
+MARKET_PIPELINE_BACKUP_CRYPT_TOOL="$PROJECT_DIR/scripts/crypt_market_pipeline_backup.py"
 TELEGRAM_QUEUE_PRODUCTION_CUTOVER_SCRIPT="$PROJECT_DIR/scripts/cutover_telegram_delivery_queue_production.py"
 TELEGRAM_BOT_SPLIT_PREFLIGHT_SCRIPT="$PROJECT_DIR/scripts/telegram_bot_split_preflight.py"
 # The production release controller currently owns the combined `all` bot
@@ -28,6 +47,30 @@ PRODUCTION_RELEASE_LOCK_DIR="/root/secure-envs/trading-bot/queue-cutover-artifac
 PRODUCTION_RELEASE_LOCK_PATH="$PRODUCTION_RELEASE_LOCK_DIR/production-release.lock"
 DEFAULT_MANIFEST="$PROJECT_DIR/deploy/production/online.env"
 MANIFEST_PATH="${DEPLOY_MANIFEST:-$DEFAULT_MANIFEST}"
+PRODUCTION_PRIVATE_PRIMARY_MANIFEST_EXPECTED_SHA256=""
+PRODUCTION_PRIVATE_PRIMARY_MANIFEST_RECEIPT_PATH=""
+PRODUCTION_PRIVATE_PRIMARY_MANIFEST_RECEIPT_SHA256=""
+PRODUCTION_PRIVATE_PRIMARY_MANIFEST_ATTESTATION_VERIFIED=0
+PRODUCTION_PRIVATE_PRIMARY_MANIFEST_SOURCE_FD=""
+PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN=""
+PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_SHA256=""
+PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_BUILD_RECEIPT=""
+PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_BUILD_RECEIPT_SHA256=""
+PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_JOURNAL=""
+PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_RECEIPT=""
+PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_CONFIRM=""
+PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_RECOVERY_CONFIRM=""
+PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_RECOVERY_STRATEGY="resume"
+PRODUCTION_PRIVATE_PRIMARY_TRANSACTION_ID=""
+PRODUCTION_MARKET_PIPELINE_PRIMARY_PAIR_RECEIPT=""
+PRODUCTION_MARKET_PIPELINE_WEB_OLD_ENV=""
+PRODUCTION_MARKET_PIPELINE_BOT_OLD_ENV=""
+PRODUCTION_MARKET_PIPELINE_REMOTE_WEB_OLD_ENV=""
+PRODUCTION_PRIVATE_PRIMARY_PRODUCT_BOT_IMAGE_RECEIPT=""
+PRODUCTION_PRIVATE_PRIMARY_PRODUCT_WEB_IMAGE_RECEIPT=""
+PRODUCTION_PRIVATE_PRIMARY_PRIVATE_MANIFEST=""
+PRODUCTION_PRIVATE_PRIMARY_LOCAL_OFFHOST_BACKUP_ROOT=""
+PRODUCTION_PRIVATE_PRIMARY_WEB_BACKUP_ROOT=""
 COMMAND=""
 IRAN_BOOTSTRAP_APT_PACKAGES="ca-certificates curl gnupg lsb-release rsync jq pigz nginx certbot python3-certbot-nginx docker.io python3-pip python3-setuptools python3-wheel"
 IRAN_BOOTSTRAP_COMPOSE_PACKAGES="docker-compose-v2 docker-compose"
@@ -48,6 +91,9 @@ FOREIGN_COMPOSE_PROJECT_NAME=""
 COMPOSE_PROJECT_NAME=""
 PRODUCTION_COIN_SNAPSHOT_RELAY_CONFIRM_TEXT="publish-production-coin-inference-snapshot"
 PRODUCTION_COIN_SNAPSHOT_RELAY_DISABLE_CONFIRM_TEXT="disable-production-coin-inference-snapshot"
+PRODUCTION_PRIVATE_PRIMARY_CONTAINER_SNAPSHOT="/app/runtime/product-estimator/latest-private-primary.json"
+PRODUCTION_PRIVATE_PRIMARY_LOCAL_SNAPSHOT_DIR="/srv/trading-bot/production-data/market-pipeline/snapshots"
+PRODUCTION_PRIVATE_PRIMARY_REMOTE_SNAPSHOT_DIR="/srv/trading-bot/market-data-production/snapshots"
 PRODUCTION_MARKET_PIPELINE_EVIDENCE_CONFIRM_TEXT="prepare-production-market-pipeline-shadow-evidence"
 PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_CONFIRM_TEXT="load-and-preflight-production-market-pipeline-shadow-hosts"
 PRODUCTION_MARKET_PIPELINE_MIGRATION_CONFIRM_TEXT="backup-and-migrate-production-market-pipeline-shadow"
@@ -63,7 +109,8 @@ PRODUCTION_TWO_HOST_RELEASE_STATE_FILE_CANONICAL="/var/lib/trading-bot/productio
 PRODUCTION_TWO_HOST_RELEASE_STATE_FILE="$PRODUCTION_TWO_HOST_RELEASE_STATE_FILE_CANONICAL"
 PRODUCTION_DEPLOY_SH_AUTHORITY_PATH="/var/lib/trading-bot/production-release/deploy-sh-authority.json"
 PRODUCTION_WRITER_QUIESCE_STATE_FILE="/var/lib/trading-bot/production-release/writer-quiesce-state.json"
-PRODUCTION_COIN_SNAPSHOT_RELAY_HAD_UNIT=0
+PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER_WAS_PRESENT=0
+PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_PRESENT=0
 PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ENABLED=0
 PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ACTIVE=0
 PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_ACTIVE=0
@@ -107,6 +154,9 @@ PRODUCTION_RELEASE_SCHEMA_HEAD=""
 PRODUCTION_FOREIGN_TARGET_BINDING_SHA256=""
 PRODUCTION_IRAN_TARGET_BINDING_SHA256=""
 PRODUCTION_COIN_INFERENCE_REQUESTED=0
+PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED=0
+PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED=0
+PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE="LEGACY"
 PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=0
 PRODUCTION_MARKET_PIPELINE_IMAGE_ID=""
 PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE=""
@@ -138,6 +188,32 @@ Production release script driven from the foreign server.
 Usage:
   scripts/production_deploy_online.sh [--manifest /path/to/online.env] [command]
 
+PRIVATE_PRIMARY manifest binding (all three are mandatory together):
+  --private-primary-manifest-sha256 SHA256
+  --private-primary-manifest-receipt /root/secure-envs/trading-bot/release-control/receipt.json
+  --private-primary-manifest-receipt-sha256 SHA256
+
+PRIVATE_PRIMARY full choreography binding:
+  Official plan files are built by the exact control-release builder before
+  any mutation.  The plan/receipt paths below are builder outputs, not
+  handmade inputs.  Recover reuses the already-bound builder receipt.
+  --private-primary-choreography-plan /root/secure-envs/trading-bot/release-control/plan.json
+  --private-primary-choreography-plan-sha256 SHA256
+  --private-primary-choreography-plan-build-receipt PATH
+  --private-primary-choreography-plan-build-receipt-sha256 SHA256
+  --private-primary-choreography-journal /root/secure-envs/trading-bot/release-control/journal.json
+  --private-primary-choreography-receipt /root/secure-envs/trading-bot/release-control/receipt.json
+  --private-primary-choreography-confirm run-production-private-primary-choreography
+  --private-primary-choreography-recovery-confirm recover-production-private-primary-choreography
+  --private-primary-choreography-recovery-strategy resume|rollback
+  --private-primary-transaction-id private-primary-<release-sha>
+  --private-primary-web-old-env PATH
+  --private-primary-bot-old-env PATH
+  --private-primary-remote-web-old-env PATH
+  --private-primary-primary-pair-receipt PATH
+  --private-primary-product-bot-image-receipt PATH
+  --private-primary-product-web-image-receipt PATH
+
 Commands:
   help                 Show this help.
   release              Run the full production flow. This is the default.
@@ -156,6 +232,16 @@ Commands:
   verify-release-evidence
                        Validate the exact backup, restore-smoke, migration rehearsal,
                        source, image, schema, and target receipts without quiescing writers.
+  validate-private-primary-release
+                       Validate the full LEGACY-to-PRIVATE_PRIMARY operation plan;
+                       no command, host, database, source or Product is mutated.
+  private-primary-release
+                       Execute/resume the fixed backup, Blue/Green, migration,
+                       two-host legacy handoff, catch-up, nine-source, outbox,
+                       promotion-verification and Product-last choreography.
+  recover-private-primary-release
+                       Resume an interrupted, digest-bound PRIVATE_PRIMARY
+                       choreography; requires the separate recovery confirmation.
   deploy-iran          Internal release phase; direct execution is refused.
   inspect-shared-data  Inspect Iran shared-table state and print the fresh/existing classification.
   seed-shared-data     Internal release phase; direct execution is refused.
@@ -178,6 +264,9 @@ Notes:
   - Setting the relay flag to 0 is an explicit disabled state. If the timer is
     active, the separate exact disable confirmation is required before it is
     left stopped and disabled.
+  - A PRIVATE_PRIMARY runtime source is refused unless the derived manifest and
+    its immutable preparation receipt are supplied and verified before the
+    manifest is sourced. Legacy manifests retain their existing behavior.
 EOF
 }
 
@@ -599,6 +688,116 @@ parse_args() {
                 MANIFEST_PATH="$2"
                 shift 2
                 ;;
+            --private-primary-manifest-sha256)
+                [[ $# -ge 2 ]] || die "--private-primary-manifest-sha256 requires a SHA-256 digest"
+                PRODUCTION_PRIVATE_PRIMARY_MANIFEST_EXPECTED_SHA256="$2"
+                shift 2
+                ;;
+            --private-primary-manifest-receipt)
+                [[ $# -ge 2 ]] || die "--private-primary-manifest-receipt requires a path"
+                PRODUCTION_PRIVATE_PRIMARY_MANIFEST_RECEIPT_PATH="$2"
+                shift 2
+                ;;
+            --private-primary-manifest-receipt-sha256)
+                [[ $# -ge 2 ]] || die "--private-primary-manifest-receipt-sha256 requires a SHA-256 digest"
+                PRODUCTION_PRIVATE_PRIMARY_MANIFEST_RECEIPT_SHA256="$2"
+                shift 2
+                ;;
+            --private-primary-choreography-plan)
+                [[ $# -ge 2 ]] || die "--private-primary-choreography-plan requires a path"
+                PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN="$2"
+                shift 2
+                ;;
+            --private-primary-choreography-plan-sha256)
+                [[ $# -ge 2 ]] || die "--private-primary-choreography-plan-sha256 requires a SHA-256 digest"
+                PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_SHA256="$2"
+                shift 2
+                ;;
+            --private-primary-choreography-plan-build-receipt)
+                [[ $# -ge 2 ]] || die "--private-primary-choreography-plan-build-receipt requires a path"
+                PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_BUILD_RECEIPT="$2"
+                shift 2
+                ;;
+            --private-primary-choreography-plan-build-receipt-sha256)
+                [[ $# -ge 2 ]] || die "--private-primary-choreography-plan-build-receipt-sha256 requires a SHA-256 digest"
+                PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_BUILD_RECEIPT_SHA256="$2"
+                shift 2
+                ;;
+            --private-primary-choreography-journal)
+                [[ $# -ge 2 ]] || die "--private-primary-choreography-journal requires a path"
+                PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_JOURNAL="$2"
+                shift 2
+                ;;
+            --private-primary-choreography-receipt)
+                [[ $# -ge 2 ]] || die "--private-primary-choreography-receipt requires a path"
+                PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_RECEIPT="$2"
+                shift 2
+                ;;
+            --private-primary-choreography-confirm)
+                [[ $# -ge 2 ]] || die "--private-primary-choreography-confirm requires a value"
+                PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_CONFIRM="$2"
+                shift 2
+                ;;
+            --private-primary-choreography-recovery-confirm)
+                [[ $# -ge 2 ]] || die "--private-primary-choreography-recovery-confirm requires the exact recovery confirmation"
+                PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_RECOVERY_CONFIRM="$2"
+                shift 2
+                ;;
+            --private-primary-choreography-recovery-strategy)
+                [[ $# -ge 2 ]] || die "--private-primary-choreography-recovery-strategy requires resume or rollback"
+                PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_RECOVERY_STRATEGY="$2"
+                shift 2
+                ;;
+            --private-primary-transaction-id)
+                [[ $# -ge 2 ]] || die "--private-primary-transaction-id requires a value"
+                PRODUCTION_PRIVATE_PRIMARY_TRANSACTION_ID="$2"
+                shift 2
+                ;;
+            --private-primary-web-old-env)
+                [[ $# -ge 2 ]] || die "--private-primary-web-old-env requires a path"
+                PRODUCTION_MARKET_PIPELINE_WEB_OLD_ENV="$2"
+                shift 2
+                ;;
+            --private-primary-bot-old-env)
+                [[ $# -ge 2 ]] || die "--private-primary-bot-old-env requires a path"
+                PRODUCTION_MARKET_PIPELINE_BOT_OLD_ENV="$2"
+                shift 2
+                ;;
+            --private-primary-remote-web-old-env)
+                [[ $# -ge 2 ]] || die "--private-primary-remote-web-old-env requires a path"
+                PRODUCTION_MARKET_PIPELINE_REMOTE_WEB_OLD_ENV="$2"
+                shift 2
+                ;;
+            --private-primary-primary-pair-receipt)
+                [[ $# -ge 2 ]] || die "--private-primary-primary-pair-receipt requires a path"
+                PRODUCTION_MARKET_PIPELINE_PRIMARY_PAIR_RECEIPT="$2"
+                shift 2
+                ;;
+            --private-primary-product-bot-image-receipt)
+                [[ $# -ge 2 ]] || die "--private-primary-product-bot-image-receipt requires a path"
+                PRODUCTION_PRIVATE_PRIMARY_PRODUCT_BOT_IMAGE_RECEIPT="$2"
+                shift 2
+                ;;
+            --private-primary-product-web-image-receipt)
+                [[ $# -ge 2 ]] || die "--private-primary-product-web-image-receipt requires a path"
+                PRODUCTION_PRIVATE_PRIMARY_PRODUCT_WEB_IMAGE_RECEIPT="$2"
+                shift 2
+                ;;
+            --private-primary-private-manifest)
+                [[ $# -ge 2 ]] || die "--private-primary-private-manifest requires a path"
+                PRODUCTION_PRIVATE_PRIMARY_PRIVATE_MANIFEST="$2"
+                shift 2
+                ;;
+            --private-primary-local-offhost-backup-root)
+                [[ $# -ge 2 ]] || die "--private-primary-local-offhost-backup-root requires a path"
+                PRODUCTION_PRIVATE_PRIMARY_LOCAL_OFFHOST_BACKUP_ROOT="$2"
+                shift 2
+                ;;
+            --private-primary-web-backup-root)
+                [[ $# -ge 2 ]] || die "--private-primary-web-backup-root requires a path"
+                PRODUCTION_PRIVATE_PRIMARY_WEB_BACKUP_ROOT="$2"
+                shift 2
+                ;;
             -h|--help|help)
                 COMMAND="help"
                 shift
@@ -617,6 +816,354 @@ parse_args() {
     [[ -n "$COMMAND" ]] || COMMAND="release"
 }
 
+private_primary_manifest_attestation_requested() {
+    [[ -n "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_EXPECTED_SHA256" \
+        || -n "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_RECEIPT_PATH" \
+        || -n "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_RECEIPT_SHA256" ]]
+}
+
+manifest_literal_runtime_source_is_private_primary() {
+    # This is a value-silent, read-only pre-source check. It recognizes the
+    # ordinary literal production manifest contract; any ambiguous form is
+    # handled again immediately after source and before release preparation.
+    python3 - "$MANIFEST_PATH" <<'PY'
+from pathlib import Path
+import os
+import stat
+import sys
+
+
+def read_regular(path: Path, maximum: int) -> bytes | None:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError:
+        return None
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size <= 0 or before.st_size > maximum:
+            return None
+        payload = b""
+        while len(payload) <= before.st_size:
+            chunk = os.read(descriptor, before.st_size + 1 - len(payload))
+            if not chunk:
+                break
+            payload += chunk
+        after = os.fstat(descriptor)
+        if len(payload) != before.st_size or (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        ):
+            return None
+        return payload
+    finally:
+        os.close(descriptor)
+
+
+def literal_value(payload: bytes, key: str) -> str | None:
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    values: list[str] = []
+    prefix = key + "="
+    for raw in text.splitlines():
+        if raw.startswith(prefix):
+            values.append(raw[len(prefix):])
+    if len(values) != 1:
+        return None
+    return values[0]
+
+
+manifest = read_regular(Path(sys.argv[1]), 256 * 1024)
+if manifest is None:
+    raise SystemExit(1)
+source_text = literal_value(manifest, "RUNTIME_ENV_SOURCE_PATH")
+if not source_text or not source_text.startswith("/"):
+    raise SystemExit(1)
+runtime = read_regular(Path(source_text), 2 * 1024 * 1024)
+if runtime is None:
+    raise SystemExit(1)
+mode = literal_value(runtime, "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE")
+raise SystemExit(0 if mode == "PRIVATE_PRIMARY" else 1)
+PY
+}
+
+verify_private_primary_deploy_manifest_before_source() {
+    local descriptor_path="" observed_sha256=""
+    PRODUCTION_PRIVATE_PRIMARY_MANIFEST_ATTESTATION_VERIFIED=0
+    PRODUCTION_PRIVATE_PRIMARY_MANIFEST_SOURCE_FD=""
+
+    if ! private_primary_manifest_attestation_requested; then
+        if manifest_literal_runtime_source_is_private_primary; then
+            die "PRIVATE_PRIMARY requires exact manifest and preparation-receipt binding before the deploy manifest is sourced."
+        fi
+        return 0
+    fi
+
+    [[ "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_EXPECTED_SHA256" =~ ^[0-9a-f]{64}$ ]] \
+        || die "PRIVATE_PRIMARY manifest SHA-256 is missing or invalid."
+    [[ -n "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_RECEIPT_PATH" ]] \
+        || die "PRIVATE_PRIMARY manifest receipt path is required."
+    [[ "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ ]] \
+        || die "PRIVATE_PRIMARY manifest receipt SHA-256 is missing or invalid."
+
+    if ! python3 - \
+        "$MANIFEST_PATH" \
+        "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_EXPECTED_SHA256" \
+        "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_RECEIPT_PATH" \
+        "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_RECEIPT_SHA256" \
+        "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_APPROVED_ROOT" \
+        "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_SCHEMA_SOURCE" \
+        "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_PREPARER" <<'PY'
+from hashlib import sha256
+import json
+import os
+from pathlib import Path
+import stat
+import sys
+
+
+SCHEMA = "production_private_primary_deploy_manifest/1.0"
+STATUS = "PASS"
+ACTION = "PREPARE_PRIVATE_PRIMARY_DEPLOY_MANIFEST"
+MAXIMUM_BYTES = 256 * 1024
+HEX64 = set("0123456789abcdef")
+NORMALIZED_KEYS = sorted(
+    {
+        "PRODUCTION_MARKET_PIPELINE_RELEASE_EVIDENCE_ENABLED",
+        "PRODUCTION_MARKET_PIPELINE_RELEASE_EVIDENCE_CONFIRM",
+        "PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_ENABLED",
+        "PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_CONFIRM",
+        "PRODUCTION_MARKET_PIPELINE_MIGRATION_ENABLED",
+        "PRODUCTION_MARKET_PIPELINE_MIGRATION_CONFIRM",
+        "PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_ENABLED",
+        "PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_CONFIRM",
+        "PRODUCTION_MARKET_PIPELINE_CAPTURE_CUTOVER_ENABLED",
+        "PRODUCTION_COIN_INFERENCE_RELAY_ENABLED",
+        "PRODUCTION_COIN_INFERENCE_RELAY_CONFIRM",
+        "PRODUCTION_COIN_INFERENCE_RELAY_DISABLE_CONFIRM",
+    }
+)
+
+
+def fail() -> None:
+    raise SystemExit(2)
+
+
+def digest(payload: bytes) -> str:
+    return sha256(payload).hexdigest()
+
+
+def is_hex64(value: object) -> bool:
+    return isinstance(value, str) and len(value) == 64 and set(value) <= HEX64
+
+
+def require_secure_directory(path: Path, approved: Path) -> None:
+    try:
+        approved_resolved = approved.resolve(strict=True)
+        current = path.resolve(strict=True)
+    except OSError:
+        fail()
+    if approved_resolved != approved or current != path:
+        fail()
+    if current != approved and approved not in current.parents:
+        fail()
+    chain = [approved]
+    for part in current.relative_to(approved).parts:
+        chain.append(chain[-1] / part)
+    for directory in chain:
+        try:
+            info = directory.lstat()
+        except OSError:
+            fail()
+        if (
+            directory.is_symlink()
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != 0
+            or stat.S_IMODE(info.st_mode) != 0o700
+        ):
+            fail()
+
+
+def require_scoped(path: Path, approved: Path) -> None:
+    if not path.is_absolute():
+        fail()
+    try:
+        resolved = path.resolve(strict=False)
+        approved_resolved = approved.resolve(strict=True)
+    except OSError:
+        fail()
+    if resolved != path or (path.parent != approved_resolved and approved_resolved not in path.parents):
+        fail()
+    require_secure_directory(path.parent, approved_resolved)
+
+
+def read_secure(path: Path, approved: Path) -> bytes:
+    require_scoped(path, approved)
+    flags = os.O_RDONLY
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError:
+        fail()
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != 0
+            or stat.S_IMODE(before.st_mode) != 0o600
+            or before.st_nlink != 1
+            or before.st_size <= 0
+            or before.st_size > MAXIMUM_BYTES
+        ):
+            fail()
+        chunks: list[bytes] = []
+        remaining = before.st_size + 1
+        while remaining > 0:
+            chunk = os.read(descriptor, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        payload = b"".join(chunks)
+        after = os.fstat(descriptor)
+        if len(payload) != before.st_size or (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        ):
+            fail()
+        return payload
+    finally:
+        os.close(descriptor)
+
+
+manifest_path = Path(sys.argv[1])
+expected_manifest_sha256 = sys.argv[2]
+receipt_path = Path(sys.argv[3])
+expected_receipt_sha256 = sys.argv[4]
+approved_root = Path(sys.argv[5])
+schema_source = Path(sys.argv[6])
+preparer = Path(sys.argv[7])
+
+if os.geteuid() != 0:
+    fail()
+manifest_payload = read_secure(manifest_path, approved_root)
+receipt_payload = read_secure(receipt_path, approved_root)
+if digest(manifest_payload) != expected_manifest_sha256:
+    fail()
+if digest(receipt_payload) != expected_receipt_sha256:
+    fail()
+try:
+    receipt = json.loads(receipt_payload)
+except (UnicodeDecodeError, json.JSONDecodeError):
+    fail()
+if not isinstance(receipt, dict):
+    fail()
+canonical = (json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+if receipt_payload != canonical:
+    fail()
+try:
+    schema_digest = digest(schema_source.read_bytes())
+    tool_digest = digest(preparer.read_bytes())
+except OSError:
+    fail()
+expected = {
+    "schema": SCHEMA,
+    "status": STATUS,
+    "action": ACTION,
+    "output_sha256": expected_manifest_sha256,
+    "output_path_sha256": digest(str(manifest_path).encode("utf-8")),
+    "receipt_path_sha256": digest(str(receipt_path).encode("utf-8")),
+    "manifest_schema_sha256": schema_digest,
+    "tool_sha256": tool_digest,
+    "source_preserved_by_tool": True,
+    "secrets_disclosed": False,
+}
+if any(receipt.get(key) != value for key, value in expected.items()):
+    fail()
+for key in ("source_sha256", "source_path_sha256"):
+    if not is_hex64(receipt.get(key)):
+        fail()
+normalized = receipt.get("normalized_keys")
+changed = receipt.get("changed_keys")
+if (
+    not isinstance(normalized, list)
+    or normalized != NORMALIZED_KEYS
+    or not isinstance(changed, list)
+    or changed != sorted(changed)
+    or len(changed) != len(set(changed))
+    or not set(changed).issubset(normalized)
+):
+    fail()
+PY
+    then
+        die "PRIVATE_PRIMARY deploy manifest attestation is invalid."
+    fi
+
+    # Source the exact attested inode, not a pathname that could be replaced
+    # between verification and Bash's source operation. The post-source digest
+    # below also detects in-place mutation while the file is being evaluated.
+    exec {PRODUCTION_PRIVATE_PRIMARY_MANIFEST_SOURCE_FD}<"$MANIFEST_PATH" \
+        || die "Could not open the attested PRIVATE_PRIMARY manifest."
+    descriptor_path="/proc/$$/fd/$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_SOURCE_FD"
+    observed_sha256="$(sha256sum "$descriptor_path" | awk '{print $1}')"
+    if [[ "$observed_sha256" != "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_EXPECTED_SHA256" ]]; then
+        exec {PRODUCTION_PRIVATE_PRIMARY_MANIFEST_SOURCE_FD}<&-
+        PRODUCTION_PRIVATE_PRIMARY_MANIFEST_SOURCE_FD=""
+        die "PRIVATE_PRIMARY manifest changed after attestation verification."
+    fi
+    PRODUCTION_PRIVATE_PRIMARY_MANIFEST_ATTESTATION_VERIFIED=1
+}
+
+close_private_primary_manifest_source_fd() {
+    if [[ -n "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_SOURCE_FD" ]]; then
+        exec {PRODUCTION_PRIVATE_PRIMARY_MANIFEST_SOURCE_FD}<&-
+        PRODUCTION_PRIVATE_PRIMARY_MANIFEST_SOURCE_FD=""
+    fi
+}
+
+verify_private_primary_manifest_mode_after_source() {
+    local mode=""
+    mode="$(read_env_value "$RUNTIME_ENV_SOURCE_PATH" "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE")"
+    mode="${mode:-LEGACY}"
+    case "$mode" in
+        PRIVATE_PRIMARY)
+            [[ "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_ATTESTATION_VERIFIED" == "1" ]] \
+                || die "PRIVATE_PRIMARY manifest attestation was not verified before source."
+            ;;
+        *)
+            [[ "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_ATTESTATION_VERIFIED" == "0" ]] \
+                || die "A PRIVATE_PRIMARY manifest receipt cannot authorize a non-PRIVATE_PRIMARY runtime source."
+            ;;
+    esac
+}
+
 lock_production_compose_project_identity() {
     : "${FOREIGN_COMPOSE_PROJECT_NAME:=$PRODUCTION_FOREIGN_COMPOSE_PROJECT_NAME}"
     [[ "$FOREIGN_COMPOSE_PROJECT_NAME" == "$PRODUCTION_FOREIGN_COMPOSE_PROJECT_NAME" ]] \
@@ -627,8 +1174,11 @@ lock_production_compose_project_identity() {
 
 load_manifest() {
     local env_iran_connectivity_mode="${IRAN_CONNECTIVITY_MODE-}"
+    local original_manifest_path="$MANIFEST_PATH"
+    local sourced_manifest_sha256=""
 
     [[ -f "$MANIFEST_PATH" ]] || die "Manifest not found: $MANIFEST_PATH"
+    verify_private_primary_deploy_manifest_before_source
     # These identities are release-control values, not ambient process input.
     # Clear inherited values before loading the approved manifest so a caller
     # cannot redirect Compose to a different production project.
@@ -637,7 +1187,18 @@ load_manifest() {
         PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_PATH \
         PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_SHA256
     # shellcheck disable=SC1090
+    if [[ "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_ATTESTATION_VERIFIED" == "1" ]]; then
+        MANIFEST_PATH="/proc/$$/fd/$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_SOURCE_FD"
+    fi
     source "$MANIFEST_PATH"
+    MANIFEST_PATH="$original_manifest_path"
+    if [[ "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_ATTESTATION_VERIFIED" == "1" ]]; then
+        sourced_manifest_sha256="$(sha256sum "/proc/$$/fd/$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_SOURCE_FD" | awk '{print $1}')"
+        close_private_primary_manifest_source_fd
+        [[ "$sourced_manifest_sha256" == "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_EXPECTED_SHA256" ]] \
+            || die "PRIVATE_PRIMARY manifest changed while it was being sourced."
+    fi
+    verify_private_primary_manifest_mode_after_source
 
     if [[ -n "$env_iran_connectivity_mode" ]]; then
         IRAN_CONNECTIVITY_MODE="$env_iran_connectivity_mode"
@@ -720,6 +1281,8 @@ load_manifest() {
     PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_ROOT="${PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_ROOT:-/root/secure-envs/trading-bot/market-pipeline-backups}"
     PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_ROOT="${PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_ROOT:-/root/secure-envs/trading-bot/market-pipeline-backups}"
     PRODUCTION_MARKET_PIPELINE_BACKUP_MAX_AGE_SECONDS="${PRODUCTION_MARKET_PIPELINE_BACKUP_MAX_AGE_SECONDS:-3600}"
+    PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_KEY_PATH="${PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_KEY_PATH:-/root/secure-envs/trading-bot/market-pipeline-backup.key}"
+    PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_KEY_PATH="${PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_KEY_PATH:-/root/secure-envs/trading-bot/market-pipeline-backup.key}"
     PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_ENABLED="${PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_ENABLED:-0}"
     PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_CONFIRM="${PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_CONFIRM:-}"
     PRODUCTION_COIN_INFERENCE_SOURCE_ROOT="${PRODUCTION_COIN_INFERENCE_SOURCE_ROOT:-/srv/trading-bot/production-data/coin-intelligence/private-gold-live}"
@@ -893,14 +1456,25 @@ acquire_production_operation_lock() {
 verify_queue_cutover_deploy_authority() {
     local authority_path="${TELEGRAM_QUEUE_PRODUCTION_PHASE_RECEIPT:-}"
     local authority_digest="${TELEGRAM_QUEUE_PRODUCTION_PHASE_RECEIPT_SHA256:-}"
+    local -a authority_args=(
+        verify-deploy-authority
+        --manifest "$MANIFEST_PATH"
+        --artifact-dir "$PRODUCTION_RELEASE_LOCK_DIR"
+        --deploy-authority "$authority_path"
+        --deploy-authority-sha256 "$authority_digest"
+    )
     [[ -n "$authority_path" && -n "$authority_digest" ]] \
         || die "A guarded Queue cutover authority receipt is required."
     [[ -f "$PRODUCTION_RELEASE_LOCK_PATH" && ! -L "$PRODUCTION_RELEASE_LOCK_PATH" ]] \
         || die "The guarded production release lock is not active."
-    python3 "$TELEGRAM_QUEUE_PRODUCTION_CUTOVER_SCRIPT" verify-deploy-authority \
-        --manifest "$MANIFEST_PATH" \
-        --deploy-authority "$authority_path" \
-        --deploy-authority-sha256 "$authority_digest" >/dev/null \
+    if private_primary_manifest_attestation_requested; then
+        authority_args+=(
+            --private-primary-manifest-sha256 "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_EXPECTED_SHA256"
+            --private-primary-manifest-receipt "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_RECEIPT_PATH"
+            --private-primary-manifest-receipt-sha256 "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_RECEIPT_SHA256"
+        )
+    fi
+    python3 "$TELEGRAM_QUEUE_PRODUCTION_CUTOVER_SCRIPT" "${authority_args[@]}" >/dev/null \
         || die "The guarded Queue cutover authority receipt is invalid."
     # A Queue cutover changes the immutable runtime source profile while the
     # Git release stays fixed.  The ordinary release deliberately reuses
@@ -914,11 +1488,21 @@ verify_queue_cutover_deploy_authority() {
 guard_production_release_command() {
     local mutating=0 profile=""
     case "$COMMAND" in
-        release|prepare-release-evidence|verify-release-evidence|deploy-foreign|bootstrap-iran|configure-nginx|issue-cert|build-release|sync-project|ship-images|load-images|deploy-iran|seed-shared-data)
+        release|private-primary-release|recover-private-primary-release|prepare-release-evidence|verify-release-evidence|deploy-foreign|bootstrap-iran|configure-nginx|issue-cert|build-release|sync-project|ship-images|load-images|deploy-iran|seed-shared-data)
             mutating=1
             ;;
     esac
     [[ "$mutating" == "1" ]] || return 0
+    if [[ "$COMMAND" == "private-primary-release" \
+        || "$COMMAND" == "recover-private-primary-release" ]]; then
+        # The stateful controller and final Product promoter own/adopt the
+        # durable Market maintenance and Queue/source locks.  Acquiring the
+        # ordinary shell lock here would deadlock that exact-inode handoff.
+        return 0
+    fi
+    [[ ! -e "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_LOCK" \
+        && ! -L "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_LOCK" ]] \
+        || die "A PRIVATE_PRIMARY choreography is active or requires recovery before another production mutation."
     case "$COMMAND" in
         deploy-foreign|deploy-iran|sync-project|ship-images|load-images|seed-shared-data)
             die "This production mutation is internal to the full two-host release choreography and cannot run directly."
@@ -1034,18 +1618,18 @@ configure_iran_transport() {
         key)
             SSH_IRAN_CMD=(
                 timeout --signal=TERM --kill-after=15s "${IRAN_SSH_COMMAND_TIMEOUT_SECONDS}s"
-                ssh -p "$IRAN_SSH_PORT" "${ssh_common_options[@]}"
+                /usr/bin/ssh -p "$IRAN_SSH_PORT" "${ssh_common_options[@]}"
                 -o BatchMode=yes -o PasswordAuthentication=no
                 -o KbdInteractiveAuthentication=no -o IdentitiesOnly=yes
             )
             SCP_IRAN_CMD=(
                 timeout --signal=TERM --kill-after=15s "${IRAN_TRANSFER_TIMEOUT_SECONDS}s"
-                scp -P "$IRAN_SSH_PORT" "${ssh_common_options[@]}"
+                /usr/bin/scp -P "$IRAN_SSH_PORT" "${ssh_common_options[@]}"
                 -o BatchMode=yes -o PasswordAuthentication=no
                 -o KbdInteractiveAuthentication=no -o IdentitiesOnly=yes
             )
             RSYNC_RSH_CMD=(
-                ssh -p "$IRAN_SSH_PORT" "${ssh_common_options[@]}"
+                /usr/bin/ssh -p "$IRAN_SSH_PORT" "${ssh_common_options[@]}"
                 -o BatchMode=yes -o PasswordAuthentication=no
                 -o KbdInteractiveAuthentication=no -o IdentitiesOnly=yes
             )
@@ -1430,6 +2014,7 @@ validate_production_market_pipeline_evidence_manifest() {
     [[ -f "$MARKET_PIPELINE_RELEASE_PREPARER" \
         && -f "$MARKET_PIPELINE_FOUNDATION_MANAGER" \
         && -f "$MARKET_PIPELINE_BACKUP_TOOL" \
+        && -f "$MARKET_PIPELINE_BACKUP_CRYPT_TOOL" \
         && -f "$LOCAL_PROJECT_DIR/scripts/migrate_market_pipeline_archive.py" \
         && -f "$LOCAL_PROJECT_DIR/scripts/upgrade_market_pipeline_bluegreen.py" \
         && -f "$LOCAL_PROJECT_DIR/deploy/market-data/Dockerfile" ]] \
@@ -1507,6 +2092,16 @@ validate_production_market_pipeline_migration_manifest() {
             && "$(canonical_path "$backup_root")" == "$backup_root" ]] \
             || die "Market Pipeline backup roots must be canonical production paths under the protected backup base."
     done
+    local backup_key_path
+    for backup_key_path in \
+        "$PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_KEY_PATH" \
+        "$PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_KEY_PATH"
+    do
+        [[ "$backup_key_path" =~ ^/root/secure-envs/trading-bot/[A-Za-z0-9._/-]+$ \
+            && "$backup_key_path" != *staging* \
+            && "$(canonical_path "$backup_key_path")" == "$backup_key_path" ]] \
+            || die "Market Pipeline backup key paths must be canonical protected production paths."
+    done
 }
 
 validate_production_market_pipeline_shadow_rollout_manifest() {
@@ -1526,34 +2121,75 @@ validate_production_market_pipeline_shadow_rollout_manifest() {
 }
 
 validate_production_coin_inference_activation_contract() {
-    local preview selection guard auto_selection value
+    local preview selection guard auto_selection value mode maximum_age
+    local app_host bot_host remote_host app_path bot_path remote_path
     preview="$(read_env_value "$RUNTIME_ENV_SOURCE_PATH" "PRODUCTION_COIN_INFERENCE_PREVIEW_ENABLED")"
     selection="$(read_env_value "$RUNTIME_ENV_SOURCE_PATH" "PRODUCTION_COIN_INFERENCE_SELECTION_ENABLED")"
     guard="$(read_env_value "$RUNTIME_ENV_SOURCE_PATH" "PRODUCTION_OFFER_MODEL_PRICE_GUARD_ENABLED")"
     auto_selection="$(read_env_value "$RUNTIME_ENV_SOURCE_PATH" "PRODUCTION_COIN_INFERENCE_AUTO_SELECTION_ENABLED")"
+    mode="$(read_env_value "$RUNTIME_ENV_SOURCE_PATH" "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE")"
+    maximum_age="$(read_env_value "$RUNTIME_ENV_SOURCE_PATH" "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MAX_AGE_SECONDS")"
+    mode="${mode:-LEGACY}"
+    maximum_age="${maximum_age:-120}"
     for value in "$preview" "$selection" "$guard" "$auto_selection"; do
         [[ "$value" == "true" || "$value" == "false" ]] \
             || die "Production coin inference flags must be explicit true/false values in the immutable source."
     done
     [[ "$auto_selection" == "false" ]] \
         || die "Production coin inference automatic commodity selection remains forbidden."
+    case "$mode" in
+        LEGACY|PRIVATE_SHADOW|PRIVATE_PRIMARY) ;;
+        *) die "Production Product estimator Snapshot mode is invalid." ;;
+    esac
+    [[ "$maximum_age" == "120" ]] \
+        || die "Production Product estimator Snapshot maximum age must be exactly 120 seconds."
+    PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE="$mode"
     PRODUCTION_COIN_INFERENCE_REQUESTED=0
+    PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED=0
+    PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED=0
     if [[ "$preview" == "true" || "$selection" == "true" || "$guard" == "true" ]]; then
         PRODUCTION_COIN_INFERENCE_REQUESTED=1
         [[ "$preview" == "true" && "$selection" == "true" && "$guard" == "true" ]] \
             || die "Live production coin inference requires preview, selection, and price guard to transition together."
-        [[ "$PRODUCTION_COIN_INFERENCE_RELAY_ENABLED" == "1" \
-            && "$PRODUCTION_COIN_INFERENCE_RELAY_CONFIRM" == "$PRODUCTION_COIN_SNAPSHOT_RELAY_CONFIRM_TEXT" ]] \
-            || die "Live production coin inference requires the confirmed production Snapshot relay."
-        [[ -f "$PRODUCTION_COIN_INPUT_TIMER_INSTALLER" \
-            && -f "$PRODUCTION_COIN_READINESS_SCRIPT" ]] \
-            || die "Production coin inference input/readiness tooling is missing."
-        [[ "$COIN_GROUP_EVENT_CHANNEL_ID" =~ ^-100[0-9]{8,16}$ \
-            && "$COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_OFFER_CHANNEL_ID" =~ ^-100[0-9]{8,16}$ \
-            && "$COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_TRADE_CHANNEL_ID" =~ ^-100[0-9]{8,16}$ \
-            && "$COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_OFFER_CHANNEL_ID" != "$COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_TRADE_CHANNEL_ID" \
-            && "$COIN_INTELLIGENCE_EXPECTED_TELEGRAM_API_ID" =~ ^[1-9][0-9]{0,15}$ ]] \
-            || die "Production coin inference collector identities must be explicitly bound in the manifest."
+        if [[ "$mode" == "PRIVATE_PRIMARY" ]]; then
+            app_host="$(read_env_value "$RUNTIME_ENV_SOURCE_PATH" "PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR")"
+            bot_host="$(read_env_value "$RUNTIME_ENV_SOURCE_PATH" "PRODUCTION_PRODUCT_ESTIMATOR_BOT_SNAPSHOT_HOST_DIR")"
+            remote_host="$(read_env_value "$RUNTIME_ENV_SOURCE_PATH" "PRODUCTION_PRODUCT_ESTIMATOR_IRAN_APP_SNAPSHOT_HOST_DIR")"
+            app_path="$(read_env_value "$RUNTIME_ENV_SOURCE_PATH" "PRODUCTION_PRODUCT_ESTIMATOR_APP_PRIVATE_PRIMARY_SNAPSHOT_PATH")"
+            bot_path="$(read_env_value "$RUNTIME_ENV_SOURCE_PATH" "PRODUCTION_PRODUCT_ESTIMATOR_BOT_PRIVATE_PRIMARY_SNAPSHOT_PATH")"
+            remote_path="$(read_env_value "$RUNTIME_ENV_SOURCE_PATH" "PRODUCTION_PRODUCT_ESTIMATOR_IRAN_APP_PRIVATE_PRIMARY_SNAPSHOT_PATH")"
+            [[ "$app_host" == "$PRODUCTION_PRIVATE_PRIMARY_LOCAL_SNAPSHOT_DIR" \
+                && "$bot_host" == "$PRODUCTION_PRIVATE_PRIMARY_LOCAL_SNAPSHOT_DIR" \
+                && "$remote_host" == "$PRODUCTION_PRIVATE_PRIMARY_REMOTE_SNAPSHOT_DIR" ]] \
+                || die "Production PRIVATE_PRIMARY host Snapshot directories do not match the approved pipeline runtime."
+            [[ "$app_path" == "$PRODUCTION_PRIVATE_PRIMARY_CONTAINER_SNAPSHOT" \
+                && "$bot_path" == "$PRODUCTION_PRIVATE_PRIMARY_CONTAINER_SNAPSHOT" \
+                && "$remote_path" == "$PRODUCTION_PRIVATE_PRIMARY_CONTAINER_SNAPSHOT" ]] \
+                || die "Production PRIVATE_PRIMARY container Snapshot paths are invalid."
+            [[ -f "$PRODUCTION_COIN_READINESS_SCRIPT" ]] \
+                || die "Production PRIVATE_PRIMARY readiness tooling is missing."
+            [[ "$PRODUCTION_COIN_INFERENCE_RELAY_ENABLED" == "0" \
+                && -z "$PRODUCTION_COIN_INFERENCE_RELAY_CONFIRM" \
+                && "$PRODUCTION_COIN_INFERENCE_RELAY_DISABLE_CONFIRM" == "$PRODUCTION_COIN_SNAPSHOT_RELAY_DISABLE_CONFIRM_TEXT" ]] \
+                || die "Production PRIVATE_PRIMARY requires an explicit relay-disabled release manifest and exact rollback-only disable confirmation."
+            PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED=1
+        else
+            PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED=1
+            [[ "$PRODUCTION_COIN_INFERENCE_RELAY_ENABLED" == "1" \
+                && "$PRODUCTION_COIN_INFERENCE_RELAY_CONFIRM" == "$PRODUCTION_COIN_SNAPSHOT_RELAY_CONFIRM_TEXT" ]] \
+                || die "Legacy production coin inference requires the confirmed production Snapshot relay."
+            [[ -f "$PRODUCTION_COIN_INPUT_TIMER_INSTALLER" \
+                && -f "$PRODUCTION_COIN_READINESS_SCRIPT" ]] \
+                || die "Production coin inference input/readiness tooling is missing."
+            [[ "$COIN_GROUP_EVENT_CHANNEL_ID" =~ ^-100[0-9]{8,16}$ \
+                && "$COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_OFFER_CHANNEL_ID" =~ ^-100[0-9]{8,16}$ \
+                && "$COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_TRADE_CHANNEL_ID" =~ ^-100[0-9]{8,16}$ \
+                && "$COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_OFFER_CHANNEL_ID" != "$COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_TRADE_CHANNEL_ID" \
+                && "$COIN_INTELLIGENCE_EXPECTED_TELEGRAM_API_ID" =~ ^[1-9][0-9]{0,15}$ ]] \
+                || die "Production coin inference collector identities must be explicitly bound in the manifest."
+        fi
+    elif [[ "$mode" == "PRIVATE_PRIMARY" ]]; then
+        die "Production PRIVATE_PRIMARY requires preview, selection, and price guard to be enabled together."
     fi
 }
 
@@ -1893,31 +2529,50 @@ if path.is_symlink() or not path.is_file() or stat.S_IMODE(path.stat().st_mode) 
     raise SystemExit(2)
 payload = json.loads(path.read_text(encoding="utf-8"))
 required = {
+    "schema_version",
     "status",
     "relay_intentionally_stopped",
+    "previous_timer_unit_present",
+    "previous_service_unit_present",
     "previous_timer_enabled",
     "previous_timer_active",
+    "previous_service_active",
     "release_sha",
     "relay_script_sha256",
     "recovery_action",
 }
 if set(payload) != required:
     raise SystemExit(2)
-if payload["status"] != "release_incomplete" or payload["relay_intentionally_stopped"] is not True:
+if payload["schema_version"] != 2 or payload["status"] != "release_incomplete" or payload["relay_intentionally_stopped"] is not True:
     raise SystemExit(2)
-if not isinstance(payload["previous_timer_enabled"], bool) or not isinstance(payload["previous_timer_active"], bool):
+if not all(isinstance(payload[key], bool) for key in (
+    "previous_timer_unit_present",
+    "previous_service_unit_present",
+    "previous_timer_enabled",
+    "previous_timer_active",
+    "previous_service_active",
+)):
     raise SystemExit(2)
 if not re.fullmatch(r"[0-9a-f]{40,64}", str(payload["release_sha"])):
     raise SystemExit(2)
 if not re.fullmatch(r"[0-9a-f]{64}", str(payload["relay_script_sha256"])):
     raise SystemExit(2)
-if payload["recovery_action"] != "rerun_release_for_verified_reconcile":
+if payload["recovery_action"] != "restore_exact_prior_relay_state_on_release_failure":
     raise SystemExit(2)
-print(int(payload["previous_timer_enabled"]), int(payload["previous_timer_active"]))
+print(
+    int(payload["previous_timer_unit_present"]),
+    int(payload["previous_service_unit_present"]),
+    int(payload["previous_timer_enabled"]),
+    int(payload["previous_timer_active"]),
+    int(payload["previous_service_active"]),
+)
 PY
 )" || die "Production coin Snapshot relay recovery marker is invalid; manual review is required."
-    read -r PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ENABLED \
-        PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ACTIVE <<<"$state"
+    read -r PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER_WAS_PRESENT \
+        PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_PRESENT \
+        PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ENABLED \
+        PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ACTIVE \
+        PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_ACTIVE <<<"$state"
     PRODUCTION_COIN_SNAPSHOT_RELAY_RECOVERY_PENDING=1
 }
 
@@ -1930,8 +2585,11 @@ write_production_coin_relay_recovery_marker() {
     install -d -m 0700 -- "$state_dir"
     validate_production_coin_relay_state_file
     python3 - "$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE" \
+        "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER_WAS_PRESENT" \
+        "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_PRESENT" \
         "$PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ENABLED" \
         "$PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ACTIVE" \
+        "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_ACTIVE" \
         "$RELEASE_SHA" "$relay_digest" <<'PY'
 import json
 import os
@@ -1941,13 +2599,17 @@ from uuid import uuid4
 
 destination = Path(sys.argv[1])
 payload = {
+    "schema_version": 2,
     "status": "release_incomplete",
     "relay_intentionally_stopped": True,
-    "previous_timer_enabled": sys.argv[2] == "1",
-    "previous_timer_active": sys.argv[3] == "1",
-    "release_sha": sys.argv[4],
-    "relay_script_sha256": sys.argv[5],
-    "recovery_action": "rerun_release_for_verified_reconcile",
+    "previous_timer_unit_present": sys.argv[2] == "1",
+    "previous_service_unit_present": sys.argv[3] == "1",
+    "previous_timer_enabled": sys.argv[4] == "1",
+    "previous_timer_active": sys.argv[5] == "1",
+    "previous_service_active": sys.argv[6] == "1",
+    "release_sha": sys.argv[7],
+    "relay_script_sha256": sys.argv[8],
+    "recovery_action": "restore_exact_prior_relay_state_on_release_failure",
 }
 candidate = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
 descriptor = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -1979,25 +2641,31 @@ clear_production_coin_relay_recovery_marker() {
 suspend_production_coin_snapshot_relay() {
     validate_production_coin_relay_state_file
     load_production_coin_relay_recovery_marker
-    PRODUCTION_COIN_SNAPSHOT_RELAY_HAD_UNIT=0
-    if command -v systemctl >/dev/null 2>&1 \
-        && systemctl cat "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1; then
-        PRODUCTION_COIN_SNAPSHOT_RELAY_HAD_UNIT=1
-    fi
     if [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_RECOVERY_PENDING" != "1" ]]; then
+        PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER_WAS_PRESENT=0
+        PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_PRESENT=0
         PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ENABLED=0
         PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ACTIVE=0
         PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_ACTIVE=0
-        if [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_HAD_UNIT" == "1" ]]; then
+        if command -v systemctl >/dev/null 2>&1; then
+            if systemctl cat "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1; then
+                PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER_WAS_PRESENT=1
+            fi
+            if systemctl cat "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE" >/dev/null 2>&1; then
+                PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_PRESENT=1
+            fi
+        fi
+        if [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER_WAS_PRESENT" == "1" ]]; then
             if systemctl is-enabled --quiet "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER"; then
                 PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ENABLED=1
             fi
             if systemctl is-active --quiet "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER"; then
                 PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ACTIVE=1
             fi
-            if systemctl is-active --quiet "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE"; then
-                PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_ACTIVE=1
-            fi
+        fi
+        if [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_PRESENT" == "1" ]] \
+            && systemctl is-active --quiet "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE"; then
+            PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_ACTIVE=1
         fi
     fi
     if [[ "$PRODUCTION_COIN_INFERENCE_RELAY_ENABLED" != "1" \
@@ -2029,15 +2697,80 @@ suspend_production_coin_snapshot_relay() {
 production_release_relay_exit_guard() {
     local status="${1:-$?}"
     if [[ "$status" != "0" && "$PRODUCTION_COIN_SNAPSHOT_RELAY_GUARD_ARMED" == "1" ]]; then
-        systemctl stop "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1 || true
-        systemctl stop "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE" >/dev/null 2>&1 || true
-        if write_production_coin_relay_recovery_marker; then
-            printf 'production_release_status=release_incomplete relay_intentionally_stopped=true recovery_action=rerun_release_for_verified_reconcile\n' >&2
+        if restore_production_coin_snapshot_relay_recovery_state; then
+            printf 'production_coin_snapshot_relay=exact_prior_state_restored\n' >&2
         else
-            printf 'production_release_status=release_incomplete relay_intentionally_stopped=true recovery_marker=write_failed\n' >&2
+            printf 'production_coin_snapshot_relay=rollback_incomplete recovery_state_retained=true manual_recovery_required=true\n' >&2
         fi
     fi
     return "$status"
+}
+
+restore_production_coin_snapshot_relay_recovery_state() {
+    local status failed=0
+    load_production_coin_relay_recovery_marker || return 1
+    [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_RECOVERY_PENDING" == "1" ]] || return 1
+    command -v systemctl >/dev/null 2>&1 || return 1
+    set +e
+    systemctl stop "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1 || true
+    systemctl stop "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE" >/dev/null 2>&1 || true
+    if [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER_WAS_PRESENT" == "1" ]]; then
+        if [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ENABLED" == "1" ]]; then
+            systemctl enable "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1 || failed=1
+        else
+            systemctl disable "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1 || failed=1
+        fi
+        if [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ACTIVE" == "1" ]]; then
+            systemctl start "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1 || failed=1
+        fi
+        if systemctl is-enabled --quiet "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1; then
+            status=0
+        else
+            status=$?
+        fi
+        if [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ENABLED" == "1" ]]; then
+            [[ "$status" == "0" ]] || failed=1
+        else
+            [[ "$status" == "1" ]] || failed=1
+        fi
+    else
+        ! systemctl cat "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1 || failed=1
+    fi
+    if [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_PRESENT" == "1" ]]; then
+        if [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_ACTIVE" == "1" ]]; then
+            systemctl start "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE" >/dev/null 2>&1 || failed=1
+        fi
+    else
+        ! systemctl cat "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE" >/dev/null 2>&1 || failed=1
+    fi
+    if systemctl is-active --quiet "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1; then
+        status=0
+    else
+        status=$?
+    fi
+    if [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ACTIVE" == "1" ]]; then
+        [[ "$status" == "0" ]] || failed=1
+    elif [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER_WAS_PRESENT" == "1" ]]; then
+        [[ "$status" == "3" ]] || failed=1
+    else
+        [[ "$status" != "0" ]] || failed=1
+    fi
+    if systemctl is-active --quiet "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE" >/dev/null 2>&1; then
+        status=0
+    else
+        status=$?
+    fi
+    if [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_ACTIVE" == "1" ]]; then
+        [[ "$status" == "0" ]] || failed=1
+    elif [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_PRESENT" == "1" ]]; then
+        [[ "$status" == "3" ]] || failed=1
+    else
+        [[ "$status" != "0" ]] || failed=1
+    fi
+    set -e
+    [[ "$failed" == "0" ]] || return 1
+    clear_production_coin_relay_recovery_marker
+    PRODUCTION_COIN_SNAPSHOT_RELAY_GUARD_ARMED=0
 }
 
 validate_production_coin_input_timer_recovery_path() {
@@ -2093,6 +2826,10 @@ timers = (
     "coin-group-event-telegram.timer",
     "trading-bot-private-gold-collector.timer",
 )
+services = (
+    "coin-group-event-telegram.service",
+    "trading-bot-private-gold-collector.service",
+)
 if (
     root.is_symlink()
     or not root.is_dir()
@@ -2106,15 +2843,19 @@ state_stat = state_path.stat()
 if stat.S_IMODE(state_stat.st_mode) != 0o600 or state_stat.st_nlink != 1 or state_stat.st_uid != os.getuid():
     raise SystemExit(2)
 payload = json.loads(state_path.read_text(encoding="utf-8"))
-if set(payload) != {"schema_version", "status", "release_sha", "units", "timers", "recovery_action"}:
+if set(payload) != {"schema_version", "status", "release_sha", "units", "timers", "services", "recovery_action"}:
     raise SystemExit(2)
-if payload["schema_version"] != 1 or payload["status"] != "prepared":
+if payload["schema_version"] != 2 or payload["status"] != "prepared":
     raise SystemExit(2)
-if payload["recovery_action"] != "restore_prior_units_and_timer_state_on_release_failure":
+if payload["recovery_action"] != "restore_prior_units_and_runtime_state_on_release_failure":
     raise SystemExit(2)
 if not re.fullmatch(r"[0-9a-f]{40}", str(payload["release_sha"])):
     raise SystemExit(2)
-if set(payload["units"]) != set(units) or set(payload["timers"]) != set(timers):
+if (
+    set(payload["units"]) != set(units)
+    or set(payload["timers"]) != set(timers)
+    or set(payload["services"]) != set(services)
+):
     raise SystemExit(2)
 print(f"release\t{payload['release_sha']}")
 expected_entries = {"state.json"}
@@ -2146,6 +2887,11 @@ for timer in timers:
     ):
         raise SystemExit(2)
     print(f"timer\t{timer}\t{int(record['enabled'])}\t{int(record['active'])}")
+for service in services:
+    record = payload["services"][service]
+    if set(record) != {"active"} or not isinstance(record["active"], bool):
+        raise SystemExit(2)
+    print(f"service\t{service}\t{int(record['active'])}")
 PY
 }
 
@@ -2157,7 +2903,7 @@ capture_production_coin_input_timer_recovery_state() {
         return 0
     fi
     validate_production_coin_input_timer_recovery_path
-    local recovery_parent candidate state_path unit timer status
+    local recovery_parent candidate state_path unit timer service status
     local -a units=(
         coin-group-event-telegram.service
         coin-group-event-telegram.timer
@@ -2168,7 +2914,11 @@ capture_production_coin_input_timer_recovery_state() {
         coin-group-event-telegram.timer
         trading-bot-private-gold-collector.timer
     )
-    local -A existed=() digests=() enabled=() active=()
+    local -a services=(
+        coin-group-event-telegram.service
+        trading-bot-private-gold-collector.service
+    )
+    local -A existed=() digests=() enabled=() active=() service_active=()
     if [[ -e "$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR" \
         || -L "$PRODUCTION_COIN_INPUT_TIMER_RECOVERY_DIR" ]]; then
         local recovered_release
@@ -2228,6 +2978,20 @@ capture_production_coin_input_timer_recovery_state() {
             fi
         fi
     done
+    for service in "${services[@]}"; do
+        service_active["$service"]=0
+        if [[ "${existed[$service]}" == "1" ]]; then
+            if systemctl is-active --quiet "$service" >/dev/null 2>&1; then
+                service_active["$service"]=1
+            else
+                status=$?
+                [[ "$status" == "3" ]] || {
+                    rm -rf -- "$candidate"
+                    die "Production coin input service active state is unavailable: $service"
+                }
+            fi
+        fi
+    done
     state_path="$candidate/state.json"
     python3 - "$state_path" "$RELEASE_SHA" \
         "${existed[${units[0]}]}" "${digests[${units[0]}]}" \
@@ -2235,7 +2999,9 @@ capture_production_coin_input_timer_recovery_state() {
         "${existed[${units[2]}]}" "${digests[${units[2]}]}" \
         "${existed[${units[3]}]}" "${digests[${units[3]}]}" \
         "${enabled[${timers[0]}]}" "${active[${timers[0]}]}" \
-        "${enabled[${timers[1]}]}" "${active[${timers[1]}]}" <<'PY'
+        "${enabled[${timers[1]}]}" "${active[${timers[1]}]}" \
+        "${service_active[${services[0]}]}" \
+        "${service_active[${services[1]}]}" <<'PY'
 import json
 import os
 import sys
@@ -2253,11 +3019,16 @@ timers = (
     "coin-group-event-telegram.timer",
     "trading-bot-private-gold-collector.timer",
 )
+services = (
+    "coin-group-event-telegram.service",
+    "trading-bot-private-gold-collector.service",
+)
 values = sys.argv[3:]
 unit_values = values[:8]
-timer_values = values[8:]
+timer_values = values[8:12]
+service_values = values[12:]
 payload = {
-    "schema_version": 1,
+    "schema_version": 2,
     "status": "prepared",
     "release_sha": release_sha,
     "units": {
@@ -2274,7 +3045,11 @@ payload = {
         }
         for index, timer in enumerate(timers)
     },
-    "recovery_action": "restore_prior_units_and_timer_state_on_release_failure",
+    "services": {
+        service: {"active": service_values[index] == "1"}
+        for index, service in enumerate(services)
+    },
+    "recovery_action": "restore_prior_units_and_runtime_state_on_release_failure",
 }
 descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
 with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
@@ -2345,7 +3120,7 @@ PY
 }
 
 restore_production_coin_input_timer_recovery_state() {
-    local serialized recovered unit existed digest timer enabled active candidate status
+    local serialized recovered kind unit existed digest timer service enabled active candidate status
     local -a records=()
     local -A prior_unit_existed=()
     local failed=0
@@ -2357,9 +3132,11 @@ restore_production_coin_input_timer_recovery_state() {
     mapfile -t records <<<"$serialized"
     [[ "${records[0]:-}" == $'release\t'"$RELEASE_SHA" ]] \
         || return 1
-    for recovered in "${records[@]:1:4}"; do
-        IFS=$'\t' read -r _ unit existed digest <<<"$recovered"
-        prior_unit_existed["$unit"]="$existed"
+    for recovered in "${records[@]:1}"; do
+        IFS=$'\t' read -r kind unit existed digest <<<"$recovered"
+        if [[ "$kind" == "unit" ]]; then
+            prior_unit_existed["$unit"]="$existed"
+        fi
     done
     set +e
     for timer in coin-group-event-telegram.timer trading-bot-private-gold-collector.timer; do
@@ -2371,8 +3148,12 @@ restore_production_coin_input_timer_recovery_state() {
         fi
         systemctl disable "$timer" >/dev/null 2>&1 || true
     done
-    for recovered in "${records[@]:1:4}"; do
+    for service in coin-group-event-telegram.service trading-bot-private-gold-collector.service; do
+        systemctl stop "$service" >/dev/null 2>&1 || true
+    done
+    for recovered in "${records[@]:1}"; do
         IFS=$'\t' read -r _ unit existed digest <<<"$recovered"
+        [[ "${recovered%%$'\t'*}" == "unit" ]] || continue
         if [[ "$existed" == "1" ]]; then
             candidate="$(mktemp "$PRODUCTION_COIN_INPUT_SYSTEMD_DIR/.${unit}.rollback.XXXXXXXX")" || {
                 failed=1
@@ -2420,8 +3201,9 @@ finally:
     os.close(descriptor)
 PY
     systemctl daemon-reload >/dev/null 2>&1 || failed=1
-    for recovered in "${records[@]:5:2}"; do
-        IFS=$'\t' read -r _ timer enabled active <<<"$recovered"
+    for recovered in "${records[@]:1}"; do
+        IFS=$'\t' read -r kind timer enabled active <<<"$recovered"
+        [[ "$kind" == "timer" ]] || continue
         if [[ "${prior_unit_existed[$timer]:-0}" != "1" ]]; then
             continue
         fi
@@ -2446,6 +3228,28 @@ PY
             [[ "$status" == "1" ]] || failed=1
         fi
         if systemctl is-active --quiet "$timer" >/dev/null 2>&1; then
+            status=0
+        else
+            status=$?
+        fi
+        if [[ "$active" == "1" ]]; then
+            [[ "$status" == "0" ]] || failed=1
+        else
+            [[ "$status" == "3" ]] || failed=1
+        fi
+    done
+    for recovered in "${records[@]:1}"; do
+        IFS=$'\t' read -r kind service active <<<"$recovered"
+        [[ "$kind" == "service" ]] || continue
+        if [[ "${prior_unit_existed[$service]:-0}" != "1" ]]; then
+            continue
+        fi
+        if [[ "$active" == "1" ]]; then
+            systemctl restart "$service" >/dev/null 2>&1 || failed=1
+        else
+            systemctl stop "$service" >/dev/null 2>&1 || failed=1
+        fi
+        if systemctl is-active --quiet "$service" >/dev/null 2>&1; then
             status=0
         else
             status=$?
@@ -2565,7 +3369,7 @@ run_production_coin_input_timer_installer() {
 }
 
 install_and_verify_production_coin_inputs() {
-    [[ "$PRODUCTION_COIN_INFERENCE_REQUESTED" == "1" ]] || return 0
+    [[ "$PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED" == "1" ]] || return 0
     run_production_coin_input_timer_installer 0
     local attempt
     for attempt in $(seq 1 30); do
@@ -2588,8 +3392,126 @@ install_and_verify_production_coin_inputs() {
     die "Production coin inference upstream collectors did not reach the required fresh/readable state."
 }
 
-verify_running_production_coin_consumers() {
-    [[ "$PRODUCTION_COIN_INFERENCE_REQUESTED" == "1" ]] || return 0
+retire_production_legacy_coin_inputs() {
+    [[ "$PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED" == "1" ]] || return 0
+    local serialized recovered kind unit existed digest status
+    local -a timers=(
+        coin-group-event-telegram.timer
+        trading-bot-private-gold-collector.timer
+    )
+    local -a services=(
+        coin-group-event-telegram.service
+        trading-bot-private-gold-collector.service
+    )
+    local -a recovery_records=()
+    local -A prior_unit_existed=()
+    serialized="$(read_production_coin_input_timer_recovery_state)" \
+        || die "Production legacy coin input recovery state is missing before retirement."
+    mapfile -t recovery_records <<<"$serialized"
+    [[ "${recovery_records[0]:-}" == $'release\t'"$RELEASE_SHA" ]] \
+        || die "Production legacy coin input recovery state is bound to another release."
+    for recovered in "${recovery_records[@]:1}"; do
+        IFS=$'\t' read -r kind unit existed digest <<<"$recovered"
+        if [[ "$kind" == "unit" ]]; then
+            prior_unit_existed["$unit"]="$existed"
+        fi
+    done
+    for unit in "${timers[@]}"; do
+        systemctl stop "$unit" >/dev/null 2>&1 || true
+        systemctl disable "$unit" >/dev/null 2>&1 || true
+    done
+    for unit in "${services[@]}"; do
+        systemctl stop "$unit" >/dev/null 2>&1 || true
+    done
+    for unit in "${timers[@]}"; do
+        if systemctl is-active --quiet "$unit" >/dev/null 2>&1; then
+            die "Production legacy coin input timer remained active after PRIVATE_PRIMARY verification: $unit"
+        else
+            status=$?
+            if [[ "${prior_unit_existed[$unit]:-0}" == "1" ]]; then
+                [[ "$status" == "3" ]] \
+                    || die "Production legacy coin input timer active state is unavailable after retirement: $unit"
+            else
+                [[ "$status" != "0" ]] \
+                    || die "Production legacy coin input timer absence is ambiguous: $unit"
+            fi
+        fi
+        if systemctl is-enabled --quiet "$unit" >/dev/null 2>&1; then
+            die "Production legacy coin input timer remained enabled after PRIVATE_PRIMARY verification: $unit"
+        else
+            status=$?
+            if [[ "${prior_unit_existed[$unit]:-0}" == "1" ]]; then
+                [[ "$status" == "1" ]] \
+                    || die "Production legacy coin input timer enabled state is unavailable after retirement: $unit"
+            else
+                [[ "$status" != "0" ]] \
+                    || die "Production legacy coin input timer retirement state is ambiguous: $unit"
+            fi
+        fi
+    done
+    for unit in "${services[@]}"; do
+        if systemctl is-active --quiet "$unit" >/dev/null 2>&1; then
+            die "Production legacy coin input collector remained active after PRIVATE_PRIMARY verification: $unit"
+        else
+            status=$?
+            if [[ "${prior_unit_existed[$unit]:-0}" == "1" ]]; then
+                [[ "$status" == "3" ]] \
+                    || die "Production legacy coin input collector state is unavailable after retirement: $unit"
+            else
+                [[ "$status" != "0" ]] \
+                    || die "Production legacy coin input collector absence is ambiguous: $unit"
+            fi
+        fi
+    done
+    log "Production legacy coin input timers and collectors are stopped and timers are disabled after PRIVATE_PRIMARY consumer verification."
+}
+
+retire_production_coin_snapshot_relay() {
+    [[ "$PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED" == "1" ]] || return 0
+    local status
+    suspend_production_coin_snapshot_relay
+    systemctl disable "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1 || true
+    if systemctl is-active --quiet "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1; then
+        die "Production legacy coin Snapshot relay timer remained active after PRIVATE_PRIMARY verification."
+    else
+        status=$?
+        if [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER_WAS_PRESENT" == "1" ]]; then
+            [[ "$status" == "3" ]] \
+                || die "Production legacy coin Snapshot relay timer state is unavailable after retirement."
+        else
+            [[ "$status" != "0" ]] \
+                || die "Production legacy coin Snapshot relay timer absence is ambiguous."
+        fi
+    fi
+    if systemctl is-enabled --quiet "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" >/dev/null 2>&1; then
+        die "Production legacy coin Snapshot relay timer remained enabled after PRIVATE_PRIMARY verification."
+    else
+        status=$?
+        if [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER_WAS_PRESENT" == "1" ]]; then
+            [[ "$status" == "1" ]] \
+                || die "Production legacy coin Snapshot relay timer enabled state is unavailable after retirement."
+        else
+            [[ "$status" != "0" ]] \
+                || die "Production legacy coin Snapshot relay timer retirement is ambiguous."
+        fi
+    fi
+    if systemctl is-active --quiet "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE" >/dev/null 2>&1; then
+        die "Production legacy coin Snapshot relay service remained active after PRIVATE_PRIMARY verification."
+    else
+        status=$?
+        if [[ "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_PRESENT" == "1" ]]; then
+            [[ "$status" == "3" ]] \
+                || die "Production legacy coin Snapshot relay service state is unavailable after retirement."
+        else
+            [[ "$status" != "0" ]] \
+                || die "Production legacy coin Snapshot relay service absence is ambiguous."
+        fi
+    fi
+    log "Production legacy coin Snapshot relay is stopped and disabled after PRIVATE_PRIMARY consumer verification."
+}
+
+verify_running_legacy_production_coin_consumers() {
+    [[ "$PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED" == "1" ]] || return 0
     local attempt local_digest remote_digest
     for attempt in $(seq 1 5); do
         local_digest="$(file_sha256 "$FOREIGN_COIN_SNAPSHOT_PATH")"
@@ -2613,6 +3535,89 @@ verify_running_production_coin_consumers() {
         sleep 2
     done
     die "Production coin inference consumers did not pass the post-deploy readiness contract."
+}
+
+resolve_private_primary_product_runtime_contract() {
+    local foreign_mode remote_mode app_dir bot_dir remote_dir
+    local app_path bot_path remote_path foreign_age remote_age
+    foreign_mode="$(read_env_value "$FOREIGN_RUNTIME_ENV_PATH" "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE")"
+    remote_mode="$(read_env_value "$IRAN_RUNTIME_ENV_PATH" "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE")"
+    [[ "$foreign_mode" == "PRIVATE_PRIMARY" && "$remote_mode" == "$foreign_mode" ]] \
+        || die "Rendered Product estimator mode must be PRIVATE_PRIMARY on both production hosts."
+    foreign_age="$(read_env_value "$FOREIGN_RUNTIME_ENV_PATH" "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MAX_AGE_SECONDS")"
+    remote_age="$(read_env_value "$IRAN_RUNTIME_ENV_PATH" "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MAX_AGE_SECONDS")"
+    [[ "$foreign_age" == "120" && "$remote_age" == "$foreign_age" ]] \
+        || die "Rendered PRIVATE_PRIMARY maximum age must be exactly 120 seconds."
+    app_dir="$(read_env_value "$FOREIGN_RUNTIME_ENV_PATH" "PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR")"
+    bot_dir="$(read_env_value "$FOREIGN_RUNTIME_ENV_PATH" "PRODUCTION_PRODUCT_ESTIMATOR_BOT_SNAPSHOT_HOST_DIR")"
+    remote_dir="$(read_env_value "$IRAN_RUNTIME_ENV_PATH" "PRODUCTION_PRODUCT_ESTIMATOR_IRAN_APP_SNAPSHOT_HOST_DIR")"
+    [[ "$app_dir" == "$PRODUCTION_PRIVATE_PRIMARY_LOCAL_SNAPSHOT_DIR" \
+        && "$bot_dir" == "$PRODUCTION_PRIVATE_PRIMARY_LOCAL_SNAPSHOT_DIR" \
+        && "$remote_dir" == "$PRODUCTION_PRIVATE_PRIMARY_REMOTE_SNAPSHOT_DIR" ]] \
+        || die "Rendered PRIVATE_PRIMARY host directories do not match the approved pipeline runtime."
+    app_path="$(read_env_value "$FOREIGN_RUNTIME_ENV_PATH" "PRODUCTION_PRODUCT_ESTIMATOR_APP_PRIVATE_PRIMARY_SNAPSHOT_PATH")"
+    bot_path="$(read_env_value "$FOREIGN_RUNTIME_ENV_PATH" "PRODUCTION_PRODUCT_ESTIMATOR_BOT_PRIVATE_PRIMARY_SNAPSHOT_PATH")"
+    remote_path="$(read_env_value "$IRAN_RUNTIME_ENV_PATH" "PRODUCTION_PRODUCT_ESTIMATOR_IRAN_APP_PRIVATE_PRIMARY_SNAPSHOT_PATH")"
+    [[ "$app_path" == "$PRODUCTION_PRIVATE_PRIMARY_CONTAINER_SNAPSHOT" \
+        && "$bot_path" == "$PRODUCTION_PRIVATE_PRIMARY_CONTAINER_SNAPSHOT" \
+        && "$remote_path" == "$PRODUCTION_PRIVATE_PRIMARY_CONTAINER_SNAPSHOT" ]] \
+        || die "Rendered PRIVATE_PRIMARY container paths are invalid."
+    FOREIGN_PRIVATE_PRIMARY_SNAPSHOT_PATH="$app_dir/latest-private-primary.json"
+    IRAN_PRIVATE_PRIMARY_SNAPSHOT_PATH="$remote_dir/latest-private-primary.json"
+}
+
+verify_running_private_primary_consumers() {
+    [[ "$PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED" == "1" ]] || return 0
+    resolve_private_primary_product_runtime_contract
+    local attempt local_digest remote_digest final_local_digest final_remote_digest
+    [[ -d "$PRODUCTION_PRIVATE_PRIMARY_LOCAL_SNAPSHOT_DIR" \
+        && ! -L "$PRODUCTION_PRIVATE_PRIMARY_LOCAL_SNAPSHOT_DIR" ]] \
+        || die "Local PRIVATE_PRIMARY Snapshot directory is missing or unsafe."
+    ssh_iran "test -d '$PRODUCTION_PRIVATE_PRIMARY_REMOTE_SNAPSHOT_DIR' && test ! -L '$PRODUCTION_PRIVATE_PRIMARY_REMOTE_SNAPSHOT_DIR'" \
+        || die "Remote PRIVATE_PRIMARY Snapshot directory is missing or unsafe."
+    for attempt in $(seq 1 10); do
+        if [[ -f "$FOREIGN_PRIVATE_PRIMARY_SNAPSHOT_PATH" \
+            && ! -L "$FOREIGN_PRIVATE_PRIMARY_SNAPSHOT_PATH" ]]; then
+            local_digest="$(file_sha256 "$FOREIGN_PRIVATE_PRIMARY_SNAPSHOT_PATH")"
+        else
+            local_digest=""
+        fi
+        remote_digest="$(ssh_iran "test -f '$IRAN_PRIVATE_PRIMARY_SNAPSHOT_PATH' && test ! -L '$IRAN_PRIVATE_PRIMARY_SNAPSHOT_PATH' && sha256sum '$IRAN_PRIVATE_PRIMARY_SNAPSHOT_PATH' | awk '{print \$1}'" 2>/dev/null || true)"
+        if [[ "$local_digest" =~ ^[0-9a-f]{64}$ \
+            && "$remote_digest" == "$local_digest" ]] \
+            && docker exec trading_bot_app python3 /app/scripts/check_production_coin_inference_readiness.py \
+                --environment production \
+                --production-confirmation check-production-coin-inference-readiness \
+                private-primary-consumer \
+                --snapshot "$PRODUCTION_PRIVATE_PRIMARY_CONTAINER_SNAPSHOT" \
+                --expected-sha256 "$local_digest" \
+            && docker exec trading_bot_bot python3 /app/scripts/check_production_coin_inference_readiness.py \
+                --environment production \
+                --production-confirmation check-production-coin-inference-readiness \
+                private-primary-consumer \
+                --snapshot "$PRODUCTION_PRIVATE_PRIMARY_CONTAINER_SNAPSHOT" \
+                --expected-sha256 "$local_digest" \
+            && ssh_iran "docker exec trading_bot_app python3 /app/scripts/check_production_coin_inference_readiness.py --environment production --production-confirmation check-production-coin-inference-readiness private-primary-consumer --snapshot '$PRODUCTION_PRIVATE_PRIMARY_CONTAINER_SNAPSHOT' --expected-sha256 '$local_digest'"; then
+            final_local_digest="$(file_sha256 "$FOREIGN_PRIVATE_PRIMARY_SNAPSHOT_PATH")"
+            final_remote_digest="$(ssh_iran "sha256sum '$IRAN_PRIVATE_PRIMARY_SNAPSHOT_PATH' | awk '{print \$1}'")"
+            if [[ "$final_local_digest" == "$local_digest" \
+                && "$final_remote_digest" == "$local_digest" ]]; then
+                log "Production PRIVATE_PRIMARY consumers passed exact-release, same-digest, read-only mount, fresh V2, status OK and 14-cell checks."
+                return 0
+            fi
+        fi
+        sleep 2
+    done
+    die "Production PRIVATE_PRIMARY consumers did not pass the post-deploy readiness contract."
+}
+
+verify_running_production_coin_consumers() {
+    [[ "$PRODUCTION_COIN_INFERENCE_REQUESTED" == "1" ]] || return 0
+    if [[ "$PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED" == "1" ]]; then
+        verify_running_private_primary_consumers
+    else
+        verify_running_legacy_production_coin_consumers
+    fi
 }
 
 reconcile_production_coin_snapshot_relay() {
@@ -3828,17 +4833,43 @@ prepare_market_pipeline_control_payload() {
     rm -f -- "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST"
     install -d -m 0700 -- "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR"
     git -C "$LOCAL_PROJECT_DIR" archive --format=tar "$RELEASE_SHA" -- \
+        core/__init__.py \
+        core/market_intelligence \
+        core/telegram_delivery_cutover_contract.py \
         deploy/market-data/Dockerfile \
         deploy/market-data/requirements.lock \
         deploy/market-data/compose.yml \
         deploy/market-data/compose.web.yml \
         deploy/market-data/compose.bot.yml \
         scripts/prepare_market_pipeline_release.py \
+        scripts/prepare_market_pipeline_primary_release.py \
+        scripts/prepare_production_private_primary_manifest.py \
+        scripts/capture_production_baseline.py \
+        scripts/deploy_config.py \
+        scripts/plan_telegram_delivery_queue_production.py \
+        scripts/run_production_backup.py \
+        scripts/scan_telegram_queue_artifacts.py \
+        scripts/cutover_telegram_delivery_queue_production.py \
         scripts/backup_market_pipeline_archive.py \
+        scripts/crypt_market_pipeline_backup.py \
         scripts/migrate_market_pipeline_archive.py \
         scripts/rollout_market_pipeline_shadow.py \
         scripts/upgrade_market_pipeline_bluegreen.py \
+        scripts/quiesce_production_legacy_market_collectors.py \
         scripts/manage_market_pipeline_stage3.py \
+        scripts/audit_production_market_catchup.py \
+        scripts/observe_production_private_primary.py \
+        scripts/reconcile_estimator_snapshot_publication_outbox.py \
+        scripts/verify_production_private_primary_promotion.py \
+        scripts/promote_production_private_primary_product.py \
+        scripts/production_deploy_online.sh \
+        scripts/build_production_private_primary_choreography_plan.py \
+        scripts/run_production_private_primary_choreography.py \
+        scripts/run_fenced_production_deploy.py \
+        scripts/run_release_bound_product_readiness.py \
+        scripts/update_production_coin_inference_source.py \
+        scripts/check_production_coin_inference_readiness.py \
+        scripts/render_runtime_envs.py \
         | tar -xf - -C "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR"
     [[ -z "$(find "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR" -type l -print -quit)" \
         && -z "$(find "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR" ! -type f ! -type d -print -quit)" ]] \
@@ -3947,6 +4978,7 @@ install_market_pipeline_control_release_local() {
         [[ -f "$release_dir/control-payload.sha256" \
             && "$(file_sha256 "$release_dir/control-payload.sha256")" == "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256" \
             && "$(file_sha256 "$release_dir/bot.release.env")" == "$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_BOT_ENV")" \
+            && "$(file_sha256 "$release_dir/web.release.env")" == "$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_WEB_ENV")" \
             && "$(file_sha256 "$release_dir/market-pipeline-image-prebuild-receipt.json")" == "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT_SHA256" \
             && "$(file_sha256 "$release_dir/market-pipeline-release-pair-receipt.json")" == "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT_SHA256" ]] \
             || die "Existing local Market Pipeline release directory does not match this release."
@@ -3963,6 +4995,7 @@ install_market_pipeline_control_release_local() {
     rsync -a --delete "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR/" "$incoming/"
     install -m 0600 -- "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST" "$incoming/control-payload.sha256"
     install -m 0600 -- "$PRODUCTION_MARKET_PIPELINE_BOT_ENV" "$incoming/bot.release.env"
+    install -m 0600 -- "$PRODUCTION_MARKET_PIPELINE_WEB_ENV" "$incoming/web.release.env"
     install -m 0600 -- "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT" "$incoming/market-pipeline-image-prebuild-receipt.json"
     install -m 0600 -- "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT" "$incoming/market-pipeline-release-pair-receipt.json"
     (
@@ -3971,6 +5004,7 @@ install_market_pipeline_control_release_local() {
     ) || die "Local installed Market Pipeline control payload failed verification."
     fsync_file_and_parent "$incoming/control-payload.sha256"
     fsync_file_and_parent "$incoming/bot.release.env"
+    fsync_file_and_parent "$incoming/web.release.env"
     mv -- "$incoming" "$release_dir"
     sync -f "$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR"
     LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR="$release_dir"
@@ -4261,17 +5295,19 @@ PY
 }
 
 write_market_pipeline_offhost_backup_receipt() {
-    local source_receipt="$1" destination="$2" local_artifact="$3"
+    local source_receipt="$1" destination="$2" local_artifact="$3" encryption_receipt="${4:--}"
+    local require_fresh="${5:-1}" allow_replace="${6:-0}"
     local source_sha web_env_sha preflight_sha
     source_sha="$(file_sha256 "$source_receipt")"
     web_env_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_WEB_ENV")"
     preflight_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT")"
-    python3 - "$destination" "$source_receipt" "$local_artifact" \
+    python3 - "$destination" "$source_receipt" "$local_artifact" "$encryption_receipt" \
         "$RELEASE_SHA" "$PRODUCTION_RELEASE_TREE" \
         "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
         "$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE" \
         "$source_sha" "$web_env_sha" "$preflight_sha" \
-        "$PRODUCTION_MARKET_PIPELINE_BACKUP_MAX_AGE_SECONDS" <<'PY'
+        "$PRODUCTION_MARKET_PIPELINE_BACKUP_MAX_AGE_SECONDS" \
+        "$require_fresh" "$allow_replace" <<'PY'
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import json
@@ -4284,9 +5320,12 @@ import sys
 destination = Path(sys.argv[1])
 source_path = Path(sys.argv[2])
 artifact_argument = sys.argv[3]
-release_sha, release_tree, image_id, image_signature = sys.argv[4:8]
-source_sha, web_env_sha, preflight_sha = sys.argv[8:11]
-maximum_age_seconds = int(sys.argv[11])
+encryption_receipt_argument = sys.argv[4]
+release_sha, release_tree, image_id, image_signature = sys.argv[5:9]
+source_sha, web_env_sha, preflight_sha = sys.argv[9:12]
+maximum_age_seconds = int(sys.argv[12])
+require_fresh = sys.argv[13] == "1"
+allow_replace = sys.argv[14] == "1"
 
 def digest(path: Path) -> str:
     value = sha256()
@@ -4306,18 +5345,33 @@ def secure_file(path: Path) -> None:
     ):
         raise SystemExit(2)
 
+def secure_parent(path: Path) -> None:
+    info = path.parent.lstat()
+    if (
+        not path.parent.is_absolute()
+        or path.parent.is_symlink()
+        or not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != os.geteuid()
+        or stat.S_IMODE(info.st_mode) != 0o700
+    ):
+        raise SystemExit(2)
+
 secure_file(source_path)
+secure_parent(destination)
+if destination.exists() or destination.is_symlink():
+    secure_file(destination)
 if digest(source_path) != source_sha:
     raise SystemExit(2)
 source = json.loads(source_path.read_text(encoding="utf-8"))
 common_keys = {
     "schema", "status", "created_at_utc", "release_sha", "release_tree",
-    "image_id", "image_input_signature", "role_env_sha256", "source",
+    "image_id", "image_input_signature", "role_env_sha256", "backup_run_id",
+    "source", "source_after",
     "backup", "restore_smoke", "off_host_copy_required", "database_mutated",
     "services_started", "secrets_disclosed",
 }
 expected_identity = {
-    "schema": "market_pipeline_backup_restore/1.0",
+    "schema": "market_pipeline_backup_restore/1.2",
     "release_sha": release_sha,
     "release_tree": release_tree,
     "image_id": image_id,
@@ -4336,8 +5390,8 @@ try:
 except (KeyError, TypeError, ValueError):
     raise SystemExit(2)
 now = datetime.now(timezone.utc)
-if created > now + timedelta(seconds=30) or now - created > timedelta(
-    seconds=maximum_age_seconds
+if created > now + timedelta(seconds=30) or (
+    require_fresh and now - created > timedelta(seconds=maximum_age_seconds)
 ):
     raise SystemExit(2)
 
@@ -4348,45 +5402,126 @@ if status == "PASS":
     source_artifact = source.get("backup")
     restore = source.get("restore_smoke")
     source_database = source.get("source")
+    source_after = source.get("source_after")
     if (
         not isinstance(source_artifact, dict)
         or set(source_artifact) != {"path", "sha256", "size_bytes", "format"}
         or source_artifact.get("format") != "postgres_custom"
         or not isinstance(restore, dict)
+        or set(restore) != {
+            "status", "schema_versions", "table_count", "fact_count",
+            "table_row_counts", "sequence_values", "schema_catalog_sha256",
+            "schema_objects_sha256", "cleanup_status",
+        }
         or restore.get("status") != "PASS"
         or restore.get("cleanup_status") != "PASS"
         or not isinstance(source_database, dict)
+        or set(source_database) != {
+            "container_id", "database", "database_size_bytes",
+            "database_identity_sha256", "schema_versions", "table_count",
+            "fact_count", "table_row_counts", "sequence_values",
+            "schema_catalog_sha256", "schema_objects_sha256",
+        }
+        or not isinstance(source_after, dict)
+        or set(source_after) != set(source_database)
         or restore.get("schema_versions") != source_database.get("schema_versions")
         or restore.get("table_count") != source_database.get("table_count")
         or restore.get("fact_count") != source_database.get("fact_count")
+        or restore.get("table_row_counts") != source_database.get("table_row_counts")
+        or restore.get("sequence_values") != source_database.get("sequence_values")
+        or restore.get("schema_catalog_sha256") != source_database.get("schema_catalog_sha256")
+        or restore.get("schema_objects_sha256") != source_database.get("schema_objects_sha256")
+        or any(
+            source_after.get(key) != source_database.get(key)
+            for key in (
+                "database_identity_sha256", "schema_versions", "table_count",
+                "fact_count", "table_row_counts", "sequence_values",
+                "schema_catalog_sha256", "schema_objects_sha256",
+            )
+        )
+        or not isinstance(source_database.get("table_row_counts"), dict)
+        or len(source_database["table_row_counts"]) != source_database.get("table_count")
+        or source_database["table_row_counts"].get("market_facts") != source_database.get("fact_count")
+        or any(
+            not isinstance(name, str)
+            or not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", name)
+            or not isinstance(count, int)
+            or count < 0
+            for name, count in source_database["table_row_counts"].items()
+        )
+        or not isinstance(source_database.get("sequence_values"), dict)
+        or any(
+            not isinstance(name, str)
+            or not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", name)
+            or not isinstance(value, dict)
+            or set(value) != {"last_value", "is_called"}
+            or not isinstance(value.get("last_value"), int)
+            or not isinstance(value.get("is_called"), bool)
+            for name, value in source_database["sequence_values"].items()
+        )
+        or not re.fullmatch(r"[0-9a-f]{64}", str(source_database.get("schema_catalog_sha256") or ""))
+        or not re.fullmatch(r"[0-9a-f]{64}", str(source_database.get("schema_objects_sha256") or ""))
         or source.get("off_host_copy_required") is not True
     ):
         raise SystemExit(2)
     local_path = Path(artifact_argument)
+    encryption_path = Path(encryption_receipt_argument)
     secure_file(local_path)
+    secure_file(encryption_path)
+    try:
+        encryption = json.loads(encryption_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        raise SystemExit(2)
+    encryption_keys = {
+        "schema", "algorithm", "kdf", "kdf_iterations",
+        "plaintext_sha256", "plaintext_size_bytes", "ciphertext_sha256",
+        "ciphertext_size_bytes", "authentication_hmac_sha256",
+        "plaintext_materialized_offhost", "secrets_disclosed",
+    }
     source_name = Path(str(source_artifact.get("path") or "")).name
     if (
         local_path.parent != destination.parent
-        or local_path.name != source_name
+        or encryption_path.parent != destination.parent
+        or local_path.name != source_name + ".enc"
         or not re.fullmatch(
-            r"market-archive-before-[0-9a-f]{12}-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}\.dump",
+            r"market-archive-before-[0-9a-f]{12}-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}\.dump\.enc",
             local_path.name,
         )
-        or digest(local_path) != source_artifact.get("sha256")
-        or local_path.stat().st_size != source_artifact.get("size_bytes")
+        or set(encryption) != encryption_keys
+        or encryption.get("schema") != "market_pipeline_backup_encryption/1.1"
+        or encryption.get("algorithm") != "AES-256-CBC+PBKDF2-HMAC-SHA256"
+        or encryption.get("kdf") != "PBKDF2-HMAC-SHA256"
+        or encryption.get("kdf_iterations") != 600000
+        or encryption.get("plaintext_sha256") != source_artifact.get("sha256")
+        or encryption.get("plaintext_size_bytes") != source_artifact.get("size_bytes")
+        or encryption.get("ciphertext_sha256") != digest(local_path)
+        or encryption.get("ciphertext_size_bytes") != local_path.stat().st_size
+        or not re.fullmatch(r"[0-9a-f]{64}", str(encryption.get("authentication_hmac_sha256") or ""))
+        or encryption.get("plaintext_materialized_offhost") is not False
+        or encryption.get("secrets_disclosed") is not False
     ):
         raise SystemExit(2)
     artifact = {
         "name": local_path.name,
-        "sha256": source_artifact["sha256"],
-        "size_bytes": source_artifact["size_bytes"],
+        "ciphertext_sha256": encryption["ciphertext_sha256"],
+        "ciphertext_size_bytes": encryption["ciphertext_size_bytes"],
+        "plaintext_sha256": encryption["plaintext_sha256"],
+        "plaintext_size_bytes": encryption["plaintext_size_bytes"],
+        "authentication_hmac_sha256": encryption["authentication_hmac_sha256"],
+        "encryption_algorithm": encryption["algorithm"],
+        "kdf": encryption["kdf"],
+        "kdf_iterations": encryption["kdf_iterations"],
+        "encryption_receipt_sha256": digest(encryption_path),
+        "encryption_receipt_path": str(encryption_path),
         "bot_copy_path": str(local_path),
     }
-    copy_status = "PASS"
+    copy_status = "PASS_ENCRYPTED_VERIFIED"
 elif status == "INITIAL_EMPTY":
     if (
         artifact_argument != "-"
+        or encryption_receipt_argument != "-"
         or source.get("source") != {"database_initialized": False}
+        or source.get("source_after") != {"database_initialized": False}
         or source.get("backup") is not None
         or source.get("restore_smoke") != {"status": "NOT_APPLICABLE"}
         or source.get("off_host_copy_required") is not False
@@ -4396,7 +5531,7 @@ else:
     raise SystemExit(2)
 
 payload = {
-    "schema": "market_pipeline_backup_offhost_copy/1.0",
+    "schema": "market_pipeline_backup_offhost_copy/2.0",
     "status": "PASS",
     "verified_at_utc": source["created_at_utc"],
     "release_sha": release_sha,
@@ -4426,7 +5561,11 @@ try:
         stream.write("\n")
         stream.flush()
         os.fsync(stream.fileno())
-    if destination.exists() and destination.read_bytes() != candidate.read_bytes():
+    if (
+        destination.exists()
+        and destination.read_bytes() != candidate.read_bytes()
+        and not allow_replace
+    ):
         raise SystemExit(2)
     os.replace(candidate, destination)
     directory = os.open(destination.parent, os.O_RDONLY)
@@ -4441,7 +5580,8 @@ PY
 }
 
 verify_market_pipeline_offhost_backup_receipt() {
-    local bot_backup_dir artifact_path prior_sha current_sha
+    local require_fresh="${1:-1}"
+    local bot_backup_dir artifact_path encryption_receipt prior_sha current_sha plaintext_sha plaintext_size
     bot_backup_dir="$PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_ROOT/$RELEASE_SHA"
     PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT="$bot_backup_dir/web-source-receipt.json"
     PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT="$bot_backup_dir/offhost-copy-receipt.json"
@@ -4454,27 +5594,43 @@ verify_market_pipeline_offhost_backup_receipt() {
         && ! -L "$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT" \
         && "$(stat -c '%u:%a' "$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT")" == "$(id -u):600" ]] \
         || return 1
-    artifact_path="$(python3 - "$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT" <<'PY'
+    IFS=$'\t' read -r artifact_path encryption_receipt plaintext_sha plaintext_size <<<"$(python3 - "$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT" <<'PY'
 import json
 from pathlib import Path
 import sys
 payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-if payload.get("schema") != "market_pipeline_backup_offhost_copy/1.0":
+if payload.get("schema") != "market_pipeline_backup_offhost_copy/2.0":
     raise SystemExit(2)
 artifact = payload.get("artifact")
 if artifact is None:
-    print("-")
-elif isinstance(artifact, dict) and isinstance(artifact.get("bot_copy_path"), str):
-    print(artifact["bot_copy_path"])
+    print("-\t-\t-\t-")
+elif (
+    isinstance(artifact, dict)
+    and isinstance(artifact.get("bot_copy_path"), str)
+    and isinstance(artifact.get("encryption_receipt_path"), str)
+):
+    print("\t".join(str(artifact[key]) for key in (
+        "bot_copy_path", "encryption_receipt_path", "plaintext_sha256",
+        "plaintext_size_bytes",
+    )))
 else:
     raise SystemExit(2)
 PY
 )" || return 1
+    if [[ "$artifact_path" != "-" ]]; then
+        python3 "$MARKET_PIPELINE_BACKUP_CRYPT_TOOL" verify \
+            --artifact "$artifact_path" \
+            --key-file "$PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_KEY_PATH" \
+            --receipt "$encryption_receipt" \
+            --expected-plaintext-sha256 "$plaintext_sha" \
+            --expected-plaintext-size-bytes "$plaintext_size" >/dev/null \
+            || return 1
+    fi
     prior_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT")"
     write_market_pipeline_offhost_backup_receipt \
         "$PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT" \
         "$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT" \
-        "$artifact_path" \
+        "$artifact_path" "$encryption_receipt" "$require_fresh" 0 \
         || return 1
     current_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT")"
     [[ "$current_sha" == "$prior_sha" ]] || return 1
@@ -4485,12 +5641,17 @@ PY
 prepare_market_pipeline_archive_backup() {
     [[ "$PRODUCTION_MARKET_PIPELINE_MIGRATION_REQUESTED" == "1" ]] || return 0
     verify_market_pipeline_two_host_preflight_receipt
-    local web_backup_dir bot_backup_dir remote_receipt remote_output metadata
-    local backup_status artifact_name artifact_sha artifact_size remote_artifact
+    local web_backup_dir bot_backup_dir remote_receipt remote_output metadata remote_migration_state
+    local backup_status artifact_name artifact_sha artifact_size remote_artifact remote_encrypted
     local local_artifact receipt_candidate artifact_candidate remote_artifact_identity
+    local remote_encryption_receipt local_encryption_receipt encryption_receipt_candidate
     web_backup_dir="$PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_ROOT/$RELEASE_SHA"
     bot_backup_dir="$PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_ROOT/$RELEASE_SHA"
+    [[ ! -e "$bot_backup_dir/migration-state.json" \
+        && ! -L "$bot_backup_dir/migration-state.json" ]] \
+        || die "Market Pipeline backup refresh is forbidden after migration PREPARED."
     remote_receipt="$web_backup_dir/market-pipeline-backup-receipt.json"
+    remote_migration_state="$web_backup_dir/migration-state.json"
     validate_remote_shell_path "$web_backup_dir" "Market Pipeline web backup directory"
     validate_remote_shell_path "$bot_backup_dir" "Market Pipeline bot backup directory"
     remote_output="$(ssh_iran "set -euo pipefail
@@ -4499,8 +5660,36 @@ install -d -m 0700 '$PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_ROOT' '$web_backup_di
 [ ! -L '$web_backup_dir' ]
 [ \"\$(stat -c '%u:%a' '$web_backup_dir')\" = \"\$(id -u):700\" ]
 cd '$REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR'
-if [ ! -f '$remote_receipt' ]; then
-  [ -z \"\$(find '$web_backup_dir' -mindepth 1 -maxdepth 1 -print -quit)\" ]
+[ ! -e '$remote_migration_state' ] && [ ! -L '$remote_migration_state' ]
+if [ -f '$remote_receipt' ]; then
+  if ! python3 scripts/backup_market_pipeline_archive.py verify \
+    --env-file '$REMOTE_MARKET_PIPELINE_WEB_ENV' \
+    --receipt '$remote_receipt' \
+    --release-sha '$RELEASE_SHA' \
+    --release-tree '$PRODUCTION_RELEASE_TREE' \
+    --image-id '$PRODUCTION_MARKET_PIPELINE_IMAGE_ID' \
+    --image-input-signature '$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE' \
+    --maximum-age-seconds '$PRODUCTION_MARKET_PIPELINE_BACKUP_MAX_AGE_SECONDS' >/dev/null; then
+    python3 scripts/backup_market_pipeline_archive.py verify \
+      --env-file '$REMOTE_MARKET_PIPELINE_WEB_ENV' \
+      --receipt '$remote_receipt' \
+      --release-sha '$RELEASE_SHA' \
+      --release-tree '$PRODUCTION_RELEASE_TREE' \
+      --image-id '$PRODUCTION_MARKET_PIPELINE_IMAGE_ID' \
+      --image-input-signature '$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE' \
+      --allow-stale >/dev/null
+    python3 scripts/backup_market_pipeline_archive.py create \
+      --env-file '$REMOTE_MARKET_PIPELINE_WEB_ENV' \
+      --backup-dir '$web_backup_dir' \
+      --receipt '$remote_receipt' \
+      --release-sha '$RELEASE_SHA' \
+      --release-tree '$PRODUCTION_RELEASE_TREE' \
+      --image-id '$PRODUCTION_MARKET_PIPELINE_IMAGE_ID' \
+      --image-input-signature '$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE' \
+      --refresh-complete \
+      --confirm create-production-market-pipeline-archive-backup >/dev/null
+  fi
+else
   python3 scripts/backup_market_pipeline_archive.py create \\
     --env-file '$REMOTE_MARKET_PIPELINE_WEB_ENV' \\
     --backup-dir '$web_backup_dir' \\
@@ -4543,44 +5732,79 @@ print("\\t".join("-" if v is None else str(v) for v in values))' <<<"$remote_out
     fi
     chmod 0600 "$receipt_candidate"
     sync -f "$receipt_candidate"
-    if [[ -f "$PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT" \
-        && "$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT")" != "$(file_sha256 "$receipt_candidate")" ]]; then
-        rm -f -- "$receipt_candidate"
-        die "Existing bot-host Market Pipeline backup receipt differs for this release."
-    fi
     mv -f -- "$receipt_candidate" "$PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT"
     sync -f "$bot_backup_dir"
     PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT_SHA256="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT")"
 
     local_artifact="-"
+    local_encryption_receipt="-"
     if [[ "$backup_status" == "PASS" ]]; then
         [[ "$artifact_name" =~ ^market-archive-before-[0-9a-f]{12}-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}\.dump$ \
             && "$artifact_sha" =~ ^[0-9a-f]{64}$ \
             && "$artifact_size" =~ ^[1-9][0-9]*$ ]] \
             || die "Market Pipeline backup artifact identity was invalid."
         remote_artifact="$web_backup_dir/$artifact_name"
-        local_artifact="$bot_backup_dir/$artifact_name"
+        remote_encrypted="$remote_artifact.enc"
+        remote_encryption_receipt="$remote_artifact.encryption.json"
+        local_artifact="$bot_backup_dir/$artifact_name.enc"
+        local_encryption_receipt="$bot_backup_dir/$artifact_name.encryption.json"
+        [[ -f "$PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_KEY_PATH" \
+            && ! -L "$PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_KEY_PATH" \
+            && "$(stat -c '%u:%a:%h' "$PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_KEY_PATH")" == "$(id -u):600:1" ]] \
+            || die "Bot-host Market Pipeline backup encryption key is unavailable or insecure."
+        ssh_iran "test -f '$PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_KEY_PATH' && test ! -L '$PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_KEY_PATH' && test \"\$(stat -c '%u:%a:%h' '$PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_KEY_PATH')\" = \"\$(id -u):600:1\"" \
+            || die "Web-host Market Pipeline backup encryption key is unavailable or insecure."
+        ssh_iran "set -euo pipefail
+cd '$REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR'
+python3 scripts/crypt_market_pipeline_backup.py encrypt \\
+  --source '$remote_artifact' \\
+  --destination '$remote_encrypted' \\
+  --key-file '$PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_KEY_PATH' \\
+  --receipt '$remote_encryption_receipt' \\
+  --confirm encrypt-production-market-pipeline-offhost-backup >/dev/null
+python3 scripts/crypt_market_pipeline_backup.py verify \\
+  --artifact '$remote_encrypted' \\
+  --key-file '$PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_KEY_PATH' \\
+  --receipt '$remote_encryption_receipt' \\
+  --expected-plaintext-sha256 '$artifact_sha' \\
+  --expected-plaintext-size-bytes '$artifact_size' >/dev/null" \
+            || die "Market Pipeline backup encryption or source-side decrypt verification failed."
+        encryption_receipt_candidate="$bot_backup_dir/.offhost-encryption-receipt.$$.incoming"
+        if ! ssh_iran "cat '$remote_encryption_receipt'" >"$encryption_receipt_candidate"; then
+            rm -f -- "$encryption_receipt_candidate"
+            die "Could not stream the Market Pipeline encryption receipt."
+        fi
+        chmod 0600 "$encryption_receipt_candidate"
+        if [[ -f "$local_encryption_receipt" \
+            && "$(file_sha256 "$local_encryption_receipt")" != "$(file_sha256 "$encryption_receipt_candidate")" ]]; then
+            rm -f -- "$encryption_receipt_candidate"
+            die "Existing Market Pipeline encryption receipt differs for this release."
+        fi
+        mv -f -- "$encryption_receipt_candidate" "$local_encryption_receipt"
+        sync -f "$bot_backup_dir"
         if [[ -f "$local_artifact" && ! -L "$local_artifact" ]]; then
-            [[ "$(file_sha256 "$local_artifact")" == "$artifact_sha" \
-                && "$(stat -c '%s' "$local_artifact")" == "$artifact_size" \
-                && "$(stat -c '%u:%a' "$local_artifact")" == "$(id -u):600" ]] \
-                || die "Existing bot-host Market Pipeline backup artifact drifted."
+            [[ "$(stat -c '%u:%a' "$local_artifact")" == "$(id -u):600" ]] \
+                || die "Existing encrypted bot-host Market Pipeline backup artifact is insecure."
         else
             [[ ! -e "$local_artifact" && ! -L "$local_artifact" ]] \
                 || die "Bot-host Market Pipeline backup artifact path is unsafe."
-            artifact_candidate="$bot_backup_dir/.$artifact_name.$$.incoming"
-            if ! ssh_iran "cat '$remote_artifact'" >"$artifact_candidate"; then
+            artifact_candidate="$bot_backup_dir/.$artifact_name.enc.$$.incoming"
+            if ! ssh_iran "cat '$remote_encrypted'" >"$artifact_candidate"; then
                 rm -f -- "$artifact_candidate"
-                die "Could not stream the Market Pipeline archive backup to the bot host."
+                die "Could not stream the encrypted Market Pipeline archive backup to the bot host."
             fi
             chmod 0600 "$artifact_candidate"
             sync -f "$artifact_candidate"
-            [[ "$(file_sha256 "$artifact_candidate")" == "$artifact_sha" \
-                && "$(stat -c '%s' "$artifact_candidate")" == "$artifact_size" ]] \
-                || { rm -f -- "$artifact_candidate"; die "Streamed Market Pipeline backup digest/size mismatch."; }
             mv -- "$artifact_candidate" "$local_artifact"
             sync -f "$bot_backup_dir"
         fi
+        python3 "$MARKET_PIPELINE_BACKUP_CRYPT_TOOL" verify \
+            --artifact "$local_artifact" \
+            --key-file "$PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_KEY_PATH" \
+            --receipt "$local_encryption_receipt" \
+            --expected-plaintext-sha256 "$artifact_sha" \
+            --expected-plaintext-size-bytes "$artifact_size" >/dev/null \
+            || die "Bot-host encrypted backup failed authenticated decrypt-stream reconciliation."
         remote_artifact_identity="$(ssh_iran "sha256sum '$remote_artifact' | awk '{print \\$1}'; stat -c '%s' '$remote_artifact'")"
         [[ "$remote_artifact_identity" == "$artifact_sha"$'\n'"$artifact_size" ]] \
             || die "Web-host Market Pipeline backup changed during off-host copy."
@@ -4591,10 +5815,10 @@ print("\\t".join("-" if v is None else str(v) for v in values))' <<<"$remote_out
     write_market_pipeline_offhost_backup_receipt \
         "$PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT" \
         "$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT" \
-        "$local_artifact" \
+        "$local_artifact" "$local_encryption_receipt" 1 1 \
         || die "Could not record verified Market Pipeline off-host backup evidence."
     PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT_SHA256="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT")"
-    log "Market Pipeline archive backup is restore-proven and retained on the bot host; no migration/service/authority changed."
+    log "Market Pipeline archive backup is restore-proven and retained only as authenticated ciphertext on the bot host; no migration/service/authority changed."
 }
 
 verify_market_pipeline_migration_receipt_file() {
@@ -4668,16 +5892,129 @@ printf '%s\\t%s\\n' '$expected_id' \"\$facts\"")" || return 1
         && "$remote_facts" -ge "$expected_facts" ]]
 }
 
+write_market_pipeline_bot_migration_state() {
+    local state="$1" destination="$2" receipt_sha256="${3:--}"
+    local source_sha offhost_sha preflight_sha web_env_sha
+    source_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_BACKUP_RECEIPT")"
+    offhost_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT")"
+    preflight_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT")"
+    web_env_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_WEB_ENV")"
+    python3 - "$destination" "$state" "$receipt_sha256" \
+        "$RELEASE_SHA" "$PRODUCTION_RELEASE_TREE" \
+        "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
+        "$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE" \
+        "$source_sha" "$offhost_sha" "$preflight_sha" "$web_env_sha" <<'PY'
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+
+path = Path(sys.argv[1])
+state, receipt_sha = sys.argv[2:4]
+expected = {
+    "schema": "market_pipeline_bot_migration_state/1.0",
+    "release_sha": sys.argv[4],
+    "release_tree": sys.argv[5],
+    "image_id": sys.argv[6],
+    "image_input_signature": sys.argv[7],
+    "source_backup_receipt_sha256": sys.argv[8],
+    "offhost_backup_receipt_sha256": sys.argv[9],
+    "host_preflight_receipt_sha256": sys.argv[10],
+    "web_role_env_sha256": sys.argv[11],
+    "secrets_disclosed": False,
+}
+if state not in {"PREPARED", "APPLYING", "COMPLETE"}:
+    raise SystemExit(2)
+if state == "COMPLETE":
+    if not re.fullmatch(r"[0-9a-f]{64}", receipt_sha):
+        raise SystemExit(2)
+else:
+    if receipt_sha != "-":
+        raise SystemExit(2)
+    receipt_sha = None
+info = path.parent.lstat()
+if (
+    not path.parent.is_absolute()
+    or path.parent.is_symlink()
+    or not stat.S_ISDIR(info.st_mode)
+    or info.st_uid != os.geteuid()
+    or stat.S_IMODE(info.st_mode) != 0o700
+):
+    raise SystemExit(2)
+current = None
+if path.exists() or path.is_symlink():
+    file_info = path.lstat()
+    if (
+        path.is_symlink()
+        or not stat.S_ISREG(file_info.st_mode)
+        or file_info.st_uid != os.geteuid()
+        or stat.S_IMODE(file_info.st_mode) != 0o600
+        or file_info.st_nlink != 1
+    ):
+        raise SystemExit(2)
+    current = json.loads(path.read_text(encoding="utf-8"))
+    if (
+        not isinstance(current, dict)
+        or set(current) != set(expected) | {"status", "receipt_sha256"}
+        or any(current.get(key) != value for key, value in expected.items())
+    ):
+        raise SystemExit(2)
+    transitions = {
+        "PREPARED": {"PREPARED", "APPLYING"},
+        "APPLYING": {"APPLYING", "COMPLETE"},
+        "COMPLETE": {"COMPLETE"},
+    }
+    if state not in transitions.get(current.get("status"), set()):
+        raise SystemExit(2)
+    if current.get("status") == "COMPLETE" and current.get("receipt_sha256") != receipt_sha:
+        raise SystemExit(2)
+elif state != "PREPARED":
+    raise SystemExit(2)
+payload = {**expected, "status": state, "receipt_sha256": receipt_sha}
+candidate = path.parent / f".{path.name}.{os.getpid()}.tmp"
+descriptor = os.open(
+    candidate,
+    os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+    0o600,
+)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(candidate, path)
+    directory = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+finally:
+    candidate.unlink(missing_ok=True)
+PY
+}
+
 run_market_pipeline_archive_migration() {
-    verify_market_pipeline_offhost_backup_receipt \
+    verify_market_pipeline_offhost_backup_receipt 0 \
         || die "Verified Market Pipeline off-host backup evidence is required before migration."
-    local bot_backup_dir web_backup_dir remote_backup_receipt migration_output
-    local candidate destination existing_sha
+    local bot_backup_dir web_backup_dir remote_backup_receipt remote_journal remote_receipt
+    local bot_state candidate destination existing_sha
     bot_backup_dir="$PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_ROOT/$RELEASE_SHA"
     web_backup_dir="$PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_ROOT/$RELEASE_SHA"
     remote_backup_receipt="$web_backup_dir/market-pipeline-backup-receipt.json"
+    remote_journal="$web_backup_dir/migration-state.json"
+    remote_receipt="$web_backup_dir/migration-receipt.json"
     destination="$bot_backup_dir/migration-receipt.json"
-    migration_output="$(ssh_iran "set -euo pipefail
+    bot_state="$bot_backup_dir/migration-state.json"
+    if [[ ! -e "$bot_state" && ! -L "$bot_state" ]]; then
+        write_market_pipeline_bot_migration_state PREPARED "$bot_state" \
+            || die "Could not durably prepare the bot-host migration state."
+    fi
+    write_market_pipeline_bot_migration_state APPLYING "$bot_state" \
+        || die "Could not durably enter the bot-host migration applying state."
+    ssh_iran "set -euo pipefail
 cd '$REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR'
 python3 scripts/migrate_market_pipeline_archive.py \\
   --release-root '$REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR' \\
@@ -4690,10 +6027,15 @@ python3 scripts/migrate_market_pipeline_archive.py \\
   --offhost-receipt-sha256 '$PRODUCTION_MARKET_PIPELINE_OFFHOST_RECEIPT_SHA256' \\
   --host-preflight-receipt-sha256 '$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT_SHA256' \\
   --backup-maximum-age-seconds '$PRODUCTION_MARKET_PIPELINE_BACKUP_MAX_AGE_SECONDS' \\
-  --confirm run-production-market-pipeline-archive-migration")" \
+  --journal '$remote_journal' \\
+  --receipt '$remote_receipt' \\
+  --confirm run-production-market-pipeline-archive-migration >/dev/null" \
         || die "Market Pipeline archive migration failed; a newly-created database is stopped without deleting state."
     candidate="$bot_backup_dir/.migration-receipt.$$.incoming"
-    printf '%s\n' "$migration_output" >"$candidate"
+    if ! ssh_iran "cat '$remote_receipt'" >"$candidate"; then
+        rm -f -- "$candidate"
+        die "Could not recover the durable web-host migration receipt."
+    fi
     chmod 0600 "$candidate"
     sync -f "$candidate"
     verify_market_pipeline_migration_receipt_file "$candidate" \
@@ -4707,6 +6049,9 @@ python3 scripts/migrate_market_pipeline_archive.py \\
     sync -f "$bot_backup_dir"
     PRODUCTION_MARKET_PIPELINE_MIGRATION_RECEIPT="$destination"
     PRODUCTION_MARKET_PIPELINE_MIGRATION_RECEIPT_SHA256="$(file_sha256 "$destination")"
+    write_market_pipeline_bot_migration_state \
+        COMPLETE "$bot_state" "$PRODUCTION_MARKET_PIPELINE_MIGRATION_RECEIPT_SHA256" \
+        || die "Could not commit the bot-host migration state."
     verify_market_pipeline_migrated_database_current "$destination" \
         || die "Market Pipeline database drifted immediately after migration."
     log "Market Pipeline migration passed twice; only its database is running and capture/Product authority remain off."
@@ -4714,11 +6059,15 @@ python3 scripts/migrate_market_pipeline_archive.py \\
 
 prepare_market_pipeline_backup_and_migration() {
     [[ "$PRODUCTION_MARKET_PIPELINE_MIGRATION_REQUESTED" == "1" ]] || return 0
-    local bot_backup_dir existing_migration
+    local bot_backup_dir existing_migration bot_state
     bot_backup_dir="$PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_ROOT/$RELEASE_SHA"
     existing_migration="$bot_backup_dir/migration-receipt.json"
+    bot_state="$bot_backup_dir/migration-state.json"
     if [[ -f "$existing_migration" && ! -L "$existing_migration" ]]; then
-        verify_market_pipeline_offhost_backup_receipt \
+        # A completed migration is bound to its historical backup.  Resume
+        # verifies the full immutable backup/ciphertext contract without
+        # requiring that historical creation time to still be fresh.
+        verify_market_pipeline_offhost_backup_receipt 0 \
             || die "Existing Market Pipeline migration lost its bound off-host backup evidence."
         verify_market_pipeline_migration_receipt_file "$existing_migration" \
             || die "Existing Market Pipeline migration receipt drifted."
@@ -4726,7 +6075,16 @@ prepare_market_pipeline_backup_and_migration() {
             || die "Existing Market Pipeline migrated database drifted."
         PRODUCTION_MARKET_PIPELINE_MIGRATION_RECEIPT="$existing_migration"
         PRODUCTION_MARKET_PIPELINE_MIGRATION_RECEIPT_SHA256="$(file_sha256 "$existing_migration")"
+        write_market_pipeline_bot_migration_state \
+            COMPLETE "$bot_state" "$PRODUCTION_MARKET_PIPELINE_MIGRATION_RECEIPT_SHA256" \
+            || die "Existing Market Pipeline migration state is missing or drifted."
         log "Resumed from the exact verified Market Pipeline migration receipt; no migration was rerun."
+        return 0
+    fi
+    if [[ -e "$bot_state" || -L "$bot_state" ]]; then
+        verify_market_pipeline_offhost_backup_receipt 0 \
+            || die "Prepared Market Pipeline migration lost its immutable off-host backup evidence."
+        run_market_pipeline_archive_migration
         return 0
     fi
     if ! verify_market_pipeline_offhost_backup_receipt; then
@@ -7378,9 +8736,14 @@ run_release() {
     rollout_market_pipeline_private_shadow
     verify_frozen_release_source
     begin_two_host_release_transaction
-    capture_production_coin_input_timer_recovery_state
-    install_and_verify_production_coin_inputs
-    suspend_production_coin_snapshot_relay
+    if [[ "$PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED" == "1" \
+        || "$PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED" == "1" ]]; then
+        capture_production_coin_input_timer_recovery_state
+    fi
+    if [[ "$PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED" == "1" ]]; then
+        install_and_verify_production_coin_inputs
+        suspend_production_coin_snapshot_relay
+    fi
     verify_frozen_release_source
     quiesce_two_host_writers_for_migration
     deploy_foreign 1
@@ -7388,30 +8751,498 @@ run_release() {
     verify_sync_sampler_local
     sync_project
     write_two_host_release_state iran_payload_installed
-    reconcile_production_coin_snapshot_relay
+    if [[ "$PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED" == "1" ]]; then
+        reconcile_production_coin_snapshot_relay
+    fi
     install_sync_sampler_remote
     deploy_iran 1
     write_two_host_release_state iran_committed
     handle_iran_shared_data
     verify_two_host_schema_head
-    if [[ "$PRODUCTION_COIN_INFERENCE_REQUESTED" == "1" ]]; then
+    if [[ "$PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED" == "1" ]]; then
         verify_production_coin_snapshot_relay
     fi
     start_two_host_writers_after_schema_convergence
     verify_running_production_coin_consumers
+    if [[ "$PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED" == "1" ]]; then
+        retire_production_legacy_coin_inputs
+        retire_production_coin_snapshot_relay
+    fi
     repair_registry_fingerprint_rollout_quarantine
     healthcheck
     finalize_two_host_writer_restart_policies
-    PRODUCTION_COIN_SNAPSHOT_RELAY_GUARD_ARMED=0
+    if [[ "$PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED" == "1" \
+        || "$PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED" == "1" ]]; then
+        PRODUCTION_COIN_SNAPSHOT_RELAY_GUARD_ARMED=0
+    fi
     PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_GUARD_ARMED=0
-    clear_production_coin_relay_recovery_marker
+    if [[ "$PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED" == "1" \
+        || "$PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED" == "1" ]]; then
+        clear_production_coin_relay_recovery_marker
+    fi
     clear_two_host_release_state
-    if [[ "$PRODUCTION_COIN_INFERENCE_REQUESTED" == "1" ]]; then
+    if [[ "$PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED" == "1" \
+        || "$PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED" == "1" ]]; then
         clear_production_coin_input_timer_recovery_state \
             || die "Could not commit the production coin input timer transition."
     fi
     release_production_locks
     trap - EXIT
+}
+
+run_exact_control_release_python() {
+    local control_root="$1"
+    local relative="$2"
+    shift 2
+    [[ -n "$control_root" && -n "$relative" && "$relative" == scripts/* ]] \
+        || die "exact control-release python invocation is incomplete."
+    [[ -f "$control_root/control-payload.sha256" && ! -L "$control_root/control-payload.sha256" ]] \
+        || die "exact control-release payload manifest is missing."
+    (
+        export HOME="${HOME:-/root}"
+        export LANG=C.UTF-8
+        export LC_ALL=C.UTF-8
+        export PATH=/usr/bin:/bin
+        export PYTHONPATH="$control_root"
+        unset PYTHONHOME PYTHONSTARTUP PYTHONNOUSERSITE
+        cd /
+        exec /usr/bin/python3 - "$control_root" "$relative" "$@" <<'PY'
+import os
+import stat
+import sys
+from hashlib import sha256
+
+root = sys.argv[1]
+relative = sys.argv[2]
+arguments = sys.argv[3:]
+if (
+    not relative.startswith("scripts/")
+    or ".." in relative.split("/")
+    or relative.startswith("/")
+):
+    raise SystemExit("exact_control_release_tool_path_invalid")
+manifest_path = os.path.join(root, "control-payload.sha256")
+tool_path = os.path.join(root, relative)
+flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+try:
+    manifest_fd = os.open(manifest_path, flags)
+except OSError:
+    raise SystemExit("exact_control_release_manifest_unavailable")
+try:
+    before = os.fstat(manifest_fd)
+    path_info = os.lstat(manifest_path)
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or (before.st_dev, before.st_ino) != (path_info.st_dev, path_info.st_ino)
+        or before.st_nlink != 1
+        or bool(before.st_mode & 0o022)
+    ):
+        raise SystemExit("exact_control_release_manifest_invalid")
+    payload = b""
+    while len(payload) < before.st_size:
+        chunk = os.read(manifest_fd, before.st_size - len(payload))
+        if not chunk:
+            break
+        payload += chunk
+    after = os.fstat(manifest_fd)
+    if len(payload) != before.st_size or (
+        before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns
+    ) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+        raise SystemExit("exact_control_release_manifest_drift")
+finally:
+    os.close(manifest_fd)
+expected = None
+for line in payload.decode("utf-8").splitlines():
+    digest, separator, name = line.partition("  ./")
+    if not separator:
+        raise SystemExit("exact_control_release_manifest_invalid")
+    if name == relative:
+        if expected is not None:
+            raise SystemExit("exact_control_release_manifest_duplicate")
+        expected = digest
+if expected is None or len(expected) != 64:
+    raise SystemExit("exact_control_release_tool_not_in_manifest")
+try:
+    tool_fd = os.open(tool_path, flags)
+except OSError:
+    raise SystemExit("exact_control_release_tool_unavailable")
+try:
+    before = os.fstat(tool_fd)
+    path_info = os.lstat(tool_path)
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or (before.st_dev, before.st_ino) != (path_info.st_dev, path_info.st_ino)
+        or before.st_nlink != 1
+        or bool(before.st_mode & 0o022)
+    ):
+        raise SystemExit("exact_control_release_tool_invalid")
+    observed = sha256()
+    remaining = before.st_size
+    while remaining:
+        chunk = os.read(tool_fd, remaining)
+        if not chunk:
+            break
+        observed.update(chunk)
+        remaining -= len(chunk)
+    after = os.fstat(tool_fd)
+    if (
+        observed.hexdigest() != expected
+        or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+        != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+    ):
+        raise SystemExit("exact_control_release_tool_digest_mismatch")
+    os.lseek(tool_fd, 0, os.SEEK_SET)
+    os.execv(
+        "/usr/bin/python3",
+        ["/usr/bin/python3", f"/proc/self/fd/{tool_fd}", *arguments],
+    )
+finally:
+    os.close(tool_fd)
+PY
+    ) || die "exact control-release tool ${relative} failed closed."
+}
+
+require_regular_bound_file() {
+    local path="$1"
+    local label="$2"
+    [[ -n "$path" && "$path" == /* && -f "$path" && ! -L "$path" ]] \
+        || die "${label} must be an absolute regular file."
+    [[ "$(stat -c '%u:%h' "$path")" == "$(id -u):1" ]] \
+        || die "${label} must be a single-link owner-controlled file."
+}
+
+verify_official_private_primary_plan_build_receipt() {
+    local plan="$1"
+    local receipt="$2"
+    local control_root="$3"
+    local expected_plan_sha256="$4"
+    local expected_receipt_sha256="$5"
+    local transaction_id="$6"
+    /usr/bin/python3 - "$plan" "$receipt" "$control_root" \
+        "$expected_plan_sha256" "$expected_receipt_sha256" "$transaction_id" <<'PY'
+import json
+import os
+import stat
+import sys
+from hashlib import sha256
+from pathlib import Path
+
+plan, receipt, control_root, expected_plan, expected_receipt, transaction_id = sys.argv[1:7]
+
+def read_regular(path: str) -> bytes:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise SystemExit("official_plan_receipt_file_invalid")
+        payload = b""
+        while len(payload) < before.st_size:
+            chunk = os.read(fd, before.st_size - len(payload))
+            if not chunk:
+                break
+            payload += chunk
+        if len(payload) != before.st_size:
+            raise SystemExit("official_plan_receipt_file_invalid")
+        return payload
+    finally:
+        os.close(fd)
+
+plan_payload = read_regular(plan)
+receipt_payload = read_regular(receipt)
+if sha256(plan_payload).hexdigest() != expected_plan:
+    raise SystemExit("official_plan_digest_mismatch")
+if sha256(receipt_payload).hexdigest() != expected_receipt:
+    raise SystemExit("official_plan_build_receipt_digest_mismatch")
+document = json.loads(receipt_payload.decode("utf-8"))
+if (
+    document.get("schema") != "production_private_primary_choreography_plan_build/1.0"
+    or document.get("status") != "PASS"
+    or document.get("transaction_id") != transaction_id
+    or document.get("builder_tool")
+    != "scripts/build_production_private_primary_choreography_plan.py"
+    or document.get("plan_sha256") != expected_plan
+    or document.get("secrets_disclosed") is not False
+):
+    raise SystemExit("official_plan_build_receipt_invalid")
+manifest = read_regular(str(Path(control_root) / "control-payload.sha256"))
+builder_digest = None
+for line in manifest.decode("utf-8").splitlines():
+    digest, separator, name = line.partition("  ./")
+    if name == "scripts/build_production_private_primary_choreography_plan.py":
+        builder_digest = digest
+if document.get("builder_script_sha256") != builder_digest:
+    raise SystemExit("official_builder_script_digest_mismatch")
+print("official-plan-build-receipt-verified")
+PY
+}
+
+build_official_private_primary_choreography_plan() {
+    local control_root="$1"
+    local web_ssh_argv_sha256="$2"
+    local deployment_manifest_sha256="$3"
+    local transaction_id expected_control_manifest
+    local runtime_source deployment_manifest control_pair primary_pair
+    local market_image preflight web_env bot_env web_old_env bot_old_env
+    local product_bot_image product_web_image private_manifest private_receipt
+    local remote_web_env remote_web_old_env web_backup_root local_offhost
+    local web_key local_key secure_root
+    [[ -n "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN" \
+        && -n "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_BUILD_RECEIPT" ]] \
+        || die "PRIVATE_PRIMARY official plan output paths are required."
+    transaction_id="${PRODUCTION_PRIVATE_PRIMARY_TRANSACTION_ID:-private-primary-${RELEASE_SHA}}"
+    PRODUCTION_PRIVATE_PRIMARY_TRANSACTION_ID="$transaction_id"
+    [[ "$transaction_id" =~ ^[a-z0-9][a-z0-9-]{7,95}$ ]] \
+        || die "PRIVATE_PRIMARY transaction id is invalid."
+    runtime_source="${RUNTIME_ENV_SOURCE_PATH:-}"
+    deployment_manifest="$MANIFEST_PATH"
+    control_pair="$control_root/market-pipeline-release-pair-receipt.json"
+    primary_pair="${PRODUCTION_MARKET_PIPELINE_PRIMARY_PAIR_RECEIPT:-${RELEASE_ARTIFACT_DIR:-}/market-pipeline-primary-release-pair-receipt.json}"
+    market_image="${PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT:-$control_root/market-pipeline-image-prebuild-receipt.json}"
+    [[ -f "$market_image" ]] \
+        || market_image="$control_root/market-pipeline-image-prebuild-receipt.json"
+    preflight="${PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT:-}"
+    web_env="$control_root/web.release.env"
+    bot_env="${LOCAL_MARKET_PIPELINE_BOT_ENV:-$control_root/bot.release.env}"
+    web_old_env="$PRODUCTION_MARKET_PIPELINE_WEB_OLD_ENV"
+    bot_old_env="$PRODUCTION_MARKET_PIPELINE_BOT_OLD_ENV"
+    product_bot_image="${PRODUCTION_PRIVATE_PRIMARY_PRODUCT_BOT_IMAGE_RECEIPT:-${PRODUCTION_FOREIGN_IMAGE_RECEIPT:-}}"
+    product_web_image="${PRODUCTION_PRIVATE_PRIMARY_PRODUCT_WEB_IMAGE_RECEIPT:-${PRODUCTION_IRAN_IMAGE_RECEIPT:-}}"
+    private_manifest="${PRODUCTION_PRIVATE_PRIMARY_PRIVATE_MANIFEST:-}"
+    private_receipt="${PRODUCTION_PRIVATE_PRIMARY_MANIFEST_RECEIPT_PATH:-}"
+    remote_web_env="${REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR:-$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR/$RELEASE_SHA}/web.release.env"
+    remote_web_old_env="$PRODUCTION_MARKET_PIPELINE_REMOTE_WEB_OLD_ENV"
+    web_backup_root="${PRODUCTION_PRIVATE_PRIMARY_WEB_BACKUP_ROOT:-/srv/trading-bot/market-data-production/backups}"
+    local_offhost="${PRODUCTION_PRIVATE_PRIMARY_LOCAL_OFFHOST_BACKUP_ROOT:-/root/secure-envs/trading-bot/release-control/offhost-backups}"
+    web_key="${PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_KEY_PATH:-}"
+    local_key="${PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_KEY_PATH:-}"
+    secure_root="$(dirname -- "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN")"
+    [[ "$secure_root" == "$(dirname -- "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_BUILD_RECEIPT")" ]] \
+        || die "PRIVATE_PRIMARY official plan and receipt must share one secure parent."
+    expected_control_manifest="$(file_sha256 "$control_root/control-payload.sha256")"
+    require_regular_bound_file "$runtime_source" "runtime source"
+    require_regular_bound_file "$deployment_manifest" "deployment manifest"
+    require_regular_bound_file "$control_pair" "control pair receipt"
+    require_regular_bound_file "$primary_pair" "primary pair receipt"
+    require_regular_bound_file "$market_image" "market image receipt"
+    require_regular_bound_file "$preflight" "two-host preflight receipt"
+    require_regular_bound_file "$web_env" "web role env"
+    require_regular_bound_file "$bot_env" "bot role env"
+    require_regular_bound_file "$web_old_env" "web old env"
+    require_regular_bound_file "$bot_old_env" "bot old env"
+    require_regular_bound_file "$product_bot_image" "product bot image receipt"
+    require_regular_bound_file "$product_web_image" "product web image receipt"
+    require_regular_bound_file "$private_manifest" "private primary manifest"
+    require_regular_bound_file "$private_receipt" "private primary manifest receipt"
+    require_regular_bound_file "$local_key" "local backup key"
+    [[ -d "$local_offhost" && ! -L "$local_offhost" \
+        && "$(stat -c '%u:%a' "$local_offhost")" == "$(id -u):700" ]] \
+        || die "local off-host backup root must be an owner-controlled mode 0700 directory."
+    [[ -n "$remote_web_old_env" && "$remote_web_old_env" == /* ]] \
+        || die "remote web old env path is required."
+    run_exact_control_release_python \
+        "$control_root" \
+        "scripts/build_production_private_primary_choreography_plan.py" \
+        --release-sha "$RELEASE_SHA" \
+        --release-tree "$PRODUCTION_RELEASE_TREE" \
+        --runtime-source "$runtime_source" \
+        --expected-runtime-source-sha256 "$(file_sha256 "$runtime_source")" \
+        --deployment-manifest "$deployment_manifest" \
+        --expected-deployment-manifest-sha256 "$deployment_manifest_sha256" \
+        --control-pair-receipt "$control_pair" \
+        --expected-control-pair-receipt-sha256 "$(file_sha256 "$control_pair")" \
+        --primary-pair-receipt "$primary_pair" \
+        --expected-primary-pair-receipt-sha256 "$(file_sha256 "$primary_pair")" \
+        --market-image-receipt "$market_image" \
+        --expected-market-image-receipt-sha256 "$(file_sha256 "$market_image")" \
+        --preflight-receipt "$preflight" \
+        --expected-preflight-receipt-sha256 "$(file_sha256 "$preflight")" \
+        --web-env "$web_env" \
+        --expected-web-env-sha256 "$(file_sha256 "$web_env")" \
+        --bot-env "$bot_env" \
+        --expected-bot-env-sha256 "$(file_sha256 "$bot_env")" \
+        --web-old-env "$web_old_env" \
+        --expected-web-old-env-sha256 "$(file_sha256 "$web_old_env")" \
+        --bot-old-env "$bot_old_env" \
+        --expected-bot-old-env-sha256 "$(file_sha256 "$bot_old_env")" \
+        --product-bot-image-receipt "$product_bot_image" \
+        --expected-product-bot-image-receipt-sha256 "$(file_sha256 "$product_bot_image")" \
+        --product-web-image-receipt "$product_web_image" \
+        --expected-product-web-image-receipt-sha256 "$(file_sha256 "$product_web_image")" \
+        --private-manifest "$private_manifest" \
+        --expected-private-manifest-sha256 "$(file_sha256 "$private_manifest")" \
+        --private-manifest-receipt "$private_receipt" \
+        --expected-private-manifest-receipt-sha256 "$(file_sha256 "$private_receipt")" \
+        --local-control-release-root "$control_root" \
+        --remote-control-release-root "${REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR:-$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR/$RELEASE_SHA}" \
+        --expected-control-manifest-sha256 "$expected_control_manifest" \
+        --expected-web-ssh-target "$IRAN_SSH_TARGET" \
+        --expected-web-ssh-argv-sha256 "$web_ssh_argv_sha256" \
+        --web-backup-root "$web_backup_root" \
+        --local-offhost-backup-root "$local_offhost" \
+        --web-backup-key-file "$web_key" \
+        --local-backup-key-file "$local_key" \
+        --remote-web-env "$remote_web_env" \
+        --remote-web-old-env "$remote_web_old_env" \
+        --release-checkout "$PROJECT_DIR" \
+        --secure-transaction-root "$secure_root" \
+        --transaction-id "$transaction_id" \
+        --output "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN" \
+        --receipt "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_BUILD_RECEIPT" \
+        --confirm "build-production-private-primary-choreography-plan" \
+        || die "official PRIVATE_PRIMARY plan builder failed closed."
+    local built_plan_sha256 built_receipt_sha256
+    built_plan_sha256="$(file_sha256 "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN")"
+    built_receipt_sha256="$(file_sha256 "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_BUILD_RECEIPT")"
+    if [[ -n "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_SHA256" ]]; then
+        [[ "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_SHA256" == "$built_plan_sha256" ]] \
+            || die "official PRIVATE_PRIMARY plan digest does not match the exact builder output."
+    fi
+    if [[ -n "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_BUILD_RECEIPT_SHA256" ]]; then
+        [[ "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_BUILD_RECEIPT_SHA256" == "$built_receipt_sha256" ]] \
+            || die "official PRIVATE_PRIMARY plan-build receipt digest does not match the exact builder output."
+    fi
+    PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_SHA256="$built_plan_sha256"
+    PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_BUILD_RECEIPT_SHA256="$built_receipt_sha256"
+    verify_official_private_primary_plan_build_receipt \
+        "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN" \
+        "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_BUILD_RECEIPT" \
+        "$control_root" \
+        "$built_plan_sha256" \
+        "$built_receipt_sha256" \
+        "$transaction_id" \
+        >/dev/null \
+        || die "official PRIVATE_PRIMARY plan-build receipt failed independent verification."
+}
+
+run_private_primary_choreography_controller() {
+    local action="$1"
+    local web_ssh_argv_sha256 deployment_manifest_sha256 controller value seen_ssh=0
+    local -a controller_web_ssh_argv=()
+    check_local
+    verify_frozen_release_source
+    LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR="$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR/$RELEASE_SHA"
+    REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR="$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR/$RELEASE_SHA"
+    [[ -d "$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR" \
+        && ! -L "$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR" \
+        && -f "$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR/control-payload.sha256" \
+        && ! -L "$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR/control-payload.sha256" ]] \
+        || die "The exact local Market Pipeline control release is not installed; prepare and preflight this release first."
+    PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256="$(
+        file_sha256 "$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR/control-payload.sha256"
+    )"
+    [[ "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] \
+        || die "The installed Market Pipeline control manifest digest is invalid."
+    (
+        cd "$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR"
+        sha256sum -c control-payload.sha256 >/dev/null
+    ) || die "The exact local Market Pipeline control release drifted."
+    ssh_iran "set -euo pipefail
+root='$REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR'
+[ -d \"\$root\" ] && [ ! -L \"\$root\" ]
+[ \"\$(stat -c '%u:%a' \"\$root\")\" = '0:700' ]
+[ \"\$(sha256sum \"\$root/control-payload.sha256\" | awk '{print \$1}')\" = '$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256' ]
+(cd \"\$root\" && sha256sum -c control-payload.sha256 >/dev/null)" \
+        || die "The exact remote Market Pipeline control release is missing or drifted."
+    controller="$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR/scripts/run_production_private_primary_choreography.py"
+    [[ -f "$controller" && ! -L "$controller" ]] \
+        || die "The exact PRIVATE_PRIMARY choreography controller is missing."
+    [[ "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN" == /root/secure-envs/trading-bot/release-control/* \
+        && "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_BUILD_RECEIPT" == /root/secure-envs/trading-bot/release-control/* \
+        && "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN" != "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_BUILD_RECEIPT" ]] \
+        || die "PRIVATE_PRIMARY choreography requires approved-root official plan output paths."
+    [[ -n "${RUNTIME_ENV_SOURCE_PATH:-}" && -n "${SSH_IRAN_CMD[*]:-}" \
+        && "$IRAN_SSH_AUTH_METHOD" == "key" ]] \
+        || die "PRIVATE_PRIMARY choreography requires the official runtime source and SSH transport."
+    for value in "${SSH_IRAN_CMD[@]}"; do
+        if [[ "$seen_ssh" == "1" ]]; then
+            controller_web_ssh_argv+=("$value")
+        elif [[ "$value" == "/usr/bin/ssh" ]]; then
+            seen_ssh=1
+            controller_web_ssh_argv+=("$value")
+        elif [[ "${value##*/}" == "ssh" ]]; then
+            die "PRIVATE_PRIMARY choreography refuses a PATH-selected SSH executable."
+        fi
+    done
+    [[ "$seen_ssh" == "1" && "${controller_web_ssh_argv[0]}" == "/usr/bin/ssh" ]] \
+        || die "PRIVATE_PRIMARY choreography could not derive the pinned key-based SSH transport."
+    controller_web_ssh_argv+=("$IRAN_SSH_TARGET")
+    web_ssh_argv_sha256="$(printf '%s\0' "${controller_web_ssh_argv[@]}" | sha256sum | awk '{print $1}')"
+    deployment_manifest_sha256="$(file_sha256 "$MANIFEST_PATH")"
+    [[ "$web_ssh_argv_sha256" =~ ^[0-9a-f]{64}$ ]] \
+        || die "PRIVATE_PRIMARY choreography could not bind the official SSH transport."
+    if [[ "$action" == "recover" ]]; then
+        [[ "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_SHA256" =~ ^[0-9a-f]{64}$ \
+            && "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_BUILD_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ \
+            && -n "${PRODUCTION_PRIVATE_PRIMARY_TRANSACTION_ID:-}" ]] \
+            || die "PRIVATE_PRIMARY recover requires the already-bound official plan, receipt, and transaction id."
+        [[ "$(file_sha256 "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN")" == "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_SHA256" \
+            && "$(file_sha256 "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_BUILD_RECEIPT")" == "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_BUILD_RECEIPT_SHA256" ]] \
+            || die "PRIVATE_PRIMARY recover plan or receipt drifted from the bound official digest."
+        verify_official_private_primary_plan_build_receipt \
+            "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN" \
+            "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_BUILD_RECEIPT" \
+            "$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR" \
+            "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_SHA256" \
+            "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_BUILD_RECEIPT_SHA256" \
+            "$PRODUCTION_PRIVATE_PRIMARY_TRANSACTION_ID" \
+            >/dev/null \
+            || die "PRIVATE_PRIMARY recover refused an unbound or handmade plan receipt."
+    else
+        build_official_private_primary_choreography_plan \
+            "$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR" \
+            "$web_ssh_argv_sha256" \
+            "$deployment_manifest_sha256"
+    fi
+    local -a arguments=(
+        "$action"
+        --plan "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN"
+        --expected-plan-sha256 "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_SHA256"
+        --plan-build-receipt "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_BUILD_RECEIPT"
+        --expected-plan-build-receipt-sha256 "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_PLAN_BUILD_RECEIPT_SHA256"
+        --release-root "$PROJECT_DIR"
+        --expected-source-manifest "$RUNTIME_ENV_SOURCE_PATH"
+        --expected-deployment-manifest "$MANIFEST_PATH"
+        --expected-deployment-manifest-sha256 "$deployment_manifest_sha256"
+        --expected-web-ssh-argv-sha256 "$web_ssh_argv_sha256"
+        --expected-local-control-release-root "$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR"
+        --expected-remote-control-release-root "$REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR"
+        --expected-control-payload-manifest-sha256 "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256"
+    )
+    if [[ "$action" == "execute" || "$action" == "recover" ]]; then
+        local confirmation="$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_CONFIRM"
+        if [[ "$action" == "recover" ]]; then
+            confirmation="$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_RECOVERY_CONFIRM"
+            [[ "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_RECOVERY_STRATEGY" == "resume" \
+                || "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_RECOVERY_STRATEGY" == "rollback" ]] \
+                || die "PRIVATE_PRIMARY choreography recovery strategy is invalid."
+        fi
+        [[ "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_JOURNAL" == /root/secure-envs/trading-bot/release-control/* \
+            && "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_RECEIPT" == /root/secure-envs/trading-bot/release-control/* \
+            && "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_JOURNAL" != "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_RECEIPT" \
+            && ( ( "$action" == "execute" && "$confirmation" == "run-production-private-primary-choreography" ) \
+                || ( "$action" == "recover" \
+                    && ( ( "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_RECOVERY_STRATEGY" == "resume" \
+                            && "$confirmation" == "recover-production-private-primary-choreography" ) \
+                        || ( "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_RECOVERY_STRATEGY" == "rollback" \
+                            && "$confirmation" == "rollback-production-private-primary-choreography" ) ) ) ) ]] \
+            || die "PRIVATE_PRIMARY choreography execute/recovery binding is incomplete or invalid."
+        arguments+=(
+            --journal "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_JOURNAL"
+            --receipt "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_RECEIPT"
+            --confirm "$confirmation"
+        )
+        if [[ "$action" == "recover" ]]; then
+            arguments+=(
+                --recovery-strategy "$PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_RECOVERY_STRATEGY"
+            )
+        fi
+    fi
+    run_exact_control_release_python \
+        "$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR" \
+        "scripts/run_production_private_primary_choreography.py" \
+        "${arguments[@]}" \
+        || die "PRIVATE_PRIMARY choreography ${action} failed closed."
 }
 
 main() {
@@ -7451,6 +9282,15 @@ main() {
             load_iran_image_build_receipt
             verify_release_evidence_gate
             load_two_host_release_state
+            ;;
+        validate-private-primary-release)
+            run_private_primary_choreography_controller validate
+            ;;
+        private-primary-release)
+            run_private_primary_choreography_controller execute
+            ;;
+        recover-private-primary-release)
+            run_private_primary_choreography_controller recover
             ;;
         deploy-foreign) prepare_local_release_inputs; install_sync_sampler_local; build_release; deploy_foreign; verify_sync_sampler_local ;;
         bootstrap-iran) prepare_local_release_inputs; bootstrap_iran ;;

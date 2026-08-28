@@ -237,12 +237,15 @@ acquire_production_source_lock
 set +e
 PYTHONPATH="$3" python3 - "$4" "$5" "$6" "$7" <<'PY'
 import sys
+from hashlib import sha256
 from pathlib import Path
 from scripts import update_production_coin_inference_source as updater
 updater.APPROVED_MANIFEST_PATH = Path(sys.argv[1])
+updater.APPROVED_MANIFEST_ROOTS = (Path(sys.argv[1]).parent,)
 raise SystemExit(updater.main([
     "apply", "--manifest", sys.argv[1],
     "--expected-source-sha256", sys.argv[2],
+    "--expected-manifest-sha256", sha256(Path(sys.argv[1]).read_bytes()).hexdigest(),
     "--confirm", updater.APPLY_CONFIRMATION,
     "--backup-dir", sys.argv[3],
     "--receipt", sys.argv[4],
@@ -1156,34 +1159,194 @@ reconcile_production_coin_snapshot_relay
             self.assertNotIn("start coin-intelligence-production-snapshot-relay.timer", commands)
             self.assertNotIn("restart coin-intelligence-production-snapshot-relay.timer", commands)
 
-    def test_interrupted_release_writes_secret_free_atomic_recovery_marker(self) -> None:
+    def test_interrupted_release_restores_exact_relay_state_and_clears_marker(self) -> None:
         with tempfile.TemporaryDirectory(prefix="production-relay-interrupted-") as temporary:
-            state_file = Path(temporary) / "production-state" / "relay.json"
+            root = Path(temporary)
+            state_file = root / "production-state" / "relay.json"
+            command_log = root / "systemctl.log"
             result = run_sourced_script(
                 """
 PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE="$2"
 PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE_CANONICAL="$2"
+COMMAND_LOG="$3"
 RELEASE_SHA=cccccccccccccccccccccccccccccccccccccccc
+PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER_WAS_PRESENT=1
+PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_PRESENT=1
 PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ENABLED=1
-PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ACTIVE=1
+PRODUCTION_COIN_SNAPSHOT_RELAY_WAS_ACTIVE=0
+PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE_WAS_ACTIVE=1
 PRODUCTION_COIN_SNAPSHOT_RELAY_GUARD_ARMED=1
-systemctl() { return 0; }
+write_production_coin_relay_recovery_marker
+FAKE_TIMER_ENABLED=0
+FAKE_TIMER_ACTIVE=0
+FAKE_SERVICE_ACTIVE=0
+systemctl() {
+  local command="$1" unit="${*: -1}"
+  printf '%s %s\n' "$command" "$unit" >>"$COMMAND_LOG"
+  case "$command" in
+    cat) return 0 ;;
+    stop)
+      [[ "$unit" == "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" ]] && FAKE_TIMER_ACTIVE=0
+      [[ "$unit" == "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE" ]] && FAKE_SERVICE_ACTIVE=0
+      return 0
+      ;;
+    enable) FAKE_TIMER_ENABLED=1; return 0 ;;
+    disable) FAKE_TIMER_ENABLED=0; return 0 ;;
+    start)
+      [[ "$unit" == "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" ]] && FAKE_TIMER_ACTIVE=1
+      [[ "$unit" == "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE" ]] && FAKE_SERVICE_ACTIVE=1
+      return 0
+      ;;
+    is-enabled) [[ "$FAKE_TIMER_ENABLED" == 1 ]] ;;
+    is-active)
+      if [[ "$unit" == "$PRODUCTION_COIN_SNAPSHOT_RELAY_TIMER" ]]; then
+        [[ "$FAKE_TIMER_ACTIVE" == 1 ]] || return 3
+      else
+        [[ "$FAKE_SERVICE_ACTIVE" == 1 ]] || return 3
+      fi
+      ;;
+    *) return 2 ;;
+  esac
+}
 set +e
 false
 production_release_relay_exit_guard
 """,
                 str(state_file),
+                str(command_log),
             )
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("release_incomplete", result.stderr)
-            self.assertIn("relay_intentionally_stopped=true", result.stderr)
-            marker = json.loads(state_file.read_text(encoding="utf-8"))
-            self.assertEqual(marker["status"], "release_incomplete")
-            self.assertEqual(marker["recovery_action"], "rerun_release_for_verified_reconcile")
-            self.assertEqual(stat.S_IMODE(state_file.stat().st_mode), 0o600)
-            serialized = state_file.read_text(encoding="utf-8")
-            self.assertNotIn(str(REPO_ROOT), serialized)
-            self.assertNotIn("password", serialized.lower())
+            self.assertIn("exact_prior_state_restored", result.stderr)
+            self.assertFalse(state_file.exists())
+            commands = command_log.read_text(encoding="utf-8")
+            self.assertIn(
+                "enable coin-intelligence-production-snapshot-relay.timer",
+                commands,
+            )
+            self.assertNotIn(
+                "start coin-intelligence-production-snapshot-relay.timer",
+                commands,
+            )
+            self.assertIn(
+                "start coin-intelligence-production-snapshot-relay.service",
+                commands,
+            )
+
+    def test_service_only_relay_state_is_captured_and_restored(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="production-relay-service-only-") as temporary:
+            root = Path(temporary)
+            state_file = root / "production-state" / "relay.json"
+            command_log = root / "systemctl.log"
+            result = run_sourced_script(
+                """
+PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE="$2"
+PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE_CANONICAL="$2"
+COMMAND_LOG="$3"
+RELEASE_SHA=dddddddddddddddddddddddddddddddddddddddd
+PRODUCTION_COIN_INFERENCE_RELAY_ENABLED=0
+PRODUCTION_COIN_INFERENCE_RELAY_DISABLE_CONFIRM=disable-production-coin-inference-snapshot
+FAKE_SERVICE_ACTIVE=1
+systemctl() {
+  local command="$1" unit="${*: -1}"
+  printf '%s %s\n' "$command" "$unit" >>"$COMMAND_LOG"
+  case "$command" in
+    cat)
+      [[ "$unit" == "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE" ]]
+      ;;
+    is-enabled) return 1 ;;
+    is-active)
+      [[ "$unit" == "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE" \
+          && "$FAKE_SERVICE_ACTIVE" == 1 ]] || return 3
+      ;;
+    stop)
+      [[ "$unit" == "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE" ]] \
+        && FAKE_SERVICE_ACTIVE=0
+      return 0
+      ;;
+    start)
+      [[ "$unit" == "$PRODUCTION_COIN_SNAPSHOT_RELAY_SERVICE" ]] \
+        && FAKE_SERVICE_ACTIVE=1
+      return 0
+      ;;
+    disable|enable) return 0 ;;
+    *) return 2 ;;
+  esac
+}
+suspend_production_coin_snapshot_relay
+python3 - "$PRODUCTION_COIN_SNAPSHOT_RELAY_STATE_FILE" <<'PY'
+import json
+import sys
+payload = json.load(open(sys.argv[1], encoding="utf-8"))
+print(
+    f"{int(payload['previous_timer_unit_present'])}|"
+    f"{int(payload['previous_service_unit_present'])}|"
+    f"{int(payload['previous_service_active'])}"
+)
+PY
+restore_production_coin_snapshot_relay_recovery_state
+""",
+                str(state_file),
+                str(command_log),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("0|1|1", result.stdout)
+            self.assertFalse(state_file.exists())
+            self.assertIn(
+                "start coin-intelligence-production-snapshot-relay.service",
+                command_log.read_text(encoding="utf-8"),
+            )
+
+    def test_private_primary_legacy_input_retirement_requires_exact_systemd_states(self) -> None:
+        exact = run_sourced_script(
+            """
+PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED=1
+RELEASE_SHA=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+read_production_coin_input_timer_recovery_state() {
+  printf '%s\n' \
+    "release${TAB}$RELEASE_SHA" \
+    "unit${TAB}coin-group-event-telegram.service${TAB}1${TAB}$(printf x | sha256sum | awk '{print $1}')" \
+    "unit${TAB}coin-group-event-telegram.timer${TAB}1${TAB}$(printf x | sha256sum | awk '{print $1}')" \
+    "unit${TAB}trading-bot-private-gold-collector.service${TAB}1${TAB}$(printf x | sha256sum | awk '{print $1}')" \
+    "unit${TAB}trading-bot-private-gold-collector.timer${TAB}1${TAB}$(printf x | sha256sum | awk '{print $1}')"
+}
+systemctl() {
+  case "$1" in
+    stop|disable) return 0 ;;
+    is-active) return 3 ;;
+    is-enabled) return 1 ;;
+    *) return 2 ;;
+  esac
+}
+retire_production_legacy_coin_inputs
+""".replace("${TAB}", "\t")
+        )
+        self.assertEqual(exact.returncode, 0, exact.stderr + exact.stdout)
+
+        unavailable = run_sourced_script(
+            """
+PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED=1
+RELEASE_SHA=ffffffffffffffffffffffffffffffffffffffff
+read_production_coin_input_timer_recovery_state() {
+  printf '%s\n' \
+    "release${TAB}$RELEASE_SHA" \
+    "unit${TAB}coin-group-event-telegram.service${TAB}1${TAB}$(printf x | sha256sum | awk '{print $1}')" \
+    "unit${TAB}coin-group-event-telegram.timer${TAB}1${TAB}$(printf x | sha256sum | awk '{print $1}')" \
+    "unit${TAB}trading-bot-private-gold-collector.service${TAB}1${TAB}$(printf x | sha256sum | awk '{print $1}')" \
+    "unit${TAB}trading-bot-private-gold-collector.timer${TAB}1${TAB}$(printf x | sha256sum | awk '{print $1}')"
+}
+systemctl() {
+  case "$1" in
+    stop|disable) return 0 ;;
+    is-active) return 4 ;;
+    is-enabled) return 4 ;;
+    *) return 2 ;;
+  esac
+}
+retire_production_legacy_coin_inputs
+""".replace("${TAB}", "\t")
+        )
+        self.assertNotEqual(unavailable.returncode, 0)
+        self.assertIn("state is unavailable", unavailable.stderr)
 
     def test_two_host_release_marker_binds_exact_code_and_env_pair_until_health(self) -> None:
         with tempfile.TemporaryDirectory(prefix="production-two-host-release-") as temporary:
@@ -1908,6 +2071,69 @@ printf '%s\n' "$PRODUCTION_COIN_INFERENCE_REQUESTED"
             self.assertEqual(ready.returncode, 0, ready.stderr + ready.stdout)
             self.assertEqual(ready.stdout.strip(), "1")
 
+    def test_private_primary_inference_requires_exact_product_contract_not_legacy_relay(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="production-private-primary-contract-") as temporary:
+            source = Path(temporary) / "source.env"
+            source.write_text(
+                "PRODUCTION_COIN_INFERENCE_PREVIEW_ENABLED=true\n"
+                "PRODUCTION_COIN_INFERENCE_SELECTION_ENABLED=true\n"
+                "PRODUCTION_COIN_INFERENCE_AUTO_SELECTION_ENABLED=false\n"
+                "PRODUCTION_OFFER_MODEL_PRICE_GUARD_ENABLED=true\n"
+                "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE=PRIVATE_PRIMARY\n"
+                "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MAX_AGE_SECONDS=120\n"
+                "PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR=/srv/trading-bot/production-data/market-pipeline/snapshots\n"
+                "PRODUCTION_PRODUCT_ESTIMATOR_BOT_SNAPSHOT_HOST_DIR=/srv/trading-bot/production-data/market-pipeline/snapshots\n"
+                "PRODUCTION_PRODUCT_ESTIMATOR_IRAN_APP_SNAPSHOT_HOST_DIR=/srv/trading-bot/market-data-production/snapshots\n"
+                "PRODUCTION_PRODUCT_ESTIMATOR_APP_PRIVATE_PRIMARY_SNAPSHOT_PATH=/app/runtime/product-estimator/latest-private-primary.json\n"
+                "PRODUCTION_PRODUCT_ESTIMATOR_BOT_PRIVATE_PRIMARY_SNAPSHOT_PATH=/app/runtime/product-estimator/latest-private-primary.json\n"
+                "PRODUCTION_PRODUCT_ESTIMATOR_IRAN_APP_PRIVATE_PRIMARY_SNAPSHOT_PATH=/app/runtime/product-estimator/latest-private-primary.json\n",
+                encoding="utf-8",
+            )
+            ready = run_sourced_script(
+                """
+RUNTIME_ENV_SOURCE_PATH="$2"
+PRODUCTION_COIN_INFERENCE_RELAY_ENABLED=0
+PRODUCTION_COIN_INFERENCE_RELAY_CONFIRM=
+PRODUCTION_COIN_INFERENCE_RELAY_DISABLE_CONFIRM=disable-production-coin-inference-snapshot
+COIN_GROUP_EVENT_CHANNEL_ID=''
+COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_OFFER_CHANNEL_ID=''
+COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_TRADE_CHANNEL_ID=''
+COIN_INTELLIGENCE_EXPECTED_TELEGRAM_API_ID=''
+validate_production_coin_inference_activation_contract
+printf '%s %s %s %s\n' "$PRODUCTION_COIN_INFERENCE_REQUESTED" "$PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED" "$PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED" "$PRODUCTION_COIN_INFERENCE_RELAY_ENABLED"
+""",
+                str(source),
+            )
+            self.assertEqual(ready.returncode, 0, ready.stderr + ready.stdout)
+            self.assertEqual(ready.stdout.strip(), "1 0 1 0")
+
+            relay_enabled = run_sourced_script(
+                """
+RUNTIME_ENV_SOURCE_PATH="$2"
+PRODUCTION_COIN_INFERENCE_RELAY_ENABLED=1
+PRODUCTION_COIN_INFERENCE_RELAY_CONFIRM=publish-production-coin-inference-snapshot
+PRODUCTION_COIN_INFERENCE_RELAY_DISABLE_CONFIRM=
+validate_production_coin_inference_activation_contract
+""",
+                str(source),
+            )
+            self.assertNotEqual(relay_enabled.returncode, 0)
+            self.assertIn("explicit relay-disabled", relay_enabled.stderr)
+
+            source.write_text(
+                source.read_text(encoding="utf-8").replace(
+                    "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MAX_AGE_SECONDS=120",
+                    "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MAX_AGE_SECONDS=121",
+                ),
+                encoding="utf-8",
+            )
+            blocked = run_sourced_script(
+                'RUNTIME_ENV_SOURCE_PATH="$2"; validate_production_coin_inference_activation_contract',
+                str(source),
+            )
+            self.assertNotEqual(blocked.returncode, 0)
+            self.assertIn("maximum age", blocked.stderr)
+
     def test_release_gates_inputs_snapshot_and_consumers_before_final_health(self) -> None:
         source = RELEASE_SCRIPT.read_text(encoding="utf-8")
         release = source.split("run_release() {", 1)[1].split("\n}", 1)[0]
@@ -1927,16 +2153,85 @@ printf '%s\n' "$PRODUCTION_COIN_INFERENCE_REQUESTED"
             release.index("verify_running_production_coin_consumers"),
             release.index("healthcheck"),
         )
-        consumer = source.split("verify_running_production_coin_consumers() {", 1)[1].split("\n}", 1)[0]
-        self.assertIn("trading_bot_app", consumer)
-        self.assertIn("trading_bot_bot", consumer)
-        self.assertIn("--expect-enabled", consumer)
-        self.assertIn("--expected-sha256", consumer)
+        dispatcher = source.split("verify_running_production_coin_consumers() {", 1)[1].split("\n}", 1)[0]
+        legacy = source.split("verify_running_legacy_production_coin_consumers() {", 1)[1].split("\n}", 1)[0]
+        private = source.split("verify_running_private_primary_consumers() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("verify_running_private_primary_consumers", dispatcher)
+        self.assertIn("verify_running_legacy_production_coin_consumers", dispatcher)
+        self.assertIn("trading_bot_app", legacy)
+        self.assertIn("trading_bot_bot", legacy)
+        self.assertIn("--expect-enabled", legacy)
+        self.assertIn("trading_bot_app", private)
+        self.assertIn("trading_bot_bot", private)
+        self.assertIn("private-primary-consumer", private)
+        self.assertIn("--expected-sha256", private)
+
+    def test_private_primary_release_retires_legacy_only_after_verified_consumers(self) -> None:
+        source = RELEASE_SCRIPT.read_text(encoding="utf-8")
+        release = source.split("run_release() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("retire_production_legacy_coin_inputs", source)
+        self.assertIn("retire_production_coin_snapshot_relay", source)
+        self.assertLess(
+            release.index("begin_two_host_release_transaction"),
+            release.index("capture_production_coin_input_timer_recovery_state"),
+        )
+        self.assertLess(
+            release.index("capture_production_coin_input_timer_recovery_state"),
+            release.index("verify_running_production_coin_consumers"),
+        )
+        self.assertLess(
+            release.index("verify_running_production_coin_consumers"),
+            release.index("retire_production_legacy_coin_inputs"),
+        )
+        self.assertLess(
+            release.index("retire_production_legacy_coin_inputs"),
+            release.index("retire_production_coin_snapshot_relay"),
+        )
+        self.assertLess(
+            release.index("retire_production_coin_snapshot_relay"),
+            release.index("healthcheck"),
+        )
+        self.assertLess(
+            release.index("healthcheck"),
+            release.index("clear_production_coin_input_timer_recovery_state"),
+        )
+        relay_recovery = source.split(
+            "write_production_coin_relay_recovery_marker() {", 1
+        )[1].split("\n}", 1)[0]
+        self.assertIn('"previous_timer_unit_present"', relay_recovery)
+        self.assertIn('"previous_service_unit_present"', relay_recovery)
+        self.assertIn(
+            '"restore_exact_prior_relay_state_on_release_failure"',
+            relay_recovery,
+        )
+        input_recovery = source.split(
+            "capture_production_coin_input_timer_recovery_state() {", 1
+        )[1].split("\n}", 1)[0]
+        self.assertIn('"services"', input_recovery)
+        self.assertIn(
+            '"restore_prior_units_and_runtime_state_on_release_failure"',
+            input_recovery,
+        )
+        private_contract = source.split(
+            'if [[ "$mode" == "PRIVATE_PRIMARY" ]]; then', 1
+        )[1].split("else", 1)[0]
+        self.assertNotIn("PRODUCTION_COIN_INFERENCE_RELAY_ENABLED=", private_contract)
+        self.assertIn('PRODUCTION_COIN_INFERENCE_RELAY_ENABLED" == "0"', private_contract)
 
     def test_script_can_be_sourced_without_running_a_release(self) -> None:
         result = run_sourced_script('printf "source-only-ok\\n"')
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertEqual(result.stdout, "source-only-ok\n")
+
+    def test_backup_key_is_proved_only_by_authenticated_decrypt(self) -> None:
+        source = RELEASE_SCRIPT.read_text(encoding="utf-8")
+        backup = source.split("prepare_market_pipeline_archive_backup() {", 1)[1].split(
+            "\n}", 1
+        )[0]
+        self.assertNotIn("local_key_identity", backup)
+        self.assertNotIn("remote_key_identity", backup)
+        self.assertNotIn("sha256sum '$PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_KEY_PATH'", backup)
+        self.assertIn("authenticated decrypt-stream reconciliation", backup)
 
 
 if __name__ == "__main__":

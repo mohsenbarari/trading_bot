@@ -10,6 +10,7 @@ commit and one content-addressed image.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 from hashlib import sha256
 import json
 import os
@@ -48,6 +49,10 @@ else:
 CONFIRMATION = "render-market-pipeline-private-primary"
 SCHEMA = "market_pipeline_primary_release_pair/1.0"
 ROLE_IMAGE_SCHEMA = "market_pipeline_primary_release_pair/1.1"
+AUTHORIZED_BACKFILL_NOT_BEFORE_UTC = "2026-08-25T09:33:00Z"
+AUTHORIZED_BACKFILL_SOURCE_CODES = (
+    "MELTED_PRIMARY_FLOW,GROUP_1,GROUP_2"
+)
 
 
 class PrimaryReleaseError(RuntimeError):
@@ -119,6 +124,26 @@ def _source(role: str, path: Path) -> dict[str, str]:
     if DYNAMIC_VALUES.intersection(values):
         raise PrimaryReleaseError("primary_release_source_contains_dynamic_values")
     validate_source(role, values)
+    if role == "web":
+        if (
+            values.get("MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC")
+            != AUTHORIZED_BACKFILL_NOT_BEFORE_UTC
+            or values.get("MARKET_CAPTURE_BACKFILL_SOURCE_CODES")
+            != AUTHORIZED_BACKFILL_SOURCE_CODES
+        ):
+            raise PrimaryReleaseError(
+                "primary_release_authorized_backfill_contract_invalid"
+            )
+        try:
+            maximum = int(values.get("MARKET_CAPTURE_BACKFILL_MAX_MESSAGES", ""))
+        except ValueError as exc:
+            raise PrimaryReleaseError(
+                "primary_release_authorized_backfill_contract_invalid"
+            ) from exc
+        if not 2_000 <= maximum <= 250_000:
+            raise PrimaryReleaseError(
+                "primary_release_authorized_backfill_contract_invalid"
+            )
     return values
 
 
@@ -154,6 +179,8 @@ def derive_source(
     rendered_env: Path,
     source_env: Path,
     research_key_file: Path | None = None,
+    capture_backfill_not_before_utc: str | None = None,
+    capture_backfill_max_messages: int | None = None,
 ) -> dict[str, object]:
     """Create a topology source from an existing release-bound env.
 
@@ -171,8 +198,52 @@ def derive_source(
         if research_key_file is None or not research_key_file.is_absolute():
             raise PrimaryReleaseError("primary_release_research_key_path_required")
         source["MARKET_RESEARCH_ENCRYPTION_KEY_FILE"] = str(research_key_file)
-    elif research_key_file is not None:
-        raise PrimaryReleaseError("primary_release_research_key_path_forbidden")
+        if capture_backfill_not_before_utc is not None:
+            try:
+                cutoff = datetime.fromisoformat(
+                    capture_backfill_not_before_utc.replace("Z", "+00:00")
+                )
+            except ValueError as exc:
+                raise PrimaryReleaseError(
+                    "primary_release_backfill_cutoff_invalid"
+                ) from exc
+            if (
+                cutoff.tzinfo is None
+                or cutoff.utcoffset() != timezone.utc.utcoffset(cutoff)
+                or not capture_backfill_not_before_utc.endswith("Z")
+            ):
+                raise PrimaryReleaseError(
+                    "primary_release_backfill_cutoff_invalid"
+                )
+            source["MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC"] = (
+                cutoff.astimezone(timezone.utc)
+                .isoformat(timespec="seconds")
+                .replace("+00:00", "Z")
+            )
+            maximum = (
+                100_000
+                if capture_backfill_max_messages is None
+                else int(capture_backfill_max_messages)
+            )
+            if not 2_000 <= maximum <= 250_000:
+                raise PrimaryReleaseError(
+                    "primary_release_backfill_max_messages_invalid"
+                )
+            source["MARKET_CAPTURE_BACKFILL_MAX_MESSAGES"] = str(maximum)
+            source["MARKET_CAPTURE_BACKFILL_SOURCE_CODES"] = (
+                AUTHORIZED_BACKFILL_SOURCE_CODES
+            )
+        elif capture_backfill_max_messages is not None:
+            raise PrimaryReleaseError("primary_release_backfill_cutoff_required")
+    elif any(
+        value is not None
+        for value in (
+            research_key_file,
+            capture_backfill_not_before_utc,
+            capture_backfill_max_messages,
+        )
+    ):
+        raise PrimaryReleaseError("primary_release_web_only_option_forbidden")
     validate_source(role, source)
     _atomic_write(source_env, _env_bytes(source), exclusive=True)
     return {
@@ -182,6 +253,9 @@ def derive_source(
         "source_env_sha256": _digest(source_env),
         "dynamic_values_removed": sorted(DYNAMIC_VALUES.intersection(values)),
         "secret_values_read": False,
+        "capture_backfill_boundary_added": bool(
+            role == "web" and capture_backfill_not_before_utc is not None
+        ),
     }
 
 
@@ -230,6 +304,9 @@ def render_pair(
         outputs[role] = {
             "source_sha256": _digest(web_source if role == "web" else bot_source),
             "output_sha256": sha256(payload).hexdigest(),
+            "product_snapshot_root": sources[role][
+                "MARKET_PRODUCT_SNAPSHOT_ROOT"
+            ],
         }
     common_image = len(set(image_ids.values())) == 1
     document: dict[str, object] = {
@@ -242,6 +319,11 @@ def render_pair(
         "expected_snapshot_lane": "PRIVATE_PRIMARY",
         "product_authority_changed": False,
         "legacy_retirement_authorized": False,
+        "capture_backfill": {
+            "not_before_utc": sources["web"]["MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC"],
+            "source_codes": sources["web"]["MARKET_CAPTURE_BACKFILL_SOURCE_CODES"].split(","),
+            "max_messages": int(sources["web"]["MARKET_CAPTURE_BACKFILL_MAX_MESSAGES"]),
+        },
         "roles": outputs,
         "secrets_disclosed": False,
     }
@@ -299,6 +381,15 @@ def verify_pair(
             "expected_snapshot_lane": "PRIVATE_PRIMARY",
             "product_authority_changed": False,
             "legacy_retirement_authorized": False,
+            "capture_backfill": {
+                "not_before_utc": AUTHORIZED_BACKFILL_NOT_BEFORE_UTC,
+                "source_codes": AUTHORIZED_BACKFILL_SOURCE_CODES.split(","),
+                "max_messages": int(
+                    _source("web", web_source)[
+                        "MARKET_CAPTURE_BACKFILL_MAX_MESSAGES"
+                    ]
+                ),
+            },
             "secrets_disclosed": False,
         }.items()
     ):
@@ -324,6 +415,9 @@ def verify_pair(
         if not isinstance(role_receipt, Mapping) or role_receipt != {
             "source_sha256": _digest(source),
             "output_sha256": _digest(output),
+            "product_snapshot_root": source_values[
+                "MARKET_PRODUCT_SNAPSHOT_ROOT"
+            ],
         }:
             raise PrimaryReleaseError("primary_release_output_digest_mismatch")
     _validate_pair(
@@ -341,6 +435,8 @@ def build_parser() -> argparse.ArgumentParser:
     derive.add_argument("--rendered-env", type=Path, required=True)
     derive.add_argument("--source-env", type=Path, required=True)
     derive.add_argument("--research-key-file", type=Path)
+    derive.add_argument("--capture-backfill-not-before-utc")
+    derive.add_argument("--capture-backfill-max-messages", type=int)
     for name in ("render-pair", "verify-pair"):
         command = commands.add_parser(name)
         command.add_argument("--web-source", type=Path, required=True)
@@ -369,6 +465,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 rendered_env=args.rendered_env,
                 source_env=args.source_env,
                 research_key_file=args.research_key_file,
+                capture_backfill_not_before_utc=args.capture_backfill_not_before_utc,
+                capture_backfill_max_messages=args.capture_backfill_max_messages,
             )
             print(
                 json.dumps(

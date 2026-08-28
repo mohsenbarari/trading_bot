@@ -84,6 +84,8 @@ services:
         source: ${PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR:-/srv/trading-bot/production-data/coin-intelligence/production-runtime}
         target: /app/runtime/product-estimator
         read_only: true
+        bind:
+          create_host_path: false
     ports:
       - "127.0.0.1:8000:8000"
     ulimits:
@@ -140,6 +142,8 @@ services:
         source: ${PRODUCTION_PRODUCT_ESTIMATOR_BOT_SNAPSHOT_HOST_DIR:-/srv/trading-bot/production-data/coin-intelligence/production-runtime}
         target: /app/runtime/product-estimator
         read_only: true
+        bind:
+          create_host_path: false
     env_file:
       - .env
     extra_hosts:

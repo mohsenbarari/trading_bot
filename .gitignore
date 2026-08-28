@@ -111,7 +111,6 @@ __pycache__/
 
 # Temporary Test Files
 tests/debug_trade.py
-tests/__init__.py
 tests/live_simulation.py
 tests/load_test.py
 .venv

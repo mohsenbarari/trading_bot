@@ -51,6 +51,7 @@ COMMON_REQUIRED = {
 ROLE_REQUIRED = {
     "web": {
         "MARKET_WEB_DATA_ROOT",
+        "MARKET_PRODUCT_SNAPSHOT_ROOT",
         "MARKET_POSTGRES_PASSWORD_FILE",
         "MARKET_CAPTURE_ACCOUNT1_CONFIG_FILE",
         "MARKET_CAPTURE_ACCOUNT2_CONFIG_FILE",
@@ -61,6 +62,7 @@ ROLE_REQUIRED = {
     },
     "bot": {
         "MARKET_BOT_DATA_ROOT",
+        "MARKET_PRODUCT_SNAPSHOT_ROOT",
         "MARKET_BOT_TRANSPORT_CERT_FILE",
         "MARKET_BOT_TRANSPORT_KEY_FILE",
     },
@@ -104,6 +106,7 @@ class RenderedRole:
     source_sha256: str
     output_sha256: str
     data_root: str
+    product_snapshot_root: str
     bind_ip: str
     peer_ip: str
     receiver_port: int
@@ -226,6 +229,13 @@ def validate_source(role: str, values: Mapping[str, str]) -> dict[str, object]:
         _absolute_host_path(values[key], field=key.lower())
     data_key = "MARKET_WEB_DATA_ROOT" if role == "web" else "MARKET_BOT_DATA_ROOT"
     data_root = _absolute_host_path(values[data_key], field=data_key.lower())
+    product_snapshot_root = _absolute_host_path(
+        values["MARKET_PRODUCT_SNAPSHOT_ROOT"],
+        field="market_product_snapshot_root",
+    )
+    expected_product_snapshot_root = str(Path(data_root) / "snapshots")
+    if product_snapshot_root != expected_product_snapshot_root:
+        raise ReleaseContractError("market_product_snapshot_root_mismatch")
     receiver_key = (
         "MARKET_WEB_SNAPSHOT_RECEIVER_PORT"
         if role == "web"
@@ -233,6 +243,7 @@ def validate_source(role: str, values: Mapping[str, str]) -> dict[str, object]:
     )
     return {
         "data_root": data_root,
+        "product_snapshot_root": product_snapshot_root,
         "bind_ip": bind_ip,
         "peer_ip": bot_ip if role == "web" else web_ip,
         "receiver_port": _port(values, receiver_key),
@@ -357,6 +368,7 @@ def _render_role(
         source_sha256=_digest(source_path),
         output_sha256=sha256(payload).hexdigest(),
         data_root=str(summary["data_root"]),
+        product_snapshot_root=str(summary["product_snapshot_root"]),
         bind_ip=str(summary["bind_ip"]),
         peer_ip=str(summary["peer_ip"]),
         receiver_port=int(summary["receiver_port"]),
@@ -432,6 +444,7 @@ def render_pair(
                     "source_sha256": item.source_sha256,
                     "output_sha256": item.output_sha256,
                     "data_root": item.data_root,
+                    "product_snapshot_root": item.product_snapshot_root,
                     "bind_ip": item.bind_ip,
                     "peer_ip": item.peer_ip,
                     "receiver_port": item.receiver_port,
@@ -470,6 +483,7 @@ def check_sources(*, web_source: Path, bot_source: Path) -> dict[str, object]:
             "web": {
                 "source_sha256": _digest(web_source),
                 "data_root": web["data_root"],
+                "product_snapshot_root": web["product_snapshot_root"],
                 "bind_ip": web["bind_ip"],
                 "peer_ip": web["peer_ip"],
                 "receiver_port": web["receiver_port"],
@@ -478,6 +492,7 @@ def check_sources(*, web_source: Path, bot_source: Path) -> dict[str, object]:
             "bot": {
                 "source_sha256": _digest(bot_source),
                 "data_root": bot["data_root"],
+                "product_snapshot_root": bot["product_snapshot_root"],
                 "bind_ip": bot["bind_ip"],
                 "peer_ip": bot["peer_ip"],
                 "receiver_port": bot["receiver_port"],

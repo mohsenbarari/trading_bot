@@ -29,7 +29,15 @@ class PrepareMarketPipelinePrimaryReleaseTests(unittest.TestCase):
         self.web_env = self.root / "web.primary.env"
         self.bot_env = self.root / "bot.primary.env"
         self.receipt = self.root / "receipt.json"
-        _write_source(self.web_source, _web_values())
+        web_values = _web_values()
+        web_values.update(
+            {
+                "MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC": primary.AUTHORIZED_BACKFILL_NOT_BEFORE_UTC,
+                "MARKET_CAPTURE_BACKFILL_SOURCE_CODES": primary.AUTHORIZED_BACKFILL_SOURCE_CODES,
+                "MARKET_CAPTURE_BACKFILL_MAX_MESSAGES": "100000",
+            }
+        )
+        _write_source(self.web_source, web_values)
         _write_source(self.bot_source, _bot_values())
 
     def tearDown(self) -> None:
@@ -62,6 +70,14 @@ class PrepareMarketPipelinePrimaryReleaseTests(unittest.TestCase):
             )
         self.assertFalse(document["product_authority_changed"])
         self.assertFalse(document["legacy_retirement_authorized"])
+        self.assertEqual(
+            document["roles"]["bot"]["product_snapshot_root"],
+            "/srv/trading-bot/production-data/market-pipeline/snapshots",
+        )
+        self.assertEqual(
+            document["roles"]["web"]["product_snapshot_root"],
+            "/srv/trading-bot/market-data-production/snapshots",
+        )
         self.assertNotIn("/srv/trading-bot/secure/market", self.receipt.read_text())
         verified = primary.verify_pair(**self._arguments())
         self.assertEqual(verified, document)
@@ -113,6 +129,8 @@ class PrepareMarketPipelinePrimaryReleaseTests(unittest.TestCase):
             research_key_file=Path(
                 "/srv/trading-bot/secure/market/research-archive.key"
             ),
+            capture_backfill_not_before_utc="2026-08-25T09:33:00Z",
+            capture_backfill_max_messages=100_000,
         )
 
         values = parse_env(derived, secure_input=True)
@@ -121,10 +139,20 @@ class PrepareMarketPipelinePrimaryReleaseTests(unittest.TestCase):
             values["MARKET_RESEARCH_ENCRYPTION_KEY_FILE"],
             "/srv/trading-bot/secure/market/research-archive.key",
         )
+        self.assertEqual(
+            values["MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC"],
+            "2026-08-25T09:33:00Z",
+        )
+        self.assertEqual(values["MARKET_CAPTURE_BACKFILL_MAX_MESSAGES"], "100000")
+        self.assertEqual(
+            values["MARKET_CAPTURE_BACKFILL_SOURCE_CODES"],
+            "MELTED_PRIMARY_FLOW,GROUP_1,GROUP_2",
+        )
+        self.assertTrue(result["capture_backfill_boundary_added"])
         self.assertFalse(result["secret_values_read"])
 
     def test_dynamic_authority_values_are_forbidden_in_source(self) -> None:
-        values = _web_values()
+        values = parse_env(self.web_source, secure_input=True)
         values["MARKET_PIPELINE_FEED_MODE"] = "PRIVATE_PRIMARY"
         _write_source(self.web_source, values)
 
@@ -135,6 +163,39 @@ class PrepareMarketPipelinePrimaryReleaseTests(unittest.TestCase):
             primary.render_pair(**self._arguments())
         self.assertFalse(self.web_env.exists())
 
+    def test_derive_source_rejects_zero_backfill_cap(self) -> None:
+        rendered = _web_values()
+        rendered.update(
+            {
+                "MARKET_PIPELINE_IMAGE": "market-pipeline@sha256:" + "a" * 64,
+                "MARKET_PIPELINE_RELEASE_SHA": "b" * 40,
+                "MARKET_PIPELINE_MODE": "live",
+                "MARKET_PIPELINE_PROJECT_NAME": "market-private-pipeline-test",
+                "MARKET_PIPELINE_FEED_MODE": "PRIVATE_SHADOW",
+                "MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY": "0",
+                "MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE": "PRIVATE_SHADOW",
+            }
+        )
+        rendered.pop("MARKET_RESEARCH_ENCRYPTION_KEY_FILE")
+        old_env = self.root / "old-web-zero.env"
+        derived = self.root / "derived-web-zero.source.env"
+        _write_source(old_env, rendered)
+        with self.assertRaisesRegex(
+            primary.PrimaryReleaseError,
+            "primary_release_backfill_max_messages_invalid",
+        ):
+            primary.derive_source(
+                role="web",
+                rendered_env=old_env,
+                source_env=derived,
+                research_key_file=Path(
+                    "/srv/trading-bot/secure/market/research-archive.key"
+                ),
+                capture_backfill_not_before_utc="2026-08-25T09:33:00Z",
+                capture_backfill_max_messages=0,
+            )
+        self.assertFalse(derived.exists())
+
     def test_cross_host_topology_drift_fails_before_output(self) -> None:
         values = _bot_values()
         values["MARKET_WEB_PRIVATE_IP"] = "10.240.1.21"
@@ -144,6 +205,17 @@ class PrepareMarketPipelinePrimaryReleaseTests(unittest.TestCase):
             primary.render_pair(**self._arguments())
         self.assertFalse(self.web_env.exists())
         self.assertFalse(self.bot_env.exists())
+
+    def test_wrong_or_missing_owner_authorized_backfill_scope_fails_closed(self) -> None:
+        values = parse_env(self.web_source, secure_input=True)
+        values["MARKET_CAPTURE_BACKFILL_SOURCE_CODES"] = "GROUP_1,GROUP_2"
+        _write_source(self.web_source, values)
+        with self.assertRaisesRegex(
+            primary.PrimaryReleaseError,
+            "primary_release_authorized_backfill_contract_invalid",
+        ):
+            primary.render_pair(**self._arguments())
+        self.assertFalse(self.web_env.exists())
 
     def test_receipt_or_output_tampering_is_rejected(self) -> None:
         primary.render_pair(**self._arguments())

@@ -782,6 +782,21 @@ class ProductionSnapshotRelayTests(unittest.TestCase):
         )
         self.assertEqual(foreign.count("target: /app/runtime/product-estimator"), 2)
         self.assertEqual(iran.count("target: /app/runtime/product-estimator"), 1)
+        self.assertEqual(foreign.count("create_host_path: false"), 2)
+        self.assertEqual(iran.count("create_host_path: false"), 1)
+        from scripts.update_production_coin_inference_source import (
+            PRIVATE_PRIMARY_UPDATES,
+        )
+
+        for key in (
+            "PRODUCTION_PRODUCT_ESTIMATOR_APP_PRIVATE_PRIMARY_SNAPSHOT_PATH",
+            "PRODUCTION_PRODUCT_ESTIMATOR_BOT_PRIVATE_PRIMARY_SNAPSHOT_PATH",
+            "PRODUCTION_PRODUCT_ESTIMATOR_IRAN_APP_PRIVATE_PRIMARY_SNAPSHOT_PATH",
+        ):
+            self.assertEqual(
+                Path(PRIVATE_PRIMARY_UPDATES[key]).parent,
+                Path("/app/runtime/product-estimator"),
+            )
         self.assertNotIn("COIN_INTELLIGENCE_INFERENCE_SNAPSHOT", foreign.split("sync_worker:", 1)[1])
         self.assertNotIn("COIN_INTELLIGENCE_INFERENCE_SNAPSHOT", iran.split("sync_worker:", 1)[1])
 

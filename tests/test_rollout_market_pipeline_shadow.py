@@ -28,7 +28,7 @@ def _fixture_parent(path: Path) -> None:
 
 def _values(role: str, feed_mode: str = "PRIVATE_SHADOW") -> dict[str, str]:
     primary = feed_mode == "PRIVATE_PRIMARY"
-    return {
+    values = {
         "MARKET_PIPELINE_PROJECT_NAME": "market-private-pipeline-production",
         "MARKET_PIPELINE_RELEASE_SHA": RELEASE_SHA,
         "MARKET_PIPELINE_IMAGE": IMAGE_ID,
@@ -38,6 +38,9 @@ def _values(role: str, feed_mode: str = "PRIVATE_SHADOW") -> dict[str, str]:
         "MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE": feed_mode,
         "MARKET_PRIVATE_BIND_IP": "10.240.1.10" if role == "bot" else "10.240.1.20",
     }
+    if role == "web":
+        values["MARKET_WEB_DATA_ROOT"] = "/tmp/test-market-web-data"
+    return values
 
 
 class RolloutMarketPipelineShadowTests(unittest.TestCase):
@@ -181,6 +184,62 @@ class RolloutMarketPipelineShadowTests(unittest.TestCase):
         self.assertEqual(result["services"][0]["state"], "bootstrap_ready")
         self.assertEqual(result["status"], "in_progress")
 
+    def test_primary_receiver_is_revisited_after_sender_and_promotes_to_pass(self) -> None:
+        with (
+            mock.patch.object(
+                rollout,
+                "_validate_env",
+                return_value=_values("web", "PRIVATE_PRIMARY"),
+            ),
+            mock.patch.object(rollout, "_ids", return_value=[]),
+            mock.patch.object(
+                rollout,
+                "_run",
+                return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+            ),
+        ):
+            payload = rollout.prepare(
+                role="web",
+                release_root=self.root,
+                env_file=self.env,
+                journal=self.journal,
+                release_sha=RELEASE_SHA,
+                image_id=IMAGE_ID,
+                feed_mode="PRIVATE_PRIMARY",
+            )
+        for index, row in enumerate(payload["services"]):
+            row["state"] = "bootstrap_ready" if index == 0 else "healthy"
+            row["container_id"] = f"{index + 1:x}" * 64
+            row["created_by_release"] = True
+        payload["status"] = "in_progress"
+        rollout._write_journal(self.journal, payload)
+        receiver_id = payload["services"][0]["container_id"]
+        with (
+            mock.patch.object(
+                rollout,
+                "_validate_env",
+                return_value=_values("web", "PRIVATE_PRIMARY"),
+            ),
+            mock.patch.object(rollout, "_ids", return_value=[receiver_id]),
+            mock.patch.object(
+                rollout,
+                "_identity",
+                return_value={"running": True, "healthy": True},
+            ),
+        ):
+            result = rollout.start_service(
+                role="web",
+                release_root=self.root,
+                env_file=self.env,
+                journal=self.journal,
+                release_sha=RELEASE_SHA,
+                image_id=IMAGE_ID,
+                service="estimator-snapshot-receiver",
+                feed_mode="PRIVATE_PRIMARY",
+            )
+        self.assertEqual(result["services"][0]["state"], "healthy")
+        self.assertEqual(result["status"], "PASS")
+
     def test_adapter_cannot_start_before_fact_receiver(self) -> None:
         self._prepared()
         with mock.patch.object(rollout, "_validate_env", return_value=_values("bot")):
@@ -300,6 +359,231 @@ class RolloutMarketPipelineShadowTests(unittest.TestCase):
             )
         self.assertTrue(removed)
         self.assertEqual(result["status"], "ROLLED_BACK")
+
+    def test_create_intent_is_durable_before_compose_and_can_resume_without_owner(
+        self,
+    ) -> None:
+        self._prepared()
+        compose_attempts = 0
+        owner_present = False
+
+        def ids(
+            _project: str, service: str, *, running: bool = False
+        ) -> list[str]:
+            del running
+            if service != "market-fact-receiver" or not owner_present:
+                return []
+            return [CONTAINER_ID]
+
+        def run(
+            _arguments: list[str], *, label: str, allow_failure: bool = False
+        ) -> subprocess.CompletedProcess[str]:
+            nonlocal compose_attempts, owner_present
+            del allow_failure
+            self.assertEqual(label, "rollout_service_start")
+            compose_attempts += 1
+            if compose_attempts == 1:
+                raise RuntimeError("synthetic_crash_before_create")
+            owner_present = True
+            return subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        common = {
+            "role": "bot",
+            "release_root": self.root,
+            "env_file": self.env,
+            "journal": self.journal,
+            "release_sha": RELEASE_SHA,
+            "image_id": IMAGE_ID,
+            "service": "market-fact-receiver",
+        }
+        with (
+            mock.patch.object(rollout, "_validate_env", return_value=_values("bot")),
+            mock.patch.object(rollout, "_ids", side_effect=ids),
+            mock.patch.object(rollout, "_run", side_effect=run),
+            mock.patch.object(
+                rollout,
+                "_identity",
+                return_value={"running": True, "healthy": True},
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "crash_before_create"):
+                rollout.start_service(**common)
+            interrupted = rollout._read_journal(self.journal)
+            self.assertEqual(
+                interrupted["services"][0]["state"], "create_prepared"
+            )
+            self.assertIsNone(interrupted["services"][0]["container_id"])
+            result = rollout.start_service(**common)
+
+        self.assertEqual(compose_attempts, 2)
+        self.assertEqual(result["services"][0]["container_id"], CONTAINER_ID)
+        self.assertEqual(result["services"][0]["state"], "healthy")
+
+    def test_sigkill_after_create_before_identity_wal_adopts_exact_owner(
+        self,
+    ) -> None:
+        self._prepared()
+        owner_present = False
+        crash_after_create = True
+
+        def ids(
+            _project: str, service: str, *, running: bool = False
+        ) -> list[str]:
+            nonlocal crash_after_create
+            del running
+            if service != "market-fact-receiver" or not owner_present:
+                return []
+            if crash_after_create:
+                crash_after_create = False
+                raise RuntimeError("synthetic_sigkill_after_create")
+            return [CONTAINER_ID]
+
+        def run(
+            _arguments: list[str], *, label: str, allow_failure: bool = False
+        ) -> subprocess.CompletedProcess[str]:
+            nonlocal owner_present
+            del allow_failure
+            self.assertEqual(label, "rollout_service_start")
+            owner_present = True
+            return subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        common = {
+            "role": "bot",
+            "release_root": self.root,
+            "env_file": self.env,
+            "journal": self.journal,
+            "release_sha": RELEASE_SHA,
+            "image_id": IMAGE_ID,
+            "service": "market-fact-receiver",
+        }
+        with (
+            mock.patch.object(rollout, "_validate_env", return_value=_values("bot")),
+            mock.patch.object(rollout, "_ids", side_effect=ids),
+            mock.patch.object(rollout, "_run", side_effect=run),
+            mock.patch.object(
+                rollout,
+                "_identity",
+                return_value={"running": True, "healthy": True},
+            ) as identity,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "sigkill_after_create"):
+                rollout.start_service(**common)
+            interrupted = rollout._read_journal(self.journal)
+            self.assertEqual(
+                interrupted["services"][0]["state"], "create_prepared"
+            )
+            result = rollout.start_service(**common)
+
+        self.assertEqual(result["services"][0]["container_id"], CONTAINER_ID)
+        self.assertEqual(result["services"][0]["state"], "healthy")
+        identity.assert_called()
+
+    def test_create_intent_rejects_an_unbound_owner_fail_closed(self) -> None:
+        payload = self._prepared()
+        payload["status"] = "in_progress"
+        payload["services"][0]["state"] = "create_prepared"
+        rollout._write_journal(self.journal, payload)
+
+        with (
+            mock.patch.object(rollout, "_validate_env", return_value=_values("bot")),
+            mock.patch.object(rollout, "_ids", return_value=[CONTAINER_ID]),
+            mock.patch.object(
+                rollout,
+                "_identity",
+                side_effect=rollout.RolloutError(
+                    "rollout_container_identity_mismatch"
+                ),
+            ),
+        ):
+            with self.assertRaisesRegex(
+                rollout.RolloutError, "container_identity_mismatch"
+            ):
+                rollout.start_service(
+                    role="bot",
+                    release_root=self.root,
+                    env_file=self.env,
+                    journal=self.journal,
+                    release_sha=RELEASE_SHA,
+                    image_id=IMAGE_ID,
+                    service="market-fact-receiver",
+                )
+        self.assertEqual(
+            rollout._read_journal(self.journal)["services"][0]["state"],
+            "create_prepared",
+        )
+
+    def test_rollback_recovers_exact_owner_created_after_create_intent(self) -> None:
+        payload = self._prepared()
+        payload["status"] = "in_progress"
+        payload["services"][0]["state"] = "create_prepared"
+        rollout._write_journal(self.journal, payload)
+        owner_present = True
+
+        def ids(
+            _project: str, service: str, *, running: bool = False
+        ) -> list[str]:
+            del running
+            if service != "market-fact-receiver" or not owner_present:
+                return []
+            return [CONTAINER_ID]
+
+        def run(
+            arguments: list[str], *, label: str, allow_failure: bool = False
+        ) -> subprocess.CompletedProcess[str]:
+            nonlocal owner_present
+            del label, allow_failure
+            if arguments[1] == "rm":
+                owner_present = False
+            return subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        with (
+            mock.patch.object(rollout, "_validate_env", return_value=_values("bot")),
+            mock.patch.object(rollout, "_ids", side_effect=ids),
+            mock.patch.object(rollout, "_identity", return_value={}),
+            mock.patch.object(rollout, "_run", side_effect=run),
+        ):
+            result = rollout.rollback(
+                role="bot",
+                env_file=self.env,
+                journal=self.journal,
+                release_sha=RELEASE_SHA,
+                image_id=IMAGE_ID,
+            )
+
+        self.assertFalse(owner_present)
+        self.assertEqual(result["status"], "ROLLED_BACK")
+        self.assertFalse(result["rollback_state_deleted"])
+        self.assertTrue(
+            all(row["state"] == "rolled_back" for row in result["services"])
+        )
+
+    def test_rollback_rejects_an_untracked_owner_fail_closed(self) -> None:
+        payload = self._prepared()
+
+        def ids(
+            _project: str, service: str, *, running: bool = False
+        ) -> list[str]:
+            del running
+            return [CONTAINER_ID] if service == "market-store-adapter" else []
+
+        with (
+            mock.patch.object(rollout, "_validate_env", return_value=_values("bot")),
+            mock.patch.object(rollout, "_ids", side_effect=ids),
+        ):
+            with self.assertRaisesRegex(
+                rollout.RolloutError, "rollback_untracked_owner"
+            ):
+                rollout.rollback(
+                    role="bot",
+                    env_file=self.env,
+                    journal=self.journal,
+                    release_sha=RELEASE_SHA,
+                    image_id=IMAGE_ID,
+                )
+
+        result = rollout._read_journal(self.journal)
+        self.assertEqual(result["status"], "in_progress")
+        self.assertEqual(result["services"][1]["state"], "pending")
 
     def test_cli_confirmation_fails_before_runtime(self) -> None:
         with mock.patch.object(rollout, "prepare") as prepare:

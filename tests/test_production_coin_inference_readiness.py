@@ -26,10 +26,55 @@ from core.market_intelligence.market_store import (
     initialize_market_store,
     upsert_observation,
 )
+from core.market_intelligence.private_pipeline_contracts import (
+    content_hash,
+    estimator_snapshot_id,
+)
+from core.market_intelligence.estimator_snapshot_runtime import (
+    build_estimator_snapshot,
+)
 from scripts import check_production_coin_inference_readiness as readiness
+from tests.test_market_pipeline_stage10_snapshot import Stage10SnapshotTests
+from tests.test_product_snapshot_reader import (
+    _snapshot_document as _private_snapshot_document,
+    _write_private_view,
+)
 
 
 NOW = datetime(2026, 8, 21, 9, 30, tzinfo=timezone.utc)
+
+
+def _with_private_primary_source_inputs(document: dict) -> dict:
+    traces = []
+    stamp = NOW.isoformat().replace("+00:00", "Z")
+    for index, (component, source_code) in enumerate(
+        sorted(readiness.PRIVATE_PRIMARY_SOURCE_INPUTS.items()), start=1
+    ):
+        traces.append(
+            {
+                "component": component,
+                "source_codes": [source_code],
+                "source_event_key": f"{index:064x}",
+                "source_fact_id": f"{index + 20:064x}",
+                "fact_revision": 1,
+                "occurred_at_utc": stamp,
+                "available_at_utc": stamp,
+                "parsed_at_utc": stamp,
+                "transferred_at_utc": stamp,
+                "point_value": "1",
+                "mean_value": "1",
+                "unit": "PROJECT_THOUSAND_TOMAN",
+                "sample_count": 1,
+                "selection_method": "PRIVATE_PRIMARY_SOURCE_READINESS_V1",
+                "fallback": False,
+                "freshness": "FRESH",
+                "age_seconds": 0.0,
+            }
+        )
+    document["inputs"] = traces
+    document["input_snapshot_hash"] = content_hash(traces)
+    document["snapshot_id"] = estimator_snapshot_id(document)
+    return document
 
 
 def test_cli_does_not_parse_operational_compose_dotenv(tmp_path: Path) -> None:
@@ -510,6 +555,336 @@ def test_consumer_gate_binds_canonical_read_only_mount_digest_and_flags(monkeypa
             match="consumer_snapshot_mount_not_read_only",
         ):
             readiness._consumer_probe(args, now=NOW)
+
+
+def test_private_primary_consumer_binds_mount_reader_mode_and_exact_grid(
+    monkeypatch,
+) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        snapshot = root / "latest-private-primary.json"
+        document = _with_private_primary_source_inputs(_private_snapshot_document(
+            lane="PRIVATE_PRIMARY",
+            generated_at=NOW.isoformat().replace("+00:00", "Z"),
+        ))
+        _write_private_view(snapshot, document)
+        digest = readiness.sha256(snapshot.read_bytes()).hexdigest()
+        mountinfo = root / "mountinfo"
+        mountinfo.write_text(
+            f"37 28 0:35 / {root} ro,relatime - tmpfs tmpfs ro\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(readiness, "PRIVATE_PRIMARY_CONTAINER_DIR", root)
+        monkeypatch.setattr(
+            readiness, "PRIVATE_PRIMARY_CONTAINER_SNAPSHOT", snapshot
+        )
+        monkeypatch.setenv("PRODUCT_ESTIMATOR_SNAPSHOT_MODE", "PRIVATE_PRIMARY")
+        monkeypatch.setenv(
+            "PRODUCT_ESTIMATOR_PRIVATE_PRIMARY_SNAPSHOT_PATH", str(snapshot)
+        )
+        monkeypatch.setenv(
+            "PRODUCT_ESTIMATOR_SNAPSHOT_MAX_AGE_SECONDS", "120"
+        )
+        monkeypatch.setenv("COIN_INTELLIGENCE_INFERENCE_PREVIEW_ENABLED", "true")
+        monkeypatch.setenv("COIN_INTELLIGENCE_INFERENCE_SELECTION_ENABLED", "true")
+        monkeypatch.setenv("OFFER_MODEL_PRICE_GUARD_ENABLED", "true")
+        monkeypatch.setenv(
+            "COIN_INTELLIGENCE_INFERENCE_AUTO_SELECTION_ENABLED", "false"
+        )
+        args = type(
+            "Args",
+            (),
+            {
+                "snapshot": str(snapshot),
+                "mountinfo": str(mountinfo),
+                "expected_sha256": digest,
+            },
+        )()
+
+        report = readiness._private_primary_consumer_probe(args, now=NOW)
+
+        assert report["authority"] == "PRIVATE_PRIMARY"
+        assert report["rate_cell_count"] == 14
+        assert report["snapshot_digest"] == digest
+        assert report["required_source_input_trace_count"] == 9
+        assert len(report["source_input_trace_sha256"]) == 64
+
+        missing_trace = json.loads(json.dumps(document))
+        missing_trace["inputs"].pop()
+        missing_trace["input_snapshot_hash"] = content_hash(missing_trace["inputs"])
+        missing_trace["snapshot_id"] = estimator_snapshot_id(missing_trace)
+        _write_private_view(snapshot, missing_trace)
+        args.expected_sha256 = readiness.sha256(snapshot.read_bytes()).hexdigest()
+        with pytest.raises(
+            readiness.ProductionInferenceReadinessError,
+            match="private_primary_source_input_inventory_invalid",
+        ):
+            readiness._private_primary_consumer_probe(args, now=NOW)
+
+        duplicate_trace = json.loads(json.dumps(document))
+        duplicate_trace["inputs"].append(
+            json.loads(json.dumps(duplicate_trace["inputs"][0]))
+        )
+        duplicate_trace["input_snapshot_hash"] = content_hash(
+            duplicate_trace["inputs"]
+        )
+        duplicate_trace["snapshot_id"] = estimator_snapshot_id(duplicate_trace)
+        _write_private_view(snapshot, duplicate_trace)
+        args.expected_sha256 = readiness.sha256(snapshot.read_bytes()).hexdigest()
+        with pytest.raises(
+            readiness.ProductionInferenceReadinessError,
+            match="private_primary_source_input_inventory_invalid",
+        ):
+            readiness._private_primary_consumer_probe(args, now=NOW)
+
+        future = json.loads(json.dumps(document))
+        future["generated_at_utc"] = (NOW + timedelta(seconds=1)).isoformat().replace(
+            "+00:00", "Z"
+        )
+        for trace in future["inputs"]:
+            trace["transferred_at_utc"] = future["generated_at_utc"]
+        future["input_snapshot_hash"] = content_hash(future["inputs"])
+        future["snapshot_id"] = estimator_snapshot_id(future)
+        _write_private_view(snapshot, future)
+        args.expected_sha256 = readiness.sha256(snapshot.read_bytes()).hexdigest()
+        with pytest.raises(
+            readiness.ProductionInferenceReadinessError,
+            match="private_primary_snapshot_stale_or_future",
+        ):
+            readiness._private_primary_consumer_probe(args, now=NOW)
+
+        _write_private_view(snapshot, document)
+        args.expected_sha256 = digest
+
+        monkeypatch.setenv("PRODUCT_ESTIMATOR_SNAPSHOT_MODE", "LEGACY")
+        with pytest.raises(
+            readiness.ProductionInferenceReadinessError,
+            match="private_primary_mode_not_configured",
+        ):
+            readiness._private_primary_consumer_probe(args, now=NOW)
+
+
+def test_private_primary_consumer_accepts_real_estimator_snapshot_with_extra_signals(
+    monkeypatch,
+) -> None:
+    """Exercise the gate against the real builder, not a nine-trace fixture.
+
+    The real snapshot contains pricing-signal traces in addition to the nine
+    source-inventory proof traces.  Those legitimate extras must remain
+    accepted, while every component in the complete input ledger stays unique.
+    """
+
+    case = Stage10SnapshotTests(methodName="runTest")
+    case.setUp()
+    try:
+        case._seed_remaining_primary_inventory()
+        generated = datetime(2026, 8, 26, 5, 0, 10, tzinfo=timezone.utc)
+        private_snapshot = build_estimator_snapshot(
+            case.market,
+            as_of_utc=generated,
+            generated_at_utc=generated,
+            snapshot_version=1,
+            feed_mode="PRIVATE_PRIMARY",
+        )
+        document = private_snapshot.model_dump(mode="json")
+        required = set(readiness.PRIVATE_PRIMARY_SOURCE_INPUTS)
+        components = [item["component"] for item in document["inputs"]]
+        assert len(components) > len(required)
+        assert len(components) == len(set(components))
+        assert required.issubset(components)
+
+        trace_count, trace_digest = (
+            readiness._private_primary_source_trace_assessment(
+                private_snapshot,
+                snapshot_age_seconds=0.0,
+            )
+        )
+
+        assert trace_count == 9
+        assert len(trace_digest) == 64
+    finally:
+        case.tearDown()
+
+
+@pytest.mark.parametrize("unsafe_state", ("SAFE_NO_DATA", "STALE_TRANSPORT"))
+def test_private_primary_consumer_rejects_non_rate_ready_snapshot(
+    monkeypatch,
+    unsafe_state: str,
+) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        snapshot = root / "latest-private-primary.json"
+        document = _with_private_primary_source_inputs(_private_snapshot_document(
+            lane="PRIVATE_PRIMARY",
+            generated_at=NOW.isoformat().replace("+00:00", "Z"),
+            no_data=unsafe_state == "SAFE_NO_DATA",
+        ))
+        _write_private_view(snapshot, document)
+        if unsafe_state == "STALE_TRANSPORT":
+            wrapped = json.loads(snapshot.read_text(encoding="utf-8"))
+            wrapped["transport_state"] = "STALE"
+            snapshot.write_text(json.dumps(wrapped), encoding="utf-8")
+        digest = readiness.sha256(snapshot.read_bytes()).hexdigest()
+        mountinfo = root / "mountinfo"
+        mountinfo.write_text(
+            f"37 28 0:35 / {root} ro,relatime - tmpfs tmpfs ro\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(readiness, "PRIVATE_PRIMARY_CONTAINER_DIR", root)
+        monkeypatch.setattr(
+            readiness, "PRIVATE_PRIMARY_CONTAINER_SNAPSHOT", snapshot
+        )
+        monkeypatch.setenv("PRODUCT_ESTIMATOR_SNAPSHOT_MODE", "PRIVATE_PRIMARY")
+        monkeypatch.setenv(
+            "PRODUCT_ESTIMATOR_PRIVATE_PRIMARY_SNAPSHOT_PATH", str(snapshot)
+        )
+        monkeypatch.setenv(
+            "PRODUCT_ESTIMATOR_SNAPSHOT_MAX_AGE_SECONDS", "120"
+        )
+        monkeypatch.setenv("COIN_INTELLIGENCE_INFERENCE_PREVIEW_ENABLED", "true")
+        monkeypatch.setenv("COIN_INTELLIGENCE_INFERENCE_SELECTION_ENABLED", "true")
+        monkeypatch.setenv("OFFER_MODEL_PRICE_GUARD_ENABLED", "true")
+        monkeypatch.setenv(
+            "COIN_INTELLIGENCE_INFERENCE_AUTO_SELECTION_ENABLED", "false"
+        )
+        args = type(
+            "Args",
+            (),
+            {
+                "snapshot": str(snapshot),
+                "mountinfo": str(mountinfo),
+                "expected_sha256": digest,
+            },
+        )()
+
+        with pytest.raises(
+            readiness.ProductionInferenceReadinessError,
+            match="private_primary_snapshot_not_rate_ready",
+        ):
+            readiness._private_primary_consumer_probe(args, now=NOW)
+
+
+def test_private_primary_consumer_detects_replacement_during_probe(
+    monkeypatch,
+) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        snapshot = root / "latest-private-primary.json"
+        document = _with_private_primary_source_inputs(_private_snapshot_document(
+            lane="PRIVATE_PRIMARY",
+            generated_at=NOW.isoformat().replace("+00:00", "Z"),
+        ))
+        _write_private_view(snapshot, document)
+        original = snapshot.read_bytes()
+        digest = readiness.sha256(original).hexdigest()
+        mountinfo = root / "mountinfo"
+        mountinfo.write_text(
+            f"37 28 0:35 / {root} ro,relatime - tmpfs tmpfs ro\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(readiness, "PRIVATE_PRIMARY_CONTAINER_DIR", root)
+        monkeypatch.setattr(
+            readiness, "PRIVATE_PRIMARY_CONTAINER_SNAPSHOT", snapshot
+        )
+        for key, value in {
+            "PRODUCT_ESTIMATOR_SNAPSHOT_MODE": "PRIVATE_PRIMARY",
+            "PRODUCT_ESTIMATOR_PRIVATE_PRIMARY_SNAPSHOT_PATH": str(snapshot),
+            "PRODUCT_ESTIMATOR_SNAPSHOT_MAX_AGE_SECONDS": "120",
+            "COIN_INTELLIGENCE_INFERENCE_PREVIEW_ENABLED": "true",
+            "COIN_INTELLIGENCE_INFERENCE_SELECTION_ENABLED": "true",
+            "OFFER_MODEL_PRICE_GUARD_ENABLED": "true",
+            "COIN_INTELLIGENCE_INFERENCE_AUTO_SELECTION_ENABLED": "false",
+        }.items():
+            monkeypatch.setenv(key, value)
+        real_read_bytes = Path.read_bytes
+        calls = 0
+
+        def changing_read_bytes(path: Path) -> bytes:
+            nonlocal calls
+            if path == snapshot:
+                calls += 1
+                if calls > 1:
+                    return original + b" "
+            return real_read_bytes(path)
+
+        monkeypatch.setattr(Path, "read_bytes", changing_read_bytes)
+        args = type(
+            "Args",
+            (),
+            {
+                "snapshot": str(snapshot),
+                "mountinfo": str(mountinfo),
+                "expected_sha256": digest,
+            },
+        )()
+
+        with pytest.raises(
+            readiness.ProductionInferenceReadinessError,
+            match="private_primary_snapshot_changed_during_probe",
+        ):
+            readiness._private_primary_consumer_probe(args, now=NOW)
+
+
+def test_private_primary_consumer_rejects_thirteen_estimated_plus_one_no_data(
+    monkeypatch,
+) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        snapshot = root / "latest-private-primary.json"
+        document = _with_private_primary_source_inputs(_private_snapshot_document(
+            lane="PRIVATE_PRIMARY",
+            generated_at=NOW.isoformat().replace("+00:00", "Z"),
+        ))
+        document["rates"][0].update(
+            {
+                "status": "NO_DATA",
+                "value": None,
+                "lower_bound": None,
+                "upper_bound": None,
+                "confidence": "NONE",
+                "reason_code": "NO_FRESH_MELTED",
+                "underlying_source": None,
+                "underlying_age_seconds": None,
+                "anchor_age_seconds": None,
+            }
+        )
+        document["snapshot_id"] = estimator_snapshot_id(document)
+        _write_private_view(snapshot, document)
+        digest = readiness.sha256(snapshot.read_bytes()).hexdigest()
+        mountinfo = root / "mountinfo"
+        mountinfo.write_text(
+            f"37 28 0:35 / {root} ro,relatime - tmpfs tmpfs ro\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(readiness, "PRIVATE_PRIMARY_CONTAINER_DIR", root)
+        monkeypatch.setattr(
+            readiness, "PRIVATE_PRIMARY_CONTAINER_SNAPSHOT", snapshot
+        )
+        for key, value in {
+            "PRODUCT_ESTIMATOR_SNAPSHOT_MODE": "PRIVATE_PRIMARY",
+            "PRODUCT_ESTIMATOR_PRIVATE_PRIMARY_SNAPSHOT_PATH": str(snapshot),
+            "PRODUCT_ESTIMATOR_SNAPSHOT_MAX_AGE_SECONDS": "120",
+            "COIN_INTELLIGENCE_INFERENCE_PREVIEW_ENABLED": "true",
+            "COIN_INTELLIGENCE_INFERENCE_SELECTION_ENABLED": "true",
+            "OFFER_MODEL_PRICE_GUARD_ENABLED": "true",
+            "COIN_INTELLIGENCE_INFERENCE_AUTO_SELECTION_ENABLED": "false",
+        }.items():
+            monkeypatch.setenv(key, value)
+        args = type(
+            "Args",
+            (),
+            {
+                "snapshot": str(snapshot),
+                "mountinfo": str(mountinfo),
+                "expected_sha256": digest,
+            },
+        )()
+
+        with pytest.raises(
+            readiness.ProductionInferenceReadinessError,
+            match="private_primary_snapshot_not_rate_ready",
+        ):
+            readiness._private_primary_consumer_probe(args, now=NOW)
 
 
 def test_cli_is_redacted_and_requires_exact_production_confirmation(

@@ -124,16 +124,34 @@ jobs:
           status=0
           mkdir -p tmp
           python3 -m coverage erase
-          python3 -m coverage run --branch -m unittest discover -s tests -p 'test_*.py' 2>&1 | tee tmp/backend-coverage.log
+          APP_ENV_FILE=config/unit-test.env.example \
+          python3 -m coverage run --branch -m unittest discover -s tests -t . -p 'test_*.py' 2>&1 | tee tmp/backend-coverage.log
           command_status=${PIPESTATUS[0]}
           if [[ "$command_status" -ne 0 ]]; then
             status=$command_status
+          fi
+          # Pytest-style PRIVATE_PRIMARY builder/controller/outbox/promotion
+          # files are not collected by unittest discovery. This explicit run
+          # is a required official gate, not optional coverage.
+          APP_ENV_FILE=config/unit-test.env.example PYTHONWARNINGS=error \
+          python3 -m coverage run --branch --parallel-mode -m pytest -q \
+            tests/test_build_production_private_primary_choreography_plan.py \
+            tests/test_production_private_primary_choreography.py \
+            tests/test_promote_production_private_primary_product.py \
+            tests/test_reconcile_estimator_snapshot_publication_outbox.py \
+            tests/test_verify_production_private_primary_promotion.py \
+            2>&1 | tee -a tmp/backend-coverage.log
+          pytest_status=${PIPESTATUS[0]}
+          if [[ "$pytest_status" -ne 0 ]]; then
+            status=$pytest_status
           fi
           (
             printf 'stage9_evidence_commit=%s\n' "$(git rev-parse HEAD)"
             export DATABASE_URL='postgresql+asyncpg://admin:strongpassword@127.0.0.1:5432/trading_bot_db'
             export SYNC_DATABASE_URL='postgresql+psycopg2://admin:strongpassword@127.0.0.1:5432/trading_bot_db'
             export TRADING_BOT_EXPECTED_CHECKOUT="$PWD"
+            export STAGE9_SCRATCH_DATABASES_ALLOWED='true'
+            export ENVIRONMENT='ci'
             export STAGE9_COVERAGE_FILE="$PWD/.coverage"
             python3 scripts/run_registration_scratch_suite.py
           ) > tmp/backend-postgres-opt-in.log 2>&1 &

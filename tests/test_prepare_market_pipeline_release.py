@@ -35,6 +35,9 @@ def _web_values() -> dict[str, str]:
     return {
         **_common(bind_ip="10.240.1.20"),
         "MARKET_WEB_DATA_ROOT": "/srv/trading-bot/market-data-production",
+        "MARKET_PRODUCT_SNAPSHOT_ROOT": (
+            "/srv/trading-bot/market-data-production/snapshots"
+        ),
         "MARKET_POSTGRES_PASSWORD_FILE": "/srv/trading-bot/secure/market/postgres-password",
         "MARKET_CAPTURE_ACCOUNT1_CONFIG_FILE": "/srv/trading-bot/secure/market/account1.json",
         "MARKET_CAPTURE_ACCOUNT2_CONFIG_FILE": "/srv/trading-bot/secure/market/account2.json",
@@ -49,6 +52,9 @@ def _bot_values() -> dict[str, str]:
     return {
         **_common(bind_ip="10.240.1.10"),
         "MARKET_BOT_DATA_ROOT": "/srv/trading-bot/production-data/market-pipeline",
+        "MARKET_PRODUCT_SNAPSHOT_ROOT": (
+            "/srv/trading-bot/production-data/market-pipeline/snapshots"
+        ),
         "MARKET_BOT_TRANSPORT_CERT_FILE": "/srv/trading-bot/secure/market/bot-cert.pem",
         "MARKET_BOT_TRANSPORT_KEY_FILE": "/srv/trading-bot/secure/market/bot-key.pem",
     }
@@ -123,6 +129,23 @@ class PrepareMarketPipelineReleaseTests(unittest.TestCase):
             image_input_signature=IMAGE_SIGNATURE,
         )
         self.assertEqual(verified, document)
+
+    def test_product_snapshot_root_must_be_exact_data_root_child(self) -> None:
+        values = _web_values()
+        values["MARKET_PRODUCT_SNAPSHOT_ROOT"] = (
+            "/srv/trading-bot/market-data-production/other-snapshots"
+        )
+        _write_source(self.web_source, values)
+
+        with self.assertRaisesRegex(
+            release.ReleaseContractError,
+            "market_product_snapshot_root_mismatch",
+        ):
+            self._render()
+
+        self.assertFalse(self.web_env.exists())
+        self.assertFalse(self.bot_env.exists())
+        self.assertFalse(self.receipt.exists())
 
     def test_role_local_image_ids_remain_one_release_pair(self) -> None:
         document = release.render_pair(

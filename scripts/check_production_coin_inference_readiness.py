@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -45,6 +46,14 @@ from core.market_intelligence.market_store import (
     connect_market_store_read_only,
     verify_market_store_read_only,
 )
+from core.market_intelligence.product_snapshot_reader import (
+    ProductSnapshotReader,
+    ProductSnapshotUnavailable,
+)
+from core.market_intelligence.private_pipeline_contracts import (
+    ESTIMATOR_RATE_GRID_V1,
+    EstimatorSnapshotV2,
+)
 from core.services.offer_model_price_guard import (
     OFFER_MODEL_PRICE_GUARD_MAXIMUM_ANCHOR_AGE_SECONDS,
     OFFER_MODEL_PRICE_GUARD_MAXIMUM_UNDERLYING_AGE_SECONDS,
@@ -56,9 +65,27 @@ from core.services.offer_model_price_guard import (
 PRODUCTION_CONFIRMATION = "check-production-coin-inference-readiness"
 CANONICAL_CONTAINER_DIR = Path("/app/runtime/coin-inference")
 CANONICAL_CONTAINER_SNAPSHOT = CANONICAL_CONTAINER_DIR / "coin-rates.json"
+PRIVATE_PRIMARY_CONTAINER_DIR = Path("/app/runtime/product-estimator")
+PRIVATE_PRIMARY_CONTAINER_SNAPSHOT = (
+    PRIVATE_PRIMARY_CONTAINER_DIR / "latest-private-primary.json"
+)
 MAXIMUM_SNAPSHOT_AGE_SECONDS = 120
 MAXIMUM_GROUP_INPUT_AGE_SECONDS = 3 * 86_400
 _DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+
+# Complete PRIVATE_PRIMARY fact-trace inventory.  A rate-only snapshot is not
+# enough to prove that every authorized source traversed parse and transfer.
+PRIVATE_PRIMARY_SOURCE_INPUTS = {
+    "SOURCE_INPUT_MELTED_PRIMARY": "PRIVATE_GOLD_CHANNEL",
+    "SOURCE_INPUT_GROUP_1": "GROUP_1",
+    "SOURCE_INPUT_GROUP_2": "GROUP_2",
+    "SOURCE_INPUT_MELTED_AGGREGATE": "MELTED_AGGREGATE",
+    "SOURCE_INPUT_MELTED_FLOW": "MELTED_FLOW",
+    "SOURCE_INPUT_USD_HERAT": "USD_HERAT",
+    "SOURCE_INPUT_XAUUSD": "XAUUSD",
+    "SOURCE_INPUT_WALLEX": "WALLEX_PUBLIC_API",
+    "SOURCE_INPUT_BINANCE_PAXG": "BINANCE_PAXG_PUBLIC_API",
+}
 SAFE_NO_DATA_CONTEXT_KEY = "production_safe_no_data"
 SAFE_NO_DATA_CONTEXT_VERSION = "production-safe-no-data-v1"
 SAFE_NO_DATA_SOURCE_REASON = "PRIVATE_GOLD_QUIET_OUTSIDE_HARD_AUTHORITY_WINDOW"
@@ -511,6 +538,243 @@ def _consumer_probe(args: argparse.Namespace, *, now: datetime) -> dict[str, obj
     return {**assessment, "mount_read_only": True, "enabled_flags": enabled}
 
 
+def _private_primary_source_trace_assessment(
+    private_snapshot: EstimatorSnapshotV2,
+    *,
+    snapshot_age_seconds: float,
+) -> tuple[int, str]:
+    """Bind the nine mandatory facts while permitting real pricing signals.
+
+    The estimator ledger contains both pricing components and nine source
+    inventory proof components.  Every component in the complete ledger must
+    be unique; each mandatory proof must then occur exactly once with its
+    precise source/fact provenance.
+    """
+
+    traces = {trace.component: trace for trace in private_snapshot.inputs}
+    if (
+        len(traces) != len(private_snapshot.inputs)
+        or not set(PRIVATE_PRIMARY_SOURCE_INPUTS).issubset(traces)
+    ):
+        raise ProductionInferenceReadinessError(
+            "private_primary_source_input_inventory_invalid"
+        )
+    trace_binding: list[dict[str, object]] = []
+    for component, source_code in sorted(PRIVATE_PRIMARY_SOURCE_INPUTS.items()):
+        trace = traces[component]
+        if (
+            trace.source_codes != (source_code,)
+            or trace.freshness != "FRESH"
+            or trace.source_event_key is None
+            or trace.source_fact_id is None
+            or trace.fact_revision is None
+            or trace.occurred_at_utc is None
+            or trace.available_at_utc is None
+            or trace.parsed_at_utc is None
+            or trace.transferred_at_utc is None
+            or trace.sample_count < 1
+            or trace.age_seconds is None
+            or trace.age_seconds + snapshot_age_seconds > 900.0
+        ):
+            raise ProductionInferenceReadinessError(
+                "private_primary_source_input_trace_invalid"
+            )
+        trace_binding.append(
+            {
+                "component": component,
+                "source_code": source_code,
+                "source_event_key": trace.source_event_key,
+                "source_fact_id": trace.source_fact_id,
+                "fact_revision": trace.fact_revision,
+                "transferred_at_utc": trace.transferred_at_utc.isoformat(),
+            }
+        )
+    return len(trace_binding), sha256(
+        json.dumps(
+            trace_binding, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _private_primary_consumer_probe(
+    args: argparse.Namespace,
+    *,
+    now: datetime,
+) -> dict[str, object]:
+    """Validate the exact receiver-acknowledged V2 Product authority."""
+
+    snapshot_path = Path(args.snapshot)
+    if snapshot_path != PRIVATE_PRIMARY_CONTAINER_SNAPSHOT:
+        raise ProductionInferenceReadinessError(
+            "private_primary_snapshot_path_invalid"
+        )
+    if not _mount_is_read_only(
+        Path(args.mountinfo), PRIVATE_PRIMARY_CONTAINER_DIR
+    ):
+        raise ProductionInferenceReadinessError(
+            "private_primary_snapshot_mount_not_read_only"
+        )
+    expected_digest = str(args.expected_sha256 or "").strip().lower()
+    if not _DIGEST_PATTERN.fullmatch(expected_digest):
+        raise ProductionInferenceReadinessError(
+            "private_primary_expected_digest_invalid"
+        )
+    try:
+        first_payload = snapshot_path.read_bytes()
+        actual_digest = sha256(first_payload).hexdigest()
+        document = json.loads(first_payload.decode("utf-8"))
+        private_snapshot = EstimatorSnapshotV2.model_validate(
+            document["snapshot"]
+        )
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        raise ProductionInferenceReadinessError(
+            "private_primary_snapshot_unavailable"
+        ) from exc
+    if actual_digest != expected_digest:
+        raise ProductionInferenceReadinessError(
+            "private_primary_snapshot_digest_mismatch"
+        )
+    if (
+        document.get("contract") != "estimator_snapshot_web_view/1.0"
+        or document.get("feed_mode") != "PRIVATE_PRIMARY"
+        or document.get("transport_state") != "FRESH"
+        or private_snapshot.feed_mode != "PRIVATE_PRIMARY"
+        or private_snapshot.status != "OK"
+        or any(rate.status != "ESTIMATED" for rate in private_snapshot.rates)
+        or tuple(
+            (rate.instrument, rate.settlement)
+            for rate in private_snapshot.rates
+        )
+        != ESTIMATOR_RATE_GRID_V1
+    ):
+        raise ProductionInferenceReadinessError(
+            "private_primary_snapshot_not_rate_ready"
+        )
+    snapshot_age_seconds = (
+        now - private_snapshot.generated_at_utc.astimezone(timezone.utc)
+    ).total_seconds()
+    if not 0.0 <= snapshot_age_seconds <= float(MAXIMUM_SNAPSHOT_AGE_SECONDS):
+        raise ProductionInferenceReadinessError(
+            "private_primary_snapshot_stale_or_future"
+        )
+    if any(
+        rate.underlying_age_seconds is None
+        or float(rate.underlying_age_seconds) + snapshot_age_seconds
+        > OFFER_MODEL_PRICE_GUARD_MAXIMUM_UNDERLYING_AGE_SECONDS
+        for rate in private_snapshot.rates
+    ):
+        raise ProductionInferenceReadinessError(
+            "private_primary_underlying_freshness_invalid"
+        )
+
+    required_trace_count, source_input_trace_sha256 = (
+        _private_primary_source_trace_assessment(
+            private_snapshot,
+            snapshot_age_seconds=snapshot_age_seconds,
+        )
+    )
+
+    configured_mode = os.getenv(
+        "PRODUCT_ESTIMATOR_SNAPSHOT_MODE", "LEGACY"
+    ).strip().upper()
+    configured_path = os.getenv(
+        "PRODUCT_ESTIMATOR_PRIVATE_PRIMARY_SNAPSHOT_PATH", ""
+    ).strip()
+    configured_age = os.getenv(
+        "PRODUCT_ESTIMATOR_SNAPSHOT_MAX_AGE_SECONDS", ""
+    ).strip()
+    if configured_mode != "PRIVATE_PRIMARY":
+        raise ProductionInferenceReadinessError(
+            "private_primary_mode_not_configured"
+        )
+    if configured_path != str(PRIVATE_PRIMARY_CONTAINER_SNAPSHOT):
+        raise ProductionInferenceReadinessError(
+            "private_primary_configured_path_invalid"
+        )
+    if configured_age != str(MAXIMUM_SNAPSHOT_AGE_SECONDS):
+        raise ProductionInferenceReadinessError(
+            "private_primary_maximum_age_invalid"
+        )
+
+    enabled = {
+        "preview": os.getenv(
+            "COIN_INTELLIGENCE_INFERENCE_PREVIEW_ENABLED", "false"
+        ).lower()
+        == "true",
+        "selection": os.getenv(
+            "COIN_INTELLIGENCE_INFERENCE_SELECTION_ENABLED", "false"
+        ).lower()
+        == "true",
+        "guard": os.getenv(
+            "OFFER_MODEL_PRICE_GUARD_ENABLED", "false"
+        ).lower()
+        == "true",
+    }
+    if not all(enabled.values()):
+        raise ProductionInferenceReadinessError(
+            "consumer_inference_flags_not_enabled"
+        )
+    if os.getenv(
+        "COIN_INTELLIGENCE_INFERENCE_AUTO_SELECTION_ENABLED", "false"
+    ).lower() == "true":
+        raise ProductionInferenceReadinessError(
+            "consumer_auto_selection_forbidden"
+        )
+
+    try:
+        result = ProductSnapshotReader(
+            legacy_path="/nonexistent-legacy-snapshot",
+            private_primary_path=snapshot_path,
+            mode="PRIVATE_PRIMARY",
+            maximum_age_seconds=MAXIMUM_SNAPSHOT_AGE_SECONDS,
+        ).load(now_utc=now)
+    except ProductSnapshotUnavailable as exc:
+        raise ProductionInferenceReadinessError(
+            f"private_primary_reader_rejected:{exc.reason_code}"
+        ) from exc
+    rates = result.snapshot.get("rates")
+    items = rates.get("items") if isinstance(rates, Mapping) else None
+    if not isinstance(items, list):
+        raise ProductionInferenceReadinessError(
+            "private_primary_rate_grid_unavailable"
+        )
+    if len(items) != len(ESTIMATOR_RATE_GRID_V1):
+        raise ProductionInferenceReadinessError(
+            "private_primary_rate_grid_invalid"
+        )
+    if (
+        result.authority != "PRIVATE_PRIMARY"
+        or result.private_snapshot_hash != private_snapshot.snapshot_id
+        or result.private_snapshot_version != private_snapshot.snapshot_version
+    ):
+        raise ProductionInferenceReadinessError(
+            "private_primary_authority_invalid"
+        )
+    try:
+        final_digest = sha256(snapshot_path.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise ProductionInferenceReadinessError(
+            "private_primary_snapshot_unavailable"
+        ) from exc
+    if final_digest != expected_digest:
+        raise ProductionInferenceReadinessError(
+            "private_primary_snapshot_changed_during_probe"
+        )
+    return {
+        "status": "READY",
+        "authority": result.authority,
+        "snapshot_digest": actual_digest,
+        "snapshot_hash": result.private_snapshot_hash,
+        "snapshot_version": result.private_snapshot_version,
+        "snapshot_age_seconds": round(snapshot_age_seconds, 3),
+        "rate_cell_count": len(items),
+        "required_source_input_trace_count": required_trace_count,
+        "source_input_trace_sha256": source_input_trace_sha256,
+        "mount_read_only": True,
+        "enabled_flags": enabled,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--environment", required=True, choices=("production",))
@@ -528,6 +792,10 @@ def build_parser() -> argparse.ArgumentParser:
     consumer.add_argument("--mountinfo", default="/proc/self/mountinfo")
     consumer.add_argument("--expect-enabled", action="store_true")
     consumer.add_argument("--require-hard-reject-coverage", action="store_true")
+    private_consumer = commands.add_parser("private-primary-consumer")
+    private_consumer.add_argument("--snapshot", required=True)
+    private_consumer.add_argument("--expected-sha256", required=True)
+    private_consumer.add_argument("--mountinfo", default="/proc/self/mountinfo")
     return parser
 
 
@@ -546,8 +814,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         elif args.command == "source":
             result = _source_probe(Path(args.market_store), now=now)
-        else:
+        elif args.command == "consumer":
             result = _consumer_probe(args, now=now)
+        else:
+            result = _private_primary_consumer_probe(args, now=now)
         result = dict(result)
         status = str(result.pop("status", "READY"))
         _emit(status, **result)

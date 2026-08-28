@@ -1,4 +1,5 @@
 import hashlib
+import fcntl
 import json
 import os
 import signal
@@ -9,7 +10,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from scripts import cutover_telegram_delivery_queue_production as cutover
 from scripts import plan_telegram_delivery_queue_production as planner
@@ -74,7 +75,7 @@ class FakeOperations:
     def start_bot(self):
         self.mutations.append("start_bot")
 
-    def deploy_official(self, _authority_path=None, _authority_digest=None):
+    def deploy_official(self, _authority_path=None, _authority_digest=None, **_kwargs):
         self.deploy_calls += 1
         self.mutations.append("deploy")
         if self.fail_first_deploy and self.deploy_calls == 1:
@@ -109,6 +110,7 @@ class FakeRedeployOperations:
     def __init__(self, _manifest: Path, *, fail_first_deploy: bool = False) -> None:
         self.fail_first_deploy = fail_first_deploy
         self.deploy_calls = 0
+        self.private_primary_attestations = []
         self.inventories = iter(
             (
                 {"count": 1, "owner": "queue-v1", "overlap": False},
@@ -119,8 +121,16 @@ class FakeRedeployOperations:
     def executor_inventory(self):
         return next(self.inventories)
 
-    def deploy_official(self, _authority_path=None, _authority_digest=None):
+    def deploy_official(
+        self,
+        _authority_path=None,
+        _authority_digest=None,
+        *,
+        private_primary_attestation=None,
+        **_kwargs,
+    ):
         self.deploy_calls += 1
+        self.private_primary_attestations.append(private_primary_attestation)
         if self.fail_first_deploy and self.deploy_calls == 1:
             raise cutover.ProductionCutoverError("SIMULATED_REDEPLOY_FAILURE")
         return {"status": "completed", "official_script": True}
@@ -145,6 +155,61 @@ class FakeRedeployOperations:
 
     def b2b_lane_probe(self):
         return {"status": "passed", "synthetic_mutations": 0}
+
+
+class FakeInterruptedRecoveryOperations:
+    def __init__(self, manifest: Path, *, owner: str | None, artifact_dir: Path) -> None:
+        self.manifest = manifest
+        self.owner = owner
+        self.artifact_dir = artifact_dir
+        self.observed_wal: list[tuple[str, str]] = []
+
+    def _status(self) -> str:
+        paths = list(self.artifact_dir.glob("production-queue-phase-*.json"))
+        assert len(paths) == 1
+        return json.loads(paths[0].read_text(encoding="utf-8"))["status"]
+
+    def executor_inventory(self):
+        return {
+            "count": 0 if self.owner is None else 1,
+            "owner": self.owner,
+            "overlap": False,
+        }
+
+    def stop_producers(self):
+        self.observed_wal.append(("stop_producers", self._status()))
+        return [("foreign", "app"), ("iran", "app")]
+
+    def wait_for_drain(self, _timeout, _poll):
+        self.observed_wal.append(("wait_for_drain", self._status()))
+        return {"status": "drained"}
+
+    def stop_bot(self):
+        self.observed_wal.append(("stop_bot", self._status()))
+        self.owner = None
+
+    def deploy_official(
+        self,
+        _authority_path=None,
+        _authority_digest=None,
+        *,
+        private_primary_attestation=None,
+        **_kwargs,
+    ):
+        del private_primary_attestation
+        self.observed_wal.append(("deploy", self._status()))
+        manifest_values = planner.parse_env_file(self.manifest)
+        source = Path(manifest_values["RUNTIME_ENV_SOURCE_PATH"])
+        self.owner = planner.source_profile(planner.parse_env_file(source))
+        return {"status": "completed", "official_script": True}
+
+    def runtime_contract(self, _values, *, expected_owner):
+        if self.owner != expected_owner:
+            raise AssertionError((self.owner, expected_owner))
+        return {"status": "verified", "owner": expected_owner}
+
+    def queue_health(self, _database_name):
+        return {"status": "passed", "decision": "continue"}
 
 
 class ProductionQueueCutoverTests(unittest.TestCase):
@@ -250,6 +315,21 @@ class ProductionQueueCutoverTests(unittest.TestCase):
             "worktree": "clean",
         }
 
+    def abandon_lock_as_dead_process(self, lock: cutover.ExclusiveRunLock) -> None:
+        assert lock.descriptor is not None
+        payload = json.loads(lock.path.read_text(encoding="utf-8"))
+        payload["owner_start_ticks"] = "0"
+        os.lseek(lock.descriptor, 0, os.SEEK_SET)
+        os.ftruncate(lock.descriptor, 0)
+        os.write(
+            lock.descriptor,
+            (json.dumps(payload, sort_keys=True) + "\n").encode("utf-8"),
+        )
+        os.fsync(lock.descriptor)
+        os.close(lock.descriptor)
+        lock.descriptor = None
+        lock.held = False
+
     def test_verify_authority_cli_arguments_parse_without_conflict(self):
         parsed = cutover.parse_args(
             [
@@ -262,6 +342,42 @@ class ProductionQueueCutoverTests(unittest.TestCase):
         )
         self.assertEqual(parsed.command, "verify-deploy-authority")
         self.assertEqual(parsed.deploy_authority_sha256, "a" * 64)
+
+    def test_private_primary_attestation_cli_is_all_or_nothing(self):
+        parsed = cutover.parse_args(
+            [
+                "verify-deploy-authority",
+                "--manifest",
+                "/secure/online.env",
+                "--deploy-authority",
+                "/secure/authority.json",
+                "--deploy-authority-sha256",
+                "a" * 64,
+                "--private-primary-manifest-sha256",
+                "b" * 64,
+                "--private-primary-manifest-receipt",
+                "/secure/private-primary.json",
+                "--private-primary-manifest-receipt-sha256",
+                "c" * 64,
+            ]
+        )
+        self.assertEqual(parsed.private_primary_manifest_sha256, "b" * 64)
+        self.assertEqual(
+            parsed.private_primary_manifest_receipt,
+            Path("/secure/private-primary.json"),
+        )
+        missing = cutover.parse_args(
+            [
+                "verify-deploy-authority",
+                "--private-primary-manifest-sha256",
+                "b" * 64,
+            ]
+        )
+        with self.assertRaisesRegex(
+            cutover.ProductionCutoverError,
+            "BLOCKED_PRIVATE_PRIMARY_ATTESTATION",
+        ):
+            cutover.private_primary_deploy_attestation_from_args(missing)
 
     def write_preflight(self, path: Path, binding, backup_digest: str, source_digest: str) -> str:
         payload = {
@@ -515,6 +631,217 @@ class ProductionQueueCutoverTests(unittest.TestCase):
                 source_lock.release()
                 run_lock.release()
 
+    def test_private_primary_authority_binds_source_after_and_is_one_time(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source, _staging, manifest = self.fixture(root)
+            self.write_env(
+                source,
+                planner.queue_target_values(planner.parse_env_file(source)),
+            )
+            source_after = source.read_bytes()
+            evidence = root / "private-primary-preparation.json"
+            evidence.write_text('{"status":"PASS"}\n', encoding="utf-8")
+            evidence.chmod(0o600)
+            attestation = cutover.bind_private_primary_deploy_attestation(
+                manifest,
+                manifest_sha256=cutover._sha256(manifest),
+                receipt_path=evidence,
+                receipt_sha256=cutover._sha256(evidence),
+            )
+            artifacts = root / "artifacts"
+            artifacts.mkdir(mode=0o700)
+            binding = self.binding()
+            run_lock = cutover.ExclusiveRunLock(artifacts)
+            source_lock = cutover.ImmutableSourceLock(source)
+            run_lock.acquire()
+            source_lock.acquire()
+            try:
+                journal = cutover.PhaseJournal(
+                    artifacts,
+                    command="redeploy",
+                    source_sha256=cutover._sha256(source),
+                    git_head=binding["head"],
+                    run_lock=run_lock,
+                )
+                journal.update("official_redeploy_authorizing")
+                with patch.object(cutover, "git_binding", return_value=binding):
+                    authority_path, authority_digest = (
+                        cutover.create_deploy_authority(
+                            artifacts,
+                            source,
+                            binding,
+                            run_lock=run_lock,
+                            journal=journal,
+                            deploy_manifest=manifest,
+                            private_primary_attestation=attestation,
+                        )
+                    )
+                    with self.assertRaisesRegex(
+                        cutover.ProductionCutoverError,
+                        "BLOCKED_QUEUE_DEPLOY_AUTHORITY",
+                    ):
+                        cutover.verify_deploy_authority(
+                            manifest,
+                            authority_path,
+                            authority_digest,
+                            expected_artifact_dir=artifacts,
+                        )
+                    source.write_text(
+                        source.read_text(encoding="utf-8") + "UNRELATED_BINDING=changed\n",
+                        encoding="utf-8",
+                    )
+                    source.chmod(0o600)
+                    with self.assertRaisesRegex(
+                        cutover.ProductionCutoverError,
+                        "BLOCKED_QUEUE_DEPLOY_AUTHORITY",
+                    ):
+                        cutover.verify_deploy_authority(
+                            manifest,
+                            authority_path,
+                            authority_digest,
+                            expected_artifact_dir=artifacts,
+                            private_primary_attestation=attestation,
+                        )
+                    source.write_bytes(source_after)
+                    source.chmod(0o600)
+                    verified = cutover.verify_deploy_authority(
+                        manifest,
+                        authority_path,
+                        authority_digest,
+                        expected_artifact_dir=artifacts,
+                        private_primary_attestation=attestation,
+                    )
+                    self.assertTrue(
+                        verified["private_primary_manifest_attestation_bound"]
+                    )
+                    with self.assertRaisesRegex(
+                        cutover.ProductionCutoverError,
+                        "BLOCKED_QUEUE_DEPLOY_AUTHORITY",
+                    ):
+                        cutover.verify_deploy_authority(
+                            manifest,
+                            authority_path,
+                            authority_digest,
+                            expected_artifact_dir=artifacts,
+                            private_primary_attestation=attestation,
+                        )
+            finally:
+                source_lock.release()
+                run_lock.release()
+
+    def test_shell_queue_gate_consumes_exact_private_attestation_authority(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source, _staging, manifest = self.fixture(root)
+            self.write_env(
+                source,
+                planner.queue_target_values(planner.parse_env_file(source)),
+            )
+            preparation = root / "private-primary-preparation.json"
+            preparation.write_text('{"status":"PASS"}\n', encoding="utf-8")
+            preparation.chmod(0o600)
+            attestation = cutover.bind_private_primary_deploy_attestation(
+                manifest,
+                manifest_sha256=cutover._sha256(manifest),
+                receipt_path=preparation,
+                receipt_sha256=cutover._sha256(preparation),
+            )
+            artifacts = root / "artifacts"
+            artifacts.mkdir(mode=0o700)
+            binding = self.binding()
+            run_lock = cutover.ExclusiveRunLock(artifacts)
+            source_lock = cutover.ImmutableSourceLock(source)
+            run_lock.acquire()
+            source_lock.acquire()
+            try:
+                journal = cutover.PhaseJournal(
+                    artifacts,
+                    command="redeploy",
+                    source_sha256=cutover._sha256(source),
+                    git_head=binding["head"],
+                    run_lock=run_lock,
+                )
+                journal.update("official_redeploy_authorizing")
+                authority_path, authority_digest = cutover.create_deploy_authority(
+                    artifacts,
+                    source,
+                    binding,
+                    run_lock=run_lock,
+                    journal=journal,
+                    deploy_manifest=manifest,
+                    private_primary_attestation=attestation,
+                )
+                fake_bin = root / "bin"
+                fake_bin.mkdir(mode=0o700)
+                fake_git = fake_bin / "git"
+                fake_git.write_text(
+                    "#!/bin/sh\n"
+                    "case \"$*\" in\n"
+                    f"  'rev-parse --abbrev-ref HEAD') echo main ;;\n"
+                    f"  'rev-parse HEAD') echo {'a' * 40} ;;\n"
+                    f"  'rev-parse HEAD^{{tree}}') echo {'b' * 40} ;;\n"
+                    f"  'rev-parse origin/main') echo {'a' * 40} ;;\n"
+                    "  'status --porcelain') exit 0 ;;\n"
+                    "  *) exit 2 ;;\n"
+                    "esac\n",
+                    encoding="utf-8",
+                )
+                fake_git.chmod(0o700)
+                result = subprocess.run(
+                    [
+                        "bash",
+                        "-c",
+                        """
+source "$1"
+MANIFEST_PATH="$2"
+PRODUCTION_RELEASE_LOCK_DIR="$3"
+PRODUCTION_RELEASE_LOCK_PATH="$3/production-release.lock"
+TELEGRAM_QUEUE_PRODUCTION_PHASE_RECEIPT="$4"
+TELEGRAM_QUEUE_PRODUCTION_PHASE_RECEIPT_SHA256="$5"
+PRODUCTION_PRIVATE_PRIMARY_MANIFEST_EXPECTED_SHA256="$6"
+PRODUCTION_PRIVATE_PRIMARY_MANIFEST_RECEIPT_PATH="$7"
+PRODUCTION_PRIVATE_PRIMARY_MANIFEST_RECEIPT_SHA256="$8"
+verify_queue_cutover_deploy_authority
+""",
+                        "queue-authority-shell",
+                        str(
+                            cutover.REPO_ROOT
+                            / "scripts/production_deploy_online.sh"
+                        ),
+                        str(manifest),
+                        str(artifacts),
+                        str(authority_path),
+                        authority_digest,
+                        attestation.manifest_sha256,
+                        str(attestation.receipt_path),
+                        attestation.receipt_sha256,
+                    ],
+                    cwd=cutover.REPO_ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    env={
+                        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                        "PYTHONPATH": str(cutover.REPO_ROOT),
+                        "LANG": os.environ.get("LANG", "C.UTF-8"),
+                        "TZ": "UTC",
+                    },
+                )
+                self.assertEqual(
+                    result.returncode, 0, result.stderr + result.stdout
+                )
+                state_name = json.loads(
+                    authority_path.read_text(encoding="utf-8")
+                )["state_file"]
+                state = json.loads(
+                    (artifacts / state_name).read_text(encoding="utf-8")
+                )
+                self.assertEqual(state["status"], "consumed")
+            finally:
+                source_lock.release()
+                run_lock.release()
+
     def test_swapped_release_lock_cannot_authorize_or_be_silently_unlinked(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -692,6 +1019,20 @@ class ProductionQueueCutoverTests(unittest.TestCase):
     def test_official_deploy_marks_inherited_source_lock_only_with_authority(self):
         operations = cutover.ProductionOperations.__new__(cutover.ProductionOperations)
         operations.manifest = Path("/secure/online.env")
+        operations.release_root = cutover.REPO_ROOT
+        operations._open_release_deploy_script = Mock(
+            side_effect=lambda: (
+                os.open(
+                    cutover.REPO_ROOT
+                    / "scripts/production_deploy_online.sh",
+                    os.O_RDONLY,
+                ),
+                cutover._sha256(
+                    cutover.REPO_ROOT
+                    / "scripts/production_deploy_online.sh"
+                ),
+            )
+        )
         operations._run = Mock(
             return_value=subprocess.CompletedProcess([], 0, stdout="", stderr="")
         )
@@ -715,12 +1056,603 @@ class ProductionQueueCutoverTests(unittest.TestCase):
             "PRODUCTION_RELEASE_RELAY_RECOVERY_MARKER",
         ):
             self.assertNotIn(forbidden, plain_env)
-        operations.deploy_official(Path("/secure/authority.json"), "a" * 64)
-        authority_env = operations._run.call_args.kwargs["env"]
-        self.assertEqual(
-            authority_env["PRODUCTION_SOURCE_LOCK_INHERITED_CONFIRM"],
-            "verified-cutover-held-lock",
+        with self.assertRaisesRegex(
+            cutover.ProductionCutoverError,
+            "BLOCKED_DEPLOY_FENCE_LOCKS_REQUIRED",
+        ):
+            operations.deploy_official(Path("/secure/authority.json"), "a" * 64)
+
+    def test_release_deploy_script_is_fd_bound_and_fd_bootstrap_preserves_root(self):
+        deploy_script = (
+            cutover.REPO_ROOT / "scripts/production_deploy_online.sh"
         )
+        descriptor = os.open(deploy_script, os.O_RDONLY)
+        try:
+            environment = {
+                **os.environ,
+                "PRODUCTION_RELEASE_ROOT_FD_EXEC_CONFIRM": (
+                    "verified-release-root-fd-exec"
+                ),
+                "PRODUCTION_RELEASE_ROOT_FD_EXEC": str(cutover.REPO_ROOT),
+                "PRODUCTION_RELEASE_ROOT_FD_EXEC_SHA256": hashlib.sha256(
+                    str(cutover.REPO_ROOT).encode("utf-8")
+                ).hexdigest(),
+            }
+            completed = subprocess.run(
+                ["bash", f"/proc/self/fd/{descriptor}", "help"],
+                cwd=Path("/tmp"),
+                env=environment,
+                pass_fds=(descriptor,),
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn("private-primary-release", completed.stdout)
+            environment["PRODUCTION_RELEASE_ROOT_FD_EXEC_SHA256"] = "0" * 64
+            refused = subprocess.run(
+                ["bash", f"/proc/self/fd/{descriptor}", "help"],
+                cwd=Path("/tmp"),
+                env=environment,
+                pass_fds=(descriptor,),
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(refused.returncode, 0)
+        finally:
+            os.close(descriptor)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            release_root = Path(tmpdir) / "release"
+            release_script = release_root / "scripts/production_deploy_online.sh"
+            release_script.parent.mkdir(parents=True)
+            release_script.write_bytes(deploy_script.read_bytes())
+            operations = cutover.ProductionOperations.__new__(
+                cutover.ProductionOperations
+            )
+            operations._control_release_mode = True
+            operations.release_root = release_root
+            held, expected_digest = operations._open_release_deploy_script()
+            try:
+                replacement = release_root / "scripts/replacement.sh"
+                replacement.write_text("#!/bin/bash\nexit 99\n", encoding="utf-8")
+                os.replace(replacement, release_script)
+                self.assertEqual(
+                    hashlib.sha256(
+                        os.pread(held, 20_000_000, 0)
+                    ).hexdigest(),
+                    expected_digest,
+                )
+                self.assertNotEqual(
+                    hashlib.sha256(release_script.read_bytes()).hexdigest(),
+                    expected_digest,
+                )
+            finally:
+                os.close(held)
+
+    def test_official_deploy_forwards_exact_private_primary_attestation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            manifest = root / "online.env"
+            manifest.write_text("SAFE=1\n", encoding="utf-8")
+            manifest.chmod(0o600)
+            receipt = root / "private-primary-preparation.json"
+            receipt.write_text('{"status":"PASS"}\n', encoding="utf-8")
+            receipt.chmod(0o600)
+            attestation = cutover.bind_private_primary_deploy_attestation(
+                manifest,
+                manifest_sha256=cutover._sha256(manifest),
+                receipt_path=receipt,
+                receipt_sha256=cutover._sha256(receipt),
+            )
+            operations = cutover.ProductionOperations.__new__(
+                cutover.ProductionOperations
+            )
+            operations.manifest = manifest
+            operations.release_root = cutover.REPO_ROOT
+            deploy_script_digest = cutover._sha256(
+                cutover.REPO_ROOT / "scripts/production_deploy_online.sh"
+            )
+            operations._open_release_deploy_script = Mock(
+                side_effect=lambda: (
+                    os.open(
+                        cutover.REPO_ROOT
+                        / "scripts/production_deploy_online.sh",
+                        os.O_RDONLY,
+                    ),
+                    deploy_script_digest,
+                )
+            )
+            supervisor_digest = cutover._sha256(
+                cutover.FENCED_DEPLOY_SUPERVISOR
+            )
+            operations._open_control_supervisor = Mock(
+                side_effect=lambda: (
+                    os.open(cutover.FENCED_DEPLOY_SUPERVISOR, os.O_RDONLY),
+                    supervisor_digest,
+                    cutover.FENCED_DEPLOY_SUPERVISOR,
+                )
+            )
+            operations._run = Mock(
+                return_value=subprocess.CompletedProcess(
+                    [], 0, stdout="", stderr=""
+                )
+            )
+            with self.assertRaisesRegex(
+                cutover.ProductionCutoverError,
+                "BLOCKED_PRIVATE_PRIMARY_ATTESTATION",
+            ):
+                operations.deploy_official(
+                    private_primary_attestation=attestation
+                )
+            first_lock = root / "run.lock"
+            second_lock = root / "source.lock"
+            first_lock.write_text("lock\n", encoding="utf-8")
+            second_lock.write_text("lock\n", encoding="utf-8")
+            first_lock.chmod(0o600)
+            second_lock.chmod(0o600)
+            descriptors = (os.open(first_lock, os.O_RDWR), os.open(second_lock, os.O_RDWR))
+            fence = root / "fence.json"
+            fence.write_text("{}\n", encoding="utf-8")
+            fence.chmod(0o600)
+            try:
+                with (
+                    patch.object(
+                        cutover,
+                        "_prepare_deploy_child_fence",
+                        return_value=(fence, "f" * 64),
+                    ),
+                    patch.object(
+                        cutover,
+                        "_read_deploy_child_fence",
+                        return_value={
+                            "status": "SUCCEEDED",
+                            "returncode": 0,
+                            "deploy_script_sha256": deploy_script_digest,
+                            "product_readiness": {
+                                "consumer_count": 3,
+                                "required_source_input_trace_count": 9,
+                            },
+                        },
+                    ),
+                ):
+                    operations.deploy_official(
+                        root / "authority.json",
+                        "a" * 64,
+                        private_primary_attestation=attestation,
+                        inherited_lock_descriptors=descriptors,
+                    )
+            finally:
+                os.close(descriptors[0])
+                os.close(descriptors[1])
+            supervisor_argv = operations._run.call_args.args[0]
+            self.assertEqual(supervisor_argv[0], sys.executable)
+            self.assertRegex(supervisor_argv[1], r"^/proc/self/fd/[0-9]+$")
+            separator = supervisor_argv.index("--")
+            argv = supervisor_argv[separator + 1 :]
+            self.assertEqual(
+                argv[0],
+                "bash",
+            )
+            self.assertRegex(argv[1], r"^/proc/self/fd/[0-9]+$")
+            self.assertEqual(
+                argv[2:],
+                [
+                    "--manifest",
+                    str(manifest),
+                    "--private-primary-manifest-sha256",
+                    attestation.manifest_sha256,
+                    "--private-primary-manifest-receipt",
+                    str(receipt),
+                    "--private-primary-manifest-receipt-sha256",
+                    attestation.receipt_sha256,
+                    "release",
+                ],
+            )
+            child_env = operations._run.call_args.kwargs["env"]
+            self.assertNotIn(receipt.read_text(encoding="utf-8"), child_env.values())
+
+    def test_fenced_supervisor_is_manifest_digest_and_fd_bound(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            supervisor = root / "scripts/run_fenced_production_deploy.py"
+            supervisor.parent.mkdir(parents=True)
+            supervisor.write_text("print('safe')\n", encoding="utf-8")
+            supervisor.chmod(0o600)
+            expected = hashlib.sha256(supervisor.read_bytes()).hexdigest()
+            manifest = root / "control-payload.sha256"
+            manifest.write_text(
+                f"{expected}  ./scripts/run_fenced_production_deploy.py\n",
+                encoding="utf-8",
+            )
+            manifest.chmod(0o600)
+            operations = cutover.ProductionOperations.__new__(
+                cutover.ProductionOperations
+            )
+            operations.release_root = root
+            operations._control_release_mode = True
+            with (
+                patch.object(cutover, "FENCED_DEPLOY_SUPERVISOR", supervisor),
+                patch.object(cutover, "CONTROL_PAYLOAD_MANIFEST", manifest),
+            ):
+                descriptor, observed, observed_path = (
+                    operations._open_control_supervisor()
+                )
+                try:
+                    replacement = supervisor.with_name("replacement.py")
+                    replacement.write_text(
+                        "raise RuntimeError('hostile')\n", encoding="utf-8"
+                    )
+                    replacement.chmod(0o600)
+                    os.replace(replacement, supervisor)
+                    self.assertEqual(observed, expected)
+                    self.assertEqual(observed_path, supervisor)
+                    self.assertEqual(
+                        hashlib.sha256(
+                            os.pread(descriptor, 1_000_000, 0)
+                        ).hexdigest(),
+                        expected,
+                    )
+                    self.assertNotEqual(
+                        hashlib.sha256(supervisor.read_bytes()).hexdigest(),
+                        expected,
+                    )
+                finally:
+                    os.close(descriptor)
+
+    def test_fenced_supervisor_normal_checkout_uses_exact_approved_git_blob(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            release = Path(tmpdir) / "release"
+            supervisor = release / "scripts/run_fenced_production_deploy.py"
+            supervisor.parent.mkdir(parents=True)
+            supervisor.write_text("print('approved')\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(release)], check=True)
+            subprocess.run(
+                ["git", "-C", str(release), "config", "user.name", "Test"],
+                check=True,
+            )
+            subprocess.run(
+                [
+                    "git", "-C", str(release), "config", "user.email",
+                    "test@example.invalid",
+                ],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(release), "add", "scripts"], check=True
+            )
+            subprocess.run(
+                ["git", "-C", str(release), "commit", "-qm", "approved"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(release), "branch", "-M", "main"],
+                check=True,
+            )
+            head = subprocess.check_output(
+                ["git", "-C", str(release), "rev-parse", "HEAD"], text=True
+            ).strip()
+            subprocess.run(
+                [
+                    "git", "-C", str(release), "update-ref",
+                    "refs/remotes/origin/main", head,
+                ],
+                check=True,
+            )
+            operations = cutover.ProductionOperations.__new__(
+                cutover.ProductionOperations
+            )
+            operations.release_root = release
+            operations._control_release_mode = False
+            absent_manifest = release / "missing-control-payload.sha256"
+            with (
+                patch.object(
+                    cutover, "CONTROL_PAYLOAD_MANIFEST", absent_manifest
+                ),
+                patch.dict(
+                    os.environ,
+                    {"PATH": str(release), "GIT_DIR": "/hostile"},
+                    clear=False,
+                ),
+            ):
+                descriptor, observed, observed_path = (
+                    operations._open_control_supervisor()
+                )
+                try:
+                    self.assertEqual(observed_path, supervisor)
+                    self.assertEqual(
+                        observed,
+                        hashlib.sha256(supervisor.read_bytes()).hexdigest(),
+                    )
+                finally:
+                    os.close(descriptor)
+                (release / "untracked").write_text("drift\n", encoding="utf-8")
+                with self.assertRaisesRegex(
+                    cutover.ProductionCutoverError,
+                    "BLOCKED_PRODUCTION_DEPLOY_SUPERVISOR",
+                ):
+                    operations._open_control_supervisor()
+
+    def test_standalone_queue_uses_git_even_when_disk_manifest_is_present(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            release = Path(tmpdir) / "release"
+            supervisor = release / "scripts/run_fenced_production_deploy.py"
+            supervisor.parent.mkdir(parents=True)
+            approved = "print('approved-git-blob')\n"
+            supervisor.write_text(approved, encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(release)], check=True)
+            subprocess.run(
+                ["git", "-C", str(release), "config", "user.name", "Test"],
+                check=True,
+            )
+            subprocess.run(
+                [
+                    "git", "-C", str(release), "config", "user.email",
+                    "test@example.invalid",
+                ],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(release), "add", "scripts"], check=True
+            )
+            subprocess.run(
+                ["git", "-C", str(release), "commit", "-qm", "approved"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(release), "branch", "-M", "main"],
+                check=True,
+            )
+            head = subprocess.check_output(
+                ["git", "-C", str(release), "rev-parse", "HEAD"], text=True
+            ).strip()
+            subprocess.run(
+                [
+                    "git", "-C", str(release), "update-ref",
+                    "refs/remotes/origin/main", head,
+                ],
+                check=True,
+            )
+            hostile_manifest = Path(tmpdir) / "control-payload.sha256"
+            hostile = "0" * 64 + "  ./scripts/run_fenced_production_deploy.py\n"
+            hostile_manifest.write_text(hostile, encoding="utf-8")
+            hostile_manifest.chmod(0o600)
+            operations = cutover.ProductionOperations.__new__(
+                cutover.ProductionOperations
+            )
+            operations.release_root = release
+            operations._control_release_mode = False
+            hostile_bin = Path(tmpdir) / "hostile-bin"
+            hostile_bin.mkdir()
+            (hostile_bin / "git").write_text("#!/bin/sh\nexit 41\n", encoding="utf-8")
+            (hostile_bin / "git").chmod(0o700)
+            with (
+                patch.object(cutover, "CONTROL_PAYLOAD_MANIFEST", hostile_manifest),
+                patch.dict(
+                    os.environ,
+                    {
+                        "PATH": str(hostile_bin),
+                        "GIT_DIR": "/hostile",
+                        "GIT_WORK_TREE": "/hostile-tree",
+                    },
+                    clear=False,
+                ),
+            ):
+                descriptor, observed, observed_path = (
+                    operations._open_control_supervisor()
+                )
+                try:
+                    self.assertEqual(observed_path, supervisor)
+                    self.assertEqual(
+                        observed,
+                        hashlib.sha256(approved.encode("utf-8")).hexdigest(),
+                    )
+                    self.assertNotEqual(observed, "0" * 64)
+                finally:
+                    os.close(descriptor)
+
+    def test_control_release_supervisor_never_falls_back_when_manifest_missing(self):
+        operations = cutover.ProductionOperations.__new__(
+            cutover.ProductionOperations
+        )
+        operations.release_root = Path("/definitely/different/release")
+        operations._control_release_mode = True
+        with patch.object(
+            cutover,
+            "CONTROL_PAYLOAD_MANIFEST",
+            Path("/definitely/missing/control-payload.sha256"),
+        ):
+            with self.assertRaisesRegex(
+                cutover.ProductionCutoverError,
+                "BLOCKED_PRODUCTION_DEPLOY_SUPERVISOR",
+            ):
+                operations._open_control_supervisor()
+    def test_fenced_deploy_survives_controller_sigkill_without_overlap(self):
+        """A real SIGKILL must leave the exact inherited locks with the child."""
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            run_lock = root / "run.lock"
+            source_lock = root / "source.lock"
+            journal = root / "deploy-fence.json"
+            ready = root / "controller-ready"
+            started = root / "worker-started"
+            finished = root / "worker-finished"
+            active = root / "active-count"
+            maximum = root / "maximum-count"
+            counter_lock = root / "counter.lock"
+            worker_script = root / "worker.py"
+            deploy_script = root / "scripts/production_deploy_online.sh"
+            deploy_script.parent.mkdir()
+            deploy_script.write_text(
+                "#!/bin/bash\nset -euo pipefail\nexec \"$@\"\n",
+                encoding="utf-8",
+            )
+            deploy_script.chmod(0o700)
+            for path in (run_lock, source_lock, counter_lock):
+                path.write_text("lock\n", encoding="utf-8")
+                path.chmod(0o600)
+            active.write_text("0", encoding="ascii")
+            maximum.write_text("0", encoding="ascii")
+            worker_script.write_text(
+                "\n".join(
+                    (
+                        "import fcntl, pathlib, sys, time",
+                        "active, maximum, guard, started, finished = map(pathlib.Path, sys.argv[1:])",
+                        "with guard.open('r+') as lock:",
+                        "    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)",
+                        "    current = int(active.read_text()) + 1",
+                        "    active.write_text(str(current))",
+                        "    maximum.write_text(str(max(current, int(maximum.read_text()))))",
+                        "started.write_text('started')",
+                        "time.sleep(1.2)",
+                        "with guard.open('r+') as lock:",
+                        "    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)",
+                        "    active.write_text(str(int(active.read_text()) - 1))",
+                        "finished.write_text('finished')",
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            command = [
+                sys.executable,
+                str(worker_script),
+                str(active),
+                str(maximum),
+                str(counter_lock),
+                str(started),
+                str(finished),
+            ]
+            controller_code = "\n".join(
+                (
+                    "import fcntl, hashlib, json, os, pathlib, subprocess, sys, time",
+                    "run_path, source_path, journal_path, ready_path = map(pathlib.Path, sys.argv[1:5])",
+                    "supervisor = pathlib.Path(sys.argv[5])",
+                    "deploy_path = pathlib.Path(sys.argv[6])",
+                    "worker = sys.argv[7:]",
+                    "descriptors = [os.open(run_path, os.O_RDWR), os.open(source_path, os.O_RDWR), os.open(deploy_path, os.O_RDONLY)]",
+                    "[fcntl.flock(fd, fcntl.LOCK_EX) for fd in descriptors[:2]]",
+                    "command = ['bash', f'/proc/self/fd/{descriptors[2]}', *worker]",
+                    "def binding(fd):",
+                    "    info = os.fstat(fd)",
+                    "    path = pathlib.Path(os.readlink(f'/proc/self/fd/{fd}')).resolve(strict=True)",
+                    "    return {'device': info.st_dev, 'inode': info.st_ino, 'path_sha256': hashlib.sha256(str(path).encode()).hexdigest()}",
+                    "command_digest = hashlib.sha256(json.dumps(command, separators=(',', ':')).encode()).hexdigest()",
+                    "deploy_digest = hashlib.sha256(deploy_path.read_bytes()).hexdigest()",
+                    "payload = {'schema':'production_deploy_child_fence/1.0','status':'PREPARED','command_sha256':command_digest,'deploy_script_sha256':deploy_digest,'run_lock':binding(descriptors[0]),'source_lock':binding(descriptors[1]),'private_primary_required':False,'authority_sha256':'a'*64,'journal_file':'phase.json','source_sha256':'b'*64,'manifest_sha256':'c'*64,'secrets_disclosed':False}",
+                    "body = (json.dumps(payload, sort_keys=True, separators=(',', ':')) + '\\n').encode()",
+                    "journal_path.write_bytes(body); journal_path.chmod(0o600)",
+                    "digest = hashlib.sha256(body).hexdigest()",
+                    "child = subprocess.Popen([sys.executable, str(supervisor), '--journal', str(journal_path), '--expected-journal-sha256', digest, '--run-lock-fd', str(descriptors[0]), '--source-lock-fd', str(descriptors[1]), '--deploy-script-fd', str(descriptors[2]), '--expected-deploy-script-sha256', deploy_digest, '--cwd', str(journal_path.parent), '--', *command], pass_fds=tuple(descriptors), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)",
+                    "ready_path.write_text(str(child.pid))",
+                    "time.sleep(60)",
+                )
+            )
+            controller = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    controller_code,
+                    str(run_lock),
+                    str(source_lock),
+                    str(journal),
+                    str(ready),
+                    str(cutover.FENCED_DEPLOY_SUPERVISOR),
+                    str(deploy_script),
+                    *command,
+                ],
+                cwd=root,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            supervisor_pid: int | None = None
+            try:
+                deadline = time.monotonic() + 8.0
+                while time.monotonic() < deadline and not started.exists():
+                    if controller.poll() is not None:
+                        self.fail(
+                            "controller exited before worker start: "
+                            + str(controller.stderr.read() if controller.stderr else "")
+                        )
+                    time.sleep(0.02)
+                self.assertTrue(started.exists(), "fenced deploy did not start")
+                supervisor_pid = int(ready.read_text(encoding="ascii"))
+
+                os.kill(controller.pid, signal.SIGKILL)
+                controller.wait(timeout=2.0)
+
+                # A recovery contender cannot acquire either exact lock and
+                # therefore cannot launch a second deploy while the inherited
+                # child is alive.
+                probe = subprocess.run(
+                    [
+                        sys.executable,
+                        "-c",
+                        (
+                            "import fcntl,os,sys; "
+                            "fds=[os.open(p,os.O_RDWR) for p in sys.argv[1:]]; "
+                            "[fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB) for fd in fds]"
+                        ),
+                        str(run_lock),
+                        str(source_lock),
+                    ],
+                    cwd=root,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertNotEqual(probe.returncode, 0)
+
+                deadline = time.monotonic() + 8.0
+                terminal: dict[str, object] = {}
+                while time.monotonic() < deadline:
+                    try:
+                        terminal = json.loads(journal.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        terminal = {}
+                    if terminal.get("status") == "SUCCEEDED":
+                        break
+                    time.sleep(0.02)
+                self.assertEqual(terminal.get("status"), "SUCCEEDED")
+                self.assertTrue(finished.exists())
+                self.assertEqual(maximum.read_text(encoding="ascii"), "1")
+                self.assertEqual(active.read_text(encoding="ascii"), "0")
+
+                deadline = time.monotonic() + 3.0
+                acquired_after_terminal = False
+                while time.monotonic() < deadline:
+                    descriptors = [
+                        os.open(run_lock, os.O_RDWR),
+                        os.open(source_lock, os.O_RDWR),
+                    ]
+                    try:
+                        for descriptor in descriptors:
+                            fcntl.flock(
+                                descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB
+                            )
+                    except BlockingIOError:
+                        time.sleep(0.02)
+                    else:
+                        acquired_after_terminal = True
+                        break
+                    finally:
+                        for descriptor in descriptors:
+                            os.close(descriptor)
+                self.assertTrue(acquired_after_terminal)
+            finally:
+                if controller.poll() is None:
+                    controller.kill()
+                    controller.wait(timeout=2.0)
+                if controller.stderr is not None:
+                    controller.stderr.close()
+                if supervisor_pid is not None:
+                    try:
+                        os.kill(supervisor_pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
 
     def test_operations_remote_commands_are_strictly_key_only(self):
         operations = cutover.ProductionOperations.__new__(cutover.ProductionOperations)
@@ -741,6 +1673,170 @@ class ProductionQueueCutoverTests(unittest.TestCase):
             "KbdInteractiveAuthentication=no",
         ):
             self.assertIn(option, argv)
+
+    def test_private_primary_terminal_live_rechecks_are_value_free_and_exact(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            local = root / "local"
+            remote = Path("/srv/private-primary-remote")
+            local.mkdir()
+            snapshot = local / "latest-private-primary.json"
+            snapshot.write_text('{"contract":"test"}\n', encoding="utf-8")
+            digest = hashlib.sha256(snapshot.read_bytes()).hexdigest()
+            operations = cutover.ProductionOperations.__new__(
+                cutover.ProductionOperations
+            )
+            operations.manifest_values = {
+                "PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR": str(local),
+                "PRODUCTION_PRODUCT_ESTIMATOR_BOT_SNAPSHOT_HOST_DIR": str(local),
+                "PRODUCTION_PRODUCT_ESTIMATOR_IRAN_APP_SNAPSHOT_HOST_DIR": str(remote),
+                "PRODUCTION_MARKET_PIPELINE_PROJECT_NAME": "market-private-pipeline-production",
+            }
+            inactive = [
+                subprocess.CompletedProcess([], 3, stdout="", stderr="")
+                for _ in range(6)
+            ]
+            disabled = [
+                subprocess.CompletedProcess([], 1, stdout="", stderr="")
+                for _ in range(3)
+            ]
+            remote_digest = subprocess.CompletedProcess(
+                [],
+                0,
+                stdout=f"{digest}  {remote / 'latest-private-primary.json'}\n",
+                stderr="",
+            )
+            operations._host = Mock(
+                side_effect=[*inactive, *disabled, remote_digest]
+            )
+            operations._docker = Mock(
+                side_effect=(
+                    subprocess.CompletedProcess(
+                        [], 0, stdout="receiver-container\n", stderr=""
+                    ),
+                    subprocess.CompletedProcess([], 0, stdout="0\n", stderr=""),
+                )
+            )
+
+            self.assertEqual(
+                operations.private_primary_legacy_inputs_off()[
+                    "legacy_input_units_active"
+                ],
+                0,
+            )
+            self.assertEqual(
+                operations.private_primary_snapshot_identity(
+                    expected_digest=digest
+                ),
+                {
+                    "status": "verified",
+                    "snapshot_digest": digest,
+                    "consumer_artifact_count": 3,
+                },
+            )
+            self.assertEqual(
+                operations.private_primary_publication_outbox_zero(),
+                {"status": "verified", "open_outbox": 0},
+            )
+
+    def test_private_primary_terminal_recheck_rejects_legacy_restart(self):
+        operations = cutover.ProductionOperations.__new__(
+            cutover.ProductionOperations
+        )
+        operations._host = Mock(
+            return_value=subprocess.CompletedProcess(
+                [], 0, stdout="active\n", stderr=""
+            )
+        )
+        with self.assertRaisesRegex(
+            cutover.ProductionCutoverError,
+            "PRIVATE_PRIMARY_LEGACY_INPUT_ACTIVE",
+        ):
+            operations.private_primary_legacy_inputs_off()
+
+    def test_product_runtime_mode_rechecks_all_three_live_consumers(self):
+        operations = cutover.ProductionOperations.__new__(
+            cutover.ProductionOperations
+        )
+        operations._running = Mock(return_value=True)
+        operations._container_env = Mock(
+            return_value={"PRODUCT_ESTIMATOR_SNAPSHOT_MODE": "LEGACY"}
+        )
+        self.assertEqual(
+            operations.product_estimator_runtime_mode("LEGACY"),
+            {
+                "status": "verified",
+                "mode": "LEGACY",
+                "consumer_count": 3,
+                "values_disclosed": False,
+            },
+        )
+        self.assertEqual(
+            operations._container_env.call_args_list,
+            [
+                call("foreign", cutover.FOREIGN_CONTAINERS["app"]),
+                call("foreign", cutover.FOREIGN_CONTAINERS["bot"]),
+                call("iran", cutover.IRAN_CONTAINERS["app"]),
+            ],
+        )
+
+    def test_product_runtime_mode_rejects_one_premature_private_consumer(self):
+        operations = cutover.ProductionOperations.__new__(
+            cutover.ProductionOperations
+        )
+        operations._running = Mock(return_value=True)
+        operations._container_env = Mock(
+            side_effect=(
+                {"PRODUCT_ESTIMATOR_SNAPSHOT_MODE": "LEGACY"},
+                {"PRODUCT_ESTIMATOR_SNAPSHOT_MODE": "PRIVATE_PRIMARY"},
+            )
+        )
+        with self.assertRaisesRegex(
+            cutover.ProductionCutoverError, "BLOCKED_PRODUCT_RUNTIME_MODE"
+        ):
+            operations.product_estimator_runtime_mode("LEGACY")
+
+    def test_private_primary_snapshot_recheck_rejects_post_probe_symlink_swap(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            local = root / "local"
+            local.mkdir()
+            snapshot = local / "latest-private-primary.json"
+            snapshot.write_text('{"contract":"expected"}\n', encoding="utf-8")
+            digest = hashlib.sha256(snapshot.read_bytes()).hexdigest()
+            replacement = root / "replacement.json"
+            replacement.write_text('{"contract":"expected"}\n', encoding="utf-8")
+            remote = Path("/srv/private-primary-remote")
+            operations = cutover.ProductionOperations.__new__(
+                cutover.ProductionOperations
+            )
+            operations.manifest_values = {
+                "PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR": str(local),
+                "PRODUCTION_PRODUCT_ESTIMATOR_BOT_SNAPSHOT_HOST_DIR": str(local),
+                "PRODUCTION_PRODUCT_ESTIMATOR_IRAN_APP_SNAPSHOT_HOST_DIR": str(remote),
+            }
+
+            def replace_during_remote_probe(_role, _argv):
+                snapshot.unlink()
+                snapshot.symlink_to(replacement)
+                return subprocess.CompletedProcess(
+                    [],
+                    0,
+                    stdout=(
+                        f"{digest}  "
+                        f"{remote / 'latest-private-primary.json'}\n"
+                    ),
+                    stderr="",
+                )
+
+            operations._host = Mock(side_effect=replace_during_remote_probe)
+            with self.assertRaisesRegex(
+                cutover.ProductionCutoverError,
+                "PRIVATE_PRIMARY_SNAPSHOT_IDENTITY_INVALID",
+            ):
+                operations.private_primary_snapshot_identity(
+                    expected_digest=digest
+                )
 
     def test_run_rm_migration_role_is_read_from_compose_without_a_container(self):
         operations = cutover.ProductionOperations.__new__(cutover.ProductionOperations)
@@ -1218,6 +2314,384 @@ class ProductionQueueCutoverTests(unittest.TestCase):
             finally:
                 first.release()
 
+    def test_exact_pid_start_identity_allows_only_proven_stale_lock_recovery(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            secure = Path(tmpdir) / "artifacts"
+            secure.mkdir(mode=0o700)
+            abandoned = cutover.ExclusiveRunLock(secure)
+            abandoned.acquire()
+            self.abandon_lock_as_dead_process(abandoned)
+
+            retry = cutover.ExclusiveRunLock(secure)
+            retry.acquire()
+            try:
+                payload = json.loads(retry.path.read_text(encoding="utf-8"))
+                self.assertEqual(payload["owner_pid"], os.getpid())
+                self.assertNotEqual(payload["owner_start_ticks"], "0")
+            finally:
+                retry.release()
+
+    def test_terminal_receipt_intent_recovers_crash_without_orphan_receipt(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            secure = Path(tmpdir) / "artifacts"
+            secure.mkdir(mode=0o700)
+            lock = cutover.ExclusiveRunLock(secure)
+            lock.acquire()
+            journal = cutover.PhaseJournal(
+                secure,
+                command="redeploy",
+                source_sha256="1" * 64,
+                git_head="2" * 40,
+                run_lock=lock,
+            )
+            receipt = {
+                "environment": "production",
+                "status": "redeployed",
+                "secrets_disclosed": False,
+            }
+            original_atomic_write = cutover._atomic_write
+
+            def crash_before_receipt_publish(path, body):
+                if path.name.startswith("receipt-crash-"):
+                    raise KeyboardInterrupt("simulated kill boundary")
+                return original_atomic_write(path, body)
+
+            with patch.object(
+                cutover, "_atomic_write", side_effect=crash_before_receipt_publish
+            ), self.assertRaises(KeyboardInterrupt):
+                cutover._commit_terminal_receipt(
+                    journal,
+                    secure,
+                    prefix="receipt-crash",
+                    receipt=receipt,
+                    terminal_status="redeployed",
+                )
+            pending = json.loads(journal.path.read_text(encoding="utf-8"))
+            self.assertEqual(pending["status"], "terminal_receipt_pending")
+            self.assertRegex(pending["pending_receipt_sha256"], r"^[0-9a-f]{64}$")
+            self.assertFalse((secure / pending["pending_receipt_file"]).exists())
+            lock.release()
+
+            cutover._recover_terminal_receipt_journals(secure)
+            terminal = json.loads(journal.path.read_text(encoding="utf-8"))
+            self.assertEqual(terminal["status"], "redeployed")
+            receipt_path = secure / terminal["receipt_file"]
+            self.assertEqual(cutover._sha256(receipt_path), terminal["receipt_sha256"])
+            self.assertEqual(
+                [row["status"] for row in terminal["state_history"]][-2:],
+                ["terminal_receipt_pending", "redeployed"],
+            )
+
+    def test_interrupted_apply_rollback_and_redeploy_recover_pre_state(self):
+        for command in ("apply", "rollback", "redeploy"):
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                source, _staging, manifest = self.fixture(root)
+                secure = root / "secure"
+                artifacts = root / "artifacts"
+                secure.mkdir(mode=0o700)
+                artifacts.mkdir(mode=0o700)
+                legacy = source.read_bytes()
+                if command in {"rollback", "redeploy"}:
+                    queue = cutover.upsert_env_lines(
+                        legacy.decode("utf-8"),
+                        cutover._queue_source_updates(planner.parse_env_file(source)),
+                    ).encode("utf-8")
+                    cutover._atomic_write(source, queue)
+                expected_digest = cutover._sha256(source)
+                snapshot = (
+                    cutover._create_recovery_source_snapshot(
+                        source, secure, expected_sha256=expected_digest
+                    )
+                    if command != "redeploy"
+                    else None
+                )
+                lock = cutover.ExclusiveRunLock(artifacts)
+                lock.acquire()
+                journal = cutover.PhaseJournal(
+                    artifacts,
+                    command=command,
+                    source_sha256=expected_digest,
+                    git_head=self.binding()["head"],
+                    run_lock=lock,
+                    recovery_source_backup=snapshot,
+                )
+                journal.update("deploy_authorizing")
+                if command == "apply":
+                    cutover._atomic_write(
+                        source,
+                        cutover.upsert_env_lines(
+                            legacy.decode("utf-8"),
+                            cutover._queue_source_updates(
+                                planner.parse_env_file(source)
+                            ),
+                        ).encode("utf-8"),
+                    )
+                    live_owner = "queue-v1"
+                elif command == "rollback":
+                    cutover._atomic_write(source, legacy)
+                    live_owner = "legacy"
+                else:
+                    live_owner = None
+                self.abandon_lock_as_dead_process(lock)
+                operations = FakeInterruptedRecoveryOperations(
+                    manifest, owner=live_owner, artifact_dir=artifacts
+                )
+
+                result = cutover._recover_interrupted_phase(
+                    command=command,
+                    manifest=manifest,
+                    artifact_dir=artifacts,
+                    binding=self.binding(),
+                    operations_factory=lambda _manifest: operations,
+                    recovery_backup_dir=(secure if command != "redeploy" else None),
+                )
+
+                desired = "legacy" if command == "apply" else "queue-v1"
+                self.assertEqual(result["status"], "interrupted_recovered")
+                self.assertEqual(operations.owner, desired)
+                self.assertEqual(
+                    planner.source_profile(planner.parse_env_file(source)), desired
+                )
+                terminal = json.loads(journal.path.read_text(encoding="utf-8"))
+                self.assertEqual(terminal["status"], "interrupted_recovered")
+                if live_owner != desired:
+                    self.assertEqual(
+                        operations.observed_wal,
+                        [
+                            (
+                                "stop_producers",
+                                "interrupted_recovery_producers_quiescing",
+                            ),
+                            ("wait_for_drain", "interrupted_recovery_drain_waiting"),
+                            ("stop_bot", "interrupted_recovery_executor_stopping"),
+                            (
+                                "deploy",
+                                "interrupted_recovery_deploy_authorizing",
+                            ),
+                        ],
+                    )
+
+    def test_exclusive_cutover_lock_atomically_adopts_market_maintenance_inode(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            secure = Path(tmpdir) / "artifacts"
+            secure.mkdir(mode=0o700)
+            journal = secure / "market-maintenance.json"
+            lock_path = secure / "production-release.lock"
+            lock_path.touch(mode=0o600)
+            metadata = lock_path.stat()
+            maintenance = {
+                "schema": "market_pipeline_maintenance_lock/1.0",
+                "environment": "production",
+                "release_sha": "a" * 40,
+                "nonce_sha256": "9" * 64,
+                "journal_path_sha256": hashlib.sha256(
+                    str(journal).encode("utf-8")
+                ).hexdigest(),
+                "device": metadata.st_dev,
+                "inode": metadata.st_ino,
+            }
+            lock_path.write_text(
+                json.dumps(maintenance, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            lock_path.chmod(0o600)
+            journal.write_text(
+                json.dumps(
+                    {
+                        "schema": "production_legacy_market_collector_handoff/1.1",
+                        "host_role": "bot",
+                        "status": "PRIMARY_COMMITTED",
+                        "release_sha": "a" * 40,
+                        "maintenance_lock": maintenance,
+                        "secrets_disclosed": False,
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            journal.chmod(0o600)
+            journal_digest = hashlib.sha256(journal.read_bytes()).hexdigest()
+
+            run_lock = cutover.ExclusiveRunLock(secure)
+            with patch.object(
+                cutover.market_handoff,
+                "validate_committed_handoff",
+                return_value={},
+            ):
+                run_lock.adopt_market_pipeline_maintenance(
+                    journal=journal,
+                    expected_journal_sha256=journal_digest,
+                    expected_primary_verification_sha256="6" * 64,
+                    release_sha="a" * 40,
+                )
+            try:
+                adopted = lock_path.stat()
+                payload = json.loads(lock_path.read_text(encoding="utf-8"))
+                self.assertEqual(adopted.st_ino, metadata.st_ino)
+                self.assertEqual(adopted.st_dev, metadata.st_dev)
+                self.assertEqual(payload, maintenance)
+                self.assertEqual(run_lock.binding()["inode"], metadata.st_ino)
+                self.assertEqual(run_lock.binding()["nonce_sha256"], "9" * 64)
+            finally:
+                run_lock.release()
+            self.assertFalse(lock_path.exists())
+
+    def test_unsuccessful_promotion_restores_adoptable_market_maintenance_lock(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            secure = Path(tmpdir) / "artifacts"
+            secure.mkdir(mode=0o700)
+            journal = secure / "production-market-maintenance.json"
+            lock_path = secure / "production-release.lock"
+            lock_path.touch(mode=0o600)
+            metadata = lock_path.stat()
+            maintenance = {
+                "schema": "market_pipeline_maintenance_lock/1.0",
+                "environment": "production",
+                "release_sha": "d" * 40,
+                "nonce_sha256": "8" * 64,
+                "journal_path_sha256": hashlib.sha256(
+                    str(journal).encode("utf-8")
+                ).hexdigest(),
+                "device": metadata.st_dev,
+                "inode": metadata.st_ino,
+            }
+            lock_path.write_text(
+                json.dumps(maintenance, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            lock_path.chmod(0o600)
+            journal.write_text(
+                json.dumps(
+                    {
+                        "schema": "production_legacy_market_collector_handoff/1.1",
+                        "host_role": "bot",
+                        "status": "PRIMARY_COMMITTED",
+                        "release_sha": "d" * 40,
+                        "maintenance_lock": maintenance,
+                        "secrets_disclosed": False,
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            journal.chmod(0o600)
+            journal_digest = hashlib.sha256(journal.read_bytes()).hexdigest()
+
+            first = cutover.ExclusiveRunLock(secure)
+            with patch.object(
+                cutover.market_handoff,
+                "validate_committed_handoff",
+                return_value={},
+            ):
+                first.adopt_market_pipeline_maintenance(
+                    journal=journal,
+                    expected_journal_sha256=journal_digest,
+                    expected_primary_verification_sha256="5" * 64,
+                    release_sha="d" * 40,
+                )
+            first.restore_adopted_market_pipeline_maintenance()
+            self.assertFalse(first.held)
+            self.assertEqual(lock_path.stat().st_ino, metadata.st_ino)
+            self.assertEqual(
+                json.loads(lock_path.read_text(encoding="utf-8")), maintenance
+            )
+
+            retry = cutover.ExclusiveRunLock(secure)
+            with patch.object(
+                cutover.market_handoff,
+                "validate_committed_handoff",
+                return_value={},
+            ):
+                retry.adopt_market_pipeline_maintenance(
+                    journal=journal,
+                    expected_journal_sha256=journal_digest,
+                    expected_primary_verification_sha256="5" * 64,
+                    release_sha="d" * 40,
+                )
+            retry.release()
+            self.assertFalse(lock_path.exists())
+
+    def test_market_maintenance_adoption_rejects_pending_queue_phase_journal(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            secure = Path(tmpdir) / "artifacts"
+            secure.mkdir(mode=0o700)
+            pending = secure / "production-queue-phase-pending.json"
+            pending.write_text('{"status":"prepared"}\n', encoding="utf-8")
+            pending.chmod(0o600)
+            journal = secure / "production-market-maintenance.json"
+            journal.write_text("{}\n", encoding="utf-8")
+            journal.chmod(0o600)
+            lock = cutover.ExclusiveRunLock(secure)
+            with self.assertRaisesRegex(
+                cutover.ProductionCutoverError,
+                "BLOCKED_PENDING_PHASE_JOURNAL",
+            ):
+                lock.adopt_market_pipeline_maintenance(
+                    journal=journal,
+                    expected_journal_sha256=hashlib.sha256(
+                        journal.read_bytes()
+                    ).hexdigest(),
+                    expected_primary_verification_sha256="4" * 64,
+                    release_sha="e" * 40,
+                )
+
+    def test_exclusive_cutover_lock_rejects_tampered_market_maintenance_binding(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            secure = Path(tmpdir) / "artifacts"
+            secure.mkdir(mode=0o700)
+            journal = secure / "market-maintenance.json"
+            lock_path = secure / "production-release.lock"
+            lock_path.touch(mode=0o600)
+            metadata = lock_path.stat()
+            maintenance = {
+                "schema": "market_pipeline_maintenance_lock/1.0",
+                "environment": "production",
+                "release_sha": "b" * 40,
+                "nonce_sha256": "7" * 64,
+                "journal_path_sha256": hashlib.sha256(
+                    str(journal).encode("utf-8")
+                ).hexdigest(),
+                "device": metadata.st_dev,
+                "inode": metadata.st_ino,
+            }
+            lock_path.write_text(
+                json.dumps({**maintenance, "release_sha": "c" * 40}) + "\n",
+                encoding="utf-8",
+            )
+            lock_path.chmod(0o600)
+            journal.write_text(
+                json.dumps(
+                    {
+                        "schema": "production_legacy_market_collector_handoff/1.1",
+                        "host_role": "bot",
+                        "status": "PRIMARY_COMMITTED",
+                        "release_sha": "b" * 40,
+                        "maintenance_lock": maintenance,
+                        "secrets_disclosed": False,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            journal.chmod(0o600)
+
+            run_lock = cutover.ExclusiveRunLock(secure)
+            with self.assertRaisesRegex(
+                cutover.ProductionCutoverError,
+                "BLOCKED_MARKET_MAINTENANCE_LOCK",
+            ):
+                run_lock.adopt_market_pipeline_maintenance(
+                    journal=journal,
+                    expected_journal_sha256=hashlib.sha256(
+                        journal.read_bytes()
+                    ).hexdigest(),
+                    expected_primary_verification_sha256="3" * 64,
+                    release_sha="b" * 40,
+                )
+            self.assertFalse(run_lock.held)
+            self.assertTrue(lock_path.exists())
+
     def test_reconciliation_lock_allows_only_its_exact_failed_journal(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             secure = Path(tmpdir) / "artifacts"
@@ -1568,6 +3042,81 @@ class ProductionQueueCutoverTests(unittest.TestCase):
             self.assertFalse(payload["source_profile_changed"])
             self.assertEqual(payload["synthetic_customer_mutations"], 0)
             live.assert_called_once()
+
+    def test_queue_owned_redeploy_threads_exact_private_primary_attestation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source, staging, manifest = self.fixture(root)
+            values = planner.queue_target_values(planner.parse_env_file(source))
+            values["PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE"] = (
+                "PRIVATE_PRIMARY"
+            )
+            self.write_env(source, values)
+            backup_receipt = root / "backup.json"
+            backup_receipt.write_text("{}", encoding="utf-8")
+            backup_digest = hashlib.sha256(
+                backup_receipt.read_bytes()
+            ).hexdigest()
+            manifest_values = planner.parse_env_file(manifest)
+            manifest_values.update(
+                {
+                    "PRODUCTION_BACKUP_RECEIPT_PATH": str(backup_receipt),
+                    "PRODUCTION_BACKUP_RECEIPT_SHA256": backup_digest,
+                }
+            )
+            self.write_env(manifest, manifest_values)
+            preparation = root / "private-primary-preparation.json"
+            preparation.write_text('{"status":"PASS"}\n', encoding="utf-8")
+            preparation.chmod(0o600)
+            attestation = cutover.bind_private_primary_deploy_attestation(
+                manifest,
+                manifest_sha256=cutover._sha256(manifest),
+                receipt_path=preparation,
+                receipt_sha256=cutover._sha256(preparation),
+            )
+            original_source = source.read_bytes()
+            source_digest = hashlib.sha256(original_source).hexdigest()
+            artifacts = root / "artifacts"
+            artifacts.mkdir(mode=0o700)
+            binding = self.binding()
+            preflight = root / "redeploy-preflight.json"
+            preflight_digest = self.write_redeploy_preflight(
+                preflight, binding, backup_digest, source_digest
+            )
+            fake = FakeRedeployOperations(manifest)
+            live = Mock(
+                return_value={
+                    "status": "READY_FOR_QUEUE_V1_REDEPLOY",
+                    "source_sha256": source_digest,
+                    "git": binding,
+                }
+            )
+            with patch.object(cutover, "git_binding", return_value=binding):
+                result = cutover.redeploy_queue_v1(
+                    manifest=manifest,
+                    staging_env=staging,
+                    preflight_report=preflight,
+                    preflight_digest=preflight_digest,
+                    backup_receipt=backup_receipt,
+                    backup_digest=backup_digest,
+                    artifact_dir=artifacts,
+                    confirmation=cutover.REDEPLOY_CONFIRMATION,
+                    private_primary_attestation=attestation,
+                    operations_factory=lambda _manifest: fake,
+                    preflight_runner=live,
+                )
+            self.assertEqual(result["status"], "redeployed")
+            self.assertEqual(fake.private_primary_attestations, [attestation])
+            self.assertEqual(source.read_bytes(), original_source)
+            payload = json.loads(
+                (artifacts / result["receipt_file"]).read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                payload["private_primary_manifest_attestation"],
+                cutover._private_primary_attestation_binding(
+                    manifest, attestation
+                ),
+            )
 
     def test_queue_redeploy_preflight_binds_current_runtime_backup_to_target_git(self):
         with tempfile.TemporaryDirectory() as tmpdir:
