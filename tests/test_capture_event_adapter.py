@@ -33,6 +33,7 @@ def market_event(
     edited: str | None = None,
     is_backfill: bool = False,
     entities: list[dict[str, object]] | None = None,
+    content_type: str = "text",
 ) -> dict[str, object]:
     message = {
         "message_id": str(message_id),
@@ -42,6 +43,7 @@ def market_event(
         "text_sha256": sha256(text.encode("utf-8")).hexdigest() if text is not None else None,
         "is_forwarded": False,
         "entities": entities or [],
+        "content_type": content_type,
     }
     return {
         "schema": "market_channel_event",
@@ -73,6 +75,7 @@ def group_event(
     reply_to: int | None = None,
     published: str | None = "2026-08-24T10:00:00Z",
     available: str | None = "2026-08-24T10:00:01Z",
+    edited: str | None = None,
     is_backfill: bool = False,
 ) -> dict[str, object]:
     return {
@@ -84,7 +87,7 @@ def group_event(
         "message": {
             "message_id": str(message_id),
             "published_at_utc": published,
-            "edited_at_utc": None,
+            "edited_at_utc": edited,
             "text": text,
             "content_type": "text" if text is not None else None,
             "is_forwarded": False,
@@ -253,6 +256,175 @@ class CaptureEventAdapterTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual((row["price_num"], row["event_time_utc"]), (4630.1, "2026-08-24T10:00:01Z"))
 
+    def test_non_model_edit_retracts_previous_public_market_fact(self) -> None:
+        self._stage_market(
+            market_event(
+                15,
+                source="XAUUSD",
+                text="4630.10",
+                message_id=15,
+                published="2026-08-24T10:00:01Z",
+                available="2026-08-24T10:00:02Z",
+            )
+        )
+        self._project()
+        self._stage_market(
+            market_event(
+                16,
+                source="XAUUSD",
+                text="",
+                content_type="media_only",
+                event_type="message_edited",
+                message_id=15,
+                published="2026-08-24T10:00:01Z",
+                edited="2026-08-24T10:00:20Z",
+                available="2026-08-24T10:00:21Z",
+            )
+        )
+        lineage = self.staging.execute(
+            "SELECT status,disposition_code FROM capture_event_lineage "
+            "WHERE event_id=?",
+            ("00000000-0000-7000-8000-000000000016",),
+        ).fetchone()
+        self.assertEqual(
+            (str(lineage["status"]), str(lineage["disposition_code"])),
+            ("FILTERED", "NON_MODEL_MEDIA_ONLY"),
+        )
+        self._project()
+        self.assertEqual(
+            self.market.execute(
+                "SELECT quality_state FROM market_observations "
+                "WHERE source_code='XAUUSD' AND price_value='4630.10'"
+            ).fetchone()[0],
+            "REJECTED",
+        )
+
+    def test_same_receipt_public_edit_marks_the_actual_current_revision_parsed(self) -> None:
+        self._stage_market(
+            market_event(
+                999,
+                source="XAUUSD",
+                text="4630.10",
+                message_id=17,
+                published="2026-08-24T10:00:01Z",
+                available="2026-08-24T10:00:30Z",
+            )
+        )
+        self._stage_market(
+            market_event(
+                1,
+                source="XAUUSD",
+                text="4631.20",
+                event_type="message_edited",
+                message_id=17,
+                published="2026-08-24T10:00:01Z",
+                edited="2026-08-24T10:00:20Z",
+                available="2026-08-24T10:00:30Z",
+            )
+        )
+        self._project()
+        rows = self.staging.execute(
+            "SELECT event_id,status,disposition_code FROM capture_event_lineage "
+            "WHERE source_id='XAUUSD' AND message_id=17 ORDER BY rowid"
+        ).fetchall()
+        self.assertEqual(
+            [(str(row["status"]), str(row["disposition_code"])) for row in rows],
+            [
+                ("FILTERED", "SUPERSEDED_BY_NEWER_REVISION"),
+                ("PARSED", "PARSER_EXECUTED"),
+            ],
+        )
+        self.assertTrue(str(rows[1]["event_id"]).endswith("000000000001"))
+        self.assertEqual(
+            self.market.execute(
+                "SELECT price_num FROM market_observations "
+                "WHERE source_code='XAUUSD' AND quality_state='ELIGIBLE'"
+            ).fetchone()[0],
+            4631.2,
+        )
+
+    def test_same_receipt_private_revisions_keep_reverse_lexical_lineage(self) -> None:
+        self._stage_market(
+            market_event(
+                999,
+                source="MELTED_PRIMARY_FLOW",
+                text="95,000,000 فروش 5 تا بدون حواله",
+                message_id=18,
+                published="2026-08-24T10:00:01Z",
+                available="2026-08-24T10:00:30Z",
+            )
+        )
+        self._stage_market(
+            market_event(
+                1,
+                source="MELTED_PRIMARY_FLOW",
+                text="95,100,000 فروش 5 تا بدون حواله",
+                event_type="message_edited",
+                message_id=18,
+                published="2026-08-24T10:00:01Z",
+                edited="2026-08-24T10:00:20Z",
+                available="2026-08-24T10:00:30Z",
+            )
+        )
+
+        self._project()
+
+        rows = self.staging.execute(
+            "SELECT event_id,status,disposition_code FROM capture_event_lineage "
+            "WHERE source_id='MELTED_PRIMARY_FLOW' AND message_id=18 ORDER BY rowid"
+        ).fetchall()
+        self.assertEqual(
+            [(str(row["status"]), str(row["disposition_code"])) for row in rows],
+            [("PARSED", "PARSER_EXECUTED"), ("PARSED", "PARSER_EXECUTED")],
+        )
+        self.assertTrue(str(rows[0]["event_id"]).endswith("000000000999"))
+        self.assertTrue(str(rows[1]["event_id"]).endswith("000000000001"))
+        self.assertEqual(
+            self.staging.execute(
+                "SELECT message_text FROM capture_market_messages "
+                "WHERE source_id='MELTED_PRIMARY_FLOW' AND message_id=18"
+            ).fetchone()[0],
+            "95,100,000 فروش 5 تا بدون حواله",
+        )
+
+    def test_same_receipt_group_edit_marks_reverse_lexical_current_parsed(self) -> None:
+        self._stage_group(
+            group_event(
+                999,
+                text="امام فروش فردا 190000 / 5 تا",
+                message_id=25,
+                sender="owner00000000025",
+                available="2026-08-24T10:00:30Z",
+            )
+        )
+        self._stage_group(
+            group_event(
+                1,
+                text="امام فروش فردا 190100 / 5 تا",
+                event_type="message_edited",
+                message_id=25,
+                sender="owner00000000025",
+                edited="2026-08-24T10:00:20Z",
+                available="2026-08-24T10:00:30Z",
+            )
+        )
+
+        self._project()
+
+        rows = self.staging.execute(
+            "SELECT event_id,status,disposition_code FROM capture_event_lineage "
+            "WHERE source_id='GROUP_1' AND message_id=25 ORDER BY rowid"
+        ).fetchall()
+        self.assertEqual(
+            [(str(row["status"]), str(row["disposition_code"])) for row in rows],
+            [
+                ("FILTERED", "SUPERSEDED_BY_NEWER_REVISION"),
+                ("PARSED", "PARSER_EXECUTED"),
+            ],
+        )
+        self.assertTrue(str(rows[0]["event_id"]).endswith("000000000999"))
+        self.assertTrue(str(rows[1]["event_id"]).endswith("000000000001"))
+
     def test_never_exported_dependency_retraction_does_not_requeue(self) -> None:
         self._stage_market(
             market_event(
@@ -348,6 +520,49 @@ class CaptureEventAdapterTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(trade["quality_state"], "REJECTED")
 
+    def test_live_group_revisions_reach_terminal_lineage_after_projection(self) -> None:
+        self._stage_group(
+            group_event(
+                24,
+                text="امام فروش فردا 190000 / 5 تا",
+                message_id=24,
+                sender="owner00000000024",
+                available="2026-08-24T10:00:30Z",
+            )
+        )
+        self._stage_group(
+            group_event(
+                25,
+                text="امام فروش فردا 190100 / 5 تا",
+                event_type="message_edited",
+                message_id=24,
+                sender="owner00000000024",
+                edited="2026-08-24T10:00:20Z",
+                available="2026-08-24T10:00:30Z",
+            )
+        )
+        pending = self.staging.execute(
+            "SELECT status FROM capture_event_lineage WHERE source_id='GROUP_1' "
+            "AND message_id=24 ORDER BY event_id"
+        ).fetchall()
+        self.assertEqual([str(row["status"]) for row in pending], ["PENDING", "PENDING"])
+
+        self._project()
+
+        terminal = self.staging.execute(
+            "SELECT status,disposition_code,terminal_at_utc "
+            "FROM capture_event_lineage WHERE source_id='GROUP_1' "
+            "AND message_id=24 ORDER BY event_id"
+        ).fetchall()
+        self.assertEqual(
+            [(str(row["status"]), str(row["disposition_code"])) for row in terminal],
+            [
+                ("FILTERED", "SUPERSEDED_BY_NEWER_REVISION"),
+                ("PARSED", "PARSER_EXECUTED"),
+            ],
+        )
+        self.assertTrue(all(row["terminal_at_utc"] is not None for row in terminal))
+
     def test_duplicate_event_is_idempotent(self) -> None:
         event = decode_market_channel_event(market_event(30, source="MELTED_FLOW", text="95,000,000 باحواله فروش"))
         first = stage_capture_event(self.staging, event)
@@ -405,7 +620,7 @@ class CaptureEventAdapterTests(unittest.TestCase):
         row = self.staging.execute(
             "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
         ).fetchone()
-        self.assertEqual(row["schema_version"], 6)
+        self.assertEqual(row["schema_version"], 8)
         self.assertEqual(
             self.staging.execute(
                 "SELECT COUNT(*) FROM capture_market_message_revisions"
@@ -459,7 +674,7 @@ class CaptureEventAdapterTests(unittest.TestCase):
             self.staging.execute(
                 "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
             ).fetchone()[0],
-            6,
+            8,
         )
         self.assertEqual(
             self.staging.execute(

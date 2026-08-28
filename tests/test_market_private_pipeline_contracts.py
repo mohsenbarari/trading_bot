@@ -2,10 +2,12 @@ import copy
 import json
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 from pydantic import ValidationError
 
+from core.market_intelligence.market_fact_archive import _fact_semantic_fingerprint
 from core.market_intelligence.private_pipeline_contracts import (
     ESTIMATOR_RATE_GRID_V1,
     EstimatorSnapshotV1,
@@ -223,6 +225,50 @@ class MarketPrivatePipelineContractTests(unittest.TestCase):
         validated = MarketFactBatchV1.model_validate(batch)
         self.assertEqual(
             [item.fact.source_sequence for item in validated.items], [1, 1]
+        )
+
+    def test_fact_semantic_fingerprint_covers_quality_parser_and_times(self):
+        payload = fixture("market_fact.json")["payload"]
+        common = {
+            "event_key": "1" * 64,
+            "origin_event_key": "2" * 64,
+            "source_code": "GROUP_1",
+            "stream_id": "market.fact.coin.group.1",
+            "source_sequence": 7,
+            "occurred_at_utc": datetime(2026, 8, 26, 5, tzinfo=timezone.utc),
+            "available_at_utc": datetime(
+                2026, 8, 26, 5, 0, 1, tzinfo=timezone.utc
+            ),
+            "parser_version": "parser-v1",
+            "quality_state": "ELIGIBLE",
+            "quality_reason_codes": (),
+            "payload": payload,
+        }
+        baseline = _fact_semantic_fingerprint(**common)
+        variants = (
+            {**common, "event_key": "3" * 64},
+            {**common, "origin_event_key": "4" * 64},
+            {**common, "source_code": "GROUP_2"},
+            {**common, "stream_id": "market.fact.coin.group.2"},
+            {**common, "source_sequence": 8},
+            {
+                **common,
+                "occurred_at_utc": datetime(
+                    2026, 8, 26, 4, 59, 59, tzinfo=timezone.utc
+                ),
+            },
+            {**common, "quality_state": "REJECTED"},
+            {**common, "quality_reason_codes": ("RETRACTED",)},
+            {**common, "parser_version": "parser-v2"},
+            {
+                **common,
+                "available_at_utc": datetime(
+                    2026, 8, 26, 5, 0, 2, tzinfo=timezone.utc
+                ),
+            },
+        )
+        self.assertTrue(
+            all(_fact_semantic_fingerprint(**variant) != baseline for variant in variants)
         )
 
     def test_safe_no_data_cannot_carry_rates(self):

@@ -21,6 +21,40 @@ def fixture(name):
 
 
 class MarketPipelineStage3FoundationTests(unittest.TestCase):
+    def test_live_capture_starting_is_process_healthy_during_backfill(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ,
+            {"MARKET_PIPELINE_STATE_ROOT": directory},
+            clear=False,
+        ), patch("os.kill"):
+            state = Path(directory) / "market-capture-account1"
+            state.mkdir(parents=True)
+            (state / "health.json").write_text(
+                json.dumps(
+                    {
+                        "schema": "market_capture_engine/1.0",
+                        "role": "market-capture-account1",
+                        "mode": "live",
+                        "status": "live-starting",
+                        "updated_at_utc": foundation.utc_now()
+                        .isoformat()
+                        .replace("+00:00", "Z"),
+                        "pid": os.getpid(),
+                        "sources": {
+                            "MELTED_PRIMARY_FLOW": {},
+                            "MELTED_AGGREGATE": {},
+                            "MELTED_FLOW": {},
+                            "USD_HERAT": {},
+                            "XAUUSD": {},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                foundation.run_healthcheck("market-capture-account1", 60), 0
+            )
+
     def test_live_mode_stage10_roles_bind_the_release_revision(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

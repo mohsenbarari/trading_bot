@@ -29,6 +29,8 @@ from .private_capture import (
     ACCOUNT_SOURCES,
     CaptureEngine,
     CaptureRuntimeError,
+    QuarantineEventIdentity,
+    StageResult,
     parse_utc,
     utc_now,
     utc_text,
@@ -39,6 +41,24 @@ CAPTURE_CONFIG_CONTRACT = "market_telegram_capture_config/1.0"
 AUTHORITY_MARKER_CONTRACT = "market_capture_authority/1.0"
 SESSION_FILE_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{2,48}\.session$")
 LIVE_REPLY_CACHE_MAX_ENTRIES = 50_000
+EXACT_CATCHUP_SOURCES = frozenset(
+    {"MELTED_PRIMARY_FLOW", "GROUP_1", "GROUP_2"}
+)
+
+_QUARANTINABLE_BACKFILL_ERRORS = frozenset(
+    {
+        "CAPTURE_MESSAGE_ID_INVALID",
+        "CAPTURE_MESSAGE_TEXT_INVALID",
+        "CAPTURE_MESSAGE_TEXT_REQUIRED",
+        "CAPTURE_MESSAGE_TEXT_TOO_LARGE",
+        "COIN_CAPTURE_SENDER_NAME_INVALID",
+        "COIN_CAPTURE_SENDER_TELEGRAM_ID_INVALID",
+        "COIN_CAPTURE_SENDER_TELEGRAM_ID_MISSING",
+        "MARKET_CAPTURE_ENTITIES_INVALID",
+        "MARKET_CAPTURE_ENTITY_INVALID",
+        "MARKET_CAPTURE_ENTITY_RANGE_INVALID",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,6 +223,43 @@ def _aware(value: datetime | None, *, field: str) -> datetime | None:
     return value.astimezone(timezone.utc)
 
 
+def _quarantinable_backfill_error(exc: CaptureRuntimeError) -> bool:
+    return str(exc).strip().upper() in _QUARANTINABLE_BACKFILL_ERRORS
+
+
+def _quarantine_identity(
+    policy: SourcePolicy,
+    message: object,
+    *,
+    is_forum: bool,
+    event_type: str,
+    origin: str,
+) -> tuple[QuarantineEventIdentity, TelegramMessageSnapshot] | None:
+    """Return a value-free identity, or ``None`` when identity is ambiguous.
+
+    Ambiguous events deliberately remain in the legacy unresolved quarantine;
+    inventing a message id or revision would make later replay evidence false.
+    """
+
+    try:
+        snapshot = snapshot_from_telethon(
+            message,
+            is_forum=is_forum,
+        )
+        identity = QuarantineEventIdentity(
+            account=policy.account,
+            source_code=policy.source_code,
+            message_id=snapshot.message_id,
+            revision_sha256=_revision(snapshot),
+            event_type=event_type,
+            origin=origin,
+        )
+        identity.validate()
+    except (CaptureRuntimeError, TypeError, ValueError, OverflowError):
+        return None
+    return identity, snapshot
+
+
 def _available(
     received_at: datetime, published_at: datetime, edited_at: datetime | None
 ) -> tuple[datetime, bool]:
@@ -292,6 +349,7 @@ def build_market_event(
     event_type: Literal["message_created", "message_snapshot", "message_edited"],
     received_at: datetime,
     backfill: bool,
+    explicit_backfill: bool = False,
 ) -> dict[str, Any]:
     if policy.account != "account1":
         raise CaptureRuntimeError("market_capture_policy_invalid")
@@ -306,9 +364,11 @@ def build_market_event(
     available, adjusted = _available(received, published, edited)
     revision = _revision(snapshot)
     logical_type = "message_upsert" if event_type != "message_edited" else event_type
+    explicit_identity = "|explicit_backfill" if explicit_backfill else ""
     identity = (
         f"market_channel_event|{policy.source_code}|{logical_type}|"
         f"{snapshot.message_id}|{int(effective.timestamp() * 1_000_000)}|{revision}"
+        f"{explicit_identity}"
     )
     text_hash = sha256(snapshot.text.encode("utf-8")).hexdigest()
     return {
@@ -359,7 +419,13 @@ def build_market_event(
         "producer": {
             "name": "market_channel_capture",
             "version": "2.0.0-docker",
-            "origin": "reconcile" if backfill else "live",
+            "origin": (
+                "explicit_backfill"
+                if explicit_backfill
+                else "reconcile"
+                if backfill
+                else "live"
+            ),
             "is_backfill": backfill,
             "received_at_utc": utc_text(received),
             "available_at_utc": utc_text(available),
@@ -377,6 +443,7 @@ def build_group_event(
     backfill: bool,
     reply_status: str,
     hmac_key: bytes,
+    explicit_backfill: bool = False,
 ) -> dict[str, Any]:
     if policy.account != "account2":
         raise CaptureRuntimeError("group_capture_policy_invalid")
@@ -398,9 +465,10 @@ def build_group_event(
     assert occurred is not None
     available, _adjusted = _available(received, published, edited)
     revision = _revision(snapshot) if event_type == "message_edited" else ""
+    explicit_identity = "|explicit_backfill" if explicit_backfill else ""
     identity = (
         f"coin|{policy.source_code}|{event_type}|{snapshot.message_id}|"
-        f"{int(occurred.timestamp() * 1_000_000)}|{revision}"
+        f"{int(occurred.timestamp() * 1_000_000)}|{revision}{explicit_identity}"
     )
     parent = snapshot.reply_to_message_id
     topic_id = snapshot.reply_to_top_id
@@ -449,6 +517,13 @@ def build_group_event(
         "producer": {
             "name": "coin_group_capture",
             "version": "3.1.0-docker",
+            "origin": (
+                "explicit_backfill"
+                if explicit_backfill
+                else "reconcile"
+                if backfill
+                else "live"
+            ),
             "available_at_utc": utc_text(available),
         },
     }
@@ -506,6 +581,7 @@ def build_deleted_event(
         "producer": {
             "name": "coin_group_capture",
             "version": "3.1.0-docker",
+            "origin": "live",
             "available_at_utc": utc_text(received),
         },
     }
@@ -625,6 +701,11 @@ class TelegramCaptureProvider:
         hmac_key: bytes | None,
         stop: threading.Event,
         heartbeat: Callable[[], None] | None = None,
+        backfill_not_before: datetime | None = None,
+        backfill_upper_bound: datetime | None = None,
+        backfill_max_messages: int = 100_000,
+        backfill_source_codes: frozenset[str] | None = None,
+        release_sha: str | None = None,
     ) -> None:
         self.config = config
         self.engine = engine
@@ -632,6 +713,56 @@ class TelegramCaptureProvider:
         self.hmac_key = hmac_key
         self.stop = stop
         self.heartbeat = heartbeat
+        self.backfill_not_before = (
+            _aware(backfill_not_before, field="capture_backfill_not_before")
+            if backfill_not_before is not None
+            else None
+        )
+        self.backfill_upper_bound = (
+            _aware(backfill_upper_bound, field="capture_backfill_upper_bound")
+            if backfill_upper_bound is not None
+            else utc_now()
+            if backfill_not_before is not None
+            else None
+        )
+        if not 2_000 <= int(backfill_max_messages) <= 250_000:
+            raise CaptureRuntimeError("capture_backfill_max_messages_invalid")
+        self.backfill_max_messages = int(backfill_max_messages)
+        requested_sources = backfill_source_codes or frozenset()
+        if not requested_sources.issubset(SOURCE_POLICIES):
+            raise CaptureRuntimeError("capture_backfill_source_codes_invalid")
+        if self.backfill_not_before is not None and not requested_sources:
+            raise CaptureRuntimeError("capture_backfill_source_codes_required")
+        self.backfill_source_codes = frozenset(requested_sources)
+        if self.backfill_not_before is not None:
+            # Legacy markers collapsed source attribution and therefore
+            # expand to the complete account.  New event-bound failures add
+            # only their exact sources.  The configured promotion sources are
+            # always retained.
+            self.backfill_source_codes = frozenset(
+                self.backfill_source_codes
+                | self.engine.state.quarantine_replay_sources(
+                    self.backfill_not_before
+                )
+            )
+        if self.backfill_not_before is not None and not (
+            self.backfill_source_codes & ACCOUNT_SOURCES[self.config.account]
+        ):
+            raise CaptureRuntimeError("capture_backfill_account_sources_missing")
+        if (
+            self.backfill_not_before is not None
+            and self.backfill_upper_bound is not None
+            and self.backfill_upper_bound < self.backfill_not_before
+        ):
+            raise CaptureRuntimeError("capture_backfill_bounds_invalid")
+        if self.backfill_not_before is not None:
+            if (
+                release_sha is None
+                or not re.fullmatch(r"[0-9a-f]{40}", release_sha)
+            ):
+                raise CaptureRuntimeError("capture_backfill_release_required")
+        self.release_sha = release_sha
+        self._replay_run_id: str | None = None
         self._policy_by_peer = {
             binding.peer_id: SOURCE_POLICIES[binding.source_code]
             for binding in config.sources
@@ -641,12 +772,63 @@ class TelegramCaptureProvider:
         self._live_seen: set[tuple[str, int]] = set()
         self._live_seen_order: deque[tuple[str, int]] = deque()
         self.reconciliation_truncated = False
+        self.backfill_in_progress = False
         self._fatal: BaseException | None = None
         self._ready_for_live_updates = False
+
+    def _ensure_replay_run(self) -> str | None:
+        if self.backfill_not_before is None:
+            return None
+        if self.release_sha is None or self.backfill_upper_bound is None:
+            raise CaptureRuntimeError("capture_backfill_release_required")
+        sources = self.backfill_source_codes & ACCOUNT_SOURCES[self.config.account]
+        if not sources:
+            raise CaptureRuntimeError("capture_backfill_account_sources_missing")
+        if self._replay_run_id is None:
+            self._replay_run_id = self.engine.state.begin_replay_run(
+                cutoff=self.backfill_not_before,
+                upper_bound=self.backfill_upper_bound,
+                source_codes=sources,
+                release_sha=self.release_sha,
+            )
+            # On restart, ``begin_replay_run`` resumes the prior fixed window;
+            # never widen it to the new process start time.
+            self.backfill_upper_bound = self.engine.state.replay_run_upper_bound(
+                self._replay_run_id
+            )
+        return self._replay_run_id
 
     def _fail_runtime(self, exc: BaseException) -> None:
         self._fatal = exc
         self.stop.set()
+
+    def _note_event_quarantine(
+        self,
+        policy: SourcePolicy,
+        message: object,
+        exc: CaptureRuntimeError,
+        *,
+        marker: bytes,
+        event_type: str,
+        origin: str,
+    ) -> None:
+        entity = self._entity_by_source.get(policy.source_code)
+        bound = _quarantine_identity(
+            policy,
+            message,
+            is_forum=bool(getattr(entity, "forum", False)),
+            event_type=event_type,
+            origin=origin,
+        )
+        if bound is None:
+            # No synthetic identity is permitted.  Preserve the old generic
+            # unresolved marker so promotion continues to fail closed.
+            self.engine.state.note_quarantine(
+                marker, exc, source_code=policy.source_code
+            )
+            return
+        identity, _snapshot = bound
+        self.engine.state.note_event_quarantine(identity, exc)
 
     def _policy(self, peer_id: object) -> SourcePolicy | None:
         try:
@@ -677,7 +859,9 @@ class TelegramCaptureProvider:
         backfill: bool,
         edited: bool,
         parent_depth: int = 0,
-    ) -> None:
+        explicit_backfill: bool = False,
+        explicit_results: list[StageResult] | None = None,
+    ) -> StageResult:
         sender_entity = getattr(message, "sender", None)
         if (
             policy.account == "account2"
@@ -717,6 +901,7 @@ class TelegramCaptureProvider:
                 ),
                 received_at=received,
                 backfill=backfill,
+                explicit_backfill=explicit_backfill,
             )
         else:
             if self.hmac_key is None:
@@ -740,15 +925,44 @@ class TelegramCaptureProvider:
                             is_forum=bool(getattr(entity, "forum", False)),
                         )
                         if parent_snapshot.published_at >= snapshot.published_at - timedelta(hours=2):
-                            await self._capture_message(
-                                client,
-                                policy,
-                                parent_message,
-                                backfill=True,
-                                edited=parent_snapshot.edited_at is not None,
-                                parent_depth=parent_depth + 1,
-                            )
-                            reply_status = "resolved_from_api"
+                            try:
+                                await self._capture_message(
+                                    client,
+                                    policy,
+                                    parent_message,
+                                    backfill=True,
+                                    edited=parent_snapshot.edited_at is not None,
+                                    parent_depth=parent_depth + 1,
+                                    # A recursively fetched reply ancestor is
+                                    # causal context, not an item enumerated by
+                                    # the explicit replay window.  Counting it
+                                    # as explicit made attempted/accepted drift
+                                    # from the immutable replay manifest.  If
+                                    # the ancestor is itself in the requested
+                                    # window, the top-level iterator will visit
+                                    # it and create its own manifest entry.
+                                    explicit_backfill=False,
+                                    explicit_results=None,
+                                )
+                            except CaptureRuntimeError as exc:
+                                if not (
+                                    explicit_backfill
+                                    and _quarantinable_backfill_error(exc)
+                                ):
+                                    raise
+                                # A reply ancestor is causal context, not the
+                                # in-window child currently being captured.  A
+                                # media/service/invalid ancestor must not make
+                                # the valid child disappear.  The same parent,
+                                # when it is itself enumerated in the requested
+                                # window, is still quarantined by the top-level
+                                # loop and therefore blocks coverage.
+                                self.engine.state.note_context_filter(
+                                    exc, source_code=policy.source_code
+                                )
+                                reply_status = "unavailable"
+                            else:
+                                reply_status = "resolved_from_api"
                         else:
                             reply_status = "unavailable"
                     else:
@@ -763,10 +977,14 @@ class TelegramCaptureProvider:
                 backfill=backfill,
                 reply_status=reply_status,
                 hmac_key=self.hmac_key,
+                explicit_backfill=explicit_backfill,
             )
-        self.engine.accept(document)
+        result = self.engine.accept(document)
+        if explicit_backfill and explicit_results is not None:
+            explicit_results.append(result)
         if not backfill:
             self._remember_live_reply_parent(policy, snapshot.message_id)
+        return result
 
     async def _reconcile_source(self, client: object, policy: SourcePolicy) -> None:
         entity = self._entity_by_source[policy.source_code]
@@ -813,11 +1031,192 @@ class TelegramCaptureProvider:
                 # messages that have no model-consumable text. One such
                 # historical item must not poison reconciliation or prevent
                 # later valid market messages from becoming durable.
-                self.engine.state.note_quarantine(
-                    b"telegram-reconcile-event",
+                self._note_event_quarantine(
+                    policy,
+                    message,
                     exc,
-                    source_code=policy.source_code,
+                    marker=b"telegram-reconcile-event",
+                    event_type=(
+                        "message_edited"
+                        if getattr(message, "edit_date", None) is not None
+                        else "message_snapshot"
+                        if policy.account == "account1"
+                        else "message_created"
+                    ),
+                    origin="reconcile",
                 )
+
+    async def _backfill_source_to_cutoff(
+        self, client: object, policy: SourcePolicy
+    ) -> None:
+        cutoff = self.backfill_not_before
+        if cutoff is None or policy.source_code not in self.backfill_source_codes:
+            return
+        replay_run_id = self._ensure_replay_run()
+        if replay_run_id is None:
+            raise CaptureRuntimeError("capture_replay_run_missing")
+        if (
+            self.engine.state.backfill_covers(policy.source_code, cutoff)
+            and self.engine.state.replay_source_manifest_count(
+                replay_run_id, policy.source_code
+            )
+            > 0
+        ):
+            return
+        if policy.account != self.config.account:
+            raise CaptureRuntimeError("capture_backfill_policy_account_mismatch")
+        entity = self._entity_by_source[policy.source_code]
+        messages: list[object] = []
+        exhaustion = "source_exhausted"
+        self.engine.state.begin_backfill(policy.source_code, cutoff)
+        attempted_total = 0
+        async for message in client.iter_messages(  # type: ignore[attr-defined]
+            entity, limit=self.backfill_max_messages + 1
+        ):
+            if self.stop.is_set():
+                raise CaptureRuntimeError("telegram_backfill_interrupted")
+            published = _aware(
+                getattr(message, "date", None), field="telegram_backfill_date"
+            )
+            if published is None:
+                raise CaptureRuntimeError("telegram_backfill_date_required")
+            if (
+                self.backfill_upper_bound is not None
+                and published > self.backfill_upper_bound
+            ):
+                continue
+            edited = _aware(
+                getattr(message, "edit_date", None),
+                field="telegram_backfill_edit_date",
+            )
+            if (
+                edited is not None
+                and self.backfill_upper_bound is not None
+                and published <= self.backfill_upper_bound < edited
+            ):
+                # Telegram exposes only the latest revision here.  Pretending
+                # it was the pre-upper-bound revision would fabricate a
+                # point-in-time replay, so retain a source/revision-bound
+                # blocker instead.
+                self._note_event_quarantine(
+                    policy,
+                    message,
+                    CaptureRuntimeError(
+                        "CAPTURE_REPLAY_POINT_IN_TIME_REVISION_UNAVAILABLE"
+                    ),
+                    marker=b"telegram-explicit-backfill-event",
+                    event_type="message_edited",
+                    origin="explicit_backfill",
+                )
+                self.engine.state.note_backfill_outcome(
+                    policy.source_code, cutoff, "quarantined"
+                )
+                attempted_total += 1
+                continue
+            if published < cutoff:
+                exhaustion = "cutoff_crossed"
+                break
+            messages.append(message)
+            if len(messages) > self.backfill_max_messages:
+                self.reconciliation_truncated = True
+                raise CaptureRuntimeError("telegram_backfill_limit_exceeded")
+        def record_results(results: list[StageResult]) -> None:
+            nonlocal attempted_total
+            for result in results:
+                self.engine.state.note_backfill_outcome(
+                    policy.source_code,
+                    cutoff,
+                    "duplicate" if result.status == "duplicate" else "accepted",
+                )
+                attempted_total += 1
+
+        for message in reversed(messages):
+            if self.stop.is_set():
+                raise CaptureRuntimeError("telegram_backfill_interrupted")
+            results: list[StageResult] = []
+            try:
+                result = await self._capture_message(
+                    client,
+                    policy,
+                    message,
+                    backfill=True,
+                    edited=getattr(message, "edit_date", None) is not None,
+                    explicit_backfill=True,
+                    explicit_results=results,
+                )
+            except CaptureRuntimeError as exc:
+                record_results(results)
+                if not _quarantinable_backfill_error(exc):
+                    raise
+                self._note_event_quarantine(
+                    policy,
+                    message,
+                    exc,
+                    marker=b"telegram-explicit-backfill-event",
+                    event_type=(
+                        "message_edited"
+                        if getattr(message, "edit_date", None) is not None
+                        else "message_snapshot"
+                        if policy.account == "account1"
+                        else "message_created"
+                    ),
+                    origin="explicit_backfill",
+                )
+                self.engine.state.note_backfill_outcome(
+                    policy.source_code, cutoff, "quarantined"
+                )
+                attempted_total += 1
+            except BaseException:
+                # A durable accept can precede a transport/process failure.
+                # Account every result already returned by the capture engine
+                # before propagating so recovery evidence is never silently
+                # reset to zero.
+                record_results(results)
+                raise
+            else:
+                record_results(results)
+                event_type = (
+                    "message_edited"
+                    if getattr(message, "edit_date", None) is not None
+                    else "message_snapshot"
+                    if policy.account == "account1"
+                    else "message_created"
+                )
+                bound = _quarantine_identity(
+                    policy,
+                    message,
+                    is_forum=bool(getattr(entity, "forum", False)),
+                    event_type=event_type,
+                    origin="explicit_backfill",
+                )
+                if bound is None:
+                    raise CaptureRuntimeError("capture_replay_identity_unavailable")
+                identity, snapshot = bound
+                available = self.engine.state.event_available_at(result.event_id)
+                if available is None:
+                    raise CaptureRuntimeError("capture_replay_durable_event_missing")
+                event_time = (
+                    snapshot.edited_at
+                    if event_type == "message_edited"
+                    else snapshot.published_at
+                )
+                self.engine.state.record_replay_manifest_entry(
+                    run_id=replay_run_id,
+                    identity=identity,
+                    event_id=result.event_id,
+                    content_type=_content_type(snapshot),
+                    event_time_utc=utc_text(event_time),
+                    available_at_utc=available,
+                    capture_status=(
+                        "duplicate" if result.status == "duplicate" else "accepted"
+                    ),
+                )
+        self.engine.state.mark_backfill_complete(
+            policy.source_code,
+            cutoff,
+            expected_attempted=attempted_total,
+            exhaustion=exhaustion,
+        )
 
     async def run(self) -> None:
         try:
@@ -850,8 +1249,17 @@ class TelegramCaptureProvider:
                     client, policy, getattr(event, "message"), backfill=False, edited=False
                 )
             except CaptureRuntimeError as exc:
-                self.engine.state.note_quarantine(
-                    b"telegram-created-event", exc, source_code=policy.source_code
+                self._note_event_quarantine(
+                    policy,
+                    getattr(event, "message"),
+                    exc,
+                    marker=b"telegram-created-event",
+                    event_type=(
+                        "message_snapshot"
+                        if policy.account == "account1"
+                        else "message_created"
+                    ),
+                    origin="live",
                 )
             except BaseException as exc:
                 self._fail_runtime(exc)
@@ -868,8 +1276,13 @@ class TelegramCaptureProvider:
                     client, policy, getattr(event, "message"), backfill=False, edited=True
                 )
             except CaptureRuntimeError as exc:
-                self.engine.state.note_quarantine(
-                    b"telegram-edited-event", exc, source_code=policy.source_code
+                self._note_event_quarantine(
+                    policy,
+                    getattr(event, "message"),
+                    exc,
+                    marker=b"telegram-edited-event",
+                    event_type="message_edited",
+                    origin="live",
                 )
             except BaseException as exc:
                 self._fail_runtime(exc)
@@ -911,11 +1324,28 @@ class TelegramCaptureProvider:
                     binding.source_code
                 ]
             self._ready_for_live_updates = True
+            heartbeat_task = asyncio.create_task(heartbeat_loop())
+            self.backfill_in_progress = self.backfill_not_before is not None
+            try:
+                replay_run_id = self._ensure_replay_run()
+                for binding in self.config.sources:
+                    await self._backfill_source_to_cutoff(
+                        client, SOURCE_POLICIES[binding.source_code]
+                    )
+                if replay_run_id is not None:
+                    self.engine.state.complete_replay_run(replay_run_id)
+                    # Quarantine is not evidence that replay failed, but a
+                    # completed local manifest is also not proof that the
+                    # processor, archive, ACK and bot-side Store received the
+                    # same data.  Resolution therefore remains fail-closed
+                    # until the independent catch-up audit emits and applies a
+                    # digest-bound evidence bundle.
+            finally:
+                self.backfill_in_progress = False
             for binding in self.config.sources:
                 await self._reconcile_source(
                     client, SOURCE_POLICIES[binding.source_code]
                 )
-            heartbeat_task = asyncio.create_task(heartbeat_loop())
             while not self.stop.is_set():
                 try:
                     await asyncio.wait_for(

@@ -26,6 +26,7 @@ from core.market_intelligence.market_input_materializer import materialize_input
 from core.market_intelligence.market_store import connect_market_store
 from core.market_intelligence.private_pipeline_contracts import content_hash
 from core.market_intelligence.snapshot_publisher import publish_rate_ready_snapshot
+from scripts import audit_production_market_catchup as catchup_audit
 
 
 AT = "2026-08-26T05:00:00Z"
@@ -220,6 +221,119 @@ class Stage9AdapterTests(unittest.TestCase):
         self.assertEqual(str(trade_row["settlement_term"]), "CASH")
         self.assertEqual(str(trade_row["price_value"]), "187300")
         self.assertEqual(str(trade_row["quantity_value"]), "2")
+
+    def test_applied_trade_revised_to_audit_only_retires_prior_observation(self):
+        stream = "market.fact.coin.group.1"
+        offer = _fact(
+            201,
+            source_code="GROUP_1",
+            stream_id=stream,
+            source_sequence=1,
+            payload={
+                "kind": "COIN_OFFER",
+                "group_code": 1,
+                "instrument": "COIN_IMAM",
+                "side": "SELL",
+                "settlement": "CASH",
+                "trade_form": "PHYSICAL",
+                "offered_price_value": "187500",
+                "price_unit": "PROJECT_THOUSAND_TOMAN",
+                "quantity_value": "5",
+                "quantity_unit": "COIN_COUNT",
+            },
+        )
+        trade = _fact(
+            202,
+            source_code="GROUP_1",
+            stream_id=stream,
+            source_sequence=2,
+            payload={
+                "kind": "COIN_TRADE",
+                "offer_fact_id": offer["fact_id"],
+                "outcome": "CONFIRMED_PARTIAL",
+                "agreed_price_value": "187300",
+                "price_unit": "PROJECT_THOUSAND_TOMAN",
+                "agreed_quantity_value": "2",
+                "quantity_unit": "COIN_COUNT",
+            },
+        )
+        self._receive(
+            _batch(201, stream_id=stream, deliveries=[(1, offer), (2, trade)])
+        )
+        self.assertEqual(run_adapter_cycle(self.receiver, self.market).applied, 2)
+
+        revised = json.loads(json.dumps(trade))
+        revised["fact_revision"] = 2
+        revised["quality_state"] = "REJECTED"
+        revised["quality_reason_codes"] = ["NO_LONGER_CURRENT"]
+        revised["payload"] = {
+            "kind": "COIN_TRADE",
+            "offer_fact_id": offer["fact_id"],
+            "outcome": "REJECTED",
+            "agreed_price_value": None,
+            "price_unit": None,
+            "agreed_quantity_value": None,
+            "quantity_unit": None,
+        }
+        revised["payload_hash"] = content_hash(revised["payload"])
+        self._receive(_batch(202, stream_id=stream, deliveries=[(3, revised)]))
+        report = run_adapter_cycle(self.receiver, self.market)
+        self.assertEqual((report.audit_only, report.rejected), (1, 0))
+
+        observation = self.market.execute(
+            "SELECT quality_state,parse_confidence,attributes_json "
+            "FROM market_observations WHERE event_key=?",
+            (bytes.fromhex(str(trade["event_key"])),),
+        ).fetchone()
+        self.assertIsNotNone(observation)
+        self.assertEqual(str(observation["quality_state"]), "IGNORED")
+        self.assertEqual(float(observation["parse_confidence"]), 0.0)
+        attributes = json.loads(str(observation["attributes_json"]))
+        self.assertEqual(attributes["fact_revision"], 2)
+        self.assertEqual(attributes["adapter_disposition"], "AUDIT_ONLY")
+        projection = self.market.execute(
+            "SELECT fact_revision,status FROM private_fact_adapter_projections "
+            "WHERE fact_id=?",
+            (str(trade["fact_id"]),),
+        ).fetchone()
+        self.assertEqual((int(projection[0]), str(projection[1])), (2, "AUDIT_ONLY"))
+        history = self.market.execute(
+            "SELECT fact_revision,status FROM "
+            "private_fact_adapter_projection_revisions WHERE fact_id=? "
+            "ORDER BY fact_revision",
+            (str(trade["fact_id"]),),
+        ).fetchall()
+        self.assertEqual(
+            [(int(row[0]), str(row[1])) for row in history],
+            [(1, "APPLIED"), (2, "AUDIT_ONLY")],
+        )
+        revision_lineage = catchup_audit._receiver_revision_rows(
+            self.receiver, self.market
+        )
+        self.assertEqual(len(revision_lineage["GROUP_1"]), 3)
+        self.assertEqual(
+            [
+                (row[3], row[7])
+                for row in revision_lineage["GROUP_1"]
+                if row[0] == str(trade["fact_id"])
+            ],
+            [("1", "ELIGIBLE"), ("2", "REJECTED")],
+        )
+
+        self.receiver.execute(
+            "UPDATE fact_deliveries SET received_at_utc=?",
+            ("2026-08-20T00:00:00Z",),
+        )
+        compact_consumed_payloads(
+            self.receiver,
+            applied_checkpoints={stream: 3},
+            now=datetime(2026, 8, 27, tzinfo=timezone.utc),
+            retention_seconds=3_600,
+        )
+        compacted_lineage = catchup_audit._receiver_revision_rows(
+            self.receiver, self.market
+        )
+        self.assertEqual(compacted_lineage, revision_lineage)
 
     def test_restart_and_revision_are_idempotent_without_unit_conversion(self):
         stream = "market.fact.coin.group.1"

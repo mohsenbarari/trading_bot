@@ -42,6 +42,7 @@ from core.market_intelligence.private_pipeline_contracts import (
     EstimatorSnapshotV2,
     estimator_snapshot_id,
 )
+from scripts import audit_production_market_catchup as catchup_audit
 from tests.test_market_pipeline_stage9_adapter import _batch, _fact
 
 
@@ -168,6 +169,115 @@ class Stage10SnapshotTests(unittest.TestCase):
         self.assertEqual((report.applied, report.rejected), (4, 0))
         self.market.commit()
 
+    def _seed_remaining_primary_inventory(self) -> None:
+        facts = (
+            (
+                105,
+                "market.fact.coin.group.2",
+                _fact(
+                    105,
+                    source_code="GROUP_2",
+                    stream_id="market.fact.coin.group.2",
+                    source_sequence=1,
+                    payload={
+                        "kind": "COIN_OFFER",
+                        "group_code": 2,
+                        "instrument": "COIN_IMAM",
+                        "side": "BUY",
+                        "settlement": "CASH",
+                        "trade_form": "PHYSICAL",
+                        "offered_price_value": "187400",
+                        "price_unit": "PROJECT_THOUSAND_TOMAN",
+                        "quantity_value": "1",
+                        "quantity_unit": "COIN_COUNT",
+                    },
+                ),
+            ),
+            *(
+                (
+                    number,
+                    stream,
+                    _fact(
+                        number,
+                        source_code=source,
+                        stream_id=stream,
+                        source_sequence=1,
+                        payload={
+                            "kind": "OBSERVATION",
+                            "instrument": "MELTED_GOLD_AGGREGATE",
+                            "event_type": "OFFER",
+                            "side": "SELL",
+                            "settlement": "TODAY",
+                            "trade_form": "PHYSICAL",
+                            "price_value": value,
+                            "price_unit": "TOMAN_PER_MESGHAL_750",
+                            "currency": "TOMAN",
+                            "quantity_value": None,
+                            "quantity_unit": None,
+                        },
+                    ),
+                )
+                for number, source, stream, value in (
+                    (106, "MELTED_AGGREGATE", "market.fact.melted-aggregate", "80010000"),
+                    (107, "MELTED_FLOW", "market.fact.melted-flow", "80020000"),
+                )
+            ),
+            (
+                108,
+                "market.fact.usd-herat",
+                _fact(
+                    108,
+                    source_code="USD_HERAT",
+                    stream_id="market.fact.usd-herat",
+                    source_sequence=1,
+                    payload={
+                        "kind": "OBSERVATION",
+                        "instrument": "USD_HERAT",
+                        "event_type": "OFFER",
+                        "side": "BUY",
+                        "settlement": "TOMORROW",
+                        "trade_form": "PAPER_NORMAL",
+                        "price_value": "97000",
+                        "price_unit": "TOMAN_PER_USD",
+                        "currency": "TOMAN",
+                        "quantity_value": None,
+                        "quantity_unit": None,
+                    },
+                ),
+            ),
+            (
+                109,
+                "market.fact.binance-paxg",
+                _fact(
+                    109,
+                    source_code="BINANCE_PAXG_PUBLIC_API",
+                    stream_id="market.fact.binance-paxg",
+                    source_sequence=1,
+                    payload={
+                        "kind": "EXTERNAL_QUOTE",
+                        "instrument": "PAXG_USD_PROXY",
+                        "quote_kind": "MID",
+                        "price_value": "3401",
+                        "price_unit": "USD_PER_TROY_OUNCE",
+                        "currency": "USD",
+                    },
+                ),
+            ),
+        )
+        for number, stream, fact in facts:
+            with patch(
+                "core.market_intelligence.market_fact_receiver._utc_now",
+                return_value=datetime(2026, 8, 26, 5, 0, 6, tzinfo=timezone.utc),
+            ):
+                self._receive_fact(number, stream, fact)
+        with patch(
+            "core.market_intelligence.market_store._utc_now",
+            return_value="2026-08-26T05:00:06.000000Z",
+        ):
+            report = run_adapter_cycle(self.fact_receiver, self.market)
+        self.assertEqual((report.applied, report.rejected), (5, 0))
+        self.market.commit()
+
     def _publish(
         self,
         at: str = "2026-08-26T05:00:10Z",
@@ -203,6 +313,134 @@ class Stage10SnapshotTests(unittest.TestCase):
             allow_private_primary=allow_private_primary,
             now_utc=now_utc,
         )
+
+    def test_snapshot_exposes_source_bound_input_health_for_private_primary_inventory(self):
+        document = self._publish(feed_mode="PRIVATE_PRIMARY")
+        inputs = {item["component"]: item for item in document["inputs"]}
+        expected = {
+            "SOURCE_INPUT_MELTED_PRIMARY": ("PRIVATE_GOLD_CHANNEL", True),
+            "SOURCE_INPUT_GROUP_1": ("GROUP_1", True),
+            "SOURCE_INPUT_GROUP_2": ("GROUP_2", False),
+            "SOURCE_INPUT_MELTED_AGGREGATE": ("MELTED_AGGREGATE", False),
+            "SOURCE_INPUT_MELTED_FLOW": ("MELTED_FLOW", False),
+            "SOURCE_INPUT_USD_HERAT": ("USD_HERAT", False),
+            "SOURCE_INPUT_XAUUSD": ("XAUUSD", True),
+            "SOURCE_INPUT_WALLEX": ("WALLEX_PUBLIC_API", True),
+            "SOURCE_INPUT_BINANCE_PAXG": ("BINANCE_PAXG_PUBLIC_API", False),
+        }
+        for component, (source, observed) in expected.items():
+            with self.subTest(component=component):
+                trace = inputs[component]
+                self.assertEqual(trace["source_codes"], [source])
+                self.assertEqual(trace["selection_method"], "PRIVATE_PRIMARY_SOURCE_READINESS_V1")
+                self.assertEqual(trace["source_fact_id"] is not None, observed)
+                self.assertEqual(trace["freshness"] == "MISSING", not observed)
+
+    def test_private_primary_snapshot_fact_binds_all_nine_configured_inputs(self):
+        self._seed_remaining_primary_inventory()
+        document = self._publish(feed_mode="PRIVATE_PRIMARY")
+        validated = EstimatorSnapshotV2.model_validate(document)
+        indexed = catchup_audit._index_snapshot_inputs(validated)
+        self.assertEqual(len(indexed), len(validated.inputs))
+        inputs = {item["component"]: item for item in document["inputs"]}
+        expected_sources = {
+            "SOURCE_INPUT_MELTED_PRIMARY": "PRIVATE_GOLD_CHANNEL",
+            "SOURCE_INPUT_GROUP_1": "GROUP_1",
+            "SOURCE_INPUT_GROUP_2": "GROUP_2",
+            "SOURCE_INPUT_MELTED_AGGREGATE": "MELTED_AGGREGATE",
+            "SOURCE_INPUT_MELTED_FLOW": "MELTED_FLOW",
+            "SOURCE_INPUT_USD_HERAT": "USD_HERAT",
+            "SOURCE_INPUT_XAUUSD": "XAUUSD",
+            "SOURCE_INPUT_WALLEX": "WALLEX_PUBLIC_API",
+            "SOURCE_INPUT_BINANCE_PAXG": "BINANCE_PAXG_PUBLIC_API",
+        }
+        for component, source in expected_sources.items():
+            with self.subTest(component=component):
+                trace = inputs[component]
+                self.assertEqual(trace["source_codes"], [source])
+                self.assertIsNotNone(trace["source_fact_id"])
+                self.assertIsNotNone(trace["source_event_key"])
+                self.assertIsNotNone(trace["fact_revision"])
+                self.assertNotEqual(trace["freshness"], "MISSING")
+
+        duplicated = validated.model_copy(
+            update={"inputs": (*validated.inputs, validated.inputs[0])}
+        )
+        with self.assertRaisesRegex(
+            catchup_audit.CatchupAuditError,
+            "estimator_input_component_duplicate",
+        ):
+            catchup_audit._index_snapshot_inputs(duplicated)
+
+    def test_trace_uses_signal_event_key_when_two_rows_share_event_time(self):
+        second = _fact(
+            110,
+            source_code="GROUP_1",
+            stream_id="market.fact.coin.group.1",
+            source_sequence=2,
+            occurred_at_utc="2026-08-26T05:00:02Z",
+            available_at_utc="2026-08-26T05:00:04Z",
+            persisted_at_utc="2026-08-26T05:00:05Z",
+            payload={
+                "kind": "COIN_OFFER",
+                "group_code": 1,
+                "instrument": "COIN_IMAM",
+                "side": "SELL",
+                "settlement": "CASH",
+                "trade_form": "PHYSICAL",
+                "offered_price_value": "187600",
+                "price_unit": "PROJECT_THOUSAND_TOMAN",
+                "quantity_value": "1",
+                "quantity_unit": "COIN_COUNT",
+            },
+        )
+        with patch(
+            "core.market_intelligence.market_fact_receiver._utc_now",
+            return_value=datetime(2026, 8, 26, 5, 0, 6, tzinfo=timezone.utc),
+        ):
+            status, response = apply_fact_batch(
+                self.fact_receiver,
+                _batch(
+                    110,
+                    stream_id="market.fact.coin.group.1",
+                    deliveries=[(2, second)],
+                ),
+            )
+        self.assertEqual((status, response["status"]), (200, "ACK"))
+        with patch(
+            "core.market_intelligence.market_store._utc_now",
+            return_value="2026-08-26T05:00:07.000000Z",
+        ):
+            report = run_adapter_cycle(self.fact_receiver, self.market)
+        self.assertEqual((report.applied, report.rejected), (1, 0))
+        rows = self.market.execute(
+            "SELECT o.event_key,o.event_time_utc,o.price_num,p.fact_id "
+            "FROM market_observations o JOIN private_fact_adapter_projections p "
+            "ON p.event_key=o.event_key WHERE o.source_code='GROUP_1' "
+            "ORDER BY o.id"
+        ).fetchall()
+        self.assertEqual(len(rows), 2)
+        selected = rows[0]
+        trace = estimator_snapshot_runtime._input_traces(
+            self.market,
+            {
+                "SOURCE_INPUT_GROUP_1": {
+                    "status": "FRESH",
+                    "price_unit": "PROJECT_THOUSAND_TOMAN",
+                    "last_event_utc": str(selected["event_time_utc"]),
+                    "source_event_key": bytes(selected["event_key"]).hex(),
+                    "age_seconds": 1,
+                    "observation_count": 1,
+                    "source_codes": ["GROUP_1"],
+                    "method": "private_primary_source_readiness_v1",
+                    "latest_price": str(selected["price_num"]),
+                    "mean_price": str(selected["price_num"]),
+                }
+            },
+        )[0]
+        self.assertEqual(trace.source_event_key, bytes(selected["event_key"]).hex())
+        self.assertEqual(trace.source_fact_id, str(selected["fact_id"]))
+        self.assertNotEqual(trace.source_event_key, bytes(rows[1]["event_key"]).hex())
 
     def test_product_market_regime_is_translated_to_v2_wire_vocabulary(self):
         translate = estimator_snapshot_runtime._estimator_market_regime

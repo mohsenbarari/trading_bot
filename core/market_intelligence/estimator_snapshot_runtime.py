@@ -246,9 +246,20 @@ def _trace_row(
     *,
     source_codes: tuple[str, ...],
     last_event_utc: str,
+    source_event_key: str,
 ) -> sqlite3.Row | None:
-    if not source_codes or not last_event_utc:
+    if not source_codes or not last_event_utc or not source_event_key:
         return None
+    try:
+        event_key = bytes.fromhex(source_event_key)
+    except ValueError as exc:
+        raise EstimatorSnapshotRuntimeError(
+            "estimator_snapshot_source_event_key_invalid"
+        ) from exc
+    if len(event_key) != 32 or event_key.hex() != source_event_key.lower():
+        raise EstimatorSnapshotRuntimeError(
+            "estimator_snapshot_source_event_key_invalid"
+        )
     placeholders = ",".join("?" for _ in source_codes)
     return connection.execute(
         f"""
@@ -260,10 +271,10 @@ def _trace_row(
         WHERE o.quality_state='ELIGIBLE'
           AND o.source_code IN ({placeholders})
           AND o.event_time_utc=?
-        ORDER BY o.id DESC
+          AND o.event_key=?
         LIMIT 1
         """,
-        (*source_codes, last_event_utc),
+        (*source_codes, last_event_utc, event_key),
     ).fetchone()
 
 
@@ -295,6 +306,7 @@ def _input_traces(
             connection,
             source_codes=source_codes,
             last_event_utc=str(signal.get("last_event_utc") or ""),
+            source_event_key=str(signal.get("source_event_key") or ""),
         )
         if row is None:
             raise EstimatorSnapshotRuntimeError(

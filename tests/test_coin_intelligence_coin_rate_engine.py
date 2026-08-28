@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 import tempfile
 import unittest
 
-from core.market_intelligence.coin_rate_engine import build_coin_rate_estimates
-from core.market_intelligence.market_contracts import MarketObservation, derive_event_key
+from core.market_intelligence.coin_rate_engine import _coin_anchor, build_coin_rate_estimates
+from core.market_intelligence.market_contracts import (
+    MarketObservation,
+    MarketStoreContractError,
+    derive_event_key,
+)
 from core.market_intelligence.market_store import connect_market_store, initialize_market_store, upsert_observation
 
 
@@ -47,6 +52,14 @@ class CoinRateEngineTests(unittest.TestCase):
             item
             for item in build_coin_rate_estimates(self.connection, as_of_utc=at)
             if item.commodity_code == code and item.settlement_term == settlement
+        )
+
+    def anchor_at(self, code: str, settlement: str, *, at: str):
+        return _coin_anchor(
+            self.connection,
+            as_of=datetime.fromisoformat(at.replace("Z", "+00:00")).astimezone(timezone.utc),
+            code=code,
+            settlement=settlement,
         )
 
     def test_rate_excludes_fact_inserted_after_evaluation_time(self) -> None:
@@ -112,6 +125,175 @@ class CoinRateEngineTests(unittest.TestCase):
         self.assertEqual(imam.method, "SAME_SETTLEMENT_COIN_ANCHOR_TRANSFER")
         self.assertEqual(imam.anchor_age_seconds, 300.0)
         self.assertEqual(imam.estimated_project_price, 188_500)
+
+    def test_stale_trade_does_not_mask_fresh_offer_anchor(self) -> None:
+        self.add(
+            "stale-one-gram-trade",
+            instrument="COIN_ONE_GRAM",
+            price=20_000,
+            unit="PROJECT_THOUSAND_TOMAN",
+            at="2026-08-01T09:59:59Z",
+            settlement="CASH",
+            form="PHYSICAL",
+            event_type="TRADE",
+        )
+        self.add(
+            "fresh-one-gram-offer",
+            instrument="COIN_ONE_GRAM",
+            price=21_000,
+            unit="PROJECT_THOUSAND_TOMAN",
+            at="2026-08-08T09:59:00Z",
+            settlement="CASH",
+            form="PHYSICAL",
+            event_type="OFFER",
+        )
+        self.connection.commit()
+
+        anchor = self.anchor_at("ONE_GRAM", "CASH", at="2026-08-08T10:00:00Z")
+
+        self.assertIsNotNone(anchor)
+        assert anchor is not None
+        self.assertEqual(anchor[0], 21_000)
+        self.assertEqual(anchor[1].isoformat(), "2026-08-08T09:59:00+00:00")
+
+    def test_fresh_trade_is_preferred_over_fresh_offer_anchor(self) -> None:
+        self.add(
+            "fresh-one-gram-offer",
+            instrument="COIN_ONE_GRAM",
+            price=21_000,
+            unit="PROJECT_THOUSAND_TOMAN",
+            at="2026-08-08T09:59:00Z",
+            settlement="CASH",
+            form="PHYSICAL",
+            event_type="OFFER",
+        )
+        self.add(
+            "fresh-one-gram-trade",
+            instrument="COIN_ONE_GRAM",
+            price=20_500,
+            unit="PROJECT_THOUSAND_TOMAN",
+            at="2026-08-08T09:58:00Z",
+            settlement="CASH",
+            form="PHYSICAL",
+            event_type="TRADE",
+        )
+        self.connection.commit()
+
+        anchor = self.anchor_at("ONE_GRAM", "CASH", at="2026-08-08T10:00:00Z")
+
+        self.assertIsNotNone(anchor)
+        assert anchor is not None
+        self.assertEqual(anchor[0], 20_500)
+        self.assertEqual(anchor[1].isoformat(), "2026-08-08T09:58:00+00:00")
+
+    def test_all_stale_coin_anchors_abstain(self) -> None:
+        self.add(
+            "stale-one-gram-offer",
+            instrument="COIN_ONE_GRAM",
+            price=21_000,
+            unit="PROJECT_THOUSAND_TOMAN",
+            at="2026-08-01T09:59:59Z",
+            settlement="CASH",
+            form="PHYSICAL",
+            event_type="OFFER",
+        )
+        self.add(
+            "older-one-gram-trade",
+            instrument="COIN_ONE_GRAM",
+            price=20_500,
+            unit="PROJECT_THOUSAND_TOMAN",
+            at="2026-08-01T09:00:00Z",
+            settlement="CASH",
+            form="PHYSICAL",
+            event_type="TRADE",
+        )
+        self.connection.commit()
+
+        anchor = self.anchor_at("ONE_GRAM", "CASH", at="2026-08-08T10:00:00Z")
+
+        self.assertIsNone(anchor)
+
+    def test_coin_anchor_at_exact_seven_day_boundary_is_fresh(self) -> None:
+        self.add(
+            "boundary-one-gram-trade",
+            instrument="COIN_ONE_GRAM",
+            price=20_500,
+            unit="PROJECT_THOUSAND_TOMAN",
+            at="2026-08-01T10:00:00Z",
+            settlement="CASH",
+            form="PHYSICAL",
+            event_type="TRADE",
+        )
+        self.connection.commit()
+
+        anchor = self.anchor_at("ONE_GRAM", "CASH", at="2026-08-08T10:00:00Z")
+
+        self.assertIsNotNone(anchor)
+        assert anchor is not None
+        self.assertEqual(anchor[0], 20_500)
+        self.assertEqual(anchor[1].isoformat(), "2026-08-01T10:00:00+00:00")
+
+    def test_future_trade_is_ignored_instead_of_becoming_age_zero(self) -> None:
+        self.add(
+            "fresh-one-gram-offer",
+            instrument="COIN_ONE_GRAM",
+            price=21_000,
+            unit="PROJECT_THOUSAND_TOMAN",
+            at="2026-08-08T09:59:00Z",
+            settlement="CASH",
+            form="PHYSICAL",
+            event_type="OFFER",
+        )
+        self.add(
+            "future-one-gram-trade",
+            instrument="COIN_ONE_GRAM",
+            price=20_500,
+            unit="PROJECT_THOUSAND_TOMAN",
+            at="2026-08-08T10:00:01Z",
+            settlement="CASH",
+            form="PHYSICAL",
+            event_type="TRADE",
+        )
+        self.connection.execute(
+            "UPDATE market_observations SET inserted_at_utc=? WHERE event_key=?",
+            (
+                "2026-08-08T09:59:30Z",
+                derive_event_key("rate-engine", "future-one-gram-trade"),
+            ),
+        )
+        self.connection.commit()
+
+        anchor = self.anchor_at("ONE_GRAM", "CASH", at="2026-08-08T10:00:00Z")
+
+        self.assertIsNotNone(anchor)
+        assert anchor is not None
+        self.assertEqual(anchor[0], 21_000)
+
+    def test_invalid_anchor_timestamp_remains_fail_closed(self) -> None:
+        self.add(
+            "invalid-one-gram-trade",
+            instrument="COIN_ONE_GRAM",
+            price=20_500,
+            unit="PROJECT_THOUSAND_TOMAN",
+            at="2026-08-08T09:59:00Z",
+            settlement="CASH",
+            form="PHYSICAL",
+            event_type="TRADE",
+        )
+        self.connection.execute(
+            "UPDATE market_observations SET event_time_utc=? WHERE event_key=?",
+            (
+                "0000",
+                derive_event_key("rate-engine", "invalid-one-gram-trade"),
+            ),
+        )
+        self.connection.commit()
+
+        with self.assertRaisesRegex(
+            MarketStoreContractError,
+            "coin_anchor_event_time_utc_invalid",
+        ):
+            self.anchor_at("ONE_GRAM", "CASH", at="2026-08-08T10:00:00Z")
 
     def test_paper_fallback_is_visible_and_no_high_coin_anchor_abstains(self) -> None:
         self.add("paper", instrument="MELTED_GOLD_PRIVATE", price=80_500_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:09:30Z", settlement="TOMORROW", form="PAPER_NORMAL")

@@ -7,6 +7,7 @@ import contextlib
 import io
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 from unittest import mock
 
@@ -55,6 +56,16 @@ def _document() -> dict[str, object]:
 
 
 class MigrateMarketPipelineArchiveTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory(prefix="market-migration-")
+        self.state_root = Path(self.temporary.name)
+        self.state_root.chmod(0o700)
+        self.journal = self.state_root / "migration-state.json"
+        self.receipt = self.state_root / "migration-receipt.json"
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
     def test_host_standalone_schema_binding_matches_runtime_contract(self) -> None:
         self.assertEqual(migration.MARKET_SCHEMA_VERSION, CORE_SCHEMA_VERSION)
         self.assertEqual(migration.MARKET_SCHEMA_TABLE_COUNT, CORE_TABLE_COUNT)
@@ -111,6 +122,8 @@ class MigrateMarketPipelineArchiveTests(unittest.TestCase):
                 offhost_receipt_sha256="f" * 64,
                 host_preflight_receipt_sha256="1" * 64,
                 backup_maximum_age_seconds=3600,
+                journal_path=self.journal,
+                receipt_path=self.receipt,
             )
         return result, run_mock
 
@@ -250,6 +263,8 @@ class MigrateMarketPipelineArchiveTests(unittest.TestCase):
                 offhost_receipt_sha256="f" * 64,
                 host_preflight_receipt_sha256="1" * 64,
                 backup_maximum_age_seconds=3600,
+                journal_path=self.journal,
+                receipt_path=self.receipt,
             )
 
         self.assertTrue(result["database_container_created"])
@@ -262,6 +277,125 @@ class MigrateMarketPipelineArchiveTests(unittest.TestCase):
             migration._migration_result(
                 '{"status":"applied","version":3,"table_count":28}', second=True
             )
+
+    def test_complete_remote_receipt_recovers_after_journal_lag(self) -> None:
+        backup_document = {"status": "PASS", "source": {"container_id": CONTAINER_ID}}
+        first, _runner = self._run(backup_document)
+        journal = json.loads(self.journal.read_text(encoding="utf-8"))
+        journal["status"] = "APPLYING"
+        journal["receipt_sha256"] = None
+        migration._atomic_json(self.journal, journal)
+
+        def query(_container: str, _user: str, _database: str, sql: str) -> str:
+            return "1,2,3" if "string_agg" in sql else "9"
+
+        with (
+            mock.patch.object(migration.backup, "validate_release_env", return_value=_values()),
+            mock.patch.object(
+                migration.backup, "verify_receipt", return_value=backup_document
+            ) as backup_verifier,
+            mock.patch.object(migration.backup, "file_digest", return_value="2" * 64),
+            mock.patch.object(migration, "_running_services", return_value=["market-database"]),
+            mock.patch.object(migration, "_container_ids", return_value=[CONTAINER_ID]),
+            mock.patch.object(migration, "_inspect", return_value=_document()),
+            mock.patch.object(migration, "_query", side_effect=query),
+            mock.patch.object(migration, "_run") as mutator,
+        ):
+            recovered = migration.run_migration(
+                release_root=Path("/srv/release"),
+                env_file=Path("/srv/web.env"),
+                backup_receipt=Path("/root/backup.json"),
+                release_sha=RELEASE_SHA,
+                release_tree=RELEASE_TREE,
+                image_id=IMAGE_ID,
+                image_input_signature=IMAGE_SIGNATURE,
+                offhost_receipt_sha256="f" * 64,
+                host_preflight_receipt_sha256="1" * 64,
+                backup_maximum_age_seconds=3600,
+                journal_path=self.journal,
+                receipt_path=self.receipt,
+            )
+        self.assertEqual(recovered, first)
+        mutator.assert_not_called()
+        self.assertIsNone(backup_verifier.call_args.kwargs["maximum_age_seconds"])
+        self.assertEqual(
+            json.loads(self.journal.read_text(encoding="utf-8"))["status"],
+            "COMPLETE",
+        )
+
+    def test_complete_journal_without_receipt_fails_before_mutation(self) -> None:
+        before = {"container_id": None, "running": False}
+        expected = migration._journal_identity(
+            release_sha=RELEASE_SHA,
+            release_tree=RELEASE_TREE,
+            image_id=IMAGE_ID,
+            image_input_signature=IMAGE_SIGNATURE,
+            offhost_receipt_sha256="f" * 64,
+            host_preflight_receipt_sha256="1" * 64,
+            source_backup_receipt_sha256="2" * 64,
+            web_role_env_sha256="2" * 64,
+            backup_status="INITIAL_EMPTY",
+            before=before,
+        )
+        migration._atomic_json(
+            self.journal,
+            {
+                **expected,
+                "status": "COMPLETE",
+                "receipt_path": str(self.receipt),
+                "receipt_sha256": "3" * 64,
+            },
+        )
+        with (
+            mock.patch.object(migration.backup, "validate_release_env", return_value=_values()),
+            mock.patch.object(
+                migration.backup,
+                "verify_receipt",
+                return_value={"status": "INITIAL_EMPTY", "source": {"database_initialized": False}},
+            ),
+            mock.patch.object(migration.backup, "file_digest", return_value="2" * 64),
+            mock.patch.object(migration, "_running_services", return_value=[]),
+            mock.patch.object(migration, "_run") as mutator,
+        ):
+            with self.assertRaisesRegex(migration.MigrationError, "complete_receipt_missing"):
+                migration.run_migration(
+                    release_root=Path("/srv/release"),
+                    env_file=Path("/srv/web.env"),
+                    backup_receipt=Path("/root/backup.json"),
+                    release_sha=RELEASE_SHA,
+                    release_tree=RELEASE_TREE,
+                    image_id=IMAGE_ID,
+                    image_input_signature=IMAGE_SIGNATURE,
+                    offhost_receipt_sha256="f" * 64,
+                    host_preflight_receipt_sha256="1" * 64,
+                    backup_maximum_age_seconds=3600,
+                    journal_path=self.journal,
+                    receipt_path=self.receipt,
+                )
+        mutator.assert_not_called()
+
+    def test_journal_extra_field_is_rejected(self) -> None:
+        expected = migration._journal_identity(
+            release_sha=RELEASE_SHA,
+            release_tree=RELEASE_TREE,
+            image_id=IMAGE_ID,
+            image_input_signature=IMAGE_SIGNATURE,
+            offhost_receipt_sha256="f" * 64,
+            host_preflight_receipt_sha256="1" * 64,
+            source_backup_receipt_sha256="2" * 64,
+            web_role_env_sha256="2" * 64,
+            backup_status="INITIAL_EMPTY",
+            before={"container_id": None, "running": False},
+        )
+        payload = {
+            **expected,
+            "status": "PREPARED",
+            "receipt_path": str(self.receipt),
+            "receipt_sha256": None,
+            "unexpected": "tamper",
+        }
+        with self.assertRaisesRegex(migration.MigrationError, "journal_schema_invalid"):
+            migration._validate_journal(payload, expected=expected, receipt_path=self.receipt)
 
     def test_failed_initial_migration_stops_created_database_without_deleting_state(self) -> None:
         run_mock = mock.Mock(
@@ -280,6 +414,7 @@ class MigrateMarketPipelineArchiveTests(unittest.TestCase):
                     "source": {"database_initialized": False},
                 },
             ),
+            mock.patch.object(migration.backup, "file_digest", return_value="2" * 64),
             mock.patch.object(migration, "_container_ids", side_effect=[[], [CONTAINER_ID]]),
             mock.patch.object(migration, "_running_services", return_value=[]),
             mock.patch.object(migration, "_inspect", side_effect=[_document(), stopped]),
@@ -298,6 +433,8 @@ class MigrateMarketPipelineArchiveTests(unittest.TestCase):
                     offhost_receipt_sha256="f" * 64,
                     host_preflight_receipt_sha256="1" * 64,
                     backup_maximum_age_seconds=3600,
+                    journal_path=self.journal,
+                    receipt_path=self.receipt,
                 )
         commands = [call.args[0] for call in run_mock.call_args_list]
         self.assertTrue(any(command[:3] == ["docker", "update", "--restart=no"] for command in commands))
@@ -326,6 +463,8 @@ class MigrateMarketPipelineArchiveTests(unittest.TestCase):
                         "--offhost-receipt-sha256", "f" * 64,
                         "--host-preflight-receipt-sha256", "1" * 64,
                         "--backup-maximum-age-seconds", "3600",
+                        "--journal", str(self.journal),
+                        "--receipt", str(self.receipt),
                         "--confirm", "wrong",
                     ]
                 )

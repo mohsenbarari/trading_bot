@@ -338,18 +338,35 @@ def _coin_anchor(connection: sqlite3.Connection, *, as_of: datetime, code: str, 
     )
     if not rows:
         return None
-    # ``_rows`` is already ordered by economic event time, then id.  Prefer a
-    # confirmed trade over an offer, but keep that chronological ordering
-    # within the selected evidence type.  An older backfilled trade can have a
-    # larger SQLite id and must not displace the newer market anchor.
-    row = next(
-        (item for item in rows if str(item["event_type"]) == "TRADE"),
-        rows[0],
-    )
-    event_time = _utc(str(row["event_time_utc"]), name="coin_anchor_event_time_utc")
-    age = max(0.0, (as_of - event_time).total_seconds())
-    if age > _MAX_ANCHOR_AGE_SECONDS:
+    fresh_rows: list[tuple[sqlite3.Row, datetime]] = []
+    for item in rows:
+        event_time = _utc(
+            str(item["event_time_utc"]),
+            name="coin_anchor_event_time_utc",
+        )
+        age_seconds = (as_of - event_time).total_seconds()
+        # ``_rows`` already enforces this causal boundary in SQL.  Keep the
+        # parsed-timestamp check as a second, explicit guard instead of hiding
+        # a future timestamp behind ``max(0, ...)``.
+        if age_seconds < 0:
+            continue
+        if age_seconds <= _MAX_ANCHOR_AGE_SECONDS:
+            fresh_rows.append((item, event_time))
+    if not fresh_rows:
         return None
+    # ``_rows`` is already ordered by economic event time, then id.  Prefer a
+    # *fresh* confirmed trade over a fresh offer, while keeping chronological
+    # ordering within the selected evidence type.  An expired trade must not
+    # mask a usable offer, and a later-inserted historical trade must not
+    # displace a newer event of the same type.
+    row, event_time = next(
+        (
+            candidate
+            for candidate in fresh_rows
+            if str(candidate[0]["event_type"]) == "TRADE"
+        ),
+        fresh_rows[0],
+    )
     price = float(row["price_num"])
     return (price, event_time) if price > 0 else None
 

@@ -25,7 +25,7 @@ from pydantic import ValidationError
 
 from .market_contracts import MarketObservation, MarketStoreContractError
 from .market_store import connect_market_store, initialize_market_store, upsert_observation
-from .private_pipeline_contracts import MarketFactV1, load_source_registry
+from .private_pipeline_contracts import MarketFactV1, content_hash, load_source_registry
 
 
 ADAPTER_SCHEMA = "market_fact_adapter/1.0"
@@ -241,6 +241,8 @@ def initialize_adapter_store(connection: sqlite3.Connection) -> None:
             fact_revision INTEGER NOT NULL CHECK(fact_revision>0),
             event_key BLOB NOT NULL CHECK(length(event_key)=32),
             payload_hash TEXT NOT NULL,
+            quality_state TEXT,
+            envelope_hash TEXT,
             status TEXT NOT NULL CHECK(status IN ('APPLIED','AUDIT_ONLY','REJECTED')),
             occurred_at_utc TEXT NOT NULL,
             available_at_utc TEXT NOT NULL,
@@ -249,6 +251,29 @@ def initialize_adapter_store(connection: sqlite3.Connection) -> None:
             adapted_at_utc TEXT NOT NULL,
             updated_at_utc TEXT NOT NULL,
             UNIQUE(stream_id,source_sequence)
+        );
+        CREATE TABLE IF NOT EXISTS private_fact_adapter_projection_revisions (
+            fact_id TEXT NOT NULL,
+            fact_revision INTEGER NOT NULL CHECK(fact_revision>0),
+            stream_id TEXT NOT NULL,
+            source_sequence INTEGER NOT NULL CHECK(source_sequence>0),
+            delivery_sequence INTEGER NOT NULL CHECK(delivery_sequence>0),
+            event_key BLOB NOT NULL CHECK(length(event_key)=32),
+            payload_hash TEXT NOT NULL,
+            quality_state TEXT NOT NULL,
+            envelope_hash TEXT NOT NULL CHECK(length(envelope_hash)=64),
+            status TEXT NOT NULL CHECK(status IN ('APPLIED','AUDIT_ONLY','REJECTED')),
+            occurred_at_utc TEXT NOT NULL,
+            available_at_utc TEXT NOT NULL,
+            parsed_at_utc TEXT NOT NULL,
+            transferred_at_utc TEXT NOT NULL,
+            adapted_at_utc TEXT NOT NULL,
+            PRIMARY KEY(fact_id,fact_revision),
+            UNIQUE(stream_id,delivery_sequence)
+        );
+        CREATE TABLE IF NOT EXISTS private_fact_adapter_migrations (
+            migration_code TEXT PRIMARY KEY,
+            completed_at_utc TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS private_fact_adapter_offer_dimensions (
             offer_fact_id TEXT PRIMARY KEY,
@@ -281,6 +306,22 @@ def initialize_adapter_store(connection: sqlite3.Connection) -> None:
         ON private_fact_adapter_rejections(rejected_at_utc);
         """
     )
+    projection_columns = {
+        str(row[1])
+        for row in connection.execute(
+            "PRAGMA table_info(private_fact_adapter_projections)"
+        )
+    }
+    if "quality_state" not in projection_columns:
+        connection.execute(
+            "ALTER TABLE private_fact_adapter_projections "
+            "ADD COLUMN quality_state TEXT"
+        )
+    if "envelope_hash" not in projection_columns:
+        connection.execute(
+            "ALTER TABLE private_fact_adapter_projections "
+            "ADD COLUMN envelope_hash TEXT"
+        )
     # Existing stores predate the insert trigger. Reconcile once at owner
     # startup; steady-state health updates then read three constant-size rows
     # instead of rescanning the permanently growing delivery ledger.
@@ -709,13 +750,16 @@ def _advance(
             """
             INSERT INTO private_fact_adapter_projections(
               fact_id,stream_id,source_sequence,fact_revision,event_key,
-              payload_hash,status,occurred_at_utc,available_at_utc,parsed_at_utc,
+              payload_hash,quality_state,envelope_hash,status,
+              occurred_at_utc,available_at_utc,parsed_at_utc,
               transferred_at_utc,adapted_at_utc,updated_at_utc
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(fact_id) DO UPDATE SET
               stream_id=excluded.stream_id,source_sequence=excluded.source_sequence,
               fact_revision=excluded.fact_revision,event_key=excluded.event_key,
-              payload_hash=excluded.payload_hash,status=excluded.status,
+              payload_hash=excluded.payload_hash,
+              quality_state=excluded.quality_state,
+              envelope_hash=excluded.envelope_hash,status=excluded.status,
               occurred_at_utc=excluded.occurred_at_utc,
               available_at_utc=excluded.available_at_utc,
               parsed_at_utc=excluded.parsed_at_utc,
@@ -731,12 +775,54 @@ def _advance(
                 fact.fact_revision,
                 bytes.fromhex(fact.event_key),
                 fact.payload_hash,
+                fact.quality_state,
+                content_hash(fact.model_dump(mode="json")),
                 status,
                 utc_text(fact.occurred_at_utc),
                 utc_text(fact.available_at_utc),
                 utc_text(fact.persisted_at_utc),
                 transferred_at_utc,
                 utc_text(),
+                utc_text(),
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO private_fact_adapter_projection_revisions(
+              fact_id,fact_revision,stream_id,source_sequence,
+              delivery_sequence,event_key,payload_hash,quality_state,
+              envelope_hash,status,
+              occurred_at_utc,available_at_utc,parsed_at_utc,
+              transferred_at_utc,adapted_at_utc
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(fact_id,fact_revision) DO UPDATE SET
+              stream_id=excluded.stream_id,
+              source_sequence=excluded.source_sequence,
+              delivery_sequence=excluded.delivery_sequence,
+              event_key=excluded.event_key,payload_hash=excluded.payload_hash,
+              quality_state=excluded.quality_state,
+              envelope_hash=excluded.envelope_hash,
+              status=excluded.status,occurred_at_utc=excluded.occurred_at_utc,
+              available_at_utc=excluded.available_at_utc,
+              parsed_at_utc=excluded.parsed_at_utc,
+              transferred_at_utc=excluded.transferred_at_utc,
+              adapted_at_utc=excluded.adapted_at_utc
+            """,
+            (
+                fact.fact_id,
+                fact.fact_revision,
+                stream_id,
+                fact.source_sequence,
+                sequence,
+                bytes.fromhex(fact.event_key),
+                fact.payload_hash,
+                fact.quality_state,
+                content_hash(fact.model_dump(mode="json")),
+                status,
+                utc_text(fact.occurred_at_utc),
+                utc_text(fact.available_at_utc),
+                utc_text(fact.persisted_at_utc),
+                transferred_at_utc,
                 utc_text(),
             ),
         )
@@ -756,6 +842,94 @@ def _reason_code(error: BaseException) -> str:
     if not token or not token[0].isalpha():
         return "MARKET_FACT_ADAPTER_MAPPING_REJECTED"
     return token
+
+
+def _retire_previous_applied_observation(
+    connection: sqlite3.Connection,
+    *,
+    fact: MarketFactV1,
+    delivery_sequence: int,
+) -> bool:
+    """Make an older economic projection non-model-visible on AUDIT_ONLY.
+
+    A later revision can change a previously confirmed trade/outcome into an
+    audit-only disposition.  Updating adapter lineage without retiring the
+    prior Market Store row would leave stale economics eligible indefinitely.
+    """
+
+    previous = connection.execute(
+        "SELECT fact_revision,event_key,status FROM private_fact_adapter_projections "
+        "WHERE fact_id=?",
+        (fact.fact_id,),
+    ).fetchone()
+    if previous is None or str(previous["status"]) != "APPLIED":
+        return False
+    if int(previous["fact_revision"]) >= fact.fact_revision:
+        raise MarketFactMappingError(
+            "market_fact_adapter_audit_revision_not_newer"
+        )
+    event_key = bytes(previous["event_key"])
+    if event_key.hex() != fact.event_key:
+        raise MarketFactMappingError(
+            "market_fact_adapter_audit_event_key_mismatch"
+        )
+    locations: list[tuple[str, sqlite3.Row]] = []
+    for table in ("market_observations", "market_observations_archive"):
+        row = connection.execute(
+            f"SELECT event_time_utc,attributes_json FROM {table} WHERE event_key=?",
+            (event_key,),
+        ).fetchone()
+        if row is not None:
+            locations.append((table, row))
+    if len(locations) != 1:
+        raise MarketFactMappingError(
+            "market_fact_adapter_previous_observation_missing"
+            if not locations
+            else "market_fact_adapter_previous_observation_duplicated"
+        )
+    table, row = locations[0]
+    try:
+        attributes = json.loads(str(row["attributes_json"] or "{}"))
+    except (TypeError, ValueError) as exc:
+        raise MarketFactMappingError(
+            "market_fact_adapter_previous_observation_invalid"
+        ) from exc
+    if not isinstance(attributes, dict):
+        raise MarketFactMappingError(
+            "market_fact_adapter_previous_observation_invalid"
+        )
+    attributes.update(
+        {
+            "transfer_fact_id": fact.fact_id,
+            "fact_revision": fact.fact_revision,
+            "delivery_sequence": delivery_sequence,
+            "quality_reason_codes": list(fact.quality_reason_codes),
+            "adapter_disposition": "AUDIT_ONLY",
+            "resolution_reason": "FACT_REVISION_AUDIT_ONLY",
+        }
+    )
+    available = max(
+        str(row["event_time_utc"]),
+        utc_text(fact.available_at_utc),
+    )
+    connection.execute(
+        f"""
+        UPDATE {table}
+        SET available_at_utc=?,parse_confidence=0,
+            parser_version=?,quality_state='IGNORED',
+            quality_policy_version=?,attributes_json=?,inserted_at_utc=?
+        WHERE event_key=?
+        """,
+        (
+            available,
+            fact.parser_version,
+            ADAPTER_VERSION,
+            json.dumps(attributes, sort_keys=True, separators=(",", ":")),
+            utc_text(),
+            event_key,
+        ),
+    )
+    return True
 
 
 def apply_received_delivery(
@@ -812,6 +986,12 @@ def apply_received_delivery(
         if observation is not None:
             observation.normalized()
             upsert_observation(destination, observation)
+        elif status == "AUDIT_ONLY":
+            _retire_previous_applied_observation(
+                destination,
+                fact=fact,
+                delivery_sequence=sequence,
+            )
         if offer is not None:
             _store_offer(destination, offer, fact_revision=fact.fact_revision)
         _advance(
@@ -867,6 +1047,7 @@ def run_adapter_cycle(
 ) -> AdapterReport:
     if not 1 <= max_deliveries <= 5_000:
         raise MarketFactAdapterError("market_fact_adapter_batch_limit_invalid")
+    _backfill_projection_revision_history(receiver, destination)
     checkpoints = {
         str(row["stream_id"]): int(row["highest_delivery_sequence"])
         for row in destination.execute(
@@ -888,6 +1069,142 @@ def run_adapter_cycle(
         rejected=counts["REJECTED"],
         duplicate=counts["DUPLICATE"],
     )
+
+
+def _backfill_projection_revision_history(
+    receiver: sqlite3.Connection,
+    destination: sqlite3.Connection,
+) -> None:
+    """One-time upgrade of the durable per-revision adapter lineage.
+
+    Older adapter stores retained every terminal delivery but only the latest
+    projection.  The receiver still holds each seven-day fact envelope; use it
+    once to reconstruct the missing value-free revision identity before any
+    new delivery advances the checkpoint.  Already-compacted legacy rows are
+    left absent; a cutoff-scoped promotion audit will fail closed if one is
+    still required for the release being proved.
+    """
+
+    migration = "projection-revision-history-v1"
+    if destination.execute(
+        "SELECT 1 FROM private_fact_adapter_migrations WHERE migration_code=?",
+        (migration,),
+    ).fetchone() is not None:
+        return
+    deliveries = destination.execute(
+        "SELECT stream_id,delivery_sequence,fact_id,fact_revision,payload_hash,status "
+        "FROM private_fact_adapter_deliveries ORDER BY stream_id,delivery_sequence"
+    ).fetchall()
+    destination.execute("BEGIN IMMEDIATE")
+    try:
+        for delivery in deliveries:
+            if destination.execute(
+                "SELECT 1 FROM private_fact_adapter_projection_revisions "
+                "WHERE fact_id=? AND fact_revision=?",
+                (str(delivery["fact_id"]), int(delivery["fact_revision"])),
+            ).fetchone() is not None:
+                continue
+            received = receiver.execute(
+                "SELECT payload_json,payload_compacted_at_utc,received_at_utc "
+                "FROM fact_deliveries WHERE stream_id=? AND delivery_sequence=? "
+                "AND fact_id=? AND fact_revision=? AND payload_hash=?",
+                (
+                    str(delivery["stream_id"]),
+                    int(delivery["delivery_sequence"]),
+                    str(delivery["fact_id"]),
+                    int(delivery["fact_revision"]),
+                    str(delivery["payload_hash"]),
+                ),
+            ).fetchone()
+            if (
+                received is None
+            ):
+                raise MarketFactAdapterError(
+                    "market_fact_adapter_revision_history_unrecoverable"
+                )
+            if received["payload_compacted_at_utc"] is not None:
+                continue
+            if not str(received["payload_json"] or ""):
+                raise MarketFactAdapterError(
+                    "market_fact_adapter_revision_history_unrecoverable"
+                )
+            try:
+                fact = MarketFactV1.model_validate_json(str(received["payload_json"]))
+            except ValidationError as exc:
+                rejection = destination.execute(
+                    "SELECT body_hash FROM private_fact_adapter_rejections "
+                    "WHERE stream_id=? AND delivery_sequence=?",
+                    (
+                        str(delivery["stream_id"]),
+                        int(delivery["delivery_sequence"]),
+                    ),
+                ).fetchone()
+                if (
+                    str(delivery["status"]) == "REJECTED"
+                    and rejection is not None
+                    and str(rejection["body_hash"])
+                    == str(delivery["payload_hash"])
+                ):
+                    continue
+                raise MarketFactAdapterError(
+                    "market_fact_adapter_revision_history_invalid"
+                ) from exc
+            if (
+                fact.fact_id != str(delivery["fact_id"])
+                or fact.fact_revision != int(delivery["fact_revision"])
+                or fact.payload_hash != str(delivery["payload_hash"])
+                or fact.stream_id != str(delivery["stream_id"])
+            ):
+                raise MarketFactAdapterError(
+                    "market_fact_adapter_revision_history_conflict"
+                )
+            destination.execute(
+                """
+                INSERT INTO private_fact_adapter_projection_revisions(
+                  fact_id,fact_revision,stream_id,source_sequence,
+                  delivery_sequence,event_key,payload_hash,quality_state,
+                  envelope_hash,status,
+                  occurred_at_utc,available_at_utc,parsed_at_utc,
+                  transferred_at_utc,adapted_at_utc
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    fact.fact_id,
+                    fact.fact_revision,
+                    fact.stream_id,
+                    fact.source_sequence,
+                    int(delivery["delivery_sequence"]),
+                    bytes.fromhex(fact.event_key),
+                    fact.payload_hash,
+                    fact.quality_state,
+                    content_hash(fact.model_dump(mode="json")),
+                    str(delivery["status"]),
+                    utc_text(fact.occurred_at_utc),
+                    utc_text(fact.available_at_utc),
+                    utc_text(fact.persisted_at_utc),
+                    str(received["received_at_utc"]),
+                    utc_text(),
+                ),
+            )
+            destination.execute(
+                "UPDATE private_fact_adapter_projections "
+                "SET quality_state=?,envelope_hash=? "
+                "WHERE fact_id=? AND fact_revision=?",
+                (
+                    fact.quality_state,
+                    content_hash(fact.model_dump(mode="json")),
+                    fact.fact_id,
+                    fact.fact_revision,
+                ),
+            )
+        destination.execute(
+            "INSERT INTO private_fact_adapter_migrations VALUES(?,?)",
+            (migration, utc_text()),
+        )
+        destination.commit()
+    except BaseException:
+        destination.rollback()
+        raise
 
 
 def _select_pending_deliveries(

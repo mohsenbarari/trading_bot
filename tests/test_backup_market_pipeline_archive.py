@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from copy import deepcopy
 import json
 from pathlib import Path
 import tempfile
+import subprocess
 import unittest
 from unittest import mock
 
@@ -17,6 +19,20 @@ RELEASE_TREE = "b" * 40
 IMAGE_ID = "sha256:" + "c" * 64
 IMAGE_SIGNATURE = "d" * 64
 REAL_SECURE_DIRECTORY = backup._secure_directory
+
+
+def _invariants(*, fact_count: int, table_count: int = 1) -> dict[str, object]:
+    tables = {"market_facts": fact_count}
+    for index in range(1, table_count):
+        tables[f"table_{index}"] = 0
+    return {
+        "table_row_counts": tables,
+        "sequence_values": {
+            "market_facts_id_seq": {"last_value": 101, "is_called": True}
+        },
+        "schema_catalog_sha256": "1" * 64,
+        "schema_objects_sha256": "2" * 64,
+    }
 
 
 def _env_values(root: Path) -> dict[str, str]:
@@ -101,16 +117,52 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
         arguments.update(overrides)
         return backup.verify_receipt(**arguments)  # type: ignore[arg-type]
 
-    def test_initial_empty_store_receipt_is_non_mutating_and_fresh(self) -> None:
-        payload = backup.create_backup(
-            env_file=self.env_file,
-            backup_dir=self.backup_dir,
-            receipt=self.receipt,
-            release_sha=RELEASE_SHA,
-            release_tree=RELEASE_TREE,
-            image_id=IMAGE_ID,
-            image_input_signature=IMAGE_SIGNATURE,
+    def _write_bound_receipt(self, payload: dict[str, object]) -> None:
+        run_id = "deadbeefdeadbeef"
+        payload["backup_run_id"] = run_id
+        payload.setdefault("source_after", deepcopy(payload["source"]))
+        artifact = payload.get("backup")
+        artifact_path = (
+            Path(artifact["path"])
+            if isinstance(artifact, dict)
+            else self.backup_dir
+            / f"market-archive-before-{RELEASE_SHA[:12]}-20260827T120000Z-{run_id[:8]}.dump"
         )
+        journal = {
+            "schema": backup.JOURNAL_SCHEMA,
+            "status": "COMPLETE",
+            "backup_status": payload["status"],
+            "run_id": run_id,
+            "created_at_utc": payload["created_at_utc"],
+            "release_sha": RELEASE_SHA,
+            "release_tree": RELEASE_TREE,
+            "image_id": IMAGE_ID,
+            "image_input_signature": IMAGE_SIGNATURE,
+            "role_env_sha256": backup.file_digest(self.env_file),
+            "receipt_path": str(self.receipt),
+            "artifact_path": str(artifact_path),
+            "candidate_path": str(self.backup_dir / f".{artifact_path.name}.pending"),
+            "source_before": payload["source"],
+            "source_after": payload["source_after"],
+            "backup": payload["backup"],
+            "restore_smoke": payload["restore_smoke"],
+            "restore_resources": None,
+            "secrets_disclosed": False,
+        }
+        backup._write_journal(backup._journal_path(self.backup_dir), journal)
+        backup._write_receipt(self.receipt, payload)
+
+    def test_initial_empty_store_receipt_is_non_mutating_and_fresh(self) -> None:
+        with mock.patch.object(backup, "_running_project_services", return_value=[]):
+            payload = backup.create_backup(
+                env_file=self.env_file,
+                backup_dir=self.backup_dir,
+                receipt=self.receipt,
+                release_sha=RELEASE_SHA,
+                release_tree=RELEASE_TREE,
+                image_id=IMAGE_ID,
+                image_input_signature=IMAGE_SIGNATURE,
+            )
         self.assertEqual(payload["status"], "INITIAL_EMPTY")
         self.assertIsNone(payload["backup"])
         self.assertFalse(payload["database_mutated"])
@@ -120,17 +172,30 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
         self.assertEqual(self._verify(), payload)
         with self.assertRaisesRegex(backup.BackupError, "stale"):
             self._verify(now=backup.utc_now() + timedelta(hours=2))
+        self.assertEqual(
+            self._verify(
+                now=backup.utc_now() + timedelta(hours=2),
+                maximum_age_seconds=None,
+            ),
+            payload,
+        )
+        with self.assertRaisesRegex(backup.BackupError, "stale"):
+            self._verify(
+                now=backup.utc_now() - timedelta(minutes=2),
+                maximum_age_seconds=None,
+            )
 
     def test_initial_empty_receipt_fails_if_store_changes_before_migration(self) -> None:
-        backup.create_backup(
-            env_file=self.env_file,
-            backup_dir=self.backup_dir,
-            receipt=self.receipt,
-            release_sha=RELEASE_SHA,
-            release_tree=RELEASE_TREE,
-            image_id=IMAGE_ID,
-            image_input_signature=IMAGE_SIGNATURE,
-        )
+        with mock.patch.object(backup, "_running_project_services", return_value=[]):
+            backup.create_backup(
+                env_file=self.env_file,
+                backup_dir=self.backup_dir,
+                receipt=self.receipt,
+                release_sha=RELEASE_SHA,
+                release_tree=RELEASE_TREE,
+                image_id=IMAGE_ID,
+                image_input_signature=IMAGE_SIGNATURE,
+            )
         (self.postgres_root / "unexpected").write_text("partial-init\n", encoding="utf-8")
         with self.assertRaisesRegex(backup.BackupError, "initial_store_changed"):
             self._verify()
@@ -160,6 +225,7 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
                 "schema_versions": [1, 2],
                 "table_count": 26,
                 "fact_count": 99,
+                **_invariants(fact_count=99, table_count=26),
             },
             "backup": {
                 "path": str(artifact),
@@ -172,6 +238,7 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
                 "schema_versions": [1, 2],
                 "table_count": 26,
                 "fact_count": 99,
+                **_invariants(fact_count=99, table_count=26),
                 "cleanup_status": "PASS",
             },
             "off_host_copy_required": True,
@@ -179,7 +246,7 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
             "services_started": False,
             "secrets_disclosed": False,
         }
-        backup._write_receipt(self.receipt, payload)
+        self._write_bound_receipt(payload)
         self.assertEqual(self._verify(), payload)
         artifact.write_bytes(b"tampered")
         with self.assertRaisesRegex(backup.BackupError, "artifact_drifted"):
@@ -210,6 +277,7 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
                 "schema_versions": [1],
                 "table_count": 1,
                 "fact_count": 1,
+                **_invariants(fact_count=1),
             },
             "backup": {
                 "path": str(artifact),
@@ -222,6 +290,7 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
                 "schema_versions": [1],
                 "table_count": 1,
                 "fact_count": 2,
+                **_invariants(fact_count=2),
                 "cleanup_status": "PASS",
             },
             "off_host_copy_required": True,
@@ -229,7 +298,7 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
             "services_started": False,
             "secrets_disclosed": False,
         }
-        backup._write_receipt(self.receipt, base)
+        self._write_bound_receipt(base)
         with self.assertRaisesRegex(backup.BackupError, "metadata_invalid"):
             self._verify()
         base["unexpected_raw"] = "must-not-be-accepted"
@@ -259,6 +328,8 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
 
         def fake_run(arguments: list[str], *, label: str) -> str:
             joined = " ".join(arguments)
+            if label == "backup_project_workload_inventory":
+                return "market-database"
             if arguments[:3] == ["docker", "ps", "-q"]:
                 return container_id
             if arguments[:2] == ["docker", "inspect"]:
@@ -266,12 +337,20 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
             sql = arguments[-1]
             if "to_regclass" in sql:
                 return "t"
+            if label == "backup_table_names":
+                return "market_facts\nmarket_offers"
+            if label == "backup_table_row_count":
+                return "42" if sql.endswith("market_facts") else "7"
+            if label == "backup_sequence_names":
+                return "market_facts_id_seq"
+            if label == "backup_sequence_value":
+                return "99|t"
+            if label == "backup_schema_catalogue":
+                return '[{"table_name":"market_facts"}]'
+            if label == "backup_schema_objects":
+                return '[{"kind":"index","identity":"market_facts_pkey"}]'
             if "string_agg" in sql:
                 return "1,2"
-            if "market_facts" in sql:
-                return "42"
-            if "information_schema.tables" in sql:
-                return "26"
             if "pg_control_system" in sql:
                 return "123456789"
             if "pg_database_size" in sql:
@@ -282,7 +361,12 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
             report = backup.inspect_source_database(self.values)
         self.assertEqual(report["schema_versions"], [1, 2])
         self.assertEqual(report["fact_count"], 42)
-        self.assertEqual(report["table_count"], 26)
+        self.assertEqual(report["table_count"], 2)
+        self.assertEqual(report["table_row_counts"], {"market_facts": 42, "market_offers": 7})
+        self.assertEqual(
+            report["sequence_values"],
+            {"market_facts_id_seq": {"last_value": 99, "is_called": True}},
+        )
         self.assertNotIn("system_identifier", report)
 
     def test_database_inventory_rejects_initialized_database_without_archive_schema(self) -> None:
@@ -306,6 +390,8 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
         }
 
         def fake_run(arguments: list[str], *, label: str) -> str:
+            if label == "backup_project_workload_inventory":
+                return "market-database"
             if arguments[:3] == ["docker", "ps", "-q"]:
                 return container_id
             if arguments[:2] == ["docker", "inspect"]:
@@ -358,6 +444,201 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
         self.assertNotIn("--publish", restore)
         self.assertIn('"--exit-on-error"', restore)
         self.assertIn("_assert_restore_resource_absent", restore)
+
+    def test_initial_empty_complete_journal_recovers_missing_receipt(self) -> None:
+        with mock.patch.object(backup, "_running_project_services", return_value=[]):
+            first = backup.create_backup(
+                env_file=self.env_file,
+                backup_dir=self.backup_dir,
+                receipt=self.receipt,
+                release_sha=RELEASE_SHA,
+                release_tree=RELEASE_TREE,
+                image_id=IMAGE_ID,
+                image_input_signature=IMAGE_SIGNATURE,
+            )
+            self.receipt.unlink()
+            recovered = backup.create_backup(
+                env_file=self.env_file,
+                backup_dir=self.backup_dir,
+                receipt=self.receipt,
+                release_sha=RELEASE_SHA,
+                release_tree=RELEASE_TREE,
+                image_id=IMAGE_ID,
+                image_input_signature=IMAGE_SIGNATURE,
+            )
+        self.assertEqual(recovered, first)
+        self.assertEqual(self._verify(), first)
+
+    def test_refresh_resumes_after_receipt_was_archived(self) -> None:
+        with mock.patch.object(backup, "_running_project_services", return_value=[]):
+            first = backup.create_backup(
+                env_file=self.env_file,
+                backup_dir=self.backup_dir,
+                receipt=self.receipt,
+                release_sha=RELEASE_SHA,
+                release_tree=RELEASE_TREE,
+                image_id=IMAGE_ID,
+                image_input_signature=IMAGE_SIGNATURE,
+            )
+            run_id = first["backup_run_id"]
+            archived_receipt = (
+                self.backup_dir / f"market-pipeline-backup-receipt.{run_id}.json"
+            )
+            # Reproduce SIGKILL between archiving the receipt and archiving the
+            # matching journal.  Resume may only accept this exact payload.
+            self.receipt.replace(archived_receipt)
+            refreshed = backup.create_backup(
+                env_file=self.env_file,
+                backup_dir=self.backup_dir,
+                receipt=self.receipt,
+                release_sha=RELEASE_SHA,
+                release_tree=RELEASE_TREE,
+                image_id=IMAGE_ID,
+                image_input_signature=IMAGE_SIGNATURE,
+                refresh_complete=True,
+            )
+        self.assertNotEqual(refreshed["backup_run_id"], run_id)
+        self.assertTrue(
+            (self.backup_dir / f"market-pipeline-backup-journal.{run_id}.json").is_file()
+        )
+        self.assertEqual(self._verify(), refreshed)
+
+    def test_pending_dump_is_resumed_without_second_pg_dump(self) -> None:
+        self.backup_dir.mkdir(mode=0o700)
+        destination = self.backup_dir / (
+            f"market-archive-before-{RELEASE_SHA[:12]}-20260828T120000Z-deadbeef.dump"
+        )
+        candidate = self.backup_dir / f".{destination.name}.pending"
+        candidate.write_bytes(b"completed-custom-dump")
+        candidate.chmod(0o600)
+        validation = mock.Mock(returncode=0)
+        with mock.patch.object(backup.subprocess, "run", return_value=validation) as runner:
+            backup._write_dump(
+                container_id="e" * 64,
+                user="market_data",
+                database="market_archive",
+                destination=destination,
+            )
+        self.assertEqual(runner.call_count, 1)
+        self.assertIn("pg_restore", runner.call_args.args[0])
+        self.assertEqual(destination.read_bytes(), b"completed-custom-dump")
+        self.assertFalse(candidate.exists())
+
+    def test_partial_pending_dump_is_not_promoted(self) -> None:
+        self.backup_dir.mkdir(mode=0o700)
+        destination = self.backup_dir / (
+            f"market-archive-before-{RELEASE_SHA[:12]}-20260828T120000Z-deadbeef.dump"
+        )
+        candidate = self.backup_dir / f".{destination.name}.pending"
+        candidate.write_bytes(b"partial")
+        candidate.chmod(0o600)
+        results = [
+            mock.Mock(returncode=1),  # resumed candidate validation
+            mock.Mock(returncode=9),  # fresh pg_dump fails in this fixture
+        ]
+        with mock.patch.object(backup.subprocess, "run", side_effect=results):
+            with self.assertRaisesRegex(backup.BackupError, "pg_dump_failed_rc_9"):
+                backup._write_dump(
+                    container_id="e" * 64,
+                    user="market_data",
+                    database="market_archive",
+                    destination=destination,
+                )
+        self.assertFalse(destination.exists())
+        self.assertFalse(candidate.exists())
+
+    def test_journal_tamper_is_rejected(self) -> None:
+        with mock.patch.object(backup, "_running_project_services", return_value=[]):
+            backup.create_backup(
+                env_file=self.env_file,
+                backup_dir=self.backup_dir,
+                receipt=self.receipt,
+                release_sha=RELEASE_SHA,
+                release_tree=RELEASE_TREE,
+                image_id=IMAGE_ID,
+                image_input_signature=IMAGE_SIGNATURE,
+            )
+        journal_path = backup._journal_path(self.backup_dir)
+        journal = json.loads(journal_path.read_text(encoding="utf-8"))
+        journal["unexpected"] = "tamper"
+        backup._write_journal(journal_path, journal)
+        with self.assertRaisesRegex(backup.BackupError, "journal_schema_invalid"):
+            self._verify()
+
+    def test_source_after_mismatch_is_rejected_without_overwrite(self) -> None:
+        self.backup_dir.mkdir(mode=0o700)
+        artifact = self.backup_dir / (
+            f"market-archive-before-{RELEASE_SHA[:12]}-20260828T120000Z-deadbeef.dump"
+        )
+        artifact.write_bytes(b"dump")
+        artifact.chmod(0o600)
+        source = {
+            "container_id": "e" * 64,
+            "database": "market_archive",
+            "database_size_bytes": 100,
+            "database_identity_sha256": "f" * 64,
+            "schema_versions": [1],
+            "table_count": 1,
+            "fact_count": 7,
+            **_invariants(fact_count=7),
+        }
+        source_after = deepcopy(source)
+        source_after["fact_count"] = 8
+        source_after["table_row_counts"]["market_facts"] = 8
+        payload: dict[str, object] = {
+            "schema": backup.RECEIPT_SCHEMA,
+            "status": "PASS",
+            "created_at_utc": backup.utc_text(backup.utc_now()),
+            "release_sha": RELEASE_SHA,
+            "release_tree": RELEASE_TREE,
+            "image_id": IMAGE_ID,
+            "image_input_signature": IMAGE_SIGNATURE,
+            "role_env_sha256": backup.file_digest(self.env_file),
+            "source": source,
+            "source_after": source_after,
+            "backup": {
+                "path": str(artifact), "sha256": backup.file_digest(artifact),
+                "size_bytes": 4, "format": "postgres_custom",
+            },
+            "restore_smoke": {
+                "status": "PASS", "schema_versions": [1], "table_count": 1,
+                "fact_count": 7, **_invariants(fact_count=7),
+                "cleanup_status": "PASS",
+            },
+            "off_host_copy_required": True,
+            "database_mutated": False,
+            "services_started": False,
+            "secrets_disclosed": False,
+        }
+        self._write_bound_receipt(payload)
+        with self.assertRaisesRegex(backup.BackupError, "metadata_invalid"):
+            self._verify()
+
+    def test_writer_workload_must_be_quiesced(self) -> None:
+        with mock.patch.object(
+            backup,
+            "_running_project_services",
+            return_value=["market-capture-account1", "market-database"],
+        ):
+            with self.assertRaisesRegex(backup.BackupError, "writer_workloads_not_quiesced"):
+                backup._assert_writer_workloads_quiesced(
+                    self.values["MARKET_PIPELINE_PROJECT_NAME"]
+                )
+
+    def test_orphan_cleanup_refuses_wrong_owner_label(self) -> None:
+        inspected = subprocess.CompletedProcess(
+            [], 0, stdout="different-run\n", stderr=""
+        )
+        with (
+            mock.patch.object(backup.subprocess, "run", return_value=inspected),
+            mock.patch.object(backup, "_run_text") as destructive,
+        ):
+            with self.assertRaisesRegex(backup.BackupError, "owner_mismatch"):
+                backup._cleanup_owned_restore_resource(
+                    "container", "market_pipeline_restore_0123456789abcdef",
+                    "market-pipeline-backup-0123456789abcdef",
+                )
+        destructive.assert_not_called()
 
     def test_production_backup_directory_rejects_tmp(self) -> None:
         with self.assertRaisesRegex(backup.BackupError, "tmp_forbidden"):

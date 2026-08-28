@@ -90,6 +90,47 @@ def _retention(source_code: str, persisted: datetime) -> tuple[str, datetime | N
     return "LIVE_3D", persisted + timedelta(days=3)
 
 
+def _fact_semantic_fingerprint(
+    *,
+    event_key: str,
+    origin_event_key: str,
+    source_code: str,
+    stream_id: str,
+    source_sequence: int,
+    occurred_at_utc: datetime | str,
+    available_at_utc: datetime | str,
+    parser_version: str,
+    quality_state: str,
+    quality_reason_codes: tuple[str, ...],
+    payload: FactPayload | Mapping[str, Any],
+) -> str:
+    """Hash every revision-bearing field, not only the economic payload.
+
+    ``payload_hash`` intentionally remains the wire contract's hash of the
+    validated payload.  Revision identity is wider: a parser/quality/time
+    correction must still emit a new immutable revision even when the
+    economic payload is byte-for-byte unchanged.
+    """
+
+    normalized_payload = _normalize_fact_payload(payload)
+    return content_hash(
+        {
+            "event_key": str(event_key),
+            "origin_event_key": str(origin_event_key),
+            "source_code": str(source_code),
+            "stream_id": str(stream_id),
+            "source_sequence": int(source_sequence),
+            "occurred_at_utc": _utc(occurred_at_utc).isoformat(),
+            "available_at_utc": _utc(available_at_utc).isoformat(),
+            "parser_version": str(parser_version),
+            "quality_state": str(quality_state),
+            "quality_reason_codes": list(quality_reason_codes),
+            "payload_hash": content_hash(normalized_payload),
+            "payload": normalized_payload.model_dump(mode="json"),
+        }
+    )
+
+
 def _write_projection(cursor, fact: MarketFactV1) -> None:
     payload = fact.payload
     fact_id = bytes.fromhex(fact.fact_id)
@@ -261,7 +302,42 @@ def build_and_publish_fact(
             (fact_id,),
         )
         existing = cursor.fetchone()
-        if existing is not None and str(existing[2]) == payload_digest:
+        if existing is not None:
+            existing_payload = _normalize_fact_payload(existing[13])
+            existing_payload_digest = content_hash(existing_payload)
+            if existing_payload_digest != str(existing[2]):
+                raise MarketFactArchiveError(
+                    "market_fact_archive_stored_payload_hash_mismatch"
+                )
+            existing_fingerprint = _fact_semantic_fingerprint(
+                event_key=str(existing[3]),
+                origin_event_key=str(existing[5]),
+                source_code=str(existing[6]),
+                stream_id=str(existing[4]),
+                source_sequence=int(existing[0]),
+                occurred_at_utc=existing[7],
+                available_at_utc=existing[8],
+                parser_version=str(existing[10]),
+                quality_state=str(existing[11]),
+                quality_reason_codes=tuple(existing[12] or ()),
+                payload=existing_payload,
+            )
+            incoming_fingerprint = _fact_semantic_fingerprint(
+                event_key=event_key,
+                origin_event_key=origin_event_key,
+                source_code=source_code,
+                stream_id=source.fact_stream_id,
+                source_sequence=int(existing[0]),
+                occurred_at_utc=occurred,
+                available_at_utc=available,
+                parser_version=parser_version,
+                quality_state=quality_state,
+                quality_reason_codes=quality_reason_codes,
+                payload=normalized_payload,
+            )
+        else:
+            existing_fingerprint = incoming_fingerprint = None
+        if existing is not None and existing_fingerprint == incoming_fingerprint:
             fact = MarketFactV1(
                 contract="market_fact/1.0",
                 fact_id=fact_id,
@@ -279,7 +355,7 @@ def build_and_publish_fact(
                 quality_state=str(existing[11]),
                 quality_reason_codes=tuple(existing[12] or ()),
                 payload_hash=str(existing[2]),
-                payload=_normalize_fact_payload(existing[13]),
+                payload=existing_payload,
             )
             return PublishedFact(fact=fact, delivery_sequence=None, changed=False)
         if existing is None:
@@ -349,12 +425,14 @@ def build_and_publish_fact(
             cursor.execute(
                 """
                 UPDATE market_data.market_facts SET
-                    available_at_utc=%s,persisted_at_utc=%s,parser_version=%s,
+                    occurred_at_utc=%s,available_at_utc=%s,
+                    persisted_at_utc=%s,parser_version=%s,
                     fact_revision=%s,quality_state=%s,quality_reason_codes=%s,
                     payload_hash=decode(%s,'hex'),payload=%s
                 WHERE fact_id=decode(%s,'hex')
                 """,
                 (
+                    fact.occurred_at_utc,
                     fact.available_at_utc,
                     fact.persisted_at_utc,
                     fact.parser_version,

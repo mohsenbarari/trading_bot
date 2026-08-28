@@ -166,7 +166,7 @@ def _read_fact_rows(
     return list(
         connection.execute(
             f"""
-            SELECT id, source_code, event_time_utc, available_at_utc, event_type,
+            SELECT id, event_key, source_code, event_time_utc, available_at_utc, event_type,
                    side, price_num, price_unit, settlement_term, trade_form,
                    is_conditional
             FROM market_observations
@@ -193,6 +193,7 @@ def _source_summary(
             "status": "MISSING",
             "price_unit": expected_unit,
             "last_event_utc": None,
+            "source_event_key": None,
             "age_seconds": None,
             "observation_count": 0,
             "source_codes": [],
@@ -221,6 +222,11 @@ def _source_summary(
         "status": status,
         "price_unit": expected_unit,
         "last_event_utc": _iso(newest),
+        # ``rows[0]`` is the exact observation which supplied latest_price.
+        # Carry its opaque identity into the snapshot builder so a later trace
+        # lookup can never combine this value with a different row that happens
+        # to have the same source and event timestamp.
+        "source_event_key": bytes(rows[0]["event_key"]).hex(),
         "age_seconds": round(age_seconds, 3),
         "observation_count": len(window),
         "source_codes": sorted({str(row["source_code"]) for row in window}),
@@ -277,6 +283,91 @@ def _signal(
     )
 
 
+_PRIMARY_INPUT_COMPONENTS = {
+    "PRIVATE_GOLD_CHANNEL": "SOURCE_INPUT_MELTED_PRIMARY",
+    "GROUP_1": "SOURCE_INPUT_GROUP_1",
+    "GROUP_2": "SOURCE_INPUT_GROUP_2",
+    "MELTED_AGGREGATE": "SOURCE_INPUT_MELTED_AGGREGATE",
+    "MELTED_FLOW": "SOURCE_INPUT_MELTED_FLOW",
+    "USD_HERAT": "SOURCE_INPUT_USD_HERAT",
+    "XAUUSD": "SOURCE_INPUT_XAUUSD",
+    "WALLEX_PUBLIC_API": "SOURCE_INPUT_WALLEX",
+    "BINANCE_PAXG_PUBLIC_API": "SOURCE_INPUT_BINANCE_PAXG",
+}
+
+
+def _source_input_readiness_signal(
+    connection: sqlite3.Connection,
+    *,
+    as_of: datetime,
+    source_code: str,
+) -> tuple[str, dict[str, Any]]:
+    """Expose one real, point-in-time source row to the estimator ledger.
+
+    These components do not alter pricing precedence.  They make the complete
+    PRIVATE_PRIMARY source inventory an explicit part of every estimator
+    snapshot's input/health contract, instead of calling data "model visible"
+    merely because it exists somewhere in the hot/archive store.
+    """
+
+    row = connection.execute(
+        """
+        SELECT event_key,event_time_utc,available_at_utc,price_num,price_unit
+        FROM market_observations
+        WHERE source_code=? AND quality_state='ELIGIBLE'
+          AND event_time_utc<=? AND available_at_utc<=?
+          AND (CASE WHEN instr(inserted_at_utc,'.')=0
+                    THEN replace(inserted_at_utc,'Z','.000000Z')
+                    ELSE inserted_at_utc END)<=?
+        ORDER BY event_time_utc DESC,id DESC
+        LIMIT 1
+        """,
+        (
+            source_code,
+            _iso(as_of),
+            _iso(as_of),
+            _iso(as_of).replace("Z", ".000000Z"),
+        ),
+    ).fetchone()
+    component = _PRIMARY_INPUT_COMPONENTS[source_code]
+    if row is None:
+        return (
+            component,
+            {
+                "status": "MISSING",
+                "price_unit": "UNKNOWN_UNIT",
+                "last_event_utc": None,
+                "source_event_key": None,
+                "age_seconds": None,
+                "observation_count": 0,
+                "source_codes": [source_code],
+                "method": "private_primary_source_readiness_v1",
+            },
+        )
+    event_time = _utc(str(row["event_time_utc"]))
+    age_seconds = max(0.0, (as_of - event_time).total_seconds())
+    price = _finite_number(row["price_num"])
+    return (
+        component,
+        {
+            "status": "FRESH" if age_seconds <= 900 else "STALE",
+            "price_unit": str(row["price_unit"]),
+            "last_event_utc": _iso(event_time),
+            "source_event_key": bytes(row["event_key"]).hex(),
+            "age_seconds": round(age_seconds, 3),
+            "observation_count": 1,
+            "source_codes": [source_code],
+            "event_counts": {},
+            "side_counts": {},
+            "latest_price": price,
+            "weighted_median_price": price,
+            "mean_price": price,
+            "median_price": price,
+            "minimum_price": price,
+            "maximum_price": price,
+            "method": "private_primary_source_readiness_v1",
+        },
+    )
 def build_market_snapshot(
     connection: sqlite3.Connection,
     *,
@@ -536,6 +627,16 @@ def build_market_snapshot(
                 aggregation_seconds=60,
                 method="external_spot_latest_minute_v1",
             ),
+        )
+    )
+    signals.update(
+        dict(
+            _source_input_readiness_signal(
+                connection,
+                as_of=as_of,
+                source_code=source_code,
+            )
+            for source_code in _PRIMARY_INPUT_COMPONENTS
         )
     )
     rate_items = [item.to_dict() for item in build_coin_rate_estimates(connection, as_of_utc=as_of)]

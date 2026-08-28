@@ -23,6 +23,7 @@ from .private_capture import (
     utc_text,
 )
 from .private_capture_telegram import (
+    EXACT_CATCHUP_SOURCES,
     TelegramCaptureProvider,
     load_capture_config,
     load_hmac_key,
@@ -66,6 +67,40 @@ def _crash_settings() -> tuple[str | None, int]:
     if bool(point) != (sequence > 0):
         raise CaptureRuntimeError("capture_fixture_crash_contract_invalid")
     return point or None, sequence
+
+
+def _backfill_settings() -> tuple[datetime | None, int, frozenset[str]]:
+    backfill_raw = os.environ.get(
+        "MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC", ""
+    ).strip()
+    backfill_not_before = (
+        parse_utc(backfill_raw, field="capture_backfill_not_before_utc")
+        if backfill_raw
+        else None
+    )
+    try:
+        backfill_max_messages = int(
+            os.environ.get("MARKET_CAPTURE_BACKFILL_MAX_MESSAGES", "100000")
+        )
+    except ValueError as exc:
+        raise CaptureRuntimeError("capture_backfill_max_messages_invalid") from exc
+    if not 2_000 <= backfill_max_messages <= 250_000:
+        raise CaptureRuntimeError("capture_backfill_max_messages_invalid")
+    backfill_sources_raw = os.environ.get(
+        "MARKET_CAPTURE_BACKFILL_SOURCE_CODES", ""
+    ).strip()
+    backfill_source_items = tuple(
+        item.strip() for item in backfill_sources_raw.split(",") if item.strip()
+    )
+    backfill_source_codes = frozenset(backfill_source_items)
+    if len(backfill_source_items) != len(backfill_source_codes):
+        raise CaptureRuntimeError("capture_backfill_source_codes_duplicate")
+    if backfill_not_before is not None:
+        if backfill_source_codes != EXACT_CATCHUP_SOURCES:
+            raise CaptureRuntimeError("capture_backfill_source_codes_mismatch")
+    elif backfill_source_codes:
+        raise CaptureRuntimeError("capture_backfill_cutoff_required")
+    return backfill_not_before, backfill_max_messages, backfill_source_codes
 
 
 def run_capture_service(
@@ -157,17 +192,30 @@ def run_capture_service(
                     )
                 )
             )
+        (
+            backfill_not_before,
+            backfill_max_messages,
+            backfill_source_codes,
+        ) = _backfill_settings()
         provider = TelegramCaptureProvider(
             config,
             engine,
             session_path=session_path,
             hmac_key=hmac_key,
             stop=stop,
+            backfill_not_before=backfill_not_before,
+            backfill_max_messages=backfill_max_messages,
+            backfill_source_codes=backfill_source_codes,
+            release_sha=release_sha,
             heartbeat=lambda: write_health(
                 status=(
-                    "live-degraded"
-                    if provider.reconciliation_truncated
-                    else "live-ready"
+                    "live-starting"
+                    if provider.backfill_in_progress
+                    else (
+                        "live-degraded"
+                        if provider.reconciliation_truncated
+                        else "live-ready"
+                    )
                 )
             ),
         )

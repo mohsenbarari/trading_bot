@@ -8,12 +8,15 @@ import re
 import sqlite3
 from typing import Any, Mapping
 
+from pydantic import TypeAdapter
+
 from .market_fact_archive import (
     MarketFactArchiveError,
+    _fact_semantic_fingerprint,
     build_and_publish_fact,
     stable_fact_id,
 )
-from .private_pipeline_contracts import load_source_registry
+from .private_pipeline_contracts import FactPayload, content_hash, load_source_registry
 from .research_archive import (
     ResearchArchiveKey,
     archive_fact_research_context,
@@ -24,10 +27,15 @@ from .research_archive import (
 PROJECTION_VERSION = "market-fact-projection-v1"
 MAX_EXPORT_PER_CYCLE = 5_000
 _REASON_TOKEN = re.compile(r"[^A-Z0-9_]+")
+_FACT_PAYLOAD_ADAPTER = TypeAdapter(FactPayload)
 
 
 class MarketFactProjectionError(RuntimeError):
     """A payload-free projection failure."""
+
+
+def _normalize_projection_payload(value: Mapping[str, Any]) -> FactPayload:
+    return _FACT_PAYLOAD_ADAPTER.validate_python(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +64,35 @@ def initialize_export_ledger(connection: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS market_fact_export_retry_idx
         ON market_fact_export_ledger(status,observation_inserted_at_utc);
+        CREATE TABLE IF NOT EXISTS market_fact_export_semantics (
+            event_key BLOB PRIMARY KEY,
+            observation_inserted_at_utc TEXT NOT NULL,
+            fact_id TEXT NOT NULL CHECK(length(fact_id)=64),
+            fact_revision INTEGER NOT NULL CHECK(fact_revision>0),
+            source_sequence INTEGER NOT NULL CHECK(source_sequence>0),
+            delivery_sequence INTEGER NOT NULL CHECK(delivery_sequence>0),
+            payload_hash TEXT NOT NULL CHECK(length(payload_hash)=64),
+            quality_state TEXT NOT NULL,
+            semantic_fingerprint TEXT NOT NULL CHECK(length(semantic_fingerprint)=64),
+            envelope_hash TEXT NOT NULL CHECK(length(envelope_hash)=64),
+            updated_at_utc TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS market_fact_export_history (
+            fact_id TEXT NOT NULL CHECK(length(fact_id)=64),
+            fact_revision INTEGER NOT NULL CHECK(fact_revision>0),
+            event_key BLOB NOT NULL,
+            observation_inserted_at_utc TEXT NOT NULL,
+            source_sequence INTEGER NOT NULL CHECK(source_sequence>0),
+            delivery_sequence INTEGER NOT NULL CHECK(delivery_sequence>0),
+            payload_hash TEXT NOT NULL CHECK(length(payload_hash)=64),
+            quality_state TEXT NOT NULL,
+            semantic_fingerprint TEXT NOT NULL CHECK(length(semantic_fingerprint)=64),
+            envelope_hash TEXT NOT NULL CHECK(length(envelope_hash)=64),
+            exported_at_utc TEXT NOT NULL,
+            PRIMARY KEY(fact_id,fact_revision)
+        );
+        CREATE INDEX IF NOT EXISTS market_fact_export_history_event_idx
+        ON market_fact_export_history(event_key,fact_revision);
         """
     )
 
@@ -70,8 +107,16 @@ def _pending_export_rows(
         SELECT o.*
         FROM market_observations o
         LEFT JOIN market_fact_export_ledger l ON l.event_key=o.event_key
+        LEFT JOIN market_fact_export_semantics s ON s.event_key=o.event_key
         WHERE l.event_key IS NULL
            OR l.observation_inserted_at_utc<>o.inserted_at_utc
+           OR (
+                l.status='SUCCESS'
+                AND (
+                    s.event_key IS NULL
+                    OR s.observation_inserted_at_utc<>o.inserted_at_utc
+                )
+              )
            OR (
                 l.status='REJECTED'
                 AND instr(COALESCE(l.reason_code,''),'fact_payload_hash_mismatch')>0
@@ -115,6 +160,40 @@ def _attributes(row: sqlite3.Row) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise MarketFactProjectionError("market_fact_projection_attributes_invalid")
     return value
+
+
+def observation_fact_semantics(
+    market: sqlite3.Connection,
+    row: sqlite3.Row,
+    *,
+    source_sequence: int,
+) -> tuple[str, str, str]:
+    """Return payload hash, transfer quality and full semantic fingerprint."""
+
+    source_code = str(row["source_code"])
+    source = load_source_registry().by_code().get(source_code)
+    if source is None or not source.transfer_to_bot:
+        raise MarketFactProjectionError(
+            "market_fact_projection_source_not_transferable"
+        )
+    payload = observation_payload(market, row)
+    quality_state = _quality(str(row["quality_state"]))
+    normalized_payload = _normalize_projection_payload(payload)
+    payload_hash = content_hash(normalized_payload)
+    fingerprint = _fact_semantic_fingerprint(
+        event_key=bytes(row["event_key"]).hex(),
+        origin_event_key=bytes(row["event_key"]).hex(),
+        source_code=source_code,
+        stream_id=source.fact_stream_id,
+        source_sequence=source_sequence,
+        occurred_at_utc=str(row["event_time_utc"]),
+        available_at_utc=str(row["available_at_utc"]),
+        parser_version=str(row["parser_version"]),
+        quality_state=quality_state,
+        quality_reason_codes=_reason_codes(row, _attributes(row)),
+        payload=normalized_payload,
+    )
+    return payload_hash, quality_state, fingerprint
 
 
 def _root_offer_fact_id(row: sqlite3.Row, attributes: Mapping[str, Any]) -> str:
@@ -313,6 +392,8 @@ def export_market_store_facts(
         reason: str | None = None
         fact_id: str | None = None
         revision: int | None = None
+        delivery_sequence: int | None = None
+        envelope_hash: str | None = None
         try:
             source = allowed.get(source_code)
             if source is None or not source.transfer_to_bot:
@@ -334,6 +415,23 @@ def export_market_store_facts(
                         quality_reason_codes=_reason_codes(row, _attributes(row)),
                         payload=payload,
                     )
+                    cursor.execute(
+                        "SELECT delivery_sequence,encode(envelope_hash,'hex') "
+                        "FROM market_data.market_fact_outbox "
+                        "WHERE fact_id=decode(%s,'hex') AND fact_revision=%s",
+                        (result.fact.fact_id, result.fact.fact_revision),
+                    )
+                    outbox = cursor.fetchone()
+                    if (
+                        outbox is None
+                        or int(outbox[0]) < 1
+                        or not re.fullmatch(r"[0-9a-f]{64}", str(outbox[1]))
+                    ):
+                        raise MarketFactProjectionError(
+                            "market_fact_projection_outbox_lineage_missing"
+                        )
+                    delivery_sequence = int(outbox[0])
+                    envelope_hash = str(outbox[1])
                     context = contexts.get(bytes(row["event_key"]))
                     if context is not None and research_key is not None:
                         archive_fact_research_context(
@@ -380,6 +478,91 @@ def export_market_store_facts(
                 reason,
             ),
         )
+        if status == "SUCCESS":
+            if delivery_sequence is None or envelope_hash is None:
+                raise MarketFactProjectionError(
+                    "market_fact_projection_outbox_lineage_missing"
+                )
+            semantic_fingerprint = _fact_semantic_fingerprint(
+                event_key=result.fact.event_key,
+                origin_event_key=result.fact.origin_event_key,
+                source_code=result.fact.source_code,
+                stream_id=result.fact.stream_id,
+                source_sequence=result.fact.source_sequence,
+                occurred_at_utc=result.fact.occurred_at_utc,
+                available_at_utc=result.fact.available_at_utc,
+                parser_version=result.fact.parser_version,
+                quality_state=result.fact.quality_state,
+                quality_reason_codes=result.fact.quality_reason_codes,
+                payload=result.fact.payload,
+            )
+            market.execute(
+                """
+                INSERT INTO market_fact_export_semantics(
+                    event_key,observation_inserted_at_utc,fact_id,fact_revision,
+                    source_sequence,delivery_sequence,payload_hash,quality_state,
+                    semantic_fingerprint,envelope_hash,updated_at_utc
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                ON CONFLICT(event_key) DO UPDATE SET
+                    observation_inserted_at_utc=excluded.observation_inserted_at_utc,
+                    fact_id=excluded.fact_id,fact_revision=excluded.fact_revision,
+                    source_sequence=excluded.source_sequence,
+                    delivery_sequence=excluded.delivery_sequence,
+                    payload_hash=excluded.payload_hash,
+                    quality_state=excluded.quality_state,
+                    semantic_fingerprint=excluded.semantic_fingerprint,
+                    envelope_hash=excluded.envelope_hash,
+                    updated_at_utc=excluded.updated_at_utc
+                """,
+                (
+                    row["event_key"],
+                    str(row["inserted_at_utc"]),
+                    result.fact.fact_id,
+                    result.fact.fact_revision,
+                    result.fact.source_sequence,
+                    delivery_sequence,
+                    result.fact.payload_hash,
+                    result.fact.quality_state,
+                    semantic_fingerprint,
+                    envelope_hash,
+                ),
+            )
+            market.execute(
+                """
+                INSERT INTO market_fact_export_history(
+                    fact_id,fact_revision,event_key,
+                    observation_inserted_at_utc,source_sequence,delivery_sequence,payload_hash,
+                    quality_state,semantic_fingerprint,envelope_hash,exported_at_utc
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                ON CONFLICT(fact_id,fact_revision) DO UPDATE SET
+                    event_key=excluded.event_key,
+                    observation_inserted_at_utc=excluded.observation_inserted_at_utc,
+                    source_sequence=excluded.source_sequence,
+                    delivery_sequence=excluded.delivery_sequence,
+                    payload_hash=excluded.payload_hash,
+                    quality_state=excluded.quality_state,
+                    semantic_fingerprint=excluded.semantic_fingerprint,
+                    envelope_hash=excluded.envelope_hash,
+                    exported_at_utc=excluded.exported_at_utc
+                """,
+                (
+                    result.fact.fact_id,
+                    result.fact.fact_revision,
+                    row["event_key"],
+                    str(row["inserted_at_utc"]),
+                    result.fact.source_sequence,
+                    delivery_sequence,
+                    result.fact.payload_hash,
+                    result.fact.quality_state,
+                    semantic_fingerprint,
+                    envelope_hash,
+                ),
+            )
+        else:
+            market.execute(
+                "DELETE FROM market_fact_export_semantics WHERE event_key=?",
+                (row["event_key"],),
+            )
     return ExportReport(
         selected=len(rows),
         published=published,

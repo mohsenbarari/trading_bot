@@ -335,6 +335,13 @@ class CoinGroupPipelineTests(unittest.TestCase):
             as_of_utc="2026-08-04T10:01:00Z",
         )
         self.market.commit()
+        inserted_before = {
+            bytes(row["event_key"]): str(row["inserted_at_utc"])
+            for row in self.market.execute(
+                "SELECT event_key,inserted_at_utc FROM market_observations "
+                "WHERE source_code='GROUP_1'"
+            ).fetchall()
+        }
 
         self._stage(1, "پیام غیر آفر", sender="offerer")
         self.staging.commit()
@@ -350,6 +357,17 @@ class CoinGroupPipelineTests(unittest.TestCase):
         self.assertEqual([row["quality_state"] for row in states], ["REJECTED", "REJECTED"])
         self.assertTrue(
             all("NO_LONGER_PRESENT" in row["attributes_json"] for row in states)
+        )
+        inserted_after = {
+            bytes(row["event_key"]): str(row["inserted_at_utc"])
+            for row in self.market.execute(
+                "SELECT event_key,inserted_at_utc FROM market_observations "
+                "WHERE source_code='GROUP_1'"
+            ).fetchall()
+        }
+        self.assertEqual(set(inserted_after), set(inserted_before))
+        self.assertTrue(
+            all(inserted_after[key] != inserted_before[key] for key in inserted_before)
         )
 
     def test_non_integral_project_price_cannot_be_coerced_into_an_anchor(self) -> None:

@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import argparse
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -22,6 +24,7 @@ else:
 
 CONFIRMATION = "run-production-market-pipeline-archive-migration"
 RESULT_SCHEMA = "market_pipeline_migration_receipt/1.0"
+JOURNAL_SCHEMA = "market_pipeline_migration_journal/1.0"
 POSTGRES_IMAGE = backup.POSTGRES_IMAGE
 MARKET_SCHEMA_VERSION = 3
 MARKET_SCHEMA_TABLE_COUNT = 28
@@ -33,6 +36,69 @@ MARKET_SCHEMA_VERSIONS_TEXT = ",".join(str(item) for item in MARKET_SCHEMA_VERSI
 
 class MigrationError(RuntimeError):
     """A stable, content-free migration refusal."""
+
+
+def _digest(path: Path) -> str:
+    return sha256(path.read_bytes()).hexdigest()
+
+
+def _secure_parent(path: Path) -> None:
+    info = path.parent.lstat()
+    if (
+        not path.parent.is_absolute()
+        or path.parent.is_symlink()
+        or not path.parent.is_dir()
+        or info.st_uid != os.geteuid()
+        or stat.S_IMODE(info.st_mode) != 0o700
+    ):
+        raise MigrationError("migration_state_parent_invalid")
+
+
+def _secure_file(path: Path) -> None:
+    info = path.lstat()
+    if (
+        path.is_symlink()
+        or not path.is_file()
+        or info.st_uid != os.geteuid()
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or info.st_nlink != 1
+    ):
+        raise MigrationError("migration_state_file_invalid")
+
+
+def _atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
+    _secure_parent(path)
+    candidate = path.parent / f".{path.name}.{os.getpid()}.tmp"
+    descriptor = os.open(
+        candidate,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(candidate, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        candidate.unlink(missing_ok=True)
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    _secure_file(path)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise MigrationError("migration_state_invalid") from exc
+    if not isinstance(payload, dict):
+        raise MigrationError("migration_state_invalid")
+    return payload
 
 
 def _run(
@@ -296,6 +362,63 @@ def validate_receipt(
         raise MigrationError("migration_receipt_transition_invalid")
 
 
+def _journal_identity(
+    *,
+    release_sha: str,
+    release_tree: str,
+    image_id: str,
+    image_input_signature: str,
+    offhost_receipt_sha256: str,
+    host_preflight_receipt_sha256: str,
+    source_backup_receipt_sha256: str,
+    web_role_env_sha256: str,
+    backup_status: str,
+    before: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "schema": JOURNAL_SCHEMA,
+        "release_sha": release_sha,
+        "release_tree": release_tree,
+        "image_id": image_id,
+        "image_input_signature": image_input_signature,
+        "offhost_backup_receipt_sha256": offhost_receipt_sha256,
+        "host_preflight_receipt_sha256": host_preflight_receipt_sha256,
+        "source_backup_receipt_sha256": source_backup_receipt_sha256,
+        "web_role_env_sha256": web_role_env_sha256,
+        "backup_status": backup_status,
+        "before": dict(before),
+        "product_authority_changed": False,
+        "telegram_capture_cutover_authorized": False,
+        "secrets_disclosed": False,
+    }
+
+
+def _validate_journal(
+    payload: Mapping[str, Any], *, expected: Mapping[str, Any], receipt_path: Path
+) -> None:
+    status = payload.get("status")
+    if status not in {"PREPARED", "APPLYING", "COMPLETE"} or payload.get(
+        "receipt_path"
+    ) != str(receipt_path):
+        raise MigrationError("migration_journal_state_invalid")
+    for key, value in expected.items():
+        if payload.get(key) != value:
+            raise MigrationError("migration_journal_identity_mismatch")
+    allowed = set(expected) | {"status", "receipt_path", "receipt_sha256"}
+    if set(payload) != allowed:
+        raise MigrationError("migration_journal_schema_invalid")
+    if status == "COMPLETE":
+        if not HEX64.fullmatch(str(payload.get("receipt_sha256") or "")):
+            raise MigrationError("migration_journal_state_invalid")
+    elif payload.get("receipt_sha256") is not None:
+        raise MigrationError("migration_journal_state_invalid")
+
+
+def _write_remote_receipt(path: Path, payload: Mapping[str, Any]) -> None:
+    _atomic_json(path, payload)
+    _secure_file(path)
+
+
 def _query(container_id: str, user: str, database: str, sql: str) -> str:
     return _text(
         [
@@ -318,6 +441,35 @@ def _query(container_id: str, user: str, database: str, sql: str) -> str:
     )
 
 
+def _verify_completed_live_state(
+    payload: Mapping[str, Any], *, values: Mapping[str, str], project: str,
+    postgres_root: Path,
+) -> None:
+    after = payload.get("after")
+    if not isinstance(after, dict):
+        raise MigrationError("migration_recovery_receipt_invalid")
+    container_id = str(after.get("container_id") or "")
+    if _container_ids(project) != [container_id]:
+        raise MigrationError("migration_recovery_database_drift")
+    identity = _database_identity(
+        _inspect(container_id), project=project, postgres_root=postgres_root
+    )
+    if identity != after or _running_services(project) != ["market-database"]:
+        raise MigrationError("migration_recovery_database_drift")
+    user = values.get("MARKET_POSTGRES_USER", "market_data")
+    database = values.get("MARKET_POSTGRES_DB", "market_archive")
+    versions = _query(
+        container_id, user, database,
+        "SELECT string_agg(version::text, ',' ORDER BY version) "
+        "FROM market_data.schema_migrations",
+    )
+    facts = int(
+        _query(container_id, user, database, "SELECT count(*) FROM market_data.market_facts")
+    )
+    if versions != MARKET_SCHEMA_VERSIONS_TEXT or facts < int(payload.get("fact_count", -1)):
+        raise MigrationError("migration_recovery_database_drift")
+
+
 def run_migration(
     *,
     release_root: Path,
@@ -331,6 +483,8 @@ def run_migration(
     offhost_receipt_sha256: str,
     host_preflight_receipt_sha256: str,
     backup_maximum_age_seconds: int,
+    journal_path: Path,
+    receipt_path: Path,
 ) -> dict[str, Any]:
     bluegreen = backup_env_file is not None
     if bluegreen:
@@ -354,6 +508,15 @@ def run_migration(
         source_values = values = backup.validate_release_env(
             env_file, release_sha=release_sha, image_id=image_id
         )
+    _secure_parent(journal_path)
+    _secure_parent(receipt_path)
+    if journal_path.parent != receipt_path.parent or journal_path == receipt_path:
+        raise MigrationError("migration_state_destination_invalid")
+    existing_journal = (
+        _read_json(journal_path)
+        if journal_path.exists() or journal_path.is_symlink()
+        else None
+    )
     receipt_env = backup_env_file or env_file
     backup_document = backup.verify_receipt(
         env_file=receipt_env,
@@ -362,43 +525,111 @@ def run_migration(
         release_tree=release_tree,
         image_id=image_id,
         image_input_signature=image_input_signature,
-        maximum_age_seconds=backup_maximum_age_seconds,
+        # Freshness is a pre-PREPARED admission gate.  Once the exact journal
+        # exists, retries after a kill or lost SSH session must continue from
+        # the immutable bound backup even if wall-clock time crossed the
+        # ordinary freshness window.
+        maximum_age_seconds=(
+            None if existing_journal is not None else backup_maximum_age_seconds
+        ),
     )
     if not HEX64.fullmatch(offhost_receipt_sha256) or not HEX64.fullmatch(
         host_preflight_receipt_sha256
     ):
         raise MigrationError("migration_prerequisite_receipt_digest_invalid")
+    source_backup_receipt_sha256 = backup.file_digest(backup_receipt)
+    web_role_env_sha256 = backup.file_digest(env_file)
     project = values["MARKET_PIPELINE_PROJECT_NAME"]
     source_project = source_values["MARKET_PIPELINE_PROJECT_NAME"]
     postgres_root = Path(values["MARKET_WEB_DATA_ROOT"]) / "postgres"
-    before_ids = _container_ids(source_project)
-    target_before_ids = _container_ids(project) if bluegreen else before_ids
     status = backup_document["status"]
-    if status == "PASS":
-        expected_id = str(backup_document["source"]["container_id"])
-        if before_ids != [expected_id]:
-            raise MigrationError("migration_source_database_identity_changed")
-        before_identity = _database_identity(
-            _inspect(expected_id), project=source_project, postgres_root=postgres_root
-        )
-        if bluegreen:
-            if before_identity["running"] or target_before_ids:
-                raise MigrationError("migration_bluegreen_source_not_quiesced")
-            before = {"container_id": expected_id, "running": False}
-        else:
-            if not before_identity["running"] or not before_identity["healthy"]:
-                raise MigrationError("migration_source_database_not_healthy")
-            before = {"container_id": expected_id, "running": True}
-    elif status == "INITIAL_EMPTY":
-        if before_ids or target_before_ids:
-            raise MigrationError("migration_initial_store_container_exists")
-        before = {"container_id": None, "running": False}
+    if existing_journal is not None:
+        before = existing_journal.get("before")
+        if not isinstance(before, dict):
+            raise MigrationError("migration_journal_state_invalid")
     else:
-        raise MigrationError("migration_backup_status_invalid")
+        before_ids = _container_ids(source_project)
+        target_before_ids = _container_ids(project) if bluegreen else before_ids
+        if status == "PASS":
+            expected_id = str(backup_document["source"]["container_id"])
+            if before_ids != [expected_id]:
+                raise MigrationError("migration_source_database_identity_changed")
+            before_identity = _database_identity(
+                _inspect(expected_id), project=source_project, postgres_root=postgres_root
+            )
+            if bluegreen:
+                if before_identity["running"] or target_before_ids:
+                    raise MigrationError("migration_bluegreen_source_not_quiesced")
+                before = {"container_id": expected_id, "running": False}
+            else:
+                if not before_identity["running"] or not before_identity["healthy"]:
+                    raise MigrationError("migration_source_database_not_healthy")
+                before = {"container_id": expected_id, "running": True}
+        elif status == "INITIAL_EMPTY":
+            if before_ids or target_before_ids:
+                raise MigrationError("migration_initial_store_container_exists")
+            before = {"container_id": None, "running": False}
+        else:
+            raise MigrationError("migration_backup_status_invalid")
+    expected_journal = _journal_identity(
+        release_sha=release_sha,
+        release_tree=release_tree,
+        image_id=image_id,
+        image_input_signature=image_input_signature,
+        offhost_receipt_sha256=offhost_receipt_sha256,
+        host_preflight_receipt_sha256=host_preflight_receipt_sha256,
+        source_backup_receipt_sha256=source_backup_receipt_sha256,
+        web_role_env_sha256=web_role_env_sha256,
+        backup_status=status,
+        before=before,
+    )
+    if existing_journal is None:
+        existing_journal = {
+            **expected_journal,
+            "status": "PREPARED",
+            "receipt_path": str(receipt_path),
+            "receipt_sha256": None,
+        }
+        _atomic_json(journal_path, existing_journal)
+    else:
+        _validate_journal(existing_journal, expected=expected_journal, receipt_path=receipt_path)
     if bluegreen and _running_services(source_project):
         raise MigrationError("migration_bluegreen_source_project_running")
     if [service for service in _running_services(project) if service != "market-database"]:
         raise MigrationError("migration_other_market_service_running")
+
+    if receipt_path.exists() or receipt_path.is_symlink():
+        recovered = _read_json(receipt_path)
+        validate_receipt(
+            recovered,
+            release_sha=release_sha,
+            release_tree=release_tree,
+            image_id=image_id,
+            image_input_signature=image_input_signature,
+            offhost_receipt_sha256=offhost_receipt_sha256,
+            host_preflight_receipt_sha256=host_preflight_receipt_sha256,
+            source_backup_receipt_sha256=source_backup_receipt_sha256,
+            web_role_env_sha256=web_role_env_sha256,
+        )
+        _verify_completed_live_state(
+            recovered, values=values, project=project, postgres_root=postgres_root
+        )
+        receipt_sha256 = _digest(receipt_path)
+        if (
+            existing_journal.get("status") == "COMPLETE"
+            and existing_journal.get("receipt_sha256") != receipt_sha256
+        ):
+            raise MigrationError("migration_receipt_journal_mismatch")
+        existing_journal["status"] = "COMPLETE"
+        existing_journal["receipt_sha256"] = receipt_sha256
+        _atomic_json(journal_path, existing_journal)
+        return recovered
+    if existing_journal.get("status") == "COMPLETE":
+        raise MigrationError("migration_complete_receipt_missing")
+
+    existing_journal["status"] = "APPLYING"
+    existing_journal["receipt_sha256"] = None
+    _atomic_json(journal_path, existing_journal)
 
     compose = _compose(release_root, env_file)
     _run([*compose, "config", "--quiet"], label="migration_compose_config")
@@ -512,6 +743,10 @@ def run_migration(
             source_backup_receipt_sha256=backup.file_digest(backup_receipt),
             web_role_env_sha256=backup.file_digest(env_file),
         )
+        _write_remote_receipt(receipt_path, result)
+        existing_journal["status"] = "COMPLETE"
+        existing_journal["receipt_sha256"] = _digest(receipt_path)
+        _atomic_json(journal_path, existing_journal)
         return result
     except Exception as exc:
         if created and after_id:
@@ -553,6 +788,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--offhost-receipt-sha256", required=True)
     parser.add_argument("--host-preflight-receipt-sha256", required=True)
     parser.add_argument("--backup-maximum-age-seconds", type=int, required=True)
+    parser.add_argument("--journal", type=Path, required=True)
+    parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--confirm", required=True)
     return parser
 
@@ -581,6 +818,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             offhost_receipt_sha256=args.offhost_receipt_sha256,
             host_preflight_receipt_sha256=args.host_preflight_receipt_sha256,
             backup_maximum_age_seconds=args.backup_maximum_age_seconds,
+            journal_path=args.journal,
+            receipt_path=args.receipt,
         )
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0

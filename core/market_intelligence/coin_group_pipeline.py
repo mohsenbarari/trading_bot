@@ -8,7 +8,7 @@ no collector, scheduler, network, or application request hook is registered.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from hashlib import blake2b
 import json
 import math
@@ -107,6 +107,14 @@ _CAUSAL_ATTRIBUTE_KEYS = (
     "quantity_was_negotiated",
     "confirmation_kind",
 )
+
+
+def _utc_now() -> str:
+    return (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="microseconds")
+        .replace("+00:00", "Z")
+    )
 
 
 def _causal_attribute_signature(value: object) -> tuple[object, ...]:
@@ -884,12 +892,13 @@ def _reconcile_missing_current_facts(
             SET available_at_utc=?, parse_confidence=0,
                 quality_state='REJECTED',
                 quality_policy_version='coin-group-current-graph-v1',
-                attributes_json=?
+                attributes_json=?, inserted_at_utc=?
             WHERE event_key=?
             """,
             (
                 available_at_utc,
                 json.dumps(attributes, sort_keys=True, separators=(",", ":")),
+                _utc_now(),
                 event_key,
             ),
         )

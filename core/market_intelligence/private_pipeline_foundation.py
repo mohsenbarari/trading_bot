@@ -619,7 +619,15 @@ def run_healthcheck(role: str, max_age_seconds: float) -> int:
             if document.get("schema") != "market_capture_engine/1.0":
                 raise FoundationError("capture_heartbeat_schema_invalid")
             mode = document.get("mode")
-            if document.get("status") != f"{mode}-ready" or mode not in {
+            allowed_statuses = {f"{mode}-ready"}
+            # A live capture process deliberately starts its subscriptions
+            # before running the bounded, owner-authorized historical catch-up.
+            # During that interval the process itself is healthy, but it is not
+            # promotion-ready.  Compose may keep it alive; the promotion
+            # observer still requires ``live-ready``.
+            if mode == "live":
+                allowed_statuses.add("live-starting")
+            if document.get("status") not in allowed_statuses or mode not in {
                 "fixture",
                 "live",
             }:

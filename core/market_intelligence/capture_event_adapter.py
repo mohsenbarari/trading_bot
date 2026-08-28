@@ -50,8 +50,8 @@ from .public_telegram.parser import parse_public_message, should_ignore_public_m
 from .public_telegram.sources import source_for_code
 
 
-CAPTURE_ADAPTER_SCHEMA_VERSION = 6
-CAPTURE_ADAPTER_VERSION = "capture-event-adapter-v8-projection-reconciliation"
+CAPTURE_ADAPTER_SCHEMA_VERSION = 8
+CAPTURE_ADAPTER_VERSION = "capture-event-adapter-v10-terminal-lineage"
 CAPTURE_RAW_RETENTION = timedelta(days=3)
 COIN_GROUP_ACTIVE_REPLAY_WINDOW = timedelta(hours=6)
 MARKET_BACKFILL_REPLAY_WINDOW = timedelta(minutes=30)
@@ -79,6 +79,15 @@ _PUBLIC_SOURCE_CODES = frozenset(
 _PRIMARY_SOURCE_CODE = "MELTED_PRIMARY_FLOW"
 _MARKET_SOURCE_CODES = _PUBLIC_SOURCE_CODES | {_PRIMARY_SOURCE_CODE}
 _GROUP_NUMBERS = {"GROUP_1": 1, "GROUP_2": 2}
+_PROMOTION_BACKFILL_SOURCE_CODES = frozenset(
+    {_PRIMARY_SOURCE_CODE, "GROUP_1", "GROUP_2"}
+)
+_EXPLICIT_BACKFILL_SOURCE_CODES = _MARKET_SOURCE_CODES | frozenset(
+    _GROUP_NUMBERS
+)
+_EXPLICIT_BACKFILL_STATUSES = frozenset({"PENDING", "PARSED", "FILTERED"})
+_NON_MODEL_CONTENT_TYPES = frozenset({"media_only", "service"})
+_CONTENT_TYPES = frozenset({"text", "caption"}) | _NON_MODEL_CONTENT_TYPES
 _RETRACTION_REASON = "CAPTURE_SOURCE_REVISION_NOT_CURRENT"
 _V8_RECONCILIATION_CODE = "V8_PRIVATE_ROOT_AND_COIN_PARSER_REPAIR"
 
@@ -100,12 +109,14 @@ class CaptureEvent:
     text: str | None
     is_forwarded: bool
     is_backfill: bool
+    is_explicit_backfill: bool = False
     parser_profile: str | None = None
     entities_json: str = "[]"
     sender_identity: str | None = None
     sender_telegram_id: str | None = None
     sender_display_name: str | None = None
     reply_to_message_id: int | None = None
+    content_type: str = "text"
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,6 +288,57 @@ CREATE TABLE IF NOT EXISTS capture_rejected_records (
 );
 CREATE INDEX IF NOT EXISTS idx_capture_rejection_expiry
     ON capture_rejected_records(expires_at_utc);
+
+CREATE TABLE IF NOT EXISTS capture_explicit_backfill_lineage (
+    event_id TEXT PRIMARY KEY,
+    stream TEXT NOT NULL CHECK(stream IN ('market','coin')),
+    source_id TEXT NOT NULL CHECK(
+      source_id IN ('MELTED_PRIMARY_FLOW','GROUP_1','GROUP_2')
+    ),
+    message_id INTEGER NOT NULL CHECK(message_id > 0),
+    event_type TEXT NOT NULL,
+    event_time_utc TEXT,
+    available_at_utc TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('PENDING','PARSED','FILTERED')),
+    disposition_code TEXT NOT NULL,
+    terminal_at_utc TEXT,
+    expires_at_utc TEXT NOT NULL,
+    CHECK(
+      (status='PENDING' AND terminal_at_utc IS NULL)
+      OR (status IN ('PARSED','FILTERED') AND terminal_at_utc IS NOT NULL)
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_capture_explicit_backfill_status
+    ON capture_explicit_backfill_lineage(status,stream,source_id,message_id);
+CREATE INDEX IF NOT EXISTS idx_capture_explicit_backfill_expiry
+    ON capture_explicit_backfill_lineage(expires_at_utc);
+
+CREATE TABLE IF NOT EXISTS capture_event_lineage (
+    event_id TEXT PRIMARY KEY,
+    stream TEXT NOT NULL CHECK(stream IN ('market','coin')),
+    source_id TEXT NOT NULL,
+    message_id INTEGER NOT NULL CHECK(message_id > 0),
+    event_type TEXT NOT NULL,
+    origin TEXT NOT NULL CHECK(origin IN ('live','reconcile','explicit_backfill')),
+    event_time_utc TEXT,
+    available_at_utc TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('PENDING','PARSED','FILTERED')),
+    disposition_code TEXT NOT NULL,
+    terminal_at_utc TEXT,
+    expires_at_utc TEXT NOT NULL,
+    CHECK(
+      (status='PENDING' AND terminal_at_utc IS NULL)
+      OR (status IN ('PARSED','FILTERED') AND terminal_at_utc IS NOT NULL)
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_capture_event_lineage_status
+    ON capture_event_lineage(status,stream,source_id,message_id);
+CREATE INDEX IF NOT EXISTS idx_capture_event_lineage_expiry
+    ON capture_event_lineage(expires_at_utc);
+CREATE TABLE IF NOT EXISTS capture_event_lineage_control (
+    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+    enabled_at_utc TEXT NOT NULL
+);
 """
 
 
@@ -332,6 +394,24 @@ def _text(value: object, *, required: bool) -> str | None:
     return value
 
 
+def _content_type_and_text(
+    message: Mapping[str, object], *, deleted: bool
+) -> tuple[str, str | None]:
+    if deleted:
+        return "deleted", _text(message.get("text"), required=False)
+    raw_type = str(message.get("content_type") or "text").strip().lower()
+    if raw_type not in _CONTENT_TYPES:
+        raise CaptureEventContractError("capture_message_content_type_invalid")
+    raw_text = message.get("text")
+    if raw_type in _NON_MODEL_CONTENT_TYPES:
+        if raw_text is not None and (
+            not isinstance(raw_text, str) or bool(raw_text.strip())
+        ):
+            raise CaptureEventContractError("capture_non_model_text_invalid")
+        return raw_type, None
+    return raw_type, _text(raw_text, required=True)
+
+
 def _entities_json(value: object, *, text: str | None) -> str:
     if value is None:
         return "[]"
@@ -384,6 +464,21 @@ def _validate_time_order(event: CaptureEvent) -> None:
             raise CaptureEventContractError("capture_available_before_edit")
 
 
+def _validate_explicit_backfill_contract(event: CaptureEvent) -> None:
+    if not event.is_explicit_backfill:
+        return
+    if not event.is_backfill:
+        raise CaptureEventContractError("capture_explicit_backfill_flag_required")
+    if event.source_id not in _EXPLICIT_BACKFILL_SOURCE_CODES:
+        raise CaptureEventContractError("capture_explicit_backfill_source_unsupported")
+    if (
+        event.stream == "market" and event.source_id not in _MARKET_SOURCE_CODES
+    ) or (
+        event.stream == "coin" and event.source_id not in _GROUP_NUMBERS
+    ):
+        raise CaptureEventContractError("capture_explicit_backfill_stream_mismatch")
+
+
 def decode_market_channel_event(record: object) -> CaptureEvent:
     envelope = _mapping(record, field="market_capture_envelope")
     if envelope.get("schema") != "market_channel_event" or str(envelope.get("schema_version")) != "1.0":
@@ -400,12 +495,14 @@ def decode_market_channel_event(record: object) -> CaptureEvent:
         raise CaptureEventContractError("market_capture_parser_profile_missing")
     message = _mapping(envelope.get("message"), field="market_capture_message")
     deleted = event_type == "message_deleted"
-    text = _text(message.get("text"), required=not deleted)
-    if text is not None:
+    content_type, text = _content_type_and_text(message, deleted=deleted)
+    if text is not None or content_type in _NON_MODEL_CONTENT_TYPES:
+        digest_text = text or ""
         digest = str(message.get("text_sha256") or "").strip().lower()
-        if not _HEX_SHA256.fullmatch(digest) or sha256(text.encode("utf-8")).hexdigest() != digest:
+        if not _HEX_SHA256.fullmatch(digest) or sha256(digest_text.encode("utf-8")).hexdigest() != digest:
             raise CaptureEventContractError("market_capture_text_digest_mismatch")
     producer = _mapping(envelope.get("producer"), field="market_capture_producer")
+    is_backfill = bool(producer.get("is_backfill", False))
     event = CaptureEvent(
         stream="market",
         event_id=_event_id(envelope.get("event_id")),
@@ -417,11 +514,16 @@ def decode_market_channel_event(record: object) -> CaptureEvent:
         edited_at_utc=_stamp(message.get("edited_at_utc"), field="market_capture_edited_at_utc", required=False),
         text=text,
         is_forwarded=bool(message.get("is_forwarded", False)),
-        is_backfill=bool(producer.get("is_backfill", False)),
+        is_backfill=is_backfill,
+        is_explicit_backfill=(
+            str(producer.get("origin") or "").strip() == "explicit_backfill"
+        ),
         parser_profile=profile,
         entities_json=_entities_json(message.get("entities"), text=text),
+        content_type=content_type,
     )
     _validate_time_order(event)
+    _validate_explicit_backfill_contract(event)
     return event
 
 
@@ -442,7 +544,7 @@ def decode_coin_group_event(record: object) -> CaptureEvent:
         raise CaptureEventContractError("coin_capture_source_unsupported")
     message = _mapping(envelope.get("message"), field="coin_capture_message")
     deleted = event_type == "message_deleted"
-    text = _text(message.get("text"), required=not deleted)
+    content_type, text = _content_type_and_text(message, deleted=deleted)
     producer = _mapping(envelope.get("producer"), field="coin_capture_producer")
     # Legacy reconciled rows explicitly lack a trustworthy receipt time.  They
     # are not repaired from event time because doing so would leak future data
@@ -479,6 +581,7 @@ def decode_coin_group_event(record: object) -> CaptureEvent:
                 raise CaptureEventContractError("coin_capture_sender_name_invalid")
         if schema_version == "2.1" and sender and sender_telegram_id is None:
             raise CaptureEventContractError("coin_capture_sender_telegram_id_missing")
+    is_backfill = bool(message.get("is_backfill", False))
     event = CaptureEvent(
         stream="coin",
         event_id=_event_id(envelope.get("event_id")),
@@ -490,13 +593,18 @@ def decode_coin_group_event(record: object) -> CaptureEvent:
         edited_at_utc=_stamp(message.get("edited_at_utc"), field="coin_capture_edited_at_utc", required=False),
         text=text,
         is_forwarded=bool(message.get("is_forwarded", False)),
-        is_backfill=bool(message.get("is_backfill", False)),
+        is_backfill=is_backfill,
+        is_explicit_backfill=(
+            str(producer.get("origin") or "").strip() == "explicit_backfill"
+        ),
         sender_identity=sender,
         sender_telegram_id=sender_telegram_id,
         sender_display_name=sender_display_name,
         reply_to_message_id=reply_to,
+        content_type=content_type,
     )
     _validate_time_order(event)
+    _validate_explicit_backfill_contract(event)
     return event
 
 
@@ -516,9 +624,15 @@ def initialize_capture_adapter(connection: sqlite3.Connection) -> None:
     ).fetchone()
     if row is None:
         connection.executescript(_SCHEMA)
+        initialized = _utc_now()
         connection.execute(
             "INSERT INTO capture_adapter_metadata(singleton,schema_version,initialized_at_utc) VALUES(1,?,?)",
-            (CAPTURE_ADAPTER_SCHEMA_VERSION, _utc_now()),
+            (CAPTURE_ADAPTER_SCHEMA_VERSION, initialized),
+        )
+        connection.execute(
+            "INSERT INTO capture_event_lineage_control(singleton,enabled_at_utc) "
+            "VALUES(1,?)",
+            (initialized,),
         )
         connection.commit()
         return
@@ -778,6 +892,101 @@ def initialize_capture_adapter(connection: sqlite3.Connection) -> None:
         metadata = connection.execute(
             "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
         ).fetchone()
+    if metadata is not None and int(metadata[0]) == 6:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS capture_explicit_backfill_lineage (
+                event_id TEXT PRIMARY KEY,
+                stream TEXT NOT NULL CHECK(stream IN ('market','coin')),
+                source_id TEXT NOT NULL CHECK(
+                  source_id IN ('MELTED_PRIMARY_FLOW','GROUP_1','GROUP_2')
+                ),
+                message_id INTEGER NOT NULL CHECK(message_id > 0),
+                event_type TEXT NOT NULL,
+                event_time_utc TEXT,
+                available_at_utc TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(
+                  status IN ('PENDING','PARSED','FILTERED')
+                ),
+                disposition_code TEXT NOT NULL,
+                terminal_at_utc TEXT,
+                expires_at_utc TEXT NOT NULL,
+                CHECK(
+                  (status='PENDING' AND terminal_at_utc IS NULL)
+                  OR (
+                    status IN ('PARSED','FILTERED')
+                    AND terminal_at_utc IS NOT NULL
+                  )
+                )
+            );
+            CREATE INDEX IF NOT EXISTS idx_capture_explicit_backfill_status
+                ON capture_explicit_backfill_lineage(
+                  status,stream,source_id,message_id
+                );
+            CREATE INDEX IF NOT EXISTS idx_capture_explicit_backfill_expiry
+                ON capture_explicit_backfill_lineage(expires_at_utc);
+            UPDATE capture_adapter_metadata
+               SET schema_version=7
+             WHERE singleton=1;
+            """
+        )
+        connection.commit()
+        metadata = connection.execute(
+            "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
+        ).fetchone()
+    if metadata is not None and int(metadata[0]) == 7:
+        enabled = _utc_now()
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS capture_event_lineage (
+                event_id TEXT PRIMARY KEY,
+                stream TEXT NOT NULL CHECK(stream IN ('market','coin')),
+                source_id TEXT NOT NULL,
+                message_id INTEGER NOT NULL CHECK(message_id > 0),
+                event_type TEXT NOT NULL,
+                origin TEXT NOT NULL CHECK(
+                  origin IN ('live','reconcile','explicit_backfill')
+                ),
+                event_time_utc TEXT,
+                available_at_utc TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(
+                  status IN ('PENDING','PARSED','FILTERED')
+                ),
+                disposition_code TEXT NOT NULL,
+                terminal_at_utc TEXT,
+                expires_at_utc TEXT NOT NULL,
+                CHECK(
+                  (status='PENDING' AND terminal_at_utc IS NULL)
+                  OR (
+                    status IN ('PARSED','FILTERED')
+                    AND terminal_at_utc IS NOT NULL
+                  )
+                )
+            );
+            CREATE INDEX IF NOT EXISTS idx_capture_event_lineage_status
+                ON capture_event_lineage(
+                  status,stream,source_id,message_id
+                );
+            CREATE INDEX IF NOT EXISTS idx_capture_event_lineage_expiry
+                ON capture_event_lineage(expires_at_utc);
+            CREATE TABLE IF NOT EXISTS capture_event_lineage_control (
+                singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                enabled_at_utc TEXT NOT NULL
+            );
+            """
+        )
+        connection.execute(
+            "INSERT OR IGNORE INTO capture_event_lineage_control(singleton,enabled_at_utc) "
+            "VALUES(1,?)",
+            (enabled,),
+        )
+        connection.execute(
+            "UPDATE capture_adapter_metadata SET schema_version=8 WHERE singleton=1"
+        )
+        connection.commit()
+        metadata = connection.execute(
+            "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
+        ).fetchone()
     if metadata is None or int(metadata[0]) != CAPTURE_ADAPTER_SCHEMA_VERSION:
         raise CaptureEventContractError("capture_adapter_schema_upgrade_required")
 
@@ -939,7 +1148,7 @@ def _apply_market_message(connection: sqlite3.Connection, event: CaptureEvent) -
         return False
     assert event.event_time_utc is not None and event.text is not None
     revision_time = event.edited_at_utc or event.event_time_utc
-    if event.is_backfill:
+    if event.is_backfill and not event.is_explicit_backfill:
         available = datetime.fromisoformat(
             event.available_at_utc.replace("Z", "+00:00")
         )
@@ -1106,27 +1315,242 @@ def _apply_group_message(connection: sqlite3.Connection, event: CaptureEvent) ->
     return changed
 
 
+def _apply_non_model_message(
+    connection: sqlite3.Connection, event: CaptureEvent
+) -> bool:
+    """Retire a previously modelled current row without parsing empty media.
+
+    A standalone media/service event is terminal immediately.  If it is a
+    newer revision of a public-market or group message, the prior model fact
+    must also be retracted; otherwise an empty edit would leave stale pricing
+    evidence active.  Private-gold offer economics remain immutable by their
+    separate lifecycle contract.
+    """
+
+    if event.source_id == _PRIMARY_SOURCE_CODE:
+        return False
+    revision_time = event.edited_at_utc or event.event_time_utc
+    if event.stream == "market":
+        current = connection.execute(
+            "SELECT event_time_utc,available_at_utc,edited_at_utc "
+            "FROM capture_market_messages WHERE source_id=? AND message_id=?",
+            (event.source_id, event.message_id),
+        ).fetchone()
+        if current is None:
+            return False
+        current_revision = str(current["edited_at_utc"] or current["event_time_utc"])
+        if revision_time is None or revision_time < current_revision:
+            return False
+        connection.execute(
+            "DELETE FROM capture_market_messages WHERE source_id=? AND message_id=?",
+            (event.source_id, event.message_id),
+        )
+        _mark_dirty_market(
+            connection,
+            source_id=event.source_id,
+            message_id=event.message_id,
+            event_time_utc=str(current["event_time_utc"]),
+            available_at_utc=event.available_at_utc,
+        )
+        return True
+    group = _GROUP_NUMBERS[event.source_id]
+    current = connection.execute(
+        "SELECT event_time_utc,available_at_utc,edited_at_utc "
+        "FROM coin_group_staged_messages WHERE group_number=? AND message_id=?",
+        (group, event.message_id),
+    ).fetchone()
+    if current is None:
+        return False
+    current_revision = str(current["edited_at_utc"] or current["event_time_utc"])
+    if revision_time is None or revision_time < current_revision:
+        return False
+    delete_coin_group_staged_message(
+        connection, group_number=group, message_id=event.message_id
+    )
+    _mark_dirty_group(
+        connection,
+        group,
+        event.available_at_utc,
+        str(current["event_time_utc"]),
+    )
+    return True
+
+
 def stage_capture_event(connection: sqlite3.Connection, event: CaptureEvent) -> CaptureStageReport:
     """Stage one validated event idempotently; caller commits the transaction."""
 
-    if connection.execute(
+    _validate_explicit_backfill_contract(event)
+    seen_event = connection.execute(
         "SELECT 1 FROM capture_seen_events WHERE event_id=?", (event.event_id,)
-    ).fetchone() is not None:
+    ).fetchone()
+    existing_explicit_lineage = (
+        connection.execute(
+            "SELECT 1 FROM capture_explicit_backfill_lineage WHERE event_id=?",
+            (event.event_id,),
+        ).fetchone()
+        if event.is_explicit_backfill
+        and event.source_id in _PROMOTION_BACKFILL_SOURCE_CODES
+        else None
+    )
+    if seen_event is not None and (
+        not event.is_explicit_backfill or existing_explicit_lineage is not None
+    ):
         return CaptureStageReport(False, True, False, False)
+    non_model = event.content_type in _NON_MODEL_CONTENT_TYPES
     if event.event_type == "message_deleted":
         changed = _apply_tombstone(connection, event)
         tombstone = changed
+    elif non_model:
+        changed = _apply_non_model_message(connection, event)
+        tombstone = False
     elif event.stream == "market":
         changed = _apply_market_message(connection, event)
         tombstone = False
     else:
         changed = _apply_group_message(connection, event)
         tombstone = False
-    connection.execute(
-        "INSERT INTO capture_seen_events(event_id,stream,available_at_utc,expires_at_utc) VALUES(?,?,?,?)",
-        (event.event_id, event.stream, event.available_at_utc, _expiry(event.available_at_utc)),
+    explicit_current_reparse = False
+    if (
+        event.is_explicit_backfill
+        and event.event_type != "message_deleted"
+        and not changed
+        and not (event.stream == "coin" and event.is_forwarded)
+    ):
+        if event.stream == "market":
+            current = connection.execute(
+                """
+                SELECT event_time_utc FROM capture_market_messages
+                WHERE source_id=? AND message_id=?
+                """,
+                (event.source_id, event.message_id),
+            ).fetchone()
+            if current is not None:
+                _mark_dirty_market(
+                    connection,
+                    source_id=event.source_id,
+                    message_id=event.message_id,
+                    event_time_utc=str(current["event_time_utc"]),
+                    available_at_utc=event.available_at_utc,
+                )
+                explicit_current_reparse = True
+        else:
+            current = connection.execute(
+                """
+                SELECT event_time_utc FROM coin_group_staged_messages
+                WHERE group_number=? AND message_id=?
+                """,
+                (_GROUP_NUMBERS[event.source_id], event.message_id),
+            ).fetchone()
+            if current is not None:
+                _mark_dirty_group(
+                    connection,
+                    _GROUP_NUMBERS[event.source_id],
+                    event.available_at_utc,
+                    str(current["event_time_utc"]),
+                )
+                explicit_current_reparse = True
+    if seen_event is None:
+        connection.execute(
+            "INSERT INTO capture_seen_events(event_id,stream,available_at_utc,expires_at_utc) VALUES(?,?,?,?)",
+            (
+                event.event_id,
+                event.stream,
+                event.available_at_utc,
+                _expiry(event.available_at_utc),
+            ),
+        )
+    if event.event_type == "message_deleted":
+        status = "FILTERED"
+        disposition = "DELETE_APPLIED" if changed else "DELETE_SUPPRESSED"
+        terminal_at = event.available_at_utc
+    elif non_model:
+        status = "FILTERED"
+        disposition = f"NON_MODEL_{event.content_type.upper()}"
+        terminal_at = event.available_at_utc
+    elif changed or explicit_current_reparse:
+        status = "PENDING"
+        disposition = (
+            "AWAITING_CURRENT_REPARSE"
+            if explicit_current_reparse
+            else "AWAITING_PARSER"
+        )
+        terminal_at = None
+    else:
+        status = "FILTERED"
+        disposition = (
+            "FORWARDED_UNSUPPORTED"
+            if event.stream == "coin" and event.is_forwarded
+            else "CURRENT_REVISION_UNCHANGED"
+        )
+        terminal_at = event.available_at_utc
+    origin = (
+        "explicit_backfill"
+        if event.is_explicit_backfill
+        else "reconcile"
+        if event.is_backfill
+        else "live"
     )
-    return CaptureStageReport(True, False, changed, tombstone)
+    # An explicit replay can deliberately revisit an event which was already
+    # accepted by the routine stream.  The generic row describes that first
+    # durable event; the separate explicit-backfill ledger describes the
+    # replay.  Do not duplicate or rewrite the generic identity here.
+    connection.execute(
+        """
+        INSERT OR IGNORE INTO capture_event_lineage(
+          event_id,stream,source_id,message_id,event_type,origin,
+          event_time_utc,available_at_utc,status,disposition_code,
+          terminal_at_utc,expires_at_utc
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            event.event_id,
+            event.stream,
+            event.source_id,
+            event.message_id,
+            event.event_type,
+            origin,
+            event.event_time_utc,
+            event.available_at_utc,
+            status,
+            disposition,
+            terminal_at,
+            _expiry(event.available_at_utc),
+        ),
+    )
+    if (
+        event.is_explicit_backfill
+        and event.source_id in _PROMOTION_BACKFILL_SOURCE_CODES
+    ):
+        if status not in _EXPLICIT_BACKFILL_STATUSES:  # pragma: no cover - invariant
+            raise CaptureEventContractError("capture_explicit_backfill_status_invalid")
+        connection.execute(
+            """
+            INSERT INTO capture_explicit_backfill_lineage(
+              event_id,stream,source_id,message_id,event_type,event_time_utc,
+              available_at_utc,status,disposition_code,terminal_at_utc,
+              expires_at_utc
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                event.event_id,
+                event.stream,
+                event.source_id,
+                event.message_id,
+                event.event_type,
+                event.event_time_utc,
+                event.available_at_utc,
+                status,
+                disposition,
+                terminal_at,
+                _expiry(event.available_at_utc),
+            ),
+        )
+    return CaptureStageReport(
+        seen_event is None,
+        seen_event is not None,
+        changed,
+        tombstone,
+    )
 
 
 def record_capture_rejection(
@@ -1263,6 +1687,68 @@ def _remember_projection(
         "INSERT OR IGNORE INTO capture_projection_keys(source_id,message_id,event_key,bucket_utc) VALUES(?,?,?,?)",
         [(source_id, message_id, key, bucket_utc) for key in event_keys],
     )
+
+
+def _finish_capture_lineage(
+    connection: sqlite3.Connection,
+    *,
+    stream: str,
+    source_id: str,
+    message_id: int,
+    status: str,
+    disposition_code: str,
+    completed_at_utc: str,
+    parse_all_pending: bool = False,
+) -> int:
+    if status not in {"PARSED", "FILTERED"}:
+        raise CaptureEventContractError("capture_lineage_terminal_invalid")
+    changed = 0
+    for table in ("capture_event_lineage", "capture_explicit_backfill_lineage"):
+        rows = connection.execute(
+            f"SELECT rowid AS lineage_rowid,event_id FROM {table} "
+            "WHERE stream=? AND source_id=? "
+            "AND message_id=? AND status='PENDING' "
+            "ORDER BY lineage_rowid",
+            (stream, source_id, int(message_id)),
+        ).fetchall()
+        if not rows:
+            continue
+        current_event_id = str(rows[-1]["event_id"])
+        if status == "PARSED" and not parse_all_pending and len(rows) > 1:
+            superseded = connection.execute(
+                f"UPDATE {table} SET status='FILTERED',"
+                "disposition_code='SUPERSEDED_BY_NEWER_REVISION',"
+                "terminal_at_utc=? WHERE stream=? AND source_id=? "
+                "AND message_id=? AND status='PENDING' AND event_id<>?",
+                (
+                    completed_at_utc,
+                    stream,
+                    source_id,
+                    int(message_id),
+                    current_event_id,
+                ),
+            )
+            changed += max(0, int(superseded.rowcount or 0))
+        target = connection.execute(
+            f"UPDATE {table} SET status=?,disposition_code=?,terminal_at_utc=? "
+            "WHERE stream=? AND source_id=? AND message_id=? AND status='PENDING'"
+            + ("" if status != "PARSED" or parse_all_pending else " AND event_id=?"),
+            (
+                status,
+                disposition_code,
+                completed_at_utc,
+                stream,
+                source_id,
+                int(message_id),
+                *(
+                    (current_event_id,)
+                    if status == "PARSED" and not parse_all_pending
+                    else ()
+                ),
+            ),
+        )
+        changed += max(0, int(target.rowcount or 0))
+    return changed
 
 
 def _public_keys(row: sqlite3.Row) -> tuple[bytes, ...]:
@@ -1742,6 +2228,15 @@ def project_capture_changes(
                     """,
                     (as_of, source_id, int(item["message_id"])),
                 )
+            _finish_capture_lineage(
+                staging,
+                stream="market",
+                source_id=source_id,
+                message_id=int(item["message_id"]),
+                status="FILTERED",
+                disposition_code="CURRENT_ROW_UNAVAILABLE_AT_PARSE",
+                completed_at_utc=as_of,
+            )
             continue
         projected += 1
         if source_id == _PRIMARY_SOURCE_CODE:
@@ -1770,6 +2265,20 @@ def project_capture_changes(
                 )
         else:
             upserted += _project_public_row(staging, market, row)
+        _finish_capture_lineage(
+            staging,
+            stream="market",
+            source_id=source_id,
+            message_id=int(item["message_id"]),
+            status="PARSED",
+            disposition_code=(
+                "FORWARDED_FILTERED"
+                if bool(row["is_forwarded"])
+                else "PARSER_EXECUTED"
+            ),
+            completed_at_utc=as_of,
+            parse_all_pending=source_id == _PRIMARY_SOURCE_CODE,
+        )
     if dirty:
         staging.executemany(
             "DELETE FROM capture_dirty_market_messages WHERE source_id=? AND message_id=?",
@@ -1788,8 +2297,49 @@ def project_capture_changes(
         "SELECT group_number,minimum_event_time_utc FROM capture_dirty_groups WHERE available_at_utc<=?",
         (as_of,),
     ).fetchall()
+    explicit_group_rows = staging.execute(
+        """
+        SELECT source_id,message_id
+        FROM capture_explicit_backfill_lineage
+        WHERE stream='coin' AND status='PENDING' AND available_at_utc<=?
+        ORDER BY source_id,message_id
+        """,
+        (as_of,),
+    ).fetchall()
+    explicit_group_keys = frozenset(
+        (_GROUP_NUMBERS[str(row["source_id"])], int(row["message_id"]))
+        for row in explicit_group_rows
+    )
+    generic_group_rows = staging.execute(
+        """
+        SELECT source_id,message_id
+        FROM capture_event_lineage
+        WHERE stream='coin' AND status='PENDING' AND available_at_utc<=?
+        ORDER BY source_id,message_id
+        """,
+        (as_of,),
+    ).fetchall()
+    generic_group_keys = frozenset(
+        (_GROUP_NUMBERS[str(row["source_id"])], int(row["message_id"]))
+        for row in generic_group_rows
+    )
+    pending_group_keys = explicit_group_keys | generic_group_keys
+    current_pending_group_keys = frozenset(
+        (int(row["group_number"]), int(row["message_id"]))
+        for row in staging.execute(
+            """
+            SELECT group_number,message_id
+            FROM coin_group_staged_messages
+            WHERE available_at_utc<=? AND expires_at_utc>?
+            """,
+            (as_of, as_of),
+        ).fetchall()
+        if (int(row["group_number"]), int(row["message_id"]))
+        in pending_group_keys
+    )
+    current_explicit_group_keys = current_pending_group_keys & explicit_group_keys
     group_report = None
-    if dirty_groups or projection_reconciliation:
+    if dirty_groups or projection_reconciliation or pending_group_keys:
         repair_group_keys = (
             _missing_offer_reply_graph(staging, market, as_of_utc=as_of)
             if projection_reconciliation
@@ -1803,7 +2353,11 @@ def project_capture_changes(
         else:
             included_group_keys = frozenset()
             group_cutoff = as_of
-        included_group_keys = included_group_keys | repair_group_keys
+        included_group_keys = (
+            included_group_keys
+            | repair_group_keys
+            | current_explicit_group_keys
+        )
         dirty_horizon = min(
             (
                 str(row["minimum_event_time_utc"])
@@ -1822,6 +2376,33 @@ def project_capture_changes(
                 reconciliation_horizon_utc=max(group_cutoff, dirty_horizon),
                 included_message_keys=included_group_keys,
                 reconcile_missing_current_facts=bool(dirty_groups),
+            )
+        parsed_pending_group_keys = pending_group_keys & included_group_keys
+        for group, message_id in parsed_pending_group_keys:
+            _finish_capture_lineage(
+                staging,
+                stream="coin",
+                source_id=f"GROUP_{group}",
+                message_id=message_id,
+                status="PARSED",
+                disposition_code="PARSER_EXECUTED",
+                completed_at_utc=as_of,
+            )
+        unavailable_pending_group_keys = pending_group_keys - parsed_pending_group_keys
+        for group, message_id in unavailable_pending_group_keys:
+            is_current = (group, message_id) in current_pending_group_keys
+            _finish_capture_lineage(
+                staging,
+                stream="coin",
+                source_id=f"GROUP_{group}",
+                message_id=message_id,
+                status="FILTERED",
+                disposition_code=(
+                    "OUTSIDE_ACTIVE_REPLAY_WINDOW"
+                    if is_current
+                    else "CURRENT_ROW_UNAVAILABLE_AT_PARSE"
+                ),
+                completed_at_utc=as_of,
             )
         staging.executemany(
             "DELETE FROM capture_dirty_groups WHERE group_number=?",
@@ -1871,6 +2452,8 @@ def purge_capture_staging(connection: sqlite3.Connection, *, as_of_utc: datetime
         "capture_seen_events",
         "capture_tombstones",
         "capture_rejected_records",
+        "capture_explicit_backfill_lineage",
+        "capture_event_lineage",
     ):
         result = connection.execute(f"DELETE FROM {table} WHERE expires_at_utc<=?", (as_of,))
         counts += max(0, int(result.rowcount or 0))
