@@ -786,6 +786,56 @@ class Stage10SnapshotTests(unittest.TestCase):
         self.assertEqual(bounded["retained_receipt_count"], 1)
         self.assertEqual(bounded["retained_full_payload_count"], 0)
 
+    def test_snapshot_receiver_compaction_batches_a_large_backlog(self):
+        old = "2026-08-10T05:00:00Z"
+        for version in range(1, 8):
+            snapshot_id = f"{version:064x}"
+            self.web_receiver.execute(
+                "INSERT INTO estimator_snapshot_receipts"
+                "(feed_mode,snapshot_version,snapshot_id,input_snapshot_hash,payload_json,"
+                "received_at_utc,published_at_utc) VALUES(?,?,?,?,?,?,?)",
+                (
+                    "PRIVATE_SHADOW",
+                    version,
+                    snapshot_id,
+                    "f" * 64,
+                    '{"payload":true}',
+                    old,
+                    old,
+                ),
+            )
+            self.web_receiver.execute(
+                "INSERT INTO estimator_snapshot_publication_outbox"
+                "(event_id,feed_mode,snapshot_version,snapshot_id,published_at_utc,"
+                "delivered_at_utc) VALUES(?,?,?,?,?,?)",
+                (f"{version + 20:064x}", "PRIVATE_SHADOW", version, snapshot_id, old, old),
+            )
+            self.web_receiver.execute(
+                "INSERT INTO estimator_snapshot_rejections"
+                "(reason_code,body_hash,rejected_at_utc) VALUES(?,?,?)",
+                ("OLD", f"{version + 40:064x}", old),
+            )
+
+        with patch.object(
+            estimator_snapshot_receiver, "SNAPSHOT_COMPACTION_BATCH_SIZE", 2
+        ):
+            result = compact_snapshot_receiver(
+                self.web_receiver,
+                now_utc=datetime(2026, 8, 27, 6, 0, tzinfo=timezone.utc),
+            )
+
+        self.assertEqual(result["payloads_redacted"], 7)
+        self.assertEqual(result["receipts_deleted"], 6)
+        self.assertEqual(result["outbox_rows_deleted"], 7)
+        self.assertEqual(result["rejections_deleted"], 7)
+        remaining = self.web_receiver.execute(
+            "SELECT snapshot_version,payload_json FROM estimator_snapshot_receipts"
+        ).fetchall()
+        self.assertEqual(
+            [(row["snapshot_version"], row["payload_json"]) for row in remaining],
+            [(7, "{}")],
+        )
+
     def test_receiver_readiness_uses_snapshot_generation_not_publish_time(self):
         document = self._publish()
         self.assertEqual(self._apply_web(document)[0], 200)

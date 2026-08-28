@@ -28,6 +28,7 @@ PREDICTION_LEDGER_RETENTION = timedelta(hours=24)
 SNAPSHOT_PUBLICATION_EVENT_LOG_MAX_BYTES = 8 * 1024 * 1024
 SNAPSHOT_PAYLOAD_RETENTION = timedelta(hours=24)
 SNAPSHOT_OPERATIONAL_RETENTION = timedelta(days=7)
+SNAPSHOT_COMPACTION_BATCH_SIZE = 250
 _PREDICTION_COMMODITY = {
     "COIN_IMAM": "امام",
     "COIN_BAHAR": "بهار",
@@ -790,38 +791,56 @@ def compact_snapshot_receiver(
     now = _utc(now_utc)
     payload_cutoff = _stamp(now - SNAPSHOT_PAYLOAD_RETENTION)
     operational_cutoff = _stamp(now - SNAPSHOT_OPERATIONAL_RETENTION)
-    connection.execute("BEGIN IMMEDIATE")
-    try:
-        payloads = connection.execute(
-            "UPDATE estimator_snapshot_receipts SET payload_json='{}' "
-            "WHERE published_at_utc IS NOT NULL AND payload_json<>'{}' "
-            "AND julianday(published_at_utc)<julianday(?)",
-            (payload_cutoff,),
-        ).rowcount
-        receipts = connection.execute(
-            "DELETE FROM estimator_snapshot_receipts "
-            "WHERE published_at_utc IS NOT NULL "
-            "AND julianday(published_at_utc)<julianday(?) "
-            "AND snapshot_version<(SELECT MAX(newer.snapshot_version) "
-            "FROM estimator_snapshot_receipts AS newer "
-            "WHERE newer.feed_mode=estimator_snapshot_receipts.feed_mode)",
-            (operational_cutoff,),
-        ).rowcount
-        outbox = connection.execute(
-            "DELETE FROM estimator_snapshot_publication_outbox "
-            "WHERE delivered_at_utc IS NOT NULL "
-            "AND julianday(delivered_at_utc)<julianday(?)",
-            (operational_cutoff,),
-        ).rowcount
-        rejections = connection.execute(
-            "DELETE FROM estimator_snapshot_rejections "
-            "WHERE julianday(rejected_at_utc)<julianday(?)",
-            (operational_cutoff,),
-        ).rowcount
-        connection.commit()
-    except BaseException:
-        connection.rollback()
-        raise
+    def mutate_in_batches(
+        select_sql: str,
+        parameters: tuple[object, ...],
+        mutation_sql: str,
+    ) -> int:
+        rowids = [int(row[0]) for row in connection.execute(select_sql, parameters)]
+        changed = 0
+        for offset in range(0, len(rowids), SNAPSHOT_COMPACTION_BATCH_SIZE):
+            batch = rowids[offset : offset + SNAPSHOT_COMPACTION_BATCH_SIZE]
+            connection.execute("BEGIN IMMEDIATE")
+            before = connection.total_changes
+            try:
+                connection.executemany(mutation_sql, ((rowid,) for rowid in batch))
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+            changed += connection.total_changes - before
+        return changed
+
+    payloads = mutate_in_batches(
+        "SELECT rowid FROM estimator_snapshot_receipts "
+        "WHERE published_at_utc IS NOT NULL AND payload_json<>'{}' "
+        "AND julianday(published_at_utc)<julianday(?) ORDER BY rowid",
+        (payload_cutoff,),
+        "UPDATE estimator_snapshot_receipts SET payload_json='{}' WHERE rowid=?",
+    )
+    receipts = mutate_in_batches(
+        "SELECT receipt.rowid FROM estimator_snapshot_receipts AS receipt "
+        "WHERE receipt.published_at_utc IS NOT NULL "
+        "AND julianday(receipt.published_at_utc)<julianday(?) "
+        "AND receipt.snapshot_version<(SELECT MAX(newer.snapshot_version) "
+        "FROM estimator_snapshot_receipts AS newer "
+        "WHERE newer.feed_mode=receipt.feed_mode) ORDER BY receipt.rowid",
+        (operational_cutoff,),
+        "DELETE FROM estimator_snapshot_receipts WHERE rowid=?",
+    )
+    outbox = mutate_in_batches(
+        "SELECT rowid FROM estimator_snapshot_publication_outbox "
+        "WHERE delivered_at_utc IS NOT NULL "
+        "AND julianday(delivered_at_utc)<julianday(?) ORDER BY rowid",
+        (operational_cutoff,),
+        "DELETE FROM estimator_snapshot_publication_outbox WHERE rowid=?",
+    )
+    rejections = mutate_in_batches(
+        "SELECT rowid FROM estimator_snapshot_rejections "
+        "WHERE julianday(rejected_at_utc)<julianday(?) ORDER BY rowid",
+        (operational_cutoff,),
+        "DELETE FROM estimator_snapshot_rejections WHERE rowid=?",
+    )
     return {
         "payloads_redacted": max(0, int(payloads)),
         "receipts_deleted": max(0, int(receipts)),
