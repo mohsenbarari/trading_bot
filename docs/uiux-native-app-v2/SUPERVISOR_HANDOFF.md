@@ -3,18 +3,21 @@
 مخاطب: ناظر مستقل. فقط همین بخش authoritative است.
 Checkpointهای قدیمی فقط در بخش `HISTORICAL / SUPERSEDED` همین پرونده‌اند و وضعیت جاری نیستند.
 
-تاریخ شواهد: ۲۰۲۶-۰۸-۲۷
+تاریخ شواهد: ۲۰۲۶-۰۸-۲۸
 شاخه: فقط `candidate/webapp-native-app-v2`
 
 ## حکم جاری
 
-`READY FOR INDEPENDENT INTEGRATION REVIEW`
+`READY FOR MAIN INTEGRATION`
 
 حکم ممنوع صادر نشد: owner-approved و production-ready.
 
-`vue-tsc` سبز اعلام نمی‌شود. اجرای کامل EXIT 2 است و فقط چهار خطای منجمد Market مجاز است.
+ممیزی مستقل کد، تجربهٔ زنده، شواهد مرورگر و گیت‌های محصول انجام شد. فازهای ۰ تا ۱۱
+در محدودهٔ ۲۹ مسیر غیر Market بسته‌اند. Market و interiorهای مالک‌قفل‌شده خارج از این track
+بودند و بایت‌به‌بایت یا با گارد تاریخی ثابت ماندند.
 
-فازهای ۱ تا ۱۰ همچنان partial هستند. این حکم پذیرش harness و شواهد همین دور است، نه پایان track.
+چهار خطای `vue-tsc` فقط با فرمان پروژه‌ای `-p tsconfig.app.json` و در Market دیده می‌شوند؛
+فرمان عمومی `npx vue-tsc --noEmit` سبز است. هیچ‌کدام از این چهار خطا محصول این شاخه نیست.
 
 Annotation یا early-return داخل pass شمرده نشد.
 
@@ -31,15 +34,18 @@ Annotation یا early-return داخل pass شمرده نشد.
 | درخت harness | `f232d2f48a4ca76aae2d63edea126193bbcf7533` |
 | commit محصولی همین دور | `8668a9bd10ce7c57e81fb99b219eeb476a854889` |
 | درخت محصولی | `f0edc11c0b2e44890a0ceb32832cdfbbd5e1f9c1` |
+| commit ممیزی نهایی محصول و harness | `876e8eb07fa72c4c0272cab9fba1df14b97e0b87` |
+| درخت ممیزی نهایی | `70b7968786240fc31d6d510e78e9bd351b3fa49d` |
 | merge-base با `origin/main` | `581396c6791fa9e1fdae9894d3bb56ffbd06f136` |
-| فاصله با `origin/main` هنگام نگارش | ۵۹ جلو / ۲۵ عقب |
+| فاصله با `origin/main` پس از commit محصولی نهایی | ۶۱ جلو / ۲۶ عقب |
 | `git diff --name-only $(git merge-base HEAD origin/main) origin/main -- frontend` | خالی |
-| تصمیم merge | انجام نشد |
-| پوش / deploy / Figma / Sites | انجام نشد |
+| تصمیم merge | پس از commit نهایی و بازاجرای گیت یکپارچه مجاز است |
+| Figma / Sites | انجام نشد |
 | `MarketView.vue` | `6eea08979c7a91ae4ea5f96939165c28459f2729fb6a4c4c75f15f169c80e608` |
 | `OffersList.vue` | `9a58458142f8b0213ce6a853b152a5b04ef93d6f87f8f98e6cb1f37d2b2c086c` |
 
-پس از commit همین پرونده، HEAD و درخت را دوباره از Git بخوان.
+commit اسناد عمداً پس از commit محصولی قرار می‌گیرد؛ برای ادغام، HEAD و درخت نهایی را
+مستقیماً از Git بخوان.
 
 ---
 
@@ -51,13 +57,13 @@ Annotation یا early-return داخل pass شمرده نشد.
 |---|---|---:|---:|---:|---:|---:|---:|
 | پوشش ۲۹ مسیر / دلیل N/A | Chromium | ۱ | ۱ | ۰ | ۰ | ۰ | ۰ |
 | هندسه `initial/normal` | Chromium | ۲۹۰ | ۲۹۰ | ۰ سلول تست | ۰ | ۰ | ۰ |
-| ماتریس state | Chromium | ۲۹۶ | ۲۹۶ | ۴۰۰ سلول توصیف‌گر در ۲ عرض | ۰ | ۰ | ۰ |
+| ماتریس state | Chromium | ۲۹۴ | ۲۹۴ | ۴۰۲ سلول توصیف‌گر در ۲ عرض | ۰ | ۰ | ۰ |
 | مکمل خانوادهٔ حساس | Chromium | ۰ | ۰ | ۰ | ۴۴ | ۰ | ۰ |
 | خانوادهٔ حساس `normal` | Firefox | ۴۴ | ۴۴ | ۰ | ۰ | ۰ | ۰ |
 | خانوادهٔ حساس `normal` | WebKit | ۴۴ | ۴۴ | ۰ | ۰ | ۰ | console ۴۴ |
-| صفحه‌کلید / sheet / کپی عملیات | Chromium | ۱۳ | ۱۳ | ۰ | ۰ | ۰ | ۰ |
-| صفحه‌کلید / sheet / کپی عملیات | Firefox | ۱۳ | ۱۳ | ۰ | ۰ | ۰ | ۰ |
-| صفحه‌کلید / sheet / کپی عملیات | WebKit | ۱۳ | ۱۳ | ۰ | ۰ | ۰ | ۰ |
+| صفحه‌کلید / sheet / کپی و پروفایل همتا | Chromium | ۱۴ | ۱۴ | ۰ | ۰ | ۰ | ۰ |
+| صفحه‌کلید / sheet / کپی و پروفایل همتا | Firefox | ۱۴ | ۱۴ | ۰ | ۰ | ۰ | ۰ |
+| صفحه‌کلید / sheet / کپی و پروفایل همتا | WebKit | ۱۴ | ۱۴ | ۰ | ۰ | ۰ | ۰ |
 | safe-area:login | Chromium | ۱ | ۱ | ۰ | ۰ | ۰ | ۰ |
 | safe-area:login | Firefox | ۱ | ۱ | ۰ | ۰ | ۰ | ۰ |
 | safe-area:login | WebKit | ۱ | ۱ | ۰ | ۰ | ۰ | ۰ |
@@ -77,11 +83,14 @@ Annotation یا early-return داخل pass شمرده نشد.
 | fail-closed harness | Firefox | ۱۰ | ۱۰ | ۰ | ۰ | ۰ | ۰ |
 | fail-closed harness | WebKit | ۱۰ | ۱۰ | ۰ | ۰ | ۰ | ۰ |
 
-جمع Chromium همین سه spec: ۶۲۶ passed + ۴۴ skipped = ۶۷۰.
-جمع Firefox خانواده‌های حساس و قراردادهای اندازه‌گیری‌شده: ۸۴ passed.
-جمع WebKit همان خانواده: ۸۴ passed + ۵۸۶ skipped سلول Chromium-only.
+جمع Chromium همین سه spec: ۶۲۵ passed + ۴۴ skipped = ۶۶۹.
+جمع Firefox خانواده‌های حساس و قراردادهای اندازه‌گیری‌شده: ۸۵ سلول؛ یک اجرای طولانی
+پس از ۲۳ صفحهٔ زنده با توقف پردازش مرورگر یک timeout محیطی داشت و همان سلول
+`customers:desktop-1440:normal` در اجرای مستقل بلافاصله pass شد. این رخداد به‌عنوان
+«اجرای کامل یک‌بارهٔ سبز» معرفی نمی‌شود.
+جمع WebKit همان خانواده: ۸۵ passed + ۵۸۴ skipped در یک اجرای کامل.
 
-یکتای مسیر+حالت N/A: ۲۰۰. در دو عرض حساس: ۴۰۰ سلول توصیف‌گر.
+یکتای مسیر+حالت N/A: ۲۰۱. در دو عرض حساس: ۴۰۲ سلول توصیف‌گر.
 
 کدهای N/A در ۲ عرض حساس:
 
@@ -89,7 +98,7 @@ Annotation یا early-return داخل pass شمرده نشد.
 |---|---:|---|
 | `hub-always-populated` | ۷۲ | هاب همیشه ردیف دارد |
 | `no-ltr-token` | ۵۲ | شناسهٔ LTR محصولی ندارد |
-| `no-stale-resource` | ۵۲ | منبع stale/refresh ندارد |
+| `no-stale-resource` | ۵۴ | منبع stale/refresh ندارد؛ پروفایل عمومی همتا عمداً وضعیت عضویت داخلی ندارد |
 | `no-unbroken-token` | ۵۲ | شناسهٔ بی‌فاصله ندارد |
 | `no-page-load-resource` | ۳۴ | بار صفحه به فهرست شبکه وابسته نیست؛ شامل آفلاین فرم‌های ورود/ثبت/دعوت |
 | `no-long-persian-copy` | ۲۸ | متن بلند فارسی محصولی ندارد |
@@ -152,10 +161,10 @@ Abort فقط وقتی environmental است که ناوبری واقعی و کن�
 |---|---|
 | `git diff --check` | پاک |
 | Vitest متمرکز | ProfilePresentation ۳، CreateChannel ۱۰، AdminView ۴۰، Stage4 ۳۳، PublicProfile ۵۸ — همه passed |
-| Vitest کامل `--maxWorkers=1` | ۱۶۹ پرونده / ۱۹۸۶ تست passed |
+| Vitest کامل `--maxWorkers=1` | ۱۶۹ پرونده / ۱۹۸۸ تست passed |
 | ChatView جدا `--maxWorkers=1` | ۱۰۹ passed |
 | `vue-tsc -p tsconfig.app.json --noEmit` | EXIT 2؛ فقط `MarketView.vue:825 TS2345`، `961 TS18048`، `962 TS18048`، `1271 TS2322` |
-| بیلد موقت | `/tmp/native-app-v2-prod-build-honesty`؛ ۱۷۰ فایل؛ ۵٬۷۲۵٬۲۵۵ بایت؛ digest `83bb4fe09e0ab71a80bbc6612512ec995348c6520462822d5c2c17672a316f0c` |
+| بیلد موقت نهایی | `/tmp/native-app-v2-final-dist-v3`؛ ۱۷۰ فایل؛ ۵٬۷۲۵٬۲۴۱ بایت؛ digest `7589b2c2edcb215a8ebeeb75f7af2bcd7393373a191403bbe8210918f84f256e` |
 | `npm run guard:ui` | PASS |
 | `memory-custodian check` | پس از commit اسناد |
 
@@ -180,8 +189,9 @@ Abort فقط وقتی environmental است که ناوبری واقعی و کن�
 
 مجموعهٔ قبلی `/tmp/native-app-v2-visual-correction` digest `1bd0a21399c69a6d363e870f59e5248f8f6023cd57e90acb5057b24b57857199` **منسوخ** است؛ در چند شات normal، محتوا و loader نیمه‌شفاف با هم دیده می‌شد.
 
-مجموعهٔ تازه پس از `waitForVisualStability`: `/tmp/native-app-v2-visual-honesty`
-۱۴۵ PNG؛ ۲۹ مسیر × ۵ عرض؛ ۴٬۳۸۹٬۷۹۲ بایت؛ digest `8af07491da8e994404fbf948d34c9c6a654641921497b14a531c1a743ba87797`.
+مجموعهٔ نهایی پس از دو دور `waitForVisualStability` و کنترل scroll اولیه:
+`/tmp/native-app-v2-final-visual-v3-20260828`، ۱۴۵ PNG؛ ۲۹ مسیر × ۵ عرض؛
+۴٬۲۰۹٬۲۵۶ بایت؛ digest `ae27c762190cc6a3b9545e6e5dcf9f0be227e60c115063a84b57a5259141f5f3`.
 PNG داخل Git نیست.
 
 ایرادهای بصری پیدا و اصلاح‌شده:
@@ -189,16 +199,18 @@ PNG داخل Git نیست.
 - نام حساب چندخطی و last-visit با `position:absolute` به مرز هدر و کارت بعدی برخورد می‌کرد
 - سلسله‌مراتب هدر پروفایل نامتعادل بود
 - CreateChannel کارت تو در کارت و سطح دوم / gutter دوبل داشت
+- outcome دعوت با فوکوس برنامه‌ای یک focus ring تمام‌صفحه می‌کشید؛ specificity و
+  `box-shadow` در قرارداد دقیق همان عنصر اصلاح و روی هر پنج عرض بازتصویربرداری شد
 
 ---
 
-## باقی‌ماندهٔ کوچک
+## استثناهای آگاهانه، نه مانع track
 
-- چهار خطای منجمد `vue-tsc` در Market؛ خارج از این track
-- فازهای ۱ تا ۱۰ partial؛ کاتالوگ V2 هنوز `--ui-v2-*` دارد
-- قاعدهٔ مردهٔ `.channel-admin-header-btn` با رنگ `#334155` در CSS کانال هنوز در فایل است و در قالب استفاده نمی‌شود
+- چهار خطای فرمان پروژه‌ای `vue-tsc` در Market؛ خارج از این track و پیش‌موجود
+- hookهای تاریخی `ui-v2-*` که تست‌ها و گاردها به آن‌ها متصل‌اند؛ زبان بصری دوم نیستند
+- CSS منجمد کانال حتی در بخش‌های بدون مصرف تغییر نکرد، چون receipt تاریخی دقیقاً همان فایل را قفل می‌کند
 - Vitest موازی ممکن است ChatView را flake کند؛ با یک worker سبز است
-- مسیر fixture پروفایل عمومی همان کاربر جاری است؛ نمای کاربر دیگر همان `ProfileIdentityHeader` را دارد
+- fixture پروفایل عمومی اکنون viewer و target را مستقل می‌سازد و رؤیت تلفن/نشانی همتا را می‌آزماید
 - ۴۴ پیام محیطی WebKit فقط کلید viewport ناشناخته است
 
 ---
@@ -210,9 +222,9 @@ PNG داخل Git نیست.
 - Checkpointهای `4c5e8136` / `5f77a02a` / `da0dc34a` / `aaec89a7` / `5f9018e1` و حکم READY قبلی **منسوخ**اند.
 - fail-closed = ۹ **منسوخ** است؛ شمار جاری ۱۰ است.
 - overlay interaction = ۷ در حالی که inventory داخل آن بود **منسوخ** است؛ inventory جدا است.
-- state executed ۳۰۶ و N/A ۳۹۰ **منسوخ** است؛ شمار جاری ۲۹۶ executed و ۴۰۰ N/A در ۲ عرض است.
+- state executed ۳۰۶/۲۹۶ و N/A ۳۹۰/۴۰۰ **منسوخ** است؛ شمار جاری ۲۹۴ executed و ۴۰۲ N/A در ۲ عرض است.
 - digest تصویر `1bd0a213…` **منسوخ** است.
 - environmental شمردن تمام abortهای GET/HEAD، dynamic import، و هر متن حاوی `/api/realtime/ws` **منسوخ** است.
 - fixture ۴۲۵ به‌عنوان خطای فهرست **منسوخ** است.
 - ادعای ناقص بودن inset کانال **منسوخ** است؛ کارت تو در کارت برداشته شد.
-- `vue-tsc` هیچ‌گاه در این track سبز اعلام نشود.
+- سبز اعلام‌کردن `vue-tsc -p tsconfig.app.json` تا رفع چهار خطای خارج از scope Market ممنوع است؛ فرمان عمومی بدون project سبز است.

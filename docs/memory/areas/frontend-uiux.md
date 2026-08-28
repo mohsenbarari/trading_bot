@@ -4,7 +4,7 @@ Load for Vue/PWA refactoring, Design System V2, Figma/Sites evidence, or shared 
 
 ## Decisions
 
-- 2026-08-27 | Native App V2 on `candidate/webapp-native-app-v2` is READY FOR INDEPENDENT INTEGRATION REVIEW after honest offline fail-closed, settled visuals, profile header flow, and CreateChannel inset. Not owner-approved. Phases 1–10 stay partial. No merge, push, or deploy.
+- 2026-08-28 | Native App V2 on `candidate/webapp-native-app-v2` passed independent supervisor audit for all 29 non-Market routes: common native widths/spacing, concise copy, peer-visible phone/address, settled initial screenshots, fail-closed fixtures, keyboard/overlay contracts and multi-browser gates. Market and protected interiors stayed frozen. The track is complete and ready for controlled main integration; it is not by itself deployment authority.
 - 2026-08-22 | Market is owner-frozen; feed, meter, overtime, calendar confirm, and delivery interiors stay unchanged without explicit owner scope.
 - 2026-08-21 | Native standardization V1 receipts on `main` `428dd1a0` stay historical. Production/Sites stay untouched.
 - 2026-08-20 | Native means installed PWA: 48px back, bottom primary CTA, shared destructive dialog, keyboard-safe forms, and grouped lists. Today trades stay a horizontal row.
