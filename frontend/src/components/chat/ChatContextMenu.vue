@@ -6,8 +6,9 @@
       class="context-menu"
       :class="{ 'has-reactions': showReactionRow }"
       :style="menuStyle"
+      ref="menuRef"
       role="menu"
-      aria-label="Message actions"
+      aria-label="اقدام‌های پیام"
       @click.stop
     >
       <div v-if="showReactionRow" class="reaction-picker-shell telegram-panel telegram-menu-shadow">
@@ -83,6 +84,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useOverlayA11y } from '../ui/useOverlayA11y'
 import { canShareFiles } from '../../composables/chat/useChatFileHandler'
 import { buildQuickMessageReactions } from '../../utils/messageReactions'
 import {
@@ -150,6 +152,14 @@ const currentUserReactionEmoji = computed(() => {
   return typeof match?.emoji === 'string' ? match.emoji : ''
 })
 const isReactionRowMounted = ref(false)
+const menuRef = ref<HTMLElement | null>(null)
+const isMenuOpen = computed(() => props.menuState.visible)
+useOverlayA11y({
+  open: isMenuOpen,
+  description: computed(() => undefined),
+  containerRef: menuRef,
+  close: () => emit('close'),
+})
 const isReactionPickerExpanded = ref(false)
 const quickReactions = computed(() => buildQuickMessageReactions(props.availableReactions, currentUserReactionEmoji.value))
 const overflowReactions = computed(() => {

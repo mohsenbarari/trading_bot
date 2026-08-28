@@ -2,8 +2,8 @@
 import { ref, onBeforeUnmount, onMounted, computed, watch } from 'vue'
 import { usePWAInstall } from '../utils/pwaInstall'
 import { isSecurityLayerActive } from '../utils/securityLayerState'
+import AppBottomSheet from './ui/AppBottomSheet.vue'
 import AppButton from './ui/AppButton.vue'
-import AppCard from './ui/AppCard.vue'
 
 const { isInstallable, isInstalled, installApp } = usePWAInstall()
 const props = withDefaults(defineProps<{ eligible?: boolean }>(), { eligible: false })
@@ -18,9 +18,16 @@ const PROMPT_DISMISS_TTL_MS = 24 * 60 * 60 * 1000
 type IOSWindow = Window & { MSStream?: unknown }
 type IOSNavigator = Navigator & { standalone?: boolean }
 
-// تشخیص سیستم‌عامل برای نمایش راهنمای اختصاصی
 const isIOS = computed(() => {
   return /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as IOSWindow).MSStream
+})
+
+const installCopy = computed(() => {
+  if (isIOS.value && showIosGuide.value) {
+    return 'در سافاری دکمه اشتراک را بزنید و «افزودن به صفحه اصلی» را انتخاب کنید.'
+  }
+  if (isIOS.value) return 'برای نصب در آیفون، راهنمای کوتاه نصب را باز کنید.'
+  return 'روی صفحه اصلی بگذارید تا مثل یک برنامه باز شود.'
 })
 
 const wasRecentlyDismissed = () => {
@@ -45,8 +52,6 @@ const maybeShowOverlay = () => {
     return
   }
 
-  // در اندروید/دسکتاپ از isInstallable استفاده می‌کنیم (Chrome/Edge).
-  // در iOS چون رویداد beforeinstallprompt نداریم، فقط راهنمای نصب نشان می‌دهیم.
   const shouldShowForAndroid = isInstallable.value
   const shouldShowForIOS = isIOS.value && !(window.navigator as IOSNavigator).standalone
 
@@ -116,36 +121,65 @@ const handleInstall = async () => {
   } catch {
     // A rejected browser prompt is not actionable from the consumed event.
   }
-  // A browser-level dismissal invalidates the consumed prompt event. Close the
-  // card and respect the same bounded quiet period as an explicit “later”.
   dismiss()
 }
 </script>
 
 <template>
-  <transition name="slide-up">
-    <aside v-if="showOverlay" class="ui-v2-pwa-install" aria-label="نصب اپلیکیشن">
-      <AppCard class="ui-v2-pwa-card">
-        <div class="ui-v2-pwa-icon">
-          <img src="/pwa-192x192.png" alt="App Icon" />
-        </div>
-        <div class="ui-v2-pwa-copy">
-          <h3>نصب روی صفحه اصلی</h3>
-          <p v-if="isIOS && !showIosGuide">برای نصب در آیفون، راهنمای کوتاه نصب را باز کنید.</p>
-          <p v-else-if="isIOS" class="ui-v2-pwa-ios-guide">
-            در سافاری دکمه اشتراک را بزنید و «افزودن به صفحه اصلی» را انتخاب کنید.
-          </p>
-          <p v-else>روی صفحه اصلی بگذارید تا مثل یک برنامه باز شود.</p>
-        </div>
-        <div class="ui-v2-pwa-actions">
-          <AppButton class="pwa-action-dismiss" variant="ghost" size="sm" @click="dismiss"
-            >بعداً</AppButton
-          >
-          <AppButton class="pwa-action-install" size="sm" @click="handleInstall">
-            {{ isIOS ? 'راهنما' : 'نصب' }}
-          </AppButton>
-        </div>
-      </AppCard>
-    </aside>
-  </transition>
+  <AppBottomSheet
+    :open="showOverlay"
+    title="نصب روی صفحه اصلی"
+    :description="installCopy"
+    :show-close="false"
+    close-label="بعداً"
+    backdrop-class="ui-v2-pwa-install pwa-install-layer"
+    panel-class="pwa-install-sheet"
+    body-class="pwa-install-body"
+    actions-class="ui-v2-pwa-actions pwa-install-actions"
+    @close="dismiss"
+  >
+    <div class="ui-v2-pwa-icon pwa-install-icon">
+      <img src="/pwa-192x192.png" alt="" />
+    </div>
+    <p v-if="isIOS && showIosGuide" class="ui-v2-pwa-ios-guide pwa-install-guide">
+      {{ installCopy }}
+    </p>
+    <template #actions>
+      <AppButton class="pwa-action-dismiss" variant="ghost" @click="dismiss">بعداً</AppButton>
+      <AppButton class="pwa-action-install" @click="handleInstall">
+        {{ isIOS ? 'راهنما' : 'نصب' }}
+      </AppButton>
+    </template>
+  </AppBottomSheet>
 </template>
+
+<style scoped>
+.pwa-install-icon {
+  width: 3rem;
+  height: 3rem;
+  overflow: hidden;
+  margin: 0 auto;
+  border-radius: 12px;
+  background: var(--ds-bg-inset, #f8fafc);
+}
+
+.pwa-install-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.pwa-install-guide {
+  margin: 0.75rem 0 0;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-sm);
+  line-height: 1.7;
+}
+
+.pwa-install-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+</style>

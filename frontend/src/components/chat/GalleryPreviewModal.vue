@@ -9,6 +9,7 @@
 // Videos are previewed only (no editor in Phase B). HEIC files pass through
 // as-is (normalize happens later in useChatMedia).
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
+import { useOverlayA11y } from '../ui/useOverlayA11y'
 
 const ImageEditorModal = defineAsyncComponent(() => import('./ImageEditorModal.vue'))
 
@@ -116,16 +117,32 @@ function sendAll() {
 function cancelAll() {
   emit('cancel')
 }
+
+const dialogRef = ref<HTMLElement | null>(null)
+const isOpen = computed(() => props.files.length > 0)
+const { titleId } = useOverlayA11y({
+  open: isOpen,
+  description: computed(() => undefined),
+  containerRef: dialogRef,
+  close: cancelAll,
+})
 </script>
 
 <template>
   <teleport to="body">
-    <div class="gallery-preview-overlay" role="dialog" aria-modal="true">
+    <div
+      ref="dialogRef"
+      class="gallery-preview-overlay"
+      role="dialog"
+      aria-modal="true"
+      :aria-labelledby="titleId"
+      tabindex="-1"
+    >
       <div class="gp-top-bar">
         <button type="button" class="gp-top-btn" @click="cancelAll" aria-label="انصراف">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M6 18L18 6"/></svg>
         </button>
-        <div class="gp-title">{{ items.length }} مورد</div>
+        <h2 :id="titleId" class="gp-title">{{ items.length }} مورد</h2>
         <div style="width: 48px;"></div>
       </div>
 

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { computed, onMounted, ref, toRef, watch } from 'vue'
+import { useOverlayA11y } from '../ui/useOverlayA11y'
 import LoadingSkeleton from '../LoadingSkeleton.vue'
 import ChatUserListRow from './ChatUserListRow.vue'
 import AppBackButton from '../ui/AppBackButton.vue'
@@ -39,6 +40,15 @@ type SearchUser = {
 const searchQuery = ref('')
 const users = ref<SearchUser[]>([])
 const isLoading = ref(false)
+const dialogRef = ref<HTMLElement | null>(null)
+const searchInputRef = ref<HTMLInputElement | null>(null)
+const { titleId } = useOverlayA11y({
+  open: toRef(props, 'show'),
+  description: computed(() => undefined),
+  containerRef: dialogRef,
+  close: () => emit('close'),
+  initialFocusRef: searchInputRef,
+})
 
 function getPrimaryUserName(user: SearchUser) {
   const normalizedCustomerName = (user.customer_management_name || '').trim()
@@ -137,12 +147,19 @@ function handleUserClick(user: SearchUser) {
 
 <template>
   <div v-if="show" class="new-chat-modal-overlay">
-    <div class="new-chat-container">
+    <div
+      ref="dialogRef"
+      class="new-chat-container"
+      role="dialog"
+      aria-modal="true"
+      :aria-labelledby="titleId"
+      tabindex="-1"
+    >
       
       <!-- Header -->
       <div class="new-chat-header">
         <AppBackButton class="icon-btn back-btn" aria-label="بازگشت" @click="$emit('close')" />
-        <span class="header-title">شروع مکالمه جدید</span>
+        <h2 :id="titleId" class="header-title">شروع مکالمه جدید</h2>
       </div>
 
       <!-- Search Input -->
@@ -151,10 +168,12 @@ function handleUserClick(user: SearchUser) {
           <span class="new-group-icon"><UsersRound :size="20" /></span>
           <span>ساخت گروه جدید</span>
         </button>
-        <input 
-          v-model="searchQuery" 
-          type="text" 
-          placeholder="جستجو (نام، آیدی، موبایل)..." 
+        <input
+          ref="searchInputRef"
+          v-model="searchQuery"
+          type="search"
+          placeholder="جستجو (نام، آیدی، موبایل)..."
+          aria-label="جستجو (نام، آیدی، موبایل)"
           class="new-chat-search-input"
         />
       </div>
@@ -251,9 +270,9 @@ function handleUserClick(user: SearchUser) {
 .icon-btn:hover { background: rgba(0,0,0,0.05); }
 
 .header-title {
+  margin: 0 0 0 16px;
   font-size: 18px;
   font-weight: 500;
-  margin-right: 16px;
   color: #000;
 }
 

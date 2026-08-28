@@ -157,7 +157,7 @@ describe('CreateChannelView.vue', () => {
     await membersEntry!.trigger('click')
     await flushPromises()
 
-    expect(wrapper.get('.search-input').classes()).toContain('ui-input')
+    expect(wrapper.get('.ui-search-field input').attributes('type')).toBe('search')
 
     const memberRow = wrapper.findAll('.chat-user-row').find((row) => row.text().includes('Member Two'))
     expect(memberRow).toBeTruthy()
@@ -305,8 +305,8 @@ describe('CreateChannelView.vue', () => {
     await avatarInput.trigger('change')
     await flushPromises()
 
-    await wrapper.get('#channel-title').setValue('Fresh Channel')
-    await wrapper.get('#channel-description').setValue('Created here')
+    await wrapper.get('input[placeholder="مثلاً اطلاعیه‌های ویژه"]').setValue('Fresh Channel')
+    await wrapper.get('textarea[placeholder="چند خط کوتاه درباره موضوع کانال"]').setValue('Created here')
 
     const createButton = wrapper.findAll('button').find((button) => button.text().includes('ساخت کانال'))
     expect(createButton).toBeTruthy()
@@ -317,7 +317,7 @@ describe('CreateChannelView.vue', () => {
     expect(uploadAvatarImageMock).toHaveBeenCalledTimes(1)
     expect(wrapper.emitted('refresh-conversations')).toHaveLength(1)
     expect(wrapper.text()).toContain('افزودن عضو')
-    expect(wrapper.get('.search-input').classes()).toContain('ui-input')
+    expect(wrapper.get('.ui-search-field input').attributes('type')).toBe('search')
 
     const candidateRow = wrapper.findAll('.chat-user-row').find((row) => row.text().includes('Member Two'))
     expect(candidateRow).toBeTruthy()
@@ -452,8 +452,8 @@ describe('CreateChannelView.vue', () => {
     const removeAvatarButton = wrapper.findAll('button').find((button) => button.text().includes('حذف عکس'))
     expect(removeAvatarButton).toBeTruthy()
     await removeAvatarButton!.trigger('click')
-    await wrapper.get('#edit-channel-title').setValue('Renamed Channel')
-    await wrapper.get('#edit-channel-description').setValue('Updated channel details')
+    await wrapper.get('input[placeholder="نام کانال"]').setValue('Renamed Channel')
+    await wrapper.get('textarea[placeholder="توضیحات کانال برای اعضا"]').setValue('Updated channel details')
 
     const saveButton = wrapper.findAll('button').find((button) => button.text().includes('ذخیره تغییرات'))
     expect(saveButton).toBeTruthy()
@@ -475,7 +475,7 @@ describe('CreateChannelView.vue', () => {
     await adminsEntry!.trigger('click')
     await flushPromises()
 
-    expect(wrapper.get('.search-input').classes()).toContain('ui-input')
+    expect(wrapper.get('.ui-search-field input').attributes('type')).toBe('search')
 
     const promoteButton = wrapper.findAll('.channel-member-action').find((button) => button.text().includes('ارتقا به ادمین'))
     expect(promoteButton).toBeTruthy()
@@ -639,7 +639,7 @@ describe('CreateChannelView.vue', () => {
     vm.page = 'add-members'
     await flushPromises()
     expect(wrapper.get('.select-all-toggle input').classes()).toContain('ui-checkbox')
-    expect(wrapper.get('.state-box.ui-empty-state').text()).toContain('کاربری برای دعوت باقی نمانده است.')
+    expect(wrapper.get('.ui-empty-state').text()).toContain('کاربری برای دعوت باقی نمانده است.')
 
     vm.activeChannel = { ...channel, is_mandatory: true }
     await vm.loadCandidates('x')
@@ -971,6 +971,51 @@ describe('CreateChannelView.vue', () => {
     vi.useRealTimers()
   })
 
+  it('retries the channel list from the home error banner', async () => {
+    apiFetchJsonMock
+      .mockRejectedValueOnce(new Error('channels unavailable'))
+      .mockResolvedValueOnce([
+        {
+          id: 21,
+          type: 'channel',
+          title: 'کانال پذیرش',
+          description: '',
+          avatar_file_id: null,
+          created_by_id: 1,
+          is_system: false,
+          is_mandatory: false,
+          member_count: 0,
+          created_at: '2026-05-12T10:00:00',
+        },
+      ])
+
+    const CreateChannelView = (await import('./CreateChannelView.vue')).default
+    const wrapper = mount(CreateChannelView, {
+      props: {
+        apiBaseUrl: '',
+        jwtToken: 'token',
+        currentUserId: 1,
+        showCloseButton: false,
+      },
+      global: {
+        directives: { ripple: {} },
+        stubs: { transition: false },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('channels unavailable')
+    const retry = wrapper.findAll('button').find((button) => button.text().includes('تلاش دوباره'))
+    expect(retry).toBeTruthy()
+    await retry!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('کانال پذیرش')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
   it('guards open-current-channel without an active channel, then discards back state before emitting and keeps back-triggered close from popping again', async () => {
     apiFetchJsonMock.mockResolvedValue([])
 
@@ -1020,36 +1065,17 @@ describe('CreateChannelView.vue', () => {
     expect(popBackStateMock).not.toHaveBeenCalled()
   })
 
-  it('anchors the two floating channel HelpPopovers to local card containing blocks', () => {
-    const popovers = createChannelSource.match(/<HelpPopover\b[\s\S]*?\/>/g) || []
-    const cards = [...createChannelSource.matchAll(/<AppSectionCard\b[\s\S]*?<\/AppSectionCard>/g)].map(
-      (match) => match[0],
-    )
-    const helpCards = cards.filter((card) => /\bcard-with-help\b/.test(card))
-    const placementRule = createChannelSource.match(
-      /\.manager-section-card\.card-with-help\s*\{([^}]+)\}/,
-    )?.[1]
-
-    expect(popovers).toHaveLength(2)
-    expect(helpCards).toHaveLength(2)
-    expect(helpCards[0]).toContain('button-test="channel-home-help"')
-    expect(helpCards[0]).toContain('note-test="channel-home-help-note"')
-    expect(helpCards[0]).toContain('label="راهنمای ساخت کانال"')
-    expect(helpCards[1]).toContain('button-test="channel-create-preview-help"')
-    expect(helpCards[1]).toContain('note-test="channel-create-preview-help-note"')
-    expect(helpCards[1]).toContain('label="راهنمای پیش‌نمایش کانال"')
-
-    for (const card of helpCards) {
-      const nested = card.match(/<HelpPopover\b[\s\S]*?\/>/g) || []
-      expect(nested).toHaveLength(1)
-      expect(nested[0]).toMatch(/^\s*<HelpPopover\s+floating\b/)
-      expect(nested[0]).not.toMatch(/comfortableTarget/)
-    }
-
-    expect(placementRule).toBeDefined()
-    expect(placementRule).toContain('position: relative;')
-    expect(placementRule).toContain('padding-left: 4rem;')
-    expect(placementRule).not.toMatch(/overflow\s*:\s*visible/)
+  it('keeps the live channel manager free of HelpPopover and nested web cards', () => {
+    expect(createChannelSource).not.toContain('HelpPopover')
+    expect(createChannelSource).not.toContain('card-with-help')
+    expect(createChannelSource).not.toContain('manager-section-card')
+    expect(createChannelSource).not.toContain('AppSectionCard')
+    expect(createChannelSource).toContain('AppInsetGroup')
+    expect(createChannelSource).not.toContain('<main')
+    expect(createChannelSource).not.toContain(':hover:not(:disabled)')
+    expect(createChannelSource).toContain('v-if="showCloseButton || canGoBack"')
+    expect(createChannelSource).toContain('channel-admin-header--page')
+    expect(createChannelSource).toContain('.channel-admin-shell--page .manager-body')
   })
 
 })

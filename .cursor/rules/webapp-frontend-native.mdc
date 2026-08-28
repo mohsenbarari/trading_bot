@@ -15,5 +15,7 @@ alwaysApply: false
 ```
 
 - Reuse `--ds-control-*` for leftover classes
+- Lists use inset grouped rows with 16px gutter; do not flush cards to the screen edge
+- Button labels must stay inside the control
 - Messenger inputs may stay raw if they match the same 48px inset geometry
 - Do not restyle Market offer cards, meters, or hourglasses

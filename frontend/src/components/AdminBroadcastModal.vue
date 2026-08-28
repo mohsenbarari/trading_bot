@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { X } from 'lucide-vue-next'
 import { apiFetch } from '../utils/auth'
-import { AppButton, AppIconButton, AppTextarea } from './ui'
+import { AppBottomSheet, AppButton, AppTextarea } from './ui'
 
 const emit = defineEmits<{
   (e: 'close'): void
@@ -22,7 +21,9 @@ const isSubmitting = ref(false)
 const error = ref('')
 const success = ref('')
 
-const canSubmit = computed(() => content.value.trim().length > 0 && selectedTargets.value.length > 0 && !isSubmitting.value)
+const canSubmit = computed(
+  () => content.value.trim().length > 0 && selectedTargets.value.length > 0 && !isSubmitting.value,
+)
 
 async function submitBroadcast() {
   if (!canSubmit.value) return
@@ -51,103 +52,51 @@ async function submitBroadcast() {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div class="broadcast-modal-backdrop" @click.self="emit('close')">
-      <section class="broadcast-modal" role="dialog" aria-modal="true" aria-labelledby="broadcast-modal-title">
-        <header class="broadcast-modal-header">
-          <div>
-            <h2 id="broadcast-modal-title">ارسال پیام مدیریت</h2>
-            <p>این پیام مستقل از کانال‌ها برای گیرندگان انتخاب‌شده در پیام‌رسان ارسال می‌شود.</p>
-          </div>
-          <AppIconButton label="بستن" class="broadcast-close-control" @click="emit('close')">
-            <X :size="20" />
-          </AppIconButton>
-        </header>
+  <AppBottomSheet
+    :open="true"
+    title="ارسال پیام مدیریت"
+    description="این پیام مستقل از کانال‌ها برای گیرندگان انتخاب‌شده در پیام‌رسان ارسال می‌شود."
+    backdrop-class="broadcast-sheet-layer"
+    panel-class="broadcast-sheet"
+    body-class="broadcast-sheet-body"
+    actions-class="broadcast-actions ds-native-actions ds-native-actions--split"
+    @close="emit('close')"
+  >
+    <AppTextarea
+      v-model="content"
+      class="broadcast-textarea"
+      rows="6"
+      placeholder="متن پیام مدیریت..."
+    />
 
-        <AppTextarea v-model="content" class="broadcast-textarea" rows="6" placeholder="متن پیام مدیریت..." />
-
-        <div class="target-grid" aria-label="گروه‌های هدف">
-          <label v-for="option in targetOptions" :key="option.key" class="target-option">
-            <input v-model="selectedTargets" type="checkbox" :value="option.key" />
-            <span>{{ option.label }}</span>
-          </label>
-        </div>
-
-        <div v-if="error" class="form-alert error">{{ error }}</div>
-        <div v-if="success" class="form-alert success">{{ success }}</div>
-
-        <footer class="broadcast-actions ds-native-actions ds-native-actions--split">
-          <AppButton type="button" variant="secondary" @click="emit('close')">بستن</AppButton>
-          <AppButton type="button" :disabled="!canSubmit" :loading="isSubmitting" @click="submitBroadcast">
-            ارسال
-          </AppButton>
-        </footer>
-      </section>
+    <div class="target-grid" aria-label="گروه‌های هدف">
+      <label v-for="option in targetOptions" :key="option.key" class="target-option">
+        <input v-model="selectedTargets" type="checkbox" :value="option.key" />
+        <span>{{ option.label }}</span>
+      </label>
     </div>
-  </Teleport>
+
+    <div v-if="error" class="form-alert error">{{ error }}</div>
+    <div v-if="success" class="form-alert success">{{ success }}</div>
+
+    <template #actions>
+      <AppButton type="button" variant="secondary" @click="emit('close')">بستن</AppButton>
+      <AppButton type="button" :disabled="!canSubmit" :loading="isSubmitting" @click="submitBroadcast">
+        ارسال
+      </AppButton>
+    </template>
+  </AppBottomSheet>
 </template>
 
 <style scoped>
-.broadcast-modal-backdrop {
-  position: fixed;
-  inset: 0;
+.broadcast-sheet-layer {
   z-index: 1200;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding: 1rem;
-  background: rgba(15, 23, 42, 0.42);
-  backdrop-filter: blur(8px);
-}
-
-.broadcast-modal {
-  width: min(100%, 560px);
-  max-height: min(88dvh, 720px);
-  overflow-y: auto;
-  border-radius: 24px 24px 0 0;
-  background: var(--ds-bg-card);
-  border: 1px solid var(--ds-native-hairline);
-  box-shadow: none;
-  padding: 1rem;
-}
-
-.broadcast-modal-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 0.85rem;
-}
-
-.broadcast-modal-header h2 {
-  margin: 0 0 0.25rem;
-  font-size: 1.05rem;
-  font-weight: 950;
-  color: var(--ds-primary-700);
-}
-
-.broadcast-modal-header p {
-  margin: 0;
-  font-size: 0.78rem;
-  line-height: 1.7;
-  color: #64748b;
-}
-
-.broadcast-close-control {
-  flex: 0 0 auto;
 }
 
 .broadcast-textarea {
   width: 100%;
   resize: vertical;
   min-height: 140px;
-  border: 1.5px solid var(--ds-control-border);
-  border-radius: var(--ds-control-radius, 12px);
-  background: var(--ds-control-bg, #fff);
-  padding: 0.85rem;
-  font: inherit;
-  line-height: 1.8;
-  color: #0f172a;
 }
 
 .target-grid {
@@ -166,39 +115,34 @@ async function submitBroadcast() {
   gap: 0.55rem;
   min-height: var(--ds-native-row-min-height, 48px);
   padding: 0.7rem 0.75rem;
-  border-radius: 0;
-  background: var(--ds-bg-card);
-  border: 0;
   border-block-end: 1px solid var(--ds-native-hairline);
-  font-size: 0.86rem;
+  font-size: var(--ds-font-sm);
   font-weight: 800;
+}
+
+.target-option:last-child {
+  border-block-end: 0;
 }
 
 .form-alert {
   margin-top: 0.75rem;
   padding: 0.75rem 0.85rem;
-  border-radius: 14px;
-  font-size: 0.82rem;
+  border-radius: 12px;
+  font-size: var(--ds-font-sm);
   font-weight: 800;
 }
 
 .form-alert.error {
-  background: rgba(254, 226, 226, 0.92);
-  color: #b91c1c;
+  background: var(--ds-danger-50, #fef2f2);
+  color: var(--ds-danger-700, #b91c1c);
 }
 
 .form-alert.success {
-  background: rgba(220, 252, 231, 0.92);
-  color: #047857;
+  background: var(--ds-success-50, #ecfdf5);
+  color: var(--ds-success-700, #047857);
 }
 
 .broadcast-actions {
-  margin-top: 1rem;
-}
-
-@media (min-width: 640px) {
-  .broadcast-modal-backdrop {
-    align-items: center;
-  }
+  margin-top: 0;
 }
 </style>

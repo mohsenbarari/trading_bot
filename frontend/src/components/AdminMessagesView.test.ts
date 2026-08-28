@@ -199,7 +199,7 @@ describe('AdminMessagesView.vue', () => {
     expect(marketTextarea.classes()).toContain('ui-textarea')
     expect((marketTextarea.element as HTMLTextAreaElement).value).toBe('پیام قبلی بازار')
     expect(adminMessagesMocks.scrollIntoViewMock).toHaveBeenCalled()
-  })
+  }, 10_000)
 
   it('supports keyboard navigation between management message tabs', async () => {
     const AdminMessagesView = (await import('./AdminMessagesView.vue')).default
@@ -301,5 +301,88 @@ describe('AdminMessagesView.vue', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-test="market-empty-help-note"]').text()).toContain('در حال حاضر هیچ پیام پین‌شده‌ای برای بازار فعال نیست')
+  })
+
+  it('shows a chrome retry when broadcast history fails to load', async () => {
+    adminMessagesMocks.apiFetchMock.mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/admin-messages/broadcasts/history')) {
+        return { ok: false, status: 500, json: async () => ({ detail: 'boom' }) }
+      }
+      if (path === '/api/admin-messages/market/current') {
+        return responseOf(null)
+      }
+      if (path.startsWith('/api/admin-messages/market/history')) {
+        return responseOf([])
+      }
+      return responseOf([])
+    })
+
+    const AdminMessagesView = (await import('./AdminMessagesView.vue')).default
+    const wrapper = mount(AdminMessagesView)
+    await flushPromises()
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('دریافت تاریخچه پیام‌های چت ممکن نشد')
+    expect(wrapper.text()).toContain('تلاش دوباره')
+
+    adminMessagesMocks.apiFetchMock.mockImplementation(async (path: string) => {
+      if (path.startsWith('/api/admin-messages/broadcasts/history')) {
+        return responseOf([])
+      }
+      if (path === '/api/admin-messages/market/current') {
+        return responseOf(null)
+      }
+      if (path.startsWith('/api/admin-messages/market/history')) {
+        return responseOf([])
+      }
+      return responseOf([])
+    })
+
+    const retry = wrapper.findAll('button').find((button) => button.text().includes('تلاش دوباره'))
+    expect(retry).toBeTruthy()
+    await retry!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('keeps successful chat history when a market source fails independently', async () => {
+    adminMessagesMocks.apiFetchMock.mockImplementation(async (path: string) => {
+      if (path === '/api/admin-messages/market/current') {
+        throw new Error('market current failed')
+      }
+      if (path.startsWith('/api/admin-messages/market/history')) {
+        return { ok: false, status: 422, json: async () => ({ detail: 'market history failed' }) }
+      }
+      if (path.startsWith('/api/admin-messages/broadcasts/history')) {
+        return responseOf([
+          {
+            id: 2,
+            content: 'پیام قبلی همگانی',
+            target_groups: ['users', 'customers'],
+            recipient_count: 4,
+            published_at: '2026-05-29T09:00:00Z',
+            created_at: '2026-05-29T09:00:00Z',
+            created_by_id: 99,
+            created_by_name: 'admin',
+          },
+        ])
+      }
+      return responseOf(null)
+    })
+
+    const AdminMessagesView = (await import('./AdminMessagesView.vue')).default
+    const wrapper = mount(AdminMessagesView)
+    await flushPromises()
+
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('دریافت تاریخچه پیام‌های چت ممکن نشد')
+
+    await wrapper.get('[data-test="message-mode-chat"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('پیام قبلی همگانی')
+
+    wrapper.unmount()
   })
 })

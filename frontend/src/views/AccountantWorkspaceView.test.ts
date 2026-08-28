@@ -884,7 +884,8 @@ describe('AccountantWorkspaceView.vue', () => {
     const rawServerDetail = 'raw-server-detail: accountant relation=12'
     const wrapper = mount(AccountantWorkspaceView)
     await flushPromises()
-    await wrapper.get('.accountant-pending-card .ui-button--danger').trigger('click')
+    await wrapper.get('.accountant-pending-card [aria-label="اقدام‌های دعوت"]').trigger('click')
+    await wrapper.get('.accountant-pending-card .ui-action-overflow__item--danger').trigger('click')
     const vm = viewVm(wrapper)
 
     expect(confirmDialog().text()).toContain('لغو رابطه و دعوت حسابدار')
@@ -1108,7 +1109,7 @@ describe('AccountantWorkspaceView.vue', () => {
           '.ui-v2-workspace-accountant-root.ui-v2-workspace-adapter',
         )
         expect(accountantStage5Css).toContain('grid-template-columns: minmax(0, 1fr);')
-        expect(accountantStage5Css).toContain('min-block-size: var(--ui-v2-size-target-min);')
+        expect(accountantStage5Css).not.toContain('.ui-tabs__tab')
         expect(accountantStage5Css).toContain('@media (prefers-reduced-motion: reduce)')
         expect(accountantStage5Css).toContain('transition: none;')
         expect(accountantStage5Css).not.toContain('padding-bottom')

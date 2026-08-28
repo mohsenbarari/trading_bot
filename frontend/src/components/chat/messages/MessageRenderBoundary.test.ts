@@ -40,8 +40,8 @@ describe('MessageRenderBoundary', () => {
 
     expect(wrapper.text()).toContain('این پیام قابل نمایش نیست')
     expect(warnSpy).toHaveBeenCalledTimes(1)
-    expect(warnSpy.mock.calls[0][0]).toBe('[messenger] message render failed')
-    expect(warnSpy.mock.calls[0][1]).toMatchObject({ messageId: 10 })
+    expect(warnSpy.mock.calls[0]![0]).toBe('[messenger] message render failed')
+    expect(warnSpy.mock.calls[0]![1]).toMatchObject({ messageId: 10 })
   })
 
   it('resets the fallback when the message identity changes', async () => {

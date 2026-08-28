@@ -78,7 +78,9 @@ function reducedMotionSelectors(source: string) {
   const selectors: string[] = []
   postcss.parse(source).walkAtRules('media', (rule) => {
     if (rule.params !== '(prefers-reduced-motion: reduce)') return
-    rule.walkRules((nestedRule) => selectors.push(...nestedRule.selectors))
+    rule.walkRules((nestedRule) => {
+      selectors.push(...nestedRule.selectors)
+    })
   })
   return selectors
 }
@@ -227,6 +229,23 @@ describe('App.vue', () => {
     expect(wrapper.get('[data-test="route-transition"]').attributes('data-transition-name')).toBe(
       'fade',
     )
+  })
+
+  it('does not reserve daily navigation space on messenger', async () => {
+    appMocks.route.name = 'messenger'
+    appMocks.route.path = '/chat'
+    appMocks.route.fullPath = '/chat'
+    appMocks.route.meta = {
+      uiShellClass: 'protected-legacy',
+      uiV2Scope: 'off',
+    }
+    appMocks.isReadyMock.mockResolvedValueOnce()
+
+    const wrapper = mountApp()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="auth-shell"]').exists()).toBe(true)
+    expect(wrapper.get('.app-route-scroll').classes()).toContain('app-route-scroll--no-daily-nav')
   })
 
   it('applies the Persian typography marker only to NONE route vnodes', async () => {

@@ -7,15 +7,6 @@
   gap: var(--ui-v2-spacing-12);
 }
 
-:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
-  .ui-v2-workspace-customer-detail-tabs
-  > button,
-:where([data-ui-system='v2'], [data-ui-system='v2-portal'])
-  .ui-v2-workspace-customer-filter-chips
-  > button {
-  min-block-size: var(--ui-v2-size-target-min);
-}
-
 :where([data-ui-system='v2'], [data-ui-system='v2-portal']) .ui-v2-workspace-customer-layout {
   display: grid;
   min-inline-size: 0;
@@ -66,10 +57,10 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
   gap: var(--ui-v2-spacing-12);
-  padding: var(--ui-v2-spacing-16);
-  border: var(--ui-v2-stroke-standard) solid var(--ui-v2-color-border-default);
+  padding: var(--ui-v2-spacing-4) var(--ui-v2-spacing-2) var(--ui-v2-spacing-12);
+  border: var(--ui-v2-stroke-standard) solid transparent;
   border-radius: var(--ui-v2-radius-card);
-  background: var(--ui-v2-color-surface-card);
+  background: var(--ui-v2-color-surface-page);
 }
 
 :where([data-ui-system='v2'], [data-ui-system='v2-portal'])

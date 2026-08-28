@@ -17,7 +17,6 @@ import {
 import type { RelationStatus } from '../composables/useOwnerCustomers'
 import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
 import { invitationRelationLink, invitationSmsStatusMessage } from '../utils/invitationContract'
-import HelpPopover from './HelpPopover.vue'
 import { AppBackButton, AppInput, AppTextarea } from './ui'
 
 
@@ -570,12 +569,6 @@ onBeforeUnmount(() => {
                 <h4>افزودن حسابدار جدید</h4>
               </div>
               <div class="accordion-header-actions">
-                <HelpPopover
-                  button-test="accountant-create-help"
-                  note-test="accountant-create-help-note"
-                  label="راهنمای افزودن حسابدار"
-                  text="پس از ثبت، لینک ثبت‌نام مخصوص همان حسابدار ساخته می‌شود."
-                />
                 <ChevronLeft :size="20" class="accountant-accordion-chevron" />
               </div>
             </div>
@@ -688,12 +681,6 @@ onBeforeUnmount(() => {
                 <h4>مدیریت حسابداران</h4>
               </div>
               <div class="accordion-header-actions">
-                <HelpPopover
-                  button-test="accountant-list-help"
-                  note-test="accountant-list-help-note"
-                  label="راهنمای لیست حسابداران"
-                  text="برای حسابدار فعال می‌توانید شرح وظیفه، نشست‌ها و قطع ارتباط را از صفحه تنظیمات مدیریت کنید."
-                />
                 <ChevronLeft :size="20" class="accountant-accordion-chevron" />
               </div>
             </div>

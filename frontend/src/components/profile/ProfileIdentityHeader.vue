@@ -15,6 +15,7 @@ withDefaults(defineProps<{
   hideBackButton?: boolean
   backLabel?: string
   loading?: boolean
+  titleTag?: 'h1' | 'p'
 }>(), {
   avatarUrl: null,
   avatarInitial: '',
@@ -26,6 +27,7 @@ withDefaults(defineProps<{
   hideBackButton: false,
   backLabel: 'بازگشت',
   loading: false,
+  titleTag: 'h1',
 })
 
 const emit = defineEmits<{
@@ -36,80 +38,116 @@ const emit = defineEmits<{
 
 <template>
   <div class="header-row profile-header-row" data-test="profile-identity-header">
-    <AppBackButton
-      v-if="!hideBackButton"
-      class="profile-nav-back"
-      :label="backLabel"
-      @click="emit('back')"
-    />
-    <div v-else class="header-back-spacer" aria-hidden="true"></div>
-    <div class="header-title">
-      <h2 v-if="displayName">
-        <slot name="title">{{ displayName }}</slot>
-      </h2>
-      <h2 v-else-if="loading" class="skeleton-text-header">
-        <div class="skeleton-box" style="width: 120px; height: 24px;"></div>
-      </h2>
-      <h2 v-else>پروفایل</h2>
-    </div>
-    <div class="header-spacer">
-      <div v-if="displayName || avatarUrl || editable || loading" class="profile-avatar-stack profile-avatar-stack--header">
-        <button
-          v-if="editable"
-          type="button"
-          class="profile-avatar profile-avatar-button profile-avatar-button--editable"
-          data-test="profile-avatar-trigger"
-          :disabled="avatarBusy"
-          :aria-label="avatarUrl ? 'تغییر آواتار' : 'افزودن آواتار'"
-          @click="emit('pick-avatar')"
+    <div class="profile-header-main">
+      <AppBackButton
+        v-if="!hideBackButton"
+        class="profile-nav-back"
+        :label="backLabel"
+        @click="emit('back')"
+      />
+      <div v-else class="header-back-spacer" aria-hidden="true"></div>
+      <div class="header-title">
+        <component
+          :is="titleTag"
+          v-if="displayName"
+          class="profile-identity-title"
+          :title="displayName"
+          dir="auto"
         >
-          <img v-if="avatarUrl" :src="avatarUrl" :alt="displayName" class="profile-avatar-image" />
-          <template v-else>{{ avatarInitial }}</template>
-          <span class="profile-avatar-edit-indicator" aria-hidden="true">
-            <Pencil :size="12" />
-          </span>
-          <div v-if="avatarBusy" class="profile-avatar-busy">در حال ذخیره...</div>
-        </button>
-        <div v-else class="profile-avatar profile-avatar--readonly" data-test="profile-avatar-readonly">
-          <img v-if="avatarUrl" :src="avatarUrl" :alt="displayName" class="profile-avatar-image" />
-          <template v-else>{{ avatarInitial || '—' }}</template>
+          <slot name="title">{{ displayName }}</slot>
+        </component>
+        <component
+          :is="titleTag"
+          v-else-if="loading"
+          class="profile-identity-title skeleton-text-header"
+        >
+          <span class="skeleton-box" style="width: 120px; height: 24px;"></span>
+        </component>
+        <component :is="titleTag" v-else class="profile-identity-title">پروفایل</component>
+      </div>
+      <div class="header-spacer">
+        <div v-if="displayName || avatarUrl || editable || loading" class="profile-avatar-stack profile-avatar-stack--header">
+          <button
+            v-if="editable"
+            type="button"
+            class="profile-avatar profile-avatar-button profile-avatar-button--editable"
+            data-test="profile-avatar-trigger"
+            :disabled="avatarBusy"
+            :aria-label="avatarUrl ? 'تغییر آواتار' : 'افزودن آواتار'"
+            @click="emit('pick-avatar')"
+          >
+            <img v-if="avatarUrl" :src="avatarUrl" :alt="displayName" class="profile-avatar-image" />
+            <template v-else>{{ avatarInitial }}</template>
+            <span class="profile-avatar-edit-indicator" aria-hidden="true">
+              <Pencil :size="12" />
+            </span>
+            <div v-if="avatarBusy" class="profile-avatar-busy">در حال ذخیره...</div>
+          </button>
+          <div v-else class="profile-avatar profile-avatar--readonly" data-test="profile-avatar-readonly">
+            <img v-if="avatarUrl" :src="avatarUrl" :alt="displayName" class="profile-avatar-image" />
+            <template v-else>{{ avatarInitial || '—' }}</template>
+          </div>
         </div>
-        <ProfilePresence
-          v-if="showPresence && presenceStatus"
-          :status="presenceStatus"
-          :online="online"
-          own
-        />
       </div>
     </div>
+    <ProfilePresence
+      v-if="showPresence && presenceStatus"
+      :status="presenceStatus"
+      :online="online"
+      own
+    />
   </div>
 </template>
 
 <style scoped>
 .profile-header-row {
-  /*
-   * Keep the title track explicitly shrinkable. A bare `1fr` has an automatic
-   * minimum, so a long account name could widen the whole route at 360px and
-   * push the back control outside the viewport.
-   */
-  grid-template-columns: 3rem minmax(0, 1fr) minmax(4rem, 5.5rem);
-  align-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.4rem;
   min-width: 0;
-  padding-bottom: 24px;
+  z-index: auto;
+  padding: 0 0 1rem;
+  background: transparent;
 }
 
-.profile-header-row > * {
+.profile-header-main {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.profile-header-row > *,
+.profile-header-main > * {
   min-width: 0;
 }
 
 .header-title {
   min-width: 0;
+  justify-content: flex-start;
+  text-align: start;
 }
 
-.header-title h2 {
+.header-title .profile-identity-title {
   margin: 0;
+  min-width: 0;
+  color: var(--ds-text-primary);
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   overflow-wrap: anywhere;
-  word-break: break-word;
+}
+
+.header-title .profile-identity-title:dir(ltr) {
+  -webkit-line-clamp: 1;
+  word-break: break-all;
 }
 
 .header-back-spacer {
@@ -135,7 +173,7 @@ const emit = defineEmits<{
 
 .profile-avatar-stack--header {
   position: relative;
-  width: 88px;
+  width: 64px;
   height: 64px;
   padding-top: 0;
 }

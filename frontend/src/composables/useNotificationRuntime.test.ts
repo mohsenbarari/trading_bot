@@ -49,9 +49,9 @@ const notificationRuntimeMocks = vi.hoisted(() => ({
   unlockAudioContext: vi.fn(),
   handlers: new Map<string, Array<(payload?: unknown) => void>>(),
   connect: vi.fn(),
-  on: vi.fn(<T>(event: string, callback: (payload: T) => void) => {
+  on: vi.fn((event: string, callback: (payload: unknown) => void) => {
     const current = notificationRuntimeMocks.handlers.get(event) ?? []
-    current.push((payload) => callback(payload as T))
+    current.push(callback)
     notificationRuntimeMocks.handlers.set(event, current)
   }),
   off: vi.fn(),
@@ -126,7 +126,7 @@ function mountRuntime() {
     setup() {
       useNotificationRuntime({
         connect: notificationRuntimeMocks.connect,
-        on: notificationRuntimeMocks.on,
+        on: notificationRuntimeMocks.on as <T>(event: string, callback: (data: T) => void) => void,
         off: notificationRuntimeMocks.off,
         ensureSessionValidation: notificationRuntimeMocks.ensureSessionValidation,
       })

@@ -4,7 +4,7 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { apiFetch } from '../utils/auth'
 import { formatIranDateTime } from '../utils/iranTime'
 import HelpPopover from './HelpPopover.vue'
-import { AppButton, AppCheckbox, AppIconButton, AppTextarea } from './ui'
+import { AppButton, AppCheckbox, AppIconButton, AppInsetGroup, AppTextarea } from './ui'
 
 type AdminMarketMessage = {
   id: number
@@ -53,6 +53,7 @@ const isPublishingMarket = ref(false)
 const isPublishingBroadcast = ref(false)
 const isClearingMarketPin = ref(false)
 const isLoading = ref(false)
+const broadcastLoadError = ref('')
 const marketComposerInputRef = ref<{
   focus: (options?: FocusOptions) => void
   scrollIntoView: (arg?: boolean | ScrollIntoViewOptions) => void
@@ -108,25 +109,42 @@ function handlePanelKeydown(event: KeyboardEvent, panel: 'market' | 'chat') {
   selectPanel(panelOptions[nextIndex]!.key)
 }
 
+async function readJsonIfOk(response: Response) {
+  if (!response.ok) return null
+  try {
+    return await response.json()
+  } catch {
+    return null
+  }
+}
+
 async function loadDashboard() {
   isLoading.value = true
-  try {
-    const [currentRes, marketRes, broadcastRes] = await Promise.all([
-      apiFetch('/api/admin-messages/market/current'),
-      apiFetch('/api/admin-messages/market/history?limit=50'),
-      apiFetch('/api/admin-messages/broadcasts/history?limit=50'),
-    ])
-    activeMarketMessage.value = currentRes.ok ? await currentRes.json().catch(() => null) : null
+  broadcastLoadError.value = ''
+  const [currentResult, marketResult, broadcastResult] = await Promise.allSettled([
+    apiFetch('/api/admin-messages/market/current'),
+    apiFetch('/api/admin-messages/market/history?limit=50'),
+    apiFetch('/api/admin-messages/broadcasts/history?limit=50'),
+  ])
+  if (currentResult.status === 'fulfilled') {
+    activeMarketMessage.value = await readJsonIfOk(currentResult.value)
     isMarketPinExpanded.value = false
-    if (marketRes.ok) {
-      marketHistory.value = await marketRes.json()
-    }
-    if (broadcastRes.ok) {
-      broadcastHistory.value = await broadcastRes.json()
-    }
-  } finally {
-    isLoading.value = false
   }
+  if (marketResult.status === 'fulfilled') {
+    const history = await readJsonIfOk(marketResult.value)
+    if (history) marketHistory.value = history
+  }
+  if (broadcastResult.status === 'fulfilled') {
+    const history = await readJsonIfOk(broadcastResult.value)
+    if (history) {
+      broadcastHistory.value = history
+    } else {
+      broadcastLoadError.value = 'دریافت تاریخچه پیام‌های چت ممکن نشد. دوباره تلاش کنید.'
+    }
+  } else {
+    broadcastLoadError.value = 'دریافت تاریخچه پیام‌های چت ممکن نشد. دوباره تلاش کنید.'
+  }
+  isLoading.value = false
 }
 
 function focusMarketComposer() {
@@ -275,6 +293,17 @@ onMounted(loadDashboard)
       </AppButton>
     </div>
 
+    <div
+      v-if="broadcastLoadError"
+      class="admin-messages-load-error"
+      role="alert"
+    >
+      <p>{{ broadcastLoadError }}</p>
+      <AppButton type="button" variant="secondary" :loading="isLoading" @click="loadDashboard">
+        تلاش دوباره
+      </AppButton>
+    </div>
+
     <div class="message-workspace" :aria-busy="isLoading">
       <section
         v-if="activePanel === 'market'"
@@ -408,6 +437,7 @@ onMounted(loadDashboard)
             data-test="market-composer-input"
             rows="7"
             placeholder="متن پیام بازار..."
+            aria-label="متن پیام بازار"
           />
           <div v-if="marketError" class="alert error">{{ marketError }}</div>
           <div v-if="marketSuccess" class="alert success">{{ marketSuccess }}</div>
@@ -428,38 +458,14 @@ onMounted(loadDashboard)
         role="tabpanel"
         aria-labelledby="admin-message-tab-chat"
       >
-        <article class="status-card status-card--broadcast card-with-help">
-          <HelpPopover
-            floating
-            button-test="broadcast-status-help"
-            note-test="broadcast-status-help-note"
-            label="راهنمای مخاطبان پیام چت"
-            text="پیام با عنوان «پیام مدیریت» برای هر کاربر در اتاق مدیریت خودش ثبت می‌شود و هویت واقعی ادمین به گیرنده نشان داده نمی‌شود."
-          />
-          <div class="status-card-header">
-            <div>
-              <span class="status-pill status-pill--info">مخاطبان انتخاب‌شده</span>
-              <p class="status-meta">{{ selectedBroadcastCount.toLocaleString('fa-IR') }} گروه مقصد</p>
-            </div>
-            <span class="history-badge">{{ selectedBroadcastLabels.join('، ') || 'بدون انتخاب' }}</span>
-          </div>
-        </article>
-
-        <section class="composer-card card-with-help">
-          <HelpPopover
-            floating
-            button-test="broadcast-composer-help"
-            note-test="broadcast-composer-help-note"
-            label="راهنمای نوشتن پیام چت"
-            text="گیرنده‌ها را انتخاب کن و پیام را یک‌بار برای همه آن‌ها در چت ثبت کن. اتاق مقصد فقط‌خواندنی است و unread عادی پیام‌رسان را هم به‌روزرسانی می‌کند."
-          />
+        <section class="composer-card composer-card--sheet">
           <div class="composer-header">
             <div>
               <h4>نوشتن پیام چت</h4>
             </div>
-            <span class="composer-counter">{{ broadcastContent.trim().length.toLocaleString('fa-IR') }} کاراکتر</span>
+            <span class="history-badge">{{ selectedBroadcastLabels.join('، ') || 'بدون انتخاب' }}</span>
           </div>
-          <AppTextarea v-model="broadcastContent" class="message-textarea" rows="7" placeholder="متن پیام همگانی..." />
+          <AppTextarea v-model="broadcastContent" class="message-textarea" rows="7" placeholder="متن پیام همگانی..." aria-label="متن پیام همگانی" />
 
           <div class="audience-panel">
             <div class="audience-header">
@@ -488,21 +494,7 @@ onMounted(loadDashboard)
           </div>
         </section>
 
-        <section class="history-card card-with-help">
-          <HelpPopover
-            floating
-            button-test="broadcast-history-help"
-            note-test="broadcast-history-help-note"
-            label="راهنمای تاریخچه پیام‌های چت"
-            text="ارسال‌های قبلی برای بازاستفاده و اصلاح سریع اینجا نگه داشته می‌شوند."
-          />
-          <div class="history-header">
-            <div>
-              <h4>تاریخچه پیام‌های چت</h4>
-            </div>
-            <span class="history-badge">{{ broadcastHistory.length.toLocaleString('fa-IR') }} مورد</span>
-          </div>
-
+        <AppInsetGroup title="تاریخچه پیام‌های چت">
           <article v-for="message in broadcastHistory" :key="message.id" class="history-item">
             <div class="history-meta">
               <span>{{ formatDate(message.published_at) }}</span>
@@ -516,7 +508,7 @@ onMounted(loadDashboard)
           </article>
 
           <p v-if="!broadcastHistory.length" class="empty-history">هنوز هیچ ارسال همگانی ثبت نشده است.</p>
-        </section>
+        </AppInsetGroup>
       </section>
     </div>
   </div>
@@ -617,6 +609,30 @@ onMounted(loadDashboard)
 .composer-card,
 .history-card {
   padding: 1rem;
+}
+
+.message-panel--chat .status-card,
+.message-panel--chat .audience-panel {
+  padding: 0.85rem 1rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.message-panel--chat .composer-card--sheet {
+  padding: 0.25rem 0 1rem;
+  border-radius: 0;
+  border: 0;
+  background: transparent;
+}
+
+.message-panel--chat .history-item {
+  padding: 0.9rem 1rem;
+  border-top: 1px solid var(--ds-native-hairline);
+}
+
+.message-panel--chat .history-item:first-of-type {
+  border-top: 0;
 }
 
 .card-with-help {
@@ -973,6 +989,25 @@ onMounted(loadDashboard)
 .alert.success {
   color: #047857;
   background: rgba(220, 252, 231, 0.92);
+}
+
+.admin-messages-load-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: var(--ds-native-row-min-height, 48px);
+  padding: 0.82rem 0.9rem;
+  border-radius: 16px;
+  color: #b91c1c;
+  background: rgba(254, 226, 226, 0.92);
+}
+
+.admin-messages-load-error p {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 850;
 }
 
 .composer-actions {

@@ -81,7 +81,11 @@ const sectionMetaByKey: Record<string, { title: string; description: string }> =
     description: 'مشاهده و ویرایش تنظیمات کاربر منتخب',
   },
 }
-const currentSectionMeta = computed(() => sectionMetaByKey[currentSection.value] || sectionMetaByKey.menu)
+const currentSectionMeta = computed(() => (
+  sectionMetaByKey[currentSection.value]
+  ?? sectionMetaByKey.menu
+  ?? { title: 'مرکز مدیریت', description: '' }
+))
 const isUserDirectoryProfileSubview = computed(() => currentSection.value === 'user_profile')
 const adminSubviewReturnLabel = computed(() =>
   isUserDirectoryProfileSubview.value ? 'بازگشت به فهرست کاربران' : 'بازگشت به پنل مدیریت',
@@ -170,7 +174,7 @@ function parseUserDirectoryScroll(value: unknown) {
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0
 }
 
-function buildUserDirectoryRouteQuery(scroll = userDirectoryScrollTop.value) {
+function buildUserDirectoryRouteQuery(scroll = userDirectoryScrollTop.value): Record<string, string> {
   const normalizedScroll = parseUserDirectoryScroll(scroll)
   return normalizedScroll > 0 ? { scroll: String(normalizedScroll) } : {}
 }
@@ -267,6 +271,10 @@ function captureUserDirectoryScroll(syncRoute = true) {
 
   userDirectoryScrollTop.value = nextScroll
   if (syncRoute) syncUserDirectoryRouteQuery()
+}
+
+function handleUserDirectoryScroll() {
+  captureUserDirectoryScroll()
 }
 
 function restoreUserDirectoryScroll(releaseWhenLoaded = false) {
@@ -613,7 +621,7 @@ onMounted(() => {
   syncRouteToSection()
   void nextTick(() => {
     userDirectoryScrollTarget = resolveUserDirectoryScrollTarget()
-    userDirectoryScrollTarget?.addEventListener('scroll', captureUserDirectoryScroll, {
+    userDirectoryScrollTarget?.addEventListener('scroll', handleUserDirectoryScroll, {
       passive: true,
     })
     restoreUserDirectoryScroll()
@@ -787,7 +795,7 @@ onUnmounted(() => {
   isMenuUserDirectoryNavigationPending = false
   cancelRouteUserProfileRequest()
   clearUserDirectoryScrollRestore()
-  userDirectoryScrollTarget?.removeEventListener('scroll', captureUserDirectoryScroll)
+  userDirectoryScrollTarget?.removeEventListener('scroll', handleUserDirectoryScroll)
   userDirectoryScrollTarget = null
   clearBackStack()
 })
@@ -800,7 +808,6 @@ onUnmounted(() => {
         <AppPageHeader
           eyebrow="مدیریت پروژه"
           title="مرکز مدیریت"
-          description="ابزارهای مدیریتی مجاز حساب خود را از این بخش دنبال کنید."
         />
         <AdminPanel @navigate="handleNavigate" />
       </template>
@@ -813,22 +820,21 @@ onUnmounted(() => {
               :label="adminSubviewReturnLabel"
               @click="handleAdminSubviewReturn"
             />
-            <h2 class="admin-subview-title">{{ currentSectionMeta.title }}</h2>
+            <h1 class="admin-subview-title">{{ currentSectionMeta.title }}</h1>
           </div>
-          <AppSectionCard class="admin-subview-card">
+          <CreateChannelView
+            v-if="currentSection === 'create_channel'"
+            :apiBaseUrl="apiBaseUrl"
+            :jwtToken="jwtToken"
+            @open-public-profile="handleOpenPublicProfile"
+          />
+          <AppSectionCard v-else class="admin-subview-card">
 
             <transition name="fade" mode="out-in">
               <CreateInvitationView
                 v-if="currentSection === 'create_invitation'"
                 :apiBaseUrl="apiBaseUrl"
                 :jwtToken="jwtToken"
-              />
-
-              <CreateChannelView
-                v-else-if="currentSection === 'create_channel'"
-                :apiBaseUrl="apiBaseUrl"
-                :jwtToken="jwtToken"
-                @open-public-profile="handleOpenPublicProfile"
               />
 
               <CommodityManager
@@ -907,6 +913,9 @@ onUnmounted(() => {
 
 .admin-subview-card {
   min-width: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
 }
 
 .admin-subview-card :deep(.ui-section-card__body) {
@@ -924,9 +933,9 @@ onUnmounted(() => {
   margin: 0;
   min-width: 0;
   color: var(--ds-text-primary);
-  font-size: var(--ds-font-lg);
+  font-size: var(--ds-native-title-size);
   font-weight: 800;
-  line-height: 1.4;
+  line-height: 1.25;
 }
 
 .fade-enter-active,
@@ -942,7 +951,7 @@ onUnmounted(() => {
 @media (max-width: 767px) {
   .admin-subview-card :deep(.ui-section-card__header),
   .admin-subview-card :deep(.ui-section-card__body) {
-    padding-inline: 0.85rem;
+    padding-inline: 0;
   }
 }
 </style>

@@ -178,7 +178,7 @@ defineExpose({
   <div ref="rootRef" class="virtual-timeline" :style="{ height: `${totalSize}px` }">
     <div
       v-for="virtualRow in virtualItems"
-      :key="virtualRow.key"
+      :key="String(virtualRow.key)"
       :ref="(element) => setMeasuredRowRef(String(virtualRow.key), element as Element | null)"
       class="virtual-timeline-row"
       :data-index="virtualRow.index"

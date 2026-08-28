@@ -5,6 +5,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AccountHubView from './AccountHubView.vue'
 
 const accountHubSource = readFileSync(resolve(process.cwd(), 'src/views/AccountHubView.vue'), 'utf8')
+const telegramPanelSource = readFileSync(
+  resolve(process.cwd(), 'src/components/account/TelegramConnectPanel.vue'),
+  'utf8',
+)
 
 const accountHubMocks = vi.hoisted(() => ({
   routerPushMock: vi.fn(),
@@ -60,7 +64,7 @@ function findAction(wrapper: ReturnType<typeof mount>, label: string) {
 function findSectionGrid(wrapper: ReturnType<typeof mount>, title: string) {
   const section = wrapper
     .findAll('.account-section-card')
-    .find((card) => card.get('h2').text() === title)
+    .find((card) => card.get('.ui-inset-group__title').text() === title)
 
   if (!section) throw new Error(`Expected ${title} account section`)
   return section.get('.account-action-grid')
@@ -97,13 +101,15 @@ describe('AccountHubView.vue', () => {
 
     expect(accountHubMocks.loadCurrentUserSummaryMock).toHaveBeenCalledWith({ force: true })
     expect(wrapper.get('h1.account-page-title').text()).toBe('حساب')
+    expect(wrapper.get('h1.account-page-title').classes()).not.toContain('sr-only')
     expect(wrapper.findAll('.account-section-card')).toHaveLength(3)
     expect(wrapper.text()).not.toContain('مرکز حساب کاربری')
     expect(wrapper.text()).toContain('محمد')
     expect(wrapper.find('.account-status-badge').exists()).toBe(false)
     expect(wrapper.find('.account-status-dot').exists()).toBe(false)
     expect(wrapper.text()).toContain('نشست‌های فعال')
-    expect(findAction(wrapper, 'تنظیمات کاربری')?.text()).toContain('وقت اضافه')
+    expect(findAction(wrapper, 'تنظیمات کاربری')?.exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('وقت اضافه')
 
     await findAction(wrapper, 'پروفایل من')!.trigger('click')
     await findAction(wrapper, 'تنظیمات کاربری')!.trigger('click')
@@ -331,9 +337,11 @@ describe('AccountHubView.vue', () => {
 
     const wrapper = await mountView()
 
-    expect(wrapper.get('.account-telegram-panel').text()).toContain(
-      'برای استفاده از امکانات اپ در بستر تلگرام ضربه بزنید!',
-    )
+    expect(wrapper.get('.account-telegram-panel').text()).toContain('اتصال تلگرام')
+    expect(wrapper.get('.account-telegram-panel').text()).not.toContain('ضربه بزنید')
+    expect(telegramPanelSource).not.toContain('ضربه بزنید')
+    expect(telegramPanelSource).toMatch(/border:\s*0/)
+    expect(telegramPanelSource).not.toMatch(/border-radius:\s*12px/)
 
     await wrapper.get('.telegram-connect-panel').trigger('click')
     await flushPromises()

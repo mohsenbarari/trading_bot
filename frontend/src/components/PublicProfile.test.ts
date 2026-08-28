@@ -25,7 +25,15 @@ const profileIdentityHeaderSource = readFileSync(
   resolve(process.cwd(), 'src/components/profile/ProfileIdentityHeader.vue'),
   'utf8',
 )
-const publicProfileSource = [publicProfileFileSource, profileIdentityHeaderSource].join('\n\n')
+const profileActionsSource = readFileSync(
+  resolve(process.cwd(), 'src/components/profile/ProfileActions.vue'),
+  'utf8',
+)
+const publicProfileSource = [
+  publicProfileFileSource,
+  profileIdentityHeaderSource,
+  profileActionsSource,
+].join('\n\n')
 
 vi.mock('../utils/chatFiles', () => ({
   buildChatFileUrl: buildChatFileUrlMock,
@@ -48,6 +56,15 @@ function makeResponse(payload: unknown, ok = true, status = ok ? 200 : 400): Res
       'Content-Type': 'application/json',
     },
   })
+}
+
+async function clickHistoryOverflowAction(wrapper: { find: (selector: string) => { exists: () => boolean; trigger: (event: string) => Promise<unknown> }; findAll: (selector: string) => Array<{ text: () => string; trigger: (event: string) => Promise<unknown> }> }, label: string) {
+  const more = wrapper.find('[aria-label="اقدام‌های دیگر تاریخچه"]')
+  expect(more.exists()).toBe(true)
+  await more.trigger('click')
+  const action = wrapper.findAll('button').find((node) => node.text().includes(label))
+  expect(action).toBeTruthy()
+  await action!.trigger('click')
 }
 
 function makeHistoryPage(items: unknown[], nextCursor: string | null = null, hasMore = false): Response {
@@ -168,15 +185,15 @@ describe('PublicProfile.vue', () => {
   it('keeps profile-header tracks shrinkable on narrow devices', () => {
     const headerRule = publicProfileSource.match(/\.profile-header-row\s*\{([\s\S]*?)\n\}/)?.[1]
 
-    expect(headerRule).toContain(
-      'grid-template-columns: minmax(4rem, 5.5rem) minmax(0, 1fr) minmax(3rem, 5.5rem);',
-    )
+    expect(headerRule).toContain('display: flex;')
+    expect(headerRule).toContain('flex-direction: column;')
     expect(headerRule).toContain('min-width: 0;')
+    expect(headerRule).not.toMatch(/grid-template-columns/)
     expect(publicProfileSource).toMatch(/\.profile-header-row\s*>\s*\*\s*\{\s*min-width:\s*0;/)
   })
 
   it('keeps public-profile typography locally aligned with the Figma Persian card scale', () => {
-    expect(publicProfileSource).toMatch(/<div class="card public-profile-typography">/)
+    expect(publicProfileSource).toMatch(/<div class="public-profile public-profile-typography">/)
     expect(publicProfileSource).toMatch(
       /\.public-profile-typography\s*\{[\s\S]*?font-family:\s*Vazirmatn,\s*Tahoma,\s*Arial,\s*sans-serif;[\s\S]*?font-synthesis:\s*none;/,
     )
@@ -202,20 +219,23 @@ describe('PublicProfile.vue', () => {
     const actionCardRule = publicProfileSource.match(/\.profile-action-card\s*\{([\s\S]*?)\n\}/)?.[1]
     const miniTradeRule = Array.from(
       publicProfileSource.matchAll(/\.mini-trade-card\s*\{([\s\S]*?)\n\}/g),
-    ).find(([, rule]) => rule.includes('transition: transform 0.15s;'))
+    ).find((match) => match[1]?.includes('transition: background 0.18s ease;'))
     const miniTradeReducedMotionRule = publicProfileSource.match(
       /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.mini-trade-card\s*\{\s*transition:\s*none;\s*\}\s*\}/,
     )?.[0]
 
     expect(backRule).toContain('justify-self: start;')
     expect(addressEditRule).toContain('transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;')
-    expect(actionCardRule).toContain('transition: all 0.2s;')
-    expect(miniTradeRule?.[1]).toContain('transition: transform 0.15s;')
+    expect(actionCardRule).toContain('transition: background 0.18s ease;')
+    expect(miniTradeRule?.[1]).toContain('transition: background 0.18s ease;')
     expect(publicProfileSource).toMatch(/\.profile-nav-back\s*\{[\s\S]*?min-block-size:\s*3rem;/)
-    expect(publicProfileSource).toMatch(/\.profile-action-card:active\s*\{\s*transform:\s*scale\(0\.98\);/)
-    expect(publicProfileSource).toMatch(/\.mini-trade-card:active\s*\{\s*transform:\s*scale\(0\.98\);/)
+    expect(publicProfileSource).toMatch(/\.profile-action-card:active\s*\{\s*transform:\s*none;/)
+    expect(publicProfileSource).toMatch(/\.mini-trade-card:active\s*\{\s*transform:\s*none;/)
     expect(publicProfileSource).toMatch(
-      /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.profile-nav-back,\s*\.address-edit-trigger,\s*\.profile-action-card\s*\{\s*transition:\s*none;\s*\}/,
+      /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.profile-nav-back,\s*\.address-edit-trigger\s*\{\s*transition:\s*none;\s*\}/,
+    )
+    expect(profileActionsSource).toMatch(
+      /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.profile-action-card\s*\{\s*transition:\s*none;\s*\}/,
     )
     expect(miniTradeReducedMotionRule).toBeTruthy()
     expect(publicProfileSource.indexOf(miniTradeReducedMotionRule!)).toBeGreaterThan(
@@ -224,6 +244,7 @@ describe('PublicProfile.vue', () => {
   })
 
   it('renders remaining public-profile chrome with shared icon and button primitives', () => {
+    expect(publicProfileFileSource).not.toContain('HelpPopover')
     expect(publicProfileFileSource).toMatch(/<ProfileIdentityHeader/)
     expect(publicProfileSource).toMatch(/<AppBackButton[\s\S]*?class="profile-nav-back"/)
     expect(publicProfileSource).toMatch(/<AppButton class="retry-btn"/)
@@ -418,9 +439,7 @@ describe('PublicProfile.vue', () => {
 
     fetchMock.mockResolvedValueOnce(new Response('server exploded', { status: 400, headers: { 'Content-Type': 'text/plain' } }))
 
-    const pdfButton = wrapper.findAll('button').find((node) => node.text().includes('خروجی PDF'))
-    expect(pdfButton).toBeTruthy()
-    await pdfButton!.trigger('click')
+    await clickHistoryOverflowAction(wrapper, 'خروجی PDF')
     await flushPromises()
 
     expect(wrapper.text()).toContain('خطا در دریافت خروجی تاریخچه معاملات')
@@ -1084,7 +1103,7 @@ describe('PublicProfile.vue', () => {
     await flushPromises()
 
     expect(wrapper.get('label[for="project-users-directory-search"]').text()).toBe('جستجوی همکاران پروژه')
-    expect(wrapper.get('input#project-users-directory-search').exists()).toBe(true)
+    expect(wrapper.find('input#project-users-directory-search').exists()).toBe(true)
 
     await wrapper.get('.project-users-search').trigger('submit')
     await flushPromises()
@@ -1365,8 +1384,8 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    expect(wrapper.get('.header-title h2 .customer-name-with-badge__name').text()).toBe('مشتری ویژه')
-    expect(wrapper.get('.header-title h2 .customer-name-with-badge__badge').text()).toBe('مشتری')
+    expect(wrapper.get('.header-title h1 .customer-name-with-badge__name').text()).toBe('مشتری ویژه')
+    expect(wrapper.get('.header-title h1 .customer-name-with-badge__badge').text()).toBe('مشتری')
     expect(wrapper.get('[data-test="profile-avatar-trigger"]').text()).toContain('م')
     expect(wrapper.text()).not.toContain('لیست همکاران')
     expect(wrapper.findAll('button').some((button) => button.text().includes('حسابداران'))).toBe(false)
@@ -1979,7 +1998,7 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.find('.address-edit-form').exists()).toBe(false)
   })
 
-  it('renders meaningful help popovers for owner profile menus and keeps accountant list closed by default', async () => {
+  it('renders owner profile lists without help popovers and keeps accountant list visible as rows', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({
       id: 44,
@@ -2036,13 +2055,13 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.find('.profile-accordion').exists()).toBe(false)
 
     expect(wrapper.find('[data-test="public-profile-info-help"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="public-profile-project-users-help"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="public-profile-accountants-help"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="public-profile-history-help"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('برای حفظ حریم خصوصی')
-    await wrapper.get('[data-test="public-profile-project-users-help"]').trigger('click')
-    expect(wrapper.text()).toContain('با انتخاب نام هر همکار')
-    await wrapper.get('[data-test="public-profile-accountants-help"]').trigger('click')
-    expect(wrapper.text()).toContain('عنوان هر ردیف همان نام نمایشی رابطه است')
-    await wrapper.get('[data-test="public-profile-history-help"]').trigger('click')
-    expect(wrapper.text()).toContain('طرف دیگر معامله را از میان همکاران پروژه انتخاب کنید')
+    expect(wrapper.text()).not.toContain('با انتخاب نام هر همکار')
+    expect(wrapper.text()).toContain('حسابدار اصلی')
+    expect(wrapper.text()).toContain('@acct66')
   })
 
   it('exposes owner actions for settings and owner workspace navigation', async () => {
@@ -2459,8 +2478,8 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.find('.customer-context-banner').text()).toContain('سرگروه: owner15')
     expect(wrapper.find('.customer-context-banner').text()).not.toContain('سطح 2')
     expect(wrapper.text()).not.toContain('طرف دیگر معامله')
-    await wrapper.get('[data-test="public-profile-history-help"]').trigger('click')
-    expect(wrapper.text()).toContain('بازه زمانی و کالا را از فهرست کالاهای ثبت‌شده محدود کنید')
+    expect(wrapper.find('[data-test="public-profile-history-help"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('بازه زمانی و کالا را از فهرست کالاهای ثبت‌شده محدود کنید')
     expect(wrapper.text()).not.toContain('طرف دیگر معامله را از میان همکاران پروژه انتخاب کنید')
 
     const applyButton = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
@@ -2663,9 +2682,7 @@ describe('PublicProfile.vue', () => {
     expect(filteredCall?.[0]).toContain('trade_type=sell')
     expect(filteredCall?.[0]).toContain('settlement_type=tomorrow')
 
-    const pdfButton = wrapper.findAll('button').find((node) => node.text().includes('خروجی PDF'))
-    expect(pdfButton).toBeTruthy()
-    await pdfButton!.trigger('click')
+    await clickHistoryOverflowAction(wrapper, 'خروجی PDF')
     await flushPromises()
 
     const exportCall = fetchMock.mock.calls.find(([url]) => typeof url === 'string' && url.includes('/api/trades/my/export?'))
@@ -3003,9 +3020,7 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.text()).toContain('بازه زمانی انتخاب‌شده معتبر نیست.')
     expect(fetchMock.mock.calls.filter(([url]) => typeof url === 'string' && url.startsWith('/api/trades/my/page?'))).toHaveLength(1)
 
-    const pdfButton = wrapper.findAll('button').find((node) => node.text().includes('خروجی PDF'))
-    expect(pdfButton).toBeTruthy()
-    await pdfButton!.trigger('click')
+    await clickHistoryOverflowAction(wrapper, 'خروجی PDF')
     await flushPromises()
 
     expect(fetchMock.mock.calls.some(([url]) => typeof url === 'string' && url.includes('/api/trades/my/export?'))).toBe(false)

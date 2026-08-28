@@ -6,7 +6,7 @@ import { useActionState } from '../composables/useActionState';
 import { getInvitableRoleOptions } from '../utils/adminAccess';
 import { formatIranDateTime } from '../utils/iranTime';
 import { invitationSmsStatusMessage, normalizeInvitationContract, type InvitationSmsStatus } from '../utils/invitationContract';
-import { AppButton, AppConfirmDialog, AppEmptyState, AppErrorState, AppFormField, AppInput, AppLoadingState, AppSelect } from './ui';
+import { AppButton, AppConfirmDialog, AppEmptyState, AppErrorState, AppFormField, AppInput, AppInsetGroup, AppLoadingState, AppSelect } from './ui';
 
 const props = defineProps<{
   apiBaseUrl: string;
@@ -392,7 +392,7 @@ function normalizeMobile(mobile: string): string {
 <template>
   <div class="invitation-manager">
     <form class="invitation-form" @submit.prevent="createInvite" autocomplete="off">
-      <AppFormField class="form-group" id="account_name" label="نام کاربری (Account Name)">
+      <AppFormField class="form-group" id="account_name" label="نام کاربری">
         <AppInput v-model="invite.account_name" id="account_name" type="text" placeholder="مثلاً alireza" required />
       </AppFormField>
       <AppFormField class="form-group" id="mobile_number" label="شماره موبایل (ایران)">
@@ -437,7 +437,6 @@ function normalizeMobile(mobile: string): string {
       <div class="pending-header">
         <div>
           <h3 id="pending-invitations-title">دعوت‌نامه‌های در انتظار</h3>
-          <p>فهرست دعوت‌های در انتظار</p>
         </div>
         <AppButton type="button" class="pending-refresh-btn" variant="secondary" :loading="pendingLoading" :disabled="pendingDeleteId !== null" @click="loadPendingInvitations">
           {{ pendingLoading ? 'در حال دریافت...' : 'به‌روزرسانی' }}
@@ -473,7 +472,7 @@ function normalizeMobile(mobile: string): string {
         title="دعوت‌نامه‌ای در انتظار وجود ندارد."
         role="status"
       />
-      <div v-else class="pending-list">
+      <AppInsetGroup v-else class="pending-list">
         <div v-for="pending in pendingInvitations" :key="pending.id" class="pending-row">
           <div class="pending-main">
             <div class="pending-title">{{ pending.account_name }}</div>
@@ -505,7 +504,7 @@ function normalizeMobile(mobile: string): string {
             {{ pendingDeleteId === pending.id ? 'در حال حذف...' : 'حذف' }}
           </AppButton>
         </div>
-      </div>
+      </AppInsetGroup>
     </section>
 
     <AppConfirmDialog
@@ -551,22 +550,21 @@ function normalizeMobile(mobile: string): string {
 .success-box,
 .pending-notice,
 .pending-refresh-error,
-.pending-state,
-.pending-row {
-  border: 1px solid var(--ds-border-medium);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-bg-card);
+.pending-state {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .result-box.error,
 .pending-refresh-error {
-  border-color: var(--ds-danger-200);
-  background: var(--ds-danger-50);
+  border-color: transparent;
+  background: transparent;
   color: var(--ds-danger-800);
 }
 
 .result-box.error {
-  padding: 1rem;
+  padding: 0.25rem 0;
   font-size: var(--ds-font-sm);
   line-height: 1.75;
   overflow-wrap: anywhere;
@@ -633,13 +631,6 @@ function normalizeMobile(mobile: string): string {
   line-height: 1.6;
 }
 
-.pending-header p {
-  margin: 0.25rem 0 0;
-  color: var(--ds-text-muted);
-  font-size: var(--ds-font-xs);
-  line-height: 1.7;
-}
-
 .pending-refresh-btn { flex: 0 0 auto; }
 
 .pending-error { margin: 0; }
@@ -648,14 +639,14 @@ function normalizeMobile(mobile: string): string {
 .pending-refresh-error,
 .pending-state {
   margin: 0;
-  padding: 0.75rem;
+  padding: 0.25rem 0;
   font-size: var(--ds-font-xs);
   line-height: 1.7;
 }
 
 .pending-notice {
-  border-color: var(--ds-success-100);
-  background: var(--ds-success-50);
+  border-color: transparent;
+  background: transparent;
   color: var(--ds-success-800);
 }
 
@@ -673,8 +664,7 @@ function normalizeMobile(mobile: string): string {
 }
 
 .pending-list {
-  display: grid;
-  gap: var(--ds-section-gap);
+  display: block;
 }
 
 .pending-row {
@@ -682,7 +672,15 @@ function normalizeMobile(mobile: string): string {
   grid-template-columns: minmax(0, 1fr);
   gap: var(--ds-section-gap);
   align-items: start;
-  padding: 1rem;
+  padding: 0.85rem 1rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: inset 0 -1px 0 var(--ds-native-hairline);
+}
+
+.pending-row:last-child {
+  box-shadow: none;
 }
 
 .pending-main { min-width: 0; }

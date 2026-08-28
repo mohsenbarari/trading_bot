@@ -110,7 +110,10 @@ const goBack = async () => {
 }
 
 const formatTime = (ts: unknown) => {
-  return formatIranTime(ts)
+  if (typeof ts === 'string' || typeof ts === 'number' || ts instanceof Date || ts == null) {
+    return formatIranTime(ts)
+  }
+  return ''
 }
 
 type ParsedNotificationLine = {
@@ -253,9 +256,9 @@ onMounted(async () => {
 </script>
 
 <template>
-  <AppPage narrow class="ui-v2-daily-page ui-v2-notifications-page">
-    <div class="notifications-view ui-v2-daily-page__content">
-      <AppPageHeader eyebrow="حساب" title="اعلان‌ها" description="آخرین اعلان‌های دریافت‌شده در این حساب">
+  <AppPage narrow class="notifications-page">
+    <div class="notifications-view">
+      <AppPageHeader eyebrow="حساب" title="اعلان‌ها">
         <template #back>
           <AppBackButton
             class="notifications-return"
@@ -281,7 +284,7 @@ onMounted(async () => {
         <AppSectionCard
           title="اعلان مرورگر"
           :description="pushStateDescription"
-          class="push-section ui-v2-browser-push ui-v2-notifications-push"
+          class="push-section"
         >
           <template #actions>
             <AppStatusBadge :tone="pushStatusTone">{{ pushStatusLabel }}</AppStatusBadge>
@@ -304,7 +307,7 @@ onMounted(async () => {
               v-else-if="pushState === 'error'"
               class="push-status-retry"
               variant="secondary"
-              :loading="pushState === 'checking'"
+              :loading="false"
               @click="refreshPushState"
             >
               <template #icon>
@@ -313,7 +316,7 @@ onMounted(async () => {
               بررسی دوباره
             </AppButton>
           </div>
-          <p class="push-device-scope">این تنظیم فقط برای همین مرورگر و دستگاه است.</p>
+          <p class="push-device-scope">فقط برای همین مرورگر.</p>
           <p v-if="pushActionMessage" class="push-action-message" role="status" aria-live="polite">
             {{ pushActionMessage }}
           </p>
@@ -421,14 +424,11 @@ onMounted(async () => {
               :key="notif.id"
               :is="canOpenNotificationRoute(notif) ? 'button' : 'article'"
               :type="canOpenNotificationRoute(notif) ? 'button' : undefined"
-              class="notif-item ui-v2-notifications-item"
+              class="notif-item"
               :class="[
                 `type-${notif.level || 'info'}`,
                 `category-${notif.category || 'system'}`,
-                {
-                  'is-unread': !notif.is_read,
-                  'ui-v2-notifications-item--unread': !notif.is_read,
-                },
+                { 'is-unread': !notif.is_read },
               ]"
               :aria-label="canOpenNotificationRoute(notif) ? `باز کردن اعلان ${notif.title || 'اعلان جدید'}` : undefined"
               @click="openNotificationRoute(notif)"
@@ -452,9 +452,9 @@ onMounted(async () => {
                     <div
                       v-for="(line, lineIndex) in getNotificationLines(notif)"
                       :key="`${notif.id}-line-${lineIndex}`"
-                      class="notif-line ui-v2-notifications-line"
+                      class="notif-line"
                       :class="[
-                        line.isField ? 'notif-line-field ui-v2-notifications-field' : 'notif-line-plain',
+                        line.isField ? 'notif-line-field' : 'notif-line-plain',
                         { 'notif-line-wide': line.isWide },
                       ]"
                     >
@@ -617,7 +617,6 @@ onMounted(async () => {
   background: transparent;
   border-radius: 0;
   border: 0;
-  border-right: 3px solid var(--ds-border-strong);
   box-shadow: inset 0 -1px 0 var(--ds-native-hairline);
   color: inherit;
   font: inherit;
@@ -631,11 +630,6 @@ onMounted(async () => {
 .notif-item.is-unread {
   background: color-mix(in srgb, var(--ds-primary-50) 40%, var(--ds-bg-card) 60%);
 }
-
-.notif-item.type-info { border-right-color: var(--ds-info-500); }
-.notif-item.type-success { border-right-color: var(--ds-success-500); }
-.notif-item.type-warning { border-right-color: var(--ds-primary-500); }
-.notif-item.type-error { border-right-color: var(--ds-danger-500); }
 
 .notif-item.category-trade {
   gap: 0.55rem;

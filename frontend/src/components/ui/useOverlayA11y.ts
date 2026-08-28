@@ -9,12 +9,17 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(', ')
 
+type OverlayInitialFocus = 'first' | 'container'
+
 type OverlayA11yOptions = {
   open: Ref<boolean>
   description: Ref<string | undefined>
   containerRef: Ref<HTMLElement | null>
   close: () => void
   closeOnEscape?: Ref<boolean>
+  initialFocus?: Ref<OverlayInitialFocus>
+  initialFocusRef?: Ref<HTMLElement | null>
+  trapProgrammaticFocus?: Ref<boolean>
 }
 
 export function useOverlayA11y(options: OverlayA11yOptions) {
@@ -22,6 +27,7 @@ export function useOverlayA11y(options: OverlayA11yOptions) {
   const descriptionId = useId()
   const previousActiveElement = ref<HTMLElement | null>(null)
   const ownsScrollLock = ref(false)
+  let disposed = false
 
   const ariaDescriptionId = computed(() => (options.description.value ? descriptionId : undefined))
 
@@ -33,13 +39,34 @@ export function useOverlayA11y(options: OverlayA11yOptions) {
   }
 
   function focusInitialTarget() {
+    const preferred = options.initialFocusRef?.value
+    if (preferred && preferred.isConnected && !preferred.hasAttribute('disabled')) {
+      preferred.focus({ preventScroll: true })
+      return
+    }
+
+    const container = options.containerRef.value
+    if (options.initialFocus?.value === 'container') {
+      container?.focus({ preventScroll: true })
+      return
+    }
+
     const focusableElements = getFocusableElements()
     if (focusableElements.length > 0) {
       focusableElements[0]!.focus()
       return
     }
 
-    options.containerRef.value?.focus()
+    container?.focus({ preventScroll: true })
+  }
+
+  function keepProgrammaticFocusInside(event: FocusEvent) {
+    if (!options.trapProgrammaticFocus?.value || !options.open.value || !options.containerRef.value) {
+      return
+    }
+    if (event.target instanceof Node && !options.containerRef.value.contains(event.target)) {
+      options.containerRef.value.focus({ preventScroll: true })
+    }
   }
 
   function handleKeydown(event: KeyboardEvent) {
@@ -55,10 +82,11 @@ export function useOverlayA11y(options: OverlayA11yOptions) {
 
     if (event.key !== 'Tab') return
 
+    const container = options.containerRef.value
     const focusableElements = getFocusableElements()
     if (focusableElements.length === 0) {
       event.preventDefault()
-      options.containerRef.value?.focus()
+      container?.focus({ preventScroll: true })
       return
     }
 
@@ -67,14 +95,19 @@ export function useOverlayA11y(options: OverlayA11yOptions) {
     const activeElement = document.activeElement as HTMLElement | null
 
     if (event.shiftKey) {
-      if (!activeElement || activeElement === firstElement || !options.containerRef.value?.contains(activeElement)) {
+      if (
+        !activeElement ||
+        activeElement === firstElement ||
+        activeElement === container ||
+        !container?.contains(activeElement)
+      ) {
         event.preventDefault()
         lastElement.focus()
       }
       return
     }
 
-    if (!activeElement || activeElement === lastElement || !options.containerRef.value?.contains(activeElement)) {
+    if (!activeElement || activeElement === lastElement || !container?.contains(activeElement)) {
       event.preventDefault()
       firstElement.focus()
     }
@@ -113,28 +146,39 @@ export function useOverlayA11y(options: OverlayA11yOptions) {
     previousActiveElement.value = null
   }
 
+  function attachListeners() {
+    document.addEventListener('keydown', handleKeydown)
+    document.addEventListener('focusin', keepProgrammaticFocusInside, true)
+  }
+
+  function detachListeners() {
+    document.removeEventListener('keydown', handleKeydown)
+    document.removeEventListener('focusin', keepProgrammaticFocusInside, true)
+  }
+
   watch(
     options.open,
     async (isOpen) => {
       if (isOpen) {
-        previousActiveElement.value = document.activeElement instanceof HTMLElement ? document.activeElement : null
+        previousActiveElement.value =
+          document.activeElement instanceof HTMLElement ? document.activeElement : null
         lockScroll()
-        document.addEventListener('keydown', handleKeydown)
+        attachListeners()
         await nextTick()
-        focusInitialTarget()
+        if (!disposed && options.open.value) focusInitialTarget()
         return
       }
 
-      document.removeEventListener('keydown', handleKeydown)
+      detachListeners()
       unlockScroll()
-      await nextTick()
       restoreFocus()
     },
     { flush: 'post', immediate: true },
   )
 
   onBeforeUnmount(() => {
-    document.removeEventListener('keydown', handleKeydown)
+    disposed = true
+    detachListeners()
     unlockScroll()
     restoreFocus()
   })

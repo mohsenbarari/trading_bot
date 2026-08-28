@@ -9,10 +9,19 @@
     </transition>
 
     <transition name="fade">
-      <div v-if="modelValue && showCameraCapture" class="camera-capture-overlay">
+      <div
+        v-if="modelValue && showCameraCapture"
+        ref="cameraCaptureRef"
+        class="camera-capture-overlay"
+        role="dialog"
+        aria-modal="true"
+        :aria-labelledby="cameraTitleId"
+        tabindex="-1"
+      >
         <div class="camera-capture-shell">
+          <h2 :id="cameraTitleId" class="sr-only">دوربین</h2>
           <div class="camera-topbar">
-            <button class="camera-icon-btn" @click="closeCameraCapture" title="بازگشت">
+            <button type="button" class="camera-icon-btn" @click="closeCameraCapture" aria-label="بازگشت از دوربین" title="بازگشت">
               <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="15 18 9 12 15 6"></polyline>
               </svg>
@@ -214,10 +223,15 @@
         v-if="modelValue && !showCameraCapture && !isGalleryReviewStageOpen"
         ref="sheetRef"
         :class="['attachment-sheet', { 'full-screen-sheet': activeTab === 'location' }]"
+        role="dialog"
+        aria-modal="true"
+        :aria-labelledby="sheetTitleId"
+        tabindex="-1"
         @touchstart="onTouchStart"
         @touchmove="onTouchMove"
         @touchend="onTouchEnd"
       >
+        <h2 :id="sheetTitleId" class="sr-only">پیوست</h2>
         <!-- Drag Handle -->
         <div class="sheet-handle"><div class="handle-bar"></div></div>
 
@@ -448,6 +462,7 @@
 
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { useOverlayA11y } from '../ui/useOverlayA11y'
 import 'leaflet/dist/leaflet.css'
 import { LCircle, LCircleMarker, LMap, LTileLayer } from '@vue-leaflet/vue-leaflet'
 import { popBackState, pushBackState } from '../../composables/useBackButton'
@@ -1317,6 +1332,23 @@ function close() {
   cleanupCamera(true)
   emit('update:modelValue', false)
 }
+
+const cameraCaptureRef = ref<HTMLElement | null>(null)
+const isSheetOpen = computed(() =>
+  props.modelValue && !showCameraCapture.value && !isGalleryReviewStageOpen.value,
+)
+const { titleId: sheetTitleId } = useOverlayA11y({
+  open: isSheetOpen,
+  description: computed(() => undefined),
+  containerRef: sheetRef,
+  close,
+})
+const { titleId: cameraTitleId } = useOverlayA11y({
+  open: showCameraCapture,
+  description: computed(() => undefined),
+  containerRef: cameraCaptureRef,
+  close: closeCameraCapture,
+})
 
 function hasOpenStage() {
   return Boolean(

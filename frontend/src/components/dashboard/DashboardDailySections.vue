@@ -13,8 +13,8 @@ import {
   AppDisclosure,
   AppEmptyState,
   AppInput,
+  AppInsetGroup,
   AppListItem,
-  AppSectionCard,
   AppStatusBadge,
 } from '../ui'
 
@@ -102,13 +102,13 @@ const tradeCountLabel = computed(() => `${formatNumber(trades.value.length)} م�
 const coworkersMetaLabel = computed(() => {
   if (!coworkersAvailable.value) return 'محدود'
   if (coworkersLoading.value) return 'در حال دریافت'
-  if (!coworkersLoaded.value) return 'برای مشاهده باز کنید'
+  if (!coworkersLoaded.value) return ''
   if (coworkersError.value) return 'خطا'
   return `${formatNumber(coworkers.value.length)} همکار`
 })
 const commoditiesMetaLabel = computed(() => {
   if (commoditiesLoading.value) return 'در حال دریافت'
-  if (!commoditiesLoaded.value) return 'برای مشاهده باز کنید'
+  if (!commoditiesLoaded.value) return ''
   if (commoditiesError.value) return 'خطا'
   return `${formatNumber(commodities.value.length)} کالا`
 })
@@ -540,13 +540,9 @@ onUnmounted(() => {
 
 <template>
   <div class="dashboard-daily">
-    <AppSectionCard
-      class="dashboard-today-trades"
-      title="معاملات امروز"
-      description="همهٔ معامله‌های ثبت‌شدهٔ امروز به وقت ایران"
-      aria-label="معاملات امروز کاربر"
-    >
-      <template #actions>
+    <section class="dashboard-today-trades" aria-label="معاملات امروز کاربر">
+      <div class="dashboard-today-trades__heading">
+        <h2>معاملات امروز</h2>
         <AppButton
           type="button"
           size="sm"
@@ -556,13 +552,15 @@ onUnmounted(() => {
           aria-label="به‌روزرسانی معاملات امروز"
           @click="loadTodayTrades()"
         >
-          <RefreshCw :size="16" aria-hidden="true" />
+          <template #icon>
+            <RefreshCw :size="16" aria-hidden="true" />
+          </template>
           به‌روزرسانی
         </AppButton>
-      </template>
-
+      </div>
+      <AppInsetGroup>
       <div v-if="tradesLoading" class="dashboard-daily-state" role="status">
-        در حال دریافت معاملات امروز…
+        در حال بارگذاری…
       </div>
       <AppEmptyState
         v-else-if="tradesError"
@@ -578,21 +576,17 @@ onUnmounted(() => {
       <AppEmptyState
         v-else-if="trades.length === 0"
         title="امروز معامله‌ای ثبت نشده است"
-        message="معامله‌های امروز پس از ثبت، همراه با جزئیات کامل اینجا دیده می‌شوند."
         role="status"
       />
       <div v-else class="dashboard-trades">
-        <p class="dashboard-trades__scroll-hint">
-          برای دیدن همهٔ ستون‌ها، جدول را به چپ یا راست بکشید.
-        </p>
         <div
           class="dashboard-trades__scroller"
           tabindex="0"
           role="region"
-          :aria-label="`${tradeCountLabel}؛ جدول معاملات امروز با پیمایش افقی`"
+          :aria-label="tradeCountLabel"
         >
           <table class="dashboard-trades__table">
-            <caption class="sr-only">جزئیات کامل معاملات امروز</caption>
+            <caption class="sr-only">معاملات امروز</caption>
             <thead>
               <tr>
                 <th scope="col">شماره معامله</th>
@@ -634,19 +628,19 @@ onUnmounted(() => {
           </table>
         </div>
       </div>
-    </AppSectionCard>
+      </AppInsetGroup>
+    </section>
 
     <AppDisclosure
       class="dashboard-coworkers"
       title="لیست همکاران"
-      description="اعضای قابل مشاهدهٔ فضای کاری"
       :open="coworkersOpen"
       panel-class="dashboard-directory-panel"
       @toggle="toggleCoworkers"
     >
       <template #leading><UsersRound :size="21" /></template>
       <template #meta>
-        <AppStatusBadge tone="info">{{ coworkersMetaLabel }}</AppStatusBadge>
+        <AppStatusBadge v-if="coworkersMetaLabel" tone="info">{{ coworkersMetaLabel }}</AppStatusBadge>
         <ChevronDown
           :size="18"
           class="dashboard-disclosure-chevron"
@@ -677,7 +671,7 @@ onUnmounted(() => {
           </div>
         </form>
         <div v-if="coworkersLoading" class="dashboard-daily-state" role="status">
-          در حال دریافت فهرست همکاران…
+          در حال بارگذاری…
         </div>
         <AppEmptyState
           v-else-if="coworkersError"
@@ -703,7 +697,6 @@ onUnmounted(() => {
             v-for="coworker in coworkers"
             :key="coworker.id"
             :title="coworker.account_name"
-            description="مشاهده پروفایل عمومی"
             interactive
             @select="openCoworkerProfile(coworker)"
           />
@@ -724,14 +717,13 @@ onUnmounted(() => {
     <AppDisclosure
       class="dashboard-commodities"
       title="کالاهای مجاز برای معامله"
-      description="نام کالاها و نام‌های مستعار ثبت‌شده"
       :open="commoditiesOpen"
       panel-class="dashboard-directory-panel"
       @toggle="toggleCommodities"
     >
       <template #leading><PackageCheck :size="21" /></template>
       <template #meta>
-        <AppStatusBadge tone="info">{{ commoditiesMetaLabel }}</AppStatusBadge>
+        <AppStatusBadge v-if="commoditiesMetaLabel" tone="info">{{ commoditiesMetaLabel }}</AppStatusBadge>
         <ChevronDown
           :size="18"
           class="dashboard-disclosure-chevron"
@@ -741,7 +733,7 @@ onUnmounted(() => {
       </template>
 
       <div v-if="commoditiesLoading" class="dashboard-daily-state" role="status">
-        در حال دریافت فهرست کالاها…
+        در حال بارگذاری…
       </div>
       <AppEmptyState
         v-else-if="commoditiesError"
@@ -765,8 +757,8 @@ onUnmounted(() => {
           :key="commodity.id"
           class="dashboard-commodity"
           :title="commodity.name"
-          :description="commodity.aliases.length ? commodity.aliases.join('، ') : 'نام مستعار دیگری ثبت نشده است.'"
-          :meta="`${formatNumber(commodity.aliases.length)} نام مستعار`"
+          :description="commodity.aliases.length ? commodity.aliases.join('، ') : undefined"
+          :meta="commodity.aliases.length ? `${formatNumber(commodity.aliases.length)} نام مستعار` : undefined"
         />
       </div>
     </AppDisclosure>
@@ -779,19 +771,44 @@ onUnmounted(() => {
   gap: 0.75rem;
 }
 
-.dashboard-today-trades :deep(.ui-section-card__body) {
-  padding: 0.75rem;
+.dashboard-coworkers,
+.dashboard-commodities {
+  border: 0;
+  border-radius: var(--ds-inset-group-radius, 12px);
+  background: var(--ds-bg-card);
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.dashboard-today-trades {
+  min-width: 0;
+}
+
+.dashboard-today-trades__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0 1rem 0.4rem;
+}
+
+.dashboard-today-trades__heading h2 {
+  margin: 0;
+  color: var(--ds-text-muted);
+  font-size: var(--ds-font-xs);
+  font-weight: 650;
+  line-height: 1.4;
 }
 
 .dashboard-today-trades__refresh {
-  white-space: nowrap;
+  min-width: 0;
 }
 
 .dashboard-daily-state {
-  min-height: 5rem;
+  min-height: var(--ds-native-row-min-height);
   display: grid;
   place-items: center;
-  padding: 1rem;
+  padding: 0.85rem 1rem;
   color: var(--ds-text-secondary);
   font-size: var(--ds-font-sm);
   line-height: 1.7;
@@ -799,15 +816,6 @@ onUnmounted(() => {
 
 .dashboard-trades {
   min-width: 0;
-  display: grid;
-  gap: 0.5rem;
-}
-
-.dashboard-trades__scroll-hint {
-  margin: 0;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-xs);
-  line-height: 1.6;
 }
 
 .dashboard-trades__scroller {
@@ -816,61 +824,44 @@ onUnmounted(() => {
   max-width: 100%;
   overflow-x: auto;
   overscroll-behavior-inline: contain;
-  border: 1px solid var(--ds-border-medium);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-bg-card);
   scrollbar-gutter: stable;
 }
 
 .dashboard-trades__scroller:focus-visible {
   outline: none;
-  box-shadow: var(--ds-focus-ring);
+  box-shadow: inset 0 0 0 3px rgba(245, 158, 11, 0.28);
 }
 
 .dashboard-trades__table {
   width: max-content;
   min-width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
+  border-collapse: collapse;
   color: var(--ds-text-primary);
   font-size: var(--ds-font-sm);
 }
 
 .dashboard-trades__table th,
 .dashboard-trades__table td {
-  padding: 0.625rem 0.75rem;
-  border-block-end: 1px solid var(--ds-border-subtle);
+  padding: 0.7rem 0.85rem;
+  border-block-end: 1px solid var(--ds-native-hairline);
   text-align: start;
   white-space: nowrap;
   vertical-align: middle;
 }
 
 .dashboard-trades__table thead th {
-  position: sticky;
-  inset-block-start: 0;
-  z-index: 1;
-  background: var(--ds-bg-inset);
   color: var(--ds-text-secondary);
   font-size: var(--ds-font-xs);
-  font-weight: 700;
+  font-weight: 650;
 }
 
 .dashboard-trades__table tbody th {
   color: var(--ds-text-primary);
-  font-weight: 800;
+  font-weight: 750;
 }
 
 .dashboard-trades__table tbody tr:last-child > * {
   border-block-end: 0;
-}
-
-.dashboard-trades__table tbody tr:nth-child(even) > * {
-  background: var(--ds-bg-inset);
-}
-
-.dashboard-trades__table small {
-  color: var(--ds-text-secondary);
-  font-size: inherit;
 }
 
 .dashboard-disclosure-chevron {
@@ -904,9 +895,7 @@ onUnmounted(() => {
 .dashboard-commodity-list {
   display: grid;
   gap: 0;
-  overflow: hidden;
-  border-radius: 12px;
-  background: var(--ds-bg-card);
+  min-width: 0;
 }
 
 .dashboard-commodity {
@@ -914,14 +903,15 @@ onUnmounted(() => {
 }
 
 @media (max-width: 540px) {
-  .dashboard-today-trades :deep(.ui-section-card__header) {
+  .dashboard-today-trades__heading {
     align-items: stretch;
     flex-direction: column;
+    margin-inline: 0;
   }
 
   .dashboard-trades__table th,
   .dashboard-trades__table td {
-    padding: 0.5625rem 0.625rem;
+    padding: 0.65rem 0.75rem;
   }
 
   .dashboard-directory-search > div {

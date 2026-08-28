@@ -48,7 +48,7 @@ describe('WorkspaceAccountDeletionDialog', () => {
     const last = focusable.at(-1)
     expect(first).toBeDefined()
     expect(last).toBeDefined()
-    last?.element.focus()
+    ;(last?.element as HTMLElement | undefined)?.focus()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
     expect(document.activeElement).toBe(first?.element)
 

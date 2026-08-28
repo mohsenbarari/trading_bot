@@ -141,7 +141,7 @@ async function submitPassword() {
     focused
     fill-viewport
     title="تنظیم رمز عبور"
-    description="برای تکمیل گیت امنیتی، یک رمز قوی تعریف کنید. پس از ثبت موفق وارد سامانه می‌شوید."
+    description="یک رمز قوی تعریف کنید."
   >
     <form class="ui-v2-auth-password-form" @submit.prevent="submitPassword">
       <AppFormField label="رمز عبور جدید" :error="passwordError">

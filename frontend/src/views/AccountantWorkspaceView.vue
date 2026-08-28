@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { BriefcaseBusiness, Clock, Copy, ShieldAlert, UserPlus } from 'lucide-vue-next'
+import { BriefcaseBusiness, Clock, ShieldAlert, UserPlus } from 'lucide-vue-next'
 import {
   WorkspaceAccountDeletionDialog,
   WorkspaceDetailHeader,
@@ -11,9 +11,9 @@ import {
   WorkspaceShell,
 } from '../components/workspace'
 import {
+  AppActionOverflow,
   AppBottomSheet,
   AppButton,
-  AppCard,
   AppConfirmDialog,
   AppDangerZone,
   AppEmptyState,
@@ -21,6 +21,7 @@ import {
   AppFilterChips,
   AppFormField,
   AppInput,
+  AppInsetGroup,
   AppListItem,
   AppLoadingState,
   AppResponsiveDialog,
@@ -745,10 +746,10 @@ async function copyRegistrationLink(relation: AccountantRelation) {
 
 function openConfirmDialog(
   kind: ConfirmAction,
-  relation: AccountantRelation,
+  relation: AccountantRelation | null,
   session: AccountantSessionSummary | null = null,
 ) {
-  if (isConfirmBusy.value) return
+  if (!relation || isConfirmBusy.value) return
   if (kind === 'cancel-invitation' && relation.status !== 'pending') return
   const relationAccountantUserId = getLiveAccountantUserId(relation)
   if (
@@ -947,7 +948,8 @@ async function handleConfirmAction() {
   }
 }
 
-function getRelationTitle(relation: AccountantRelation) {
+function getRelationTitle(relation: AccountantRelation | null): string {
+  if (!relation) return ''
   return (
     relation.relation_display_name ||
     relation.accountant_account_name ||
@@ -993,6 +995,28 @@ function invitationDeadlineText(relation: AccountantRelation) {
   return relation.expires_at
     ? `مهلت استفاده تا ${formatDate(relation.expires_at)}`
     : 'مهلت استفاده برای این دعوت ثبت نشده است.'
+}
+
+function pendingInviteOverflowActions(relation: AccountantRelation) {
+  const actions: { id: string; label: string; tone?: 'neutral' | 'danger' }[] = []
+  if (invitationRelationLink(relation, 'web')) {
+    actions.push({
+      id: 'copy',
+      label: copiedRelationId.value === relation.id ? 'کپی شد' : 'کپی لینک وب',
+    })
+  }
+  actions.push({ id: 'cancel', label: 'لغو دعوت', tone: 'danger' })
+  return actions
+}
+
+function handlePendingInviteOverflow(relation: AccountantRelation, id: string) {
+  if (id === 'copy') {
+    void copyRegistrationLink(relation)
+    return
+  }
+  if (id === 'cancel') {
+    openConfirmDialog('cancel-invitation', relation)
+  }
 }
 
 function sessionPlatformLabel(platform: string | null | undefined) {
@@ -1157,7 +1181,6 @@ onBeforeUnmount(() => {
       class="ui-v2-workspace-accountant-root"
       title="حسابداران"
       eyebrow="عملیات"
-      description="افزودن، مرور و تنظیم روابط حسابداران در یک فضای کاری یکپارچه."
       layout="split"
       v2-scope
       show-back
@@ -1207,7 +1230,6 @@ onBeforeUnmount(() => {
           v-if="!isMobile || hasDetailRoute"
           class="accountant-detail-section ui-v2-workspace-accountant-detail-section"
           title="پرونده حسابدار"
-          description="مشخصات، شرح وظیفه، نشست‌ها و اقدامات حساس در یک نمای یکپارچه."
           v2-scope
         >
           <AppEmptyState
@@ -1239,7 +1261,7 @@ onBeforeUnmount(() => {
           <AppLoadingState
             v-else-if="!hasLoadedRelations && isLoading"
             class="accountant-detail-loading"
-            label="در حال ساخت پرونده حسابدار"
+            label="در حال دریافت پرونده حسابدار"
           />
           <AppEmptyState
             v-else-if="!activeRelation && hasLoadedRelations"
@@ -1262,7 +1284,6 @@ onBeforeUnmount(() => {
               header-class="accountant-detail-header ui-v2-workspace-accountant-detail-header"
               badges-class="accountant-detail-badges ui-v2-workspace-accountant-detail-badges"
               :title="getRelationTitle(activeRelation)"
-              :description="getRelationDescription(activeRelation)"
             >
               <AppStatusBadge :tone="getStatusTone(activeRelation.status)">
                 {{ getStatusLabel(activeRelation.status) }}
@@ -1299,7 +1320,7 @@ onBeforeUnmount(() => {
               reveal-selection-on-keyboard
             />
 
-            <div
+            <AppInsetGroup
               v-if="detailTab === 'profile'"
               class="accountant-detail-grid ui-v2-workspace-accountant-detail-grid"
             >
@@ -1325,17 +1346,14 @@ onBeforeUnmount(() => {
               />
               <AppListItem title="فعال‌سازی" :meta="formatDate(activeRelation.activated_at)" />
               <AppListItem title="ایجاد رابطه" :meta="formatDate(activeRelation.created_at)" />
-            </div>
+            </AppInsetGroup>
 
             <div
               v-else-if="detailTab === 'duty' && isActiveRelation"
               class="accountant-detail-list ui-v2-workspace-accountant-detail-list"
             >
-              <AppCard class="accountant-edit-form-card ui-v2-workspace-accountant-edit-form-card">
-                <AppFormField
-                  label="شرح وظیفه"
-                  hint="یک توضیح کوتاه برای تفکیک مسئولیت این حسابدار بنویسید."
-                >
+              <div class="accountant-edit-form-card ui-v2-workspace-accountant-edit-form-card">
+                <AppFormField label="شرح وظیفه">
                   <template #default="{ id }">
                     <AppTextarea
                       :id="id"
@@ -1385,7 +1403,7 @@ onBeforeUnmount(() => {
                     ذخیره تغییرات
                   </AppButton>
                 </WorkspaceFormActions>
-              </AppCard>
+              </div>
             </div>
 
             <div
@@ -1428,7 +1446,7 @@ onBeforeUnmount(() => {
               </WorkspaceNotice>
               <AppLoadingState
                 v-if="detailSessionsLoading && !detailSessions.length"
-                label="در حال ساخت فهرست نشست‌ها"
+                label="در حال دریافت نشست‌ها"
               />
               <AppEmptyState
                 v-else-if="!detailSessionsError && !detailSessions.length"
@@ -1436,7 +1454,7 @@ onBeforeUnmount(() => {
                 message="برای این حسابدار نشست فعالی ثبت نشده است."
                 role="status"
               />
-              <template v-if="detailSessions.length">
+              <AppInsetGroup v-if="detailSessions.length">
                 <AppListItem
                   v-for="session in detailSessions"
                   :key="session.id"
@@ -1465,7 +1483,7 @@ onBeforeUnmount(() => {
                     </div>
                   </template>
                 </AppListItem>
-              </template>
+              </AppInsetGroup>
             </div>
 
             <div
@@ -1480,13 +1498,6 @@ onBeforeUnmount(() => {
                       ? 'حذف رابطه حسابدار'
                       : 'حذف حساب حسابدار'
                 "
-                :description="
-                  activeRelation.status === 'pending'
-                    ? 'رابطه و دعوت در انتظار را لغو و رزرو هویت را آزاد کنید.'
-                    : isOrphanActiveRelation
-                      ? 'این رابطه حساب کاربری زنده‌ای ندارد و بدون حذف زنجیره‌ای حساب برداشته می‌شود.'
-                      : 'حذف حساب یک اقدام بازگشت‌ناپذیر با پیامدهای امنیتی و تجاری است.'
-                "
               >
                 <div class="accountant-danger-card ui-v2-workspace-accountant-danger-card">
                   <ShieldAlert :size="22" />
@@ -1500,15 +1511,7 @@ onBeforeUnmount(() => {
                             : `حذف حساب ${getRelationTitle(activeRelation)}`
                       }}
                     </strong>
-                    <p>
-                      {{
-                        activeRelation.status === 'pending'
-                          ? 'رابطه و دعوت در انتظار لغو، لینک ثبت‌نام بی‌اعتبار و رزرو هویت و نام کاربری آزاد می‌شود. چون حسابی فعال نشده، حذف زنجیره‌ای حساب، نشست، آفر یا روابط فعال اجرا نمی‌شود.'
-                          : isOrphanActiveRelation
-                            ? 'فقط همین رابطه حذف می‌شود؛ حساب، نشست، آفر، دعوت یا روابط دیگری به‌صورت زنجیره‌ای حذف نمی‌شوند.'
-                            : 'دسترسی وب و ربات پایان می‌یابد؛ همه نشست‌های فعال پایان می‌یابند؛ آفرهای فعال منقضی و دعوت‌های در انتظار مرتبط لغو می‌شوند؛ همه روابط باز مشتری یا حسابدارِ متعلق یا متصل بسته می‌شوند؛ حساب‌های وابسته فعالِ متعلق ممکن است به‌صورت بازگشتی حذف شوند و سابقه معاملات حفظ می‌شود.'
-                      }}
-                    </p>
+                    <p v-if="isOrphanActiveRelation">فقط همین رابطه حذف می‌شود.</p>
                   </div>
                 </div>
                 <WorkspaceFormActions action-class="accountant-inline-actions ui-v2-workspace-accountant-inline-actions">
@@ -1543,7 +1546,6 @@ onBeforeUnmount(() => {
           v-if="!isMobile || !hasDetailRoute"
           class="accountant-list-section ui-v2-workspace-accountant-list-section"
           title="لیست حسابداران"
-          description="جستجو، فیلتر و انتخاب حسابدار با دسترسی مستقیم به دعوت‌ها و پرونده‌های فعال."
           v2-scope
         >
           <template #actions>
@@ -1602,7 +1604,7 @@ onBeforeUnmount(() => {
           <AppLoadingState
             v-if="isLoading && !hasLoadedRelations"
             class="accountant-list-loading"
-            label="در حال ساخت فهرست حسابداران"
+            label="در حال دریافت فهرست حسابداران"
           />
           <AppEmptyState
             v-if="hasLoadedRelations && !accountantState.orderedRelations.value.length"
@@ -1632,15 +1634,14 @@ onBeforeUnmount(() => {
             v-if="hasLoadedRelations && filteredRelations.length"
             class="workspace-relation-list accountant-scroll-restoration-region ui-v2-workspace-accountant-relation-list ui-v2-workspace-accountant-scroll-region"
           >
-            <div
+            <AppInsetGroup
               v-if="visiblePendingRelations.length"
               class="accountant-list-group ui-v2-workspace-accountant-list-group"
+              title="دعوت‌های در انتظار"
             >
-              <h3>دعوت‌های در انتظار</h3>
-              <AppCard
+              <div
                 v-for="relation in visiblePendingRelations"
                 :key="relation.id"
-                tone="warning"
                 class="accountant-pending-card"
               >
                 <div
@@ -1655,26 +1656,16 @@ onBeforeUnmount(() => {
                 <p class="accountant-pending-deadline ui-v2-workspace-accountant-pending-deadline">
                   {{ invitationDeadlineText(relation) }}
                 </p>
-                <WorkspaceFormActions action-class="accountant-inline-actions ui-v2-workspace-accountant-inline-actions">
-                  <AppButton
-                    v-if="invitationRelationLink(relation, 'web')"
-                    size="sm"
-                    variant="secondary"
-                    @click="copyRegistrationLink(relation)"
-                  >
-                    <template #icon>
-                      <Copy :size="16" />
-                    </template>
-                    {{ copiedRelationId === relation.id ? 'کپی شد' : 'کپی لینک وب' }}
+                <AppActionOverflow
+                  class="accountant-inline-actions ui-v2-workspace-accountant-inline-actions"
+                  :actions="pendingInviteOverflowActions(relation)"
+                  more-label="اقدام‌های دعوت"
+                  @select="(id) => handlePendingInviteOverflow(relation, id)"
+                >
+                  <AppButton size="sm" variant="primary" @click="openRelation(relation.id)">
+                    بررسی دعوت
                   </AppButton>
-                  <AppButton
-                    size="sm"
-                    variant="danger"
-                    @click="openConfirmDialog('cancel-invitation', relation)"
-                  >
-                    لغو دعوت
-                  </AppButton>
-                </WorkspaceFormActions>
+                </AppActionOverflow>
                 <p
                   v-if="invitationSmsStatusMessage(relation.sms_status)"
                   class="accountant-pending-sms-status ui-v2-workspace-accountant-pending-sms-status"
@@ -1690,14 +1681,14 @@ onBeforeUnmount(() => {
                   "
                   :message="relationFeedback[relation.id]?.message"
                 />
-              </AppCard>
-            </div>
+              </div>
+            </AppInsetGroup>
 
-            <div
+            <AppInsetGroup
               v-if="visibleManageableRelations.length"
               class="accountant-list-group ui-v2-workspace-accountant-list-group"
+              title="روابط ثبت‌شده"
             >
-              <h3>روابط ثبت‌شده</h3>
               <AppListItem
                 v-for="relation in visibleManageableRelations"
                 :key="relation.id"
@@ -1727,7 +1718,7 @@ onBeforeUnmount(() => {
                   </div>
                 </template>
               </AppListItem>
-            </div>
+            </AppInsetGroup>
           </div>
         </WorkspaceSection>
       </div>
@@ -1735,7 +1726,7 @@ onBeforeUnmount(() => {
       <div id="accountant-workspace-overlay-host" class="ui-v2-workspace-overlay-host" />
 
       <AppConfirmDialog
-        class="ui-v2-workspace-confirm-backdrop"
+        backdrop-class="ui-v2-workspace-confirm-backdrop"
         :open="isConfirmDialogOpen && confirmAction !== 'delete-account'"
         :title="confirmTitle"
         :message="confirmMessage"
@@ -1768,7 +1759,6 @@ onBeforeUnmount(() => {
       :is="isMobile ? AppBottomSheet : AppResponsiveDialog"
       :open="isCreatePanelOpen"
       title="افزودن حسابدار"
-      description="اطلاعات اولیه حسابدار و شرح وظیفه را ثبت کنید."
       teleport-to="#accountant-workspace-overlay-host"
       backdrop-class="ui-v2-workspace-overlay-backdrop"
       panel-class="ui-v2-workspace-overlay-panel"
@@ -1782,10 +1772,7 @@ onBeforeUnmount(() => {
         class="accountant-create-panel ui-v2-workspace-accountant-create-panel"
         :aria-busy="isCreateSubmitting ? 'true' : undefined"
       >
-        <AppFormField
-          label="نام کاربری جهانی"
-          hint="این نام برای ساخت دعوت و ورود حسابدار استفاده می‌شود."
-        >
+        <AppFormField label="نام کاربری جهانی">
           <template #default="{ id }">
             <AppInput
               :id="id"
@@ -1796,7 +1783,7 @@ onBeforeUnmount(() => {
           </template>
         </AppFormField>
 
-        <AppFormField label="نام نمایشی رابطه" hint="نامی که در فضای کاری خودتان می‌بینید.">
+        <AppFormField label="نام نمایشی رابطه">
           <template #default="{ id }">
             <AppInput
               :id="id"
@@ -1807,10 +1794,7 @@ onBeforeUnmount(() => {
           </template>
         </AppFormField>
 
-        <AppFormField
-          label="شماره موبایل"
-          hint="برای ثبت دعوت و ساخت لینک مخصوص حسابدار استفاده می‌شود."
-        >
+        <AppFormField label="شماره موبایل">
           <template #default="{ id }">
             <AppInput
               :id="id"
@@ -1821,7 +1805,7 @@ onBeforeUnmount(() => {
           </template>
         </AppFormField>
 
-        <AppFormField label="شرح وظیفه" hint="اختیاری، برای تفکیک نقش حسابدار در گروه کاری.">
+        <AppFormField label="شرح وظیفه">
           <template #default="{ id }">
             <AppTextarea
               :id="id"
@@ -1833,7 +1817,7 @@ onBeforeUnmount(() => {
           </template>
         </AppFormField>
 
-        <AppCard
+        <div
           v-if="generatedGlobalAccountName"
           class="accountant-generated-account ui-v2-workspace-accountant-generated-account"
         >
@@ -1841,7 +1825,7 @@ onBeforeUnmount(() => {
             >نام کاربری دعوتی</span
           >
           <strong>@{{ generatedGlobalAccountName }}</strong>
-        </AppCard>
+        </div>
 
         <WorkspaceNotice
           v-if="createError"
@@ -1870,3 +1854,24 @@ onBeforeUnmount(() => {
     </component>
   </div>
 </template>
+
+<style scoped>
+.accountant-danger-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: var(--ds-touch-target, 48px);
+  color: var(--ds-text-primary);
+}
+
+.accountant-danger-card strong {
+  font-size: var(--ds-font-md);
+  font-weight: 700;
+}
+
+.accountant-danger-card p {
+  margin: 4px 0 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-sm);
+}
+</style>

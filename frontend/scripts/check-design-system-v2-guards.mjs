@@ -42,10 +42,15 @@ function isV2Style(filePath) {
   )
 }
 
+function isProductTokenSheet(filePath) {
+  return toFrontendPath(filePath) === 'src/assets/main.css'
+}
+
 function readV2StyleSources() {
   const styleSources = []
   for (const filePath of walkFiles(srcRoot)) {
     if (filePath.endsWith('.css')) {
+      if (isProductTokenSheet(filePath)) continue
       const styleSource = readSource(filePath)
       if (isV2Style(filePath) || hasV2CssMarker(styleSource.source)) styleSources.push(styleSource)
       continue

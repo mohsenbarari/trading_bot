@@ -17,6 +17,7 @@ import AppEmptyState from './ui/AppEmptyState.vue'
 import AppFormField from './ui/AppFormField.vue'
 import AppIconButton from './ui/AppIconButton.vue'
 import AppInput from './ui/AppInput.vue'
+import AppInsetGroup from './ui/AppInsetGroup.vue'
 import AppListItem from './ui/AppListItem.vue'
 import AppLoadingState from './ui/AppLoadingState.vue'
 import AppSectionCard from './ui/AppSectionCard.vue'
@@ -627,7 +628,6 @@ onUnmounted(() => {
     <AppSectionCard
       v-if="viewMode === 'list'"
       title="فهرست کالاها"
-      description="کالاهای قابل معامله و نام‌های مستعار هر مورد را از این بخش مدیریت کنید."
     >
       <template #actions>
         <AppButton class="commodity-action primary-soft" variant="primary" @click="onAddCommodityStart">
@@ -643,7 +643,6 @@ onUnmounted(() => {
       <AppEmptyState
         v-else-if="hasLoadedList && commodities.length === 0"
         title="هنوز کالایی ثبت نشده است"
-        message="ابتدا کالای اصلی را ثبت کنید و سپس نام‌های مستعار آن را مدیریت کنید."
         role="status"
       >
         <template #icon>
@@ -654,7 +653,8 @@ onUnmounted(() => {
         </template>
       </AppEmptyState>
 
-      <div v-else-if="hasLoadedList" class="list-group" :aria-busy="listLoading">
+      <AppInsetGroup v-else-if="hasLoadedList" :aria-busy="listLoading">
+        <div class="list-group">
         <AppListItem
           v-for="comm in commodities"
           :key="comm.id"
@@ -673,7 +673,8 @@ onUnmounted(() => {
             </span>
           </template>
         </AppListItem>
-      </div>
+        </div>
+      </AppInsetGroup>
     </AppSectionCard>
 
     <template v-if="viewMode === 'aliases' && selectedCommodity">
@@ -686,7 +687,6 @@ onUnmounted(() => {
       </div>
       <AppSectionCard
         :title="selectedCommodity.name"
-        description="لیست نام‌های مستعار این کالا و اقدامات مرتبط با آن را از اینجا مدیریت کنید."
       >
         <template #actions>
           <AppStatusBadge tone="info">{{ aliasCountLabel(selectedCommodityAliasCount) }}</AppStatusBadge>
@@ -695,7 +695,6 @@ onUnmounted(() => {
         <AppEmptyState
           v-if="selectedCommodity.aliases.length === 0"
           title="نام مستعاری برای این کالا ثبت نشده است"
-          message="می‌توانید یک یا چند نام مستعار جدید به این کالا اضافه کنید."
           role="status"
         >
           <template #icon>
@@ -708,12 +707,12 @@ onUnmounted(() => {
           </template>
         </AppEmptyState>
 
-        <div v-else class="alias-list">
+        <AppInsetGroup v-else>
+        <div class="alias-list">
           <div v-for="alias in selectedCommodity.aliases" :key="alias.id" class="alias-row">
             <AppListItem
               class="alias-item"
               :title="alias.alias"
-              description="نام مستعار قابل استفاده در بازار"
             >
               <template #leading>
                 <Tag :size="16" />
@@ -731,11 +730,11 @@ onUnmounted(() => {
             </AppListItem>
           </div>
         </div>
+        </AppInsetGroup>
       </AppSectionCard>
 
       <AppSectionCard
         title="اقدامات کالا"
-        description="ثبت نام مستعار جدید، تغییر نام اصلی یا حذف کامل کالا از این بخش انجام می‌شود."
       >
         <div class="card-footer stacked">
           <AppButton class="commodity-action primary-soft" variant="primary" block @click="onAddAliasStart">
@@ -778,7 +777,6 @@ onUnmounted(() => {
     <AppSectionCard
       v-if="viewMode === 'add_commodity'"
       title="افزودن کالای جدید"
-      description="نام اصلی کالا و در صورت نیاز نام‌های مستعار اولیه را هم‌زمان ثبت کنید."
     >
       <form @submit.prevent="onAddCommoditySubmit" class="manager-form">
         <AppFormField label="نام اصلی کالا">
@@ -818,7 +816,6 @@ onUnmounted(() => {
     <AppSectionCard
       v-if="viewMode === 'edit_commodity_name' && selectedCommodity"
       title="ویرایش نام کالا"
-      :description="`نام جدید برای «${selectedCommodity.name}» را ثبت کنید.`"
     >
       <form @submit.prevent="onEditCommodityNameSubmit" class="manager-form">
         <AppFormField :label="`نام جدید برای ${selectedCommodity.name}`">
@@ -844,7 +841,6 @@ onUnmounted(() => {
     <AppSectionCard
       v-if="viewMode === 'add_alias' && selectedCommodity"
       title="افزودن نام مستعار"
-      :description="`نام‌های مستعار جدید برای «${selectedCommodity.name}» را ثبت کنید.`"
     >
       <form @submit.prevent="onAddAliasSubmit" class="manager-form">
         <AppFormField label="نام‌های مستعار" hint="می‌توانید چند نام را با «،» یا «-» وارد کنید.">
@@ -871,7 +867,6 @@ onUnmounted(() => {
     <AppSectionCard
       v-if="viewMode === 'edit_alias' && selectedCommodity && selectedAlias"
       title="ویرایش نام مستعار"
-      :description="`نام جدید برای «${selectedAlias.alias}» را ثبت کنید.`"
     >
       <form @submit.prevent="onEditAliasSubmit" class="manager-form">
         <AppFormField :label="`نام جدید برای ${selectedAlias.alias}`">
@@ -957,7 +952,12 @@ onUnmounted(() => {
 }
 
 .list-group,
-.alias-list,
+.alias-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
 .manager-form,
 .card-footer.stacked {
   display: flex;
@@ -1028,10 +1028,10 @@ onUnmounted(() => {
 }
 
 .locked-commodity-hint {
-  padding: 0.85rem 0.95rem;
-  border: 1px solid var(--ds-warning-100);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-warning-50);
+  padding: 0.25rem 0 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .form-footer {

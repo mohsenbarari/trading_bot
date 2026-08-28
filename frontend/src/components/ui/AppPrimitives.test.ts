@@ -5,6 +5,7 @@ import { defineComponent, nextTick, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import {
   AppActionCard,
+  AppActionOverflow,
   AppBottomSheet,
   AppButton,
   AppDangerZone,
@@ -16,6 +17,7 @@ import {
   AppFilterChips,
   AppFormField,
   AppInput,
+  AppInsetGroup,
   AppListItem,
   AppLoadingState,
   AppMasterDetail,
@@ -509,6 +511,23 @@ describe('ui primitives', () => {
     trigger.remove()
   })
 
+  it('applies an official backdrop class without leaking attributes onto the teleport fragment', async () => {
+    const dialog = mount(AppConfirmDialog, {
+      props: {
+        open: true,
+        title: 'تأیید',
+        message: 'ادامه داده شود؟',
+        backdropClass: 'ui-v2-workspace-confirm-backdrop',
+      },
+      attachTo: document.body,
+    })
+    await nextTick()
+    const portalBackdrop = document.body.querySelector<HTMLElement>('.ui-dialog-backdrop')
+    expect(portalBackdrop?.classList.contains('ui-v2-workspace-confirm-backdrop')).toBe(true)
+    expect(dialog.attributes('class')).toBeUndefined()
+    dialog.unmount()
+  })
+
   it('renders page, workspace, master-detail, toolbar, and page header primitives', () => {
     const page = mount(AppPage, {
       props: { narrow: true },
@@ -796,5 +815,142 @@ describe('ui primitives', () => {
     expect(guardedDialog.emitted('close')).toBeUndefined()
     guardedDialog.unmount()
     await nextTick()
+  })
+
+  it('keeps grouped list rows, wrapped button labels, and a 16px page gutter', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/assets/main.css'), 'utf8')
+    expect(css).toMatch(/--ds-page-padding:\s*16px/)
+    expect(css).toMatch(/--ds-inset-group-radius:\s*12px/)
+    expect(css).not.toMatch(/--ds-page-padding:\s*14px/)
+    expect(css).toMatch(/\.ui-button\s*\{[\s\S]*?white-space:\s*normal/)
+    expect(css).toMatch(/\.ui-list-item\s*\{[\s\S]*?min-height:\s*var\(--ds-native-row-min-height/)
+    expect(css).toMatch(/\.ui-tabs__tab,\s*\n\s*\.ui-filter-chip\s*\{[\s\S]*?min-width:\s*var\(--ds-touch-target, 48px\)/)
+    expect(css).toMatch(/\.app-route-scroll--market-frozen \.ui-tabs__tab,[\s\S]*?min-width:\s*0/)
+    expect(css).toMatch(
+      /\.ui-disclosure__leading\s*\{[\s\S]*?width:\s*var\(--ds-native-row-min-height\)/,
+    )
+    expect(css).not.toMatch(/\.ui-list-item--interactive:hover\s*\{[\s\S]*?transform:\s*translateY/)
+    expect(css).not.toMatch(/\.ui-list-item--interactive:hover\s*\{\s*background:/)
+
+    const longLabel = 'کپی لینک تلگرام و بررسی دعوت باز مشتری'
+    const button = mount(AppButton, {
+      props: { block: true },
+      slots: { default: longLabel },
+    })
+    expect(button.classes()).toContain('ui-button--block')
+    expect(button.get('.ui-button__label').text()).toBe(longLabel)
+    expect(css).toMatch(/\.ui-button__label\s*\{[\s\S]*?overflow-wrap:\s*anywhere/)
+    button.unmount()
+
+    const grouped = mount(AppListItem, {
+      props: { title: 'حسن رضایی', interactive: true },
+    })
+    expect(grouped.classes()).toContain('ui-list-item--grouped')
+    expect(grouped.classes()).not.toContain('ui-list-item--card')
+    grouped.unmount()
+
+    const card = mount(AppListItem, {
+      props: { title: 'کارت جدا', variant: 'card' },
+    })
+    expect(card.classes()).toContain('ui-list-item--card')
+    card.unmount()
+  })
+
+  it('keeps inset groups off the page edge and overflow actions inside a menu', async () => {
+    const page = mount({
+      components: { AppInsetGroup, AppListItem },
+      template: `
+        <main class="ui-page" style="width: 390px">
+          <AppInsetGroup title="پروفایل">
+            <AppListItem title="پروفایل من" />
+            <AppListItem title="نشست‌های فعال" />
+          </AppInsetGroup>
+        </main>
+      `,
+    })
+    const group = page.get('.ui-inset-group')
+    expect(group.findAll('.ui-list-item')).toHaveLength(2)
+    expect(page.get('.ui-page').classes()).toContain('ui-page')
+    const css = readFileSync(resolve(process.cwd(), 'src/assets/main.css'), 'utf8')
+    expect(css).toMatch(/\.ui-page[\s\S]*?padding:[\s\S]*?var\(--ds-page-padding\)/)
+    expect(css).toMatch(/\.ui-inset-group__body\s*\{[\s\S]*?border-radius:\s*var\(--ds-inset-group-radius/)
+    page.unmount()
+
+    const overflow = mount(AppActionOverflow, {
+      props: {
+        actions: [
+          { id: 'copy-web', label: 'کپی لینک وب' },
+          { id: 'cancel', label: 'لغو دعوت', tone: 'danger' },
+        ],
+      },
+      slots: {
+        default: '<button type="button" class="ui-button">بررسی دعوت</button>',
+      },
+    })
+    expect(overflow.get('.ui-action-overflow__primary').text()).toContain('بررسی دعوت')
+    expect(overflow.find('.ui-action-overflow__panel').exists()).toBe(false)
+    await overflow.get('button[aria-label="بیشتر"]').trigger('click')
+    expect(overflow.find('[role="menu"]').exists()).toBe(true)
+    await overflow.get('button[role="menuitem"]').trigger('click')
+    expect(overflow.emitted('select')?.[0]).toEqual(['copy-web'])
+    expect(overflow.find('[role="menu"]').exists()).toBe(false)
+    overflow.unmount()
+  })
+
+  it('makes the overflow menu keyboard-complete without nested unnamed controls', async () => {
+    const overflow = mount(AppActionOverflow, {
+      attachTo: document.body,
+      props: {
+        actions: [
+          { id: 'copy-web', label: 'کپی لینک وب' },
+          { id: 'inspect', label: 'بررسی', disabled: true },
+          { id: 'cancel', label: 'لغو دعوت', tone: 'danger' },
+        ],
+      },
+      slots: {
+        default: '<button type="button" class="ui-button">بررسی دعوت</button>',
+      },
+    })
+
+    const trigger = overflow.get('button[aria-label="بیشتر"]').element as HTMLButtonElement
+    trigger.focus()
+    await trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    await nextTick()
+    await nextTick()
+
+    const menu = overflow.get('[role="menu"]')
+    expect(menu.attributes('aria-label')).toBe('بیشتر')
+    const items = overflow.findAll('[role="menuitem"]')
+    expect(items).toHaveLength(3)
+    expect(document.activeElement).toBe(items[0]!.element)
+    const overflowCss = readFileSync(resolve(process.cwd(), 'src/assets/main.css'), 'utf8')
+    expect(overflowCss).toMatch(/\.ui-action-overflow__item\s*\{[\s\S]*?min-height:\s*var\(--ds-native-row-min-height/)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    await nextTick()
+    expect(document.activeElement).toBe(items[2]!.element)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }))
+    await nextTick()
+    expect(document.activeElement).toBe(items[0]!.element)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+    await nextTick()
+    expect(document.activeElement).toBe(items[2]!.element)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
+    await nextTick()
+    expect(document.activeElement).toBe(items[0]!.element)
+
+    await items[1]!.trigger('click')
+    expect(overflow.emitted('select')).toBeUndefined()
+    expect(overflow.find('[role="menu"]').exists()).toBe(true)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await nextTick()
+    expect(overflow.find('[role="menu"]').exists()).toBe(false)
+    expect(document.activeElement).toBe(trigger)
+
+    overflow.unmount()
   })
 })

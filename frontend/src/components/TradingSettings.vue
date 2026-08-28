@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { apiFetch } from '../utils/auth'
-import { Loader2, ChevronLeft, Save, RotateCcw, Mail, ClipboardList, Clock, ShieldCheck, AlertCircle } from 'lucide-vue-next'
+import { Loader2, ChevronLeft, Save, RotateCcw, Mail, ClipboardList, Clock, ShieldCheck } from 'lucide-vue-next'
 import { formatIranDateTime } from '../utils/iranTime'
 import JalaliDatePicker from './JalaliDatePicker.vue'
 import { AppButton, AppCheckbox, AppConfirmDialog, AppInput, AppSelect } from './ui'
@@ -13,6 +13,7 @@ const props = defineProps<{
 
 const loading = ref(true)
 const saving = ref(false)
+const settingsLoadFailed = ref(false)
 const message = ref('')
 const messageType = ref<'success' | 'danger'>('success')
 const viewportToast = ref<{ type: 'success' | 'danger'; text: string } | null>(null)
@@ -213,10 +214,12 @@ const applySettingsResponse = (data: Record<string, any>) => {
 const loadSettings = async () => {
   try {
     loading.value = true
+    settingsLoadFailed.value = false
     const data = await fetchApi('GET', '/trading-settings/')
     applySettingsResponse(data)
     form.value = {} // پاک کردن فرم بعد از لود جدید
   } catch (error) {
+    settingsLoadFailed.value = true
     message.value = 'خطا در بارگذاری تنظیمات'
     messageType.value = 'danger'
   } finally {
@@ -434,8 +437,18 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else class="settings-container">
-      <div v-if="message" class="ds-message" :class="messageType">
-        {{ message }}
+      <div v-if="message" class="ds-message" :class="messageType" :role="messageType === 'danger' ? 'alert' : 'status'">
+        <span>{{ message }}</span>
+        <AppButton
+          v-if="settingsLoadFailed"
+          type="button"
+          class="settings-load-retry"
+          variant="secondary"
+          :loading="loading"
+          @click="loadSettings"
+        >
+          تلاش دوباره
+        </AppButton>
       </div>
 
       <!-- دعوت‌نامه -->
@@ -638,10 +651,6 @@ onBeforeUnmount(() => {
           role="region"
           aria-labelledby="trading-settings-security-header"
         >
-          <div class="info-note">
-            <AlertCircle :size="16" />
-            <span>این مقادیر آستانه پایه برای جلوگیری از سوءاستفاده (Anti-Abuse) هستند. برای کاربرانی با بیش از یک نشست فعال، سیستم به صورت خودکار آستانه را افزایش می‌دهد.</span>
-          </div>
           <div class="ds-form-group">
             <label class="ds-label">آستانه پایه روزانه</label>
             <AppInput
@@ -913,6 +922,27 @@ onBeforeUnmount(() => {
   gap: 0.75rem;
 }
 
+.ds-message {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: var(--ds-native-row-min-height, 48px);
+  padding: 0.75rem 0.9rem;
+  border-radius: 12px;
+}
+
+.ds-message.danger {
+  background: rgba(254, 242, 242, 0.96);
+  color: #b91c1c;
+}
+
+.ds-message.success {
+  background: rgba(240, 253, 244, 0.96);
+  color: #047857;
+}
+
 .settings-viewport-toast {
   position: fixed;
   top: calc(env(safe-area-inset-top, 0px) + 14px);
@@ -1005,24 +1035,6 @@ onBeforeUnmount(() => {
 
 .is-default {
   color: var(--ds-text-placeholder) !important;
-}
-
-.info-note {
-  display: flex;
-  gap: 0.75rem;
-  padding: 0.85rem;
-  background: var(--ds-primary-50);
-  border: 1px solid var(--ds-primary-100);
-  border-radius: var(--ds-radius-lg);
-  font-size: 0.75rem;
-  line-height: 1.6;
-  color: var(--ds-primary-800);
-  margin-bottom: 1.5rem;
-}
-
-.info-note svg {
-  flex-shrink: 0;
-  margin-top: 2px;
 }
 
 .footer-actions {

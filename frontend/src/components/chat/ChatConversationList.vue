@@ -589,8 +589,6 @@ onBeforeUnmount(() => {
               @pointercancel="cancelLongPress"
               @pointerleave="cancelLongPress"
             >
-              <div class="conversation-card-glow"></div>
-
               <div
                 class="conv-avatar"
                 :class="{
@@ -733,6 +731,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding-top: var(--messenger-header-height, 56px);
   background: var(--messenger-surface-page, #f2f2f7);
 }
 
@@ -750,69 +749,10 @@ onBeforeUnmount(() => {
   box-shadow: none;
 }
 
-.conversation-summary-strip {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 18px 18px 12px;
-  border-bottom: 1px solid rgba(217, 119, 6, 0.1);
-}
-
-.summary-copy h2 {
-  margin: 2px 0 6px;
-  color: var(--text-strong);
-  font-size: 1.2rem;
-  font-weight: 900;
-}
-
-.summary-copy p {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 0.82rem;
-}
-
-.summary-kicker {
-  display: inline-flex;
-  color: var(--accent);
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-}
-
-.summary-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.summary-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border-radius: 999px;
-  font-size: 0.74rem;
-  font-weight: 800;
-  border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.8);
-}
-
-.summary-pill.accent {
-  color: var(--teal);
-  border-color: rgba(15, 118, 110, 0.16);
-}
-
-.summary-pill.warm {
-  color: var(--accent);
-  border-color: rgba(217, 119, 6, 0.16);
-}
-
 .conversations-list {
   flex: 1;
   overflow-y: auto;
-  padding: 0 0 112px;
+  padding: 0 0 calc(80px + env(safe-area-inset-bottom, 0px));
   scrollbar-width: thin;
   scrollbar-color: rgba(60, 60, 67, 0.18) transparent;
 }
@@ -824,51 +764,6 @@ onBeforeUnmount(() => {
 .conversations-list::-webkit-scrollbar-thumb {
   background: rgba(60, 60, 67, 0.18);
   border-radius: 999px;
-}
-
-.conversation-section + .conversation-section {
-  margin-top: 18px;
-}
-
-.section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 4px 6px 10px;
-}
-
-.section-header h3 {
-  margin: 0;
-  color: var(--text-strong);
-  font-size: 0.92rem;
-  font-weight: 900;
-}
-
-.section-header p {
-  margin: 3px 0 0;
-  color: var(--text-muted);
-  font-size: 0.74rem;
-}
-
-.section-count {
-  min-width: 30px;
-  height: 30px;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.84);
-  color: var(--accent);
-  font-size: 0.76rem;
-  font-weight: 900;
-  box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.1);
-}
-
-.section-items {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
 }
 
 .conversation-card {
@@ -974,10 +869,6 @@ onBeforeUnmount(() => {
 
 .conversation-card--active .conv-role-badge {
   color: inherit;
-}
-
-.conversation-card-glow {
-  display: none;
 }
 
 .conv-avatar {
@@ -1272,24 +1163,19 @@ onBeforeUnmount(() => {
 
 .fab-new-chat {
   position: absolute;
-  right: 22px;
-  bottom: 26px;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   z-index: 4;
-  width: 58px;
-  height: 58px;
+  width: 48px;
+  height: 48px;
   border: none;
-  border-radius: var(--messenger-radius-panel, 18px);
+  border-radius: 50%;
   background: var(--messenger-accent, #f59e0b);
   color: #111827;
   display: flex;
   align-items: center;
   justify-content: center;
   box-shadow: none;
-  transition: transform var(--messenger-motion-standard, 180ms) ease, box-shadow var(--messenger-motion-standard, 180ms) ease;
-}
-
-.fab-new-chat:hover {
-  transform: translateY(-1px) scale(1.02);
 }
 
 .conversation-menu-overlay {
@@ -1435,25 +1321,17 @@ onBeforeUnmount(() => {
 
 @media (max-width: 640px) {
   .conversation-panel {
-    margin: 6px 8px 0;
-    border-radius: 24px 24px 0 0;
-  }
-
-  .conversation-summary-strip {
-    padding: 16px 14px 10px;
+    margin: 0;
+    border-radius: 0;
   }
 
   .conversations-list {
-    padding: 10px 10px 108px;
+    padding: 0 0 calc(80px + env(safe-area-inset-bottom, 0px));
   }
 
   .conversation-card {
-    padding: 13px 14px;
-    border-radius: var(--messenger-radius-panel, 18px);
-  }
-  .fab-new-chat {
-    right: 18px;
-    bottom: 22px;
+    padding: 10px 16px;
+    border-radius: 0;
   }
 }
 

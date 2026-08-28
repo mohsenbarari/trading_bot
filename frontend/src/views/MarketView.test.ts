@@ -328,7 +328,7 @@ describe('MarketView.vue', () => {
 
     expect(wrapper.find('.market-overtime-pref').exists()).toBe(false)
     expect(wrapper.get('.market-page-title').text()).toBe('بازار')
-    expect(wrapper.get('[data-test="market-status-chip"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="market-status-chip"]').exists()).toBe(true)
     expect(wrapper.find('.market-feed-heading').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('لفظ‌های فعال')
     expect(wrapper.text()).not.toContain('مرتب‌شده بر اساس زمان')

@@ -387,12 +387,14 @@ describe('WebRegister.vue', () => {
     expect(wrapper.text()).toContain('نام حساب')
     expect(wrapper.text()).toContain('مهلت ثبت‌نام')
     expect(wrapper.text()).toContain('مرحله ۱ از ۳')
+    expect(wrapper.text()).not.toContain('اتصال تلگرام')
     expect(wrapper.find('[data-ui-pwa]').exists()).toBe(false)
     await wrapper.get('button').trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('کد تأیید پنج‌رقمی')
     expect(wrapper.text()).toContain('مرحله ۲ از ۳')
+    expect(wrapper.text()).not.toContain('اتصال تلگرام')
     await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
     await wrapper
       .findAll('button')
@@ -403,6 +405,8 @@ describe('WebRegister.vue', () => {
     expect(wrapper.text()).toContain('نشانی دقیق پستی')
     expect(wrapper.text()).toContain('مهلت ثبت‌نام')
     expect(wrapper.text()).toContain('مرحله ۳ از ۳')
+    expect(wrapper.text()).not.toContain('اتصال تلگرام')
+    expect(wrapper.text()).not.toContain('نشانی در پروفایل عمومی نمایش داده نمی‌شود')
     await wrapper
       .get('textarea[autocomplete="street-address"]')
       .setValue('تهران، خیابان مثال، پلاک ۱۲۳')
@@ -423,6 +427,71 @@ describe('WebRegister.vue', () => {
       '/api/auth/me',
       '/api/auth/registration-context/clear',
     ])
+  })
+
+  it('shows optional Telegram connect only after registration step four', async () => {
+    webRegisterMocks.fetch
+      .mockResolvedValueOnce(makeRegistrationContextResponse())
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ detail: 'کد تایید ارسال شد' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ detail: 'کد تایید شد' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ access_token: 'access-4', refresh_token: 'refresh-4' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ can_connect_telegram: true, telegram_linked: false }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+
+    const wrapper = mount(WebRegister)
+    await flushPromises()
+    expect(wrapper.text()).toContain('مرحله ۱ از ۳')
+    expect(wrapper.text()).not.toContain('اتصال تلگرام')
+
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('مرحله ۲ از ۳')
+    expect(wrapper.text()).not.toContain('اتصال تلگرام')
+
+    await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('تأیید و ادامه'))!
+      .trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('مرحله ۳ از ۳')
+    expect(wrapper.text()).not.toContain('اتصال تلگرام')
+
+    await wrapper
+      .get('textarea[autocomplete="street-address"]')
+      .setValue('تهران، خیابان مثال، پلاک ۱۲۳')
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('تکمیل ثبت‌نام'))!
+      .trigger('click')
+    await flushPromises()
+
+    expect((wrapper.vm as unknown as { step: number }).step).toBe(4)
+    expect(wrapper.text()).toContain('اتصال تلگرام')
+    expect(wrapper.text()).toContain('این اتصال اختیاری است')
+    expect(wrapper.text()).toContain('اتصال به ربات تلگرام')
+    expect(webRegisterMocks.replace).not.toHaveBeenCalledWith('/')
+    wrapper.unmount()
   })
 
   it('retains the authoritative completion marker when ordinary Home navigation fails', async () => {

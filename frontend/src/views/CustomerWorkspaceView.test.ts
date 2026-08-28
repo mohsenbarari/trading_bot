@@ -119,6 +119,7 @@ type CustomerWorkspaceTestVm = {
   detailTradesLoading: boolean
   isCreatePanelOpen: boolean
   isCreateSubmitting: boolean
+  isConfirmDialogOpen: boolean
   isLimitsReviewOpen: boolean
   limitsNotice: string
   listActionNotice: string
@@ -509,14 +510,17 @@ describe('CustomerWorkspaceView.vue', () => {
 
     const wrapper = mount(CustomerWorkspaceView)
     await flushPromises()
-    const buttons = wrapper.findAll('.customer-pending-card .ui-button--secondary')
-    expect(buttons).toHaveLength(2)
-    await buttons[0]!.trigger('click')
+    const more = wrapper.get('.customer-pending-card [aria-label="اقدام‌های دعوت"]')
+    await more.trigger('click')
+    const overflowItems = wrapper.findAll('.customer-pending-card .ui-action-overflow__item')
+    expect(overflowItems).toHaveLength(3)
+    await overflowItems[0]!.trigger('click')
     await flushPromises()
-    expect(buttons[0]!.text()).toBe('کپی شد')
-    await buttons[1]!.trigger('click')
+    await more.trigger('click')
+    const overflowAfterFirst = wrapper.findAll('.customer-pending-card .ui-action-overflow__item')
+    expect(overflowAfterFirst[0]!.text()).toBe('کپی شد')
+    await overflowAfterFirst[1]!.trigger('click')
     await flushPromises()
-    expect(buttons[1]!.text()).toBe('کپی شد')
     expect(clipboardWrite).toHaveBeenNthCalledWith(1, 'https://t.me/bot?start=dual-token')
     expect(clipboardWrite).toHaveBeenNthCalledWith(2, 'https://example.test/i/CUST0020')
     wrapper.unmount()
@@ -592,7 +596,7 @@ describe('CustomerWorkspaceView.vue', () => {
         status: 'pending',
         web_short_link: 'https://example.test/i/CUST0021',
         activated_at: null,
-      }),
+      }) as unknown as Record<string, unknown>,
     )
     await createRequest
     await flushPromises()
@@ -745,9 +749,7 @@ describe('CustomerWorkspaceView.vue', () => {
   )
 
   it('keeps workspace touch targets tokenized and removes back motion for reduced-motion users', () => {
-    expect(customerWorkspaceCss).toMatch(
-      /\.ui-v2-workspace-customer-detail-tabs\s*>\s*button,[\s\S]*\.ui-v2-workspace-customer-filter-chips\s*>\s*button\s*\{\s*min-block-size: var\(--ui-v2-size-target-min\);/,
-    )
+    expect(customerWorkspaceCss).not.toContain('.ui-tabs__tab')
     expect(customerWorkspaceCss).toMatch(
       /\.ui-v2-workspace-customer-period-tab\s*\{[\s\S]*?min-block-size: var\(--ui-v2-size-target-min\);/,
     )
@@ -1354,14 +1356,14 @@ describe('CustomerWorkspaceView.vue', () => {
 
     expect(staleSignal.aborted).toBe(true)
     expect(
-      vm.customerState.relations.value.find((relation: { id: number }) => relation.id === 11)
+      vm.customerState.relations.value.find((relation: { id: number }) => relation.id === 11)!
         .max_daily_trades,
     ).toBe(9)
     staleRefresh.resolve(staleSnapshot)
     await refreshRequest
     await flushPromises()
     expect(
-      vm.customerState.relations.value.find((relation: { id: number }) => relation.id === 11)
+      vm.customerState.relations.value.find((relation: { id: number }) => relation.id === 11)!
         .max_daily_trades,
     ).toBe(9)
   })
@@ -1427,7 +1429,7 @@ describe('CustomerWorkspaceView.vue', () => {
     staleTrades.resolve([makeTrade(1, 'پاسخ قدیمی')])
     await flushPromises()
     expect(
-      tradesVm.detailTrades.map((trade: { counterparty_name: string }) => trade.counterparty_name),
+      tradesVm.detailTrades.map((trade) => trade.counterparty_name),
     ).toEqual(['پاسخ جاری'])
     expect(tradesVm.detailTradesLoading).toBe(false)
     tradesWrapper.unmount()
@@ -1455,8 +1457,8 @@ describe('CustomerWorkspaceView.vue', () => {
     await flushPromises()
     staleStats.resolve(makeStats(11, 7, 7))
     await flushPromises()
-    expect(statsVm.detailStats.period_days).toBe(30)
-    expect(statsVm.detailStats.trade_count).toBe(30)
+    expect(statsVm.detailStats!.period_days).toBe(30)
+    expect(statsVm.detailStats!.trade_count).toBe(30)
     expect(statsVm.detailStatsLoading).toBe(false)
     statsWrapper.unmount()
 
@@ -1579,7 +1581,7 @@ describe('CustomerWorkspaceView.vue', () => {
     await limitsRequest
     await flushPromises()
 
-    expect(limitsVm.activeRelation.id).toBe(13)
+    expect(limitsVm.activeRelation!.id).toBe(13)
     expect(limitsVm.customerState.detailEditForm.max_daily_trades).toBe('2')
     expect(limitsVm.limitsNotice).toBe('')
     expect(limitsVm.isLimitsReviewOpen).toBe(false)
@@ -1612,7 +1614,7 @@ describe('CustomerWorkspaceView.vue', () => {
     await terminationRequest
     await flushPromises()
 
-    expect(sessionsVm.activeRelation.id).toBe(13)
+    expect(sessionsVm.activeRelation!.id).toBe(13)
     expect(sessionsVm.sessionNotice).toBe('')
     expect(sessionsVm.detailSessions.map((session: { id: string }) => session.id)).toContain(
       'session-1',
@@ -1639,7 +1641,7 @@ describe('CustomerWorkspaceView.vue', () => {
     await deleteRequest
     await flushPromises()
 
-    expect(deleteVm.activeRelation.id).toBe(13)
+    expect(deleteVm.activeRelation!.id).toBe(13)
     expect(deleteVm.listActionNotice).toBe('')
     expect(customerWorkspaceMocks.routerPushMock).not.toHaveBeenCalled()
   })
@@ -1782,7 +1784,7 @@ describe('CustomerWorkspaceView.vue', () => {
 
     const wrapper = mount(CustomerWorkspaceView, { attachTo: routeScroll })
     expect(wrapper.find('.workspace-relation-list').exists()).toBe(false)
-    pendingRelations.resolve([makeCustomerRelation()])
+    pendingRelations.resolve([makeCustomerRelation() as unknown as Record<string, unknown>])
     await flushPromises()
     await flushPromises()
 
@@ -1876,5 +1878,23 @@ describe('CustomerWorkspaceView.vue', () => {
       name: 'operations-customers',
       query: {},
     })
+  })
+
+  it('fails closed when confirm helpers receive no customer relation', async () => {
+    customerWorkspaceMocks.fetchOwnerCustomerRelationsMock.mockResolvedValueOnce([])
+    customerWorkspaceMocks.routeState.params = {}
+    customerWorkspaceMocks.routeState.query = {}
+
+    const wrapper = mount(CustomerWorkspaceView)
+    await flushPromises()
+    const vm = getCustomerWorkspaceVm(wrapper)
+
+    vm.openConfirmDialog('cancel-invitation', null)
+    vm.openAccountDeletionDialog(null)
+
+    expect(vm.isConfirmDialogOpen).toBe(false)
+    expect(hasBodyDialog('.ui-confirm-dialog')).toBe(false)
+    expect(hasBodyDialog('.ui-v2-workspace-account-deletion-dialog')).toBe(false)
+    expect(customerWorkspaceMocks.deleteOwnerCustomerRelationMock).not.toHaveBeenCalled()
   })
 })

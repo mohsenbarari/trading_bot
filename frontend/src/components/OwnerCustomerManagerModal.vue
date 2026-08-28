@@ -35,7 +35,6 @@ import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
 import { invitationRelationLink, invitationSmsStatusMessage } from '../utils/invitationContract'
 import { tradeSettlementLabel } from '../utils/settlementType'
 import CustomerNameWithBadge from './CustomerNameWithBadge.vue'
-import HelpPopover from './HelpPopover.vue'
 import { AppBackButton, AppInput, AppTextarea } from './ui'
 
 
@@ -881,12 +880,6 @@ onBeforeUnmount(() => {
                 <h4>افزودن مشتری جدید</h4>
               </div>
               <div class="accordion-header-actions">
-                <HelpPopover
-                  button-test="customer-create-help"
-                  note-test="customer-create-help-note"
-                  label="راهنمای افزودن مشتری"
-                  text="دعوت مشتری از همین پنل ثبت می‌شود و در صورت نیاز می‌توانید لینک ثبت‌نام را کپی کنید."
-                />
                 <ChevronLeft :size="20" class="customer-accordion-chevron" />
               </div>
             </div>
@@ -1084,12 +1077,6 @@ onBeforeUnmount(() => {
                 <h4>مدیریت مشتریان</h4>
               </div>
               <div class="accordion-header-actions">
-                <HelpPopover
-                  button-test="customer-list-help"
-                  note-test="customer-list-help-note"
-                  label="راهنمای لیست مشتریان"
-                  text="برای مشتری فعال می‌توانید سطح و محدودیت‌ها را به‌روزرسانی یا ارتباط را قطع کنید."
-                />
                 <ChevronLeft :size="20" class="customer-accordion-chevron" />
               </div>
             </div>

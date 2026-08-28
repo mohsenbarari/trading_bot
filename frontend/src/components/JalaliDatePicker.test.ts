@@ -120,7 +120,7 @@ describe('JalaliDatePicker.vue', () => {
     })
 
     const selectedDay = findDay(wrapper, '۹')
-    selectedDay.element.focus()
+    ;(selectedDay.element as HTMLElement).focus()
     const event = new KeyboardEvent('keydown', {
       key: 'ArrowLeft',
       bubbles: true,
@@ -147,7 +147,7 @@ describe('JalaliDatePicker.vue', () => {
     })
 
     const selectedDay = findDay(wrapper, '۹')
-    selectedDay.element.focus()
+    ;(selectedDay.element as HTMLElement).focus()
     await selectedDay.trigger('keydown', { key: 'ArrowLeft' })
 
     expect(document.activeElement).toBe(findDay(wrapper, '۱۰').element)
@@ -167,7 +167,7 @@ describe('JalaliDatePicker.vue', () => {
     })
 
     const selectedDay = findDay(wrapper, '۱')
-    selectedDay.element.focus()
+    ;(selectedDay.element as HTMLElement).focus()
     await selectedDay.trigger('keydown', { key: 'ArrowRight' })
     await nextTick()
     await nextTick()

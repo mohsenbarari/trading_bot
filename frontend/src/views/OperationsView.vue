@@ -4,6 +4,7 @@ import type { Component } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   BriefcaseBusiness,
+  ChevronLeft,
   Megaphone,
   Package,
   Settings,
@@ -11,7 +12,6 @@ import {
   Users,
 } from 'lucide-vue-next'
 import {
-  WorkspaceActionTile,
   WorkspaceNotice,
   WorkspaceSection,
   WorkspaceShell,
@@ -20,6 +20,8 @@ import {
   AppButton,
   AppEmptyState,
   AppErrorState,
+  AppInsetGroup,
+  AppListItem,
   AppLoadingState,
 } from '../components/ui'
 import {
@@ -180,47 +182,49 @@ onMounted(refreshIdentity)
       <WorkspaceSection
         v-if="hasIdentity && ownerActions.length"
         title="روابط کاری"
-        tone="primary"
         v2-scope
       >
-        <div class="action-grid">
-          <WorkspaceActionTile
+        <AppInsetGroup class="operations-action-group">
+          <AppListItem
             v-for="action in ownerActions"
             :key="action.key"
             class="operations-action-tile"
+            interactive
             :title="action.title"
-            :tone="action.tone || 'neutral'"
-            v2-scope
             @select="action.action"
           >
-            <template #icon>
+            <template #leading>
               <component :is="action.icon" :size="20" />
             </template>
-          </WorkspaceActionTile>
-        </div>
+            <template #trailing>
+              <ChevronLeft :size="18" aria-hidden="true" />
+            </template>
+          </AppListItem>
+        </AppInsetGroup>
       </WorkspaceSection>
 
       <WorkspaceSection
         v-if="hasIdentity && adminActions.length"
         title="مدیریت"
-        tone="success"
         v2-scope
       >
-        <div class="action-grid">
-          <WorkspaceActionTile
+        <AppInsetGroup class="operations-action-group">
+          <AppListItem
             v-for="action in adminActions"
             :key="action.key"
             class="operations-action-tile"
+            interactive
             :title="action.title"
-            tone="success"
-            v2-scope
             @select="action.action"
           >
-            <template #icon>
+            <template #leading>
               <component :is="action.icon" :size="20" />
             </template>
-          </WorkspaceActionTile>
-        </div>
+            <template #trailing>
+              <ChevronLeft :size="18" aria-hidden="true" />
+            </template>
+          </AppListItem>
+        </AppInsetGroup>
       </WorkspaceSection>
 
       <AppEmptyState
@@ -246,13 +250,8 @@ onMounted(refreshIdentity)
   min-height: 100dvh;
 }
 
-.action-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 0;
-  overflow: hidden;
-  border-radius: 12px;
-  background: var(--ds-bg-card);
+.operations-action-group {
+  margin: 0;
 }
 
 .operations-action-tile {

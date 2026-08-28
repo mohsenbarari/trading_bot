@@ -148,7 +148,7 @@ async function cancelDialog(wrapper: VueWrapper) {
 
 function expectDialogKeepsSafeCopy(wrapper: VueWrapper, rawDetail: string) {
   const dialog = wrapper.get('.ui-confirm-dialog')
-  expect(dialog.exists()).toBe(true)
+  expect(wrapper.find('.ui-confirm-dialog').exists()).toBe(true)
   expect(dialog.text()).toContain('تأیید نشد')
   expect(dialog.text()).not.toContain(rawDetail)
   expect(dialog.text()).not.toContain('owner12')
@@ -205,7 +205,7 @@ describe('UserProfile.vue authoritative admin actions', () => {
   })
 
   it('keeps admin-profile typography locally aligned with the Figma Persian card scale', () => {
-    expect(userProfileSource).toMatch(/<div class="card admin-user-profile">/)
+    expect(userProfileSource).toMatch(/<div class="admin-user-profile">/)
     expect(userProfileSource).toMatch(
       /\.admin-user-profile\s*\{[\s\S]*?font-family:\s*Vazirmatn,\s*Tahoma,\s*Arial,\s*sans-serif;[\s\S]*?font-synthesis:\s*none;/,
     )
@@ -1090,7 +1090,7 @@ describe('UserProfile.vue authoritative admin actions', () => {
       viewerRole: 'مدیر میانی',
     })
 
-    expect(wrapper.get('.admin-sensitive-readonly').text()).toContain('حساب خودتان')
+    expect(wrapper.get('.admin-sensitive-readonly').text()).toBe('این حساب فقط قابل مشاهده است.')
     expect(wrapper.find('.sessions-config-box').exists()).toBe(false)
     expect(wrapper.find('.settings-btn').exists()).toBe(false)
     expect(wrapper.find('.delete-btn').exists()).toBe(false)
@@ -1106,7 +1106,7 @@ describe('UserProfile.vue authoritative admin actions', () => {
       viewerRole: 'مدیر ارشد',
     })
 
-    expect(wrapper.get('.admin-sensitive-readonly').text()).toContain('مدیر ارشد هم‌سطح')
+    expect(wrapper.get('.admin-sensitive-readonly').text()).toBe('این مدیر فقط قابل مشاهده است.')
     expect(wrapper.find('.sessions-config-box').exists()).toBe(false)
     expect(wrapper.find('.settings-btn').exists()).toBe(false)
     expect(wrapper.find('.delete-btn').exists()).toBe(false)

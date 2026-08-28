@@ -7,10 +7,10 @@ import {
   AppBackButton,
   AppButton,
   AppErrorState,
+  AppInsetGroup,
   AppListItem,
   AppLoadingState,
   AppPage,
-  AppSectionCard,
   AppStatusBadge,
 } from '../components/ui'
 import { WorkspaceNotice } from '../components/workspace'
@@ -46,7 +46,6 @@ const identityBusy = ref(false)
 interface AccountAction {
   key: string
   title: string
-  description: string
   icon: Component
   action: () => void
 }
@@ -82,7 +81,6 @@ const profileActions = computed<AccountAction[]>(() => {
     {
       key: 'profile',
       title: 'پروفایل من',
-      description: 'مشاهده و ویرایش اطلاعات حساب',
       icon: UserRound,
       action: () => router.push({ name: 'profile' }),
     },
@@ -91,7 +89,6 @@ const profileActions = computed<AccountAction[]>(() => {
     actions.push({
       key: 'settings',
       title: 'تنظیمات کاربری',
-      description: 'مدیریت وقت اضافه پیشنهادهای تازه',
       icon: Settings,
       action: () => router.push({ name: 'settings' }),
     })
@@ -107,7 +104,6 @@ const securityActions = computed<AccountAction[]>(() => {
     actions.push({
       key: 'sessions',
       title: 'نشست‌های فعال',
-      description: 'بررسی و مدیریت دستگاه‌های فعال',
       icon: Smartphone,
       action: () => router.push({ name: 'account-security' }),
     })
@@ -116,7 +112,6 @@ const securityActions = computed<AccountAction[]>(() => {
   actions.push({
     key: 'storage',
     title: 'حافظه و داده‌ها',
-    description: 'پاک‌سازی فایل‌های دانلود شده و داده‌های محلی',
     icon: Database,
     action: () => router.push({ name: 'account-storage' }),
   })
@@ -124,19 +119,12 @@ const securityActions = computed<AccountAction[]>(() => {
   return actions
 })
 
-const securitySectionDescription = computed(() =>
-  isAccountant.value
-    ? 'حافظه دستگاه و داده‌های محلی را از مسیر مشخص خود مدیریت کنید.'
-    : 'نشست‌ها، حافظه دستگاه و داده‌های محلی را از مسیر مشخص خود مدیریت کنید.',
-)
-
 const notificationActions = computed<AccountAction[]>(() =>
   hasIdentity.value
     ? [
         {
           key: 'notifications',
           title: 'اعلان‌ها',
-          description: 'اعلان‌های سیستمی، بازار و معاملات',
           icon: Bell,
           action: () => router.push({ name: 'account-notifications' }),
         },
@@ -188,9 +176,8 @@ onMounted(refreshIdentity)
 </script>
 
 <template>
-  <div class="ds-page account-hub-page ui-v2-daily-page ui-v2-account-page">
+  <div class="ds-page account-hub-page">
     <AppPage>
-      <h1 class="sr-only account-page-title">حساب</h1>
       <AppLoadingState
         v-if="identityState === 'loading' && !hasIdentity"
         class="account-identity-loading"
@@ -229,13 +216,14 @@ onMounted(refreshIdentity)
             >به‌روزرسانی</AppButton
           >
         </WorkspaceNotice>
-        <header class="account-compact-header ui-v2-account-header" aria-label="حساب کاربری">
+        <header class="account-compact-header" aria-labelledby="account-page-title">
           <AppBackButton
             class="account-return-control"
             label="بازگشت"
             @click="router.back()"
           />
-          <div class="account-identity ui-v2-account-header__identity">
+          <div class="account-identity">
+            <h1 id="account-page-title" class="account-page-title">حساب</h1>
             <div class="account-identity-name-row">
               <span
                 v-if="accountRestriction"
@@ -256,7 +244,7 @@ onMounted(refreshIdentity)
           <div class="account-header-spacer" aria-hidden="true"></div>
         </header>
 
-        <AppSectionCard class="account-section-card" title="پروفایل" tone="primary">
+        <AppInsetGroup class="account-section-card" title="پروفایل">
           <div
             class="account-action-grid"
             :class="{ 'account-action-grid--single': profileActions.length === 1 }"
@@ -267,7 +255,6 @@ onMounted(refreshIdentity)
               class="hub-action"
               interactive
               :title="action.title"
-              :description="action.description"
               @select="action.action"
             >
               <template #leading>
@@ -286,13 +273,9 @@ onMounted(refreshIdentity)
             :error="telegramLinkError"
             @connect="connectTelegram"
           />
-        </AppSectionCard>
+        </AppInsetGroup>
 
-        <AppSectionCard
-          class="account-section-card"
-          title="امنیت و داده‌ها"
-          :description="securitySectionDescription"
-        >
+        <AppInsetGroup class="account-section-card" title="امنیت و داده‌ها">
           <div
             class="account-action-grid"
             :class="{ 'account-action-grid--single': securityActions.length === 1 }"
@@ -303,7 +286,6 @@ onMounted(refreshIdentity)
               class="hub-action"
               interactive
               :title="action.title"
-              :description="action.description"
               @select="action.action"
             >
               <template #leading>
@@ -314,13 +296,9 @@ onMounted(refreshIdentity)
               </template>
             </AppListItem>
           </div>
-        </AppSectionCard>
+        </AppInsetGroup>
 
-        <AppSectionCard
-          class="account-section-card"
-          title="اعلان‌ها"
-          description="اعلان‌های بازار، معامله و سیستم را از مسیر اختصاصی خود ببینید."
-        >
+        <AppInsetGroup class="account-section-card" title="اعلان‌ها">
           <div
             class="account-action-grid"
             :class="{ 'account-action-grid--single': notificationActions.length === 1 }"
@@ -331,7 +309,6 @@ onMounted(refreshIdentity)
               class="hub-action"
               interactive
               :title="action.title"
-              :description="action.description"
               @select="action.action"
             >
               <template #leading>
@@ -342,7 +319,7 @@ onMounted(refreshIdentity)
               </template>
             </AppListItem>
           </div>
-        </AppSectionCard>
+        </AppInsetGroup>
       </template>
     </AppPage>
   </div>
@@ -355,15 +332,24 @@ onMounted(refreshIdentity)
 
 .account-compact-header {
   display: grid;
-  grid-template-columns: 3rem minmax(0, 1fr) 3rem;
-  align-items: center;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
   gap: 0.75rem;
-  margin-bottom: 0.9rem;
-  min-height: 3rem;
+  margin-bottom: var(--ds-page-padding);
+  min-height: var(--ds-native-row-min-height);
 }
 
 .account-return-control {
-  white-space: nowrap;
+  min-height: var(--ds-native-row-min-height);
+}
+
+.account-page-title {
+  margin: 0;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-native-title-size);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
 }
 
 .account-identity {
@@ -372,8 +358,8 @@ onMounted(refreshIdentity)
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.2rem;
-  min-height: 2.25rem;
+  gap: 0.25rem;
+  min-height: var(--ds-native-row-min-height);
   text-align: center;
 }
 
@@ -424,12 +410,12 @@ onMounted(refreshIdentity)
 }
 
 .account-header-spacer {
-  width: 3rem;
-  height: 3rem;
+  width: var(--ds-native-row-min-height);
+  height: var(--ds-native-row-min-height);
 }
 
 .account-section-card + .account-section-card {
-  margin-top: 0.75rem;
+  margin-top: var(--ds-page-padding);
 }
 
 .account-action-grid {
@@ -443,20 +429,11 @@ onMounted(refreshIdentity)
 }
 
 .account-telegram-panel {
-  margin-top: 0.75rem;
+  box-shadow: none;
 }
 
 .account-action-grid :deep(.ui-list-item) {
-  border: 0;
-  border-radius: 0;
-  background: var(--ds-bg-card);
-  box-shadow: inset 0 -1px 0 var(--ds-native-hairline);
   padding-inline: 0.25rem;
-}
-
-.account-action-grid :deep(.ui-list-item--interactive:hover) {
-  transform: none;
-  box-shadow: inset 0 -1px 0 var(--ds-native-hairline);
 }
 
 @media (max-width: 700px) {

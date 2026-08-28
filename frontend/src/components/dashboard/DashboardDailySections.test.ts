@@ -108,6 +108,15 @@ describe('DashboardDailySections.vue', () => {
     mocks.wsOff.mockClear()
   })
 
+  it('renders coworkers and commodities as inset groups without outer card chrome', () => {
+    expect(componentSource).toMatch(
+      /\.dashboard-coworkers,\s*\.dashboard-commodities\s*\{[\s\S]*?border:\s*0;/,
+    )
+    expect(componentSource).toMatch(
+      /\.dashboard-coworkers,\s*\.dashboard-commodities\s*\{[\s\S]*?border-radius:\s*var\(--ds-inset-group-radius/,
+    )
+  })
+
   it('keeps one semantic row per trade inside a keyboard-focusable horizontal scroller', () => {
     expect(componentSource.match(/<tr v-for="trade in trades"/g)).toHaveLength(1)
     expect(componentSource).toMatch(
@@ -142,14 +151,15 @@ describe('DashboardDailySections.vue', () => {
     ])
     const tradeRows = wrapper.findAll('.dashboard-trades__table tbody tr')
     expect(tradeRows).toHaveLength(2)
-    expect(tradeRows[0].findAll('th, td')).toHaveLength(11)
+    expect(tradeRows[0]!.findAll('th, td')).toHaveLength(11)
     expect(wrapper.findAll('.dashboard-trades__table thead th')).toHaveLength(11)
     expect(wrapper.get('.dashboard-trades__scroller').attributes()).toMatchObject({
       role: 'region',
       tabindex: '0',
     })
-    expect(wrapper.get('.dashboard-trades__scroller').attributes('aria-label')).toContain('۲ معامله')
-    expect(wrapper.text()).toContain('جدول را به چپ یا راست بکشید')
+    expect(wrapper.get('.dashboard-trades__scroller').attributes('aria-label')).toBe('۲ معامله')
+    expect(wrapper.text()).not.toContain('جدول را به چپ یا راست بکشید')
+    expect(wrapper.text()).not.toContain('با پیمایش افقی')
     expect(wrapper.text()).toContain('شماره معامله')
     expect(wrapper.text()).toContain('۱۲۳۴۵۶')
     expect(wrapper.text()).not.toContain('۱۲۳٬۴۵۶')

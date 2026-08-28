@@ -5,10 +5,12 @@ withDefaults(defineProps<{
   modelValue?: string
   placeholder?: string
   label?: string
+  disabled?: boolean
 }>(), {
   modelValue: '',
   placeholder: 'جستجو',
   label: 'جستجو',
+  disabled: false,
 })
 
 defineEmits<{
@@ -25,6 +27,7 @@ defineEmits<{
       :aria-label="label"
       :value="modelValue"
       :placeholder="placeholder"
+      :disabled="disabled"
       @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
     >
   </label>

@@ -226,6 +226,8 @@ describe('SettingsView.vue', () => {
 
     expect(wrapper.get('h1').text()).toBe('تنظیمات حساب')
     expect(wrapper.get('.settings-overtime-card').text()).toContain('وقت اضافه')
+    expect(wrapper.get('.settings-overtime-card').findAll('h3').length).toBe(1)
+    expect(wrapper.get('.settings-overtime-card').find('.ui-section-card__header').exists()).toBe(false)
     expect(wrapper.find('.settings-security-card').exists()).toBe(false)
     expect(wrapper.find('.settings-storage-card').exists()).toBe(false)
     expect(requestsFor('/api/sessions/active')).toHaveLength(0)
@@ -395,7 +397,7 @@ describe('SettingsView.vue', () => {
     const wrapper = await mountSettingsView()
 
     expect(wrapper.get('.settings-other-sessions-card').text()).toContain(
-      'نشست فعلی این دستگاه را حفظ می‌کند',
+      'خروج از نشست‌های دیگر',
     )
     await wrapper.get('.logout-all-btn').trigger('click')
     expect(bodyConfirmDialog().textContent).toContain('نشست فعلی این دستگاه باز می‌ماند')
@@ -632,14 +634,14 @@ describe('SettingsView.vue', () => {
     const wrapper = await mountSettingsView('account-storage')
 
     expect(wrapper.get('.settings-storage-card').text()).toContain(
-      'پیام‌ها، تنظیمات حساب و فایل‌های روی سرور تغییر نمی‌کنند',
+      'فقط فایل‌های ذخیره‌شده روی این دستگاه پاک می‌شوند',
     )
     await wrapper.get('.storage-clear-btn').trigger('click')
     expect(settingsViewMocks.clearStorageFileCacheMock).not.toHaveBeenCalled()
     const dialog = bodyConfirmDialog()
     expect(dialog.contains(document.activeElement)).toBe(true)
-    expect(dialog.textContent).toContain('روی همین دستگاه')
-    expect(dialog.textContent).toContain('لغو یا Escape هیچ تغییری ایجاد نمی‌کند')
+    expect(dialog.textContent).toContain('فقط فایل‌های این دستگاه حذف می‌شوند')
+    expect(dialog.textContent).toContain('پیام‌ها و حساب تغییری نمی‌کنند')
     expect(dialog.textContent).not.toContain('trading-bot-chat-files')
     expect(dialog.textContent).not.toContain('localforage')
 

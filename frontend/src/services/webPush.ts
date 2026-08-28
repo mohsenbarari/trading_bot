@@ -240,9 +240,12 @@ async function subscribeWithKey(
   registration: ServiceWorkerRegistration,
   publicKey: string,
 ): Promise<PushSubscription> {
+  const applicationServerKey = urlBase64ToUint8Array(publicKey)
+  const keyCopy = new Uint8Array(applicationServerKey.byteLength)
+  keyCopy.set(applicationServerKey)
   return registration.pushManager.subscribe({
     userVisibleOnly: true,
-    applicationServerKey: urlBase64ToUint8Array(publicKey),
+    applicationServerKey: keyCopy,
   })
 }
 

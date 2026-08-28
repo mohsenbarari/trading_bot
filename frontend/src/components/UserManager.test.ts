@@ -120,11 +120,11 @@ describe('UserManager.vue', () => {
     const wrapper = await mountView()
 
     expect(wrapper.find('.search-toggle-btn').exists()).toBe(false)
-    expect(wrapper.get('.user-search-form').exists()).toBe(true)
+    expect(wrapper.find('.user-search-form').exists()).toBe(true)
     expect(wrapper.get('.user-search-input').classes()).toContain('ui-input')
     expect(wrapper.get('.search-submit-btn').classes()).toContain('ui-button')
     expect(wrapper.get('label[for="user-directory-search"]').text()).toBe('جستجوی کاربر')
-    expect(wrapper.get('input#user-directory-search').exists()).toBe(true)
+    expect(wrapper.find('input#user-directory-search').exists()).toBe(true)
 
     await wrapper.get('input').setValue(' ali search ')
     expect(userManagerMocks.apiFetchMock).toHaveBeenCalledTimes(1)
@@ -152,9 +152,9 @@ describe('UserManager.vue', () => {
     const wrapper = await mountView()
     const row = wrapper.get('.users-list > li > button.user-item')
 
-    expect(row.get('.ui-list-item__leading').exists()).toBe(true)
-    expect(row.get('.ui-list-item__copy').exists()).toBe(true)
-    expect(row.get('.ui-list-item__trailing').exists()).toBe(true)
+    expect(row.find('.ui-list-item__leading').exists()).toBe(true)
+    expect(row.find('.ui-list-item__copy').exists()).toBe(true)
+    expect(row.find('.ui-list-item__trailing').exists()).toBe(true)
     expect(row.get('.user-name').text()).toContain('directory-user-with-a-deliberately-long-name')
     expect(row.get('.user-meta').text()).toContain('حساب غیرفعال')
     expect(row.get('.role-badge').text()).toContain('مدیر ارشد')

@@ -199,6 +199,8 @@ describe('TradingSettings.vue', () => {
 
     expect(wrapper.text()).toContain('خطا در بارگذاری تنظیمات')
     expect(wrapper.find('.ds-loading-state').exists()).toBe(false)
+    expect(wrapper.get('.settings-load-retry').text()).toContain('تلاش دوباره')
+    expect(wrapper.get('[role="alert"]').text()).toContain('خطا در بارگذاری تنظیمات')
 
     wrapper.unmount()
   })

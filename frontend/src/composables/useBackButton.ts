@@ -19,7 +19,7 @@ let isListening = false
 let isTelegramListening = false
 let ignoreNextPopState = false
 let ignoredPopStateCallback: BackHandler | null = null
-let ignoredPopStateFallbackTimer: ReturnType<typeof window.setTimeout> | null = null
+let ignoredPopStateFallbackTimer: number | null = null
 let telegramInitInterval: any = null
 
 function handlePopState() {
@@ -136,7 +136,7 @@ export function popBackStateAfterHistory(onAfterHistoryBack: BackHandler) {
     ignoredPopStateCallback = null
     ignoredPopStateFallbackTimer = null
     onAfterHistoryBack()
-  }, 120)
+  }, 120) as unknown as number
   return true
 }
 

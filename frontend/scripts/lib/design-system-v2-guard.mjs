@@ -1703,20 +1703,23 @@ function isApprovedStage4ActivationBoundary({ path: sourcePath, source }) {
   }
 
   if (sourcePath === 'src/components/SessionApprovalModal.vue') {
-    const scopeBindings = [...source.matchAll(/:data-ui-system\s*=\s*["']portalScopeValue["']/g)]
-    const modalRoot =
-      /<div\b(?=[^>]*\bv-if\s*=\s*["']showModal["'])(?=[^>]*:data-ui-system\s*=\s*["']portalScopeValue["'])[^>]*>/.test(
-        source,
-      )
+    const backdropBindings = [...source.matchAll(/:backdrop-attrs\s*=\s*["']sessionBackdropAttrs["']/g)]
+    const sheetRoot = /<AppBottomSheet\b(?=[^>]*:open\s*=\s*["']sheetOpen["'])(?=[^>]*:backdrop-attrs\s*=\s*["']sessionBackdropAttrs["'])/.test(
+      source,
+    )
+    const bindsPortalOnBackdrop = /['"]data-ui-system['"]\s*:\s*portalScopeValue/.test(source)
     const hasRawScope = /\bdata-ui-system\s*=\s*["']v2(?:-portal)?["']/.test(source)
     if (
-      scopeBindings.length !== 1 ||
-      !modalRoot ||
+      backdropBindings.length !== 1 ||
+      !sheetRoot ||
+      !bindsPortalOnBackdrop ||
       hasRawScope ||
       !/\bv2Portal\??\s*:\s*boolean\b/.test(source) ||
       !/\bv2Portal\s*:\s*false\b/.test(source) ||
       !/\bportalScopeValue\b/.test(source) ||
       !/\bprops\.v2Portal\b/.test(source) ||
+      !/:show-close\s*=\s*["']false["']/.test(source) ||
+      !/:close-on-escape\s*=\s*["']false["']/.test(source) ||
       !/\bUI_DESIGN_SYSTEM_PORTAL_SCOPE_VALUE\b/.test(source) ||
       !/from\s+["'][^"']*uiDesignSystemScope["']/.test(source)
     ) {
@@ -1724,7 +1727,8 @@ function isApprovedStage4ActivationBoundary({ path: sourcePath, source }) {
     }
 
     const withoutApprovedPortalBinding = source
-      .replace(/:data-ui-system\s*=\s*["']portalScopeValue["']/g, '')
+      .replace(/:backdrop-attrs\s*=\s*["']sessionBackdropAttrs["']/g, '')
+      .replace(/['"]data-ui-system['"]\s*:\s*portalScopeValue(?:\.value)?/g, '')
       .replace(/\bUI_DESIGN_SYSTEM_PORTAL_SCOPE_VALUE\b/g, '')
     return sourceActivationEvidence(sourcePath, withoutApprovedPortalBinding) === null
   }
@@ -1755,24 +1759,25 @@ function isApprovedStage4ActivationBoundary({ path: sourcePath, source }) {
     const scopedSections = [
       ...source.matchAll(/<AppDesignSystemScope\b([^>]*)>([\s\S]*?)<\/AppDesignSystemScope>/g),
     ]
-    const homeSections = scopedSections.filter((section) =>
-      /\bclass\s*=\s*["'][^"']*\bui-v2-home-top\b[^"']*["']/.test(section[1]),
-    )
     const pwaSections = scopedSections.filter((section) =>
       /\bclass\s*=\s*["'][^"']*\bui-v2-pwa-section\b[^"']*["']/.test(section[1]),
     )
-    const homeContent = homeSections[0]?.[2] ?? ''
+    const homeMatch = source.match(
+      /<div\b([^>]*)\bclass\s*=\s*["'][^"']*\bdashboard-home-top\b[^"']*["'][^>]*>([\s\S]*?)<\/div>\s*<section\b/,
+    )
+    const homeContent = homeMatch?.[2] ?? ''
     const pwaContent = pwaSections[0]?.[2] ?? ''
     if (
-      scopedSections.length !== 2 ||
-      homeSections.length !== 1 ||
+      scopedSections.length !== 1 ||
       pwaSections.length !== 1 ||
-      !/<header\b[^>]*\bui-v2-home-header\b/.test(homeContent) ||
-      !/\bui-v2-home-header__main\b/.test(homeContent) ||
-      !/\bui-v2-home-identity\b/.test(homeContent) ||
-      !/\bui-v2-home-notifications\b/.test(homeContent) ||
-      !/\bui-v2-home-title\b/.test(homeContent) ||
-      !/\bui-v2-home-alert\b/.test(homeContent) ||
+      !homeMatch ||
+      /\bui-v2-home-/.test(source) ||
+      !/<header\b[^>]*\bdashboard-header\b/.test(homeContent) ||
+      !/\bdashboard-header-main\b/.test(homeContent) ||
+      !/\buser-info-center\b/.test(homeContent) ||
+      !/\bnotif-btn\b/.test(homeContent) ||
+      !/\bdashboard-page-title\b/.test(homeContent) ||
+      !/\bdashboard-notice\b/.test(homeContent) ||
       /\bhero-btn\b|Market Entry|<MarketHero\b|<PWAInstallOverlay\b/.test(homeContent) ||
       !/^\s*<PWAInstallOverlay\b[^>]*\/>\s*$/.test(pwaContent) ||
       /\bhero-btn\b|Market Entry|<MarketHero\b/.test(pwaContent)

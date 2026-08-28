@@ -164,13 +164,6 @@ const pageTitle = computed(() => {
   if (isSecurityRoute.value) return 'امنیت حساب'
   return 'حافظه و داده‌ها'
 })
-const pageDescription = computed(() => {
-  if (isGeneralRoute.value) return 'وقت اضافه پیشنهادهای تازه را از مسیر مشخص حساب مدیریت کنید.'
-  if (isSecurityRoute.value) {
-    return 'نشست‌های گزارش‌شده توسط همین سرور و اختیار دستگاه فعلی را مدیریت کنید.'
-  }
-  return 'فایل‌های محلی پیام‌رسان روی همین دستگاه را بررسی و پاک‌سازی کنید.'
-})
 
 const currentSession = computed(() => sessions.value.find((session) => session.isCurrent) ?? null)
 const currentSessionIsPrimary = computed(() => currentSession.value?.isPrimary === true)
@@ -192,7 +185,7 @@ const sessionAuthority = computed<ActionFeedback>(() => {
     return {
       tone: 'success',
       title: 'این دستگاه، نشست اصلی است',
-      message: 'این دستگاه طبق پاسخ سرور اجازه پایان دادن به نشست‌های دیگر را دارد.',
+      message: 'می‌توانید نشست‌های دیگر را از این دستگاه پایان دهید.',
     }
   }
   return {
@@ -601,9 +594,9 @@ watch(
 </script>
 
 <template>
-  <div ref="settingsPageRoot" class="ds-page settings-page ui-v2-daily-page ui-v2-settings-page">
+  <div ref="settingsPageRoot" class="ds-page settings-page">
     <AppPage narrow>
-      <AppPageHeader eyebrow="حساب" :title="pageTitle" :description="pageDescription">
+      <AppPageHeader eyebrow="حساب" :title="pageTitle">
         <template #back>
           <AppBackButton
             class="settings-return-control"
@@ -659,9 +652,6 @@ watch(
         <AppSectionCard
           v-if="showOvertimePreference"
           class="settings-section-card settings-overtime-card"
-          title="وقت اضافه پیشنهادها"
-          description="مدت اعتبار افزوده برای پیشنهادهایی که از این پس ایجاد می‌کنید."
-          tone="primary"
         >
           <OfferOvertimePreferencePanel class="settings-overtime-panel" />
         </AppSectionCard>
@@ -686,8 +676,6 @@ watch(
           <AppSectionCard
             class="settings-section-card settings-security-card"
             title="نشست‌های این سرور"
-            description="فقط نشست‌هایی نمایش داده می‌شوند که همین سرور گزارش کرده است؛ درباره سرور دیگر نتیجه‌ای فرض نمی‌شود."
-            tone="primary"
           >
             <WorkspaceNotice
               class="session-authority-notice"
@@ -818,7 +806,6 @@ watch(
             v-if="canLogoutOtherSessions || logoutOthersFeedback"
             class="settings-section-card settings-other-sessions-card"
             title="نشست‌های دیگر"
-            description="این اقدام نشست‌های دیگر را می‌بندد و نشست فعلی این دستگاه را حفظ می‌کند."
           >
             <WorkspaceNotice
               v-if="logoutOthersFeedback"
@@ -844,8 +831,6 @@ watch(
           <AppSectionCard
             class="settings-section-card settings-current-logout-card"
             title="خروج از این دستگاه"
-            description="اطلاعات ورود فقط از همین دستگاه پاک می‌شود."
-            tone="danger"
           >
             <WorkspaceNotice
               v-if="localLogoutFeedback"
@@ -873,14 +858,12 @@ watch(
           v-else-if="isStorageRoute"
           class="settings-section-card settings-storage-card"
           title="فایل‌های پیام‌رسان این دستگاه"
-          description="فقط نسخه‌های محلی فایل‌های دریافت‌شده حذف می‌شوند؛ پیام‌ها، تنظیمات حساب و فایل‌های روی سرور تغییر نمی‌کنند."
-          tone="primary"
+          description="فقط فایل‌های ذخیره‌شده روی این دستگاه پاک می‌شوند."
         >
           <div class="storage-card">
             <div class="storage-info">
               <div>
                 <span class="storage-label">فضای فایل‌های محلی پیام‌رسان</span>
-                <p class="storage-copy">این مقدار فقط به حافظه همین دستگاه مربوط است.</p>
               </div>
               <strong class="storage-value" dir="ltr">{{ cacheSizeLabel }}</strong>
             </div>
@@ -947,7 +930,7 @@ watch(
       v-if="storageDialogOpen"
       :open="storageDialogOpen"
       title="پاک‌کردن فایل‌های محلی"
-      message="فقط فایل‌های ذخیره‌شده پیام‌رسان روی همین دستگاه حذف می‌شوند. پیام‌ها، تنظیمات حساب و فایل‌های روی سرور تغییر نمی‌کنند. لغو یا Escape هیچ تغییری ایجاد نمی‌کند."
+      message="فقط فایل‌های این دستگاه حذف می‌شوند؛ پیام‌ها و حساب تغییری نمی‌کنند."
       confirm-label="تأیید پاک‌سازی"
       cancel-label="انصراف"
       tone="danger"

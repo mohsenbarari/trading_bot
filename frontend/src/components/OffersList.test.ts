@@ -1794,7 +1794,7 @@ describe('OffersList.vue', () => {
     for (const time of times) {
       expect(time).not.toMatch(/\d{4}-\d{2}-\d{2}T/)
     }
-    expect(wrapper.get('[data-test="offer-deadline-meter"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="offer-deadline-meter"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="offer-overtime-sticker"]').attributes('aria-label')).toBe('وقت اضافه')
     wrapper.unmount()
   })

@@ -83,6 +83,7 @@ describe('workspace primitives', () => {
       },
     })
     expect(section.classes()).toContain('ds-workspace-section--warning')
+    expect(section.classes()).toContain('ds-workspace-section--plain')
     expect(section.classes()).toContain('ui-section-card')
     expect(section.classes()).toContain('ui-section-card--warning')
     expect(section.text()).toContain('محدودیت‌ها')

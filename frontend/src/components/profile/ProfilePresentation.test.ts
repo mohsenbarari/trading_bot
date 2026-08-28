@@ -39,7 +39,26 @@ describe('profile presentation primitives', () => {
     expect(publicHeader.get('[data-test="profile-avatar-readonly"]').text()).toContain('م')
     expect(publicHeader.find('[data-test="profile-avatar-trigger"]').exists()).toBe(false)
     expect(adminHeader.get('.header-title').text()).toBe('حساب نمونه')
+    expect(selfHeader.find('h1.profile-identity-title').exists()).toBe(true)
     expect(adminHeader.get('.profile-nav-back').attributes('aria-label')).toBe('بازگشت به لیست کاربران')
+
+    const loadingHeader = mount(ProfileIdentityHeader, {
+      props: {
+        displayName: '',
+        loading: true,
+      },
+    })
+    expect(loadingHeader.get('h1.profile-identity-title').find('div').exists()).toBe(false)
+    expect(loadingHeader.find('h1.profile-identity-title span.skeleton-box').exists()).toBe(true)
+
+    const nestedAdminTitle = mount(ProfileIdentityHeader, {
+      props: {
+        displayName: 'حساب تو در تو',
+        titleTag: 'p',
+      },
+    })
+    expect(nestedAdminTitle.find('h1').exists()).toBe(false)
+    expect(nestedAdminTitle.get('p.profile-identity-title').text()).toBe('حساب تو در تو')
 
     await selfHeader.get('[data-test="profile-avatar-trigger"]').trigger('click')
     expect(selfHeader.emitted('pick-avatar')).toHaveLength(1)
@@ -76,6 +95,7 @@ describe('profile presentation primitives', () => {
     })
 
     expect(presence.classes()).toContain('profile-presence-status--own')
+    expect(presence.attributes('style') || '').not.toContain('absolute')
     expect(summary.get('[aria-label="خلاصه وضعیت پروفایل"]').text()).toContain('عضویت')
     expect(summary.text()).toContain('پروفایل مشتری')
     expect(summary.text()).not.toContain('سطح')

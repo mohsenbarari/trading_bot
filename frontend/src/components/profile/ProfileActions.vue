@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ChevronLeft } from 'lucide-vue-next'
-import { AppListItem, AppSectionCard } from '../ui'
+import { AppInsetGroup, AppListItem } from '../ui'
 import type { ProfileActionItem } from './types'
 
 withDefaults(defineProps<{
@@ -22,10 +22,7 @@ const emit = defineEmits<{
 
 <template>
   <section v-if="actions.length > 0" class="profile-section" :class="sectionClass" data-test="profile-actions">
-    <AppSectionCard class="profile-menu-card" :title="title" :description="description || undefined">
-      <template v-if="$slots.actions" #actions>
-        <slot name="actions" />
-      </template>
+    <AppInsetGroup class="profile-menu-card" :title="title">
       <div class="profile-action-grid">
         <AppListItem
           v-for="action in actions"
@@ -49,7 +46,7 @@ const emit = defineEmits<{
         </AppListItem>
       </div>
       <slot />
-    </AppSectionCard>
+    </AppInsetGroup>
   </section>
 </template>
 
@@ -66,9 +63,9 @@ const emit = defineEmits<{
   min-height: var(--ds-native-row-min-height, 48px);
   border: 0;
   border-radius: 0;
-  background: var(--ds-bg-card);
-  box-shadow: inset 0 -1px 0 var(--ds-native-hairline);
-  transition: background-color 0.2s;
+  background: transparent;
+  box-shadow: none;
+  transition: background 0.18s ease;
 }
 
 .profile-action-card:active {

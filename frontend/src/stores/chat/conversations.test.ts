@@ -48,8 +48,8 @@ describe('useConversationsStore', () => {
     const store = useConversationsStore()
     const cached = await store.hydrateFromCache(7)
 
-    expect(cached?.conversations[0].other_user_name).toBe('کش شده')
-    expect(store.conversations[0].other_user_name).toBe('کش شده')
+    expect(cached?.conversations[0]?.other_user_name).toBe('کش شده')
+    expect(store.conversations[0]?.other_user_name).toBe('کش شده')
     expect(store.hydrationStatus).toBe('cached')
     expect(store.lastCacheAt).toBe(123)
   })
@@ -75,8 +75,8 @@ describe('useConversationsStore', () => {
       conversation(10, { is_muted: false, is_pinned: false }),
     ])
 
-    expect(merged[0].is_muted).toBe(true)
-    expect(merged[0].is_pinned).toBe(true)
+    expect(merged[0]!.is_muted).toBe(true)
+    expect(merged[0]!.is_pinned).toBe(true)
     expect(cacheMocks.writeCachedConversations).toHaveBeenCalledOnce()
   })
 })

@@ -33,15 +33,13 @@ withDefaults(defineProps<{
 }
 
 .profile-presence-status--own {
-  position: absolute;
-  top: 68px;
-  left: 0;
-  right: 0;
+  position: static;
   margin: 0;
+  min-width: 0;
   min-height: 1.1rem;
   font-size: 0.76rem;
   line-height: 1.45;
-  text-align: center;
+  text-align: start;
 }
 
 .profile-presence-status.online {
