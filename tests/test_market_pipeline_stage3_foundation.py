@@ -223,6 +223,14 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
             "target: /var/lib/market-data/calibration/coin-groups", 1
         )[1].split("depends_on:", 1)[0]
         self.assertIn("read_only: false", calibration_mount)
+        snapshot_receiver = web.split("  estimator-snapshot-receiver:", 1)[1].split(
+            "\nsecrets:", 1
+        )[0]
+        self.assertIn(
+            "SQLITE_TMPDIR: /var/lib/market-data/state/"
+            "estimator-snapshot-receiver/sqlite-tmp",
+            snapshot_receiver,
+        )
 
     def test_adapter_wal_reader_mount_must_not_be_filesystem_read_only(self):
         base_service = {

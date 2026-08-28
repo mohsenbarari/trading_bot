@@ -271,6 +271,19 @@ def run_estimator_snapshot_receiver_service(
     )
     snapshot_root.mkdir(mode=0o700, parents=True, exist_ok=True)
     calibration_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    sqlite_tmp = os.environ.get("SQLITE_TMPDIR", "").strip()
+    if sqlite_tmp:
+        sqlite_tmp_path = Path(sqlite_tmp)
+        if (
+            not sqlite_tmp_path.is_absolute()
+            or sqlite_tmp_path.parent != state_directory
+            or sqlite_tmp_path.is_symlink()
+        ):
+            raise EstimatorSnapshotReceiverServiceError(
+                "snapshot_receiver_sqlite_tmp_invalid"
+            )
+        sqlite_tmp_path.mkdir(mode=0o700, parents=False, exist_ok=True)
+        sqlite_tmp_path.chmod(0o700)
     database_path = state_directory / "estimator-snapshot-receiver.sqlite3"
     probe = connect_snapshot_receiver(database_path)
     probe.close()

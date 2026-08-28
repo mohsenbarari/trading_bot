@@ -268,6 +268,7 @@ services:
       MARKET_PIPELINE_SNAPSHOT_STALE_AFTER_SECONDS: ${MARKET_PIPELINE_SNAPSHOT_STALE_AFTER_SECONDS:-30}
       MARKET_PIPELINE_SNAPSHOT_ROOT: /var/lib/market-data/snapshots
       MARKET_PIPELINE_CALIBRATION_ROOT: /var/lib/market-data/calibration/coin-groups
+      SQLITE_TMPDIR: /var/lib/market-data/state/estimator-snapshot-receiver/sqlite-tmp
     secrets:
       - market_postgres_password
       - market_transport_ca
