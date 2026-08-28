@@ -550,3 +550,11 @@ Stage 12 و Stage 13 تا پیاده‌سازی fan-out قابل ممیزی با
 capture manifest و snapshot timeline واقعی، report parity امضاشده، severity-1/2 صفر، p95
 حداکثر ۷ ثانیه و تصمیم صریح promotion در وضعیت HOLD باقی می‌مانند. failure soak کوتاه این
 سند جای آن جلسه کامل را نمی‌گیرد.
+
+## تصمیم بعدی مالک — 2026-08-28
+
+HOLD تاریخی این سند بعداً با مجوز صریح مالک برای اجرای `PRIVATE_PRIMARY` جایگزین شد؛ اما مجوز
+به‌معنای انجام‌شدن cutover نیست. انتقال باید با runbook مستقل Blue/Green، backup/restore تازه،
+single-owner و receipt نهایی انجام شود. تا آن receipt، runtime این سند و authority محصول نباید
+«بازنشسته» یا «تغییریافته» گزارش شوند. مرجع اجرای جدید:
+[COIN_MARKET_DATA_PRIVATE_PRIMARY_BLUEGREEN_RUNBOOK.md](./COIN_MARKET_DATA_PRIVATE_PRIMARY_BLUEGREEN_RUNBOOK.md).

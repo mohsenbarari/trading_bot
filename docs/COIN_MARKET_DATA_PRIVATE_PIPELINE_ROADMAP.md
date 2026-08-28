@@ -1407,3 +1407,13 @@ owner میزبان بسازد؛ اجرای overlap ممنوع است.
 - sync عمومی نیز در مرحله مستقل روی شبکه خصوصی مهاجرت کرده باشد؛
 - مسیرهای قدیمی فقط پس از تایید و backup/restore proof بازنشسته شده باشند؛
 - مستندات، runbook، health check و MemoryCustodian به‌روز و سبز باشند.
+
+## 17. مسیر انتقال PRIVATE_PRIMARY مصوب — 2026-08-28
+
+مالک اجرای خط خصوصی به‌عنوان ورودی اصلی مدل را تصویب کرده است. این تصویب، گیت‌های فنی را حذف
+نمی‌کند: authority محصول فقط پس از backup/restore تازه، migration دوباره‌پذیر، single-owner،
+انتقال end-to-end روی شبکهٔ خصوصی و snapshot معتبر و تازه تغییر می‌کند. اجرای Blue/Green و
+rollback دقیق در
+[COIN_MARKET_DATA_PRIVATE_PRIMARY_BLUEGREEN_RUNBOOK.md](./COIN_MARKET_DATA_PRIVATE_PRIMARY_BLUEGREEN_RUNBOOK.md)
+تعریف شده است. تا پیش از receipt نهایی همان runbook، وضعیت عملیاتی این تصمیم `IN_PROGRESS`
+است و legacy feed بازنشسته‌شده محسوب نمی‌شود.

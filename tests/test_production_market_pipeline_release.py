@@ -225,6 +225,7 @@ printf '%s\n' "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256"
             self.assertIn("scripts/backup_market_pipeline_archive.py", names)
             self.assertIn("scripts/migrate_market_pipeline_archive.py", names)
             self.assertIn("scripts/rollout_market_pipeline_shadow.py", names)
+            self.assertIn("scripts/upgrade_market_pipeline_bluegreen.py", names)
             self.assertIn("deploy/market-data/compose.web.yml", names)
             self.assertIn("deploy/market-data/compose.bot.yml", names)
             self.assertFalse(any(".env" in name or "session" in name for name in names))

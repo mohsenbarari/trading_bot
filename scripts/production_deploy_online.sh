@@ -1431,6 +1431,7 @@ validate_production_market_pipeline_evidence_manifest() {
         && -f "$MARKET_PIPELINE_FOUNDATION_MANAGER" \
         && -f "$MARKET_PIPELINE_BACKUP_TOOL" \
         && -f "$LOCAL_PROJECT_DIR/scripts/migrate_market_pipeline_archive.py" \
+        && -f "$LOCAL_PROJECT_DIR/scripts/upgrade_market_pipeline_bluegreen.py" \
         && -f "$LOCAL_PROJECT_DIR/deploy/market-data/Dockerfile" ]] \
         || die "Market Pipeline formal release tooling is incomplete."
     [[ "$PRODUCTION_MARKET_PIPELINE_WEB_ENV_SOURCE_PATH" == /* \
@@ -3836,6 +3837,7 @@ prepare_market_pipeline_control_payload() {
         scripts/backup_market_pipeline_archive.py \
         scripts/migrate_market_pipeline_archive.py \
         scripts/rollout_market_pipeline_shadow.py \
+        scripts/upgrade_market_pipeline_bluegreen.py \
         scripts/manage_market_pipeline_stage3.py \
         | tar -xf - -C "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR"
     [[ -z "$(find "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR" -type l -print -quit)" \
