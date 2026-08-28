@@ -184,16 +184,22 @@ def append_coin_group_feedback_revisions(
         digest = _digest(payload)
         existing = connection.execute(
             """
-            SELECT revision_digest FROM coin_group_calibration_corpus
+            SELECT revision_digest,parser_version_before
+            FROM coin_group_calibration_corpus
             WHERE event_key=? AND review_revision=?
             """,
             (item.event_key, int(item.review_revision)),
         ).fetchone()
         if existing is not None:
             if bytes(existing["revision_digest"]) != digest:
-                raise CoinGroupCalibrationCorpusError(
-                    "coin_group_calibration_revision_conflict"
+                replay_payload = _revision_payload(
+                    item,
+                    parser_version_before=str(existing["parser_version_before"]),
                 )
+                if bytes(existing["revision_digest"]) != _digest(replay_payload):
+                    raise CoinGroupCalibrationCorpusError(
+                        "coin_group_calibration_revision_conflict"
+                    )
             replayed += 1
             continue
         connection.execute(

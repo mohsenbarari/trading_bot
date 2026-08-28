@@ -52,7 +52,7 @@ class CoinGroupCalibrationCorpusTests(unittest.TestCase):
         replay = append_coin_group_feedback_revisions(
             self.connection,
             [feedback()],
-            parser_version_before="parser-v1",
+            parser_version_before="parser-v9",
             appended_at_utc="2026-08-25T10:02:05Z",
         )
         second = append_coin_group_feedback_revisions(
