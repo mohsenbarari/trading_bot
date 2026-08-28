@@ -61,6 +61,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "IRAN_SERVER_ALIASES": "sync-iran.example.com,iran-app",
             "IRAN_OTP_DELIVERY_STATE_SECRET": "iran-only-otp-state-secret-0123456789abcdef",
             "TELEGRAM_OTP_QUEUE_SECRET": "foreign-only-otp-queue-secret-0123456789abcdef",
+            # Keep this production renderer fixture independent from the
+            # ambient unit-test profile, where provider authority is enabled
+            # deliberately for isolated transport tests.
+            "TELEGRAM_PROVIDER_TEST_AUTHORITY": "false",
             "OFFER_EXPIRY_COMMAND_RECEIPTS_ENABLED": "true",
             "RELEASE_SHA": "abc123release",
             "DB_POOL_SIZE": "15",

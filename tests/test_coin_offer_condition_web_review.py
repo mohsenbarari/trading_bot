@@ -277,6 +277,9 @@ def test_live_queue_reads_private_source_without_copying_identifiers(tmp_path: P
         review_db=tmp_path / "review.sqlite3",
         owner_pack_path=None,
         model_path=None,
+        # This test exercises privacy projection, not the default three-day
+        # live-window boundary. Keep its fixed historical fixture in scope.
+        live_recent_days=30,
     )
 
     result = service.list_queue(queue="LIVE")

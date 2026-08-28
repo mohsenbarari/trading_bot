@@ -63,6 +63,18 @@ class SnapshotPublisherTests(unittest.TestCase):
                 quality_policy_version="publisher-test-v1",
             ),
         )
+        # Point-in-time snapshots exclude rows inserted after the evaluation
+        # instant.  Keep this historical fixture temporally coherent instead
+        # of inheriting the wall-clock insert time of the test run.
+        self.connection.execute(
+            "UPDATE market_observations SET inserted_at_utc=? WHERE event_key=?",
+            (
+                at.astimezone(timezone.utc)
+                .isoformat(timespec="microseconds")
+                .replace("+00:00", "Z"),
+                derive_event_key("publisher-test", identity),
+            ),
+        )
         self.connection.commit()
 
     def test_publishes_rate_ready_snapshot_from_read_only_store(self) -> None:

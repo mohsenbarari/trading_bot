@@ -228,6 +228,9 @@ def test_receipt_failure_rolls_back_exact_installed_source_and_clears_pending_ma
         original = b"PRIVATE_TOKEN=stable\n"
         source.write_bytes(original)
         source.chmod(0o600)
+        manifest = root / "online.env"
+        manifest.write_text(_manifest_payload(source), encoding="utf-8")
+        manifest.chmod(0o600)
         receipt = root / "receipts" / "activation.json"
         args = argparse.Namespace(
             confirm=CONFIRMATION,
@@ -242,7 +245,10 @@ def test_receipt_failure_rolls_back_exact_installed_source_and_clears_pending_ma
                 raise OSError("synthetic receipt failure")
             real_exclusive_write(path, payload, mode=mode)
 
-        with mock.patch.object(updater, "_exclusive_write", side_effect=fail_receipt):
+        with (
+            mock.patch.object(updater, "APPROVED_MANIFEST_PATH", manifest),
+            mock.patch.object(updater, "_exclusive_write", side_effect=fail_receipt),
+        ):
             with pytest.raises(OSError, match="synthetic receipt failure"):
                 updater._apply(
                     args,

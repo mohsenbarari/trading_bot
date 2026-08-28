@@ -38,10 +38,11 @@ class PublishCoinIntelligenceSnapshotTests(unittest.TestCase):
         self.tempdir.cleanup()
 
     def _seed_rate_ready_store(self) -> None:
+        event_key = derive_event_key("snapshot-cli-test", "physical-gold")
         upsert_observation(
             self.connection,
             MarketObservation(
-                event_key=derive_event_key("snapshot-cli-test", "physical-gold"),
+                event_key=event_key,
                 source_code="PRIVATE_GOLD_CHANNEL",
                 source_family="TELEGRAM_PRIVATE",
                 event_time_utc=self.now - timedelta(seconds=10),
@@ -59,6 +60,18 @@ class PublishCoinIntelligenceSnapshotTests(unittest.TestCase):
                 parser_version="snapshot-cli-test-v1",
                 quality_state="ELIGIBLE",
                 quality_policy_version="snapshot-cli-test-v1",
+            ),
+        )
+        # The snapshot is intentionally evaluated at a historical instant.
+        # Keep the fixture's ingestion time at that same instant so the
+        # point-in-time query does not correctly classify it as future data.
+        self.connection.execute(
+            "UPDATE market_observations SET inserted_at_utc=? WHERE event_key=?",
+            (
+                (self.now - timedelta(seconds=10))
+                .isoformat(timespec="microseconds")
+                .replace("+00:00", "Z"),
+                event_key,
             ),
         )
         self.connection.commit()
