@@ -32,6 +32,7 @@ else:
 
 
 CONFIRMATION = "rollout-production-market-pipeline-private-shadow"
+PRIMARY_CONFIRMATION = "rollout-production-market-pipeline-private-primary"
 SCHEMA = "market_pipeline_shadow_rollout/1.0"
 RELEASE_SHA = re.compile(r"^[0-9a-f]{40}$")
 ROLE_SERVICES = {
@@ -141,17 +142,26 @@ def _read_journal(path: Path) -> dict[str, Any]:
     return payload
 
 
-def _validate_env(role: str, env_file: Path, release_sha: str, image_id: str) -> dict[str, str]:
+def _validate_env(
+    role: str,
+    env_file: Path,
+    release_sha: str,
+    image_id: str,
+    feed_mode: str = "PRIVATE_SHADOW",
+) -> dict[str, str]:
     values = parse_env(env_file, secure_input=True)
     source = {key: value for key, value in values.items() if key not in DYNAMIC_VALUES}
     validate_source(role, source)
+    if feed_mode not in {"PRIVATE_SHADOW", "PRIVATE_PRIMARY"}:
+        raise RolloutError("rollout_feed_mode_invalid")
+    primary = feed_mode == "PRIVATE_PRIMARY"
     expected = {
         "MARKET_PIPELINE_RELEASE_SHA": release_sha,
         "MARKET_PIPELINE_IMAGE": image_id,
         "MARKET_PIPELINE_MODE": "live",
-        "MARKET_PIPELINE_FEED_MODE": "PRIVATE_SHADOW",
-        "MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY": "0",
-        "MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE": "PRIVATE_SHADOW",
+        "MARKET_PIPELINE_FEED_MODE": feed_mode,
+        "MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY": "1" if primary else "0",
+        "MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE": feed_mode,
     }
     if any(values.get(key) != value for key, value in expected.items()):
         raise RolloutError("rollout_release_env_identity_mismatch")
@@ -218,12 +228,12 @@ def _identity(
 
 def _validate_journal(
     payload: Mapping[str, Any], *, role: str, release_sha: str, image_id: str,
-    env_sha256: str, project: str
+    env_sha256: str, project: str, feed_mode: str = "PRIVATE_SHADOW",
 ) -> None:
     expected_keys = {
         "schema", "status", "role", "release_sha", "image_id", "env_sha256",
         "project", "services", "capture_services_started", "product_authority_changed",
-        "private_shadow_only", "rollback_state_deleted", "secrets_disclosed",
+        "feed_mode", "private_shadow_only", "rollback_state_deleted", "secrets_disclosed",
     }
     if (
         set(payload) != expected_keys
@@ -234,9 +244,10 @@ def _validate_journal(
         or payload.get("image_id") != image_id
         or payload.get("env_sha256") != env_sha256
         or payload.get("project") != project
+        or payload.get("feed_mode") != feed_mode
         or payload.get("capture_services_started") is not False
         or payload.get("product_authority_changed") is not False
-        or payload.get("private_shadow_only") is not True
+        or payload.get("private_shadow_only") is not (feed_mode == "PRIVATE_SHADOW")
         or payload.get("rollback_state_deleted") is not False
         or payload.get("secrets_disclosed") is not False
     ):
@@ -270,16 +281,16 @@ def _validate_journal(
 
 def prepare(
     *, role: str, release_root: Path, env_file: Path, journal: Path,
-    release_sha: str, image_id: str
+    release_sha: str, image_id: str, feed_mode: str = "PRIVATE_SHADOW",
 ) -> dict[str, Any]:
-    values = _validate_env(role, env_file, release_sha, image_id)
+    values = _validate_env(role, env_file, release_sha, image_id, feed_mode)
     project = values["MARKET_PIPELINE_PROJECT_NAME"]
     env_sha = _sha256(env_file)
     if journal.exists():
         payload = _read_journal(journal)
         _validate_journal(
             payload, role=role, release_sha=release_sha, image_id=image_id,
-            env_sha256=env_sha, project=project,
+            env_sha256=env_sha, project=project, feed_mode=feed_mode,
         )
         if payload["status"] == "ROLLED_BACK":
             if any(_ids(project, service) for service in ROLE_SERVICES[role]):
@@ -311,10 +322,11 @@ def prepare(
         "image_id": image_id,
         "env_sha256": env_sha,
         "project": project,
+        "feed_mode": feed_mode,
         "services": rows,
         "capture_services_started": False,
         "product_authority_changed": False,
-        "private_shadow_only": True,
+        "private_shadow_only": feed_mode == "PRIVATE_SHADOW",
         "rollback_state_deleted": False,
         "secrets_disclosed": False,
     }
@@ -329,13 +341,15 @@ def _sha256(path: Path) -> str:
 
 def start_service(
     *, role: str, release_root: Path, env_file: Path, journal: Path,
-    release_sha: str, image_id: str, service: str
+    release_sha: str, image_id: str, service: str,
+    feed_mode: str = "PRIVATE_SHADOW",
 ) -> dict[str, Any]:
-    values = _validate_env(role, env_file, release_sha, image_id)
+    values = _validate_env(role, env_file, release_sha, image_id, feed_mode)
     payload = _read_journal(journal)
     _validate_journal(
         payload, role=role, release_sha=release_sha, image_id=image_id,
         env_sha256=_sha256(env_file), project=values["MARKET_PIPELINE_PROJECT_NAME"],
+        feed_mode=feed_mode,
     )
     order = ROLE_SERVICES[role]
     if service not in order:
@@ -404,13 +418,15 @@ def start_service(
 
 
 def verify(
-    *, role: str, env_file: Path, journal: Path, release_sha: str, image_id: str
+    *, role: str, env_file: Path, journal: Path, release_sha: str, image_id: str,
+    feed_mode: str = "PRIVATE_SHADOW",
 ) -> dict[str, Any]:
-    values = _validate_env(role, env_file, release_sha, image_id)
+    values = _validate_env(role, env_file, release_sha, image_id, feed_mode)
     payload = _read_journal(journal)
     _validate_journal(
         payload, role=role, release_sha=release_sha, image_id=image_id,
         env_sha256=_sha256(env_file), project=values["MARKET_PIPELINE_PROJECT_NAME"],
+        feed_mode=feed_mode,
     )
     if payload["status"] != "PASS":
         raise RolloutError("rollout_not_complete")
@@ -428,13 +444,15 @@ def verify(
 
 
 def rollback(
-    *, role: str, env_file: Path, journal: Path, release_sha: str, image_id: str
+    *, role: str, env_file: Path, journal: Path, release_sha: str, image_id: str,
+    feed_mode: str = "PRIVATE_SHADOW",
 ) -> dict[str, Any]:
-    values = _validate_env(role, env_file, release_sha, image_id)
+    values = _validate_env(role, env_file, release_sha, image_id, feed_mode)
     payload = _read_journal(journal)
     _validate_journal(
         payload, role=role, release_sha=release_sha, image_id=image_id,
         env_sha256=_sha256(env_file), project=values["MARKET_PIPELINE_PROJECT_NAME"],
+        feed_mode=feed_mode,
     )
     for row in reversed(payload["services"]):
         container_id = row["container_id"]
@@ -473,6 +491,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--release-sha", required=True)
     parser.add_argument("--image-id", required=True)
     parser.add_argument("--service")
+    parser.add_argument(
+        "--feed-mode",
+        choices=("PRIVATE_SHADOW", "PRIVATE_PRIMARY"),
+        default="PRIVATE_SHADOW",
+    )
     parser.add_argument("--confirm", required=True)
     return parser
 
@@ -481,7 +504,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if (
-            args.confirm != CONFIRMATION
+            args.confirm
+            != (
+                PRIMARY_CONFIRMATION
+                if args.feed_mode == "PRIVATE_PRIMARY"
+                else CONFIRMATION
+            )
             or not RELEASE_SHA.fullmatch(args.release_sha)
             or not IMAGE_ID.fullmatch(args.image_id)
         ):
@@ -492,6 +520,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "journal": args.journal,
             "release_sha": args.release_sha,
             "image_id": args.image_id,
+            "feed_mode": args.feed_mode,
         }
         if args.command == "prepare":
             result = prepare(release_root=args.release_root, **common)
@@ -511,6 +540,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "status": result["status"],
                     "role": result["role"],
                     "release_sha": result["release_sha"],
+                    "feed_mode": result["feed_mode"],
+                    "private_shadow_only": result["private_shadow_only"],
                     "capture_services_started": False,
                     "product_authority_changed": False,
                     "secrets_disclosed": False,

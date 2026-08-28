@@ -26,15 +26,16 @@ def _fixture_parent(path: Path) -> None:
     path.parent.chmod(0o700)
 
 
-def _values(role: str) -> dict[str, str]:
+def _values(role: str, feed_mode: str = "PRIVATE_SHADOW") -> dict[str, str]:
+    primary = feed_mode == "PRIVATE_PRIMARY"
     return {
         "MARKET_PIPELINE_PROJECT_NAME": "market-private-pipeline-production",
         "MARKET_PIPELINE_RELEASE_SHA": RELEASE_SHA,
         "MARKET_PIPELINE_IMAGE": IMAGE_ID,
         "MARKET_PIPELINE_MODE": "live",
-        "MARKET_PIPELINE_FEED_MODE": "PRIVATE_SHADOW",
-        "MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY": "0",
-        "MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE": "PRIVATE_SHADOW",
+        "MARKET_PIPELINE_FEED_MODE": feed_mode,
+        "MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY": "1" if primary else "0",
+        "MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE": feed_mode,
         "MARKET_PRIVATE_BIND_IP": "10.240.1.10" if role == "bot" else "10.240.1.20",
     }
 
@@ -84,6 +85,41 @@ class RolloutMarketPipelineShadowTests(unittest.TestCase):
         )
         self.assertFalse(payload["capture_services_started"])
         self.assertFalse(payload["product_authority_changed"])
+
+    def test_primary_prepare_is_explicit_and_not_reported_as_shadow(self) -> None:
+        with (
+            mock.patch.object(
+                rollout,
+                "_validate_env",
+                return_value=_values("bot", "PRIVATE_PRIMARY"),
+            ),
+            mock.patch.object(rollout, "_ids", return_value=[]),
+            mock.patch.object(
+                rollout,
+                "_run",
+                return_value=subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+            ),
+        ):
+            payload = rollout.prepare(
+                role="bot",
+                release_root=self.root,
+                env_file=self.env,
+                journal=self.journal,
+                release_sha=RELEASE_SHA,
+                image_id=IMAGE_ID,
+                feed_mode="PRIVATE_PRIMARY",
+            )
+        self.assertEqual(payload["feed_mode"], "PRIVATE_PRIMARY")
+        self.assertFalse(payload["private_shadow_only"])
+        rollout._validate_journal(
+            payload,
+            role="bot",
+            release_sha=RELEASE_SHA,
+            image_id=IMAGE_ID,
+            env_sha256=rollout._sha256(self.env),
+            project="market-private-pipeline-production",
+            feed_mode="PRIVATE_PRIMARY",
+        )
 
     def test_adapter_cannot_start_before_fact_receiver(self) -> None:
         self._prepared()
@@ -174,6 +210,21 @@ class RolloutMarketPipelineShadowTests(unittest.TestCase):
                         "--env-file", "/srv/bot.env", "--journal", "/root/journal.json",
                         "--release-sha", RELEASE_SHA, "--image-id", IMAGE_ID,
                         "--confirm", "wrong",
+                    ]
+                )
+        self.assertEqual(code, 1)
+        prepare.assert_not_called()
+
+    def test_primary_cli_requires_distinct_confirmation(self) -> None:
+        with mock.patch.object(rollout, "prepare") as prepare:
+            with contextlib.redirect_stderr(io.StringIO()):
+                code = rollout.main(
+                    [
+                        "prepare", "--role", "bot", "--release-root", "/srv/release",
+                        "--env-file", "/srv/bot.env", "--journal", "/root/journal.json",
+                        "--release-sha", RELEASE_SHA, "--image-id", IMAGE_ID,
+                        "--feed-mode", "PRIVATE_PRIMARY",
+                        "--confirm", rollout.CONFIRMATION,
                     ]
                 )
         self.assertEqual(code, 1)
