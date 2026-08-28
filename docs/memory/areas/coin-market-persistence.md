@@ -10,7 +10,7 @@
 - Parity freezes owner prefix; replay cannot replace live gates.
 - Legacy is `NONE` for G1/G2/`MELTED_PRIMARY_FLOW` and is never their data oracle. The nine required sources are a unique subset, not total cardinality; each needs nonzero capture→parse→fact→archive/ACK→bot-Store→main-snapshot trace.
 - Account2 reuses sender HMAC; rotation splits identity; no session overlap.
-- 2026-08-28: Urgent `PRIVATE_PRIMARY` skips staging/full-session/soak. Control code is on pushed `main`; live Product stays `LEGACY` until the canonical checkout can run the official wrapper, plus backup/off-host, one owner, nine-source subset, 14/14 `OK`, CAS. Cutoff=`2026-08-25T09:33:00Z`; real 7d anchors remain. `occurrences` is recurrence, not cardinality (489 may be five events). Never synthesize/waive/delete/reset.
+- 2026-08-28: Urgent `PRIVATE_PRIMARY` skips staging/soak. Code is on `main`; live Product stays `LEGACY` until canonical-checkout wrapper, backup/off-host, one owner, nine-source subset, 14/14 `OK`, CAS. Cutoff=`2026-08-25T09:33:00Z`; real 7d anchors remain. `occurrences`≠cardinality. Never synthesize/waive/delete/reset.
 - Adapter=500/cycle, causal cursors. Redact after checkpoint+3d; retain stream/sequence/fact/revision/hash; reject watermark regression.
 - Account1 stores no live reply IDs; Account2 is bounded. Never use `/tmp`.
 - Release binds image/env to SHA/tree/signature/content-ID and preflights disk/paths/secrets.
