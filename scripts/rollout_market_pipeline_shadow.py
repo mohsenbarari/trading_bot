@@ -260,10 +260,19 @@ def _validate_journal(
     for row in rows:
         if set(row) != {"service", "state", "container_id", "created_by_release"}:
             raise RolloutError("rollout_journal_service_schema_invalid")
-        if row["state"] not in {"pending", "healthy", "rolled_back"}:
+        if row["state"] not in {"pending", "starting", "healthy", "rolled_back"}:
             raise RolloutError("rollout_journal_service_state_invalid")
         if row["state"] == "pending":
-            if row["container_id"] is not None or row["created_by_release"] is not False:
+            clean_pending = (
+                row["container_id"] is None and row["created_by_release"] is False
+            )
+            interrupted_legacy_start = (
+                payload["status"] == "in_progress"
+                and isinstance(row["container_id"], str)
+                and re.fullmatch(r"[0-9a-f]{64}", row["container_id"])
+                and row["created_by_release"] is True
+            )
+            if not clean_pending and not interrupted_legacy_start:
                 raise RolloutError("rollout_journal_pending_owner_invalid")
         elif (
             not isinstance(row["container_id"], str)
@@ -400,6 +409,7 @@ def start_service(
         raise RolloutError("rollout_service_owner_count_invalid")
     row["container_id"] = ids[0]
     row["created_by_release"] = True
+    row["state"] = "starting"
     _write_journal(journal, payload)
     for _attempt in range(60):
         identity = _identity(

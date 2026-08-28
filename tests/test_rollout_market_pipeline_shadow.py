@@ -201,6 +201,46 @@ class RolloutMarketPipelineShadowTests(unittest.TestCase):
         self.assertEqual([command[1] for command in commands], ["update", "stop", "rm"] * 2)
         self.assertFalse(any("volume" in command for command in commands))
 
+    def test_interrupted_legacy_pending_owner_can_be_rolled_back(self) -> None:
+        payload = self._prepared()
+        row = payload["services"][0]
+        row.update(
+            {
+                "state": "pending",
+                "container_id": CONTAINER_ID,
+                "created_by_release": True,
+            }
+        )
+        payload["status"] = "in_progress"
+        rollout._write_journal(self.journal, payload)
+        removed = False
+
+        def ids(_project: str, service: str, *, running: bool = False) -> list[str]:
+            del running
+            return [] if removed or service != row["service"] else [CONTAINER_ID]
+
+        def run(arguments: list[str], **_kwargs) -> subprocess.CompletedProcess[str]:
+            nonlocal removed
+            if arguments[1] == "rm":
+                removed = True
+            return subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        with (
+            mock.patch.object(rollout, "_validate_env", return_value=_values("bot")),
+            mock.patch.object(rollout, "_ids", side_effect=ids),
+            mock.patch.object(rollout, "_identity", return_value={}),
+            mock.patch.object(rollout, "_run", side_effect=run),
+        ):
+            result = rollout.rollback(
+                role="bot",
+                env_file=self.env,
+                journal=self.journal,
+                release_sha=RELEASE_SHA,
+                image_id=IMAGE_ID,
+            )
+        self.assertTrue(removed)
+        self.assertEqual(result["status"], "ROLLED_BACK")
+
     def test_cli_confirmation_fails_before_runtime(self) -> None:
         with mock.patch.object(rollout, "prepare") as prepare:
             with contextlib.redirect_stderr(io.StringIO()):
