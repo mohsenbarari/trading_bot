@@ -1,5 +1,6 @@
 # Telegram Delivery
 
+- 2026-08-28 | An unknown channel `sendMessage` outcome remains fail-closed and is never retried from silence. Persistent reconciliation blockers emit recurring critical diagnostics; confirmed absence is recovered only through the audited CLI, whose preflight and limiter scope includes every active Publisher lane.
 - 2026-08-23 | `primary` polls/ACKs; the sole `executor` owns Queue-v1, OTP and global locks. APIs only produce. Leases and cutover fail closed, preserve jobs and await old owners; compose pins image+SHA.
 - 2026-08-23 | Panel navigation precedes FSM/router. Commodity admin API uses the configured foreign runtime origin (never a fixed Compose alias) plus exact dev key; callbacks ACK before work and stale actions fail visibly. Durable menu anchors preserve device Back.
 - 2026-08-23 | Latency uses ACK wakeup, shared HTTP, serial batch 8, claim index with `sent` and 1.05s/destination. Local ACK is lease-fenced; workers never repeat it.
