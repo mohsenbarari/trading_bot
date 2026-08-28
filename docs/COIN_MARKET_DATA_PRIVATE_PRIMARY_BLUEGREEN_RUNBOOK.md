@@ -10,7 +10,7 @@ authority محصول تا تکمیل تمام گیت‌ها و CAS نهایی د
 soak طولانی را برای همین cutover حذف می‌کند؛ اما هیچ‌یک از گیت‌های صحت حذف نشده است: release
 یکتا، reconciliation بدون حذف، backup/restore تازه و نسخهٔ رمز‌شدهٔ off-host، migration
 دوباره‌پذیر، single-owner، نبود gap داخلی/duplicate/rejection، catch-up چندروز اخیر، snapshot V2 با
-۱۴/۱۴ نرخ `ESTIMATED` و status=`OK`، ACK و view یکسان، تغییر CAS منبع در آخر، rollback آماده و
+grid کامل و status=`OK`، ACK و view یکسان، تغییر CAS منبع در آخر، rollback آماده و
 postcheck کوتاه همچنان اجباری‌اند. این بند برای این cutover بر بندهای تاریخی Stage 12/13/14 و
 الزام full-session مقدم است؛ مجوز ساخت داده یا پذیرش snapshot کهنه/ناقص نیست.
 
@@ -25,8 +25,11 @@ archive و ACK یکسان، حضور در Market Store بات و trace واقع�
 منبع مجاز اضافی ممنوع نیست و تمام کدهای این subset باید یکتا باشند.
 
 horizon نقطه‌زمانی هفت‌روزهٔ موتور نرخ برای anchorهای سکه و driverها همچنان الزامی است.
-مرز catch-up بالا این horizon را waive نمی‌کند؛ نبود anchor واقعی، readiness ۱۴/۱۴ را fail-closed
-نگه می‌دارد.
+مرز catch-up بالا این horizon را waive نمی‌کند. تنها `COIN_ONE_GRAM/CASH` و
+`COIN_ONE_GRAM/TOMORROW` می‌توانند در نبود طبیعی anchor هم‌کالا با method دقیق
+`ABSTAIN_NO_SAFE_SAME_COMMODITY_ANCHOR` و reason دقیق
+`NO_SAFE_SAME_COMMODITY_ANCHOR`، در حالی که melted همان settlement تازه است، `NO_DATA`
+باشند. نبود driver، کهنگی underlying یا هر gap/quarantine/rejection همچنان fail-closed است.
 
 `occurrences` شمارندهٔ دفعات مشاهدهٔ یک marker تکراری است، نه cardinality رویدادهای
 یکتا. fixture رسمی ۴۸۹ occurrence را برای پنج رویداد یکتا دارد؛ پس ۴۸۹ نه شمار رویداد است
@@ -134,12 +137,13 @@ oracle مقایسه و rollback داده‌ای نیست. rollback آن صرفا
 - Fact روی private IP و mTLS از web به bot منتقل و ACK پایدار شود.
 - parser/lifecycle روی web اجرا شود و bot فقط fact/features قرارداد را دریافت کند.
 - snapshot برگشتی روی lane `PRIVATE_PRIMARY` دریافت شود.
-- همهٔ ۱۴ rate حاضر، snapshot تازه، source binding دقیق و وضعیت مدل `OK` باشد.
+- هر ۱۴ سلول حاضر، snapshot تازه، source binding دقیق و وضعیت مدل `OK` باشد. نرخ‌های
+  داده‌دار `ESTIMATED` و حداکثر دو سلول یک‌گرمی با قرارداد محدود بالا `NO_DATA` باشند.
 - digest snapshot روی bot و web برابر باشد.
 - فقط پس از تمام موارد بالا، ابزار رسمی تغییر source با receipt مستقل روی production اجرا شود.
-- بسته‌بودن بازار به‌تنهایی مانع نیست؛ بااین‌حال snapshot باید در همان لحظه تازه، status=`OK` و
-  ۱۴/۱۴ نرخ آن `ESTIMATED` باشد. snapshot کهنه، `SAFE_NO_DATA` یا ناقص promotion را متوقف
-  می‌کند و دادهٔ ساختگی مجاز نیست.
+- بسته‌بودن بازار به‌تنهایی مانع نیست؛ بااین‌حال snapshot باید در همان لحظه تازه و
+  status=`OK` باشد. snapshot کهنه، snapshot سراسری `SAFE_NO_DATA`، `NO_DATA` خارج از
+  استثنای محدود یک‌گرمی یا grid ناقص promotion را متوقف می‌کند و دادهٔ ساختگی مجاز نیست.
 
 ### F. postcheck کوتاه و بازنشستگی legacy
 
@@ -208,7 +212,7 @@ CI همین دو اجرا را در `.github/workflows/coverage-report.yml` ال
 - schema `[1,2,3]` و ۲۸ جدول با fact count بدون افت؛
 - یک owner دقیق برای هر capture و هر endpoint؛
 - fact، ACK و snapshot end-to-end روی شبکه خصوصی؛
-- ۱۴/۱۴ rate تازه و معتبر؛
+- grid کامل نرخ تازه و معتبر، با `NO_DATA` محدود یک‌گرمی فقط تحت قرارداد اثبات‌شدهٔ بالا؛
 - production product source با receipt مستقل و CAS-bound؛
 - postcheck کوتاه بدون gap/rejection/duplicate application و با restart سالم؛
 - rollback proof بدون حذف state؛
