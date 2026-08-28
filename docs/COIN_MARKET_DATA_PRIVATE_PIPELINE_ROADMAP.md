@@ -1,20 +1,16 @@
 # Roadmap انتقال داده و Parse بازار روی شبکه خصوصی
 
-وضعیت: roadmap ناتمام است. مراحل 0 و 1 بسته‌اند؛ Stage 2 از نظر
-طراحی و rehearsal گذشته و backup عملیاتی آن باقی است. Docker foundation مرحله 3
-کامل است. قرارداد build/evidence و کد transfer/load/preflight دو میزبان به deploy رسمی
-متصل و offline تست شده، اما اجرای عملیاتی آن مجوز نگرفته است. ابزار backup/restore و migration
-دوپاس و rollout غیر-capture به‌ترتیب receiver-first با گیت‌های مستقل به controller رسمی متصل
-و offline تست شده‌اند؛ اجرای production و upgrade/rollback از runtime قدیمی هنوز اثبات نشده
-است. Stage 11 فقط tooling و seed
-هفت‌روزه staging را دارد؛ import کامل تاریخچه
-باز است. Stage 12 از نظر offline سخت‌شده و در انتظار پنجره کامل بازار
-با pin پیش از بازشدن و seal پس از بسته‌شدن است. Stage 13-A قبلاً به‌صورت
-دستی/خارج از deploy رسمی در `PRIVATE_SHADOW` اجرا شده؛ `PRODUCT` و
-`PRIVATE_PRIMARY` مجوز ندارند. این بازنگری هیچ deploy یا authority switchی انجام
-نمی‌دهد.
+وضعیت جاری ــ 2026-08-28: tooling مسیر `PRIVATE_PRIMARY` به controller رسمی
+deploy متصل و offline تست شده است، اما رسید کامل اجرای زنده هنوز ثبت نشده
+است. مجوز فوری مالک، staging، full-session و soak چندجلسه‌ای تاریخی را فقط
+برای این cutover حذف می‌کند. تا پاس‌شدن exact-release، backup/restore تازه و
+off-host رمزشده، migration دوباره‌پذیر، single-owner، catch-up/gap audit، اثبات
+مستقل زنجیرهٔ نه منبع الزامی، snapshot V2 تازه با ۱۴/۱۴ نرخ `ESTIMATED` و
+status=`OK`، و CAS نهایی، authority محصول باید `LEGACY` بماند. بندهای Stage
+12/13/14 در ادامه تاریخچهٔ حذف‌نشده‌اند؛ دستور جاری بند 17 و runbook مرتبط
+است. این بازنگری خودش deploy یا authority switch انجام نمی‌دهد.
 
-تاریخ بازبینی: 2026-08-27
+تاریخ بازبینی: 2026-08-28
 
 مبنای بازنگری Docker: `main@315f7e6a`
 
@@ -87,7 +83,7 @@ Telegram/API
 14. آفرهای دو گروه سکه می‌توانند معامله‌ای با تعداد و قیمت توافقی متفاوت داشته باشند؛ این outcome باید جدا و دائمی ثبت شود.
 15. دو کانال عمومی آبشده برای مصرف زنده مدل قابل استفاده‌اند، اما تاریخچه دائمی نمی‌خواهند.
 16. بورس در این نسخه خارج از محدوده است، ولی schema و source registry باید افزودن آن را بدون بازطراحی ممکن کند.
-17. تمام اجزای جایگزین Market Intelligence باید Docker-native و بخشی از deploy رسمی پروژه شوند؛ این اتصال هنوز کامل نیست.
+17. تمام اجزای جایگزین Market Intelligence باید Docker-native و بخشی از deploy رسمی پروژه باشند؛ tooling این اتصال اکنون در controller رسمی است، ولی تا رسید زنده authority ایجاد نمی‌کند.
 18. یک image immutable و متصل به Git SHA/digest می‌تواند چند command داشته باشد، اما هر مسئولیت process/service مستقل دارد؛ یک کانتینر یکپارچه ساخته نمی‌شود.
 19. کد و dependency داخل image است؛ database، spool، outbox، checkpoint، model artifact، Telegram session و secret داخل image نیست.
 20. SQLite فقط روی volume محلی و با single writer مجاز است؛ SQLite مشترک روی network filesystem ممنوع است.
@@ -304,11 +300,13 @@ Captureهای دو حساب جدا هستند. Parse، lifecycle و feature mate
 - deployment receiver-first، سپس sender، shadow و در آخر authority switch؛
 - migration به‌صورت one-shot container و قبل از شروع writer جدید؛
 - systemd فقط می‌تواند Docker/Compose stack را در boot فراخوانی کند؛ اجرای مستقیم Python جدید روی میزبان ممنوع است؛
-- در وضع موجود `compose.web.yml` و `compose.bot.yml` خارج از
-  چرخه رسمی staging/production هستند. حضور کد آنها در payload ریپازیتوری
-  به‌معنای build، transfer، migration، rollout یا rollback رسمی نیست؛
-- جریان هدف باید از همان Git SHA تمیز روی سرور بات image را بسازد،
-  digest/receipt را ثبت کند و artifact پین‌شده را به سرور وب برساند؛
+- [تاریخی؛ superseded] `compose.web.yml` و `compose.bot.yml` پیش‌تر خارج از
+  چرخهٔ رسمی staging/production بودند؛ حضور کد آنها به‌تنهایی build، transfer،
+  migration، rollout یا rollback رسمی را اثبات نمی‌کرد؛
+- اکنون controller رسمی همان exact release را از checkout تمیز `main` و برابر
+  `origin/main` می‌سازد، manifest/control payload/receipt را به همان SHA/tree/content
+  ID می‌بندد و artifact پین‌شده را به میزبان وب می‌رساند. هر dirty tree،
+  commit فقط محلی، override یا ناهمسانی release باید fail-closed باشد؛
 - owner میزبانی `coin-capture`/`market-channel-capture` legacy مستقل نیست؛
   نسخه میزبانی همان سیستم جدید است. auto-return یا guard فرار روی
   `/run` بعد از reboot می‌تواند owner دوم بسازد و rollback پایدار محسوب
@@ -1032,10 +1030,11 @@ Gate:
 
 ### مرحله 13 — Cutover staging
 
-وضعیت: Stage 13-A به‌صورت دستی/خارج از deploy رسمی در shadow اجرا شده
-است؛ Stage 13 و `PRIVATE_PRIMARY` باز و بدون مجوز هستند. authority محصول فعلاً
-`LEGACY` می‌ماند؛ این به‌معنای وجود collector legacy زنده یا معتبربودن آن به‌عنوان
-oracle/rollback نیست.
+وضعیت تاریخی: Stage 13-A به‌صورت دستی/خارج از deploy رسمی در shadow اجرا
+شد. [superseded فقط به‌عنوان پیش‌نیاز cutover فوری] مجوز 2026-08-28 عبور
+مجدد staging را برای این cutover الزامی نمی‌کند، اما شواهد زیر حذف یا
+بازنویسی نشده‌اند. authority محصول تا تکمیل گیت‌های فعلی باید `LEGACY`
+بماند؛ این به‌معنای وجود collector legacy زنده یا اعتبار آن به‌عنوان oracle نیست.
 
 ترتیب:
 
@@ -1163,7 +1162,11 @@ Gate:
 
 ### مرحله 14 — Cutover production
 
-این مرحله خودکار و ضمنی نیست و authorization جدا می‌خواهد.
+وضعیت تاریخی: این ترتیب به authorization جدا نیاز داشت. [superseded برای cutover
+فوری 2026-08-28] authorization اکنون در بند 17 ثبت است و ترتیب اجرای معتبر
+runbook جدید است. این جایگزینی تنها staging/full-session/soak تاریخی را برمی‌دارد؛
+exact-release، backup/restore/off-host، single-owner، catch-up، نه منبع الزامی به‌عنوان
+subset، snapshot V2 دقیق ۱۴/۱۴، CAS و rollback همچنان مانع‌های fail-closed هستند.
 
 ترتیب:
 
@@ -1338,17 +1341,19 @@ SLOها بعد از baseline خصوصی می‌توانند فقط سخت‌گی
 
 ## 13. Rollback سراسری
 
-Rollback هرگز capture یا archive وب را خاموش نمی‌کند. live legacy راه بازگشت نیست:
+مرز rollback، commit اتمی `PRIMARY_COMMITTED` است:
 
-1. freeze promotion؛
-2. image، snapshot و authority marker به release پین‌شده و سالم قبلی private pipeline
-   برگردند؛
-3. snapshot وب stale/degraded یا `NO_DATA` را شفاف نشان دهد و مقدار کهنه را
-   تازه جلوه ندهد؛
-4. private outbox بدون حذف حفظ شود؛
-5. checkpoint از ACK پایین آورده نشود؛
-6. root cause با replay روی shadow بررسی شود؛
-7. بازگشت به private primary فقط بعد از parity مجدد و مجوز صریح.
+1. پیش از `PRIMARY_COMMITTED`، Blue/Green می‌تواند پروژهٔ جدید را متوقف کند،
+   markerها را به payload/release قبلی برگرداند و همان container ID/restart policy
+   ثبت‌شده قبلی را با حفظ bind mountها روشن کند.
+2. پس از `PRIMARY_COMMITTED`، بازگرداندن runtime یا collector قدیمی ممنوع است.
+   ابتدا CAS محصول به بایت‌های دقیق قبلی برمی‌گردد، سپس محصول به‌صورت
+   محدود روی `LEGACY` و inference خاموش می‌شود؛ capture/archive زندهٔ
+   `PRIVATE_PRIMARY` مالک می‌ماند و تعمیر runtime فقط forward است.
+3. در هر دو طرف مرز، دادهٔ raw/fact/outbox/checkpoint حذف یا reset نمی‌شود،
+   checkpoint از ACK پایین نمی‌آید و snapshot کهنه تازه جلوه داده نمی‌شود.
+4. root cause با replay روی shadow بررسی و promotion بعدی فقط پس از parity مجدد
+   و مجوز صریح انجام می‌شود.
 
 برای مهاجرت sync عمومی، rollback فقط peer URL/route را به transport قبلی برمی‌گرداند؛ schema، change log و source sequence دست‌کاری نمی‌شوند.
 
@@ -1417,3 +1422,28 @@ rollback دقیق در
 [COIN_MARKET_DATA_PRIVATE_PRIMARY_BLUEGREEN_RUNBOOK.md](./COIN_MARKET_DATA_PRIVATE_PRIMARY_BLUEGREEN_RUNBOOK.md)
 تعریف شده است. تا پیش از receipt نهایی همان runbook، وضعیت عملیاتی این تصمیم `IN_PROGRESS`
 است و legacy feed بازنشسته‌شده محسوب نمی‌شود.
+
+مجوز فوری مالک در همان تاریخ، پیش‌نیاز staging، full-session و soak چندجلسه‌ای را فقط برای
+این cutover production حذف کرد. این override بندهای تاریخی Stage 12/13/14 را به‌عنوان شرط promotion
+کنار می‌گذارد، ولی release binding، reconciliation، backup/restore و off-host، single-owner،
+gap audit، catch-up، snapshot V2 تازه و دقیق ۱۴/۱۴ با status=`OK`، CAS و rollback را حفظ می‌کند.
+
+قرارداد جاری اجرا:
+
+- مرز catch-up دقیقاً `2026-08-25T09:33:00Z` است؛ horizon هفت‌روزهٔ
+  point-in-time موردنیاز موتور نرخ همچنان باید پوشش داده شود. فاصلهٔ واقعی
+  upstream ثبت می‌شود؛ با دادهٔ ساختگی، waiver، حذف رکورد، reset شمارنده یا
+  پایین‌آوردن checkpoint پر نمی‌شود.
+- نه منبع الزامی یک subset از ورودی‌های واقعی‌اند، نه اینکه تعداد کل منابع
+  دقیقاً نه باشد. هر کد منبع در این subset باید یکتا باشد و capture→parse→fact→archive/ACK→
+  bot Store→main-snapshot input trace غیرصفر داشته باشد؛ منبع مجاز اضافی ممنوع نیست.
+- در وضعیت legacy، سه منبع `GROUP_1`، `GROUP_2` و `MELTED_PRIMARY_FLOW`
+  دقیقاً `NONE` هستند؛ legacy برای آنها oracle یا مرجع rollback داده نیست.
+- `occurrences` شمارندهٔ مشاهدهٔ تکراری یک marker است، نه cardinality رویداد
+  یکتا. fixture رسمی ۴۸۹ occurrence را برای فقط پنج رویداد یکتا اثبات می‌کند؛
+  پس نمی‌توان از ۴۸۹ حداقل رویداد ساخت.
+- تحویل تکراری در transport ات‌لیست‌وانس برای retry مجاز است؛ اعمال تکراری
+  رویداد/fact ممنوع و باید با idempotency و checkpoint پیوسته اثبات شود.
+- Product از ابتدا تا پایان backfill/audit/readiness روی `LEGACY` می‌ماند. فقط
+  ابزار promotion رسمی، پس از پاس تمام گیت‌ها، می‌تواند با CAS دقیق authority را
+  به `PRIVATE_PRIMARY` تغییر دهد.

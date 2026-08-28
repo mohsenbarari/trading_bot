@@ -11,4 +11,4 @@
 - Capture=`market_channel_event/1.0`,`coin_group_event/2.0`; receipt/revisions/reply status/allowlist are authoritative; raw=3d, Store opaque.
 - Parser v10/linker v7. v10 adds only proven multiline-offer and explicit low-price duplicated-zero recovery. Promotion needs version bump plus exact-production dominance; removal/mutation/unreviewed gain blocks. Replay needs raw/Store/feedback/causal `MAIN_ONLINE`; ambiguity=REVIEW.
 - Private melted: initial price/quantity immutable; lifetime=120s. Lower remaining=cumulative fill; zero=full, positive closure=no-trade. Generic edit≠trade; inconsistency=ambiguous; partials finalize at deadline. Post-expiry deletion keeps economics; estimator freshness=900s.
-- Before cutover seed 7d same-time melted/Herat anchors. Coins predating coverage abstain; not transport loss.
+- Before cutover seed the real 7d point-in-time coin/melted/Herat driver horizon. The 2026-08-25T09:33:00Z catch-up cutoff does not waive it; missing anchors block fresh `OK` 14/14 readiness. Predating coins abstain; never synthesize anchors or call absence transport loss.
