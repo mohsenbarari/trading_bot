@@ -2,6 +2,7 @@
 
 Entries are newest first.
 
+- 2026-08-28 | `PRIVATE_PRIMARY` control/choreography is on pushed `main` (`ddd5c295`). Live cutover stays blocked: official `deploy.sh` accepts only the canonical checkout, that checkout is on another branch while `main` is bound to a second worktree, and Product remains `LEGACY` until real 14/14 `OK`. Do not weaken the canonical-checkout gate or CAS.
 - 2026-08-28 | Urgent `PRIVATE_PRIMARY` cutover may skip staging/full-session/soak. Product stays `LEGACY` until exact clean release, restore+encrypted off-host backup, single-owner/catch-up, nine-source subset, fresh `OK` 14/14 `ESTIMATED`, and final CAS. No synthetic/waiver/delete/reset. After `PRIMARY_COMMITTED`, rollback is Product-only to bounded LEGACY; PRIVATE_PRIMARY capture stays owner.
 - 2026-08-26 | Parity freezes one HMAC-manifested owner window, pinned clone lanes and one clock. Compare final facts/aligned snapshots; separate value/metadata/schema drift. Minute XAU is no event oracle.
 - 2026-08-25 | Market Intelligence is Docker-native/deploy-managed. One immutable SHA/digest image may expose isolated commands; persistent data/models/sessions/secrets stay mounted. Shadow-first cutover forbids dual Telegram-session owners.
