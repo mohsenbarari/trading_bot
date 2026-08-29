@@ -9051,6 +9051,10 @@ try:
     ):
         raise SystemExit("exact_control_release_tool_digest_mismatch")
     os.lseek(tool_fd, 0, os.SEEK_SET)
+    # Python 3.4+ opens descriptors as non-inheritable (O_CLOEXEC). The
+    # replacement interpreter must inherit this verified fd or
+    # /proc/self/fd/N disappears at exec.
+    os.set_inheritable(tool_fd, True)
     os.execv(
         "/usr/bin/python3",
         ["/usr/bin/python3", f"/proc/self/fd/{tool_fd}", *arguments],

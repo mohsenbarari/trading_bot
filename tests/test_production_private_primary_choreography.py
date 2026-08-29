@@ -1195,6 +1195,57 @@ def test_official_shell_exposes_only_explicit_validate_and_execute_actions() -> 
     assert "PATH=/usr/bin:/bin" in exact
     assert "0o022" in exact
     assert "exact_control_release_tool_invalid" in exact
+    assert "set_inheritable" in exact
+
+
+def test_exact_control_release_python_inherits_verified_tool_fd(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "control"
+    scripts = root / "scripts"
+    scripts.mkdir(parents=True)
+    tool = scripts / "probe_exact_tool.py"
+    tool.write_text(
+        "import sys\nprint('exact-fd-ok', sys.argv[1])\n",
+        encoding="utf-8",
+    )
+    os.chmod(tool, 0o444)
+    digest = sha256(tool.read_bytes()).hexdigest()
+    manifest = root / "control-payload.sha256"
+    manifest.write_text(f"{digest}  ./scripts/probe_exact_tool.py\n", encoding="utf-8")
+    os.chmod(manifest, 0o600)
+    ready = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'source "$1"\nrun_exact_control_release_python "$2" scripts/probe_exact_tool.py token-one\n',
+            "exact-fd-test",
+            str(DEPLOY),
+            str(root),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert ready.returncode == 0, ready.stderr + ready.stdout
+    assert "exact-fd-ok token-one" in ready.stdout
+
+    os.chmod(tool, 0o664)
+    blocked = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'source "$1"\nrun_exact_control_release_python "$2" scripts/probe_exact_tool.py token-one\n',
+            "exact-fd-test",
+            str(DEPLOY),
+            str(root),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert blocked.returncode != 0
+    assert "exact_control_release_tool_invalid" in blocked.stderr
 
 
 def test_readiness_result_requires_fresh_fourteen_rate_nine_source_proof() -> None:
