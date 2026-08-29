@@ -465,6 +465,9 @@ class RuntimeContinuityTests(unittest.TestCase):
         self.assertIn("inventory-private-primary-runtime", source)
         self.assertIn("provision-private-primary-secrets", source)
         self.assertIn("render-private-primary-runtime-env", source)
+        self.assertIn("PYTHONPATH=", source)
+        self.assertIn("production-web-secret-verify", source)
+        self.assertIn("private-primary-mtls-verify.json", source)
 
     def test_prepare_skips_apply_on_adopted_roots(self) -> None:
         source = RELEASE_SCRIPT.read_text(encoding="utf-8")
