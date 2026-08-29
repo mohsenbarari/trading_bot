@@ -724,7 +724,8 @@ printf '%s\n' "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT_SHA256"
             "\n}", 1
         )[0]
         self.assertIn('docker image save "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID"', load_image)
-        self.assertIn('"${SSH_IRAN_CMD[@]}" "$IRAN_SSH_TARGET"', load_image)
+        self.assertIn('"${RSYNC_RSH_CMD[@]}" "$IRAN_SSH_TARGET"', load_image)
+        self.assertNotIn('"${SSH_IRAN_CMD[@]}" "$IRAN_SSH_TARGET"', load_image)
         self.assertNotIn("/tmp", load_image)
         self.assertNotIn("docker image save -o", load_image)
 
