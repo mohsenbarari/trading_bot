@@ -348,7 +348,7 @@ def _read_control_file(root: Path, relative: str, expected: str) -> bytes:
             not stat.S_ISREG(before.st_mode)
             or before.st_uid != os.geteuid()
             or before.st_nlink != 1
-            or not 0 < before.st_size <= MAXIMUM_DOCUMENT_BYTES
+            or not 0 <= before.st_size <= MAXIMUM_DOCUMENT_BYTES
         ):
             raise PlanBuildError("control_manifest_file_invalid")
         payload = os.read(descriptor, before.st_size + 1)

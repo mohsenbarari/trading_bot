@@ -431,6 +431,31 @@ def test_rejects_old_and_new_data_root_drift(tmp_path: Path) -> None:
         builder.build(args)
 
 
+def test_accepts_empty_committed_control_package_marker(tmp_path: Path) -> None:
+    args, _files = _fixture(tmp_path)
+    control = Path(args.local_control_release_root)
+    marker = control / "core" / "__init__.py"
+    marker.parent.mkdir(mode=0o700)
+    marker.write_bytes(b"")
+    marker.chmod(0o444)
+    manifest = control / builder.CONTROL_MANIFEST_NAME
+    empty_digest = sha256(b"").hexdigest()
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + f"{empty_digest}  ./core/__init__.py\n",
+        encoding="utf-8",
+    )
+    manifest.chmod(0o600)
+    args.expected_control_manifest_sha256 = _digest(manifest)
+    preflight = Path(args.preflight_receipt)
+    payload = json.loads(preflight.read_text(encoding="utf-8"))
+    payload["control_payload_manifest_sha256"] = _digest(manifest)
+    _json(preflight, payload)
+    args.expected_preflight_receipt_sha256 = _digest(preflight)
+    plan, receipt = builder.build(args)
+    assert receipt["status"] == "PASS"
+    assert plan["release_sha"] == SHA
+
+
 def test_accepts_attested_private_primary_deploy_as_loaded_manifest(
     tmp_path: Path,
 ) -> None:
