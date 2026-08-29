@@ -676,6 +676,43 @@ def test_handmade_receipt_without_input_inventory_is_rejected(
         controller.validate(namespace)
 
 
+def test_accepts_independent_host_market_image_ids(tmp_path: Path) -> None:
+    web_market = "sha256:" + "1" * 64
+    args, files = _fixture(tmp_path)
+    web_text = files["web_env"].read_text(encoding="utf-8").replace(MARKET_IMAGE, web_market)
+    files["web_env"].write_text(web_text, encoding="utf-8")
+    os.chmod(files["web_env"], 0o600)
+    pair = json.loads(files["primary_pair_receipt"].read_text(encoding="utf-8"))
+    pair["schema"] = "market_pipeline_primary_release_pair/1.1"
+    del pair["image_id"]
+    pair["image_ids"] = {"bot": MARKET_IMAGE, "web": web_market}
+    pair["roles"]["web"]["output_sha256"] = _digest(files["web_env"])
+    _json(files["primary_pair_receipt"], pair)
+    preflight = json.loads(files["preflight_receipt"].read_text(encoding="utf-8"))
+    preflight["image_ids"] = {"bot": MARKET_IMAGE, "web": web_market}
+    preflight["role_env_sha256"]["web"] = _digest(files["web_env"])
+    _json(files["preflight_receipt"], preflight)
+    args.expected_web_env_sha256 = _digest(files["web_env"])
+    args.expected_primary_pair_receipt_sha256 = _digest(files["primary_pair_receipt"])
+    args.expected_preflight_receipt_sha256 = _digest(files["preflight_receipt"])
+    plan, _receipt = builder.build(args)
+    assert plan["release_sha"] == SHA
+    assert plan["release_tree"] == TREE
+
+
+def test_rejects_preflight_without_host_local_web_image(tmp_path: Path) -> None:
+    web_market = "sha256:" + "1" * 64
+    args, files = _fixture(tmp_path)
+    pair = json.loads(files["primary_pair_receipt"].read_text(encoding="utf-8"))
+    pair["schema"] = "market_pipeline_primary_release_pair/1.1"
+    del pair["image_id"]
+    pair["image_ids"] = {"bot": MARKET_IMAGE, "web": web_market}
+    _json(files["primary_pair_receipt"], pair)
+    args.expected_primary_pair_receipt_sha256 = _digest(files["primary_pair_receipt"])
+    with pytest.raises(builder.PlanBuildError, match="preflight_receipt_invalid"):
+        builder.build(args)
+
+
 def test_accepts_primary_schema_as_installed_control_pair(tmp_path: Path) -> None:
     args, files = _fixture(tmp_path)
     document = json.loads(files["primary_pair_receipt"].read_text(encoding="utf-8"))

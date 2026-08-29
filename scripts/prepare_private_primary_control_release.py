@@ -18,6 +18,7 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import sys
 from typing import Any, Mapping, Sequence
 
 
@@ -26,6 +27,7 @@ INSTALL_SCHEMA = "private_primary_control_release_install/1.0"
 FOUNDATION_SCHEMA = "private_primary_foundation/1.0"
 PREPARE_SCHEMA = "private_primary_control_release_prepare/1.0"
 KEY_CONFIRMATION = "generate-production-market-pipeline-backup-key"
+SELECT_IMAGE_CONFIRMATION = "select-market-pipeline-host-image"
 MAXIMUM_RECEIPT_AGE_SECONDS = 3600
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -339,6 +341,67 @@ def _load_json(path: Path, *, label: str) -> dict[str, Any]:
     return document
 
 
+def _pair_host_image_id(document: Mapping[str, Any], *, host_role: str) -> str | None:
+    if "image_ids" in document:
+        values = document.get("image_ids")
+        if not isinstance(values, Mapping) or host_role not in values:
+            raise PrepareError("image_mismatch")
+        return str(values[host_role])
+    value = document.get("image_id")
+    return None if value is None else str(value)
+
+
+def _load_inspect_documents(raw: bytes) -> list[Mapping[str, Any]]:
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PrepareError("host_image_inspect_invalid") from exc
+    if isinstance(payload, Mapping):
+        return [payload]
+    if not isinstance(payload, list) or not payload or not all(
+        isinstance(item, Mapping) for item in payload
+    ):
+        raise PrepareError("host_image_inspect_invalid")
+    return payload
+
+
+def select_host_image_id(
+    documents: Sequence[Mapping[str, Any]],
+    *,
+    release_sha: str,
+    release_tree: str,
+    input_signature: str,
+) -> str:
+    if not HEX40.fullmatch(release_sha) or not HEX40.fullmatch(release_tree):
+        raise PrepareError("release_identity_invalid")
+    if not HEX64.fullmatch(input_signature):
+        raise PrepareError("image_identity_invalid")
+    matches: list[str] = []
+    for document in documents:
+        config = document.get("Config") if isinstance(document, Mapping) else None
+        labels = config.get("Labels") if isinstance(config, Mapping) else None
+        if not isinstance(config, Mapping) or not isinstance(labels, Mapping):
+            continue
+        image_id = str(document.get("Id") or "")
+        platform = f"{document.get('Os')}/{document.get('Architecture')}"
+        if (
+            platform == "linux/amd64"
+            and str(config.get("User") or "") == "10001:10001"
+            and str(labels.get("org.opencontainers.image.revision") or "") == release_sha
+            and str(labels.get("io.gold-trade.release.tree") or "") == release_tree
+            and str(labels.get("io.gold-trade.release.input-signature") or "")
+            == input_signature
+            and IMAGE_ID.fullmatch(image_id)
+            and image_id not in matches
+        ):
+            matches.append(image_id)
+    if not matches:
+        raise PrepareError("host_image_identity_missing")
+    if len(matches) > 1:
+        raise PrepareError("host_image_identity_ambiguous")
+    return matches[0]
+
+
 def _validate_bound_identity(
     extras: Mapping[str, Path],
     *,
@@ -356,7 +419,8 @@ def _validate_bound_identity(
             raise PrepareError("release_sha_mismatch")
         if document.get("release_tree") not in {None, release_tree}:
             raise PrepareError("release_tree_mismatch")
-        if document.get("image_id") not in {None, image_id}:
+        bound = _pair_host_image_id(document, host_role=host_role)
+        if bound not in {None, image_id}:
             raise PrepareError("image_mismatch")
         if document.get("feed_mode") not in {None, "PRIVATE_PRIMARY"}:
             raise PrepareError("feed_mode_mismatch")
@@ -366,7 +430,10 @@ def _validate_bound_identity(
             raise PrepareError("release_sha_mismatch")
         if document.get("release_tree") not in {None, release_tree}:
             raise PrepareError("release_tree_mismatch")
-        if document.get("image_id") not in {None, image_id}:
+        receipt_image = document.get("image_id")
+        if host_role == "bot" and receipt_image not in {None, image_id}:
+            raise PrepareError("image_mismatch")
+        if receipt_image not in {None} and not IMAGE_ID.fullmatch(str(receipt_image)):
             raise PrepareError("image_mismatch")
         if document.get("input_signature") not in {None, image_input_signature}:
             raise PrepareError("image_signature_mismatch")
@@ -676,6 +743,11 @@ def build_parser() -> argparse.ArgumentParser:
     install.add_argument("--image-id", required=True)
     install.add_argument("--image-input-signature", required=True)
     install.add_argument("--receipt", type=Path, required=True)
+    select_image = commands.add_parser("select-host-image")
+    _add_confirm(select_image)
+    select_image.add_argument("--release-sha", required=True)
+    select_image.add_argument("--release-tree", required=True)
+    select_image.add_argument("--input-signature", required=True)
     return parser
 
 
@@ -684,6 +756,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.confirm != CONFIRMATION and not (
             args.command == "generate-backup-key" and args.confirm == KEY_CONFIRMATION
+        ) and not (
+            args.command == "select-host-image"
+            and args.confirm == SELECT_IMAGE_CONFIRMATION
         ):
             raise PrepareError("confirmation_invalid")
         if args.command == "reject-historical-flags":
@@ -729,6 +804,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "database_mutated": False,
                 "authority_changed": False,
                 "capture_owner_changed": False,
+                "secrets_disclosed": False,
+            }
+        elif args.command == "select-host-image":
+            result = {
+                "status": "PASS",
+                "image_id": select_host_image_id(
+                    _load_inspect_documents(sys.stdin.buffer.read()),
+                    release_sha=args.release_sha,
+                    release_tree=args.release_tree,
+                    input_signature=args.input_signature,
+                ),
                 "secrets_disclosed": False,
             }
         elif args.command == "install-control-release":

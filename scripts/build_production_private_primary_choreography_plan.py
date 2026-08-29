@@ -781,7 +781,7 @@ def build(args: argparse.Namespace) -> tuple[dict[str, object], dict[str, object
     if primary_pair.get("schema") not in {"market_pipeline_primary_release_pair/1.0", "market_pipeline_primary_release_pair/1.1"} or primary_pair.get("feed_mode") != "PRIVATE_PRIMARY" or primary_pair.get("private_primary_allowed") is not True or primary_pair.get("expected_snapshot_lane") != "PRIVATE_PRIMARY" or primary_pair.get("product_authority_changed") is not False or primary_pair.get("legacy_retirement_authorized") is not False:
         raise PlanBuildError("primary_pair_receipt_invalid")
     market_images = _image_ids(primary_pair, label="primary_pair_receipt")
-    if set(market_images.values()) != {market_id}:
+    if market_images["bot"] != market_id:
         raise PlanBuildError("primary_pair_market_image_mismatch")
     roles = primary_pair.get("roles")
     if not isinstance(roles, dict) or set(roles) != {"bot", "web"}:
@@ -794,6 +794,8 @@ def build(args: argparse.Namespace) -> tuple[dict[str, object], dict[str, object
     preflight = _json(bound["preflight_receipt"])
     _require_release(preflight, sha, tree, label="preflight_receipt")
     if preflight.get("schema") != "market_pipeline_two_host_preflight/1.0" or preflight.get("environment") != "production" or preflight.get("image_id") != market_id or preflight.get("image_input_signature") != market_signature or preflight.get("control_payload_manifest_sha256") != bound["control_manifest"].digest or preflight.get("role_env_sha256") != {"bot": bound["bot_env"].digest, "web": bound["web_env"].digest} or preflight.get("private_shadow_only") is not True or preflight.get("image_loaded_on_both_hosts") is not True or preflight.get("services_started") is not False or preflight.get("database_mutated") is not False or preflight.get("product_authority_changed") is not False:
+        raise PlanBuildError("preflight_receipt_invalid")
+    if _image_ids(preflight, label="preflight_receipt") != market_images:
         raise PlanBuildError("preflight_receipt_invalid")
     host_preflight = preflight.get("host_preflight_sha256")
     if not isinstance(host_preflight, dict) or set(host_preflight) != {"bot", "web"} or any(not HEX64.fullmatch(str(v)) for v in host_preflight.values()):

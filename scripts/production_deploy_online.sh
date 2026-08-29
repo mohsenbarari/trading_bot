@@ -167,6 +167,7 @@ PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED=0
 PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE="LEGACY"
 PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=0
 PRODUCTION_MARKET_PIPELINE_IMAGE_ID=""
+REMOTE_MARKET_PIPELINE_IMAGE_ID=""
 PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE=""
 PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT=""
 PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT_SHA256=""
@@ -5156,24 +5157,41 @@ done" || die "Market Pipeline web host private-bind/data-root/disk contract fail
 }
 
 load_market_pipeline_image_remote() {
-    local expected_identity remote_identity
-    expected_identity="$PRODUCTION_MARKET_PIPELINE_IMAGE_ID|linux/amd64|10001:10001|$RELEASE_SHA|$PRODUCTION_RELEASE_TREE|$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE"
+    local expected_fields remote_identity remote_id
+    expected_fields="linux/amd64|10001:10001|$RELEASE_SHA|$PRODUCTION_RELEASE_TREE|$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE"
     remote_identity="$(ssh_iran "docker image inspect --format '{{.Id}}|{{.Os}}/{{.Architecture}}|{{.Config.User}}|{{index .Config.Labels \"org.opencontainers.image.revision\"}}|{{index .Config.Labels \"io.gold-trade.release.tree\"}}|{{index .Config.Labels \"io.gold-trade.release.input-signature\"}}' '$PRODUCTION_MARKET_PIPELINE_IMAGE_ID' 2>/dev/null || true")"
-    if [[ "$remote_identity" != "$expected_identity" ]]; then
+    if [[ "$remote_identity" != "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID|$expected_fields" ]]; then
         log "Streaming the exact Market Pipeline image to the web host without a transfer file"
         if ! docker image save "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
             | timeout --signal=TERM --kill-after=15s "${IRAN_TRANSFER_TIMEOUT_SECONDS}s" \
                 "${SSH_IRAN_CMD[@]}" "$IRAN_SSH_TARGET" "docker image load >/dev/null"; then
             die "Market Pipeline image stream/load failed."
         fi
-        remote_identity="$(ssh_iran "docker image inspect --format '{{.Id}}|{{.Os}}/{{.Architecture}}|{{.Config.User}}|{{index .Config.Labels \"org.opencontainers.image.revision\"}}|{{index .Config.Labels \"io.gold-trade.release.tree\"}}|{{index .Config.Labels \"io.gold-trade.release.input-signature\"}}' '$PRODUCTION_MARKET_PIPELINE_IMAGE_ID'")"
     fi
-    [[ "$remote_identity" == "$expected_identity" ]] \
+    remote_id="$(ssh_iran "set -euo pipefail
+ids=\$(docker images --filter 'label=org.opencontainers.image.revision=$RELEASE_SHA' --filter 'label=io.gold-trade.release.input-signature=$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE' --no-trunc --format '{{.ID}}' | awk 'NF' | sort -u)
+[ -n \"\$ids\" ] || exit 71
+docker image inspect \$ids" \
+        | python3 "$PRIVATE_PRIMARY_CONTROL_RELEASE_PREPARER" select-host-image \
+            --confirm "select-market-pipeline-host-image" \
+            --release-sha "$RELEASE_SHA" \
+            --release-tree "$PRODUCTION_RELEASE_TREE" \
+            --input-signature "$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE" \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)["image_id"])')" \
+        || die "Remote Market Pipeline image identity could not be bound after load."
+    [[ "$remote_id" =~ ^sha256:[0-9a-f]{64}$ ]] \
+        || die "Remote Market Pipeline image ID is invalid."
+    REMOTE_MARKET_PIPELINE_IMAGE_ID="$remote_id"
+    ssh_iran "set -euo pipefail
+identity=\$(docker image inspect --format '{{.Id}}|{{.Os}}/{{.Architecture}}|{{.Config.User}}|{{index .Config.Labels \"org.opencontainers.image.revision\"}}|{{index .Config.Labels \"io.gold-trade.release.tree\"}}|{{index .Config.Labels \"io.gold-trade.release.input-signature\"}}' '$REMOTE_MARKET_PIPELINE_IMAGE_ID')
+[ \"\$identity\" = '$REMOTE_MARKET_PIPELINE_IMAGE_ID|$expected_fields' ]
+docker tag '$REMOTE_MARKET_PIPELINE_IMAGE_ID' 'market_pipeline_release:$RELEASE_SHA'" \
         || die "Market Pipeline image content/OCI identity differs between the two hosts."
 }
 
 run_market_pipeline_two_host_preflight() {
     local bot_data_root web_preflight_sha bot_preflight_sha web_env_sha bot_env_sha
+    local remote_image="${REMOTE_MARKET_PIPELINE_IMAGE_ID:-$PRODUCTION_MARKET_PIPELINE_IMAGE_ID}"
     bot_data_root="$(read_env_value "$LOCAL_MARKET_PIPELINE_BOT_ENV" MARKET_BOT_DATA_ROOT)"
     (
         set -a
@@ -5196,7 +5214,7 @@ set +a
 python3 '$REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR/scripts/manage_market_pipeline_stage3.py' preflight \
   --role web \
   --root \"\$MARKET_WEB_DATA_ROOT\" \
-  --image '$PRODUCTION_MARKET_PIPELINE_IMAGE_ID' \
+  --image '$remote_image' \
   --release-sha '$RELEASE_SHA'" >"$PRODUCTION_MARKET_PIPELINE_WEB_PREFLIGHT_RECEIPT" \
         || die "Market Pipeline web host preflight failed."
     chmod 0600 "$PRODUCTION_MARKET_PIPELINE_WEB_PREFLIGHT_RECEIPT"
@@ -5211,7 +5229,8 @@ python3 '$REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR/scripts/manage_market_pipel
         "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
         "$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE" \
         "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256" \
-        "$bot_env_sha" "$web_env_sha" "$bot_preflight_sha" "$web_preflight_sha" <<'PY'
+        "$bot_env_sha" "$web_env_sha" "$bot_preflight_sha" "$web_preflight_sha" \
+        "$remote_image" <<'PY'
 import json
 import os
 from pathlib import Path
@@ -5220,12 +5239,13 @@ import sys
 destination = Path(sys.argv[1])
 bot = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 web = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
+expected_ids = {"bot": sys.argv[6], "web": sys.argv[13]}
 for role, document in (("bot", bot), ("web", web)):
     if document.get("status") != "pass" or document.get("role") != role:
         raise SystemExit(2)
     inventory = document.get("inventory") or {}
     image = inventory.get("image") or {}
-    if image.get("image_id") != sys.argv[6] or image.get("revision") != sys.argv[4]:
+    if image.get("image_id") != expected_ids[role] or image.get("revision") != sys.argv[4]:
         raise SystemExit(2)
 payload = {
     "schema": "market_pipeline_two_host_preflight/1.0",
@@ -5233,6 +5253,7 @@ payload = {
     "release_sha": sys.argv[4],
     "release_tree": sys.argv[5],
     "image_id": sys.argv[6],
+    "image_ids": {"bot": sys.argv[6], "web": sys.argv[13]},
     "image_input_signature": sys.argv[7],
     "control_payload_manifest_sha256": sys.argv[8],
     "role_env_sha256": {"bot": sys.argv[9], "web": sys.argv[10]},
@@ -5299,7 +5320,8 @@ verify_market_pipeline_two_host_preflight_receipt() {
         "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256" \
         "$LOCAL_MARKET_PIPELINE_BOT_ENV" "$PRODUCTION_MARKET_PIPELINE_WEB_ENV" \
         "$PRODUCTION_MARKET_PIPELINE_BOT_PREFLIGHT_RECEIPT" \
-        "$PRODUCTION_MARKET_PIPELINE_WEB_PREFLIGHT_RECEIPT" <<'PY'
+        "$PRODUCTION_MARKET_PIPELINE_WEB_PREFLIGHT_RECEIPT" \
+        "${REMOTE_MARKET_PIPELINE_IMAGE_ID:-$PRODUCTION_MARKET_PIPELINE_IMAGE_ID}" <<'PY'
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -5315,6 +5337,7 @@ expected = {
     "release_sha": sys.argv[2],
     "release_tree": sys.argv[3],
     "image_id": sys.argv[4],
+    "image_ids": {"bot": sys.argv[4], "web": sys.argv[11]},
     "image_input_signature": sys.argv[5],
     "control_payload_manifest_sha256": sys.argv[6],
     "role_env_sha256": {"bot": digest(sys.argv[7]), "web": digest(sys.argv[8])},
@@ -5330,10 +5353,11 @@ expected = {
 if payload != expected:
     raise SystemExit(2)
 PY
-    local expected_identity remote_identity
-    expected_identity="$PRODUCTION_MARKET_PIPELINE_IMAGE_ID|linux/amd64|10001:10001|$RELEASE_SHA|$PRODUCTION_RELEASE_TREE|$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE"
-    remote_identity="$(ssh_iran "docker image inspect --format '{{.Id}}|{{.Os}}/{{.Architecture}}|{{.Config.User}}|{{index .Config.Labels \"org.opencontainers.image.revision\"}}|{{index .Config.Labels \"io.gold-trade.release.tree\"}}|{{index .Config.Labels \"io.gold-trade.release.input-signature\"}}' '$PRODUCTION_MARKET_PIPELINE_IMAGE_ID'")"
-    [[ "$remote_identity" == "$expected_identity" ]] \
+    local expected_fields remote_identity remote_image
+    remote_image="${REMOTE_MARKET_PIPELINE_IMAGE_ID:-$PRODUCTION_MARKET_PIPELINE_IMAGE_ID}"
+    expected_fields="linux/amd64|10001:10001|$RELEASE_SHA|$PRODUCTION_RELEASE_TREE|$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE"
+    remote_identity="$(ssh_iran "docker image inspect --format '{{.Id}}|{{.Os}}/{{.Architecture}}|{{.Config.User}}|{{index .Config.Labels \"org.opencontainers.image.revision\"}}|{{index .Config.Labels \"io.gold-trade.release.tree\"}}|{{index .Config.Labels \"io.gold-trade.release.input-signature\"}}' '$remote_image'")"
+    [[ "$remote_identity" == "$remote_image|$expected_fields" ]] \
         || die "Remote Market Pipeline image drifted after host preflight."
 }
 
@@ -9218,6 +9242,7 @@ run_prepare_private_primary_control_release() {
     PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=1
     verify_market_pipeline_control_payload
     PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=0
+    load_market_pipeline_image_remote
     PRODUCTION_MARKET_PIPELINE_WEB_ENV_SOURCE_PATH="$web_source"
     PRODUCTION_MARKET_PIPELINE_BOT_ENV_SOURCE_PATH="$bot_source"
     project_name="market-private-pipeline-primary"
@@ -9237,7 +9262,8 @@ run_prepare_private_primary_control_release() {
         --receipt "$primary_pair" \
         --release-sha "$RELEASE_SHA" \
         --release-tree "$PRODUCTION_RELEASE_TREE" \
-        --image-id "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
+        --bot-image-id "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
+        --web-image-id "${REMOTE_MARKET_PIPELINE_IMAGE_ID:-$PRODUCTION_MARKET_PIPELINE_IMAGE_ID}" \
         --project-name "$project_name" >/dev/null \
         || die "PRIVATE_PRIMARY role pair rendering failed."
     install -m 0600 -- "$primary_pair" "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT"
@@ -9352,7 +9378,7 @@ sync -f '$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR'"
         --web-env "$PRODUCTION_MARKET_PIPELINE_WEB_ENV" \
         --image-receipt "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT" \
         --pair-receipt "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT" \
-        --image-id "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
+        --image-id "${REMOTE_MARKET_PIPELINE_IMAGE_ID:-$PRODUCTION_MARKET_PIPELINE_IMAGE_ID}" \
         --image-input-signature "$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE" \
         --receipt "$install_remote_receipt" >/dev/null \
         || die "PRIVATE_PRIMARY remote control-release receipt failed."
@@ -9375,7 +9401,6 @@ python3 '$REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR/scripts/manage_market_pipel
   --root '${PRODUCTION_PRIVATE_PRIMARY_REMOTE_SNAPSHOT_DIR%/snapshots}' \
   --apply \
   --acknowledge-host-mutation >/dev/null"
-    load_market_pipeline_image_remote
     market_pipeline_verify_local_host_contract
     market_pipeline_verify_remote_host_contract
     PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_REQUESTED=1

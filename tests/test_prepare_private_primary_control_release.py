@@ -191,6 +191,11 @@ class PreparePrivatePrimaryControlReleaseTests(unittest.TestCase):
             body.index('--confirm "render-market-pipeline-private-primary"'),
             body.index("render-pair"),
         )
+        self.assertLess(body.index("load_market_pipeline_image_remote"), body.index("render-pair"))
+        self.assertIn("--bot-image-id", body)
+        self.assertIn("--web-image-id", body)
+        self.assertIn("select-host-image", source)
+        self.assertIn("REMOTE_MARKET_PIPELINE_IMAGE_ID", body)
         self.assertIn("--control-manifest", body)
         self.assertIn("PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST", body)
         self.assertIn('-e "$RSYNC_SSH"', body)
@@ -402,6 +407,73 @@ class PreparePrivatePrimaryControlReleaseTests(unittest.TestCase):
             str(path),
             "/root/secure-envs/trading-bot/release-control/remote-control-mirror",
         )
+
+    def test_web_host_image_id_may_differ_from_authority_receipt(self) -> None:
+        web_image = "sha256:" + "f" * 64
+        _write(
+            self.web_env,
+            (
+                f"MARKET_WEB_DATA_ROOT={preparer.CANONICAL_WEB_DATA_ROOT}\n"
+                f"MARKET_PIPELINE_RELEASE_SHA={SHA}\n"
+                f"MARKET_PIPELINE_IMAGE={web_image}\n"
+                "MARKET_PIPELINE_FEED_MODE=PRIVATE_PRIMARY\n"
+            ),
+        )
+        _json(
+            self.pair_receipt,
+            {
+                "schema": "market_pipeline_primary_release_pair/1.1",
+                "release_sha": SHA,
+                "release_tree": TREE,
+                "image_ids": {"bot": IMAGE, "web": web_image},
+                "feed_mode": "PRIVATE_PRIMARY",
+                "product_authority_changed": False,
+                "secrets_disclosed": False,
+            },
+        )
+        payload = self.install(host_role="web", image_id=web_image)
+        self.assertEqual(payload["installation_status"], "PASS")
+        self.assertEqual(payload["image_id"], web_image)
+
+    def test_select_host_image_binds_unique_label_match(self) -> None:
+        document = {
+            "Id": IMAGE,
+            "Os": "linux",
+            "Architecture": "amd64",
+            "Config": {
+                "User": "10001:10001",
+                "Labels": {
+                    "org.opencontainers.image.revision": SHA,
+                    "io.gold-trade.release.tree": TREE,
+                    "io.gold-trade.release.input-signature": SIGNATURE,
+                },
+            },
+        }
+        self.assertEqual(
+            preparer.select_host_image_id(
+                [document],
+                release_sha=SHA,
+                release_tree=TREE,
+                input_signature=SIGNATURE,
+            ),
+            IMAGE,
+        )
+        extra = dict(document)
+        extra["Id"] = "sha256:" + "f" * 64
+        with self.assertRaisesRegex(preparer.PrepareError, "host_image_identity_ambiguous"):
+            preparer.select_host_image_id(
+                [document, extra],
+                release_sha=SHA,
+                release_tree=TREE,
+                input_signature=SIGNATURE,
+            )
+        with self.assertRaisesRegex(preparer.PrepareError, "host_image_identity_missing"):
+            preparer.select_host_image_id(
+                [document],
+                release_sha=SHA,
+                release_tree=TREE,
+                input_signature="e" * 64,
+            )
 
     def test_insecure_data_root_is_rejected(self) -> None:
         with self.assertRaisesRegex(preparer.PrepareError, "bot_data_root_path_forbidden"):
