@@ -670,7 +670,8 @@ def _assert_exact_release_checkout(
     release_sha: str,
     release_tree: str,
     approved_release_ref: str,
-) -> None:
+    allow_historical_approved: bool = False,
+) -> bool:
     if approved_release_ref != "refs/remotes/origin/main":
         raise ChoreographyError("release_approved_ref_invalid")
     try:
@@ -704,11 +705,46 @@ def _assert_exact_release_checkout(
         raise ChoreographyError("release_checkout_identity_unavailable") from exc
     head, tree = _git_identity(release_root)
     if (
-        approved != release_sha
-        or (head, tree) != (release_sha, release_tree)
-        or status_output
+        approved == release_sha
+        and (head, tree) == (release_sha, release_tree)
+        and not status_output
     ):
+        return False
+    if not allow_historical_approved or status_output or head != approved:
         raise ChoreographyError("release_checkout_not_exact_clean_approved")
+    try:
+        historical_tree = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(release_root),
+                "rev-parse",
+                "--verify",
+                f"{release_sha}^{{tree}}",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        ancestor = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(release_root),
+                "merge-base",
+                "--is-ancestor",
+                release_sha,
+                approved,
+            ],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        raise ChoreographyError("release_checkout_identity_unavailable") from exc
+    if ancestor.returncode != 0 or historical_tree != release_tree:
+        raise ChoreographyError("release_checkout_not_exact_clean_approved")
+    return True
 
 
 def _tracked_tool_sha256(release_root: Path, tool: str) -> str:
@@ -1098,7 +1134,8 @@ def _validate_phase_execution_contract(
 
 
 def _validate_plan(
-    document: Mapping[str, object], *, release_root: Path
+    document: Mapping[str, object], *, release_root: Path,
+    allow_historical_approved: bool = False,
 ) -> tuple[
     str,
     str,
@@ -1126,14 +1163,18 @@ def _validate_plan(
         or document.get("secrets_disclosed") is not False
     ):
         raise ChoreographyError("plan_contract_invalid")
-    _assert_exact_release_checkout(
+    historical_approved = _assert_exact_release_checkout(
         release_root,
         release_sha=release_sha,
         release_tree=release_tree,
         approved_release_ref=str(document.get("approved_release_ref") or ""),
+        allow_historical_approved=allow_historical_approved,
     )
     observed_head, observed_tree = _git_identity(release_root)
-    if (observed_head, observed_tree) != (release_sha, release_tree):
+    if not historical_approved and (
+        observed_head,
+        observed_tree,
+    ) != (release_sha, release_tree):
         raise ChoreographyError("plan_release_root_binding_mismatch")
     source = Path(str(document.get("source_manifest") or ""))
     deployment_manifest = Path(str(document.get("deployment_manifest") or ""))
@@ -4034,7 +4075,13 @@ def _execute_locked(
         remote_control_root,
         control_manifest_sha256,
         role_env_bindings,
-    ) = _validate_plan(plan, release_root=Path(args.release_root))
+    ) = _validate_plan(
+        plan,
+        release_root=Path(args.release_root),
+        allow_historical_approved=(
+            recovery_requested and recovery_strategy == "rollback"
+        ),
+    )
     control_entries = _control_release_manifest(
         local_control_root,
         expected_manifest_sha256=control_manifest_sha256,
@@ -4514,7 +4561,15 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
         remote_control_root,
         control_manifest_sha256,
         _role_env_bindings,
-    ) = _validate_plan(plan, release_root=Path(args.release_root))
+    ) = _validate_plan(
+        plan,
+        release_root=Path(args.release_root),
+        allow_historical_approved=(
+            getattr(args, "command", "execute") == "recover"
+            and str(getattr(args, "recovery_strategy", "resume") or "resume")
+            == "rollback"
+        ),
+    )
     control_entries = _control_release_manifest(
         local_control_root,
         expected_manifest_sha256=control_manifest_sha256,

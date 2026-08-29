@@ -760,6 +760,77 @@ def test_exact_release_checkout_rejects_dirty_or_unapproved_tree(
             )
 
 
+def test_historical_release_checkout_is_only_allowed_for_explicit_rollback_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.undo()
+    with tempfile.TemporaryDirectory(prefix="private-primary-historical-git-") as temporary:
+        root = Path(temporary)
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(
+            ["git", "-C", str(root), "config", "user.name", "Test"], check=True
+        )
+        subprocess.run(
+            ["git", "-C", str(root), "config", "user.email", "test@example.invalid"],
+            check=True,
+        )
+        tracked = root / "tracked.txt"
+        tracked.write_text("historical\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "tracked.txt"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "historical"], check=True)
+        historical_sha = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+        ).strip()
+        historical_tree = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD^{tree}"], text=True
+        ).strip()
+        tracked.write_text("approved\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "commit", "-qam", "approved"], check=True)
+        approved_sha = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+        ).strip()
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "update-ref",
+                controller.APPROVED_RELEASE_REF,
+                approved_sha,
+            ],
+            check=True,
+        )
+        with pytest.raises(
+            controller.ChoreographyError,
+            match="release_checkout_not_exact_clean_approved",
+        ):
+            controller._assert_exact_release_checkout(
+                root,
+                release_sha=historical_sha,
+                release_tree=historical_tree,
+                approved_release_ref=controller.APPROVED_RELEASE_REF,
+            )
+        assert controller._assert_exact_release_checkout(
+            root,
+            release_sha=historical_sha,
+            release_tree=historical_tree,
+            approved_release_ref=controller.APPROVED_RELEASE_REF,
+            allow_historical_approved=True,
+        ) is True
+        tracked.write_text("dirty\n", encoding="utf-8")
+        with pytest.raises(
+            controller.ChoreographyError,
+            match="release_checkout_not_exact_clean_approved",
+        ):
+            controller._assert_exact_release_checkout(
+                root,
+                release_sha=historical_sha,
+                release_tree=historical_tree,
+                approved_release_ref=controller.APPROVED_RELEASE_REF,
+                allow_historical_approved=True,
+            )
+
+
 def test_validate_rejects_missing_phase_command_and_product_source_tamper() -> None:
     with tempfile.TemporaryDirectory(prefix="private-primary-controller-tamper-") as temporary:
         root = Path(temporary)
