@@ -705,6 +705,78 @@ def _invariant_view(payload: Mapping[str, Any]) -> dict[str, Any]:
     return {key: payload.get(key) for key in keys}
 
 
+def _same_database_identity(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    return (
+        left.get("database_identity_sha256")
+        and left.get("database_identity_sha256") == right.get("database_identity_sha256")
+    )
+
+
+def _same_schema_window(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    return (
+        left.get("schema_versions") == right.get("schema_versions")
+        and left.get("schema_catalog_sha256") == right.get("schema_catalog_sha256")
+        and left.get("schema_objects_sha256") == right.get("schema_objects_sha256")
+        and bool(left.get("schema_versions"))
+        and HEX64.fullmatch(str(left.get("schema_catalog_sha256") or ""))
+        and HEX64.fullmatch(str(left.get("schema_objects_sha256") or ""))
+    )
+
+
+def _source_window_compatible(
+    before: Mapping[str, Any],
+    after: Mapping[str, Any],
+    *,
+    allow_running_writers: bool,
+) -> bool:
+    """Quiesced backups require byte-equal inventories; hot backups allow row drift."""
+
+    if not _same_database_identity(before, after) or not _same_schema_window(before, after):
+        return False
+    if allow_running_writers:
+        return True
+    return _invariant_view(before) == _invariant_view(after)
+
+
+def _restore_window_compatible(
+    source: Mapping[str, Any],
+    source_after: Mapping[str, Any],
+    restore: Mapping[str, Any],
+    *,
+    allow_running_writers: bool,
+) -> bool:
+    if not _source_window_compatible(
+        source, source_after, allow_running_writers=allow_running_writers
+    ):
+        return False
+    if not _same_schema_window(source, restore):
+        return False
+    if allow_running_writers:
+        return True
+    return _invariant_view(source) == _invariant_view(restore)
+
+
+def _empty_prepared_journal(journal: Mapping[str, Any], *, root: Path) -> bool:
+    if journal.get("status") != "PREPARED" or journal.get("backup") is not None:
+        return False
+    artifact = Path(str(journal.get("artifact_path") or ""))
+    candidate = Path(str(journal.get("candidate_path") or ""))
+    if artifact.parent != root or candidate.parent != root:
+        return False
+    return not artifact.exists() and not candidate.exists() and not artifact.is_symlink() and not candidate.is_symlink()
+
+
+def _abandon_empty_prepared_journal(path: Path, journal: Mapping[str, Any], *, root: Path) -> None:
+    if not _empty_prepared_journal(journal, root=root):
+        raise BackupError("backup_journal_not_abandonable")
+    path.unlink()
+    directory = os.open(root, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
 def _validate_journal_identity(
     payload: Mapping[str, Any],
     *,
@@ -819,6 +891,10 @@ def create_backup(
     journal: dict[str, Any] | None = None
     if journal_path.exists() or journal_path.is_symlink():
         journal = _read_journal(journal_path)
+        if allow_running_writers and _empty_prepared_journal(journal, root=root):
+            _abandon_empty_prepared_journal(journal_path, journal, root=root)
+            journal = None
+    if journal is not None:
         _validate_journal_identity(
             journal,
             root=root,
@@ -951,10 +1027,8 @@ def create_backup(
         _write_journal(journal_path, journal)
     source = journal["source_before"]
     current_source = inspect_source_database(values, require_quiesce=require_quiesce)
-    if (
-        current_source.get("database_identity_sha256")
-        != source.get("database_identity_sha256")
-        or _invariant_view(current_source) != _invariant_view(source)
+    if not _source_window_compatible(
+        source, current_source, allow_running_writers=allow_running_writers
     ):
         raise BackupError("backup_source_changed_before_dump")
     artifact = Path(str(journal["artifact_path"]))
@@ -982,10 +1056,8 @@ def create_backup(
     journal["status"] = "DUMP_READY"
     _write_journal(journal_path, journal)
     source_after = inspect_source_database(values, require_quiesce=require_quiesce)
-    if (
-        source.get("database_identity_sha256")
-        != source_after.get("database_identity_sha256")
-        or _invariant_view(source) != _invariant_view(source_after)
+    if not _source_window_compatible(
+        source, source_after, allow_running_writers=allow_running_writers
     ):
         raise BackupError("backup_source_changed_during_dump")
     journal["source_after"] = source_after
@@ -996,10 +1068,11 @@ def create_backup(
         source,
         resource_binding=journal["restore_resources"],
     )
-    if not (
-        _invariant_view(source)
-        == _invariant_view(source_after)
-        == _invariant_view(restore)
+    if not _restore_window_compatible(
+        source,
+        source_after,
+        restore,
+        allow_running_writers=allow_running_writers,
     ):
         raise BackupError("backup_restore_reconciliation_mismatch")
     journal["restore_smoke"] = restore

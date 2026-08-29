@@ -672,6 +672,87 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
         self.assertNotEqual(backup.CREATE_CONFIRMATION, backup.HOT_CREATE_CONFIRMATION)
         self.assertIn("hot-backup", backup.HOT_CREATE_CONFIRMATION)
 
+    def test_hot_window_allows_row_drift_but_not_schema_or_identity_drift(self) -> None:
+        before = {
+            "database_identity_sha256": "a" * 64,
+            "schema_versions": [1, 2],
+            "schema_catalog_sha256": "1" * 64,
+            "schema_objects_sha256": "2" * 64,
+            "table_count": 2,
+            "fact_count": 10,
+            "table_row_counts": {"market_facts": 10, "market_offers": 1},
+            "sequence_values": {"market_facts_id_seq": {"last_value": 10, "is_called": True}},
+        }
+        after = dict(before)
+        after["fact_count"] = 12
+        after["table_row_counts"] = {"market_facts": 12, "market_offers": 1}
+        after["sequence_values"] = {
+            "market_facts_id_seq": {"last_value": 12, "is_called": True}
+        }
+        self.assertTrue(
+            backup._source_window_compatible(
+                before, after, allow_running_writers=True
+            )
+        )
+        self.assertFalse(
+            backup._source_window_compatible(
+                before, after, allow_running_writers=False
+            )
+        )
+        drifted_schema = dict(after)
+        drifted_schema["schema_catalog_sha256"] = "3" * 64
+        self.assertFalse(
+            backup._source_window_compatible(
+                before, drifted_schema, allow_running_writers=True
+            )
+        )
+        drifted_identity = dict(after)
+        drifted_identity["database_identity_sha256"] = "b" * 64
+        self.assertFalse(
+            backup._source_window_compatible(
+                before, drifted_identity, allow_running_writers=True
+            )
+        )
+        restore = {
+            "schema_versions": [1, 2],
+            "schema_catalog_sha256": "1" * 64,
+            "schema_objects_sha256": "2" * 64,
+            "table_count": 2,
+            "fact_count": 11,
+            "table_row_counts": {"market_facts": 11, "market_offers": 1},
+            "sequence_values": {"market_facts_id_seq": {"last_value": 11, "is_called": True}},
+        }
+        self.assertTrue(
+            backup._restore_window_compatible(
+                before, after, restore, allow_running_writers=True
+            )
+        )
+        self.assertFalse(
+            backup._restore_window_compatible(
+                before, after, restore, allow_running_writers=False
+            )
+        )
+
+    def test_hot_retry_abandons_empty_prepared_journal(self) -> None:
+        journal = {
+            "status": "PREPARED",
+            "backup": None,
+            "artifact_path": str(self.backup_dir / "market-archive-before-aaaaaaaaaaaa-20260101T000000Z-01234567.dump"),
+            "candidate_path": str(self.backup_dir / ".market-archive-before-aaaaaaaaaaaa-20260101T000000Z-01234567.dump.pending"),
+        }
+        self.backup_dir.mkdir(mode=0o700)
+        path = self.backup_dir / "market-pipeline-backup-journal.json"
+        path.write_text("{}\n", encoding="utf-8")
+        self.assertTrue(backup._empty_prepared_journal(journal, root=self.backup_dir))
+        backup._abandon_empty_prepared_journal(path, journal, root=self.backup_dir)
+        self.assertFalse(path.exists())
+        with self.assertRaisesRegex(backup.BackupError, "not_abandonable"):
+            backup._abandon_empty_prepared_journal(
+                path,
+                {**journal, "status": "DUMP_READY"},
+                root=self.backup_dir,
+            )
+
     def test_orphan_cleanup_refuses_wrong_owner_label(self) -> None:
         inspected = subprocess.CompletedProcess(
             [], 0, stdout="different-run\n", stderr=""
