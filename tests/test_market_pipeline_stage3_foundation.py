@@ -351,9 +351,15 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
                 },
             }
         ]
+        inspect_document[0]["Created"] = "2026-01-01T00:00:00Z"
+        inspect_document[0]["RootFS"] = {"Type": "layers", "Layers": ["sha256:" + "d" * 64]}
         with patch.object(manager, "run", return_value=json.dumps(inspect_document)):
             metadata = manager.image_metadata(image_id, "b" * 40, fixture=False)
         self.assertEqual(metadata["image_id"], image_id)
+        self.assertEqual(
+            metadata["portable_content_digest"],
+            manager.portable_image_content_digest(inspect_document[0]),
+        )
         with self.assertRaisesRegex(
             manager.Stage3Error, "release_image_must_be_digest_pinned"
         ):

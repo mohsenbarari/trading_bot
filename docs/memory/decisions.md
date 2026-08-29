@@ -2,7 +2,7 @@
 
 Entries are newest first.
 
-- 2026-08-29 | `prepare-private-primary-control-release` is exact-SHA, preflight-only, and host-local after `docker load`; SHA/tree/signature stay shared. Historical flags stay `0`. No live service/DB/Queue/capture/Product change. Cutover is separate; Product stays `LEGACY`.
+- 2026-08-29 | PRIVATE_PRIMARY adopts live Shadow roots in-place (Path A) and rehomes live-mounted secrets to `/srv/trading-bot/secure/market-data`. Both-role preflight plus equal portable image digest required. No live cutover; Product stays `LEGACY`.
 - 2026-08-28 | Urgent `PRIVATE_PRIMARY` may skip staging/soak. Product stays `LEGACY` until exact release, backup/off-host, one owner, nine-source gap audit, fresh complete-grid `OK`, and CAS. Only one-gram cells may use `NO_DATA` for a proven missing same-commodity anchor while melted is fresh; no synthetic data or gap waiver. After `PRIMARY_COMMITTED`, rollback is Product-only.
 - 2026-08-26 | Parity freezes one HMAC-manifested owner window, pinned clone lanes and one clock. Compare final facts/aligned snapshots; separate value/metadata/schema drift. Minute XAU is no event oracle.
 - 2026-08-25 | Market Intelligence is Docker-native/deploy-managed. One immutable SHA/digest image may expose isolated commands; persistent data/models/sessions/secrets stay mounted. Shadow-first cutover forbids dual Telegram-session owners.

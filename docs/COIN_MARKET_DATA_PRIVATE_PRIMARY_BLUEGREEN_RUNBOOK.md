@@ -48,6 +48,21 @@ oracle مقایسه و rollback داده‌ای نیست. rollback آن صرفا
 `PRIMARY_COMMITTED` متوقف می‌مانند تا rollback دقیق به همان شناسه، image و restart policy
 ممکن باشد؛ پس از آن commit، اجرای مجددشان ممنوع است.
 
+## تصمیم state root — راه A
+
+stack فعال `market-private-pipeline-stage13-shadow` مرجع فعلی capture و pipeline است.
+نام تاریخی مسیرها شامل `staging` است، ولی آن مسیرها اکنون state واقعی production-shadow
+هستند. امن‌ترین مسیر این است که `PRIVATE_PRIMARY` همان bind mountهای زنده را حفظ کند:
+
+- بات: `/srv/trading-bot/staging-data/coin-intelligence/private-pipeline-shadow`
+- وب: `/srv/trading-bot/market-data-staging-shadow`
+
+ممنوعیت عمومی مسیر staging شل نمی‌شود. فقط استثنای exact-runtime-bound با رسید inventory
+زنده، نام پروژه، شناسهٔ کانتینر و هویت mount پذیرفته می‌شود. مسیر staging نامرتبط رد
+می‌شود. env قدیم و جدید یک data root دارند؛ نام پروژه فرق می‌کند؛ feed جدید
+`PRIVATE_PRIMARY` است. state کپی، reset یا جابه‌جا نمی‌شود. راه B (جابه‌جایی پس از
+quiesce) فقط اگر راه A از نظر قرارداد غیرمجاز باشد؛ اینجا مجاز است و mutation کمتری دارد.
+
 ## اصول غیرقابل‌چشم‌پوشی
 
 - پروژهٔ قدیم و جدید نام یکسان ندارند.

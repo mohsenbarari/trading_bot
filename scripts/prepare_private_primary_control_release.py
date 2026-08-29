@@ -21,6 +21,13 @@ import stat
 import sys
 from typing import Any, Mapping, Sequence
 
+from scripts.inventory_private_primary_active_runtime import (
+    ALLOWED_ADOPTED_DATA_ROOTS,
+    COMBINED_SCHEMA,
+    INVENTORY_SCHEMA,
+    validate_inventory,
+)
+
 
 CONFIRMATION = "prepare-production-private-primary-control-release"
 INSTALL_SCHEMA = "private_primary_control_release_install/1.0"
@@ -128,12 +135,26 @@ def _secure_parent(path: Path, *, create: bool) -> None:
         raise PrepareError("parent_owner_mode_invalid")
 
 
-def validate_lexical_path(raw: str, *, label: str, repository_root: Path) -> Path:
+def validate_lexical_path(
+    raw: str,
+    *,
+    label: str,
+    repository_root: Path,
+    allow_exact: set[str] | frozenset[str] | None = None,
+) -> Path:
     if not raw or not raw.startswith("/") or ".." in Path(raw).parts:
         raise PrepareError(f"{label}_path_invalid")
     lowered = raw.lower()
+    allowed = set(allow_exact or ())
     if any(marker in lowered for marker in FORBIDDEN_PATH_MARKERS):
-        raise PrepareError(f"{label}_path_forbidden")
+        staging_exception = (
+            raw in allowed
+            and "staging" in lowered
+            and "/tmp/" not in lowered
+            and "/var/tmp/" not in lowered
+        )
+        if not staging_exception:
+            raise PrepareError(f"{label}_path_forbidden")
     path = Path(raw)
     try:
         resolved = path.resolve(strict=False)
@@ -153,11 +174,54 @@ def validate_historical_flags(values: Mapping[str, str]) -> None:
             raise PrepareError("historical_private_shadow_flag_enabled")
 
 
+def load_continuity_receipt(path: Path, *, role: str) -> dict[str, Any]:
+    validate_lexical_path(str(path), label="continuity_receipt", repository_root=Path("/nonexistent-repo"))
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise PrepareError("continuity_receipt_unavailable") from exc
+    if (
+        path.is_symlink()
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_nlink != 1
+        or stat.S_IMODE(info.st_mode) != 0o600
+    ):
+        raise PrepareError("continuity_receipt_invalid")
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if document.get("schema") == COMBINED_SCHEMA:
+        host = (document.get("hosts") or {}).get(role)
+        if not isinstance(host, Mapping):
+            raise PrepareError("continuity_host_missing")
+        adopted = str(host.get("adopted_data_root") or "")
+        if adopted != ALLOWED_ADOPTED_DATA_ROOTS[role]:
+            raise PrepareError("continuity_data_root_unapproved")
+        if document.get("decision") != "adopt_live_roots" or document.get("status") != "PASS":
+            raise PrepareError("continuity_decision_invalid")
+        return {
+            "adopted_data_root": adopted,
+            "adopted_snapshot_root": str(host.get("adopted_snapshot_root") or f"{adopted}/snapshots"),
+            "container_ids": list(host.get("container_ids") or []),
+            "mount_identity_sha256": str(host.get("mount_identity_sha256") or ""),
+            "project_name": str(document.get("project_name") or ""),
+        }
+    if document.get("schema") == INVENTORY_SCHEMA:
+        validated = validate_inventory(document, role=role)
+        return {
+            "adopted_data_root": validated["adopted_data_root"],
+            "adopted_snapshot_root": validated["adopted_snapshot_root"],
+            "container_ids": list(validated["container_ids"]),
+            "mount_identity_sha256": validated["mount_identity_sha256"],
+            "project_name": validated["project_name"],
+        }
+    raise PrepareError("continuity_schema_invalid")
+
+
 def validate_topology_source(
     path: Path,
     *,
     role: str,
     repository_root: Path,
+    continuity_receipt: Path | None = None,
 ) -> dict[str, str]:
     validate_lexical_path(str(path), label=f"{role}_source", repository_root=repository_root)
     try:
@@ -181,15 +245,29 @@ def validate_topology_source(
         key, value = line.split("=", 1)
         values[key] = value
     root_key = "MARKET_WEB_DATA_ROOT" if role == "web" else "MARKET_BOT_DATA_ROOT"
-    expected_root = CANONICAL_WEB_DATA_ROOT if role == "web" else CANONICAL_BOT_DATA_ROOT
+    allowed_exact: set[str] = set()
+    if continuity_receipt is not None:
+        adopted = load_continuity_receipt(continuity_receipt, role=role)
+        expected_root = adopted["adopted_data_root"]
+        expected_snapshot = adopted["adopted_snapshot_root"]
+        allowed_exact = {expected_root, expected_snapshot}
+        if not adopted.get("container_ids") or not adopted.get("mount_identity_sha256"):
+            raise PrepareError("continuity_identity_incomplete")
+    else:
+        expected_root = CANONICAL_WEB_DATA_ROOT if role == "web" else CANONICAL_BOT_DATA_ROOT
+        expected_snapshot = f"{expected_root}/snapshots"
     if values.get(root_key) != expected_root:
         raise PrepareError(f"{role}_data_root_mismatch")
     snapshot = values.get("MARKET_PRODUCT_SNAPSHOT_ROOT", "")
-    if snapshot != f"{expected_root}/snapshots":
+    if snapshot != expected_snapshot:
         raise PrepareError(f"{role}_snapshot_root_mismatch")
     for key, value in values.items():
-        if "staging" in value.lower() or value.startswith("/tmp/"):
+        if value.startswith("/tmp/") or "/var/tmp/" in value:
             raise PrepareError(f"{role}_source_staging_or_tmp")
+        if "staging" in value.lower() and value not in allowed_exact:
+            raise PrepareError(f"{role}_source_staging_or_tmp")
+        if key.endswith("_FILE") and "staging" in value.lower():
+            raise PrepareError(f"{role}_secret_path_not_canonical")
         if key.endswith(("_TOKEN", "_PASSWORD", "_SECRET")) and value:
             raise PrepareError(f"{role}_source_plaintext_secret")
     return values
@@ -248,8 +326,18 @@ def generate_or_reuse_backup_key(path: Path) -> dict[str, Any]:
     }
 
 
-def prepare_directory(path: Path, *, label: str) -> dict[str, Any]:
-    validate_lexical_path(str(path), label=label, repository_root=Path("/nonexistent-repo"))
+def prepare_directory(
+    path: Path,
+    *,
+    label: str,
+    allow_exact: set[str] | frozenset[str] | None = None,
+) -> dict[str, Any]:
+    validate_lexical_path(
+        str(path),
+        label=label,
+        repository_root=Path("/nonexistent-repo"),
+        allow_exact=allow_exact,
+    )
     if path.exists() or path.is_symlink():
         info = path.lstat()
         if path.is_symlink() or not stat.S_ISDIR(info.st_mode):
@@ -277,12 +365,33 @@ def prepare_foundation(
     receipt: Path,
     release_sha: str,
     release_tree: str,
+    continuity_receipt: Path | None = None,
 ) -> dict[str, Any]:
     if not HEX40.fullmatch(release_sha) or not HEX40.fullmatch(release_tree):
         raise PrepareError("release_identity_invalid")
+    allow_exact: set[str] = set()
+    adopted = False
+    if continuity_receipt is not None:
+        bot = load_continuity_receipt(continuity_receipt, role="bot")
+        web = load_continuity_receipt(continuity_receipt, role="web")
+        if str(bot_data_root) != bot["adopted_data_root"]:
+            raise PrepareError("foundation_bot_root_not_adopted")
+        if str(web_data_root) != web["adopted_data_root"]:
+            raise PrepareError("foundation_web_root_not_adopted")
+        allow_exact = {
+            bot["adopted_data_root"],
+            web["adopted_data_root"],
+            bot["adopted_snapshot_root"],
+            web["adopted_snapshot_root"],
+        }
+        adopted = True
     directories = {
-        "bot_data_root": prepare_directory(bot_data_root, label="bot_data_root"),
-        "web_data_root": prepare_directory(web_data_root, label="web_data_root"),
+        "bot_data_root": prepare_directory(
+            bot_data_root, label="bot_data_root", allow_exact=allow_exact
+        ),
+        "web_data_root": prepare_directory(
+            web_data_root, label="web_data_root", allow_exact=allow_exact
+        ),
         "web_backup_root": prepare_directory(web_backup_root, label="web_backup_root"),
         "offhost_root": prepare_directory(offhost_root, label="offhost_root"),
     }
@@ -302,6 +411,9 @@ def prepare_foundation(
             "created": key["created"],
             "mode": key["mode"],
         },
+        "adopted_live_roots": adopted,
+        "state_copied": False,
+        "relocation_required": False,
         "services_started": False,
         "database_mutated": False,
         "authority_changed": False,
@@ -715,6 +827,7 @@ def build_parser() -> argparse.ArgumentParser:
     source.add_argument("--role", choices=("web", "bot"), required=True)
     source.add_argument("--source", type=Path, required=True)
     source.add_argument("--repository-root", type=Path, required=True)
+    source.add_argument("--continuity-receipt", type=Path)
     foundation = commands.add_parser("prepare-foundation")
     _add_confirm(foundation)
     foundation.add_argument("--bot-data-root", type=Path, default=Path(CANONICAL_BOT_DATA_ROOT))
@@ -725,6 +838,7 @@ def build_parser() -> argparse.ArgumentParser:
     foundation.add_argument("--receipt", type=Path, required=True)
     foundation.add_argument("--release-sha", required=True)
     foundation.add_argument("--release-tree", required=True)
+    foundation.add_argument("--continuity-receipt", type=Path)
     key = commands.add_parser("generate-backup-key")
     _add_confirm(key)
     key.add_argument("--key-file", type=Path, required=True)
@@ -770,7 +884,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = {"status": "PASS", "historical_flags": {key: "0" for key in HISTORICAL_FLAGS}, "secrets_disclosed": False}
         elif args.command == "validate-topology-source":
             validate_topology_source(
-                args.source, role=args.role, repository_root=args.repository_root
+                args.source,
+                role=args.role,
+                repository_root=args.repository_root,
+                continuity_receipt=args.continuity_receipt,
             )
             result = {
                 "status": "PASS",
@@ -793,6 +910,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 receipt=args.receipt,
                 release_sha=args.release_sha,
                 release_tree=args.release_tree,
+                continuity_receipt=args.continuity_receipt,
             )
             result = {
                 "status": "PASS",

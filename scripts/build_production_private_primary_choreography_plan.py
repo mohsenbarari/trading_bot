@@ -36,6 +36,20 @@ SAFE_ARGUMENT = re.compile(r"^[A-Za-z0-9_./:=,@+%-]+$")
 SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 ENV_KEY = re.compile(r"^[A-Z][A-Z0-9_]*$")
 TRANSACTION_ID = re.compile(r"^[a-z0-9][a-z0-9-]{7,95}$")
+REQUIRED_NINE_SOURCES = (
+    "MELTED_PRIMARY_FLOW",
+    "GROUP_1",
+    "GROUP_2",
+    "MELTED_AGGREGATE",
+    "MELTED_FLOW",
+    "USD_HERAT",
+    "XAUUSD",
+    "WALLEX_PUBLIC_API",
+    "BINANCE_PAXG_PUBLIC_API",
+)
+SAFE_SPARSE_NO_DATA_CELLS = (("COIN_ONE_GRAM", "CASH"), ("COIN_ONE_GRAM", "TOMORROW"))
+SAFE_SPARSE_NO_DATA_METHOD = "ABSTAIN_NO_SAFE_SAME_COMMODITY_ANCHOR"
+SAFE_SPARSE_NO_DATA_REASON = "NO_SAFE_SAME_COMMODITY_ANCHOR"
 
 PHASES = (
     "bluegreen_workload_quiesce",
@@ -748,6 +762,8 @@ def build(args: argparse.Namespace) -> tuple[dict[str, object], dict[str, object
             raise PlanBuildError(f"{role}_env_contract_invalid")
         if not old_values.get("MARKET_PIPELINE_PROJECT_NAME") or old_values.get("MARKET_PIPELINE_FEED_MODE") == "PRIVATE_PRIMARY":
             raise PlanBuildError(f"{role}_old_env_contract_invalid")
+        if old_values.get(root_key) and old_values.get(root_key) != values.get(root_key):
+            raise PlanBuildError(f"{role}_data_root_drift")
         for value in (values[root_key], values["MARKET_PRODUCT_SNAPSHOT_ROOT"]):
             _lexical_path(value, label=f"{role}_env")
         if not SAFE_NAME.fullmatch(values["MARKET_PIPELINE_PROJECT_NAME"]) or not SAFE_NAME.fullmatch(old_values["MARKET_PIPELINE_PROJECT_NAME"]):
@@ -793,8 +809,21 @@ def build(args: argparse.Namespace) -> tuple[dict[str, object], dict[str, object
 
     preflight = _json(bound["preflight_receipt"])
     _require_release(preflight, sha, tree, label="preflight_receipt")
-    if preflight.get("schema") != "market_pipeline_two_host_preflight/1.0" or preflight.get("environment") != "production" or preflight.get("image_id") != market_id or preflight.get("image_input_signature") != market_signature or preflight.get("control_payload_manifest_sha256") != bound["control_manifest"].digest or preflight.get("role_env_sha256") != {"bot": bound["bot_env"].digest, "web": bound["web_env"].digest} or preflight.get("private_shadow_only") is not True or preflight.get("image_loaded_on_both_hosts") is not True or preflight.get("services_started") is not False or preflight.get("database_mutated") is not False or preflight.get("product_authority_changed") is not False:
+    if preflight.get("schema") not in {
+        "market_pipeline_two_host_preflight/1.0",
+        "market_pipeline_two_host_preflight/1.1",
+    } or preflight.get("environment") != "production" or preflight.get("image_id") != market_id or preflight.get("image_input_signature") != market_signature or preflight.get("control_payload_manifest_sha256") != bound["control_manifest"].digest or preflight.get("role_env_sha256") != {"bot": bound["bot_env"].digest, "web": bound["web_env"].digest} or preflight.get("private_shadow_only") is not True or preflight.get("image_loaded_on_both_hosts") is not True or preflight.get("services_started") is not False or preflight.get("database_mutated") is not False or preflight.get("product_authority_changed") is not False:
         raise PlanBuildError("preflight_receipt_invalid")
+    if preflight.get("schema") == "market_pipeline_two_host_preflight/1.1":
+        portable = str(preflight.get("portable_content_digest") or "")
+        portable_roles = preflight.get("portable_content_digests") or {}
+        if (
+            not HEX64.fullmatch(portable)
+            or not isinstance(portable_roles, dict)
+            or portable_roles.get("bot") != portable
+            or portable_roles.get("web") != portable
+        ):
+            raise PlanBuildError("portable_image_digest_mismatch")
     if _image_ids(preflight, label="preflight_receipt") != market_images:
         raise PlanBuildError("preflight_receipt_invalid")
     host_preflight = preflight.get("host_preflight_sha256")
@@ -894,6 +923,14 @@ def build(args: argparse.Namespace) -> tuple[dict[str, object], dict[str, object
         "web_ssh_argv": ssh_argv,
         "product_authority_initial": "LEGACY",
         "product_authority_final": "PRIVATE_PRIMARY",
+        "required_nine_sources": list(REQUIRED_NINE_SOURCES),
+        "sparse_one_gram": {
+            "cells": [f"{commodity}:{settlement}" for commodity, settlement in SAFE_SPARSE_NO_DATA_CELLS],
+            "method": SAFE_SPARSE_NO_DATA_METHOD,
+            "reason": SAFE_SPARSE_NO_DATA_REASON,
+        },
+        "catchup_cutoff_utc": "2026-08-25T09:33:00Z",
+        "data_root_continuity": "adopt_live_roots",
         "legacy_collectors_restart_forbidden": True,
         "product_promotion_last": True,
         "secrets_disclosed": False,

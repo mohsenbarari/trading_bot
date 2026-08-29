@@ -78,6 +78,12 @@ PRODUCTION_PRIVATE_PRIMARY_WEB_SOURCE=""
 PRODUCTION_PRIVATE_PRIMARY_BOT_SOURCE=""
 PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_RECEIPT=""
 PRODUCTION_PRIVATE_PRIMARY_FOUNDATION_RECEIPT=""
+PRODUCTION_PRIVATE_PRIMARY_CONTINUITY_RECEIPT=""
+PRODUCTION_PRIVATE_PRIMARY_SECRETS_CONFIRM=""
+PRODUCTION_PRIVATE_PRIMARY_RUNTIME_INVENTORY_CONFIRM=""
+PRIVATE_PRIMARY_RUNTIME_INVENTORY="$PROJECT_DIR/scripts/inventory_private_primary_active_runtime.py"
+PRIVATE_PRIMARY_SECRET_PROVISIONER="$PROJECT_DIR/scripts/provision_private_primary_secrets.py"
+PRIVATE_PRIMARY_RUNTIME_ENV_RENDERER="$PROJECT_DIR/scripts/render_private_primary_runtime_env.py"
 COMMAND=""
 IRAN_BOOTSTRAP_APT_PACKAGES="ca-certificates curl gnupg lsb-release rsync jq pigz nginx certbot python3-certbot-nginx docker.io python3-pip python3-setuptools python3-wheel"
 IRAN_BOOTSTRAP_COMPOSE_PACKAGES="docker-compose-v2 docker-compose"
@@ -102,6 +108,9 @@ PRODUCTION_PRIVATE_PRIMARY_CONTAINER_SNAPSHOT="/app/runtime/product-estimator/la
 PRODUCTION_PRIVATE_PRIMARY_LOCAL_SNAPSHOT_DIR="/srv/trading-bot/production-data/market-pipeline/snapshots"
 PRODUCTION_PRIVATE_PRIMARY_REMOTE_SNAPSHOT_DIR="/srv/trading-bot/market-data-production/snapshots"
 PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_CONFIRM_TEXT="prepare-production-private-primary-control-release"
+PRODUCTION_PRIVATE_PRIMARY_SECRETS_CONFIRM_TEXT="provision-production-private-primary-secrets"
+PRODUCTION_PRIVATE_PRIMARY_RUNTIME_INVENTORY_CONFIRM_TEXT="inventory-production-private-primary-active-runtime"
+PRODUCTION_PRIVATE_PRIMARY_RUNTIME_ENV_CONFIRM_TEXT="render-production-private-primary-runtime-env"
 PRODUCTION_MARKET_PIPELINE_EVIDENCE_CONFIRM_TEXT="prepare-production-market-pipeline-shadow-evidence"
 PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_CONFIRM_TEXT="load-and-preflight-production-market-pipeline-shadow-hosts"
 PRODUCTION_MARKET_PIPELINE_MIGRATION_CONFIRM_TEXT="backup-and-migrate-production-market-pipeline-shadow"
@@ -260,6 +269,15 @@ Commands:
                        Install the exact-SHA control-release, foundation,
                        Market Pipeline image, and host preflight on both
                        hosts without starting services or changing Product.
+  inventory-private-primary-runtime
+                       Record the live production-shadow project, mounts,
+                       and adopted data roots without disclosing secrets.
+  provision-private-primary-secrets
+                       Inventory, rehome, or verify PRIVATE_PRIMARY secrets
+                       from proven live mounts into the canonical secret root.
+  render-private-primary-runtime-env
+                       Generate official old env and topology sources from
+                       the live runtime inventory and adopted data roots.
   deploy-iran          Internal release phase; direct execution is refused.
   inspect-shared-data  Inspect Iran shared-table state and print the fresh/existing classification.
   seed-shared-data     Internal release phase; direct execution is refused.
@@ -839,6 +857,21 @@ parse_args() {
             --private-primary-foundation-receipt)
                 [[ $# -ge 2 ]] || die "--private-primary-foundation-receipt requires a path"
                 PRODUCTION_PRIVATE_PRIMARY_FOUNDATION_RECEIPT="$2"
+                shift 2
+                ;;
+            --private-primary-continuity-receipt)
+                [[ $# -ge 2 ]] || die "--private-primary-continuity-receipt requires a path"
+                PRODUCTION_PRIVATE_PRIMARY_CONTINUITY_RECEIPT="$2"
+                shift 2
+                ;;
+            --private-primary-secrets-confirm)
+                [[ $# -ge 2 ]] || die "--private-primary-secrets-confirm requires the exact confirmation"
+                PRODUCTION_PRIVATE_PRIMARY_SECRETS_CONFIRM="$2"
+                shift 2
+                ;;
+            --private-primary-runtime-inventory-confirm)
+                [[ $# -ge 2 ]] || die "--private-primary-runtime-inventory-confirm requires the exact confirmation"
+                PRODUCTION_PRIVATE_PRIMARY_RUNTIME_INVENTORY_CONFIRM="$2"
                 shift 2
                 ;;
             -h|--help|help)
@@ -1531,7 +1564,7 @@ verify_queue_cutover_deploy_authority() {
 guard_production_release_command() {
     local mutating=0 profile=""
     case "$COMMAND" in
-        release|private-primary-release|recover-private-primary-release|prepare-private-primary-control-release|prepare-release-evidence|verify-release-evidence|deploy-foreign|bootstrap-iran|configure-nginx|issue-cert|build-release|sync-project|ship-images|load-images|deploy-iran|seed-shared-data)
+        release|private-primary-release|recover-private-primary-release|prepare-private-primary-control-release|inventory-private-primary-runtime|provision-private-primary-secrets|render-private-primary-runtime-env|prepare-release-evidence|verify-release-evidence|deploy-foreign|bootstrap-iran|configure-nginx|issue-cert|build-release|sync-project|ship-images|load-images|deploy-iran|seed-shared-data)
             mutating=1
             ;;
     esac
@@ -1574,7 +1607,7 @@ guard_production_release_command() {
         || die "Immutable production source has an invalid Telegram execution profile."
     if [[ "$profile" == "queue-v1" ]]; then
         case "$COMMAND" in
-            prepare-release-evidence|verify-release-evidence|prepare-private-primary-control-release)
+            prepare-release-evidence|verify-release-evidence|prepare-private-primary-control-release|inventory-private-primary-runtime|provision-private-primary-secrets|render-private-primary-runtime-env)
                 # These commands build or validate immutable artifacts only.
                 # They never quiesce writers, replace containers, mutate a
                 # database, or call Telegram.  A target release must be able
@@ -5201,9 +5234,12 @@ docker tag '$REMOTE_MARKET_PIPELINE_IMAGE_ID' 'market_pipeline_release:$RELEASE_
 
 run_market_pipeline_two_host_preflight() {
     local bot_data_root web_preflight_sha bot_preflight_sha web_env_sha bot_env_sha
+    local bot_rc=0 web_rc=0
     local remote_image="${REMOTE_MARKET_PIPELINE_IMAGE_ID:-$PRODUCTION_MARKET_PIPELINE_IMAGE_ID}"
     bot_data_root="$(read_env_value "$LOCAL_MARKET_PIPELINE_BOT_ENV" MARKET_BOT_DATA_ROOT)"
+    set +e
     (
+        set -euo pipefail
         set -a
         # The release renderer accepts only shell-safe literal values.
         # shellcheck disable=SC1090
@@ -5214,9 +5250,8 @@ run_market_pipeline_two_host_preflight() {
             --root "$bot_data_root" \
             --image "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
             --release-sha "$RELEASE_SHA"
-    ) >"$PRODUCTION_MARKET_PIPELINE_BOT_PREFLIGHT_RECEIPT" \
-        || die "Market Pipeline bot host preflight failed."
-    chmod 0600 "$PRODUCTION_MARKET_PIPELINE_BOT_PREFLIGHT_RECEIPT"
+    ) >"$PRODUCTION_MARKET_PIPELINE_BOT_PREFLIGHT_RECEIPT"
+    bot_rc=$?
     ssh_iran "set -euo pipefail
 set -a
 . '$REMOTE_MARKET_PIPELINE_WEB_ENV'
@@ -5225,9 +5260,15 @@ python3 '$REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR/scripts/manage_market_pipel
   --role web \
   --root \"\$MARKET_WEB_DATA_ROOT\" \
   --image '$remote_image' \
-  --release-sha '$RELEASE_SHA'" >"$PRODUCTION_MARKET_PIPELINE_WEB_PREFLIGHT_RECEIPT" \
-        || die "Market Pipeline web host preflight failed."
-    chmod 0600 "$PRODUCTION_MARKET_PIPELINE_WEB_PREFLIGHT_RECEIPT"
+  --release-sha '$RELEASE_SHA'" >"$PRODUCTION_MARKET_PIPELINE_WEB_PREFLIGHT_RECEIPT"
+    web_rc=$?
+    set -e
+    chmod 0600 "$PRODUCTION_MARKET_PIPELINE_BOT_PREFLIGHT_RECEIPT" "$PRODUCTION_MARKET_PIPELINE_WEB_PREFLIGHT_RECEIPT" 2>/dev/null || true
+    [[ -f "$PRODUCTION_MARKET_PIPELINE_BOT_PREFLIGHT_RECEIPT" && ! -L "$PRODUCTION_MARKET_PIPELINE_BOT_PREFLIGHT_RECEIPT" ]] \
+        || die "Market Pipeline bot host preflight produced no receipt."
+    [[ -f "$PRODUCTION_MARKET_PIPELINE_WEB_PREFLIGHT_RECEIPT" && ! -L "$PRODUCTION_MARKET_PIPELINE_WEB_PREFLIGHT_RECEIPT" ]] \
+        || die "Market Pipeline web host preflight produced no receipt."
+    chmod 0600 "$PRODUCTION_MARKET_PIPELINE_BOT_PREFLIGHT_RECEIPT" "$PRODUCTION_MARKET_PIPELINE_WEB_PREFLIGHT_RECEIPT"
     bot_preflight_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_BOT_PREFLIGHT_RECEIPT")"
     web_preflight_sha="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_WEB_PREFLIGHT_RECEIPT")"
     bot_env_sha="$(file_sha256 "$LOCAL_MARKET_PIPELINE_BOT_ENV")"
@@ -5250,21 +5291,30 @@ destination = Path(sys.argv[1])
 bot = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 web = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
 expected_ids = {"bot": sys.argv[6], "web": sys.argv[13]}
+portable = {}
 for role, document in (("bot", bot), ("web", web)):
     if document.get("status") != "pass" or document.get("role") != role:
         raise SystemExit(2)
     inventory = document.get("inventory") or {}
     image = inventory.get("image") or {}
+    digest = str(image.get("portable_content_digest") or "")
+    portable[role] = digest
     if image.get("image_id") != expected_ids[role] or image.get("revision") != sys.argv[4]:
         raise SystemExit(2)
+    if len(digest) != 64 or any(item not in "0123456789abcdef" for item in digest):
+        raise SystemExit(2)
+if portable["bot"] != portable["web"]:
+    raise SystemExit(3)
 payload = {
-    "schema": "market_pipeline_two_host_preflight/1.0",
+    "schema": "market_pipeline_two_host_preflight/1.1",
     "environment": "production",
     "release_sha": sys.argv[4],
     "release_tree": sys.argv[5],
     "image_id": sys.argv[6],
     "image_ids": {"bot": sys.argv[6], "web": sys.argv[13]},
     "image_input_signature": sys.argv[7],
+    "portable_content_digest": portable["bot"],
+    "portable_content_digests": portable,
     "control_payload_manifest_sha256": sys.argv[8],
     "role_env_sha256": {"bot": sys.argv[9], "web": sys.argv[10]},
     "host_preflight_sha256": {"bot": sys.argv[11], "web": sys.argv[12]},
@@ -5298,6 +5348,9 @@ finally:
 PY
     chmod 0600 "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT"
     PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT_SHA256="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT")"
+    if [[ "$bot_rc" -ne 0 || "$web_rc" -ne 0 ]]; then
+        die "Market Pipeline host preflight failed after collecting both role diagnostics."
+    fi
 }
 
 prepare_market_pipeline_two_host_preflight() {
@@ -5341,14 +5394,22 @@ def digest(path: str) -> str:
     return sha256(Path(path).read_bytes()).hexdigest()
 
 payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+bot = json.loads(Path(sys.argv[9]).read_text(encoding="utf-8"))
+web = json.loads(Path(sys.argv[10]).read_text(encoding="utf-8"))
+portable_bot = str(((bot.get("inventory") or {}).get("image") or {}).get("portable_content_digest") or "")
+portable_web = str(((web.get("inventory") or {}).get("image") or {}).get("portable_content_digest") or "")
+if portable_bot != portable_web or len(portable_bot) != 64:
+    raise SystemExit(2)
 expected = {
-    "schema": "market_pipeline_two_host_preflight/1.0",
+    "schema": "market_pipeline_two_host_preflight/1.1",
     "environment": "production",
     "release_sha": sys.argv[2],
     "release_tree": sys.argv[3],
     "image_id": sys.argv[4],
     "image_ids": {"bot": sys.argv[4], "web": sys.argv[11]},
     "image_input_signature": sys.argv[5],
+    "portable_content_digest": portable_bot,
+    "portable_content_digests": {"bot": portable_bot, "web": portable_web},
     "control_payload_manifest_sha256": sys.argv[6],
     "role_env_sha256": {"bot": digest(sys.argv[7]), "web": digest(sys.argv[8])},
     "host_preflight_sha256": {"bot": digest(sys.argv[9]), "web": digest(sys.argv[10])},
@@ -9216,6 +9277,7 @@ run_prepare_private_primary_control_release() {
     local web_source bot_source foundation_receipt install_local_receipt
     local install_remote_receipt prepare_receipt primary_pair project_name
     local remote_release_dir remote_incoming control_manifest_sha
+    local continuity_receipt local_bot_data_root local_web_data_root
     [[ "$PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_CONFIRM" == "$PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_CONFIRM_TEXT" ]] \
         || die "PRIVATE_PRIMARY control-release prepare requires the exact confirmation."
     [[ "${PRODUCTION_MARKET_PIPELINE_RELEASE_EVIDENCE_ENABLED:-0}" == "0" \
@@ -9234,17 +9296,24 @@ run_prepare_private_primary_control_release() {
     bot_source="${PRODUCTION_PRIVATE_PRIMARY_BOT_SOURCE:-}"
     [[ "$web_source" == /* && "$bot_source" == /* && "$web_source" != "$bot_source" ]] \
         || die "PRIVATE_PRIMARY topology sources must be distinct absolute paths."
+    continuity_receipt="${PRODUCTION_PRIVATE_PRIMARY_CONTINUITY_RECEIPT:-}"
+    if [[ -n "$continuity_receipt" ]]; then
+        [[ "$continuity_receipt" == /* && -f "$continuity_receipt" && ! -L "$continuity_receipt" ]] \
+            || die "PRIVATE_PRIMARY continuity receipt must be an absolute regular file."
+    fi
     python3 "$PRIVATE_PRIMARY_CONTROL_RELEASE_PREPARER" validate-topology-source \
         --confirm "$PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_CONFIRM_TEXT" \
         --role web \
         --source "$web_source" \
-        --repository-root "$PROJECT_DIR" >/dev/null \
+        --repository-root "$PROJECT_DIR" \
+        ${continuity_receipt:+--continuity-receipt "$continuity_receipt"} >/dev/null \
         || die "PRIVATE_PRIMARY web topology source is invalid."
     python3 "$PRIVATE_PRIMARY_CONTROL_RELEASE_PREPARER" validate-topology-source \
         --confirm "$PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_CONFIRM_TEXT" \
         --role bot \
         --source "$bot_source" \
-        --repository-root "$PROJECT_DIR" >/dev/null \
+        --repository-root "$PROJECT_DIR" \
+        ${continuity_receipt:+--continuity-receipt "$continuity_receipt"} >/dev/null \
         || die "PRIVATE_PRIMARY bot topology source is invalid."
     install -d -m 0700 -- "$PRODUCTION_MARKET_PIPELINE_RELEASE_DIR" "$RELEASE_ARTIFACT_DIR"
     build_private_primary_market_pipeline_image
@@ -9280,23 +9349,33 @@ run_prepare_private_primary_control_release() {
     PRODUCTION_MARKET_PIPELINE_PRIMARY_PAIR_RECEIPT="$primary_pair"
     PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT_SHA256="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT")"
     foundation_receipt="${PRODUCTION_PRIVATE_PRIMARY_FOUNDATION_RECEIPT:-/root/secure-envs/trading-bot/release-control/private-primary-foundation-receipt.json}"
+    local_bot_data_root="$(read_env_value "$bot_source" MARKET_BOT_DATA_ROOT)"
+    local_web_data_root="$(read_env_value "$web_source" MARKET_WEB_DATA_ROOT)"
     python3 "$PRIVATE_PRIMARY_CONTROL_RELEASE_PREPARER" prepare-foundation \
         --confirm "$PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_CONFIRM_TEXT" \
-        --bot-data-root "${PRODUCTION_PRIVATE_PRIMARY_LOCAL_SNAPSHOT_DIR%/snapshots}" \
-        --web-data-root "${PRODUCTION_PRIVATE_PRIMARY_REMOTE_SNAPSHOT_DIR%/snapshots}" \
+        --bot-data-root "$local_bot_data_root" \
+        --web-data-root "$local_web_data_root" \
         --web-backup-root "${PRODUCTION_PRIVATE_PRIMARY_WEB_BACKUP_ROOT:-/srv/trading-bot/market-data-production/backups}" \
         --offhost-root "${PRODUCTION_PRIVATE_PRIMARY_LOCAL_OFFHOST_BACKUP_ROOT:-/root/secure-envs/trading-bot/release-control/offhost-backups}" \
         --backup-key "${PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_KEY_PATH:-/root/secure-envs/trading-bot/market-pipeline-backup.key}" \
         --receipt "$foundation_receipt" \
         --release-sha "$RELEASE_SHA" \
-        --release-tree "$PRODUCTION_RELEASE_TREE" >/dev/null \
+        --release-tree "$PRODUCTION_RELEASE_TREE" \
+        ${continuity_receipt:+--continuity-receipt "$continuity_receipt"} >/dev/null \
         || die "PRIVATE_PRIMARY foundation prepare failed."
-    python3 "$MARKET_PIPELINE_FOUNDATION_MANAGER" prepare-paths \
-        --role bot \
-        --root "${PRODUCTION_PRIVATE_PRIMARY_LOCAL_SNAPSHOT_DIR%/snapshots}" \
-        --apply \
-        --acknowledge-host-mutation >/dev/null \
-        || die "PRIVATE_PRIMARY bot path contract prepare failed."
+    if [[ -n "$continuity_receipt" ]]; then
+        python3 "$MARKET_PIPELINE_FOUNDATION_MANAGER" prepare-paths \
+            --role bot \
+            --root "$local_bot_data_root" >/dev/null \
+            || die "PRIVATE_PRIMARY adopted bot path contract inspect failed."
+    else
+        python3 "$MARKET_PIPELINE_FOUNDATION_MANAGER" prepare-paths \
+            --role bot \
+            --root "$local_bot_data_root" \
+            --apply \
+            --acknowledge-host-mutation >/dev/null \
+            || die "PRIVATE_PRIMARY bot path contract prepare failed."
+    fi
     install_local_receipt="${RELEASE_ARTIFACT_DIR}/private-primary-control-release-local.json"
     python3 "$PRIVATE_PRIMARY_CONTROL_RELEASE_PREPARER" install-control-release \
         --confirm "$PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_CONFIRM_TEXT" \
@@ -9402,15 +9481,23 @@ sync -f '$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR'"
             "$IRAN_SSH_TARGET:${PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_KEY_PATH:-/root/secure-envs/trading-bot/market-pipeline-backup.key}"
         ssh_iran "chmod 0600 -- '${PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_KEY_PATH:-/root/secure-envs/trading-bot/market-pipeline-backup.key}'"
     fi
-    ssh_iran "set -euo pipefail
+    if [[ -n "$continuity_receipt" ]]; then
+        ssh_iran "set -euo pipefail
+install -d -m 0700 -- '${PRODUCTION_PRIVATE_PRIMARY_WEB_BACKUP_ROOT:-/srv/trading-bot/market-data-production/backups}'
+python3 '$REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR/scripts/manage_market_pipeline_stage3.py' prepare-paths \
+  --role web \
+  --root '$local_web_data_root' >/dev/null"
+    else
+        ssh_iran "set -euo pipefail
 install -d -m 0700 -- \
-  '${PRODUCTION_PRIVATE_PRIMARY_REMOTE_SNAPSHOT_DIR%/snapshots}' \
+  '$local_web_data_root' \
   '${PRODUCTION_PRIVATE_PRIMARY_WEB_BACKUP_ROOT:-/srv/trading-bot/market-data-production/backups}'
 python3 '$REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR/scripts/manage_market_pipeline_stage3.py' prepare-paths \
   --role web \
-  --root '${PRODUCTION_PRIVATE_PRIMARY_REMOTE_SNAPSHOT_DIR%/snapshots}' \
+  --root '$local_web_data_root' \
   --apply \
   --acknowledge-host-mutation >/dev/null"
+    fi
     market_pipeline_verify_local_host_contract
     market_pipeline_verify_remote_host_contract
     PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_REQUESTED=1
@@ -9604,6 +9691,110 @@ root='$REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR'
         || die "PRIVATE_PRIMARY choreography ${action} failed closed."
 }
 
+run_inventory_private_primary_runtime() {
+    local bot_receipt web_receipt pair_receipt remote_receipt
+    [[ "$PRODUCTION_PRIVATE_PRIMARY_RUNTIME_INVENTORY_CONFIRM" == "$PRODUCTION_PRIVATE_PRIMARY_RUNTIME_INVENTORY_CONFIRM_TEXT" ]] \
+        || die "PRIVATE_PRIMARY runtime inventory requires the exact confirmation."
+    [[ -f "$PRIVATE_PRIMARY_RUNTIME_INVENTORY" ]] \
+        || die "PRIVATE_PRIMARY runtime inventory tool is missing."
+    bot_receipt="${PRODUCTION_PRIVATE_PRIMARY_BOT_RUNTIME_RECEIPT:-/root/secure-envs/trading-bot/release-control/private-primary-bot-runtime-inventory.json}"
+    web_receipt="${PRODUCTION_PRIVATE_PRIMARY_WEB_RUNTIME_RECEIPT:-/root/secure-envs/trading-bot/release-control/private-primary-web-runtime-inventory.json}"
+    pair_receipt="${PRODUCTION_PRIVATE_PRIMARY_CONTINUITY_RECEIPT:-/root/secure-envs/trading-bot/release-control/private-primary-runtime-continuity.json}"
+    remote_receipt="/root/secure-envs/trading-bot/release-control/private-primary-web-runtime-inventory.json"
+    python3 "$PRIVATE_PRIMARY_RUNTIME_INVENTORY" inventory \
+        --confirm "$PRODUCTION_PRIVATE_PRIMARY_RUNTIME_INVENTORY_CONFIRM_TEXT" \
+        --role bot \
+        --receipt "$bot_receipt" >/dev/null \
+        || die "PRIVATE_PRIMARY bot runtime inventory failed."
+    ssh_iran "install -d -m 0700 -- /root/secure-envs/trading-bot/release-control"
+    ssh_iran "python3 - inventory --confirm '$PRODUCTION_PRIVATE_PRIMARY_RUNTIME_INVENTORY_CONFIRM_TEXT' --role web --receipt '$remote_receipt'" \
+        <"$PRIVATE_PRIMARY_RUNTIME_INVENTORY" >/dev/null \
+        || die "PRIVATE_PRIMARY web runtime inventory failed."
+    scp_iran "$IRAN_SSH_TARGET:$remote_receipt" "$web_receipt"
+    chmod 0600 -- "$bot_receipt" "$web_receipt"
+    python3 "$PRIVATE_PRIMARY_RUNTIME_INVENTORY" combine \
+        --confirm "$PRODUCTION_PRIVATE_PRIMARY_RUNTIME_INVENTORY_CONFIRM_TEXT" \
+        --bot-receipt "$bot_receipt" \
+        --web-receipt "$web_receipt" \
+        --receipt "$pair_receipt" >/dev/null \
+        || die "PRIVATE_PRIMARY runtime inventory combine failed."
+    PRODUCTION_PRIVATE_PRIMARY_CONTINUITY_RECEIPT="$pair_receipt"
+    log "PRIVATE_PRIMARY live runtime inventory recorded; no service or secret value changed."
+}
+
+run_provision_private_primary_secrets() {
+    local bot_inventory web_inventory bot_receipt web_receipt bot_verify web_verify
+    [[ "$PRODUCTION_PRIVATE_PRIMARY_SECRETS_CONFIRM" == "$PRODUCTION_PRIVATE_PRIMARY_SECRETS_CONFIRM_TEXT" ]] \
+        || die "PRIVATE_PRIMARY secret provision requires the exact confirmation."
+    [[ -f "$PRIVATE_PRIMARY_SECRET_PROVISIONER" ]] \
+        || die "PRIVATE_PRIMARY secret provisioner is missing."
+    bot_inventory="${PRODUCTION_PRIVATE_PRIMARY_BOT_RUNTIME_RECEIPT:-/root/secure-envs/trading-bot/release-control/private-primary-bot-runtime-inventory.json}"
+    web_inventory="${PRODUCTION_PRIVATE_PRIMARY_WEB_RUNTIME_RECEIPT:-/root/secure-envs/trading-bot/release-control/private-primary-web-runtime-inventory.json}"
+    bot_receipt="/root/secure-envs/trading-bot/release-control/private-primary-bot-secret-prepare.json"
+    web_receipt="/root/secure-envs/trading-bot/release-control/private-primary-web-secret-prepare.json"
+    bot_verify="/root/secure-envs/trading-bot/release-control/private-primary-bot-secret-verify.json"
+    web_verify="/root/secure-envs/trading-bot/release-control/private-primary-web-secret-verify.json"
+    [[ -f "$bot_inventory" && -f "$web_inventory" ]] \
+        || die "PRIVATE_PRIMARY secret provision requires both runtime inventory receipts."
+    python3 "$PRIVATE_PRIMARY_SECRET_PROVISIONER" prepare \
+        --confirm "$PRODUCTION_PRIVATE_PRIMARY_SECRETS_CONFIRM_TEXT" \
+        --role bot \
+        --runtime-inventory "$bot_inventory" \
+        --receipt "$bot_receipt" >/dev/null \
+        || die "PRIVATE_PRIMARY bot secret prepare failed."
+    scp_iran "$web_inventory" "$IRAN_SSH_TARGET:$web_inventory"
+    ssh_iran "python3 - prepare --confirm '$PRODUCTION_PRIVATE_PRIMARY_SECRETS_CONFIRM_TEXT' --role web --runtime-inventory '$web_inventory' --receipt '$web_receipt'" \
+        <"$PRIVATE_PRIMARY_SECRET_PROVISIONER" >/dev/null \
+        || die "PRIVATE_PRIMARY web secret prepare failed."
+    python3 "$PRIVATE_PRIMARY_SECRET_PROVISIONER" verify \
+        --confirm "$PRODUCTION_PRIVATE_PRIMARY_SECRETS_CONFIRM_TEXT" \
+        --role bot \
+        --runtime-inventory "$bot_inventory" \
+        --receipt "$bot_verify" >/dev/null \
+        || die "PRIVATE_PRIMARY bot secret verify failed."
+    ssh_iran "cd '$IRAN_PROJECT_DIR' && PYTHONPATH='$IRAN_PROJECT_DIR' python3 - verify --confirm '$PRODUCTION_PRIVATE_PRIMARY_SECRETS_CONFIRM_TEXT' --role web --runtime-inventory '$web_inventory' --receipt '$web_verify'" \
+        <"$PRIVATE_PRIMARY_SECRET_PROVISIONER" >/dev/null \
+        || die "PRIVATE_PRIMARY web secret verify failed."
+    log "PRIVATE_PRIMARY secrets were installed from live identities; source files were retained."
+}
+
+run_render_private_primary_runtime_env() {
+    local bot_inventory web_inventory web_live
+    [[ "$PRODUCTION_PRIVATE_PRIMARY_RUNTIME_INVENTORY_CONFIRM" == "$PRODUCTION_PRIVATE_PRIMARY_RUNTIME_ENV_CONFIRM_TEXT" \
+        || "$PRODUCTION_PRIVATE_PRIMARY_RUNTIME_INVENTORY_CONFIRM" == "$PRODUCTION_PRIVATE_PRIMARY_RUNTIME_INVENTORY_CONFIRM_TEXT" ]] \
+        || die "PRIVATE_PRIMARY runtime env render requires the exact confirmation."
+    bot_inventory="${PRODUCTION_PRIVATE_PRIMARY_BOT_RUNTIME_RECEIPT:-/root/secure-envs/trading-bot/release-control/private-primary-bot-runtime-inventory.json}"
+    web_inventory="${PRODUCTION_PRIVATE_PRIMARY_WEB_RUNTIME_RECEIPT:-/root/secure-envs/trading-bot/release-control/private-primary-web-runtime-inventory.json}"
+    web_live="/root/secure-envs/trading-bot/release-control/web.live-source.env"
+    python3 "$PRIVATE_PRIMARY_RUNTIME_ENV_RENDERER" \
+        --confirm "$PRODUCTION_PRIVATE_PRIMARY_RUNTIME_ENV_CONFIRM_TEXT" \
+        --role bot \
+        --runtime-inventory "$bot_inventory" \
+        --live-env /srv/trading-bot/secure/agent-access/market-data-staging/market-data.bot.env \
+        --old-env /root/secure-envs/trading-bot/release-control/bot.old.env \
+        --topology-source /root/secure-envs/trading-bot/release-control/bot.production-source.env \
+        --receipt /root/secure-envs/trading-bot/release-control/private-primary-bot-old-env-receipt.json >/dev/null \
+        || die "PRIVATE_PRIMARY bot old env render failed."
+    scp_iran "$IRAN_SSH_TARGET:/srv/trading-bot/secure/agent-access/market-data-staging/market-data.web.env" \
+        "$web_live"
+    chmod 0600 -- "$web_live"
+    python3 "$PRIVATE_PRIMARY_RUNTIME_ENV_RENDERER" \
+        --confirm "$PRODUCTION_PRIVATE_PRIMARY_RUNTIME_ENV_CONFIRM_TEXT" \
+        --role web \
+        --runtime-inventory "$web_inventory" \
+        --live-env "$web_live" \
+        --old-env /root/secure-envs/trading-bot/release-control/web.old.env \
+        --topology-source /root/secure-envs/trading-bot/release-control/web.production-source.env \
+        --receipt /root/secure-envs/trading-bot/release-control/private-primary-web-old-env-receipt.json >/dev/null \
+        || die "PRIVATE_PRIMARY web old env render failed."
+    ssh_iran "install -d -m 0700 -- /root/secure-envs/trading-bot/release-control"
+    scp_iran /root/secure-envs/trading-bot/release-control/web.old.env \
+        "$IRAN_SSH_TARGET:/root/secure-envs/trading-bot/release-control/web.old.env"
+    scp_iran /root/secure-envs/trading-bot/release-control/web.production-source.env \
+        "$IRAN_SSH_TARGET:/root/secure-envs/trading-bot/release-control/web.production-source.env"
+    log "PRIVATE_PRIMARY old env and topology sources were rendered from live inventory."
+}
+
 main() {
     local release_iran_mode=""
     parse_args "$@"
@@ -9653,6 +9844,15 @@ main() {
             ;;
         prepare-private-primary-control-release)
             run_prepare_private_primary_control_release
+            ;;
+        inventory-private-primary-runtime)
+            run_inventory_private_primary_runtime
+            ;;
+        provision-private-primary-secrets)
+            run_provision_private_primary_secrets
+            ;;
+        render-private-primary-runtime-env)
+            run_render_private_primary_runtime_env
             ;;
         deploy-foreign) prepare_local_release_inputs; install_sync_sampler_local; build_release; deploy_foreign; verify_sync_sampler_local ;;
         bootstrap-iran) prepare_local_release_inputs; bootstrap_iran ;;

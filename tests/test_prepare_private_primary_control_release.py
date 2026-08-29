@@ -544,6 +544,22 @@ class PreparePrivatePrimaryControlReleaseTests(unittest.TestCase):
         self.assertEqual(payload["capture_owner_changed"], False)
         self.assertEqual(payload["historical_flags"], {key: "0" for key in preparer.HISTORICAL_FLAGS})
 
+    def test_topology_source_rejects_unbound_staging_data_root(self) -> None:
+        from scripts.inventory_private_primary_active_runtime import ALLOWED_ADOPTED_DATA_ROOTS
+
+        adopted = ALLOWED_ADOPTED_DATA_ROOTS["bot"]
+        source = _write(
+            self.workspace / "inputs" / "bot.adopted.env",
+            (
+                f"MARKET_BOT_DATA_ROOT={adopted}\n"
+                f"MARKET_PRODUCT_SNAPSHOT_ROOT={adopted}/snapshots\n"
+            ),
+        )
+        with self.assertRaisesRegex(preparer.PrepareError, "bot_data_root_mismatch"):
+            preparer.validate_topology_source(
+                source, role="bot", repository_root=REPO_ROOT
+            )
+
     def test_topology_source_rejects_staging_and_plaintext_secret(self) -> None:
         source = _write(
             self.workspace / "inputs" / "bot.source.env",

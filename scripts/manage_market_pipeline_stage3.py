@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from hashlib import sha256
 import ipaddress
 import json
 import os
@@ -242,6 +243,8 @@ def inspect_secret_contract(
             status = "file_owner_mismatch"
         elif stat.S_IMODE(info.st_mode) != 0o440:
             status = "file_mode_mismatch"
+        elif info.st_nlink != 1:
+            status = "file_hardlink_forbidden"
         elif info.st_size <= 0:
             status = "file_empty"
         findings.append({"secret": key, "status": status})
@@ -393,7 +396,24 @@ def image_metadata(image: str, release_sha: str, *, fixture: bool) -> dict[str, 
         "revision": labels.get("org.opencontainers.image.revision"),
         "version": labels.get("org.opencontainers.image.version"),
         "runtime_user": document.get("Config", {}).get("User"),
+        "release_tree": labels.get("io.gold-trade.release.tree"),
+        "input_signature": labels.get("io.gold-trade.release.input-signature"),
+        "portable_content_digest": portable_image_content_digest(document),
     }
+
+
+def portable_image_content_digest(document: Mapping[str, Any]) -> str:
+    payload = {
+        "Architecture": document.get("Architecture"),
+        "Config": document.get("Config"),
+        "Created": document.get("Created"),
+        "Os": document.get("Os"),
+        "RootFS": document.get("RootFS"),
+    }
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), default=str
+    ).encode()
+    return sha256(encoded).hexdigest()
 
 
 def inventory(

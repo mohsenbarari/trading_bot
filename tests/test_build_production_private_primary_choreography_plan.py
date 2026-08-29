@@ -344,6 +344,10 @@ def test_builds_canonical_value_free_deterministic_plan(tmp_path: Path) -> None:
     }
     assert receipt["plan_sha256"] == sha256(first_plan).hexdigest()
     assert receipt["phase_count"] == 12
+    assert plan["required_nine_sources"] == list(builder.REQUIRED_NINE_SOURCES)
+    assert plan["sparse_one_gram"]["cells"] == ["COIN_ONE_GRAM:CASH", "COIN_ONE_GRAM:TOMORROW"]
+    assert plan["sparse_one_gram"]["method"] == "ABSTAIN_NO_SAFE_SAME_COMMODITY_ANCHOR"
+    assert plan["catchup_cutoff_utc"] == "2026-08-25T09:33:00Z"
     assert receipt["transaction_id"] == args.transaction_id
     assert receipt["plan_output_path_sha256"] == sha256(
         args.output.encode("utf-8")
@@ -410,6 +414,33 @@ def test_builds_canonical_value_free_deterministic_plan(tmp_path: Path) -> None:
     assert second_receipt["receipt_output_path_sha256"] == sha256(
         args.receipt.encode("utf-8")
     ).hexdigest()
+
+
+def test_rejects_old_and_new_data_root_drift(tmp_path: Path) -> None:
+    args, files = _fixture(tmp_path)
+    _write(
+        files["bot_old_env"],
+        (
+            "MARKET_PIPELINE_PROJECT_NAME=market-private-pipeline-bot\n"
+            "MARKET_PIPELINE_FEED_MODE=PRIVATE_SHADOW\n"
+            "MARKET_BOT_DATA_ROOT=/srv/trading-bot/other-data-root\n"
+        ),
+    )
+    args.expected_bot_old_env_sha256 = _digest(files["bot_old_env"])
+    with pytest.raises(builder.PlanBuildError, match="bot_data_root_drift"):
+        builder.build(args)
+
+
+def test_rejects_portable_digest_mismatch_on_preflight_v11(tmp_path: Path) -> None:
+    args, files = _fixture(tmp_path)
+    payload = json.loads(files["preflight_receipt"].read_text(encoding="utf-8"))
+    payload["schema"] = "market_pipeline_two_host_preflight/1.1"
+    payload["portable_content_digest"] = "1" * 64
+    payload["portable_content_digests"] = {"bot": "1" * 64, "web": "2" * 64}
+    _json(files["preflight_receipt"], payload)
+    args.expected_preflight_receipt_sha256 = _digest(files["preflight_receipt"])
+    with pytest.raises(builder.PlanBuildError, match="portable_image_digest_mismatch"):
+        builder.build(args)
 
 
 def stat_mode(path: Path) -> int:
