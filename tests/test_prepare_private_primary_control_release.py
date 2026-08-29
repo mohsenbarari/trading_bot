@@ -195,6 +195,11 @@ class PreparePrivatePrimaryControlReleaseTests(unittest.TestCase):
         self.assertIn("PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST", body)
         self.assertIn('-e "$RSYNC_SSH"', body)
         self.assertNotIn("RSYNC_IRAN_SSH", body)
+        self.assertIn(
+            "--base-dir \"/root/secure-envs/trading-bot/release-control/remote-control-mirror\"",
+            body,
+        )
+        self.assertNotIn("$RELEASE_ARTIFACT_DIR/remote-control-mirror", body)
         self.assertIn("services_started", body)
         self.assertIn("database_mutated", body)
         self.assertIn("authority_changed", body)
@@ -378,6 +383,25 @@ class PreparePrivatePrimaryControlReleaseTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(preparer.PrepareError, "host_role_mismatch"):
             self.install()
+
+    def test_repo_tmp_control_mirror_is_lexically_forbidden(self) -> None:
+        with self.assertRaisesRegex(preparer.PrepareError, "release_base_path_forbidden"):
+            preparer.validate_lexical_path(
+                "/root/trading-bot/trading_bot/tmp/production-release/artifacts/remote-control-mirror",
+                label="release_base",
+                repository_root=REPO_ROOT,
+            )
+
+    def test_secure_remote_control_mirror_is_lexically_allowed(self) -> None:
+        path = preparer.validate_lexical_path(
+            "/root/secure-envs/trading-bot/release-control/remote-control-mirror",
+            label="release_base",
+            repository_root=REPO_ROOT,
+        )
+        self.assertEqual(
+            str(path),
+            "/root/secure-envs/trading-bot/release-control/remote-control-mirror",
+        )
 
     def test_insecure_data_root_is_rejected(self) -> None:
         with self.assertRaisesRegex(preparer.PrepareError, "bot_data_root_path_forbidden"):

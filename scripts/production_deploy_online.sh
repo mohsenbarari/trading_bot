@@ -9342,7 +9342,7 @@ sync -f '$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR'"
     install_remote_receipt="${RELEASE_ARTIFACT_DIR}/private-primary-control-release-remote.json"
     python3 "$PRIVATE_PRIMARY_CONTROL_RELEASE_PREPARER" install-control-release \
         --confirm "$PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_CONFIRM_TEXT" \
-        --base-dir "$RELEASE_ARTIFACT_DIR/remote-control-mirror" \
+        --base-dir "/root/secure-envs/trading-bot/release-control/remote-control-mirror" \
         --release-sha "$RELEASE_SHA" \
         --release-tree "$PRODUCTION_RELEASE_TREE" \
         --host-role web \
