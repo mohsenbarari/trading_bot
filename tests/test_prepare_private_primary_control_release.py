@@ -196,6 +196,11 @@ class PreparePrivatePrimaryControlReleaseTests(unittest.TestCase):
         self.assertIn("--web-image-id", body)
         self.assertIn("select-host-image", source)
         self.assertIn("REMOTE_MARKET_PIPELINE_IMAGE_ID", body)
+        load_body = source.split("load_market_pipeline_image_remote() {", 1)[1]
+        load_body = load_body.split("\nrun_market_pipeline_two_host_preflight() {", 1)[0]
+        self.assertIn('"${RSYNC_RSH_CMD[@]}"', load_body)
+        self.assertNotIn("SSH_IRAN_CMD", load_body)
+        self.assertNotIn("docker image load >/dev/null", load_body)
         self.assertIn("--control-manifest", body)
         self.assertIn("PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST", body)
         self.assertIn('-e "$RSYNC_SSH"', body)

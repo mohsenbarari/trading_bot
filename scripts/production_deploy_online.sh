@@ -5156,19 +5156,8 @@ for path in \"\$MARKET_WEB_DATA_ROOT\" \"\$docker_root\"; do
 done" || die "Market Pipeline web host private-bind/data-root/disk contract failed."
 }
 
-load_market_pipeline_image_remote() {
-    local expected_fields remote_identity remote_id
-    expected_fields="linux/amd64|10001:10001|$RELEASE_SHA|$PRODUCTION_RELEASE_TREE|$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE"
-    remote_identity="$(ssh_iran "docker image inspect --format '{{.Id}}|{{.Os}}/{{.Architecture}}|{{.Config.User}}|{{index .Config.Labels \"org.opencontainers.image.revision\"}}|{{index .Config.Labels \"io.gold-trade.release.tree\"}}|{{index .Config.Labels \"io.gold-trade.release.input-signature\"}}' '$PRODUCTION_MARKET_PIPELINE_IMAGE_ID' 2>/dev/null || true")"
-    if [[ "$remote_identity" != "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID|$expected_fields" ]]; then
-        log "Streaming the exact Market Pipeline image to the web host without a transfer file"
-        if ! docker image save "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
-            | timeout --signal=TERM --kill-after=15s "${IRAN_TRANSFER_TIMEOUT_SECONDS}s" \
-                "${SSH_IRAN_CMD[@]}" "$IRAN_SSH_TARGET" "docker image load >/dev/null"; then
-            die "Market Pipeline image stream/load failed."
-        fi
-    fi
-    remote_id="$(ssh_iran "set -euo pipefail
+market_pipeline_select_remote_image_id() {
+    ssh_iran "set -euo pipefail
 ids=\$(docker images --filter 'label=org.opencontainers.image.revision=$RELEASE_SHA' --filter 'label=io.gold-trade.release.input-signature=$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE' --no-trunc --format '{{.ID}}' | awk 'NF' | sort -u)
 [ -n \"\$ids\" ] || exit 71
 docker image inspect \$ids" \
@@ -5177,8 +5166,29 @@ docker image inspect \$ids" \
             --release-sha "$RELEASE_SHA" \
             --release-tree "$PRODUCTION_RELEASE_TREE" \
             --input-signature "$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE" \
-        | python3 -c 'import json,sys; print(json.load(sys.stdin)["image_id"])')" \
-        || die "Remote Market Pipeline image identity could not be bound after load."
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)["image_id"])'
+}
+
+load_market_pipeline_image_remote() {
+    local expected_fields remote_identity remote_id load_output
+    expected_fields="linux/amd64|10001:10001|$RELEASE_SHA|$PRODUCTION_RELEASE_TREE|$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE"
+    remote_identity="$(ssh_iran "docker image inspect --format '{{.Id}}|{{.Os}}/{{.Architecture}}|{{.Config.User}}|{{index .Config.Labels \"org.opencontainers.image.revision\"}}|{{index .Config.Labels \"io.gold-trade.release.tree\"}}|{{index .Config.Labels \"io.gold-trade.release.input-signature\"}}' '$PRODUCTION_MARKET_PIPELINE_IMAGE_ID' 2>/dev/null || true")"
+    remote_id=""
+    if [[ "$remote_identity" == "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID|$expected_fields" ]]; then
+        remote_id="$PRODUCTION_MARKET_PIPELINE_IMAGE_ID"
+    else
+        remote_id="$(market_pipeline_select_remote_image_id 2>/dev/null || true)"
+    fi
+    if [[ ! "$remote_id" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+        log "Streaming the exact Market Pipeline image to the web host without a transfer file"
+        load_output="$(docker image save "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
+            | timeout --signal=TERM --kill-after=15s "${IRAN_TRANSFER_TIMEOUT_SECONDS}s" \
+                "${RSYNC_RSH_CMD[@]}" "$IRAN_SSH_TARGET" "docker image load")" \
+            || die "Market Pipeline image stream/load failed."
+        remote_id="$(printf '%s\n' "$load_output" | awk '/Loaded image ID:/{print $4; found=1} END{if(!found) exit 1}')" \
+            || remote_id="$(market_pipeline_select_remote_image_id)" \
+            || die "Remote Market Pipeline image identity could not be bound after load."
+    fi
     [[ "$remote_id" =~ ^sha256:[0-9a-f]{64}$ ]] \
         || die "Remote Market Pipeline image ID is invalid."
     REMOTE_MARKET_PIPELINE_IMAGE_ID="$remote_id"
