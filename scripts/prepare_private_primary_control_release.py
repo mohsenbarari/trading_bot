@@ -588,6 +588,24 @@ def _regular_file(path: Path, *, label: str) -> None:
         raise PrepareError(f"{label}_file_invalid")
 
 
+def _harden_control_release_tree(root: Path, extra_names: set[str]) -> None:
+    for child in (root, *root.rglob("*")):
+        if child.is_symlink():
+            raise PrepareError("incoming_symlink_forbidden")
+        info = child.lstat()
+        if stat.S_ISDIR(info.st_mode):
+            os.chmod(child, 0o700)
+            continue
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise PrepareError("control_payload_file_invalid")
+        if child.parent == root and child.name in extra_names:
+            os.chmod(child, 0o600)
+        else:
+            os.chmod(child, 0o444)
+        if child.lstat().st_mode & 0o022:
+            raise PrepareError("control_payload_writable")
+
+
 def _payload_matches(release_dir: Path, payload_dir: Path, extras: Mapping[str, Path]) -> bool:
     manifest = release_dir / "control-payload.sha256"
     if not manifest.is_file():
@@ -678,6 +696,7 @@ def install_control_release(
         if release_dir.is_symlink() or not release_dir.is_dir():
             raise PrepareError("existing_release_not_directory")
         if _payload_matches(release_dir, payload_dir, extras):
+            _harden_control_release_tree(release_dir, set(extras))
             payload = _install_receipt(
                 release_sha=release_sha,
                 release_tree=release_tree,
@@ -700,6 +719,7 @@ def install_control_release(
             os.chmod(destination, 0o600)
         if incoming.is_symlink() or any(child.is_symlink() for child in incoming.rglob("*")):
             raise PrepareError("incoming_symlink_forbidden")
+        _harden_control_release_tree(incoming, set(extras))
         manifest = incoming / "control-payload.sha256"
         _regular_file(manifest, label="control_manifest")
         completed = []

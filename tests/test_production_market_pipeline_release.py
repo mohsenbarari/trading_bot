@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 import os
 from pathlib import Path
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -233,7 +234,16 @@ printf '%s\n' "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256"
             self.assertIn("scripts/upgrade_market_pipeline_bluegreen.py", names)
             self.assertIn("scripts/prepare_market_pipeline_primary_release.py", names)
             self.assertIn("scripts/prepare_private_primary_control_release.py", names)
+            self.assertIn("scripts/build_production_private_primary_choreography_plan.py", names)
             self.assertIn("scripts/audit_production_market_catchup.py", names)
+            writable = [
+                path.as_posix()
+                for path in payload.rglob("*")
+                if path.is_file() and path.stat().st_mode & 0o022
+            ]
+            self.assertEqual(writable, [])
+            builder = payload / "scripts/build_production_private_primary_choreography_plan.py"
+            self.assertEqual(stat.S_IMODE(builder.stat().st_mode), 0o444)
             self.assertIn("scripts/observe_production_private_primary.py", names)
             self.assertIn("scripts/verify_production_private_primary_promotion.py", names)
             self.assertIn("scripts/promote_production_private_primary_product.py", names)

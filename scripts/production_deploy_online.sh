@@ -4964,6 +4964,12 @@ prepare_market_pipeline_control_payload() {
     [[ -z "$(find "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR" -type l -print -quit)" \
         && -z "$(find "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR" ! -type f ! -type d -print -quit)" ]] \
         || die "Market Pipeline control payload contains an unsupported filesystem entry."
+    # git archive | tar can inherit a group-writable umask. Exact control-release
+    # python refuses any tool with group/other write bits.
+    find "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR" -type d -exec chmod 0700 {} +
+    find "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR" -type f -exec chmod 0444 {} +
+    [[ -z "$(find "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR" -type f -perm /022 -print -quit)" ]] \
+        || die "Market Pipeline control payload files must not be group or world writable."
     (
         cd "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR"
         find . -type f -print0 | LC_ALL=C sort -z | xargs -r -0 sha256sum
@@ -4989,6 +4995,8 @@ verify_market_pipeline_control_payload() {
         cd "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR"
         sha256sum -c "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST" >/dev/null
     ) || die "Market Pipeline control payload contents drifted."
+    [[ -z "$(find "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR" -type f -perm /022 -print -quit)" ]] \
+        || die "Market Pipeline control payload files must not be group or world writable."
 }
 
 verify_market_pipeline_release_evidence() {

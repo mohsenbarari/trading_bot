@@ -324,6 +324,25 @@ class PreparePrivatePrimaryControlReleaseTests(unittest.TestCase):
         second = self.install(receipt=self.workspace / "receipts" / "install-2.json")
         self.assertEqual(second["idempotent_reuse"], True)
         self.assertEqual((release / "control.txt").read_bytes(), self.control.read_bytes())
+        self.assertEqual(stat.S_IMODE((release / "control.txt").stat().st_mode), 0o444)
+        self.assertEqual(stat.S_IMODE((release / "control-payload.sha256").stat().st_mode), 0o600)
+
+    def test_install_strips_group_write_from_payload_files(self) -> None:
+        os.chmod(self.control, 0o664)
+        payload = self.install()
+        installed = self.base / SHA / "control.txt"
+        self.assertEqual(installed.read_bytes(), self.control.read_bytes())
+        self.assertEqual(stat.S_IMODE(installed.stat().st_mode), 0o444)
+        self.assertFalse(payload["idempotent_reuse"])
+
+    def test_reuse_hardens_existing_group_writable_payload(self) -> None:
+        self.install()
+        target = self.base / SHA / "control.txt"
+        os.chmod(target, 0o664)
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o664)
+        reused = self.install(receipt=self.workspace / "receipts" / "install-harden.json")
+        self.assertTrue(reused["idempotent_reuse"])
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o444)
 
     def test_existing_divergent_release_is_fail_closed(self) -> None:
         self.install()

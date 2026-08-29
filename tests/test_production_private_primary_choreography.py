@@ -1193,6 +1193,8 @@ def test_official_shell_exposes_only_explicit_validate_and_execute_actions() -> 
     assert "/proc/self/fd/" in exact
     assert "O_NOFOLLOW" in exact
     assert "PATH=/usr/bin:/bin" in exact
+    assert "0o022" in exact
+    assert "exact_control_release_tool_invalid" in exact
 
 
 def test_readiness_result_requires_fresh_fourteen_rate_nine_source_proof() -> None:
