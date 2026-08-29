@@ -209,6 +209,28 @@ class ProvisionPrivatePrimarySecretsTests(unittest.TestCase):
         with self.assertRaisesRegex(provisioner.ProvisionError, "existing_invalid_refused"):
             provisioner._install_atomic(source, broken)
 
+    def test_continuity_secret_may_reuse_sibling_of_live_mounts(self) -> None:
+        live = _write(self.sources / "hmac-active", SECRET)
+        extra = _write(self.sources / "research-archive.key", b"R" * 32)
+        runtime = _runtime(
+            "web",
+            [
+                {
+                    "source": str(live),
+                    "destination": "/run/secrets/market_hmac_active",
+                    "env_key": "MARKET_HMAC_ACTIVE_FILE",
+                }
+            ],
+        )
+        runtime["historical_secret_root"] = str(self.sources)
+        chosen = provisioner._select_source(
+            runtime,
+            "MARKET_RESEARCH_ENCRYPTION_KEY_FILE",
+            "research-archive.key",
+            continuity_required=True,
+        )
+        self.assertEqual(chosen, extra)
+
     def test_prepare_requires_live_source_and_does_not_generate(self) -> None:
         hmac = _write(self.sources / "hmac-active", SECRET)
         runtime = _runtime(

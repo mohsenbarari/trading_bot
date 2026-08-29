@@ -236,7 +236,13 @@ def _install_atomic(source: Path, destination: Path) -> str:
     return "installed"
 
 
-def _select_source(inventory: Mapping[str, Any], env_key: str, filename: str) -> Path:
+def _select_source(
+    inventory: Mapping[str, Any],
+    env_key: str,
+    filename: str,
+    *,
+    continuity_required: bool,
+) -> Path:
     candidates: list[str] = []
     for item in inventory.get("secret_mounts") or []:
         source = str(item.get("source") or "")
@@ -250,6 +256,15 @@ def _select_source(inventory: Mapping[str, Any], env_key: str, filename: str) ->
     for path in candidates:
         if path not in unique:
             unique.append(path)
+    if not unique and continuity_required:
+        historical_root = Path(str(inventory.get("historical_secret_root") or HISTORICAL_SECRET_ROOT))
+        historical = historical_root / filename
+        sibling_live = any(
+            Path(str(item.get("source") or "")).parent == historical_root
+            for item in (inventory.get("secret_mounts") or [])
+        )
+        if sibling_live and historical.is_file():
+            unique.append(str(historical))
     if not unique:
         raise ProvisionError(f"{env_key}_live_source_missing")
     chosen = Path(unique[0])
@@ -307,7 +322,9 @@ def prepare_secrets(
     _secure_parent(secret_root, create=True)
     rows = []
     for env_key, filename, continuity, safe_generate in SECRET_SPECS[role]:
-        source = _select_source(inventory, env_key, filename)
+        source = _select_source(
+            inventory, env_key, filename, continuity_required=continuity
+        )
         destination = secret_root / filename
         action = _install_atomic(source, destination)
         metadata = inspect_file(destination)
