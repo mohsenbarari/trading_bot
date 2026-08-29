@@ -535,6 +535,34 @@ def _evidence(host: str, path: str, schema: str, statuses: Sequence[str]) -> dic
     return {"host": host, "path": path, "schema": schema, "statuses": list(statuses)}
 
 
+def _assert_private_manifest_receipt_binding(
+    receipt: Mapping[str, Any],
+    *,
+    deployment_digest: str,
+    private_digest: str,
+) -> None:
+    source = str(receipt.get("source_sha256") or "")
+    output = str(receipt.get("output_sha256") or "")
+    if (
+        receipt.get("schema") != "production_private_primary_deploy_manifest/1.0"
+        or receipt.get("status") != "PASS"
+        or not HEX64.fullmatch(source)
+        or not HEX64.fullmatch(output)
+        or output != private_digest
+        or receipt.get("source_preserved_by_tool") is not True
+        or receipt.get("secrets_disclosed") is not False
+    ):
+        raise PlanBuildError("private_manifest_receipt_invalid")
+    # Classic: the loaded deploy file is the preserved source; the private
+    # manifest is the derived output. Attested cutover: the loaded deploy
+    # file is that derived output while Product remains LEGACY.
+    if source == deployment_digest and source != output:
+        return
+    if output == deployment_digest and source != output:
+        return
+    raise PlanBuildError("private_manifest_receipt_invalid")
+
+
 def _phase(phase_id: str, commands: list[dict[str, object]], evidence: list[dict[str, object]]) -> dict[str, object]:
     return {"id": phase_id, "commands": commands, "evidence": evidence, "recovery_commands": [], "rollback_commands": []}
 
@@ -840,8 +868,11 @@ def build(args: argparse.Namespace) -> tuple[dict[str, object], dict[str, object
         "web": _product_image_receipt(_json(bound["product_web_image_receipt"]), sha, tree, role="web", web_host=web_host),
     }
     private_receipt = _json(bound["private_manifest_receipt"])
-    if private_receipt.get("schema") != "production_private_primary_deploy_manifest/1.0" or private_receipt.get("status") != "PASS" or private_receipt.get("source_sha256") != bound["deployment_manifest"].digest or private_receipt.get("output_sha256") != bound["private_manifest"].digest or private_receipt.get("source_preserved_by_tool") is not True or private_receipt.get("secrets_disclosed") is not False:
-        raise PlanBuildError("private_manifest_receipt_invalid")
+    _assert_private_manifest_receipt_binding(
+        private_receipt,
+        deployment_digest=bound["deployment_manifest"].digest,
+        private_digest=bound["private_manifest"].digest,
+    )
 
     web_backup_root = _lexical_path(args.web_backup_root, label="web_backup_root")
     local_backup_root = _lexical_path(args.local_offhost_backup_root, label="local_backup_root")

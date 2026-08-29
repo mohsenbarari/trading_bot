@@ -431,6 +431,48 @@ def test_rejects_old_and_new_data_root_drift(tmp_path: Path) -> None:
         builder.build(args)
 
 
+def test_accepts_attested_private_primary_deploy_as_loaded_manifest(
+    tmp_path: Path,
+) -> None:
+    args, files = _fixture(tmp_path)
+    source = files["deployment_manifest"]
+    private = files["private_manifest"]
+    _write(private, source.read_bytes() + b"PRODUCTION_COIN_INFERENCE_RELAY_ENABLED=0\n")
+    _json(
+        files["private_manifest_receipt"],
+        {
+            "schema": "production_private_primary_deploy_manifest/1.0",
+            "status": "PASS",
+            "source_sha256": _digest(source),
+            "output_sha256": _digest(private),
+            "source_preserved_by_tool": True,
+            "secrets_disclosed": False,
+        },
+    )
+    args.deployment_manifest = str(private)
+    args.expected_deployment_manifest_sha256 = _digest(private)
+    args.expected_private_manifest_sha256 = _digest(private)
+    args.expected_private_manifest_receipt_sha256 = _digest(
+        files["private_manifest_receipt"]
+    )
+    plan, receipt = builder.build(args)
+    assert receipt["status"] == "PASS"
+    assert plan["release_sha"] == SHA
+
+
+def test_rejects_unbound_private_manifest_receipt(tmp_path: Path) -> None:
+    args, files = _fixture(tmp_path)
+    payload = json.loads(files["private_manifest_receipt"].read_text(encoding="utf-8"))
+    payload["source_sha256"] = "0" * 64
+    payload["output_sha256"] = "1" * 64
+    _json(files["private_manifest_receipt"], payload)
+    args.expected_private_manifest_receipt_sha256 = _digest(
+        files["private_manifest_receipt"]
+    )
+    with pytest.raises(builder.PlanBuildError, match="private_manifest_receipt_invalid"):
+        builder.build(args)
+
+
 def test_rejects_portable_digest_mismatch_on_preflight_v11(tmp_path: Path) -> None:
     args, files = _fixture(tmp_path)
     payload = json.loads(files["preflight_receipt"].read_text(encoding="utf-8"))
