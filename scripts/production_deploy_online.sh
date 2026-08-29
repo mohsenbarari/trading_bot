@@ -4930,6 +4930,7 @@ prepare_market_pipeline_control_payload() {
         scripts/backup_market_pipeline_archive.py \
         scripts/crypt_market_pipeline_backup.py \
         scripts/migrate_market_pipeline_archive.py \
+        scripts/rehearse_market_pipeline_archive_migration.py \
         scripts/rollout_market_pipeline_shadow.py \
         scripts/upgrade_market_pipeline_bluegreen.py \
         scripts/quiesce_production_legacy_market_collectors.py \

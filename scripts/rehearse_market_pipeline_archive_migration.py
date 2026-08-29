@@ -137,7 +137,14 @@ def _run_migrate(container: str, image_id: str, password_file: Path) -> dict[str
         text=True,
     )
     if result.returncode:
-        raise RehearsalError(f"migration_pass_failed_rc_{result.returncode}")
+        reason = ""
+        try:
+            payload = json.loads((result.stderr or "").strip().splitlines()[-1])
+            if isinstance(payload, dict) and payload.get("reason_code"):
+                reason = f"_{payload['reason_code']}"
+        except (json.JSONDecodeError, IndexError, TypeError):
+            reason = ""
+        raise RehearsalError(f"migration_pass_failed_rc_{result.returncode}{reason}")
     return _migration_result(result.stdout, second=False)
 
 
@@ -157,11 +164,16 @@ def rehearse(
     backup_document = _load_backup_receipt(backup_receipt)
     artifact = Path(str(backup_document["backup"]["path"]))
     source = backup_document["source"]
+    restore_inventory = backup_document["restore_smoke"]
     work = receipt.parent / f".rehearsal-{os.getpid()}"
     work.mkdir(mode=0o700)
     password_file = work / "postgres-password"
     password_file.write_text(DUMMY_PASSWORD, encoding="ascii")
     os.chmod(password_file, 0o440)
+    try:
+        os.chown(password_file, 10001, 10001)
+    except OSError:
+        os.chmod(password_file, 0o0444)
     first: dict[str, Any] | None = None
     second: dict[str, Any] | None = None
     after: dict[str, Any] | None = None
@@ -204,10 +216,10 @@ def rehearse(
             lambda sql, *, label: backup._restore_query(container, sql)
         )
         if (
-            after["fact_count"] != source["fact_count"]
-            or after["table_count"] != source["table_count"]
+            after["fact_count"] != restore_inventory["fact_count"]
+            or after["table_count"] != restore_inventory["table_count"]
             or after["table_count"] != MARKET_SCHEMA_TABLE_COUNT
-            or after["sequence_values"] != source["sequence_values"]
+            or after["sequence_values"] != restore_inventory["sequence_values"]
         ):
             raise RehearsalError("rehearsal_inventory_regressed")
 

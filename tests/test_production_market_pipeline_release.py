@@ -228,6 +228,7 @@ printf '%s\n' "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256"
             self.assertIn("scripts/prepare_market_pipeline_release.py", names)
             self.assertIn("scripts/backup_market_pipeline_archive.py", names)
             self.assertIn("scripts/migrate_market_pipeline_archive.py", names)
+            self.assertIn("scripts/rehearse_market_pipeline_archive_migration.py", names)
             self.assertIn("scripts/rollout_market_pipeline_shadow.py", names)
             self.assertIn("scripts/upgrade_market_pipeline_bluegreen.py", names)
             self.assertIn("scripts/prepare_market_pipeline_primary_release.py", names)

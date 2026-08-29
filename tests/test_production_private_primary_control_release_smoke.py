@@ -23,6 +23,7 @@ CONTROL_RELEASE_TOOLS = (
     "scripts/prepare_private_primary_control_release.py",
     "scripts/prepare_production_private_primary_manifest.py",
     "scripts/promote_production_private_primary_product.py",
+    "scripts/rehearse_market_pipeline_archive_migration.py",
     "scripts/quiesce_production_legacy_market_collectors.py",
     "scripts/reconcile_estimator_snapshot_publication_outbox.py",
     "scripts/rollout_market_pipeline_shadow.py",

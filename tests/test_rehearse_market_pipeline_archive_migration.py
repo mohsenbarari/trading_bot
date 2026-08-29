@@ -19,6 +19,10 @@ class RehearseMarketPipelineArchiveMigrationTests(unittest.TestCase):
         self.assertNotIn("quiesce", source)
         self.assertIn("container:{container}", source)
         self.assertIn(rehearsal.CONFIRMATION, source)
+        self.assertIn("os.chown(password_file, 10001, 10001)", source)
+        self.assertIn("0o0444", source)
+        self.assertIn("restore_inventory", source)
+        self.assertIn('restore_inventory["fact_count"]', source)
 
     def test_restore_smoke_exposes_before_cleanup_hook(self) -> None:
         source = Path(restore_smoke.__code__.co_filename).read_text(encoding="utf-8")
