@@ -5090,7 +5090,7 @@ install -d -m 0700 -- \"\$base\"
 rm -rf -- \"\$incoming\"
 install -d -m 0700 -- \"\$incoming\""
     run_iran_transfer rsync -a --delete \
-        -e "${RSYNC_IRAN_SSH[*]}" \
+        -e "$RSYNC_SSH" \
         "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR/" \
         "$IRAN_SSH_TARGET:$incoming/"
     scp_iran "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST" \
@@ -9286,6 +9286,10 @@ run_prepare_private_primary_control_release() {
 base='$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR'
 incoming='$remote_incoming'
 release_dir='$remote_release_dir'
+if [ -d \"\$incoming\" ] && [ ! -L \"\$incoming\" ]; then
+  [ -z \"\$(find \"\$incoming\" -mindepth 1 -print -quit)\" ] || exit 52
+  rmdir -- \"\$incoming\"
+fi
 [ ! -e \"\$incoming\" ] && [ ! -L \"\$incoming\" ]
 if [ -e \"\$base\" ]; then
   [ -d \"\$base\" ] && [ ! -L \"\$base\" ]
@@ -9321,9 +9325,10 @@ esac
 [ \"\$(stat -c '%a' \"\$base\")\" = 700 ]
 install -d -m 0700 -- \"\$incoming\""
         run_iran_transfer rsync -a --delete \
-            -e "${RSYNC_IRAN_SSH[*]}" \
+            -e "$RSYNC_SSH" \
             "$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR/" \
-            "$IRAN_SSH_TARGET:$remote_incoming/"
+            "$IRAN_SSH_TARGET:$remote_incoming/" \
+            || die "Remote PRIVATE_PRIMARY control-release transfer failed."
         ssh_iran "set -euo pipefail
 incoming='$remote_incoming'
 release_dir='$remote_release_dir'

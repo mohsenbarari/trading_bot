@@ -193,6 +193,8 @@ class PreparePrivatePrimaryControlReleaseTests(unittest.TestCase):
         )
         self.assertIn("--control-manifest", body)
         self.assertIn("PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST", body)
+        self.assertIn('-e "$RSYNC_SSH"', body)
+        self.assertNotIn("RSYNC_IRAN_SSH", body)
         self.assertIn("services_started", body)
         self.assertIn("database_mutated", body)
         self.assertIn("authority_changed", body)
