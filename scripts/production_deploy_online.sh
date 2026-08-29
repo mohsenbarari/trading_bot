@@ -32,6 +32,8 @@ PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_LOCK="/root/secure-envs/trading-bot/rele
 PRODUCTION_PRIVATE_PRIMARY_MANIFEST_SCHEMA_SOURCE="$PROJECT_DIR/deploy/production/online.env.example"
 PRODUCTION_PRIVATE_PRIMARY_MANIFEST_APPROVED_ROOT="/root/secure-envs/trading-bot/release-control"
 MARKET_PIPELINE_RELEASE_PREPARER="$PROJECT_DIR/scripts/prepare_market_pipeline_release.py"
+MARKET_PIPELINE_PRIMARY_RELEASE_PREPARER="$PROJECT_DIR/scripts/prepare_market_pipeline_primary_release.py"
+PRIVATE_PRIMARY_CONTROL_RELEASE_PREPARER="$PROJECT_DIR/scripts/prepare_private_primary_control_release.py"
 MARKET_PIPELINE_FOUNDATION_MANAGER="$PROJECT_DIR/scripts/manage_market_pipeline_stage3.py"
 MARKET_PIPELINE_BACKUP_TOOL="$PROJECT_DIR/scripts/backup_market_pipeline_archive.py"
 MARKET_PIPELINE_BACKUP_CRYPT_TOOL="$PROJECT_DIR/scripts/crypt_market_pipeline_backup.py"
@@ -71,6 +73,11 @@ PRODUCTION_PRIVATE_PRIMARY_PRODUCT_WEB_IMAGE_RECEIPT=""
 PRODUCTION_PRIVATE_PRIMARY_PRIVATE_MANIFEST=""
 PRODUCTION_PRIVATE_PRIMARY_LOCAL_OFFHOST_BACKUP_ROOT=""
 PRODUCTION_PRIVATE_PRIMARY_WEB_BACKUP_ROOT=""
+PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_CONFIRM=""
+PRODUCTION_PRIVATE_PRIMARY_WEB_SOURCE=""
+PRODUCTION_PRIVATE_PRIMARY_BOT_SOURCE=""
+PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_RECEIPT=""
+PRODUCTION_PRIVATE_PRIMARY_FOUNDATION_RECEIPT=""
 COMMAND=""
 IRAN_BOOTSTRAP_APT_PACKAGES="ca-certificates curl gnupg lsb-release rsync jq pigz nginx certbot python3-certbot-nginx docker.io python3-pip python3-setuptools python3-wheel"
 IRAN_BOOTSTRAP_COMPOSE_PACKAGES="docker-compose-v2 docker-compose"
@@ -94,6 +101,7 @@ PRODUCTION_COIN_SNAPSHOT_RELAY_DISABLE_CONFIRM_TEXT="disable-production-coin-inf
 PRODUCTION_PRIVATE_PRIMARY_CONTAINER_SNAPSHOT="/app/runtime/product-estimator/latest-private-primary.json"
 PRODUCTION_PRIVATE_PRIMARY_LOCAL_SNAPSHOT_DIR="/srv/trading-bot/production-data/market-pipeline/snapshots"
 PRODUCTION_PRIVATE_PRIMARY_REMOTE_SNAPSHOT_DIR="/srv/trading-bot/market-data-production/snapshots"
+PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_CONFIRM_TEXT="prepare-production-private-primary-control-release"
 PRODUCTION_MARKET_PIPELINE_EVIDENCE_CONFIRM_TEXT="prepare-production-market-pipeline-shadow-evidence"
 PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_CONFIRM_TEXT="load-and-preflight-production-market-pipeline-shadow-hosts"
 PRODUCTION_MARKET_PIPELINE_MIGRATION_CONFIRM_TEXT="backup-and-migrate-production-market-pipeline-shadow"
@@ -213,6 +221,11 @@ PRIVATE_PRIMARY full choreography binding:
   --private-primary-primary-pair-receipt PATH
   --private-primary-product-bot-image-receipt PATH
   --private-primary-product-web-image-receipt PATH
+  --private-primary-control-release-confirm prepare-production-private-primary-control-release
+  --private-primary-web-source PATH
+  --private-primary-bot-source PATH
+  --private-primary-control-release-receipt PATH
+  --private-primary-foundation-receipt PATH
 
 Commands:
   help                 Show this help.
@@ -242,6 +255,10 @@ Commands:
   recover-private-primary-release
                        Resume an interrupted, digest-bound PRIVATE_PRIMARY
                        choreography; requires the separate recovery confirmation.
+  prepare-private-primary-control-release
+                       Install the exact-SHA control-release, foundation,
+                       Market Pipeline image, and host preflight on both
+                       hosts without starting services or changing Product.
   deploy-iran          Internal release phase; direct execution is refused.
   inspect-shared-data  Inspect Iran shared-table state and print the fresh/existing classification.
   seed-shared-data     Internal release phase; direct execution is refused.
@@ -796,6 +813,31 @@ parse_args() {
             --private-primary-web-backup-root)
                 [[ $# -ge 2 ]] || die "--private-primary-web-backup-root requires a path"
                 PRODUCTION_PRIVATE_PRIMARY_WEB_BACKUP_ROOT="$2"
+                shift 2
+                ;;
+            --private-primary-control-release-confirm)
+                [[ $# -ge 2 ]] || die "--private-primary-control-release-confirm requires the exact confirmation"
+                PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_CONFIRM="$2"
+                shift 2
+                ;;
+            --private-primary-web-source)
+                [[ $# -ge 2 ]] || die "--private-primary-web-source requires a path"
+                PRODUCTION_PRIVATE_PRIMARY_WEB_SOURCE="$2"
+                shift 2
+                ;;
+            --private-primary-bot-source)
+                [[ $# -ge 2 ]] || die "--private-primary-bot-source requires a path"
+                PRODUCTION_PRIVATE_PRIMARY_BOT_SOURCE="$2"
+                shift 2
+                ;;
+            --private-primary-control-release-receipt)
+                [[ $# -ge 2 ]] || die "--private-primary-control-release-receipt requires a path"
+                PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_RECEIPT="$2"
+                shift 2
+                ;;
+            --private-primary-foundation-receipt)
+                [[ $# -ge 2 ]] || die "--private-primary-foundation-receipt requires a path"
+                PRODUCTION_PRIVATE_PRIMARY_FOUNDATION_RECEIPT="$2"
                 shift 2
                 ;;
             -h|--help|help)
@@ -1488,7 +1530,7 @@ verify_queue_cutover_deploy_authority() {
 guard_production_release_command() {
     local mutating=0 profile=""
     case "$COMMAND" in
-        release|private-primary-release|recover-private-primary-release|prepare-release-evidence|verify-release-evidence|deploy-foreign|bootstrap-iran|configure-nginx|issue-cert|build-release|sync-project|ship-images|load-images|deploy-iran|seed-shared-data)
+        release|private-primary-release|recover-private-primary-release|prepare-private-primary-control-release|prepare-release-evidence|verify-release-evidence|deploy-foreign|bootstrap-iran|configure-nginx|issue-cert|build-release|sync-project|ship-images|load-images|deploy-iran|seed-shared-data)
             mutating=1
             ;;
     esac
@@ -1531,7 +1573,7 @@ guard_production_release_command() {
         || die "Immutable production source has an invalid Telegram execution profile."
     if [[ "$profile" == "queue-v1" ]]; then
         case "$COMMAND" in
-            prepare-release-evidence|verify-release-evidence)
+            prepare-release-evidence|verify-release-evidence|prepare-private-primary-control-release)
                 # These commands build or validate immutable artifacts only.
                 # They never quiesce writers, replace containers, mutate a
                 # database, or call Telegram.  A target release must be able
@@ -4843,6 +4885,7 @@ prepare_market_pipeline_control_payload() {
         deploy/market-data/compose.bot.yml \
         scripts/prepare_market_pipeline_release.py \
         scripts/prepare_market_pipeline_primary_release.py \
+        scripts/prepare_private_primary_control_release.py \
         scripts/prepare_production_private_primary_manifest.py \
         scripts/capture_production_baseline.py \
         scripts/deploy_config.py \
@@ -9115,6 +9158,266 @@ build_official_private_primary_choreography_plan() {
         || die "official PRIVATE_PRIMARY plan-build receipt failed independent verification."
 }
 
+build_private_primary_control_payload() {
+    case "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR:$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST" in
+        "$PRODUCTION_MARKET_PIPELINE_RELEASE_DIR"/*:"$PRODUCTION_MARKET_PIPELINE_RELEASE_DIR"/*) ;;
+        *) die "PRIVATE_PRIMARY control payload escaped the private release directory." ;;
+    esac
+    PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=1
+    prepare_market_pipeline_control_payload
+    PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=0
+    [[ -f "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST" ]] \
+        || die "PRIVATE_PRIMARY control payload manifest is missing."
+}
+
+build_private_primary_market_pipeline_image() {
+    PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=1
+    build_market_pipeline_release_image
+    PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=0
+    [[ "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]] \
+        || die "PRIVATE_PRIMARY Market Pipeline image is missing."
+}
+
+run_prepare_private_primary_control_release() {
+    local web_source bot_source foundation_receipt install_local_receipt
+    local install_remote_receipt prepare_receipt primary_pair project_name
+    local remote_release_dir remote_incoming control_manifest_sha
+    [[ "$PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_CONFIRM" == "$PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_CONFIRM_TEXT" ]] \
+        || die "PRIVATE_PRIMARY control-release prepare requires the exact confirmation."
+    [[ "${PRODUCTION_MARKET_PIPELINE_RELEASE_EVIDENCE_ENABLED:-0}" == "0" \
+        && "${PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_ENABLED:-0}" == "0" \
+        && "${PRODUCTION_MARKET_PIPELINE_MIGRATION_ENABLED:-0}" == "0" \
+        && "${PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_ENABLED:-0}" == "0" \
+        && "${PRODUCTION_MARKET_PIPELINE_CAPTURE_CUTOVER_ENABLED:-0}" == "0" ]] \
+        || die "PRIVATE_PRIMARY control-release prepare refuses historical PRIVATE_SHADOW flags."
+    [[ -f "$PRIVATE_PRIMARY_CONTROL_RELEASE_PREPARER" \
+        && -f "$MARKET_PIPELINE_PRIMARY_RELEASE_PREPARER" \
+        && -f "$MARKET_PIPELINE_FOUNDATION_MANAGER" ]] \
+        || die "PRIVATE_PRIMARY control-release prepare tooling is incomplete."
+    prepare_local_release_inputs
+    verify_frozen_release_source
+    web_source="${PRODUCTION_PRIVATE_PRIMARY_WEB_SOURCE:-}"
+    bot_source="${PRODUCTION_PRIVATE_PRIMARY_BOT_SOURCE:-}"
+    [[ "$web_source" == /* && "$bot_source" == /* && "$web_source" != "$bot_source" ]] \
+        || die "PRIVATE_PRIMARY topology sources must be distinct absolute paths."
+    python3 "$PRIVATE_PRIMARY_CONTROL_RELEASE_PREPARER" validate-topology-source \
+        --confirm "$PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_CONFIRM_TEXT" \
+        --role web \
+        --source "$web_source" \
+        --repository-root "$PROJECT_DIR" >/dev/null \
+        || die "PRIVATE_PRIMARY web topology source is invalid."
+    python3 "$PRIVATE_PRIMARY_CONTROL_RELEASE_PREPARER" validate-topology-source \
+        --confirm "$PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_CONFIRM_TEXT" \
+        --role bot \
+        --source "$bot_source" \
+        --repository-root "$PROJECT_DIR" >/dev/null \
+        || die "PRIVATE_PRIMARY bot topology source is invalid."
+    install -d -m 0700 -- "$PRODUCTION_MARKET_PIPELINE_RELEASE_DIR" "$RELEASE_ARTIFACT_DIR"
+    build_private_primary_market_pipeline_image
+    build_private_primary_control_payload
+    PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=1
+    verify_market_pipeline_control_payload
+    PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=0
+    PRODUCTION_MARKET_PIPELINE_WEB_ENV_SOURCE_PATH="$web_source"
+    PRODUCTION_MARKET_PIPELINE_BOT_ENV_SOURCE_PATH="$bot_source"
+    project_name="market-private-pipeline-primary"
+    primary_pair="${PRODUCTION_MARKET_PIPELINE_PRIMARY_PAIR_RECEIPT:-$RELEASE_ARTIFACT_DIR/market-pipeline-primary-release-pair-receipt.json}"
+    rm -f -- \
+        "$PRODUCTION_MARKET_PIPELINE_WEB_ENV" \
+        "$PRODUCTION_MARKET_PIPELINE_BOT_ENV" \
+        "$primary_pair" \
+        "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT"
+    python3 "$MARKET_PIPELINE_PRIMARY_RELEASE_PREPARER" render-pair \
+        --confirm "render-market-pipeline-private-primary" \
+        --web-source "$web_source" \
+        --bot-source "$bot_source" \
+        --web-env "$PRODUCTION_MARKET_PIPELINE_WEB_ENV" \
+        --bot-env "$PRODUCTION_MARKET_PIPELINE_BOT_ENV" \
+        --receipt "$primary_pair" \
+        --release-sha "$RELEASE_SHA" \
+        --release-tree "$PRODUCTION_RELEASE_TREE" \
+        --image-id "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
+        --project-name "$project_name" >/dev/null \
+        || die "PRIVATE_PRIMARY role pair rendering failed."
+    install -m 0600 -- "$primary_pair" "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT"
+    PRODUCTION_MARKET_PIPELINE_PRIMARY_PAIR_RECEIPT="$primary_pair"
+    PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT_SHA256="$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT")"
+    foundation_receipt="${PRODUCTION_PRIVATE_PRIMARY_FOUNDATION_RECEIPT:-/root/secure-envs/trading-bot/release-control/private-primary-foundation-receipt.json}"
+    python3 "$PRIVATE_PRIMARY_CONTROL_RELEASE_PREPARER" prepare-foundation \
+        --confirm "$PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_CONFIRM_TEXT" \
+        --bot-data-root "${PRODUCTION_PRIVATE_PRIMARY_LOCAL_SNAPSHOT_DIR%/snapshots}" \
+        --web-data-root "${PRODUCTION_PRIVATE_PRIMARY_REMOTE_SNAPSHOT_DIR%/snapshots}" \
+        --web-backup-root "${PRODUCTION_PRIVATE_PRIMARY_WEB_BACKUP_ROOT:-/srv/trading-bot/market-data-production/backups}" \
+        --offhost-root "${PRODUCTION_PRIVATE_PRIMARY_LOCAL_OFFHOST_BACKUP_ROOT:-/root/secure-envs/trading-bot/release-control/offhost-backups}" \
+        --backup-key "${PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_KEY_PATH:-/root/secure-envs/trading-bot/market-pipeline-backup.key}" \
+        --receipt "$foundation_receipt" \
+        --release-sha "$RELEASE_SHA" \
+        --release-tree "$PRODUCTION_RELEASE_TREE" >/dev/null \
+        || die "PRIVATE_PRIMARY foundation prepare failed."
+    python3 "$MARKET_PIPELINE_FOUNDATION_MANAGER" prepare-paths \
+        --role bot \
+        --root "${PRODUCTION_PRIVATE_PRIMARY_LOCAL_SNAPSHOT_DIR%/snapshots}" \
+        --apply \
+        --acknowledge-host-mutation >/dev/null \
+        || die "PRIVATE_PRIMARY bot path contract prepare failed."
+    install_local_receipt="${RELEASE_ARTIFACT_DIR}/private-primary-control-release-local.json"
+    python3 "$PRIVATE_PRIMARY_CONTROL_RELEASE_PREPARER" install-control-release \
+        --confirm "$PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_CONFIRM_TEXT" \
+        --base-dir "$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR" \
+        --release-sha "$RELEASE_SHA" \
+        --release-tree "$PRODUCTION_RELEASE_TREE" \
+        --host-role bot \
+        --payload-dir "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR" \
+        --bot-env "$PRODUCTION_MARKET_PIPELINE_BOT_ENV" \
+        --web-env "$PRODUCTION_MARKET_PIPELINE_WEB_ENV" \
+        --image-receipt "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT" \
+        --pair-receipt "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT" \
+        --image-id "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
+        --image-input-signature "$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE" \
+        --receipt "$install_local_receipt" >/dev/null \
+        || die "PRIVATE_PRIMARY local control-release install failed."
+    LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR="$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR/$RELEASE_SHA"
+    LOCAL_MARKET_PIPELINE_BOT_ENV="$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR/bot.release.env"
+    remote_release_dir="$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR/$RELEASE_SHA"
+    remote_incoming="$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR/.$RELEASE_SHA.incoming"
+    ssh_iran "set -euo pipefail
+base='$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR'
+incoming='$remote_incoming'
+release_dir='$remote_release_dir'
+[ ! -e \"\$incoming\" ] && [ ! -L \"\$incoming\" ]
+if [ -e \"\$base\" ]; then
+  [ -d \"\$base\" ] && [ ! -L \"\$base\" ]
+  [ \"\$(stat -c '%u:%a' \"\$base\")\" = '0:700' ] || [ \"\$(stat -c '%u:%a' \"\$base\")\" = \"\$(id -u):700\" ]
+fi
+if [ -e \"\$release_dir\" ]; then
+  [ -d \"\$release_dir\" ] && [ ! -L \"\$release_dir\" ]
+fi" || die "Remote PRIVATE_PRIMARY control-release base is unsafe or another incoming transaction exists."
+    if ssh_iran "test -d '$remote_release_dir' && test ! -L '$remote_release_dir'"; then
+        control_manifest_sha="$(file_sha256 "$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR/control-payload.sha256")"
+        ssh_iran "set -euo pipefail
+[ \"\$(sha256sum '$remote_release_dir/control-payload.sha256' | awk '{print \$1}')\" = '$control_manifest_sha' ]
+(cd '$remote_release_dir' && sha256sum -c control-payload.sha256 >/dev/null)" \
+            || die "Existing remote PRIVATE_PRIMARY control-release does not match this release."
+    else
+        ssh_iran "set -euo pipefail
+base='$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR'
+incoming='$remote_incoming'
+install -d -m 0700 -- \"\$base\"
+[ \"\$(stat -c '%a' \"\$base\")\" = 700 ]
+install -d -m 0700 -- \"\$incoming\""
+        run_iran_transfer rsync -a --delete \
+            -e "${RSYNC_IRAN_SSH[*]}" \
+            "$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR/" \
+            "$IRAN_SSH_TARGET:$remote_incoming/"
+        ssh_iran "set -euo pipefail
+incoming='$remote_incoming'
+release_dir='$remote_release_dir'
+(cd \"\$incoming\" && sha256sum -c control-payload.sha256 >/dev/null)
+chmod 0600 -- \"\$incoming/control-payload.sha256\" \"\$incoming/web.release.env\" \"\$incoming/bot.release.env\" || true
+mv -- \"\$incoming\" \"\$release_dir\"
+sync -f '$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR'"
+    fi
+    REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR="$remote_release_dir"
+    REMOTE_MARKET_PIPELINE_WEB_ENV="$remote_release_dir/web.release.env"
+    install_remote_receipt="${RELEASE_ARTIFACT_DIR}/private-primary-control-release-remote.json"
+    python3 "$PRIVATE_PRIMARY_CONTROL_RELEASE_PREPARER" install-control-release \
+        --confirm "$PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_CONFIRM_TEXT" \
+        --base-dir "$RELEASE_ARTIFACT_DIR/remote-control-mirror" \
+        --release-sha "$RELEASE_SHA" \
+        --release-tree "$PRODUCTION_RELEASE_TREE" \
+        --host-role web \
+        --payload-dir "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR" \
+        --bot-env "$PRODUCTION_MARKET_PIPELINE_BOT_ENV" \
+        --web-env "$PRODUCTION_MARKET_PIPELINE_WEB_ENV" \
+        --image-receipt "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT" \
+        --pair-receipt "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT" \
+        --image-id "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
+        --image-input-signature "$PRODUCTION_MARKET_PIPELINE_IMAGE_SIGNATURE" \
+        --receipt "$install_remote_receipt" >/dev/null \
+        || die "PRIVATE_PRIMARY remote control-release receipt failed."
+    python3 "$MARKET_PIPELINE_BACKUP_CRYPT_TOOL" generate-key \
+        --key-file "${PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_KEY_PATH:-/root/secure-envs/trading-bot/market-pipeline-backup.key}" \
+        --confirm "generate-production-market-pipeline-backup-key" >/dev/null \
+        || die "PRIVATE_PRIMARY local backup key prepare failed."
+    if ssh_iran "test ! -e '${PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_KEY_PATH:-/root/secure-envs/trading-bot/market-pipeline-backup.key}'"; then
+        ssh_iran "install -d -m 0700 -- /root/secure-envs/trading-bot"
+        scp_iran "${PRODUCTION_MARKET_PIPELINE_BOT_BACKUP_KEY_PATH:-/root/secure-envs/trading-bot/market-pipeline-backup.key}" \
+            "$IRAN_SSH_TARGET:${PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_KEY_PATH:-/root/secure-envs/trading-bot/market-pipeline-backup.key}"
+        ssh_iran "chmod 0600 -- '${PRODUCTION_MARKET_PIPELINE_WEB_BACKUP_KEY_PATH:-/root/secure-envs/trading-bot/market-pipeline-backup.key}'"
+    fi
+    ssh_iran "set -euo pipefail
+install -d -m 0700 -- \
+  '${PRODUCTION_PRIVATE_PRIMARY_REMOTE_SNAPSHOT_DIR%/snapshots}' \
+  '${PRODUCTION_PRIVATE_PRIMARY_WEB_BACKUP_ROOT:-/srv/trading-bot/market-data-production/backups}'
+python3 '$REMOTE_MARKET_PIPELINE_CONTROL_RELEASE_DIR/scripts/manage_market_pipeline_stage3.py' prepare-paths \
+  --role web \
+  --root '${PRODUCTION_PRIVATE_PRIMARY_REMOTE_SNAPSHOT_DIR%/snapshots}' \
+  --apply \
+  --acknowledge-host-mutation >/dev/null"
+    load_market_pipeline_image_remote
+    market_pipeline_verify_local_host_contract
+    market_pipeline_verify_remote_host_contract
+    PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_REQUESTED=1
+    run_market_pipeline_two_host_preflight
+    verify_market_pipeline_two_host_preflight_receipt
+    PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_REQUESTED=0
+    prepare_receipt="${PRODUCTION_PRIVATE_PRIMARY_CONTROL_RELEASE_RECEIPT:-/root/secure-envs/trading-bot/release-control/private-primary-control-release-receipt.json}"
+    python3 - "$prepare_receipt" "$RELEASE_SHA" "$PRODUCTION_RELEASE_TREE" \
+        "$(file_sha256 "$LOCAL_MARKET_PIPELINE_CONTROL_RELEASE_DIR/control-payload.sha256")" \
+        "$PRODUCTION_MARKET_PIPELINE_IMAGE_ID" \
+        "$(file_sha256 "$PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_RECEIPT")" \
+        "$(file_sha256 "$install_local_receipt")" \
+        "$(file_sha256 "$install_remote_receipt")" \
+        "$(file_sha256 "$foundation_receipt")" <<'PY'
+import json
+import os
+from pathlib import Path
+import sys
+
+destination = Path(sys.argv[1])
+payload = {
+    "schema": "private_primary_control_release_prepare/1.0",
+    "environment": "production",
+    "status": "PASS",
+    "release_sha": sys.argv[2],
+    "release_tree": sys.argv[3],
+    "control_manifest_sha256": sys.argv[4],
+    "image_id": sys.argv[5],
+    "preflight_sha256": sys.argv[6],
+    "local_install_receipt_sha256": sys.argv[7],
+    "remote_install_receipt_sha256": sys.argv[8],
+    "foundation_receipt_sha256": sys.argv[9],
+    "historical_flags": {
+        "PRODUCTION_MARKET_PIPELINE_RELEASE_EVIDENCE_ENABLED": "0",
+        "PRODUCTION_MARKET_PIPELINE_HOST_PREFLIGHT_ENABLED": "0",
+        "PRODUCTION_MARKET_PIPELINE_MIGRATION_ENABLED": "0",
+        "PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_ENABLED": "0",
+        "PRODUCTION_MARKET_PIPELINE_CAPTURE_CUTOVER_ENABLED": "0",
+    },
+    "services_started": False,
+    "database_mutated": False,
+    "authority_changed": False,
+    "capture_owner_changed": False,
+    "queue_owner_changed": False,
+    "secrets_disclosed": False,
+}
+candidate = destination.parent / f".{destination.name}.{os.getpid()}.tmp"
+flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+descriptor = os.open(candidate, flags, 0o600)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(candidate, destination)
+finally:
+    candidate.unlink(missing_ok=True)
+PY
+    chmod 0600 "$prepare_receipt"
+    log "Prepared exact PRIVATE_PRIMARY control-release, foundation, and host preflight; no service, database, Queue, capture, or Product authority was changed."
+}
+
 run_private_primary_choreography_controller() {
     local action="$1"
     local web_ssh_argv_sha256 deployment_manifest_sha256 controller value seen_ssh=0
@@ -9291,6 +9594,9 @@ main() {
             ;;
         recover-private-primary-release)
             run_private_primary_choreography_controller recover
+            ;;
+        prepare-private-primary-control-release)
+            run_prepare_private_primary_control_release
             ;;
         deploy-foreign) prepare_local_release_inputs; install_sync_sampler_local; build_release; deploy_foreign; verify_sync_sampler_local ;;
         bootstrap-iran) prepare_local_release_inputs; bootstrap_iran ;;

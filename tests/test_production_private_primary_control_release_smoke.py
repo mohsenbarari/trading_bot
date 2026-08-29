@@ -20,6 +20,7 @@ CONTROL_RELEASE_TOOLS = (
     "scripts/cutover_telegram_delivery_queue_production.py",
     "scripts/migrate_market_pipeline_archive.py",
     "scripts/observe_production_private_primary.py",
+    "scripts/prepare_private_primary_control_release.py",
     "scripts/prepare_production_private_primary_manifest.py",
     "scripts/promote_production_private_primary_product.py",
     "scripts/quiesce_production_legacy_market_collectors.py",

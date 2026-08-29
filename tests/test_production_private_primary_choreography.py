@@ -1168,6 +1168,8 @@ def test_official_shell_exposes_only_explicit_validate_and_execute_actions() -> 
     assert "validate-private-primary-release" in source
     assert "private-primary-release" in source
     assert "recover-private-primary-release" in source
+    assert "prepare-private-primary-control-release" in source
+    assert "run_prepare_private_primary_control_release" in source
     assert "--private-primary-choreography-recovery-strategy resume|rollback" in source
     assert "run_private_primary_choreography_controller validate" in source
     assert "run_private_primary_choreography_controller execute" in source

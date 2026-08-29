@@ -758,7 +758,17 @@ def build(args: argparse.Namespace) -> tuple[dict[str, object], dict[str, object
 
     control_pair = _json(bound["control_pair_receipt"])
     _require_release(control_pair, sha, tree, label="control_pair_receipt")
-    if control_pair.get("schema") not in {"market_pipeline_release_pair/1.0", "market_pipeline_release_pair/1.1"}:
+    if control_pair.get("schema") not in {
+        "market_pipeline_release_pair/1.0",
+        "market_pipeline_release_pair/1.1",
+        "market_pipeline_primary_release_pair/1.0",
+        "market_pipeline_primary_release_pair/1.1",
+    }:
+        raise PlanBuildError("control_pair_receipt_schema_invalid")
+    if str(control_pair.get("schema") or "").startswith("market_pipeline_primary_release_pair") and (
+        control_pair.get("feed_mode") != "PRIVATE_PRIMARY"
+        or control_pair.get("product_authority_changed") is not False
+    ):
         raise PlanBuildError("control_pair_receipt_schema_invalid")
     market_image = _json(bound["market_image_receipt"])
     expected_market_fixed = {"schema": "market_pipeline_image_release/1.0", "environment": "production", "release_sha": sha, "release_tree": tree, "platform": "linux/amd64", "runtime_user": "10001:10001", "transport": "ssh_stream_then_verify_content_id", "secrets_disclosed": False}

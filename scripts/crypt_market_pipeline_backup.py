@@ -23,6 +23,7 @@ from typing import Any, Mapping, Sequence
 
 
 CONFIRMATION = "encrypt-production-market-pipeline-offhost-backup"
+KEY_CONFIRMATION = "generate-production-market-pipeline-backup-key"
 SCHEMA = "market_pipeline_backup_encryption/1.1"
 ALGORITHM = "AES-256-CBC+PBKDF2-HMAC-SHA256"
 KDF = "PBKDF2-HMAC-SHA256"
@@ -71,6 +72,50 @@ def _secure_parent(path: Path) -> None:
         or stat.S_IMODE(info.st_mode) != 0o700
     ):
         raise BackupCryptError("backup_crypt_parent_security_invalid")
+
+
+def generate_key(*, key_file: Path) -> dict[str, Any]:
+    _secure_parent(key_file)
+    if key_file.exists() or key_file.is_symlink():
+        _secure_regular(key_file)
+        try:
+            text = key_file.read_text(encoding="ascii").strip()
+        except (OSError, UnicodeDecodeError) as exc:
+            raise BackupCryptError("backup_crypt_key_invalid") from exc
+        if not HEX64.fullmatch(text):
+            raise BackupCryptError("backup_crypt_key_invalid")
+        return {
+            "status": "PASS",
+            "reused": True,
+            "created": False,
+            "mode": "0600",
+            "secrets_disclosed": False,
+        }
+    payload = os.urandom(32).hex() + "\n"
+    candidate = key_file.parent / f".{key_file.name}.{os.getpid()}.tmp"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(candidate, flags, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="ascii") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(candidate, key_file)
+        directory = os.open(key_file.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        candidate.unlink(missing_ok=True)
+    os.chmod(key_file, 0o600)
+    return {
+        "status": "PASS",
+        "reused": False,
+        "created": True,
+        "mode": "0600",
+        "secrets_disclosed": False,
+    }
 
 
 def _master_key(path: Path) -> bytes:
@@ -322,8 +367,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     check.add_argument("--receipt", type=Path, required=True)
     check.add_argument("--expected-plaintext-sha256")
     check.add_argument("--expected-plaintext-size-bytes", type=int)
+    keygen = commands.add_parser("generate-key")
+    keygen.add_argument("--key-file", type=Path, required=True)
+    keygen.add_argument("--confirm", required=True)
     args = parser.parse_args(argv)
     try:
+        if args.command == "generate-key":
+            if args.confirm != KEY_CONFIRMATION:
+                raise BackupCryptError("backup_crypt_confirmation_invalid")
+            payload = generate_key(key_file=args.key_file)
+            print(json.dumps(payload, sort_keys=True))
+            return 0
         if args.command == "encrypt":
             if args.confirm != CONFIRMATION:
                 raise BackupCryptError("backup_crypt_confirmation_invalid")

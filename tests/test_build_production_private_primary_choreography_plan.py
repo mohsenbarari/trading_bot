@@ -674,3 +674,40 @@ def test_handmade_receipt_without_input_inventory_is_rejected(
         match="controller_plan_build_receipt_invalid",
     ):
         controller.validate(namespace)
+
+
+def test_accepts_primary_schema_as_installed_control_pair(tmp_path: Path) -> None:
+    args, files = _fixture(tmp_path)
+    document = json.loads(files["primary_pair_receipt"].read_text(encoding="utf-8"))
+    _json(files["control_pair_receipt"], document)
+    args.expected_control_pair_receipt_sha256 = _digest(files["control_pair_receipt"])
+    plan, _receipt = builder.build(args)
+    assert plan["release_sha"] == SHA
+    assert plan["release_tree"] == TREE
+
+
+def test_rejects_primary_control_pair_that_changes_product_authority(
+    tmp_path: Path,
+) -> None:
+    args, files = _fixture(tmp_path)
+    document = json.loads(files["primary_pair_receipt"].read_text(encoding="utf-8"))
+    document["product_authority_changed"] = True
+    _json(files["control_pair_receipt"], document)
+    args.expected_control_pair_receipt_sha256 = _digest(files["control_pair_receipt"])
+    with pytest.raises(builder.PlanBuildError, match="control_pair_receipt_schema_invalid"):
+        builder.build(args)
+
+
+def test_rejects_missing_preflight_receipt(tmp_path: Path) -> None:
+    args, files = _fixture(tmp_path)
+    files["preflight_receipt"].unlink()
+    with pytest.raises(builder.PlanBuildError, match="preflight_receipt_unavailable"):
+        builder.build(args)
+
+
+def test_rejects_missing_exact_control_release(tmp_path: Path) -> None:
+    args, _files = _fixture(tmp_path)
+    manifest = Path(args.local_control_release_root) / builder.CONTROL_MANIFEST_NAME
+    manifest.unlink()
+    with pytest.raises(builder.PlanBuildError, match="control_manifest"):
+        builder.build(args)

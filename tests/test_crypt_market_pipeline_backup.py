@@ -136,6 +136,23 @@ class MarketPipelineBackupCryptTests(unittest.TestCase):
                 artifact=self.artifact, key_file=self.key, receipt=self.receipt
             )
 
+    def test_generate_key_reuses_valid_and_refuses_invalid_overwrite(self) -> None:
+        created = self.root / "fresh.key"
+        first = crypt.generate_key(key_file=created)
+        self.assertTrue(first["created"])
+        self.assertFalse(first["reused"])
+        self.assertNotIn("key", first)
+        self.assertNotIn("sha256", json.dumps(first))
+        material = created.read_text(encoding="ascii")
+        second = crypt.generate_key(key_file=created)
+        self.assertTrue(second["reused"])
+        self.assertEqual(created.read_text(encoding="ascii"), material)
+        created.write_text("not-a-key\n", encoding="ascii")
+        created.chmod(0o600)
+        with self.assertRaisesRegex(crypt.BackupCryptError, "backup_crypt_key_invalid"):
+            crypt.generate_key(key_file=created)
+        self.assertEqual(created.read_text(encoding="ascii"), "not-a-key\n")
+
     def test_key_and_parent_permissions_fail_closed(self) -> None:
         self.key.chmod(0o644)
         with self.assertRaisesRegex(crypt.BackupCryptError, "file_security_invalid"):

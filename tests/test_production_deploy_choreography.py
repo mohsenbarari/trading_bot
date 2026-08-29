@@ -511,7 +511,11 @@ printf 'ssh=%s\nscp=%s\nrsync=%s\n' \
                 self.assertIn("internal to the full two-host release", rejected.stderr)
 
     def test_queue_profile_allows_only_non_runtime_release_evidence_commands(self) -> None:
-        for command in ("prepare-release-evidence", "verify-release-evidence"):
+        for command in (
+            "prepare-release-evidence",
+            "verify-release-evidence",
+            "prepare-private-primary-control-release",
+        ):
             with self.subTest(command=command):
                 allowed = run_sourced_script(
                     f"""
@@ -1688,6 +1692,7 @@ load_two_host_release_state
         self.assertEqual(help_text.returncode, 0, help_text.stderr + help_text.stdout)
         self.assertIn("prepare-release-evidence", help_text.stdout)
         self.assertIn("verify-release-evidence", help_text.stdout)
+        self.assertIn("prepare-private-primary-control-release", help_text.stdout)
 
     def test_writer_replacements_are_created_restart_disabled_and_ids_are_journaled(self) -> None:
         source = RELEASE_SCRIPT.read_text(encoding="utf-8")
