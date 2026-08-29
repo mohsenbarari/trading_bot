@@ -9227,8 +9227,9 @@ run_prepare_private_primary_control_release() {
         "$PRODUCTION_MARKET_PIPELINE_BOT_ENV" \
         "$primary_pair" \
         "$PRODUCTION_MARKET_PIPELINE_PAIR_RECEIPT"
-    python3 "$MARKET_PIPELINE_PRIMARY_RELEASE_PREPARER" render-pair \
+    python3 "$MARKET_PIPELINE_PRIMARY_RELEASE_PREPARER" \
         --confirm "render-market-pipeline-private-primary" \
+        render-pair \
         --web-source "$web_source" \
         --bot-source "$bot_source" \
         --web-env "$PRODUCTION_MARKET_PIPELINE_WEB_ENV" \

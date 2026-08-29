@@ -187,6 +187,10 @@ class PreparePrivatePrimaryControlReleaseTests(unittest.TestCase):
         self.assertNotIn("PRODUCTION_MARKET_PIPELINE_SHADOW_ROLLOUT_ENABLED=1", body)
         self.assertNotIn("PRODUCTION_MARKET_PIPELINE_CAPTURE_CUTOVER_ENABLED=1", body)
         self.assertNotIn("PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE=", body)
+        self.assertLess(
+            body.index('--confirm "render-market-pipeline-private-primary"'),
+            body.index("render-pair"),
+        )
         self.assertIn("services_started", body)
         self.assertIn("database_mutated", body)
         self.assertIn("authority_changed", body)
