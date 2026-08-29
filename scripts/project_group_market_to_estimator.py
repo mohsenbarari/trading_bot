@@ -220,10 +220,39 @@ def _causal_trade_exclusion_reason(
     return None
 
 
+def _utc(value: str) -> datetime:
+    return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+
+def _live_book_offer_ref(
+    offer: sqlite3.Row | tuple[bytes, float, float, float, str],
+    *,
+    offer_times: dict[bytes, tuple[datetime, datetime]] | None = None,
+) -> tuple[bytes, float, float, float, str]:
+    if isinstance(offer, tuple):
+        return offer
+    offer_key = bytes(offer["event_key"])
+    if offer_times is not None and offer_key in offer_times:
+        event_time, available_at = offer_times[offer_key]
+    else:
+        event_time = _utc(str(offer["event_time_utc"]))
+        available_at = _utc(str(offer["available_at_utc"]))
+    return (
+        offer_key,
+        event_time.timestamp(),
+        available_at.timestamp(),
+        float(offer["price_num"]),
+        str(offer["settlement_term"]).upper(),
+    )
+
+
 def _live_book_price_exclusion_reason(
     row: sqlite3.Row,
     *,
-    eligible_offers: Sequence[sqlite3.Row],
+    eligible_offers: Sequence[sqlite3.Row] | Sequence[tuple[bytes, float, float, float, str]],
+    event_time: datetime | None = None,
+    available_at: datetime | None = None,
+    offer_times: dict[bytes, tuple[datetime, datetime]] | None = None,
 ) -> str | None:
     """Reject a glaring deviation from a causal, multi-offer instrument book.
 
@@ -234,46 +263,38 @@ def _live_book_price_exclusion_reason(
     implausible fact out of realtime estimation and training.
     """
 
-    event_time = datetime.fromisoformat(
-        str(row["event_time_utc"]).replace("Z", "+00:00")
-    )
-    available_at = datetime.fromisoformat(
-        str(row["available_at_utc"]).replace("Z", "+00:00")
-    )
+    row_key = bytes(row["event_key"])
+    available_at = available_at or _utc(str(row["available_at_utc"]))
+    candidate_available_ts = available_at.timestamp()
+    settlement = str(row["settlement_term"]).upper()
     same_book_prices: list[float] = []
     instrument_prices: list[float] = []
     for offer in eligible_offers:
-        if bytes(offer["event_key"]) == bytes(row["event_key"]):
+        offer_key, offer_event_ts, offer_available_ts, price, offer_settlement = (
+            _live_book_offer_ref(offer, offer_times=offer_times)
+        )
+        if offer_key == row_key:
             continue
-        if any(
+        if not isinstance(offer, tuple) and any(
             str(offer[column]).upper() != str(row[column]).upper()
             for column in ("instrument", "trade_form")
         ):
             continue
-        offer_event_time = datetime.fromisoformat(
-            str(offer["event_time_utc"]).replace("Z", "+00:00")
-        )
-        offer_available_at = datetime.fromisoformat(
-            str(offer["available_at_utc"]).replace("Z", "+00:00")
-        )
         # The estimator can use every offer already known when this fact
         # becomes available.  Telegram batches may deliver a slightly later
         # economic event in the same envelope, so ordering by source time here
         # would discard causal evidence that is already present at decision
         # time.
-        age = (available_at - offer_event_time).total_seconds()
+        age = candidate_available_ts - offer_event_ts
         if (
             age < 0
             or age > LIVE_BOOK_PRICE_WINDOW_SECONDS
-            or offer_available_at > available_at
+            or offer_available_ts > candidate_available_ts
         ):
             continue
-        price = float(offer["price_num"])
         if price > 0:
             instrument_prices.append(price)
-            if str(offer["settlement_term"]).upper() == str(
-                row["settlement_term"]
-            ).upper():
+            if offer_settlement == settlement:
                 same_book_prices.append(price)
     prices = (
         same_book_prices
@@ -300,6 +321,13 @@ def _model_exclusion_reasons(
     """Build causal model gates once so projection and observability agree."""
 
     rows_by_key = {bytes(row["event_key"]): row for row in rows}
+    offer_times = {
+        bytes(row["event_key"]): (
+            _utc(str(row["event_time_utc"])),
+            _utc(str(row["available_at_utc"])),
+        )
+        for row in rows
+    }
     base_exclusions = {
         bytes(row["event_key"]): _model_exclusion_reason(row) for row in rows
     }
@@ -309,6 +337,15 @@ def _model_exclusion_reasons(
         if str(row["event_type"]).upper() == "OFFER"
         and base_exclusions[bytes(row["event_key"])] is None
     ]
+    offers_by_book: dict[tuple[str, str], list[tuple[bytes, float, float, float, str]]] = {}
+    for offer in eligible_offers:
+        book = (
+            str(offer["instrument"]).upper(),
+            str(offer["trade_form"]).upper(),
+        )
+        offers_by_book.setdefault(book, []).append(
+            _live_book_offer_ref(offer, offer_times=offer_times)
+        )
     exclusions: dict[bytes, str | None] = {}
     for row in rows:
         event_key = bytes(row["event_key"])
@@ -320,9 +357,17 @@ def _model_exclusion_reasons(
                 exclusions=exclusions,
             )
         if reason is None:
+            book = (
+                str(row["instrument"]).upper(),
+                str(row["trade_form"]).upper(),
+            )
+            event_time, available_at = offer_times[event_key]
             reason = _live_book_price_exclusion_reason(
                 row,
-                eligible_offers=eligible_offers,
+                eligible_offers=offers_by_book.get(book, ()),
+                event_time=event_time,
+                available_at=available_at,
+                offer_times=offer_times,
             )
         exclusions[event_key] = reason
     return exclusions
@@ -335,6 +380,62 @@ def _audit_projectable(row: sqlite3.Row) -> bool:
         "ELIGIBLE",
         "PENDING_REVIEW",
     }
+
+
+def _projection_digest(
+    row: sqlite3.Row,
+    *,
+    exclusion_reason: str | None,
+    model_eligible: bool,
+    attributes: dict[str, object],
+) -> str:
+    payload = {
+        "available_at_utc": str(row["available_at_utc"]),
+        "commodity": _commodity(row),
+        "confidence": float(row["parse_confidence"]),
+        "event_time_utc": str(row["event_time_utc"]),
+        "event_type": str(row["event_type"]).upper(),
+        "exclusion_reason": exclusion_reason,
+        "is_aggregate": bool(attributes.get("is_aggregate")),
+        "is_conditional": bool(row["is_conditional"]),
+        "model_eligible": model_eligible,
+        "parser_version": str(row["parser_version"]),
+        "price": float(row["price_num"]),
+        "quality_state": str(row["quality_state"]),
+        "quantity": _quantity(row),
+        "root_offer_event_key": (
+            None
+            if _root_offer_event_key(attributes) is None
+            else _root_offer_event_key(attributes).hex()
+        ),
+        "settlement": _settlement(str(row["settlement_term"])),
+        "side": str(row["side"]).upper(),
+        "source_code": str(row["source_code"]),
+        "trade_form": _trade_form(str(row["trade_form"])),
+        "version": PROJECTION_VERSION,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _ensure_projection_digest_column(destination: sqlite3.Connection) -> None:
+    columns = {
+        str(row[1])
+        for row in destination.execute("PRAGMA table_info(canonical_group_projection)")
+    }
+    if "payload_digest" not in columns:
+        destination.execute(
+            "ALTER TABLE canonical_group_projection ADD COLUMN payload_digest TEXT"
+        )
+
+
+def _prior_digest(prior: sqlite3.Row) -> str | None:
+    try:
+        value = prior["payload_digest"]
+    except (IndexError, KeyError):
+        return None
+    return None if value in (None, "") else str(value)
 
 
 def _delete_projected(destination: sqlite3.Connection, prior: sqlite3.Row) -> None:
@@ -458,13 +559,19 @@ def project(
             )
             """
         )
+        _ensure_projection_digest_column(destination)
         source_event_keys = {bytes(row["event_key"]) for row in rows}
-        for prior in destination.execute(
-            "SELECT event_key,event_type,row_id,message_id FROM canonical_group_projection"
-        ).fetchall():
+        priors = {
+            bytes(prior["event_key"]): prior
+            for prior in destination.execute(
+                "SELECT * FROM canonical_group_projection"
+            ).fetchall()
+        }
+        for prior in list(priors.values()):
             if bytes(prior["event_key"]) in source_event_keys:
                 continue
             _delete_projected(destination, prior)
+            priors.pop(bytes(prior["event_key"]), None)
             counts["ineligible_removed"] += 1
         destination.execute(
             """
@@ -493,17 +600,39 @@ def project(
             attributes = _attributes(row)
             row_id = _opaque_id(event_key, event_type.encode("ascii"))
             message_id = _opaque_id(event_key, b"MESSAGE")
-            prior = destination.execute(
-                "SELECT event_key,event_type,row_id,message_id FROM canonical_group_projection WHERE event_key=?",
-                (event_key,),
-            ).fetchone()
+            prior = priors.get(event_key)
             if not _audit_projectable(row):
                 if prior is not None:
                     _delete_projected(destination, prior)
+                    priors.pop(event_key, None)
                     counts["ineligible_removed"] += 1
                 continue
             exclusion_reason = exclusion_reasons[event_key]
             model_eligible = exclusion_reason is None
+            digest = _projection_digest(
+                row,
+                exclusion_reason=exclusion_reason,
+                model_eligible=model_eligible,
+                attributes=attributes,
+            )
+            if (
+                prior is not None
+                and str(prior["projection_version"]) == PROJECTION_VERSION
+                and _prior_digest(prior) == digest
+            ):
+                if event_type == "OFFER":
+                    counts["audit_offers"] += 1
+                    if model_eligible:
+                        counts["eligible_offers"] += 1
+                    else:
+                        counts["audit_only_offers"] += 1
+                else:
+                    counts["audit_trades"] += 1
+                    if model_eligible:
+                        counts["eligible_trades"] += 1
+                    else:
+                        counts["audit_only_trades"] += 1
+                continue
             source_file, _group_number = _source(row)
             commodity = _commodity(row)
             settlement = _settlement(str(row["settlement_term"]))
@@ -773,14 +902,24 @@ def project(
             destination.execute(
                 """
                 INSERT INTO canonical_group_projection(
-                    event_key,event_type,row_id,message_id,projected_at_utc,projection_version
-                ) VALUES(?,?,?,?,?,?)
+                    event_key,event_type,row_id,message_id,projected_at_utc,
+                    projection_version,payload_digest
+                ) VALUES(?,?,?,?,?,?,?)
                 ON CONFLICT(event_key) DO UPDATE SET
                     event_type=excluded.event_type,row_id=excluded.row_id,
                     message_id=excluded.message_id,projected_at_utc=excluded.projected_at_utc,
-                    projection_version=excluded.projection_version
+                    projection_version=excluded.projection_version,
+                    payload_digest=excluded.payload_digest
                 """,
-                (event_key, event_type, row_id, message_id, now, PROJECTION_VERSION),
+                (
+                    event_key,
+                    event_type,
+                    row_id,
+                    message_id,
+                    now,
+                    PROJECTION_VERSION,
+                    digest,
+                ),
             )
         destination.execute(
             """
