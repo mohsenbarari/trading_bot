@@ -144,6 +144,32 @@ class PreparePrivatePrimaryControlReleaseTests(unittest.TestCase):
         values.update(overrides)
         return preparer.install_control_release(**values)  # type: ignore[arg-type]
 
+    def test_cli_accepts_confirm_after_subcommand(self) -> None:
+        source = self.workspace / "inputs" / "bot.source.env"
+        _write(
+            source,
+            (
+                f"MARKET_BOT_DATA_ROOT={preparer.CANONICAL_BOT_DATA_ROOT}\n"
+                f"MARKET_PRODUCT_SNAPSHOT_ROOT={preparer.CANONICAL_BOT_DATA_ROOT}/snapshots\n"
+            ),
+        )
+        self.assertEqual(
+            preparer.main(
+                [
+                    "validate-topology-source",
+                    "--confirm",
+                    preparer.CONFIRMATION,
+                    "--role",
+                    "bot",
+                    "--source",
+                    str(source),
+                    "--repository-root",
+                    str(REPO_ROOT),
+                ]
+            ),
+            0,
+        )
+
     def test_help_lists_the_official_command(self) -> None:
         source = RELEASE_SCRIPT.read_text(encoding="utf-8")
         self.assertIn("prepare-private-primary-control-release", source)

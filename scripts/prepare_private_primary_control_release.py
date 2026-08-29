@@ -632,17 +632,24 @@ def write_prepare_receipt(
     return payload
 
 
+def _add_confirm(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--confirm", required=True)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     flags = commands.add_parser("reject-historical-flags")
+    _add_confirm(flags)
     for key in HISTORICAL_FLAGS:
         flags.add_argument(f"--{key.lower().replace('_', '-')}", default="0")
     source = commands.add_parser("validate-topology-source")
+    _add_confirm(source)
     source.add_argument("--role", choices=("web", "bot"), required=True)
     source.add_argument("--source", type=Path, required=True)
     source.add_argument("--repository-root", type=Path, required=True)
     foundation = commands.add_parser("prepare-foundation")
+    _add_confirm(foundation)
     foundation.add_argument("--bot-data-root", type=Path, default=Path(CANONICAL_BOT_DATA_ROOT))
     foundation.add_argument("--web-data-root", type=Path, default=Path(CANONICAL_WEB_DATA_ROOT))
     foundation.add_argument("--web-backup-root", type=Path, default=Path(CANONICAL_WEB_BACKUP_ROOT))
@@ -652,8 +659,10 @@ def build_parser() -> argparse.ArgumentParser:
     foundation.add_argument("--release-sha", required=True)
     foundation.add_argument("--release-tree", required=True)
     key = commands.add_parser("generate-backup-key")
+    _add_confirm(key)
     key.add_argument("--key-file", type=Path, required=True)
     install = commands.add_parser("install-control-release")
+    _add_confirm(install)
     install.add_argument("--base-dir", type=Path, required=True)
     install.add_argument("--release-sha", required=True)
     install.add_argument("--release-tree", required=True)
@@ -666,7 +675,6 @@ def build_parser() -> argparse.ArgumentParser:
     install.add_argument("--image-id", required=True)
     install.add_argument("--image-input-signature", required=True)
     install.add_argument("--receipt", type=Path, required=True)
-    parser.add_argument("--confirm", required=True)
     return parser
 
 
