@@ -1247,6 +1247,14 @@ def test_control_release_manifest_accepts_primary_pair_schema(
         )
 
 
+def test_remote_control_release_supervisor_accepts_and_constrains_primary_pair() -> None:
+    supervisor = controller._REMOTE_RELEASE_TOOL_SUPERVISOR
+    assert "market_pipeline_primary_release_pair/1.0" in supervisor
+    assert "market_pipeline_primary_release_pair/1.1" in supervisor
+    assert "pair.get('feed_mode')!='PRIVATE_PRIMARY'" in supervisor
+    assert "pair.get('product_authority_changed') is not False" in supervisor
+
+
 def test_exact_control_release_python_inherits_verified_tool_fd(
     tmp_path: Path,
 ) -> None:

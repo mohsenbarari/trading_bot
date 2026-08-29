@@ -1789,7 +1789,9 @@ def verify_payload():
             fail('payload_dependency_drift')
 verify_payload()
 pair=json.loads(read_regular(os.path.join(root,'market-pipeline-release-pair-receipt.json'),2_000_000))
-if pair.get('schema') not in {'market_pipeline_release_pair/1.0','market_pipeline_release_pair/1.1'} or pair.get('release_sha')!=release_sha or pair.get('release_tree')!=release_tree or pair.get('secrets_disclosed') is not False:
+if pair.get('schema') not in {'market_pipeline_release_pair/1.0','market_pipeline_release_pair/1.1','market_pipeline_primary_release_pair/1.0','market_pipeline_primary_release_pair/1.1'} or pair.get('release_sha')!=release_sha or pair.get('release_tree')!=release_tree or pair.get('secrets_disclosed') is not False:
+    fail('pair_binding')
+if str(pair.get('schema') or '').startswith('market_pipeline_primary_release_pair') and (pair.get('feed_mode')!='PRIVATE_PRIMARY' or pair.get('product_authority_changed') is not False):
     fail('pair_binding')
 path=os.path.join(root,relative)
 d=os.open(path,os.O_RDONLY|getattr(os,'O_NOFOLLOW',0))
