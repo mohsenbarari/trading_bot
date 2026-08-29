@@ -96,6 +96,10 @@ oracle مقایسه و rollback داده‌ای نیست. rollback آن صرفا
   receipt، image label و promotion receipt باید به همان exact release بایت‌به‌بایت متصل باشند.
 - image application از نظر Config/RootFS/label با هر دو میزبان تطبیق داده شود؛ image ID محلی
   می‌تواند متفاوت باشد.
+- فرمان رسمی `prepare-private-primary-control-release` پیش از validate/execute،
+  control-release دقیق، foundation امن، image و host preflight را روی هر دو میزبان
+  نصب می‌کند. این فرمان full `release` نیست، فلگ‌های تاریخی PRIVATE_SHADOW را روشن
+  نمی‌کند، و سرویس، دیتابیس، Queue، capture یا authority محصول را تغییر نمی‌دهد.
 - preflight رسمی web و bot باید `PASS` باشد.
 - پروژهٔ قدیم دقیقاً inventory انتظار را داشته باشد و پروژهٔ جدید کاملاً خالی باشد.
 - `plan` روی هر دو میزبان اجرا و journalهای `0600` ثبت شود.
