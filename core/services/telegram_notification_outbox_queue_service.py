@@ -97,6 +97,11 @@ _QUEUE_SOURCE_TYPES = (
     *sorted(TELEGRAM_NOTIFICATION_ACTION_SOURCE_TYPES),
 )
 
+_DEPENDENCY_WAIT_FAST_SECONDS = 1
+_DEPENDENCY_WAIT_SHORT_SECONDS = 5
+_DEPENDENCY_WAIT_MEDIUM_SECONDS = 15
+_DEPENDENCY_WAIT_MAX_SECONDS = 60
+
 
 class TelegramNotificationOutboxQueueHandoffError(RuntimeError):
     """Raised before cross-server or unsafe queue handoff."""
@@ -125,6 +130,55 @@ async def _flush(db: AsyncSession | Any) -> None:
     flush = getattr(db, "flush", None)
     if callable(flush):
         await flush()
+
+
+def _dependency_wait_retry_seconds(
+    outbox: TelegramNotificationOutbox,
+    *,
+    reason: str,
+    now: datetime,
+) -> int:
+    """Back off a durable dependency wait without delaying its first retry."""
+    if str(outbox.reason or "") != reason:
+        return _DEPENDENCY_WAIT_FAST_SECONDS
+    created_at = outbox.created_at
+    if created_at is None:
+        return _DEPENDENCY_WAIT_FAST_SECONDS
+    try:
+        age_seconds = max(0.0, (now - created_at).total_seconds())
+    except TypeError:
+        comparable_created_at = created_at.replace(tzinfo=now.tzinfo)
+        age_seconds = max(0.0, (now - comparable_created_at).total_seconds())
+    if age_seconds < 60:
+        return _DEPENDENCY_WAIT_FAST_SECONDS
+    if age_seconds < 5 * 60:
+        return _DEPENDENCY_WAIT_SHORT_SECONDS
+    if age_seconds < 60 * 60:
+        return _DEPENDENCY_WAIT_MEDIUM_SECONDS
+    return _DEPENDENCY_WAIT_MAX_SECONDS
+
+
+async def _defer_for_dependency(
+    db: AsyncSession | Any,
+    *,
+    outbox: TelegramNotificationOutbox,
+    reason: str,
+    now: datetime,
+) -> TelegramNotificationOutboxQueueHandoffResult:
+    retry_seconds = _dependency_wait_retry_seconds(
+        outbox,
+        reason=reason,
+        now=now,
+    )
+    outbox.reason = reason
+    outbox.next_retry_at = now + timedelta(seconds=retry_seconds)
+    outbox.updated_at = now
+    await _flush(db)
+    return TelegramNotificationOutboxQueueHandoffResult(
+        outbox_id=int(outbox.id),
+        disposition=NOTIFICATION_OUTBOX_QUEUE_DEFERRED,
+        reason=reason,
+    )
 
 
 async def _select_next_due_outbox(
@@ -313,14 +367,11 @@ async def handoff_next_due_telegram_notification_outbox(
                 now=current_time,
             )
         if waits_for_offer_success:
-            outbox.reason = "offer_success_source_version_pending"
-            outbox.next_retry_at = current_time + timedelta(seconds=1)
-            outbox.updated_at = current_time
-            await _flush(db)
-            return TelegramNotificationOutboxQueueHandoffResult(
-                outbox_id=int(outbox.id),
-                disposition=NOTIFICATION_OUTBOX_QUEUE_DEFERRED,
+            return await _defer_for_dependency(
+                db,
+                outbox=outbox,
                 reason="offer_success_source_version_pending",
+                now=current_time,
             )
     if action_policy is not None:
         try:
@@ -340,14 +391,11 @@ async def handoff_next_due_telegram_notification_outbox(
                 now=current_time,
             )
         if waits_for_recipient:
-            outbox.reason = "notification_action_recipient_version_pending"
-            outbox.next_retry_at = current_time + timedelta(seconds=1)
-            outbox.updated_at = current_time
-            await _flush(db)
-            return TelegramNotificationOutboxQueueHandoffResult(
-                outbox_id=int(outbox.id),
-                disposition=NOTIFICATION_OUTBOX_QUEUE_DEFERRED,
+            return await _defer_for_dependency(
+                db,
+                outbox=outbox,
                 reason="notification_action_recipient_version_pending",
+                now=current_time,
             )
         try:
             target_decision = (
@@ -370,14 +418,11 @@ async def handoff_next_due_telegram_notification_outbox(
                 target_decision.outcome
                 == TelegramInteractionDependencyOutcome.WAIT_DEPENDENCY
             ):
-                outbox.reason = "notification_action_result_target_pending"
-                outbox.next_retry_at = current_time + timedelta(seconds=1)
-                outbox.updated_at = current_time
-                await _flush(db)
-                return TelegramNotificationOutboxQueueHandoffResult(
-                    outbox_id=int(outbox.id),
-                    disposition=NOTIFICATION_OUTBOX_QUEUE_DEFERRED,
+                return await _defer_for_dependency(
+                    db,
+                    outbox=outbox,
                     reason="notification_action_result_target_pending",
+                    now=current_time,
                 )
             if (
                 target_decision.outcome

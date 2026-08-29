@@ -12,6 +12,7 @@ import unittest
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from unittest.mock import call, patch
 
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -147,8 +148,16 @@ def _docker_available() -> bool:
 def _start_scratch() -> tuple[str, str]:
     postgres_port = os.environ.get("TELEGRAM_SPLIT_SCRATCH_PG_PORT", "55433")
     redis_port = os.environ.get("TELEGRAM_SPLIT_SCRATCH_REDIS_PORT", "56379")
-    subprocess.run(["docker", "rm", "-f", POSTGRES_CONTAINER], check=False, capture_output=True)
-    subprocess.run(["docker", "rm", "-f", REDIS_CONTAINER], check=False, capture_output=True)
+    subprocess.run(
+        ["docker", "rm", "-fv", POSTGRES_CONTAINER],
+        check=False,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["docker", "rm", "-fv", REDIS_CONTAINER],
+        check=False,
+        capture_output=True,
+    )
     pg = subprocess.run(
         [
             "docker",
@@ -188,7 +197,11 @@ def _start_scratch() -> tuple[str, str]:
         check=False,
     )
     if redis.returncode != 0:
-        subprocess.run(["docker", "rm", "-f", POSTGRES_CONTAINER], check=False, capture_output=True)
+        subprocess.run(
+            ["docker", "rm", "-fv", POSTGRES_CONTAINER],
+            check=False,
+            capture_output=True,
+        )
         raise unittest.SkipTest(f"could not start scratch redis: {redis.stderr.strip()}")
     url = (
         f"postgresql://split_runtime:split_runtime@127.0.0.1:{postgres_port}/{SCRATCH_DB_NAME}"
@@ -210,8 +223,38 @@ def _start_scratch() -> tuple[str, str]:
 
 
 def _stop_scratch() -> None:
-    subprocess.run(["docker", "rm", "-f", POSTGRES_CONTAINER], check=False, capture_output=True)
-    subprocess.run(["docker", "rm", "-f", REDIS_CONTAINER], check=False, capture_output=True)
+    subprocess.run(
+        ["docker", "rm", "-fv", POSTGRES_CONTAINER],
+        check=False,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["docker", "rm", "-fv", REDIS_CONTAINER],
+        check=False,
+        capture_output=True,
+    )
+
+
+class TelegramSplitRuntimeScratchCleanupTests(unittest.TestCase):
+    @patch("tests.test_telegram_split_runtime_dual_process.subprocess.run")
+    def test_stop_scratch_removes_anonymous_image_volumes(self, run_mock):
+        _stop_scratch()
+
+        self.assertEqual(
+            run_mock.call_args_list,
+            [
+                call(
+                    ["docker", "rm", "-fv", POSTGRES_CONTAINER],
+                    check=False,
+                    capture_output=True,
+                ),
+                call(
+                    ["docker", "rm", "-fv", REDIS_CONTAINER],
+                    check=False,
+                    capture_output=True,
+                ),
+            ],
+        )
 
 
 @unittest.skipUnless(_docker_available(), "docker is required for isolated scratch dual-process tests")
