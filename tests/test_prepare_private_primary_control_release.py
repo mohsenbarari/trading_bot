@@ -191,6 +191,8 @@ class PreparePrivatePrimaryControlReleaseTests(unittest.TestCase):
             body.index('--confirm "render-market-pipeline-private-primary"'),
             body.index("render-pair"),
         )
+        self.assertIn("--control-manifest", body)
+        self.assertIn("PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST", body)
         self.assertIn("services_started", body)
         self.assertIn("database_mutated", body)
         self.assertIn("authority_changed", body)
@@ -214,6 +216,61 @@ class PreparePrivatePrimaryControlReleaseTests(unittest.TestCase):
             preparer.validate_historical_flags(
                 {**{key: "0" for key in preparer.HISTORICAL_FLAGS}, preparer.HISTORICAL_FLAGS[0]: "1"}
             )
+
+    def test_sibling_control_manifest_is_installed(self) -> None:
+        sibling = _write(
+            self.workspace / "inputs" / "control-payload.sha256",
+            self.manifest.read_text(encoding="utf-8"),
+        )
+        self.manifest.unlink()
+        extras = self.extras()
+        extras["control-payload.sha256"] = sibling
+        payload = self.install(extras=extras)
+        installed = self.base / SHA / "control-payload.sha256"
+        self.assertTrue(installed.is_file())
+        self.assertEqual(installed.read_bytes(), sibling.read_bytes())
+        self.assertFalse(payload["idempotent_reuse"])
+
+    def test_cli_install_binds_explicit_sibling_manifest(self) -> None:
+        sibling = _write(
+            self.workspace / "inputs" / "control-payload.sha256",
+            self.manifest.read_text(encoding="utf-8"),
+        )
+        self.manifest.unlink()
+        argv = [
+            "install-control-release",
+            "--confirm",
+            preparer.CONFIRMATION,
+            "--base-dir",
+            str(self.base),
+            "--release-sha",
+            SHA,
+            "--release-tree",
+            TREE,
+            "--host-role",
+            "bot",
+            "--payload-dir",
+            str(self.payload),
+            "--control-manifest",
+            str(sibling),
+            "--bot-env",
+            str(self.bot_env),
+            "--web-env",
+            str(self.web_env),
+            "--image-receipt",
+            str(self.image_receipt),
+            "--pair-receipt",
+            str(self.pair_receipt),
+            "--image-id",
+            IMAGE,
+            "--image-input-signature",
+            SIGNATURE,
+            "--receipt",
+            str(self.receipt),
+        ]
+        self.assertEqual(preparer.main(argv), 0)
+        installed = self.base / SHA / "control-payload.sha256"
+        self.assertEqual(installed.read_bytes(), sibling.read_bytes())
 
     def test_atomic_install_is_idempotent_when_exact(self) -> None:
         first = self.install()

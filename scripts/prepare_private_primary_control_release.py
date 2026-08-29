@@ -668,6 +668,7 @@ def build_parser() -> argparse.ArgumentParser:
     install.add_argument("--release-tree", required=True)
     install.add_argument("--host-role", choices=("web", "bot"), required=True)
     install.add_argument("--payload-dir", type=Path, required=True)
+    install.add_argument("--control-manifest", type=Path)
     install.add_argument("--bot-env", type=Path, required=True)
     install.add_argument("--web-env", type=Path, required=True)
     install.add_argument("--image-receipt", type=Path, required=True)
@@ -736,7 +737,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "web.release.env": args.web_env,
                 "market-pipeline-image-prebuild-receipt.json": args.image_receipt,
                 "market-pipeline-release-pair-receipt.json": args.pair_receipt,
-                "control-payload.sha256": args.payload_dir / "control-payload.sha256",
+                "control-payload.sha256": (
+                    args.control_manifest
+                    if args.control_manifest is not None
+                    else args.payload_dir / "control-payload.sha256"
+                ),
             }
             result = {
                 "status": "PASS",

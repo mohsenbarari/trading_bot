@@ -9269,6 +9269,7 @@ run_prepare_private_primary_control_release() {
         --release-tree "$PRODUCTION_RELEASE_TREE" \
         --host-role bot \
         --payload-dir "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR" \
+        --control-manifest "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST" \
         --bot-env "$PRODUCTION_MARKET_PIPELINE_BOT_ENV" \
         --web-env "$PRODUCTION_MARKET_PIPELINE_WEB_ENV" \
         --image-receipt "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT" \
@@ -9341,6 +9342,7 @@ sync -f '$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR'"
         --release-tree "$PRODUCTION_RELEASE_TREE" \
         --host-role web \
         --payload-dir "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_DIR" \
+        --control-manifest "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST" \
         --bot-env "$PRODUCTION_MARKET_PIPELINE_BOT_ENV" \
         --web-env "$PRODUCTION_MARKET_PIPELINE_WEB_ENV" \
         --image-receipt "$PRODUCTION_MARKET_PIPELINE_IMAGE_RECEIPT" \
