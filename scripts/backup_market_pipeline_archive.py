@@ -573,33 +573,58 @@ def restore_smoke(
         )
         created_container = True
         ready = False
-        for _attempt in range(60):
-            result = subprocess.run(
+        consecutive = 0
+        for _attempt in range(90):
+            ready_probe = subprocess.run(
                 ["docker", "exec", container, "pg_isready", "-U", "restore", "-d", "restore"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
             )
-            if result.returncode == 0:
-                ready = True
-                break
+            sql_probe = subprocess.run(
+                [
+                    "docker", "exec", container, "psql",
+                    "-X", "-v", "ON_ERROR_STOP=1", "-At",
+                    "-U", "restore", "-d", "restore", "-c", "SELECT 1",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                text=True,
+            )
+            if ready_probe.returncode == 0 and sql_probe.returncode == 0 and sql_probe.stdout.strip() == "1":
+                consecutive += 1
+                if consecutive >= 2:
+                    ready = True
+                    break
+            else:
+                consecutive = 0
             time.sleep(1)
         if not ready:
             raise BackupError("backup_restore_not_ready")
-        with artifact.open("rb") as stream:
-            result = subprocess.run(
-                [
-                    "docker", "exec", "-i", container, "pg_restore",
-                    "-U", "restore", "-d", "restore",
-                    "--exit-on-error", "--no-owner", "--no-privileges",
-                ],
-                stdin=stream,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                check=False,
-            )
-        if result.returncode:
+        result = None
+        for attempt in range(2):
+            with artifact.open("rb") as stream:
+                result = subprocess.run(
+                    [
+                        "docker", "exec", "-i", container, "pg_restore",
+                        "-U", "restore", "-d", "restore",
+                        "--exit-on-error", "--no-owner", "--no-privileges",
+                    ],
+                    stdin=stream,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                )
+            if result.returncode == 0:
+                break
+            stderr_text = (result.stderr or b"").decode("utf-8", "replace").lower()
+            if attempt == 0 and "no such file or directory" in stderr_text:
+                time.sleep(2)
+                continue
             raise BackupError(f"backup_restore_failed_rc_{result.returncode}")
+        if result is None or result.returncode:
+            raise BackupError("backup_restore_failed")
         def restore_query(sql: str, *, label: str) -> str:
             del label
             return _restore_query(container, sql)
@@ -610,6 +635,8 @@ def restore_smoke(
         # the authoritative row/sequence inventory.  The migration set must
         # still match the pre-dump source observation; a concurrent schema
         # transition is not safe to accept.
+        if not restored["schema_versions"]:
+            raise BackupError("backup_restore_schema_missing")
         if restored["schema_versions"] != source["schema_versions"]:
             raise BackupError("backup_restore_reconciliation_mismatch")
         if before_cleanup is not None:

@@ -473,6 +473,8 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
         self.assertNotIn("--publish", restore)
         self.assertIn('"--exit-on-error"', restore)
         self.assertIn("_assert_restore_resource_absent", restore)
+        self.assertIn('"-c", "SELECT 1"', restore)
+        self.assertIn("consecutive >= 2", restore)
 
     def test_initial_empty_complete_journal_recovers_missing_receipt(self) -> None:
         with mock.patch.object(backup, "_running_project_services", return_value=[]):
