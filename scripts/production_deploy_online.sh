@@ -9287,7 +9287,14 @@ release_dir='$remote_release_dir'
 [ ! -e \"\$incoming\" ] && [ ! -L \"\$incoming\" ]
 if [ -e \"\$base\" ]; then
   [ -d \"\$base\" ] && [ ! -L \"\$base\" ]
-  [ \"\$(stat -c '%u:%a' \"\$base\")\" = '0:700' ] || [ \"\$(stat -c '%u:%a' \"\$base\")\" = \"\$(id -u):700\" ]
+  [ \"\$(stat -c '%u' \"\$base\")\" = 0 ] || [ \"\$(stat -c '%u' \"\$base\")\" = \"\$(id -u)\" ]
+  mode=\"\$(stat -c '%a' \"\$base\")\"
+  case \"\$mode\" in
+    700) ;;
+    755|750|711|710|701) chmod 0700 -- \"\$base\" ;;
+    *) exit 51 ;;
+  esac
+  [ \"\$(stat -c '%a' \"\$base\")\" = 700 ]
 fi
 if [ -e \"\$release_dir\" ]; then
   [ -d \"\$release_dir\" ] && [ ! -L \"\$release_dir\" ]
@@ -9303,6 +9310,12 @@ fi" || die "Remote PRIVATE_PRIMARY control-release base is unsafe or another inc
 base='$PRODUCTION_MARKET_PIPELINE_RELEASE_BASE_DIR'
 incoming='$remote_incoming'
 install -d -m 0700 -- \"\$base\"
+mode=\"\$(stat -c '%a' \"\$base\")\"
+case \"\$mode\" in
+  700) ;;
+  755|750|711|710|701) chmod 0700 -- \"\$base\" ;;
+  *) exit 51 ;;
+esac
 [ \"\$(stat -c '%a' \"\$base\")\" = 700 ]
 install -d -m 0700 -- \"\$incoming\""
         run_iran_transfer rsync -a --delete \

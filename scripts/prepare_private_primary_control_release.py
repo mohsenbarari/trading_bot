@@ -452,8 +452,16 @@ def install_control_release(
         info = base_dir.lstat()
         if base_dir.is_symlink() or not stat.S_ISDIR(info.st_mode):
             raise PrepareError("release_base_invalid")
-        if info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o700:
+        if info.st_uid != os.geteuid():
             raise PrepareError("release_base_owner_mode_invalid")
+        mode = stat.S_IMODE(info.st_mode)
+        if mode != 0o700:
+            if mode not in {0o755, 0o750, 0o711, 0o710, 0o701}:
+                raise PrepareError("release_base_owner_mode_invalid")
+            os.chmod(base_dir, 0o700)
+            info = base_dir.lstat()
+            if stat.S_IMODE(info.st_mode) != 0o700:
+                raise PrepareError("release_base_owner_mode_invalid")
     else:
         base_dir.mkdir(mode=0o700, parents=True)
         os.chmod(base_dir, 0o700)

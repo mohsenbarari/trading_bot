@@ -213,11 +213,22 @@ class PreparePrivatePrimaryControlReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(preparer.PrepareError, "payload_symlink_forbidden"):
             self.install()
 
-    def test_invalid_owner_mode_is_rejected(self) -> None:
-        self.base.mkdir(mode=0o755)
-        os.chmod(self.base, 0o755)
+    def test_world_writable_owner_mode_is_rejected(self) -> None:
+        self.base.mkdir(mode=0o777)
+        os.chmod(self.base, 0o777)
         with self.assertRaisesRegex(preparer.PrepareError, "release_base_owner_mode_invalid"):
             self.install()
+        self.assertEqual(stat.S_IMODE(self.base.stat().st_mode), 0o777)
+
+    def test_existing_0755_base_is_tightened_without_deleting_children(self) -> None:
+        self.base.mkdir(mode=0o755)
+        os.chmod(self.base, 0o755)
+        marker = self.base / "keep-me"
+        marker.mkdir()
+        (marker / "child").write_text("stay\n", encoding="utf-8")
+        self.install()
+        self.assertEqual(stat.S_IMODE(self.base.stat().st_mode), 0o700)
+        self.assertEqual((marker / "child").read_text(encoding="utf-8"), "stay\n")
 
     def test_foreign_incoming_is_not_deleted(self) -> None:
         self.base.mkdir(mode=0o700)
