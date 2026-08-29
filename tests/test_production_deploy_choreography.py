@@ -2139,6 +2139,33 @@ validate_production_coin_inference_activation_contract
             self.assertNotEqual(blocked.returncode, 0)
             self.assertIn("maximum age", blocked.stderr)
 
+    def test_attested_private_primary_cutover_keeps_legacy_runtime_without_snapshot_relay(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="production-private-primary-cutover-") as temporary:
+            source = Path(temporary) / "source.env"
+            source.write_text(
+                "PRODUCTION_COIN_INFERENCE_PREVIEW_ENABLED=true\n"
+                "PRODUCTION_COIN_INFERENCE_SELECTION_ENABLED=true\n"
+                "PRODUCTION_COIN_INFERENCE_AUTO_SELECTION_ENABLED=false\n"
+                "PRODUCTION_OFFER_MODEL_PRICE_GUARD_ENABLED=true\n"
+                "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE=LEGACY\n"
+                "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MAX_AGE_SECONDS=120\n",
+                encoding="utf-8",
+            )
+            ready = run_sourced_script(
+                """
+RUNTIME_ENV_SOURCE_PATH="$2"
+PRODUCTION_PRIVATE_PRIMARY_MANIFEST_ATTESTATION_VERIFIED=1
+PRODUCTION_COIN_INFERENCE_RELAY_ENABLED=0
+PRODUCTION_COIN_INFERENCE_RELAY_CONFIRM=
+PRODUCTION_COIN_INFERENCE_RELAY_DISABLE_CONFIRM=disable-production-coin-inference-snapshot
+validate_production_coin_inference_activation_contract
+printf '%s %s %s\n' "$PRODUCTION_COIN_INFERENCE_REQUESTED" "$PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED" "$PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED"
+""",
+                str(source),
+            )
+            self.assertEqual(ready.returncode, 0, ready.stderr + ready.stdout)
+            self.assertEqual(ready.stdout.strip(), "1 0 1")
+
     def test_release_gates_inputs_snapshot_and_consumers_before_final_health(self) -> None:
         source = RELEASE_SCRIPT.read_text(encoding="utf-8")
         release = source.split("run_release() {", 1)[1].split("\n}", 1)[0]

@@ -2253,6 +2253,14 @@ validate_production_coin_inference_activation_contract() {
                 && "$PRODUCTION_COIN_INFERENCE_RELAY_DISABLE_CONFIRM" == "$PRODUCTION_COIN_SNAPSHOT_RELAY_DISABLE_CONFIRM_TEXT" ]] \
                 || die "Production PRIVATE_PRIMARY requires an explicit relay-disabled release manifest and exact rollback-only disable confirmation."
             PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED=1
+        elif [[ "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_ATTESTATION_VERIFIED" == "1" ]]; then
+            # Live Product stays LEGACY until CAS. The attested deploy
+            # manifest already disabled the Snapshot relay for cutover.
+            PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED=1
+            [[ "$PRODUCTION_COIN_INFERENCE_RELAY_ENABLED" == "0" \
+                && -z "$PRODUCTION_COIN_INFERENCE_RELAY_CONFIRM" \
+                && "$PRODUCTION_COIN_INFERENCE_RELAY_DISABLE_CONFIRM" == "$PRODUCTION_COIN_SNAPSHOT_RELAY_DISABLE_CONFIRM_TEXT" ]] \
+                || die "Production PRIVATE_PRIMARY requires an explicit relay-disabled release manifest and exact rollback-only disable confirmation."
         else
             PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED=1
             [[ "$PRODUCTION_COIN_INFERENCE_RELAY_ENABLED" == "1" \
