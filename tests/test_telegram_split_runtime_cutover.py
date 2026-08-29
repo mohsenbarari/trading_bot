@@ -45,6 +45,25 @@ class TelegramSplitRuntimeCutoverTests(unittest.TestCase):
         self.assertFalse(operator.owns_queue["bot"])
         self.assertFalse(operator.owns_central["bot_executor"])
 
+    def test_forward_replaces_an_existing_split_release_without_duplicate_owner(self):
+        operator = InMemorySplitOperator.successful()
+        operator.running["bot"] = True
+        operator.running["bot_executor"] = True
+        operator.roles["bot"] = "primary"
+        operator.roles["bot_executor"] = "executor"
+        operator.split_flags["bot"] = True
+        operator.split_flags["bot_executor"] = True
+        operator.queue_owners = 1
+        operator.central_pollers = 1
+
+        report = SplitCutoverController(operator).forward()
+
+        self.assertTrue(report.ok, report.reasons)
+        self.assertEqual(operator.queue_owners, 1)
+        self.assertEqual(operator.central_pollers, 1)
+        self.assertTrue(operator.running["bot"])
+        self.assertTrue(operator.running["bot_executor"])
+
     def test_success_is_not_declared_before_postchecks(self):
         operator = InMemorySplitOperator.successful()
         operator.fail_on = "unknown"

@@ -163,7 +163,12 @@ class SplitCutoverController:
             report.schema_head = operator.schema_head()
             return
         if step == "stop_combined_all":
-            operator.stop_services(("bot",))
+            # A deploy can start from either the legacy combined runtime or an
+            # already-split previous release.  Stop both known runtimes before
+            # bringing up the new executor so a healthy old executor is not
+            # mistaken for a duplicate owner.  Queue jobs are durable and are
+            # explicitly verified again by the rollback/postcheck path.
+            operator.stop_services(("bot", "bot_executor"))
             return
         if step == "start_executor":
             operator.start_service(
