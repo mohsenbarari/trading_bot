@@ -533,23 +533,41 @@ def _product_container_mode(
         rows = json.loads(completed.stdout or b"[]")
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         raise ChoreographyError("controller_product_runtime_mode_invalid") from exc
-    expected_project = "trading_bot" if host == "local" else "current"
-    config = rows[0].get("Config") or {}
-    labels = config.get("Labels") or {}
     if (
         completed.returncode != 0
         or not isinstance(rows, list)
         or len(rows) != 1
         or not isinstance(rows[0], dict)
-        or (rows[0].get("State") or {}).get("Running") is not True
+    ):
+        raise ChoreographyError("controller_product_runtime_mode_invalid")
+    row = rows[0]
+    expected_project = "trading_bot" if host == "local" else "current"
+    config = row.get("Config") or {}
+    labels = config.get("Labels") or {}
+    runtime_image_id = str(row.get("Image") or "")
+    if (
+        (row.get("State") or {}).get("Running") is not True
         or labels.get(
             "com.docker.compose.project"
         )
         != expected_project
-        or rows[0].get("Image") != expected_image_id
+        or not re.fullmatch(r"sha256:[0-9a-f]{64}", runtime_image_id)
         or labels.get("org.opencontainers.image.revision") != release_sha
         or labels.get("io.gold-trade.release.tree") != release_tree
     ):
+        raise ChoreographyError("controller_product_runtime_mode_invalid")
+    if host == "local":
+        if runtime_image_id != expected_image_id:
+            raise ChoreographyError("controller_product_runtime_mode_invalid")
+    elif _portable_product_image_identity(
+        host="local", image_id=expected_image_id, ssh_argv=ssh_argv
+    ) != _portable_product_image_identity(
+        host="web", image_id=runtime_image_id, ssh_argv=ssh_argv
+    ):
+        # Docker may assign a different raw image ID after a portable archive
+        # is loaded into another content store.  The release deploy therefore
+        # proves the immutable, portable image fields instead of requiring the
+        # store-local ID to match.  Keep the same contract in this controller.
         raise ChoreographyError("controller_product_runtime_mode_invalid")
     environment = config.get("Env")
     if not isinstance(environment, list):
@@ -560,6 +578,40 @@ def _product_container_mode(
         if isinstance(row, str) and "=" in row
     }
     return str(values.get("PRODUCT_ESTIMATOR_SNAPSHOT_MODE") or "")
+
+
+def _portable_product_image_identity(
+    *, host: str, image_id: str, ssh_argv: Sequence[str]
+) -> str:
+    if host not in {"local", "web"} or not re.fullmatch(
+        r"sha256:[0-9a-f]{64}", image_id
+    ):
+        raise ChoreographyError("controller_product_runtime_mode_invalid")
+    template = (
+        "{{.Os}}|{{.Architecture}}|{{.Created}}|"
+        "{{json .Config}}|{{json .RootFS}}"
+    )
+    command = ["docker", "image", "inspect", "--format", template, image_id]
+    if host == "web":
+        command = [
+            *ssh_argv,
+            " ".join(shlex.quote(value) for value in command),
+        ]
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ChoreographyError("controller_product_runtime_mode_invalid") from exc
+    payload = (completed.stdout or b"").rstrip(b"\r\n")
+    if completed.returncode != 0 or not payload or len(payload) > 1_000_000:
+        raise ChoreographyError("controller_product_runtime_mode_invalid")
+    return _digest(payload)
 
 
 def _assert_product_runtime(

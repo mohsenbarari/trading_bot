@@ -1335,6 +1335,7 @@ def test_product_runtime_probe_is_self_contained_and_checks_three_consumers(
         "bot": "sha256:" + "b" * 64,
         "web": "sha256:" + "c" * 64,
     }
+    remote_web_image = "sha256:" + "d" * 64
 
     def inspect(
         mode: str, project: str, image_id: str
@@ -1361,24 +1362,59 @@ def test_product_runtime_probe_is_self_contained_and_checks_three_consumers(
         (
             inspect("LEGACY", "trading_bot", images["bot"]),
             inspect("LEGACY", "trading_bot", images["bot"]),
-            inspect("LEGACY", "current", images["web"]),
+            inspect("LEGACY", "current", remote_web_image),
         )
     )
+    portable_calls: list[tuple[str, str]] = []
+
+    def portable(*, host: str, image_id: str, ssh_argv: list[str]) -> str:
+        del ssh_argv
+        portable_calls.append((host, image_id))
+        return "portable-image"
+
+    monkeypatch.setattr(controller, "_portable_product_image_identity", portable)
     monkeypatch.setattr(controller.subprocess, "run", lambda *_a, **_k: next(observed))
     controller._assert_product_runtime(
         ssh_argv=["ssh", "root@web.example"], expected_mode="LEGACY",
         expected_image_ids=images, release_sha=release_sha,
         release_tree=release_tree,
     )
+    assert portable_calls == [
+        ("local", images["web"]),
+        ("web", remote_web_image),
+    ]
 
     observed = iter(
         (
             inspect("LEGACY", "trading_bot", images["bot"]),
             inspect("PRIVATE_PRIMARY", "trading_bot", images["bot"]),
-            inspect("LEGACY", "current", images["web"]),
+            inspect("LEGACY", "current", remote_web_image),
         )
     )
     monkeypatch.setattr(controller.subprocess, "run", lambda *_a, **_k: next(observed))
+    with pytest.raises(
+        controller.ChoreographyError,
+        match="controller_product_runtime_mode_invalid",
+    ):
+        controller._assert_product_runtime(
+            ssh_argv=["ssh", "root@web.example"], expected_mode="LEGACY",
+            expected_image_ids=images, release_sha=release_sha,
+            release_tree=release_tree,
+        )
+
+    observed = iter(
+        (
+            inspect("LEGACY", "trading_bot", images["bot"]),
+            inspect("LEGACY", "trading_bot", images["bot"]),
+            inspect("LEGACY", "current", remote_web_image),
+        )
+    )
+    monkeypatch.setattr(controller.subprocess, "run", lambda *_a, **_k: next(observed))
+    monkeypatch.setattr(
+        controller,
+        "_portable_product_image_identity",
+        lambda *, host, **_kwargs: host,
+    )
     with pytest.raises(
         controller.ChoreographyError,
         match="controller_product_runtime_mode_invalid",
