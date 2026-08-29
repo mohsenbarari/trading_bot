@@ -442,6 +442,38 @@ class RuntimeContinuityTests(unittest.TestCase):
         }
         self.assertFalse(DYNAMIC_VALUES.intersection(topology_keys))
 
+    def test_web_topology_binds_authorized_backfill_contract(self) -> None:
+        runtime = _runtime("web", [])
+        receipt = _json(self.workspace / "web-runtime.json", runtime)
+        live = _write(
+            self.workspace / "web-live.env",
+            (
+                "MARKET_PIPELINE_PROJECT_NAME=market-private-pipeline-stage13-shadow\n"
+                "MARKET_PIPELINE_FEED_MODE=PRIVATE_SHADOW\n"
+                "MARKET_PIPELINE_MODE=live\n"
+                f"MARKET_PIPELINE_IMAGE=sha256:{'a' * 64}\n"
+                f"MARKET_PIPELINE_RELEASE_SHA={'b' * 40}\n"
+                "MARKET_PRIVATE_BIND_IP=10.240.1.20\n"
+                "MARKET_CAPTURE_BACKFILL_SOURCE_CODES=GROUP_1\n"
+            ),
+            mode=0o600,
+        )
+        payload = renderer.render(
+            role="web",
+            inventory_path=receipt,
+            live_env_path=live,
+            old_env_path=self.workspace / "web.old.env",
+            topology_path=self.workspace / "web.source.env",
+            receipt_path=self.workspace / "web-old-env-receipt.json",
+        )
+        topology = Path(payload["topology_source_path"]).read_text(encoding="utf-8")
+        self.assertIn("MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC=2026-08-25T09:33:00Z", topology)
+        self.assertIn(
+            "MARKET_CAPTURE_BACKFILL_SOURCE_CODES=MELTED_PRIMARY_FLOW,GROUP_1,GROUP_2",
+            topology,
+        )
+        self.assertIn("MARKET_CAPTURE_BACKFILL_MAX_MESSAGES=100000", topology)
+
     def test_portable_digest_equality_and_mismatch(self) -> None:
         document = {
             "Os": "linux",

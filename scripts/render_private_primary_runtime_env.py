@@ -28,6 +28,10 @@ if __package__:
         INVENTORY_SCHEMA,
         validate_inventory,
     )
+    from scripts.prepare_market_pipeline_primary_release import (
+        AUTHORIZED_BACKFILL_NOT_BEFORE_UTC,
+        AUTHORIZED_BACKFILL_SOURCE_CODES,
+    )
     from scripts.provision_private_primary_secrets import SECRET_SPECS
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -39,7 +43,13 @@ else:
         INVENTORY_SCHEMA,
         validate_inventory,
     )
+    from scripts.prepare_market_pipeline_primary_release import (
+        AUTHORIZED_BACKFILL_NOT_BEFORE_UTC,
+        AUTHORIZED_BACKFILL_SOURCE_CODES,
+    )
     from scripts.provision_private_primary_secrets import SECRET_SPECS
+
+AUTHORIZED_BACKFILL_MAX_MESSAGES = "100000"
 
 
 CONFIRMATION = "render-production-private-primary-runtime-env"
@@ -238,6 +248,9 @@ def render_topology_source(*, role: str, inventory: Mapping[str, Any], live_env:
         values["MARKET_BOT_PRIVATE_IP"] = values.get("MARKET_BOT_PRIVATE_IP") or "10.240.1.10"
         values.setdefault("MARKET_POSTGRES_USER", "market_data")
         values.setdefault("MARKET_POSTGRES_DB", "market_archive")
+        values["MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC"] = AUTHORIZED_BACKFILL_NOT_BEFORE_UTC
+        values["MARKET_CAPTURE_BACKFILL_SOURCE_CODES"] = AUTHORIZED_BACKFILL_SOURCE_CODES
+        values["MARKET_CAPTURE_BACKFILL_MAX_MESSAGES"] = AUTHORIZED_BACKFILL_MAX_MESSAGES
     for env_key, filename, _, _ in SECRET_SPECS[role]:
         values[env_key] = f"{CANONICAL_SECRET_ROOT}/{filename}"
     values.pop("MARKET_PIPELINE_PROJECT_NAME", None)
