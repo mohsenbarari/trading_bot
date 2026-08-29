@@ -15,6 +15,7 @@ from scripts import prepare_private_primary_control_release as preparer
 from scripts import provision_private_primary_secrets as provisioner
 from scripts import render_private_primary_runtime_env as renderer
 from scripts.manage_market_pipeline_stage3 import portable_image_content_digest
+from scripts.prepare_market_pipeline_release import DYNAMIC_VALUES
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -434,6 +435,12 @@ class RuntimeContinuityTests(unittest.TestCase):
         self.assertIn(f"{inventory.CANONICAL_SECRET_ROOT}/hmac-active", topology)
         self.assertNotIn("PRIVATE_PRIMARY", old_text)
         self.assertNotIn(SECRET.decode(), old_text + topology)
+        topology_keys = {
+            line.split("=", 1)[0]
+            for line in topology.splitlines()
+            if "=" in line
+        }
+        self.assertFalse(DYNAMIC_VALUES.intersection(topology_keys))
 
     def test_portable_digest_equality_and_mismatch(self) -> None:
         document = {

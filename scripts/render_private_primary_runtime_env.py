@@ -242,6 +242,7 @@ def render_topology_source(*, role: str, inventory: Mapping[str, Any], live_env:
         values[env_key] = f"{CANONICAL_SECRET_ROOT}/{filename}"
     values.pop("MARKET_PIPELINE_PROJECT_NAME", None)
     values.pop("MARKET_PIPELINE_FEED_MODE", None)
+    values.pop("MARKET_PIPELINE_MODE", None)
     values.pop("MARKET_PIPELINE_IMAGE", None)
     values.pop("MARKET_PIPELINE_RELEASE_SHA", None)
     values.pop("MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY", None)
