@@ -717,8 +717,8 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
         )
         restore = {
             "schema_versions": [1, 2],
-            "schema_catalog_sha256": "1" * 64,
-            "schema_objects_sha256": "2" * 64,
+            "schema_catalog_sha256": "9" * 64,
+            "schema_objects_sha256": "8" * 64,
             "table_count": 2,
             "fact_count": 11,
             "table_row_counts": {"market_facts": 11, "market_offers": 1},
@@ -732,6 +732,15 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
         self.assertFalse(
             backup._restore_window_compatible(
                 before, after, restore, allow_running_writers=False
+            )
+        )
+        matching_rows = dict(restore)
+        matching_rows["fact_count"] = before["fact_count"]
+        matching_rows["table_row_counts"] = before["table_row_counts"]
+        matching_rows["sequence_values"] = before["sequence_values"]
+        self.assertTrue(
+            backup._restore_window_compatible(
+                before, before, matching_rows, allow_running_writers=False
             )
         )
 

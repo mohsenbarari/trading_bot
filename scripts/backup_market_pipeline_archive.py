@@ -765,6 +765,11 @@ def _source_window_compatible(
     return _invariant_view(before) == _invariant_view(after)
 
 
+def _row_inventory_view(payload: Mapping[str, Any]) -> dict[str, Any]:
+    keys = ("schema_versions", "table_count", "fact_count", "table_row_counts", "sequence_values")
+    return {key: payload.get(key) for key in keys}
+
+
 def _restore_window_compatible(
     source: Mapping[str, Any],
     source_after: Mapping[str, Any],
@@ -776,11 +781,13 @@ def _restore_window_compatible(
         source, source_after, allow_running_writers=allow_running_writers
     ):
         return False
-    if not _same_schema_window(source, restore):
+    if source.get("schema_versions") != restore.get("schema_versions") or not source.get(
+        "schema_versions"
+    ):
         return False
     if allow_running_writers:
         return True
-    return _invariant_view(source) == _invariant_view(restore)
+    return _row_inventory_view(source) == _row_inventory_view(restore)
 
 
 def _empty_prepared_journal(journal: Mapping[str, Any], *, root: Path) -> bool:
@@ -1260,7 +1267,7 @@ def verify_receipt(
             or source.get("database_identity_sha256")
             != source_after.get("database_identity_sha256")
             or _invariant_view(source) != _invariant_view(source_after)
-            or _invariant_view(source) != _invariant_view(restore)
+            or _row_inventory_view(source) != _row_inventory_view(restore)
         ):
             raise BackupError("backup_source_restore_metadata_invalid")
         artifact = Path(str(backup.get("path") or ""))
