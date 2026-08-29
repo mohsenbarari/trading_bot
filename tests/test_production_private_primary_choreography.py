@@ -1198,6 +1198,55 @@ def test_official_shell_exposes_only_explicit_validate_and_execute_actions() -> 
     assert "set_inheritable" in exact
 
 
+def test_control_release_manifest_accepts_primary_pair_schema(
+    tmp_path: Path,
+) -> None:
+    head, tree = _git_identity()
+    release, manifest_sha = _control_release_fixture(tmp_path, head, tree)
+    pair = release / controller.CONTROL_RELEASE_PAIR_RECEIPT
+    pair.write_text(
+        json.dumps(
+            {
+                "schema": "market_pipeline_primary_release_pair/1.1",
+                "release_sha": head,
+                "release_tree": tree,
+                "feed_mode": "PRIVATE_PRIMARY",
+                "product_authority_changed": False,
+                "secrets_disclosed": False,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    pair.chmod(0o600)
+    entries = controller._control_release_manifest(
+        release,
+        expected_manifest_sha256=manifest_sha,
+        release_sha=head,
+        release_tree=tree,
+    )
+    assert "scripts/run_production_private_primary_choreography.py" in entries
+
+    payload = json.loads(pair.read_text(encoding="utf-8"))
+    payload["feed_mode"] = "PRIVATE_SHADOW"
+    pair.write_text(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    pair.chmod(0o600)
+    with pytest.raises(
+        controller.ChoreographyError, match="control_release_pair_binding_invalid"
+    ):
+        controller._control_release_manifest(
+            release,
+            expected_manifest_sha256=manifest_sha,
+            release_sha=head,
+            release_tree=tree,
+        )
+
+
 def test_exact_control_release_python_inherits_verified_tool_fd(
     tmp_path: Path,
 ) -> None:

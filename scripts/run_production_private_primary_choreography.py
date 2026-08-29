@@ -786,10 +786,17 @@ def _control_release_manifest(
         pair.get("schema") not in {
             "market_pipeline_release_pair/1.0",
             "market_pipeline_release_pair/1.1",
+            "market_pipeline_primary_release_pair/1.0",
+            "market_pipeline_primary_release_pair/1.1",
         }
         or pair.get("release_sha") != release_sha
         or pair.get("release_tree") != release_tree
         or pair.get("secrets_disclosed") is not False
+    ):
+        raise ChoreographyError("control_release_pair_binding_invalid")
+    if str(pair.get("schema") or "").startswith("market_pipeline_primary_release_pair") and (
+        pair.get("feed_mode") != "PRIVATE_PRIMARY"
+        or pair.get("product_authority_changed") is not False
     ):
         raise ChoreographyError("control_release_pair_binding_invalid")
     # Validate every executable tool now.  The target tool is validated again
@@ -4591,13 +4598,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not args.journal or not args.receipt:
                 raise ChoreographyError("controller_output_paths_required")
             result = execute(args)
-    except (ChoreographyError, OSError, TypeError, ValueError):
+    except (ChoreographyError, OSError, TypeError, ValueError) as exc:
+        reason = str(exc)
+        if not isinstance(exc, ChoreographyError) or not re.fullmatch(r"[a-z0-9_]+", reason):
+            reason = "private_primary_choreography_blocked"
         print(
             json.dumps(
                 {
                     "schema": RECEIPT_SCHEMA,
                     "status": "BLOCKED",
-                    "reason_code": "private_primary_choreography_blocked",
+                    "reason_code": reason,
                     "secrets_disclosed": False,
                 },
                 sort_keys=True,
