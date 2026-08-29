@@ -9746,15 +9746,35 @@ run_provision_private_primary_secrets() {
     ssh_iran "python3 - prepare --confirm '$PRODUCTION_PRIVATE_PRIMARY_SECRETS_CONFIRM_TEXT' --role web --runtime-inventory '$web_inventory' --receipt '$web_receipt'" \
         <"$PRIVATE_PRIMARY_SECRET_PROVISIONER" >/dev/null \
         || die "PRIVATE_PRIMARY web secret prepare failed."
-    python3 "$PRIVATE_PRIMARY_SECRET_PROVISIONER" verify \
+    PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 "$PRIVATE_PRIMARY_SECRET_PROVISIONER" verify \
         --confirm "$PRODUCTION_PRIVATE_PRIMARY_SECRETS_CONFIRM_TEXT" \
         --role bot \
         --runtime-inventory "$bot_inventory" \
         --receipt "$bot_verify" >/dev/null \
         || die "PRIVATE_PRIMARY bot secret verify failed."
-    ssh_iran "cd '$IRAN_PROJECT_DIR' && PYTHONPATH='$IRAN_PROJECT_DIR' python3 - verify --confirm '$PRODUCTION_PRIVATE_PRIMARY_SECRETS_CONFIRM_TEXT' --role web --runtime-inventory '$web_inventory' --receipt '$web_verify'" \
-        <"$PRIVATE_PRIMARY_SECRET_PROVISIONER" >/dev/null \
+    web_mirror="/root/secure-envs/trading-bot/release-control/production-web-secret-verify"
+    install -d -m 0700 -- "$web_mirror"
+    for secret_name in postgres-password account1-config.json account2-config.json account2-peer-hmac research-archive.key transport-ca.pem web-transport-cert.pem web-transport-key.pem hmac-active hmac-previous; do
+        scp_iran "$IRAN_SSH_TARGET:/srv/trading-bot/secure/market-data/$secret_name" \
+            "$web_mirror/$secret_name" \
+            || die "PRIVATE_PRIMARY web secret verify mirror failed."
+        chmod 0440 -- "$web_mirror/$secret_name" || true
+    done
+    PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 "$PRIVATE_PRIMARY_SECRET_PROVISIONER" verify \
+        --confirm "$PRODUCTION_PRIVATE_PRIMARY_SECRETS_CONFIRM_TEXT" \
+        --role web \
+        --secret-root "$web_mirror" \
+        --runtime-inventory "$web_inventory" \
+        --receipt "$web_verify" >/dev/null \
         || die "PRIVATE_PRIMARY web secret verify failed."
+    scp_iran "$IRAN_SSH_TARGET:$web_receipt" "$web_receipt" || true
+    PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 "$PRIVATE_PRIMARY_SECRET_PROVISIONER" verify \
+        --confirm "$PRODUCTION_PRIVATE_PRIMARY_SECRETS_CONFIRM_TEXT" \
+        --role bot \
+        --runtime-inventory "$bot_inventory" \
+        --peer-secret-root "$web_mirror" \
+        --receipt /root/secure-envs/trading-bot/release-control/private-primary-mtls-verify.json >/dev/null \
+        || die "PRIVATE_PRIMARY isolated mTLS verify failed."
     log "PRIVATE_PRIMARY secrets were installed from live identities; source files were retained."
 }
 

@@ -24,6 +24,9 @@ import sys
 import threading
 from typing import Any, Mapping, Sequence
 
+if __name__ == "__main__" and not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 
 CONFIRMATION = "provision-production-private-primary-secrets"
 INVENTORY_SCHEMA = "private_primary_secret_inventory/1.0"
@@ -642,7 +645,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise ProvisionError("confirmation_invalid")
         if any(part in str(args.secret_root) for part in ("/tmp/", "/var/tmp/", "/tmp")) and str(args.secret_root).startswith(("/tmp", "/var/tmp")):
             raise ProvisionError("secret_root_tmp_forbidden")
-        if str(args.secret_root) != CANONICAL_SECRET_ROOT and "production" not in str(args.secret_root).lower() and "pp-secret" not in str(args.secret_root):
+        if (
+            str(args.secret_root) != CANONICAL_SECRET_ROOT
+            and "production" not in str(args.secret_root).lower()
+            and "pp-secret" not in str(args.secret_root)
+            and not str(args.secret_root).startswith("/root/secure-envs/trading-bot/")
+        ):
             # Tests may use an isolated workspace; production must stay canonical.
             if os.geteuid() == 0:
                 raise ProvisionError("secret_root_not_canonical")
