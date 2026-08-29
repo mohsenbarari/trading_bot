@@ -190,6 +190,8 @@ def render_old_env(*, role: str, inventory: Mapping[str, Any], live_env: Mapping
     values["MARKET_PIPELINE_PROJECT_NAME"] = EXPECTED_PROJECT
     values["MARKET_PIPELINE_FEED_MODE"] = EXPECTED_FEED_MODE
     values["MARKET_PIPELINE_MODE"] = str(inventory.get("pipeline_mode") or values.get("MARKET_PIPELINE_MODE") or "live")
+    values["MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY"] = "0"
+    values["MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE"] = EXPECTED_FEED_MODE
     values["MARKET_PIPELINE_IMAGE"] = values.get("MARKET_PIPELINE_IMAGE") or _live_image(inventory)
     if not IMAGE_ID.fullmatch(values["MARKET_PIPELINE_IMAGE"]):
         values["MARKET_PIPELINE_IMAGE"] = _live_image(inventory)

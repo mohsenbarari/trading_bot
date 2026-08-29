@@ -430,10 +430,12 @@ class RuntimeContinuityTests(unittest.TestCase):
         old_text = Path(payload["old_env_path"]).read_text(encoding="utf-8")
         topology = Path(payload["topology_source_path"]).read_text(encoding="utf-8")
         self.assertIn("MARKET_PIPELINE_FEED_MODE=PRIVATE_SHADOW", old_text)
+        self.assertIn("MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY=0", old_text)
+        self.assertIn("MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE=PRIVATE_SHADOW", old_text)
         self.assertIn(f"MARKET_BOT_DATA_ROOT={inventory.ALLOWED_ADOPTED_DATA_ROOTS['bot']}", old_text)
         self.assertIn(f"MARKET_BOT_DATA_ROOT={inventory.ALLOWED_ADOPTED_DATA_ROOTS['bot']}", topology)
         self.assertIn(f"{inventory.CANONICAL_SECRET_ROOT}/hmac-active", topology)
-        self.assertNotIn("PRIVATE_PRIMARY", old_text)
+        self.assertNotIn("MARKET_PIPELINE_FEED_MODE=PRIVATE_PRIMARY", old_text)
         self.assertNotIn(SECRET.decode(), old_text + topology)
         topology_keys = {
             line.split("=", 1)[0]

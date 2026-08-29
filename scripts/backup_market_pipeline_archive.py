@@ -23,6 +23,7 @@ import stat
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from typing import Any, Mapping, Sequence
 
 if __package__:
@@ -49,6 +50,7 @@ POSTGRES_IMAGE = (
     "sha256:fe0737ba566a2c5b2a28f34433c0a423261900ec17b9bf7ad115e1aae7e57f1b"
 )
 CREATE_CONFIRMATION = "create-production-market-pipeline-archive-backup"
+HOT_CREATE_CONFIRMATION = "create-production-market-pipeline-archive-hot-backup"
 RECEIPT_SCHEMA = "market_pipeline_backup_restore/1.2"
 JOURNAL_SCHEMA = "market_pipeline_backup_journal/1.0"
 PROJECT_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{2,62}$")
@@ -315,8 +317,17 @@ def _assert_writer_workloads_quiesced(project: str) -> None:
         raise BackupError("backup_writer_workloads_not_quiesced")
 
 
-def inspect_source_database(values: Mapping[str, str]) -> dict[str, Any]:
-    _assert_writer_workloads_quiesced(values["MARKET_PIPELINE_PROJECT_NAME"])
+def inspect_source_database(
+    values: Mapping[str, str],
+    *,
+    require_quiesce: bool = True,
+) -> dict[str, Any]:
+    project = values["MARKET_PIPELINE_PROJECT_NAME"]
+    running = _running_project_services(project)
+    if require_quiesce:
+        _assert_writer_workloads_quiesced(project)
+    elif "market-database" not in running:
+        raise BackupError("backup_database_not_running")
     postgres_path = _postgres_path(values)
     container_id, _ = _container_ids(
         project=values["MARKET_PIPELINE_PROJECT_NAME"], postgres_path=postgres_path
@@ -511,6 +522,7 @@ def restore_smoke(
     source: Mapping[str, Any],
     *,
     resource_binding: Mapping[str, str] | None = None,
+    before_cleanup: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     if resource_binding is None:
         nonce = secrets.token_hex(8)
@@ -599,6 +611,8 @@ def restore_smoke(
         # transition is not safe to accept.
         if restored["schema_versions"] != source["schema_versions"]:
             raise BackupError("backup_restore_reconciliation_mismatch")
+        if before_cleanup is not None:
+            before_cleanup(container)
         return {"status": "PASS", **restored, "cleanup_status": "PASS"}
     finally:
         try:
@@ -790,8 +804,10 @@ def create_backup(
     image_id: str,
     image_input_signature: str,
     refresh_complete: bool = False,
+    allow_running_writers: bool = False,
 ) -> dict[str, Any]:
     values = validate_release_env(env_file, release_sha=release_sha, image_id=image_id)
+    require_quiesce = not allow_running_writers
     root = _secure_directory(backup_dir, create=True)
     if receipt.parent != root or receipt.name != "market-pipeline-backup-receipt.json":
         raise BackupError("backup_receipt_destination_invalid")
@@ -899,7 +915,7 @@ def create_backup(
         return payload
 
     if journal is None:
-        source = inspect_source_database(values)
+        source = inspect_source_database(values, require_quiesce=require_quiesce)
         nonce = secrets.token_hex(8)
         stamp = created_at.strftime("%Y%m%dT%H%M%SZ")
         restore_nonce = secrets.token_hex(8)
@@ -933,7 +949,7 @@ def create_backup(
         }
         _write_journal(journal_path, journal)
     source = journal["source_before"]
-    current_source = inspect_source_database(values)
+    current_source = inspect_source_database(values, require_quiesce=require_quiesce)
     if (
         current_source.get("database_identity_sha256")
         != source.get("database_identity_sha256")
@@ -964,7 +980,7 @@ def create_backup(
     journal["backup"] = observed_backup
     journal["status"] = "DUMP_READY"
     _write_journal(journal_path, journal)
-    source_after = inspect_source_database(values)
+    source_after = inspect_source_database(values, require_quiesce=require_quiesce)
     if (
         source.get("database_identity_sha256")
         != source_after.get("database_identity_sha256")
@@ -1176,6 +1192,7 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "create":
             command.add_argument("--backup-dir", type=Path, required=True)
             command.add_argument("--refresh-complete", action="store_true")
+            command.add_argument("--allow-running-writers", action="store_true")
             command.add_argument("--confirm", required=True)
         else:
             command.add_argument("--maximum-age-seconds", type=int, default=3600)
@@ -1203,11 +1220,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             "image_input_signature": args.image_input_signature,
         }
         if args.command == "create":
-            if args.confirm != CREATE_CONFIRMATION:
+            expected_confirm = (
+                HOT_CREATE_CONFIRMATION
+                if args.allow_running_writers
+                else CREATE_CONFIRMATION
+            )
+            if args.confirm != expected_confirm:
                 raise BackupError("backup_confirmation_invalid")
             document = create_backup(
                 backup_dir=args.backup_dir,
                 refresh_complete=args.refresh_complete,
+                allow_running_writers=args.allow_running_writers,
                 **common,
             )
         else:

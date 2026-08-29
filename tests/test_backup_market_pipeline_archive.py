@@ -624,6 +624,24 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
                 backup._assert_writer_workloads_quiesced(
                     self.values["MARKET_PIPELINE_PROJECT_NAME"]
                 )
+            with self.assertRaisesRegex(backup.BackupError, "writer_workloads_not_quiesced"):
+                backup.inspect_source_database(self.values)
+
+    def test_hot_backup_allows_running_writers_at_inspect_gate(self) -> None:
+        with mock.patch.object(
+            backup,
+            "_running_project_services",
+            return_value=["market-capture-account1", "market-database"],
+        ):
+            with mock.patch.object(
+                backup,
+                "_container_ids",
+                side_effect=backup.BackupError("stopped_at_container_lookup"),
+            ):
+                with self.assertRaisesRegex(backup.BackupError, "stopped_at_container_lookup"):
+                    backup.inspect_source_database(self.values, require_quiesce=False)
+        self.assertNotEqual(backup.CREATE_CONFIRMATION, backup.HOT_CREATE_CONFIRMATION)
+        self.assertIn("hot-backup", backup.HOT_CREATE_CONFIRMATION)
 
     def test_orphan_cleanup_refuses_wrong_owner_label(self) -> None:
         inspected = subprocess.CompletedProcess(
