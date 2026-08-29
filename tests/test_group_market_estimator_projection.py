@@ -318,6 +318,155 @@ def test_projection_links_canonical_trade_to_its_opaque_root_offer() -> None:
         assert quality[0] == offer[0]
 
 
+def test_projection_links_transported_trade_by_stable_offer_fact_id() -> None:
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        market_path = root / "market.sqlite3"
+        conversation_path = root / "conversation.sqlite3"
+        destination = sqlite3.connect(conversation_path)
+        destination.executescript(_CONVERSATION_SCHEMA)
+        destination.close()
+        market = connect_market_store(market_path)
+        initialize_market_store(market)
+        offer_key = derive_event_key("transported-coin-offer", 1)
+        trade_key = derive_event_key("transported-coin-trade", 1)
+        offer_fact_id = "a" * 64
+        common = {
+            "source_code": "GROUP_1",
+            "source_family": "GROUP",
+            "instrument": "COIN_IMAM",
+            "market_label": "GROUP_COIN_IMAM",
+            "settlement_term": "TOMORROW",
+            "trade_form": "PHYSICAL",
+            "side": "SELL",
+            "price_unit": "PROJECT_THOUSAND_TOMAN",
+            "currency": "TOMAN",
+            "quantity_unit": "COIN_COUNT",
+            "parse_confidence": 1.0,
+            "parser_version": "market-fact-adapter-v1",
+            "quality_state": "ELIGIBLE",
+            "quality_policy_version": "market-fact-adapter-v1",
+        }
+        upsert_observation(
+            market,
+            MarketObservation(
+                event_key=offer_key,
+                event_time_utc="2026-08-29T09:00:00Z",
+                available_at_utc="2026-08-29T09:00:02Z",
+                event_type="OFFER",
+                price=Decimal("216000"),
+                quantity=Decimal("10"),
+                attributes={"transfer_fact_id": offer_fact_id},
+                **common,
+            ),
+        )
+        upsert_observation(
+            market,
+            MarketObservation(
+                event_key=trade_key,
+                event_time_utc="2026-08-29T09:01:00Z",
+                available_at_utc="2026-08-29T09:01:02Z",
+                event_type="TRADE",
+                price=Decimal("216000"),
+                quantity=Decimal("4"),
+                attributes={
+                    "transfer_fact_id": "b" * 64,
+                    "root_offer_fact_id": offer_fact_id,
+                    "trade_outcome": "CONFIRMED_PARTIAL",
+                },
+                **common,
+            ),
+        )
+        market.commit()
+        market.close()
+
+        report = project(market_path, conversation_path)
+        assert (report["eligible_offers"], report["eligible_trades"]) == (1, 1)
+        connection = sqlite3.connect(conversation_path)
+        offer = connection.execute("SELECT id,message_id FROM offers").fetchone()
+        trade = connection.execute(
+            "SELECT offer_message_id,price,quantity FROM confirmed_trades"
+        ).fetchone()
+        quality = connection.execute(
+            "SELECT linked_offer_id,realtime_eligible,exclusion_reason "
+            "FROM trade_market_quality"
+        ).fetchone()
+        connection.close()
+
+        assert offer is not None and trade is not None and quality is not None
+        assert trade == (offer[1], 216000, 4)
+        assert quality == (offer[0], 1, None)
+
+
+def test_projection_rejects_conflicting_legacy_and_transport_root_references() -> None:
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        market_path = root / "market.sqlite3"
+        conversation_path = root / "conversation.sqlite3"
+        destination = sqlite3.connect(conversation_path)
+        destination.executescript(_CONVERSATION_SCHEMA)
+        destination.close()
+        market = connect_market_store(market_path)
+        initialize_market_store(market)
+        first_offer_key = derive_event_key("root-reference-conflict", 1)
+        second_offer_key = derive_event_key("root-reference-conflict", 2)
+        trade_key = derive_event_key("root-reference-conflict", 3)
+        fact_id = "c" * 64
+        common = {
+            "source_code": "GROUP_2",
+            "source_family": "GROUP",
+            "instrument": "COIN_HALF_BAHAR",
+            "market_label": "GROUP_COIN_HALF_BAHAR",
+            "settlement_term": "CASH",
+            "trade_form": "PHYSICAL",
+            "side": "BUY",
+            "price": Decimal("110000"),
+            "price_unit": "PROJECT_THOUSAND_TOMAN",
+            "currency": "TOMAN",
+            "quantity": Decimal("5"),
+            "quantity_unit": "COIN_COUNT",
+            "parser_version": "root-reference-conflict-test",
+        }
+        for index, event_key in enumerate((first_offer_key, second_offer_key)):
+            upsert_observation(
+                market,
+                MarketObservation(
+                    event_key=event_key,
+                    event_time_utc=f"2026-08-29T09:0{index}:00Z",
+                    available_at_utc=f"2026-08-29T09:0{index}:02Z",
+                    event_type="OFFER",
+                    attributes={"transfer_fact_id": fact_id} if index == 0 else {},
+                    **common,
+                ),
+            )
+        upsert_observation(
+            market,
+            MarketObservation(
+                event_key=trade_key,
+                event_time_utc="2026-08-29T09:02:00Z",
+                available_at_utc="2026-08-29T09:02:02Z",
+                event_type="TRADE",
+                attributes={
+                    "root_offer_event_key": second_offer_key.hex(),
+                    "root_offer_fact_id": fact_id,
+                },
+                **common,
+            ),
+        )
+        market.commit()
+        market.close()
+
+        report = project(market_path, conversation_path)
+        assert report["eligible_trades"] == 0
+        assert report["audit_only_trades"] == 1
+        connection = sqlite3.connect(conversation_path)
+        quality = connection.execute(
+            "SELECT realtime_eligible,exclusion_reason FROM trade_market_quality"
+        ).fetchone()
+        connection.close()
+        assert quality == (0, "CAUSAL_TRADE_ROOT_REFERENCE_CONFLICT")
+
+
 def test_projection_keeps_trade_with_root_instrument_mismatch_audit_only() -> None:
     with TemporaryDirectory() as directory:
         root = Path(directory)

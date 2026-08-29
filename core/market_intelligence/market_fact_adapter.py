@@ -1048,6 +1048,7 @@ def run_adapter_cycle(
     if not 1 <= max_deliveries <= 5_000:
         raise MarketFactAdapterError("market_fact_adapter_batch_limit_invalid")
     _backfill_projection_revision_history(receiver, destination)
+    _retire_stale_audit_only_observations(destination)
     checkpoints = {
         str(row["stream_id"]): int(row["highest_delivery_sequence"])
         for row in destination.execute(
@@ -1195,6 +1196,124 @@ def _backfill_projection_revision_history(
                     content_hash(fact.model_dump(mode="json")),
                     fact.fact_id,
                     fact.fact_revision,
+                ),
+            )
+        destination.execute(
+            "INSERT INTO private_fact_adapter_migrations VALUES(?,?)",
+            (migration, utc_text()),
+        )
+        destination.commit()
+    except BaseException:
+        destination.rollback()
+        raise
+
+
+def _retire_stale_audit_only_observations(
+    destination: sqlite3.Connection,
+) -> None:
+    """Repair observations left eligible by pre-retirement adapter releases.
+
+    The wire projection is the durable authority for the latest fact revision.
+    Releases predating ``_retire_previous_applied_observation`` advanced that
+    lineage to ``AUDIT_ONLY`` but could leave the older economic observation
+    eligible.  Reconcile that bounded mismatch once during upgrade; future
+    revisions are retired synchronously in ``apply_received_delivery``.
+    """
+
+    migration = "retire-stale-audit-only-observations-v1"
+    destination.execute("BEGIN IMMEDIATE")
+    try:
+        if destination.execute(
+            "SELECT 1 FROM private_fact_adapter_migrations WHERE migration_code=?",
+            (migration,),
+        ).fetchone() is not None:
+            destination.commit()
+            return
+        projections = destination.execute(
+            "SELECT fact_id,fact_revision,event_key,available_at_utc "
+            "FROM private_fact_adapter_projections WHERE status='AUDIT_ONLY' "
+            "ORDER BY fact_id"
+        ).fetchall()
+        for projection in projections:
+            event_key = bytes(projection["event_key"])
+            locations: list[tuple[str, sqlite3.Row]] = []
+            for table in ("market_observations", "market_observations_archive"):
+                row = destination.execute(
+                    f"SELECT event_time_utc,quality_state,attributes_json "
+                    f"FROM {table} WHERE event_key=?",
+                    (event_key,),
+                ).fetchone()
+                if row is not None:
+                    locations.append((table, row))
+            # A fact that was audit-only from its first revision correctly has
+            # no economic observation to retire.
+            if not locations:
+                continue
+            if len(locations) != 1:
+                raise MarketFactAdapterError(
+                    "market_fact_adapter_audit_observation_duplicated"
+                )
+            table, row = locations[0]
+            try:
+                attributes = json.loads(str(row["attributes_json"] or "{}"))
+            except (TypeError, ValueError) as exc:
+                raise MarketFactAdapterError(
+                    "market_fact_adapter_audit_observation_invalid"
+                ) from exc
+            if not isinstance(attributes, dict):
+                raise MarketFactAdapterError(
+                    "market_fact_adapter_audit_observation_invalid"
+                )
+            existing_fact_id = str(attributes.get("transfer_fact_id") or "")
+            if existing_fact_id and existing_fact_id != str(projection["fact_id"]):
+                raise MarketFactAdapterError(
+                    "market_fact_adapter_audit_observation_fact_mismatch"
+                )
+            revision = int(projection["fact_revision"])
+            if (
+                str(row["quality_state"]).upper() == "IGNORED"
+                and int(attributes.get("fact_revision") or 0) >= revision
+            ):
+                continue
+            revision_row = destination.execute(
+                "SELECT delivery_sequence FROM "
+                "private_fact_adapter_projection_revisions "
+                "WHERE fact_id=? AND fact_revision=?",
+                (str(projection["fact_id"]), revision),
+            ).fetchone()
+            attributes.update(
+                {
+                    "transfer_fact_id": str(projection["fact_id"]),
+                    "fact_revision": revision,
+                    "adapter_disposition": "AUDIT_ONLY",
+                    "resolution_reason": "FACT_REVISION_AUDIT_ONLY",
+                    "quality_reason_codes": ["FACT_REVISION_AUDIT_ONLY"],
+                }
+            )
+            if revision_row is not None:
+                attributes["delivery_sequence"] = int(
+                    revision_row["delivery_sequence"]
+                )
+            available = max(
+                str(row["event_time_utc"]),
+                str(projection["available_at_utc"]),
+            )
+            destination.execute(
+                f"""
+                UPDATE {table}
+                SET available_at_utc=?,parse_confidence=0,
+                    quality_state='IGNORED',quality_policy_version=?,
+                    attributes_json=?,inserted_at_utc=?
+                WHERE event_key=?
+                """,
+                (
+                    available,
+                    ADAPTER_VERSION,
+                    json.dumps(
+                        attributes, sort_keys=True, separators=(",", ":")
+                    ),
+                    utc_text(),
+                    event_key,
                 ),
             )
         destination.execute(

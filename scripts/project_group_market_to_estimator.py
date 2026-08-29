@@ -29,7 +29,7 @@ if str(REPO_ROOT) not in sys.path:
 from core.market_intelligence.input_health import update_probe_state
 
 
-PROJECTION_VERSION = "canonical-group-estimator-projection-v5-cross-book-price-guard"
+PROJECTION_VERSION = "canonical-group-estimator-projection-v6-transport-root-reference"
 PROJECTION_IMPORT_ID = -9_000_000_000_000_000_001
 MAXIMUM_MODEL_PROJECTION_DELAY_SECONDS = 5 * 60
 LIVE_BOOK_PRICE_WINDOW_SECONDS = 5 * 60
@@ -141,15 +141,100 @@ def _attributes(row: sqlite3.Row) -> dict[str, object]:
     return value if isinstance(value, dict) else {}
 
 
-def _root_offer_event_key(attributes: dict[str, object]) -> bytes | None:
-    value = str(attributes.get("root_offer_event_key") or "").strip()
-    if not value:
+def _event_key_reference(value: object) -> bytes | None:
+    """Decode a canonical event key while preserving its schema width range."""
+
+    token = str(value or "").strip().lower()
+    if len(token) % 2 or not 32 <= len(token) <= 128:
         return None
     try:
-        decoded = bytes.fromhex(value)
+        return bytes.fromhex(token)
     except ValueError:
         return None
-    return decoded if 16 <= len(decoded) <= 64 else None
+
+
+def _fact_id_reference(value: object) -> bytes | None:
+    """Decode a transport fact ID without accepting truncated identifiers."""
+
+    token = str(value or "").strip().lower()
+    if len(token) != 64:
+        return None
+    try:
+        return bytes.fromhex(token)
+    except ValueError:
+        return None
+
+
+def _offer_event_keys_by_fact_id(
+    rows: Sequence[sqlite3.Row],
+) -> dict[bytes, bytes]:
+    """Index transport-stable offer facts back to canonical event keys.
+
+    Origin Market Stores retain ``root_offer_event_key`` on trades.  The
+    bot-side adapter deliberately replaces that source-local reference with
+    ``root_offer_fact_id``.  Both are canonical representations of the same
+    dependency; this index lets every downstream projection consume either
+    store without weakening the causal root checks.
+    """
+
+    result: dict[bytes, bytes] = {}
+    for row in rows:
+        if str(row["event_type"]).upper() != "OFFER":
+            continue
+        attributes = _attributes(row)
+        fact_id = _fact_id_reference(attributes.get("transfer_fact_id"))
+        if fact_id is None:
+            continue
+        event_key = bytes(row["event_key"])
+        prior = result.get(fact_id)
+        if prior is not None and prior != event_key:
+            raise ProjectionError("canonical_group_offer_fact_reference_conflict")
+        result[fact_id] = event_key
+    return result
+
+
+def _resolved_root_offer_event_keys(
+    rows: Sequence[sqlite3.Row],
+) -> tuple[dict[bytes, bytes | None], dict[bytes, str | None]]:
+    """Resolve legacy and transported root references with conflict guards."""
+
+    offer_by_fact_id = _offer_event_keys_by_fact_id(rows)
+    roots: dict[bytes, bytes | None] = {}
+    errors: dict[bytes, str | None] = {}
+    for row in rows:
+        event_key = bytes(row["event_key"])
+        if str(row["event_type"]).upper() != "TRADE":
+            roots[event_key] = None
+            errors[event_key] = None
+            continue
+        attributes = _attributes(row)
+        direct_raw = attributes.get("root_offer_event_key")
+        fact_raw = attributes.get("root_offer_fact_id")
+        direct = _event_key_reference(direct_raw)
+        fact_id = _fact_id_reference(fact_raw)
+        mapped = offer_by_fact_id.get(fact_id) if fact_id is not None else None
+        if direct_raw not in {None, ""} and direct is None:
+            roots[event_key] = None
+            errors[event_key] = "CAUSAL_TRADE_ROOT_REFERENCE_INVALID"
+        elif fact_raw not in {None, ""} and fact_id is None:
+            roots[event_key] = None
+            errors[event_key] = "CAUSAL_TRADE_ROOT_REFERENCE_INVALID"
+        elif direct is not None and mapped is not None and direct != mapped:
+            roots[event_key] = None
+            errors[event_key] = "CAUSAL_TRADE_ROOT_REFERENCE_CONFLICT"
+        elif direct is not None:
+            roots[event_key] = direct
+            errors[event_key] = None
+        elif mapped is not None:
+            roots[event_key] = mapped
+            errors[event_key] = None
+        elif fact_id is not None:
+            roots[event_key] = None
+            errors[event_key] = "CAUSAL_TRADE_ROOT_OFFER_UNAVAILABLE"
+        else:
+            roots[event_key] = None
+            errors[event_key] = "CAUSAL_TRADE_ROOT_KEY_MISSING"
+    return roots, errors
 
 
 def _rows(connection: sqlite3.Connection) -> list[sqlite3.Row]:
@@ -197,10 +282,16 @@ def _causal_trade_exclusion_reason(
     *,
     rows_by_key: dict[bytes, sqlite3.Row],
     exclusions: dict[bytes, str | None],
+    root_event_keys: dict[bytes, bytes | None],
+    root_reference_errors: dict[bytes, str | None],
 ) -> str | None:
     if str(row["event_type"]).upper() != "TRADE":
         return None
-    root_key = _root_offer_event_key(_attributes(row))
+    event_key = bytes(row["event_key"])
+    reference_error = root_reference_errors.get(event_key)
+    if reference_error is not None:
+        return reference_error
+    root_key = root_event_keys.get(event_key)
     if root_key is None:
         return "CAUSAL_TRADE_ROOT_KEY_MISSING"
     root = rows_by_key.get(root_key)
@@ -317,6 +408,9 @@ def _live_book_price_exclusion_reason(
 
 def _model_exclusion_reasons(
     rows: Sequence[sqlite3.Row],
+    *,
+    root_event_keys: dict[bytes, bytes | None],
+    root_reference_errors: dict[bytes, str | None],
 ) -> dict[bytes, str | None]:
     """Build causal model gates once so projection and observability agree."""
 
@@ -355,6 +449,8 @@ def _model_exclusion_reasons(
                 row,
                 rows_by_key=rows_by_key,
                 exclusions=exclusions,
+                root_event_keys=root_event_keys,
+                root_reference_errors=root_reference_errors,
             )
         if reason is None:
             book = (
@@ -388,6 +484,7 @@ def _projection_digest(
     exclusion_reason: str | None,
     model_eligible: bool,
     attributes: dict[str, object],
+    root_offer_event_key: bytes | None,
 ) -> str:
     payload = {
         "available_at_utc": str(row["available_at_utc"]),
@@ -405,9 +502,10 @@ def _projection_digest(
         "quantity": _quantity(row),
         "root_offer_event_key": (
             None
-            if _root_offer_event_key(attributes) is None
-            else _root_offer_event_key(attributes).hex()
+            if root_offer_event_key is None
+            else root_offer_event_key.hex()
         ),
+        "root_offer_fact_id": str(attributes.get("root_offer_fact_id") or "") or None,
         "settlement": _settlement(str(row["settlement_term"])),
         "side": str(row["side"]).upper(),
         "source_code": str(row["source_code"]),
@@ -533,7 +631,12 @@ def project(
     try:
         _require_schema(destination)
         rows = _rows(source)
-        exclusion_reasons = _model_exclusion_reasons(rows)
+        root_event_keys, root_reference_errors = _resolved_root_offer_event_keys(rows)
+        exclusion_reasons = _model_exclusion_reasons(
+            rows,
+            root_event_keys=root_event_keys,
+            root_reference_errors=root_reference_errors,
+        )
         counts.update(
             _group_observability(rows, exclusion_reasons=exclusion_reasons)
         )
@@ -614,6 +717,7 @@ def project(
                 exclusion_reason=exclusion_reason,
                 model_eligible=model_eligible,
                 attributes=attributes,
+                root_offer_event_key=root_event_keys[event_key],
             )
             if (
                 prior is not None
@@ -775,7 +879,7 @@ def project(
                 else:
                     counts["audit_only_offers"] += 1
             else:
-                root_event_key = _root_offer_event_key(attributes)
+                root_event_key = root_event_keys[event_key]
                 linked_offer = (
                     destination.execute(
                         """

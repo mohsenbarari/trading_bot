@@ -335,6 +335,93 @@ class Stage9AdapterTests(unittest.TestCase):
         )
         self.assertEqual(compacted_lineage, revision_lineage)
 
+    def test_upgrade_retires_observation_left_eligible_by_old_adapter(self):
+        stream = "market.fact.coin.group.1"
+        offer = _fact(
+            1201,
+            source_code="GROUP_1",
+            stream_id=stream,
+            source_sequence=1,
+            payload={
+                "kind": "COIN_OFFER",
+                "group_code": 1,
+                "instrument": "COIN_IMAM",
+                "side": "SELL",
+                "settlement": "TOMORROW",
+                "trade_form": "PHYSICAL",
+                "offered_price_value": "216000",
+                "price_unit": "PROJECT_THOUSAND_TOMAN",
+                "quantity_value": "5",
+                "quantity_unit": "COIN_COUNT",
+            },
+        )
+        trade = _fact(
+            1202,
+            source_code="GROUP_1",
+            stream_id=stream,
+            source_sequence=2,
+            payload={
+                "kind": "COIN_TRADE",
+                "offer_fact_id": offer["fact_id"],
+                "outcome": "CONFIRMED_PARTIAL",
+                "agreed_price_value": "216000",
+                "price_unit": "PROJECT_THOUSAND_TOMAN",
+                "agreed_quantity_value": "2",
+                "quantity_unit": "COIN_COUNT",
+            },
+        )
+        self._receive(
+            _batch(1201, stream_id=stream, deliveries=[(1, offer), (2, trade)])
+        )
+        self.assertEqual(run_adapter_cycle(self.receiver, self.market).applied, 2)
+
+        # Reproduce the durable state written by an adapter release that
+        # advanced lineage to AUDIT_ONLY but did not retire its old row.
+        self.market.execute(
+            "UPDATE private_fact_adapter_projections "
+            "SET fact_revision=2,status='AUDIT_ONLY',quality_state='REJECTED',"
+            "available_at_utc=? WHERE fact_id=?",
+            ("2026-08-26T05:01:00Z", str(trade["fact_id"])),
+        )
+        self.market.execute(
+            """
+            INSERT INTO private_fact_adapter_projection_revisions(
+              fact_id,fact_revision,stream_id,source_sequence,delivery_sequence,
+              event_key,payload_hash,quality_state,envelope_hash,status,
+              occurred_at_utc,available_at_utc,parsed_at_utc,
+              transferred_at_utc,adapted_at_utc
+            )
+            SELECT fact_id,2,stream_id,source_sequence,1002,event_key,
+                   payload_hash,'REJECTED',envelope_hash,'AUDIT_ONLY',
+                   occurred_at_utc,'2026-08-26T05:01:00Z',parsed_at_utc,
+                   transferred_at_utc,'2026-08-26T05:01:01Z'
+            FROM private_fact_adapter_projections WHERE fact_id=?
+            """,
+            (str(trade["fact_id"]),),
+        )
+        self.market.execute(
+            "DELETE FROM private_fact_adapter_migrations "
+            "WHERE migration_code='retire-stale-audit-only-observations-v1'"
+        )
+        self.market.commit()
+
+        report = run_adapter_cycle(self.receiver, self.market)
+        self.assertEqual(report.selected, 0)
+        observation = self.market.execute(
+            "SELECT quality_state,parse_confidence,attributes_json "
+            "FROM market_observations WHERE event_key=?",
+            (bytes.fromhex(str(trade["event_key"])),),
+        ).fetchone()
+        self.assertIsNotNone(observation)
+        self.assertEqual((str(observation[0]), float(observation[1])), ("IGNORED", 0.0))
+        attributes = json.loads(str(observation[2]))
+        self.assertEqual(attributes["fact_revision"], 2)
+        self.assertEqual(attributes["delivery_sequence"], 1002)
+        self.assertEqual(attributes["adapter_disposition"], "AUDIT_ONLY")
+        self.assertEqual(
+            attributes["resolution_reason"], "FACT_REVISION_AUDIT_ONLY"
+        )
+
     def test_restart_and_revision_are_idempotent_without_unit_conversion(self):
         stream = "market.fact.coin.group.1"
         offer = _fact(

@@ -522,6 +522,17 @@ class ShadowLegacyBridgeTests(unittest.TestCase):
         self.seed_shadow([_private_offer(key=old, when=self.when)])
         first = self.project()
         self.assertEqual(first["mode"], "full")
+        # Make the original row genuinely older than the later incremental
+        # watermark.  Leaving its insertion timestamp tied to wall-clock time
+        # makes this assertion depend on the hour at which the suite runs and
+        # correctly causes the bridge to revisit it as a possible backfill.
+        shadow = connect_market_store(self.shadow)
+        shadow.execute(
+            "UPDATE market_observations SET inserted_at_utc=? WHERE event_key=?",
+            (self.when.isoformat().replace("+00:00", "Z"), old),
+        )
+        shadow.commit()
+        shadow.close()
         shadow = connect_market_store(self.shadow)
         upsert_observation(
             shadow,
