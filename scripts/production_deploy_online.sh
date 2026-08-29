@@ -1233,9 +1233,13 @@ verify_private_primary_manifest_mode_after_source() {
             [[ "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_ATTESTATION_VERIFIED" == "1" ]] \
                 || die "PRIVATE_PRIMARY manifest attestation was not verified before source."
             ;;
+        LEGACY)
+            # Live Product stays LEGACY until CAS. An attested PRIVATE_PRIMARY
+            # deploy manifest is the authorized cutover vehicle and must not
+            # require rewriting the live runtime source first.
+            ;;
         *)
-            [[ "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_ATTESTATION_VERIFIED" == "0" ]] \
-                || die "A PRIVATE_PRIMARY manifest receipt cannot authorize a non-PRIVATE_PRIMARY runtime source."
+            die "runtime estimator snapshot mode is invalid."
             ;;
     esac
 }

@@ -168,29 +168,24 @@ printf '%s|%s|%s\n' "$MANIFEST_PATH" "$PRODUCTION_PRIVATE_PRIMARY_MANIFEST_ATTES
             f"{self.manifest}|1|closed",
         )
 
-    def test_attested_manifest_cannot_authorize_legacy_runtime_source(self) -> None:
+    def test_attested_manifest_can_authorize_legacy_runtime_source_for_cutover(self) -> None:
         self.runtime_source.write_text(
             "PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE=LEGACY\n",
             encoding="utf-8",
         )
         result = run_sourced(
             r'''
-PRODUCTION_PRIVATE_PRIMARY_MANIFEST_APPROVED_ROOT="$2"
-MANIFEST_PATH="$3"
-PRODUCTION_PRIVATE_PRIMARY_MANIFEST_EXPECTED_SHA256="$4"
-PRODUCTION_PRIVATE_PRIMARY_MANIFEST_RECEIPT_PATH="$5"
-PRODUCTION_PRIVATE_PRIMARY_MANIFEST_RECEIPT_SHA256="$6"
-load_manifest
+PRODUCTION_PRIVATE_PRIMARY_MANIFEST_ATTESTATION_VERIFIED=1
+RUNTIME_ENV_SOURCE_PATH="$2"
+verify_private_primary_manifest_mode_after_source
+printf '%s\n' PASS
 ''',
-            str(self.approved_root),
-            str(self.manifest),
-            sha256(self.manifest.read_bytes()).hexdigest(),
-            str(self.receipt),
-            sha256(self.receipt.read_bytes()).hexdigest(),
+            str(self.runtime_source),
         )
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("cannot authorize a non-PRIVATE_PRIMARY", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(result.stdout.strip().splitlines()[-1], "PASS")
+        self.assertNotIn("cannot authorize a non-PRIVATE_PRIMARY", result.stderr)
 
     def test_private_primary_without_attestation_is_rejected_before_source(self) -> None:
         marker = self.temporary_root / "manifest-was-sourced"
