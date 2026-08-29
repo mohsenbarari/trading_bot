@@ -248,11 +248,12 @@ def _database_invariants(query: Any) -> dict[str, Any]:
             value, is_called = raw.split("|", 1)
         except ValueError as exc:
             raise BackupError("backup_database_sequence_inventory_invalid") from exc
-        if is_called not in {"t", "f"}:
+        called = is_called.strip().lower()
+        if called not in {"t", "true", "f", "false"}:
             raise BackupError("backup_database_sequence_inventory_invalid")
         sequence_values[name] = {
             "last_value": int(value),
-            "is_called": is_called == "t",
+            "is_called": called in {"t", "true"},
         }
     catalogue = query(
         "SELECT COALESCE(json_agg(row_to_json(x) ORDER BY "

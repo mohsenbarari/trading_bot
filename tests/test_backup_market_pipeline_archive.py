@@ -369,6 +369,35 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
         )
         self.assertNotIn("system_identifier", report)
 
+    def test_sequence_is_called_accepts_verbose_boolean_text(self) -> None:
+        seen = {"names": 0, "values": 0}
+
+        def query(sql: str, *, label: str) -> str:
+            if label == "backup_table_names":
+                return "market_facts"
+            if label == "backup_table_row_count":
+                return "3"
+            if label == "backup_sequence_names":
+                seen["names"] += 1
+                return "market_facts_id_seq"
+            if label == "backup_sequence_value":
+                seen["values"] += 1
+                return "12|false"
+            if label == "backup_schema_catalogue":
+                return "[]"
+            if label == "backup_schema_objects":
+                return "[]"
+            if "string_agg" in sql:
+                return "1,2,3"
+            raise AssertionError(label)
+
+        report = backup._database_invariants(query)
+        self.assertEqual(seen["values"], 1)
+        self.assertEqual(
+            report["sequence_values"],
+            {"market_facts_id_seq": {"last_value": 12, "is_called": False}},
+        )
+
     def test_database_inventory_rejects_initialized_database_without_archive_schema(self) -> None:
         container_id = "e" * 64
         document = {
