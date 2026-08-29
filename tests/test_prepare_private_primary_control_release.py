@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 import shutil
 import stat
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -174,6 +176,24 @@ class PreparePrivatePrimaryControlReleaseTests(unittest.TestCase):
         source = RELEASE_SCRIPT.read_text(encoding="utf-8")
         self.assertIn("prepare-private-primary-control-release", source)
         self.assertIn("run_prepare_private_primary_control_release() {", source)
+
+    def test_direct_script_execution_imports_without_package(self) -> None:
+        source = (REPO_ROOT / "scripts" / "prepare_private_primary_control_release.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("sys.path.insert", source)
+        env = os.environ.copy()
+        env.pop("PYTHONPATH", None)
+        result = subprocess.run(
+            [sys.executable, str(REPO_ROOT / "scripts" / "prepare_private_primary_control_release.py"), "--help"],
+            cwd="/",
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("validate-topology-source", result.stdout)
 
     def test_prepare_body_never_calls_forbidden_mutations(self) -> None:
         source = RELEASE_SCRIPT.read_text(encoding="utf-8")

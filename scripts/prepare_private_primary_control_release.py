@@ -21,12 +21,21 @@ import stat
 import sys
 from typing import Any, Mapping, Sequence
 
-from scripts.inventory_private_primary_active_runtime import (
-    ALLOWED_ADOPTED_DATA_ROOTS,
-    COMBINED_SCHEMA,
-    INVENTORY_SCHEMA,
-    validate_inventory,
-)
+if __package__:
+    from scripts.inventory_private_primary_active_runtime import (
+        ALLOWED_ADOPTED_DATA_ROOTS,
+        COMBINED_SCHEMA,
+        INVENTORY_SCHEMA,
+        validate_inventory,
+    )
+else:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from scripts.inventory_private_primary_active_runtime import (
+        ALLOWED_ADOPTED_DATA_ROOTS,
+        COMBINED_SCHEMA,
+        INVENTORY_SCHEMA,
+        validate_inventory,
+    )
 
 
 CONFIRMATION = "prepare-production-private-primary-control-release"
