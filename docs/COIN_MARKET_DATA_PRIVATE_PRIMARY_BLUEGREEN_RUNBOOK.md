@@ -96,6 +96,18 @@ quiesce) فقط اگر راه A از نظر قرارداد غیرمجاز باش
 7. `rollback`: فقط پیش از `PRIMARY_COMMITTED`، حذف کانتینرهای پروژهٔ جدید و
    بازگرداندن markerها و همان کانتینرهای قدیم.
 
+### بازیابی receiver-first پس از بازسازی اضطراری
+
+اگر کانتینرهای rollback تاریخی قبلاً با مجوز مالک بازنشسته شده باشند، ولی base
+`PRIVATE_PRIMARY` همان release به‌وسیلهٔ ابزار رسمی rollout و بدون حذف bind mount یا داده
+بازسازی شده باشد، فرمان محدود `adopt-primary-base` مجاز است. این فرمان فقط با digest دقیق
+journal سبز rollout، env و image و release یکسان، inventory دقیق receiver-first، نبود owner
+قدیمیِ درحال‌اجرا و markerهای خوانده‌شده از دیسک journal blue/green را در حالت پیش از انتقال
+اختیار می‌سازد. این فرمان هیچ کانتینر یا marker را تغییر نمی‌دهد و Product، Queue و capture را
+فعال نمی‌کند؛ quiesce مالک‌های legacy، انتقال اتمیک marker، شروع capture، catch-up و promotion
+همچنان باید با همان ابزارها و ترتیب عادی اجرا شوند. بازگشت base پذیرفته‌شده متعلق به journal
+دقیق rollout متصل‌شده است و حذف volume یا state همچنان ممنوع می‌ماند.
+
 تأیید لفظی ابزار دقیقاً `upgrade-market-pipeline-bluegreen` است. journal و env ورودی باید فایل
 معمولی، تک‌لینک، متعلق به کاربر اجرا و با mode `0600` باشند. مسیرهای امن و digestها در گزارش
 عملیاتی ثبت می‌شوند؛ secret یا payload در گزارش و مخزن قرار نمی‌گیرد.
