@@ -54,18 +54,22 @@ class LegacyMarketCollectorHandoffTests(unittest.TestCase):
         unit = arguments[-1]
         if action == "is-active":
             code = 0 if self.active[unit] else 3
+            output = ""
         elif action == "is-enabled":
             code = 0 if self.enabled[unit] else 1
+            output = "enabled\n" if self.enabled[unit] else "disabled\n"
         elif action in {"stop", "start"}:
             self.active[unit] = action == "start"
             code = 0
+            output = ""
         elif action in {"disable", "enable"}:
             self.enabled[unit] = action == "enable"
             code = 0
+            output = ""
         else:
             raise AssertionError(arguments)
         self.assertIn(code, allow)
-        return type("Result", (), {"returncode": code, "stdout": "", "stderr": ""})()
+        return type("Result", (), {"returncode": code, "stdout": output, "stderr": ""})()
 
     def context(self):
         return (
@@ -210,6 +214,27 @@ class LegacyMarketCollectorHandoffTests(unittest.TestCase):
                 handoff.CollectorHandoffError, "unit_missing"
             ):
                 handoff._inventory("bot")
+
+    def test_static_unit_is_not_enabled_but_still_requires_inactive_state(self) -> None:
+        def static_state(arguments, *, allow=(0,)):
+            action = arguments[1]
+            if action == "is-enabled":
+                return type(
+                    "Result",
+                    (),
+                    {"returncode": 0, "stdout": "static\n", "stderr": ""},
+                )()
+            if action == "is-active":
+                return type(
+                    "Result",
+                    (),
+                    {"returncode": 3, "stdout": "", "stderr": ""},
+                )()
+            raise AssertionError(arguments)
+
+        with patch.object(handoff, "_run", side_effect=static_state):
+            self.assertFalse(handoff._state("is-enabled", "static.service"))
+            self.assertFalse(handoff._state("is-active", "static.service"))
 
     def test_verify_rejects_active_or_enabled_standalone_capture_owner(self) -> None:
         context = self.context()
@@ -820,15 +845,19 @@ def command(arguments, *, allow=(0,)):
     action = arguments[1]; unit = arguments[-1]
     if action == "is-active":
         code = 0 if active[unit] else 3
+        output = ""
     elif action == "is-enabled":
         code = 0 if enabled[unit] else 1
+        output = "enabled\n" if enabled[unit] else "disabled\n"
     elif action in {"stop", "start"}:
         active[unit] = action == "start"; code = 0
+        output = ""
     elif action in {"disable", "enable"}:
         enabled[unit] = action == "enable"; code = 0
+        output = ""
     else:
         raise AssertionError(arguments)
-    return type("Result", (), {"returncode": code, "stdout": "", "stderr": ""})()
+    return type("Result", (), {"returncode": code, "stdout": output, "stderr": ""})()
 real_complete = handoff._complete_quiesce_from_prepared
 def hang(**kwargs):
     Path(ready).write_text("prepared\n", encoding="utf-8")

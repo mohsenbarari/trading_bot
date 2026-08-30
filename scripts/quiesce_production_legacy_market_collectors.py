@@ -681,11 +681,37 @@ def _run(arguments: Sequence[str], *, allow: tuple[int, ...] = (0,)) -> subproce
 
 
 def _state(action: str, unit: str) -> bool:
-    result = _run(["systemctl", action, "--quiet", unit], allow=(0, 1, 3, 4))
     if action == "is-enabled":
+        # ``systemctl is-enabled`` deliberately returns success for unit-file
+        # states such as ``static`` and ``indirect``.  Those states do not make
+        # a unit a boot owner: a static collector can only run when another
+        # active unit starts it, and activity is checked separately below.
+        # Using only the exit code therefore makes an inactive static service
+        # look enabled and prevents a legitimate legacy-owner handoff.
+        result = _run(
+            ["systemctl", action, unit], allow=(0, 1, 3, 4)
+        )
+        state = result.stdout.strip()
+        if state in {"enabled", "enabled-runtime"}:
+            return True
+        if state in {
+            "disabled",
+            "static",
+            "indirect",
+            "alias",
+            "linked",
+            "linked-runtime",
+            "masked",
+            "masked-runtime",
+            "generated",
+            "transient",
+        }:
+            return False
         if result.returncode not in (0, 1):
             raise CollectorHandoffError("collector_handoff_enabled_state_unknown")
-    elif result.returncode not in (0, 3):
+        raise CollectorHandoffError("collector_handoff_enabled_state_unknown")
+    result = _run(["systemctl", action, "--quiet", unit], allow=(0, 1, 3, 4))
+    if result.returncode not in (0, 3):
         raise CollectorHandoffError("collector_handoff_active_state_unknown")
     return result.returncode == 0
 
