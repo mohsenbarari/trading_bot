@@ -94,6 +94,35 @@ def _precise_stamp(value: datetime | None = None) -> str:
     return _precise_utc(value).isoformat().replace("+00:00", "Z")
 
 
+def _live_snapshot_completion_utc() -> datetime:
+    """Return the wall-clock time after a live estimator build completes."""
+
+    return _precise_utc()
+
+
+def _restamp_live_snapshot(
+    snapshot: EstimatorSnapshotV2,
+    *,
+    generated_at_utc: datetime,
+) -> EstimatorSnapshotV2:
+    """Bind a live artifact identity to its completion time.
+
+    The estimator evaluates one pinned SQLite read snapshot at the earlier
+    ``as_of_utc`` time.  A large Store can take longer than the receiver's
+    freshness window to evaluate, however, so the transport artifact must be
+    dated when that evaluation has actually completed.  The timestamp is part
+    of the signed content identity and therefore the snapshot id is rebuilt as
+    well.
+    """
+
+    payload = snapshot.model_dump(mode="json")
+    payload.pop("snapshot_id", None)
+    payload["generated_at_utc"] = _precise_stamp(generated_at_utc)
+    return EstimatorSnapshotV2.model_validate(
+        {**payload, "snapshot_id": estimator_snapshot_id(payload)}
+    )
+
+
 def _code(value: object, *, fallback: str) -> str:
     normalized = _CODE.sub("_", str(value or "").upper()).strip("_")
     if len(normalized) < 2:
@@ -474,6 +503,16 @@ def publish_estimator_snapshot(
                 feed_mode=feed_mode,
                 generated_at_utc=generated_at,
             )
+            if as_of_utc is None:
+                completed_at = _live_snapshot_completion_utc()
+                if completed_at < generated_at:
+                    raise EstimatorSnapshotRuntimeError(
+                        "estimator_snapshot_completion_time_regression"
+                    )
+                snapshot = _restamp_live_snapshot(
+                    snapshot,
+                    generated_at_utc=completed_at,
+                )
             market.rollback()
         finally:
             market.close()

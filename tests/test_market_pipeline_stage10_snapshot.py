@@ -908,6 +908,37 @@ class Stage10SnapshotTests(unittest.TestCase):
             )
         )
 
+    def test_live_publish_dates_artifact_after_expensive_evaluation(self):
+        output = self.root / "bot" / "live-completion-timestamp.json"
+        completed_at = datetime(2030, 1, 2, 3, 4, 5, 678901, tzinfo=timezone.utc)
+        with patch(
+            "core.market_intelligence.estimator_snapshot_runtime."
+            "_live_snapshot_completion_utc",
+            return_value=completed_at,
+        ):
+            publish_estimator_snapshot(
+                market_store_path=self.market_path,
+                state_path=self.root / "live-completion-state.sqlite3",
+                output_path=output,
+                feed_mode="PRIVATE_SHADOW",
+            )
+
+        document = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(
+            document["generated_at_utc"],
+            "2030-01-02T03:04:05.678901Z",
+        )
+        identity = dict(document)
+        identity.pop("snapshot_id")
+        self.assertEqual(document["snapshot_id"], estimator_snapshot_id(identity))
+
+    def test_explicit_historical_publish_preserves_requested_generation_time(self):
+        document = self._publish("2026-08-26T05:00:10.123456Z")
+        self.assertEqual(
+            document["generated_at_utc"],
+            "2026-08-26T05:00:10.123456Z",
+        )
+
     def test_monotonic_guard_duplicate_and_stale_route_cut(self):
         first = self._publish()
         self.assertEqual(self._apply_web(first)[0], 200)
