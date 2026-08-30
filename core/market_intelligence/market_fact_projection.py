@@ -101,7 +101,28 @@ def _pending_export_rows(
     market: sqlite3.Connection,
     *,
     max_rows: int,
+    force_event_keys: tuple[bytes, ...] | None = None,
 ) -> list[sqlite3.Row]:
+    if force_event_keys is not None:
+        keys = tuple(dict.fromkeys(bytes(value) for value in force_event_keys))
+        if not keys:
+            return []
+        if len(keys) > max_rows or any(len(value) != 32 for value in keys):
+            raise MarketFactProjectionError(
+                "market_fact_projection_force_scope_invalid"
+            )
+        placeholders = ",".join("?" for _ in keys)
+        return market.execute(
+            f"""
+            SELECT o.*
+            FROM market_observations o
+            WHERE o.event_key IN ({placeholders})
+            ORDER BY o.event_time_utc,
+                     CASE o.event_type WHEN 'OFFER' THEN 0 WHEN 'TRADE' THEN 1 ELSE 2 END,
+                     o.event_key
+            """,
+            keys,
+        ).fetchall()
     return market.execute(
         """
         SELECT o.*
@@ -365,10 +386,15 @@ def export_market_store_facts(
     max_rows: int = MAX_EXPORT_PER_CYCLE,
     capture_staging: sqlite3.Connection | None = None,
     research_key: ResearchArchiveKey | None = None,
+    force_event_keys: tuple[bytes, ...] | None = None,
 ) -> ExportReport:
     initialize_export_ledger(market)
     allowed = load_source_registry().by_code()
-    rows = _pending_export_rows(market, max_rows=max_rows)
+    rows = _pending_export_rows(
+        market,
+        max_rows=max_rows,
+        force_event_keys=force_event_keys,
+    )
     research_sources = {
         "GROUP_1",
         "GROUP_2",

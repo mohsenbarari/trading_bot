@@ -37,8 +37,14 @@ from .coin_group_calibration_corpus import (
 from .coin_group_feedback import (
     CoinGroupParserFeedback,
     load_coin_group_parser_feedback,
+    mark_coin_group_parser_feedback_applied,
 )
 from .coin_group_pipeline import COIN_GROUP_PIPELINE_VERSION
+from .coin_group_review_projection import (
+    CoinGroupReviewProjectionError,
+    project_coin_group_reviews,
+    reconcile_pending_trades_from_reviewed_roots,
+)
 from .coin_group_staging import connect_coin_group_staging
 from .coin_group_trades import MAX_REPLY_AGE_SECONDS
 from .coin_groups import COIN_GROUP_PARSER_VERSION
@@ -712,6 +718,9 @@ def process_coin_spool_cycle(
         stream: {key: 0 for key in totals}
         for stream in ("market", "coin", "external")
     }
+    applied_feedback_keys: tuple[bytes, ...] = ()
+    review_projection = None
+    trade_reconciliation = None
     try:
         initialize_capture_adapter(staging)
         initialize_market_store(market)
@@ -777,6 +786,37 @@ def process_coin_spool_cycle(
             group_additional_anchors=anchors,
             group_parser_feedback=feedback,
         )
+        pipeline_applied = set(
+            projection.group_pipeline.applied_feedback_event_keys
+            if projection.group_pipeline is not None
+            else ()
+        )
+        pending_exact_reviews = tuple(
+            item
+            for item in feedback.values()
+            if item.applied_revision < item.review_revision
+            and item.event_key not in pipeline_applied
+        )
+        try:
+            review_projection = project_coin_group_reviews(
+                market,
+                pending_exact_reviews,
+            )
+        except CoinGroupReviewProjectionError as exc:
+            raise CoinProcessorError(str(exc)) from exc
+        applied_feedback_keys = tuple(
+            sorted(pipeline_applied | set(review_projection.event_keys))
+        )
+        if pending_exact_reviews:
+            try:
+                trade_reconciliation = reconcile_pending_trades_from_reviewed_roots(
+                    market,
+                    cutoff_utc=min(
+                        item.source_event_time_utc for item in pending_exact_reviews
+                    ),
+                )
+            except CoinGroupReviewProjectionError as exc:
+                raise CoinProcessorError(str(exc)) from exc
         temporary_public_melted_purged = _purge_temporary_public_melted(
             market,
             as_of_utc=now,
@@ -821,6 +861,11 @@ def process_coin_spool_cycle(
         corpus.close()
         market.close()
         staging.close()
+    if paths.feedback_database is not None and applied_feedback_keys:
+        mark_coin_group_parser_feedback_applied(
+            paths.feedback_database,
+            applied_feedback_keys,
+        )
     group = projection.group_pipeline
     return {
         **totals,
@@ -840,6 +885,22 @@ def process_coin_spool_cycle(
             group.pending_or_rejected_offers + group.pending_or_rejected_trades
             if group
             else 0
+        ),
+        "feedback_reviews_projected": (
+            review_projection.projected if review_projection else 0
+        ),
+        "feedback_reviews_unchanged": (
+            review_projection.unchanged if review_projection else 0
+        ),
+        "feedback_reviews_marked_applied": len(applied_feedback_keys),
+        "reviewed_root_trades_projected": (
+            trade_reconciliation.projected if trade_reconciliation else 0
+        ),
+        "reviewed_root_trades_eligible": (
+            trade_reconciliation.eligible if trade_reconciliation else 0
+        ),
+        "reviewed_root_trades_rejected": (
+            trade_reconciliation.rejected if trade_reconciliation else 0
         ),
         "market_messages_reprojected": projection.market_messages_reprojected,
         "market_facts_upserted": projection.market_facts_upserted,
@@ -922,7 +983,11 @@ def run_coin_processor_service(
     def cycle_and_write(*, stopped: bool = False) -> None:
         nonlocal last_projection_causal_inputs
         counters = process_coin_spool_cycle(paths=paths, mode=mode)
-        if int(counters["changes"]) or int(counters["tombstones"]):
+        if (
+            int(counters["changes"])
+            or int(counters["tombstones"])
+            or int(counters["feedback_reviews_projected"])
+        ):
             last_projection_causal_inputs = {
                 "feedback_rows": int(counters["feedback_rows"]),
                 "prediction_rows_seen": int(counters["rows_seen"]),

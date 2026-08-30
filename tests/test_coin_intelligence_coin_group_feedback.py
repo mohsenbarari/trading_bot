@@ -6,22 +6,31 @@ import sqlite3
 from tempfile import TemporaryDirectory
 
 from core.market_intelligence.coin_group_feedback import (
+    CoinGroupFeedbackError,
     load_coin_group_parser_feedback,
     mark_coin_group_parser_feedback_applied,
     record_coin_group_parser_feedback,
+    record_coin_group_parser_feedback_batch,
 )
 from core.market_intelligence.coin_group_pipeline import process_coin_group_staging
+from core.market_intelligence.coin_group_review_projection import (
+    CoinGroupReviewProjectionError,
+    project_coin_group_reviews,
+    reconcile_pending_trades_from_reviewed_roots,
+)
 from core.market_intelligence.coin_group_staging import (
     CoinGroupStagingMessage,
     connect_coin_group_staging,
     initialize_coin_group_staging,
     stage_coin_group_message,
 )
-from core.market_intelligence.market_contracts import derive_event_key
+from core.market_intelligence.market_contracts import MarketObservation, derive_event_key
 from core.market_intelligence.market_store import (
     connect_market_store,
     initialize_market_store,
+    upsert_observation,
 )
+from core.market_intelligence.shadow_legacy_bridge import parser_version_allowed
 
 
 def _record_feedback(path: Path, event_key: bytes, *, reviewed_at: str):
@@ -80,6 +89,341 @@ def test_feedback_sidecar_is_structured_revisioned_and_privacy_safe() -> None:
         assert len(bytes(row[0])) == 32
         assert json.loads(row[1]) == ["commodity"]
         assert row[2] == 1
+
+
+def _batch_decision(event_key: bytes, *, price: int = 188_600) -> dict[str, object]:
+    return {
+        "event_key": event_key,
+        "event_type": "OFFER",
+        "group_number": 1,
+        "source_event_time_utc": "2026-08-15T10:00:00Z",
+        "ambiguous_fields": ["commodity"],
+        "event_confirmed": True,
+        "commodity_code": "IMAM",
+        "side": "SELL",
+        "price_project_thousand_toman": price,
+        "quantity": 5,
+        "settlement_term": "TOMORROW",
+        "trade_form": "PHYSICAL",
+        "is_conditional": False,
+    }
+
+
+def test_feedback_batch_is_atomic_revisioned_and_idempotent() -> None:
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "feedback.sqlite3"
+        first = derive_event_key("batch", 1)
+        second = derive_event_key("batch", 2)
+        decisions = [_batch_decision(first), _batch_decision(second)]
+        result = record_coin_group_parser_feedback_batch(
+            path,
+            decisions,
+            reviewer="supervised-audit",
+            reviewed_at_utc="2026-08-15T10:05:00Z",
+        )
+        assert result == {"submitted": 2, "recorded": 2, "unchanged": 0}
+        replay = record_coin_group_parser_feedback_batch(
+            path,
+            decisions,
+            reviewer="supervised-audit",
+            reviewed_at_utc="2026-08-15T10:06:00Z",
+        )
+        assert replay == {"submitted": 2, "recorded": 0, "unchanged": 2}
+        changed = record_coin_group_parser_feedback_batch(
+            path,
+            [_batch_decision(first, price=188_700)],
+            reviewer="supervised-audit",
+            reviewed_at_utc="2026-08-15T10:07:00Z",
+        )
+        assert changed == {"submitted": 1, "recorded": 1, "unchanged": 0}
+        loaded = load_coin_group_parser_feedback(path)
+        assert loaded[first].review_revision == 2
+        assert loaded[second].review_revision == 1
+
+
+def test_feedback_batch_rejects_all_rows_before_writing() -> None:
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "feedback.sqlite3"
+        valid = _batch_decision(derive_event_key("batch-valid", 1))
+        invalid = _batch_decision(derive_event_key("batch-invalid", 2))
+        invalid["event_confirmed"] = "yes"
+        try:
+            record_coin_group_parser_feedback_batch(
+                path,
+                [valid, invalid],
+                reviewer="supervised-audit",
+                reviewed_at_utc="2026-08-15T10:05:00Z",
+            )
+        except CoinGroupFeedbackError:
+            pass
+        else:
+            raise AssertionError("invalid batch unexpectedly accepted")
+        assert load_coin_group_parser_feedback(path) == {}
+
+
+def _pending_observation(event_key: bytes) -> MarketObservation:
+    return MarketObservation(
+        event_key=event_key,
+        source_code="GROUP_1",
+        source_family="GROUP",
+        event_time_utc="2026-08-15T10:00:00Z",
+        available_at_utc="2026-08-15T10:00:01Z",
+        instrument="COIN_UNRESOLVED",
+        market_label="GROUP_COIN_UNRESOLVED",
+        settlement_term="TOMORROW",
+        trade_form="PHYSICAL",
+        event_type="OFFER",
+        side="SELL",
+        price=188_600,
+        price_unit="PROJECT_THOUSAND_TOMAN",
+        currency="TOMAN",
+        quantity=5,
+        quantity_unit="COIN",
+        parse_confidence=0.25,
+        parser_version="coin-parser-test",
+        quality_state="PENDING_REVIEW",
+        quality_policy_version="coin-policy-test",
+        is_conditional=False,
+        attributes={"resolution_reason": "COMMODITY_AMBIGUOUS"},
+    )
+
+
+def test_exact_event_review_projection_is_causal_idempotent_and_rejectable() -> None:
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        market = connect_market_store(root / "market.sqlite3")
+        initialize_market_store(market)
+        accepted_key = derive_event_key("review-projection", 1)
+        rejected_key = derive_event_key("review-projection", 2)
+        upsert_observation(market, _pending_observation(accepted_key))
+        upsert_observation(market, _pending_observation(rejected_key))
+        market.commit()
+        feedback = root / "feedback.sqlite3"
+        accepted = _record_feedback(
+            feedback,
+            accepted_key,
+            reviewed_at="2026-08-15T12:00:00Z",
+        )
+        rejected = record_coin_group_parser_feedback(
+            feedback,
+            event_key=rejected_key,
+            event_type="OFFER",
+            group_number=1,
+            source_event_time_utc="2026-08-15T10:00:00Z",
+            ambiguous_fields=["commodity", "event_validity"],
+            event_confirmed=False,
+            commodity_code="UNRESOLVED",
+            side="SELL",
+            price_project_thousand_toman=188_600,
+            quantity=5,
+            settlement_term="TOMORROW",
+            trade_form="PHYSICAL",
+            is_conditional=False,
+            reviewer="operator",
+            reviewed_at_utc="2026-08-15T12:00:00Z",
+        )
+        report = project_coin_group_reviews(market, [accepted, rejected])
+        market.commit()
+        assert (report.projected, report.eligible, report.rejected) == (2, 1, 1)
+        accepted_row = market.execute(
+            "SELECT * FROM market_observations WHERE event_key=?", (accepted_key,)
+        ).fetchone()
+        rejected_row = market.execute(
+            "SELECT * FROM market_observations WHERE event_key=?", (rejected_key,)
+        ).fetchone()
+        assert accepted_row["instrument"] == "COIN_IMAM"
+        assert accepted_row["quality_state"] == "ELIGIBLE"
+        assert accepted_row["available_at_utc"] == "2026-08-15T12:00:00Z"
+        assert len(accepted_row["parser_version"]) <= 96
+        assert parser_version_allowed(accepted_row["parser_version"])
+        accepted_attributes = json.loads(accepted_row["attributes_json"])
+        assert accepted_attributes["supervised_review_revision"] == 1
+        assert "human_feedback_syntax_fingerprint" not in accepted_attributes
+        assert rejected_row["instrument"] == "COIN_UNRESOLVED"
+        assert rejected_row["quality_state"] == "REJECTED"
+        replay = project_coin_group_reviews(market, [accepted, rejected])
+        market.commit()
+        assert (replay.projected, replay.unchanged) == (0, 2)
+        market.close()
+
+
+def test_exact_event_review_projection_validates_batch_before_writing() -> None:
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        market = connect_market_store(root / "market.sqlite3")
+        initialize_market_store(market)
+        valid_key = derive_event_key("review-projection-valid", 1)
+        missing_key = derive_event_key("review-projection-missing", 2)
+        upsert_observation(market, _pending_observation(valid_key))
+        market.commit()
+        feedback = root / "feedback.sqlite3"
+        valid = _record_feedback(
+            feedback, valid_key, reviewed_at="2026-08-15T12:00:00Z"
+        )
+        missing = _record_feedback(
+            feedback, missing_key, reviewed_at="2026-08-15T12:00:00Z"
+        )
+        try:
+            project_coin_group_reviews(market, [valid, missing])
+        except CoinGroupReviewProjectionError as exc:
+            assert str(exc) == "review_projection_event_missing"
+        else:
+            raise AssertionError("incomplete exact-event batch unexpectedly projected")
+        row = market.execute(
+            "SELECT quality_state FROM market_observations WHERE event_key=?",
+            (valid_key,),
+        ).fetchone()
+        assert row["quality_state"] == "PENDING_REVIEW"
+        market.close()
+
+
+def _pending_trade(
+    event_key: bytes,
+    root_key: bytes,
+    *,
+    reason: str,
+) -> MarketObservation:
+    return MarketObservation(
+        event_key=event_key,
+        source_code="GROUP_1",
+        source_family="GROUP",
+        event_time_utc="2026-08-15T10:05:00Z",
+        available_at_utc="2026-08-15T10:05:01Z",
+        instrument="COIN_UNRESOLVED",
+        market_label="GROUP_COIN_UNRESOLVED",
+        settlement_term="TOMORROW",
+        trade_form="PHYSICAL",
+        event_type="TRADE",
+        side="SELL",
+        price=188_600,
+        price_unit="PROJECT_THOUSAND_TOMAN",
+        currency="TOMAN",
+        quantity=5,
+        quantity_unit="COIN",
+        parse_confidence=0.2,
+        parser_version="coin-trade-test",
+        quality_state="PENDING_REVIEW",
+        quality_policy_version="coin-trade-policy-test",
+        is_conditional=False,
+        attributes={
+            "root_offer_event_key": root_key.hex(),
+            "resolution_reason": reason,
+        },
+    )
+
+
+def test_reviewed_root_trade_reconciliation_accepts_only_root_only_blocker() -> None:
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        market = connect_market_store(root / "market.sqlite3")
+        initialize_market_store(market)
+        eligible_root = derive_event_key("trade-review-root", 1)
+        invalid_trade_root = derive_event_key("trade-review-root", 2)
+        rejected_root = derive_event_key("trade-review-root", 3)
+        unreviewed_root = derive_event_key("trade-review-root", 4)
+        for key in (eligible_root, invalid_trade_root, rejected_root, unreviewed_root):
+            upsert_observation(market, _pending_observation(key))
+        eligible_trade = derive_event_key("trade-review", 1)
+        invalid_trade = derive_event_key("trade-review", 2)
+        rejected_root_trade = derive_event_key("trade-review", 3)
+        hard_blocked_trade = derive_event_key("trade-review", 4)
+        upsert_observation(
+            market,
+            _pending_trade(
+                eligible_trade,
+                eligible_root,
+                reason="ROOT_OFFER_NOT_MODEL_ELIGIBLE:ANCHORS",
+            ),
+        )
+        upsert_observation(
+            market,
+            _pending_trade(
+                invalid_trade,
+                invalid_trade_root,
+                reason=(
+                    "ROOT_OFFER_NOT_MODEL_ELIGIBLE:ANCHORS;"
+                    "NON_AGGREGATE_FILL_EXCEEDS_REMAINING_ROOT_QUANTITY"
+                ),
+            ),
+        )
+        upsert_observation(
+            market,
+            _pending_trade(
+                rejected_root_trade,
+                rejected_root,
+                reason="ROOT_OFFER_NOT_MODEL_ELIGIBLE:ANCHORS",
+            ),
+        )
+        upsert_observation(
+            market,
+            _pending_trade(
+                hard_blocked_trade,
+                unreviewed_root,
+                reason="COUNTERPARTY_DECLARATION_REQUIRES_OFFERER_CONFIRMATION",
+            ),
+        )
+        market.commit()
+        feedback = root / "feedback.sqlite3"
+        accepted_one = _record_feedback(
+            feedback, eligible_root, reviewed_at="2026-08-15T12:00:00Z"
+        )
+        accepted_two = _record_feedback(
+            feedback, invalid_trade_root, reviewed_at="2026-08-15T12:00:00Z"
+        )
+        rejected = record_coin_group_parser_feedback(
+            feedback,
+            event_key=rejected_root,
+            event_type="OFFER",
+            group_number=1,
+            source_event_time_utc="2026-08-15T10:00:00Z",
+            ambiguous_fields=["commodity", "event_validity"],
+            event_confirmed=False,
+            commodity_code="UNRESOLVED",
+            side="SELL",
+            price_project_thousand_toman=188_600,
+            quantity=5,
+            settlement_term="TOMORROW",
+            trade_form="PHYSICAL",
+            is_conditional=False,
+            reviewer="operator",
+            reviewed_at_utc="2026-08-15T12:00:00Z",
+        )
+        project_coin_group_reviews(market, [accepted_one, accepted_two, rejected])
+        report = reconcile_pending_trades_from_reviewed_roots(
+            market, cutoff_utc="2026-08-15T00:00:00Z"
+        )
+        market.commit()
+        assert (report.considered, report.eligible, report.rejected) == (4, 1, 3)
+        replay = reconcile_pending_trades_from_reviewed_roots(
+            market, cutoff_utc="2026-08-15T00:00:00Z"
+        )
+        market.commit()
+        assert (replay.projected, replay.unchanged) == (0, 4)
+        states = {
+            bytes(row["event_key"]): str(row["quality_state"])
+            for row in market.execute(
+                "SELECT event_key,quality_state FROM market_observations "
+                "WHERE event_type='TRADE'"
+            )
+        }
+        assert states == {
+            eligible_trade: "ELIGIBLE",
+            invalid_trade: "REJECTED",
+            rejected_root_trade: "REJECTED",
+            hard_blocked_trade: "REJECTED",
+        }
+        eligible = market.execute(
+            "SELECT instrument,available_at_utc,parser_version,attributes_json "
+            "FROM market_observations WHERE event_key=?",
+            (eligible_trade,),
+        ).fetchone()
+        assert eligible["instrument"] == "COIN_IMAM"
+        assert eligible["available_at_utc"] == "2026-08-15T12:00:00Z"
+        assert len(eligible["parser_version"]) <= 96
+        assert parser_version_allowed(eligible["parser_version"])
+        attributes = json.loads(eligible["attributes_json"])
+        assert attributes["resolution_reason"] == "SUPERVISED_REVIEWED_ROOT_TRADE"
+        market.close()
 
 
 def test_feedback_corrects_exact_event_and_calibrates_later_similar_offer() -> None:

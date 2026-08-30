@@ -688,6 +688,83 @@ class ShadowLegacyBridgeTests(unittest.TestCase):
         self.assertEqual(result["projected"], 2)
         self.assertEqual(self.dest_count("PRIVATE_GOLD_CHANNEL"), 2)
 
+    def test_transported_trade_keeps_root_offer_fact_id(self) -> None:
+        offer = derive_event_key("transport-offer", 1)
+        trade = derive_event_key("transport-trade", 2)
+        fact_id = "4" * 64
+        self.seed_shadow(
+            [
+                _group(
+                    key=offer,
+                    source="GROUP_1",
+                    when=self.when,
+                    extra={"transfer_fact_id": fact_id},
+                ),
+                _group(
+                    key=trade,
+                    source="GROUP_1",
+                    when=datetime(2026, 8, 29, 9, 1, tzinfo=timezone.utc),
+                    event_type="TRADE",
+                    extra={"root_offer_fact_id": fact_id},
+                ),
+            ]
+        )
+        self.project(sources=GROUP_SOURCES)
+        connection = sqlite3.connect(self.legacy)
+        attributes = json.loads(
+            connection.execute(
+                "SELECT attributes_json FROM market_observations WHERE event_key=?",
+                (trade,),
+            ).fetchone()[0]
+        )
+        connection.close()
+        self.assertEqual(attributes["root_offer_fact_id"], fact_id)
+
+    def test_invalid_transported_root_offer_fact_id_fails_closed(self) -> None:
+        trade = derive_event_key("transport-invalid", 1)
+        self.seed_shadow(
+            [
+                _group(
+                    key=trade,
+                    source="GROUP_1",
+                    when=self.when,
+                    event_type="TRADE",
+                    extra={"root_offer_fact_id": "4" * 63},
+                )
+            ]
+        )
+        with self.assertRaisesRegex(BridgeError, "root_offer_fact_id_invalid"):
+            self.project(sources=GROUP_SOURCES)
+
+    def test_forced_full_reconcile_revisits_rows_before_overlap(self) -> None:
+        old = derive_event_key("force-full-old", 1)
+        new = derive_event_key("force-full-new", 2)
+        self.seed_shadow([_private_offer(key=old, when=self.when)])
+        self.project()
+        later = datetime(2026, 8, 29, 12, 0, tzinfo=timezone.utc)
+        source = connect_market_store(self.shadow)
+        upsert_observation(source, _private_offer(key=new, when=later))
+        source.execute(
+            "UPDATE market_observations SET inserted_at_utc=? WHERE event_key=?",
+            (later.isoformat().replace("+00:00", "Z"), new),
+        )
+        source.commit()
+        source.close()
+        self.project()
+        source = sqlite3.connect(self.shadow)
+        source.execute(
+            "UPDATE market_observations SET price_value='45200000',price_num=45200000,inserted_at_utc=? WHERE event_key=?",
+            (self.when.isoformat().replace("+00:00", "Z"), old),
+        )
+        source.commit()
+        source.close()
+        incremental = self.project()
+        self.assertEqual(incremental["mode"], "incremental")
+        self.assertEqual(self.dest_price(old), 45000000.0)
+        full = self.project(force_full_reconcile=True)
+        self.assertEqual(full["mode"], "full")
+        self.assertEqual(self.dest_price(old), 45200000.0)
+
     def test_missing_source_fact_is_retired(self) -> None:
         key = derive_event_key("retire-me", 1)
         self.seed_shadow([_private_offer(key=key, when=self.when)])

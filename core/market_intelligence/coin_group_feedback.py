@@ -15,7 +15,7 @@ from hashlib import blake2b
 import json
 from pathlib import Path
 import sqlite3
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from .coin_groups import _PRICE_BOUNDS
 from .market_contracts import MarketStoreContractError, normalize_utc
@@ -390,6 +390,200 @@ def record_coin_group_parser_feedback(
     finally:
         connection.close()
     return load_coin_group_parser_feedback(path)[opaque_key]
+
+
+def record_coin_group_parser_feedback_batch(
+    path: Path | str,
+    decisions: Iterable[Mapping[str, object]],
+    *,
+    reviewer: str,
+    reviewed_at_utc: str | None = None,
+) -> dict[str, int]:
+    """Atomically record complete, privacy-safe review decisions.
+
+    The batch is validated in full before the feedback store is opened for
+    writing.  Replaying an identical decision is a no-op, while a changed
+    decision receives the next per-event revision.  This keeps supervised
+    historical remediation all-or-nothing and safely repeatable.
+    """
+
+    reviewed_at = reviewed_at_utc or _utc_now()
+    reviewer_digest = _reviewer_digest(reviewer)
+    normalized: list[
+        tuple[
+            bytes,
+            str,
+            int,
+            str,
+            tuple[str, ...],
+            bool,
+            str,
+            str,
+            int,
+            int,
+            str,
+            str,
+            bool,
+            str,
+        ]
+    ] = []
+    seen: set[bytes] = set()
+    for decision in decisions:
+        key = _event_key(decision.get("event_key", b""))
+        if key in seen:
+            raise CoinGroupFeedbackError("parser_feedback_batch_duplicate_event")
+        seen.add(key)
+        values = _validated_values(
+            event_type=str(decision.get("event_type") or ""),
+            group_number=decision.get("group_number"),  # type: ignore[arg-type]
+            source_event_time_utc=str(
+                decision.get("source_event_time_utc") or ""
+            ),
+            ambiguous_fields=decision.get("ambiguous_fields") or (),
+            event_confirmed=decision.get("event_confirmed"),  # type: ignore[arg-type]
+            commodity_code=str(decision.get("commodity_code") or ""),
+            side=str(decision.get("side") or ""),
+            price_project_thousand_toman=decision.get(
+                "price_project_thousand_toman"
+            ),  # type: ignore[arg-type]
+            quantity=decision.get("quantity"),  # type: ignore[arg-type]
+            settlement_term=str(decision.get("settlement_term") or ""),
+            trade_form=str(decision.get("trade_form") or ""),
+            is_conditional=decision.get("is_conditional"),  # type: ignore[arg-type]
+            reviewed_at_utc=reviewed_at,
+        )
+        normalized.append((key, *values))
+    if not normalized:
+        return {"submitted": 0, "recorded": 0, "unchanged": 0}
+
+    ensure_coin_group_feedback_store(path)
+    connection = _connection(path, read_only=False)
+    recorded = unchanged = 0
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        state = connection.execute(
+            "SELECT calibration_revision FROM coin_group_parser_feedback_state WHERE singleton=1"
+        ).fetchone()
+        calibration_revision = int(state["calibration_revision"])
+        for item in normalized:
+            (
+                opaque_key,
+                normalized_type,
+                normalized_group,
+                source_time,
+                fields,
+                confirmed,
+                code,
+                side_value,
+                price,
+                count,
+                settlement,
+                form,
+                conditional,
+                normalized_reviewed_at,
+            ) = item
+            fields_json = json.dumps(fields, separators=(",", ":"))
+            prior = connection.execute(
+                "SELECT * FROM coin_group_parser_feedback WHERE event_key=?",
+                (opaque_key,),
+            ).fetchone()
+            comparable = (
+                normalized_type,
+                normalized_group,
+                source_time,
+                fields_json,
+                int(confirmed),
+                code,
+                side_value,
+                price,
+                count,
+                settlement,
+                form,
+                int(conditional),
+            )
+            if prior is not None and comparable == (
+                str(prior["event_type"]),
+                int(prior["group_number"]),
+                str(prior["source_event_time_utc"]),
+                str(prior["ambiguous_fields_json"]),
+                int(prior["event_confirmed"]),
+                str(prior["commodity_code"]),
+                str(prior["side"]),
+                int(prior["price_project_thousand_toman"]),
+                int(prior["quantity"]),
+                str(prior["settlement_term"]),
+                str(prior["trade_form"]),
+                int(prior["is_conditional"]),
+            ):
+                unchanged += 1
+                continue
+            review_revision = (
+                int(prior["review_revision"]) + 1 if prior is not None else 1
+            )
+            connection.execute(
+                """
+                INSERT INTO coin_group_parser_feedback(
+                    event_key,event_type,group_number,source_event_time_utc,
+                    ambiguous_fields_json,event_confirmed,commodity_code,side,
+                    price_project_thousand_toman,quantity,settlement_term,trade_form,
+                    is_conditional,reviewer_digest,review_revision,reviewed_at_utc,
+                    applied_revision,applied_at_utc,application_count
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,NULL,0)
+                ON CONFLICT(event_key) DO UPDATE SET
+                    event_type=excluded.event_type,
+                    group_number=excluded.group_number,
+                    source_event_time_utc=excluded.source_event_time_utc,
+                    ambiguous_fields_json=excluded.ambiguous_fields_json,
+                    event_confirmed=excluded.event_confirmed,
+                    commodity_code=excluded.commodity_code,
+                    side=excluded.side,
+                    price_project_thousand_toman=excluded.price_project_thousand_toman,
+                    quantity=excluded.quantity,
+                    settlement_term=excluded.settlement_term,
+                    trade_form=excluded.trade_form,
+                    is_conditional=excluded.is_conditional,
+                    reviewer_digest=excluded.reviewer_digest,
+                    review_revision=excluded.review_revision,
+                    reviewed_at_utc=excluded.reviewed_at_utc,
+                    applied_revision=0,applied_at_utc=NULL
+                """,
+                (
+                    opaque_key,
+                    normalized_type,
+                    normalized_group,
+                    source_time,
+                    fields_json,
+                    int(confirmed),
+                    code,
+                    side_value,
+                    price,
+                    count,
+                    settlement,
+                    form,
+                    int(conditional),
+                    reviewer_digest,
+                    review_revision,
+                    normalized_reviewed_at,
+                ),
+            )
+            recorded += 1
+        if recorded:
+            connection.execute(
+                "UPDATE coin_group_parser_feedback_state "
+                "SET calibration_revision=?,updated_at_utc=? WHERE singleton=1",
+                (calibration_revision + recorded, reviewed_at),
+            )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+    return {
+        "submitted": len(normalized),
+        "recorded": recorded,
+        "unchanged": unchanged,
+    }
 
 
 def _feedback_from_row(row: sqlite3.Row) -> CoinGroupParserFeedback:

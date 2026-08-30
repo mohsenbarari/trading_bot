@@ -34,6 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ledger", type=Path, required=True)
     parser.add_argument("--cutoff-utc", default=AUTHORIZED_CUTOFF_UTC)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--full-reconcile", action="store_true")
     return parser
 
 
@@ -47,6 +48,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             sources=PRIVATE_SOURCES,
             cutoff_utc=args.cutoff_utc,
             dry_run=args.dry_run,
+            force_full_reconcile=args.full_reconcile,
         )
     except (
         BridgeError,

@@ -98,6 +98,7 @@ _ATTRIBUTE_ALLOWLIST = frozenset(
         "requires_market_comparability",
         "resolution_reason",
         "root_offer_event_key",
+        "root_offer_fact_id",
         "trade_status",
         "transfer_fact_id",
     }
@@ -133,6 +134,7 @@ _PARSER_PREFIXES = (
 )
 _LEGACY_PARSER = re.compile(r"^legacy-parser-sha256:[0-9a-f]{64}$")
 _HEX_KEY = re.compile(r"^[0-9a-f]{32,128}$")
+_FACT_ID = re.compile(r"^[0-9a-f]{64}$")
 _LEDGER_SCHEMA = """
 CREATE TABLE IF NOT EXISTS projection_ledger (
     event_key BLOB PRIMARY KEY CHECK(length(event_key) BETWEEN 16 AND 64),
@@ -291,6 +293,12 @@ def _sanitize_attributes(raw: object) -> dict[str, Any]:
             if hex_key and not _HEX_KEY.fullmatch(hex_key):
                 raise BridgeError("root_offer_event_key_invalid")
             sanitized[name] = hex_key
+            continue
+        if name == "root_offer_fact_id":
+            fact_id = str(value or "").strip().lower()
+            if fact_id and not _FACT_ID.fullmatch(fact_id):
+                raise BridgeError("root_offer_fact_id_invalid")
+            sanitized[name] = fact_id
             continue
         sanitized[name] = value
     return sanitized
@@ -692,6 +700,7 @@ def project_shadow_to_legacy_market(
     sources: Iterable[str] = PRIVATE_SOURCES,
     cutoff_utc: str = AUTHORIZED_CUTOFF_UTC,
     dry_run: bool = False,
+    force_full_reconcile: bool = False,
 ) -> dict[str, Any]:
     selected_sources = tuple(sorted({str(item).strip().upper() for item in sources}))
     unknown = [item for item in selected_sources if item not in MARKET_BRIDGE_SOURCES]
@@ -717,9 +726,12 @@ def project_shadow_to_legacy_market(
                 selected_sources,
             )
         }
-        since_utc, full_reconcile = _checkpoint_since(
-            dest_conn, selected_sources, cutoff_utc
-        )
+        if force_full_reconcile:
+            since_utc, full_reconcile = None, True
+        else:
+            since_utc, full_reconcile = _checkpoint_since(
+                dest_conn, selected_sources, cutoff_utc
+            )
         hot = _load_rows(
             source_conn,
             selected_sources,

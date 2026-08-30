@@ -19,7 +19,12 @@ from core.market_intelligence.private_coin_processor import (
     process_coin_spool_cycle,
 )
 from core.market_intelligence.capture_event_adapter import initialize_capture_adapter
+from core.market_intelligence.coin_group_feedback import (
+    load_coin_group_parser_feedback,
+    record_coin_group_parser_feedback,
+)
 from core.market_intelligence.coin_group_staging import connect_coin_group_staging
+from core.market_intelligence.market_contracts import derive_event_key
 
 
 def event(
@@ -276,6 +281,69 @@ class MarketPipelineStage5CoinProcessorTests(unittest.TestCase):
                     CoinProcessorError, "causal_inputs_required"
                 ):
                     _paths(mode="live", state_directory=root / "state")
+
+    def test_expired_raw_exact_review_projects_and_marks_feedback_applied(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = self._fixture(root)
+            record = event(
+                18,
+                group=1,
+                message_id=18,
+                text="ف 190000 5تا",
+                sender="a" * 16,
+                second=0,
+            )
+            (paths.spool_directory / "events-2026-08-24.jsonl").write_text(
+                json.dumps(record, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            process_coin_spool_cycle(
+                paths=paths,
+                mode="fixture",
+                now_utc="2026-08-24T10:02:00Z",
+            )
+            event_key = derive_event_key("coin-group-offer-v1", 1, 18, 0)
+            feedback_path = root / "feedback.sqlite3"
+            review = record_coin_group_parser_feedback(
+                feedback_path,
+                event_key=event_key,
+                event_type="OFFER",
+                group_number=1,
+                source_event_time_utc="2026-08-24T10:00:00Z",
+                ambiguous_fields=["commodity"],
+                event_confirmed=True,
+                commodity_code="IMAM",
+                side="SELL",
+                price_project_thousand_toman=190_000,
+                quantity=5,
+                settlement_term="TOMORROW",
+                trade_form="PHYSICAL",
+                is_conditional=False,
+                reviewer="operator",
+                reviewed_at_utc="2026-08-28T10:00:00Z",
+            )
+            self.assertEqual(review.applied_revision, 0)
+            paths = replace(paths, feedback_database=feedback_path)
+            report = process_coin_spool_cycle(
+                paths=paths,
+                mode="fixture",
+                now_utc="2026-08-28T10:01:00Z",
+            )
+            self.assertEqual(report["feedback_reviews_projected"], 1)
+            self.assertEqual(report["feedback_reviews_marked_applied"], 1)
+            applied = load_coin_group_parser_feedback(feedback_path)[event_key]
+            self.assertEqual(applied.applied_revision, applied.review_revision)
+            market = sqlite3.connect(paths.market_database)
+            try:
+                row = market.execute(
+                    "SELECT instrument,quality_state,available_at_utc "
+                    "FROM market_observations WHERE event_key=?",
+                    (event_key,),
+                ).fetchone()
+            finally:
+                market.close()
+            self.assertEqual(row, ("COIN_IMAM", "ELIGIBLE", "2026-08-28T10:00:00Z"))
 
     def test_invalid_sibling_is_quarantined_without_payload_persistence(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

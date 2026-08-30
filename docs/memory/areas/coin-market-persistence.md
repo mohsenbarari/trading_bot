@@ -4,7 +4,7 @@
 - Melted price/quantity are immutable; outcome/executed/remaining stay separate; no `final_price/final_quantity`.
 - Facts use mTLS/HMAC, no PII. PostgreSQL Decimal/UTC/availability+outbox are authority. Raw=3d, quarantine=14d, ACKed=7d behind checkpoint; identity permanent.
 - Docker is commit-bound; state/secrets/locks isolated. Bot ships pinned artifact; web never builds.
-- Capture: per-account FULL/fsync SQLite, 3d raw, 30m channel/6h group+2h ancestors, one owner. G1/G2+three melted sources persist. Event 2.1 has actor; old null identity is irrecoverable.
+- Capture: per-account FULL/fsync SQLite, raw=3d, bounded context, one owner. G1/G2+three melted sources persist. Event 2.1 has actor; old null identity is irrecoverable.
 - Transport: logical/delivery sequence, atomic outbox, contiguous ACK, bounded repair. Redelivery allowed; duplicate apply forbidden. Product reads `estimator_snapshot_web_view/1.0`; health binds receipt/outbox/view.
 - History import is ordered/idempotent with quarantine; web encrypts raw/actors, bot gets facts. Legacy IDs negative; Primary collisions fail; approval required.
 - Parity freezes owner prefix; replay cannot replace live gates.
@@ -16,4 +16,4 @@
 - Release binds image/env to SHA/tree/signature/content-ID and preflights disk/paths/secrets.
 - Archive migration: root-only `pg_dump -Fc`, offline restore, verified copy, two idempotent passes; reject partial/unversioned.
 - Receiver-first. Pre-`PRIMARY_COMMITTED`: restore exact old containers/markers. Post-commit: never restore old runtime; CAS Product to prior `LEGACY` bytes; retain PRIVATE_PRIMARY capture; never delete state.
-- 2026-08-29: Shadow→Legacy bridge is one-way into current estimator DBs. Reuse existing writer locks; never hold both. Old group/gold timers stopped, not deleted. Rollback deactivates ledger rows only.
+- 2026-08-29/30: Shadow→Legacy is one-way under existing locks. Historical reviews require exact-key projection, parser ≤96, `root_offer_fact_id`, and full reconcile; 120s misses old trades. Product stays `LEGACY`; calibration≠cutover.

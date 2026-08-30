@@ -60,6 +60,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--conversation-lock", type=Path, required=True)
     parser.add_argument("--lock-timeout-seconds", type=int, default=300)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--full-reconcile",
+        action="store_true",
+        help="Reconcile the complete authorized source window instead of the incremental overlap.",
+    )
     parser.add_argument("--skip-quick-check", action="store_true")
     return parser
 
@@ -134,6 +139,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             sources=MARKET_BRIDGE_SOURCES,
             cutoff_utc=args.cutoff_utc,
             dry_run=args.dry_run,
+            force_full_reconcile=args.full_reconcile,
         )
     finally:
         market_lock.close()

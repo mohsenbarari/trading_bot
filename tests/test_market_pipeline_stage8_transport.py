@@ -523,6 +523,20 @@ class Stage8TransportTests(unittest.TestCase):
             )
             market.commit()
             self.assertEqual(_pending_export_rows(market, max_rows=10), [])
+            forced = _pending_export_rows(
+                market,
+                max_rows=10,
+                force_event_keys=(event_key,),
+            )
+            self.assertEqual([bytes(row["event_key"]) for row in forced], [event_key])
+            self.assertEqual(
+                _pending_export_rows(
+                    market,
+                    max_rows=10,
+                    force_event_keys=(),
+                ),
+                [],
+            )
             market.close()
 
     def test_sparse_review_trade_payload_hashes_as_validated_contract(self):
