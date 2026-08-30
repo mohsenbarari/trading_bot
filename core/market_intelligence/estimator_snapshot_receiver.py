@@ -1710,6 +1710,58 @@ def reconcile_snapshot_publication_outbox(
                 backup.close()
 
 
+def retire_superseded_snapshot_reservations(
+    connection: sqlite3.Connection,
+) -> int:
+    """Remove only abandoned reservations superseded by durable publication.
+
+    A failure between monotonic reservation and publication intent can leave a
+    receipt that the independently advancing sender will never retry.  It is
+    safe to retire only when the row has no outbox intent and a strictly newer
+    receipt in the same lane has both been published and had its event
+    delivered.  The current fence and every recoverable publication intent
+    remain untouched.
+    """
+
+    rowids = [
+        int(row[0])
+        for row in connection.execute(
+            "SELECT receipt.rowid FROM estimator_snapshot_receipts AS receipt "
+            "WHERE receipt.published_at_utc IS NULL "
+            "AND NOT EXISTS(SELECT 1 FROM estimator_snapshot_publication_outbox AS intent "
+            "WHERE intent.feed_mode=receipt.feed_mode "
+            "AND intent.snapshot_version=receipt.snapshot_version "
+            "AND intent.snapshot_id=receipt.snapshot_id) "
+            "AND EXISTS(SELECT 1 FROM estimator_snapshot_receipts AS newer "
+            "JOIN estimator_snapshot_publication_outbox AS delivered "
+            "ON delivered.feed_mode=newer.feed_mode "
+            "AND delivered.snapshot_version=newer.snapshot_version "
+            "AND delivered.snapshot_id=newer.snapshot_id "
+            "WHERE newer.feed_mode=receipt.feed_mode "
+            "AND newer.snapshot_version>receipt.snapshot_version "
+            "AND newer.published_at_utc IS NOT NULL "
+            "AND delivered.delivered_at_utc IS NOT NULL) "
+            "ORDER BY receipt.rowid"
+        )
+    ]
+    changed = 0
+    for offset in range(0, len(rowids), SNAPSHOT_COMPACTION_BATCH_SIZE):
+        batch = rowids[offset : offset + SNAPSHOT_COMPACTION_BATCH_SIZE]
+        connection.execute("BEGIN IMMEDIATE")
+        before = connection.total_changes
+        try:
+            connection.executemany(
+                "DELETE FROM estimator_snapshot_receipts WHERE rowid=?",
+                ((rowid,) for rowid in batch),
+            )
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+        changed += connection.total_changes - before
+    return max(0, int(changed))
+
+
 def compact_snapshot_receiver(
     connection: sqlite3.Connection,
     *,
@@ -1770,25 +1822,8 @@ def compact_snapshot_receiver(
         (operational_cutoff,),
         "DELETE FROM estimator_snapshot_rejections WHERE rowid=?",
     )
-    superseded_pending_receipts = mutate_in_batches(
-        "SELECT receipt.rowid FROM estimator_snapshot_receipts AS receipt "
-        "WHERE receipt.published_at_utc IS NULL "
-        "AND NOT EXISTS(SELECT 1 FROM estimator_snapshot_publication_outbox AS intent "
-        "WHERE intent.feed_mode=receipt.feed_mode "
-        "AND intent.snapshot_version=receipt.snapshot_version "
-        "AND intent.snapshot_id=receipt.snapshot_id) "
-        "AND EXISTS(SELECT 1 FROM estimator_snapshot_receipts AS newer "
-        "JOIN estimator_snapshot_publication_outbox AS delivered "
-        "ON delivered.feed_mode=newer.feed_mode "
-        "AND delivered.snapshot_version=newer.snapshot_version "
-        "AND delivered.snapshot_id=newer.snapshot_id "
-        "WHERE newer.feed_mode=receipt.feed_mode "
-        "AND newer.snapshot_version>receipt.snapshot_version "
-        "AND newer.published_at_utc IS NOT NULL "
-        "AND delivered.delivered_at_utc IS NOT NULL) "
-        "ORDER BY receipt.rowid",
-        (),
-        "DELETE FROM estimator_snapshot_receipts WHERE rowid=?",
+    superseded_pending_receipts = retire_superseded_snapshot_reservations(
+        connection
     )
     return {
         "payloads_redacted": max(0, int(payloads)),
@@ -1956,6 +1991,7 @@ __all__ = [
     "estimator_snapshot_publication_event_id",
     "inspect_snapshot_publication_reconciliation_recovery",
     "reconcile_snapshot_publication_outbox",
+    "retire_superseded_snapshot_reservations",
     "update_prediction_ledger",
     "read_web_snapshot_view",
     "read_published_web_snapshot_view",
