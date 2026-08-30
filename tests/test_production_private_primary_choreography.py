@@ -108,11 +108,8 @@ def _arguments(
         values.extend(
             [
                 "--env-file",
-                str(
-                    Path(
-                        f"/srv/trading-bot/market-pipeline-releases/{release_sha}/web-new.env"
-                    )
-                ),
+                "/srv/trading-bot/runtime/web-old.env",
+                "--bluegreen-source-env",
                 "--backup-dir",
                 str(root / "web-backup"),
                 "--receipt",
@@ -150,11 +147,7 @@ def _arguments(
                     )
                 ),
                 "--backup-env-file",
-                str(
-                    Path(
-                        f"/srv/trading-bot/market-pipeline-releases/{release_sha}/web-new.env"
-                    )
-                ),
+                "/srv/trading-bot/runtime/web-old.env",
                 "--release-sha",
                 release_sha,
                 "--release-tree",

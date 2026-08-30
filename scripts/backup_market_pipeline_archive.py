@@ -136,19 +136,33 @@ def _run_text(arguments: Sequence[str], *, label: str) -> str:
 
 
 def validate_release_env(
-    env_file: Path, *, release_sha: str, image_id: str
+    env_file: Path,
+    *,
+    release_sha: str,
+    image_id: str,
+    allow_target_identity_mismatch: bool = False,
 ) -> dict[str, str]:
     values = parse_env(env_file, secure_input=True)
     source_values = {key: value for key, value in values.items() if key not in DYNAMIC_VALUES}
     validate_source("web", source_values)
     expected = {
-        "MARKET_PIPELINE_RELEASE_SHA": release_sha,
-        "MARKET_PIPELINE_IMAGE": image_id,
         "MARKET_PIPELINE_MODE": "live",
         "MARKET_PIPELINE_FEED_MODE": "PRIVATE_SHADOW",
         "MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY": "0",
         "MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE": "PRIVATE_SHADOW",
     }
+    if not allow_target_identity_mismatch:
+        expected.update(
+            {
+                "MARKET_PIPELINE_RELEASE_SHA": release_sha,
+                "MARKET_PIPELINE_IMAGE": image_id,
+            }
+        )
+    elif (
+        not RELEASE_SHA.fullmatch(values.get("MARKET_PIPELINE_RELEASE_SHA", ""))
+        or not IMAGE_ID.fullmatch(values.get("MARKET_PIPELINE_IMAGE", ""))
+    ):
+        raise BackupError("backup_source_release_identity_invalid")
     if any(values.get(key) != value for key, value in expected.items()):
         raise BackupError("backup_release_env_identity_mismatch")
     project = values.get("MARKET_PIPELINE_PROJECT_NAME", "")
@@ -912,8 +926,14 @@ def create_backup(
     image_input_signature: str,
     refresh_complete: bool = False,
     allow_running_writers: bool = False,
+    allow_target_identity_mismatch: bool = False,
 ) -> dict[str, Any]:
-    values = validate_release_env(env_file, release_sha=release_sha, image_id=image_id)
+    values = validate_release_env(
+        env_file,
+        release_sha=release_sha,
+        image_id=image_id,
+        allow_target_identity_mismatch=allow_target_identity_mismatch,
+    )
     require_quiesce = not allow_running_writers
     root = _secure_directory(backup_dir, create=True)
     if receipt.parent != root or receipt.name != "market-pipeline-backup-receipt.json":
@@ -1128,8 +1148,14 @@ def verify_receipt(
     image_input_signature: str,
     maximum_age_seconds: int | None,
     now: datetime | None = None,
+    allow_target_identity_mismatch: bool = False,
 ) -> dict[str, Any]:
-    values = validate_release_env(env_file, release_sha=release_sha, image_id=image_id)
+    values = validate_release_env(
+        env_file,
+        release_sha=release_sha,
+        image_id=image_id,
+        allow_target_identity_mismatch=allow_target_identity_mismatch,
+    )
     _secure_regular(receipt)
     _secure_directory(receipt.parent, create=False)
     try:
@@ -1305,6 +1331,7 @@ def build_parser() -> argparse.ArgumentParser:
         else:
             command.add_argument("--maximum-age-seconds", type=int, default=3600)
             command.add_argument("--allow-stale", action="store_true")
+        command.add_argument("--bluegreen-source-env", action="store_true")
     return parser
 
 
@@ -1326,6 +1353,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "release_tree": args.release_tree,
             "image_id": args.image_id,
             "image_input_signature": args.image_input_signature,
+            "allow_target_identity_mismatch": args.bluegreen_source_env,
         }
         if args.command == "create":
             expected_confirm = (

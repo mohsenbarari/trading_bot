@@ -966,6 +966,7 @@ def quiesce_database(
             release_tree=release_tree,
             image_id=image_id,
             image_input_signature=image_input_signature,
+            allow_target_identity_mismatch=True,
             maximum_age_seconds=(
                 None
                 if payload["status"]

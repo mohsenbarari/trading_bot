@@ -492,7 +492,10 @@ def run_migration(
             env_file, release_sha=release_sha, image_id=image_id
         )
         source_values = backup.validate_release_env(
-            backup_env_file, release_sha=release_sha, image_id=image_id
+            backup_env_file,
+            release_sha=release_sha,
+            image_id=image_id,
+            allow_target_identity_mismatch=True,
         )
         if (
             source_values["MARKET_PIPELINE_PROJECT_NAME"]
@@ -525,6 +528,7 @@ def run_migration(
         release_tree=release_tree,
         image_id=image_id,
         image_input_signature=image_input_signature,
+        allow_target_identity_mismatch=bluegreen,
         # Freshness is a pre-PREPARED admission gate.  Once the exact journal
         # exists, retries after a kill or lost SSH session must continue from
         # the immutable bound backup even if wall-clock time crossed the

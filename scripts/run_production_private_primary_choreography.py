@@ -1277,11 +1277,22 @@ def _validate_plan(
                     != role_env_bindings[role]["old_path"]
                 ):
                     raise ChoreographyError("plan_role_env_binding_invalid")
-            if tool in {"backup_market_pipeline_archive.py", "migrate_market_pipeline_archive.py"}:
-                if _option(arguments, "--env-file") != role_env_bindings["web"]["new_path"]:
+            if tool == "backup_market_pipeline_archive.py":
+                if (
+                    _option(arguments, "--env-file")
+                    != role_env_bindings["web"]["old_path"]
+                    or "--bluegreen-source-env" not in arguments
+                    or _option(arguments, "--backup-env-file") is not None
+                ):
                     raise ChoreographyError("plan_role_env_binding_invalid")
-                backup_env = _option(arguments, "--backup-env-file")
-                if backup_env is not None and backup_env != role_env_bindings["web"]["new_path"]:
+            if tool == "migrate_market_pipeline_archive.py":
+                if (
+                    _option(arguments, "--env-file")
+                    != role_env_bindings["web"]["new_path"]
+                    or _option(arguments, "--backup-env-file")
+                    != role_env_bindings["web"]["old_path"]
+                    or "--bluegreen-source-env" in arguments
+                ):
                     raise ChoreographyError("plan_role_env_binding_invalid")
             if tool == "rollout_market_pipeline_shadow.py":
                 assert role in {"bot", "web"}

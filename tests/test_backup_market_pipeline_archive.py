@@ -442,6 +442,30 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
                 self.env_file, release_sha=RELEASE_SHA, image_id=IMAGE_ID
             )
 
+    def test_bluegreen_source_env_keeps_shadow_identity_but_binds_target_receipt(self) -> None:
+        source_release = "e" * 40
+        source_image = "sha256:" + "f" * 64
+        values = dict(self.values)
+        values["MARKET_PIPELINE_RELEASE_SHA"] = source_release
+        values["MARKET_PIPELINE_IMAGE"] = source_image
+        _write_env(self.env_file, values)
+
+        observed = backup.validate_release_env(
+            self.env_file,
+            release_sha=RELEASE_SHA,
+            image_id=IMAGE_ID,
+            allow_target_identity_mismatch=True,
+        )
+
+        self.assertEqual(observed["MARKET_PIPELINE_RELEASE_SHA"], source_release)
+        self.assertEqual(observed["MARKET_PIPELINE_IMAGE"], source_image)
+        with self.assertRaisesRegex(backup.BackupError, "identity_mismatch"):
+            backup.validate_release_env(
+                self.env_file,
+                release_sha=RELEASE_SHA,
+                image_id=IMAGE_ID,
+            )
+
     def test_receipt_and_backup_must_be_isolated_from_database_root(self) -> None:
         with self.assertRaisesRegex(backup.BackupError, "destination_invalid"):
             backup.create_backup(

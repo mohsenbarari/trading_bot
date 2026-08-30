@@ -526,6 +526,27 @@ def test_generated_plan_passes_controller_structural_validator(
     assert len(validated[5]) == 12
 
 
+def test_backup_uses_old_shadow_env_and_migration_uses_primary_target(
+    tmp_path: Path,
+) -> None:
+    args, files = _fixture(tmp_path)
+    plan, _receipt = builder.build(args)
+    backup_phase = next(
+        phase for phase in plan["phases"] if phase["id"] == "backup_restore_offhost"
+    )
+    for command in backup_phase["commands"][:2]:
+        arguments = command["arguments"]
+        assert _option(arguments, "--env-file") == args.remote_web_old_env
+        assert "--bluegreen-source-env" in arguments
+    migration_phase = next(
+        phase for phase in plan["phases"] if phase["id"] == "migration"
+    )
+    arguments = migration_phase["commands"][0]["arguments"]
+    assert _option(arguments, "--env-file") == args.remote_web_env
+    assert _option(arguments, "--backup-env-file") == args.remote_web_old_env
+    assert _digest(files["web_old_env"]) == plan["role_env_bindings"]["web"]["old_sha256"]
+
+
 def test_every_release_tool_argument_vector_matches_its_parser(tmp_path: Path) -> None:
     args, _files = _fixture(tmp_path)
     plan, _receipt = builder.build(args)

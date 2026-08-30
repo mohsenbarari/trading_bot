@@ -629,7 +629,7 @@ def _build_commands(
         _command("local", remote_root, "upgrade_market_pipeline_bluegreen.py", ["quiesce-workload", "--role", "bot", "--release-sha", sha, "--journal", bot_bg, "--confirm", "upgrade-market-pipeline-bluegreen"]),
     ], [_evidence("web", web_bg, "market_pipeline_bluegreen_upgrade/1.0", ["workload_quiesced"]), _evidence("local", bot_bg, "market_pipeline_bluegreen_upgrade/1.0", ["workload_quiesced"])]))
 
-    backup_common = ["--env-file", str(remote_web_env), "--receipt", backup_receipt, "--release-sha", sha, "--release-tree", tree, "--image-id", market_images["web"], "--image-input-signature", market_signature]
+    backup_common = ["--env-file", str(remote_web_old_env), "--receipt", backup_receipt, "--release-sha", sha, "--release-tree", tree, "--image-id", market_images["web"], "--image-input-signature", market_signature, "--bluegreen-source-env"]
     phases.append(_phase(PHASES[1], [
         _command("web", remote_root, "backup_market_pipeline_archive.py", ["create", *backup_common, "--backup-dir", str(web_backup_root), "--confirm", "create-production-market-pipeline-archive-backup"]),
         _command("web", remote_root, "backup_market_pipeline_archive.py", ["verify", *backup_common, "--maximum-age-seconds", "3600"]),
@@ -642,7 +642,7 @@ def _build_commands(
     ], [_evidence("web", web_bg, "market_pipeline_bluegreen_upgrade/1.0", ["database_quiesced"])]))
 
     phases.append(_phase(PHASES[3], [
-        _command("web", remote_root, "migrate_market_pipeline_archive.py", ["--release-root", str(remote_root), "--env-file", str(remote_web_env), "--backup-env-file", str(remote_web_env), "--backup-receipt", backup_receipt, "--release-sha", sha, "--release-tree", tree, "--image-id", market_images["web"], "--image-input-signature", market_signature, "--host-preflight-receipt-sha256", web_preflight_digest, "--backup-maximum-age-seconds", "3600", "--journal", migration_journal, "--receipt", migration_receipt, "--confirm", "run-production-market-pipeline-archive-migration"]),
+        _command("web", remote_root, "migrate_market_pipeline_archive.py", ["--release-root", str(remote_root), "--env-file", str(remote_web_env), "--backup-env-file", str(remote_web_old_env), "--backup-receipt", backup_receipt, "--release-sha", sha, "--release-tree", tree, "--image-id", market_images["web"], "--image-input-signature", market_signature, "--host-preflight-receipt-sha256", web_preflight_digest, "--backup-maximum-age-seconds", "3600", "--journal", migration_journal, "--receipt", migration_receipt, "--confirm", "run-production-market-pipeline-archive-migration"]),
     ], [_evidence("web", migration_receipt, "market_pipeline_migration_receipt/1.0", ["PASS"])]))
 
     starts = (
