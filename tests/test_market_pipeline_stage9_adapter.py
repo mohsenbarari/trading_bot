@@ -116,6 +116,25 @@ class Stage9AdapterTests(unittest.TestCase):
         status, response = apply_fact_batch(self.receiver, batch)
         self.assertEqual((status, response.get("status")), (200, "ACK"))
 
+    def test_projection_event_key_lookup_has_a_durable_index(self):
+        indexes = {
+            str(row[1])
+            for row in self.market.execute(
+                "PRAGMA index_list(private_fact_adapter_projections)"
+            )
+        }
+        self.assertIn(
+            "private_fact_adapter_projections_event_key_idx",
+            indexes,
+        )
+        columns = [
+            str(row[2])
+            for row in self.market.execute(
+                "PRAGMA index_info(private_fact_adapter_projections_event_key_idx)"
+            )
+        ]
+        self.assertEqual(columns, ["event_key"])
+
     def test_compaction_watermark_is_durable_and_never_regresses(self):
         path = Path(self.directory.name) / "adapter-watermark.json"
         checkpoints = {"market.fact.coin.group.1": 2}

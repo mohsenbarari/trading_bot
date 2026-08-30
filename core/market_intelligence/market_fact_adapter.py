@@ -252,6 +252,8 @@ def initialize_adapter_store(connection: sqlite3.Connection) -> None:
             updated_at_utc TEXT NOT NULL,
             UNIQUE(stream_id,source_sequence)
         );
+        CREATE INDEX IF NOT EXISTS private_fact_adapter_projections_event_key_idx
+        ON private_fact_adapter_projections(event_key);
         CREATE TABLE IF NOT EXISTS private_fact_adapter_projection_revisions (
             fact_id TEXT NOT NULL,
             fact_revision INTEGER NOT NULL CHECK(fact_revision>0),
