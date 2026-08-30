@@ -727,6 +727,23 @@ def test_official_approved_secure_root_is_accepted_without_production_token() ->
     assert "secure_root != official_secure_root" in source
 
 
+def test_collector_handoff_journals_use_the_tool_approved_root(
+    tmp_path: Path,
+) -> None:
+    args, _files = _fixture(tmp_path)
+    plan, _receipt = builder.build(args)
+    phase = next(row for row in plan["phases"] if row["id"] == "legacy_quiesce")
+    paths = {
+        command["arguments"][command["arguments"].index("--journal") + 1]
+        for command in phase["commands"]
+        if command["tool"] == "quiesce_production_legacy_market_collectors.py"
+    }
+    assert paths == {
+        "/root/secure-envs/trading-bot/market-pipeline-cutover/web-legacy-handoff.json",
+        "/root/secure-envs/trading-bot/market-pipeline-cutover/bot-legacy-handoff.json",
+    }
+
+
 def test_official_builder_receipt_is_accepted_by_controller_validate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

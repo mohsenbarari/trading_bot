@@ -583,12 +583,16 @@ def _build_commands(
     deployment_manifest_digest: str, release_checkout: Path,
     transaction_id: str,
 ) -> list[dict[str, object]]:
+    # Collector handoff journals are operational authority records, not
+    # generic release-control artifacts. The handoff tool deliberately
+    # accepts only this dedicated, owner-controlled root.
+    handoff_root = Path("/root/secure-envs/trading-bot/market-pipeline-cutover")
     web_bg = _path(secure_root, "web-bluegreen.json")
     bot_bg = _path(secure_root, "bot-bluegreen.json")
     web_rollout = _path(secure_root, "web-rollout.json")
     bot_rollout = _path(secure_root, "bot-rollout.json")
-    web_legacy = _path(secure_root, "web-legacy-handoff.json")
-    bot_legacy = _path(secure_root, "bot-legacy-handoff.json")
+    web_legacy = _path(handoff_root, "web-legacy-handoff.json")
+    bot_legacy = _path(handoff_root, "bot-legacy-handoff.json")
     backup_receipt = _path(web_backup_root, "market-pipeline-backup-receipt.json")
     offhost_receipt_web = _path(secure_root, "web-offhost-copy-receipt.json")
     migration_journal = _path(secure_root, "web-migration-journal.json")
