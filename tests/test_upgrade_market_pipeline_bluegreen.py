@@ -412,6 +412,205 @@ class MarketPipelineBlueGreenUpgradeTests(unittest.TestCase):
                     new_project=NEW_PROJECT,
                 )
 
+    def _primary_rollout_receipt(
+        self, *, role: str, services: set[str]
+    ) -> tuple[Path, str, dict[str, dict[str, object]]]:
+        rows: dict[str, dict[str, object]] = {}
+        journal_rows: list[dict[str, object]] = []
+        for service in sorted(services):
+            identity = self.identity(service)
+            identity["image_id"] = IMAGE
+            identity["release_sha"] = RELEASE
+            rows[service] = identity
+            journal_rows.append(
+                {
+                    "container_id": identity["container_id"],
+                    "created_by_release": True,
+                    "service": service,
+                    "state": "healthy",
+                }
+            )
+        path = self.root / f"{role}-rollout.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "schema": upgrade.ROLLOUT_SCHEMA,
+                    "status": "PASS",
+                    "role": role,
+                    "release_sha": RELEASE,
+                    "project": NEW_PROJECT,
+                    "image_id": IMAGE,
+                    "env_sha256": sha256(self.new_env.read_bytes()).hexdigest(),
+                    "feed_mode": "PRIVATE_PRIMARY",
+                    "private_shadow_only": False,
+                    "capture_services_started": False,
+                    "product_authority_changed": False,
+                    "rollback_state_deleted": False,
+                    "services": journal_rows,
+                    "secrets_disclosed": False,
+                },
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        path.chmod(0o600)
+        return path, sha256(path.read_bytes()).hexdigest(), rows
+
+    def test_adopt_primary_base_binds_running_bot_rollout_without_mutation(
+        self,
+    ) -> None:
+        services = set(upgrade.ROLE_SERVICES["bot"])
+        receipt, digest, rows = self._primary_rollout_receipt(
+            role="bot", services=services
+        )
+
+        def ids(project, service, *, running=False):
+            if project == OLD_PROJECT:
+                return []
+            if project == NEW_PROJECT and service in rows:
+                return [str(rows[service]["container_id"])]
+            return []
+
+        with (
+            patch.object(
+                upgrade,
+                "_project_services",
+                side_effect=lambda project: services if project == NEW_PROJECT else set(),
+            ),
+            patch.object(upgrade, "_ids", side_effect=ids),
+            patch.object(
+                upgrade,
+                "_identity",
+                side_effect=lambda _id, project, service: rows[service],
+            ),
+            patch.object(
+                upgrade,
+                "_release_root_binding",
+                return_value=self.release_binding(),
+            ),
+        ):
+            payload = upgrade.adopt_primary_base(
+                role="bot",
+                old_env=self.old_env,
+                new_env=self.new_env,
+                journal=self.journal,
+                release_sha=RELEASE,
+                release_tree=RELEASE_TREE,
+                release_root=self.release_root,
+                old_project=OLD_PROJECT,
+                new_project=NEW_PROJECT,
+                rollout_journal=receipt,
+                expected_rollout_journal_sha256=digest,
+            )
+
+        self.assertEqual(payload["status"], "workload_quiesced")
+        self.assertTrue(payload["adopted_primary_base"])
+        self.assertEqual(payload["services"], [])
+        self.assertFalse(payload["product_authority_changed"])
+        self.assertFalse(payload["state_deleted"])
+
+    def test_adopt_primary_base_binds_web_markers_and_database(self) -> None:
+        application_services = set(upgrade.WEB_PRIMARY_BASE) - {
+            "market-database"
+        }
+        receipt, digest, rows = self._primary_rollout_receipt(
+            role="web", services=application_services
+        )
+        marker_paths: dict[str, Path] = {}
+        marker_values: dict[str, dict[str, object]] = {}
+        for role, account in (
+            ("market-capture-account1", "account1"),
+            ("market-capture-account2", "account2"),
+        ):
+            path = self.root / account / "authority-container.json"
+            path.parent.mkdir()
+            value = {
+                "contract": upgrade.AUTHORITY_CONTRACT,
+                "authority": "container",
+                "role": role,
+                "release_sha": "d" * 40,
+            }
+            path.write_text(json.dumps(value), encoding="utf-8")
+            path.chmod(0o600)
+            marker_paths[role] = path
+            marker_values[role] = value
+
+        def ids(project, service, *, running=False):
+            if project == OLD_PROJECT:
+                return []
+            if project == NEW_PROJECT and service in rows:
+                return [str(rows[service]["container_id"])]
+            return []
+
+        with (
+            patch.object(
+                upgrade,
+                "_project_services",
+                side_effect=lambda project: set(upgrade.WEB_PRIMARY_BASE)
+                if project == NEW_PROJECT
+                else set(),
+            ),
+            patch.object(upgrade, "_ids", side_effect=ids),
+            patch.object(
+                upgrade,
+                "_identity",
+                side_effect=lambda _id, project, service: rows[service],
+            ),
+            patch.object(
+                upgrade,
+                "_release_root_binding",
+                return_value=self.release_binding(),
+            ),
+            patch.object(upgrade, "_marker_paths", return_value=marker_paths),
+            patch.object(
+                upgrade,
+                "_load_marker",
+                side_effect=lambda path, role, release_sha=None: marker_values[role],
+            ),
+            patch.object(upgrade, "_new_database_identity", return_value={}),
+        ):
+            payload = upgrade.adopt_primary_base(
+                role="web",
+                old_env=self.old_env,
+                new_env=self.new_env,
+                journal=self.journal,
+                release_sha=RELEASE,
+                release_tree=RELEASE_TREE,
+                release_root=self.release_root,
+                old_project=OLD_PROJECT,
+                new_project=NEW_PROJECT,
+                rollout_journal=receipt,
+                expected_rollout_journal_sha256=digest,
+            )
+
+        self.assertEqual(payload["status"], "database_quiesced")
+        self.assertEqual(set(payload["markers"]), set(marker_paths))
+        self.assertEqual(
+            payload["adoption"]["rollout_journal_sha256"], digest
+        )
+
+    def test_adopt_primary_base_rejects_rollout_digest_drift(self) -> None:
+        services = set(upgrade.ROLE_SERVICES["bot"])
+        receipt, _digest, _rows = self._primary_rollout_receipt(
+            role="bot", services=services
+        )
+        with self.assertRaisesRegex(
+            upgrade.UpgradeError, "adoption_rollout_invalid"
+        ):
+            upgrade.adopt_primary_base(
+                role="bot",
+                old_env=self.old_env,
+                new_env=self.new_env,
+                journal=self.journal,
+                release_sha=RELEASE,
+                release_tree=RELEASE_TREE,
+                release_root=self.release_root,
+                old_project=OLD_PROJECT,
+                new_project=NEW_PROJECT,
+                rollout_journal=receipt,
+                expected_rollout_journal_sha256="0" * 64,
+            )
+
     def test_release_root_binding_rejects_wrong_root_and_compose_tamper(self) -> None:
         binding = upgrade._release_root_binding(
             self.release_root,

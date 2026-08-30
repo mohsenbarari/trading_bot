@@ -47,6 +47,7 @@ CONFIRMATION = "upgrade-market-pipeline-bluegreen"
 SCHEMA = "market_pipeline_bluegreen_upgrade/1.0"
 LEGACY_SCHEMA = SCHEMA
 JOURNAL_CONTRACT_REVISION = 2
+ROLLOUT_SCHEMA = "market_pipeline_shadow_rollout/1.0"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^(?:sha256:)?[0-9a-f]{64}$")
 PROJECT = re.compile(r"^[a-z0-9][a-z0-9_-]{2,62}$")
@@ -735,6 +736,166 @@ def plan(
         "state_deleted": False,
         "secrets_disclosed": False,
     }
+    _atomic_json(journal, payload, exclusive=True)
+    return payload
+
+
+def adopt_primary_base(
+    *,
+    role: str,
+    old_env: Path,
+    new_env: Path,
+    journal: Path,
+    release_sha: str,
+    release_tree: str,
+    release_root: Path,
+    old_project: str,
+    new_project: str,
+    rollout_journal: Path,
+    expected_rollout_journal_sha256: str,
+) -> dict[str, Any]:
+    """Adopt an exact, already-running receiver-first PRIMARY base.
+
+    This is a narrow crash/emergency recovery seam for a release whose
+    receiver-first services were started by ``rollout_market_pipeline_shadow``
+    after the historical blue/green rollback assets had already been retired.
+    It does not start or stop a container, mutate a marker, change Product or
+    Queue authority, or waive the normal legacy-capture handoff.  The resulting
+    journal resumes at the same state reached immediately after the database
+    and receiver-first base are ready; the standard authority choreography must
+    still quiesce legacy collectors before capture services can start.
+    """
+
+    release_binding = _release_root_binding(
+        release_root, release_sha=release_sha, release_tree=release_tree
+    )
+    old_values, new_values = _validate_envs(
+        role=role,
+        old_env=old_env,
+        new_env=new_env,
+        release_sha=release_sha,
+        old_project=old_project,
+        new_project=new_project,
+    )
+    if not HEX64.fullmatch(expected_rollout_journal_sha256):
+        raise UpgradeError("upgrade_adoption_rollout_digest_invalid")
+    try:
+        rollout = json.loads(
+            _secure_read(
+                rollout_journal,
+                expected_sha256=expected_rollout_journal_sha256,
+            ).decode("utf-8")
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, UpgradeError) as exc:
+        raise UpgradeError("upgrade_adoption_rollout_invalid") from exc
+
+    expected_services = (
+        set(ROLE_SERVICES["bot"])
+        if role == "bot"
+        else set(WEB_PRIMARY_BASE) - {"market-database"}
+    )
+    rollout_rows = rollout.get("services") if isinstance(rollout, dict) else None
+    if not isinstance(rollout_rows, list):
+        raise UpgradeError("upgrade_adoption_rollout_invalid")
+    by_service = {
+        str(row.get("service")): row
+        for row in rollout_rows
+        if isinstance(row, dict) and isinstance(row.get("service"), str)
+    }
+    if (
+        rollout.get("schema") != ROLLOUT_SCHEMA
+        or rollout.get("status") != "PASS"
+        or rollout.get("role") != role
+        or rollout.get("release_sha") != release_sha
+        or rollout.get("project") != new_project
+        or rollout.get("image_id") != new_values["MARKET_PIPELINE_IMAGE"]
+        or rollout.get("env_sha256") != _sha256(new_env)
+        or rollout.get("feed_mode") != "PRIVATE_PRIMARY"
+        or rollout.get("private_shadow_only") is not False
+        or rollout.get("capture_services_started") is not False
+        or rollout.get("product_authority_changed") is not False
+        or rollout.get("rollback_state_deleted") is not False
+        or rollout.get("secrets_disclosed") is not False
+        or len(by_service) != len(rollout_rows)
+        or set(by_service) != expected_services
+    ):
+        raise UpgradeError("upgrade_adoption_rollout_invalid")
+
+    expected_inventory = (
+        set(ROLE_SERVICES["bot"]) if role == "bot" else set(WEB_PRIMARY_BASE)
+    )
+    if _project_services(new_project) != expected_inventory:
+        raise UpgradeError("upgrade_adoption_primary_inventory_invalid")
+    if any(
+        _ids(old_project, service, running=True)
+        for service in ROLE_SERVICES[role]
+    ):
+        raise UpgradeError("upgrade_adoption_old_owner_running")
+
+    payload: dict[str, Any] = {
+        "schema": SCHEMA,
+        "journal_contract_revision": JOURNAL_CONTRACT_REVISION,
+        "status": (
+            "workload_quiesced" if role == "bot" else "database_quiesced"
+        ),
+        "role": role,
+        "release_sha": release_sha,
+        **release_binding,
+        "old_project": old_project,
+        "new_project": new_project,
+        "old_env": str(old_env),
+        "new_env": str(new_env),
+        "old_env_sha256": _sha256(old_env),
+        "new_env_sha256": _sha256(new_env),
+        "new_image_id": new_values["MARKET_PIPELINE_IMAGE"],
+        # Historical blue/green containers no longer exist.  Recovery of this
+        # adopted base is owned by the exact rollout journal bound below.
+        "services": [],
+        "markers": {},
+        "marker_transition": {
+            "status": "NOT_STARTED",
+            "authorized_at_utc": None,
+            "entries": {},
+        },
+        "backup_receipt_sha256": None,
+        "source_backup_receipt_sha256": None,
+        "offhost_backup_receipt_sha256": None,
+        "offhost_backup_binding": None,
+        "new_capture_ids": {},
+        "adopted_primary_base": True,
+        "adoption": {
+            "rollout_journal": str(rollout_journal),
+            "rollout_journal_sha256": expected_rollout_journal_sha256,
+            "adopted_at_utc": datetime.now(timezone.utc).isoformat().replace(
+                "+00:00", "Z"
+            ),
+            "rollback_owner": "market_pipeline_shadow_rollout",
+        },
+        "product_authority_changed": False,
+        "state_deleted": False,
+        "secrets_disclosed": False,
+    }
+    if role == "web":
+        for marker_role, path in _marker_paths(old_values).items():
+            marker = _load_marker(path, role=marker_role)
+            payload["markers"][marker_role] = {
+                "path": str(path),
+                "payload": marker,
+                "sha256": _sha256(path),
+            }
+
+    for service in sorted(expected_services):
+        row = by_service[service]
+        current = _new_identity(payload, service)
+        if (
+            row.get("container_id") != current["container_id"]
+            or row.get("created_by_release") is not True
+            or row.get("state") != "healthy"
+        ):
+            raise UpgradeError("upgrade_adoption_rollout_identity_drift")
+    if role == "web":
+        _new_database_identity(payload)
+
     _atomic_json(journal, payload, exclusive=True)
     return payload
 
@@ -2815,7 +2976,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "command",
         choices=(
-            "plan", "quiesce-workload", "quiesce-database",
+            "plan", "adopt-primary-base", "quiesce-workload", "quiesce-database",
             "prepare-capture-authority", "authorize-captures",
             "start-captures", "verify", "rollback",
         ),
@@ -2836,6 +2997,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--image-id")
     parser.add_argument("--image-input-signature")
     parser.add_argument("--backup-maximum-age-seconds", type=int, default=3600)
+    parser.add_argument("--rollout-journal", type=Path)
+    parser.add_argument("--expected-rollout-journal-sha256")
     parser.add_argument("--web-legacy-collector-receipt", type=Path)
     parser.add_argument("--expected-web-legacy-collector-receipt-sha256")
     parser.add_argument(
@@ -2871,6 +3034,33 @@ def main(argv: Sequence[str] | None = None) -> int:
                 old_env=args.old_env, new_env=args.new_env,
                 old_project=args.old_project, new_project=args.new_project,
                 release_root=args.release_root, release_tree=args.release_tree,
+                **common,
+            )
+        elif args.command == "adopt-primary-base":
+            if not all(
+                (
+                    args.old_env,
+                    args.new_env,
+                    args.old_project,
+                    args.new_project,
+                    args.release_root,
+                    args.release_tree,
+                    args.rollout_journal,
+                    args.expected_rollout_journal_sha256,
+                )
+            ):
+                raise UpgradeError("upgrade_adoption_arguments_required")
+            result = adopt_primary_base(
+                old_env=args.old_env,
+                new_env=args.new_env,
+                old_project=args.old_project,
+                new_project=args.new_project,
+                release_root=args.release_root,
+                release_tree=args.release_tree,
+                rollout_journal=args.rollout_journal,
+                expected_rollout_journal_sha256=(
+                    args.expected_rollout_journal_sha256
+                ),
                 **common,
             )
         elif args.command == "quiesce-workload":
