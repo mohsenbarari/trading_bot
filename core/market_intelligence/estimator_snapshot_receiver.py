@@ -21,6 +21,7 @@ from .coin_rate_engine import COIN_RATE_ENGINE_VERSION
 from .private_pipeline_contracts import (
     EstimatorSnapshotV1,
     EstimatorSnapshotV2,
+    content_hash,
     estimator_snapshot_id,
 )
 
@@ -66,6 +67,28 @@ def estimator_snapshot_publication_event_id(
             "snapshot_publication_identity_invalid"
         ) from exc
     return hashlib.sha256(identity).hexdigest()
+
+
+def _legacy_estimator_snapshot_v1_id(payload: Mapping[str, object]) -> str:
+    """Reproduce the immutable identity emitted by the original V1 runtime.
+
+    V1 snapshots created before the shared ``estimator_snapshot_id`` helper
+    existed used the identity contract as the document root and deliberately
+    omitted the transport contract, snapshot id and reason codes.  Historical
+    retained receipts remain valid evidence and must be verified with that
+    exact algorithm rather than weakened or rewritten during reconciliation.
+    """
+
+    return content_hash(
+        {
+            "contract": "estimator_snapshot_identity/1.0",
+            **{
+                key: value
+                for key, value in payload.items()
+                if key not in {"contract", "snapshot_id", "reason_codes"}
+            },
+        }
+    )
 
 
 def _utc(value: datetime | None = None) -> datetime:
@@ -1069,12 +1092,16 @@ def _snapshot_publication_reconciliation_plan(
                 raise EstimatorSnapshotReceiverError(
                     "snapshot_reconciliation_receipt_payload_invalid"
                 ) from exc
+            valid_snapshot_ids = {estimator_snapshot_id(retained_snapshot)}
+            if declared_contract == "estimator_snapshot/1.0":
+                valid_snapshot_ids.add(
+                    _legacy_estimator_snapshot_v1_id(payload_value)
+                )
             if (
                 retained_snapshot.feed_mode != lane
                 or retained_snapshot.snapshot_version != version
                 or retained_snapshot.snapshot_id != snapshot_id
-                or retained_snapshot.snapshot_id
-                != estimator_snapshot_id(retained_snapshot)
+                or retained_snapshot.snapshot_id not in valid_snapshot_ids
                 or retained_snapshot.input_snapshot_hash
                 != str(row["receipt_input_snapshot_hash"])
             ):

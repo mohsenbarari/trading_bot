@@ -22,8 +22,11 @@ from core.market_intelligence.estimator_snapshot_receiver import (
     estimator_snapshot_publication_event_id,
     reconcile_snapshot_publication_outbox,
 )
-from core.market_intelligence.private_pipeline_contracts import estimator_snapshot_id
-from core.market_intelligence.private_pipeline_contracts import EstimatorSnapshotV1
+from core.market_intelligence.private_pipeline_contracts import (
+    EstimatorSnapshotV1,
+    content_hash,
+    estimator_snapshot_id,
+)
 from scripts import reconcile_estimator_snapshot_publication_outbox as operator
 from tests.test_market_private_pipeline_contracts import (
     estimator_snapshot_fixture,
@@ -63,6 +66,24 @@ def _snapshot(
         document = EstimatorSnapshotV1.model_validate(document).model_dump(mode="json")
     document.pop("snapshot_id", None)
     document["snapshot_id"] = estimator_snapshot_id(document)
+    return document
+
+
+def _legacy_v1_snapshot(lane: str, version: int) -> dict[str, object]:
+    document = EstimatorSnapshotV1.model_validate(
+        fixture("estimator_snapshot.json")
+    ).model_dump(mode="json")
+    document["feed_mode"] = lane
+    document["snapshot_version"] = version
+    identity = {
+        "contract": "estimator_snapshot_identity/1.0",
+        **{
+            key: value
+            for key, value in document.items()
+            if key not in {"contract", "snapshot_id", "reason_codes"}
+        },
+    }
+    document["snapshot_id"] = content_hash(identity)
     return document
 
 
@@ -639,13 +660,59 @@ def test_latest_historical_shadow_v1_view_can_be_reconciled_without_rewrite() ->
         root = Path(directory)
         connection = connect_snapshot_receiver(root / "receiver.sqlite")
         try:
-            original = _add_pending(
-                connection,
-                snapshot_root=root / "snapshots",
-                events_path=root / "events" / "publication.jsonl",
-                lane="PRIVATE_SHADOW",
-                version=7,
-                contract="estimator_snapshot/1.0",
+            original = _legacy_v1_snapshot("PRIVATE_SHADOW", 7)
+            snapshot_id = str(original["snapshot_id"])
+            event_id = estimator_snapshot_publication_event_id(
+                "PRIVATE_SHADOW", snapshot_id
+            )
+            connection.execute(
+                "INSERT INTO estimator_snapshot_receipts "
+                "(feed_mode,snapshot_version,snapshot_id,input_snapshot_hash,"
+                "payload_json,received_at_utc,published_at_utc) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (
+                    "PRIVATE_SHADOW",
+                    7,
+                    snapshot_id,
+                    original["input_snapshot_hash"],
+                    json.dumps(original, sort_keys=True),
+                    RECEIVED_AT,
+                    PUBLISHED_AT,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO estimator_snapshot_publication_outbox "
+                "(event_id,feed_mode,snapshot_version,snapshot_id,published_at_utc,"
+                "delivered_at_utc) VALUES(?,?,?,?,?,NULL)",
+                (event_id, "PRIVATE_SHADOW", 7, snapshot_id, PUBLISHED_AT),
+            )
+            view_path = root / "snapshots" / "latest-private-shadow.json"
+            _write_json(
+                view_path,
+                {
+                    "contract": "estimator_snapshot_web_view/1.0",
+                    "snapshot_hash": snapshot_id,
+                    "snapshot_version": 7,
+                    "feed_mode": "PRIVATE_SHADOW",
+                    "received_at_utc": RECEIVED_AT,
+                    "published_at_utc": PUBLISHED_AT,
+                    "transport_state": "FRESH",
+                    "stale_after_seconds": 30,
+                    "snapshot": original,
+                },
+            )
+            events_path = root / "events" / "publication.jsonl"
+            _write_json(
+                events_path,
+                {
+                    "contract": "estimator_snapshot_realtime_event/1.0",
+                    "event_id": event_id,
+                    "event_type": "estimator:snapshot-published",
+                    "feed_mode": "PRIVATE_SHADOW",
+                    "snapshot_hash": snapshot_id,
+                    "snapshot_version": 7,
+                    "published_at_utc": PUBLISHED_AT,
+                },
             )
             view_path = root / "snapshots" / "latest-private-shadow.json"
             view_digest = sha256(view_path.read_bytes()).hexdigest()
