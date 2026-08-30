@@ -278,6 +278,8 @@ def _database_invariants(query: Any) -> dict[str, Any]:
         label="backup_schema_catalogue",
     )
     schema_objects = query(
+        "WITH canonical_search_path AS MATERIALIZED ("
+        "SELECT set_config('search_path','pg_catalog',true) AS configured) "
         "SELECT COALESCE(json_agg(row_to_json(x) ORDER BY x.kind,x.identity)::text,'[]') "
         "FROM ("
         "SELECT 'constraint' AS kind, c.oid::regclass::text || ':' || con.conname || ':' || "
@@ -294,7 +296,7 @@ def _database_invariants(query: Any) -> dict[str, Any]:
         "WHERE n.nspname='market_data' AND NOT t.tgisinternal "
         "UNION ALL SELECT 'function', p.oid::regprocedure::text || ':' || pg_get_functiondef(p.oid) "
         "FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
-        "WHERE n.nspname='market_data') x",
+        "WHERE n.nspname='market_data') x CROSS JOIN canonical_search_path",
         label="backup_schema_objects",
     )
     return {

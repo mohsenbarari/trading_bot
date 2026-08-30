@@ -3108,6 +3108,12 @@ def _write_offhost_receipt(
     ssh_argv: Sequence[str],
 ) -> str:
     backup, backup_digest = _backup_receipt_binding(phases, ssh_argv)
+    web_new_env = _command_path(
+        phases,
+        ("upgrade_market_pipeline_bluegreen.py", "plan", "web"),
+        "--new-env",
+    )
+    web_new_env_sha256 = _digest(_remote_read(web_new_env, ssh_argv))
     (
         _source,
         _remote_artifact,
@@ -3152,7 +3158,10 @@ def _write_offhost_receipt(
         "release_tree": backup["release_tree"],
         "image_id": backup["image_id"],
         "image_input_signature": backup["image_input_signature"],
-        "web_role_env_sha256": backup["role_env_sha256"],
+        # The backup receipt is necessarily bound to the old/source env.  The
+        # off-host receipt authorizes the target blue/green runtime, so bind
+        # it to the exact new web env consumed by that runtime instead.
+        "web_role_env_sha256": web_new_env_sha256,
         "host_preflight_receipt_sha256": preflight_digest,
         "source_backup_receipt_sha256": backup_digest,
         "backup_status": "PASS",

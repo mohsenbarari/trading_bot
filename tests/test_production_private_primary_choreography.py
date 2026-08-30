@@ -1637,6 +1637,103 @@ def test_nonce_backup_name_replaces_plan_placeholders(
         ) == str(nonce_source) + ".encryption.json"
 
 
+def test_offhost_receipt_binds_target_web_env_not_backup_source_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with tempfile.TemporaryDirectory(prefix="private-primary-offhost-env-") as temporary:
+        root = Path(temporary)
+        root.chmod(0o700)
+        _plan_path, _source, document = _plan(root)
+        phases = document["phases"]
+        web_plan = next(
+            command
+            for phase in phases
+            for command in phase["commands"]
+            if controller._signature(command)
+            == ("upgrade_market_pipeline_bluegreen.py", "plan", "web")
+        )
+        new_env = root / "web-new.env"
+        new_env.write_text("TARGET=private-primary\n", encoding="utf-8")
+        new_env.chmod(0o600)
+        web_plan["arguments"] = controller._set_option(
+            web_plan["arguments"], "--new-env", str(new_env)
+        )
+
+        artifact = root / "backup.dump.enc"
+        artifact.write_bytes(b"ciphertext")
+        artifact.chmod(0o600)
+        encryption_receipt = root / "backup.dump.encryption.json"
+        plaintext = b"database-backup"
+        result = {
+            "status": "PASS",
+            "schema": "market_pipeline_backup_encryption/1.1",
+            "algorithm": "AES-256-CBC+PBKDF2-HMAC-SHA256",
+            "kdf": "PBKDF2-HMAC-SHA256",
+            "kdf_iterations": 600000,
+            "ciphertext_sha256": sha256(artifact.read_bytes()).hexdigest(),
+            "ciphertext_size_bytes": artifact.stat().st_size,
+            "plaintext_sha256": sha256(plaintext).hexdigest(),
+            "plaintext_size_bytes": len(plaintext),
+            "authentication_hmac_sha256": "a" * 64,
+            "plaintext_materialized_offhost": False,
+            "secrets_disclosed": False,
+        }
+        encryption_receipt.write_bytes(
+            controller._canonical(
+                {key: value for key, value in result.items() if key != "status"}
+            )
+        )
+        encryption_receipt.chmod(0o600)
+        backup = {
+            "created_at_utc": "2026-08-30T12:00:00Z",
+            "release_sha": document["release_sha"],
+            "release_tree": document["release_tree"],
+            "image_id": "sha256:" + "b" * 64,
+            "image_input_signature": "c" * 64,
+            "role_env_sha256": "d" * 64,
+            "backup": {
+                "path": str(root / "backup.dump"),
+                "sha256": result["plaintext_sha256"],
+                "size_bytes": result["plaintext_size_bytes"],
+            },
+        }
+        monkeypatch.setattr(
+            controller,
+            "_backup_receipt_binding",
+            lambda *_args, **_kwargs: (backup, "e" * 64),
+        )
+        monkeypatch.setattr(
+            controller,
+            "_backup_encryption_paths",
+            lambda *_args, **_kwargs: (
+                root / "backup.dump",
+                root / "remote.dump.enc",
+                root / "remote.encryption.json",
+                artifact,
+                encryption_receipt,
+            ),
+        )
+        monkeypatch.setattr(
+            controller,
+            "_remote_read",
+            lambda path, _ssh: Path(path).read_bytes(),
+        )
+        monkeypatch.setattr(
+            controller,
+            "_mirror_remote_exact",
+            lambda source, _destination, _ssh: sha256(source.read_bytes()).hexdigest(),
+        )
+
+        controller._write_offhost_receipt(
+            result=result,
+            phases=phases,
+            ssh_argv=[],
+        )
+        receipt = json.loads((root / "offhost-copy-receipt.json").read_text())
+        assert receipt["web_role_env_sha256"] == sha256(new_env.read_bytes()).hexdigest()
+        assert receipt["web_role_env_sha256"] != backup["role_env_sha256"]
+
+
 def test_interrupted_exclusive_artifact_is_adopted_without_replay() -> None:
     with tempfile.TemporaryDirectory(prefix="private-primary-adopt-") as temporary:
         root = Path(temporary)
