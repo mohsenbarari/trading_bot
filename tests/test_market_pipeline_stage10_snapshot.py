@@ -655,6 +655,63 @@ class Stage10SnapshotTests(unittest.TestCase):
             (self.web_root / "latest-private-primary.json").exists()
         )
 
+    def test_compaction_removes_only_superseded_pre_intent_reservations(self):
+        first = self._publish(
+            "2026-08-26T05:00:10Z",
+            feed_mode="PRIVATE_PRIMARY",
+        )
+        with patch.object(
+            estimator_snapshot_receiver,
+            "update_prediction_ledger",
+            side_effect=OSError("simulated_pre_intent_failure"),
+        ):
+            with self.assertRaisesRegex(OSError, "simulated_pre_intent_failure"):
+                self._apply_web(first, allow_private_primary=True)
+
+        self.assertEqual(
+            self.web_receiver.execute(
+                "SELECT COUNT(*) FROM estimator_snapshot_receipts "
+                "WHERE published_at_utc IS NULL"
+            ).fetchone()[0],
+            1,
+        )
+        self.assertEqual(
+            self.web_receiver.execute(
+                "SELECT COUNT(*) FROM estimator_snapshot_publication_outbox"
+            ).fetchone()[0],
+            0,
+        )
+        before_superseded = compact_snapshot_receiver(
+            self.web_receiver,
+            now_utc=datetime(2026, 8, 26, 5, 0, 20, tzinfo=timezone.utc),
+        )
+        self.assertEqual(
+            before_superseded["superseded_pending_receipts_deleted"], 0
+        )
+
+        second = self._publish(
+            "2026-08-26T05:00:15Z",
+            feed_mode="PRIVATE_PRIMARY",
+        )
+        self.assertEqual(
+            self._apply_web(second, allow_private_primary=True)[0],
+            200,
+        )
+        result = compact_snapshot_receiver(
+            self.web_receiver,
+            now_utc=datetime(2026, 8, 26, 5, 0, 25, tzinfo=timezone.utc),
+        )
+        metrics = snapshot_receiver_metrics(
+            self.web_receiver,
+            now_utc=datetime(2026, 8, 26, 5, 0, 25, tzinfo=timezone.utc),
+            expected_lane="PRIVATE_PRIMARY",
+            snapshot_root=self.web_root,
+        )
+
+        self.assertEqual(result["superseded_pending_receipts_deleted"], 1)
+        self.assertEqual(metrics["pending_receipts"], 0)
+        self.assertTrue(metrics["snapshot_ready"])
+
     def test_prediction_ledger_id_collision_fails_without_silent_drop(self):
         primary = EstimatorSnapshotV2.model_validate(
             self._publish(feed_mode="PRIVATE_PRIMARY")

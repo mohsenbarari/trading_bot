@@ -1770,11 +1770,34 @@ def compact_snapshot_receiver(
         (operational_cutoff,),
         "DELETE FROM estimator_snapshot_rejections WHERE rowid=?",
     )
+    superseded_pending_receipts = mutate_in_batches(
+        "SELECT receipt.rowid FROM estimator_snapshot_receipts AS receipt "
+        "WHERE receipt.published_at_utc IS NULL "
+        "AND NOT EXISTS(SELECT 1 FROM estimator_snapshot_publication_outbox AS intent "
+        "WHERE intent.feed_mode=receipt.feed_mode "
+        "AND intent.snapshot_version=receipt.snapshot_version "
+        "AND intent.snapshot_id=receipt.snapshot_id) "
+        "AND EXISTS(SELECT 1 FROM estimator_snapshot_receipts AS newer "
+        "JOIN estimator_snapshot_publication_outbox AS delivered "
+        "ON delivered.feed_mode=newer.feed_mode "
+        "AND delivered.snapshot_version=newer.snapshot_version "
+        "AND delivered.snapshot_id=newer.snapshot_id "
+        "WHERE newer.feed_mode=receipt.feed_mode "
+        "AND newer.snapshot_version>receipt.snapshot_version "
+        "AND newer.published_at_utc IS NOT NULL "
+        "AND delivered.delivered_at_utc IS NOT NULL) "
+        "ORDER BY receipt.rowid",
+        (),
+        "DELETE FROM estimator_snapshot_receipts WHERE rowid=?",
+    )
     return {
         "payloads_redacted": max(0, int(payloads)),
         "receipts_deleted": max(0, int(receipts)),
         "outbox_rows_deleted": max(0, int(outbox)),
         "rejections_deleted": max(0, int(rejections)),
+        "superseded_pending_receipts_deleted": max(
+            0, int(superseded_pending_receipts)
+        ),
     }
 
 
