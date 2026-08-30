@@ -16,4 +16,4 @@
 - Release binds image/env to SHA/tree/signature/content-ID and preflights disk/paths/secrets.
 - Archive migration: root-only `pg_dump -Fc`, offline restore, verified copy, two idempotent passes; reject partial/unversioned.
 - Receiver-first. Pre-`PRIMARY_COMMITTED`: restore exact old containers/markers. Post-commit: never restore old runtime; CAS Product to prior `LEGACY` bytes; retain PRIVATE_PRIMARY capture; never delete state.
-- 2026-08-29/30: Shadow→Legacy is one-way under existing locks. Historical reviews require exact-key projection, parser ≤96, `root_offer_fact_id`, and full reconcile; 120s misses old trades. Product stays `LEGACY`; calibration≠cutover.
+- 2026-08-29/30: Shadow→Legacy is one-way under existing locks. Full reconcile at `83029b12` cleared scoped review states and produced `RATE_READY`; Product stays `LEGACY`. The installed `4d98b85d` timer is disabled because it drops `root_offer_fact_id`; re-enable only after an immutable compatible bridge release.
