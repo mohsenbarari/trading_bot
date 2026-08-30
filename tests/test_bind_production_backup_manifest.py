@@ -22,8 +22,10 @@ class ProductionBackupManifestBindingTests(unittest.TestCase):
         base = Path(self.temporary.name)
         self.control = base / "release-control"
         self.evidence = base / "evidence"
+        self.rehearsals = base / "rehearsals"
         self.control.mkdir(mode=0o700)
         self.evidence.mkdir(mode=0o700)
+        self.rehearsals.mkdir(mode=0o700)
         self.source = self.control / "source.env"
         self.output = self.control / "bound.env"
         self.receipt = self.control / "bound.receipt.json"
@@ -36,6 +38,8 @@ class ProductionBackupManifestBindingTests(unittest.TestCase):
         source_text = probe._source_text() + (
             "PRODUCTION_BACKUP_RECEIPT_PATH=/root/old-backup.json\n"
             "PRODUCTION_BACKUP_RECEIPT_SHA256=" + "1" * 64 + "\n"
+            "PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_PATH=/root/old-rehearsal.json\n"
+            "PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_SHA256=" + "2" * 64 + "\n"
         )
         self.source.write_text(source_text, encoding="utf-8")
         self.source.chmod(0o600)
@@ -50,9 +54,26 @@ class ProductionBackupManifestBindingTests(unittest.TestCase):
         }
         self.backup.write_text(json.dumps(payload) + "\n", encoding="utf-8")
         self.backup.chmod(0o600)
+        self.rehearsal = self.rehearsals / "rehearsal.json"
+        rehearsal = {
+            "contract": "production-migration-rehearsal-v1",
+            "status": "passed",
+            "production_mutation": False,
+            "backup_receipt_sha256": sha256(self.backup.read_bytes()).hexdigest(),
+            "roles": ["foreign", "iran"],
+            "results": [
+                {"role": "foreign", "status": "passed"},
+                {"role": "iran", "status": "passed"},
+            ],
+        }
+        self.rehearsal.write_text(json.dumps(rehearsal) + "\n", encoding="utf-8")
+        self.rehearsal.chmod(0o600)
         self.patches = (
             mock.patch.object(preparer, "APPROVED_ROOT", self.control),
             mock.patch.object(binder, "APPROVED_BACKUP_ROOT", self.evidence),
+            mock.patch.object(
+                binder, "APPROVED_REHEARSAL_ROOT", self.rehearsals
+            ),
         )
         for patch in self.patches:
             patch.start()
@@ -68,6 +89,8 @@ class ProductionBackupManifestBindingTests(unittest.TestCase):
             "--expected-source-sha256", sha256(self.source.read_bytes()).hexdigest(),
             "--backup-receipt", str(self.backup),
             "--expected-backup-receipt-sha256", backup_digest or sha256(self.backup.read_bytes()).hexdigest(),
+            "--migration-rehearsal-receipt", str(self.rehearsal),
+            "--expected-migration-rehearsal-receipt-sha256", sha256(self.rehearsal.read_bytes()).hexdigest(),
             "--output", str(self.output),
             "--receipt", str(self.receipt),
             "--confirm", binder.CONFIRMATION,

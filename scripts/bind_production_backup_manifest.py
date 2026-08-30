@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CAS-bind a fresh two-host backup receipt into a production deploy manifest.
+"""CAS-bind fresh backup and migration evidence into a deploy manifest.
 
 The source manifest is preserved.  Only the two reviewed backup-evidence keys
 may change.  This is intentionally separate from the PRIVATE_PRIMARY manifest
@@ -29,12 +29,17 @@ from scripts import prepare_production_private_primary_manifest as manifest_tool
 APPROVED_BACKUP_ROOT = Path(
     "/root/secure-envs/trading-bot/production-backups/evidence"
 )
+APPROVED_REHEARSAL_ROOT = Path(
+    "/root/secure-envs/trading-bot/production-migration-rehearsal/evidence"
+)
 CONFIRMATION = "bind-fresh-production-backup-receipt"
 RECEIPT_SCHEMA = "production_backup_manifest_binding/1.0"
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 TARGET_KEYS = (
     "PRODUCTION_BACKUP_RECEIPT_PATH",
     "PRODUCTION_BACKUP_RECEIPT_SHA256",
+    "PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_PATH",
+    "PRODUCTION_MIGRATION_REHEARSAL_RECEIPT_SHA256",
 )
 
 
@@ -93,7 +98,64 @@ def _read_backup_receipt(path: Path, expected_digest: str) -> bytes:
     return payload
 
 
-def _render(source: bytes, *, backup_path: Path, backup_digest: str) -> tuple[bytes, list[str]]:
+def _read_rehearsal_receipt(
+    path: Path, expected_digest: str, *, backup_digest: str
+) -> bytes:
+    if not path.is_absolute() or path.parent != APPROVED_REHEARSAL_ROOT:
+        raise BackupManifestBindingError("rehearsal_receipt_scope_invalid")
+    try:
+        root = APPROVED_REHEARSAL_ROOT.resolve(strict=True)
+        info = root.lstat()
+    except OSError as exc:
+        raise BackupManifestBindingError("rehearsal_receipt_root_invalid") from exc
+    if (
+        root != APPROVED_REHEARSAL_ROOT
+        or root.is_symlink()
+        or not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != 0
+        or stat.S_IMODE(info.st_mode) != 0o700
+    ):
+        raise BackupManifestBindingError("rehearsal_receipt_root_invalid")
+    try:
+        payload = manifest_tools._read_stable_regular(
+            path, label="rehearsal_receipt"
+        )
+    except manifest_tools.ManifestPreparationError as exc:
+        raise BackupManifestBindingError("rehearsal_receipt_security_invalid") from exc
+    if _digest(payload) != expected_digest:
+        raise BackupManifestBindingError("rehearsal_receipt_cas_mismatch")
+    try:
+        document = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise BackupManifestBindingError("rehearsal_receipt_contract_invalid") from exc
+    results = document.get("results") if isinstance(document, dict) else None
+    if (
+        document.get("contract") != "production-migration-rehearsal-v1"
+        or document.get("status") != "passed"
+        or document.get("production_mutation") is not False
+        or document.get("backup_receipt_sha256") != backup_digest
+        or document.get("roles") != ["foreign", "iran"]
+        or not isinstance(results, list)
+        or len(results) != 2
+        or {item.get("role") for item in results if isinstance(item, dict)}
+        != {"foreign", "iran"}
+        or any(
+            not isinstance(item, dict) or item.get("status") != "passed"
+            for item in results
+        )
+    ):
+        raise BackupManifestBindingError("rehearsal_receipt_contract_invalid")
+    return payload
+
+
+def _render(
+    source: bytes,
+    *,
+    backup_path: Path,
+    backup_digest: str,
+    rehearsal_path: Path,
+    rehearsal_digest: str,
+) -> tuple[bytes, list[str]]:
     # Reuse the production manifest's strict schema, syntax, identity and
     # release-safety validation, but do not use its PRIVATE_PRIMARY rendering.
     manifest_tools._parse_and_render(source)
@@ -104,6 +166,8 @@ def _render(source: bytes, *, backup_path: Path, backup_digest: str) -> tuple[by
     replacements = {
         TARGET_KEYS[0]: str(backup_path),
         TARGET_KEYS[1]: backup_digest,
+        TARGET_KEYS[2]: str(rehearsal_path),
+        TARGET_KEYS[3]: rehearsal_digest,
     }
     lines = text.splitlines(keepends=True)
     seen: set[str] = set()
@@ -139,6 +203,12 @@ def prepare(args: argparse.Namespace) -> dict[str, object]:
         raise BackupManifestBindingError("expected_source_sha256_invalid")
     if not HEX64.fullmatch(args.expected_backup_receipt_sha256 or ""):
         raise BackupManifestBindingError("expected_backup_receipt_sha256_invalid")
+    if not HEX64.fullmatch(
+        args.expected_migration_rehearsal_receipt_sha256 or ""
+    ):
+        raise BackupManifestBindingError(
+            "expected_migration_rehearsal_receipt_sha256_invalid"
+        )
     source = manifest_tools._require_under_approved_root(
         Path(args.source), label="source_manifest"
     )
@@ -149,6 +219,7 @@ def prepare(args: argparse.Namespace) -> dict[str, object]:
         Path(args.receipt), label="receipt"
     )
     backup = Path(args.backup_receipt)
+    rehearsal = Path(args.migration_rehearsal_receipt)
     if len({source, output, receipt}) != 3:
         raise BackupManifestBindingError("manifest_output_alias")
     with manifest_tools._exclusive_preparation_lock():
@@ -158,10 +229,17 @@ def prepare(args: argparse.Namespace) -> dict[str, object]:
         if _digest(before) != args.expected_source_sha256:
             raise BackupManifestBindingError("source_manifest_cas_mismatch")
         _read_backup_receipt(backup, args.expected_backup_receipt_sha256)
+        _read_rehearsal_receipt(
+            rehearsal,
+            args.expected_migration_rehearsal_receipt_sha256,
+            backup_digest=args.expected_backup_receipt_sha256,
+        )
         rendered, changed = _render(
             before,
             backup_path=backup,
             backup_digest=args.expected_backup_receipt_sha256,
+            rehearsal_path=rehearsal,
+            rehearsal_digest=args.expected_migration_rehearsal_receipt_sha256,
         )
         if _digest(manifest_tools._read_secure_file(source, label="source_manifest")) != _digest(before):
             raise BackupManifestBindingError("source_manifest_changed_during_prepare")
@@ -172,10 +250,16 @@ def prepare(args: argparse.Namespace) -> dict[str, object]:
             "source_sha256": _digest(before),
             "output_sha256": _digest(rendered),
             "backup_receipt_sha256": args.expected_backup_receipt_sha256,
+            "migration_rehearsal_receipt_sha256": (
+                args.expected_migration_rehearsal_receipt_sha256
+            ),
             "source_path_sha256": _digest(str(source).encode()),
             "output_path_sha256": _digest(str(output).encode()),
             "receipt_path_sha256": _digest(str(receipt).encode()),
             "backup_receipt_path_sha256": _digest(str(backup).encode()),
+            "migration_rehearsal_receipt_path_sha256": _digest(
+                str(rehearsal).encode()
+            ),
             "changed_keys": changed,
             "allowed_keys": sorted(TARGET_KEYS),
             "source_preserved_by_tool": True,
@@ -212,6 +296,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-source-sha256", required=True)
     parser.add_argument("--backup-receipt", required=True)
     parser.add_argument("--expected-backup-receipt-sha256", required=True)
+    parser.add_argument("--migration-rehearsal-receipt", required=True)
+    parser.add_argument(
+        "--expected-migration-rehearsal-receipt-sha256", required=True
+    )
     parser.add_argument("--output", required=True)
     parser.add_argument("--receipt", required=True)
     parser.add_argument("--confirm", required=True)
