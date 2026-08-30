@@ -34,7 +34,7 @@ class PrepareMarketPipelinePrimaryReleaseTests(unittest.TestCase):
             {
                 "MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC": primary.AUTHORIZED_BACKFILL_NOT_BEFORE_UTC,
                 "MARKET_CAPTURE_BACKFILL_SOURCE_CODES": primary.AUTHORIZED_BACKFILL_SOURCE_CODES,
-                "MARKET_CAPTURE_BACKFILL_MAX_MESSAGES": "100000",
+                "MARKET_CAPTURE_BACKFILL_MAX_MESSAGES": "250000",
             }
         )
         _write_source(self.web_source, web_values)
@@ -130,7 +130,7 @@ class PrepareMarketPipelinePrimaryReleaseTests(unittest.TestCase):
                 "/srv/trading-bot/secure/market/research-archive.key"
             ),
             capture_backfill_not_before_utc="2026-08-25T09:33:00Z",
-            capture_backfill_max_messages=100_000,
+            capture_backfill_max_messages=250_000,
         )
 
         values = parse_env(derived, secure_input=True)
@@ -143,7 +143,7 @@ class PrepareMarketPipelinePrimaryReleaseTests(unittest.TestCase):
             values["MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC"],
             "2026-08-25T09:33:00Z",
         )
-        self.assertEqual(values["MARKET_CAPTURE_BACKFILL_MAX_MESSAGES"], "100000")
+        self.assertEqual(values["MARKET_CAPTURE_BACKFILL_MAX_MESSAGES"], "250000")
         self.assertEqual(
             values["MARKET_CAPTURE_BACKFILL_SOURCE_CODES"],
             "MELTED_PRIMARY_FLOW,GROUP_1,GROUP_2",

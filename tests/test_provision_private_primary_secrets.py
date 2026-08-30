@@ -365,11 +365,12 @@ class RuntimeContinuityTests(unittest.TestCase):
 
     def test_topology_accepts_only_receipt_bound_adopted_root(self) -> None:
         adopted = inventory.ALLOWED_ADOPTED_DATA_ROOTS["bot"]
+        snapshot_root = inventory.CANONICAL_PRODUCT_SNAPSHOT_ROOTS["bot"]
         source = _write(
             self.workspace / "bot.source.env",
             (
                 f"MARKET_BOT_DATA_ROOT={adopted}\n"
-                f"MARKET_PRODUCT_SNAPSHOT_ROOT={adopted}/snapshots\n"
+                f"MARKET_PRODUCT_SNAPSHOT_ROOT={snapshot_root}\n"
                 f"MARKET_TRANSPORT_CA_FILE={inventory.CANONICAL_SECRET_ROOT}/transport-ca.pem\n"
             ),
             mode=0o600,
@@ -387,6 +388,7 @@ class RuntimeContinuityTests(unittest.TestCase):
             continuity_receipt=receipt,
         )
         self.assertEqual(values["MARKET_BOT_DATA_ROOT"], adopted)
+        self.assertEqual(values["MARKET_PRODUCT_SNAPSHOT_ROOT"], snapshot_root)
         other = _write(
             self.workspace / "other.source.env",
             (
@@ -434,6 +436,10 @@ class RuntimeContinuityTests(unittest.TestCase):
         self.assertIn("MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE=PRIVATE_SHADOW", old_text)
         self.assertIn(f"MARKET_BOT_DATA_ROOT={inventory.ALLOWED_ADOPTED_DATA_ROOTS['bot']}", old_text)
         self.assertIn(f"MARKET_BOT_DATA_ROOT={inventory.ALLOWED_ADOPTED_DATA_ROOTS['bot']}", topology)
+        self.assertIn(
+            f"MARKET_PRODUCT_SNAPSHOT_ROOT={inventory.CANONICAL_PRODUCT_SNAPSHOT_ROOTS['bot']}",
+            topology,
+        )
         self.assertIn(f"{inventory.CANONICAL_SECRET_ROOT}/hmac-active", topology)
         self.assertNotIn("MARKET_PIPELINE_FEED_MODE=PRIVATE_PRIMARY", old_text)
         self.assertNotIn(SECRET.decode(), old_text + topology)
@@ -474,7 +480,7 @@ class RuntimeContinuityTests(unittest.TestCase):
             "MARKET_CAPTURE_BACKFILL_SOURCE_CODES=MELTED_PRIMARY_FLOW,GROUP_1,GROUP_2",
             topology,
         )
-        self.assertIn("MARKET_CAPTURE_BACKFILL_MAX_MESSAGES=100000", topology)
+        self.assertIn("MARKET_CAPTURE_BACKFILL_MAX_MESSAGES=250000", topology)
 
     def test_portable_digest_equality_and_mismatch(self) -> None:
         document = {

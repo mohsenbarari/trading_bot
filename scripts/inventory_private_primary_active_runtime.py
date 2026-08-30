@@ -32,6 +32,10 @@ ALLOWED_ADOPTED_DATA_ROOTS = {
     "bot": "/srv/trading-bot/staging-data/coin-intelligence/private-pipeline-shadow",
     "web": "/srv/trading-bot/market-data-staging-shadow",
 }
+CANONICAL_PRODUCT_SNAPSHOT_ROOTS = {
+    "bot": "/srv/trading-bot/production-data/market-pipeline/snapshots",
+    "web": "/srv/trading-bot/market-data-production/snapshots",
+}
 ENV_FILE_LABEL = "com.docker.compose.project.environment_file"
 SAFE_ENV_KEYS = {
     "MARKET_BOT_DATA_ROOT",

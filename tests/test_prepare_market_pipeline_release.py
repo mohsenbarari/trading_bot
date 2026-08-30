@@ -130,7 +130,7 @@ class PrepareMarketPipelineReleaseTests(unittest.TestCase):
         )
         self.assertEqual(verified, document)
 
-    def test_product_snapshot_root_must_be_exact_data_root_child(self) -> None:
+    def test_product_snapshot_root_must_be_exact_canonical_publication_root(self) -> None:
         values = _web_values()
         values["MARKET_PRODUCT_SNAPSHOT_ROOT"] = (
             "/srv/trading-bot/market-data-production/other-snapshots"
@@ -146,6 +146,22 @@ class PrepareMarketPipelineReleaseTests(unittest.TestCase):
         self.assertFalse(self.web_env.exists())
         self.assertFalse(self.bot_env.exists())
         self.assertFalse(self.receipt.exists())
+
+    def test_adopted_state_root_may_publish_into_canonical_product_root(self) -> None:
+        values = _web_values()
+        values["MARKET_WEB_DATA_ROOT"] = "/srv/trading-bot/market-data-staging-shadow"
+        _write_source(self.web_source, values)
+
+        document = self._render()
+
+        self.assertEqual(
+            document["roles"]["web"]["data_root"],
+            "/srv/trading-bot/market-data-staging-shadow",
+        )
+        self.assertEqual(
+            document["roles"]["web"]["product_snapshot_root"],
+            "/srv/trading-bot/market-data-production/snapshots",
+        )
 
     def test_role_local_image_ids_remain_one_release_pair(self) -> None:
         document = release.render_pair(

@@ -22,6 +22,7 @@ from typing import Any, Mapping, Sequence
 if __package__:
     from scripts.inventory_private_primary_active_runtime import (
         ALLOWED_ADOPTED_DATA_ROOTS,
+        CANONICAL_PRODUCT_SNAPSHOT_ROOTS,
         CANONICAL_SECRET_ROOT,
         EXPECTED_FEED_MODE,
         EXPECTED_PROJECT,
@@ -37,6 +38,7 @@ else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from scripts.inventory_private_primary_active_runtime import (
         ALLOWED_ADOPTED_DATA_ROOTS,
+        CANONICAL_PRODUCT_SNAPSHOT_ROOTS,
         CANONICAL_SECRET_ROOT,
         EXPECTED_FEED_MODE,
         EXPECTED_PROJECT,
@@ -49,7 +51,7 @@ else:
     )
     from scripts.provision_private_primary_secrets import SECRET_SPECS
 
-AUTHORIZED_BACKFILL_MAX_MESSAGES = "100000"
+AUTHORIZED_BACKFILL_MAX_MESSAGES = "250000"
 
 
 CONFIRMATION = "render-production-private-primary-runtime-env"
@@ -238,7 +240,7 @@ def render_topology_source(*, role: str, inventory: Mapping[str, Any], live_env:
         if key.startswith("MARKET_") and SAFE_VALUE.fullmatch(value):
             values[key] = value
     values[root_key] = adopted
-    values["MARKET_PRODUCT_SNAPSHOT_ROOT"] = f"{adopted}/snapshots"
+    values["MARKET_PRODUCT_SNAPSHOT_ROOT"] = CANONICAL_PRODUCT_SNAPSHOT_ROOTS[role]
     values["MARKET_PRIVATE_BIND_IP"] = str(
         inventory.get("bind_ip") or values.get("MARKET_PRIVATE_BIND_IP") or ""
     )

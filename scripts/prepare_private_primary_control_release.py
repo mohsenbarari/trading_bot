@@ -24,6 +24,7 @@ from typing import Any, Mapping, Sequence
 if __package__:
     from scripts.inventory_private_primary_active_runtime import (
         ALLOWED_ADOPTED_DATA_ROOTS,
+        CANONICAL_PRODUCT_SNAPSHOT_ROOTS,
         COMBINED_SCHEMA,
         INVENTORY_SCHEMA,
         validate_inventory,
@@ -32,6 +33,7 @@ else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from scripts.inventory_private_primary_active_runtime import (
         ALLOWED_ADOPTED_DATA_ROOTS,
+        CANONICAL_PRODUCT_SNAPSHOT_ROOTS,
         COMBINED_SCHEMA,
         INVENTORY_SCHEMA,
         validate_inventory,
@@ -258,13 +260,13 @@ def validate_topology_source(
     if continuity_receipt is not None:
         adopted = load_continuity_receipt(continuity_receipt, role=role)
         expected_root = adopted["adopted_data_root"]
-        expected_snapshot = adopted["adopted_snapshot_root"]
+        expected_snapshot = CANONICAL_PRODUCT_SNAPSHOT_ROOTS[role]
         allowed_exact = {expected_root, expected_snapshot}
         if not adopted.get("container_ids") or not adopted.get("mount_identity_sha256"):
             raise PrepareError("continuity_identity_incomplete")
     else:
         expected_root = CANONICAL_WEB_DATA_ROOT if role == "web" else CANONICAL_BOT_DATA_ROOT
-        expected_snapshot = f"{expected_root}/snapshots"
+        expected_snapshot = CANONICAL_PRODUCT_SNAPSHOT_ROOTS[role]
     if values.get(root_key) != expected_root:
         raise PrepareError(f"{role}_data_root_mismatch")
     snapshot = values.get("MARKET_PRODUCT_SNAPSHOT_ROOT", "")

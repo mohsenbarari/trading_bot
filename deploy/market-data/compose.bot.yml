@@ -103,7 +103,7 @@ services:
         target: /var/lib/market-data/models
         read_only: true
       - type: bind
-        source: ${MARKET_BOT_DATA_ROOT:?MARKET_BOT_DATA_ROOT is required}/snapshots
+        source: ${MARKET_PRODUCT_SNAPSHOT_ROOT:?MARKET_PRODUCT_SNAPSHOT_ROOT is required}
         target: /var/lib/market-data/snapshots
     depends_on:
       market-store-adapter:
@@ -142,7 +142,7 @@ services:
         source: ${MARKET_BOT_DATA_ROOT:?MARKET_BOT_DATA_ROOT is required}/state/estimator-snapshot-sender
         target: /var/lib/market-data/state
       - type: bind
-        source: ${MARKET_BOT_DATA_ROOT:?MARKET_BOT_DATA_ROOT is required}/snapshots
+        source: ${MARKET_PRODUCT_SNAPSHOT_ROOT:?MARKET_PRODUCT_SNAPSHOT_ROOT is required}
         target: /var/lib/market-data/snapshots
     depends_on:
       coin-estimator:

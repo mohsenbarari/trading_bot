@@ -71,7 +71,7 @@ services:
       MARKET_PIPELINE_CAPTURE_ROOT: /var/lib/market-data/capture
       MARKET_CAPTURE_CONFIG_FILE: /run/secrets/market_capture_account1_config
       MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC: ${MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC:-}
-      MARKET_CAPTURE_BACKFILL_MAX_MESSAGES: ${MARKET_CAPTURE_BACKFILL_MAX_MESSAGES:-100000}
+      MARKET_CAPTURE_BACKFILL_MAX_MESSAGES: ${MARKET_CAPTURE_BACKFILL_MAX_MESSAGES:-250000}
       MARKET_CAPTURE_BACKFILL_SOURCE_CODES: ${MARKET_CAPTURE_BACKFILL_SOURCE_CODES:-}
     secrets:
       - market_capture_account1_config
@@ -110,7 +110,7 @@ services:
       MARKET_CAPTURE_CONFIG_FILE: /run/secrets/market_capture_account2_config
       MARKET_CAPTURE_HMAC_KEY_FILE: /run/secrets/market_capture_account2_hmac
       MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC: ${MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC:-}
-      MARKET_CAPTURE_BACKFILL_MAX_MESSAGES: ${MARKET_CAPTURE_BACKFILL_MAX_MESSAGES:-100000}
+      MARKET_CAPTURE_BACKFILL_MAX_MESSAGES: ${MARKET_CAPTURE_BACKFILL_MAX_MESSAGES:-250000}
       MARKET_CAPTURE_BACKFILL_SOURCE_CODES: ${MARKET_CAPTURE_BACKFILL_SOURCE_CODES:-}
     secrets:
       - market_capture_account2_config
@@ -287,7 +287,7 @@ services:
         source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/state/estimator-snapshot-receiver
         target: /var/lib/market-data/state
       - type: bind
-        source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/snapshots
+        source: ${MARKET_PRODUCT_SNAPSHOT_ROOT:?MARKET_PRODUCT_SNAPSHOT_ROOT is required}
         target: /var/lib/market-data/snapshots
       - type: bind
         source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/calibration/coin-groups

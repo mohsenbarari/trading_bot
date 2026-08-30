@@ -591,7 +591,7 @@ class PreparePrivatePrimaryControlReleaseTests(unittest.TestCase):
             self.workspace / "inputs" / "bot.adopted.env",
             (
                 f"MARKET_BOT_DATA_ROOT={adopted}\n"
-                f"MARKET_PRODUCT_SNAPSHOT_ROOT={adopted}/snapshots\n"
+                f"MARKET_PRODUCT_SNAPSHOT_ROOT={preparer.CANONICAL_BOT_DATA_ROOT}/snapshots\n"
             ),
         )
         with self.assertRaisesRegex(preparer.PrepareError, "bot_data_root_mismatch"):

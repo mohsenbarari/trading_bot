@@ -94,6 +94,10 @@ TOPOLOGY_KEYS = {
     "MARKET_WEB_SNAPSHOT_RECEIVER_PORT",
     "MARKET_BOT_FACT_RECEIVER_PORT",
 }
+CANONICAL_PRODUCT_SNAPSHOT_ROOTS = {
+    "bot": "/srv/trading-bot/production-data/market-pipeline/snapshots",
+    "web": "/srv/trading-bot/market-data-production/snapshots",
+}
 
 
 class ReleaseContractError(RuntimeError):
@@ -233,7 +237,7 @@ def validate_source(role: str, values: Mapping[str, str]) -> dict[str, object]:
         values["MARKET_PRODUCT_SNAPSHOT_ROOT"],
         field="market_product_snapshot_root",
     )
-    expected_product_snapshot_root = str(Path(data_root) / "snapshots")
+    expected_product_snapshot_root = CANONICAL_PRODUCT_SNAPSHOT_ROOTS[role]
     if product_snapshot_root != expected_product_snapshot_root:
         raise ReleaseContractError("market_product_snapshot_root_mismatch")
     receiver_key = (
