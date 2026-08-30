@@ -71,6 +71,24 @@ class Stage10SnapshotTests(unittest.TestCase):
         self.fact_receiver.close()
         self.temporary.cleanup()
 
+    def test_receiver_health_queries_have_bounded_operational_indexes(self) -> None:
+        indexes = {
+            str(row[1])
+            for table in (
+                "estimator_snapshot_receipts",
+                "estimator_snapshot_publication_outbox",
+            )
+            for row in self.web_receiver.execute(f"PRAGMA index_list({table})")
+        }
+        self.assertTrue(
+            {
+                "estimator_snapshot_receipts_pending_idx",
+                "estimator_snapshot_receipts_full_payload_idx",
+                "estimator_snapshot_outbox_pending_idx",
+                "estimator_snapshot_outbox_delivery_idx",
+            }.issubset(indexes)
+        )
+
     def _receive_fact(self, number: int, stream: str, fact: dict[str, object]) -> None:
         status, response = apply_fact_batch(
             self.fact_receiver,

@@ -150,6 +150,19 @@ def initialize_snapshot_receiver(connection: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS transport_nonces_expiry_idx
         ON transport_nonces(expires_at_epoch);
+        CREATE INDEX IF NOT EXISTS estimator_snapshot_receipts_pending_idx
+        ON estimator_snapshot_receipts(feed_mode,snapshot_version)
+        WHERE published_at_utc IS NULL;
+        CREATE INDEX IF NOT EXISTS estimator_snapshot_receipts_full_payload_idx
+        ON estimator_snapshot_receipts(feed_mode,snapshot_version)
+        WHERE payload_json<>'{}';
+        CREATE INDEX IF NOT EXISTS estimator_snapshot_outbox_pending_idx
+        ON estimator_snapshot_publication_outbox(feed_mode,snapshot_version)
+        WHERE delivered_at_utc IS NULL;
+        CREATE INDEX IF NOT EXISTS estimator_snapshot_outbox_delivery_idx
+        ON estimator_snapshot_publication_outbox(
+          feed_mode,snapshot_version,snapshot_id,delivered_at_utc
+        );
         """
     )
 
@@ -1856,10 +1869,11 @@ def snapshot_receiver_metrics(
         "AND outbox.snapshot_version=receipt.snapshot_version "
         "AND outbox.snapshot_id=receipt.snapshot_id "
         "AND outbox.delivered_at_utc IS NOT NULL) AS event_delivered "
-        "FROM estimator_snapshot_receipts AS receipt "
-        "WHERE receipt.snapshot_version=(SELECT MAX(newer.snapshot_version) "
-        "FROM estimator_snapshot_receipts AS newer "
-        "WHERE newer.feed_mode=receipt.feed_mode)"
+        "FROM (SELECT feed_mode,MAX(snapshot_version) AS snapshot_version "
+        "FROM estimator_snapshot_receipts GROUP BY feed_mode) AS latest "
+        "JOIN estimator_snapshot_receipts AS receipt "
+        "ON receipt.feed_mode=latest.feed_mode "
+        "AND receipt.snapshot_version=latest.snapshot_version"
     ).fetchall():
         published = row["published_at_utc"]
         publish_age: float | None = None
