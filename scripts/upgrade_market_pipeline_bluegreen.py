@@ -34,10 +34,12 @@ from typing import Any, Mapping, Sequence
 if __package__:
     from scripts import backup_market_pipeline_archive as backup
     from scripts import quiesce_production_legacy_market_collectors as legacy_handoff
+    from scripts import rollout_market_pipeline_shadow as shadow_rollout
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from scripts import backup_market_pipeline_archive as backup
     from scripts import quiesce_production_legacy_market_collectors as legacy_handoff
+    from scripts import rollout_market_pipeline_shadow as shadow_rollout
 
 
 CONFIRMATION = "upgrade-market-pipeline-bluegreen"
@@ -2476,6 +2478,11 @@ def _rollback_preflight(
     payload: Mapping[str, Any], *, role: str,
     authority_mode: str = "NONE",
 ) -> None:
+    if _is_adopted_primary_base(payload):
+        _adopted_rollback_preflight(
+            payload, role=role, authority_mode=authority_mode
+        )
+        return
     raw_old_rows = payload.get("services")
     if not isinstance(raw_old_rows, list) or any(
         not isinstance(row, dict) or not isinstance(row.get("service"), str)
@@ -2609,6 +2616,180 @@ def _rollback_preflight(
             _load_marker(path, role=marker_role, release_sha=release)
 
 
+def _is_adopted_primary_base(payload: Mapping[str, Any]) -> bool:
+    adoption = payload.get("adoption")
+    return (
+        payload.get("adopted_primary_base") is True
+        and isinstance(adoption, dict)
+        and adoption.get("rollback_owner")
+        == "market_pipeline_shadow_rollout"
+    )
+
+
+def _adopted_rollout_receipt(
+    payload: Mapping[str, Any], *, role: str
+) -> tuple[dict[str, Any], Path, str]:
+    """Validate the exact rollout journal that owns an adopted base.
+
+    Once this journal has durably entered PREPARED, the owned rollout journal
+    may legitimately move from PASS through in_progress to ROLLED_BACK.  The
+    immutable identity is still checked field-by-field; a terminal digest is
+    then sealed back into the blue/green journal.
+    """
+
+    adoption = payload.get("adoption")
+    if not isinstance(adoption, dict):
+        raise UpgradeError("upgrade_adoption_rollback_binding_invalid")
+    path = Path(str(adoption.get("rollout_journal") or ""))
+    original_digest = str(adoption.get("rollout_journal_sha256") or "")
+    rollback_status = str(adoption.get("rollback_status") or "NOT_STARTED")
+    if not re.fullmatch(r"[0-9a-f]{64}", original_digest):
+        raise UpgradeError("upgrade_adoption_rollback_binding_invalid")
+    try:
+        raw = _secure_read(path)
+        receipt = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError, UpgradeError) as exc:
+        raise UpgradeError("upgrade_adoption_rollback_binding_invalid") from exc
+    digest = sha256(raw).hexdigest()
+    if not isinstance(receipt, dict):
+        raise UpgradeError("upgrade_adoption_rollback_binding_invalid")
+
+    expected_services = set(shadow_rollout.ROLE_SERVICES[role])
+    rows = receipt.get("services")
+    if not isinstance(rows, list) or any(
+        not isinstance(row, dict) or not isinstance(row.get("service"), str)
+        for row in rows
+    ):
+        raise UpgradeError("upgrade_adoption_rollback_binding_invalid")
+    by_service = {str(row["service"]): row for row in rows}
+    expected_image = str(payload.get("new_image_id") or "")
+    expected_env_digest = str(payload.get("new_env_sha256") or "")
+    if (
+        receipt.get("schema") != ROLLOUT_SCHEMA
+        or receipt.get("role") != role
+        or receipt.get("release_sha") != payload.get("release_sha")
+        or receipt.get("project") != payload.get("new_project")
+        or receipt.get("image_id") != expected_image
+        or receipt.get("env_sha256") != expected_env_digest
+        or receipt.get("feed_mode") != "PRIVATE_PRIMARY"
+        or receipt.get("private_shadow_only") is not False
+        or receipt.get("capture_services_started") is not False
+        or receipt.get("product_authority_changed") is not False
+        or receipt.get("rollback_state_deleted") is not False
+        or receipt.get("secrets_disclosed") is not False
+        or len(by_service) != len(rows)
+        or set(by_service) != expected_services
+    ):
+        raise UpgradeError("upgrade_adoption_rollback_binding_invalid")
+
+    receipt_status = str(receipt.get("status") or "")
+    if rollback_status == "NOT_STARTED":
+        if receipt_status != "PASS" or digest != original_digest:
+            raise UpgradeError("upgrade_adoption_rollback_binding_invalid")
+        allowed_states = {"healthy"}
+    else:
+        if receipt_status not in {"PASS", "in_progress", "ROLLED_BACK"}:
+            raise UpgradeError("upgrade_adoption_rollback_binding_invalid")
+        allowed_states = {"healthy", "rolled_back"}
+    if receipt_status == "PASS" and digest != original_digest:
+        raise UpgradeError("upgrade_adoption_rollback_binding_invalid")
+    if any(
+        set(row) != {
+            "service", "state", "container_id", "created_by_release"
+        }
+        or row.get("created_by_release") is not True
+        or row.get("state") not in allowed_states
+        or not isinstance(row.get("container_id"), str)
+        or not row.get("container_id")
+        for row in rows
+    ):
+        raise UpgradeError("upgrade_adoption_rollback_binding_invalid")
+    if receipt_status == "ROLLED_BACK" and any(
+        row.get("state") != "rolled_back" for row in rows
+    ):
+        raise UpgradeError("upgrade_adoption_rollback_binding_invalid")
+    terminal_digest = adoption.get("rollout_rollback_sha256")
+    if terminal_digest is not None and terminal_digest != digest:
+        raise UpgradeError("upgrade_adoption_rollback_binding_invalid")
+    return receipt, path, digest
+
+
+def _adopted_rollback_preflight(
+    payload: Mapping[str, Any], *, role: str, authority_mode: str
+) -> None:
+    raw_old_rows = payload.get("services")
+    if raw_old_rows != [] or _project_services(str(payload["old_project"])):
+        raise UpgradeError("upgrade_adoption_rollback_old_owner_invalid")
+    receipt, _path, _digest = _adopted_rollout_receipt(payload, role=role)
+    adoption = payload["adoption"]
+    rollback_status = str(adoption.get("rollback_status") or "NOT_STARTED")
+    receipt_status = str(receipt["status"])
+    live_services = {
+        str(row["service"])
+        for row in receipt["services"]
+        if row["state"] != "rolled_back"
+    }
+    expected_inventory = set(live_services)
+    if role == "web":
+        expected_inventory.add("market-database")
+        if rollback_status == "NOT_STARTED":
+            expected_inventory.update(CAPTURE_SERVICES)
+        else:
+            expected_inventory.update(
+                service
+                for service in CAPTURE_SERVICES
+                if _ids(str(payload["new_project"]), service)
+            )
+    actual_inventory = _project_services(str(payload["new_project"]))
+    if actual_inventory != expected_inventory:
+        raise UpgradeError("upgrade_adoption_rollback_inventory_invalid")
+
+    if role == "web":
+        _new_database_identity(payload)
+    for service in sorted(live_services):
+        _new_identity(payload, service, healthy=False)
+    capture_ids = payload.get("new_capture_ids")
+    if role == "web":
+        if not isinstance(capture_ids, dict):
+            raise UpgradeError("upgrade_adoption_capture_identity_invalid")
+        prepared = adoption.get("capture_remove_prepared", [])
+        removed = adoption.get("removed_capture_services", [])
+        if (
+            not isinstance(prepared, list)
+            or not isinstance(removed, list)
+            or any(service not in CAPTURE_SERVICES for service in prepared)
+            or any(service not in CAPTURE_SERVICES for service in removed)
+        ):
+            raise UpgradeError("upgrade_adoption_capture_identity_invalid")
+        for service in CAPTURE_SERVICES:
+            ids = _ids(str(payload["new_project"]), service)
+            if ids and (
+                len(ids) != 1
+                or ids[0] != capture_ids.get(service)
+                or _new_identity(payload, service, healthy=False)["container_id"]
+                != ids[0]
+            ):
+                raise UpgradeError("upgrade_adoption_capture_identity_invalid")
+            if rollback_status == "NOT_STARTED" and len(ids) != 1:
+                raise UpgradeError("upgrade_adoption_capture_identity_invalid")
+            if (
+                rollback_status != "NOT_STARTED"
+                and not ids
+                and service not in prepared
+                and service not in removed
+            ):
+                raise UpgradeError("upgrade_adoption_capture_identity_invalid")
+        if authority_mode == "NONE":
+            raise UpgradeError("upgrade_maintenance_lock_invalid")
+    elif capture_ids not in ({}, None):
+        raise UpgradeError("upgrade_adoption_capture_identity_invalid")
+
+    if receipt_status == "ROLLED_BACK":
+        terminal = {"market-database"} if role == "web" else set()
+        if actual_inventory != terminal:
+            raise UpgradeError("upgrade_adoption_rollback_inventory_invalid")
+
+
 def _restore_markers(*, journal: Path, payload: dict[str, Any]) -> None:
     transition = payload["marker_transition"]
     if transition.get("status") == "NOT_STARTED":
@@ -2725,6 +2906,15 @@ def _verify_rolled_back_runtime(
 ) -> None:
     """Freshly prove a terminal rollback instead of trusting its journal word."""
 
+    if _is_adopted_primary_base(payload):
+        _verify_adopted_rolled_back_runtime(
+            payload,
+            role=role,
+            journal=journal,
+            descriptor=descriptor,
+            live_lock=live_lock,
+        )
+        return
     if _project_services(str(payload["new_project"])):
         raise UpgradeError("upgrade_rollback_new_project_remaining")
     raw_rows = payload.get("services")
@@ -2804,6 +2994,64 @@ def _verify_rolled_back_runtime(
         )
 
 
+def _verify_adopted_rolled_back_runtime(
+    payload: Mapping[str, Any],
+    *,
+    role: str,
+    journal: Path,
+    descriptor: int | None,
+    live_lock: Mapping[str, Any] | None,
+) -> None:
+    adoption = payload.get("adoption")
+    if (
+        not isinstance(adoption, dict)
+        or adoption.get("rollback_status") != "COMPLETE"
+        or not re.fullmatch(
+            r"[0-9a-f]{64}",
+            str(adoption.get("rollout_rollback_sha256") or ""),
+        )
+        or payload.get("services") != []
+        or _project_services(str(payload["old_project"]))
+    ):
+        raise UpgradeError("upgrade_adoption_rollback_terminal_invalid")
+    receipt, _path, digest = _adopted_rollout_receipt(payload, role=role)
+    if (
+        receipt.get("status") != "ROLLED_BACK"
+        or digest != adoption.get("rollout_rollback_sha256")
+    ):
+        raise UpgradeError("upgrade_adoption_rollback_terminal_invalid")
+    expected_inventory = {"market-database"} if role == "web" else set()
+    if _project_services(str(payload["new_project"])) != expected_inventory:
+        raise UpgradeError("upgrade_adoption_rollback_terminal_invalid")
+    if role != "web":
+        return
+    _new_database_identity(payload)
+    _verify_terminal_legacy_binding(
+        payload=payload,
+        journal=journal,
+        descriptor=descriptor,
+        live_lock=live_lock,
+    )
+    transition = _validate_marker_transition(payload, allow_rollback=True)
+    if (
+        transition.get("rollback_status") != "COMPLETE"
+        or any(
+            row.get("rollback_status") != "RESTORED"
+            for row in transition["entries"].values()
+        )
+    ):
+        raise UpgradeError("upgrade_adoption_rollback_terminal_invalid")
+    for marker_role, row in transition["entries"].items():
+        path = Path(str(row["path"]))
+        if _sha256(path) != row["prior_sha256"]:
+            raise UpgradeError("upgrade_adoption_rollback_terminal_invalid")
+        _load_marker(
+            path,
+            role=marker_role,
+            release_sha=str(row["prior_payload"]["release_sha"]),
+        )
+
+
 def rollback(*, journal: Path, role: str, release_sha: str) -> dict[str, Any]:
     payload = _read_journal(journal)
     _validate_journal(
@@ -2876,6 +3124,16 @@ def _rollback_locked(
             live_lock=live_lock,
         )
     _rollback_preflight(payload, role=role, authority_mode=authority_mode)
+    if _is_adopted_primary_base(payload):
+        return _rollback_adopted_locked(
+            journal=journal,
+            role=role,
+            release_sha=release_sha,
+            payload=payload,
+            authority_mode=authority_mode,
+            descriptor=descriptor,
+            live_lock=live_lock,
+        )
     old_rows = {row["service"]: row for row in payload["services"]}
     for service in reversed(ROLE_SERVICES[role]):
         for container_id in _ids(payload["new_project"], service):
@@ -2959,6 +3217,153 @@ def _rollback_locked(
             raise UpgradeError("upgrade_rollback_health_timeout")
     if _project_services(payload["new_project"]):
         raise UpgradeError("upgrade_rollback_new_project_remaining")
+    payload["status"] = "ROLLED_BACK"
+    _atomic_json(journal, payload)
+    _verify_rolled_back_runtime(
+        payload,
+        role=role,
+        journal=journal,
+        descriptor=descriptor,
+        live_lock=live_lock,
+    )
+    return payload
+
+
+def _rollback_adopted_locked(
+    *,
+    journal: Path,
+    role: str,
+    release_sha: str,
+    payload: dict[str, Any],
+    authority_mode: str,
+    descriptor: int | None,
+    live_lock: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Rollback an adopted PRIMARY base through its exact owning receipt.
+
+    The web database and every bind-mounted state directory remain in place.
+    Only release-owned application/capture containers are removed.
+    """
+
+    adoption = payload["adoption"]
+    if adoption.get("rollback_status") in {None, "NOT_STARTED"}:
+        adoption["rollback_status"] = "PREPARED"
+        adoption["capture_remove_prepared"] = []
+        adoption["removed_capture_services"] = []
+        _atomic_json(journal, payload)
+
+    if role == "web":
+        removed = adoption.get("removed_capture_services")
+        prepared = adoption.get("capture_remove_prepared")
+        if (
+            not isinstance(removed, list)
+            or not isinstance(prepared, list)
+            or any(service not in CAPTURE_SERVICES for service in removed)
+            or any(service not in CAPTURE_SERVICES for service in prepared)
+        ):
+            raise UpgradeError("upgrade_adoption_capture_identity_invalid")
+        for service in reversed(CAPTURE_SERVICES):
+            ids = _ids(str(payload["new_project"]), service)
+            if not ids:
+                if service not in removed and service not in prepared:
+                    raise UpgradeError("upgrade_adoption_capture_identity_invalid")
+                if service not in removed:
+                    removed.append(service)
+                    _atomic_json(journal, payload)
+                continue
+            expected_id = payload["new_capture_ids"].get(service)
+            if ids != [expected_id]:
+                raise UpgradeError("upgrade_adoption_capture_identity_invalid")
+            row = _new_identity(payload, service, healthy=False)
+            if service not in prepared:
+                prepared.append(service)
+                _atomic_json(journal, payload)
+            if row["running"]:
+                _run(
+                    ["docker", "update", "--restart=no", expected_id],
+                    label="upgrade_adoption_capture_restart_disable",
+                )
+                _run(
+                    ["docker", "stop", "-t", "60", expected_id],
+                    label="upgrade_adoption_capture_stop",
+                )
+            _run(
+                ["docker", "rm", expected_id],
+                label="upgrade_adoption_capture_remove",
+            )
+            if _ids(str(payload["new_project"]), service):
+                raise UpgradeError("upgrade_adoption_capture_remove_incomplete")
+            if service not in removed:
+                removed.append(service)
+            _atomic_json(journal, payload)
+
+    receipt, rollout_path, _digest = _adopted_rollout_receipt(
+        payload, role=role
+    )
+    if receipt["status"] != "ROLLED_BACK":
+        expected_image = str(payload["new_image_id"])
+        try:
+            shadow_rollout.rollback(
+                role=role,
+                env_file=Path(str(payload["new_env"])),
+                journal=rollout_path,
+                release_sha=release_sha,
+                image_id=expected_image,
+                feed_mode="PRIVATE_PRIMARY",
+            )
+        except shadow_rollout.RolloutError as exc:
+            raise UpgradeError("upgrade_adoption_base_rollback_failed") from exc
+    receipt, _rollout_path, rollback_digest = _adopted_rollout_receipt(
+        payload, role=role
+    )
+    if receipt["status"] != "ROLLED_BACK":
+        raise UpgradeError("upgrade_adoption_base_rollback_incomplete")
+    adoption["rollout_rollback_sha256"] = rollback_digest
+    adoption["rollback_status"] = "BASE_ROLLED_BACK"
+    _atomic_json(journal, payload)
+
+    if role == "web":
+        if descriptor is None or live_lock is None:
+            raise UpgradeError("upgrade_maintenance_lock_invalid")
+        marker_authority_sha256 = _marker_authority_digest(payload)
+        _restore_markers(journal=journal, payload=payload)
+        if authority_mode == "TRANSFER_STARTED":
+            receipt_path = Path(str(payload["legacy_collector_receipt"]))
+            try:
+                restored = (
+                    legacy_handoff.mark_capture_authority_restored_with_held_lock(
+                        descriptor=descriptor,
+                        journal=receipt_path,
+                        release_sha=release_sha,
+                        host_role="web",
+                        expected_lock=live_lock,
+                        bluegreen_journal=journal,
+                        marker_authority_sha256=marker_authority_sha256,
+                    )
+                )
+            except legacy_handoff.CollectorHandoffError as exc:
+                raise UpgradeError(
+                    "upgrade_legacy_authority_restore_failed"
+                ) from exc
+            payload["legacy_collector_receipt_sha256"] = _sha256(receipt_path)
+            payload["legacy_authority_transfer"] = restored.get(
+                "authority_transfer"
+            )
+            _atomic_json(journal, payload)
+        elif authority_mode == "ALREADY_RESTORED":
+            receipt_path = Path(str(payload["legacy_collector_receipt"]))
+            restored = legacy_handoff._read(
+                receipt_path, release_sha=release_sha, host_role="web"
+            )
+            payload["legacy_collector_receipt_sha256"] = _sha256(receipt_path)
+            payload["legacy_authority_transfer"] = restored.get(
+                "authority_transfer"
+            )
+            _atomic_json(journal, payload)
+        else:
+            raise UpgradeError("upgrade_legacy_collector_authority_invalid")
+
+    adoption["rollback_status"] = "COMPLETE"
     payload["status"] = "ROLLED_BACK"
     _atomic_json(journal, payload)
     _verify_rolled_back_runtime(

@@ -611,6 +611,257 @@ class MarketPipelineBlueGreenUpgradeTests(unittest.TestCase):
                 expected_rollout_journal_sha256="0" * 64,
             )
 
+    def test_adopted_bot_rollback_uses_bound_rollout_and_is_terminally_verified(
+        self,
+    ) -> None:
+        services = set(upgrade.ROLE_SERVICES["bot"])
+        receipt, digest, rows = self._primary_rollout_receipt(
+            role="bot", services=services
+        )
+        payload = {
+            "schema": upgrade.SCHEMA,
+            "journal_contract_revision": upgrade.JOURNAL_CONTRACT_REVISION,
+            "status": "PASS",
+            "role": "bot",
+            "release_sha": RELEASE,
+            **self.release_binding(),
+            "old_project": OLD_PROJECT,
+            "new_project": NEW_PROJECT,
+            "old_env": str(self.old_env),
+            "new_env": str(self.new_env),
+            "old_env_sha256": sha256(self.old_env.read_bytes()).hexdigest(),
+            "new_env_sha256": sha256(self.new_env.read_bytes()).hexdigest(),
+            "new_image_id": IMAGE,
+            "services": [],
+            "markers": {},
+            "marker_transition": {
+                "status": "NOT_STARTED",
+                "authorized_at_utc": None,
+                "entries": {},
+            },
+            "new_capture_ids": {},
+            "adopted_primary_base": True,
+            "adoption": {
+                "rollout_journal": str(receipt),
+                "rollout_journal_sha256": digest,
+                "rollback_owner": "market_pipeline_shadow_rollout",
+            },
+            "product_authority_changed": False,
+            "state_deleted": False,
+            "secrets_disclosed": False,
+        }
+        upgrade._atomic_json(self.journal, payload, exclusive=True)
+        live = set(services)
+
+        def project_services(project):
+            return set(live) if project == NEW_PROJECT else set()
+
+        def ids(project, service, *, running=False):
+            del running
+            if project == NEW_PROJECT and service in live:
+                return [str(rows[service]["container_id"])]
+            return []
+
+        def identity(_container_id, *, project, service):
+            self.assertEqual(project, NEW_PROJECT)
+            return dict(rows[service])
+
+        def rollback_owner(**_kwargs):
+            document = json.loads(receipt.read_text(encoding="utf-8"))
+            document["status"] = "ROLLED_BACK"
+            for row in document["services"]:
+                row["state"] = "rolled_back"
+            receipt.write_text(
+                json.dumps(document, sort_keys=True, separators=(",", ":"))
+                + "\n",
+                encoding="utf-8",
+            )
+            receipt.chmod(0o600)
+            live.clear()
+            return document
+
+        with (
+            patch.object(upgrade, "_project_services", side_effect=project_services),
+            patch.object(upgrade, "_ids", side_effect=ids),
+            patch.object(upgrade, "_identity", side_effect=identity),
+            patch.object(
+                upgrade.shadow_rollout,
+                "rollback",
+                side_effect=rollback_owner,
+            ) as owner_rollback,
+            patch.object(upgrade, "_run") as direct_docker_mutation,
+        ):
+            result = upgrade.rollback(
+                journal=self.journal, role="bot", release_sha=RELEASE
+            )
+            repeated = upgrade.rollback(
+                journal=self.journal, role="bot", release_sha=RELEASE
+            )
+        owner_rollback.assert_called_once()
+        direct_docker_mutation.assert_not_called()
+        self.assertEqual(result["status"], "ROLLED_BACK")
+        self.assertEqual(repeated["status"], "ROLLED_BACK")
+        self.assertEqual(result["adoption"]["rollback_status"], "COMPLETE")
+        self.assertFalse(result["state_deleted"])
+
+    def test_adopted_rollback_rejects_rollout_drift_before_mutation(self) -> None:
+        services = set(upgrade.ROLE_SERVICES["bot"])
+        receipt, digest, rows = self._primary_rollout_receipt(
+            role="bot", services=services
+        )
+        payload = {
+            "schema": upgrade.SCHEMA,
+            "journal_contract_revision": upgrade.JOURNAL_CONTRACT_REVISION,
+            "status": "PASS",
+            "role": "bot",
+            "release_sha": RELEASE,
+            "old_project": OLD_PROJECT,
+            "new_project": NEW_PROJECT,
+            "old_env": str(self.old_env),
+            "new_env": str(self.new_env),
+            "old_env_sha256": sha256(self.old_env.read_bytes()).hexdigest(),
+            "new_env_sha256": sha256(self.new_env.read_bytes()).hexdigest(),
+            "new_image_id": IMAGE,
+            "services": [],
+            "markers": {},
+            "marker_transition": {"status": "NOT_STARTED", "entries": {}},
+            "new_capture_ids": {},
+            "adopted_primary_base": True,
+            "adoption": {
+                "rollout_journal": str(receipt),
+                "rollout_journal_sha256": digest,
+                "rollback_owner": "market_pipeline_shadow_rollout",
+            },
+            "product_authority_changed": False,
+            "state_deleted": False,
+            "secrets_disclosed": False,
+        }
+        upgrade._atomic_json(self.journal, payload, exclusive=True)
+        document = json.loads(receipt.read_text(encoding="utf-8"))
+        document["project"] = "wrong-project"
+        receipt.write_text(json.dumps(document), encoding="utf-8")
+        receipt.chmod(0o600)
+        with (
+            patch.object(
+                upgrade,
+                "_project_services",
+                side_effect=lambda project: services
+                if project == NEW_PROJECT
+                else set(),
+            ),
+            patch.object(upgrade, "_run") as mutation,
+            patch.object(upgrade.shadow_rollout, "rollback") as owner_rollback,
+        ):
+            with self.assertRaisesRegex(
+                upgrade.UpgradeError, "adoption_rollback_binding_invalid"
+            ):
+                upgrade.rollback(
+                    journal=self.journal, role="bot", release_sha=RELEASE
+                )
+        mutation.assert_not_called()
+        owner_rollback.assert_not_called()
+
+    def test_adopted_web_terminal_rollback_keeps_database_and_markers(self) -> None:
+        services = set(upgrade.WEB_PRIMARY_BASE) - {"market-database"}
+        receipt, _digest, _rows = self._primary_rollout_receipt(
+            role="web", services=services
+        )
+        document = json.loads(receipt.read_text(encoding="utf-8"))
+        document["status"] = "ROLLED_BACK"
+        for row in document["services"]:
+            row["state"] = "rolled_back"
+        receipt.write_text(
+            json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        receipt.chmod(0o600)
+        terminal_digest = sha256(receipt.read_bytes()).hexdigest()
+        marker = self.root / "authority-container.json"
+        prior = {
+            "contract": upgrade.AUTHORITY_CONTRACT,
+            "authority": "container",
+            "role": "market-capture-account1",
+            "release_sha": "d" * 40,
+        }
+        marker.write_text(
+            json.dumps(prior, sort_keys=True, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        marker.chmod(0o600)
+        authorized_at = "2026-08-30T00:00:00Z"
+        target = upgrade._marker_target(
+            marker_role="market-capture-account1",
+            release_sha=RELEASE,
+            authorized_at=authorized_at,
+        )
+        payload = {
+            "release_sha": RELEASE,
+            "old_project": OLD_PROJECT,
+            "new_project": NEW_PROJECT,
+            "new_env": str(self.new_env),
+            "new_env_sha256": sha256(self.new_env.read_bytes()).hexdigest(),
+            "new_image_id": IMAGE,
+            "services": [],
+            "markers": {
+                "market-capture-account1": {
+                    "path": str(marker),
+                    "payload": prior,
+                    "sha256": sha256(marker.read_bytes()).hexdigest(),
+                }
+            },
+            "adopted_primary_base": True,
+            "adoption": {
+                "rollout_journal": str(receipt),
+                "rollout_journal_sha256": "1" * 64,
+                "rollout_rollback_sha256": terminal_digest,
+                "rollback_status": "COMPLETE",
+                "rollback_owner": "market_pipeline_shadow_rollout",
+            },
+            "marker_transition": {
+                "status": "COMPLETE",
+                "rollback_status": "COMPLETE",
+                "authorized_at_utc": authorized_at,
+                "entries": {
+                    "market-capture-account1": {
+                        "path": str(marker),
+                        "prior_sha256": sha256(marker.read_bytes()).hexdigest(),
+                        "prior_payload": prior,
+                        "target_sha256": upgrade._json_digest(target),
+                        "target_payload": target,
+                        "status": "APPLIED",
+                        "rollback_status": "RESTORED",
+                    }
+                },
+            },
+        }
+        with (
+            patch.object(
+                upgrade,
+                "_project_services",
+                side_effect=lambda project: {"market-database"}
+                if project == NEW_PROJECT
+                else set(),
+            ),
+            patch.object(upgrade, "_new_database_identity", return_value={}) as db,
+            patch.object(upgrade, "_verify_terminal_legacy_binding") as authority,
+            patch.object(
+                upgrade,
+                "_load_marker",
+                side_effect=self.marker_load_for_test,
+            ),
+            patch.object(upgrade, "_run") as mutation,
+        ):
+            upgrade._verify_adopted_rolled_back_runtime(
+                payload,
+                role="web",
+                journal=self.journal,
+                descriptor=None,
+                live_lock=None,
+            )
+        db.assert_called_once_with(payload)
+        authority.assert_called_once()
+        mutation.assert_not_called()
+
     def test_release_root_binding_rejects_wrong_root_and_compose_tamper(self) -> None:
         binding = upgrade._release_root_binding(
             self.release_root,
