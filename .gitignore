@@ -2,6 +2,7 @@
 app_logs.txt
 # Build artifacts
 check-dns
+/repomix-output.xml
 docs/*
 !docs/uiux-stage6-admin-profile/
 docs/uiux-stage6-admin-profile/*
@@ -85,6 +86,10 @@ docs/uiux-native-app-v2/*
 !docs/TELEGRAM_DISPATCH_LATENCY_CADENCE_20260823.md
 !docs/TELEGRAM_DISPATCH_LATENCY_HOT_PATH_20260823.md
 !docs/TELEGRAM_DISPATCH_LATENCY_POOL_20260823.md
+!docs/REPOSITORY_LOCAL_STORAGE_AND_RETENTION.md
+!docs/archive/
+docs/archive/*
+!docs/archive/OFFER_OVERTIME_IMPLEMENTATION_PLAN_20260812.md
 .env
 .env.test
 .env.staging
@@ -131,3 +136,7 @@ map_data/
 .deploy_count
 deploy/production/online.env
 deploy/monitoring/.env.monitoring.local
+
+# Repository-local runtime artifacts and quarantined files.
+# Content below this directory is never committed and must follow retention rules.
+/.local/

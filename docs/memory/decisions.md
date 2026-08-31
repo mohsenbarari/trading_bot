@@ -2,13 +2,15 @@
 
 Entries are newest first.
 
-- 2026-08-29 | PRIVATE_PRIMARY adopts live Shadow roots in-place (Path A) and rehomes live-mounted secrets to `/srv/trading-bot/secure/market-data`. Both-role preflight plus equal portable image digest required. No live cutover; Product stays `LEGACY`.
-- 2026-08-28 | Urgent `PRIVATE_PRIMARY` may skip staging/soak. Product stays `LEGACY` until exact release, backup/off-host, one owner, nine-source gap audit, fresh complete-grid `OK`, and CAS. Only one-gram cells may use `NO_DATA` for a proven missing same-commodity anchor while melted is fresh; no synthetic data or gap waiver. After `PRIMARY_COMMITTED`, rollback is Product-only.
-- 2026-08-26 | Parity freezes one HMAC-manifested owner window, pinned clone lanes and one clock. Compare final facts/aligned snapshots; separate value/metadata/schema drift. Minute XAU is no event oracle.
-- 2026-08-25 | Market Intelligence is Docker-native/deploy-managed. One immutable SHA/digest image may expose isolated commands; persistent data/models/sessions/secrets stay mounted. Shadow-first cutover forbids dual Telegram-session owners.
+- 2026-08-31 | `main` is the only long-lived branch; `candidate/wa-ir-standby-v1` stays local-only and is not a merge source. The canonical checkout owns ignored artifacts with bounded retention.
+
+- 2026-08-29 | `PRIVATE_PRIMARY` adopts Shadow roots in-place and mounts secrets from `/srv/trading-bot/secure/market-data`. Both-role preflight and equal image digest are required. No live cutover; Product stays `LEGACY`.
+- 2026-08-28 | Urgent `PRIVATE_PRIMARY` may skip staging/soak, but Product stays `LEGACY` until exact release/off-host backup/single owner/nine-source gap/fresh complete-grid `OK`/CAS. `NO_DATA` requires a proven missing same-commodity one-gram anchor and fresh melted data; no synthetic/waiver. After `PRIMARY_COMMITTED`, rollback is Product-only.
+- 2026-08-26 | Parity freezes one HMAC owner window, pinned lanes, and one clock. Compare final facts/aligned snapshots; separate value, metadata, and schema drift. Minute XAU is no event oracle.
+- 2026-08-25 | Market Intelligence is Docker-native. One immutable image exposes isolated commands; persistent data/models/sessions/secrets stay mounted. Shadow-first cutover forbids dual Telegram-session owners.
 - 2026-08-25 | Market Facts first use an authenticated isolated private-network lane; product sync initially stays unchanged. General sync follows only after parity/failure/rollback/observability gates.
-- 2026-08-24 | Normal capture is causal: authoritative `source_id`, receipt availability, 30m channel reconciliation, 6h group graph+2h ancestors. Only the 2026-08-28 cutover supersedes its timing gate; real anchors remain, with bounded one-gram `NO_DATA` allowed only when absence and gap-free transport are proven.
-- 2026-08-23 | Split Queue is fail-closed: `primary` polls, one `executor` owns lanes/OTP, APIs produce. Cutover preserves rows after no-op rehearsal. Pools all/executor=15+10, primary=12+8; retain lease ACK, 1.05s cadence, freshness/retention/`sent` index.
+- 2026-08-24 | Normal capture uses authoritative `source_id`, receipt availability, 30m channel reconciliation, and 6h graph+2h ancestors. The 2026-08-28 cutover alone supersedes timing; one-gram `NO_DATA` still requires proven absence and gap-free transport.
+- 2026-08-23 | Split Queue is fail-closed: `primary` polls, one `executor` owns lanes/OTP, APIs produce. Preserve rows after no-op rehearsal; pools all/executor=15+10 and primary=12+8. Retain lease ACK, 1.05s cadence, freshness/retention/`sent` index.
 - 2026-08-22 | Release signatures ignore bytecode, not source. Quiet markets may publish bound `SAFE_NO_DATA`, then replace atomically. Queue forward redeploy keeps one owner; cutover evidence is separate. Iran nginx uses `www-data` ACL.
 - 2026-08-21 | Queue-v1/guarded inference authorized; six staging identities passed and shared fleet stays off. Web/Bot limits include overtime; tier-2 cannot publish. OTP quota replaces oldest session and flags 2/24h, 5/7d, 7/30d.
 - 2026-08-19 | Authorized profiles show full mobile/address as plain contact rows; unrelated presence, relation, trade, and management data stay excluded.

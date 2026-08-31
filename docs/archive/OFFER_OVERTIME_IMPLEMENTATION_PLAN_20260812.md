@@ -1,3 +1,11 @@
+# Archived input — not an active implementation roadmap
+
+Archived on: 2026-08-31
+Review/delete after canonical product-contract extraction: 2026-09-30
+Reason retained temporarily: this document contains approved product wording and
+behavioral decisions that must not be lost while tracked files are removed from
+`tmp/`. Current code, tests, and active product documentation take precedence.
+
 # Offer Overtime - Planning Document
 
 ## Branch and Stage Delivery Policy
