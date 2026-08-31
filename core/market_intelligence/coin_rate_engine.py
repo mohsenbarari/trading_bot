@@ -326,7 +326,13 @@ def _herat_point(
     return HeratPoint(None, None, 0.0, None, False)
 
 
-def _coin_anchor(connection: sqlite3.Connection, *, as_of: datetime, code: str, settlement: str) -> tuple[float, datetime] | None:
+def _coin_anchors(
+    connection: sqlite3.Connection,
+    *,
+    as_of: datetime,
+    code: str,
+    settlement: str,
+) -> list[tuple[float, datetime]]:
     rows = _rows(
         connection,
         as_of=as_of,
@@ -336,8 +342,6 @@ def _coin_anchor(connection: sqlite3.Connection, *, as_of: datetime, code: str, 
         price_unit="PROJECT_THOUSAND_TOMAN",
         event_types=("TRADE", "OFFER"),
     )
-    if not rows:
-        return None
     fresh_rows: list[tuple[sqlite3.Row, datetime]] = []
     for item in rows:
         event_time = _utc(
@@ -352,23 +356,33 @@ def _coin_anchor(connection: sqlite3.Connection, *, as_of: datetime, code: str, 
             continue
         if age_seconds <= _MAX_ANCHOR_AGE_SECONDS:
             fresh_rows.append((item, event_time))
-    if not fresh_rows:
-        return None
-    # ``_rows`` is already ordered by economic event time, then id.  Prefer a
-    # *fresh* confirmed trade over a fresh offer, while keeping chronological
-    # ordering within the selected evidence type.  An expired trade must not
-    # mask a usable offer, and a later-inserted historical trade must not
-    # displace a newer event of the same type.
-    row, event_time = next(
-        (
-            candidate
-            for candidate in fresh_rows
-            if str(candidate[0]["event_type"]) == "TRADE"
-        ),
-        fresh_rows[0],
+    # ``_rows`` is already ordered by economic event time, then id.  Prefer
+    # fresh confirmed trades over fresh offers while retaining every candidate
+    # in that order.  The estimator may then skip an otherwise valid anchor
+    # whose point-in-time underlying is unavailable instead of letting that
+    # one row mask later usable evidence.
+    ordered = (
+        [item for item in fresh_rows if str(item[0]["event_type"]) == "TRADE"]
+        + [item for item in fresh_rows if str(item[0]["event_type"]) != "TRADE"]
     )
-    price = float(row["price_num"])
-    return (price, event_time) if price > 0 else None
+    return [
+        (price, event_time)
+        for row, event_time in ordered
+        if (price := float(row["price_num"])) > 0
+    ]
+
+
+def _coin_anchor(
+    connection: sqlite3.Connection,
+    *,
+    as_of: datetime,
+    code: str,
+    settlement: str,
+) -> tuple[float, datetime] | None:
+    anchors = _coin_anchors(
+        connection, as_of=as_of, code=code, settlement=settlement
+    )
+    return anchors[0] if anchors else None
 
 
 def _ime_imam_point(connection: sqlite3.Connection, *, as_of: datetime) -> float | None:
@@ -437,7 +451,6 @@ def build_coin_rate_estimates(connection: sqlite3.Connection, *, as_of_utc: date
                 output.append(CoinRateEstimate(code, settlement, "NO_DATA", None, None, None, "NONE", "ABSTAIN_NO_FRESH_MELTED", None, None, None, regime, "NO_FRESH_MELTED"))
                 continue
             intrinsic = current.value_project * coefficient
-            anchor = _coin_anchor(connection, as_of=as_of, code=code, settlement=settlement)
             estimate: float | None = None
             method = ""
             anchor_age: float | None = None
@@ -445,8 +458,12 @@ def build_coin_rate_estimates(connection: sqlite3.Connection, *, as_of_utc: date
             herat_source: str | None = None
             herat_basis_relative: float | None = None
             herat_fallback = False
-            if anchor is not None:
-                anchor_price, anchor_time = anchor
+            for anchor_price, anchor_time in _coin_anchors(
+                connection,
+                as_of=as_of,
+                code=code,
+                settlement=settlement,
+            ):
                 anchor_melted = _melted_point(
                     connection,
                     as_of=anchor_time,
@@ -487,6 +504,7 @@ def build_coin_rate_estimates(connection: sqlite3.Connection, *, as_of_utc: date
                         herat_source = current_herat.source_kind
                         herat_fallback = current_herat.fallback or anchor_herat.fallback
                         method += "_WITH_HERAT_BASIS_BRIDGE"
+                    break
             if estimate is None and code == "IMAM" and settlement == "CASH":
                 ime = _ime_imam_point(connection, as_of=as_of)
                 if ime is not None:

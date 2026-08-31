@@ -186,6 +186,55 @@ class CoinRateEngineTests(unittest.TestCase):
         self.assertEqual(anchor[0], 20_500)
         self.assertEqual(anchor[1].isoformat(), "2026-08-08T09:58:00+00:00")
 
+    def test_trade_without_point_in_time_underlying_does_not_mask_offer(self) -> None:
+        self.add(
+            "trade-without-underlying",
+            instrument="COIN_IMAM",
+            price=186_000,
+            unit="PROJECT_THOUSAND_TOMAN",
+            at="2026-08-04T10:01:00Z",
+            settlement="TOMORROW",
+            form="PHYSICAL",
+            event_type="TRADE",
+        )
+        self.add(
+            "offer-with-underlying",
+            instrument="COIN_IMAM",
+            price=187_000,
+            unit="PROJECT_THOUSAND_TOMAN",
+            at="2026-08-04T10:09:00Z",
+            settlement="TOMORROW",
+            form="PHYSICAL",
+            event_type="OFFER",
+        )
+        self.add(
+            "offer-underlying",
+            instrument="MELTED_GOLD_PRIVATE",
+            price=80_300_000,
+            unit="TOMAN_PER_MESGHAL_750",
+            at="2026-08-04T10:08:30Z",
+            settlement="TOMORROW",
+            form="PAPER_NORMAL",
+        )
+        self.add(
+            "current-underlying",
+            instrument="MELTED_GOLD_PRIVATE",
+            price=81_000_000,
+            unit="TOMAN_PER_MESGHAL_750",
+            at="2026-08-04T10:09:30Z",
+            settlement="TOMORROW",
+            form="PAPER_NORMAL",
+        )
+        self.connection.commit()
+
+        imam = self.rate("IMAM", "TOMORROW")
+
+        self.assertEqual(imam.status, "ESTIMATED")
+        self.assertTrue(
+            imam.method.startswith("SAME_SETTLEMENT_COIN_ANCHOR_TRANSFER")
+        )
+        self.assertEqual(imam.anchor_age_seconds, 60.0)
+
     def test_all_stale_coin_anchors_abstain(self) -> None:
         self.add(
             "stale-one-gram-offer",
