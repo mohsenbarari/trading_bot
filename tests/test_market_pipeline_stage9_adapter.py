@@ -339,13 +339,40 @@ class Stage9AdapterTests(unittest.TestCase):
             [("1", "ELIGIBLE"), ("2", "REJECTED")],
         )
 
+        revised_again = json.loads(json.dumps(revised))
+        revised_again["fact_revision"] = 3
+        revised_again["quality_reason_codes"] = ["STILL_NOT_CURRENT"]
+        self._receive(
+            _batch(203, stream_id=stream, deliveries=[(4, revised_again)])
+        )
+        self.assertEqual(run_adapter_cycle(self.receiver, self.market).audit_only, 1)
+        refreshed = self.market.execute(
+            "SELECT attributes_json FROM market_observations WHERE event_key=?",
+            (bytes.fromhex(str(trade["event_key"])),),
+        ).fetchone()
+        self.assertEqual(
+            json.loads(str(refreshed["attributes_json"]))["fact_revision"],
+            3,
+        )
+        revision_lineage = catchup_audit._receiver_revision_rows(
+            self.receiver, self.market
+        )
+        self.assertEqual(
+            [
+                (row[3], row[7])
+                for row in revision_lineage["GROUP_1"]
+                if row[0] == str(trade["fact_id"])
+            ],
+            [("1", "ELIGIBLE"), ("2", "REJECTED"), ("3", "REJECTED")],
+        )
+
         self.receiver.execute(
             "UPDATE fact_deliveries SET received_at_utc=?",
             ("2026-08-20T00:00:00Z",),
         )
         compact_consumed_payloads(
             self.receiver,
-            applied_checkpoints={stream: 3},
+            applied_checkpoints={stream: 4},
             now=datetime(2026, 8, 27, tzinfo=timezone.utc),
             retention_seconds=3_600,
         )
@@ -493,7 +520,7 @@ class Stage9AdapterTests(unittest.TestCase):
         )
         self.market.execute(
             "DELETE FROM private_fact_adapter_migrations "
-            "WHERE migration_code='retire-stale-audit-only-observations-v1'"
+            "WHERE migration_code='retire-stale-audit-only-observations-v2'"
         )
         self.market.commit()
 

@@ -864,7 +864,10 @@ def _retire_previous_applied_observation(
         "WHERE fact_id=?",
         (fact.fact_id,),
     ).fetchone()
-    if previous is None or str(previous["status"]) != "APPLIED":
+    if previous is None or str(previous["status"]) not in {
+        "APPLIED",
+        "AUDIT_ONLY",
+    }:
         return False
     if int(previous["fact_revision"]) >= fact.fact_revision:
         raise MarketFactMappingError(
@@ -878,11 +881,16 @@ def _retire_previous_applied_observation(
     locations: list[tuple[str, sqlite3.Row]] = []
     for table in ("market_observations", "market_observations_archive"):
         row = connection.execute(
-            f"SELECT event_time_utc,attributes_json FROM {table} WHERE event_key=?",
+            f"SELECT event_time_utc,quality_state,attributes_json "
+            f"FROM {table} WHERE event_key=?",
             (event_key,),
         ).fetchone()
         if row is not None:
             locations.append((table, row))
+    if str(previous["status"]) == "AUDIT_ONLY" and not locations:
+        # A fact which has always been audit-only correctly has no economic
+        # observation.  There is nothing to refresh in that case.
+        return False
     if len(locations) != 1:
         raise MarketFactMappingError(
             "market_fact_adapter_previous_observation_missing"
@@ -899,6 +907,14 @@ def _retire_previous_applied_observation(
     if not isinstance(attributes, dict):
         raise MarketFactMappingError(
             "market_fact_adapter_previous_observation_invalid"
+        )
+    if str(previous["status"]) == "AUDIT_ONLY" and (
+        str(row["quality_state"]).upper() != "IGNORED"
+        or attributes.get("transfer_fact_id") != fact.fact_id
+        or attributes.get("adapter_disposition") != "AUDIT_ONLY"
+    ):
+        raise MarketFactMappingError(
+            "market_fact_adapter_previous_audit_observation_invalid"
         )
     attributes.update(
         {
@@ -1222,7 +1238,9 @@ def _retire_stale_audit_only_observations(
     revisions are retired synchronously in ``apply_received_delivery``.
     """
 
-    migration = "retire-stale-audit-only-observations-v1"
+    # v2 also refreshes metadata when several consecutive revisions remain
+    # AUDIT_ONLY; v1 only handled the initial APPLIED -> AUDIT_ONLY edge.
+    migration = "retire-stale-audit-only-observations-v2"
     destination.execute("BEGIN IMMEDIATE")
     try:
         if destination.execute(
