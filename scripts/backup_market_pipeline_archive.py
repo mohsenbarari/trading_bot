@@ -145,12 +145,23 @@ def validate_release_env(
     values = parse_env(env_file, secure_input=True)
     source_values = {key: value for key, value in values.items() if key not in DYNAMIC_VALUES}
     validate_source("web", source_values)
-    expected = {
-        "MARKET_PIPELINE_MODE": "live",
-        "MARKET_PIPELINE_FEED_MODE": "PRIVATE_SHADOW",
-        "MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY": "0",
-        "MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE": "PRIVATE_SHADOW",
+    expected = {"MARKET_PIPELINE_MODE": "live"}
+    source_lane = (
+        values.get("MARKET_PIPELINE_FEED_MODE"),
+        values.get("MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY"),
+        values.get("MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE"),
+    )
+    allowed_source_lanes = {
+        ("PRIVATE_SHADOW", "0", "PRIVATE_SHADOW"),
     }
+    if allow_target_identity_mismatch:
+        # A release-to-release Blue/Green upgrade may use the already-live
+        # PRIVATE_PRIMARY database as its immutable backup source.  The
+        # ordinary backup surface remains Shadow-only; only this explicitly
+        # bound source mode accepts either coherent lane triple.
+        allowed_source_lanes.add(("PRIVATE_PRIMARY", "1", "PRIVATE_PRIMARY"))
+    if source_lane not in allowed_source_lanes:
+        raise BackupError("backup_release_env_identity_mismatch")
     if not allow_target_identity_mismatch:
         expected.update(
             {

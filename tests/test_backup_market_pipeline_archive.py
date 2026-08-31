@@ -471,6 +471,55 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
                 image_id=IMAGE_ID,
             )
 
+    def test_bluegreen_source_env_accepts_coherent_primary_runtime(self) -> None:
+        source_release = "e" * 40
+        source_image = "sha256:" + "f" * 64
+        values = dict(self.values)
+        values.update(
+            {
+                "MARKET_PIPELINE_RELEASE_SHA": source_release,
+                "MARKET_PIPELINE_IMAGE": source_image,
+                "MARKET_PIPELINE_FEED_MODE": "PRIVATE_PRIMARY",
+                "MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY": "1",
+                "MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE": "PRIVATE_PRIMARY",
+            }
+        )
+        _write_env(self.env_file, values)
+
+        observed = backup.validate_release_env(
+            self.env_file,
+            release_sha=RELEASE_SHA,
+            image_id=IMAGE_ID,
+            allow_target_identity_mismatch=True,
+        )
+
+        self.assertEqual(observed["MARKET_PIPELINE_FEED_MODE"], "PRIVATE_PRIMARY")
+        with self.assertRaisesRegex(backup.BackupError, "identity_mismatch"):
+            backup.validate_release_env(
+                self.env_file,
+                release_sha=RELEASE_SHA,
+                image_id=IMAGE_ID,
+            )
+
+    def test_bluegreen_source_env_rejects_incoherent_primary_lane(self) -> None:
+        values = dict(self.values)
+        values.update(
+            {
+                "MARKET_PIPELINE_FEED_MODE": "PRIVATE_PRIMARY",
+                "MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY": "0",
+                "MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE": "PRIVATE_PRIMARY",
+            }
+        )
+        _write_env(self.env_file, values)
+
+        with self.assertRaisesRegex(backup.BackupError, "identity_mismatch"):
+            backup.validate_release_env(
+                self.env_file,
+                release_sha=RELEASE_SHA,
+                image_id=IMAGE_ID,
+                allow_target_identity_mismatch=True,
+            )
+
     def test_receipt_and_backup_must_be_isolated_from_database_root(self) -> None:
         with self.assertRaisesRegex(backup.BackupError, "destination_invalid"):
             backup.create_backup(
