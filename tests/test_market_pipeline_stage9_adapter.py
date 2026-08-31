@@ -354,6 +354,36 @@ class Stage9AdapterTests(unittest.TestCase):
         )
         self.assertEqual(compacted_lineage, revision_lineage)
 
+    def test_catchup_revision_audit_ignores_non_target_component_stream(self):
+        stream = "market.fact.private-gold-minute"
+        fact = _fact(
+            1199,
+            source_code="PRIVATE_GOLD_PAPER_MINUTE",
+            stream_id=stream,
+            source_sequence=1,
+            payload={
+                "kind": "OBSERVATION",
+                "instrument": "MELTED_GOLD_PRIVATE",
+                "event_type": "QUOTE",
+                "side": "MID",
+                "settlement": "TOMORROW",
+                "trade_form": "PAPER_NORMAL",
+                "price_value": "120000000",
+                "price_unit": "TOMAN_PER_MESGHAL_750",
+                "currency": "TOMAN",
+                "quantity_value": None,
+                "quantity_unit": None,
+            },
+        )
+        self._receive(_batch(1199, stream_id=stream, deliveries=[(1, fact)]))
+        self.assertEqual(run_adapter_cycle(self.receiver, self.market).applied, 1)
+
+        lineage = catchup_audit._receiver_revision_rows(
+            self.receiver, self.market
+        )
+
+        self.assertTrue(all(not rows for rows in lineage.values()))
+
     def test_upgrade_retires_observation_left_eligible_by_old_adapter(self):
         stream = "market.fact.coin.group.1"
         offer = _fact(

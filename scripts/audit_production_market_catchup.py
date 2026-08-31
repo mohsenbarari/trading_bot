@@ -2473,7 +2473,12 @@ def _receiver_revision_rows(
         stream = str(row["stream_id"])
         source = stream_sources.get(stream)
         if source is None:
-            _fail("adapter_revision_source_invalid")
+            # The Store also carries legitimate derived/model-component
+            # streams (currently the private-gold minute series).  They are
+            # outside this capture-to-model promotion inventory, just as
+            # ``_receiver_fact_rows`` already treats them, and must not be
+            # misclassified as an invalid source.
+            continue
         fact_id = str(row["fact_id"])
         revision = int(row["fact_revision"])
         delivery_sequence = int(row["delivery_sequence"])
