@@ -24,10 +24,11 @@ from .coin_rate_engine import COIN_RATE_ENGINE_VERSION, COIN_SPECS, build_coin_r
 from .market_contracts import MARKET_STORE_CONTRACT_VERSION, normalize_utc
 from .market_regime import detect_canonical_market_regime, product_market_regime
 from .private_gold import filter_comparable_private_gold_physical_rows
+from .xau_model_input import latest_real_xau_rows
 
 
 MARKET_SNAPSHOT_SCHEMA_VERSION = 1
-MARKET_SNAPSHOT_BUILDER_VERSION = "market-snapshot-v1"
+MARKET_SNAPSHOT_BUILDER_VERSION = "market-snapshot-v2-xau-15s"
 DEFAULT_MAXIMUM_SNAPSHOT_BYTES = 2 * 1024 * 1024
 
 
@@ -270,6 +271,13 @@ def _signal(
     )
     if include_comparable_conditional:
         rows = filter_comparable_private_gold_physical_rows(rows)
+    if instrument == "XAUUSD" and (
+        source_codes is None or tuple(source_codes) == ("XAUUSD",)
+    ):
+        # Raw capture intentionally retains every real channel quote.  Product
+        # inference preserves the established input contract: the newest real
+        # quote in each fixed 15-second UTC bucket, with no fabricated rows.
+        rows = list(reversed(latest_real_xau_rows(reversed(rows))))
     return (
         key,
         _source_summary(

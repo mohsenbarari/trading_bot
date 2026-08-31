@@ -225,7 +225,7 @@ UTC مقدار canonical است. ساعت تهران فقط در query/UI مشت
 
 ### 5.5 اونس و تتر
 
-اونس برای هر quote واقعی Parse‌شده ذخیره می‌شود. تتر برای هر poll موفق Wallex، با cadence پیش‌فرض 10 ثانیه ذخیره می‌شود. quiet-period row ساخته نمی‌شود.
+اونس برای هر quote واقعی Parse‌شده روی `wa-fi` ذخیره می‌شود؛ اما انتقال ورودی مدل و مصرف مدل، مطابق قرارداد legacy، فقط آخرین quote واقعی هر bucket ثابت ۱۵ثانیه‌ای را نگه می‌دارد. این انتخاب polling نیست و quiet-period row نمی‌سازد. تتر برای هر poll موفق Wallex، با cadence پیش‌فرض 10 ثانیه ذخیره می‌شود.
 
 علاوه بر observation، مقدار دقیق مصرف‌شده مدل نگهداری می‌شود:
 
@@ -268,7 +268,7 @@ price row تکراری برای هر اجرای پنج‌ثانیه‌ای سا�
 - freshness داخلی componentهای regime: حداکثر 180 ثانیه؛
 - XAU اصلی: آخرین quote مستقیم در پنجره 90 ثانیه؛
 - XAU fallback: فقط PAXG corroborated و مطابق guard فعلی؛
-- one-per-minute XAU compaction: برای feed اصلی ممنوع.
+- one-per-minute XAU compaction: برای feed اصلی ممنوع؛ انتخاب آخرین quote واقعی هر bucket ثابت ۱۵ثانیه‌ای فقط در مرز انتقال/ورودی مدل مجاز و الزامی است و raw capture را حذف نمی‌کند.
 
 در محاسبه intrinsic، XAU point وارد فرمول می‌شود. USDT جای مستقیم Herat نیست؛ برای trend/fallback، morning reopen و regime استفاده می‌شود. ledger باید همه roleهای واقعاً مصرف‌شده را ثبت کند، نه فقط آخرین quote را.
 

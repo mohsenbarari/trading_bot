@@ -181,6 +181,37 @@ class MarketSnapshotTests(unittest.TestCase):
             "external_reference_not_herat_substitution_v1",
         )
 
+    def test_snapshot_xau_uses_latest_real_quote_per_fifteen_second_bucket(self) -> None:
+        for identity, second, price in (
+            ("xau-1", 1, 4630.1),
+            ("xau-2", 7, 4630.7),
+            ("xau-3", 16, 4631.6),
+            ("xau-4", 29, 4632.9),
+        ):
+            self._store(
+                identity=identity,
+                source_code="XAUUSD",
+                instrument="XAUUSD",
+                price=price,
+                price_unit="USD_PER_TROY_OUNCE",
+                event_time=self.now.replace(second=second) - timedelta(minutes=1),
+                settlement="SPOT",
+                trade_form="NOT_APPLICABLE",
+            )
+
+        snapshot = build_market_snapshot(self.connection, as_of_utc=self.now)
+        signal = snapshot["signals"]["XAUUSD"]
+
+        self.assertEqual(signal["latest_price"], 4632.9)
+        self.assertAlmostEqual(signal["mean_price"], 4631.8)
+        self.assertEqual(signal["observation_count"], 2)
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT COUNT(*) FROM market_observations WHERE source_code='XAUUSD'"
+            ).fetchone()[0],
+            4,
+        )
+
     def test_snapshot_exposes_unsettled_aggregate_paper_without_relabeling_it(self) -> None:
         self._store(
             identity="aggregate-paper-unsettled",

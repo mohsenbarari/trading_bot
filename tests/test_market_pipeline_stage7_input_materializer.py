@@ -202,6 +202,68 @@ class MarketPipelineStage7InputMaterializerTests(unittest.TestCase):
             finally:
                 connection.close()
 
+    def test_direct_xau_uses_latest_real_quote_per_fifteen_second_bucket(self) -> None:
+        from core.market_intelligence.market_contracts import (
+            MarketObservation,
+            derive_event_key,
+        )
+
+        at = datetime(2026, 8, 26, 10, 0, 30, tzinfo=UTC)
+        with tempfile.TemporaryDirectory() as directory:
+            connection = self._store(Path(directory))
+            try:
+                for identifier, second, value in (
+                    (1, 1, "4630.1"),
+                    (2, 7, "4630.7"),
+                    (3, 16, "4631.6"),
+                    (4, 29, "4632.9"),
+                ):
+                    moment = at.replace(second=second)
+                    event_key = derive_event_key("xau-15s-input", identifier)
+                    upsert_observation(
+                        connection,
+                        MarketObservation(
+                            event_key=event_key,
+                            source_code="XAUUSD",
+                            source_family="TELEGRAM_PUBLIC",
+                            event_time_utc=moment,
+                            available_at_utc=moment,
+                            instrument="XAUUSD",
+                            market_label="XAUUSD_SPOT",
+                            settlement_term="SPOT",
+                            trade_form="NOT_APPLICABLE",
+                            event_type="QUOTE",
+                            side="MID",
+                            price=value,
+                            price_unit="USD_PER_TROY_OUNCE",
+                            currency="USD",
+                        ),
+                    )
+                    connection.execute(
+                        "UPDATE market_observations SET inserted_at_utc=? WHERE event_key=?",
+                        (moment.isoformat().replace("+00:00", "Z"), event_key),
+                    )
+                connection.commit()
+
+                components = {
+                    item.feature_role: item
+                    for item in build_input_components(connection, as_of_utc=at)
+                }
+                point = components["XAUUSD_90S_POINT"]
+                mean = components["XAUUSD_90S_MEAN"]
+                self.assertEqual(point.consumed_value, "4632.9")
+                self.assertEqual(mean.consumed_value, "4631.8")
+                self.assertEqual(point.sample_count, 2)
+                self.assertEqual(mean.sample_count, 2)
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM market_observations WHERE source_code='XAUUSD'"
+                    ).fetchone()[0],
+                    4,
+                )
+            finally:
+                connection.close()
+
     def test_materializer_excludes_late_availability_and_local_insert(self) -> None:
         at = datetime(2026, 8, 26, 10, 0, tzinfo=UTC)
         with tempfile.TemporaryDirectory() as directory:

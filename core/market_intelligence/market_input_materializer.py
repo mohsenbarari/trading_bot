@@ -17,9 +17,10 @@ import sqlite3
 from typing import Any, Iterable, Mapping
 
 from .market_contracts import normalize_utc
+from .xau_model_input import latest_real_xau_rows
 
 
-INPUT_LEDGER_VERSION = "market-input-ledger-v1"
+INPUT_LEDGER_VERSION = "market-input-ledger-v2-xau-15s"
 POINT_WINDOW_SECONDS = 90
 USDT_TREND_WINDOW_SECONDS = 180
 REGIME_WINDOW_SECONDS = 600
@@ -164,7 +165,7 @@ def _samples(
     placeholders = ",".join("?" for _ in sources)
     rows = connection.execute(
         f"""
-        SELECT event_key,event_time_utc,available_at_utc,price_value,
+        SELECT id,event_key,event_time_utc,available_at_utc,price_value,
                price_unit,source_code,side
         FROM market_observations
         WHERE quality_state='ELIGIBLE'
@@ -187,6 +188,8 @@ def _samples(
             _stamp(end).replace("Z", ".000000Z"),
         ),
     ).fetchall()
+    if instrument == "XAUUSD" and sources == ("XAUUSD",):
+        rows = latest_real_xau_rows(rows)
     samples: list[Sample] = []
     unit: str | None = None
     for row in rows:

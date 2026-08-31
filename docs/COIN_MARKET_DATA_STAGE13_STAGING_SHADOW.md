@@ -204,7 +204,7 @@ baseline و candidate هر دو از mountهای version-pinned خوانده ش�
   ۱٬۲۱۵ XAU fact ساخت، درحالی‌که baseline قدیمی ۲۳ public fact نوشت. final Store دارای
   ۱٬۲۱۲ XAU fact اضافه candidate و ۲۰ XAU bucket/key قدیمیِ فقط baseline بود؛
 - unit/parser/lifecycle mismatch در این window صفر بود. اختلاف XAU ناشی از سیاست مصوب
-  حفظ هر quote واقعی و ممنوعیت minute compaction است؛ baseline قدیمی برای XAU oracle
+  حفظ هر quote واقعی در capture و ممنوعیت minute compaction است؛ ورودی Product با آخرین quote واقعی هر bucket ثابت ۱۵ثانیه‌ای legacy-compatible می‌شود و baseline قدیمی برای XAU oracle
   event-by-event معتبر نیست؛
 - از ۱۹ signal، ۱۷ مورد schema جدید `mean_price` را داشتند. value مشترک USDT برابر بود؛
   فقط XAU به‌علت sample set کامل‌تر candidate value متفاوت داشت؛

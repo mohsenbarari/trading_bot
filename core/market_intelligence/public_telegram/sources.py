@@ -18,8 +18,10 @@ PUBLIC_TELEGRAM_SOURCES = (
     PublicTelegramSource("MELTED_AGGREGATE", "abshdh"),
     PublicTelegramSource("MELTED_FLOW", "NaghdP"),
     PublicTelegramSource("USD_HERAT", "ToofanHarirodOfficial"),
-    # Every real quote is an estimator input candidate.  Minute compaction
-    # destroys the exact event sequence and cannot be reproduced causally.
+    # Preserve every real quote in wa-fi capture/Store for causal audit.  The
+    # outbound/model-input layer separately selects the latest real quote per
+    # fixed 15-second bucket to reproduce the established estimator contract.
+    # Minute compaction and fabricated quiet-period rows remain forbidden.
     PublicTelegramSource("XAUUSD", "qheimat_ounce"),
 )
 SOURCES_BY_CODE = {source.code: source for source in PUBLIC_TELEGRAM_SOURCES}

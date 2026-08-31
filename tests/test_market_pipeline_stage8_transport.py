@@ -469,6 +469,56 @@ class Stage8ReceiverTests(unittest.TestCase):
 
 
 class Stage8TransportTests(unittest.TestCase):
+    def test_xau_export_keeps_only_latest_real_quote_per_closed_fifteen_second_bucket(self):
+        with tempfile.TemporaryDirectory() as directory:
+            market = connect_market_store(Path(directory) / "market.sqlite3")
+            initialize_market_store(market)
+            initialize_export_ledger(market)
+            for identity, timestamp, price in (
+                ("xau-1", "2026-08-26T05:00:01Z", "4630.1"),
+                ("xau-2", "2026-08-26T05:00:07Z", "4630.7"),
+                ("xau-3", "2026-08-26T05:00:16Z", "4631.6"),
+                ("xau-4", "2026-08-26T05:00:29Z", "4632.9"),
+            ):
+                upsert_observation(
+                    market,
+                    MarketObservation(
+                        event_key=derive_event_key("stage8-xau-input", identity),
+                        source_code="XAUUSD",
+                        source_family="TELEGRAM_PUBLIC",
+                        event_time_utc=timestamp,
+                        available_at_utc=timestamp,
+                        instrument="XAUUSD",
+                        market_label="XAUUSD_SPOT",
+                        settlement_term="SPOT",
+                        trade_form="NOT_APPLICABLE",
+                        event_type="QUOTE",
+                        side="MID",
+                        price=price,
+                        price_unit="USD_PER_TROY_OUNCE",
+                        currency="USD",
+                        parser_version="stage8-test-v1",
+                    ),
+                )
+            market.commit()
+
+            rows = _pending_export_rows(market, max_rows=10)
+
+            self.assertEqual(
+                [(row["event_time_utc"], row["price_value"]) for row in rows],
+                [
+                    ("2026-08-26T05:00:07Z", "4630.7"),
+                    ("2026-08-26T05:00:29Z", "4632.9"),
+                ],
+            )
+            self.assertEqual(
+                market.execute(
+                    "SELECT COUNT(*) FROM market_observations WHERE source_code='XAUUSD'"
+                ).fetchone()[0],
+                4,
+            )
+            market.close()
+
     def test_known_payload_hash_rejection_is_selected_for_one_time_retry(self):
         with tempfile.TemporaryDirectory() as directory:
             market = connect_market_store(Path(directory) / "market.sqlite3")

@@ -22,9 +22,14 @@ from .research_archive import (
     archive_fact_research_context,
     research_contexts_for_rows,
 )
+from .xau_model_input import (
+    XAU_MODEL_INPUT_BUCKET_SECONDS,
+    XAU_MODEL_INPUT_EXPORT_SETTLE_SECONDS,
+    xau_model_input_bucket,
+)
 
 
-PROJECTION_VERSION = "market-fact-projection-v1"
+PROJECTION_VERSION = "market-fact-projection-v2-xau-model-input"
 MAX_EXPORT_PER_CYCLE = 5_000
 _REASON_TOKEN = re.compile(r"[^A-Z0-9_]+")
 _FACT_PAYLOAD_ADAPTER = TypeAdapter(FactPayload)
@@ -51,7 +56,7 @@ class ExportReport:
 
 def initialize_export_ledger(connection: sqlite3.Connection) -> None:
     connection.executescript(
-        """
+        f"""
         CREATE TABLE IF NOT EXISTS market_fact_export_ledger (
             event_key BLOB PRIMARY KEY,
             observation_inserted_at_utc TEXT NOT NULL,
@@ -93,8 +98,180 @@ def initialize_export_ledger(connection: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS market_fact_export_history_event_idx
         ON market_fact_export_history(event_key,fact_revision);
+        CREATE TABLE IF NOT EXISTS market_xau_model_input_buckets (
+            bucket_number INTEGER PRIMARY KEY,
+            selected_event_key BLOB NOT NULL UNIQUE,
+            selected_event_time_utc TEXT NOT NULL,
+            selected_inserted_at_utc TEXT NOT NULL,
+            selected_observation_id INTEGER NOT NULL CHECK(selected_observation_id>0),
+            updated_at_utc TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS market_xau_model_input_cursor (
+            singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+            last_inserted_at_utc TEXT NOT NULL,
+            last_observation_id INTEGER NOT NULL CHECK(last_observation_id>=0),
+            updated_at_utc TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS market_xau_model_input_insert_cursor_idx
+        ON market_observations(
+            source_code,
+            (CASE WHEN instr(inserted_at_utc,'.')=0
+                  THEN replace(inserted_at_utc,'Z','.000000Z')
+                  ELSE inserted_at_utc END),
+            id
+        ) WHERE source_code='XAUUSD';
+        CREATE INDEX IF NOT EXISTS market_xau_model_input_bucket_lookup_idx
+        ON market_observations(
+            source_code,
+            (CAST(strftime('%s',event_time_utc) AS INTEGER)
+             / {XAU_MODEL_INPUT_BUCKET_SECONDS}),
+            event_time_utc DESC,
+            id DESC
+        ) WHERE source_code='XAUUSD';
         """
     )
+    cursor = connection.execute(
+        "SELECT 1 FROM market_xau_model_input_cursor WHERE singleton=1"
+    ).fetchone()
+    if cursor is None:
+        # One-time, deterministic adoption of an existing raw XAU Store.  Raw
+        # quotes remain intact; this small materialized index only identifies
+        # the latest real quote in each established 15-second input bucket.
+        connection.execute(
+            f"""
+            INSERT INTO market_xau_model_input_buckets(
+                bucket_number,selected_event_key,selected_event_time_utc,
+                selected_inserted_at_utc,selected_observation_id,updated_at_utc
+            )
+            SELECT bucket_number,event_key,event_time_utc,insert_order,id,
+                   strftime('%Y-%m-%dT%H:%M:%SZ','now')
+            FROM (
+                SELECT id,event_key,event_time_utc,
+                       CASE WHEN instr(inserted_at_utc,'.')=0
+                            THEN replace(inserted_at_utc,'Z','.000000Z')
+                            ELSE inserted_at_utc END AS insert_order,
+                       CAST(strftime('%s',event_time_utc) AS INTEGER)
+                           / {XAU_MODEL_INPUT_BUCKET_SECONDS} AS bucket_number,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY CAST(strftime('%s',event_time_utc) AS INTEGER)
+                                        / {XAU_MODEL_INPUT_BUCKET_SECONDS}
+                           ORDER BY event_time_utc DESC,id DESC
+                       ) AS bucket_rank
+                FROM market_observations
+                WHERE source_code='XAUUSD'
+            )
+            WHERE bucket_rank=1
+            """
+        )
+        latest = connection.execute(
+            """
+            SELECT CASE WHEN instr(inserted_at_utc,'.')=0
+                        THEN replace(inserted_at_utc,'Z','.000000Z')
+                        ELSE inserted_at_utc END AS insert_order,id
+            FROM market_observations
+            WHERE source_code='XAUUSD'
+            ORDER BY insert_order DESC,id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        connection.execute(
+            """
+            INSERT INTO market_xau_model_input_cursor(
+                singleton,last_inserted_at_utc,last_observation_id,updated_at_utc
+            ) VALUES(1,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+            """,
+            (
+                str(latest["insert_order"]) if latest is not None else "",
+                int(latest["id"]) if latest is not None else 0,
+            ),
+        )
+
+
+def _refresh_xau_model_input_buckets(
+    connection: sqlite3.Connection,
+    *,
+    max_rows: int = MAX_EXPORT_PER_CYCLE,
+) -> int:
+    """Incrementally index new/edited raw XAU rows without deleting raw data."""
+
+    state = connection.execute(
+        "SELECT last_inserted_at_utc,last_observation_id "
+        "FROM market_xau_model_input_cursor WHERE singleton=1"
+    ).fetchone()
+    if state is None:
+        raise MarketFactProjectionError("xau_model_input_cursor_missing")
+    rows = connection.execute(
+        """
+        SELECT id,event_key,event_time_utc,
+               CASE WHEN instr(inserted_at_utc,'.')=0
+                    THEN replace(inserted_at_utc,'Z','.000000Z')
+                    ELSE inserted_at_utc END AS insert_order
+        FROM market_observations
+        WHERE source_code='XAUUSD'
+          AND (
+                (CASE WHEN instr(inserted_at_utc,'.')=0
+                      THEN replace(inserted_at_utc,'Z','.000000Z')
+                      ELSE inserted_at_utc END)>?
+                OR (
+                    (CASE WHEN instr(inserted_at_utc,'.')=0
+                          THEN replace(inserted_at_utc,'Z','.000000Z')
+                          ELSE inserted_at_utc END)=?
+                    AND id>?
+                )
+              )
+        ORDER BY insert_order,id
+        LIMIT ?
+        """,
+        (
+            str(state["last_inserted_at_utc"]),
+            str(state["last_inserted_at_utc"]),
+            int(state["last_observation_id"]),
+            max(1, int(max_rows)),
+        ),
+    ).fetchall()
+    for row in rows:
+        bucket = xau_model_input_bucket(row["event_time_utc"])
+        connection.execute(
+            """
+            INSERT INTO market_xau_model_input_buckets(
+                bucket_number,selected_event_key,selected_event_time_utc,
+                selected_inserted_at_utc,selected_observation_id,updated_at_utc
+            ) VALUES(?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+            ON CONFLICT(bucket_number) DO UPDATE SET
+                selected_event_key=excluded.selected_event_key,
+                selected_event_time_utc=excluded.selected_event_time_utc,
+                selected_inserted_at_utc=excluded.selected_inserted_at_utc,
+                selected_observation_id=excluded.selected_observation_id,
+                updated_at_utc=excluded.updated_at_utc
+            WHERE excluded.selected_event_time_utc>
+                      market_xau_model_input_buckets.selected_event_time_utc
+               OR (
+                    excluded.selected_event_time_utc=
+                        market_xau_model_input_buckets.selected_event_time_utc
+                    AND excluded.selected_observation_id>
+                        market_xau_model_input_buckets.selected_observation_id
+                  )
+            """,
+            (
+                bucket,
+                row["event_key"],
+                str(row["event_time_utc"]),
+                str(row["insert_order"]),
+                int(row["id"]),
+            ),
+        )
+    if rows:
+        latest = rows[-1]
+        connection.execute(
+            """
+            UPDATE market_xau_model_input_cursor
+            SET last_inserted_at_utc=?,last_observation_id=?,
+                updated_at_utc=strftime('%Y-%m-%dT%H:%M:%SZ','now')
+            WHERE singleton=1
+            """,
+            (str(latest["insert_order"]), int(latest["id"])),
+        )
+    return len(rows)
 
 
 def _pending_export_rows(
@@ -123,13 +300,24 @@ def _pending_export_rows(
             """,
             keys,
         ).fetchall()
+    _refresh_xau_model_input_buckets(market, max_rows=max_rows)
     return market.execute(
-        """
+        f"""
+        WITH candidates AS (
+            SELECT o.* FROM market_observations o WHERE o.source_code<>'XAUUSD'
+            UNION ALL
+            SELECT o.*
+            FROM market_xau_model_input_buckets b
+            JOIN market_observations o ON o.event_key=b.selected_event_key
+            WHERE CAST(strftime('%s','now') AS INTEGER) >=
+                  (b.bucket_number + 1) * {XAU_MODEL_INPUT_BUCKET_SECONDS}
+                  + {XAU_MODEL_INPUT_EXPORT_SETTLE_SECONDS}
+        )
         SELECT o.*
-        FROM market_observations o
+        FROM candidates o
         LEFT JOIN market_fact_export_ledger l ON l.event_key=o.event_key
         LEFT JOIN market_fact_export_semantics s ON s.event_key=o.event_key
-        WHERE l.event_key IS NULL
+        WHERE (l.event_key IS NULL
            OR l.observation_inserted_at_utc<>o.inserted_at_utc
            OR (
                 l.status='SUCCESS'
@@ -142,6 +330,7 @@ def _pending_export_rows(
                 l.status='REJECTED'
                 AND instr(COALESCE(l.reason_code,''),'fact_payload_hash_mismatch')>0
               )
+          )
         ORDER BY o.event_time_utc,
                  CASE o.event_type WHEN 'OFFER' THEN 0 WHEN 'TRADE' THEN 1 ELSE 2 END,
                  o.event_key
