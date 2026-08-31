@@ -60,6 +60,8 @@ Discover optional memory without loading it. Entries here are not default loads.
 - None enabled.
 
 ### Enabled areas
+- `areas/infrastructure.md` — load for Finland/Iran server inventory,
+  provisioning, host identity, SSH access, failover topology, or cutover work.
 - `areas/frontend-uiux.md` — load for Vue/PWA UI/UX refactoring, Design System V2, Figma/Sites evidence, or shared UI changes that can affect protected surfaces.
 - `areas/coin-market-intelligence.md`: load for estimator, Market Store,
   coin-group parsing/trade linking, and public market ingestion work.

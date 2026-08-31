@@ -90,6 +90,9 @@ docs/uiux-native-app-v2/*
 !docs/archive/
 docs/archive/*
 !docs/archive/OFFER_OVERTIME_IMPLEMENTATION_PLAN_20260812.md
+!docs/architecture/
+docs/architecture/*
+!docs/architecture/FINLAND_PRIMARY_TARGET.md
 .env
 .env.test
 .env.staging
