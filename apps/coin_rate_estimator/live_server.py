@@ -108,6 +108,9 @@ from core.market_intelligence.coin_group_trades import (  # noqa: E402
     COIN_GROUP_TRADE_LINKER_VERSION,
 )
 from core.market_intelligence.market_contracts import derive_event_key  # noqa: E402
+from core.market_intelligence.private_pipeline_contracts import (  # noqa: E402
+    EstimatorSnapshotV2,
+)
 from telegram_price_collector.external_collectors import (  # noqa: E402
     ExternalSourceError,
     fetch_binance_paxg_live,
@@ -141,6 +144,23 @@ from shadow_cross_calibration import maybe_run_shadow_cross_calibration  # noqa:
 
 TEHRAN = ZoneInfo("Asia/Tehran")
 DEFAULT_STATE = RUNTIME_ROOT / "state.json"
+_PRIMARY_SNAPSHOT_ENV = "COIN_RATE_ESTIMATOR_PRIMARY_SNAPSHOT"
+_PRIMARY_SNAPSHOT_MAX_AGE_SECONDS = 180
+_PRIMARY_LOW_DATE_ANCHOR_MAX_AGE_SECONDS = 2 * 60 * 60
+_PRIMARY_LOW_DATE_INSTRUMENTS = {
+    "COIN_BAHAR",
+    "COIN_HALF_LOW_DATE",
+    "COIN_QUARTER_LOW_DATE",
+}
+_PRIMARY_RATE_NAMES = {
+    "COIN_IMAM": (1, "امام"),
+    "COIN_BAHAR": (2, "بهار"),
+    "COIN_QUARTER_BAHAR": (3, "ربع بهار"),
+    "COIN_HALF_BAHAR": (4, "نیم بهار"),
+    "COIN_QUARTER_LOW_DATE": (5, "ربع تاریخ پایین"),
+    "COIN_HALF_LOW_DATE": (6, "نیم تاریخ پایین"),
+    "COIN_ONE_GRAM": (7, "یک گرمی"),
+}
 DEFAULT_SHADOW_MODEL = Path(
     os.environ.get(
         "COIN_RATE_ESTIMATOR_SHADOW_MODEL",
@@ -796,9 +816,116 @@ def manual_entry_counts(conversation_db: Path) -> dict[str, int]:
         connection.close()
 
 
+def overlay_primary_snapshot_rates(
+    state: dict[str, Any],
+    *,
+    snapshot_path: Path,
+    now_utc: datetime | None = None,
+) -> dict[str, Any]:
+    """Project the authoritative V2 snapshot onto the legacy operator view.
+
+    The estimator dashboard predates the private pipeline.  During migration
+    its own legacy calculation may have no private melted-gold input even while
+    the production snapshot is healthy.  This adapter changes display state
+    only: it validates the complete signed-contract payload, rejects stale or
+    non-primary snapshots, and never writes either estimator store.
+    """
+
+    try:
+        document = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        payload = document.get("snapshot", document)
+        snapshot = EstimatorSnapshotV2.model_validate(payload)
+        if snapshot.feed_mode != "PRIVATE_PRIMARY" or snapshot.status != "OK":
+            return state
+        observed_at = (now_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        age_seconds = (observed_at - snapshot.generated_at_utc).total_seconds()
+        if age_seconds < 0 or age_seconds > _PRIMARY_SNAPSHOT_MAX_AGE_SECONDS:
+            return state
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return state
+
+    projected = deepcopy(state)
+    settlements = projected.setdefault("settlements", {})
+    rates_by_settlement: dict[str, list[dict[str, Any]]] = {
+        "CASH": [],
+        "TOMORROW": [],
+    }
+    for rate in snapshot.rates:
+        identity = _PRIMARY_RATE_NAMES.get(rate.instrument)
+        if identity is None or rate.settlement not in rates_by_settlement:
+            continue
+        commodity_id, commodity_name = identity
+        unsafe_stale_low_date_anchor = (
+            rate.instrument in _PRIMARY_LOW_DATE_INSTRUMENTS
+            and rate.anchor_age_seconds is not None
+            and float(rate.anchor_age_seconds)
+            > _PRIMARY_LOW_DATE_ANCHOR_MAX_AGE_SECONDS
+        )
+        estimated = (
+            rate.status == "ESTIMATED"
+            and rate.value is not None
+            and not unsafe_stale_low_date_anchor
+        )
+        value = int(rate.value) if estimated else None
+        lower = int(rate.lower_bound) if estimated and rate.lower_bound is not None else None
+        upper = int(rate.upper_bound) if estimated and rate.upper_bound is not None else None
+        rates_by_settlement[rate.settlement].append(
+            {
+                "commodity_id": commodity_id,
+                "commodity_name": commodity_name,
+                "status": "ESTIMATED" if estimated else "NO_DATA",
+                "estimated_project_price": value,
+                "estimated_price_toman": value * 1_000 if value is not None else None,
+                "tolerance": {
+                    "lower_project_price": lower,
+                    "upper_project_price": upper,
+                    "lower_price_toman": lower * 1_000 if lower is not None else None,
+                    "upper_price_toman": upper * 1_000 if upper is not None else None,
+                },
+                "confidence": str(rate.confidence),
+                "method": str(rate.method or rate.reason_code or "PRIVATE_PRIMARY"),
+                "reason": str(rate.reason_code or "") or None,
+                "market_regime": str(rate.market_regime),
+            }
+        )
+    if any(len(rows) != len(_PRIMARY_RATE_NAMES) for rows in rates_by_settlement.values()):
+        return state
+
+    for settlement, rates in rates_by_settlement.items():
+        book = settlements.setdefault(settlement, {})
+        book["rates"] = rates
+        regimes = {str(item.get("market_regime")) for item in rates}
+        if len(regimes) == 1:
+            book["market_regime"] = regimes.pop()
+    generated_at = snapshot.generated_at_utc.isoformat().replace("+00:00", "Z")
+    projected["generated_at_utc"] = generated_at
+    projected["window_end_utc"] = generated_at
+    projected["service_status"] = "RUNNING"
+    projected["input_health"] = {
+        "schema_version": 2,
+        "status": "HEALTHY",
+        "evaluated_at_utc": generated_at,
+        "reason_codes": list(snapshot.reason_codes),
+        "collectors": {},
+        "model_inputs": {},
+        "authority": {
+            "feed_mode": snapshot.feed_mode,
+            "model_version": snapshot.model_version,
+            "snapshot_id": snapshot.snapshot_id,
+            "snapshot_version": snapshot.snapshot_version,
+            "age_seconds": round(age_seconds, 3),
+        },
+    }
+    return projected
+
+
 class StateStore:
-    def __init__(self) -> None:
+    def __init__(self, *, primary_snapshot_path: Path | None = None) -> None:
         self._lock = threading.Lock()
+        configured_path = os.environ.get(_PRIMARY_SNAPSHOT_ENV, "").strip()
+        self._primary_snapshot_path = primary_snapshot_path or (
+            Path(configured_path).expanduser() if configured_path else None
+        )
         self._state: dict[str, Any] = {
             "service_status": "STARTING",
             "generated_at_utc": iso_utc(datetime.now(timezone.utc)),
@@ -811,7 +938,13 @@ class StateStore:
 
     def get(self) -> dict[str, Any]:
         with self._lock:
-            return json.loads(json.dumps(self._state, ensure_ascii=False))
+            current = json.loads(json.dumps(self._state, ensure_ascii=False))
+        if self._primary_snapshot_path is None:
+            return current
+        return overlay_primary_snapshot_rates(
+            current,
+            snapshot_path=self._primary_snapshot_path,
+        )
 
 
 class GroupLiveInputControl:

@@ -90,6 +90,20 @@ class CoinRateEngineTests(unittest.TestCase):
         self.assertEqual(bahar.underlying_age_seconds, 30.0)
         self.assertLess(bahar.upper_project_price - bahar.lower_project_price, 5_000)
 
+    def test_low_date_does_not_carry_multi_hour_market_premium(self) -> None:
+        self.add("old-gold", instrument="MELTED_GOLD_PRIVATE", price=78_000_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T07:00:00Z", settlement="TODAY", form="PHYSICAL")
+        self.add("stale-bahar", instrument="COIN_BAHAR", price=190_000, unit="PROJECT_THOUSAND_TOMAN", at="2026-08-04T07:05:00Z", settlement="CASH", form="PHYSICAL", event_type="TRADE")
+        self.add("current-gold", instrument="MELTED_GOLD_PRIVATE", price=80_300_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:09:30Z", settlement="TODAY", form="PHYSICAL")
+        self.connection.commit()
+
+        bahar = self.rate("BAHAR", "CASH")
+
+        self.assertEqual(
+            (bahar.status, bahar.method, bahar.estimated_project_price),
+            ("ESTIMATED", "LOW_DATE_MELTED_INTRINSIC", 180_900),
+        )
+        self.assertIsNone(bahar.anchor_age_seconds)
+
     def test_comparable_physical_condition_is_used_but_outlier_condition_is_not(self) -> None:
         self.add("normal-1", instrument="MELTED_GOLD_PRIVATE", price=80_300_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:09:00Z", settlement="TODAY", form="PHYSICAL", event_type="OFFER")
         self.add("normal-2", instrument="MELTED_GOLD_PRIVATE", price=80_310_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:09:05Z", settlement="TODAY", form="PHYSICAL", event_type="OFFER")

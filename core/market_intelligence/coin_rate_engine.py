@@ -52,6 +52,7 @@ COIN_SPECS: dict[str, tuple[float, bool]] = {
 }
 _SETTLEMENTS = ("CASH", "TOMORROW")
 _MAX_ANCHOR_AGE_SECONDS = 7 * 86_400
+_MAX_LOW_DATE_ANCHOR_AGE_SECONDS = 2 * 60 * 60
 _HERAT_CORRECTION_WEIGHT = {"CASH": 0.35, "TOMORROW": 0.60}
 
 
@@ -464,6 +465,17 @@ def build_coin_rate_estimates(connection: sqlite3.Connection, *, as_of_utc: date
                 code=code,
                 settlement=settlement,
             ):
+                candidate_anchor_age = max(
+                    0.0,
+                    (as_of - anchor_time).total_seconds(),
+                )
+                # Low-date residuals represent a short-lived market premium,
+                # not intrinsic metal value.  Carrying that premium for days
+                # can make Bahar track Imam after a regime move.  Once it is
+                # older than two hours, fall back to the current melted-gold
+                # intrinsic instead of publishing a precise but stale rate.
+                if low_date and candidate_anchor_age > _MAX_LOW_DATE_ANCHOR_AGE_SECONDS:
+                    continue
                 anchor_melted = _melted_point(
                     connection,
                     as_of=anchor_time,
@@ -473,7 +485,7 @@ def build_coin_rate_estimates(connection: sqlite3.Connection, *, as_of_utc: date
                 if anchor_melted.value_project is not None:
                     old_intrinsic = anchor_melted.value_project * coefficient
                     residual = anchor_price - old_intrinsic
-                    anchor_age = max(0.0, (as_of - anchor_time).total_seconds())
+                    anchor_age = candidate_anchor_age
                     if low_date:
                         residual *= 0.5 ** (anchor_age / (7 * 86_400))
                         method = "LOW_DATE_INTRINSIC_PLUS_DECAYED_SAME_SETTLEMENT_ANCHOR"

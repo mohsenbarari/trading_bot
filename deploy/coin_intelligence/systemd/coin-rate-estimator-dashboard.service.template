@@ -16,6 +16,7 @@ EnvironmentFile=-@RUNTIME_ROOT@/coin-group-review.env
 Environment=COIN_RATE_ESTIMATOR_RUNTIME_DIR=@RUNTIME_ROOT@/runtime
 Environment=COIN_RATE_ESTIMATOR_MARKET_DB=@RUNTIME_ROOT@/public-market/market_prices.sqlite3
 Environment=COIN_RATE_ESTIMATOR_REGIME_MARKET_DB=@RUNTIME_ROOT@/../private-gold-live/market/market.sqlite3
+Environment=COIN_RATE_ESTIMATOR_PRIMARY_SNAPSHOT=/srv/trading-bot/production-data/market-pipeline/snapshots/latest-estimator-snapshot.json
 Environment=COIN_CONVERSATION_DB=@RUNTIME_ROOT@/conversation/conversation_events.sqlite3
 Environment=COIN_RATE_ESTIMATOR_CALIBRATION_DB=@RUNTIME_ROOT@/runtime/online_calibration.sqlite3
 Environment=COIN_RATE_ESTIMATOR_MODEL=@RUNTIME_ROOT@/runtime/model.json
