@@ -584,6 +584,24 @@ def test_every_release_tool_argument_vector_matches_its_parser(tmp_path: Path) -
             assert parsed is not None
 
 
+def test_observations_use_acknowledged_private_primary_web_views(
+    tmp_path: Path,
+) -> None:
+    args, _files = _fixture(tmp_path)
+    plan, _receipt = builder.build(args)
+    commands = [
+        command
+        for phase in plan["phases"]
+        for command in phase["commands"]
+        if command["tool"] == "observe_production_private_primary.py"
+    ]
+    assert len(commands) == 2
+    for command in commands:
+        assert _option(command["arguments"], "--snapshot").endswith(
+            "/latest-private-primary.json"
+        )
+
+
 def test_rejects_decoy_control_pair_even_with_same_bytes(tmp_path: Path) -> None:
     args, files = _fixture(tmp_path)
     decoy = _write(tmp_path / "decoy-pair.json", files["control_pair_receipt"].read_bytes())

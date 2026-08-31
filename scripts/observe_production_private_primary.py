@@ -19,6 +19,7 @@ import re
 import sqlite3
 import subprocess
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping, Sequence
@@ -33,10 +34,19 @@ SCHEMA = "production_private_primary_observation/1.0"
 VIEW_CONTRACT = "estimator_snapshot_web_view/1.0"
 BOT_SERVICES = frozenset({"market-fact-receiver", "market-store-adapter", "coin-estimator", "estimator-snapshot-sender"})
 WEB_SERVICES = frozenset({"market-database", "market-capture-account1", "market-capture-account2", "market-capture-external", "market-processor", "market-fact-sync-worker", "estimator-snapshot-receiver"})
+# Only services that select or publish the Product estimator lane own a feed
+# mode. Capture, transport and receiver services are lane-neutral by design;
+# treating a missing feed-mode variable there as LEGACY makes every valid web
+# runtime (and the bot fact receiver) look like a second owner.
+FEED_MODE_SERVICES = frozenset(
+    {"market-store-adapter", "coin-estimator", "estimator-snapshot-sender"}
+)
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
 STREAM = re.compile(r"^[A-Za-z0-9_.:-]{1,160}$")
+SEQUENCE_ALIGNMENT_ATTEMPTS = 30
+SEQUENCE_ALIGNMENT_DELAY_SECONDS = 0.1
 
 
 class ObservationError(RuntimeError):
@@ -99,6 +109,36 @@ def _command(arguments: Sequence[str]) -> str:
     return completed.stdout
 
 
+def _runtime_health_document(identifier: str, service: str) -> Mapping[str, object]:
+    # Current runtimes use ``role_state(role)`` and therefore persist the
+    # document below a role-specific directory.  Older release layouts
+    # mounted that directory directly at the state root.  Read the canonical
+    # path first and keep the legacy path as a bounded compatibility fallback;
+    # failure of both remains fail-closed.
+    paths = (
+        f"/var/lib/market-data/state/{service}/health.json",
+        "/var/lib/market-data/state/health.json",
+    )
+    for path in paths:
+        completed = subprocess.run(
+            ["docker", "exec", identifier, "cat", path],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if completed.returncode != 0:
+            continue
+        try:
+            value = json.loads(completed.stdout)
+        except json.JSONDecodeError as exc:
+            raise ObservationError("runtime_health_invalid") from exc
+        if not isinstance(value, Mapping):
+            _fail("runtime_health_invalid")
+        return value
+    _fail("runtime_inspection_failed")
+
+
 def _docker_inventory(project: str) -> list[Mapping[str, object]]:
     # Inspect every container so an older Compose project cannot remain an
     # undisclosed second owner.  ``project`` is only an assertion below.
@@ -142,13 +182,7 @@ def _runtime_health(
         identifier = item.get("Id")
         if not isinstance(identifier, str) or not identifier:
             _fail("container_identity_invalid")
-        try:
-            value = json.loads(_command(["docker", "exec", identifier, "cat", "/var/lib/market-data/state/health.json"]))
-        except json.JSONDecodeError as exc:
-            raise ObservationError("runtime_health_invalid") from exc
-        if not isinstance(value, Mapping):
-            _fail("runtime_health_invalid")
-        result[str(service)] = value
+        result[str(service)] = _runtime_health_document(identifier, str(service))
     return result
 
 
@@ -210,7 +244,10 @@ def _owners(*, role: str, project: str, release_sha: str, release_tree: str, ima
             continue
         grouped[service].append(item)
         env = _env_map(item)
-        if service != "market-database" and env.get("MARKET_PIPELINE_FEED_MODE") != "PRIVATE_PRIMARY":
+        if (
+            service in FEED_MODE_SERVICES
+            and env.get("MARKET_PIPELINE_FEED_MODE") != "PRIVATE_PRIMARY"
+        ):
             legacy += 1
     owners: dict[str, object] = {}
     for service, rows in grouped.items():
@@ -300,9 +337,16 @@ def _bot_database_evidence(receiver_db: Path, market_store_db: Path, sender_db: 
     store = _sqlite(market_store_db)
     sender = _sqlite(sender_db)
     try:
-        receiver_map = _map_rows(receiver.execute("SELECT stream_id,highest_contiguous_sequence FROM fact_checkpoints ORDER BY stream_id").fetchall())
+        receiver_map: dict[str, int] = {}
+        adapter_map: dict[str, int] = {}
+        for attempt in range(SEQUENCE_ALIGNMENT_ATTEMPTS):
+            receiver_map = _map_rows(receiver.execute("SELECT stream_id,highest_contiguous_sequence FROM fact_checkpoints ORDER BY stream_id").fetchall())
+            adapter_map = _map_rows(store.execute("SELECT stream_id,highest_delivery_sequence FROM private_fact_adapter_checkpoints ORDER BY stream_id").fetchall())
+            if receiver_map == adapter_map:
+                break
+            if attempt + 1 < SEQUENCE_ALIGNMENT_ATTEMPTS:
+                time.sleep(SEQUENCE_ALIGNMENT_DELAY_SECONDS)
         duplicate, rejected = receiver.execute("SELECT duplicate_count,rejection_count FROM receiver_counters WHERE singleton=1").fetchone()
-        adapter_map = _map_rows(store.execute("SELECT stream_id,highest_delivery_sequence FROM private_fact_adapter_checkpoints ORDER BY stream_id").fetchall())
         adapter_rejected = store.execute("SELECT COALESCE(SUM(delivery_count),0) FROM private_fact_adapter_status_counts WHERE status='REJECTED'").fetchone()[0]
         ack = sender.execute("SELECT acknowledged_version FROM estimator_snapshot_sender_state WHERE singleton=1").fetchone()
         if ack is None or int(ack[0]) < 1:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -147,6 +148,39 @@ class ObservationTests(unittest.TestCase):
         ):
             self._bot(inventory=rows)
 
+    def test_lane_neutral_receiver_does_not_require_feed_mode(self):
+        rows = [container(s) for s in observer.BOT_SERVICES]
+        receiver = next(
+            row
+            for row in rows
+            if row["Config"]["Labels"]["com.docker.compose.service"]
+            == "market-fact-receiver"
+        )
+        receiver["Config"]["Env"] = [
+            item
+            for item in receiver["Config"]["Env"]
+            if not item.startswith("MARKET_PIPELINE_FEED_MODE=")
+        ]
+        self.assertEqual(self._bot(inventory=rows)["legacy_owner_count"], 0)
+
+    def test_product_lane_owner_still_requires_private_primary(self):
+        rows = [container(s) for s in observer.BOT_SERVICES]
+        estimator = next(
+            row
+            for row in rows
+            if row["Config"]["Labels"]["com.docker.compose.service"]
+            == "coin-estimator"
+        )
+        estimator["Config"]["Env"] = [
+            item
+            for item in estimator["Config"]["Env"]
+            if not item.startswith("MARKET_PIPELINE_FEED_MODE=")
+        ]
+        with self.assertRaisesRegex(
+            observer.ObservationError, "legacy_or_unexpected_owner"
+        ):
+            self._bot(inventory=rows)
+
     def test_stopped_bluegreen_rollback_container_is_not_a_live_owner(self):
         rows = [container(s) for s in observer.BOT_SERVICES]
         rows.append(
@@ -169,8 +203,9 @@ class ObservationTests(unittest.TestCase):
         self.assertEqual(result["counts"]["duplicate"], 3)
 
     def test_sequence_gap_fails_closed(self):
-        with self.assertRaisesRegex(observer.ObservationError, "local_sequence_gap"):
-            self._bot(store=self._store(gap=True))
+        with patch.object(observer, "SEQUENCE_ALIGNMENT_ATTEMPTS", 1):
+            with self.assertRaisesRegex(observer.ObservationError, "local_sequence_gap"):
+                self._bot(store=self._store(gap=True))
 
     def test_tampered_or_non_primary_snapshot_fails_closed(self):
         value = json.loads(self.snapshot.read_text())
@@ -194,6 +229,73 @@ class ObservationTests(unittest.TestCase):
         self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
         with self.assertRaises(FileExistsError):
             observer._write_exclusive(destination, value)
+
+    def test_runtime_health_prefers_role_scoped_path(self):
+        document = {
+            "role": "coin-estimator",
+            "release_sha": SHA,
+            "mode": "live",
+            "status": "live-ready",
+        }
+        with patch.object(
+            observer.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess(
+                args=[], returncode=0, stdout=json.dumps(document), stderr=""
+            ),
+        ) as run:
+            self.assertEqual(
+                observer._runtime_health_document("container-id", "coin-estimator"),
+                document,
+            )
+        self.assertEqual(
+            run.call_args.args[0],
+            [
+                "docker",
+                "exec",
+                "container-id",
+                "cat",
+                "/var/lib/market-data/state/coin-estimator/health.json",
+            ],
+        )
+
+    def test_runtime_health_falls_back_to_legacy_direct_path(self):
+        document = {
+            "role": "coin-estimator",
+            "release_sha": SHA,
+            "mode": "live",
+            "status": "live-ready",
+        }
+        missing = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="missing"
+        )
+        found = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(document), stderr=""
+        )
+        with patch.object(
+            observer.subprocess, "run", side_effect=(missing, found)
+        ) as run:
+            self.assertEqual(
+                observer._runtime_health_document("container-id", "coin-estimator"),
+                document,
+            )
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(
+            run.call_args_list[1].args[0][-1],
+            "/var/lib/market-data/state/health.json",
+        )
+
+    def test_runtime_health_fails_closed_when_both_paths_are_missing(self):
+        missing = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="missing"
+        )
+        with patch.object(
+            observer.subprocess, "run", side_effect=(missing, missing)
+        ):
+            with self.assertRaisesRegex(
+                observer.ObservationError, "runtime_inspection_failed"
+            ):
+                observer._runtime_health_document("container-id", "coin-estimator")
 
     def test_generated_bot_artifact_is_accepted_by_promotion_verifier(self):
         destination = self.root / "bot-observation.json"
