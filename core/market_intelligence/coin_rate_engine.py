@@ -9,11 +9,12 @@ no USDT→Herat substitution or hidden Rial/Toman conversion is permitted.
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 import math
 import sqlite3
 from statistics import median
 from typing import Any, Iterable
+from zoneinfo import ZoneInfo
 
 from .market_contracts import normalize_utc
 from .market_regime import detect_canonical_market_regime, product_market_regime
@@ -21,10 +22,14 @@ from .price_magnitude_policy import RIAL_PER_TOMAN, TRUE_IRT_MESGHAL_FLOOR
 from .private_gold import filter_comparable_private_gold_physical_rows
 
 
-COIN_RATE_ENGINE_VERSION = "coin-rate-engine-v8"
+COIN_RATE_ENGINE_VERSION = "coin-rate-engine-v9"
 PROJECT_TOMAN_PER_UNIT = 1_000.0  # 1 project unit = 1,000 toman
 _MESGHAL_TOMAN_MIN = 30_000_000.0
 _MESGHAL_TOMAN_MAX = 200_000_000.0
+_TEHRAN = ZoneInfo("Asia/Tehran")
+_AFTER_CLOSE_HOLD_START_LOCAL = time(22, 0)
+_AFTER_CLOSE_HOLD_END_LOCAL = time(23, 0)
+_AFTER_CLOSE_HOLD_SUFFIX = "_AFTER_CLOSE_HOLD"
 
 
 def _canonical_mesghal_toman(price_num: float) -> float | None:
@@ -110,6 +115,48 @@ def _iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _after_close_hold_applies(
+    *,
+    as_of: datetime,
+    latest_at: datetime,
+    normal_maximum_age: int,
+) -> bool:
+    """Carry only a quote that was still fresh at the 22:00 Tehran close.
+
+    This is a narrow, temporary continuity rule for the product's new
+    22:00-23:00 session.  It does not manufacture a market observation, does
+    not cross a Tehran calendar day, and becomes unavailable at 23:00 sharp.
+    """
+
+    as_of_local = as_of.astimezone(_TEHRAN)
+    if not (
+        _AFTER_CLOSE_HOLD_START_LOCAL
+        <= as_of_local.timetz().replace(tzinfo=None)
+        < _AFTER_CLOSE_HOLD_END_LOCAL
+    ):
+        return False
+    latest_local = latest_at.astimezone(_TEHRAN)
+    if latest_local.date() != as_of_local.date():
+        return False
+    close_local = datetime.combine(
+        as_of_local.date(),
+        _AFTER_CLOSE_HOLD_START_LOCAL,
+        tzinfo=_TEHRAN,
+    )
+    age_at_close = (close_local - latest_local).total_seconds()
+    return 0.0 <= age_at_close <= float(normal_maximum_age)
+
+
+def _after_close_source(source_kind: str, *, held: bool) -> str:
+    return source_kind + _AFTER_CLOSE_HOLD_SUFFIX if held else source_kind
+
+
+def _source_without_after_close_hold(source_kind: str | None) -> str | None:
+    if source_kind and source_kind.endswith(_AFTER_CLOSE_HOLD_SUFFIX):
+        return source_kind[: -len(_AFTER_CLOSE_HOLD_SUFFIX)]
+    return source_kind
+
+
 def _rows(
     connection: sqlite3.Connection,
     *,
@@ -171,7 +218,13 @@ def _robust_project_point(rows: list[sqlite3.Row], *, as_of: datetime, source_ki
         return MeltedPoint(None, None, 0.0, None, fallback)
     latest_at = _utc(str(rows[0]["event_time_utc"]), name="rate_event_time_utc")
     age = max(0.0, (as_of - latest_at).total_seconds())
-    if age > maximum_age:
+    held_after_close = age > maximum_age and _after_close_hold_applies(
+        as_of=as_of,
+        latest_at=latest_at,
+        normal_maximum_age=maximum_age,
+    )
+    effective_source = _after_close_source(source_kind, held=held_after_close)
+    if age > maximum_age and not held_after_close:
         return MeltedPoint(None, age, 0.0, source_kind, fallback)
     window: list[float] = []
     for row in rows:
@@ -182,13 +235,13 @@ def _robust_project_point(rows: list[sqlite3.Row], *, as_of: datetime, source_ki
             continue
         window.append(canonical / PROJECT_TOMAN_PER_UNIT)
     if not window:
-        return MeltedPoint(None, age, 0.0, source_kind, fallback)
+        return MeltedPoint(None, age, 0.0, effective_source, fallback)
     center = float(median(window))
     accepted = [value for value in window if abs(value - center) / center <= 0.025]
     if not accepted:
-        return MeltedPoint(None, age, 0.0, source_kind, fallback)
+        return MeltedPoint(None, age, 0.0, effective_source, fallback)
     spread = (max(accepted) - min(accepted)) / center if len(accepted) > 1 else 0.0
-    return MeltedPoint(float(median(accepted)), age, spread, source_kind, fallback)
+    return MeltedPoint(float(median(accepted)), age, spread, effective_source, fallback)
 
 
 def _melted_point(
@@ -262,7 +315,13 @@ def _robust_herat_point(
         return HeratPoint(None, None, 0.0, None, fallback)
     latest_at = _utc(str(rows[0]["event_time_utc"]), name="herat_event_time_utc")
     age = max(0.0, (as_of - latest_at).total_seconds())
-    if age > maximum_age:
+    held_after_close = age > maximum_age and _after_close_hold_applies(
+        as_of=as_of,
+        latest_at=latest_at,
+        normal_maximum_age=maximum_age,
+    )
+    effective_source = _after_close_source(source_kind, held=held_after_close)
+    if age > maximum_age and not held_after_close:
         return HeratPoint(None, age, 0.0, source_kind, fallback)
     window = [
         float(row["price_num"])
@@ -271,13 +330,13 @@ def _robust_herat_point(
         and float(row["price_num"]) > 0
     ]
     if not window:
-        return HeratPoint(None, age, 0.0, source_kind, fallback)
+        return HeratPoint(None, age, 0.0, effective_source, fallback)
     center = float(median(window))
     accepted = [value for value in window if abs(value - center) / center <= 0.025]
     if not accepted:
-        return HeratPoint(None, age, 0.0, source_kind, fallback)
+        return HeratPoint(None, age, 0.0, effective_source, fallback)
     spread = (max(accepted) - min(accepted)) / center if len(accepted) > 1 else 0.0
-    return HeratPoint(float(median(accepted)), age, spread, source_kind, fallback)
+    return HeratPoint(float(median(accepted)), age, spread, effective_source, fallback)
 
 
 def _herat_point(
@@ -420,15 +479,23 @@ def _tolerance(
 ) -> tuple[float, float]:
     base = 0.005 if anchor_age is not None else (0.006 if structural_only else 0.011)
     source_extra = min(0.004, point.spread_relative + (0.002 if point.fallback else 0.0))
+    # A held closing quote is deliberately less precise than a live quote.
+    # Widen both sides while the hard product guard independently remains
+    # fail-open because it evaluates the effective underlying age.
+    after_close_extra = (
+        0.004
+        if point.source_kind and point.source_kind.endswith(_AFTER_CLOSE_HOLD_SUFFIX)
+        else 0.0
+    )
     age_extra = min(0.006, max(0.0, (anchor_age or 0.0) - 300.0) / 86_400.0 * 0.001)
     directional = 0.003 if regime in {"UP", "DOWN"} else 0.005 if regime == "VOLATILE" else 0.0
     herat_extra = 0.0
     if herat_basis_relative is not None:
         herat_extra = min(0.003, abs(herat_basis_relative) * 0.25 + (0.001 if herat_fallback else 0.0))
-    lower = min(0.018, base + source_extra + age_extra + herat_extra + (directional if regime == "DOWN" else 0.0))
-    upper = min(0.018, base + source_extra + age_extra + herat_extra + (directional if regime == "UP" else 0.0))
+    lower = min(0.022, base + source_extra + age_extra + herat_extra + after_close_extra + (directional if regime == "DOWN" else 0.0))
+    upper = min(0.022, base + source_extra + age_extra + herat_extra + after_close_extra + (directional if regime == "UP" else 0.0))
     if regime == "VOLATILE":
-        lower = upper = min(0.02, base + source_extra + age_extra + herat_extra + directional)
+        lower = upper = min(0.024, base + source_extra + age_extra + herat_extra + after_close_extra + directional)
     return lower, upper
 
 
@@ -507,7 +574,8 @@ def build_coin_rate_estimates(connection: sqlite3.Connection, *, as_of_utc: date
                     if (
                         current_herat.value_toman is not None
                         and anchor_herat.value_toman is not None
-                        and current_herat.source_kind == anchor_herat.source_kind
+                        and _source_without_after_close_hold(current_herat.source_kind)
+                        == _source_without_after_close_hold(anchor_herat.source_kind)
                     ):
                         melted_change = current.value_project / anchor_melted.value_project - 1.0
                         herat_change = current_herat.value_toman / anchor_herat.value_toman - 1.0
@@ -529,6 +597,8 @@ def build_coin_rate_estimates(connection: sqlite3.Connection, *, as_of_utc: date
             if estimate is None:
                 output.append(CoinRateEstimate(code, settlement, "NO_DATA", None, None, None, "NONE", "ABSTAIN_NO_SAFE_SAME_COMMODITY_ANCHOR", current.source_kind, current.age_seconds, None, regime, "NO_SAFE_SAME_COMMODITY_ANCHOR"))
                 continue
+            if current.source_kind and current.source_kind.endswith(_AFTER_CLOSE_HOLD_SUFFIX):
+                method += _AFTER_CLOSE_HOLD_SUFFIX
             negative, positive = _tolerance(
                 point=current,
                 anchor_age=anchor_age,

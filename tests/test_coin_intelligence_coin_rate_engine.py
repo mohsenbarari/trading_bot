@@ -90,6 +90,54 @@ class CoinRateEngineTests(unittest.TestCase):
         self.assertEqual(bahar.underlying_age_seconds, 30.0)
         self.assertLess(bahar.upper_project_price - bahar.lower_project_price, 5_000)
 
+    def test_after_close_hold_carries_only_quote_fresh_at_2200_until_2300(self) -> None:
+        # Tehran is UTC+03:30: 18:29:30Z is 21:59:30 local.
+        self.add("closing-gold", instrument="MELTED_GOLD_PRIVATE", price=80_300_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T18:29:30Z", settlement="TODAY", form="PHYSICAL")
+        self.add("closing-imam", instrument="COIN_IMAM", price=186_900, unit="PROJECT_THOUSAND_TOMAN", at="2026-08-04T18:29:40Z", settlement="CASH", form="PHYSICAL", event_type="TRADE")
+        self.connection.commit()
+
+        live = self.rate_at("IMAM", "CASH", at="2026-08-04T18:29:50Z")
+        held = self.rate_at("IMAM", "CASH", at="2026-08-04T19:15:00Z")
+        closed = self.rate_at("IMAM", "CASH", at="2026-08-04T19:30:00Z")
+
+        self.assertEqual(held.status, "ESTIMATED")
+        self.assertEqual(held.underlying_age_seconds, 2_730.0)
+        self.assertEqual(
+            held.underlying_source,
+            "PRIVATE_PHYSICAL_TODAY_AFTER_CLOSE_HOLD",
+        )
+        self.assertTrue(held.method.endswith("_AFTER_CLOSE_HOLD"))
+        self.assertGreater(
+            held.upper_project_price - held.lower_project_price,
+            live.upper_project_price - live.lower_project_price,
+        )
+        self.assertEqual((closed.status, closed.reason), ("NO_DATA", "NO_FRESH_MELTED"))
+
+    def test_after_close_hold_carries_paper_that_was_fresh_at_close(self) -> None:
+        self.add("closing-paper", instrument="MELTED_GOLD_PRIVATE", price=80_500_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T18:28:00Z", settlement="TOMORROW", form="PAPER_NORMAL")
+        self.add("closing-imam", instrument="COIN_IMAM", price=187_000, unit="PROJECT_THOUSAND_TOMAN", at="2026-08-04T18:28:30Z", settlement="TOMORROW", form="PHYSICAL", event_type="OFFER")
+        self.connection.commit()
+
+        held = self.rate_at("IMAM", "TOMORROW", at="2026-08-04T19:20:00Z")
+
+        self.assertEqual(held.status, "ESTIMATED")
+        self.assertEqual(
+            held.underlying_source,
+            "PRIVATE_PAPER_TOMORROW_AFTER_CLOSE_HOLD",
+        )
+        self.assertEqual(held.confidence, "LOW_PAPER_FALLBACK")
+
+    def test_after_close_hold_does_not_revive_quote_stale_before_close(self) -> None:
+        # This paper quote was already 181 seconds old at 22:00 and therefore
+        # cannot gain a new lifetime merely because the product remains open.
+        self.add("stale-before-close", instrument="MELTED_GOLD_PRIVATE", price=80_500_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T18:26:59Z", settlement="TOMORROW", form="PAPER_NORMAL")
+        self.add("imam", instrument="COIN_IMAM", price=187_000, unit="PROJECT_THOUSAND_TOMAN", at="2026-08-04T18:27:00Z", settlement="TOMORROW", form="PHYSICAL", event_type="OFFER")
+        self.connection.commit()
+
+        rate = self.rate_at("IMAM", "TOMORROW", at="2026-08-04T19:00:00Z")
+
+        self.assertEqual((rate.status, rate.reason), ("NO_DATA", "NO_FRESH_MELTED"))
+
     def test_low_date_does_not_carry_multi_hour_market_premium(self) -> None:
         self.add("old-gold", instrument="MELTED_GOLD_PRIVATE", price=78_000_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T07:00:00Z", settlement="TODAY", form="PHYSICAL")
         self.add("stale-bahar", instrument="COIN_BAHAR", price=190_000, unit="PROJECT_THOUSAND_TOMAN", at="2026-08-04T07:05:00Z", settlement="CASH", form="PHYSICAL", event_type="TRADE")
