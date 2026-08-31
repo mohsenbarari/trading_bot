@@ -22,7 +22,7 @@ from .price_magnitude_policy import RIAL_PER_TOMAN, TRUE_IRT_MESGHAL_FLOOR
 from .private_gold import filter_comparable_private_gold_physical_rows
 
 
-COIN_RATE_ENGINE_VERSION = "coin-rate-engine-v9"
+COIN_RATE_ENGINE_VERSION = "coin-rate-engine-v8"
 PROJECT_TOMAN_PER_UNIT = 1_000.0  # 1 project unit = 1,000 toman
 _MESGHAL_TOMAN_MIN = 30_000_000.0
 _MESGHAL_TOMAN_MAX = 200_000_000.0

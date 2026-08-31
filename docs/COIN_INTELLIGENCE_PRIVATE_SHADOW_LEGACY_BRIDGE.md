@@ -14,7 +14,7 @@ Shadow Market Store (فقط‌خواندنی)
         ├─ GROUP_1
         └─ GROUP_2
         ▼
-Legacy Market Store ──► coin-rate-engine-v9 ──► coin-rates.json
+Legacy Market Store ──► coin-rate-engine-v8 ──► coin-rates.json
         │                                         │
         │                                         └── snapshot relay موجود
         ▼

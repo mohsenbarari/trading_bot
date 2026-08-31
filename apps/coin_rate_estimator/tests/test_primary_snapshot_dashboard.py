@@ -107,7 +107,7 @@ def snapshot(generated_at: datetime) -> SimpleNamespace:
         generated_at_utc=generated_at,
         rates=tuple(rates),
         reason_codes=(),
-        model_version="coin-rate-engine-v9",
+        model_version="coin-rate-engine-v8",
         snapshot_id="a" * 64,
         snapshot_version=42,
         inputs=inputs,
