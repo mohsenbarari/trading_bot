@@ -196,6 +196,60 @@ class CaptureEventAdapterTests(unittest.TestCase):
             1,
         )
 
+    def test_out_of_range_primary_offer_is_filtered_without_blocking_following_rows(self) -> None:
+        self._stage_market(
+            market_event(
+                4,
+                source="MELTED_PRIMARY_FLOW",
+                text="600,000,000 فروش 5 تا نقد حاضر",
+                message_id=4,
+                available="2026-08-24T10:00:01Z",
+            )
+        )
+        self._stage_market(
+            market_event(
+                5,
+                source="MELTED_PRIMARY_FLOW",
+                text="95,000,000 فروش 5 تا بدون حواله",
+                message_id=5,
+                available="2026-08-24T10:00:02Z",
+            )
+        )
+
+        report = self._project()
+
+        self.assertEqual(report.market_messages_reprojected, 2)
+        self.assertEqual(report.market_facts_upserted, 1)
+        rejected = self.staging.execute(
+            "SELECT status,disposition_code FROM capture_event_lineage "
+            "WHERE source_id='MELTED_PRIMARY_FLOW' AND message_id=4"
+        ).fetchone()
+        self.assertEqual(
+            (str(rejected["status"]), str(rejected["disposition_code"])),
+            ("FILTERED", "PRICE_OUT_OF_CANONICAL_RANGE"),
+        )
+        self.assertIsNotNone(
+            self.staging.execute(
+                "SELECT finalized_at_utc FROM capture_primary_trade_deadlines "
+                "WHERE source_id='MELTED_PRIMARY_FLOW' AND message_id=4 "
+                "AND finalized_at_utc IS NOT NULL"
+            ).fetchone()
+        )
+        self.assertEqual(
+            self.staging.execute(
+                "SELECT COUNT(*) FROM capture_dirty_market_messages "
+                "WHERE source_id='MELTED_PRIMARY_FLOW' AND message_id=4"
+            ).fetchone()[0],
+            0,
+        )
+        self.assertEqual(
+            self.market.execute(
+                "SELECT price_num FROM market_observations "
+                "WHERE source_code='PRIVATE_GOLD_CHANNEL' AND quality_state='ELIGIBLE'"
+            ).fetchone()[0],
+            95_000_000.0,
+        )
+
     def test_xau_keeps_each_event_and_delete_retracts_only_target(self) -> None:
         self._stage_market(
             market_event(

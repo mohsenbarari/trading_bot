@@ -22,7 +22,7 @@ from .market_contracts import MarketObservation, derive_event_key, normalize_utc
 from .market_store import upsert_observation
 
 
-PRIVATE_GOLD_PARSER_VERSION = "private-gold-rules-v2"
+PRIVATE_GOLD_PARSER_VERSION = "private-gold-rules-v3-description-safe-price"
 PRIVATE_GOLD_SOURCE_CODE = "PRIVATE_GOLD_CHANNEL"
 PRIVATE_GOLD_MINUTE_SOURCE_CODE = "PRIVATE_GOLD_PAPER_MINUTE"
 PRIVATE_GOLD_TRADE_WEIGHT = Decimal("3")
@@ -128,8 +128,14 @@ def _side(text: str, declared_side: str | None) -> str | None:
 
 
 def _price_toman(text: str) -> int | None:
+    # The verified channel template places the quoted unit price in the offer
+    # header.  Free-form descriptions can contain totals, account balances, or
+    # payment amounts that are not prices.  Never let those later numbers
+    # override the headline quote.
+    description = _DESCRIPTION.search(text)
+    price_region = text[: description.start()] if description is not None else text
     values: list[int] = []
-    for candidate in _PRICE.findall(text):
+    for candidate in _PRICE.findall(price_region):
         try:
             parsed = int(re.sub(r"\D", "", candidate))
         except ValueError:
@@ -138,7 +144,7 @@ def _price_toman(text: str) -> int | None:
         # clock values must never become prices.
         if 1_000_000 <= parsed <= 1_000_000_000:
             values.append(parsed)
-    return max(values) if values else None
+    return values[0] if values else None
 
 
 def _quantity(text: str, declared_quantity: int | None) -> int | None:

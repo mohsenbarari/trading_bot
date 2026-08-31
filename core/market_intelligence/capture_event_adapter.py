@@ -30,7 +30,11 @@ from .coin_group_staging import (
     purge_expired_coin_group_staging,
     stage_coin_group_message,
 )
-from .market_contracts import derive_event_key, normalize_utc
+from .market_contracts import (
+    MarketStoreContractError,
+    derive_event_key,
+    normalize_utc,
+)
 from .market_store import initialize_market_store, upsert_observation
 from .private_gold import (
     PRIVATE_GOLD_MINUTE_SOURCE_CODE,
@@ -90,6 +94,7 @@ _NON_MODEL_CONTENT_TYPES = frozenset({"media_only", "service"})
 _CONTENT_TYPES = frozenset({"text", "caption"}) | _NON_MODEL_CONTENT_TYPES
 _RETRACTION_REASON = "CAPTURE_SOURCE_REVISION_NOT_CURRENT"
 _V8_RECONCILIATION_CODE = "V8_PRIVATE_ROOT_AND_COIN_PARSER_REPAIR"
+_PRIMARY_PRICE_POLICY_REJECTION = "PRICE_OUT_OF_CANONICAL_RANGE"
 
 
 class CaptureEventContractError(RuntimeError):
@@ -2243,12 +2248,39 @@ def project_capture_changes(
             primary_changed = True
             if item["event_time_utc"]:
                 primary_minutes.add(str(item["event_time_utc"])[:16])
-            counts = _project_primary_row(
-                staging,
-                market,
-                row,
-                as_of_utc=as_of,
-            )
+            try:
+                counts = _project_primary_row(
+                    staging,
+                    market,
+                    row,
+                    as_of_utc=as_of,
+                )
+            except MarketStoreContractError as exc:
+                # Capture text is untrusted input.  A value outside the
+                # canonical magnitude policy is an input rejection, not a
+                # process-wide dependency failure.  Terminalize only this
+                # narrow policy error; every other store-contract violation
+                # remains fail-closed because it can indicate a code defect.
+                if not str(exc).startswith("price_out_of_canonical_range:"):
+                    raise
+                _finish_capture_lineage(
+                    staging,
+                    stream="market",
+                    source_id=source_id,
+                    message_id=int(item["message_id"]),
+                    status="FILTERED",
+                    disposition_code=_PRIMARY_PRICE_POLICY_REJECTION,
+                    completed_at_utc=as_of,
+                )
+                staging.execute(
+                    """
+                    UPDATE capture_primary_trade_deadlines
+                    SET finalized_at_utc=?
+                    WHERE source_id=? AND message_id=?
+                    """,
+                    (as_of, source_id, int(item["message_id"])),
+                )
+                continue
             upserted += counts[0]
             private_trades += counts[1]
             primary_minutes.update(counts[2])

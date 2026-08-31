@@ -85,6 +85,19 @@ class PrivateGoldParserTests(unittest.TestCase):
         self.assertIn('"condition_class":"NON_CONDITIONAL_NOTE"', attributes_json)
         self.assertNotIn("تهران", attributes_json)
 
+    def test_description_amount_does_not_override_the_headline_offer_price(self) -> None:
+        parsed = parse_private_gold_offer(
+            self.source(
+                "94,250,000 خرید نقد حاضر 1 تا\n"
+                "توضیحات: ۶.۶۰۰.۰۰۰.۰۰۰ تومن"
+            )
+        )
+
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertEqual(parsed.price_toman, 94_250_000)
+        self.assertEqual((parsed.side, parsed.quantity), ("BUY", 1))
+
     def test_real_payment_condition_and_ambiguous_payment_note_are_gated(self) -> None:
         confirmed = parse_private_gold_offer(
             self.source(
