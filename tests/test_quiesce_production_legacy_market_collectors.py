@@ -768,6 +768,101 @@ class LegacyMarketCollectorHandoffTests(unittest.TestCase):
             )
             self.assertEqual(restored["status"], "RESTORED")
 
+    def test_refresh_authority_transfer_requires_prepared_bluegreen_and_rebinds(
+        self,
+    ) -> None:
+        context = self.context()
+        with context[0], context[1], context[2], context[3]:
+            handoff.quiesce(**self.common())
+            bluegreen = self.root / "bluegreen.json"
+            marker = {
+                "authorized_at_utc": None,
+                "entries": {
+                    "market-capture-account1": {
+                        "path": "/secure/account1.json",
+                        "prior_sha256": "1" * 64,
+                        "target_sha256": "2" * 64,
+                        "target_payload": {"authority": "container"},
+                        "status": "PENDING",
+                        "rollback_status": "NOT_STARTED",
+                    }
+                },
+                "status": "PREPARED",
+                "rollback_status": "NOT_STARTED",
+            }
+            marker_document = {
+                "authorized_at_utc": None,
+                "entries": {
+                    "market-capture-account1": {
+                        "path": "/secure/account1.json",
+                        "prior_sha256": "1" * 64,
+                        "target_sha256": "2" * 64,
+                        "target_payload": {"authority": "container"},
+                    }
+                },
+            }
+            marker_digest = sha256(
+                json.dumps(
+                    marker_document, sort_keys=True, separators=(",", ":")
+                ).encode("utf-8")
+            ).hexdigest()
+            bluegreen.write_text(
+                json.dumps(
+                    {
+                        "schema": "market_pipeline_bluegreen_upgrade/1.0",
+                        "status": "capture_authority_prepared",
+                        "release_sha": RELEASE,
+                        "marker_transition": marker,
+                        "legacy_authority_prepared_journal_sha256": None,
+                        "legacy_authority_transfer": None,
+                        "product_authority_changed": False,
+                        "state_deleted": False,
+                        "secrets_disclosed": False,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            bluegreen.chmod(0o600)
+            prepared = handoff.prepare_authority(
+                expected_journal_sha256=sha256(
+                    self.journal.read_bytes()
+                ).hexdigest(),
+                bluegreen_journal=bluegreen,
+                prepared_bluegreen_journal_sha256="5" * 64,
+                marker_authority_sha256=marker_digest,
+                **self.common(),
+            )
+            self.assertEqual(prepared["status"], "AUTHORITY_TRANSFERRING")
+            current_bluegreen_digest = sha256(
+                bluegreen.read_bytes()
+            ).hexdigest()
+            refreshed = handoff.refresh_authority_transfer(
+                expected_journal_sha256=sha256(
+                    self.journal.read_bytes()
+                ).hexdigest(),
+                bluegreen_journal=bluegreen,
+                expected_bluegreen_journal_sha256=(
+                    current_bluegreen_digest
+                ),
+                marker_authority_sha256=marker_digest,
+                **self.common(),
+            )
+            self.assertEqual(refreshed["status"], "AUTHORITY_TRANSFERRING")
+            self.assertEqual(
+                refreshed["authority_transfer"][
+                    "prepared_bluegreen_journal_sha256"
+                ],
+                current_bluegreen_digest,
+            )
+            self.assertIsNone(
+                refreshed["authority_transfer"][
+                    "authorization_bluegreen_journal_sha256"
+                ]
+            )
+
     def test_guard_does_not_relabel_transition_io_failure_as_lock_corruption(
         self,
     ) -> None:

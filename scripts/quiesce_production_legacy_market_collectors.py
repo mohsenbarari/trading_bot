@@ -39,6 +39,9 @@ MARK_AUTHORITY_TRANSFERRED_CONFIRMATION = (
 MARK_AUTHORITY_RESTORED_CONFIRMATION = (
     "mark-production-private-primary-capture-authority-restored"
 )
+REFRESH_AUTHORITY_CONFIRMATION = (
+    "refresh-production-private-primary-capture-authority"
+)
 SCHEMA = "production_legacy_market_collector_handoff/1.1"
 MAX_HANDOFF_AGE_SECONDS = 120
 APPROVED_ROOT = Path("/root/secure-envs/trading-bot/market-pipeline-cutover")
@@ -602,6 +605,148 @@ def prepare_authority(
             ),
             marker_authority_sha256=marker_authority_sha256,
         )
+
+
+def _prepared_bluegreen_authority(
+    *, path: Path, expected_sha256: str, release_sha: str
+) -> tuple[dict[str, Any], str]:
+    raw = _secure_bytes(path)
+    digest = sha256(raw).hexdigest()
+    if not HEX64.fullmatch(expected_sha256) or digest != expected_sha256:
+        raise CollectorHandoffError(
+            "collector_handoff_bluegreen_digest_invalid"
+        )
+    try:
+        document = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CollectorHandoffError(
+            "collector_handoff_bluegreen_invalid"
+        ) from exc
+    transition = document.get("marker_transition")
+    entries = transition.get("entries") if isinstance(transition, dict) else None
+    if (
+        not isinstance(document, dict)
+        or document.get("schema") != "market_pipeline_bluegreen_upgrade/1.0"
+        or document.get("status") != "capture_authority_prepared"
+        or document.get("release_sha") != release_sha
+        or document.get("product_authority_changed") is not False
+        or document.get("state_deleted") is not False
+        or document.get("secrets_disclosed") is not False
+        or document.get("legacy_authority_prepared_journal_sha256")
+        is not None
+        or document.get("legacy_authority_transfer") is not None
+        or not isinstance(entries, dict)
+        or not entries
+        or transition.get("status") != "PREPARED"
+        or transition.get("rollback_status") not in {None, "NOT_STARTED"}
+        or any(
+            not isinstance(row, dict)
+            or row.get("status") != "PENDING"
+            or row.get("rollback_status") != "NOT_STARTED"
+            or not HEX64.fullmatch(str(row.get("prior_sha256") or ""))
+            or not HEX64.fullmatch(str(row.get("target_sha256") or ""))
+            for row in entries.values()
+        )
+    ):
+        raise CollectorHandoffError("collector_handoff_bluegreen_invalid")
+    marker_document = {
+        "authorized_at_utc": transition.get("authorized_at_utc"),
+        "entries": {
+            role: {
+                "path": row["path"],
+                "prior_sha256": row["prior_sha256"],
+                "target_sha256": row["target_sha256"],
+                "target_payload": row["target_payload"],
+            }
+            for role, row in sorted(entries.items())
+        },
+    }
+    marker_digest = sha256(
+        json.dumps(
+            marker_document, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    ).hexdigest()
+    return document, marker_digest
+
+
+def refresh_authority_transfer(
+    *,
+    journal: Path,
+    release_sha: str,
+    host_role: str,
+    expected_journal_sha256: str,
+    bluegreen_journal: Path,
+    expected_bluegreen_journal_sha256: str,
+    marker_authority_sha256: str,
+) -> dict[str, Any]:
+    """Refresh and rebind a pre-marker authority WAL after a slow handoff.
+
+    This command is deliberately narrower than ``verify``.  It only accepts
+    an AUTHORITY_TRANSFERRING receipt whose authorization digest is still
+    empty, plus an exact blue/green journal proving that every marker remains
+    PREPARED/PENDING.  It cannot refresh an already transferred authority.
+    """
+
+    with _held_maintenance_guard(
+        journal, release_sha, host_role
+    ) as (descriptor, lock_binding):
+        if (
+            not HEX64.fullmatch(expected_journal_sha256)
+            or sha256(_secure_bytes(journal)).hexdigest()
+            != expected_journal_sha256
+        ):
+            raise CollectorHandoffError(
+                "collector_handoff_journal_digest_invalid"
+            )
+        _document, observed_marker_digest = _prepared_bluegreen_authority(
+            path=bluegreen_journal,
+            expected_sha256=expected_bluegreen_journal_sha256,
+            release_sha=release_sha,
+        )
+        if (
+            not HEX64.fullmatch(marker_authority_sha256)
+            or observed_marker_digest != marker_authority_sha256
+        ):
+            raise CollectorHandoffError(
+                "collector_handoff_authority_binding_invalid"
+            )
+        _validate_held_maintenance_lock(
+            descriptor=descriptor,
+            journal=journal,
+            release_sha=release_sha,
+            host_role=host_role,
+            expected_lock=lock_binding,
+        )
+        payload = _read(
+            journal, release_sha=release_sha, host_role=host_role
+        )
+        authority = payload.get("authority_transfer")
+        if (
+            payload.get("status") != "AUTHORITY_TRANSFERRING"
+            or not isinstance(authority, dict)
+            or authority.get("bluegreen_journal_path_sha256")
+            != sha256(str(bluegreen_journal).encode("utf-8")).hexdigest()
+            or authority.get("marker_authority_sha256")
+            != marker_authority_sha256
+            or not HEX64.fullmatch(
+                str(authority.get("prepared_bluegreen_journal_sha256") or "")
+            )
+            or authority.get("authorization_bluegreen_journal_sha256")
+            is not None
+        ):
+            raise CollectorHandoffError(
+                "collector_handoff_authority_state_invalid"
+            )
+        current = _assert_quiesced(host_role)
+        authority = dict(authority)
+        authority["prepared_bluegreen_journal_sha256"] = (
+            expected_bluegreen_journal_sha256
+        )
+        payload["authority_transfer"] = authority
+        payload["current_units"] = current
+        payload["verified_at_utc"] = _now()
+        _atomic(journal, payload)
+        return payload
 
 
 def mark_authority_transferred(
@@ -1421,6 +1566,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "quiesce",
             "verify",
             "prepare-authority",
+            "refresh-authority-transfer",
             "mark-authority-transferred",
             "mark-authority-restored",
             "commit",
@@ -1472,6 +1618,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                 expected_journal_sha256=args.expected_journal_sha256,
                 bluegreen_journal=args.bluegreen_journal,
                 prepared_bluegreen_journal_sha256=(
+                    args.expected_bluegreen_journal_sha256
+                ),
+                marker_authority_sha256=args.marker_authority_sha256,
+                **common,
+            )
+        elif args.command == "refresh-authority-transfer":
+            if (
+                args.confirm != REFRESH_AUTHORITY_CONFIRMATION
+                or not args.bluegreen_journal
+                or not args.expected_journal_sha256
+                or not args.expected_bluegreen_journal_sha256
+                or not args.marker_authority_sha256
+            ):
+                raise CollectorHandoffError(
+                    "collector_handoff_authority_arguments_invalid"
+                )
+            payload = refresh_authority_transfer(
+                expected_journal_sha256=args.expected_journal_sha256,
+                bluegreen_journal=args.bluegreen_journal,
+                expected_bluegreen_journal_sha256=(
                     args.expected_bluegreen_journal_sha256
                 ),
                 marker_authority_sha256=args.marker_authority_sha256,

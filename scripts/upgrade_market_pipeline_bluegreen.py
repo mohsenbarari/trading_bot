@@ -1856,6 +1856,86 @@ def prepare_capture_authority(
         return payload
 
 
+def refresh_pre_authority_receipt(
+    *,
+    journal: Path,
+    role: str,
+    release_sha: str,
+    web_legacy_collector_receipt: Path,
+    expected_web_legacy_collector_receipt_sha256: str,
+    web_maintenance_lock_path: Path = DEFAULT_MAINTENANCE_LOCK,
+) -> dict[str, Any]:
+    """Rebind a refreshed QUIESCED receipt before any marker mutation.
+
+    The ordinary handoff intentionally binds an exact receipt digest.  A
+    read-only freshness verification can replace that receipt while the
+    blue/green journal is still PREPARED.  This recovery seam is limited to
+    that pre-authority state: every marker must still equal its prior digest,
+    no capture container may exist, and the live legacy units must remain
+    quiesced under the same maintenance-lock inode.
+    """
+
+    if role != "web":
+        raise UpgradeError("upgrade_capture_role_invalid")
+    with _maintenance_inode_guard(
+        web_maintenance_lock_path, release_sha=release_sha
+    ) as (_descriptor, live_lock):
+        payload = _read_journal(journal)
+        _validate_journal(payload, role=role, release_sha=release_sha)
+        if payload.get("status") != "capture_authority_prepared":
+            raise UpgradeError("upgrade_pre_authority_refresh_state_invalid")
+        if payload.get("legacy_collector_receipt") != str(
+            web_legacy_collector_receipt
+        ):
+            raise UpgradeError("upgrade_legacy_collector_receipt_invalid")
+        receipt = _verify_legacy_collector_handoff(
+            web_legacy_collector_receipt,
+            expected_sha256=expected_web_legacy_collector_receipt_sha256,
+            release_sha=release_sha,
+            maintenance_lock_path=web_maintenance_lock_path,
+            held_lock=live_lock,
+        )
+        transition = _validate_marker_transition(payload)
+        if (
+            receipt.get("status") != "QUIESCED"
+            or receipt.get("authority_transfer") is not None
+            or transition.get("status") != "PREPARED"
+            or transition.get("rollback_status") not in {None, "NOT_STARTED"}
+            or payload.get("legacy_authority_prepared_journal_sha256")
+            is not None
+            or payload.get("legacy_authority_transfer") is not None
+            or payload.get("new_capture_ids") not in ({}, None)
+            or any(
+                row.get("status") != "PENDING"
+                or row.get("rollback_status") != "NOT_STARTED"
+                or _sha256(Path(str(row["path"]))) != row["prior_sha256"]
+                for row in transition["entries"].values()
+            )
+            or any(
+                _ids(str(payload["new_project"]), service)
+                for service in CAPTURE_SERVICES
+            )
+        ):
+            raise UpgradeError("upgrade_pre_authority_refresh_state_invalid")
+        previous = str(
+            payload.get("legacy_collector_receipt_pre_authority_sha256") or ""
+        )
+        if not HEX64.fullmatch(previous):
+            raise UpgradeError("upgrade_pre_authority_refresh_state_invalid")
+        payload["legacy_collector_receipt_pre_authority_sha256"] = (
+            expected_web_legacy_collector_receipt_sha256
+        )
+        payload["pre_authority_receipt_refresh"] = {
+            "previous_sha256": previous,
+            "current_sha256": expected_web_legacy_collector_receipt_sha256,
+            "refreshed_at_utc": datetime.now(timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z"),
+        }
+        _atomic_json(journal, payload)
+        return payload
+
+
 def authorize_captures(
     *, journal: Path, role: str, release_sha: str,
     web_legacy_collector_receipt: Path,
@@ -3382,7 +3462,8 @@ def build_parser() -> argparse.ArgumentParser:
         "command",
         choices=(
             "plan", "adopt-primary-base", "quiesce-workload", "quiesce-database",
-            "prepare-capture-authority", "authorize-captures",
+            "prepare-capture-authority", "refresh-pre-authority-receipt",
+            "authorize-captures",
             "start-captures", "verify", "rollback",
         ),
     )
@@ -3503,6 +3584,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             ):
                 raise UpgradeError("upgrade_legacy_collector_receipt_required")
             result = prepare_capture_authority(
+                web_legacy_collector_receipt=(
+                    args.web_legacy_collector_receipt
+                ),
+                expected_web_legacy_collector_receipt_sha256=(
+                    args.expected_web_legacy_collector_receipt_sha256
+                ),
+                web_maintenance_lock_path=args.web_maintenance_lock_path,
+                **common,
+            )
+        elif args.command == "refresh-pre-authority-receipt":
+            if (
+                not args.web_legacy_collector_receipt
+                or not args.expected_web_legacy_collector_receipt_sha256
+            ):
+                raise UpgradeError("upgrade_legacy_collector_receipt_required")
+            result = refresh_pre_authority_receipt(
                 web_legacy_collector_receipt=(
                     args.web_legacy_collector_receipt
                 ),

@@ -1389,6 +1389,49 @@ class MarketPipelineBlueGreenUpgradeTests(unittest.TestCase):
                     maintenance_lock_path=lock,
                 )
 
+    def test_pre_authority_receipt_refresh_rebinds_only_untouched_markers(
+        self,
+    ) -> None:
+        receipt, original_digest, lock, _bot_receipt, _bot_digest = (
+            self.interrupt_before_legacy_authority_wal()
+        )
+        refreshed = json.loads(receipt.read_text(encoding="utf-8"))
+        refreshed["verified_at_utc"] = datetime.now(timezone.utc).isoformat().replace(
+            "+00:00", "Z"
+        )
+        receipt.write_text(json.dumps(refreshed), encoding="utf-8")
+        receipt.chmod(0o600)
+        refreshed_digest = sha256(receipt.read_bytes()).hexdigest()
+        self.assertNotEqual(original_digest, refreshed_digest)
+        with (
+            patch.object(upgrade, "_ids", return_value=[]),
+            patch.object(upgrade, "_systemd_state", return_value=False),
+        ):
+            result = upgrade.refresh_pre_authority_receipt(
+                journal=self.journal,
+                role="web",
+                release_sha=RELEASE,
+                web_legacy_collector_receipt=receipt,
+                expected_web_legacy_collector_receipt_sha256=(
+                    refreshed_digest
+                ),
+                web_maintenance_lock_path=lock,
+            )
+        self.assertEqual(result["status"], "capture_authority_prepared")
+        self.assertEqual(
+            result["legacy_collector_receipt_pre_authority_sha256"],
+            refreshed_digest,
+        )
+        self.assertEqual(
+            result["pre_authority_receipt_refresh"]["previous_sha256"],
+            original_digest,
+        )
+        for row in result["marker_transition"]["entries"].values():
+            self.assertEqual(row["status"], "PENDING")
+            self.assertEqual(
+                upgrade._sha256(Path(row["path"])), row["prior_sha256"]
+            )
+
     def test_legacy_handoff_rejects_enabled_inactive_standalone_owner(self) -> None:
         receipt, digest, lock = self.legacy_receipt()
 
