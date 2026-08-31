@@ -802,9 +802,15 @@ class LegacyMarketCollectorHandoffTests(unittest.TestCase):
                 },
             }
             marker_digest = sha256(
-                json.dumps(
-                    marker_document, sort_keys=True, separators=(",", ":")
-                ).encode("utf-8")
+                (
+                    json.dumps(
+                        marker_document,
+                        ensure_ascii=True,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    + "\n"
+                ).encode("ascii")
             ).hexdigest()
             bluegreen.write_text(
                 json.dumps(
