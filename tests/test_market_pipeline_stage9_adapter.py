@@ -384,6 +384,49 @@ class Stage9AdapterTests(unittest.TestCase):
 
         self.assertTrue(all(not rows for rows in lineage.values()))
 
+    def test_catchup_revision_audit_includes_pre_cutoff_revision_of_fact(self):
+        stream = "market.fact.coin.group.1"
+        fact = _fact(
+            1200,
+            source_code="GROUP_1",
+            stream_id=stream,
+            source_sequence=1,
+            occurred_at_utc="2026-08-25T08:00:00Z",
+            available_at_utc="2026-08-25T08:00:01Z",
+            persisted_at_utc="2026-08-25T08:00:02Z",
+            payload={
+                "kind": "COIN_OFFER",
+                "group_code": 1,
+                "instrument": "COIN_IMAM",
+                "side": "SELL",
+                "settlement": "TOMORROW",
+                "trade_form": "PHYSICAL",
+                "offered_price_value": "216000",
+                "price_unit": "PROJECT_THOUSAND_TOMAN",
+                "quantity_value": "5",
+                "quantity_unit": "COIN_COUNT",
+            },
+        )
+        self._receive(_batch(1200, stream_id=stream, deliveries=[(1, fact)]))
+        self.assertEqual(run_adapter_cycle(self.receiver, self.market).applied, 1)
+        revised = json.loads(json.dumps(fact))
+        revised["fact_revision"] = 2
+        revised["available_at_utc"] = "2026-08-25T10:00:01Z"
+        revised["persisted_at_utc"] = "2026-08-25T10:00:02Z"
+        revised["quality_state"] = "REJECTED"
+        revised["quality_reason_codes"] = ["NO_LONGER_CURRENT"]
+        self._receive(_batch(1201, stream_id=stream, deliveries=[(2, revised)]))
+        self.assertEqual(run_adapter_cycle(self.receiver, self.market).selected, 1)
+
+        lineage = catchup_audit._receiver_revision_rows(
+            self.receiver, self.market
+        )
+
+        self.assertEqual(
+            [row[3] for row in lineage["GROUP_1"] if row[0] == fact["fact_id"]],
+            ["1", "2"],
+        )
+
     def test_upgrade_retires_observation_left_eligible_by_old_adapter(self):
         stream = "market.fact.coin.group.1"
         offer = _fact(

@@ -2463,7 +2463,10 @@ def _receiver_revision_rows(
     }
     rows = store.execute(
         "SELECT * FROM private_fact_adapter_projection_revisions "
-        "WHERE occurred_at_utc>=? OR available_at_utc>=? "
+        "WHERE fact_id IN ("
+        "SELECT fact_id FROM private_fact_adapter_projection_revisions "
+        "WHERE occurred_at_utc>=? OR available_at_utc>=?"
+        ") "
         "ORDER BY stream_id,delivery_sequence",
         (CUTOFF_UTC, CUTOFF_UTC),
     ).fetchall()
