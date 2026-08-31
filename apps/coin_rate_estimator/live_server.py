@@ -161,6 +161,40 @@ _PRIMARY_RATE_NAMES = {
     "COIN_HALF_LOW_DATE": (6, "نیم تاریخ پایین"),
     "COIN_ONE_GRAM": (7, "یک گرمی"),
 }
+_PRIMARY_MELTED_COMPONENT_BY_SOURCE = {
+    "PRIVATE_PHYSICAL_TODAY": "PRIVATE_GOLD_PHYSICAL_TODAY",
+    "PUBLIC_PHYSICAL_UNSPECIFIED": "MELTED_PHYSICAL_UNSPECIFIED",
+    "PRIVATE_PAPER_TODAY": "PRIVATE_GOLD_PAPER_NORMAL_TODAY",
+    "PUBLIC_PAPER_TODAY": "MELTED_PAPER_TODAY",
+    "PRIVATE_PAPER_TOMORROW_CASH_BRIDGE": "PRIVATE_GOLD_PAPER_NORMAL_TOMORROW",
+    "PUBLIC_PAPER_TOMORROW_CASH_BRIDGE": "MELTED_PAPER_TOMORROW",
+    "PUBLIC_PAPER_UNSPECIFIED_CASH_BRIDGE": "MELTED_PAPER_UNSPECIFIED",
+    "PRIVATE_PHYSICAL_TOMORROW": "PRIVATE_GOLD_PHYSICAL_TOMORROW",
+    "PRIVATE_PAPER_TOMORROW": "PRIVATE_GOLD_PAPER_NORMAL_TOMORROW",
+    "PUBLIC_PAPER_TOMORROW": "MELTED_PAPER_TOMORROW",
+    "PUBLIC_PAPER_UNSPECIFIED_TOMORROW_BRIDGE": "MELTED_PAPER_UNSPECIFIED",
+}
+_PRIMARY_MELTED_SOURCE_LABELS = {
+    "PRIVATE_PHYSICAL_TODAY": "کانال خصوصی آب‌شده · فیزیکی امروز",
+    "PUBLIC_PHYSICAL_UNSPECIFIED": "آب‌شدهٔ تجمیعی · فیزیکی بدون تسویه",
+    "PRIVATE_PAPER_TODAY": "کانال خصوصی آب‌شده · کاغذی امروز",
+    "PUBLIC_PAPER_TODAY": "جریان آب‌شده · کاغذی امروز",
+    "PRIVATE_PAPER_TOMORROW_CASH_BRIDGE": (
+        "کانال خصوصی آب‌شده · کاغذی فردایی؛ پل نقدی"
+    ),
+    "PUBLIC_PAPER_TOMORROW_CASH_BRIDGE": (
+        "جریان آب‌شده · کاغذی فردایی؛ پل نقدی"
+    ),
+    "PUBLIC_PAPER_UNSPECIFIED_CASH_BRIDGE": (
+        "آب‌شدهٔ تجمیعی · پل نقدی"
+    ),
+    "PRIVATE_PHYSICAL_TOMORROW": "کانال خصوصی آب‌شده · فیزیکی فردایی",
+    "PRIVATE_PAPER_TOMORROW": "کانال خصوصی آب‌شده · کاغذی فردایی",
+    "PUBLIC_PAPER_TOMORROW": "جریان آب‌شده · کاغذی فردایی",
+    "PUBLIC_PAPER_UNSPECIFIED_TOMORROW_BRIDGE": (
+        "آب‌شدهٔ تجمیعی · پل فردایی"
+    ),
+}
 DEFAULT_SHADOW_MODEL = Path(
     os.environ.get(
         "COIN_RATE_ESTIMATOR_SHADOW_MODEL",
@@ -816,6 +850,317 @@ def manual_entry_counts(conversation_db: Path) -> dict[str, int]:
         connection.close()
 
 
+def _primary_numeric(value: object) -> int | float | None:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return int(number) if number.is_integer() else number
+
+
+def _primary_timestamp(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    rendered = str(value).strip()
+    return rendered or None
+
+
+def _primary_input_payload(
+    trace: object | None,
+    *,
+    snapshot_age_seconds: float,
+    source_label: str,
+    display_label: str,
+) -> dict[str, Any]:
+    freshness = str(getattr(trace, "freshness", "MISSING") or "MISSING").upper()
+    observed = freshness == "FRESH"
+    point = _primary_numeric(getattr(trace, "point_value", None)) if observed else None
+    mean = _primary_numeric(getattr(trace, "mean_value", None)) if observed else None
+    occurred_at = _primary_timestamp(getattr(trace, "occurred_at_utc", None))
+    available_at = _primary_timestamp(getattr(trace, "available_at_utc", None))
+    age = _primary_numeric(getattr(trace, "age_seconds", None))
+    effective_age = (
+        float(age) + max(0.0, snapshot_age_seconds)
+        if age is not None
+        else None
+    )
+    selection = str(
+        getattr(trace, "selection_method", "PRIVATE_PRIMARY_NO_DATA")
+        or "PRIVATE_PRIMARY_NO_DATA"
+    )
+    return {
+        "status": "OBSERVED" if observed else "NO_DATA",
+        "primary_freshness": freshness,
+        "point_price": point,
+        "latest_price": point,
+        "average_price": mean,
+        "llm_value": point if point is not None else mean,
+        "sample_count": int(getattr(trace, "sample_count", 0) or 0),
+        "latest_event_utc": occurred_at or available_at,
+        "last_event_utc": occurred_at or available_at,
+        "anchor_age_seconds": effective_age,
+        "selection": selection,
+        "price_source": source_label,
+        "display_label": display_label,
+        "primary_component": str(getattr(trace, "component", "") or ""),
+        "source_codes": list(getattr(trace, "source_codes", ()) or ()),
+        "fallback": bool(getattr(trace, "fallback", False)),
+    }
+
+
+def _primary_no_data_payload(*, display_label: str, reason: str) -> dict[str, Any]:
+    return {
+        "status": "NO_DATA",
+        "primary_freshness": "MISSING",
+        "point_price": None,
+        "average_price": None,
+        "sample_count": 0,
+        "selection": reason,
+        "price_source": "PRIVATE_PRIMARY",
+        "display_label": display_label,
+    }
+
+
+def _primary_trace_status(payload: dict[str, Any]) -> str:
+    if str(payload.get("status") or "").upper() == "OBSERVED":
+        return "OBSERVED"
+    freshness = str(payload.get("primary_freshness") or "MISSING").upper()
+    return "STALE" if freshness == "STALE" else "NO_DATA"
+
+
+def _primary_model_input_health(
+    cash: dict[str, Any],
+    tomorrow: dict[str, Any],
+    *,
+    importance: str,
+) -> dict[str, Any]:
+    settlement_statuses = {
+        "CASH": _primary_trace_status(cash),
+        "TOMORROW": _primary_trace_status(tomorrow),
+    }
+    ages = [
+        float(value)
+        for payload in (cash, tomorrow)
+        if (value := payload.get("anchor_age_seconds")) is not None
+    ]
+    times = [
+        str(value)
+        for payload in (cash, tomorrow)
+        if (value := payload.get("latest_event_utc"))
+    ]
+    if "OBSERVED" in settlement_statuses.values():
+        status = "AVAILABLE"
+    elif "STALE" in settlement_statuses.values():
+        status = "STALE"
+    else:
+        status = "NO_DATA"
+    return {
+        "status": status,
+        "importance": importance,
+        "settlements": settlement_statuses,
+        "latest_observation_age_seconds": min(ages) if ages else None,
+        "latest_observation_utc": max(times) if times else None,
+    }
+
+
+def _primary_collector_health(
+    trace: object | None,
+    *,
+    snapshot_age_seconds: float,
+) -> dict[str, Any]:
+    freshness = str(getattr(trace, "freshness", "MISSING") or "MISSING").upper()
+    age = _primary_numeric(getattr(trace, "age_seconds", None))
+    effective_age = (
+        float(age) + max(0.0, snapshot_age_seconds)
+        if age is not None
+        else None
+    )
+    return {
+        "status": {
+            "FRESH": "HEALTHY",
+            "STALE": "DEGRADED",
+            "MISSING": "CRITICAL",
+            "REJECTED": "CRITICAL",
+        }.get(freshness, "CRITICAL"),
+        "heartbeat_age_seconds": effective_age,
+        "age_label": "آخرین دادهٔ تحویل‌شده",
+        "reason_code": None if freshness == "FRESH" else freshness,
+    }
+
+
+def _project_primary_inputs(
+    projected: dict[str, Any],
+    *,
+    snapshot: EstimatorSnapshotV2,
+    snapshot_age_seconds: float,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    traces = {
+        str(getattr(item, "component", "")): item
+        for item in getattr(snapshot, "inputs", ())
+    }
+    rates = tuple(getattr(snapshot, "rates", ()))
+
+    def representative_underlying(settlement: str) -> str | None:
+        for rate in rates:
+            if (
+                getattr(rate, "settlement", None) == settlement
+                and getattr(rate, "status", None) == "ESTIMATED"
+                and getattr(rate, "underlying_source", None)
+            ):
+                return str(rate.underlying_source)
+        return None
+
+    def selected_trace(components: tuple[str, ...]) -> object | None:
+        candidates = [traces[name] for name in components if name in traces]
+        for candidate in candidates:
+            if str(getattr(candidate, "freshness", "")).upper() == "FRESH":
+                return candidate
+        return candidates[0] if candidates else None
+
+    settlement_payloads: dict[str, dict[str, dict[str, Any]]] = {}
+    for settlement in ("CASH", "TOMORROW"):
+        source = representative_underlying(settlement)
+        melted_component = _PRIMARY_MELTED_COMPONENT_BY_SOURCE.get(str(source or ""))
+        melted_trace = traces.get(str(melted_component or ""))
+        melted = _primary_input_payload(
+            melted_trace,
+            snapshot_age_seconds=snapshot_age_seconds,
+            source_label=_PRIMARY_MELTED_SOURCE_LABELS.get(
+                str(source or ""),
+                str(source or "PRIVATE_PRIMARY"),
+            ),
+            display_label="کانال خصوصی آب‌شده",
+        )
+        if source:
+            melted["selection"] = source
+
+        herat_components = (
+            ("USD_HERAT_CASH", "USD_HERAT_TODAY", "USD_HERAT_TOMORROW")
+            if settlement == "CASH"
+            else ("USD_HERAT_TOMORROW", "USD_HERAT_TODAY")
+        )
+        herat = _primary_input_payload(
+            selected_trace(herat_components),
+            snapshot_age_seconds=snapshot_age_seconds,
+            source_label="دلار هرات · مسیر مستقیم PRIVATE_PRIMARY",
+            display_label="دلار هرات",
+        )
+        xau = _primary_input_payload(
+            traces.get("XAUUSD"),
+            snapshot_age_seconds=snapshot_age_seconds,
+            source_label="اونس مستقیم · مسیر PRIVATE_PRIMARY",
+            display_label="اونس جهانی مستقیم",
+        )
+        xau["is_proxy"] = False
+        usdt = _primary_input_payload(
+            traces.get("USDT_IRT"),
+            snapshot_age_seconds=snapshot_age_seconds,
+            source_label="بازار عمومی USDT/IRT",
+            display_label="تتر / تومان",
+        )
+        regime = next(
+            (
+                str(rate.market_regime)
+                for rate in rates
+                if getattr(rate, "settlement", None) == settlement
+            ),
+            "UNKNOWN",
+        )
+        settlement_payloads[settlement] = {
+            "melted_gold": melted,
+            "usd": herat,
+            "xauusd": xau,
+            "usdt": usdt,
+            "generic_coin": _primary_no_data_payload(
+                display_label="سکه عمومی (غیرگروهی)",
+                reason="PRIVATE_PRIMARY_NO_GENERIC_COIN_INPUT",
+            ),
+            "order_flow": _primary_no_data_payload(
+                display_label="جریان سفارش",
+                reason="PRIVATE_PRIMARY_NO_ORDER_FLOW_INPUT",
+            ),
+            "market_regime": {
+                "status": "OBSERVED" if regime != "UNKNOWN" else "NO_DATA",
+                "regime": regime,
+                "direction_score": None,
+                "confidence": None,
+                "selection": "PRIVATE_PRIMARY_RATE_REGIME_V1",
+            },
+        }
+        book = projected.setdefault("settlements", {}).setdefault(settlement, {})
+        book["inputs"] = settlement_payloads[settlement]
+
+    cash = settlement_payloads["CASH"]
+    tomorrow = settlement_payloads["TOMORROW"]
+    group_traces = (
+        traces.get("SOURCE_INPUT_GROUP_1"),
+        traces.get("SOURCE_INPUT_GROUP_2"),
+    )
+    group_fresh = any(
+        str(getattr(item, "freshness", "")).upper() == "FRESH"
+        for item in group_traces
+        if item is not None
+    )
+    group_ages = [
+        float(age) + max(0.0, snapshot_age_seconds)
+        for item in group_traces
+        if item is not None
+        and (age := _primary_numeric(getattr(item, "age_seconds", None))) is not None
+    ]
+    model_inputs = {
+        "melted_gold": _primary_model_input_health(
+            cash["melted_gold"], tomorrow["melted_gold"], importance="CRITICAL"
+        ),
+        "xauusd": _primary_model_input_health(
+            cash["xauusd"], tomorrow["xauusd"], importance="CRITICAL"
+        ),
+        "usd": _primary_model_input_health(
+            cash["usd"], tomorrow["usd"], importance="CRITICAL"
+        ),
+        "usdt": _primary_model_input_health(
+            cash["usdt"], tomorrow["usdt"], importance="SUPPORTING"
+        ),
+        "generic_coin": _primary_model_input_health(
+            cash["generic_coin"],
+            tomorrow["generic_coin"],
+            importance="OPPORTUNISTIC",
+        ),
+        "coin_groups": {
+            "status": "AVAILABLE" if group_fresh else "NO_DATA",
+            "importance": "CRITICAL",
+            "settlements": {
+                "CASH": "AVAILABLE" if group_fresh else "NO_DATA",
+                "TOMORROW": "AVAILABLE" if group_fresh else "NO_DATA",
+            },
+            "latest_observation_age_seconds": min(group_ages) if group_ages else None,
+        },
+        "order_flow": _primary_model_input_health(
+            cash["order_flow"], tomorrow["order_flow"], importance="OPPORTUNISTIC"
+        ),
+    }
+    collectors = {
+        "private_gold_primary": _primary_collector_health(
+            traces.get("SOURCE_INPUT_MELTED_PRIMARY"),
+            snapshot_age_seconds=snapshot_age_seconds,
+        ),
+        "usd_herat_primary": _primary_collector_health(
+            traces.get("SOURCE_INPUT_USD_HERAT"),
+            snapshot_age_seconds=snapshot_age_seconds,
+        ),
+        "xauusd_primary": _primary_collector_health(
+            traces.get("SOURCE_INPUT_XAUUSD"),
+            snapshot_age_seconds=snapshot_age_seconds,
+        ),
+    }
+    return collectors, model_inputs
+
+
 def overlay_primary_snapshot_rates(
     state: dict[str, Any],
     *,
@@ -897,6 +1242,11 @@ def overlay_primary_snapshot_rates(
         regimes = {str(item.get("market_regime")) for item in rates}
         if len(regimes) == 1:
             book["market_regime"] = regimes.pop()
+    collectors, model_inputs = _project_primary_inputs(
+        projected,
+        snapshot=snapshot,
+        snapshot_age_seconds=age_seconds,
+    )
     generated_at = snapshot.generated_at_utc.isoformat().replace("+00:00", "Z")
     projected["generated_at_utc"] = generated_at
     projected["window_end_utc"] = generated_at
@@ -906,8 +1256,8 @@ def overlay_primary_snapshot_rates(
         "status": "HEALTHY",
         "evaluated_at_utc": generated_at,
         "reason_codes": list(snapshot.reason_codes),
-        "collectors": {},
-        "model_inputs": {},
+        "collectors": collectors,
+        "model_inputs": model_inputs,
         "authority": {
             "feed_mode": snapshot.feed_mode,
             "model_version": snapshot.model_version,
@@ -3190,6 +3540,11 @@ def render_input_cards(settlements: dict[str, dict[str, Any]]) -> str:
         estimated = "ESTIMATED" in statuses
         observed = bool(statuses & {"OBSERVED", "ESTIMATED"})
         css = "estimated" if estimated else ("observed" if observed else "no-data")
+        label = str(
+            cash.get("display_label")
+            or tomorrow.get("display_label")
+            or label
+        )
         if key == "xauusd" and (
             cash.get("is_proxy") is True or tomorrow.get("is_proxy") is True
         ):
@@ -3227,6 +3582,12 @@ def render_model_input_audit(
         for key, label in labels.items():
             payload = inputs.get(key)
             payload = payload if isinstance(payload, dict) else {}
+            if key == "xauusd":
+                label = (
+                    "پراکسی اونس جهانی (PAXG)"
+                    if payload.get("is_proxy") is True
+                    else "اونس جهانی مستقیم"
+                )
             status = str(payload.get("status") or "NO_DATA").upper()
             if key == "generic_coin" and payload.get("excluded_observations"):
                 status = "EXCLUDED"
@@ -3414,7 +3775,10 @@ def render_input_health_panel(input_health: object) -> str:
         "EXCLUDED": "کنارگذاشته‌شده",
         "EXCLUDED_BY_CONTRACT": "داده موجود؛ خارج از قرارداد",
         "QUIET_OR_NO_DATA": "بازار ساکت / بدون داده",
+        "OBSERVED": "مشاهده‌شده",
         "NO_DATA": "بدون داده",
+        "MISSING": "دریافت نشده",
+        "REJECTED": "ردشده",
         "STALE": "کهنه",
     }
     collector_labels = {
@@ -3422,6 +3786,9 @@ def render_input_health_panel(input_health: object) -> str:
         "wallex_public_api": "API تتر",
         "binance_paxg_public_api": "پراکسی اونس PAXG",
         "coin_group_projection": "ورود گروه‌ها تا مدل",
+        "private_gold_primary": "کانال خصوصی آب‌شده تا مدل",
+        "usd_herat_primary": "دلار هرات تا مدل",
+        "xauusd_primary": "اونس مستقیم تا مدل",
     }
     input_labels = {
         "melted_gold": "آب‌شده",
@@ -3437,14 +3804,17 @@ def render_input_health_panel(input_health: object) -> str:
     collectors = input_health.get("collectors")
     if isinstance(collectors, dict):
         for key, label in collector_labels.items():
+            if key not in collectors:
+                continue
             payload = collectors.get(key)
             payload = payload if isinstance(payload, dict) else {}
             status = str(payload.get("status") or "UNKNOWN").upper()
             age = payload.get("heartbeat_age_seconds")
+            age_label = str(payload.get("age_label") or "heartbeat")
             detail = (
-                "heartbeat دریافت نشده"
+                f"{age_label} دریافت نشده"
                 if age is None
-                else f"heartbeat: {fa_number(age)} ثانیه پیش"
+                else f"{age_label}: {fa_number(age)} ثانیه پیش"
             )
             if key == "coin_group_projection":
                 details = payload.get("details")

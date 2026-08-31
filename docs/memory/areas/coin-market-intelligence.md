@@ -6,11 +6,11 @@
 - Trades: oldest root/exact branch; unique sibling+owner confirmation is reciprocal. Quantity markers beat tails; reject ambiguity/overfill. Only first explicit reciprocal fill amends quantity.
 - Price gate: 3 same-instrument offers/5m reject >max(5%,6 deviations). Override needs ≤30m trade, 3 offers or ≤1% two-sided book.
 - `available_at_utc` controls reconciliation. Drop absent/rejected; pending/conditional/>5m-late are audit-only. Ignore `delivery`; fail closed.
-- Estimator: `estimator-live`, facts-only `/shadow`, 120s; no-data=0/failure=3. Inputs: private gold/Herat/XAU/G1/G2. Weak evidence abstains; prefer private melted.
+- Estimator: facts-only `/shadow`, 120s; no-data=0/failure=3. Inputs private gold/Herat/XAU/G1/G2; weak evidence abstains. Dashboard rates/inputs/health share one accepted `PRIVATE_PRIMARY`, never legacy state.
 - Staging mirrors Iran; snapshots read-only. v3 bands ±10%; ties require choice. `پک`=full/half/quarter×100, `PACK_ONLY`; oldest-first.
 - Capture=`market_channel_event/1.0`,`coin_group_event/2.0`; receipt/revision/reply/allowlist authoritative; raw=3d, Store opaque.
 - Parser v10/linker v7. Promotion needs version bump+production dominance. Replay needs raw/Store/feedback/causal `MAIN_ONLINE`; ambiguity=REVIEW.
-- Private melted: price/quantity immutable; lifetime=120s. Lower remaining=cumulative fill; zero=full, positive closure=no-trade. Edit≠trade; inconsistency=ambiguous; partials finalize at deadline; freshness=900s.
+- Private melted: immutable price/quantity; lifetime=120s, freshness=900s. Lower remaining=cumulative fill; zero=full, positive closure=no-trade; edit≠trade; inconsistency=ambiguous; partials finalize at deadline.
 - Private melted quote=first canonical header amount; amounts after `توضیحات/شرایط` are not prices. Out-of-range input is terminally filtered per message, never process-wide.
 - Cutover needs real 7d coin/melted/Herat; `2026-08-25T09:33Z` waives nothing. Predating coins abstain; never synthesize anchors.
-- 2026-08-29/30: Shadow→Legacy feeds G1/G2/private-gold; Product=`LEGACY`. Since `2026-08-25T09:33Z`: 1,249 offers, 277 trades. Reviews are causal; syntax needs raw; `human-feedback-r*`.
+- 2026-08-29/30: Shadow→Legacy feeds G1/G2/private-gold; Product=`LEGACY`. Since cutoff: 1,249 offers/277 trades. Reviews causal; syntax needs raw; `human-feedback-r*`.
