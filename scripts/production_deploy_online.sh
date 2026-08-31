@@ -47,6 +47,7 @@ TELEGRAM_BOT_SPLIT_PREFLIGHT_SCRIPT="$PROJECT_DIR/scripts/telegram_bot_split_pre
 # reserved TELEGRAM_BOT_SPLIT_PREFLIGHT_SCRIPT hook and opt into it.
 PRODUCTION_RELEASE_LOCK_DIR="/root/secure-envs/trading-bot/queue-cutover-artifacts"
 PRODUCTION_RELEASE_LOCK_PATH="$PRODUCTION_RELEASE_LOCK_DIR/production-release.lock"
+PRODUCTION_MARKET_HANDOFF_DIR="/root/secure-envs/trading-bot/market-pipeline-cutover"
 DEFAULT_MANIFEST="$PROJECT_DIR/deploy/production/online.env"
 MANIFEST_PATH="${DEPLOY_MANIFEST:-$DEFAULT_MANIFEST}"
 PRODUCTION_PRIVATE_PRIMARY_MANIFEST_EXPECTED_SHA256=""
@@ -140,6 +141,8 @@ PRODUCTION_RUNTIME_ENV_FOREIGN_SHA256=""
 PRODUCTION_RUNTIME_ENV_IRAN_SHA256=""
 PRODUCTION_RUNTIME_ENV_FOREIGN_INSTALLED=0
 PRODUCTION_RELEASE_LOCK_OWNED=0
+PRODUCTION_MARKET_MAINTENANCE_LOCK_ADOPTED=0
+PRODUCTION_MARKET_MAINTENANCE_LOCK_FD=""
 PRODUCTION_SOURCE_LOCK_FD=""
 PRODUCTION_SOURCE_LOCK_PATH=""
 PRODUCTION_SOURCE_LOCK_OWNED=0
@@ -1467,6 +1470,94 @@ release_production_operation_lock() {
     fi
 }
 
+release_adopted_market_maintenance_lock() {
+    if [[ "$PRODUCTION_MARKET_MAINTENANCE_LOCK_ADOPTED" == "1" \
+        && -n "$PRODUCTION_MARKET_MAINTENANCE_LOCK_FD" ]]; then
+        flock -u "$PRODUCTION_MARKET_MAINTENANCE_LOCK_FD"
+        exec {PRODUCTION_MARKET_MAINTENANCE_LOCK_FD}>&-
+        PRODUCTION_MARKET_MAINTENANCE_LOCK_FD=""
+        PRODUCTION_MARKET_MAINTENANCE_LOCK_ADOPTED=0
+    fi
+}
+
+adopt_market_maintenance_lock_for_control_release_prepare() {
+    local lock_fd
+    ensure_production_release_lock_directory
+    [[ -f "$PRODUCTION_RELEASE_LOCK_PATH" \
+        && ! -L "$PRODUCTION_RELEASE_LOCK_PATH" ]] \
+        || die "The active Market maintenance lock is not a regular file."
+    [[ "$(stat -c '%u:%a:%h' "$PRODUCTION_RELEASE_LOCK_PATH")" \
+        == "$(id -u):600:1" ]] \
+        || die "The active Market maintenance lock has unsafe ownership, mode, or links."
+    exec {lock_fd}<>"$PRODUCTION_RELEASE_LOCK_PATH"
+    if ! flock -n "$lock_fd"; then
+        exec {lock_fd}>&-
+        die "The active Market maintenance lock is held by another operation."
+    fi
+    if ! python3 - "$PRODUCTION_RELEASE_LOCK_PATH" "$PRODUCTION_MARKET_HANDOFF_DIR" <<'PY'
+from hashlib import sha256
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+
+lock_path = Path(sys.argv[1])
+handoff_dir = Path(sys.argv[2])
+
+def secure_regular(path: Path) -> os.stat_result:
+    before = path.lstat()
+    if (
+        path.is_symlink()
+        or not stat.S_ISREG(before.st_mode)
+        or before.st_uid != os.geteuid()
+        or stat.S_IMODE(before.st_mode) != 0o600
+        or before.st_nlink != 1
+    ):
+        raise SystemExit("market_maintenance_artifact_invalid")
+    return before
+
+lock_before = secure_regular(lock_path)
+lock = json.loads(lock_path.read_text(encoding="utf-8"))
+lock_after = lock_path.lstat()
+if (lock_before.st_dev, lock_before.st_ino) != (lock_after.st_dev, lock_after.st_ino):
+    raise SystemExit("market_maintenance_lock_drift")
+release = str(lock.get("release_sha") or "")
+if (
+    lock.get("schema") != "market_pipeline_maintenance_lock/1.0"
+    or lock.get("environment") != "production"
+    or lock.get("host_role") != "bot"
+    or not re.fullmatch(r"[0-9a-f]{40}", release)
+    or lock.get("device") != lock_before.st_dev
+    or lock.get("inode") != lock_before.st_ino
+):
+    raise SystemExit("market_maintenance_lock_contract_invalid")
+journal = handoff_dir / f"bot-legacy-handoff-{release[:8]}.json"
+secure_regular(journal)
+if lock.get("journal_path_sha256") != sha256(str(journal).encode()).hexdigest():
+    raise SystemExit("market_maintenance_journal_binding_invalid")
+payload = json.loads(journal.read_text(encoding="utf-8"))
+if (
+    payload.get("schema") != "production_legacy_market_collector_handoff/1.1"
+    or payload.get("status") != "AUTHORITY_TRANSFERRED"
+    or payload.get("host_role") != "bot"
+    or payload.get("release_sha") != release
+    or payload.get("maintenance_lock") != lock
+    or payload.get("state_deleted") is not False
+    or payload.get("secrets_disclosed") is not False
+):
+    raise SystemExit("market_maintenance_journal_contract_invalid")
+PY
+    then
+        flock -u "$lock_fd" >/dev/null 2>&1 || true
+        exec {lock_fd}>&-
+        die "The active Market maintenance lock could not be adopted safely."
+    fi
+    PRODUCTION_MARKET_MAINTENANCE_LOCK_FD="$lock_fd"
+    PRODUCTION_MARKET_MAINTENANCE_LOCK_ADOPTED=1
+}
+
 prepare_production_source_lock() {
     validate_secure_runtime_env_source_file \
         || die "Immutable production runtime env source is not secure enough to lock."
@@ -1520,6 +1611,7 @@ release_production_source_lock() {
 
 release_production_locks() {
     release_production_source_lock || true
+    release_adopted_market_maintenance_lock || true
     release_production_operation_lock || true
 }
 
@@ -1605,7 +1697,16 @@ guard_production_release_command() {
             || die "Immutable production source has an invalid Telegram execution profile."
         return 0
     fi
-    acquire_production_operation_lock
+    if [[ "$COMMAND" == "prepare-private-primary-control-release" \
+        && -e "$PRODUCTION_RELEASE_LOCK_PATH" \
+        && ! -L "$PRODUCTION_RELEASE_LOCK_PATH" ]]; then
+        # Artifact preparation is non-runtime work.  When PRIVATE_PRIMARY
+        # capture already owns the durable Market maintenance lock, hold and
+        # validate that exact inode instead of deleting or replacing it.
+        adopt_market_maintenance_lock_for_control_release_prepare
+    else
+        acquire_production_operation_lock
+    fi
     acquire_production_source_lock
     profile="$(production_runtime_source_profile)" \
         || die "Immutable production source has an invalid Telegram execution profile."
