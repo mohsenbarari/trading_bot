@@ -718,7 +718,6 @@ class ProductionMarketCatchupAuditTests(unittest.TestCase):
                         "MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY=1",
                         f"MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC={audit.CUTOFF_UTC}",
                         "MARKET_CAPTURE_BACKFILL_SOURCE_CODES=GROUP_2,MELTED_PRIMARY_FLOW,GROUP_1",
-                        "MARKET_PROCESSOR_ARCHIVE_ENABLED=1",
                         "SECRET_VALUE=must-not-be-read-or-emitted",
                     )
                 )

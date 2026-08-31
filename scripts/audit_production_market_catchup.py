@@ -282,7 +282,6 @@ def _parse_runtime_binding(path: Path, *, release_sha: str) -> dict[str, object]
         "MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY",
         "MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC",
         "MARKET_CAPTURE_BACKFILL_SOURCE_CODES",
-        "MARKET_PROCESSOR_ARCHIVE_ENABLED",
     }
     seen: set[str] = set()
     for raw in lines:
@@ -313,9 +312,14 @@ def _parse_runtime_binding(path: Path, *, release_sha: str) -> dict[str, object]
         or selected["MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY"] != "1"
         or selected["MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC"] != CUTOFF_UTC
         or configured_sources != BACKFILL_SOURCES
-        or selected["MARKET_PROCESSOR_ARCHIVE_ENABLED"] != "1"
     ):
         _fail("runtime_env_catchup_binding_invalid")
+    # Archive ownership is a fixed, release-bound Compose invariant rather
+    # than a value rendered into the role env.  The audit proves that
+    # invariant from the concrete PostgreSQL archive and end-to-end lineage
+    # below; requiring the same fixed value in the env would make every
+    # canonical primary release unverifiable even while the running service
+    # is correctly configured with archive writes enabled.
     public_binding = {
         "release_sha": release_sha,
         "feed_mode": "PRIVATE_PRIMARY",
