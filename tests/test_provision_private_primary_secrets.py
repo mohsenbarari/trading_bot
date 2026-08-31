@@ -480,7 +480,7 @@ class RuntimeContinuityTests(unittest.TestCase):
             "MARKET_CAPTURE_BACKFILL_SOURCE_CODES=MELTED_PRIMARY_FLOW,GROUP_1,GROUP_2",
             topology,
         )
-        self.assertIn("MARKET_CAPTURE_BACKFILL_MAX_MESSAGES=250000", topology)
+        self.assertIn("MARKET_CAPTURE_BACKFILL_MAX_MESSAGES=1000000", topology)
 
     def test_portable_digest_equality_and_mismatch(self) -> None:
         document = {

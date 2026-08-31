@@ -725,7 +725,7 @@ class TelegramCaptureProvider:
             if backfill_not_before is not None
             else None
         )
-        if not 2_000 <= int(backfill_max_messages) <= 250_000:
+        if not 2_000 <= int(backfill_max_messages) <= 1_000_000:
             raise CaptureRuntimeError("capture_backfill_max_messages_invalid")
         self.backfill_max_messages = int(backfill_max_messages)
         requested_sources = backfill_source_codes or frozenset()
@@ -1066,12 +1066,33 @@ class TelegramCaptureProvider:
         if policy.account != self.config.account:
             raise CaptureRuntimeError("capture_backfill_policy_account_mismatch")
         entity = self._entity_by_source[policy.source_code]
-        messages: list[object] = []
-        exhaustion = "source_exhausted"
+        # Ask Telegram for the fixed replay window in chronological order and
+        # consume it as a stream.  The previous newest-first implementation
+        # retained every Telethon Message in RAM before it could apply the
+        # oldest item.  Large, high-frequency sources could therefore restart
+        # at the safety limit without recording a single outcome.  ``reverse``
+        # preserves the required oldest-to-newest capture sequence while the
+        # lower offset keeps the exact owner cutoff inclusive.
+        exhaustion = "cutoff_crossed"
         self.engine.state.begin_backfill(policy.source_code, cutoff)
         attempted_total = 0
+        messages_seen = 0
+
+        def record_results(results: list[StageResult]) -> None:
+            nonlocal attempted_total
+            for result in results:
+                self.engine.state.note_backfill_outcome(
+                    policy.source_code,
+                    cutoff,
+                    "duplicate" if result.status == "duplicate" else "accepted",
+                )
+                attempted_total += 1
+
         async for message in client.iter_messages(  # type: ignore[attr-defined]
-            entity, limit=self.backfill_max_messages + 1
+            entity,
+            limit=self.backfill_max_messages + 1,
+            reverse=True,
+            offset_date=cutoff - timedelta(microseconds=1),
         ):
             if self.stop.is_set():
                 raise CaptureRuntimeError("telegram_backfill_interrupted")
@@ -1084,7 +1105,13 @@ class TelegramCaptureProvider:
                 self.backfill_upper_bound is not None
                 and published > self.backfill_upper_bound
             ):
-                continue
+                # Chronological iteration makes every later item outside the
+                # immutable replay window as well.
+                break
+            if messages_seen >= self.backfill_max_messages:
+                self.reconciliation_truncated = True
+                raise CaptureRuntimeError("telegram_backfill_limit_exceeded")
+            messages_seen += 1
             edited = _aware(
                 getattr(message, "edit_date", None),
                 field="telegram_backfill_edit_date",
@@ -1114,23 +1141,10 @@ class TelegramCaptureProvider:
                 attempted_total += 1
                 continue
             if published < cutoff:
-                exhaustion = "cutoff_crossed"
-                break
-            messages.append(message)
-            if len(messages) > self.backfill_max_messages:
-                self.reconciliation_truncated = True
-                raise CaptureRuntimeError("telegram_backfill_limit_exceeded")
-        def record_results(results: list[StageResult]) -> None:
-            nonlocal attempted_total
-            for result in results:
-                self.engine.state.note_backfill_outcome(
-                    policy.source_code,
-                    cutoff,
-                    "duplicate" if result.status == "duplicate" else "accepted",
-                )
-                attempted_total += 1
+                # This should be impossible with the exclusive offset above.
+                # Fail closed rather than silently accepting provider drift.
+                raise CaptureRuntimeError("telegram_backfill_lower_bound_drift")
 
-        for message in reversed(messages):
             if self.stop.is_set():
                 raise CaptureRuntimeError("telegram_backfill_interrupted")
             results: list[StageResult] = []

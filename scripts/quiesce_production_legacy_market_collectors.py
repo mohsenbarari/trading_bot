@@ -1410,7 +1410,7 @@ def _primary_verification_proof(
         != {
             "not_before_utc": primary_verifier.AUTHORIZED_BACKFILL_NOT_BEFORE_UTC,
             "source_codes": primary_verifier.AUTHORIZED_BACKFILL_SOURCE_CODES.split(","),
-            "max_messages": 250000,
+            "max_messages": 1000000,
         }
         or not isinstance(artifacts, dict)
         or not artifacts

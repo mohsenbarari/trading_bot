@@ -84,7 +84,7 @@ def _backfill_settings() -> tuple[datetime | None, int, frozenset[str]]:
         )
     except ValueError as exc:
         raise CaptureRuntimeError("capture_backfill_max_messages_invalid") from exc
-    if not 2_000 <= backfill_max_messages <= 250_000:
+    if not 2_000 <= backfill_max_messages <= 1_000_000:
         raise CaptureRuntimeError("capture_backfill_max_messages_invalid")
     backfill_sources_raw = os.environ.get(
         "MARKET_CAPTURE_BACKFILL_SOURCE_CODES", ""

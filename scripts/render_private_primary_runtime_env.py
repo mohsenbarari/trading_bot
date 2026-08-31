@@ -51,7 +51,7 @@ else:
     )
     from scripts.provision_private_primary_secrets import SECRET_SPECS
 
-AUTHORIZED_BACKFILL_MAX_MESSAGES = "250000"
+AUTHORIZED_BACKFILL_MAX_MESSAGES = "1000000"
 
 
 CONFIRMATION = "render-production-private-primary-runtime-env"

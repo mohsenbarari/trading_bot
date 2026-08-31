@@ -140,7 +140,7 @@ def _source(role: str, path: Path) -> dict[str, str]:
             raise PrimaryReleaseError(
                 "primary_release_authorized_backfill_contract_invalid"
             ) from exc
-        if not 2_000 <= maximum <= 250_000:
+        if not 2_000 <= maximum <= 1_000_000:
             raise PrimaryReleaseError(
                 "primary_release_authorized_backfill_contract_invalid"
             )
@@ -225,7 +225,7 @@ def derive_source(
                 if capture_backfill_max_messages is None
                 else int(capture_backfill_max_messages)
             )
-            if not 2_000 <= maximum <= 250_000:
+            if not 2_000 <= maximum <= 1_000_000:
                 raise PrimaryReleaseError(
                     "primary_release_backfill_max_messages_invalid"
                 )

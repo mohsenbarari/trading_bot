@@ -133,7 +133,7 @@ class LegacyMarketCollectorHandoffTests(unittest.TestCase):
                 "capture_backfill": {
                     "not_before_utc": handoff.primary_verifier.AUTHORIZED_BACKFILL_NOT_BEFORE_UTC,
                     "source_codes": handoff.primary_verifier.AUTHORIZED_BACKFILL_SOURCE_CODES.split(","),
-                    "max_messages": 250000,
+                    "max_messages": 1000000,
                 },
                 "catchup_verification": {
                     "receipt_sha256": "1" * 64,

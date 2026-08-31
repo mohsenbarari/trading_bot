@@ -185,7 +185,7 @@ def _fixture(tmp_path: Path) -> tuple[SimpleNamespace, dict[str, Path]]:
             "capture_backfill": {
                 "not_before_utc": "2026-08-25T09:33:00Z",
                 "source_codes": ["MELTED_PRIMARY_FLOW", "GROUP_1", "GROUP_2"],
-                "max_messages": 250000,
+                "max_messages": 1000000,
             },
             "roles": {
                 "web": {

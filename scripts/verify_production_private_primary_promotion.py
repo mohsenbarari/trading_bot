@@ -494,7 +494,7 @@ def _validate_env(
             != AUTHORIZED_BACKFILL_NOT_BEFORE_UTC
             or value.get("MARKET_CAPTURE_BACKFILL_SOURCE_CODES")
             != AUTHORIZED_BACKFILL_SOURCE_CODES
-            or not 2_000 <= maximum <= 250_000
+            or not 2_000 <= maximum <= 1_000_000
         ):
             _fail("authorized_backfill_contract_invalid")
     return value, digest

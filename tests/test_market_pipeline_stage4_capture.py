@@ -252,14 +252,14 @@ class CaptureFixture(unittest.TestCase):
             os.environ,
             {
                 "MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC": "2026-08-25T09:33:00Z",
-                "MARKET_CAPTURE_BACKFILL_MAX_MESSAGES": "100000",
+                "MARKET_CAPTURE_BACKFILL_MAX_MESSAGES": "1000000",
                 "MARKET_CAPTURE_BACKFILL_SOURCE_CODES": required,
             },
             clear=False,
         ):
             cutoff, maximum, sources = capture_service._backfill_settings()
         self.assertEqual(cutoff, datetime(2026, 8, 25, 9, 33, tzinfo=UTC))
-        self.assertEqual(maximum, 100_000)
+        self.assertEqual(maximum, 1_000_000)
         self.assertEqual(sources, telegram_capture.EXACT_CATCHUP_SOURCES)
 
         with patch.dict(
@@ -1019,13 +1019,16 @@ class CaptureFixture(unittest.TestCase):
         class FakeClient:
             calls = 0
 
-            async def iter_messages(self, _entity, *, limit):
+            async def iter_messages(
+                self, _entity, *, limit, reverse=False, offset_date=None
+            ):
                 self.calls += 1
                 self.limit = limit
+                self.reverse = reverse
+                self.offset_date = offset_date
                 for message_id, published in (
-                    (1002, now),
                     (1001, cutoff + timedelta(seconds=1)),
-                    (999, cutoff - timedelta(seconds=1)),
+                    (1002, now),
                 ):
                     yield SimpleNamespace(
                         id=message_id,
@@ -1079,6 +1082,8 @@ class CaptureFixture(unittest.TestCase):
             )
         )
         self.assertEqual(client.calls, 1)
+        self.assertTrue(client.reverse)
+        self.assertEqual(client.offset_date, cutoff - timedelta(microseconds=1))
         status = self.state.backfill_status("MELTED_PRIMARY_FLOW")
         self.assertIsNotNone(status)
         self.assertEqual(status["status"], "complete")
@@ -1105,7 +1110,11 @@ class CaptureFixture(unittest.TestCase):
         now = cutoff + timedelta(days=1)
 
         class FakeClient:
-            async def iter_messages(self, _entity, *, limit):
+            async def iter_messages(
+                self, _entity, *, limit, reverse=False, offset_date=None
+            ):
+                self.assert_reverse = reverse
+                self.offset_date = offset_date
                 for message_id in range(limit):
                     yield SimpleNamespace(
                         id=message_id + 1,
@@ -1154,7 +1163,8 @@ class CaptureFixture(unittest.TestCase):
         )
         status = self.state.backfill_status("MELTED_PRIMARY_FLOW")
         self.assertEqual(status["status"], "running")
-        self.assertEqual(status["attempted"], 0)
+        self.assertEqual(status["attempted"], 2_000)
+        self.assertEqual(status["accepted"], 2_000)
 
     def test_explicit_replay_refuses_revision_newer_than_fixed_upper_bound(self):
         cutoff = datetime(2026, 8, 25, 9, 33, tzinfo=UTC)
@@ -1167,14 +1177,10 @@ class CaptureFixture(unittest.TestCase):
         )
 
         class FakeClient:
-            async def iter_messages(self, _entity, *, limit):
+            async def iter_messages(
+                self, _entity, *, limit, reverse=False, offset_date=None
+            ):
                 yield message
-                yield SimpleNamespace(
-                    id=98,
-                    date=cutoff - timedelta(seconds=1),
-                    edit_date=None,
-                    message="boundary",
-                )
 
         config = TelegramCaptureConfig(
             contract="market_telegram_capture_config/1.0",
@@ -1262,15 +1268,17 @@ class CaptureFixture(unittest.TestCase):
         class FakeClient:
             calls = 0
 
-            async def iter_messages(self, _entity, *, limit):
+            async def iter_messages(
+                self, _entity, *, limit, reverse=False, offset_date=None
+            ):
                 self.calls += 1
                 yield SimpleNamespace(
-                    id=2, date=now, edit_date=None, message="2,350.50"
+                    id=1, date=cutoff, edit_date=None, message="2,349.50"
                 )
                 if self.calls == 1:
                     raise ConnectionError("fixture_transport_interrupted")
                 yield SimpleNamespace(
-                    id=1, date=cutoff, edit_date=None, message="2,349.50"
+                    id=2, date=now, edit_date=None, message="2,350.50"
                 )
 
         config = TelegramCaptureConfig(
@@ -1319,29 +1327,28 @@ class CaptureFixture(unittest.TestCase):
         status = self.state.backfill_status("MELTED_PRIMARY_FLOW")
         self.assertEqual(status["run_attempts"], 2)
         self.assertEqual(status["attempted"], 2)
-        self.assertEqual(status["accepted"], 2)
-        self.assertEqual(status["exhaustion"], "source_exhausted")
+        self.assertEqual(status["accepted"], 1)
+        self.assertEqual(status["duplicate"], 1)
+        self.assertEqual(status["exhaustion"], "cutoff_crossed")
 
     def test_explicit_backfill_includes_exact_cutoff_across_many_results(self):
         cutoff = datetime(2026, 8, 25, 9, 33, tzinfo=UTC)
         total = 205
 
         class FakeClient:
-            async def iter_messages(self, _entity, *, limit):
+            async def iter_messages(
+                self, _entity, *, limit, reverse=False, offset_date=None
+            ):
                 self.limit = limit
-                for offset in range(total - 1, -1, -1):
+                self.reverse = reverse
+                self.offset_date = offset_date
+                for offset in range(total):
                     yield SimpleNamespace(
                         id=offset + 1,
                         date=cutoff + timedelta(seconds=offset),
                         edit_date=None,
                         message="2,350.50",
                     )
-                yield SimpleNamespace(
-                    id=999,
-                    date=cutoff - timedelta(microseconds=1),
-                    edit_date=None,
-                    message="2,349.50",
-                )
 
         config = TelegramCaptureConfig(
             contract="market_telegram_capture_config/1.0",
@@ -1397,8 +1404,10 @@ class CaptureFixture(unittest.TestCase):
         cutoff = datetime(2026, 8, 25, 9, 33, tzinfo=UTC)
 
         class FakeClient:
-            async def iter_messages(self, _entity, *, limit):
-                for message_id in (2, 1):
+            async def iter_messages(
+                self, _entity, *, limit, reverse=False, offset_date=None
+            ):
+                for message_id in (1, 2):
                     yield SimpleNamespace(
                         id=message_id,
                         date=cutoff + timedelta(seconds=message_id - 1),
@@ -1473,7 +1482,9 @@ class CaptureFixture(unittest.TestCase):
         cutoff = datetime(2026, 8, 25, 9, 33, tzinfo=UTC)
 
         class FakeClient:
-            async def iter_messages(self, _entity, *, limit):
+            async def iter_messages(
+                self, _entity, *, limit, reverse=False, offset_date=None
+            ):
                 yield SimpleNamespace(
                     id=1,
                     date=cutoff,
@@ -1540,19 +1551,21 @@ class CaptureFixture(unittest.TestCase):
         class FakeClient:
             corrected = False
 
-            async def iter_messages(self, _entity, *, limit):
-                yield SimpleNamespace(
-                    id=2,
-                    date=cutoff + timedelta(seconds=1),
-                    edit_date=None,
-                    message="2,350.50",
-                )
+            async def iter_messages(
+                self, _entity, *, limit, reverse=False, offset_date=None
+            ):
                 yield SimpleNamespace(
                     id=1,
                     date=cutoff,
                     edit_date=None,
                     message="2,349.50" if self.corrected else "",
                     media=None if self.corrected else SimpleNamespace(),
+                )
+                yield SimpleNamespace(
+                    id=2,
+                    date=cutoff + timedelta(seconds=1),
+                    edit_date=None,
+                    message="2,350.50",
                 )
 
         config = TelegramCaptureConfig(
@@ -1615,14 +1628,10 @@ class CaptureFixture(unittest.TestCase):
         )
 
         class FakeClient:
-            async def iter_messages(self, _entity, *, limit):
+            async def iter_messages(
+                self, _entity, *, limit, reverse=False, offset_date=None
+            ):
                 yield child
-                yield SimpleNamespace(
-                    id=9,
-                    date=cutoff - timedelta(minutes=2),
-                    edit_date=None,
-                    message="older",
-                )
 
             async def get_messages(self, _entity, *, ids):
                 return parent if ids == 10 else None
@@ -1703,14 +1712,10 @@ class CaptureFixture(unittest.TestCase):
         )
 
         class FakeClient:
-            async def iter_messages(self, _entity, *, limit):
+            async def iter_messages(
+                self, _entity, *, limit, reverse=False, offset_date=None
+            ):
                 yield child
-                yield SimpleNamespace(
-                    id=9,
-                    date=cutoff - timedelta(minutes=2),
-                    edit_date=None,
-                    message="older",
-                )
 
             async def get_messages(self, _entity, *, ids):
                 return parent if ids == 10 else None
@@ -1798,15 +1803,11 @@ class CaptureFixture(unittest.TestCase):
         )
 
         class FakeClient:
-            async def iter_messages(self, _entity, *, limit):
-                yield child
+            async def iter_messages(
+                self, _entity, *, limit, reverse=False, offset_date=None
+            ):
                 yield parent
-                yield SimpleNamespace(
-                    id=9,
-                    date=cutoff - timedelta(seconds=1),
-                    edit_date=None,
-                    message="older",
-                )
+                yield child
 
             async def get_messages(self, _entity, *, ids):
                 return parent if ids == 10 else None
@@ -1892,15 +1893,11 @@ class CaptureFixture(unittest.TestCase):
         class FakeClient:
             parent_fetches = 0
 
-            async def iter_messages(self, _entity, *, limit):
-                yield child(12)
+            async def iter_messages(
+                self, _entity, *, limit, reverse=False, offset_date=None
+            ):
                 yield child(11)
-                yield SimpleNamespace(
-                    id=9,
-                    date=cutoff - timedelta(minutes=2),
-                    edit_date=None,
-                    message="older",
-                )
+                yield child(12)
 
             async def get_messages(self, _entity, *, ids):
                 self.parent_fetches += 1
