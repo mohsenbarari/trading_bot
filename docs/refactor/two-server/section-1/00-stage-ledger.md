@@ -54,8 +54,8 @@ requires more than a host inventory. These gates remain open:
    mutation and side effect does not yet have a reviewed `behavior_id`.
 3. Offer/Trade provenance semantics are approved, but the future ADR, schema،
    deterministic backfill and parity tests are implementation work for `P1-04`.
-4. Capacity, soak and post-cutover retention are approved; DNS, deploy SLO،
-   artifact distribution، cutover timing and rollback thresholds remain open or
+4. Capacity, soak, initial-cutover timing and post-cutover retention are approved;
+   DNS, deploy SLO، artifact distribution and rollback thresholds remain open or
    deliberately deferred to their detailed sections.
 5. Baseline deploy/restore duration needs an observed rehearsal; production
    operations were intentionally outside this audit.

@@ -7,12 +7,11 @@
 - 2026-09-01 | No operational provisioning, deploy, migration, runtime cleanup,
   DNS change or cutover occurs before the complete plan is reviewed and approved;
   production Stages still require their own explicit authorization afterward.
-- 2026-09-01 | The one-time two-Finland consolidation cutover accepts at most four
-  minutes of user access/write interruption; its 90m reserved window is not a
-  deploy SLO for the new architecture. Initial acceptance uses 24h staging soak,
-  steady CPU <=60% and
-  RAM/disk/DB-pool <=70%; after cutover observe actively for 2h, fence old sources
-  for at least 7d and retain the approved backup 30d, without automatic deletion.
+- 2026-09-01 | The approved one-time two-Finland consolidation cutover reserves
+  90m, completes preflight before freeze, allows at most 4m user access/write
+  interruption, and aborts if target is not ready. It is not a deploy SLO. Initial
+  acceptance uses 24h soak, steady CPU <=60% and RAM/disk/DB-pool <=70%; observe
+  2h, fence old sources at least 7d, and retain the approved backup 30d.
 - 2026-09-01 | Finland consolidation is behavior-preserving. An owner-reviewed,
   read-only current architecture dossier and feature-parity contract must cover
   every Web/Bot surface, tier/policy, state and side effect before implementation.
