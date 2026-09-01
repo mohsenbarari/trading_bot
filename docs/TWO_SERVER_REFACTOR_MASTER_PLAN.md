@@ -181,21 +181,30 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
 - Web و Bot دو surface متمایزند. `origin_surface` هم provenance تغییرناپذیر و هم
   ورودی policy نسخه‌دار است؛ اشتراک مدل داده به معنی یکسان‌کردن policyهای وقت
   اضافه، سطح مشتری، انتشار، محدودیت، تأیید یا notification نیست.
+- تا کامل‌شدن و تأیید کل پلن، هیچ provisioning، deploy، migration، DNS change،
+  cleanup runtime یا cutover عملیاتی انجام نمی‌شود. تأیید پلن نیز مجوز خودکار
+  اجرای Stageهای تولیدی نیست.
+- `D-07`: budget اولیهٔ staging در بار مرجع CPU پایدار حداکثر ۶۰٪، RAM و disk
+  حداکثر ۷۰٪ و DB pool حداکثر ۷۰٪ است؛ baseline می‌تواند بازبینی عددی را الزام کند.
+- `D-08`: حداقل soak معماری یکپارچهٔ Finland برابر ۲۴ ساعت با job، queue، backup،
+  log rotation و fault telemetry فعال است.
+- `D-10`: پس از cutover، پایش فعال ۲ ساعت است؛ sourceهای قدیمی حداقل ۷ روز fenced
+  و قابل‌بازیابی و backup مصوب ۳۰ روز نگه داشته می‌شود. پایان retention حذف خودکار
+  نیست و `P1-08/P2-11` و مجوز جدا همچنان الزامی‌اند.
+- در cutover برنامه‌ریزی‌شده، حداکثر ۴ دقیقه قطع دسترسی/توقف write کاربر پذیرفته
+  است؛ طراحی `D-09` باید در این سقف fail/abort کند.
 
 ### نیازمند تأیید در بازبینی این پلن
 
-| ID | تصمیم پیشنهادی | مقدار اولیه |
-| --- | --- | --- |
-| `D-02` | DNS TTL محصول | ۳۰ ثانیه در دورهٔ آماده‌سازی/cutover؛ مقدار عادی پس از soak جدا تعیین شود |
-| `D-03` | SLO deploy hotfix بدون migration | حداکثر ۱۵ دقیقه از artifact تأییدشده تا health سبز |
-| `D-04` | SLO release عادی دو سرور | حداکثر ۳۰ دقیقه در حالت اتصال سالم |
-| `D-05` | SLO rollback کد بدون DB restore | حداکثر ۱۰ دقیقه |
-| `D-06` | artifact distribution | registry اصلی + OCI archive امضاشده در Object Storage ایران برای Iran/offline |
-| `D-07` | budget ظرفیت staging یکپارچه | در بار مرجع: CPU پایدار ≤۶۰٪، RAM و disk ≤۷۰٪، DB pool ≤۷۰٪؛ مقدار دقیق پس از baseline قابل‌بازبینی است |
-| `D-08` | حداقل soak معماری Finland | ۲۴ ساعت با job، queue، backup، log rotation و fault telemetry فعال |
-| `D-09` | پنجرهٔ cutover ادغام Finland | پنجرهٔ عملیاتی ۹۰ دقیقه؛ هدف Web write-freeze ≤۱۵ دقیقه و abort اجباری در ۳۰ دقیقه بدون `GO` تازه |
-| `D-10` | observation و quarantine پس از cutover | پایش فعال ۲ ساعت؛ دو source قدیمی fenced و قابل‌بازیابی ۷ روز؛ backup مصوب ۳۰ روز مگر incident hold |
-| `D-11` | trigger عددی rollback cutover | invariant/duplicate-owner/hash/durability فوراً؛ error rate >۲٪ برای ۵ دقیقه، p95 >۲× baseline برای ۱۰ دقیقه یا queue lag >۳۰ثانیه برای ۵ دقیقه |
+| ID | تصمیم پیشنهادی | مقدار اولیه | وضعیت |
+| --- | --- | --- | --- |
+| `D-02` | DNS TTL محصول | ۳۰ ثانیه در دورهٔ آماده‌سازی/cutover؛ مقدار عادی پس از soak جدا تعیین شود | باز؛ سقف قطعی ۴ دقیقه تأیید شده، TTL هنوز نیازمند تأیید است |
+| `D-03` | SLO deploy hotfix بدون migration | حداکثر ۱۵ دقیقه از artifact تأییدشده تا health سبز | موکول به بررسی عمیق بخش ۴ |
+| `D-04` | SLO release عادی دو سرور | حداکثر ۳۰ دقیقه در حالت اتصال سالم | موکول به بررسی عمیق بخش ۴ |
+| `D-05` | SLO rollback کد بدون DB restore | حداکثر ۱۰ دقیقه | موکول به بررسی عمیق بخش ۴ |
+| `D-06` | artifact distribution | registry اصلی + OCI archive امضاشده در Object Storage ایران برای Iran/offline | باز؛ پس از توضیح و بررسی بخش ۴ |
+| `D-09` | پنجرهٔ cutover ادغام Finland | پنجرهٔ رزروشده ۹۰ دقیقه؛ تمام preflightها قبل از freeze؛ توقف دسترسی/write حداکثر ۴ دقیقه و سپس abort اگر target آماده نیست | باز؛ نیازمند تأیید پس از توضیح سناریو |
+| `D-11` | trigger عددی rollback cutover | invariant/duplicate-owner/hash/durability فوراً؛ error rate >۲٪ برای ۵ دقیقه، p95 >۲× baseline برای ۱۰ دقیقه یا queue lag >۳۰ثانیه برای ۵ دقیقه | باز؛ نیازمند تأیید آستانه‌ها و انسانی‌بودن فرمان rollback |
 
 این موارد تا تأیید مالک، requirement پیشنهادی‌اند و Cursor حق تثبیت پنهان آن‌ها
 در کد را ندارد.

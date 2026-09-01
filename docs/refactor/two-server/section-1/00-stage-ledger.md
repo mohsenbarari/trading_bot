@@ -55,8 +55,9 @@ requires more than a host inventory. These gates remain open:
 3. The immutable Offer-origin gap is unresolved. Current Offer rows use
    `home_server` as both placement/authority and an indirect proxy for Web/Bot
    origin. Co-location would make that ambiguous.
-4. Numeric staging, cutover, rollback and retention thresholds are proposed but
-   not approved.
+4. Capacity, soak and post-cutover retention are approved; DNS, deploy SLO،
+   artifact distribution، cutover timing and rollback thresholds remain open or
+   deliberately deferred to their detailed sections.
 5. Baseline deploy/restore duration needs an observed rehearsal; production
    operations were intentionally outside this audit.
 
