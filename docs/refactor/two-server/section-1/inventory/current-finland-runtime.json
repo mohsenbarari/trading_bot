@@ -1,0 +1,108 @@
+{
+  "schema_version": "two-server-refactor.runtime-inventory.v1",
+  "observed_date": "2026-09-01 UTC",
+  "observation_mode": "read-only-sanitised",
+  "secret_values_collected": false,
+  "hosts": [
+    {
+      "role": "current_bot_finland",
+      "hostname": "ubuntu-4gb-hel1-1",
+      "public_ipv4": "65.109.216.187",
+      "cpu_count": 8,
+      "memory_gib": 15.6,
+      "swap_gib": 3.0,
+      "root_disk_gib": 38,
+      "root_disk_used_percent": 89,
+      "application_db_mib": 173,
+      "application_schema_head": "ff6c7d8e9f01",
+      "release_sha": "e533d415f1fe085a251d8e6df2016fa775d86702",
+      "capabilities": [
+        "api_producer",
+        "telegram_owner",
+        "telegram_delivery",
+        "sync_worker",
+        "market_estimator",
+        "snapshot_sender"
+      ]
+    },
+    {
+      "role": "current_web_finland",
+      "hostname": "iran",
+      "public_ipv4": "65.109.220.59",
+      "cpu_count": 4,
+      "memory_gib": 7.7,
+      "swap_gib": 8.0,
+      "root_disk_gib": 150,
+      "root_disk_used_percent": 42,
+      "application_db_mib": 60,
+      "market_db_mib": 3952,
+      "application_schema_head": "ff6c7d8e9f01",
+      "release_sha": "e533d415f1fe085a251d8e6df2016fa775d86702",
+      "capabilities": [
+        "web_api",
+        "web_sessions",
+        "messenger",
+        "web_push",
+        "sms",
+        "sync_worker",
+        "market_capture",
+        "market_archive",
+        "snapshot_receiver"
+      ]
+    },
+    {
+      "role": "target_finland_primary",
+      "hostname": "ubuntu-32gb-hel1-1",
+      "public_ipv4": "65.109.214.203",
+      "cpu_count": 16,
+      "memory_gib": 31.3,
+      "swap_gib": 0,
+      "root_disk_gib": 301,
+      "root_disk_free_gib": 286,
+      "ssh_host_key_ed25519_sha256": "SHA256:bwxz2aeBwy0ZNOMMCVdRhaW//TkeALqt6etTQa3NINs",
+      "provisioned": false,
+      "production_authoritative": false,
+      "listening_tcp_ports": [22],
+      "blockers": [
+        "host_firewall_inactive",
+        "ssh_password_authentication_enabled",
+        "ssh_x11_forwarding_enabled",
+        "no_swap_policy",
+        "container_runtime_absent",
+        "monitoring_backup_restore_absent"
+      ]
+    }
+  ],
+  "application_data_policy": {
+    "orm_model_tables": 59,
+    "sync_tables": 23,
+    "no_sync_tables": 33,
+    "internal_bookkeeping_tables": 3,
+    "shared_parity": {
+      "max_rows_per_table": 50000,
+      "status": "non_business_difference",
+      "business_drift": 0,
+      "critical_drift": 0,
+      "incomplete_tables": 0,
+      "duplicate_records": 0,
+      "missing_records": 0
+    }
+  },
+  "static_surfaces": {
+    "api_route_decorators": 212,
+    "api_router_modules": 18,
+    "bot_handler_decorators": 202,
+    "bot_handler_modules": 18,
+    "frontend_routes": 30,
+    "background_job_authority_entries": 15,
+    "required_background_job_classes": 14
+  },
+  "repository": {
+    "tracked_files": 3093,
+    "worktrees": 1,
+    "ignored_production_release_gib": 1.2,
+    "ignored_frontend_node_modules_mib": 571,
+    "ignored_mutants_mib": 22,
+    "local_artifacts_mib": 4.4
+  }
+}

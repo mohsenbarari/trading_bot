@@ -1,48 +1,74 @@
 # Finland Primary target
 
-Status: created, reachable, access not established, not production-authoritative
-Last verified: 2026-08-31
+Status: accessible, inventoried read-only, unprovisioned, not production-authoritative
+Last verified: 2026-09-01 UTC
 
 ## Approved target
 
 - Role: sole planned Finland Primary
 - IPv4: `65.109.214.203`
-- Intended services after an approved migration: WebApp/API, Telegram bot,
-  background workers, PostgreSQL, and Redis
-- Iran remains the planned WebApp standby; this document does not activate or
-  promote either host.
+- Intended services after an approved migration: WebApp/API, Telegram Bot,
+  background workers, PostgreSQL, Redis and the Finland-side Market services
+- Iran remains the planned WebApp standby. Nothing in this document activates,
+  promotes or provisions either host.
 
-## SSH reachability scenario
+## Verified identity and capacity
 
-Precondition: a new server was created and the project owner authorized a
-read-only SSH attempt.
+The approved SSH identity authenticated as `root` and only read-only inventory
+commands were run. The host presented the previously observed ED25519 host key:
 
-Observed result:
+```text
+SHA256:bwxz2aeBwy0ZNOMMCVdRhaW//TkeALqt6etTQa3NINs
+```
 
-- Port 22 answered and presented an ED25519 host key.
-- Observed fingerprint: `SHA256:bwxz2aeBwy0ZNOMMCVdRhaW//TkeALqt6etTQa3NINs`
-- Authentication failed for both `root` and `ubuntu` with the currently
-  available SSH identities: `Permission denied (publickey,password)`.
-- No remote command executed, so hostname, operating system, resources, disk,
-  firewall, packages, and service state remain unknown.
+| Property | Observed value |
+| --- | --- |
+| Hostname | `ubuntu-32gb-hel1-1` |
+| Operating system | Ubuntu 26.04 |
+| Kernel | `7.0.0-29-generic` |
+| CPU | 16 vCPU |
+| RAM | 31.3 GiB |
+| Swap | none |
+| Root filesystem | 301 GiB total; about 286 GiB free |
+| Public IPv4 | `65.109.214.203/32` |
+| Time | UTC; NTP synchronized |
+| Listening services | SSH on port 22 only |
+| Container runtime | Docker/Compose not installed |
+| Application services/data | none observed |
 
-## Security gate before the next attempt
+Raw capacity is materially above either current Finland host, but this is not a
+capacity acceptance test. `P1-06` still requires a production-shaped load test,
+soak and explicit resource budgets before production cutover.
 
-1. Verify the observed ED25519 fingerprint out of band through the hosting
-   provider console or rescue environment.
-2. Confirm the intended SSH account.
-3. Install an approved public key through the provider console; do not copy a
-   private key into the repository, prompt, log, or temporary directory.
-4. Repeat a read-only inventory before any provisioning.
+## Security and provisioning blockers
 
-## Read-only inventory after access is established
+The host is intentionally treated as unprovisioned. Read-only inspection found:
 
-- identity: hostname, OS/release, kernel, timezone, and architecture
-- capacity: CPU, memory, disks, filesystems, and free space
-- network: addresses, routes, DNS, listening ports, firewall, and SSH policy
-- runtime: Docker/Compose, systemd state, Nginx, PostgreSQL/Redis presence
-- security: pending updates, automatic updates, time synchronization, and
-  provider firewall status
+- UFW is inactive and no effective nftables rules were observed.
+- SSH effective policy permits password authentication and X11 forwarding;
+  root login is limited to public-key authentication (`prohibit-password`).
+- the `ssh` unit is active but not enabled as a conventional boot service;
+  socket/service activation and reboot behavior must be tested explicitly.
+- unattended upgrades are enabled and active; 13 cached upgrades were pending at
+  inspection time.
+- no swap exists; an explicit memory-pressure policy is required.
+- Docker/Compose, reverse proxy, application directories, monitoring, backup and
+  restore tooling are absent.
 
-Provisioning, package installation, SSH hardening, data transfer, DNS changes,
-deploy, and production cutover each require a separate approved plan.
+These are provisioning inputs, not authorization to change the server. The
+approved hardening baseline must define provider firewall, host firewall, SSH
+policy, update/reboot policy, least-privilege operators, secret mounts, disk and
+volume layout, time sync, audit logging, alerting and recovery access.
+
+## Next gates
+
+1. Approve the target security/capacity contract in `P1-02` and `P1-03`.
+2. Provision through an auditable, idempotent path; do not configure manually
+   without recording the equivalent automation.
+3. Run target topology and failure-isolation tests without production secrets or
+   external side effects.
+4. Complete data-merge rehearsal, staging parity, load, soak, backup/restore and
+   rollback gates before any production cutover.
+
+Package installation, SSH hardening, data transfer, DNS changes, deploy and
+production cutover each require a separately approved operational Task Card.

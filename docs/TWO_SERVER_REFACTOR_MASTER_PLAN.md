@@ -191,6 +191,11 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
 | `D-04` | SLO release عادی دو سرور | حداکثر ۳۰ دقیقه در حالت اتصال سالم |
 | `D-05` | SLO rollback کد بدون DB restore | حداکثر ۱۰ دقیقه |
 | `D-06` | artifact distribution | registry اصلی + OCI archive امضاشده در Object Storage ایران برای Iran/offline |
+| `D-07` | budget ظرفیت staging یکپارچه | در بار مرجع: CPU پایدار ≤۶۰٪، RAM و disk ≤۷۰٪، DB pool ≤۷۰٪؛ مقدار دقیق پس از baseline قابل‌بازبینی است |
+| `D-08` | حداقل soak معماری Finland | ۲۴ ساعت با job، queue، backup، log rotation و fault telemetry فعال |
+| `D-09` | پنجرهٔ cutover ادغام Finland | پنجرهٔ عملیاتی ۹۰ دقیقه؛ هدف Web write-freeze ≤۱۵ دقیقه و abort اجباری در ۳۰ دقیقه بدون `GO` تازه |
+| `D-10` | observation و quarantine پس از cutover | پایش فعال ۲ ساعت؛ دو source قدیمی fenced و قابل‌بازیابی ۷ روز؛ backup مصوب ۳۰ روز مگر incident hold |
+| `D-11` | trigger عددی rollback cutover | invariant/duplicate-owner/hash/durability فوراً؛ error rate >۲٪ برای ۵ دقیقه، p95 >۲× baseline برای ۱۰ دقیقه یا queue lag >۳۰ثانیه برای ۵ دقیقه |
 
 این موارد تا تأیید مالک، requirement پیشنهادی‌اند و Cursor حق تثبیت پنهان آن‌ها
 در کد را ندارد.
@@ -263,9 +268,9 @@ Cursor پیش از شروع هر Stage باید تمام dependencyهای زیر
 | `P1-03` | `P1-02`, `P4-02`, `P4-03` |
 | `P1-04` | `P1-03`, `P2-00`, `P2-01` |
 | `P1-05` | `P1-04`, `P2-05`, `P4-04` |
-| `P1-06` + `P4-07` | `P1-05`, `P4-04`, `P4-05`, `P4-06` |
-| `P1-07` + `P4-08` | `P1-06`, `P4-07`, `P4-10`, مجوز تولید |
-| `P1-08` | `P1-07`, `P2-11`, retention/backup approval |
+| `P1-06` + `P4-07` | `P1-05`, `P4-04`, `P4-05`, `P4-06` و تصمیم‌های `D-07`, `D-08` |
+| `P1-07` + `P4-08` | `P1-06`, `P4-07`, `P4-10`، تصمیم‌های `D-09`, `D-11` و مجوز تولید |
+| `P1-08` | `P1-07`, `P2-11`، تصمیم `D-10` و retention/backup approval |
 | `P2-00` | `P1-00` |
 | `P2-01` | `P2-00` |
 | `P2-02` | `P2-01`, `P4-02` |
@@ -454,12 +459,13 @@ docs/refactor/two-server/section-1/
 └── stages/P1-00.md ... stages/P1-08.md
 ```
 
-ایجاد این فایل‌ها خروجی اجرای آیندهٔ Stageها است؛ شاخهٔ فعلی فقط قرارداد و پلن
-آن‌ها را تعریف می‌کند.
+فایل‌های `00..07` و Task Card `P1-00` در همین شاخه با ممیزی read-only ایجاد
+شده‌اند. بقیهٔ فایل‌ها خروجی Stageهای آینده‌اند و پیش از dependency و gate مربوط
+نباید با نتیجهٔ حدسی پر شوند.
 
 ## `P1-00` — Current-State Architecture و Behavior Baseline
 
-وضعیت: `PROPOSED`
+وضعیت: `IN_PROGRESS — ممیزی فنی آمادهٔ بازبینی مالک؛ Gate انسانی باز است`
 
 Dependency: تأیید همین پلن؛ برای مشاهدهٔ runtime، مجوز read-only جداگانه.
 
