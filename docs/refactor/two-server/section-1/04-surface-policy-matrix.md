@@ -1,6 +1,6 @@
 # Web/Bot Surface Policy Matrix
 
-Status: invariant approved; implementation gap and detailed behavior mapping open
+Status: provenance contract approved; implementation and behavior mapping open
 
 ## Rule that consolidation must preserve
 
@@ -20,9 +20,9 @@ those dimensions.
 
 | Entity/action | Current durable evidence | Consolidation requirement | Status |
 | --- | --- | --- | --- |
-| Offer creation | `offers.home_server`; creation service derives surface from it | immutable `offer_origin_surface` independent of home/placement | **BLOCKER: missing explicit field** |
+| Offer creation | `offers.home_server`; creation service derives surface from it | immutable `offer_origin_surface` independent of home/placement | contract approved; field/backfill still a blocker |
 | Request creation | `request_source_surface`, `request_source_server`, `request_home_server`, tier/commission/workflow snapshots | retain immutable source and snapshots | present; migration/parity tests required |
-| Trade creation | Offer/request references and actors; no single explicit trade-origin field observed | define whether origin is derived immutably or snapshotted on Trade | **decision required** |
+| Trade creation | Offer/request references and actors; no complete immutable provenance snapshot observed | snapshot Offer origin, Request origin, execution surface, policy version and sensitive actor/role/tier context | contract approved; schema/migration/tests open |
 | Expiry action | `expire_source_surface` and command receipt | preserve action source separately from Offer origin | present for expiry; full command coverage required |
 | Actor/persona | user/relation/accountant/admin context | snapshot every policy-sensitive role/tier value that may later change | partial; behavior audit required |
 
@@ -59,9 +59,10 @@ For each row, tests must cover at least:
 - notification audience, Web realtime/Web Push and Telegram publication/delivery;
 - failure before commit, after commit/before side effect and side-effect retry.
 
-## Design constraint for the next ADR
+## Approved semantic contract for the next ADR
 
-Recommended model (not yet an approved schema name):
+The semantics below are approved. The ADR may refine physical column names and
+normalization, but it may not weaken or derive them from physical topology:
 
 ```text
 origin_surface     immutable product provenance: WEBAPP | TELEGRAM_BOT | INTERNAL
@@ -79,7 +80,8 @@ that cannot be derived uniquely must be reported; guessing is forbidden.
 
 `P1-04` cannot remove internal Finland sync or rewrite topology labels until:
 
-1. the Offer and Trade provenance ADR is owner-approved;
+1. the Offer and Trade ADR implements the approved semantic contract without
+   collapsing its independent dimensions;
 2. every existing row has a deterministic migration or explicit quarantine;
 3. all combinations above have reference-topology characterization tests;
 4. the target runs the same tests without deriving surface from physical host;

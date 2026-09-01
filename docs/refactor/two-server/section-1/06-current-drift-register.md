@@ -7,7 +7,7 @@ Status: open findings; no implicit fixes authorized
 | `DR-001` | resolved-doc | Target inventory doc said SSH auth failed | Updated with verified access/capacity; target remains unprovisioned |
 | `DR-002` | high | Both production roles report release `e533d415`, 20 commits behind current `main` at audit | classify those commits and choose an exact migration baseline; do not silently deploy `main` |
 | `DR-003` | high | Logical roles are encoded as historical `iran`/`foreign` server labels | replace capability checks deliberately; preserve true business `home_site` authority |
-| `DR-004` | blocker | Offer has no immutable creation surface independent of `home_server` | approve Offer/Trade provenance ADR and backfill before co-location/topology rewrite |
+| `DR-004` | blocker-implementation | Offer lacks an immutable creation surface independent of `home_server`, and Trade lacks the approved complete provenance snapshot | semantic contract approved؛ implement ADR/schema/backfill/sync/parity before co-location/topology rewrite |
 | `DR-005` | medium | Deep read-only parity is complete with zero business drift, but persisted operator parity status is `missing`/not fresh | add non-mutating inspection plus explicit operator receipt workflow; do not forge status |
 | `DR-006` | high | Bot-Finland root disk is 89% full; ignored release output is ~1.2 GiB and backups ~2.2 GiB | approve retention/cleanup manifest before migration; protect active rollback/restore assets |
 | `DR-007` | high | staging and obsolete three-site containers run on production hosts | identify dependencies/traffic, then drain and decommission under separate approval |
@@ -23,6 +23,8 @@ Status: open findings; no implicit fixes authorized
 ## Interpretation
 
 - `blocker` prevents the relevant implementation Stage.
+- `blocker-implementation` means the design decision is closed but implementation
+  evidence is still mandatory before the dependent Stage.
 - `blocker-op` prevents provisioning/staging/cutover but not documentation.
 - `high` requires a named resolution and test before its dependent gate.
 - `medium` may be scheduled, but cannot be hidden if it changes parity or

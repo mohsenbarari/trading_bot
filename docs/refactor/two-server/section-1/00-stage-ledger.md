@@ -52,9 +52,8 @@ requires more than a host inventory. These gates remain open:
 2. The 212 statically discovered API route decorators, 202 Bot handler decorators
    and frontend routes are inventoried only at aggregate/module level; every
    mutation and side effect does not yet have a reviewed `behavior_id`.
-3. The immutable Offer-origin gap is unresolved. Current Offer rows use
-   `home_server` as both placement/authority and an indirect proxy for Web/Bot
-   origin. Co-location would make that ambiguous.
+3. Offer/Trade provenance semantics are approved, but the future ADR, schema،
+   deterministic backfill and parity tests are implementation work for `P1-04`.
 4. Capacity, soak and post-cutover retention are approved; DNS, deploy SLO،
    artifact distribution، cutover timing and rollback thresholds remain open or
    deliberately deferred to their detailed sections.

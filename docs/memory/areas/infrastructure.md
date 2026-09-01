@@ -1,10 +1,16 @@
 # Infrastructure
 
+- 2026-09-01 | Offer keeps immutable Web/Bot/Internal origin separate from
+  `home_site`. Trade snapshots Offer origin, Request origin, execution surface,
+  policy version and policy-sensitive actor/role/tier context so topology or
+  relation changes cannot rewrite historical decision provenance.
 - 2026-09-01 | No operational provisioning, deploy, migration, runtime cleanup,
   DNS change or cutover occurs before the complete plan is reviewed and approved;
   production Stages still require their own explicit authorization afterward.
-- 2026-09-01 | Finland cutover accepts at most four minutes of user access/write
-  interruption. Initial acceptance uses 24h staging soak, steady CPU <=60% and
+- 2026-09-01 | The one-time two-Finland consolidation cutover accepts at most four
+  minutes of user access/write interruption; its 90m reserved window is not a
+  deploy SLO for the new architecture. Initial acceptance uses 24h staging soak,
+  steady CPU <=60% and
   RAM/disk/DB-pool <=70%; after cutover observe actively for 2h, fence old sources
   for at least 7d and retain the approved backup 30d, without automatic deletion.
 - 2026-09-01 | Finland consolidation is behavior-preserving. An owner-reviewed,

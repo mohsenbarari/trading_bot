@@ -181,6 +181,11 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
 - Web و Bot دو surface متمایزند. `origin_surface` هم provenance تغییرناپذیر و هم
   ورودی policy نسخه‌دار است؛ اشتراک مدل داده به معنی یکسان‌کردن policyهای وقت
   اضافه، سطح مشتری، انتشار، محدودیت، تأیید یا notification نیست.
+- Offer منشأ تغییرناپذیر Web/Bot/Internal را مستقل از `home_site` نگه می‌دارد؛
+  جابه‌جایی authority یا هم‌مکانی processها حق بازنویسی منشأ را ندارد.
+- Trade هنگام ایجاد، منشأ Offer، منشأ Request، surface اجرای نهایی، policy version
+  و context حساس actor/role/tier را snapshot و تغییرناپذیر می‌کند تا تصمیم تاریخی
+  بدون اتکا به وضعیت بعدی رکوردهای مرتبط قابل‌بازتولید باشد.
 - تا کامل‌شدن و تأیید کل پلن، هیچ provisioning، deploy، migration، DNS change،
   cleanup runtime یا cutover عملیاتی انجام نمی‌شود. تأیید پلن نیز مجوز خودکار
   اجرای Stageهای تولیدی نیست.
@@ -203,11 +208,15 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
 | `D-04` | SLO release عادی دو سرور | حداکثر ۳۰ دقیقه در حالت اتصال سالم | موکول به بررسی عمیق بخش ۴ |
 | `D-05` | SLO rollback کد بدون DB restore | حداکثر ۱۰ دقیقه | موکول به بررسی عمیق بخش ۴ |
 | `D-06` | artifact distribution | registry اصلی + OCI archive امضاشده در Object Storage ایران برای Iran/offline | باز؛ پس از توضیح و بررسی بخش ۴ |
-| `D-09` | پنجرهٔ cutover ادغام Finland | پنجرهٔ رزروشده ۹۰ دقیقه؛ تمام preflightها قبل از freeze؛ توقف دسترسی/write حداکثر ۴ دقیقه و سپس abort اگر target آماده نیست | باز؛ نیازمند تأیید پس از توضیح سناریو |
+| `D-09` | پنجرهٔ یک‌بارهٔ cutover ادغام دو Finland فعلی | پنجرهٔ رزروشده ۹۰ دقیقه؛ تمام preflightها قبل از freeze؛ توقف دسترسی/write حداکثر ۴ دقیقه و سپس abort اگر target آماده نیست | باز؛ فقط مهاجرت اولیه است و برای deployهای بعدی SLO محسوب نمی‌شود |
 | `D-11` | trigger عددی rollback cutover | invariant/duplicate-owner/hash/durability فوراً؛ error rate >۲٪ برای ۵ دقیقه، p95 >۲× baseline برای ۱۰ دقیقه یا queue lag >۳۰ثانیه برای ۵ دقیقه | باز؛ نیازمند تأیید آستانه‌ها و انسانی‌بودن فرمان rollback |
 
 این موارد تا تأیید مالک، requirement پیشنهادی‌اند و Cursor حق تثبیت پنهان آن‌ها
 در کد را ندارد.
+
+`D-09` فقط انتقال اولیه از دو میزبان Finland قدیمی به Finland Primary است.
+release، hotfix و rollbackهای روزمرهٔ معماری جدید قرارداد، زمان و gate مستقل خود
+را در بخش ۴ دارند و نباید پنجرهٔ ۹۰ دقیقه/وقفهٔ ۴ دقیقه را به ارث ببرند.
 
 ---
 
