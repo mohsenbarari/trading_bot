@@ -310,290 +310,740 @@ Dependency چرخه‌ای مجاز نیست. دو جفت اتمیک جدول (`
 
 # بخش ۱ — ادغام Bot و WebApp روی Finland Primary
 
-هدف این بخش حذف sync و پیچیدگی مصنوعی میان دو سرور فنلاند و ساخت یک runtime
-یکپارچه روی `65.109.214.203` است. Bot و API processهای جدا می‌مانند، اما یک
-دیتابیس، یک Redis و یک مدل authority دارند.
+هدف این بخش انتقال قابلیت‌های دو میزبان فعلی Finland به یک Finland Primary با
+IP فعلی `65.109.214.203` است. Web/API و Bot همچنان process/containerهای مستقل
+هستند، اما از یک PostgreSQL، یک Redis و یک مجموعهٔ مشترک از سرویس‌های محلی
+استفاده می‌کنند. sync شبکه‌ای میان Bot-Finland و Web-Finland حذف می‌شود؛ sync
+میان Finland و Iran موضوع بخش ۲ است و حذف نمی‌شود.
 
-این بخش حق تغییر رفتار Product را ندارد. «یکپارچه‌سازی» به معنی هم‌مکان‌کردن
-runtime و حذف transport داخلی است، نه ادغام handlerها، حذف تفاوت Web/Bot، تغییر
-Policy، اصلاح ضمنی bug یا بازنویسی UX.
+این بخش یک **تغییر توپولوژی با الزام حفظ کامل رفتار** است. «ادغام» به معنی
+یکی‌کردن برنامه، handler، policy یا تجربهٔ Web و Bot نیست. منشأ Web/Bot باید
+به‌عنوان provenance تغییرناپذیر و ورودی policy نسخه‌دار باقی بماند. تفاوت‌های
+موجود در tier 2، overtime، quota، confirmation، publication، notification،
+commission و هر رفتار دیگری فقط با تصمیم جداگانهٔ مالک قابل‌تغییر است.
+
+### روایت انسانی: قبل، بعد و هنگام خطا
+
+**قبل از ریفکتور:** WebApp و Bot روی دو میزبان Finland اجرا می‌شوند. بخشی از
+داده یا side effect از مسیر HTTP/sync داخلی عبور می‌کند و deploy، backup، restart
+و تشخیص owner سرویس‌ها میان دو ماشین پخش شده است.
+
+**بعد از ریفکتور:** کاربر Web همان API و رفتار قبلی را می‌بیند و کاربر Bot همان
+command، callback، پیام و محدودیت قبلی را تجربه می‌کند. تفاوت فقط این است که
+هر دو runtime روی یک میزبان و یک data plane هستند. ثبت Offer از Web همچنان
+«Web-origin» و ثبت Offer از Bot همچنان «Bot-origin» است؛ همین قاعده مستقل برای
+Request، Trade و actor/persona/tier نیز برقرار است.
+
+**اگر یکی از processها خراب شود:** restart شدن Web/API نباید Bot را مجبور به
+restart کند و خرابی Bot نباید API را از دسترس خارج کند. اگر PostgreSQL، Redis،
+migration یا شرط لازم یک side effect آماده نباشد، سرویس وابسته باید fail-closed
+شود؛ یعنی نباید به‌ظاهر موفق باشد و state ناقص یا side effect تکراری بسازد.
+
+**اگر ادغام داده ناسالم باشد:** هیچ cutover انجام نمی‌شود. rehearsal روی clone
+جداگانه تکرار می‌شود و conflictهای مالی، موجودی، identity یا media به quarantine
+می‌روند. overwrite خام یا «آخرین مقدار برنده است» برای دادهٔ کسب‌وکار ممنوع است.
+
+**اگر پس از cutover مشکل دیده شود:** تا قبل از اولین write روی target می‌توان به
+دو source قبلی بازگشت. پس از اولین write، rollback اصلی بازگرداندن نسخهٔ برنامه
+روی همان target است؛ روشن‌کردن مستقیم دیتابیس قدیمی بدون reconciliation مجاز
+نیست.
+
+### مرز تغییر این بخش
+
+| در scope | خارج از scope |
+| --- | --- |
+| inventory و مدل دقیق معماری جاری | اصلاح رفتار محصول یا bug نامرتبط |
+| پاکسازی repository/worktree/artifact با approval | حذف خودکار فایل، branch، backup یا سرور |
+| config و compose مستقل از IP تاریخی | deploy تولید بدون مجوز جدا |
+| هم‌مکان‌کردن Web، Bot، DB و Redis | یکی‌کردن Web و Bot در یک process |
+| حذف transport داخلی میان دو Finland | حذف outbox/sync میان Finland و Iran |
+| rehearsal، staging، cutover و rollback قابل‌اثبات | تغییر DNS، token یا دادهٔ تولید در شاخهٔ پلن |
+| حفظ و تست تفاوت policy میان surfaceها | برابر فرض‌کردن Offer/Request وب و بات |
+
+### ترتیب قابل‌مرور برای مالک
+
+1. `P1-00`: بفهمیم اکنون دقیقاً چه داریم و چه رفتاری باید حفظ شود.
+2. `P1-01`: repository و artifactها را با manifest و retention پاکسازی کنیم.
+3. `P1-02`: config را از نام‌ها و IPهای تاریخی مستقل کنیم.
+4. `P1-03`: runtime هدف یک‌سروره را بدون deploy تولید بسازیم.
+5. `P1-04`: sync محلی دو Finland را به DB transaction/outbox درست تبدیل کنیم.
+6. `P1-05`: ادغام واقعی داده را چندبار روی clone تمرین و rollback کنیم.
+7. `P1-06`: رفتار معماری جاری و هدف را در staging به‌صورت differential بسنجیم.
+8. `P1-07`: فقط با مجوز جدا، cutover اتمیک داده/runtime/deploy را انجام دهیم.
+9. `P1-08`: پس از دورهٔ اطمینان، بدهی و منابع قدیمی را کنترل‌شده ببندیم.
+
+`P1-02..P1-07` تا زمان تأیید artifactهای `P1-00` اجازهٔ تغییر behavior ندارند.
+`P1-07` با `P4-08` یک change set عملیاتی است؛ جداسازی آن دو ممنوع است.
+
+### قرارداد اجرایی Cursor برای تمام Stageهای بخش ۱
+
+Cursor در آغاز هر Stage باید یک Task Card در مسیر زیر ایجاد یا تکمیل کند:
+
+```text
+docs/refactor/two-server/section-1/stages/P1-XX.md
+```
+
+هر Task Card باید دقیقاً این فیلدها را داشته باشد:
+
+```text
+status
+approved_by / approved_at
+base_branch / base_commit
+goal / non_goals
+dependencies and their evidence
+files allowed to change
+external systems allowed to read or write
+pre-change snapshot
+ordered implementation steps
+tests: success / failure / idempotency / rollback / parity
+evidence paths and SHA-256
+known gaps / owner decisions
+rollback trigger / rollback steps / rollback verification
+resulting commits
+human gate receipt
+```
+
+قواعد اجرای Task Card:
+
+1. حافظهٔ پروژه، `AGENTS.md`، همین Stage و dependencyهای آن کامل خوانده شوند.
+2. branch اجرا از commit مصوب ساخته و `base_commit` ثبت شود؛ working tree باید
+   تمیز باشد. تغییر موجود کاربر حذف، stash یا بازنویسی نمی‌شود.
+3. قبل از edit، فهرست دقیق فایل‌های در scope و testهای baseline ثبت شود.
+4. هر Stage در branch و commitهای خودش اجرا شود. فقط Stageهایی که این سند
+   اتمیک اعلام کرده می‌توانند در یک change set باشند.
+5. ابتدا characterization/golden test نوشته یا baseline موجود اجرا شود، سپس
+   implementation انجام شود. تستی که رفتار جاری را اثبات می‌کند برای تطبیق با
+   implementation جدید تضعیف نمی‌شود.
+6. خروجی خام، log و dump در Git قرار نگیرد. محل محلی evidence:
+   `.local/test-results/two-server-refactor/P1-XX/<run-id>/` است. فقط index،
+   checksum، نتیجه و دادهٔ sanitised لازم در docs track می‌شود.
+7. secret value، Telegram token/session، cookie، DB credential و کلید Arvan
+   نباید چاپ، commit یا داخل evidence ذخیره شود. فقط نام secret، mount و نتیجهٔ
+   validation ثبت می‌شود.
+8. هر command مخرب ابتدا dry-run و manifest هدف می‌خواهد. حذف branch، worktree،
+   backup، volume، host یا داده نیازمند gate انسانی همان Stage است.
+9. دسترسی read-only به runtime و دسترسی write به staging/production دو مجوز
+   متفاوت‌اند. نبود مجوز با حدس یا fixture پنهان جبران نمی‌شود.
+10. اگر response، state، ordering، timeout، copy یا side effect جاری با سند فرق
+    داشت، Cursor آن را در Drift Register ثبت و Stage را `BLOCKED` می‌کند؛ انتخاب
+    یکی از دو رفتار بدون تصمیم مالک ممنوع است.
+11. هر command و exit code، commit، image digest، migration version و checksum
+    لازم برای بازتولید نتیجه در Evidence Index ثبت شود.
+12. Cursor حق اجرای Stage بعدی را فقط با `human gate receipt` مرحلهٔ قبلی و
+    dependencyهای سبز دارد.
+
+ساختار artifactهای tracked این بخش:
+
+```text
+docs/refactor/two-server/section-1/
+├── 00-stage-ledger.md
+├── 01-current-finland-architecture.md
+├── 02-runtime-inventory.md
+├── 03-dataflow-and-ownership.md
+├── 04-surface-policy-matrix.md
+├── 05-feature-parity-contract.md
+├── 06-current-drift-register.md
+├── 07-repository-cleanup-manifest.md
+├── 08-target-configuration-contract.md
+├── 09-target-runtime-topology.md
+├── 10-finland-data-merge-contract.md
+├── 11-staging-acceptance.md
+├── 12-cutover-runbook.md
+├── 13-closure-and-decommission.md
+├── evidence-index.md
+└── stages/P1-00.md ... stages/P1-08.md
+```
+
+ایجاد این فایل‌ها خروجی اجرای آیندهٔ Stageها است؛ شاخهٔ فعلی فقط قرارداد و پلن
+آن‌ها را تعریف می‌کند.
 
 ## `P1-00` — Current-State Architecture و Behavior Baseline
 
 وضعیت: `PROPOSED`
 
-کار:
+Dependency: تأیید همین پلن؛ برای مشاهدهٔ runtime، مجوز read-only جداگانه.
 
-- inventory کامل میزبان‌های فعلی، processها، containerها، timerها، دامنه‌ها،
-  volumeها، secret mountها، backupها و ownerهای Telegram تهیه شود.
-- تمام مسیرهای mutation از Bot، Web، worker و admin به مدل/جدول نگاشت شوند.
-- source databaseهای دو Finland فعلی و drift آن‌ها فقط read-only بررسی شوند.
-- سرویس‌های target Finland و منابع موردنیاز CPU/RAM/disk/network ثبت شوند.
-- وضعیت واقعی SSH، fingerprint و سیستم‌عامل هدف با سند
-  `docs/architecture/FINLAND_PRIMARY_TARGET.md` تطبیق داده شود.
-- معماری جاری از روی `main`، migration/schema، compose، env keyها بدون مقدار،
-  deploy/runtime script، test، runbook و evidence خوانده شود؛ فرض از روی نام فایل
-  یا سند قدیمی پذیرفته نیست.
-- با مجوز read-only، واقعیت runtime دو میزبان فعلی شامل image/digest، container،
-  systemd/cron/timer، network، volume/media، DB schema/version، Redis role، Queue،
-  publisher و sync checkpoint با کد تطبیق داده شود. secret value چاپ نمی‌شود.
-- هر اختلاف میان تصمیم مالک، runtime، کد، تست و docs در `CURRENT_DRIFT_REGISTER`
-  ثبت و قبل از تبدیل به requirement تعیین تکلیف شود؛ Cursor حق انتخاب پنهان ندارد.
-- تمام قابلیت‌ها بر اساس surface، نقش و persona ممیزی شوند: Web/Bot/admin/internal،
-  standard/police/manager، accountant، customer tier 1/2 و owner/actor context.
-- login/registration/OTP/session، invitation/relation، offer/request/trade،
-  overtime/expiry/republish، Market/price guard، Messenger/media/realtime، Queue و
-  Telegram publication، notification، parser/estimator، backup/restore و deploy
-  هرکدام dataflow و state machine جاری داشته باشند.
-- برای هر behavior عمومی یا side effect، قرارداد parity با این فیلدها ساخته شود:
-  `behavior_id`, surface/persona/tier، precondition، input، response/status/copy،
-  DB mutation، outbox/event، notification/Telegram effect، ordering، timeout،
-  idempotency، failure behavior، evidence source و regression test.
-- رفتار مشاهده‌شده از رفتار مصوب تفکیک شود. bug شناخته‌شده یا ناسازگاری مبهم نه
-  silently fix می‌شود و نه بدون تصمیم مالک requirement اعلام می‌شود.
+### برداشت انسانی
 
-خروجی:
+این مرحله نقشه‌برداری است، نه اصلاح. نتیجه باید به این سؤال پاسخ دهد: «اگر دو
+سرور را خاموش کنیم، دقیقاً چه process، داده، رفتار، job یا side effectی ممکن است
+از دست برود؟» تا زمانی که پاسخ مستند نباشد، هیچ پیاده‌سازی ادغام قابل‌اعتماد نیست.
 
-- `CURRENT_RUNTIME_INVENTORY.md`
-- `MUTATION_SURFACE_MATRIX.md`
-- `FINLAND_MERGE_DATA_REPORT.md`
-- `CURRENT_FINLAND_ARCHITECTURE_DOSSIER.md`
-- `CURRENT_DATAFLOW_AND_OWNERSHIP.md`
-- `RUNTIME_DEPENDENCY_GRAPH.md`
-- `SURFACE_POLICY_MATRIX.md`
-- `FEATURE_PARITY_CONTRACT.md`
-- `SIDE_EFFECT_AND_JOB_OWNERSHIP.md`
-- `CURRENT_FAILURE_BEHAVIOR_MATRIX.md`
-- `CURRENT_DRIFT_REGISTER.md`
-- baseline زمان deploy، restart، backup، restore و smoke test
+### Task Card فنی Cursor
 
-Gate خروج:
+1. **Preflight:** SHA مبنا، وضعیت branch/worktree، نسخهٔ schema/migration و فهرست
+   منابع قابل‌خواندن را ثبت کند. هر runtime فاقد مجوز با `NOT_OBSERVED` مشخص شود.
+2. **Static inventory:** با `rg --files` و جست‌وجوی هدفمند، composeها، Dockerfileها،
+   systemd/cron/timer، deploy/runtime scriptها، env keyها بدون value، migrationها،
+   routeها، Bot handler/callbackها، workerها، schedulerها، listenerها، queueها،
+   publisherها، backup/restore و testها را inventory کند.
+3. **Runtime inventory:** فقط read-only و روی هر دو Finland فعلی، hostname/OS،
+   service/container، image digest، port/network، volume/media، mount secret،
+   DB/Redis role، scheduler، queue depth، sync checkpoint، backup location و
+   Telegram owner را با timestamp ثبت کند. هیچ config کامل یا env dump مجاز نیست.
+4. **Target inventory:** SSH host-key fingerprint، OS، disk layout، CPU/RAM،
+   firewall/port و ظرفیت `65.109.214.203` را با
+   `docs/architecture/FINLAND_PRIMARY_TARGET.md` تطبیق دهد؛ mismatch blocker است.
+5. **Data ownership:** برای هر table/domain، writer، reader، stable identity،
+   transaction boundary، FK، sequence، media relation، cache، outbox، sync direction،
+   retention، backup و restore path را ثبت کند.
+6. **Mutation graph:** هر API endpoint، Web action، Bot command/callback، admin
+   action، scheduled job و consumer را به جدول‌ها، eventها و side effectها وصل کند.
+   edge بدون owner یا مسیر write بدون idempotency باید صریحاً علامت بخورد.
+7. **Behavior matrix:** حداقل حوزه‌های auth/OTP/session، invitation/relation،
+   Offer، Request، Trade، overtime/expiry/republish، Market guard، Messenger/media/
+   realtime، Queue/Telegram، notification، parser/estimator و عملیات deploy/backup
+   را بر اساس surface، persona، role و tier پوشش دهد.
+8. **Surface policy:** برای Offer و Request دو provenance مستقل ثبت کند؛ ترکیب
+   `offer_surface × request_surface × actor_role × customer_tier × time_context`
+   باید eligibility، confirmation، quota، commission، publication، notification،
+   timeout و failure behavior موجود را نشان دهد.
+9. **Parity contract:** برای هر رفتار یک `behavior_id` با precondition، input،
+   response/status/copy، DB mutation، event/outbox، audience/side effect، ordering،
+   timeout، retry، idempotency، failure، evidence و regression test بسازد.
+10. **Characterization:** برای رفتارهای پرریسک فاقد تست، ابتدا test مشاهده‌ای یا
+    golden fixture بدون side effect خارجی بسازد. این تست‌ها رفتار موجود را ثبت
+    می‌کنند و مجوز درست‌دانستن bug نیستند.
+11. **Drift review:** اختلاف تصمیم مالک، code، runtime، test و docs را با severity،
+    impact و evidence ثبت کند. هیچ اختلافی خودکار resolve نشود.
+12. **Human review:** Dossier، Runtime Inventory، Dataflow، Surface Policy Matrix،
+    Feature Parity Contract و Drift Register را برای review مالک آماده کند.
 
-- هیچ service یا دادهٔ ناشناخته باقی نماند.
-- هر Telegram token/session دقیقاً یک owner ثبت‌شده داشته باشد.
-- audit هیچ write خارجی انجام ندهد و secret چاپ نکند.
-- هر endpoint، Bot command/callback، background job و side effect جاری یا یک
-  `behavior_id` مصوب دارد یا به‌عنوان blocker ثبت شده است.
-- `SURFACE_POLICY_MATRIX` تفاوت‌های Web/Bot، tierها، overtime، انتشار، quota،
-  confirmation، notification و commission را با evidence و test نشان دهد.
-- مالک Dossier، Drift Register و Feature Parity Contract را پیش از `P1-02..P1-07`
-  که behavior را لمس می‌کنند review کند.
+### خروجی و شواهد
 
-Rollback: چون read-only است، rollback ندارد؛ artifactهای audit طبق retention پاک
-می‌شوند.
+- فایل‌های `01` تا `06` از ساختار canonical این بخش.
+- baseline زمان deploy، restart، backup، restore، smoke و منابع هر دو میزبان.
+- machine-readable inventory sanitised در کنار Markdown، با schema و checksum.
+- Coverage report که endpoint، callback، job و side effect بدون `behavior_id` را
+  صفر یا blocker نشان دهد.
+
+### Gate انسانی و معیار خروج
+
+- مالک صریحاً Dossier، Drift Register و Feature Parity Contract را تأیید کند.
+- هیچ service، writer، scheduler، Telegram identity یا data store ناشناخته نماند.
+- هر secret فقط با نام و محل mount دیده شود و audit هیچ write خارجی نداشته باشد.
+- هر behavior جاری یا contract/test دارد یا blocker مصوب؛ «احتمالاً استفاده
+  نمی‌شود» معیار حذف نیست.
+
+ممنوع: refactor، rename، migration، deploy، restart، write روی runtime یا اصلاح
+bug. تغییر repository فقط به docs و characterization testهای این Stage محدود است.
+Rollback با revert همان commit انجام و artifactهای محلی audit طبق retention حذف
+می‌شوند؛ خود audit نسبت به runtime و دادهٔ خارجی کاملاً read-only است.
 
 ## `P1-01` — پاکسازی و یکپارچگی repository محلی
 
 وضعیت: `PROPOSED`
 
-سناریو: فایل، log، test output، backup یا clone پراکنده نباید source of truth
-شود یا تا ابد دیسک را اشغال کند.
+Dependency: `P1-00` و تأیید انسانی Cleanup Manifest قبل از هر حذف.
 
-کار:
+### برداشت انسانی
 
-- فقط یک worktree canonical حفظ شود؛ worktree/clone تازه owner و expiry می‌خواهد.
-- branchهای حذف‌شدنی پاک شوند؛ `candidate/wa-ir-standby-v1` فقط تا پایان استخراج
-  مرجع local-only می‌ماند و merge source نیست.
-- tracked logهای خام، خروجی test و evidenceهای تکراری inventory شوند. حذف فقط
-  پس از manifest اثر و تأیید اینکه مرجع فعال نیست انجام شود.
-- artifactهای local به `.local/{logs,test-results,deploy,backups,data,caches,quarantine}`
-  منتقل شوند.
-- cleanup command حتماً dry-run-first، root-bound، symlink-safe و retention-aware باشد.
-- Telegram raw data بر اساس source/day پارتیشن، deduplicate و compress شود.
-- logها، backupها، releaseها و quarantine retention و metric داشته باشند.
+repository اصلی تنها محل source code و اسناد معتبر است. log، dump، backup، raw
+Telegram data و test output یا باید در مسیر local مدیریت‌شده با owner/retention
+باشند یا حذف شوند. فایل مفید خارج repository ابتدا به مسیر درست منتقل و سپس با
+تست اثبات می‌شود؛ فایل ناشناخته صرفاً به‌دلیل قدیمی‌بودن حذف نمی‌شود.
 
-Gate خروج:
+### Task Card فنی Cursor
 
-- `git status` تمیز؛ هیچ runtime artifact جدید tracked نیست.
-- cleanup نمی‌تواند بیرون `.local` یا rootهای declareشده حذف کند.
-- active release، rollback و backup قابل restore در dry-run مستثنا هستند.
-- repo size و artifact size قبل/بعد گزارش شود.
+1. اندازهٔ repository، `git status`، tracked/untracked/ignored files، branchها،
+   remote refs و `git worktree list --porcelain` را بدون تغییر ثبت کند.
+2. فقط در rootهای ازپیش‌تأییدشدهٔ پروژه/deploy، clone، worktree، `.git`، backup،
+   log، dump، release و artifact پراکنده را پیدا کند. اسکن یا حذف مسیر گستردهٔ
+   نامشخص، `/`، home یا symlink target ممنوع است.
+3. هر مورد را در `07-repository-cleanup-manifest.md` با این فیلدها طبقه‌بندی کند:
+   `path`, `type`, `tracked`, `owner`, `size`, `last_used`, `reference`, `action`,
+   `destination`, `retention`, `expires_at`, `rollback`.
+4. action فقط یکی از `KEEP`, `MOVE`, `DELETE`, `QUARANTINE`, `BLOCKED` باشد. هیچ
+   مورد بدون owner/reference analysis به `DELETE` نرود.
+5. تمام branch/worktreeهای نامزد حذف و branch مربوط به Cursor را با diff نسبت به
+   مبنای مناسب، unique commits و artifactهای مستندی ممیزی کند. اگر ارزش مستقلی
+   ندارد، حذف آن فقط پس از درج SHA و تأیید مالک انجام شود.
+6. `candidate/wa-ir-standby-v1` را فقط برای استخراج تصمیم، test idea و docs مفید
+   ممیزی کند؛ merge/cherry-pick کد ممنوع است. این branch تا دستور جداگانهٔ مالک
+   باقی می‌ماند، حتی اگر در این Stage مرجع مفیدی پیدا نشود.
+7. tracked `tmp/`، log، screenshot، dump، generated report و test output را پیدا
+   و مصرف‌کنندهٔ واقعی آن را ثابت کند. مورد لازم به مسیر source/docs canonical
+   منتقل می‌شود؛ مورد runtime به `.local` و `.gitignore` contract می‌رود.
+8. مسیرهای محلی را به
+   `.local/{logs,test-results,deploy,backups,data,caches,quarantine}` استاندارد کند
+   و برای هرکدام owner، quota/size alert، retention و cleanup schedule تعریف کند.
+9. raw Telegram eventها را بر اساس source/date partition، stable event id
+   deduplicate، پس از بازهٔ hot فشرده و با policy «raw/derived/replay-required»
+   نگهداری کند. هیچ داده‌ای بدون اثبات replay/audit need نامحدود نمی‌ماند.
+10. برای backup، release و quarantine حداقل `created_at`, `owner`, `reason`,
+    `restore_status`, `expires_at`, `protected_until` ثبت کند؛ backup بدون restore
+    test محافظ rollback محسوب نمی‌شود.
+11. cleanup tooling را ابتدا dry-run کند. ابزار باید root-bound، allowlist-based،
+    symlink-safe، lock-aware و idempotent باشد و active release/current rollback/
+    protected backup را رد کند.
+12. پس از gate انسانی، فقط موارد دقیق manifest را اجرا و سپس reference scan، test،
+    `git status` و اندازهٔ قبل/بعد را ثبت کند. مورد متفاوت از manifest نیازمند gate
+    جدید است.
+
+### خروجی، آزمون و Gate انسانی
+
+- Cleanup Manifest، retention matrix، branch/worktree audit و size report قبل/بعد.
+- dry-run test، path-escape/symlink test، protected-artifact test و اجرای دوم
+  idempotent بدون حذف تازه.
+- repository تمیز، یک worktree canonical و هیچ runtime artifact جدید tracked نباشد.
+- حذف هر branch، worktree، backup یا فایل material یک رسید انسانی مستقل می‌خواهد.
+
+Rollback: موارد قابل‌حذف ابتدا تا پایان بازهٔ مصوب به quarantine قابل‌بازگشت منتقل
+شوند؛ حذف نهایی فقط بعد از expiry و اثبات نبود reference انجام شود.
 
 ## `P1-02` — واژگان و configuration بدون topology تاریخی
 
 وضعیت: `PROPOSED`
 
-کار:
+Dependency: `P1-00`، `P4-00` و تأیید Feature Parity Contract.
 
-- مفاهیم مبهم `foreign/iran` به `site_id=fi|ir`، `runtime_role` و
-  `writer_role` تفکیک شوند.
-- `source_surface` و policyهای Web/Bot از topology جدا شوند. surface حق ندارد صرفاً
-  به‌علت `WEBAPP` یا `TELEGRAM_BOT` بودن، home site تاریخی تولید کند.
-- IP/domain/path از runtime code حذف و فقط از manifest معتبر خوانده شوند.
-- `server_mode` قدیمی تا migration کامل adapter سازگار دارد، ولی منبع authority
-  جدید نمی‌شود.
-- test fixtureهای IP تاریخی به placeholder یا fixture صریح تبدیل شوند.
-- CI hardcode guard برای IP، domain، project path و compose identity گسترش یابد.
+### برداشت انسانی
 
-Gate خروج:
+کد نباید از روی نام‌هایی مثل `foreign` یا `iran` و IP قدیمی نتیجه بگیرد که چه
+کسی Writer، Bot owner یا collector است. محل فیزیکی، نقش runtime و منشأ درخواست سه
+مفهوم جدا هستند. این جداسازی شرط ادغام Finland و بعداً ساخت Iran Standby است.
 
-- تغییر IP یا دامنه فقط یک manifest خصوصی و artifactهای تولیدشده را تغییر دهد.
-- runtime از نام «Iran» برای سرور قدیمی فنلاند استفاده نکند.
-- config contradictory پیش از mutation fail شود.
-- API schema، status/error code، callback data و user-facing copy در golden
-  contract نسبت به baseline بدون تغییر بماند.
+### Task Card فنی Cursor
+
+1. تمام `foreign/iran/finland/server_mode`، IP/domain/path ثابت، compose project
+   name و شرط‌هایی که topology را از Web/Bot surface حدس می‌زنند inventory کند.
+2. schema typed و versioned تعریف کند که حداقل این مفاهیم را جدا نگه دارد:
+   `site_id`, `topology_role`, `web_mode`, `telegram_execution_enabled`,
+   `collector_capabilities`, `database_role`, `redis_role`, `object_storage_route`,
+   `source_surface`, `policy_version`.
+3. invariantها را صریح کند: روی target Finland، Web/API و Bot هم‌مکان‌اند؛ فقط یک
+   Telegram executor مجاز است؛ `source_surface` writer/site را تعیین نمی‌کند؛
+   config متناقض پیش از اتصال به DB/Telegram fail می‌شود.
+4. manifest عمومی بدون secret و manifest خصوصی محیط را جدا کند. secret فقط از
+   mount/store مجاز resolve شود؛ generated config باید schema validation و hash
+   قابل‌ثبت داشته باشد.
+5. adapter سازگاری برای `server_mode` قدیمی بسازد: در فاز اول dual-read با warning
+   و metric، در فاز دوم callsiteها روی schema جدید، و حذف adapter فقط در `P1-08`
+   پس از صفرشدن مصرف. dual-write authority ممنوع است.
+6. callsiteها را domain به domain و با commit کوچک migrate کند؛ پس از هر دسته،
+   golden/characterization tests همان behavior اجرا شود.
+7. fixtureهای IP/domain تاریخی را با placeholder مستند جایگزین کند؛ testی که
+   عمداً IP target را می‌سنجد باید allowlist و دلیل داشته باشد.
+8. CI guard برای hardcode شدن IP، domain، absolute project path، secret key/value،
+   compose identity و topology inference اضافه کند.
+9. failure testها را برای missing key، enum نامعتبر، writer متناقض، دو Telegram
+   owner، schema version ناسازگار و secret mount غایب اجرا کند.
+10. config matrix فعلی و هدف را generate و diff کند؛ تنها تفاوت‌های topology
+    مصوب‌اند. response schema، callback data، copy و policy نباید تغییر کند.
+
+### خروجی، آزمون و Gate انسانی
+
+- `08-target-configuration-contract.md` شامل schema، example sanitised، invariant،
+  compatibility phases و deprecation ledger.
+- unit/schema/negative test، hardcode scan و parity diff سبز.
+- با تغییر IP/domain فقط manifest خصوصی و artifact تولیدشده تغییر کند.
+- حذف legacy name یا adapter در این Stage ممنوع؛ مالک قرارداد config و diff رفتار
+  را قبل از merge تأیید کند.
+
+Rollback: callsiteها به adapter سازگار برمی‌گردند؛ schema/data product rollback یا
+تغییر runtime تولید در این Stage وجود ندارد.
 
 ## `P1-03` — compose و service ownership هدف Finland
 
 وضعیت: `PROPOSED`
 
-سرویس‌های هدف Finland:
+Dependency: `P1-02`، `P4-02` و `P4-03`. این Stage ساخت artifact است، نه deploy.
 
-- Nginx/edge
-- Web/API
-- Telegram primary و executor/publisherهای مجاز Queue-v1
-- PostgreSQL و Redis
-- sync outbox/transport به Iran
-- Market collectors مجاز، parser/materializer و estimator
-- scheduler/workerهای product
-- dashboard عملیات
-- log/metrics/backup agents
+### برداشت انسانی
 
-کار:
+روی ماشین جدید «یک برنامهٔ بزرگ» ساخته نمی‌شود. Web/API و Bot مستقل می‌مانند تا
+restart، health و failure آن‌ها از هم جدا باشد. تنها data plane مشترک می‌شود و
+owner هر job/credential دقیقاً یکی است.
 
-- یک image content-addressed و role profileهای صریح ساخته شود.
-- non-bot serviceها credential تلگرام خالی و runtime guard داشته باشند.
-- Bot و Web به یک PostgreSQL/Redis وصل شوند؛ مسیر HTTP sync قدیمی بین این دو
-  process حذف یا no-op سازگار شود.
-- job ownership برای هر scheduler ثبت و duplicate execution در startup block شود.
-- migration service قبل از app و app قبل از Bot/workerهای side-effect اجرا شود.
-- health به readiness واقعی DB/Redis/migration/queue وابسته باشد، نه فقط process up.
-- co-location مجوز حذف یا یکی‌کردن state machineها، Web/Bot policyها، Queue
-  semantics، callback contract یا notification audience نیست.
+### Runtime هدف
 
-Gate خروج:
+| service class | مسئولیت | قید ownership |
+| --- | --- | --- |
+| edge/nginx | TLS و route Web/API/dashboard | بدون Telegram/DB write مستقیم |
+| web-api | رفتار Web و admin | process مستقل از Bot |
+| telegram-bot/executor | update، callback و side effect تلگرام | تنها token/session owner |
+| postgres | source of truth محلی Finland | یک cluster/authority |
+| redis | queue/cache/coordination قراردادی | source of truth مالی نیست |
+| workers/schedulers | jobهای product و Queue-v1 | یک owner برای هر job key |
+| outbox transport | sync Finland↔Iran | هرگز loopback محلی |
+| collectors/parser/estimator | Market pipeline مجاز | capability صریح |
+| ops dashboard | مشاهده/عملیات مصوب | auth و audit اجباری |
+| backup/log/metrics | durability و observability | بدون product mutation |
 
-- compose config test ثابت کند دقیقاً یک Telegram execution owner وجود دارد.
-- mutation Bot بلافاصله در Web از همان DB دیده شود و change loop محلی نسازد.
-- restart API باعث restart اجباری Bot نشود و برعکس.
-- dependency failure، سرویس side-effect را fail-closed کند.
-- contract test ثابت کند response، persistence و side effect هر behavior مصوب با
-  runtime فعلی یکسان است؛ تنها network hop داخلی حذف شده باشد.
+### Task Card فنی Cursor
+
+1. Service Ownership Matrix را از `P1-00` به service، command، image، port،
+   network، volume، secret، healthcheck، restart policy، resource budget و owner
+   تبدیل کند.
+2. تمام image/artifactهای release را content-addressed بسازد و roleهای backend را
+   با command/profile صریح از source یکسان تعریف کند. تعداد artifactها از inventory
+   واقعی می‌آید؛ یکی‌کردن اجباری imageهای مستقل مجاز نیست و tag شناور برای cutover
+   ممنوع است.
+3. compose target را با networkهای edge/app/data/ops حداقلی، volumeهای named و
+   mountهای read-only در جای ممکن طراحی کند. DB/Redis نباید public bind شوند.
+4. migration را به یک one-shot service با lock و schema compatibility check تبدیل
+   کند. app فقط بعد از migration موفق ready و side-effect workerها بعد از app
+   ready فعال شوند.
+5. Web/API و Bot را به PostgreSQL/Redis مشترک وصل کند، اما command، healthcheck،
+   lifecycle و restart domain آن‌ها را جدا نگه دارد.
+6. Telegram credential را فقط برای executor مجاز mount کند. تمام serviceهای دیگر
+   هم در compose و هم runtime guard باید بدون credential باشند.
+7. برای هر cron/timer/scheduler/job یک `job_key`, owner service، cadence، lock،
+   retry، idempotency و missed-run policy ثبت کند؛ startup با owner تکراری fail شود.
+8. health را به liveness و readiness تفکیک کند. readiness واقعی باید DB، Redis،
+   schema، queue و dependency لازم همان service را بسنجد؛ health نباید side effect
+   خارجی ایجاد کند.
+9. log/metric correlation را با `release_id`, `service`, `site_id`, `request_id`,
+   `event_id` و بدون PII/secret استاندارد کند؛ disk quota/rotation نیز تعریف شود.
+10. backup agent، restore command و media/object references را بدون دسترسی write
+    تولیدی در compose staging قابل‌اجرا کند.
+11. failure injection را برای stop/restart مستقل API، Bot، worker، Redis و DB اجرا
+    کند و اثبات کند side effect ناقص یا duplicate owner ساخته نمی‌شود.
+12. `docker compose config`، image digest، SBOM/scan طبق P4، port exposure، mount
+    و ownership checks را در Evidence Index ثبت کند.
+
+### خروجی، آزمون و Gate انسانی
+
+- `09-target-runtime-topology.md`، Service Ownership Matrix و compose diagrams.
+- compose validation و contract/integration test برای یک Telegram owner، یک job
+  owner، migration ordering، restart isolation و fail-closed dependency.
+- mutation Bot باید بدون HTTP sync در همان DB برای Web قابل‌مشاهده باشد، بدون
+  loop یا side effect دوباره.
+- مالک service/credential/job ownership و resource budget را پیش از `P1-04`
+  تأیید کند. deploy روی `65.109.214.203` در این Stage ممنوع است.
+
+Rollback: artifactهای compose/config به commit قبلی برمی‌گردند؛ volume یا دیتای
+واقعی ایجاد/حذف نمی‌شود.
 
 ## `P1-04` — دادهٔ مشترک و حذف sync داخلی Finland
 
 وضعیت: `PROPOSED`
 
-کار:
+Dependency: `P1-03`، `P2-00` و `P2-01`؛ Data Ownership Matrix باید مصوب باشد.
 
-- `change_log` از مفهوم «Bot server در برابر Web server» جدا و به outbox
-  cross-site تبدیل شود.
-- eventهای محلی Bot/Web با `origin_site=fi` و `origin_surface` ثبت شوند، اما فقط
-  یک‌بار به Iran منتشر شوند.
-- `origin_surface` immutable و ورودی `SURFACE_POLICY_MATRIX` است. اشتراک Offer،
-  OfferRequest و Trade به معنی policy یکسان نیست؛ tier 2، overtime، publication،
-  confirmation، quota، notification و commission باید رفتار فعلی خود را حفظ کنند.
-- offer/request می‌توانند surfaceهای متفاوت داشته باشند؛ authority از `home_site`
-  و policy از context نسخه‌دار می‌آید. `request_source_surface`، tier/role snapshot،
-  workflow و `policy_version` برای audit و replay حفظ شوند.
-- نگاشت legacy در `offer_home_server_for_source` و مشابه آن ممیزی شود: topology
-  تاریخی حذف می‌شود، اما تفاوت محصولی surfaceها نباید همراه آن پاک شود.
-- تمام side-effect ledgerهای Telegram local باقی بمانند.
-- stable identity و field policy برای offer/trade/message/media بررسی شود.
-- هر listener/bulk update که outbox را دور می‌زند اصلاح یا صریحاً local اعلام شود.
+### برداشت انسانی
 
-Gate خروج:
+اکنون Web و Bot برای دیدن تغییر یکدیگر به انتقال شبکه‌ای نیاز ندارند. هر mutation
+یک‌بار در DB مشترک انجام می‌شود و اگر لازم باشد به Iran برسد، یک outbox cross-site
+در همان transaction ساخته می‌شود. منشأ Web/Bot پاک نمی‌شود، چون policyهای محصول
+ممکن است بر اساس آن متفاوت باشند.
 
-- receiver coverage، registry coverage و event emission به‌صورت CI مقایسه شوند.
-- هیچ event محلی به همان دیتابیس loopback نشود.
-- duplicate surface Web/Bot یک logical event را دوبار به Market یا sync ندهد.
-- تست ماتریسی ثابت کند هر ترکیب مصوب offer-surface × request-surface × role/tier
-  همان eligibility، workflow، پاسخ، persistence و side effect فعلی را دارد.
+### Task Card فنی Cursor
+
+1. تمام مسیرهای sync فعلی میان Bot-Finland و Web-Finland شامل HTTP client/server،
+   `change_log` producer/consumer، listener، polling، retry، bulk update و repair
+   script را به edgeهای graph تبدیل کند.
+2. هر edge را با شاهد در یکی از چهار دسته قرار دهد:
+   `REMOVE_LOCAL_TRANSPORT`, `CONVERT_TO_CROSS_SITE_OUTBOX`, `KEEP_LOCAL`,
+   `BLOCKED_UNKNOWN`. دستهٔ آخر مانع implementation است.
+3. برای هر mutation، transaction boundary و stable identity را مشخص کند. business
+   row و outbox لازم باید atomic commit شوند؛ publish مستقیم پیش از commit ممنوع است.
+4. مدل provenance را برای entityهای در scope تثبیت کند: حداقل `origin_site`,
+   `origin_surface`, `actor_id/role`, `customer_tier_snapshot`, `policy_version`,
+   `created_at` و identityهای Offer/Request/Trade. نام دقیق field پس از audit schema
+   تعیین می‌شود و duplicate field بدون migration contract ساخته نمی‌شود.
+5. `offer_source_surface` و `request_source_surface` را مستقل نگه دارد. درخواست از
+   Bot روی Offer وب یا برعکس نباید provenance یکی را روی دیگری overwrite کند.
+6. policy evaluation را از topology جدا و فقط از context نسخه‌دار مصوب تغذیه کند.
+   رفتار tier 2، overtime، quota، confirmation، publication، notification و
+   commission باید دقیقاً مطابق `04-surface-policy-matrix.md` بماند.
+7. mappingهای legacy مانند `offer_home_server_for_source` را با تست characterize
+   و سپس به site authority + surface policy تفکیک کند. حذف یک branch شرطی فقط وقتی
+   مجاز است که parity test ثابت کند behavior از دست نمی‌رود.
+8. outbox را با event id پایدار، aggregate/version، origin site/surface، payload
+   schema version و idempotency key تعریف کند. local consumer نباید event Finland
+   را دوباره به DB Finland loopback کند.
+9. side-effect ledger تلگرام و notification را local و idempotent نگه دارد؛ replay
+   cross-site نباید پیام، callback answer، publication یا notification تکراری بسازد.
+10. ORM hook، raw SQL، bulk update و maintenance pathهایی را که outbox/ledger را
+    دور می‌زنند با registry مقایسه و پوشش دهد یا با دلیل `LOCAL_ONLY` اعلام کند.
+11. migration را expand/migrate/contract طراحی کند: schema افزایشی و backward-
+    compatible، backfill resumable، validation، سپس حذف legacy فقط در closure.
+12. contract tests را برای ماتریس surface/role/tier/time و نیز duplicate، retry،
+    crash-before/after-commit، ordering و loop prevention اجرا کند.
+
+### خروجی، آزمون و Gate انسانی
+
+- Dataflow/ownership به‌روز، event registry، migration contract و parity mapping.
+- CI باید receiver coverage، registry coverage و mutation emission را مقایسه کند.
+- یک logical mutation دقیقاً یک business result و حداکثر یک event/side effect
+  idempotent بسازد؛ visibility محلی نیازمند network hop نباشد.
+- مالک هر تفاوت policy Web/Bot و تمام legacy mappingهای حذف‌شونده را تأیید کند.
+
+Rollback: تا closure، schema و adapter قدیمی قابل‌خواندن می‌مانند. transport قدیمی
+فقط در topology جداگانهٔ پیش از cutover قابل‌فعال‌شدن است؛ فعال‌کردن آن روی DB
+مشترک بدون loop guard ممنوع است. دادهٔ commit‌شده در rollback حذف نمی‌شود.
 
 ## `P1-05` — rehearsal ادغام دادهٔ دو Finland
 
 وضعیت: `PROPOSED`
 
-سناریو:
+Dependency: `P1-04`، `P2-05` و `P4-04`. مجوز production data فقط read-only backup
+و طبق قرارداد امنیتی جداگانه است.
 
-1. از هر source یک backup immutable و restore-tested گرفته می‌شود.
-2. writerها در محیط rehearsal freeze می‌شوند.
-3. داده با stable identity و policy جدول merge می‌شود.
-4. FK، sequence، checksum و business invariant بررسی می‌شود.
-5. app و Bot روی clone target بالا می‌آیند و full matrix اجرا می‌شود.
+### برداشت انسانی
 
-قواعد:
+این مرحله dress rehearsal مهاجرت داده است. دو backup واقعی در محیط جدا restore
+می‌شوند و merge دقیقاً مانند روز cutover اجرا می‌شود. تا زمانی که اجرای دوم همان
+نتیجه، hash و conflict report را نسازد، مهاجرت آماده نیست.
 
-- raw row overwrite ممنوع است.
-- users/relations/invitations/offer/trade/media هرکدام policy مشخص دارند.
-- origin surface، request surface، role/tier snapshot، workflow و policy version
-  هنگام merge حفظ می‌شوند و از روی محل فیزیکی target بازسازی نمی‌شوند.
-- money/inventory conflict فقط report/quarantine؛ نه auto LWW.
-- Redis source of truth محسوب نمی‌شود؛ فقط state موردنیاز queue/session با قرارداد
-  خودش migrate می‌شود.
+### Task Card فنی Cursor
 
-Gate خروج:
+1. برای هر source، شناسهٔ host/database، snapshot time، WAL/binlog boundary، schema
+   version، media root، backup command، encryption و checksum را در Merge Contract
+   ثبت کند؛ value حساس در سند نیاید.
+2. از هر backup یک restore مستقل روی محیط ایزوله انجام و با query read-only، schema،
+   row count، FK و sample hash صحت restore را ثابت کند. «backup command موفق شد»
+   به‌تنهایی کافی نیست.
+3. table-by-table policy بنویسد: source/authority، stable identity، duplicate key،
+   FK mapping، sequence strategy، merge rule، conflict rule، excluded field، media
+   rule، verification query و rollback consequence.
+4. users/account/relation/invitation و identityهای مشترک را پیش از dependentها حل
+   کند. تطبیق بر اساس ID عددی تصادفی یا تشابه نام مجاز نیست.
+5. Offer، Request و Trade را همراه origin surface، actor/role، tier snapshot،
+   workflow، policy version و audit timestamps merge کند؛ target location نباید این
+   metadata را بازسازی یا یکسان کند.
+6. money، inventory، settlement، balance و trade conflict را فقط report/quarantine
+   کند. auto-sum، overwrite و last-write-wins بدون rule مصوب ممنوع است.
+7. media/upload/object reference را با hash، owner entity و existence check منتقل
+   کند؛ orphan، collision و missing blob باید report جدا داشته باشد.
+8. sequence/identity، FK، unique constraint، timezone/collation و extensionها را
+   پس از load validate و sequenceها را بالاتر از max معتبر تنظیم کند.
+9. Redis را از state دائمی جدا کند. فقط queue/session/cache state دارای قرارداد
+   مصوب migrate شود؛ cache قابل‌بازسازی flush/rebuild می‌شود و source truth نیست.
+10. migration/merge runner را resumable، checkpointed، deterministic و idempotent
+    بسازد؛ kill/restart در میانه نباید duplicate یا state نیمه‌معتبر ایجاد کند.
+11. پس از merge، row count، canonical business hash، balance/inventory invariant،
+    orphan query، event/outbox count، media hash و نمونهٔ behavior contract را اجرا
+    کند.
+12. همان input را دو بار از صفر و یک‌بار به‌صورت resume اجرا کند؛ output hash و
+    conflict report باید یکسان باشند.
+13. app و Bot target را با side effect خارجی خاموش روی clone بالا بیاورد و full
+    parity smoke را اجرا کند.
+14. rollback rehearsal را با نابودکردن فقط target آزمایشی، restore مجدد source
+    cloneها و بازاجرای runbook اثبات کند؛ backupهای اصلی دست‌نخورده بمانند.
 
-- دو اجرای idempotent نتیجهٔ یکسان بدهند.
-- row count تنها معیار نیست؛ canonical business hash و invariant لازم است.
-- restore rehearsal و rollback rehearsal سبز باشند.
+### خروجی، آزمون و Gate انسانی
+
+- `10-finland-data-merge-contract.md`، mapping جدول‌ها، conflict/quarantine report،
+  restore receipt، run hashes و rollback receipt.
+- هیچ conflict مالی/موجودی unresolved و هیچ missing media/FK پنهان باقی نماند.
+- دو اجرای clean و یک resume نتیجهٔ business-equivalent بدهند.
+- مالک conflict policy و report نهایی را تأیید کند؛ این Stage هیچ writer تولید را
+  freeze، migrate یا تغییر نمی‌دهد.
+
+Rollback: target rehearsal disposable است؛ source backupها immutable و تا پایان
+cutover + retention محافظت می‌شوند.
 
 ## `P1-06` — staging یکپارچه Finland
 
 وضعیت: `PROPOSED`
 
-سناریوهای الزامی:
+Dependency: `P1-05` و change set اتمیک `P4-07`.
 
-- login/OTP، invitation، offer، trade، overtime و expiry
-- Messenger متن/media و realtime
-- Bot callback، publication و Queue-v1
-- restart مستقل API/Bot/Redis/DB
-- backup/restore و application rollback
-- بار واقعی و disk/memory headroom
-- قطع موقت Object Storage بدون خرابی product محلی
-- differential replay یک corpus ثابت روی current و target برای Web/Bot، roleها،
-  tier 1/2، accountant، overtime، publication، failure و retry
-- مقایسهٔ normalized API response، Bot callback result، DB business hash، outbox،
-  Queue/notification audience و side effect ledger؛ side effect خارجی در shadow fake است
+### برداشت انسانی
 
-Gate خروج:
+staging باید نسخهٔ کوچک و واقعی معماری هدف باشد، نه mock ساده. یک corpus ثابت از
+سناریوها هم روی معماری جاری و هم هدف اجرا می‌شود. پاسخ، state و side effectها پس
+از حذف timestamp/IDهای غیرقطعی باید برابر باشند؛ «صفحه باز شد» معیار پذیرش نیست.
 
-- full functional matrix و browser matrix سبز باشد.
-- latency و resource baseline بدتر از budget مصوب نباشد.
-- Telegram identity readback هیچ collision نشان ندهد.
-- تمام `behavior_id`های Feature Parity Contract تست passing داشته باشند و هیچ
-  اختلاف response/state/side-effect/timing بدون waiver صریح مالک باقی نماند.
+### Task Card فنی Cursor
+
+1. exact image digest، config hash، migration version، dataset hash و test corpus
+   را pin کند. staging نباید به Telegram، SMS، Arvan DNS یا Object Storage تولید
+   side effect واقعی بزند.
+2. دو محیط مقایسه بسازد: current-topology reference و target-single-Finland. داده
+   production-shaped ولی sanitised و seed deterministic باشد.
+3. corpus را برای Web/Bot/admin/internal، personaها، accountant، tier 1/2، Offer
+   surface، Request surface، overtime/normal time، success/failure/retry و concurrent
+   action تولید کند.
+4. auth/login/registration/OTP/session، invitation/relation، Offer/Request/Trade،
+   commission/settlement، expiry/republish/overtime و Market guard را اجرا کند.
+5. Messenger text/media/upload/download/realtime/unread، Queue-v1، Telegram command/
+   callback/publication و notification audience را با fake/sandbox adapter آزمون کند.
+6. خروجی دو محیط را normalize و API status/schema/copy، Bot result، DB business
+   hash، outbox/event، queue state، notification audience، ordering، retry و
+   side-effect ledger را مقایسه کند.
+7. مرورگرهای تعریف‌شده در acceptance matrix، mobile/desktop viewport و reconnect
+   realtime را اجرا کند؛ screenshot به‌تنهایی جای assertion را نمی‌گیرد.
+8. restart مستقل Web/API، Bot و worker و نیز failure/recovery Redis، PostgreSQL و
+   Object Storage را تزریق کند. duplicate message، lost mutation و false-ready
+   نباید رخ دهد.
+9. backup/restore و application rollback را با exact artifact اجرا کند و پس از آن
+   همان corpus و business hash را دوباره بسنجد.
+10. load profile مبتنی بر baseline `P1-00` را اجرا و latency/error/queue lag، CPU،
+    RAM، disk I/O، connection pool و storage growth را ثبت کند. budget قبل از test
+    در Task Card عددگذاری و توسط مالک تأیید شود.
+11. حداقل soak پیشنهادی ۲۴ ساعت را با jobها، log rotation، backup و queue فعال
+    اجرا کند؛ مدت نهایی باید در Gate انسانی ثبت شود و قابل حدس‌زدن نیست.
+12. هر diff را به `EXPECTED_TOPOLOGY`, `KNOWN_BASELINE_BUG`, `REGRESSION` یا
+    `NONDETERMINISTIC_TEST` طبقه‌بندی کند. فقط اولی بدون تصمیم رفتار قابل‌قبول است؛
+    سه مورد دیگر resolution یا waiver صریح می‌خواهند.
+
+### خروجی، آزمون و Gate انسانی
+
+- `11-staging-acceptance.md`، corpus/version، differential report، browser matrix،
+  chaos/restart، performance، soak، backup/restore و rollback receipts.
+- تمام `behavior_id`ها test passing و coverage صددرصد یا blocker مصوب داشته باشند.
+- Telegram identity collision، double job owner، unexplained behavior diff و data
+  invariant failure باید صفر باشد.
+- مالک budget، soak duration، waiverهای احتمالی و آمادگی cutover را امضا کند.
+
+Rollback: staging به artifact قبلی بازمی‌گردد یا rebuild می‌شود؛ هیچ dependency
+تولید برای سبزکردن تست تغییر نمی‌کند.
 
 ## `P1-07` — cutover کنترل‌شده به Finland Primary
 
 وضعیت: `PROPOSED — نیازمند مجوز تولید جدا`
 
-ترتیب:
+Dependency: `P1-06`، `P4-07`، `P4-10`، change set اتمیک `P4-08` و مجوز صریح
+تولید. تأیید سند به معنی این مجوز نیست.
 
-1. exact release، backup و rollback artifact تأیید شود.
-2. mutation sourceهای دو Finland قدیمی quiesce شوند.
-3. final delta و checksum گرفته شود.
-4. DB/media روی target restore و دو بار migration idempotency بررسی شود.
-5. API target بالا آید ولی traffic نگیرد.
-6. Bot قدیمی stop و session/lease آن terminal شود.
-7. Bot target با همان exact release و owner receipt بالا آید.
-8. DNS/edge به Finland Primary تغییر کند.
-9. smoke، queue، Market و audit بررسی شود.
-10. سرورهای قدیمی در یک quarantine window فقط read-only/rollback بمانند.
+### برداشت انسانی
 
-Rollback:
+در یک maintenance window، writeهای دو Finland قدیمی متوقف، آخرین delta ادغام و
+target ابتدا در حالت dark بررسی می‌شود. Bot قدیمی باید پیش از دسترسی Bot جدید به
+token/session به‌طور قطعی متوقف شود. در هر checkpoint عامل انسانی یا ادامه می‌دهد
+یا rollback می‌کند؛ failover خودکار در این Stage وجود ندارد.
 
-- قبل از DB write جدید target: بازگشت کامل به sourceهای قبلی.
-- بعد از write جدید: rollback کد روی target؛ بازگرداندن خام DB قدیمی ممنوع مگر
-  restore plan و reconciliation صریح.
+### Task Card فنی Cursor
 
-Gate خروج:
+#### آماده‌سازی پیش از پنجره
 
-- target تنها Web Writer و Telegram owner است.
-- no-op release و rollback واقعی اندازه‌گیری شده‌اند.
-- Feature Parity Contract کامل و Dossier مصوب است؛ topology تنها تفاوت عمدی ثبت‌شده
-  میان current و target است.
-- decommission تا پایان retention و تأیید backup انجام نمی‌شود.
+1. change ticket شامل owner عملیات، فرمان‌دهنده، observer، زمان، contact، نقاط
+   go/no-go و مجوزهای DB/DNS/runtime را ثبت کند.
+2. exact commit/image digest، SBOM/scan receipt، config hash، migration bundle،
+   merge runner، backup/restore و rollback artifact مصوب را freeze کند.
+3. target capacity، TLS/edge، DB/Redis volume، secret mount، monitoring، alert،
+   clock/NTP و disk headroom را read-only verify کند.
+4. backup نهایی هر دو source و media را با encryption/checksum بگیرد و حداقل یک
+   restore off-source تأییدشده داشته باشد. backup فاقد restore receipt مانع cutover است.
+5. DNS/route فعلی، TTL، old endpoint، target dark endpoint و روش rollback را ثبت
+   کند؛ تغییر واقعی فقط در checkpoint مربوط و با مجوز انجام می‌شود.
+6. baseline smoke، queue depth، sync lag، active session/job و business hash را
+   بگیرد و mutationهایی را که باید quiesce شوند فهرست کند.
+
+#### اجرای پنجره با checkpoint انسانی
+
+7. Web Writer و Bot/worker mutation روی دو source را با ترتیب runbook وارد drain
+   کند؛ requestهای جاری باید تمام و mutation تازه رد/صف شوند. صرفاً stop process
+   بدون اثبات quiescence کافی نیست.
+8. `QUIESCED` receipt شامل آخرین transaction/event/queue checkpoint بگیرد. اگر
+   writer یا scheduler ناشناخته فعال بود، عملیات متوقف و rollback شود.
+9. final delta و media delta را capture، merge runner را روی target اجرا و report،
+   conflict، FK، sequence، business hash و invariant را مقایسه کند. conflict تازه
+   go/no-go انسانی می‌خواهد.
+10. migration را یک‌بار اعمال و verification/idempotency command را دوباره اجرا
+    کند؛ اجرای دوم نباید schema/data change تازه بسازد.
+11. PostgreSQL/Redis لازم، API و workerهای بدون side effect را dark بالا بیاورد؛
+    readiness، admin smoke، data hash و internal route بررسی شوند و هنوز traffic
+    یا Telegram credential فعال نشود.
+12. Bot قدیمی و تمام Telegram executor/publisherهای قدیمی را stop و terminal
+    ownership receipt بگیرد. سپس و فقط سپس credential روی Bot target mount و
+    identity readback/owner guard اجرا شود.
+13. Bot و job ownerهای target را با exact release فعال کند؛ duplicate owner guard،
+    queue state و side-effect ledger بررسی شوند. پیام تست تولید فقط اگر change
+    ticket صریحاً اجازه دهد ارسال می‌شود.
+14. edge/DNS را طبق بخش deploy به target تغییر دهد و از resolver/probeهای مصوب
+    مقصد IP/TLS/health را اثبات کند. موفقیت API provider به‌تنهایی کافی نیست.
+15. smoke matrix بحرانی Web و Bot، login، Offer/Request/Trade، realtime، Queue،
+    Market و backup را اجرا و response/state/side effect را با baseline مقایسه کند.
+16. در observation window، error rate، latency، DB/Redis، queue، Telegram، jobs،
+    disk، backup و business invariant را پایش کند. پایان window نیازمند رسید انسان است.
+17. sourceهای قدیمی را خاموش/حذف نکند؛ آن‌ها را network-fenced و read-only در
+    quarantine نگه دارد و از accidental writer شدن alert بسازد.
+
+### مرز rollback
+
+- **پیش از اولین mutation target:** credential/traffic target بسته، target متوقف،
+  sourceها از همان checkpoint باز، route/DNS برگردانده و smoke ثبت می‌شود.
+- **پس از اولین mutation target:** rollback برنامه روی همان DB target انجام می‌شود.
+  بازگرداندن source DB قدیمی فقط با runbook reverse-migration/reconciliation تازه
+  و مجوز مالک ممکن است؛ روشن‌کردن مستقیم آن خطر دو history دارد و ممنوع است.
+- triggerهای rollback باید پیشاپیش عددی/مشاهده‌پذیر باشند: invariant failure،
+  duplicate Telegram owner، migration/hash mismatch، critical parity regression،
+  DB durability failure یا error budget breach.
+
+### خروجی و Gate انسانی
+
+- `12-cutover-runbook.md` تکمیل‌شده، timeline، تمام checkpoint receiptها، digestها،
+  backup/restore، ownership، DNS/route، smoke و observation evidence.
+- target تنها Web Writer Finland و تنها Telegram owner باشد؛ old sourceها fenced.
+- Feature Parity Contract کامل باشد و topology تنها تفاوت عمدی ثبت‌شده بماند.
+- هیچ decommission، credential revoke دائمی یا حذف backup در این Stage انجام نشود.
 
 ## `P1-08` — closure و حذف بدهی توپولوژی قدیمی
 
 وضعیت: `PROPOSED`
 
-- adapter، env، script و docs مربوط به دو Finland فقط بعد از اثبات no-reference
-  حذف شوند.
-- سرور قدیمی پس از backup/off-host verification، incident window و تأیید مالک
-  decommission شود.
-- مانیتورینگ و billing orphan بررسی شود.
+Dependency: `P1-07`، `P2-11` و تأیید retention/backup/decommission. این dependency
+عمداً باعث می‌شود منابع قدیمی پیش از عملیاتی‌شدن Iran Standby حذف نشوند.
+
+### برداشت انسانی
+
+«چند روز بدون خطا» به‌تنهایی مجوز حذف نیست. ابتدا باید ثابت شود هیچ code، DNS،
+job، backup، monitoring، rollback یا runbookی به توپولوژی قدیمی وابسته نیست. سپس
+منابع در چند gate جدا بازنشسته می‌شوند تا راه بازگشت زودتر از موعد از بین نرود.
+
+### Task Card فنی Cursor
+
+1. مدت quarantine/observation مصوب را از receipt `P1-07` کنترل و incident، alert،
+   parity diff، backup و restoreهای این بازه را خلاصه کند.
+2. repo، generated config، CI/CD، secret store nameها، DNS/edge، monitoring، backup،
+   firewall، cron/systemd، documentation و operator workstation را برای reference
+   به host/IP/path/role قدیمی اسکن کند.
+3. هر reference را `ACTIVE`, `ROLLBACK_ONLY`, `HISTORICAL_DOC`, `STALE` یا
+   `UNKNOWN` طبقه‌بندی کند. وجود `ACTIVE` یا `UNKNOWN` مانع decommission است.
+4. telemetry اثبات کند sourceهای قدیمی هیچ write، Telegram call، scheduler run،
+   inbound product traffic یا sync production ندارند و target backup/restore سالم است.
+5. adapter `server_mode`، local-sync transport، env key، compose profile، script،
+   test fixture و docs قدیمی را در commitهای کوچک حذف کند؛ قبل و بعد هر دسته
+   hardcode/reference scan و full parity suite اجرا شود.
+6. historical docs لازم را با banner منسوخ و لینک ADR نگه دارد؛ runbook قابل‌اجرا
+   نباید به command یا host بازنشسته اشاره کند.
+7. credential و access قدیمی را فقط پس از backup و audit با manifest revoke کند؛
+   rollback credential تا پایان protected window حذف نمی‌شود.
+8. volume، snapshot، backup، release و server را بر اساس retention manifest و با
+   approval مستقل decommission کند. هر حذف material باید target دقیق و recovery
+   status داشته باشد.
+9. monitoring، alert routing، inventory/CMDB، billing، DNS record، firewall allowlist
+   و backup schedule orphan را پاک یا منتقل و نتیجه را verify کند.
+10. final architecture، cost/capacity، restore receipt، data hash و owner matrix را
+    ثبت و Stage Ledger را به `COMPLETE` ببرد.
+11. `candidate/wa-ir-standby-v1` در این Stage خودکار حذف نمی‌شود. حذف آن فقط پس از
+    پایان استخراج معماری/مستندات و دستور صریح مالک، ترجیحاً در closure کل پلن است.
+
+### خروجی، آزمون و Gate انسانی
+
+- `13-closure-and-decommission.md`، no-reference report، deprecation ledger،
+  credential/resource deletion manifest و final topology receipt.
+- hardcode/reference scan، full parity suite، backup restore و disaster recovery
+  smoke پس از cleanup سبز باشند.
+- decommission هر host/volume/backup/credential نیازمند تأیید جداگانهٔ مالک است.
+- پس از closure، repository و runbookها فقط معماری فعال و history صریحاً منسوخ را
+  نشان دهند؛ هیچ billing/monitoring/backup orphan باقی نماند.
+
+Rollback: پیش از حذف نهایی، sourceها fenced و recoverable می‌مانند. پس از حذف،
+rollback فقط از backup off-host دارای restore receipt است؛ اگر چنین backupی نیست،
+decommission مجاز نیست.
+
+### Definition of Done بخش ۱
+
+بخش ادغام فقط زمانی بسته است که همهٔ موارد زیر هم‌زمان برقرار باشند:
+
+1. تمام `P1-00..P1-08` با dependency، evidence و gate انسانی `COMPLETE` باشند.
+2. Web/API و Bot روی Finland Primary جدا اجرا شوند و PostgreSQL/Redis مشترک داشته
+   باشند؛ restart و failure domain آن‌ها مستقل باشد.
+3. تنها یک Telegram executor و تنها یک owner برای هر scheduler/job وجود داشته باشد.
+4. هیچ sync شبکه‌ای برای visibility محلی Bot↔Web باقی نماند؛ outbox cross-site
+   Finland↔Iran سالم و loop-free باشد.
+5. منشأ مستقل Offer و Request و context نقش/tier/version حفظ و تمام تفاوت‌های
+   Web/Bot در Surface Policy Matrix و تست‌های regression پوشش داده شده باشد.
+6. دو rehearsal deterministic، staging differential، backup/restore و rollback
+   واقعی سبز باشند و هیچ conflict مالی/موجودی یا behavior diff بی‌تصمیم نماند.
+7. deploy/cutover با exact artifact و receipt انجام شده و old writerها fenced باشند.
+8. repository، artifactها، retention، docs و topology قدیمی طبق manifest بسته شده
+   باشند؛ حذف irreversible بدون backup restore-tested انجام نشده باشد.
 
 ---
 
