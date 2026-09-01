@@ -2,6 +2,8 @@
 
 Tombstones are newest first.
 
+- Never implement a renewable Web Writer lease, timeout-based role change, or
+  automatic promotion/demotion; Writer handover is explicitly human-controlled.
 - Never pass Market gates via synthetic anchors/events, source waiver, evidence deletion, counter/checkpoint reset, or `occurrences` as event cardinality. Redelivery is allowed; duplicate application is not.
 - Never escape Docker template quotes; run them before writer quiescence.
 - Never hash raw schema dumps; strip only PostgreSQL random `\\restrict`/`\\unrestrict` keys and version banners.

@@ -111,13 +111,15 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
 
 ### سناریوی قطع اینترنت ایران
 
-1. Finland ارتباطش با Object Storage ایران را از دست می‌دهد و Web Writer lease
-   را دیگر نمی‌تواند تمدید کند؛ پس write path وب آن باید فنس شود. این fence
-   مالکیت مستقل Bot را متوقف نمی‌کند.
-2. انتقال نقش خودکار نیست. عامل انسانی بعد از دیدن شرایط و تأیید خطر، Iran را
-   با یک `WEB_WRITER authority_epoch` جدید promote می‌کند.
-3. DNS محصول با عملیات allowlisted و auditشده به Iran تغییر می‌کند.
-4. Iran وب‌اپ را سرو می‌کند؛ Bot همچنان فقط در Finland اجرا می‌شود.
+1. عامل انسانی که طبق تصمیم مالک به هر دو سرور دسترسی دارد، در dashboard
+   Finland فرمان `DRAIN WEB WRITER` را صادر می‌کند. Finland mutation جدید Web
+   را می‌بندد، تراکنش‌های جاری را تمام می‌کند و `Fence Receipt` امضاشده می‌دهد؛
+   Bot بدون محدودیت ادامه می‌دهد.
+2. عامل Receipt را به dashboard Iran منتقل و اعتبار آن را مشاهده می‌کند.
+3. عامل با فرمان صریح و auditشده، DNS محصول را از طریق API آروان به Iran تغییر
+   می‌دهد و probeهای مقصد را بررسی می‌کند.
+4. تنها بعد از Receipt و `DNS_READY`، عامل Iran را با
+   `writer_generation + 1` فعال می‌کند؛ هیچ promotion خودکاری وجود ندارد.
 5. ورود در Iran از مسیر SMS داخلی ممکن است؛ sessionهای محصول بین دو سرور
    منتقل نمی‌شوند و کاربر دوباره وارد می‌شود.
 6. رویدادهای هر سمت در outbox محلی/سطل جمع می‌شوند؛ نبود peer خطای محصول
@@ -134,10 +136,12 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
 4. event ردشده یا conflict پنهان نمی‌شود. پول، موجودی و معامله با
    last-write-wins حل نمی‌شوند.
 5. تا `FULL_SYNC` و `MARKET_READY`، دکمهٔ Finland Writer غیرفعال است.
-6. Iran وارد drain می‌شود، final delta منتقل می‌شود، DNS به Finland تغییر
-   می‌کند و probe واقعی امضاشده مسیر را تأیید می‌کند.
-7. بعد از TTL + margin و تأیید انسانی، Finland با epoch جدید Writer می‌شود و
-   Iran به standby برمی‌گردد.
+6. عامل Iran را drain می‌کند؛ final delta منتقل و Fence Receipt امضاشده Iran
+   در dashboard Finland تأیید می‌شود.
+7. عامل DNS را به Finland تغییر می‌دهد و probe واقعی امضاشده مسیر را تأیید
+   می‌کند.
+8. عامل Finland را با `writer_generation + 1` فعال می‌کند؛ Iran در standby
+   پایدار می‌ماند و هیچ تغییر نقش خودکاری رخ نمی‌دهد.
 
 ---
 
@@ -148,7 +152,8 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
 - یک Finland Primary میزبان Web/API/Bot/Queue/PostgreSQL/Redis خواهد بود.
 - Iran فقط Web standby/writer است و هیچ Telegram credential یا executor ندارد.
 - انتقال Web Writer فقط با اقدام انسانی از dashboard انجام می‌شود.
-- فنسینگ فنی باید دو Writer هم‌زمان را مستقل از دقت انسان ناممکن کند.
+- dashboard ترتیب انسانی source-drain، Fence Receipt، DNS verification و
+  destination activation را enforce می‌کند و اجازهٔ پرش یا جابه‌جایی ترتیب نمی‌دهد.
 - هر دو سرور dashboard امن و مستقل با username/password/TOTP دارند.
 - مسیر دادهٔ بین Finland و Iran فقط Object Storage ایران است؛ SSH مسیر sync نیست.
 - سقف lag در اتصال عادی ۳۰ ثانیه است.
@@ -163,12 +168,18 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
 - تغییر Web Writer هیچ محدودیتی روی Bot فنلاند ایجاد نمی‌کند. Bot با authority
   مستقل `TELEGRAM_OWNER` و تمام قابلیت‌های فعلی خود ادامه می‌دهد؛ طراحی conflict
   policy باید این پیوستگی را بدون خاموش‌کردن commandهای Bot تضمین کند.
+- تعیین و انتقال Web Writer فقط با اقدام صریح عامل انسانی انجام می‌شود. مالک
+  دسترسی هم‌زمان خود به dashboard هر دو سرور را در قطعی تضمین کرده است؛ Web
+  Writer lease، renewal، TTL و automatic promotion/demotion وجود ندارد.
+- هر انتقال ابتدا مبدأ را drain/fence می‌کند، سپس Fence Receipt امضاشده و DNS
+  مقصد را ثابت می‌کند و در پایان با فرمان جداگانهٔ انسان مقصد را فعال می‌کند.
+- API آروان برای تغییر صریح DNS و عملیات لازم مجاز است؛ credential محلی قدیمی
+  باید بدون افشای مقدار، اعتبارسنجی و به secret mount محدود منتقل شود.
 
 ### نیازمند تأیید در بازبینی این پلن
 
 | ID | تصمیم پیشنهادی | مقدار اولیه |
 | --- | --- | --- |
-| `D-01` | Writer lease cadence | renew هر ۵ ثانیه، TTL اولیه ۶۰ ثانیه، promotion بعد از TTL + ۱۵ ثانیه clock margin؛ مقدار نهایی با fault test |
 | `D-02` | DNS TTL محصول | ۳۰ ثانیه در دورهٔ آماده‌سازی/cutover؛ مقدار عادی پس از soak جدا تعیین شود |
 | `D-03` | SLO deploy hotfix بدون migration | حداکثر ۱۵ دقیقه از artifact تأییدشده تا health سبز |
 | `D-04` | SLO release عادی دو سرور | حداکثر ۳۰ دقیقه در حالت اتصال سالم |
@@ -185,25 +196,27 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
 1. تنها یک Web Writer و تنها یک Telegram execution owner وجود دارد.
 2. DNS مسیر ترافیک است، نه منبع حقیقت Writer.
 3. هر mutating endpoint، worker و scheduler قبل از commit باید authority class
-   خود (`WEB_WRITER`, `TELEGRAM_OWNER`, `HOME_SITE`, `LOCAL_ONLY`) و epoch مرتبط
-   را بررسی کند. Web fence نباید Bot-home mutation مجاز را خاموش کند.
-4. Bot و Web روی Finland از یک PostgreSQL مشترک استفاده می‌کنند؛ sync داخلی
+   خود (`WEB_WRITER`, `TELEGRAM_OWNER`, `HOME_SITE`, `LOCAL_ONLY`) و generation
+   مرتبط را بررسی کند. Web fence نباید Bot-home mutation مجاز را خاموش کند.
+4. فقط انسان Web Writer را تغییر می‌دهد؛ timeout، network event، restart، DNS
+   یا sync state حق promotion/demotion خودکار ندارند.
+5. Bot و Web روی Finland از یک PostgreSQL مشترک استفاده می‌کنند؛ sync داخلی
    بین دو process جایگزین تراکنش مشترک نمی‌شود.
-5. Object Storage یک transport است، نه database و نه backup.
-6. event delivery حداقل‌یک‌بار و event apply دقیقاً یک‌بار از دید کسب‌وکار است.
-7. sequence gap، hash mismatch، schema mismatch یا signature failure fail-closed
+6. Object Storage یک transport است، نه database و نه backup و نه Web Writer authority.
+7. event delivery حداقل‌یک‌بار و event apply دقیقاً یک‌بار از دید کسب‌وکار است.
+8. sequence gap، hash mismatch، schema mismatch یا signature failure fail-closed
    و قابل‌مشاهده است.
-8. stable public identity مرجع cross-site است؛ integer ID محلی است.
-9. `created_at` آفر immutable است.
-10. event/availability/persisted timestamps برای Point-in-Time حفظ می‌شوند.
-11. secret وارد Git، log، artifact، prompt، `/tmp` یا Object Storage plaintext نمی‌شود.
-12. هیچ deploy از dirty tree یا artifact بدون commit/digest انجام نمی‌شود.
-13. staging قبل از production الزامی است؛ production permission جدا دارد.
-14. guardهای deploy متناسب با نوع تغییرند؛ gate نامرتبط نباید hotfix را ساعت‌ها
+9. stable public identity مرجع cross-site است؛ integer ID محلی است.
+10. `created_at` آفر immutable است.
+11. event/availability/persisted timestamps برای Point-in-Time حفظ می‌شوند.
+12. secret وارد Git، log، artifact، prompt، `/tmp` یا Object Storage plaintext نمی‌شود.
+13. هیچ deploy از dirty tree یا artifact بدون commit/digest انجام نمی‌شود.
+14. staging قبل از production الزامی است؛ production permission جدا دارد.
+15. guardهای deploy متناسب با نوع تغییرند؛ gate نامرتبط نباید hotfix را ساعت‌ها
     متوقف کند.
-15. active release، آخرین rollback و آخرین backup قابل‌بازیابی هرگز با cleanup
+16. active release، آخرین rollback و آخرین backup قابل‌بازیابی هرگز با cleanup
     حذف نمی‌شوند.
-16. `main` شاخهٔ بلندمدت است؛ شاخه‌های plan/implementation پس از merge یا رد
+17. `main` شاخهٔ بلندمدت است؛ شاخه‌های plan/implementation پس از merge یا رد
     شدن عمر محدود دارند.
 
 ---
@@ -246,7 +259,7 @@ Cursor پیش از شروع هر Stage باید تمام dependencyهای زیر
 | `P2-01` | `P2-00` |
 | `P2-02` | `P2-01`, `P4-02` |
 | `P2-03` | `P2-01`, `P2-02` |
-| `P2-04` | `P2-02`, `P2-03`, تصمیم `D-01` |
+| `P2-04` | `P2-03` و تصمیم تثبیت‌شدهٔ انتقال کاملاً انسانی Writer |
 | `P2-05` | `P2-00`, `P2-01`, `P2-04` و تصمیم تثبیت‌شدهٔ استقلال کامل Bot |
 | `P2-06` | `P2-03`, `P2-04`, `P2-05` |
 | `P2-07` | `P2-04`, `P2-06`, تصمیم `D-02` |
@@ -562,7 +575,7 @@ Gate خروج: هیچ مدل SQLAlchemy، object blob یا file store در regis
 
 ```text
 contract_version, event_id, stream_id, source_site, source_sequence,
-authority_class, authority_epoch, aggregate_type, aggregate_public_id, operation,
+authority_class, authority_generation, aggregate_type, aggregate_public_id, operation,
 occurred_at_utc, available_at_utc, persisted_at_utc,
 payload_hash, previous_hash, schema_version, payload
 ```
@@ -625,34 +638,47 @@ Gate خروج:
 Gate خروج: bootstrap وسط crash قابل resume است و اجرای دوباره state را تغییر
 نمی‌دهد.
 
-## `P2-04` — Writer lease، epoch و fencing
+## `P2-04` — Manual Writer Handover، generation و fencing
 
-وضعیت: `PROPOSED؛ D-01 باید تأیید شود`
+وضعیت: `PROPOSED؛ تصمیم معماری انتقال کاملاً انسانی تثبیت شده است`
 
 اصل:
 
-- انسان promotion را آغاز می‌کند؛ سیستم فقط انحصار Writer را enforce می‌کند.
-- Finland در حالت عادی lease را از مسیر Object Storage ایران renew می‌کند.
-- از دست‌رفتن Web lease، endpointها و jobهای دارای authority class برابر
-  `WEB_WRITER` را پیش از DB commit فنس می‌کند. Bot با authority مستقل
-  `TELEGRAM_OWNER` و aggregateهای `HOME_SITE=fi` ادامه می‌دهد.
-- Iran فقط بعد از انقضای قابل‌اثبات lease قبلی و تأیید انسان epoch بالاتر می‌گیرد.
-- authority class/epoch روی هر event و audit ثبت می‌شود. event از epoch قدیمی
-  همان authority بعد از fence apply نمی‌شود و quarantine می‌شود؛ Web epoch روی
-  event مستقل `TELEGRAM_OWNER` اعمال نمی‌شود.
-- clock skew budget و monotonic local clock در promotion predicate لحاظ می‌شود.
-- اگر conditional write/CAS واقعی Object Storage در `P2-02` ثابت نشود، این Stage
-  متوقف و ADR جایگزین تصویب می‌شود؛ پیاده‌سازی lease بر پایهٔ فرض تست‌نشده ممنوع است.
+- نقش پایدار محلی هر Web Server یکی از `WEB_WRITER`، `WEB_DRAINING` یا
+  `WEB_STANDBY` است و پس از restart حفظ می‌شود.
+- فقط عامل انسانی احراز هویت‌شده با username/password/TOTP و تأیید صریح می‌تواند
+  transition را آغاز یا تکمیل کند. هیچ network event، timeout، DNS، sync state،
+  process restart یا scheduler حق promotion/demotion خودکار ندارد.
+- انتقال از dashboard مبدأ آغاز می‌شود: mutation جدید Web بسته، transactionهای
+  جاری drain، نقش `WEB_STANDBY` پایدار و Fence Receipt امضاشده صادر می‌شود.
+- Receipt حداقل `transition_id`، `source_site`، `previous_writer_generation`،
+  `last_web_mutation_id`، drain result، زمان، release digest و امضا دارد.
+- عامل Receipt را به dashboard مقصد منتقل می‌کند. مقصد replay، tamper، generation
+  mismatch یا Receipt مربوط به انتقال دیگر را رد می‌کند.
+- تغییر DNS آروان یک اقدام انسانی جدا با preview، TOTP، provider receipt و
+  verification است. موفقیت API به‌تنهایی `DNS_READY` نیست.
+- فقط پس از Fence Receipt معتبر، gateهای sync/model متناسب با جهت انتقال و
+  `DNS_READY`، عامل مقصد را با `writer_generation + 1` فعال می‌کند.
+- `writer_generation` منقضی یا renew نمی‌شود؛ فقط شمارهٔ انتقال انسانی برای audit،
+  event provenance و رد mutation نسل قدیمی است. generation وب روی event مستقل
+  `TELEGRAM_OWNER` اعمال نمی‌شود.
+- اگر dashboard مبدأ در دسترس نباشد، Runbook دستی ابتدا Web/API مبدأ را از طریق
+  SSH یا provider hard-fence و نقش restart آن را `WEB_STANDBY` می‌کند. مقصد بدون
+  evidence این عملیات دکمهٔ Force Activate ندارد.
+- Object Storage مسیر sync و نگهداری نسخهٔ audit receipt است؛ مرجع Writer، lease
+  یا محرک تغییر نقش نیست.
 
 تست‌های بحرانی:
 
-- دو dashboard هم‌زمان دکمه را می‌زنند.
-- Finland بعد از partition دیر فنس می‌شود.
-- process pause/resume و clock skew رخ می‌دهد.
-- bucket CAS پاسخ مبهم می‌دهد.
-- Writer process restart می‌شود ولی lease قدیمی باقی است.
+- عامل دو dashboard را هم‌زمان باز می‌کند یا دکمه را دوبار می‌زند.
+- فعال‌سازی مقصد بدون Receipt، با Receipt دستکاری‌شده یا replayشده تلاش می‌شود.
+- source میان `DRAINING` و `STANDBY` restart می‌شود.
+- DNS API پس از fence مبدأ ولی پیش از activation مقصد شکست می‌خورد.
+- client با DNS cache قدیمی به مبدأ standby mutation می‌فرستد.
+- مسیر دستی hard-fence و بازیابی کنترل‌شده rehearsal می‌شود.
 
-Gate خروج: هیچ اجرای تستی دو commit معتبر از دو Writer در یک epoch تولید نکند.
+Gate خروج: هر transition رسید انسانی کامل دارد، خطا فقط downtime/read-only ایجاد
+می‌کند و هیچ تستی دو commit معتبر Web از دو generation/site هم‌زمان نمی‌سازد.
 
 ## `P2-05` — authority و conflict policy
 
@@ -670,14 +696,15 @@ Gate خروج: هیچ اجرای تستی دو commit معتبر از دو Write
   authority/merge آن را سناریومحور طراحی کند؛ خاموش‌کردن Bot راه‌حل قابل‌قبول نیست.
 - command به home غیرقابل‌دسترس pending نامحدود نمی‌ماند؛ نتیجهٔ صریح
   `HOME_SITE_UNREACHABLE` می‌دهد.
-- admin/global state به‌صورت blanket تابع Web Writer epoch نیست؛ authority هر
+- admin/global state به‌صورت blanket تابع Web Writer generation نیست؛ authority هر
   command و aggregate باید صریح باشد تا Web ایران و Bot فنلاند بدون split-brain
   و بدون محدودکردن Bot کار کنند.
 - immutable append events merge می‌شوند؛ mutable aggregateها state machine دارند.
 - money، quantity و inventory هرگز LWW نیستند.
 - eventی که oversell/negative inventory بسازد quarantine می‌شود، sync green را
   می‌بندد و تصمیم انسانی/repair audited می‌خواهد.
-- field local مثل Telegram message ID یا lease به peer business state وارد نمی‌شود.
+- field local مثل Telegram message ID یا dashboard transition session به peer
+  business state وارد نمی‌شود.
 
 Gate خروج: conflict matrix برای تمام `SYNC` tables تست تولیدی و property-based دارد.
 
@@ -691,12 +718,12 @@ Gate خروج: conflict matrix برای تمام `SYNC` tables تست تولید
 - HTTPS، local username/password/TOTP
 - cookie/session جدا، کوتاه‌عمر، SameSite/CSRF و rate limit
 - bootstrap حساب فقط حضوری/کنترل‌شده؛ TOTP secret sync نمی‌شود
-- audit append-only برای login، promotion، DNS، repair و override
+- audit append-only برای login، writer handover، DNS، repair و override
 
 نمای لازم:
 
-- نقش و epoch محلی/peer
-- lease owner/expiry و clock health
+- نقش و writer generation محلی/peer
+- آخرین transition، Fence Receipt و وضعیت drain مبدأ
 - bucket reachability و آخرین peer-seen
 - local/published/ACKed/applied sequence برای هر stream
 - gap، unpublished، unacked، apply backlog و rejected count
@@ -716,7 +743,7 @@ Dashboard summary نباید جزئیات conflict را پنهان کند؛ dril
   provider API را CAS-like اجرا می‌کند.
 - مقدار unexpected، multi-record یا provider ambiguity mutation را block می‌کند.
 - موفقیت API کافی نیست؛ authoritative DNS، resolverهای منتخب و signed site probe
-  باید destination و epoch درست را ثابت کنند.
+  باید destination و writer generation درست را ثابت کنند.
 - هر تغییر before/after، operator، request id و provider receipt دارد.
 - fallback دستی پنل provider مستند است ولی bypass audit نیست؛ نتیجه باید ثبت شود.
 
@@ -726,20 +753,23 @@ Dashboard summary نباید جزئیات conflict را پنهان کند؛ dril
 
 ```text
 CONNECTED_FI_WRITER
-  → PARTITION_SUSPECTED
-  → FI_LEASE_EXPIRED_AND_FENCED
-  → IR_PROMOTION_AUTHORIZED
+  → HUMAN_REQUESTS_FI_DRAIN
+  → FI_STANDBY_RECEIPT_VERIFIED
+  → DNS_TO_IR_VERIFIED
+  → HUMAN_ACTIVATES_IR
   → IR_WRITER
   → RECONNECTING_IR_WRITER
   → FULL_SYNC_AND_MARKET_READY
-  → IR_DRAINING
+  → HUMAN_REQUESTS_IR_DRAIN
+  → IR_STANDBY_RECEIPT_VERIFIED
   → DNS_TO_FI_VERIFIED
-  → FI_PROMOTION_AUTHORIZED
+  → HUMAN_ACTIVATES_FI
   → CONNECTED_FI_WRITER
 ```
 
 هر transition باید precondition، mutation، timeout، audit، observable proof و
-rollback/forward-recovery داشته باشد. dashboard حق جهش مستقیم بین stateها را ندارد.
+rollback/forward-recovery داشته باشد. timeout فقط درخواست UI را منقضی می‌کند و
+حق تغییر role ندارد. dashboard حق جهش مستقیم بین stateها را ندارد.
 
 ## `P2-09` — OTP، session، notification و Messenger در قطعی
 
@@ -765,7 +795,7 @@ rollback/forward-recovery داشته باشد. dashboard حق جهش مستقی�
 3. partition وسط upload و وسط ACK
 4. gap و object خراب
 5. duplicate و out-of-order
-6. simultaneous promotion
+6. درخواست هم‌زمان فعال‌سازی انسانی در دو dashboard
 7. stale DNS cache
 8. restart Writer و standby
 9. disk full و clock skew
@@ -793,7 +823,7 @@ rollback/forward-recovery داشته باشد. dashboard حق جهش مستقی�
 وضعیت: `PROPOSED — مجوز جدا`
 
 - drill برنامه‌ریزی‌شده با کاربران/دادهٔ کنترل‌شده اجرا می‌شود.
-- زمان fence، promotion، DNS، login، RPO، sync recovery و failback اندازه‌گیری می‌شود.
+- زمان fence، فعال‌سازی انسانی، DNS، login، RPO، sync recovery و failback اندازه‌گیری می‌شود.
 - هیچ موفقیتی بدون evidence دو dashboard و business parity پذیرفته نمی‌شود.
 - rollback و incident report بخشی از gate است.
 
@@ -870,7 +900,7 @@ quality_state, parser_version, payload_hash, lineage
 آفر و معاملهٔ Bot/Web باید وارد مدل شوند. contract:
 
 ```text
-event_type, surface, source_site, home_site, authority_class, authority_epoch,
+event_type, surface, source_site, home_site, authority_class, authority_generation,
 offer_public_id/trade_public_id, commodity, settlement, side,
 price, quantity, status, occurred_at, price_origin, model_snapshot_id
 ```
@@ -1233,7 +1263,7 @@ ADRهای حداقل:
 
 - co-location Bot/Web روی یک DB
 - Object Storage به‌عنوان transport
-- manual promotion + technical fencing
+- manual writer handover + signed Fence Receipt
 - home_site و conflict policy
 - local session policy
 - Market Fact و artifact authority
@@ -1252,7 +1282,7 @@ ADRهای حداقل:
 - اتصال سالم روزمره
 - هشدار lag یا checksum
 - قطع برنامه‌ریزی‌شده و ناگهانی ایران
-- promotion Iran
+- فعال‌سازی انسانی Iran Writer
 - ورود کاربر با SMS
 - reconnect و backlog drain
 - conflict و oversell quarantine
@@ -1377,7 +1407,7 @@ Gate نهایی:
 2. property/invariant برای ordering/idempotency/conflict
 3. integration با PostgreSQL/Redis/S3-compatible store
 4. Compose runtime test برای role isolation
-5. staging scenario برای network/DNS/lease/reconnect
+5. staging scenario برای network/DNS/manual-handover/fence-receipt/reconnect
 6. browser test برای dashboard و product behavior
 7. load/soak برای lag، backlog، memory، disk و deploy time
 8. restore/rollback drill
@@ -1402,7 +1432,7 @@ Gate نهایی:
 1. Bot و Web روی Finland Primary با یک DB/Redis و بدون sync داخلی دو-سروره اجرا شوند.
 2. Finland دقیقاً یک Telegram owner و Iran صفر Telegram credential داشته باشد.
 3. Iran در حالت عادی standby همگام و product-write-blocked باشد.
-4. promotion انسانی و fencing فنی split-brain را ببندند.
+4. انتقال انسانی، Fence Receipt مبدأ و گارد ترتیب dashboard دو Web Writer را ببندند.
 5. failover، reconnect و failback در staging و سپس با مجوز در production ثابت شوند.
 6. تمام داده‌های shared و Market Facts registry، sequence، ACK، checksum و repair
    قابل اثبات داشته باشند.
