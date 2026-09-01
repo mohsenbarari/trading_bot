@@ -1,5 +1,8 @@
 # Infrastructure
 
+- 2026-09-01 | Finland consolidation is behavior-preserving. An owner-reviewed,
+  read-only current architecture dossier and feature-parity contract must cover
+  every Web/Bot surface, tier/policy, state and side effect before implementation.
 - 2026-09-01 | Web Writer handover is fully human-controlled: no renewable lease,
   timeout-driven role change, or automatic promotion/demotion. The operator can
   reach both sites, fences/drains the source, transfers a signed receipt, verifies

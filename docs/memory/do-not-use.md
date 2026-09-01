@@ -2,6 +2,8 @@
 
 Tombstones are newest first.
 
+- Never mix feature/policy/UX/timing/side-effect/bug changes into the Finland
+  topology refactor; unresolved parity blocks it.
 - Never implement a renewable Web Writer lease, timeout-based role change, or
   automatic promotion/demotion; Writer handover is explicitly human-controlled.
 - Never pass Market gates via synthetic anchors/events, source waiver, evidence deletion, counter/checkpoint reset, or `occurrences` as event cardinality. Redelivery is allowed; duplicate application is not.

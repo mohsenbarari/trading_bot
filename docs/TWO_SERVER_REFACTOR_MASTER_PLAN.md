@@ -175,6 +175,12 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
   مقصد را ثابت می‌کند و در پایان با فرمان جداگانهٔ انسان مقصد را فعال می‌کند.
 - API آروان برای تغییر صریح DNS و عملیات لازم مجاز است؛ credential محلی قدیمی
   باید بدون افشای مقدار، اعتبارسنجی و به secret mount محدود منتقل شود.
+- ادغام دو میزبان Finland یک refactor صرفاً توپولوژیک و behavior-preserving است.
+  هیچ قابلیت، policy، API، callback، متن کاربر، state transition، زمان‌بندی یا
+  side effect نباید پنهانی تغییر کند؛ هر تغییر محصولی change set و تأیید جدا دارد.
+- Web و Bot دو surface متمایزند. `origin_surface` هم provenance تغییرناپذیر و هم
+  ورودی policy نسخه‌دار است؛ اشتراک مدل داده به معنی یکسان‌کردن policyهای وقت
+  اضافه، سطح مشتری، انتشار، محدودیت، تأیید یا notification نیست.
 
 ### نیازمند تأیید در بازبینی این پلن
 
@@ -218,6 +224,11 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
     حذف نمی‌شوند.
 17. `main` شاخهٔ بلندمدت است؛ شاخه‌های plan/implementation پس از merge یا رد
     شدن عمر محدود دارند.
+18. اجرای Stage تغییردهندهٔ Finland قبل از تأیید Current-State Architecture
+    Dossier و Feature Parity Contract ممنوع است؛ رفتار ناشناخته یا اختلاف بی‌توضیح
+    میان current و target، gate را قرمز می‌کند.
+19. bug یا رفتار نامطلوب کشف‌شده در ممیزی، داخل refactor توپولوژی silently fix
+    نمی‌شود؛ ابتدا ثبت و سپس در change set مستقل تصویب یا صریحاً برای parity حفظ می‌شود.
 
 ---
 
@@ -303,7 +314,11 @@ Dependency چرخه‌ای مجاز نیست. دو جفت اتمیک جدول (`
 یکپارچه روی `65.109.214.203` است. Bot و API processهای جدا می‌مانند، اما یک
 دیتابیس، یک Redis و یک مدل authority دارند.
 
-## `P1-00` — baseline و نقشهٔ سطح موجود
+این بخش حق تغییر رفتار Product را ندارد. «یکپارچه‌سازی» به معنی هم‌مکان‌کردن
+runtime و حذف transport داخلی است، نه ادغام handlerها، حذف تفاوت Web/Bot، تغییر
+Policy، اصلاح ضمنی bug یا بازنویسی UX.
+
+## `P1-00` — Current-State Architecture و Behavior Baseline
 
 وضعیت: `PROPOSED`
 
@@ -316,12 +331,40 @@ Dependency چرخه‌ای مجاز نیست. دو جفت اتمیک جدول (`
 - سرویس‌های target Finland و منابع موردنیاز CPU/RAM/disk/network ثبت شوند.
 - وضعیت واقعی SSH، fingerprint و سیستم‌عامل هدف با سند
   `docs/architecture/FINLAND_PRIMARY_TARGET.md` تطبیق داده شود.
+- معماری جاری از روی `main`، migration/schema، compose، env keyها بدون مقدار،
+  deploy/runtime script، test، runbook و evidence خوانده شود؛ فرض از روی نام فایل
+  یا سند قدیمی پذیرفته نیست.
+- با مجوز read-only، واقعیت runtime دو میزبان فعلی شامل image/digest، container،
+  systemd/cron/timer، network، volume/media، DB schema/version، Redis role، Queue،
+  publisher و sync checkpoint با کد تطبیق داده شود. secret value چاپ نمی‌شود.
+- هر اختلاف میان تصمیم مالک، runtime، کد، تست و docs در `CURRENT_DRIFT_REGISTER`
+  ثبت و قبل از تبدیل به requirement تعیین تکلیف شود؛ Cursor حق انتخاب پنهان ندارد.
+- تمام قابلیت‌ها بر اساس surface، نقش و persona ممیزی شوند: Web/Bot/admin/internal،
+  standard/police/manager، accountant، customer tier 1/2 و owner/actor context.
+- login/registration/OTP/session، invitation/relation، offer/request/trade،
+  overtime/expiry/republish، Market/price guard، Messenger/media/realtime، Queue و
+  Telegram publication، notification، parser/estimator، backup/restore و deploy
+  هرکدام dataflow و state machine جاری داشته باشند.
+- برای هر behavior عمومی یا side effect، قرارداد parity با این فیلدها ساخته شود:
+  `behavior_id`, surface/persona/tier، precondition، input، response/status/copy،
+  DB mutation، outbox/event، notification/Telegram effect، ordering، timeout،
+  idempotency، failure behavior، evidence source و regression test.
+- رفتار مشاهده‌شده از رفتار مصوب تفکیک شود. bug شناخته‌شده یا ناسازگاری مبهم نه
+  silently fix می‌شود و نه بدون تصمیم مالک requirement اعلام می‌شود.
 
 خروجی:
 
 - `CURRENT_RUNTIME_INVENTORY.md`
 - `MUTATION_SURFACE_MATRIX.md`
 - `FINLAND_MERGE_DATA_REPORT.md`
+- `CURRENT_FINLAND_ARCHITECTURE_DOSSIER.md`
+- `CURRENT_DATAFLOW_AND_OWNERSHIP.md`
+- `RUNTIME_DEPENDENCY_GRAPH.md`
+- `SURFACE_POLICY_MATRIX.md`
+- `FEATURE_PARITY_CONTRACT.md`
+- `SIDE_EFFECT_AND_JOB_OWNERSHIP.md`
+- `CURRENT_FAILURE_BEHAVIOR_MATRIX.md`
+- `CURRENT_DRIFT_REGISTER.md`
 - baseline زمان deploy، restart، backup، restore و smoke test
 
 Gate خروج:
@@ -329,6 +372,12 @@ Gate خروج:
 - هیچ service یا دادهٔ ناشناخته باقی نماند.
 - هر Telegram token/session دقیقاً یک owner ثبت‌شده داشته باشد.
 - audit هیچ write خارجی انجام ندهد و secret چاپ نکند.
+- هر endpoint، Bot command/callback، background job و side effect جاری یا یک
+  `behavior_id` مصوب دارد یا به‌عنوان blocker ثبت شده است.
+- `SURFACE_POLICY_MATRIX` تفاوت‌های Web/Bot، tierها، overtime، انتشار، quota،
+  confirmation، notification و commission را با evidence و test نشان دهد.
+- مالک Dossier، Drift Register و Feature Parity Contract را پیش از `P1-02..P1-07`
+  که behavior را لمس می‌کنند review کند.
 
 Rollback: چون read-only است، rollback ندارد؛ artifactهای audit طبق retention پاک
 می‌شوند.
@@ -368,6 +417,8 @@ Gate خروج:
 
 - مفاهیم مبهم `foreign/iran` به `site_id=fi|ir`، `runtime_role` و
   `writer_role` تفکیک شوند.
+- `source_surface` و policyهای Web/Bot از topology جدا شوند. surface حق ندارد صرفاً
+  به‌علت `WEBAPP` یا `TELEGRAM_BOT` بودن، home site تاریخی تولید کند.
 - IP/domain/path از runtime code حذف و فقط از manifest معتبر خوانده شوند.
 - `server_mode` قدیمی تا migration کامل adapter سازگار دارد، ولی منبع authority
   جدید نمی‌شود.
@@ -379,6 +430,8 @@ Gate خروج:
 - تغییر IP یا دامنه فقط یک manifest خصوصی و artifactهای تولیدشده را تغییر دهد.
 - runtime از نام «Iran» برای سرور قدیمی فنلاند استفاده نکند.
 - config contradictory پیش از mutation fail شود.
+- API schema، status/error code، callback data و user-facing copy در golden
+  contract نسبت به baseline بدون تغییر بماند.
 
 ## `P1-03` — compose و service ownership هدف Finland
 
@@ -405,6 +458,8 @@ Gate خروج:
 - job ownership برای هر scheduler ثبت و duplicate execution در startup block شود.
 - migration service قبل از app و app قبل از Bot/workerهای side-effect اجرا شود.
 - health به readiness واقعی DB/Redis/migration/queue وابسته باشد، نه فقط process up.
+- co-location مجوز حذف یا یکی‌کردن state machineها، Web/Bot policyها، Queue
+  semantics، callback contract یا notification audience نیست.
 
 Gate خروج:
 
@@ -412,6 +467,8 @@ Gate خروج:
 - mutation Bot بلافاصله در Web از همان DB دیده شود و change loop محلی نسازد.
 - restart API باعث restart اجباری Bot نشود و برعکس.
 - dependency failure، سرویس side-effect را fail-closed کند.
+- contract test ثابت کند response، persistence و side effect هر behavior مصوب با
+  runtime فعلی یکسان است؛ تنها network hop داخلی حذف شده باشد.
 
 ## `P1-04` — دادهٔ مشترک و حذف sync داخلی Finland
 
@@ -423,6 +480,14 @@ Gate خروج:
   cross-site تبدیل شود.
 - eventهای محلی Bot/Web با `origin_site=fi` و `origin_surface` ثبت شوند، اما فقط
   یک‌بار به Iran منتشر شوند.
+- `origin_surface` immutable و ورودی `SURFACE_POLICY_MATRIX` است. اشتراک Offer،
+  OfferRequest و Trade به معنی policy یکسان نیست؛ tier 2، overtime، publication،
+  confirmation، quota، notification و commission باید رفتار فعلی خود را حفظ کنند.
+- offer/request می‌توانند surfaceهای متفاوت داشته باشند؛ authority از `home_site`
+  و policy از context نسخه‌دار می‌آید. `request_source_surface`، tier/role snapshot،
+  workflow و `policy_version` برای audit و replay حفظ شوند.
+- نگاشت legacy در `offer_home_server_for_source` و مشابه آن ممیزی شود: topology
+  تاریخی حذف می‌شود، اما تفاوت محصولی surfaceها نباید همراه آن پاک شود.
 - تمام side-effect ledgerهای Telegram local باقی بمانند.
 - stable identity و field policy برای offer/trade/message/media بررسی شود.
 - هر listener/bulk update که outbox را دور می‌زند اصلاح یا صریحاً local اعلام شود.
@@ -432,6 +497,8 @@ Gate خروج:
 - receiver coverage، registry coverage و event emission به‌صورت CI مقایسه شوند.
 - هیچ event محلی به همان دیتابیس loopback نشود.
 - duplicate surface Web/Bot یک logical event را دوبار به Market یا sync ندهد.
+- تست ماتریسی ثابت کند هر ترکیب مصوب offer-surface × request-surface × role/tier
+  همان eligibility، workflow، پاسخ، persistence و side effect فعلی را دارد.
 
 ## `P1-05` — rehearsal ادغام دادهٔ دو Finland
 
@@ -449,6 +516,8 @@ Gate خروج:
 
 - raw row overwrite ممنوع است.
 - users/relations/invitations/offer/trade/media هرکدام policy مشخص دارند.
+- origin surface، request surface، role/tier snapshot، workflow و policy version
+  هنگام merge حفظ می‌شوند و از روی محل فیزیکی target بازسازی نمی‌شوند.
 - money/inventory conflict فقط report/quarantine؛ نه auto LWW.
 - Redis source of truth محسوب نمی‌شود؛ فقط state موردنیاز queue/session با قرارداد
   خودش migrate می‌شود.
@@ -472,12 +541,18 @@ Gate خروج:
 - backup/restore و application rollback
 - بار واقعی و disk/memory headroom
 - قطع موقت Object Storage بدون خرابی product محلی
+- differential replay یک corpus ثابت روی current و target برای Web/Bot، roleها،
+  tier 1/2، accountant، overtime، publication، failure و retry
+- مقایسهٔ normalized API response، Bot callback result، DB business hash، outbox،
+  Queue/notification audience و side effect ledger؛ side effect خارجی در shadow fake است
 
 Gate خروج:
 
 - full functional matrix و browser matrix سبز باشد.
 - latency و resource baseline بدتر از budget مصوب نباشد.
 - Telegram identity readback هیچ collision نشان ندهد.
+- تمام `behavior_id`های Feature Parity Contract تست passing داشته باشند و هیچ
+  اختلاف response/state/side-effect/timing بدون waiver صریح مالک باقی نماند.
 
 ## `P1-07` — cutover کنترل‌شده به Finland Primary
 
@@ -506,6 +581,8 @@ Gate خروج:
 
 - target تنها Web Writer و Telegram owner است.
 - no-op release و rollback واقعی اندازه‌گیری شده‌اند.
+- Feature Parity Contract کامل و Dossier مصوب است؛ topology تنها تفاوت عمدی ثبت‌شده
+  میان current و target است.
 - decommission تا پایان retention و تأیید backup انجام نمی‌شود.
 
 ## `P1-08` — closure و حذف بدهی توپولوژی قدیمی
@@ -871,8 +948,9 @@ quality_state, parser_version, payload_hash, lineage
 - Iran: بورس/IME و USDT را دریافت و از Object Storage به Finland می‌فرستد.
 - Finland: G1/G2، منابع تلگرامی طلا/آب‌شده/اونس قابل دسترس و Product Events را
   به Iran می‌فرستد.
-- Web/Bot offer/trade از دیتابیس محصول materialize می‌شوند و surface فقط metadata
-  است؛ یک logical event دوبار شمرده نمی‌شود.
+- Web/Bot offer/trade از دیتابیس محصول materialize می‌شوند؛ surface هم provenance
+  و هم policy input نسخه‌دار است، اما وزن estimator فقط طبق policy علمی مصوب تغییر
+  می‌کند و یک logical event دوبار شمرده نمی‌شود.
 - snapshot نهایی هر inference برای parity و audit سینک می‌شود.
 
 در قطعی:
