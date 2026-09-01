@@ -1,0 +1,236 @@
+{
+  "schema_version": "two-server-refactor.runtime-task-ownership.v1",
+  "observed_date": "2026-09-01 UTC",
+  "scope": "current code composition plus read-only production observation",
+  "invariants": [
+    "one API leader per application runtime",
+    "one Telegram polling/execution owner globally",
+    "Queue-v1 and legacy Telegram delivery worker sets are mutually exclusive",
+    "Web Writer fencing does not stop permitted Bot-home mutations",
+    "Market ownership is finalized in section P3 and may not be inferred from historical host labels"
+  ],
+  "entries": [
+    {
+      "task_id": "API-LEADER-COORDINATOR",
+      "process": "web_api",
+      "current_owner": "one Redis-elected API worker per role runtime",
+      "target_capability": "API_BACKGROUND_LEADER",
+      "source": "main.py:_run_background_leader",
+      "state_or_side_effect": "starts/stops the allowed API job set; Redis leader lock",
+      "target_status": "MUST_REMAIN_SINGLETON"
+    },
+    {
+      "task_id": "JOB-CONNECTIVITY-MONITOR",
+      "process": "web_api_leader",
+      "current_owner": "historical iran/Web-Finland",
+      "target_capability": "WEB_OBSERVABILITY_OWNER",
+      "source": "main.py:_background_job_factories",
+      "state_or_side_effect": "local Redis connectivity state",
+      "target_status": "CAPABILITY_REMAP_REQUIRED"
+    },
+    {
+      "task_id": "JOB-OFFER-EXPIRY",
+      "process": "web_api_leader",
+      "current_owner": "both roles for local-home Offers",
+      "target_capability": "HOME_SITE_OFFER_AUTHORITY",
+      "source": "core/background_job_authority.py",
+      "state_or_side_effect": "Offer expiry, outbox, realtime/cache and Telegram terminal state",
+      "target_status": "ONE_DISPATCHER_IDEMPOTENT_COMMAND_REQUIRED"
+    },
+    {
+      "task_id": "JOB-MARKET-SCHEDULE",
+      "process": "web_api_leader",
+      "current_owner": "split authoritative state and Bot-local effects",
+      "target_capability": "MARKET_SCHEDULE_AUTHORITY_PLUS_IDEMPOTENT_SURFACE_EFFECTS",
+      "source": "core/background_job_authority.py",
+      "state_or_side_effect": "market state, Offer expiry, realtime and Telegram notice",
+      "target_status": "CAPABILITY_SPLIT_REQUIRED"
+    },
+    {
+      "task_id": "JOB-SESSION-EXPIRY",
+      "process": "web_api_leader",
+      "current_owner": "each Web/local session runtime",
+      "target_capability": "WEB_LOCAL_SESSION_OWNER",
+      "source": "core/session_expiry.py",
+      "state_or_side_effect": "local user_sessions cleanup",
+      "target_status": "PRESERVE_LOCAL_ONLY"
+    },
+    {
+      "task_id": "JOB-USER-ACCOUNT-STATUS",
+      "process": "web_api_leader",
+      "current_owner": "historical iran/Web-Finland",
+      "target_capability": "SHARED_ACCOUNT_AUTHORITY",
+      "source": "core/user_account_status_loop.py",
+      "state_or_side_effect": "users, notifications and local session revocation",
+      "target_status": "CAPABILITY_REMAP_REQUIRED"
+    },
+    {
+      "task_id": "JOB-TRADE-WEB-DELIVERY",
+      "process": "web_api_leader",
+      "current_owner": "historical iran/Web-Finland",
+      "target_capability": "WEB_DELIVERY_OWNER",
+      "source": "core/trade_delivery_worker.py",
+      "state_or_side_effect": "receipt, realtime notification and Web Push",
+      "target_status": "CAPABILITY_REMAP_REQUIRED"
+    },
+    {
+      "task_id": "JOB-TRADE-TELEGRAM-DELIVERY-LEGACY",
+      "process": "api_leader_in_current_legacy_composition",
+      "current_owner": "foreign/Telegram authority when legacy workers are enabled",
+      "target_capability": "TELEGRAM_OWNER",
+      "source": "main.py:_background_job_factories",
+      "state_or_side_effect": "Telegram trade message and delivery receipt",
+      "target_status": "MUST_NOT_RUN_IN_TOKEN_FREE_WEB_API_PROCESS"
+    },
+    {
+      "task_id": "JOB-OTP-SMS-FALLBACK",
+      "process": "web_api_leader",
+      "current_owner": "conditional historical Iran runtime",
+      "target_capability": "WEB_SMS_OWNER_WHERE_PROVIDER_REACHABLE",
+      "source": "core/otp_sms_fallback_worker.py",
+      "state_or_side_effect": "SMS provider request and durable delivery state",
+      "target_status": "SECTION_P2_AUTHORITY_REQUIRED"
+    },
+    {
+      "task_id": "JOB-TELEGRAM-REGISTRATION-RECONCILIATION",
+      "process": "web_api_leader_or_bot_by_current_mode",
+      "current_owner": "foreign/Telegram authority when runtime-ready",
+      "target_capability": "TELEGRAM_OWNER",
+      "source": "core/telegram_registration_reconciliation_worker.py",
+      "state_or_side_effect": "registration receipts/intents and Telegram delivery",
+      "target_status": "MOVE_OUT_OF_SERVER_LABEL_CHECK"
+    },
+    {
+      "task_id": "BOT-PRIMARY-POLLER",
+      "process": "bot_primary",
+      "current_owner": "Bot-Finland primary identity",
+      "target_capability": "TELEGRAM_OWNER_PRIMARY_POLLER",
+      "source": "run_bot.py:supervise_pollers",
+      "state_or_side_effect": "Telegram updates and callback/message dispatch",
+      "target_status": "EXACTLY_ONE"
+    },
+    {
+      "task_id": "BOT-PUBLISHER-POLLERS",
+      "process": "bot_publishers",
+      "current_owner": "conditional publisher_1..5 identities",
+      "target_capability": "TELEGRAM_OWNER_PUBLISHER_LANES",
+      "source": "run_bot.py:configured_publisher_b2b_pollers",
+      "state_or_side_effect": "publisher callbacks and B2B ACK/dispatch messages",
+      "target_status": "CONDITIONAL_DISJOINT_IDENTITIES"
+    },
+    {
+      "task_id": "BOT-TRADE-SUGGESTION-LISTENER",
+      "process": "bot_primary",
+      "current_owner": "Bot-Finland primary",
+      "target_capability": "TELEGRAM_OWNER",
+      "source": "run_bot.py:listen_trade_suggestion_events",
+      "state_or_side_effect": "Redis event consumption and Telegram suggestion",
+      "target_status": "PRESERVE_SINGLE_CONSUMER"
+    },
+    {
+      "task_id": "BOT-CENTRAL-POLLER-OWNER-MONITOR",
+      "process": "bot_primary",
+      "current_owner": "holder of central poller ownership",
+      "target_capability": "TELEGRAM_OWNER_GUARD",
+      "source": "core/telegram_central_poller_owner.py",
+      "state_or_side_effect": "fails process when ownership is lost",
+      "target_status": "PRESERVE_FAIL_CLOSED"
+    },
+    {
+      "task_id": "BOT-PUBLISHER-DISPATCHER",
+      "process": "bot_primary",
+      "current_owner": "conditional central primary in B2B mode",
+      "target_capability": "TELEGRAM_OWNER_DISPATCH",
+      "source": "run_bot.py:configured_publisher_dispatch_worker_factory",
+      "state_or_side_effect": "publisher dispatch commands and queue cadence",
+      "target_status": "CONDITIONAL_SINGLETON"
+    },
+    {
+      "task_id": "BOT-QUEUE-V1-EXECUTOR",
+      "process": "bot_executor_role",
+      "current_owner": "one queue owner lease and disjoint identity set",
+      "target_capability": "TELEGRAM_OWNER_QUEUE_EXECUTOR",
+      "source": "run_bot.py:configured_telegram_delivery_queue_worker_factory",
+      "state_or_side_effect": "Telegram provider calls, claims, ACKs and outcomes",
+      "target_status": "MUTUALLY_EXCLUSIVE_WITH_LEGACY_SET"
+    },
+    {
+      "task_id": "BOT-OTP-EPHEMERAL-WORKER",
+      "process": "bot_executor_role",
+      "current_owner": "Queue-v1 role owning OTP",
+      "target_capability": "TELEGRAM_OWNER_OTP",
+      "source": "core/services/telegram_otp_ephemeral_queue.py",
+      "state_or_side_effect": "encrypted Redis OTP command and Telegram delivery",
+      "target_status": "SAME_OWNER_SET_AS_QUEUE_ROLE"
+    },
+    {
+      "task_id": "BOT-LEGACY-DELIVERY-SET",
+      "process": "bot_primary_legacy_mode",
+      "current_owner": "Bot-Finland when Queue-v1 is disabled",
+      "target_capability": "TELEGRAM_OWNER_LEGACY_ONLY",
+      "source": "run_bot.py:telegram_execution_worker_factories",
+      "state_or_side_effect": "Offer publication, trade, admin broadcast, notification and market notice delivery",
+      "target_status": "FIVE_WORKERS_ALL_OR_NOTHING_AND_EXCLUSIVE_WITH_QUEUE_V1"
+    },
+    {
+      "task_id": "MARKET-CAPTURE-SET",
+      "process": "market_capture_account1_account2_external",
+      "current_owner": "current Web-Finland",
+      "target_capability": "FINLAND_MARKET_CAPTURE",
+      "source": "read-only runtime inventory",
+      "state_or_side_effect": "Telegram/external raw events and Market Facts",
+      "target_status": "SECTION_P3_MAPPING_REQUIRED"
+    },
+    {
+      "task_id": "MARKET-ARCHIVE-PROCESSOR",
+      "process": "market_postgres_processor_fact_sync",
+      "current_owner": "current Web-Finland",
+      "target_capability": "FINLAND_MARKET_STORE_OWNER",
+      "source": "read-only runtime inventory",
+      "state_or_side_effect": "Market archive, revisions, outbox and fact transfer",
+      "target_status": "SECTION_P3_MAPPING_REQUIRED"
+    },
+    {
+      "task_id": "MARKET-ESTIMATOR",
+      "process": "coin_estimator",
+      "current_owner": "current Bot-Finland",
+      "target_capability": "FINLAND_ESTIMATOR_OWNER",
+      "source": "read-only runtime inventory",
+      "state_or_side_effect": "model inference and snapshot artifact",
+      "target_status": "SECTION_P3_MAPPING_REQUIRED"
+    },
+    {
+      "task_id": "MARKET-FACT-SNAPSHOT-TRANSPORT",
+      "process": "fact_receiver_store_adapter_snapshot_sender_receiver",
+      "current_owner": "split across both current Finland hosts",
+      "target_capability": "LOCAL_FINLAND_DATA_PLANE_THEN_CROSS_SITE_TRANSPORT",
+      "source": "read-only runtime inventory",
+      "state_or_side_effect": "fact ingestion and estimator snapshot transfer",
+      "target_status": "REMOVE_INTERNAL_FINLAND_HOP_PRESERVE_IRAN_CONTRACT"
+    },
+    {
+      "task_id": "SYSTEMD-PRODUCTION-MARKET-TIMERS",
+      "process": "snapshot_relay_and_sync_health_timers",
+      "current_owner": "current Bot-Finland host systemd",
+      "target_capability": "OPS_OR_MARKET_OWNER",
+      "source": "read-only runtime inventory",
+      "state_or_side_effect": "snapshot relay and sync-health evidence",
+      "target_status": "P3_P4_MANIFEST_REQUIRED"
+    },
+    {
+      "task_id": "OBSOLETE-STAGING-AND-THREE-SITE-RUNTIMES",
+      "process": "staging_containers_timers_and_three_site_stack",
+      "current_owner": "both production hosts",
+      "target_capability": "NONE_AFTER_PROVEN_DECOMMISSION",
+      "source": "read-only runtime inventory",
+      "state_or_side_effect": "unknown traffic/job/data risk until audited",
+      "target_status": "BLOCKED_DECOMMISSION_MANIFEST_REQUIRED"
+    }
+  ],
+  "open_gates": [
+    "bind every target task to exact compose service, image, secret mount, DB/Redis pool and readiness probe in P1-03",
+    "prove Queue-v1 versus legacy selection and publisher roles cannot overlap",
+    "finalize Market capture/store/estimator ownership in P3",
+    "prove obsolete staging/three-site runtimes have zero traffic, writes, credentials and schedules before decommission"
+  ]
+}

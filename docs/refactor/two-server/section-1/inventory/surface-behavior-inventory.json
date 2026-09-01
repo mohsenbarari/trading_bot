@@ -1,0 +1,165 @@
+{
+  "schema_version": "two-server-refactor.surface-behavior-inventory.v1",
+  "generated_from_commit": "19087ff0686c9260b55f1c6c35782b758be6673e",
+  "generated_date": "2026-09-01 UTC",
+  "scope": "read-only static inventory; framework-generated FastAPI docs/openapi routes excluded",
+  "taxonomy": [
+    "AUTH",
+    "IDENTITY",
+    "OFFER",
+    "REQUEST",
+    "TRADE",
+    "MARKET",
+    "MSG",
+    "NOTIFY",
+    "TG",
+    "ADMIN",
+    "SYNC",
+    "OPS"
+  ],
+  "counts": {
+    "live_api_decorators_including_main": 217,
+    "api_router_decorators": 213,
+    "main_app_decorators": 4,
+    "bot_handler_decorators": 203,
+    "web_routes": 30,
+    "background_job_authority_entries": 15
+  },
+  "coverage": {
+    "api": {
+      "total": 217,
+      "family_counts": {
+        "ADMIN": 22,
+        "AUTH": 45,
+        "IDENTITY": 38,
+        "MARKET": 2,
+        "MSG": 59,
+        "NOTIFY": 14,
+        "OFFER": 12,
+        "OPS": 4,
+        "REQUEST": 7,
+        "SYNC": 5,
+        "TRADE": 9
+      },
+      "with_direct_static_test_reference": 216,
+      "without_direct_static_test_reference": 1,
+      "unclassified": 0
+    },
+    "bot": {
+      "total": 203,
+      "family_counts": {
+        "ADMIN": 66,
+        "IDENTITY": 24,
+        "OFFER": 23,
+        "REQUEST": 2,
+        "TG": 39,
+        "TRADE": 49
+      },
+      "with_direct_static_test_reference": 198,
+      "without_direct_static_test_reference": 5,
+      "unclassified": 0
+    },
+    "web": {
+      "total": 30,
+      "family_counts": {
+        "ADMIN": 6,
+        "AUTH": 3,
+        "IDENTITY": 11,
+        "MSG": 2,
+        "NOTIFY": 2,
+        "OFFER": 1,
+        "OPS": 5
+      },
+      "with_direct_static_test_reference": 30,
+      "without_direct_static_test_reference": 0,
+      "unclassified": 0
+    },
+    "jobs": {
+      "total": 15,
+      "family_counts": {
+        "AUTH": 2,
+        "IDENTITY": 2,
+        "MARKET": 2,
+        "OFFER": 2,
+        "OPS": 1,
+        "SYNC": 1,
+        "TG": 3,
+        "TRADE": 2
+      },
+      "with_direct_static_test_reference": 15,
+      "without_direct_static_test_reference": 0,
+      "unclassified": 0
+    }
+  },
+  "known_inventory_boundaries": [
+    "src/interfaces/http_api/routers/user_router.py declares four routes but is not mounted by main.py; it is recorded as dormant code, not a live endpoint.",
+    "Bot publisher B2B and channel callback routers are conditional runtime surfaces but are included in the handler inventory.",
+    "The 15 job authority entries do not enumerate every child coroutine, feeder, poller, systemd timer, or Market container loop; runtime-task ownership remains a separate blocker report.",
+    "Direct test reference means static function/name occurrence only; absence is a review queue, not proof that behavior is untested.",
+    "A family-seeded behavior_id is not a complete scenario contract until persona/tier/time/failure/side-effect variants are linked."
+  ],
+  "dormant_declared_surfaces": [
+    {
+      "path": "src/interfaces/http_api/routers/user_router.py",
+      "declared_route_count": 4,
+      "runtime_mount_evidence": "NOT_FOUND_IN_MAIN",
+      "classification": "DORMANT_INCREMENTAL_CLEAN_ARCHITECTURE_CODE"
+    }
+  ],
+  "family_contracts": {
+    "AUTH": {
+      "authority": "WEB_LOCAL_OR_WEB_WRITER",
+      "risk": "session/OTP/SMS/Telegram identity"
+    },
+    "IDENTITY": {
+      "authority": "WEB_WRITER_OR_DOMAIN_AUTHORITY",
+      "risk": "user/relation/block/registration"
+    },
+    "OFFER": {
+      "authority": "WEB_WRITER_OR_TELEGRAM_OWNER_PLUS_HOME_SITE",
+      "risk": "offer/publication/overtime"
+    },
+    "REQUEST": {
+      "authority": "SURFACE_AUTHORITY_PLUS_HOME_SITE",
+      "risk": "request/confirmation/idempotency"
+    },
+    "TRADE": {
+      "authority": "SURFACE_AUTHORITY_PLUS_HOME_SITE",
+      "risk": "trade/settlement/delivery"
+    },
+    "MARKET": {
+      "authority": "MARKET_DOMAIN_AUTHORITY",
+      "risk": "schedule/facts/estimate/guard"
+    },
+    "MSG": {
+      "authority": "WEB_LOCAL",
+      "risk": "message/media/realtime/push"
+    },
+    "NOTIFY": {
+      "authority": "PRODUCER_AUTHORITY_PLUS_LOCAL_DELIVERY",
+      "risk": "audience/unread/Web Push"
+    },
+    "TG": {
+      "authority": "TELEGRAM_OWNER",
+      "risk": "poll/callback/queue/provider side effect"
+    },
+    "ADMIN": {
+      "authority": "WEB_WRITER_OR_SHARED_ADMIN_AUTHORITY",
+      "risk": "settings/commodity/broadcast"
+    },
+    "SYNC": {
+      "authority": "LOCAL_CROSS_SITE_OUTBOX_OWNER",
+      "risk": "apply/dedupe/gap/repair"
+    },
+    "OPS": {
+      "authority": "LOCAL_ONLY_OR_EXPLICIT_OPERATOR",
+      "risk": "health/config/frontend shell"
+    }
+  },
+  "files": {
+    "api": "surface-api.json",
+    "bot": "surface-bot.json",
+    "web": "surface-web.json",
+    "jobs": "surface-jobs.json"
+  }
+}

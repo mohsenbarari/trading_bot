@@ -1,0 +1,2428 @@
+{
+  "schema_version": "two-server-refactor.surface-behavior-inventory.v1",
+  "generated_from_commit": "19087ff0686c9260b55f1c6c35782b758be6673e",
+  "section": "bot",
+  "coverage": {
+    "total": 203,
+    "family_counts": {
+      "ADMIN": 66,
+      "IDENTITY": 24,
+      "OFFER": 23,
+      "REQUEST": 2,
+      "TG": 39,
+      "TRADE": 49
+    },
+    "with_direct_static_test_reference": 198,
+    "without_direct_static_test_reference": 5,
+    "unclassified": 0
+  },
+  "entries": [
+    {
+      "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-START-INVITATION-CREATION-L140",
+      "family": "ADMIN",
+      "kind": "message",
+      "filter": "F.text == '➕ ارسال لینک دعوت'",
+      "handler": "admin.start_invitation_creation",
+      "source": "bot/handlers/admin.py:140",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_start_creation.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-START-INVITATION-CREATION-INLINE-L160",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data == 'create_invitation_inline'",
+      "handler": "admin.start_invitation_creation_inline",
+      "source": "bot/handlers/admin.py:160",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_start_creation.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-ACCOUNT-NAME-L183",
+      "family": "ADMIN",
+      "kind": "message",
+      "filter": "InvitationCreation.awaiting_account_name",
+      "handler": "admin.process_invitation_account_name",
+      "source": "bot/handlers/admin.py:183",
+      "test_refs": [
+        "tests/test_bot_admin_account_name.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-MOBILE-L230",
+      "family": "ADMIN",
+      "kind": "message",
+      "filter": "InvitationCreation.awaiting_mobile_number",
+      "handler": "admin.process_invitation_mobile",
+      "source": "bot/handlers/admin.py:230",
+      "test_refs": [
+        "tests/test_bot_admin_mobile.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-PROCESS-INVITATION-ROLE-L278",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "InvitationCreation.awaiting_role",
+      "handler": "admin.process_invitation_role",
+      "source": "bot/handlers/admin.py:278",
+      "test_refs": [
+        "tests/test_bot_admin_role.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-CANCEL-INVITATION-CREATION-L402",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data == 'comm_fsm_cancel', StateFilter(InvitationCreation)",
+      "handler": "admin.cancel_invitation_creation",
+      "source": "bot/handlers/admin.py:402",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_cancel.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-BROADCAST-START-TELEGRAM-ADMIN-BROADCAST-L179",
+      "family": "ADMIN",
+      "kind": "message",
+      "filter": "F.text == ADMIN_BROADCAST_BUTTON_TEXT",
+      "handler": "admin_broadcast.start_telegram_admin_broadcast",
+      "source": "bot/handlers/admin_broadcast.py:179",
+      "test_refs": [
+        "tests/test_bot_admin_broadcast_handler.py",
+        "tests/test_bot_admin_broadcast_interaction_queue.py",
+        "tests/test_bot_panel_navigation_handoff.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CANCEL-TELEGRAM-ADMIN-BROADCAST-L194",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data == f'{CALLBACK_PREFIX}:cancel'",
+      "handler": "admin_broadcast.cancel_telegram_admin_broadcast",
+      "source": "bot/handlers/admin_broadcast.py:194",
+      "test_refs": [
+        "tests/test_telegram_delivery_queue_limiter_redis.py",
+        "tests/test_telegram_delivery_queue_limiter.py",
+        "tests/test_bot_overtime_callbacks_contract.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CHOOSE-ALL-RECIPIENTS-L208",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data == f'{CALLBACK_PREFIX}:all'",
+      "handler": "admin_broadcast.choose_all_recipients",
+      "source": "bot/handlers/admin_broadcast.py:208",
+      "test_refs": [
+        "tests/test_telegram_delivery_queue_postgres.py",
+        "tests/test_bot_admin_broadcast_interaction_queue.py",
+        "tests/test_core_cache.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CHOOSE-GROUP-RECIPIENTS-L221",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data == f'{CALLBACK_PREFIX}:groups'",
+      "handler": "admin_broadcast.choose_group_recipients",
+      "source": "bot/handlers/admin_broadcast.py:221",
+      "test_refs": [
+        "tests/test_bot_admin_broadcast_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-TOGGLE-GROUP-RECIPIENT-L240",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith(f'{CALLBACK_PREFIX}:gt:')",
+      "handler": "admin_broadcast.toggle_group_recipient",
+      "source": "bot/handlers/admin_broadcast.py:240",
+      "test_refs": []
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-FINISH-GROUP-SELECTION-L270",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data == f'{CALLBACK_PREFIX}:groups_done'",
+      "handler": "admin_broadcast.finish_group_selection",
+      "source": "bot/handlers/admin_broadcast.py:270",
+      "test_refs": [
+        "tests/test_bot_admin_broadcast_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CHOOSE-SELECTED-RECIPIENTS-L286",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data == f'{CALLBACK_PREFIX}:selected'",
+      "handler": "admin_broadcast.choose_selected_recipients",
+      "source": "bot/handlers/admin_broadcast.py:286",
+      "test_refs": [
+        "tests/test_bot_admin_broadcast_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-BROADCAST-PROCESS-SELECTED-RECIPIENT-SEARCH-L308",
+      "family": "ADMIN",
+      "kind": "message",
+      "filter": "AdminBroadcast.awaiting_search_query",
+      "handler": "admin_broadcast.process_selected_recipient_search",
+      "source": "bot/handlers/admin_broadcast.py:308",
+      "test_refs": [
+        "tests/test_bot_admin_broadcast_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-TOGGLE-SELECTED-USER-L334",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith(f'{CALLBACK_PREFIX}:tu:')",
+      "handler": "admin_broadcast.toggle_selected_user",
+      "source": "bot/handlers/admin_broadcast.py:334",
+      "test_refs": [
+        "tests/test_bot_admin_broadcast_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-SEARCH-AGAIN-L377",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data == f'{CALLBACK_PREFIX}:search_again'",
+      "handler": "admin_broadcast.search_again",
+      "source": "bot/handlers/admin_broadcast.py:377",
+      "test_refs": [
+        "tests/test_bot_admin_broadcast_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-FINISH-SELECTED-RECIPIENTS-L395",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data == f'{CALLBACK_PREFIX}:selected_done'",
+      "handler": "admin_broadcast.finish_selected_recipients",
+      "source": "bot/handlers/admin_broadcast.py:395",
+      "test_refs": [
+        "tests/test_bot_admin_broadcast_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-BROADCAST-PROCESS-BROADCAST-MESSAGE-TEXT-L411",
+      "family": "ADMIN",
+      "kind": "message",
+      "filter": "AdminBroadcast.awaiting_message_text",
+      "handler": "admin_broadcast.process_broadcast_message_text",
+      "source": "bot/handlers/admin_broadcast.py:411",
+      "test_refs": [
+        "tests/test_telegram_admin_broadcast_video.py",
+        "tests/test_bot_admin_broadcast_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CONFIRM-TELEGRAM-ADMIN-BROADCAST-L593",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "AdminBroadcast.awaiting_confirmation, F.data == f'{CALLBACK_PREFIX}:confirm'",
+      "handler": "admin_broadcast.confirm_telegram_admin_broadcast",
+      "source": "bot/handlers/admin_broadcast.py:593",
+      "test_refs": [
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
+        "tests/test_telegram_admin_broadcast_video.py",
+        "tests/test_bot_admin_broadcast_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-MANAGE-COMMODITIES-L305",
+      "family": "ADMIN",
+      "kind": "message",
+      "filter": "F.text == '📦 مدیریت کالاها'",
+      "handler": "admin_commodities.handle_manage_commodities",
+      "source": "bot/handlers/admin_commodities.py:305",
+      "test_refs": [
+        "tests/test_bot_admin_commodities_entry_points.py",
+        "tests/test_bot_commodity_catalog.py",
+        "tests/test_bot_panel_navigation_handoff.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-BACK-TO-LIST-L318",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data == 'comm_back_to_list', StateFilter('*')",
+      "handler": "admin_commodities.handle_back_to_list",
+      "source": "bot/handlers/admin_commodities.py:318",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_commodities_entry_points.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-MANAGE-ALIASES-L333",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('comm_manage_aliases_')",
+      "handler": "admin_commodities.handle_manage_aliases",
+      "source": "bot/handlers/admin_commodities.py:333",
+      "test_refs": [
+        "tests/test_bot_admin_commodities_entry_points.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ALIAS-ADD-START-L350",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('alias_add_'), StateFilter(None)",
+      "handler": "admin_commodities.handle_alias_add_start",
+      "source": "bot/handlers/admin_commodities.py:350",
+      "test_refs": [
+        "tests/test_bot_admin_commodities_alias_add.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-ALIAS-ADD-NAME-L365",
+      "family": "ADMIN",
+      "kind": "message",
+      "filter": "CommodityManagement.awaiting_alias_add_name",
+      "handler": "admin_commodities.handle_alias_add_name",
+      "source": "bot/handlers/admin_commodities.py:365",
+      "test_refs": [
+        "tests/test_bot_admin_commodities_alias_add.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ALIAS-EDIT-START-L408",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('alias_edit_'), StateFilter(None)",
+      "handler": "admin_commodities.handle_alias_edit_start",
+      "source": "bot/handlers/admin_commodities.py:408",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_commodities_alias_delete.py",
+        "tests/test_bot_admin_commodities_alias_edit.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-ALIAS-EDIT-NAME-L429",
+      "family": "ADMIN",
+      "kind": "message",
+      "filter": "CommodityManagement.awaiting_alias_edit_name",
+      "handler": "admin_commodities.handle_alias_edit_name",
+      "source": "bot/handlers/admin_commodities.py:429",
+      "test_refs": [
+        "tests/test_bot_admin_commodities_alias_edit.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ALIAS-DELETE-START-L466",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('alias_delete_'), StateFilter(None)",
+      "handler": "admin_commodities.handle_alias_delete_start",
+      "source": "bot/handlers/admin_commodities.py:466",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_commodities_alias_delete.py",
+        "tests/test_bot_admin_commodities_alias_edit.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ALIAS-DELETE-YES-L487",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('alias_delete_confirm_yes_'), StateFilter(CommodityManagement.awaiting_alias_delete_confirm)",
+      "handler": "admin_commodities.handle_alias_delete_yes",
+      "source": "bot/handlers/admin_commodities.py:487",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_commodities_alias_delete.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-COMMODITY-EDIT-START-L523",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('comm_edit_name_'), StateFilter(None)",
+      "handler": "admin_commodities.handle_commodity_edit_start",
+      "source": "bot/handlers/admin_commodities.py:523",
+      "test_refs": [
+        "tests/test_bot_admin_commodities_commodity_edit.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-COMMODITY-EDIT-NAME-L537",
+      "family": "ADMIN",
+      "kind": "message",
+      "filter": "CommodityManagement.awaiting_commodity_edit_name",
+      "handler": "admin_commodities.handle_commodity_edit_name",
+      "source": "bot/handlers/admin_commodities.py:537",
+      "test_refs": [
+        "tests/test_bot_admin_commodities_commodity_edit.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ADD-START-L572",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data == 'comm_add_new', StateFilter(None)",
+      "handler": "admin_commodities.handle_add_start",
+      "source": "bot/handlers/admin_commodities.py:572",
+      "test_refs": [
+        "tests/test_bot_admin_commodities_add_flow.py",
+        "tests/test_bot_admin_commodities_show_list.py",
+        "tests/test_bot_admin_commodities_add_create.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-ADD-NAME-L583",
+      "family": "ADMIN",
+      "kind": "message",
+      "filter": "CommodityManagement.awaiting_add_name",
+      "handler": "admin_commodities.handle_add_name",
+      "source": "bot/handlers/admin_commodities.py:583",
+      "test_refs": [
+        "tests/test_bot_admin_commodities_add_flow.py",
+        "tests/test_bot_admin_commodities_add_create.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-ADD-ALIASES-AND-CREATE-L622",
+      "family": "ADMIN",
+      "kind": "message",
+      "filter": "CommodityManagement.awaiting_add_aliases",
+      "handler": "admin_commodities.handle_add_aliases_and_create",
+      "source": "bot/handlers/admin_commodities.py:622",
+      "test_refs": [
+        "tests/test_bot_admin_commodities_add_create.py",
+        "tests/test_bot_admin_commodities_add_aliases_create.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-DELETE-CONFIRM-L671",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('comm_delete_'), StateFilter(None)",
+      "handler": "admin_commodities.handle_delete_confirm",
+      "source": "bot/handlers/admin_commodities.py:671",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_commodities_delete_cancel.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-DELETE-YES-L685",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('comm_delete_confirm_yes_'), StateFilter(CommodityManagement.awaiting_delete_confirmation)",
+      "handler": "admin_commodities.handle_delete_yes",
+      "source": "bot/handlers/admin_commodities.py:685",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_commodities_delete_cancel.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-CANCEL-FSM-L719",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data == 'comm_fsm_cancel', StateFilter('*')",
+      "handler": "admin_commodities.handle_cancel_fsm",
+      "source": "bot/handlers/admin_commodities.py:719",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_commodities_delete_cancel.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-EDIT-ROLE-L1078",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('user_edit_role_')",
+      "handler": "admin_users.handle_user_edit_role",
+      "source": "bot/handlers/admin_users.py:1078",
+      "test_refs": [
+        "tests/test_bot_admin_users_role_actions.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-SET-USER-ROLE-L1090",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('set_user_role_')",
+      "handler": "admin_users.handle_set_user_role",
+      "source": "bot/handlers/admin_users.py:1090",
+      "test_refs": [
+        "tests/test_bot_admin_users_role_actions.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-TOGGLE-ACCOUNT-STATUS-L1134",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('user_toggle_account_status_')",
+      "handler": "admin_users.handle_user_toggle_account_status",
+      "source": "bot/handlers/admin_users.py:1134",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_users_bot_access.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-DELETE-REQUEST-L1186",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('user_ask_delete_')",
+      "handler": "admin_users.handle_user_delete_request",
+      "source": "bot/handlers/admin_users.py:1186",
+      "test_refs": [
+        "tests/test_bot_admin_users_delete_flow.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-DELETE-CONFIRM-L1203",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('user_delete_confirm_')",
+      "handler": "admin_users.handle_user_delete_confirm",
+      "source": "bot/handlers/admin_users.py:1203",
+      "test_refs": [
+        "tests/test_bot_admin_users_delete_flow.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-LIMIT-START-L1252",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('user_limit_')",
+      "handler": "admin_users.handle_user_limit_start",
+      "source": "bot/handlers/admin_users.py:1252",
+      "test_refs": [
+        "tests/test_bot_admin_users_limit_start.py",
+        "tests/test_offers_router_create_guards.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-SET-TRADES-L1312",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('limit_set_trades_')",
+      "handler": "admin_users.handle_set_trades",
+      "source": "bot/handlers/admin_users.py:1312",
+      "test_refs": [
+        "tests/test_bot_admin_users_limit_start.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-SET-COMMODITIES-L1336",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('limit_set_commodities_')",
+      "handler": "admin_users.handle_set_commodities",
+      "source": "bot/handlers/admin_users.py:1336",
+      "test_refs": [
+        "tests/test_bot_admin_users_limit_start.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-SET-REQUESTS-L1360",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('limit_set_requests_')",
+      "handler": "admin_users.handle_set_requests",
+      "source": "bot/handlers/admin_users.py:1360",
+      "test_refs": [
+        "tests/test_bot_admin_users_limit_start.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-USERS-PROCESS-LIMIT-VALUE-L1384",
+      "family": "ADMIN",
+      "kind": "message",
+      "filter": "UserLimitations.awaiting_limit_value",
+      "handler": "admin_users.process_limit_value",
+      "source": "bot/handlers/admin_users.py:1384",
+      "test_refs": [
+        "tests/test_bot_admin_users_limit_flow.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-LIMIT-CONFIRM-L1438",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('limit_confirm_')",
+      "handler": "admin_users.handle_limit_confirm",
+      "source": "bot/handlers/admin_users.py:1438",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_users_limit_flow.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-LIMIT-CANCEL-L1563",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('limit_cancel_')",
+      "handler": "admin_users.handle_limit_cancel",
+      "source": "bot/handlers/admin_users.py:1563",
+      "test_refs": [
+        "tests/test_bot_admin_users_limit_flow.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-BLOCK-SETTINGS-L1607",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('user_block_settings_')",
+      "handler": "admin_users.handle_user_block_settings",
+      "source": "bot/handlers/admin_users.py:1607",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_users_block_settings.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-TOGGLE-BLOCK-L1649",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('admin_toggle_block_')",
+      "handler": "admin_users.handle_admin_toggle_block",
+      "source": "bot/handlers/admin_users.py:1649",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_users_block_settings.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-SET-MAX-BLOCK-L1698",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('admin_set_max_block_')",
+      "handler": "admin_users.handle_admin_set_max_block",
+      "source": "bot/handlers/admin_users.py:1698",
+      "test_refs": [
+        "tests/test_bot_admin_users_block_settings.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-MAX-BLOCK-SET-L1723",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('admin_max_block_set_')",
+      "handler": "admin_users.handle_admin_max_block_set",
+      "source": "bot/handlers/admin_users.py:1723",
+      "test_refs": [
+        "tests/test_bot_admin_users_block_settings.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-MAX-BLOCK-CUSTOM-L1772",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('admin_max_block_custom_')",
+      "handler": "admin_users.handle_admin_max_block_custom",
+      "source": "bot/handlers/admin_users.py:1772",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_users_block_custom.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-USERS-PROCESS-CUSTOM-MAX-BLOCK-L1799",
+      "family": "ADMIN",
+      "kind": "message",
+      "filter": "UserManagement.awaiting_custom_max_block",
+      "handler": "admin_users.process_custom_max_block",
+      "source": "bot/handlers/admin_users.py:1799",
+      "test_refs": [
+        "tests/test_bot_admin_users_block_custom.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-USERS-HANDLE-USERS-MENU-L489",
+      "family": "ADMIN",
+      "kind": "message",
+      "filter": "F.text == '👥 مدیریت کاربران'",
+      "handler": "admin_users.handle_users_menu",
+      "source": "bot/handlers/admin_users.py:489",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_users_entry_navigation.py",
+        "tests/test_bot_panel_navigation_handoff.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-USERS-HANDLE-USERS-LIST-COMMAND-L512",
+      "family": "ADMIN",
+      "kind": "message",
+      "filter": "F.text == '📋 لیست کاربران'",
+      "handler": "admin_users.handle_users_list_command",
+      "source": "bot/handlers/admin_users.py:512",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_users_entry_navigation.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USERS-PAGINATION-L527",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('users_page_')",
+      "handler": "admin_users.handle_users_pagination",
+      "source": "bot/handlers/admin_users.py:527",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_users_entry_navigation.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-VIEW-USER-PROFILE-L548",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('user_profile_')",
+      "handler": "admin_users.handle_view_user_profile",
+      "source": "bot/handlers/admin_users.py:548",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_users_profile_text.py",
+        "tests/test_bot_admin_users_bot_access.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-USERS-HANDLE-BACK-TO-ADMIN-L602",
+      "family": "ADMIN",
+      "kind": "message",
+      "filter": "F.text == '🔙 بازگشت به پنل مدیریت'",
+      "handler": "admin_users.handle_back_to_admin",
+      "source": "bot/handlers/admin_users.py:602",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_users_interaction_queue.py",
+        "tests/test_bot_admin_users_entry_navigation.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-USERS-START-SEARCH-USER-L635",
+      "family": "ADMIN",
+      "kind": "message",
+      "filter": "F.text == '🔍 جستجوی کاربر'",
+      "handler": "admin_users.start_search_user",
+      "source": "bot/handlers/admin_users.py:635",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_users_search_entry_cancel.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-SEARCH-CANCEL-L657",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data == 'user_search_cancel'",
+      "handler": "admin_users.handle_user_search_cancel",
+      "source": "bot/handlers/admin_users.py:657",
+      "test_refs": [
+        "tests/test_bot_admin_users_search_entry_cancel.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-USERS-PROCESS-SEARCH-QUERY-L678",
+      "family": "ADMIN",
+      "kind": "message",
+      "filter": "UserManagement.awaiting_search_query",
+      "handler": "admin_users.process_search_query",
+      "source": "bot/handlers/admin_users.py:678",
+      "test_refs": [
+        "tests/test_bot_admin_users_search_process.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-SETTINGS-L742",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('user_settings_')",
+      "handler": "admin_users.handle_user_settings",
+      "source": "bot/handlers/admin_users.py:742",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_panel_user_settings.py",
+        "tests/test_bot_admin_users_bot_access.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-BLOCK-ACTIONS-L798",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('user_block_') & ~F.data.startswith('user_block_settings_')",
+      "handler": "admin_users.handle_user_block_actions",
+      "source": "bot/handlers/admin_users.py:798",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_core_events.py",
+        "tests/test_sync_router_apply_item_success.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-UNBLOCK-L925",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('user_unblock_')",
+      "handler": "admin_users.handle_user_unblock",
+      "source": "bot/handlers/admin_users.py:925",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_users_unblock_unlimit.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-UNLIMIT-L998",
+      "family": "ADMIN",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('user_unlimit_')",
+      "handler": "admin_users.handle_user_unlimit",
+      "source": "bot/handlers/admin_users.py:998",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_admin_users_unblock_unlimit.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-SHOW-BLOCK-MENU-L223",
+      "family": "IDENTITY",
+      "kind": "callback_query",
+      "filter": "BlockMenuCallback.filter(F.action == 'main')",
+      "handler": "block_manage.show_block_menu",
+      "source": "bot/handlers/block_manage.py:223",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_keyboards.py",
+        "tests/test_offer_publication_worker.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-SHOW-BLOCKED-LIST-L244",
+      "family": "IDENTITY",
+      "kind": "callback_query",
+      "filter": "BlockMenuCallback.filter(F.action == 'list')",
+      "handler": "block_manage.show_blocked_list",
+      "source": "bot/handlers/block_manage.py:244",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_keyboards.py",
+        "tests/test_offer_publication_worker.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-START-SEARCH-L282",
+      "family": "IDENTITY",
+      "kind": "callback_query",
+      "filter": "BlockMenuCallback.filter(F.action == 'search')",
+      "handler": "block_manage.start_search",
+      "source": "bot/handlers/block_manage.py:282",
+      "test_refs": [
+        "tests/test_users_public_router_read.py",
+        "tests/test_block_service.py",
+        "tests/test_backup_market_pipeline_archive.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-MESSAGE-BLOCK-MANAGE-HANDLE-SEARCH-QUERY-L314",
+      "family": "IDENTITY",
+      "kind": "message",
+      "filter": "BlockStates.searching",
+      "handler": "block_manage.handle_search_query",
+      "source": "bot/handlers/block_manage.py:314",
+      "test_refs": [
+        "tests/test_bot_block_manage_search_query.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-HANDLE-BLOCK-USER-L372",
+      "family": "IDENTITY",
+      "kind": "callback_query",
+      "filter": "BlockUserCallback.filter(F.action == 'block')",
+      "handler": "block_manage.handle_block_user",
+      "source": "bot/handlers/block_manage.py:372",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_offer_publication_worker.py",
+        "tests/test_web_push.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-HANDLE-UNBLOCK-USER-L408",
+      "family": "IDENTITY",
+      "kind": "callback_query",
+      "filter": "BlockUserCallback.filter(F.action == 'unblock')",
+      "handler": "block_manage.handle_unblock_user",
+      "source": "bot/handlers/block_manage.py:408",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_users_router_update_limits.py",
+        "tests/test_block_service.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-HANDLE-BACK-L466",
+      "family": "IDENTITY",
+      "kind": "callback_query",
+      "filter": "BlockMenuCallback.filter(F.action == 'back')",
+      "handler": "block_manage.handle_back",
+      "source": "bot/handlers/block_manage.py:466",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_keyboards.py",
+        "tests/test_offer_publication_worker.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-BACK-TO-USER-PANEL-FROM-BLOCK-MENU-L489",
+      "family": "IDENTITY",
+      "kind": "callback_query",
+      "filter": "BlockMenuCallback.filter(F.action == 'panel')",
+      "handler": "block_manage.back_to_user_panel_from_block_menu",
+      "source": "bot/handlers/block_manage.py:489",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_panel_admin_menu.py",
+        "tests/test_bot_panel_simple_settings.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-MESSAGE-COMMODITY-CATALOG-SHOW-COMMODITY-CATALOG-L225",
+      "family": "OFFER",
+      "kind": "message",
+      "filter": "F.text == COMMODITY_CATALOG_TEXT",
+      "handler": "commodity_catalog.show_commodity_catalog",
+      "source": "bot/handlers/commodity_catalog.py:225",
+      "test_refs": [
+        "tests/test_bot_commodity_catalog.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-CALLBACK-QUERY-COMMODITY-CATALOG-PAGINATE-COMMODITY-CATALOG-L248",
+      "family": "OFFER",
+      "kind": "callback_query",
+      "filter": "CommodityCatalogPageCallback.filter()",
+      "handler": "commodity_catalog.paginate_commodity_catalog",
+      "source": "bot/handlers/commodity_catalog.py:248",
+      "test_refs": [
+        "tests/test_bot_commodity_catalog.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-CALLBACK-QUERY-DEFAULT-ACKNOWLEDGE-NOOP-CALLBACK-L17",
+      "family": "TG",
+      "kind": "callback_query",
+      "filter": "F.data == 'noop'",
+      "handler": "default.acknowledge_noop_callback",
+      "source": "bot/handlers/default.py:17",
+      "test_refs": [
+        "tests/test_sync_router_apply_item_success.py",
+        "tests/test_telegram_delivery_queue_contract.py",
+        "tests/test_production_private_primary_choreography.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-CALLBACK-QUERY-DEFAULT-HANDLE-UNMATCHED-CALLBACK-L24",
+      "family": "TG",
+      "kind": "callback_query",
+      "filter": "",
+      "handler": "default.handle_unmatched_callback",
+      "source": "bot/handlers/default.py:24",
+      "test_refs": [
+        "tests/test_bot_default_unauthorized.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-MESSAGE-DEFAULT-HANDLE-UNAUTHORIZED-MESSAGES-L43",
+      "family": "TG",
+      "kind": "message",
+      "filter": "",
+      "handler": "default.handle_unauthorized_messages",
+      "source": "bot/handlers/default.py:43",
+      "test_refs": [
+        "tests/test_bot_default_unauthorized.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-MESSAGE-LINK-ACCOUNT-CMD-LINK-L423",
+      "family": "IDENTITY",
+      "kind": "message",
+      "filter": "Command('link')",
+      "handler": "link_account.cmd_link",
+      "source": "bot/handlers/link_account.py:423",
+      "test_refs": [
+        "tests/test_telegram_link_token_service.py",
+        "tests/test_core_events.py",
+        "tests/test_promote_production_private_primary_product.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-MESSAGE-LINK-ACCOUNT-HANDLE-CONTACT-L446",
+      "family": "IDENTITY",
+      "kind": "message",
+      "filter": "LinkState.waiting_for_contact, F.contact",
+      "handler": "link_account.handle_contact",
+      "source": "bot/handlers/link_account.py:446",
+      "test_refs": [
+        "tests/test_bot_start_registration_contact.py",
+        "tests/test_stage5_direct_telegram_registration.py",
+        "tests/test_bot_link_account_guards.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-MESSAGE-LINK-ACCOUNT-HANDLE-ADDRESS-COMPLETION-L689",
+      "family": "IDENTITY",
+      "kind": "message",
+      "filter": "LinkState.waiting_for_address",
+      "handler": "link_account.handle_address_completion",
+      "source": "bot/handlers/link_account.py:689",
+      "test_refs": [
+        "tests/test_bot_link_account_guards.py",
+        "tests/test_bot_link_account_success.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-REQUEST-CALLBACK-QUERY-OFFER-OVERTIME-CALLBACKS-HANDLE-OVERTIME-OWNER-DECISION-L191",
+      "family": "REQUEST",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('ota:')",
+      "handler": "offer_overtime_callbacks.handle_overtime_owner_decision",
+      "source": "bot/handlers/offer_overtime_callbacks.py:191",
+      "test_refs": [
+        "tests/test_telegram_delivery_overtime_owner_approval_contract.py",
+        "tests/test_telegram_overtime_owner_approval_legacy_service.py",
+        "tests/test_telegram_notification_outbox_service.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-REQUEST-CALLBACK-QUERY-OFFER-OVERTIME-CALLBACKS-HANDLE-OVERTIME-REQUESTER-CANCEL-L74",
+      "family": "REQUEST",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('otc:')",
+      "handler": "offer_overtime_callbacks.handle_overtime_requester_cancel",
+      "source": "bot/handlers/offer_overtime_callbacks.py:74",
+      "test_refs": [
+        "tests/test_offer_overtime_request_cancel_forwarding.py",
+        "tests/test_bot_overtime_callbacks_contract.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-MESSAGE-OFFER-OVERTIME-PREFERENCE-START-OFFER-OVERTIME-PREFERENCE-L116",
+      "family": "OFFER",
+      "kind": "message",
+      "filter": "F.text == M1_OVERTIME_PREFERENCE_BUTTON",
+      "handler": "offer_overtime_preference.start_offer_overtime_preference",
+      "source": "bot/handlers/offer_overtime_preference.py:116",
+      "test_refs": []
+    },
+    {
+      "behavior_id": "BOT-OFFER-MESSAGE-OFFER-OVERTIME-PREFERENCE-PROCESS-OFFER-OVERTIME-PREFERENCE-VALUE-L141",
+      "family": "OFFER",
+      "kind": "message",
+      "filter": "OfferOvertimePreference.awaiting_value",
+      "handler": "offer_overtime_preference.process_offer_overtime_preference_value",
+      "source": "bot/handlers/offer_overtime_preference.py:141",
+      "test_refs": [
+        "tests/test_bot_offer_overtime_preference.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-CALLBACK-QUERY-OFFER-OVERTIME-PREFERENCE-CONFIRM-OFFER-OVERTIME-PREFERENCE-L191",
+      "family": "OFFER",
+      "kind": "callback_query",
+      "filter": "OfferOvertimePreferenceCallback.filter(F.action == 'confirm'), StateFilter(OfferOvertimePreference.awaiting_confirmation)",
+      "handler": "offer_overtime_preference.confirm_offer_overtime_preference",
+      "source": "bot/handlers/offer_overtime_preference.py:191",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_keyboards.py",
+        "tests/test_core_events.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-CALLBACK-QUERY-OFFER-OVERTIME-PREFERENCE-CANCEL-OFFER-OVERTIME-PREFERENCE-L265",
+      "family": "OFFER",
+      "kind": "callback_query",
+      "filter": "OfferOvertimePreferenceCallback.filter(F.action == 'cancel'), StateFilter(OfferOvertimePreference)",
+      "handler": "offer_overtime_preference.cancel_offer_overtime_preference",
+      "source": "bot/handlers/offer_overtime_preference.py:265",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_keyboards.py",
+        "tests/test_web_push.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-MESSAGE-PANEL-PROCESS-CUSTOMER-INVITE-MOBILE-L1005",
+      "family": "TG",
+      "kind": "message",
+      "filter": "CustomerInvite.awaiting_mobile_number",
+      "handler": "panel.process_customer_invite_mobile",
+      "source": "bot/handlers/panel.py:1005",
+      "test_refs": [
+        "tests/test_bot_panel_customer_invite_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-CONFIRM-CUSTOMER-INVITE-TIER1-L1076",
+      "family": "TG",
+      "kind": "callback_query",
+      "filter": "UserPanelCustomerInviteCallback.filter(F.action == 'confirm'), StateFilter(CustomerInvite.awaiting_confirmation)",
+      "handler": "panel.confirm_customer_invite_tier1",
+      "source": "bot/handlers/panel.py:1076",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_keyboards.py",
+        "tests/test_core_events.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-CANCEL-CUSTOMER-INVITE-TIER1-L1175",
+      "family": "TG",
+      "kind": "callback_query",
+      "filter": "UserPanelCustomerInviteCallback.filter(F.action == 'cancel'), StateFilter(CustomerInvite)",
+      "handler": "panel.cancel_customer_invite_tier1",
+      "source": "bot/handlers/panel.py:1175",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_keyboards.py",
+        "tests/test_web_push.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-BACK-TO-USER-PANEL-FROM-CUSTOMERS-L1187",
+      "family": "TG",
+      "kind": "callback_query",
+      "filter": "UserPanelCustomerCallback.filter(F.action == 'back')",
+      "handler": "panel.back_to_user_panel_from_customers",
+      "source": "bot/handlers/panel.py:1187",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_keyboards.py",
+        "tests/test_offer_publication_worker.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-MESSAGE-PANEL-HANDLE-ADMIN-SETTINGS-BUTTON-L1255",
+      "family": "TG",
+      "kind": "message",
+      "filter": "F.text == '⚙️ تنظیمات سیستم'",
+      "handler": "panel.handle_admin_settings_button",
+      "source": "bot/handlers/panel.py:1255",
+      "test_refs": [
+        "tests/test_bot_panel_interaction_queue.py",
+        "tests/test_bot_panel_admin_settings_entry.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-HANDLE-SETTINGS-EDIT-CLICK-L1272",
+      "family": "TG",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('settings_edit_')",
+      "handler": "panel.handle_settings_edit_click",
+      "source": "bot/handlers/panel.py:1272",
+      "test_refs": [
+        "tests/test_bot_panel_admin_settings_entry.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-MESSAGE-PANEL-HANDLE-SETTINGS-NEW-VALUE-L1310",
+      "family": "TG",
+      "kind": "message",
+      "filter": "TradingSettingsEdit.awaiting_value",
+      "handler": "panel.handle_settings_new_value",
+      "source": "bot/handlers/panel.py:1310",
+      "test_refs": [
+        "tests/test_bot_panel_settings_new_value.py",
+        "tests/test_bot_panel_terminal_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-HANDLE-SETTINGS-CANCEL-L1370",
+      "family": "TG",
+      "kind": "callback_query",
+      "filter": "F.data == 'settings_cancel_edit'",
+      "handler": "panel.handle_settings_cancel",
+      "source": "bot/handlers/panel.py:1370",
+      "test_refs": [
+        "tests/test_bot_panel_settings_reset.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-HANDLE-SETTINGS-RESET-L1386",
+      "family": "TG",
+      "kind": "callback_query",
+      "filter": "F.data == 'settings_reset_all'",
+      "handler": "panel.handle_settings_reset",
+      "source": "bot/handlers/panel.py:1386",
+      "test_refs": [
+        "tests/test_bot_panel_settings_reset.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-HANDLE-SETTINGS-RESET-CONFIRM-L1411",
+      "family": "TG",
+      "kind": "callback_query",
+      "filter": "F.data == 'settings_reset_confirm'",
+      "handler": "panel.handle_settings_reset_confirm",
+      "source": "bot/handlers/panel.py:1411",
+      "test_refs": [
+        "tests/test_bot_panel_settings_reset.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-HANDLE-SETTINGS-RESET-CANCEL-L1435",
+      "family": "TG",
+      "kind": "callback_query",
+      "filter": "F.data == 'settings_reset_cancel'",
+      "handler": "panel.handle_settings_reset_cancel",
+      "source": "bot/handlers/panel.py:1435",
+      "test_refs": [
+        "tests/test_bot_panel_settings_reset.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-MESSAGE-PANEL-HANDLE-BACK-TO-MAIN-MENU-L1450",
+      "family": "TG",
+      "kind": "message",
+      "filter": "F.text == '🔙 بازگشت'",
+      "handler": "panel.handle_back_to_main_menu",
+      "source": "bot/handlers/panel.py:1450",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_offer_overtime_preference.py",
+        "tests/test_bot_trade_create_wizard.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-MESSAGE-PANEL-SHOW-MY-PROFILE-AND-CHANGE-KEYBOARD-L210",
+      "family": "TG",
+      "kind": "message",
+      "filter": "Command('panel')",
+      "handler": "panel.show_my_profile_and_change_keyboard",
+      "source": "bot/handlers/panel.py:210",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_panel_admin_menu.py",
+        "tests/test_bot_panel_simple_settings.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-MESSAGE-PANEL-SHOW-MY-PROFILE-AND-CHANGE-KEYBOARD-L211",
+      "family": "TG",
+      "kind": "message",
+      "filter": "F.text == '👤 پنل کاربر'",
+      "handler": "panel.show_my_profile_and_change_keyboard",
+      "source": "bot/handlers/panel.py:211",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_panel_settings_new_value.py",
+        "tests/test_bot_panel_standard_actions.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-MESSAGE-PANEL-SHOW-ADMIN-PANEL-AND-CHANGE-KEYBOARD-L294",
+      "family": "TG",
+      "kind": "message",
+      "filter": "F.text == '🔐 پنل مدیریت'",
+      "handler": "panel.show_admin_panel_and_change_keyboard",
+      "source": "bot/handlers/panel.py:294",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_panel_admin_menu.py",
+        "tests/test_bot_panel_persistent_anchor_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-MESSAGE-PANEL-HANDLE-USER-SETTINGS-BUTTON-L323",
+      "family": "TG",
+      "kind": "message",
+      "filter": "F.text == '⚙️ تنظیمات کاربری'",
+      "handler": "panel.handle_user_settings_button",
+      "source": "bot/handlers/panel.py:323",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_panel_user_settings.py",
+        "tests/test_bot_panel_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-MESSAGE-PANEL-HANDLE-SIMPLE-SETTINGS-BUTTON-L361",
+      "family": "TG",
+      "kind": "message",
+      "filter": "F.text == '⚙️ تنظیمات'",
+      "handler": "panel.handle_simple_settings_button",
+      "source": "bot/handlers/panel.py:361",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_panel_simple_settings.py",
+        "tests/test_bot_panel_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-MESSAGE-PANEL-SHOW-SUPPORT-CONTACT-L405",
+      "family": "TG",
+      "kind": "message",
+      "filter": "F.text == USER_PANEL_SUPPORT_TEXT",
+      "handler": "panel.show_support_contact",
+      "source": "bot/handlers/panel.py:405",
+      "test_refs": [
+        "tests/test_bot_panel_standard_actions.py",
+        "tests/test_bot_panel_interaction_queue.py",
+        "tests/test_bot_panel_navigation_handoff.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-MESSAGE-PANEL-SHOW-COLLEAGUES-LIST-L470",
+      "family": "TG",
+      "kind": "message",
+      "filter": "F.text == USER_PANEL_COLLEAGUES_TEXT",
+      "handler": "panel.show_colleagues_list",
+      "source": "bot/handlers/panel.py:470",
+      "test_refs": [
+        "tests/test_bot_panel_standard_actions.py",
+        "tests/test_bot_panel_terminal_interaction_queue.py",
+        "tests/test_bot_panel_navigation_handoff.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-MESSAGE-PANEL-SHOW-RECENT-TRADES-PDF-L534",
+      "family": "TG",
+      "kind": "message",
+      "filter": "F.text == USER_PANEL_RECENT_TRADES_TEXT",
+      "handler": "panel.show_recent_trades_pdf",
+      "source": "bot/handlers/panel.py:534",
+      "test_refs": [
+        "tests/test_bot_panel_standard_actions.py",
+        "tests/test_bot_panel_terminal_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-MESSAGE-PANEL-SHOW-USER-PANEL-BLOCKED-USERS-L597",
+      "family": "TG",
+      "kind": "message",
+      "filter": "F.text == USER_PANEL_BLOCKED_USERS_TEXT",
+      "handler": "panel.show_user_panel_blocked_users",
+      "source": "bot/handlers/panel.py:597",
+      "test_refs": [
+        "tests/test_bot_panel_standard_actions.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-UNBLOCK-USER-FROM-USER-PANEL-L606",
+      "family": "TG",
+      "kind": "callback_query",
+      "filter": "UserPanelBlockCallback.filter(F.action == 'unblock')",
+      "handler": "panel.unblock_user_from_user_panel",
+      "source": "bot/handlers/panel.py:606",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_users_router_update_limits.py",
+        "tests/test_block_service.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-BACK-TO-USER-PANEL-FROM-BLOCKED-L640",
+      "family": "TG",
+      "kind": "callback_query",
+      "filter": "UserPanelBlockCallback.filter(F.action == 'back')",
+      "handler": "panel.back_to_user_panel_from_blocked",
+      "source": "bot/handlers/panel.py:640",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_keyboards.py",
+        "tests/test_offer_publication_worker.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-MESSAGE-PANEL-SHOW-USER-PANEL-CUSTOMERS-L789",
+      "family": "TG",
+      "kind": "message",
+      "filter": "F.text == USER_PANEL_CUSTOMERS_TEXT",
+      "handler": "panel.show_user_panel_customers",
+      "source": "bot/handlers/panel.py:789",
+      "test_refs": [
+        "tests/test_bot_panel_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-SHOW-USER-PANEL-CUSTOMERS-CALLBACK-L805",
+      "family": "TG",
+      "kind": "callback_query",
+      "filter": "UserPanelCustomerCallback.filter(F.action == 'list')",
+      "handler": "panel.show_user_panel_customers_callback",
+      "source": "bot/handlers/panel.py:805",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_keyboards.py",
+        "tests/test_offer_publication_worker.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-SHOW-USER-PANEL-CUSTOMER-DETAIL-L823",
+      "family": "TG",
+      "kind": "callback_query",
+      "filter": "UserPanelCustomerCallback.filter(F.action == 'detail')",
+      "handler": "panel.show_user_panel_customer_detail",
+      "source": "bot/handlers/panel.py:823",
+      "test_refs": [
+        "tests/test_sync_router_signature.py",
+        "tests/test_users_router_read_one.py",
+        "tests/test_offers_router_create_success.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-ASK-UNLINK-USER-PANEL-CUSTOMER-L844",
+      "family": "TG",
+      "kind": "callback_query",
+      "filter": "UserPanelCustomerCallback.filter(F.action == 'ask_unlink')",
+      "handler": "panel.ask_unlink_user_panel_customer",
+      "source": "bot/handlers/panel.py:844",
+      "test_refs": [
+        "tests/test_bot_panel_standard_actions.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-CONFIRM-UNLINK-USER-PANEL-CUSTOMER-L853",
+      "family": "TG",
+      "kind": "callback_query",
+      "filter": "UserPanelCustomerCallback.filter(F.action == 'confirm_unlink')",
+      "handler": "panel.confirm_unlink_user_panel_customer",
+      "source": "bot/handlers/panel.py:853",
+      "test_refs": [
+        "tests/test_bot_panel_standard_actions.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-USER-PANEL-CUSTOMER-INVITE-TIER2-WEBAPP-ONLY-L931",
+      "family": "TG",
+      "kind": "callback_query",
+      "filter": "UserPanelCustomerCallback.filter(F.action == 'invite_tier2')",
+      "handler": "panel.user_panel_customer_invite_tier2_webapp_only",
+      "source": "bot/handlers/panel.py:931",
+      "test_refs": [
+        "tests/test_bot_panel_standard_actions.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-START-USER-PANEL-CUSTOMER-INVITE-TIER1-L936",
+      "family": "TG",
+      "kind": "callback_query",
+      "filter": "UserPanelCustomerCallback.filter(F.action == 'invite_tier1')",
+      "handler": "panel.start_user_panel_customer_invite_tier1",
+      "source": "bot/handlers/panel.py:936",
+      "test_refs": [
+        "tests/test_bot_panel_standard_actions.py",
+        "tests/test_bot_panel_customer_invite_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-MESSAGE-PANEL-PROCESS-CUSTOMER-INVITE-MANAGEMENT-NAME-L967",
+      "family": "TG",
+      "kind": "message",
+      "filter": "CustomerInvite.awaiting_management_name",
+      "handler": "panel.process_customer_invite_management_name",
+      "source": "bot/handlers/panel.py:967",
+      "test_refs": [
+        "tests/test_bot_panel_customer_invite_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-MESSAGE-START-HANDLE-START-WITHOUT-TOKEN-L1018",
+      "family": "IDENTITY",
+      "kind": "message",
+      "filter": "CommandStart(deep_link=False)",
+      "handler": "start.handle_start_without_token",
+      "source": "bot/handlers/start.py:1018",
+      "test_refs": [
+        "tests/test_stage5_direct_telegram_registration.py",
+        "tests/test_bot_start_without_token.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-MESSAGE-START-HANDLE-CONTACT-L1064",
+      "family": "IDENTITY",
+      "kind": "message",
+      "filter": "Registration.awaiting_contact, F.contact",
+      "handler": "start.handle_contact",
+      "source": "bot/handlers/start.py:1064",
+      "test_refs": [
+        "tests/test_bot_start_registration_contact.py",
+        "tests/test_stage5_direct_telegram_registration.py",
+        "tests/test_bot_link_account_guards.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-MESSAGE-START-HANDLE-CONTACT-NON-CONTACT-L1152",
+      "family": "IDENTITY",
+      "kind": "message",
+      "filter": "Registration.awaiting_contact",
+      "handler": "start.handle_contact_non_contact",
+      "source": "bot/handlers/start.py:1152",
+      "test_refs": [
+        "tests/test_stage5_direct_telegram_registration.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-MESSAGE-START-HANDLE-ADDRESS-L1163",
+      "family": "IDENTITY",
+      "kind": "message",
+      "filter": "Registration.awaiting_address",
+      "handler": "start.handle_address",
+      "source": "bot/handlers/start.py:1163",
+      "test_refs": [
+        "tests/test_stage5_direct_telegram_registration.py",
+        "tests/test_bot_link_account_guards.py",
+        "tests/test_bot_start_registration_address.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-START-HANDLE-REGISTRATION-EDIT-ADDRESS-L1248",
+      "family": "IDENTITY",
+      "kind": "callback_query",
+      "filter": "StateFilter(Registration.awaiting_confirmation), F.data == REGISTRATION_EDIT_ADDRESS_CALLBACK",
+      "handler": "start.handle_registration_edit_address",
+      "source": "bot/handlers/start.py:1248",
+      "test_refs": [
+        "tests/test_stage5_direct_telegram_registration.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-START-HANDLE-REGISTRATION-CONFIRM-L1301",
+      "family": "IDENTITY",
+      "kind": "callback_query",
+      "filter": "StateFilter(Registration.awaiting_confirmation), F.data == REGISTRATION_CONFIRM_CALLBACK",
+      "handler": "start.handle_registration_confirm",
+      "source": "bot/handlers/start.py:1301",
+      "test_refs": [
+        "tests/test_stage5_direct_telegram_registration.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-MESSAGE-START-HANDLE-REGISTRATION-CONFIRMATION-MESSAGE-L1514",
+      "family": "IDENTITY",
+      "kind": "message",
+      "filter": "Registration.awaiting_confirmation",
+      "handler": "start.handle_registration_confirmation_message",
+      "source": "bot/handlers/start.py:1514",
+      "test_refs": [
+        "tests/test_stage5_direct_telegram_registration.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-CHAT-JOIN-REQUEST-START-HANDLE-CHANNEL-JOIN-REQUEST-L1524",
+      "family": "IDENTITY",
+      "kind": "chat_join_request",
+      "filter": "",
+      "handler": "start.handle_channel_join_request",
+      "source": "bot/handlers/start.py:1524",
+      "test_refs": [
+        "tests/test_bot_channel_join_requests.py",
+        "tests/test_bot_start_join_request.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-START-HANDLE-OFFER-TUTORIAL-ACK-L1606",
+      "family": "IDENTITY",
+      "kind": "callback_query",
+      "filter": "F.data == OFFER_TUTORIAL_ACK_CALLBACK",
+      "handler": "start.handle_offer_tutorial_ack",
+      "source": "bot/handlers/start.py:1606",
+      "test_refs": [
+        "tests/test_bot_start_join_request.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-START-HANDLE-CUSTOMER-TUTORIAL-ACK-L1611",
+      "family": "IDENTITY",
+      "kind": "callback_query",
+      "filter": "F.data == CUSTOMER_TUTORIAL_ACK_CALLBACK",
+      "handler": "start.handle_customer_tutorial_ack",
+      "source": "bot/handlers/start.py:1611",
+      "test_refs": [
+        "tests/test_bot_start_join_request.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-START-HANDLE-CONFIRM-TRADE-L1678",
+      "family": "IDENTITY",
+      "kind": "callback_query",
+      "filter": "F.data.startswith('confirm_trade_')",
+      "handler": "start.handle_confirm_trade",
+      "source": "bot/handlers/start.py:1678",
+      "test_refs": [
+        "tests/test_bot_start_confirm_trade.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-START-HANDLE-CANCEL-RESPOND-L1694",
+      "family": "IDENTITY",
+      "kind": "callback_query",
+      "filter": "F.data == 'cancel_respond'",
+      "handler": "start.handle_cancel_respond",
+      "source": "bot/handlers/start.py:1694",
+      "test_refs": [
+        "tests/test_bot_start_cancel_respond.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-IDENTITY-MESSAGE-START-HANDLE-START-WITH-TOKEN-L749",
+      "family": "IDENTITY",
+      "kind": "message",
+      "filter": "CommandStart(deep_link=True)",
+      "handler": "start.handle_start_with_token",
+      "source": "bot/handlers/start.py:749",
+      "test_refs": [
+        "tests/test_bot_start_respond_token_success.py",
+        "tests/test_bot_start_profile_token_success.py",
+        "tests/test_stage5_direct_telegram_registration.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-MESSAGE-TELEGRAM-PUBLISHER-B2B-RECEIVE-DISPATCH-L27",
+      "family": "TG",
+      "kind": "message",
+      "filter": "F.text.startswith('tbq1|dispatch|')",
+      "handler": "telegram_publisher_b2b.receive_dispatch",
+      "source": "bot/handlers/telegram_publisher_b2b.py:27",
+      "test_refs": [
+        "tests/test_telegram_multi_publisher_contract.py",
+        "tests/test_telegram_publisher_dispatch_service.py",
+        "tests/test_telegram_delivery_callsite_inventory.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-MESSAGE-TELEGRAM-PUBLISHER-B2B-RECEIVE-ACK-L44",
+      "family": "TG",
+      "kind": "message",
+      "filter": "F.text.startswith('tbq1|ack|')",
+      "handler": "telegram_publisher_b2b.receive_ack",
+      "source": "bot/handlers/telegram_publisher_b2b.py:44",
+      "test_refs": [
+        "tests/test_telegram_publisher_dispatch_service.py",
+        "tests/test_telegram_publisher_b2b_runtime.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-CALLBACK-QUERY-TELEGRAM-PUBLISHER-CHANNEL-CALLBACKS-TRADE-CALLBACK-L31",
+      "family": "TG",
+      "kind": "callback_query",
+      "filter": "channel_callback, ChannelTradeCallback.filter()",
+      "handler": "telegram_publisher_channel_callbacks.trade_callback",
+      "source": "bot/handlers/telegram_publisher_channel_callbacks.py:31",
+      "test_refs": [
+        "tests/test_bot_webapp_comprehensive_load_matrix.py",
+        "tests/test_trading_core_mixed_load_helpers.py",
+        "tests/test_bot_trade_execute_local_success.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TG-CALLBACK-QUERY-TELEGRAM-PUBLISHER-CHANNEL-CALLBACKS-PUBLIC-TRADE-CALLBACK-L46",
+      "family": "TG",
+      "kind": "callback_query",
+      "filter": "channel_callback, ChannelTradePublicCallback.filter()",
+      "handler": "telegram_publisher_channel_callbacks.public_trade_callback",
+      "source": "bot/handlers/telegram_publisher_channel_callbacks.py:46",
+      "test_refs": []
+    },
+    {
+      "behavior_id": "BOT-TG-CALLBACK-QUERY-TELEGRAM-PUBLISHER-CHANNEL-CALLBACKS-EXPIRY-CALLBACK-L61",
+      "family": "TG",
+      "kind": "callback_query",
+      "filter": "channel_callback, ExpireOfferCallback.filter()",
+      "handler": "telegram_publisher_channel_callbacks.expiry_callback",
+      "source": "bot/handlers/telegram_publisher_channel_callbacks.py:61",
+      "test_refs": [
+        "tests/test_bot_trade_manage_success.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-LOT-WHOLESALE-L1001",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_lot_type, LotTypeCallback.filter(F.type == 'wholesale')",
+      "handler": "trade_create.handle_lot_wholesale",
+      "source": "bot/handlers/trade_create.py:1001",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_offer_publication_worker.py",
+        "tests/test_core_events.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-LOT-SPLIT-L1016",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_lot_type, LotTypeCallback.filter(F.type == 'retail')",
+      "handler": "trade_create.handle_lot_split",
+      "source": "bot/handlers/trade_create.py:1016",
+      "test_refs": [
+        "tests/test_bot_trade_utils_lot_type_keyboard.py",
+        "tests/test_telegram_publisher_live_matrix.py",
+        "tests/test_bot_webapp_comprehensive_load_matrix.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-MESSAGE-TRADE-CREATE-HANDLE-LOT-SIZES-INPUT-L1027",
+      "family": "TRADE",
+      "kind": "message",
+      "filter": "Trade.awaiting_lot_sizes",
+      "handler": "trade_create.handle_lot_sizes_input",
+      "source": "bot/handlers/trade_create.py:1027",
+      "test_refs": [
+        "tests/test_bot_trade_create_validation_interaction_queue.py",
+        "tests/test_bot_trade_create_remaining_guards.py",
+        "tests/test_bot_trade_create_lot_sizes_input.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-ACCEPT-SUGGESTED-LOTS-L1089",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_lot_sizes, AcceptLotsCallback.filter()",
+      "handler": "trade_create.handle_accept_suggested_lots",
+      "source": "bot/handlers/trade_create.py:1089",
+      "test_refs": [
+        "tests/test_bot_trade_create_accept_suggested_lots.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-MESSAGE-TRADE-CREATE-HANDLE-PRICE-INPUT-L1118",
+      "family": "TRADE",
+      "kind": "message",
+      "filter": "Trade.awaiting_price",
+      "handler": "trade_create.handle_price_input",
+      "source": "bot/handlers/trade_create.py:1118",
+      "test_refs": [
+        "tests/test_bot_trade_create_validation_interaction_queue.py",
+        "tests/test_bot_trade_create_stale_state_text_offer.py",
+        "tests/test_bot_trade_create_price_input.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-SKIP-NOTES-L1148",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_notes, SkipNotesCallback.filter(F.target == 'notes')",
+      "handler": "trade_create.handle_skip_notes",
+      "source": "bot/handlers/trade_create.py:1148",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_offer_publication_worker.py",
+        "tests/test_core_events.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-MESSAGE-TRADE-CREATE-HANDLE-NOTES-INPUT-L1159",
+      "family": "TRADE",
+      "kind": "message",
+      "filter": "Trade.awaiting_notes",
+      "handler": "trade_create.handle_notes_input",
+      "source": "bot/handlers/trade_create.py:1159",
+      "test_refs": [
+        "tests/test_bot_trade_create_validation_interaction_queue.py",
+        "tests/test_bot_trade_create_notes_flow.py",
+        "tests/test_bot_trade_create_remaining_guards.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-WIZARD-EDIT-L1236",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_wizard_review, TradeWizardActionCallback.filter(F.action == 'edit')",
+      "handler": "trade_create.handle_wizard_edit",
+      "source": "bot/handlers/trade_create.py:1236",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_keyboards.py",
+        "tests/test_offer_publication_worker.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-WIZARD-EDIT-FIELD-L1257",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_wizard_edit, TradeWizardEditCallback.filter()",
+      "handler": "trade_create.handle_wizard_edit_field",
+      "source": "bot/handlers/trade_create.py:1257",
+      "test_refs": [
+        "tests/test_bot_trade_create_wizard.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-WIZARD-RETURN-TO-REVIEW-L1346",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "TradeWizardActionCallback.filter(F.action == 'review')",
+      "handler": "trade_create.handle_wizard_return_to_review",
+      "source": "bot/handlers/trade_create.py:1346",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_trade_create_back_cancel.py",
+        "tests/test_trade_delivery_staging_validation_report.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-WIZARD-CONTINUE-L1361",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_wizard_review, TradeWizardActionCallback.filter(F.action == 'continue')",
+      "handler": "trade_create.handle_wizard_continue",
+      "source": "bot/handlers/trade_create.py:1361",
+      "test_refs": [
+        "tests/test_telegram_notification_outbox_worker.py",
+        "tests/test_production_private_primary_choreography.py",
+        "tests/test_bot_trade_create_wizard.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-WIZARD-CANCEL-L1386",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "TradeWizardActionCallback.filter(F.action == 'cancel')",
+      "handler": "trade_create.handle_wizard_cancel",
+      "source": "bot/handlers/trade_create.py:1386",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_keyboards.py",
+        "tests/test_web_push.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TRADE-CONFIRM-L2125",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_legacy_confirm, TradeActionCallback.filter(F.action == 'confirm')",
+      "handler": "trade_create.handle_trade_confirm",
+      "source": "bot/handlers/trade_create.py:2125",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_keyboards.py",
+        "tests/test_core_events.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TRADE-WARNING-CONFIRM-L2141",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_legacy_confirm, TradeActionCallback.filter(F.action == 'confirm_warning')",
+      "handler": "trade_create.handle_trade_warning_confirm",
+      "source": "bot/handlers/trade_create.py:2141",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_warning_flow_integration.py",
+        "tests/test_bot_trade_create_text_offer_warning_confirm.py",
+        "tests/test_bot_trade_create_repeat_offer.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-BACK-TO-TYPE-L2158",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_settlement_type, TradeActionCallback.filter(F.action == 'back_to_type')",
+      "handler": "trade_create.handle_back_to_type",
+      "source": "bot/handlers/trade_create.py:2158",
+      "test_refs": [
+        "tests/test_bot_trade_create_back_cancel.py",
+        "tests/test_bot_trade_create_remaining_guards.py",
+        "tests/test_bot_trade_create_stale_state_text_offer.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-BACK-TO-SETTLEMENT-L2174",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_commodity, TradeActionCallback.filter(F.action == 'back_to_settlement')",
+      "handler": "trade_create.handle_back_to_settlement",
+      "source": "bot/handlers/trade_create.py:2174",
+      "test_refs": [
+        "tests/test_bot_trade_utils_commodities_keyboard_single_page.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-BACK-TO-COMMODITY-L2187",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_quantity, TradeActionCallback.filter(F.action == 'back_to_commodity')",
+      "handler": "trade_create.handle_back_to_commodity",
+      "source": "bot/handlers/trade_create.py:2187",
+      "test_refs": [
+        "tests/test_bot_trade_utils_quantity_confirm_keyboards.py",
+        "tests/test_bot_admin_commodities_show_aliases.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-BACK-TO-QUANTITY-L2202",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_lot_type, TradeActionCallback.filter(F.action == 'back_to_quantity')",
+      "handler": "trade_create.handle_back_to_quantity",
+      "source": "bot/handlers/trade_create.py:2202",
+      "test_refs": [
+        "tests/test_bot_trade_utils_lot_type_keyboard.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-BACK-TO-LOT-TYPE-L2221",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "TradeActionCallback.filter(F.action == 'back_to_lot_type')",
+      "handler": "trade_create.handle_back_to_lot_type",
+      "source": "bot/handlers/trade_create.py:2221",
+      "test_refs": []
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-BACK-TO-PRICE-L2234",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_notes, TradeActionCallback.filter(F.action == 'back_to_price')",
+      "handler": "trade_create.handle_back_to_price",
+      "source": "bot/handlers/trade_create.py:2234",
+      "test_refs": []
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TRADE-CANCEL-L2243",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "TradeActionCallback.filter(F.action == 'cancel')",
+      "handler": "trade_create.handle_trade_cancel",
+      "source": "bot/handlers/trade_create.py:2243",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_keyboards.py",
+        "tests/test_web_push.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-CANCEL-ALL-OFFERS-BOT-L2380",
+      "family": "OFFER",
+      "kind": "message",
+      "filter": "F.text.func(lambda text: text and text.strip() == 'نشد')",
+      "handler": "trade_create.handle_cancel_all_offers_bot",
+      "source": "bot/handlers/trade_create.py:2380",
+      "test_refs": [
+        "tests/test_bot_trade_create_helper_cancel.py",
+        "tests/test_bot_trade_create_validation_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-REPEAT-OFFER-BUTTON-L2969",
+      "family": "OFFER",
+      "kind": "message",
+      "filter": "StateFilter(None), F.text.startswith(BOT_REPEAT_OFFER_BUTTON_PREFIX)",
+      "handler": "trade_create.handle_repeat_offer_button",
+      "source": "bot/handlers/trade_create.py:2969",
+      "test_refs": [
+        "tests/test_telegram_delivery_callsite_inventory.py",
+        "tests/test_bot_trade_create_repeat_offer.py",
+        "tests/test_bot_panel_navigation_handoff.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-TEXT-OFFER-L3047",
+      "family": "OFFER",
+      "kind": "message",
+      "filter": "StateFilter(None), F.text.func(looks_like_text_offer)",
+      "handler": "trade_create.handle_text_offer",
+      "source": "bot/handlers/trade_create.py:3047",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_trade_create_helper_cancel.py",
+        "tests/test_bot_trade_create_text_offer_warning_flow_integration.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-TEXT-OFFER-WHILE-CONFIRMATION-PENDING-L3066",
+      "family": "OFFER",
+      "kind": "message",
+      "filter": "StateFilter(*_TEXT_OFFER_PENDING_CONFIRMATION_STATES), F.text.func(looks_like_text_offer)",
+      "handler": "trade_create.handle_text_offer_while_confirmation_pending",
+      "source": "bot/handlers/trade_create.py:3066",
+      "test_refs": [
+        "tests/test_bot_trade_create_stale_state_text_offer.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-TEXT-OFFER-FROM-STALE-TRADE-STATE-L3167",
+      "family": "OFFER",
+      "kind": "message",
+      "filter": "StateFilter(*_TEXT_OFFER_RECOVERY_STATES), F.text.func(looks_like_text_offer)",
+      "handler": "trade_create.handle_text_offer_from_stale_trade_state",
+      "source": "bot/handlers/trade_create.py:3167",
+      "test_refs": [
+        "tests/test_bot_trade_create_stale_state_text_offer.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-UNEXPECTED-TRADE-BUILDER-MESSAGE-L3191",
+      "family": "OFFER",
+      "kind": "message",
+      "filter": "StateFilter(*_TEXT_OFFER_RECOVERY_STATES)",
+      "handler": "trade_create.handle_unexpected_trade_builder_message",
+      "source": "bot/handlers/trade_create.py:3191",
+      "test_refs": [
+        "tests/test_bot_trade_create_stale_state_text_offer.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-INFERENCE-CHOICE-L3229",
+      "family": "OFFER",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_text_inference_choice, TextOfferInferenceCandidateCallback.filter()",
+      "handler": "trade_create.handle_text_offer_inference_choice",
+      "source": "bot/handlers/trade_create.py:3229",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-INFERENCE-SUGGESTION-CONFIRM-L3305",
+      "family": "OFFER",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_text_inference_choice, TextOfferActionCallback.filter(F.action == 'confirm_commodity')",
+      "handler": "trade_create.handle_text_offer_inference_suggestion_confirm",
+      "source": "bot/handlers/trade_create.py:3305",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-INFERENCE-SUGGESTION-EDIT-L3360",
+      "family": "OFFER",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_text_inference_choice, TextOfferActionCallback.filter(F.action == 'edit_commodity')",
+      "handler": "trade_create.handle_text_offer_inference_suggestion_edit",
+      "source": "bot/handlers/trade_create.py:3360",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-INFERENCE-SUGGESTION-EDIT-L3364",
+      "family": "OFFER",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_text_confirm, TextOfferActionCallback.filter(F.action == 'edit_commodity')",
+      "handler": "trade_create.handle_text_offer_inference_suggestion_edit",
+      "source": "bot/handlers/trade_create.py:3364",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-INFERENCE-CHOICE-CANCEL-L3432",
+      "family": "OFFER",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_text_inference_choice, TextOfferActionCallback.filter(F.action == 'cancel')",
+      "handler": "trade_create.handle_text_offer_inference_choice_cancel",
+      "source": "bot/handlers/trade_create.py:3432",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_keyboards.py",
+        "tests/test_web_push.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-CONFIRM-L3447",
+      "family": "OFFER",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_text_confirm, TextOfferActionCallback.filter(F.action == 'confirm')",
+      "handler": "trade_create.handle_text_offer_confirm",
+      "source": "bot/handlers/trade_create.py:3447",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_keyboards.py",
+        "tests/test_core_events.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-WARNING-CONFIRM-L3470",
+      "family": "OFFER",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_text_confirm, TextOfferActionCallback.filter(F.action == 'confirm_warning')",
+      "handler": "trade_create.handle_text_offer_warning_confirm",
+      "source": "bot/handlers/trade_create.py:3470",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_warning_flow_integration.py",
+        "tests/test_bot_trade_create_text_offer_warning_confirm.py",
+        "tests/test_bot_trade_create_repeat_offer.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-CANCEL-L3493",
+      "family": "OFFER",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_text_confirm, TextOfferActionCallback.filter(F.action == 'cancel')",
+      "handler": "trade_create.handle_text_offer_cancel",
+      "source": "bot/handlers/trade_create.py:3493",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_keyboards.py",
+        "tests/test_web_push.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3504",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "TradeTypeCallback.filter()",
+      "handler": "trade_create.handle_stale_trade_creation_callback",
+      "source": "bot/handlers/trade_create.py:3504",
+      "test_refs": [
+        "tests/test_bot_trade_create_stale_state_text_offer.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3505",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "TradeSettlementCallback.filter()",
+      "handler": "trade_create.handle_stale_trade_creation_callback",
+      "source": "bot/handlers/trade_create.py:3505",
+      "test_refs": [
+        "tests/test_bot_trade_create_stale_state_text_offer.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3506",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "CommodityCallback.filter()",
+      "handler": "trade_create.handle_stale_trade_creation_callback",
+      "source": "bot/handlers/trade_create.py:3506",
+      "test_refs": [
+        "tests/test_bot_trade_create_stale_state_text_offer.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3507",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "PageCallback.filter()",
+      "handler": "trade_create.handle_stale_trade_creation_callback",
+      "source": "bot/handlers/trade_create.py:3507",
+      "test_refs": [
+        "tests/test_bot_trade_create_stale_state_text_offer.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3508",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "QuantityCallback.filter()",
+      "handler": "trade_create.handle_stale_trade_creation_callback",
+      "source": "bot/handlers/trade_create.py:3508",
+      "test_refs": [
+        "tests/test_bot_trade_create_stale_state_text_offer.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3509",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "LotTypeCallback.filter()",
+      "handler": "trade_create.handle_stale_trade_creation_callback",
+      "source": "bot/handlers/trade_create.py:3509",
+      "test_refs": [
+        "tests/test_bot_trade_create_stale_state_text_offer.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3510",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "AcceptLotsCallback.filter()",
+      "handler": "trade_create.handle_stale_trade_creation_callback",
+      "source": "bot/handlers/trade_create.py:3510",
+      "test_refs": [
+        "tests/test_bot_trade_create_stale_state_text_offer.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3511",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "TradeActionCallback.filter()",
+      "handler": "trade_create.handle_stale_trade_creation_callback",
+      "source": "bot/handlers/trade_create.py:3511",
+      "test_refs": [
+        "tests/test_bot_trade_create_stale_state_text_offer.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3512",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "SkipNotesCallback.filter()",
+      "handler": "trade_create.handle_stale_trade_creation_callback",
+      "source": "bot/handlers/trade_create.py:3512",
+      "test_refs": [
+        "tests/test_bot_trade_create_stale_state_text_offer.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3513",
+      "family": "OFFER",
+      "kind": "callback_query",
+      "filter": "TextOfferActionCallback.filter()",
+      "handler": "trade_create.handle_stale_trade_creation_callback",
+      "source": "bot/handlers/trade_create.py:3513",
+      "test_refs": [
+        "tests/test_bot_trade_create_stale_state_text_offer.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3514",
+      "family": "OFFER",
+      "kind": "callback_query",
+      "filter": "TextOfferInferenceCandidateCallback.filter()",
+      "handler": "trade_create.handle_stale_trade_creation_callback",
+      "source": "bot/handlers/trade_create.py:3514",
+      "test_refs": [
+        "tests/test_bot_trade_create_stale_state_text_offer.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3515",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "TradeWizardActionCallback.filter()",
+      "handler": "trade_create.handle_stale_trade_creation_callback",
+      "source": "bot/handlers/trade_create.py:3515",
+      "test_refs": [
+        "tests/test_bot_trade_create_stale_state_text_offer.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3516",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "TradeWizardEditCallback.filter()",
+      "handler": "trade_create.handle_stale_trade_creation_callback",
+      "source": "bot/handlers/trade_create.py:3516",
+      "test_refs": [
+        "tests/test_bot_trade_create_stale_state_text_offer.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-TRADE-BUTTON-L645",
+      "family": "OFFER",
+      "kind": "message",
+      "filter": "F.text == '📈 معامله'",
+      "handler": "trade_create.handle_trade_button",
+      "source": "bot/handlers/trade_create.py:645",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_trade_create_start.py",
+        "tests/test_bot_trade_create_validation_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TRADE-TYPE-SELECTION-L709",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_trade_type, TradeTypeCallback.filter()",
+      "handler": "trade_create.handle_trade_type_selection",
+      "source": "bot/handlers/trade_create.py:709",
+      "test_refs": [
+        "tests/test_bot_trade_create_trade_type.py",
+        "tests/test_bot_trade_create_remaining_guards.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-SETTLEMENT-TYPE-SELECTION-L743",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_settlement_type, TradeSettlementCallback.filter()",
+      "handler": "trade_create.handle_settlement_type_selection",
+      "source": "bot/handlers/trade_create.py:743",
+      "test_refs": [
+        "tests/test_bot_trade_create_wizard.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-COMMODITY-PAGE-L781",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_commodity, PageCallback.filter()",
+      "handler": "trade_create.handle_commodity_page",
+      "source": "bot/handlers/trade_create.py:781",
+      "test_refs": [
+        "tests/test_bot_trade_create_commodity_page.py",
+        "tests/test_bot_trade_create_remaining_guards.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-COMMODITY-SELECTION-L812",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_commodity, CommodityCallback.filter()",
+      "handler": "trade_create.handle_commodity_selection",
+      "source": "bot/handlers/trade_create.py:812",
+      "test_refs": [
+        "tests/test_bot_trade_create_remaining_guards.py",
+        "tests/test_bot_trade_create_commodity_selection.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-QUICK-QUANTITY-L869",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "Trade.awaiting_quantity, QuantityCallback.filter()",
+      "handler": "trade_create.handle_quick_quantity",
+      "source": "bot/handlers/trade_create.py:869",
+      "test_refs": [
+        "tests/test_bot_trade_create_wizard.py",
+        "tests/test_bot_trade_create_quick_quantity.py",
+        "tests/test_bot_trade_create_validation_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-MESSAGE-TRADE-CREATE-HANDLE-MANUAL-QUANTITY-L929",
+      "family": "TRADE",
+      "kind": "message",
+      "filter": "Trade.awaiting_quantity",
+      "handler": "trade_create.handle_manual_quantity",
+      "source": "bot/handlers/trade_create.py:929",
+      "test_refs": [
+        "tests/test_bot_trade_create_validation_interaction_queue.py",
+        "tests/test_bot_trade_create_manual_quantity.py",
+        "tests/test_bot_trade_create_remaining_guards.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-L810",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "ChannelTradeCallback.filter()",
+      "handler": "trade_execute.handle_channel_trade",
+      "source": "bot/handlers/trade_execute.py:810",
+      "test_refs": [
+        "tests/test_bot_trade_execute_local_pending.py",
+        "tests/test_bot_trade_execute_offer_guards.py",
+        "tests/test_bot_trade_execute_blocked.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-PUBLIC-L829",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "ChannelTradePublicCallback.filter()",
+      "handler": "trade_execute.handle_channel_trade_public",
+      "source": "bot/handlers/trade_execute.py:829",
+      "test_refs": [
+        "tests/test_bot_trade_execute_local_success.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-MESSAGE-TRADE-HISTORY-SHOW-MY-TRADE-HISTORY-L231",
+      "family": "TRADE",
+      "kind": "message",
+      "filter": "F.text == '📊 تاریخچه معاملات من'",
+      "handler": "trade_history.show_my_trade_history",
+      "source": "bot/handlers/trade_history.py:231",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_bot_trade_history_show.py",
+        "tests/test_bot_trade_history_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-CHANGE-HISTORY-MONTHS-L253",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "HistoryPageCallback.filter()",
+      "handler": "trade_history.change_history_months",
+      "source": "bot/handlers/trade_history.py:253",
+      "test_refs": [
+        "tests/test_bot_trade_history_show.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-EXPORT-EXCEL-L381",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "ExportHistoryCallback.filter(F.format == 'excel')",
+      "handler": "trade_history.export_excel",
+      "source": "bot/handlers/trade_history.py:381",
+      "test_refs": [
+        "tests/test_bot_trade_history_generate_excel.py",
+        "tests/test_trade_history_export_service.py",
+        "tests/test_bot_trade_history_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-EXPORT-PDF-L440",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "ExportHistoryCallback.filter(F.format == 'pdf')",
+      "handler": "trade_history.export_pdf",
+      "source": "bot/handlers/trade_history.py:440",
+      "test_refs": [
+        "tests/test_bot_trade_history_interaction_queue.py",
+        "tests/test_bot_trade_history_export_pdf.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-EXPORT-PROFILE-TRADE-PDF-L498",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "ProfileTradePdfCallback.filter()",
+      "handler": "trade_history.export_profile_trade_pdf",
+      "source": "bot/handlers/trade_history.py:498",
+      "test_refs": [
+        "tests/test_bot_trade_history_interaction_queue.py",
+        "tests/test_bot_trade_history_export_pdf.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-SHOW-PUBLIC-PROFILE-USERNAME-UNAVAILABLE-L52",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "F.data == PUBLIC_PROFILE_USERNAME_UNAVAILABLE_CALLBACK",
+      "handler": "trade_history.show_public_profile_username_unavailable",
+      "source": "bot/handlers/trade_history.py:52",
+      "test_refs": [
+        "tests/test_bot_trade_history_show.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-BACK-TO-PROFILE-L554",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "ProfileCallback.filter()",
+      "handler": "trade_history.back_to_profile",
+      "source": "bot/handlers/trade_history.py:554",
+      "test_refs": [
+        "tests/test_bot_trade_history_back_to_profile.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-SHOW-MUTUAL-TRADE-HISTORY-L607",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "TradeHistoryCallback.filter()",
+      "handler": "trade_history.show_mutual_trade_history",
+      "source": "bot/handlers/trade_history.py:607",
+      "test_refs": [
+        "tests/test_bot_trade_history_show.py"
+      ]
+    },
+    {
+      "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-MANAGE-HANDLE-EXPIRE-OFFER-L118",
+      "family": "TRADE",
+      "kind": "callback_query",
+      "filter": "ExpireOfferCallback.filter()",
+      "handler": "trade_manage.handle_expire_offer",
+      "source": "bot/handlers/trade_manage.py:118",
+      "test_refs": [
+        "tests/test_bot_trade_manage_offer_guards.py",
+        "tests/test_bot_trade_manage_rate_limit.py",
+        "tests/test_bot_trade_manage_success.py"
+      ]
+    }
+  ]
+}

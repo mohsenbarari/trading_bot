@@ -12,7 +12,13 @@ Status: sanitised tracked index; raw runtime output is intentionally untracked
 | Feature parity | `05-feature-parity-contract.md` | tracked Markdown |
 | Drift register | `06-current-drift-register.md` | tracked Markdown |
 | Cleanup manifest | `07-repository-cleanup-manifest.md` | tracked Markdown |
-| Machine-readable inventory | `inventory/current-finland-runtime.json` | SHA-256 `d6fe17b2387fba087e40fce4a77179a1ca907bdfb97ad2c900e2bc35d53b31af` |
+| Runtime inventory | `inventory/current-finland-runtime.json` | SHA-256 `4dc0758b51a57cda8aa71214e889454c89540f6e1647523952b0a671486c2294` |
+| Surface inventory index | `inventory/surface-behavior-inventory.json` | SHA-256 `633ec1ba4b0397ec97e89e02db4de9e506eaa47c3cef1798d7fc5781bb6899ee` |
+| API surface inventory | `inventory/surface-api.json` | SHA-256 `da972232191c71cc7668ddafc4a3f1cfb94f647f99b5b605f72f09ffc441a89d` |
+| Bot surface inventory | `inventory/surface-bot.json` | SHA-256 `ecab4ea012197e307758d9b4399de911d122832aef58d3b1dc77b045d2172a75` |
+| Web route inventory | `inventory/surface-web.json` | SHA-256 `c3a13651720969c7920ad695b0cbc6fb8ff3b520ec46c2c4ab4cf57ffe646758` |
+| Job authority inventory | `inventory/surface-jobs.json` | SHA-256 `a324637d0c2d62ca0dcb3243414144b286ec08d8089052b659dacb4dd7781645` |
+| Runtime task ownership | `inventory/runtime-task-ownership.json` | SHA-256 `3290bc262460b682d35badd21efca59f0ca4f0c8629e13c295b3e55df521e7ac` |
 | Task Card | `stages/P1-00.md` | human gate pending |
 
 ## Evidence handling

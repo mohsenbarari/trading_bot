@@ -1,6 +1,6 @@
 # Feature Parity Contract
 
-Status: domain baseline present; endpoint/callback coverage incomplete
+Status: static behavior seeds complete; scenario characterization and owner review open
 
 ## Definition of parity
 
@@ -18,46 +18,154 @@ failure and rollback behavior
 ```
 
 A green HTTP response or matching screenshot alone is not parity. An existing
-bug discovered here is recorded as a baseline drift and either preserved for the
+bug discovered here is recorded as baseline drift and either preserved during the
 topology refactor or fixed in a separately approved change set.
 
-## Static surface coverage baseline
+## Exact static surface inventory
 
-| Surface | Static inventory | Coverage state |
-| --- | ---: | --- |
-| FastAPI route decorators | 212 across 18 router modules | module inventory complete; per-route behavior mapping open |
-| Bot handler decorators | 202 across 18 handler modules | module inventory complete; per-handler behavior mapping open |
-| Frontend router paths | 30 | route inventory complete; action/API mapping open |
-| recurring background jobs in authority registry | 15 entries: 14 required classes plus local sync worker | authority reviewed; target capability mapping open |
-| ORM model tables | 59 | sync policy classification complete |
+The inventory is now decorator/route/job-level rather than module-level. Every
+discovered live item has a unique family-seeded `behavior_id`; none is
+`UNCLASSIFIED`.
 
-Because per-route/per-callback IDs are not complete, the `P1-00` coverage gate is
-currently **BLOCKED**, not silently treated as 100%.
+| Surface | Exact discovered count | Static test evidence | Current state |
+| --- | ---: | ---: | --- |
+| FastAPI router decorators | 213 across 18 mounted router modules | included below | seeded |
+| main FastAPI app decorators | 4 | included below | seeded |
+| total live FastAPI decorators | 217 | 216 function/path references; 1 review item | seeded, variants open |
+| Bot handler decorators | 203 across 18 active/conditional modules | 198 function/filter references; 5 review items | seeded, variants open |
+| frontend router paths | 30 | 30 direct route-name references | seeded, action mapping open |
+| background authority entries | 15: 14 required classes plus local sync worker | 15 direct name references | authority baseline seeded |
+| ORM model tables | 59 | registry coverage complete | 23 sync, 33 local, 3 bookkeeping |
 
-## Required behavior families
+The earlier 212/202 counts omitted one FastAPI WebSocket decorator and one Bot
+`chat_join_request` decorator. The four main-app routes were also outside that
+router-only count. Correcting inventory is not a behavior change.
 
-Every concrete behavior later receives an ID beneath one of these stable
-families. The suffix must identify the route/command/action and persona; one ID
-must never represent several different side effects.
+“Direct static reference” is a function/path/filter evidence hint, not a coverage
+percentage. A missing reference may still be tested through a higher-level
+scenario; each such item must be manually linked or receive a characterization
+test before the gate closes.
 
-| Family prefix | Scenarios that must be characterized |
+## Machine-readable contract seeds
+
+| Artifact | Contents |
 | --- | --- |
-| `AUTH-*` | setup password, login, OTP/SMS, session approval/recovery/expiry, logout, revoked/deleted user |
-| `IDENTITY-*` | invitation, registration, Telegram linking, user/accountant/customer relations and blocks |
-| `OFFER-*` | create/edit/cancel/expire/republish, Web/Bot provenance, tier/overtime, publication and cache |
-| `REQUEST-*` | Web/Bot requests, confirmation/approval, duplicate/concurrent action, timeout and policy snapshots |
-| `TRADE-*` | create/execute/manage/history, settlement/commission, receipt/delivery and conflict handling |
-| `MARKET-*` | schedule/open/close, capture/facts, guard, estimator mode, widening/confidence and snapshot delivery |
-| `MSG-*` | chats/messages, files/uploads/downloads, realtime/reconnect/unread and Web Push |
-| `TG-*` | commands/callbacks, publisher/channel state, queue/retry/provider outcome and sole executor guard |
-| `ADMIN-*` | users, commodities, invitations, broadcasts, settings, system operations and audit |
-| `SYNC-*` | emit/apply/dedupe/gap/block/repair/parity, peer outage and restart/resume |
-| `OPS-*` | readiness, restart isolation, backup/restore, migration, rollback, disk/log/retention and monitoring |
+| `inventory/surface-behavior-inventory.json` | counts, taxonomy, family authority/risk and inventory boundaries |
+| `inventory/surface-api.json` | method/path/handler/source/family/test references for 217 decorators |
+| `inventory/surface-bot.json` | handler kind/filter/function/source/family/test references for 203 decorators |
+| `inventory/surface-web.json` | path/name/component/guard/family/test references for 30 routes |
+| `inventory/surface-jobs.json` | current/target authority, tables and side effects for 15 registered jobs |
+| `inventory/runtime-task-ownership.json` | API/Bot/Market child process, poller, worker and timer ownership seeds |
 
-## Contract record required for each concrete behavior
+These files are generated from commit `19087ff0...`. A later code change that
+adds/removes a route, handler or job must regenerate the inventory and fail CI if
+the new item has no family/behavior seed.
+
+## Human-readable scenario contract
+
+The owner reviews these domain scenarios, not hundreds of decorator lines. The
+machine manifests prove that every line is assigned to one of them.
+
+| Family | Real user/operator scenario | State and side effects that must remain equivalent |
+| --- | --- | --- |
+| `AUTH` | user requests OTP, logs in, approves/recovers/revokes a session or logs out | session and login-request state, quota, SMS/Telegram delivery, copy, expiry and revocation ordering |
+| `IDENTITY` | invited user registers/links Telegram; owner manages customer/accountant relation, block or flag | stable identity, relation permission, visibility, session consequences and notification audience |
+| `OFFER` | tier-1/2 user creates, parses, repeats, expires, cancels or republishes a Web/Bot Offer | immutable origin, `home_site`, timestamps, price guard, publication/cache/outbox and overtime policy |
+| `REQUEST` | a Web or Bot user requests the opposite-surface Offer and owner approves/rejects/cancels | both origins, actor/tier/policy snapshots, idempotency, timeout and confirmation notifications |
+| `TRADE` | approved request becomes a trade; users view/export history and receive results | immutable provenance snapshot, quantity/inventory/commission/settlement, receipts and Web/Telegram delivery |
+| `MARKET` | schedule changes, facts/snapshots arrive, estimate confidence changes or price guard evaluates | schedule authority, fact timing, widening/fail-open rules, estimator mode, notice and guard decision |
+| `MSG` | user opens Messenger, sends/edits/deletes/reacts, uploads media and reconnects realtime | local rows/media hashes, membership, ordering, unread/seen, WebSocket/poll and Web Push |
+| `NOTIFY` | product creates a notification; user reads/deletes/preferences/subscription change | audience, unread count, shared notification row, local Push subscription and no duplicate delivery |
+| `TG` | Bot receives command/callback, publisher dispatch or provider retry | callback ACK, FSM/anchor state, queue claim/dedupe, exact bot identity and single Telegram owner |
+| `ADMIN` | admin edits users/commodities/settings or sends market/broadcast message | authorization, audit row, shared state, cache invalidation and broadcast fanout |
+| `SYNC` | a committed event emits, retries, applies, detects gap/conflict or repairs | stable identity, sequence/hash/signature, exactly-once business apply, quarantine and checkpoint |
+| `OPS` | process starts/restarts, readiness fails, backup/restores or frontend shell recovers | independent process lifecycle, fail-closed readiness, exact release/schema/config and recovery evidence |
+
+## Mandatory Web/Bot combination matrix
+
+Offer and Request parity is not satisfied by testing “one Web case and one Bot
+case.” Every row below expands across owner/customer/accountant/admin where
+allowed, tier 1/2, normal/overtime/closed time and success/reject/retry/concurrent
+paths.
+
+| Offer origin | Request/action origin | Required result |
+| --- | --- | --- |
+| Web | Web | Web policy, confirmation, notification and provenance unchanged |
+| Web | Bot | Offer stays Web-origin; Request records Bot-origin and Bot reply/callback behavior |
+| Bot | Web | Offer stays Bot-origin; Web Request and Web delivery do not rewrite it |
+| Bot | Bot | sole Telegram execution/publication owner and Bot-specific policy remain unchanged |
+| Internal/system | Web or Bot | system action provenance is separate; it cannot impersonate user surface |
+
+The approved immutable Offer and Trade provenance contract in
+`04-surface-policy-matrix.md` is part of every row.
+
+## Mandatory failure timeline
+
+Each mutating behavior must be characterized at these boundaries:
+
+1. **failure before DB commit:** no durable business state and no external side
+   effect;
+2. **commit before event/side effect:** outbox/receipt remains retryable and user
+   must not receive a false terminal failure;
+3. **side effect before ACK:** retry sees the idempotency/receipt ledger and does
+   not send or apply twice;
+4. **two concurrent commands:** one authoritative result; loser gets deterministic
+   conflict/already-completed behavior;
+5. **process restart:** durable queue/FSM/reconciliation resumes without lost
+   mutation or duplicate Telegram/Web delivery;
+6. **unknown authority/schema/hash:** fail closed and visible; no implicit
+   failover, LWW or synthetic evidence.
+
+## Authority and restart invariants
+
+- Web Writer fencing never disables permitted Finland Bot-home commands.
+- only one Telegram poller/executor/provider owner may perform side effects;
+- one API leader owns recurring API jobs, but authority is checked again by each
+  job/domain command;
+- Web/API and Bot restart independently; neither restart is a deployment
+  prerequisite for the other;
+- shared PostgreSQL/Redis failure affects both and must be exposed by readiness,
+  not masked as successful behavior;
+- moving from historical `iran/foreign` labels to capabilities cannot enable a
+  previously forbidden job or suppress a required one.
+
+## Static review queue
+
+No surface is unclassified, but six items have no direct function/path/filter
+reference in the test corpus and require manual evidence linking or characterization:
+
+- API: the admin test-Web-Push command;
+- Bot: one admin broadcast group-toggle, one overtime-preference entry action,
+  one conditional publisher public-trade callback and two trade wizard back
+  actions.
+
+An evidence gap is not permission to delete or alter the handler. Each item is
+preserved until a direct test or approved higher-level scenario proves behavior.
+
+## Runtime-task ownership status
+
+The 15-entry background authority registry does not enumerate every live child
+coroutine or external timer. Current composition additionally includes:
+
+- API leader election and conditional job factories;
+- primary/publisher Telegram pollers, trade-suggestion listener and owner monitor;
+- Queue-v1 executor/OTP worker or the mutually exclusive five legacy delivery
+  workers;
+- conditional publisher dispatcher/pollers;
+- Market capture/store/processor/estimator/snapshot containers;
+- sync-health, snapshot relay/publish and legacy bridge systemd timers.
+
+They are now recorded in `inventory/runtime-task-ownership.json`, including the
+conditional and mutually exclusive runtime sets. What remains open is the target
+binding `task seed → exact compose service/image → credential mount → DB/Redis
+pool → readiness/restart policy`. That binding belongs to `P1-03`; any unknown
+current task or overlapping owner still blocks `P1-00`.
+
+## Contract record required for each scenario variant
 
 ```yaml
 behavior_id: OFFER-WEB-CREATE-TIER2-NORMAL
+seed_ids: [API-OFFER-POST-OFFERS-CREATE-OFFER-L...]
 surface: WEBAPP
 persona_role: customer
 customer_tier: 2
@@ -77,17 +185,12 @@ regression_tests: []
 target_result: NOT_RUN
 ```
 
-IDs and fixtures must be machine-readable and generated coverage must fail when
-a discovered mutation route, callback, recurring job or external side effect has
-no ID.
-
-## Initial golden invariants already supported by focused tests
+## Initial golden evidence
 
 The audit ran 81 focused tests covering background-job authority, Bot/Web
-candidate behavior, deployment surface guards, Offer/Request source policy,
-server routing/trade forwarding, sync field/registry policy and Telegram runtime
-role. All passed. These tests establish useful invariants but are not the full
-contract.
+candidate behavior, deployment-surface guards, Offer/Request source policy,
+routing/trade forwarding, sync field/registry policy and Telegram runtime role.
+All passed. These are useful invariants, not the entire characterization corpus.
 
 At minimum the target must preserve:
 
@@ -96,19 +199,40 @@ At minimum the target must preserve:
 - home-authority checks for Offer mutation and expiry;
 - request idempotency and source snapshots;
 - no duplicate Telegram/Web notification after retry;
-- local session/Messenger state handling and explicit re-login semantics where
-  cross-site sessions are intentionally not transferred;
-- all shared-table business hashes and money/inventory/settlement invariants;
+- local session/Messenger state and explicit cross-site re-login semantics;
+- shared-table business hashes and money/inventory/settlement invariants;
 - fail-closed behavior for unknown authority, migration mismatch and data gaps.
 
-## Closure method
+## Closure ledger
 
-1. extract a deterministic manifest of every route, callback, scheduled job,
-   consumer and external adapter;
-2. map each item to one or more concrete `behavior_id` records and existing tests;
-3. add side-effect-free characterization tests for uncovered high-risk behavior;
-4. run one corpus against current topology and target topology;
-5. classify every diff as `EXPECTED_TOPOLOGY`, `KNOWN_BASELINE_BUG`,
-   `REGRESSION` or `NONDETERMINISTIC_TEST`;
-6. require owner approval for every baseline bug/waiver and zero unexplained
-   regressions before `P1-06` can complete.
+| Work item | Status |
+| --- | --- |
+| deterministic decorator/route/job extraction | `COMPLETE` |
+| unique family-seeded IDs and zero unclassified items | `COMPLETE` |
+| static function/path/filter test-reference scan | `COMPLETE` |
+| manual resolution of 6 evidence-review items | `OPEN` |
+| current runtime child/poller/timer owner seed manifest | `COMPLETE` |
+| exact target compose/credential/readiness binding | future `P1-03` |
+| persona/tier/time/failure scenario records | `OPEN` |
+| owner approval of human-readable scenario contract | `OPEN` |
+| current-vs-target differential execution | future `P1-06` |
+
+`P1-00` becomes complete only after the open current-state items have evidence or
+an owner-approved blocker. `P1-06` later proves the target against this frozen
+contract; it does not invent the contract after implementation.
+
+## Owner review gate
+
+The human review is limited to these four assertions:
+
+1. the twelve scenario families above cover the user/operator capabilities that
+   must survive consolidation;
+2. Web/Bot differences, Offer/Request/Trade provenance and Bot independence are
+   intentional contracts, not cleanup candidates;
+3. the six evidence gaps must receive direct characterization/evidence before a
+   dependent behavior-changing Stage and cannot be removed as “probably unused”;
+4. the current runtime ownership seed is accepted as the baseline, while exact
+   target compose/credential/readiness bindings remain work for `P1-03`.
+
+Approval of this gate freezes the human-readable baseline; it is not approval to
+implement, deploy, delete a handler or waive any evidence gap.

@@ -1,0 +1,434 @@
+{
+  "schema_version": "two-server-refactor.surface-behavior-inventory.v1",
+  "generated_from_commit": "19087ff0686c9260b55f1c6c35782b758be6673e",
+  "section": "jobs",
+  "coverage": {
+    "total": 15,
+    "family_counts": {
+      "AUTH": 2,
+      "IDENTITY": 2,
+      "MARKET": 2,
+      "OFFER": 2,
+      "OPS": 1,
+      "SYNC": 1,
+      "TG": 3,
+      "TRADE": 2
+    },
+    "with_direct_static_test_reference": 15,
+    "without_direct_static_test_reference": 0,
+    "unclassified": 0
+  },
+  "entries": [
+    {
+      "behavior_id": "JOB-OPS-CONNECTIVITY-MONITOR",
+      "family": "OPS",
+      "job_name": "connectivity_monitor",
+      "required_registry_member": true,
+      "current_allowed_servers": [
+        "iran"
+      ],
+      "target_authority_candidates": [
+        "WEB_CAPABILITY_OWNER"
+      ],
+      "mutated_tables": [],
+      "local_runtime": true,
+      "external_state": [
+        "redis:connectivity:global"
+      ],
+      "side_effects": [],
+      "test_refs": [
+        "tests/test_background_job_authority.py",
+        "tests/test_main_lifespan.py",
+        "tests/test_core_connectivity.py"
+      ]
+    },
+    {
+      "behavior_id": "JOB-MARKET-MARKET-SCHEDULE",
+      "family": "MARKET",
+      "job_name": "market_schedule",
+      "required_registry_member": true,
+      "current_allowed_servers": [
+        "foreign",
+        "iran"
+      ],
+      "target_authority_candidates": [
+        "DOMAIN_AUTHORITY",
+        "HOME_SITE_WHERE_APPLICABLE"
+      ],
+      "mutated_tables": [
+        "market_runtime_state",
+        "offers",
+        "market_channel_notice_receipts"
+      ],
+      "local_runtime": false,
+      "external_state": [],
+      "side_effects": [
+        "market realtime events",
+        "foreign Telegram market notice when gateway allows it",
+        "active-offer cache decrement"
+      ],
+      "test_refs": [
+        "tests/test_core_events.py",
+        "tests/test_offers_router_create_success.py",
+        "tests/test_sync_router_apply_item_success.py"
+      ]
+    },
+    {
+      "behavior_id": "JOB-OFFER-OFFER-EXPIRY",
+      "family": "OFFER",
+      "job_name": "offer_expiry",
+      "required_registry_member": true,
+      "current_allowed_servers": [
+        "foreign",
+        "iran"
+      ],
+      "target_authority_candidates": [
+        "DOMAIN_AUTHORITY",
+        "HOME_SITE_WHERE_APPLICABLE"
+      ],
+      "mutated_tables": [
+        "offers"
+      ],
+      "local_runtime": false,
+      "external_state": [],
+      "side_effects": [
+        "local realtime offer:expired",
+        "active-offer cache decrement",
+        "foreign Telegram terminal channel state"
+      ],
+      "test_refs": [
+        "tests/test_web_push.py",
+        "tests/test_offers_router_create_success.py",
+        "tests/test_sync_router_apply_item_success.py"
+      ]
+    },
+    {
+      "behavior_id": "JOB-OFFER-OFFER-TELEGRAM-PUBLICATION",
+      "family": "OFFER",
+      "job_name": "offer_telegram_publication",
+      "required_registry_member": true,
+      "current_allowed_servers": [
+        "foreign"
+      ],
+      "target_authority_candidates": [
+        "TELEGRAM_OWNER"
+      ],
+      "mutated_tables": [
+        "offers",
+        "offer_publication_states"
+      ],
+      "local_runtime": false,
+      "external_state": [
+        "Telegram Bot API"
+      ],
+      "side_effects": [
+        "Telegram channel offer post",
+        "Telegram channel offer message text/markup"
+      ],
+      "test_refs": [
+        "tests/test_offer_publication_worker.py",
+        "tests/test_background_job_authority.py",
+        "tests/test_run_bot_telegram_execution_ownership.py"
+      ]
+    },
+    {
+      "behavior_id": "JOB-AUTH-OTP-SMS-FALLBACK",
+      "family": "AUTH",
+      "job_name": "otp_sms_fallback",
+      "required_registry_member": true,
+      "current_allowed_servers": [
+        "iran"
+      ],
+      "target_authority_candidates": [
+        "WEB_CAPABILITY_OWNER"
+      ],
+      "mutated_tables": [],
+      "local_runtime": true,
+      "external_state": [
+        "redis:otp_delivery:*",
+        "SMS.ir"
+      ],
+      "side_effects": [],
+      "test_refs": [
+        "tests/test_background_job_authority.py",
+        "tests/test_stage8_registration_observability.py",
+        "tests/test_sync_health_endpoint.py"
+      ]
+    },
+    {
+      "behavior_id": "JOB-AUTH-SESSION-EXPIRY",
+      "family": "AUTH",
+      "job_name": "session_expiry",
+      "required_registry_member": true,
+      "current_allowed_servers": [
+        "foreign",
+        "iran"
+      ],
+      "target_authority_candidates": [
+        "LOCAL_RUNTIME_OWNER"
+      ],
+      "mutated_tables": [
+        "user_sessions"
+      ],
+      "local_runtime": true,
+      "external_state": [],
+      "side_effects": [],
+      "test_refs": [
+        "tests/test_background_job_authority.py",
+        "tests/test_job_logging.py",
+        "tests/test_core_session_expiry.py"
+      ]
+    },
+    {
+      "behavior_id": "JOB-SYNC-SYNC-WORKER",
+      "family": "SYNC",
+      "job_name": "sync_worker",
+      "required_registry_member": false,
+      "current_allowed_servers": [
+        "foreign",
+        "iran"
+      ],
+      "target_authority_candidates": [
+        "LOCAL_CROSS_SITE_OUTBOX_OWNER"
+      ],
+      "mutated_tables": [
+        "change_log"
+      ],
+      "local_runtime": true,
+      "external_state": [
+        "redis:sync:outbound",
+        "redis:sync:retry"
+      ],
+      "side_effects": [],
+      "test_refs": [
+        "tests/test_deploy_surface_smoke.py",
+        "tests/test_production_coin_inference_snapshot_relay.py",
+        "tests/test_sync_worker.py"
+      ]
+    },
+    {
+      "behavior_id": "JOB-TG-TELEGRAM-ADMIN-BROADCAST-DELIVERY",
+      "family": "TG",
+      "job_name": "telegram_admin_broadcast_delivery",
+      "required_registry_member": true,
+      "current_allowed_servers": [
+        "foreign"
+      ],
+      "target_authority_candidates": [
+        "TELEGRAM_OWNER"
+      ],
+      "mutated_tables": [
+        "telegram_admin_broadcasts",
+        "telegram_admin_broadcast_receipts"
+      ],
+      "local_runtime": false,
+      "external_state": [
+        "Telegram Bot API"
+      ],
+      "side_effects": [
+        "Telegram private admin broadcast message"
+      ],
+      "test_refs": [
+        "tests/test_telegram_admin_broadcast_delivery_service.py",
+        "tests/test_telegram_admin_broadcast_video.py",
+        "tests/test_telegram_admin_broadcast_queue_feeder.py"
+      ]
+    },
+    {
+      "behavior_id": "JOB-TG-TELEGRAM-DELIVERY-QUEUE",
+      "family": "TG",
+      "job_name": "telegram_delivery_queue",
+      "required_registry_member": true,
+      "current_allowed_servers": [
+        "foreign"
+      ],
+      "target_authority_candidates": [
+        "TELEGRAM_OWNER"
+      ],
+      "mutated_tables": [
+        "telegram_delivery_jobs",
+        "telegram_delivery_provider_outcomes",
+        "telegram_delivery_reconciliation_evidence",
+        "telegram_delivery_runtime_gates",
+        "trade_delivery_receipts",
+        "telegram_admin_broadcasts",
+        "telegram_admin_broadcast_receipts",
+        "telegram_notification_outbox",
+        "telegram_interaction_anchor_states",
+        "market_channel_notice_receipts"
+      ],
+      "local_runtime": true,
+      "external_state": [
+        "Telegram Bot API"
+      ],
+      "side_effects": [
+        "all queued Telegram send/edit/callback methods after cutover"
+      ],
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_promote_production_private_primary_product.py",
+        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
+      ]
+    },
+    {
+      "behavior_id": "JOB-MARKET-TELEGRAM-MARKET-NOTICE-DELIVERY",
+      "family": "MARKET",
+      "job_name": "telegram_market_notice_delivery",
+      "required_registry_member": true,
+      "current_allowed_servers": [
+        "foreign"
+      ],
+      "target_authority_candidates": [
+        "TELEGRAM_OWNER"
+      ],
+      "mutated_tables": [
+        "market_channel_notice_receipts"
+      ],
+      "local_runtime": false,
+      "external_state": [
+        "Telegram Bot API"
+      ],
+      "side_effects": [
+        "Telegram market open/close channel notice"
+      ],
+      "test_refs": [
+        "tests/test_run_bot_telegram_execution_ownership.py"
+      ]
+    },
+    {
+      "behavior_id": "JOB-TG-TELEGRAM-NOTIFICATION-OUTBOX-DELIVERY",
+      "family": "TG",
+      "job_name": "telegram_notification_outbox_delivery",
+      "required_registry_member": true,
+      "current_allowed_servers": [
+        "foreign"
+      ],
+      "target_authority_candidates": [
+        "TELEGRAM_OWNER"
+      ],
+      "mutated_tables": [
+        "telegram_notification_outbox"
+      ],
+      "local_runtime": false,
+      "external_state": [
+        "Telegram Bot API"
+      ],
+      "side_effects": [
+        "Telegram private generic notification message"
+      ],
+      "test_refs": [
+        "tests/test_telegram_notification_outbox_worker.py",
+        "tests/test_background_job_authority.py",
+        "tests/test_telegram_notification_outbox_queue_feeder.py"
+      ]
+    },
+    {
+      "behavior_id": "JOB-IDENTITY-TELEGRAM-REGISTRATION-RECONCILIATION",
+      "family": "IDENTITY",
+      "job_name": "telegram_registration_reconciliation",
+      "required_registry_member": true,
+      "current_allowed_servers": [
+        "foreign"
+      ],
+      "target_authority_candidates": [
+        "TELEGRAM_OWNER"
+      ],
+      "mutated_tables": [
+        "telegram_registration_intents"
+      ],
+      "local_runtime": true,
+      "external_state": [
+        "Iran signed registration endpoint"
+      ],
+      "side_effects": [],
+      "test_refs": [
+        "tests/test_stage8_registration_observability.py",
+        "tests/test_stage5_direct_telegram_registration.py",
+        "tests/test_sync_health_endpoint.py"
+      ]
+    },
+    {
+      "behavior_id": "JOB-TRADE-TRADE-TELEGRAM-DELIVERY",
+      "family": "TRADE",
+      "job_name": "trade_telegram_delivery",
+      "required_registry_member": true,
+      "current_allowed_servers": [
+        "foreign"
+      ],
+      "target_authority_candidates": [
+        "TELEGRAM_OWNER"
+      ],
+      "mutated_tables": [
+        "trade_delivery_receipts"
+      ],
+      "local_runtime": false,
+      "external_state": [
+        "Telegram Bot API"
+      ],
+      "side_effects": [
+        "Telegram private trade message"
+      ],
+      "test_refs": [
+        "tests/test_background_job_authority.py",
+        "tests/test_trade_delivery_worker.py",
+        "tests/test_telegram_trade_result_queue_bridge_postgres.py"
+      ]
+    },
+    {
+      "behavior_id": "JOB-TRADE-TRADE-WEBAPP-DELIVERY",
+      "family": "TRADE",
+      "job_name": "trade_webapp_delivery",
+      "required_registry_member": true,
+      "current_allowed_servers": [
+        "iran"
+      ],
+      "target_authority_candidates": [
+        "WEB_CAPABILITY_OWNER"
+      ],
+      "mutated_tables": [
+        "trade_delivery_receipts",
+        "notifications"
+      ],
+      "local_runtime": false,
+      "external_state": [],
+      "side_effects": [
+        "local realtime notification event",
+        "local Web Push notification"
+      ],
+      "test_refs": [
+        "tests/test_background_job_authority.py",
+        "tests/test_trade_delivery_worker.py",
+        "tests/test_main_lifespan.py"
+      ]
+    },
+    {
+      "behavior_id": "JOB-IDENTITY-USER-ACCOUNT-STATUS",
+      "family": "IDENTITY",
+      "job_name": "user_account_status",
+      "required_registry_member": true,
+      "current_allowed_servers": [
+        "iran"
+      ],
+      "target_authority_candidates": [
+        "WEB_CAPABILITY_OWNER"
+      ],
+      "mutated_tables": [
+        "users",
+        "notifications",
+        "user_sessions"
+      ],
+      "local_runtime": false,
+      "external_state": [],
+      "side_effects": [
+        "user/accountant notifications",
+        "local session revocation",
+        "optional Telegram notification via foreign-safe gateway path"
+      ],
+      "test_refs": [
+        "tests/test_bot_admin_users_bot_access.py",
+        "tests/test_account_status_lifecycle_smoke.py",
+        "tests/test_background_job_authority.py"
+      ]
+    }
+  ]
+}

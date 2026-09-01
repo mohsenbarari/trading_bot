@@ -1,0 +1,511 @@
+{
+  "schema_version": "two-server-refactor.surface-behavior-inventory.v1",
+  "generated_from_commit": "19087ff0686c9260b55f1c6c35782b758be6673e",
+  "section": "web",
+  "coverage": {
+    "total": 30,
+    "family_counts": {
+      "ADMIN": 6,
+      "AUTH": 3,
+      "IDENTITY": 11,
+      "MSG": 2,
+      "NOTIFY": 2,
+      "OFFER": 1,
+      "OPS": 5
+    },
+    "with_direct_static_test_reference": 30,
+    "without_direct_static_test_reference": 0,
+    "unclassified": 0
+  },
+  "entries": [
+    {
+      "behavior_id": "WEB-OPS-HOME",
+      "family": "OPS",
+      "path": "/",
+      "name": "home",
+      "component": "DashboardView.vue",
+      "guards": [
+        "requiresAuth"
+      ],
+      "source": "frontend/src/router/index.ts:29",
+      "test_refs": [
+        "frontend/src/App.test.ts",
+        "frontend/src/utils/routeRequest.test.ts",
+        "frontend/src/views/ProfileView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-AUTH-SETUP-PASSWORD",
+      "family": "AUTH",
+      "path": "/setup-password",
+      "name": "setup-password",
+      "component": "SetupPassword.vue",
+      "guards": [
+        "requiresAuth"
+      ],
+      "source": "frontend/src/router/index.ts:35",
+      "test_refs": [
+        "frontend/src/App.test.ts",
+        "frontend/src/router/uiRouteContract.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-AUTH-LOGIN",
+      "family": "AUTH",
+      "path": "/login",
+      "name": "login",
+      "component": "LoginView",
+      "guards": [
+        "requiresAuth",
+        "requiresMarketAccess"
+      ],
+      "source": "frontend/src/router/index.ts:41",
+      "test_refs": [
+        "tests/test_audit_anchor_export.py",
+        "frontend/src/App.test.ts",
+        "frontend/src/utils/authNavigation.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-OFFER-MARKET",
+      "family": "OFFER",
+      "path": "/market",
+      "name": "market",
+      "component": "MarketView.vue",
+      "guards": [
+        "requiresAuth",
+        "requiresMarketAccess"
+      ],
+      "source": "frontend/src/router/index.ts:47",
+      "test_refs": [
+        "tests/test_stage9_runtime_evidence.py",
+        "tests/test_coin_intelligence_private_gold_pipeline.py",
+        "tests/test_stage9_test_matrix.py"
+      ]
+    },
+    {
+      "behavior_id": "WEB-IDENTITY-OPERATIONS",
+      "family": "IDENTITY",
+      "path": "/operations",
+      "name": "operations",
+      "component": "OperationsView.vue",
+      "guards": [
+        "requiresAuth",
+        "requiresOwnerAccess"
+      ],
+      "source": "frontend/src/router/index.ts:53",
+      "test_refs": [
+        "frontend/src/views/CustomerWorkspaceView.test.ts",
+        "frontend/src/views/AccountantWorkspaceView.test.ts",
+        "frontend/src/router/uiRouteContract.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-IDENTITY-OPERATIONS-CUSTOMERS",
+      "family": "IDENTITY",
+      "path": "/operations/customers",
+      "name": "operations-customers",
+      "component": "CustomerWorkspaceView.vue",
+      "guards": [
+        "requiresAuth",
+        "requiresOwnerAccess"
+      ],
+      "source": "frontend/src/router/index.ts:59",
+      "test_refs": [
+        "frontend/src/App.test.ts",
+        "frontend/src/views/CustomerWorkspaceView.test.ts",
+        "frontend/src/views/OperationsView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-IDENTITY-OPERATIONS-CUSTOMERS-DETAIL",
+      "family": "IDENTITY",
+      "path": "/operations/customers/:relationId",
+      "name": "operations-customers-detail",
+      "component": "CustomerWorkspaceView.vue",
+      "guards": [
+        "requiresAuth",
+        "requiresOwnerAccess"
+      ],
+      "source": "frontend/src/router/index.ts:65",
+      "test_refs": [
+        "frontend/src/App.test.ts",
+        "frontend/src/views/CustomerWorkspaceView.test.ts",
+        "frontend/src/router/uiRouteContract.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-IDENTITY-OPERATIONS-ACCOUNTANTS",
+      "family": "IDENTITY",
+      "path": "/operations/accountants",
+      "name": "operations-accountants",
+      "component": "AccountantWorkspaceView.vue",
+      "guards": [
+        "requiresAuth",
+        "requiresOwnerAccess"
+      ],
+      "source": "frontend/src/router/index.ts:74",
+      "test_refs": [
+        "frontend/src/views/AccountantWorkspaceView.test.ts",
+        "frontend/src/views/PublicProfileView.test.ts",
+        "frontend/src/views/ProfileView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-IDENTITY-OPERATIONS-ACCOUNTANTS-DETAIL",
+      "family": "IDENTITY",
+      "path": "/operations/accountants/:relationId",
+      "name": "operations-accountants-detail",
+      "component": "AccountantWorkspaceView.vue",
+      "guards": [
+        "requiresAuth",
+        "requiresOwnerAccess"
+      ],
+      "source": "frontend/src/router/index.ts:80",
+      "test_refs": [
+        "frontend/src/views/AccountantWorkspaceView.test.ts",
+        "frontend/src/router/uiRouteContract.test.ts",
+        "frontend/src/router/index.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-OPS-ACCOUNT",
+      "family": "OPS",
+      "path": "/account",
+      "name": "account",
+      "component": "AccountHubView.vue",
+      "guards": [
+        "requiresAuth"
+      ],
+      "source": "frontend/src/router/index.ts:89",
+      "test_refs": [
+        "tests/test_provision_private_primary_secrets.py",
+        "tests/test_authoritative_registration_postgres.py",
+        "tests/test_registration_stage1_migration_postgres.py"
+      ]
+    },
+    {
+      "behavior_id": "WEB-AUTH-ACCOUNT-SECURITY",
+      "family": "AUTH",
+      "path": "/account/security",
+      "name": "account-security",
+      "component": "SettingsView.vue",
+      "guards": [
+        "requiresAuth"
+      ],
+      "source": "frontend/src/router/index.ts:95",
+      "test_refs": [
+        "frontend/src/views/SettingsView.test.ts",
+        "frontend/src/views/AccountHubView.test.ts",
+        "frontend/src/router/uiRouteContract.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-OPS-ACCOUNT-STORAGE",
+      "family": "OPS",
+      "path": "/account/storage",
+      "name": "account-storage",
+      "component": "SettingsView.vue",
+      "guards": [
+        "requiresAuth"
+      ],
+      "source": "frontend/src/router/index.ts:101",
+      "test_refs": [
+        "frontend/src/views/SettingsView.test.ts",
+        "frontend/src/views/AccountHubView.test.ts",
+        "frontend/src/views/ProfileView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-NOTIFY-ACCOUNT-NOTIFICATIONS",
+      "family": "NOTIFY",
+      "path": "/account/notifications",
+      "name": "account-notifications",
+      "component": "NotificationsView.vue",
+      "guards": [
+        "requiresAuth"
+      ],
+      "source": "frontend/src/router/index.ts:107",
+      "test_refs": [
+        "frontend/src/views/NotificationsView.test.ts",
+        "frontend/src/views/AccountHubView.test.ts",
+        "frontend/src/router/uiRouteContract.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-MSG-MESSENGER",
+      "family": "MSG",
+      "path": "/chat",
+      "name": "messenger",
+      "component": "MessengerView.vue",
+      "guards": [
+        "requiresAuth"
+      ],
+      "source": "frontend/src/router/index.ts:113",
+      "test_refs": [
+        "tests/test_trading_core_mixed_load_helpers.py",
+        "tests/test_final_release_gate.py",
+        "frontend/src/App.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-IDENTITY-PUBLIC-PROFILE",
+      "family": "IDENTITY",
+      "path": "/users/:id",
+      "name": "public-profile",
+      "component": "ProfileWorkspaceView.vue",
+      "guards": [
+        "requiresAuth"
+      ],
+      "source": "frontend/src/router/index.ts:119",
+      "test_refs": [
+        "frontend/src/App.test.ts",
+        "frontend/src/utils/httpErrorPolicy.test.ts",
+        "frontend/src/views/MessengerView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-IDENTITY-PROFILE",
+      "family": "IDENTITY",
+      "path": "/profile",
+      "name": "profile",
+      "component": "ProfileWorkspaceView.vue",
+      "guards": [
+        "requiresAuth"
+      ],
+      "source": "frontend/src/router/index.ts:125",
+      "test_refs": [
+        "tests/test_logging_foundation.py",
+        "frontend/src/views/CustomerWorkspaceView.test.ts",
+        "frontend/src/views/MessengerView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-OPS-SETTINGS",
+      "family": "OPS",
+      "path": "/settings",
+      "name": "settings",
+      "component": "SettingsView.vue",
+      "guards": [
+        "requiresAdmin",
+        "requiresAuth"
+      ],
+      "source": "frontend/src/router/index.ts:131",
+      "test_refs": [
+        "tests/test_invitations_router.py",
+        "tests/test_bot_link_account_cmd.py",
+        "tests/test_auth_router_registration_flows.py"
+      ]
+    },
+    {
+      "behavior_id": "WEB-ADMIN-ADMIN",
+      "family": "ADMIN",
+      "path": "/admin",
+      "name": "admin",
+      "component": "AdminView.vue",
+      "guards": [
+        "requiresAdmin",
+        "requiresAuth"
+      ],
+      "source": "frontend/src/router/index.ts:137",
+      "test_refs": [
+        "tests/test_core_events.py",
+        "tests/test_admin_messages_router.py",
+        "tests/test_chat_schemas.py"
+      ]
+    },
+    {
+      "behavior_id": "WEB-ADMIN-ADMIN-INVITATIONS",
+      "family": "ADMIN",
+      "path": "/admin/invitations",
+      "name": "admin-invitations",
+      "component": "AdminView.vue",
+      "guards": [
+        "requiresAdmin",
+        "requiresAuth"
+      ],
+      "source": "frontend/src/router/index.ts:143",
+      "test_refs": [
+        "frontend/src/App.test.ts",
+        "frontend/src/views/AdminView.test.ts",
+        "frontend/src/router/uiRouteContract.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-ADMIN-ADMIN-CHANNELS",
+      "family": "ADMIN",
+      "path": "/admin/channels",
+      "name": "admin-channels",
+      "component": "AdminView.vue",
+      "guards": [
+        "requiresAdmin",
+        "requiresAuth"
+      ],
+      "source": "frontend/src/router/index.ts:149",
+      "test_refs": [
+        "frontend/src/App.test.ts",
+        "frontend/src/views/AdminView.test.ts",
+        "frontend/src/router/uiRouteContract.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-IDENTITY-ADMIN-USERS",
+      "family": "IDENTITY",
+      "path": "/admin/users",
+      "name": "admin-users",
+      "component": "AdminView.vue",
+      "guards": [
+        "requiresAdmin",
+        "requiresAuth"
+      ],
+      "source": "frontend/src/router/index.ts:155",
+      "test_refs": [
+        "frontend/src/App.test.ts",
+        "frontend/src/views/AdminView.test.ts",
+        "frontend/src/router/uiRouteContract.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-IDENTITY-ADMIN-USER-PROFILE",
+      "family": "IDENTITY",
+      "path": "/admin/users/:id",
+      "name": "admin-user-profile",
+      "component": "AdminView.vue",
+      "guards": [
+        "requiresAdmin",
+        "requiresAuth"
+      ],
+      "source": "frontend/src/router/index.ts:161",
+      "test_refs": [
+        "frontend/src/App.test.ts",
+        "frontend/src/views/AdminView.test.ts",
+        "frontend/src/views/PublicProfileView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-ADMIN-ADMIN-COMMODITIES",
+      "family": "ADMIN",
+      "path": "/admin/commodities",
+      "name": "admin-commodities",
+      "component": "AdminView.vue",
+      "guards": [
+        "requiresAdmin",
+        "requiresAuth"
+      ],
+      "source": "frontend/src/router/index.ts:167",
+      "test_refs": [
+        "frontend/src/router/uiRouteContract.test.ts",
+        "frontend/src/router/index.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-ADMIN-ADMIN-MESSAGES",
+      "family": "ADMIN",
+      "path": "/admin/messages",
+      "name": "admin-messages",
+      "component": "AdminView.vue",
+      "guards": [
+        "requiresAdmin",
+        "requiresAuth"
+      ],
+      "source": "frontend/src/router/index.ts:173",
+      "test_refs": [
+        "frontend/src/App.test.ts",
+        "frontend/src/views/AdminView.test.ts",
+        "frontend/src/router/uiRouteContract.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-ADMIN-ADMIN-SYSTEM",
+      "family": "ADMIN",
+      "path": "/admin/system",
+      "name": "admin-system",
+      "component": "AdminView.vue",
+      "guards": [
+        "requiresAdmin",
+        "requiresAuth"
+      ],
+      "source": "frontend/src/router/index.ts:179",
+      "test_refs": [
+        "frontend/src/App.test.ts",
+        "frontend/src/views/OperationsView.test.ts",
+        "frontend/src/views/AdminView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-IDENTITY-INVITE-LANDING",
+      "family": "IDENTITY",
+      "path": "/i/:code",
+      "name": "invite-landing",
+      "component": "InviteLanding.vue",
+      "guards": [],
+      "source": "frontend/src/router/index.ts:185",
+      "test_refs": [
+        "frontend/src/utils/authNavigation.test.ts",
+        "frontend/src/router/uiRouteContract.test.ts",
+        "frontend/src/router/index.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-IDENTITY-WEB-REGISTER",
+      "family": "IDENTITY",
+      "path": "/register",
+      "name": "web-register",
+      "component": "WebRegister.vue",
+      "guards": [
+        "requiresAuth"
+      ],
+      "source": "frontend/src/router/index.ts:191",
+      "test_refs": [
+        "frontend/src/App.test.ts",
+        "frontend/src/utils/authNavigation.test.ts",
+        "frontend/src/views/InviteLanding.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-NOTIFY-NOTIFICATIONS",
+      "family": "NOTIFY",
+      "path": "/notifications",
+      "name": "notifications",
+      "component": "ShareReceiveView.vue",
+      "guards": [
+        "requiresAuth"
+      ],
+      "source": "frontend/src/router/index.ts:197",
+      "test_refs": [
+        "tests/test_web_push.py",
+        "tests/test_sync_router_apply_item_success.py",
+        "tests/test_seed_shared_sync_tables.py"
+      ]
+    },
+    {
+      "behavior_id": "WEB-MSG-SHARE-RECEIVE",
+      "family": "MSG",
+      "path": "/share-receive",
+      "name": "share-receive",
+      "component": "ShareReceiveView.vue",
+      "guards": [
+        "requiresAuth"
+      ],
+      "source": "frontend/src/router/index.ts:203",
+      "test_refs": [
+        "frontend/src/App.test.ts",
+        "frontend/src/router/uiRouteContract.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "WEB-OPS-SYSTEM-RECOVERY",
+      "family": "OPS",
+      "path": "/:pathMatch(.*)*",
+      "name": "system-recovery",
+      "component": "SystemRecoveryView",
+      "guards": [],
+      "source": "frontend/src/router/index.ts:209",
+      "test_refs": [
+        "frontend/src/main.test.ts",
+        "frontend/src/App.test.ts",
+        "frontend/src/composables/useNotificationRuntime.test.ts"
+      ]
+    }
+  ]
+}

@@ -16,9 +16,11 @@ Status: open findings; no implicit fixes authorized
 | `DR-010` | medium | local assistant/project route summary is older than the observed 30-route frontend | regenerate canonical docs from code and add staleness checks |
 | `DR-011` | blocker | Background jobs are authorized by old server names although the target combines roles | introduce explicit job capabilities/one-owner matrix and test every job before enabling it |
 | `DR-012` | medium | role-specific app image IDs differ while release SHA matches | artifact manifest must bind role, commit, digest, config and schema |
-| `DR-013` | high | per-route/per-callback Feature Parity Contract is not yet complete | finish machine-readable mapping and characterization before implementation stages |
+| `DR-013` | high | all 217 FastAPI decorators, 203 Bot handlers, 30 Web routes and 15 authority jobs have unique family seeds, but 1 API and 5 Bot items lack direct static test evidence and scenario variants remain open | manually link evidence or add characterization; complete persona/tier/time/failure records before implementation stages |
 | `DR-014` | high | Market archive is ~3.95 GiB with million-row outbox/revision/fact tables and no approved consolidation retention/replay contract | design Market migration separately from app DB merge |
 | `DR-015` | medium | no observed deploy/restore timing baseline was produced because this audit was read-only | collect in controlled rehearsal; do not estimate it from script length |
+| `DR-016` | high | current child pollers/workers/Market processes/timers are inventoried, but exact target compose/image/credential/readiness binding is not designed | close in `P1-03`; any unknown or overlapping owner blocks activation |
+| `DR-017` | low | incremental `src/interfaces/http_api/routers/user_router.py` declares four routes but `main.py` does not mount it | retain as dormant code until `P1-01` reference/cleanup review; never count it as a live API contract |
 
 ## Interpretation
 

@@ -81,6 +81,33 @@ mean a capability, but preserve `home_site` where it is a business authority.
 Blindly setting `SERVER_MODE=foreign` or enabling every job on the new server
 would either suppress Web jobs or duplicate side effects.
 
+## Process, poller and timer ownership
+
+The exact current-task seed inventory is tracked in
+`inventory/runtime-task-ownership.json`. It covers API leader coordination and
+conditional jobs, Bot primary/publisher pollers, Queue-v1/OTP versus the mutually
+exclusive legacy delivery set, Market capture/store/estimator transport, host
+timers and the observed obsolete staging/three-site runtimes.
+
+The target composition follows these rules:
+
+1. `web_api` owns HTTP/WebSocket and one API leader but receives no Telegram
+   credential merely because it shares a host with Bot.
+2. `bot_primary` and optional publisher/executor roles form one disjoint
+   `TELEGRAM_OWNER` set. Primary, Queue-v1 and legacy worker sets cannot overlap.
+3. recurring business jobs call an authority-checked domain command; Redis leader
+   election alone is execution coordination, not business authority.
+4. Market capture, archive/store, estimator and snapshot/fact transport remain
+   separate processes. Section 3 assigns their final capability and persistence
+   roots before `P1-03` enables them.
+5. staging and three-site processes observed on production hosts have target
+   capability `NONE`, but only after traffic/write/credential/schedule proof and
+   a separately approved decommission manifest.
+
+`P1-03` must bind every target task seed to an exact compose service, image
+digest, secret mount, DB/Redis pool, readiness probe and restart policy. An entry
+without such a binding blocks runtime activation.
+
 ## Deterministic Finland merge contract
 
 The future `P1-05` runner must execute this order on isolated clones:

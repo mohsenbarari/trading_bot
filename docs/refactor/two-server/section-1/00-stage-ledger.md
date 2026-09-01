@@ -40,6 +40,8 @@ Completed technical evidence:
 - database schema/table classification and read-only shared-data parity audit;
 - background-job and Telegram execution ownership review;
 - Web/Bot provenance and policy-code review;
+- unique behavior-family seeds for 217 FastAPI decorators, 203 Bot handlers, 30
+  Web routes and 15 registered authority jobs, plus runtime-task ownership seeds;
 - focused characterization suite: 81 tests passed with the required unit-test
   environment file and no external side effects.
 
@@ -49,16 +51,11 @@ The technical dossier is ready for review, but the Stage contract deliberately
 requires more than a host inventory. These gates remain open:
 
 1. The owner has not yet approved the dossier, drift register and parity contract.
-2. The 212 statically discovered API route decorators, 202 Bot handler decorators
-   and frontend routes are inventoried only at aggregate/module level; every
-   mutation and side effect does not yet have a reviewed `behavior_id`.
-3. Offer/Trade provenance semantics are approved, but the future ADR, schema،
-   deterministic backfill and parity tests are implementation work for `P1-04`.
-4. Capacity, soak, initial-cutover timing and post-cutover retention are approved;
-   DNS, deploy SLO، artifact distribution and rollback thresholds remain open or
-   deliberately deferred to their detailed sections.
-5. Baseline deploy/restore duration needs an observed rehearsal; production
-   operations were intentionally outside this audit.
+2. Every discovered route/handler/job has a unique family seed and none is
+   unclassified, but 6 items need direct evidence resolution and concrete
+   persona/tier/time/failure scenario records.
+3. Baseline deploy/restart/backup/restore duration needs an observed rehearsal;
+   production operations were intentionally outside this audit.
 
 Until those gates close, `P1-01` may be reviewed but no cleanup is authorized and
 `P1-02..P1-07` must not change application behavior.

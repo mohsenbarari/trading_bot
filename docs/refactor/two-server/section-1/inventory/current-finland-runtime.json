@@ -89,9 +89,11 @@
     }
   },
   "static_surfaces": {
-    "api_route_decorators": 212,
+    "live_fastapi_decorators": 217,
+    "api_router_decorators": 213,
+    "main_app_decorators": 4,
     "api_router_modules": 18,
-    "bot_handler_decorators": 202,
+    "bot_handler_decorators": 203,
     "bot_handler_modules": 18,
     "frontend_routes": 30,
     "background_job_authority_entries": 15,

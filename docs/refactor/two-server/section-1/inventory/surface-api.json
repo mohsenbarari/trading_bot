@@ -1,0 +1,2850 @@
+{
+  "schema_version": "two-server-refactor.surface-behavior-inventory.v1",
+  "generated_from_commit": "19087ff0686c9260b55f1c6c35782b758be6673e",
+  "section": "api",
+  "coverage": {
+    "total": 217,
+    "family_counts": {
+      "ADMIN": 22,
+      "AUTH": 45,
+      "IDENTITY": 38,
+      "MARKET": 2,
+      "MSG": 59,
+      "NOTIFY": 14,
+      "OFFER": 12,
+      "OPS": 4,
+      "REQUEST": 7,
+      "SYNC": 5,
+      "TRADE": 9
+    },
+    "with_direct_static_test_reference": 216,
+    "without_direct_static_test_reference": 1,
+    "unclassified": 0
+  },
+  "entries": [
+    {
+      "behavior_id": "API-IDENTITY-GET-ACCOUNTANTS-LIST-MY-ACCOUNTANTS-L167",
+      "family": "IDENTITY",
+      "method": "GET",
+      "path": "/api/accountants/owner-relations",
+      "handler": "accountants.list_my_accountants",
+      "source": "api/routers/accountants.py:167",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_accountants_router.py",
+        "tests/test_customers_router.py",
+        "frontend/src/composables/useOwnerRelations.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-GET-ACCOUNTANTS-GET-MY-ACCOUNTANT-L199",
+      "family": "IDENTITY",
+      "method": "GET",
+      "path": "/api/accountants/owner-relations/{relation_id}",
+      "handler": "accountants.get_my_accountant",
+      "source": "api/routers/accountants.py:199",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_accountants_router.py",
+        "tests/test_customers_router.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-POST-ACCOUNTANTS-CREATE-MY-ACCOUNTANT-L227",
+      "family": "IDENTITY",
+      "method": "POST",
+      "path": "/api/accountants/owner-relations",
+      "handler": "accountants.create_my_accountant",
+      "source": "api/routers/accountants.py:227",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_accountants_router.py",
+        "tests/test_customers_router.py",
+        "frontend/src/composables/useOwnerRelations.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-GET-ACCOUNTANTS-LIST-MY-ACCOUNTANT-SESSIONS-L280",
+      "family": "IDENTITY",
+      "method": "GET",
+      "path": "/api/accountants/owner-relations/{relation_id}/sessions",
+      "handler": "accountants.list_my_accountant_sessions",
+      "source": "api/routers/accountants.py:280",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_accountants_router.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-DELETE-ACCOUNTANTS-TERMINATE-MY-ACCOUNTANT-SESSION-L296",
+      "family": "IDENTITY",
+      "method": "DELETE",
+      "path": "/api/accountants/owner-relations/{relation_id}/sessions/{session_id}",
+      "handler": "accountants.terminate_my_accountant_session",
+      "source": "api/routers/accountants.py:296",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_accountants_router.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-DELETE-ACCOUNTANTS-CANCEL-MY-PENDING-ACCOUNTANT-L338",
+      "family": "IDENTITY",
+      "method": "DELETE",
+      "path": "/api/accountants/owner-relations/{relation_id}",
+      "handler": "accountants.cancel_my_pending_accountant",
+      "source": "api/routers/accountants.py:338",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_accountants_router.py",
+        "tests/test_customers_router.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-PATCH-ACCOUNTANTS-UPDATE-MY-ACCOUNTANT-L367",
+      "family": "IDENTITY",
+      "method": "PATCH",
+      "path": "/api/accountants/owner-relations/{relation_id}",
+      "handler": "accountants.update_my_accountant",
+      "source": "api/routers/accountants.py:367",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_accountants_router.py",
+        "tests/test_customers_router.py"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-GET-ADMIN-MESSAGES-GET-CURRENT-MARKET-MESSAGE-L180",
+      "family": "ADMIN",
+      "method": "GET",
+      "path": "/api/admin-messages/market/current",
+      "handler": "admin_messages.get_current_market_message",
+      "source": "api/routers/admin_messages.py:180",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_admin_messages_router.py",
+        "frontend/src/views/MarketView.test.ts",
+        "frontend/src/components/AdminMessagesView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-GET-ADMIN-MESSAGES-GET-MARKET-MESSAGE-HISTORY-L194",
+      "family": "ADMIN",
+      "method": "GET",
+      "path": "/api/admin-messages/market/history",
+      "handler": "admin_messages.get_market_message_history",
+      "source": "api/routers/admin_messages.py:194",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "frontend/src/components/AdminMessagesView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-POST-ADMIN-MESSAGES-CREATE-MARKET-MESSAGE-L204",
+      "family": "ADMIN",
+      "method": "POST",
+      "path": "/api/admin-messages/market",
+      "handler": "admin_messages.create_market_message",
+      "source": "api/routers/admin_messages.py:204",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_web_push.py",
+        "tests/test_admin_messages_router.py",
+        "tests/test_offers_router_create_success.py"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-DELETE-ADMIN-MESSAGES-CLEAR-CURRENT-MARKET-MESSAGE-L235",
+      "family": "ADMIN",
+      "method": "DELETE",
+      "path": "/api/admin-messages/market/current",
+      "handler": "admin_messages.clear_current_market_message",
+      "source": "api/routers/admin_messages.py:235",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_admin_messages_router.py",
+        "frontend/src/views/MarketView.test.ts",
+        "frontend/src/components/AdminMessagesView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-GET-ADMIN-MESSAGES-GET-BROADCAST-HISTORY-L251",
+      "family": "ADMIN",
+      "method": "GET",
+      "path": "/api/admin-messages/broadcasts/history",
+      "handler": "admin_messages.get_broadcast_history",
+      "source": "api/routers/admin_messages.py:251",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "frontend/src/components/AdminMessagesView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-POST-ADMIN-MESSAGES-CREATE-BROADCAST-L261",
+      "family": "ADMIN",
+      "method": "POST",
+      "path": "/api/admin-messages/broadcasts",
+      "handler": "admin_messages.create_broadcast",
+      "source": "api/routers/admin_messages.py:261",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_admin_messages_router.py",
+        "tests/test_telegram_admin_broadcast_service.py",
+        "frontend/src/components/AdminMessagesView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-GET-AUTH-READ-USERS-ME-L1295",
+      "family": "AUTH",
+      "method": "GET",
+      "path": "/api/auth/me",
+      "handler": "auth.read_users_me",
+      "source": "api/routers/auth.py:1295",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_auth_router_current_user_contract.py",
+        "frontend/src/utils/currentUser.test.ts",
+        "frontend/src/utils/auth.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-AUTH-ISSUE-TELEGRAM-LINK-TOKEN-L1307",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/auth/telegram-link-token",
+      "handler": "auth.issue_telegram_link_token",
+      "source": "api/routers/auth.py:1307",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "frontend/src/views/WebRegister.test.ts",
+        "frontend/src/services/telegramLink.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-PUT-AUTH-UPDATE-MY-AVATAR-L1356",
+      "family": "AUTH",
+      "method": "PUT",
+      "path": "/api/auth/me/avatar",
+      "handler": "auth.update_my_avatar",
+      "source": "api/routers/auth.py:1356",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_auth_router_current_user_contract.py",
+        "frontend/src/components/PublicProfile.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-PUT-AUTH-UPDATE-MY-ADDRESS-L1375",
+      "family": "AUTH",
+      "method": "PUT",
+      "path": "/api/auth/me/address",
+      "handler": "auth.update_my_address",
+      "source": "api/routers/auth.py:1375",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_auth_router_current_user_contract.py",
+        "frontend/src/components/PublicProfile.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-PUT-AUTH-UPDATE-MY-OFFER-OVERTIME-L1387",
+      "family": "AUTH",
+      "method": "PUT",
+      "path": "/api/auth/me/offer-overtime",
+      "handler": "auth.update_my_offer_overtime",
+      "source": "api/routers/auth.py:1387",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_offer_overtime_preference_save.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-AUTH-UPDATE-OFFER-OVERTIME-INTERNAL-L1433",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/auth/internal/offer-overtime/update",
+      "handler": "auth.update_offer_overtime_internal",
+      "source": "api/routers/auth.py:1433",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_offer_overtime_preference_save.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-AUTH-RETIRED-REGISTER-OTP-REQUEST-L1501",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/auth/register-otp-request",
+      "handler": "auth.retired_register_otp_request",
+      "source": "api/routers/auth.py:1501",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_request_logging.py",
+        "tests/test_auth_router_registration_flows.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-AUTH-RETIRED-REGISTER-OTP-VERIFY-L1539",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/auth/register-otp-verify",
+      "handler": "auth.retired_register_otp_verify",
+      "source": "api/routers/auth.py:1539",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/customer_live_auth_smoke.py",
+        "tests/test_auth_router_registration_flows.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-AUTH-RETIRED-REGISTER-COMPLETE-L1580",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/auth/register-complete",
+      "handler": "auth.retired_register_complete",
+      "source": "api/routers/auth.py:1580",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_authoritative_registration_postgres.py",
+        "tests/customer_live_auth_smoke.py",
+        "tests/test_auth_router_registration_flows.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-AUTH-EXCHANGE-REGISTRATION-CONTEXT-L1696",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/auth/registration-context/exchange",
+      "handler": "auth.exchange_registration_context",
+      "source": "api/routers/auth.py:1696",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_main_frontend_serving.py",
+        "tests/test_request_logging.py",
+        "tests/test_auth_router_registration_flows.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-AUTH-READ-REGISTRATION-CONTEXT-L1819",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/auth/registration-context",
+      "handler": "auth.read_registration_context",
+      "source": "api/routers/auth.py:1819",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_main_frontend_serving.py",
+        "tests/test_request_logging.py",
+        "tests/test_auth_router_registration_flows.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-AUTH-REQUEST-REGISTRATION-CONTEXT-OTP-L1838",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/auth/registration-context/otp/request",
+      "handler": "auth.request_registration_context_otp",
+      "source": "api/routers/auth.py:1838",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_main_frontend_serving.py",
+        "tests/test_auth_router_registration_flows.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-AUTH-VERIFY-REGISTRATION-CONTEXT-OTP-L1887",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/auth/registration-context/otp/verify",
+      "handler": "auth.verify_registration_context_otp",
+      "source": "api/routers/auth.py:1887",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_main_frontend_serving.py",
+        "tests/test_auth_router_registration_flows.py",
+        "frontend/src/views/WebRegister.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-AUTH-RECONCILE-TELEGRAM-REGISTRATION-INTERNAL-L193",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/auth/internal/telegram-registration/reconcile",
+      "handler": "auth.reconcile_telegram_registration_internal",
+      "source": "api/routers/auth.py:193",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_stage9_registration_transport.py",
+        "tests/test_stage4_registration_reconciliation.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-AUTH-COMPLETE-REGISTRATION-CONTEXT-L1952",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/auth/registration-context/complete",
+      "handler": "auth.complete_registration_context",
+      "source": "api/routers/auth.py:1952",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_main_frontend_serving.py",
+        "tests/test_auth_router_registration_flows.py",
+        "frontend/src/views/WebRegister.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-AUTH-CLEAR-REGISTRATION-CONTEXT-L1995",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/auth/registration-context/clear",
+      "handler": "auth.clear_registration_context",
+      "source": "api/routers/auth.py:1995",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_main_frontend_serving.py",
+        "tests/test_auth_router_registration_flows.py",
+        "frontend/src/views/InviteLanding.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-AUTH-REFRESH-ACCESS-TOKEN-L2011",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/auth/refresh",
+      "handler": "auth.refresh_access_token",
+      "source": "api/routers/auth.py:2011",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_auth_router_session_flows.py",
+        "tests/test_account_status_lifecycle_smoke.py",
+        "tests/test_request_logging.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-AUTH-DEV-LOGIN-L2080",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/auth/dev-login",
+      "handler": "auth.dev_login",
+      "source": "api/routers/auth.py:2080",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_auth_router_special_logins.py",
+        "frontend/src/views/LoginView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-AUTH-REQUEST-OTP-L2454",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/auth/request-otp",
+      "handler": "auth.request_otp",
+      "source": "api/routers/auth.py:2454",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_stage6_otp_delivery.py",
+        "tests/test_auth_router_login_otp_flows.py",
+        "frontend/src/views/LoginView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-AUTH-COMPLETE-TELEGRAM-ACCOUNT-LINK-INTERNAL-L251",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/auth/internal/telegram-link/complete",
+      "handler": "auth.complete_telegram_account_link_internal",
+      "source": "api/routers/auth.py:251",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_stage9_registration_transport.py",
+        "tests/test_stage4_registration_reconciliation.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-AUTH-RESEND-OTP-SMS-L2612",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/auth/resend-otp-sms",
+      "handler": "auth.resend_otp_sms",
+      "source": "api/routers/auth.py:2612",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_stage6_otp_delivery.py",
+        "tests/test_auth_router_login_otp_flows.py",
+        "frontend/src/views/LoginView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-AUTH-VERIFY-OTP-L2695",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/auth/verify-otp",
+      "handler": "auth.verify_otp",
+      "source": "api/routers/auth.py:2695",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_production_realistic_load.py",
+        "tests/customer_live_auth_smoke.py",
+        "tests/test_stage6_otp_delivery.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-AUTH-WEBAPP-LOGIN-L2899",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/auth/webapp-login",
+      "handler": "auth.webapp_login",
+      "source": "api/routers/auth.py:2899",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_auth_router_special_logins.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-AUTH-SETUP-ADMIN-PASSWORD-L2915",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/auth/setup-password",
+      "handler": "auth.setup_admin_password",
+      "source": "api/routers/auth.py:2915",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_auth_router_session_flows.py",
+        "frontend/src/App.test.ts",
+        "frontend/src/utils/auth.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-AUTH-DELIVER-TELEGRAM-OTP-INTERNAL-L297",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/auth/internal/telegram-otp/deliver",
+      "handler": "auth.deliver_telegram_otp_internal",
+      "source": "api/routers/auth.py:297",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_main_foreign_surface_guard.py",
+        "tests/test_stage6_otp_delivery.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-GET-BLOCKS-GET-MY-BLOCK-STATUS-L106",
+      "family": "IDENTITY",
+      "method": "GET",
+      "path": "/api/blocks/status",
+      "handler": "blocks.get_my_block_status",
+      "source": "api/routers/blocks.py:106",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_blocks_router_status_list.py",
+        "tests/test_sync_parity_script.py",
+        "tests/test_sync_health_endpoint.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-GET-BLOCKS-GET-MY-BLOCKED-USERS-L122",
+      "family": "IDENTITY",
+      "method": "GET",
+      "path": "/api/blocks",
+      "handler": "blocks.get_my_blocked_users",
+      "source": "api/routers/blocks.py:122",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_blocks_router_status_list.py",
+        "frontend/src/components/PublicProfile.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-POST-BLOCKS-BLOCK-A-USER-L135",
+      "family": "IDENTITY",
+      "method": "POST",
+      "path": "/api/blocks/{user_id}",
+      "handler": "blocks.block_a_user",
+      "source": "api/routers/blocks.py:135",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_users_public_router_read.py",
+        "tests/test_blocks_router_unblock_check.py",
+        "tests/test_blocks_router_block.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-DELETE-BLOCKS-UNBLOCK-A-USER-L173",
+      "family": "IDENTITY",
+      "method": "DELETE",
+      "path": "/api/blocks/{user_id}",
+      "handler": "blocks.unblock_a_user",
+      "source": "api/routers/blocks.py:173",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_users_public_router_read.py",
+        "tests/test_blocks_router_unblock_check.py",
+        "tests/test_trade_delivery_reconciliation_service.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-GET-BLOCKS-CHECK-BLOCK-STATUS-L203",
+      "family": "IDENTITY",
+      "method": "GET",
+      "path": "/api/blocks/check/{user_id}",
+      "handler": "blocks.check_block_status",
+      "source": "api/routers/blocks.py:203",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_blocks_router_unblock_check.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-GET-BLOCKS-SEARCH-USERS-L223",
+      "family": "IDENTITY",
+      "method": "GET",
+      "path": "/api/blocks/search",
+      "handler": "blocks.search_users",
+      "source": "api/routers/blocks.py:223",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_block_service.py",
+        "tests/test_bot_block_manage_search_query.py",
+        "tests/test_blocks_router_search.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-GET-CHAT-GET-GROUPS-L1158",
+      "family": "MSG",
+      "method": "GET",
+      "path": "/api/chat/groups",
+      "handler": "chat.get_groups",
+      "source": "api/routers/chat.py:1158",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_core_events.py",
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
+        "tests/test_admin_messages_router.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-GET-CHAT-GET-GROUP-MEMBER-CANDIDATES-L1182",
+      "family": "MSG",
+      "method": "GET",
+      "path": "/api/chat/groups/member-candidates",
+      "handler": "chat.get_group_member_candidates",
+      "source": "api/routers/chat.py:1182",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_chat_router_groups.py",
+        "frontend/src/components/chat/ChatGroupManagerModal.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-CREATE-GROUP-L1234",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/groups",
+      "handler": "chat.create_group",
+      "source": "api/routers/chat.py:1234",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_room_service_room_setup.py",
+        "tests/test_chat_router_groups.py",
+        "tests/test_chat_router_remaining_paths.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-GET-CHAT-GET-GROUP-DETAIL-L1278",
+      "family": "MSG",
+      "method": "GET",
+      "path": "/api/chat/groups/{chat_id}",
+      "handler": "chat.get_group_detail",
+      "source": "api/routers/chat.py:1278",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_chat_router_groups.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-PATCH-CHAT-PATCH-GROUP-L1324",
+      "family": "MSG",
+      "method": "PATCH",
+      "path": "/api/chat/groups/{chat_id}",
+      "handler": "chat.patch_group",
+      "source": "api/routers/chat.py:1324",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_groups.py",
+        "tests/test_chat_router_remaining_paths.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-POST-GROUP-MEMBER-L1362",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/groups/{chat_id}/members",
+      "handler": "chat.post_group_member",
+      "source": "api/routers/chat.py:1362",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_groups.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-DELETE-CHAT-DELETE-GROUP-MEMBER-L1384",
+      "family": "MSG",
+      "method": "DELETE",
+      "path": "/api/chat/groups/{chat_id}/members/{user_id}",
+      "handler": "chat.delete_group_member",
+      "source": "api/routers/chat.py:1384",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_groups.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-PROMOTE-GROUP-ADMIN-L1406",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/groups/{chat_id}/admins/{user_id}",
+      "handler": "chat.promote_group_admin",
+      "source": "api/routers/chat.py:1406",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_groups.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-DELETE-CHAT-DEMOTE-GROUP-ADMIN-L1428",
+      "family": "MSG",
+      "method": "DELETE",
+      "path": "/api/chat/groups/{chat_id}/admins/{user_id}",
+      "handler": "chat.demote_group_admin",
+      "source": "api/routers/chat.py:1428",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_groups.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-POST-GROUP-LEAVE-L1450",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/groups/{chat_id}/leave",
+      "handler": "chat.post_group_leave",
+      "source": "api/routers/chat.py:1450",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_groups.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-PIN-ROOM-CONVERSATION-L1470",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/rooms/{chat_id}/pin",
+      "handler": "chat.pin_room_conversation",
+      "source": "api/routers/chat.py:1470",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_remaining_paths.py",
+        "tests/test_chat_router_channels.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-REORDER-ROOM-CONVERSATION-PIN-L1496",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/rooms/{chat_id}/pin-order",
+      "handler": "chat.reorder_room_conversation_pin",
+      "source": "api/routers/chat.py:1496",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_remaining_paths.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-GET-CHAT-GET-ROOM-PINNED-MESSAGE-L1526",
+      "family": "MSG",
+      "method": "GET",
+      "path": "/api/chat/rooms/{chat_id}/pinned-message",
+      "handler": "chat.get_room_pinned_message",
+      "source": "api/routers/chat.py:1526",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_chat_router_remaining_paths.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-MUTE-ROOM-CONVERSATION-L1544",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/rooms/{chat_id}/mute",
+      "handler": "chat.mute_room_conversation",
+      "source": "api/routers/chat.py:1544",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_remaining_paths.py",
+        "tests/test_chat_router_channels.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-MARK-ROOM-CONVERSATION-UNREAD-L1568",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/rooms/{chat_id}/mark-unread",
+      "handler": "chat.mark_room_conversation_unread",
+      "source": "api/routers/chat.py:1568",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_remaining_paths.py",
+        "tests/test_chat_router_channels.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-UNFOLLOW-CHANNEL-L1592",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/channels/{chat_id}/unfollow",
+      "handler": "chat.unfollow_channel",
+      "source": "api/routers/chat.py:1592",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_channels.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-GET-CHAT-GET-CHANNELS-L1611",
+      "family": "MSG",
+      "method": "GET",
+      "path": "/api/chat/channels",
+      "handler": "chat.get_channels",
+      "source": "api/routers/chat.py:1611",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_chat_router_channels.py",
+        "frontend/src/App.test.ts",
+        "frontend/src/router/uiRouteContract.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-CREATE-CHANNEL-L1636",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/channels",
+      "handler": "chat.create_channel",
+      "source": "api/routers/chat.py:1636",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_bot_channel_invites.py",
+        "tests/test_chat_router_remaining_paths.py",
+        "tests/test_chat_router_channels.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-PATCH-CHAT-UPDATE-CHANNEL-L1673",
+      "family": "MSG",
+      "method": "PATCH",
+      "path": "/api/chat/channels/{chat_id}",
+      "handler": "chat.update_channel",
+      "source": "api/routers/chat.py:1673",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_trades_router_authoritative_success.py",
+        "tests/test_chat_router_remaining_paths.py",
+        "tests/test_chat_router_channels.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-GET-CHAT-GET-CHANNEL-MEMBERS-L1710",
+      "family": "MSG",
+      "method": "GET",
+      "path": "/api/chat/channels/{chat_id}/members",
+      "handler": "chat.get_channel_members",
+      "source": "api/routers/chat.py:1710",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_chat_router_channels.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-PATCH-CHAT-PATCH-CHANNEL-MEMBER-L1741",
+      "family": "MSG",
+      "method": "PATCH",
+      "path": "/api/chat/channels/{chat_id}/members/{user_id}",
+      "handler": "chat.patch_channel_member",
+      "source": "api/routers/chat.py:1741",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_channels.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-GET-CHAT-GET-CHANNEL-INVITE-CANDIDATES-L1771",
+      "family": "MSG",
+      "method": "GET",
+      "path": "/api/chat/channels/invite-candidates",
+      "handler": "chat.get_channel_invite_candidates",
+      "source": "api/routers/chat.py:1771",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_chat_router_channels.py",
+        "frontend/src/components/CreateChannelView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-BULK-INVITE-CHANNEL-MEMBERS-L1811",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/channels/{chat_id}/members/bulk",
+      "handler": "chat.bulk_invite_channel_members",
+      "source": "api/routers/chat.py:1811",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_channels.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-GET-CHAT-GET-ROOM-MESSAGES-L1838",
+      "family": "MSG",
+      "method": "GET",
+      "path": "/api/chat/rooms/{chat_id}/messages",
+      "handler": "chat.get_room_messages",
+      "source": "api/routers/chat.py:1838",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_chat_router_rooms.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-GET-CHAT-GET-GROUP-MESSAGE-SEEN-MEMBERS-L1874",
+      "family": "MSG",
+      "method": "GET",
+      "path": "/api/chat/rooms/{chat_id}/messages/{message_id}/seen",
+      "handler": "chat.get_group_message_seen_members",
+      "source": "api/routers/chat.py:1874",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_chat_router_rooms.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-SEND-ROOM-MESSAGE-L1893",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/rooms/{chat_id}/send",
+      "handler": "chat.send_room_message",
+      "source": "api/routers/chat.py:1893",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_rooms.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-MARK-ROOM-MESSAGES-READ-L1993",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/rooms/{chat_id}/read",
+      "handler": "chat.mark_room_messages_read",
+      "source": "api/routers/chat.py:1993",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_rooms.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-SEND-MESSAGE-L2028",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/send",
+      "handler": "chat.send_message",
+      "source": "api/routers/chat.py:2028",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_core_notifications_runtime.py",
+        "tests/test_notification_and_sync_helpers.py",
+        "tests/test_bot_admin_users_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-PUT-CHAT-UPDATE-MESSAGE-L2079",
+      "family": "MSG",
+      "method": "PUT",
+      "path": "/api/chat/messages/{message_id}",
+      "handler": "chat.update_message",
+      "source": "api/routers/chat.py:2079",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_direct_mutations.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-TOGGLE-MESSAGE-REACTION-L2100",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/messages/{message_id}/reaction",
+      "handler": "chat.toggle_message_reaction",
+      "source": "api/routers/chat.py:2100",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_direct_mutations.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-TOGGLE-MESSAGE-PIN-L2162",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/messages/{message_id}/pin",
+      "handler": "chat.toggle_message_pin",
+      "source": "api/routers/chat.py:2162",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_remaining_paths.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-DELETE-CHAT-DELETE-MESSAGE-L2183",
+      "family": "MSG",
+      "method": "DELETE",
+      "path": "/api/chat/messages/{message_id}",
+      "handler": "chat.delete_message",
+      "source": "api/routers/chat.py:2183",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_bot_admin_users_helpers.py",
+        "tests/test_bot_message_manager.py",
+        "tests/test_telegram_delivery_queue_production_cutover.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-MARK-MESSAGES-READ-L2197",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/read/{user_id}",
+      "handler": "chat.mark_messages_read",
+      "source": "api/routers/chat.py:2197",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_direct_reads.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-GET-CHAT-POLL-MESSAGES-L2225",
+      "family": "MSG",
+      "method": "GET",
+      "path": "/api/chat/poll",
+      "handler": "chat.poll_messages",
+      "source": "api/routers/chat.py:2225",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_telegram_delivery_queue_production_cutover.py",
+        "tests/test_chat_router_direct_reads.py",
+        "tests/test_telegram_delivery_queue_production_plan.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-GET-CHAT-GET-STICKERS-L2305",
+      "family": "MSG",
+      "method": "GET",
+      "path": "/api/chat/stickers",
+      "handler": "chat.get_stickers",
+      "source": "api/routers/chat.py:2305",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_chat_router_remaining_paths.py",
+        "tests/test_chat_router_media.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-UPLOAD-CHAT-MEDIA-L2338",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/upload-media",
+      "handler": "chat.upload_chat_media",
+      "source": "api/routers/chat.py:2338",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_remaining_paths.py",
+        "tests/test_chat_router_media.py",
+        "frontend/src/utils/chatFiles.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-POST-UPLOAD-BATCH-L2517",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/upload-batches",
+      "handler": "chat.post_upload_batch",
+      "source": "api/routers/chat.py:2517",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_upload_sessions.py",
+        "frontend/src/services/chatUploadBackground.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-POST-UPLOAD-SESSION-L2540",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/upload-sessions",
+      "handler": "chat.post_upload_session",
+      "source": "api/routers/chat.py:2540",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_upload_sessions.py",
+        "tests/test_request_logging.py",
+        "frontend/src/services/chatUploadBackground.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-PATCH-CHAT-PATCH-UPLOAD-SESSION-CHUNK-L2576",
+      "family": "MSG",
+      "method": "PATCH",
+      "path": "/api/chat/upload-sessions/{session_id}/chunk",
+      "handler": "chat.patch_upload_session_chunk",
+      "source": "api/routers/chat.py:2576",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_upload_sessions.py",
+        "tests/test_request_logging.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-GET-CHAT-GET-UPLOAD-SESSION-STATE-L2614",
+      "family": "MSG",
+      "method": "GET",
+      "path": "/api/chat/upload-sessions/{session_id}",
+      "handler": "chat.get_upload_session_state",
+      "source": "api/routers/chat.py:2614",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_chat_router_upload_sessions.py",
+        "tests/test_request_logging.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-FINALIZE-UPLOAD-SESSION-ENDPOINT-L2636",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/upload-sessions/{session_id}/finalize",
+      "handler": "chat.finalize_upload_session_endpoint",
+      "source": "api/routers/chat.py:2636",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_upload_sessions.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-COMMIT-UPLOAD-BATCH-ENDPOINT-L2675",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/upload-batches/{batch_id}/commit",
+      "handler": "chat.commit_upload_batch_endpoint",
+      "source": "api/routers/chat.py:2675",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_upload_sessions.py",
+        "tests/test_chat_router_remaining_paths.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-CANCEL-UPLOAD-SESSION-ENDPOINT-L2726",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/upload-sessions/{session_id}/cancel",
+      "handler": "chat.cancel_upload_session_endpoint",
+      "source": "api/routers/chat.py:2726",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_upload_sessions.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-CANCEL-UPLOAD-BATCH-ENDPOINT-L2751",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/upload-batches/{batch_id}/cancel",
+      "handler": "chat.cancel_upload_batch_endpoint",
+      "source": "api/routers/chat.py:2751",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_upload_sessions.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-GET-CHAT-GET-CHAT-FILE-L2773",
+      "family": "MSG",
+      "method": "GET",
+      "path": "/api/chat/files/{file_id}",
+      "handler": "chat.get_chat_file",
+      "source": "api/routers/chat.py:2773",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_chat_router_remaining_paths.py",
+        "tests/test_chat_router_media.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-GET-CHAT-GET-CONVERSATIONS-L582",
+      "family": "MSG",
+      "method": "GET",
+      "path": "/api/chat/conversations",
+      "handler": "chat.get_conversations",
+      "source": "api/routers/chat.py:582",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_main_foreign_surface_guard.py",
+        "tests/test_chat_router_direct_reads.py",
+        "frontend/src/composables/useNotificationRuntime.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-PIN-DIRECT-CONVERSATION-L643",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/direct/{user_id}/pin",
+      "handler": "chat.pin_direct_conversation",
+      "source": "api/routers/chat.py:643",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_direct_reads.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-REORDER-DIRECT-CONVERSATION-PIN-L670",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/direct/{user_id}/pin-order",
+      "handler": "chat.reorder_direct_conversation_pin",
+      "source": "api/routers/chat.py:670",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_remaining_paths.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-GET-CHAT-GET-DIRECT-PINNED-MESSAGE-L701",
+      "family": "MSG",
+      "method": "GET",
+      "path": "/api/chat/direct/{user_id}/pinned-message",
+      "handler": "chat.get_direct_pinned_message",
+      "source": "api/routers/chat.py:701",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_chat_router_remaining_paths.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-MUTE-DIRECT-CONVERSATION-L727",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/direct/{user_id}/mute",
+      "handler": "chat.mute_direct_conversation",
+      "source": "api/routers/chat.py:727",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_direct_reads.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-MARK-DIRECT-CONVERSATION-UNREAD-L752",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/direct/{user_id}/mark-unread",
+      "handler": "chat.mark_direct_conversation_unread",
+      "source": "api/routers/chat.py:752",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_direct_reads.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-DELETE-CHAT-DELETE-DIRECT-CONVERSATION-L777",
+      "family": "MSG",
+      "method": "DELETE",
+      "path": "/api/chat/direct/{user_id}",
+      "handler": "chat.delete_direct_conversation",
+      "source": "api/routers/chat.py:777",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_direct_reads.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-GET-CHAT-SEARCH-MESSAGES-L800",
+      "family": "MSG",
+      "method": "GET",
+      "path": "/api/chat/search",
+      "handler": "chat.search_messages",
+      "source": "api/routers/chat.py:800",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_chat_router_direct_reads.py",
+        "frontend/src/components/ChatView.test.ts",
+        "frontend/src/components/chat/ChatNewConversationModal.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-GET-CHAT-GET-MESSAGES-L856",
+      "family": "MSG",
+      "method": "GET",
+      "path": "/api/chat/messages/{user_id}",
+      "handler": "chat.get_messages",
+      "source": "api/routers/chat.py:856",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_chat_router_direct_reads.py",
+        "tests/test_market_pipeline_stage4_capture.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-SEND-TYPING-SIGNAL-L918",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/typing",
+      "handler": "chat.send_typing_signal",
+      "source": "api/routers/chat.py:918",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_direct_reads.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-SEND-DIRECT-ACTIVITY-SIGNAL-L939",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/activity",
+      "handler": "chat.send_direct_activity_signal",
+      "source": "api/routers/chat.py:939",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_direct_reads.py",
+        "frontend/src/utils/chatRoomRouting.test.ts",
+        "frontend/src/services/chatUploadBackground.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-POST-CHAT-SEND-ROOM-ACTIVITY-SIGNAL-L962",
+      "family": "MSG",
+      "method": "POST",
+      "path": "/api/chat/rooms/{chat_id}/activity",
+      "handler": "chat.send_room_activity_signal",
+      "source": "api/routers/chat.py:962",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_chat_router_rooms.py"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-GET-COMMODITIES-READ-COMMODITY-L131",
+      "family": "ADMIN",
+      "method": "GET",
+      "path": "/api/commodities/{commodity_id}",
+      "handler": "commodities.read_commodity",
+      "source": "api/routers/commodities.py:131",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_commodities_router_read_one.py"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-POST-COMMODITIES-CREATE-COMMODITY-L143",
+      "family": "ADMIN",
+      "method": "POST",
+      "path": "/api/commodities",
+      "handler": "commodities.create_commodity",
+      "source": "api/routers/commodities.py:143",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_main_foreign_surface_guard.py",
+        "tests/test_bot_admin_commodities_helpers.py",
+        "tests/test_commodities_router_create.py"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-PUT-COMMODITIES-UPDATE-COMMODITY-NAME-L189",
+      "family": "ADMIN",
+      "method": "PUT",
+      "path": "/api/commodities/{commodity_id}",
+      "handler": "commodities.update_commodity_name",
+      "source": "api/routers/commodities.py:189",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_commodities_router_update_name.py"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-DELETE-COMMODITIES-DELETE-COMMODITY-L243",
+      "family": "ADMIN",
+      "method": "DELETE",
+      "path": "/api/commodities/{commodity_id}",
+      "handler": "commodities.delete_commodity",
+      "source": "api/routers/commodities.py:243",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_commodities_router_delete.py"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-POST-COMMODITIES-ADD-ALIAS-TO-COMMODITY-L340",
+      "family": "ADMIN",
+      "method": "POST",
+      "path": "/api/commodities/{commodity_id}/aliases",
+      "handler": "commodities.add_alias_to_commodity",
+      "source": "api/routers/commodities.py:340",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_commodities_router_alias_add.py"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-PUT-COMMODITIES-UPDATE-ALIAS-L388",
+      "family": "ADMIN",
+      "method": "PUT",
+      "path": "/api/commodities/aliases/{alias_id}",
+      "handler": "commodities.update_alias",
+      "source": "api/routers/commodities.py:388",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_commodities_router_alias_mutations.py"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-DELETE-COMMODITIES-DELETE-ALIAS-L437",
+      "family": "ADMIN",
+      "method": "DELETE",
+      "path": "/api/commodities/aliases/{alias_id}",
+      "handler": "commodities.delete_alias",
+      "source": "api/routers/commodities.py:437",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_commodities_router_alias_mutations.py"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-GET-COMMODITIES-READ-ALL-COMMODITIES-L99",
+      "family": "ADMIN",
+      "method": "GET",
+      "path": "/api/commodities",
+      "handler": "commodities.read_all_commodities",
+      "source": "api/routers/commodities.py:99",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_main_foreign_surface_guard.py",
+        "tests/test_bot_admin_commodities_helpers.py",
+        "tests/api_load_test.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-GET-CUSTOMERS-LIST-MY-CUSTOMERS-L386",
+      "family": "IDENTITY",
+      "method": "GET",
+      "path": "/api/customers/owner-relations",
+      "handler": "customers.list_my_customers",
+      "source": "api/routers/customers.py:386",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_accountants_router.py",
+        "tests/test_customers_router.py",
+        "frontend/src/composables/useOwnerRelations.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-POST-CUSTOMERS-CREATE-MY-CUSTOMER-L415",
+      "family": "IDENTITY",
+      "method": "POST",
+      "path": "/api/customers/owner-relations",
+      "handler": "customers.create_my_customer",
+      "source": "api/routers/customers.py:415",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_accountants_router.py",
+        "tests/test_customers_router.py",
+        "frontend/src/composables/useOwnerRelations.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-POST-CUSTOMERS-CREATE-OWNER-CUSTOMER-INTERNAL-FROM-BOT-L480",
+      "family": "IDENTITY",
+      "method": "POST",
+      "path": "/api/customers/internal/owner-relations",
+      "handler": "customers.create_owner_customer_internal_from_bot",
+      "source": "api/routers/customers.py:480",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_customers_router.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-GET-CUSTOMERS-GET-MY-CUSTOMER-RELATION-L624",
+      "family": "IDENTITY",
+      "method": "GET",
+      "path": "/api/customers/owner-relations/{relation_id}",
+      "handler": "customers.get_my_customer_relation",
+      "source": "api/routers/customers.py:624",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_accountants_router.py",
+        "tests/test_customers_router.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-DELETE-CUSTOMERS-UNLINK-MY-CUSTOMER-L640",
+      "family": "IDENTITY",
+      "method": "DELETE",
+      "path": "/api/customers/owner-relations/{relation_id}",
+      "handler": "customers.unlink_my_customer",
+      "source": "api/routers/customers.py:640",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_accountants_router.py",
+        "tests/test_customers_router.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-PATCH-CUSTOMERS-UPDATE-MY-CUSTOMER-L674",
+      "family": "IDENTITY",
+      "method": "PATCH",
+      "path": "/api/customers/owner-relations/{relation_id}",
+      "handler": "customers.update_my_customer",
+      "source": "api/routers/customers.py:674",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_accountants_router.py",
+        "tests/test_customers_router.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-GET-CUSTOMERS-GET-MY-CUSTOMER-TRADE-STATS-L708",
+      "family": "IDENTITY",
+      "method": "GET",
+      "path": "/api/customers/owner-relations/{relation_id}/trade-stats",
+      "handler": "customers.get_my_customer_trade_stats",
+      "source": "api/routers/customers.py:708",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_customers_router.py",
+        "tests/test_trading_production_contract_matrix.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-GET-CUSTOMERS-LIST-MY-CUSTOMER-SESSIONS-L817",
+      "family": "IDENTITY",
+      "method": "GET",
+      "path": "/api/customers/owner-relations/{relation_id}/sessions",
+      "handler": "customers.list_my_customer_sessions",
+      "source": "api/routers/customers.py:817",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_customers_router.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-DELETE-CUSTOMERS-TERMINATE-MY-CUSTOMER-SESSION-L833",
+      "family": "IDENTITY",
+      "method": "DELETE",
+      "path": "/api/customers/owner-relations/{relation_id}/sessions/{session_id}",
+      "handler": "customers.terminate_my_customer_session",
+      "source": "api/routers/customers.py:833",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_customers_router.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-GET-INVITATIONS-LIST-PENDING-INVITATIONS-L266",
+      "family": "IDENTITY",
+      "method": "GET",
+      "path": "/api/invitations/pending",
+      "handler": "invitations.list_pending_invitations",
+      "source": "api/routers/invitations.py:266",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_main_frontend_serving.py",
+        "tests/test_invitations_router.py",
+        "tests/test_request_logging.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-DELETE-INVITATIONS-DELETE-PENDING-INVITATION-L294",
+      "family": "IDENTITY",
+      "method": "DELETE",
+      "path": "/api/invitations/pending/{invitation_id}",
+      "handler": "invitations.delete_pending_invitation",
+      "source": "api/routers/invitations.py:294",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_authoritative_registration_postgres.py",
+        "tests/test_invitations_router.py",
+        "tests/test_stage9_service_boundaries.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-POST-INVITATIONS-CREATE-INVITATION-L320",
+      "family": "IDENTITY",
+      "method": "POST",
+      "path": "/api/invitations",
+      "handler": "invitations.create_invitation",
+      "source": "api/routers/invitations.py:320",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_bot_keyboards.py",
+        "tests/test_deploy_surface_smoke.py",
+        "tests/test_invitations_router.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-POST-INVITATIONS-CREATE-INVITATION-INTERNAL-FROM-BOT-L329",
+      "family": "IDENTITY",
+      "method": "POST",
+      "path": "/api/invitations/internal/create",
+      "handler": "invitations.create_invitation_internal_from_bot",
+      "source": "api/routers/invitations.py:329",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_stage3_invitation_creation.py",
+        "tests/test_stage9_service_boundaries.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-GET-INVITATIONS-LOOKUP-INVITATION-L382",
+      "family": "IDENTITY",
+      "method": "GET",
+      "path": "/api/invitations/lookup/{short_code}",
+      "handler": "invitations.lookup_invitation",
+      "source": "api/routers/invitations.py:382",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/customer_live_auth_smoke.py",
+        "tests/test_invitations_router.py",
+        "tests/test_stage9_service_boundaries.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-GET-INVITATIONS-VALIDATE-INVITATION-L437",
+      "family": "IDENTITY",
+      "method": "GET",
+      "path": "/api/invitations/validate/{token}",
+      "handler": "invitations.validate_invitation",
+      "source": "api/routers/invitations.py:437",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_invitations_router.py",
+        "tests/test_stage9_service_boundaries.py",
+        "tests/test_authoritative_registration_service.py"
+      ]
+    },
+    {
+      "behavior_id": "API-OPS-GET-MAIN-GET-PUBLIC-CONFIG-L531",
+      "family": "OPS",
+      "method": "GET",
+      "path": "/api/config",
+      "handler": "main.get_public_config",
+      "source": "main.py:531",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_production_benchmark_runner.py",
+        "tests/test_main_public_config.py",
+        "tests/test_deploy_surface_smoke.py"
+      ]
+    },
+    {
+      "behavior_id": "API-OPS-GET-MAIN-GET-METRICS-L540",
+      "family": "OPS",
+      "method": "GET",
+      "path": "/metrics",
+      "handler": "main.get_metrics",
+      "source": "main.py:540",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_main_foreign_surface_guard.py",
+        "tests/test_metrics_targets_render.py",
+        "tests/test_main_metrics_guard.py"
+      ]
+    },
+    {
+      "behavior_id": "API-OPS-GET-MAIN-SERVE-FRONTEND-L587",
+      "family": "OPS",
+      "method": "GET",
+      "path": "/{full_path:path}",
+      "handler": "main.serve_frontend",
+      "source": "main.py:587",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_main_frontend_serving.py"
+      ]
+    },
+    {
+      "behavior_id": "API-OPS-GET-MAIN-ROOT-L614",
+      "family": "OPS",
+      "method": "GET",
+      "path": "/",
+      "handler": "main.root",
+      "source": "main.py:614",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_logging_foundation.py",
+        "tests/test_promote_production_private_primary_product.py",
+        "tests/test_production_load_sampler.py"
+      ]
+    },
+    {
+      "behavior_id": "API-NOTIFY-GET-NOTIFICATIONS-GET-UNREAD-COUNT-L120",
+      "family": "NOTIFY",
+      "method": "GET",
+      "path": "/api/notifications/unread-count",
+      "handler": "notifications.get_unread_count",
+      "source": "api/routers/notifications.py:120",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_notifications_router_reads.py",
+        "frontend/src/stores/notifications.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-NOTIFY-GET-NOTIFICATIONS-GET-PUSH-PUBLIC-KEY-L133",
+      "family": "NOTIFY",
+      "method": "GET",
+      "path": "/api/notifications/push/public-key",
+      "handler": "notifications.get_push_public_key",
+      "source": "api/routers/notifications.py:133",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "frontend/src/services/webPush.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-NOTIFY-POST-NOTIFICATIONS-UPSERT-PUSH-SUBSCRIPTION-L138",
+      "family": "NOTIFY",
+      "method": "POST",
+      "path": "/api/notifications/push/subscription",
+      "handler": "notifications.upsert_push_subscription",
+      "source": "api/routers/notifications.py:138",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "frontend/src/utils/pushNotificationsServiceWorker.test.ts",
+        "frontend/src/services/webPush.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-NOTIFY-DELETE-NOTIFICATIONS-DISABLE-PUSH-SUBSCRIPTION-L178",
+      "family": "NOTIFY",
+      "method": "DELETE",
+      "path": "/api/notifications/push/subscription",
+      "handler": "notifications.disable_push_subscription",
+      "source": "api/routers/notifications.py:178",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "frontend/src/utils/pushNotificationsServiceWorker.test.ts",
+        "frontend/src/services/webPush.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-NOTIFY-POST-NOTIFICATIONS-SEND-TEST-PUSH-NOTIFICATION-L201",
+      "family": "NOTIFY",
+      "method": "POST",
+      "path": "/api/notifications/push/test",
+      "handler": "notifications.send_test_push_notification",
+      "source": "api/routers/notifications.py:201",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": []
+    },
+    {
+      "behavior_id": "API-NOTIFY-GET-NOTIFICATIONS-GET-NOTIFICATION-PREFERENCES-L220",
+      "family": "NOTIFY",
+      "method": "GET",
+      "path": "/api/notifications/preferences",
+      "handler": "notifications.get_notification_preferences",
+      "source": "api/routers/notifications.py:220",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_notifications_preferences.py",
+        "frontend/src/views/MarketView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-NOTIFY-PATCH-NOTIFICATIONS-UPDATE-NOTIFICATION-PREFERENCES-L233",
+      "family": "NOTIFY",
+      "method": "PATCH",
+      "path": "/api/notifications/preferences",
+      "handler": "notifications.update_notification_preferences",
+      "source": "api/routers/notifications.py:233",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_notifications_preferences.py",
+        "frontend/src/views/MarketView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-NOTIFY-GET-NOTIFICATIONS-GET-UNREAD-NOTIFICATIONS-L251",
+      "family": "NOTIFY",
+      "method": "GET",
+      "path": "/api/notifications/unread",
+      "handler": "notifications.get_unread_notifications",
+      "source": "api/routers/notifications.py:251",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_notifications_router_reads.py",
+        "frontend/src/stores/notifications.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-NOTIFY-GET-NOTIFICATIONS-GET-ALL-NOTIFICATIONS-L273",
+      "family": "NOTIFY",
+      "method": "GET",
+      "path": "/api/notifications",
+      "handler": "notifications.get_all_notifications",
+      "source": "api/routers/notifications.py:273",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_notifications_router_reads.py",
+        "frontend/src/utils/pushNotificationsServiceWorker.test.ts",
+        "frontend/src/views/MarketView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-NOTIFY-PATCH-NOTIFICATIONS-MARK-NOTIFICATION-READ-L296",
+      "family": "NOTIFY",
+      "method": "PATCH",
+      "path": "/api/notifications/{notification_id}/read",
+      "handler": "notifications.mark_notification_read",
+      "source": "api/routers/notifications.py:296",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_notifications_router_mutations.py"
+      ]
+    },
+    {
+      "behavior_id": "API-NOTIFY-POST-NOTIFICATIONS-MARK-ALL-NOTIFICATIONS-READ-L318",
+      "family": "NOTIFY",
+      "method": "POST",
+      "path": "/api/notifications/mark-all-read",
+      "handler": "notifications.mark_all_notifications_read",
+      "source": "api/routers/notifications.py:318",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_notifications_router_mutations.py",
+        "frontend/src/stores/notifications.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-NOTIFY-DELETE-NOTIFICATIONS-DELETE-ALL-NOTIFICATIONS-L343",
+      "family": "NOTIFY",
+      "method": "DELETE",
+      "path": "/api/notifications",
+      "handler": "notifications.delete_all_notifications",
+      "source": "api/routers/notifications.py:343",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_notifications_router_mutations.py",
+        "frontend/src/utils/pushNotificationsServiceWorker.test.ts",
+        "frontend/src/views/MarketView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-NOTIFY-DELETE-NOTIFICATIONS-DELETE-NOTIFICATION-L362",
+      "family": "NOTIFY",
+      "method": "DELETE",
+      "path": "/api/notifications/{notification_id}",
+      "handler": "notifications.delete_notification",
+      "source": "api/routers/notifications.py:362",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_notifications_router_mutations.py"
+      ]
+    },
+    {
+      "behavior_id": "API-NOTIFY-GET-NOTIFICATIONS-STREAM-NOTIFICATIONS-L386",
+      "family": "NOTIFY",
+      "method": "GET",
+      "path": "/api/notifications/stream",
+      "handler": "notifications.stream_notifications",
+      "source": "api/routers/notifications.py:386",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_realtime_router_sse.py",
+        "tests/api_load_test.py",
+        "tests/test_notifications_router_stream.py"
+      ]
+    },
+    {
+      "behavior_id": "API-OFFER-POST-OFFERS-PREVIEW-COIN-COMMODITY-INFERENCE-L1592",
+      "family": "OFFER",
+      "method": "POST",
+      "path": "/api/offers/inference-preview",
+      "handler": "offers.preview_coin_commodity_inference",
+      "source": "api/routers/offers.py:1592",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_coin_intelligence_preview_api.py"
+      ]
+    },
+    {
+      "behavior_id": "API-OFFER-POST-OFFERS-CREATE-OFFER-L1659",
+      "family": "OFFER",
+      "method": "POST",
+      "path": "/api/offers",
+      "handler": "offers.create_offer",
+      "source": "api/routers/offers.py:1659",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_offers_router_create_success.py",
+        "tests/test_bot_webapp_comprehensive_load_matrix.py",
+        "tests/test_main_foreign_surface_guard.py"
+      ]
+    },
+    {
+      "behavior_id": "API-OFFER-GET-OFFERS-GET-PUBLIC-OFFER-BY-PUBLIC-ID-L2232",
+      "family": "OFFER",
+      "method": "GET",
+      "path": "/api/offers/public/{offer_public_id}",
+      "handler": "offers.get_public_offer_by_public_id",
+      "source": "api/routers/offers.py:2232",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_offers_public_routes.py"
+      ]
+    },
+    {
+      "behavior_id": "API-OFFER-GET-OFFERS-GET-PUBLIC-OFFER-DETAIL-L2247",
+      "family": "OFFER",
+      "method": "GET",
+      "path": "/api/offers/public/{offer_public_id}/detail",
+      "handler": "offers.get_public_offer_detail",
+      "source": "api/routers/offers.py:2247",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_offers_public_routes.py"
+      ]
+    },
+    {
+      "behavior_id": "API-OFFER-GET-OFFERS-GET-ACTIVE-OFFERS-L2309",
+      "family": "OFFER",
+      "method": "GET",
+      "path": "/api/offers",
+      "handler": "offers.get_active_offers",
+      "source": "api/routers/offers.py:2309",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_offers_router_helpers.py",
+        "tests/test_main_foreign_surface_guard.py",
+        "tests/api_load_test.py"
+      ]
+    },
+    {
+      "behavior_id": "API-OFFER-GET-OFFERS-GET-ACTIVE-OFFER-PAGE-L2356",
+      "family": "OFFER",
+      "method": "GET",
+      "path": "/api/offers/page",
+      "handler": "offers.get_active_offer_page",
+      "source": "api/routers/offers.py:2356",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_active_offer_pagination.py",
+        "frontend/src/composables/useOffers.test.ts",
+        "frontend/src/components/PublicProfile.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-MARKET-GET-OFFERS-GET-MARKET-OFFER-HISTORY-L2423",
+      "family": "MARKET",
+      "method": "GET",
+      "path": "/api/offers/market-history",
+      "handler": "offers.get_market_offer_history",
+      "source": "api/routers/offers.py:2423",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_offers_router_helpers.py",
+        "tests/test_observability_config.py",
+        "frontend/src/views/MarketView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-MARKET-GET-OFFERS-GET-MARKET-EXPIRED-OFFERS-L2556",
+      "family": "MARKET",
+      "method": "GET",
+      "path": "/api/offers/expired",
+      "handler": "offers.get_market_expired_offers",
+      "source": "api/routers/offers.py:2556",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_chat_upload_session_service.py",
+        "tests/test_offers_router_helpers.py",
+        "frontend/src/composables/useOffers.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-OFFER-GET-OFFERS-GET-MY-REPEATABLE-OFFERS-L2607",
+      "family": "OFFER",
+      "method": "GET",
+      "path": "/api/offers/my/repeatable",
+      "handler": "offers.get_my_repeatable_offers",
+      "source": "api/routers/offers.py:2607",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_offers_router_reads.py",
+        "frontend/src/views/MarketView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-OFFER-GET-OFFERS-GET-MY-OFFERS-L2645",
+      "family": "OFFER",
+      "method": "GET",
+      "path": "/api/offers/my",
+      "handler": "offers.get_my_offers",
+      "source": "api/routers/offers.py:2645",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_offers_router_helpers.py",
+        "tests/api_load_test.py",
+        "tests/test_offers_router_reads.py"
+      ]
+    },
+    {
+      "behavior_id": "API-OFFER-POST-OFFERS-EXPIRE-OFFER-INTERNAL-L2946",
+      "family": "OFFER",
+      "method": "POST",
+      "path": "/api/offers/internal/expire",
+      "handler": "offers.expire_offer_internal",
+      "source": "api/routers/offers.py:2946",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_offer_expiry_receipts_postgres.py",
+        "tests/test_offers_router_expire.py",
+        "tests/test_main_foreign_surface_guard.py"
+      ]
+    },
+    {
+      "behavior_id": "API-OFFER-DELETE-OFFERS-EXPIRE-OFFER-L3043",
+      "family": "OFFER",
+      "method": "DELETE",
+      "path": "/api/offers/{offer_id}",
+      "handler": "offers.expire_offer",
+      "source": "api/routers/offers.py:3043",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_offer_expiry_receipts_postgres.py",
+        "tests/test_bot_webapp_comprehensive_load_matrix.py",
+        "tests/test_offers_router_expire.py"
+      ]
+    },
+    {
+      "behavior_id": "API-OFFER-POST-OFFERS-CANCEL-ALL-ACTIVE-OFFERS-L3146",
+      "family": "OFFER",
+      "method": "POST",
+      "path": "/api/offers/cancel-all",
+      "handler": "offers.cancel_all_active_offers",
+      "source": "api/routers/offers.py:3146",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_offers_router_expire.py",
+        "tests/test_bot_trade_create_helper_cancel.py",
+        "tests/test_bot_trade_create_validation_interaction_queue.py"
+      ]
+    },
+    {
+      "behavior_id": "API-OFFER-POST-OFFERS-PARSE-OFFER-TEXT-L3184",
+      "family": "OFFER",
+      "method": "POST",
+      "path": "/api/offers/parse",
+      "handler": "offers.parse_offer_text",
+      "source": "api/routers/offers.py:3184",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_trade_create_text_offer_warning_flow_integration.py",
+        "tests/test_bot_trade_create_text_offer_guards.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-WEBSOCKET-REALTIME-WEBSOCKET-ENDPOINT-L370",
+      "family": "MSG",
+      "method": "WEBSOCKET",
+      "path": "/api/realtime/ws",
+      "handler": "realtime.websocket_endpoint",
+      "source": "api/routers/realtime.py:370",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_logging_foundation.py",
+        "tests/test_realtime_router_websocket_guards.py",
+        "tests/api_load_test.py"
+      ]
+    },
+    {
+      "behavior_id": "API-MSG-GET-REALTIME-SSE-STREAM-L575",
+      "family": "MSG",
+      "method": "GET",
+      "path": "/api/realtime/stream",
+      "handler": "realtime.sse_stream",
+      "source": "api/routers/realtime.py:575",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_realtime_router_sse.py",
+        "tests/api_load_test.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-SESSIONS-VERIFY-MY-SESSION-L1031",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/sessions/verify",
+      "handler": "sessions.verify_my_session",
+      "source": "api/routers/sessions.py:1031",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_production_realistic_load.py",
+        "tests/test_core_sms.py",
+        "tests/customer_live_auth_smoke.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-GET-SESSIONS-LIST-ACTIVE-SESSIONS-L1046",
+      "family": "AUTH",
+      "method": "GET",
+      "path": "/api/sessions/active",
+      "handler": "sessions.list_active_sessions",
+      "source": "api/routers/sessions.py:1046",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_production_coin_inference_snapshot_relay.py",
+        "tests/test_coin_intelligence_systemd_units.py",
+        "tests/api_load_test.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-DELETE-SESSIONS-TERMINATE-SESSION-L1075",
+      "family": "AUTH",
+      "method": "DELETE",
+      "path": "/api/sessions/{session_id}",
+      "handler": "sessions.terminate_session",
+      "source": "api/routers/sessions.py:1075",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_users_router_mutation_authority.py",
+        "tests/test_request_logging.py",
+        "tests/test_sessions_router_runtime.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-SESSIONS-LOGOUT-ALL-SESSIONS-L1146",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/sessions/logout-all",
+      "handler": "sessions.logout_all_sessions",
+      "source": "api/routers/sessions.py:1146",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_sessions_router_runtime.py",
+        "frontend/src/views/SettingsView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-GET-SESSIONS-GET-PENDING-LOGIN-REQUESTS-L1191",
+      "family": "AUTH",
+      "method": "GET",
+      "path": "/api/sessions/login-requests/pending",
+      "handler": "sessions.get_pending_login_requests",
+      "source": "api/routers/sessions.py:1191",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_sessions_router_login_requests.py",
+        "frontend/src/composables/useSessionApprovalRuntime.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-SESSIONS-APPROVE-REQUEST-L1210",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/sessions/login-requests/{request_id}/approve",
+      "handler": "sessions.approve_request",
+      "source": "api/routers/sessions.py:1210",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_sessions_router_login_requests.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-SESSIONS-REJECT-REQUEST-L1270",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/sessions/login-requests/{request_id}/reject",
+      "handler": "sessions.reject_request",
+      "source": "api/routers/sessions.py:1270",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_sessions_router_login_requests.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-GET-SESSIONS-POLL-LOGIN-REQUEST-STATUS-L1311",
+      "family": "AUTH",
+      "method": "GET",
+      "path": "/api/sessions/login-requests/{request_id}/status",
+      "handler": "sessions.poll_login_request_status",
+      "source": "api/routers/sessions.py:1311",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_sessions_router_login_requests.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-SESSIONS-INTERNAL-SESSION-AUTHORITY-CHECK-L539",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/sessions/internal/authority-check",
+      "handler": "sessions.internal_session_authority_check",
+      "source": "api/routers/sessions.py:539",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_session_authority.py",
+        "tests/test_main_foreign_surface_guard.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-SESSIONS-INTERNAL-RESET-USER-SESSIONS-L562",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/sessions/internal/reset-user-sessions",
+      "handler": "sessions.internal_reset_user_sessions",
+      "source": "api/routers/sessions.py:562",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_session_authority.py",
+        "tests/test_main_foreign_surface_guard.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/sessions/internal/replace-user-sessions",
+      "handler": "sessions.internal_replace_user_sessions",
+      "source": "api/routers/sessions.py:593",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_session_authority.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-GET-SESSIONS-GET-PENDING-REQUESTS-L619",
+      "family": "AUTH",
+      "method": "GET",
+      "path": "/api/sessions/login-requests/pending",
+      "handler": "sessions.get_pending_requests",
+      "source": "api/routers/sessions.py:619",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_sessions_router_login_requests.py",
+        "frontend/src/composables/useSessionApprovalRuntime.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-SESSIONS-START-SINGLE-SESSION-RECOVERY-L673",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/sessions/login-requests/{request_id}/recovery",
+      "handler": "sessions.start_single_session_recovery",
+      "source": "api/routers/sessions.py:673",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_sessions_router_single_session_recovery.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-SESSIONS-CANCEL-SINGLE-SESSION-RECOVERY-L717",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/sessions/login-requests/{request_id}/recovery/cancel",
+      "handler": "sessions.cancel_single_session_recovery",
+      "source": "api/routers/sessions.py:717",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_sessions_router_single_session_recovery.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-GET-SESSIONS-GET-SINGLE-SESSION-RECOVERY-STATUS-L749",
+      "family": "AUTH",
+      "method": "GET",
+      "path": "/api/sessions/login-requests/{request_id}/recovery/status",
+      "handler": "sessions.get_single_session_recovery_status",
+      "source": "api/routers/sessions.py:749",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_sessions_router_single_session_recovery.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-GET-SESSIONS-GET-PENDING-SINGLE-SESSION-RECOVERY-PROMPTS-L788",
+      "family": "AUTH",
+      "method": "GET",
+      "path": "/api/sessions/recovery/pending",
+      "handler": "sessions.get_pending_single_session_recovery_prompts",
+      "source": "api/routers/sessions.py:788",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_sessions_router_single_session_recovery.py",
+        "frontend/src/composables/useSessionApprovalRuntime.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-SESSIONS-REQUEST-SINGLE-SESSION-RECOVERY-IDENTITY-L807",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/sessions/recovery/{recovery_id}/request-identity",
+      "handler": "sessions.request_single_session_recovery_identity",
+      "source": "api/routers/sessions.py:807",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_sessions_router_single_session_recovery.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-SESSIONS-APPROVE-SINGLE-SESSION-RECOVERY-L845",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/sessions/recovery/{recovery_id}/approve",
+      "handler": "sessions.approve_single_session_recovery",
+      "source": "api/routers/sessions.py:845",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_sessions_router_single_session_recovery.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-SESSIONS-REJECT-SINGLE-SESSION-RECOVERY-L907",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/sessions/recovery/{recovery_id}/reject",
+      "handler": "sessions.reject_single_session_recovery",
+      "source": "api/routers/sessions.py:907",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_sessions_router_single_session_recovery.py"
+      ]
+    },
+    {
+      "behavior_id": "API-AUTH-POST-SESSIONS-SUBMIT-SINGLE-SESSION-RECOVERY-IDENTITY-L955",
+      "family": "AUTH",
+      "method": "POST",
+      "path": "/api/sessions/login-requests/{request_id}/recovery/identity",
+      "handler": "sessions.submit_single_session_recovery_identity",
+      "source": "api/routers/sessions.py:955",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_sessions_router_single_session_recovery.py"
+      ]
+    },
+    {
+      "behavior_id": "API-SYNC-POST-SYNC-RECEIVE-SYNC-DATA-L3889",
+      "family": "SYNC",
+      "method": "POST",
+      "path": "/api/sync/receive",
+      "handler": "sync.receive_sync_data",
+      "source": "api/routers/sync.py:3889",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_sync_router_signature.py",
+        "tests/test_notification_and_sync_helpers.py",
+        "tests/test_production_realistic_load.py"
+      ]
+    },
+    {
+      "behavior_id": "API-SYNC-POST-SYNC-RESYNC-FROM-CHANGELOG-L4606",
+      "family": "SYNC",
+      "method": "POST",
+      "path": "/api/sync/resync",
+      "handler": "sync.resync_from_changelog",
+      "source": "api/routers/sync.py:4606",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_production_realistic_load.py",
+        "tests/test_sync_router_resync.py",
+        "tests/test_sync_router_remaining_paths.py"
+      ]
+    },
+    {
+      "behavior_id": "API-SYNC-GET-SYNC-GET-SYNC-PARITY-SNAPSHOT-L4805",
+      "family": "SYNC",
+      "method": "GET",
+      "path": "/api/sync/parity/snapshot",
+      "handler": "sync.get_sync_parity_snapshot",
+      "source": "api/routers/sync.py:4805",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_sync_health_endpoint.py",
+        "tests/test_staging_two_server_full_matrix.py"
+      ]
+    },
+    {
+      "behavior_id": "API-SYNC-POST-SYNC-RECORD-SYNC-PARITY-STATUS-L4833",
+      "family": "SYNC",
+      "method": "POST",
+      "path": "/api/sync/parity/status",
+      "handler": "sync.record_sync_parity_status",
+      "source": "api/routers/sync.py:4833",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_sync_parity_script.py",
+        "tests/test_sync_health_endpoint.py",
+        "tests/test_staging_two_server_full_matrix.py"
+      ]
+    },
+    {
+      "behavior_id": "API-SYNC-GET-SYNC-GET-SYNC-HEALTH-L4890",
+      "family": "SYNC",
+      "method": "GET",
+      "path": "/api/sync/health",
+      "handler": "sync.get_sync_health",
+      "source": "api/routers/sync.py:4890",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_deploy_surface_smoke.py",
+        "tests/test_main_foreign_surface_guard.py",
+        "tests/test_observe_production_private_primary.py"
+      ]
+    },
+    {
+      "behavior_id": "API-TRADE-POST-TRADES-CREATE-TRADE-L4853",
+      "family": "TRADE",
+      "method": "POST",
+      "path": "/api/trades",
+      "handler": "trades.create_trade",
+      "source": "api/routers/trades.py:4853",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_production_realistic_load.py",
+        "tests/test_server_routing_and_trade_forwarding.py",
+        "tests/test_main_foreign_surface_guard.py"
+      ]
+    },
+    {
+      "behavior_id": "API-REQUEST-GET-TRADES-GET-PENDING-OWNER-OVERTIME-REQUESTS-L4891",
+      "family": "REQUEST",
+      "method": "GET",
+      "path": "/api/trades/overtime-requests/pending-owner",
+      "handler": "trades.get_pending_owner_overtime_requests",
+      "source": "api/routers/trades.py:4891",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_offer_overtime_webapp_api_contract.py"
+      ]
+    },
+    {
+      "behavior_id": "API-REQUEST-GET-TRADES-GET-PENDING-REQUESTER-OVERTIME-REQUESTS-L4927",
+      "family": "REQUEST",
+      "method": "GET",
+      "path": "/api/trades/overtime-requests/pending-requester",
+      "handler": "trades.get_pending_requester_overtime_requests",
+      "source": "api/routers/trades.py:4927",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_offer_overtime_webapp_api_contract.py"
+      ]
+    },
+    {
+      "behavior_id": "API-REQUEST-GET-TRADES-GET-OVERTIME-REQUEST-L4958",
+      "family": "REQUEST",
+      "method": "GET",
+      "path": "/api/trades/overtime-requests/{request_public_id}",
+      "handler": "trades.get_overtime_request",
+      "source": "api/routers/trades.py:4958",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_offer_overtime_webapp_api_contract.py"
+      ]
+    },
+    {
+      "behavior_id": "API-REQUEST-POST-TRADES-APPROVE-OVERTIME-REQUEST-L4995",
+      "family": "REQUEST",
+      "method": "POST",
+      "path": "/api/trades/overtime-requests/{request_public_id}/approve",
+      "handler": "trades.approve_overtime_request",
+      "source": "api/routers/trades.py:4995",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_offer_overtime_webapp_api_contract.py"
+      ]
+    },
+    {
+      "behavior_id": "API-REQUEST-POST-TRADES-REJECT-OVERTIME-REQUEST-L5091",
+      "family": "REQUEST",
+      "method": "POST",
+      "path": "/api/trades/overtime-requests/{request_public_id}/reject",
+      "handler": "trades.reject_overtime_request",
+      "source": "api/routers/trades.py:5091",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_offer_overtime_webapp_api_contract.py"
+      ]
+    },
+    {
+      "behavior_id": "API-REQUEST-POST-TRADES-CANCEL-OVERTIME-REQUEST-L5129",
+      "family": "REQUEST",
+      "method": "POST",
+      "path": "/api/trades/overtime-requests/{request_public_id}/cancel",
+      "handler": "trades.cancel_overtime_request",
+      "source": "api/routers/trades.py:5129",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_offer_overtime_webapp_api_contract.py",
+        "tests/test_offer_overtime_request_cancel_forwarding.py"
+      ]
+    },
+    {
+      "behavior_id": "API-REQUEST-POST-TRADES-CANCEL-OVERTIME-REQUEST-INTERNAL-L5205",
+      "family": "REQUEST",
+      "method": "POST",
+      "path": "/api/trades/internal/overtime-requests/cancel",
+      "handler": "trades.cancel_overtime_request_internal",
+      "source": "api/routers/trades.py:5205",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_offer_overtime_request_cancel_forwarding.py"
+      ]
+    },
+    {
+      "behavior_id": "API-TRADE-POST-TRADES-EXECUTE-TRADE-INTERNAL-L5319",
+      "family": "TRADE",
+      "method": "POST",
+      "path": "/api/trades/internal/execute",
+      "handler": "trades.execute_trade_internal",
+      "source": "api/routers/trades.py:5319",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_production_realistic_load.py",
+        "tests/test_server_routing_and_trade_forwarding.py",
+        "tests/test_main_foreign_surface_guard.py"
+      ]
+    },
+    {
+      "behavior_id": "API-TRADE-GET-TRADES-GET-MY-TRADES-L5462",
+      "family": "TRADE",
+      "method": "GET",
+      "path": "/api/trades/my",
+      "handler": "trades.get_my_trades",
+      "source": "api/routers/trades.py:5462",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_trade_history_pagination.py",
+        "tests/test_trades_router_reads.py",
+        "tests/api_load_test.py"
+      ]
+    },
+    {
+      "behavior_id": "API-TRADE-GET-TRADES-GET-MY-TRADES-PAGE-L5500",
+      "family": "TRADE",
+      "method": "GET",
+      "path": "/api/trades/my/page",
+      "handler": "trades.get_my_trades_page",
+      "source": "api/routers/trades.py:5500",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_trade_history_pagination.py",
+        "frontend/src/components/PublicProfile.test.ts",
+        "frontend/src/components/dashboard/DashboardDailySections.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-TRADE-GET-TRADES-EXPORT-MY-TRADES-L5566",
+      "family": "TRADE",
+      "method": "GET",
+      "path": "/api/trades/my/export",
+      "handler": "trades.export_my_trades",
+      "source": "api/routers/trades.py:5566",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_trades_router_history_exports.py",
+        "frontend/src/components/PublicProfile.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-TRADE-GET-TRADES-GET-TRADE-L5626",
+      "family": "TRADE",
+      "method": "GET",
+      "path": "/api/trades/{trade_id}",
+      "handler": "trades.get_trade",
+      "source": "api/routers/trades.py:5626",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_bot_trade_history_keyboard.py",
+        "tests/test_trade_history_pagination.py",
+        "tests/test_bot_trade_create_back_cancel.py"
+      ]
+    },
+    {
+      "behavior_id": "API-TRADE-GET-TRADES-GET-TRADES-WITH-USER-L5673",
+      "family": "TRADE",
+      "method": "GET",
+      "path": "/api/trades/with/{other_user_id}",
+      "handler": "trades.get_trades_with_user",
+      "source": "api/routers/trades.py:5673",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_trade_history_pagination.py",
+        "tests/test_trades_router_reads.py",
+        "tests/test_trading_production_contract_matrix.py"
+      ]
+    },
+    {
+      "behavior_id": "API-TRADE-GET-TRADES-GET-TRADES-WITH-USER-PAGE-L5720",
+      "family": "TRADE",
+      "method": "GET",
+      "path": "/api/trades/with/{other_user_id}/page",
+      "handler": "trades.get_trades_with_user_page",
+      "source": "api/routers/trades.py:5720",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_trade_history_pagination.py"
+      ]
+    },
+    {
+      "behavior_id": "API-TRADE-GET-TRADES-EXPORT-TRADES-WITH-USER-L5797",
+      "family": "TRADE",
+      "method": "GET",
+      "path": "/api/trades/with/{other_user_id}/export",
+      "handler": "trades.export_trades_with_user",
+      "source": "api/routers/trades.py:5797",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_trades_router_history_exports.py"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-GET-TRADING-SETTINGS-GET-SETTINGS-L195",
+      "family": "ADMIN",
+      "method": "GET",
+      "path": "/api/trading-settings",
+      "handler": "trading_settings.get_settings",
+      "source": "api/routers/trading_settings.py:195",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_bot_panel_settings_new_value.py",
+        "tests/test_bot_panel_settings_helpers.py",
+        "tests/test_bot_panel_settings_reset.py"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-GET-TRADING-SETTINGS-GET-MARKET-STATE-L202",
+      "family": "ADMIN",
+      "method": "GET",
+      "path": "/api/trading-settings/market-state",
+      "handler": "trading_settings.get_market_state",
+      "source": "api/routers/trading_settings.py:202",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_trading_settings_router_read.py",
+        "frontend/src/views/MarketView.test.ts",
+        "frontend/src/components/BottomNav.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-GET-TRADING-SETTINGS-LIST-MARKET-OVERRIDES-L214",
+      "family": "ADMIN",
+      "method": "GET",
+      "path": "/api/trading-settings/market-overrides",
+      "handler": "trading_settings.list_market_overrides",
+      "source": "api/routers/trading_settings.py:214",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_trading_settings_router_overrides.py",
+        "frontend/src/components/TradingSettings.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-POST-TRADING-SETTINGS-CREATE-MARKET-OVERRIDE-L222",
+      "family": "ADMIN",
+      "method": "POST",
+      "path": "/api/trading-settings/market-overrides",
+      "handler": "trading_settings.create_market_override",
+      "source": "api/routers/trading_settings.py:222",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_trading_settings_router_overrides.py",
+        "frontend/src/components/TradingSettings.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-PUT-TRADING-SETTINGS-UPDATE-MARKET-OVERRIDE-L253",
+      "family": "ADMIN",
+      "method": "PUT",
+      "path": "/api/trading-settings/market-overrides/{override_id}",
+      "handler": "trading_settings.update_market_override",
+      "source": "api/routers/trading_settings.py:253",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_trading_settings_router_overrides.py"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-DELETE-TRADING-SETTINGS-DELETE-MARKET-OVERRIDE-L288",
+      "family": "ADMIN",
+      "method": "DELETE",
+      "path": "/api/trading-settings/market-overrides/{override_id}",
+      "handler": "trading_settings.delete_market_override",
+      "source": "api/routers/trading_settings.py:288",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_trading_settings_router_overrides.py"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-PUT-TRADING-SETTINGS-UPDATE-SETTINGS-L306",
+      "family": "ADMIN",
+      "method": "PUT",
+      "path": "/api/trading-settings",
+      "handler": "trading_settings.update_settings",
+      "source": "api/routers/trading_settings.py:306",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_trading_settings_router_update.py",
+        "frontend/src/views/MarketView.test.ts",
+        "frontend/src/components/BottomNav.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-ADMIN-POST-TRADING-SETTINGS-RESET-SETTINGS-L353",
+      "family": "ADMIN",
+      "method": "POST",
+      "path": "/api/trading-settings/reset",
+      "handler": "trading_settings.reset_settings",
+      "source": "api/routers/trading_settings.py:353",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_scripts_surface_smoke.py",
+        "tests/test_main_foreign_surface_guard.py",
+        "tests/test_trading_settings_router_reset.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-POST-USER-FLAGS-RESOLVE-USER-FLAG-L111",
+      "family": "IDENTITY",
+      "method": "POST",
+      "path": "/api/user-flags/{flag_id}/resolve",
+      "handler": "user_flags.resolve_user_flag",
+      "source": "api/routers/user_flags.py:111",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_user_flags_router.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-GET-USER-FLAGS-LIST-OPEN-USER-FLAGS-L83",
+      "family": "IDENTITY",
+      "method": "GET",
+      "path": "/api/user-flags/open",
+      "handler": "user_flags.list_open_user_flags",
+      "source": "api/routers/user_flags.py:83",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_chat_upload_session_service.py",
+        "frontend/src/components/UserManager.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-GET-USERS-READ-ALL-USERS-L407",
+      "family": "IDENTITY",
+      "method": "GET",
+      "path": "/api/users",
+      "handler": "users.read_all_users",
+      "source": "api/routers/users.py:407",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_metrics.py",
+        "tests/test_users_router_read_all.py",
+        "frontend/src/views/AdminView.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-GET-USERS-READ-USER-L440",
+      "family": "IDENTITY",
+      "method": "GET",
+      "path": "/api/users/{user_id}",
+      "handler": "users.read_user",
+      "source": "api/routers/users.py:440",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_users_router_read_one.py",
+        "tests/test_users_public_router_read.py",
+        "tests/test_trade_delivery_reconciliation_service.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-PUT-USERS-UPDATE-USER-L453",
+      "family": "IDENTITY",
+      "method": "PUT",
+      "path": "/api/users/{user_id}",
+      "handler": "users.update_user",
+      "source": "api/routers/users.py:453",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_users_public_router_read.py",
+        "tests/test_users_router_update_limits.py",
+        "tests/test_account_status_lifecycle_smoke.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-DELETE-USERS-DELETE-USER-L655",
+      "family": "IDENTITY",
+      "method": "DELETE",
+      "path": "/api/users/{user_id}",
+      "handler": "users.delete_user",
+      "source": "api/routers/users.py:655",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_users_public_router_read.py",
+        "tests/test_bot_admin_commodities_add_flow.py",
+        "tests/test_bot_admin_users_block_custom.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-POST-USERS-TERMINATE-USER-SESSIONS-L691",
+      "family": "IDENTITY",
+      "method": "POST",
+      "path": "/api/users/{user_id}/sessions/terminate-all",
+      "handler": "users.terminate_user_sessions",
+      "source": "api/routers/users.py:691",
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "test_refs": [
+        "tests/test_users_router_mutation_authority.py",
+        "tests/test_users_router_update_basic.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-GET-USERS-PUBLIC-SEARCH-PUBLIC-USERS-L428",
+      "family": "IDENTITY",
+      "method": "GET",
+      "path": "/api/users-public/search",
+      "handler": "users_public.search_public_users",
+      "source": "api/routers/users_public.py:428",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_users_public_router_search.py",
+        "frontend/src/components/ChatView.test.ts",
+        "frontend/src/components/chat/ChatNewConversationModal.test.ts"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-GET-USERS-PUBLIC-LIST-PROJECT-USERS-DIRECTORY-L512",
+      "family": "IDENTITY",
+      "method": "GET",
+      "path": "/api/users-public/{user_id}/project-users",
+      "handler": "users_public.list_project_users_directory",
+      "source": "api/routers/users_public.py:512",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_users_public_project_users.py"
+      ]
+    },
+    {
+      "behavior_id": "API-IDENTITY-GET-USERS-PUBLIC-READ-PUBLIC-USER-L548",
+      "family": "IDENTITY",
+      "method": "GET",
+      "path": "/api/users-public/{user_id}",
+      "handler": "users_public.read_public_user",
+      "source": "api/routers/users_public.py:548",
+      "mutation_class": "READ_OR_STREAM",
+      "test_refs": [
+        "tests/test_users_public_router_read.py",
+        "tests/test_trade_delivery_reconciliation_service.py",
+        "tests/test_metrics.py"
+      ]
+    }
+  ]
+}
