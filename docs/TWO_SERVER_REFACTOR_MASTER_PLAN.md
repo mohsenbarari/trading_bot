@@ -160,6 +160,9 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
 - کاهش داده باعث widening خروجی می‌شود، نه قطع خروجی؛ فقط خرابی بنیادی مدل یا
   نبود baseline معتبر خروجی را ناممکن می‌کند.
 - `DEGRADED` و `REFERENCE_ONLY` حق ردکردن آفر ندارند.
+- تغییر Web Writer هیچ محدودیتی روی Bot فنلاند ایجاد نمی‌کند. Bot با authority
+  مستقل `TELEGRAM_OWNER` و تمام قابلیت‌های فعلی خود ادامه می‌دهد؛ طراحی conflict
+  policy باید این پیوستگی را بدون خاموش‌کردن commandهای Bot تضمین کند.
 
 ### نیازمند تأیید در بازبینی این پلن
 
@@ -171,7 +174,6 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
 | `D-04` | SLO release عادی دو سرور | حداکثر ۳۰ دقیقه در حالت اتصال سالم |
 | `D-05` | SLO rollback کد بدون DB restore | حداکثر ۱۰ دقیقه |
 | `D-06` | artifact distribution | registry اصلی + OCI archive امضاشده در Object Storage ایران برای Iran/offline |
-| `D-07` | mutationهای سراسری Bot هنگام Iran Writer | Bot فقط offer/tradeهای `home_site=fi` و side effect تلگرام را ادامه دهد؛ admin/global mutation با پیام روشن متوقف شود |
 
 این موارد تا تأیید مالک، requirement پیشنهادی‌اند و Cursor حق تثبیت پنهان آن‌ها
 در کد را ندارد.
@@ -245,7 +247,7 @@ Cursor پیش از شروع هر Stage باید تمام dependencyهای زیر
 | `P2-02` | `P2-01`, `P4-02` |
 | `P2-03` | `P2-01`, `P2-02` |
 | `P2-04` | `P2-02`, `P2-03`, تصمیم `D-01` |
-| `P2-05` | `P2-00`, `P2-01`, `P2-04`, تصمیم `D-07` |
+| `P2-05` | `P2-00`, `P2-01`, `P2-04` و تصمیم تثبیت‌شدهٔ استقلال کامل Bot |
 | `P2-06` | `P2-03`, `P2-04`, `P2-05` |
 | `P2-07` | `P2-04`, `P2-06`, تصمیم `D-02` |
 | `P2-08` | `P2-04`, `P2-06`, `P2-07` |
@@ -659,14 +661,18 @@ Gate خروج: هیچ اجرای تستی دو commit معتبر از دو Write
 - offer/trade mutation فقط روی `home_site` انجام می‌شود.
 - آفر Finland در partition روی Iran فقط historical/read-only است و قابل execute
   نیست؛ آفر تازهٔ Iran، `home_site=ir` دارد.
-- Bot در Finland هنگام Iran Web Writer می‌تواند offer/tradeهای Bot-home خود را
-  بسازد و اجرا کند؛ این eventها تا reconnect در Finland می‌مانند.
-- mutationهای singleton/global مانند commodity، schedule، admin configuration و
-  policy فقط Web Writer را می‌پذیرند. پیشنهاد `D-07` این است که command متناظر Bot
-  در partition با پیام روشن unavailable شود، نه اینکه پنهانی queue یا merge شود.
+- Bot در Finland هنگام Iran Web Writer تمام قابلیت‌های فعلی خود را بدون محدودیت
+  ادامه می‌دهد؛ تغییر Web Writer به‌تنهایی مجاز نیست هیچ command بات را
+  `unavailable`، read-only یا متوقف کند.
+- هر command بات باید در Data Ownership Matrix به authority مستقل
+  `TELEGRAM_OWNER`، `HOME_SITE=fi` یا aggregate صریحاً Bot-owned نگاشت شود. اگر
+  دامنه‌ای اکنون هم از Web و هم از Bot mutation می‌پذیرد، این Stage باید قرارداد
+  authority/merge آن را سناریومحور طراحی کند؛ خاموش‌کردن Bot راه‌حل قابل‌قبول نیست.
 - command به home غیرقابل‌دسترس pending نامحدود نمی‌ماند؛ نتیجهٔ صریح
   `HOME_SITE_UNREACHABLE` می‌دهد.
-- admin/global state فقط Writer epoch جدید را می‌پذیرد.
+- admin/global state به‌صورت blanket تابع Web Writer epoch نیست؛ authority هر
+  command و aggregate باید صریح باشد تا Web ایران و Bot فنلاند بدون split-brain
+  و بدون محدودکردن Bot کار کنند.
 - immutable append events merge می‌شوند؛ mutable aggregateها state machine دارند.
 - money، quantity و inventory هرگز LWW نیستند.
 - eventی که oversell/negative inventory بسازد quarantine می‌شود، sync green را

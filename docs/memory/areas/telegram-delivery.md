@@ -1,5 +1,9 @@
 # Telegram Delivery
 
+- 2026-09-01 | In the two-site architecture, changing Web Writer never restricts
+  the Finland Bot. Its independent Telegram authority keeps every current Bot
+  capability active while the Iran Web is Writer; P2 must prevent conflicts by
+  explicit command/aggregate ownership, never by disabling or silently queuing Bot.
 - 2026-08-29 | Outbox dependency waits remain durable/non-terminal and back off by age (1/5/15/60s). Split-runtime teardown uses `docker rm -fv`, preventing anonymous PostgreSQL volume leaks.
 - 2026-08-28 | Unknown channel `sendMessage` outcomes fail closed; silence is never retried. Persistent reconciliation blockers recur critically; only the audited CLI recovers confirmed absence, covering every active Publisher lane in preflight/limiter scope.
 - 2026-08-23 | `primary` polls/ACKs; the sole `executor` owns Queue-v1, OTP and global locks. APIs only produce. Leases and cutover fail closed, preserve jobs and await old owners; compose pins image+SHA.
