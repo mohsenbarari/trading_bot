@@ -1,5 +1,9 @@
 # Telegram Delivery
 
+- 2026-09-02 | `P2-09` target keeps Telegram execution only in Finland. SMS capability
+  exists on both sites but only the human-selected current Web Writer/generation may
+  execute: Finland uses Telegram first then the same OTP by local SMS after 40s, while
+  Iran Writer uses local SMS only. Ambiguous provider results never trigger blind resend.
 - 2026-09-01 | Web Writer changes never restrict Finland Bot. Its independent
   Telegram authority keeps all Bot capabilities active; explicit command/aggregate
   ownership prevents conflict without disabling or silently queuing Bot.

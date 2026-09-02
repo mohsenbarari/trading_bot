@@ -1,5 +1,10 @@
 # Two-Server Refactor
 
+- 2026-09-02 | Owner approved `P2-09`: Product OTP/session are local and Writer-
+  generation-bound; every switch forces Product re-login but not Console re-login.
+  Notification/read and final Messenger metadata/media sync with stable IDs and
+  monotonic/tombstone rules; Push, cache, realtime, drafts and incomplete uploads stay
+  local. Telegram delays use freshness classes and final media gates `FULL_SYNC`.
 - 2026-09-02 | Owner approved `P2-06..08`: independent site Consoles use local
   password/TOTP, 24h sessions and narrow actuators; Product Admin/Grafana stay separate.
   `coin.gold-trade.ir` is one DNS-only A with TTL≤30s and Finland-only human Arvan

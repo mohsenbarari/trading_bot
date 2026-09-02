@@ -2321,16 +2321,202 @@ drain/fence، receipt generation، DNS/role mutation، deploy یا هیچ اقد
 
 ## `P2-09` — OTP، session، notification و Messenger در قطعی
 
-وضعیت: `PROPOSED`
+وضعیت: `PROPOSED — قرارداد سناریویی continuity در 2026-09-02 تأیید شد؛ اجرا مسدود است`
 
-- product sessionها site-local هستند؛ پس از Writer switch ورود مجدد لازم است.
-- SMS داخلی روی Iran مستقل از Telegram کار می‌کند.
-- Iran هیچ Telegram send/poll/token ندارد؛ Telegram side effect در Finland باقی
-  می‌ماند و ممکن است برای کاربر داخل ایران در partition قابل دریافت نباشد.
-- Web notification/realtime روی Writer محلی اجرا می‌شود.
-- Messenger metadata مشترک و media blob دقیقاً طبق Data Ownership Matrix رفتار
-  می‌کنند؛ cache/device state sync نمی‌شود.
-- notification dedupe و unread state در reconnect دو بار اعمال نمی‌شوند.
+این Stage چهار مفهوم را از هم جدا می‌کند: identity مشترک، credential/session محلی،
+intent بادوام کسب‌وکار و side effect خارجی. Writer عوض‌شده نباید session یا OTP سایت
+قبل را معتبر بداند؛ در مقابل notification و تاریخچهٔ نهایی Messenger نباید با تغییر
+سایت گم یا دوباره اعمال شوند.
+
+### شکاف وضعیت فعلی که باید بسته شود
+
+- OTP و SMS فعلی به `SERVER_MODE=iran` و Telegram relay فعلی به جهت Iran→Finland
+  گره خورده‌اند؛ این نام‌ها جای `SITE_ID/WEB_ROLE/writer_generation` را نمی‌گیرند.
+- SMS credential و fallback اکنون عمداً فقط در Iran API پذیرفته می‌شوند. هدف جدید
+  SMS Executor را روی هر دو سایت نصب، ولی execution را فقط برای Web Writer همان نسل
+  باز می‌کند؛ restriction جغرافیایی فعلی target architecture نیست.
+- login در سایت دیگر ممکن است به Session Authority مستقیم peer وابسته شود؛ partition
+  نباید برای اعتبارسنجی session محلی تماس synchronous cross-site لازم داشته باشد.
+- token/session فعلی writer generation را حمل نمی‌کند؛ پس fence به‌تنهایی reuse یک
+  credential قدیمی روی Writer جدید را به‌شکل قابل‌اثبات نمی‌بندد.
+- registry فعلی بعضی جدول‌های Messenger را local/`NO_SYNC` می‌داند و Web Push نیز
+  به Iran hard-code شده است؛ هر دو با Web standby کامل ناسازگارند.
+- unread count در Redis فقط cache است. نبودن یا stale بودن key نباید به کاربر عدد صفر
+  قطعی نشان دهد یا truth همگام‌شده را overwrite کند.
+
+### Ownership و محل اجرا
+
+| داده/عمل | قرارداد هدف |
+| --- | --- |
+| user identity، invitation و account policy لازم | shared، حداقلی و رمزگذاری‌شده طبق `P2-00` |
+| OTP code/request/attempt/rate-limit | فقط local current Writer و مقید به `writer_generation`؛ بدون sync |
+| Product session/refresh token/device state | site-local و generation-bound؛ بدون sync |
+| Operations Console session/TOTP | site-local، مستقل از Product و همان قرارداد ۲۴ساعتهٔ `P2-06` |
+| Telegram execution | فقط Finland؛ token/poll/FSM/claim/provider receipt محلی |
+| Telegram notification intent | logical intent بادوام و shared؛ execution queue/receipt فقط Finland |
+| SMS execution | capability روی هر دو سایت؛ فقط current Web Writer همان نسل مجاز به اجرا |
+| SMS command/provider receipt | local و non-replayable؛ business result لازم جدا و shared |
+| notification/audience/read/delete | canonical shared state با stable identity |
+| Web Push subscription/credential/receipt | local current Writer؛ بدون sync و best-effort |
+| Messenger chat/message/member/read/media نهایی | shared metadata و referenced durable blob |
+| WebSocket/SSE/cache/draft/upload session/chunk | site-local و قابل‌بازسازی/تکرار توسط کاربر |
+
+`TELEGRAM_OWNER=FINLAND` site-bound است، زیرا poll/update cursor، token و delivery
+execution باید دقیقاً یک مالک داشته باشند. SMS برعکس role-bound است: API درخواست/
+پاسخ مستقل دارد و هر سایت باید هنگام Writer بودن، بدون dependency به peer، پیامک را
+اجرا کند. فعال‌شدن SMS با تشخیص شبکه یا lease نیست؛ actor انسانی Web Role را تغییر
+می‌دهد و actuator فقط role/generation/fence تأییدشده را enforce می‌کند.
+
+### قرارداد OTP و SMS
+
+- Finland Writer، OTP را محلی می‌سازد و verify می‌کند. برای کاربر دارای Telegram،
+  Telegram Executor Finland مسیر اول است؛ اگر login تا ۴۰ ثانیه کامل نشد، **همان**
+  OTP از SMS Executor Finland فرستاده می‌شود. کاربر بدون Telegram از ابتدا SMS می‌گیرد.
+- Iran Writer، OTP را محلی می‌سازد/verify و فقط با SMS Executor Iran تحویل می‌دهد؛
+  وصل‌شدن دوبارهٔ لینک تا پایان failback، مسیر را به Telegram یا Finland عوض نمی‌کند.
+- TTL کد ۱۲۰ ثانیه می‌ماند. fallback یک `otp_request_id`، code و expiration مشترک با
+  ارسال اول دارد؛ raw OTP هرگز وارد DB/sync/Object Storage/log/dashboard نمی‌شود.
+- هر SMS command حداقل `sms_command_id`، purpose، `otp_request_id` در صورت وجود،
+  `origin_site`، `writer_generation`، expiry و payload digest دارد. inactive/fenced/
+  generation-mismatched executor پیش از provider call آن را رد می‌کند.
+- نتیجهٔ provider سه‌حالتهٔ `ACCEPTED/FAILED/AMBIGUOUS` است. timeout/429/پاسخ ناقص
+  به‌معنای «ارسال نشده» نیست؛ فرمان مبهم خودکار و کور تکرار یا با OTP جدید جایگزین
+  نمی‌شود. تا expiry همان کد معتبر است و UI امکان retry کنترل‌شده/درخواست بعدی دارد.
+- exactly-once برای provider خارجی ادعا نمی‌شود؛ local outbox/idempotency از claim
+  تکراری جلوگیری می‌کند و provider message ID، بدون PII/secret، evidence محلی است.
+- هنگام Writer switch، source پذیرش OTP/SMS تازه را drain و سپس fence می‌کند. کد و
+  command نسل قدیم invalid می‌شوند؛ SMS دیررس ممکن است برسد ولی روی مقصد قابل مصرف
+  نیست و UI درخواست کد تازه می‌دهد.
+- user غایب در snapshot قدیمی Iran به‌صورت حدسی ساخته نمی‌شود؛ پیام صریح «اطلاعات
+  standby هنوز این حساب را ندارد» نمایش داده می‌شود. registration فقط با invitation
+  معتبر محلی انجام و collision مطابق `P2-05` quarantine می‌شود.
+- credential سرویس پیامک root-only و بیرون Git/sync/log/backup عمومی روی هر دو سایت
+  mount می‌شود. کلید جدا برای هر سایت ترجیح دارد؛ اگر provider پشتیبانی نکرد، rotation
+  و exposure مشترک مستند می‌شود. دسترسی DNS/TLS/API و policy واقعی SMS.ir از Finland
+  و دسترسی داخلی Iran در `P2-10` gate است؛ عدم دسترسی، تصمیم provider/gateway جداست
+  و با relay پنهان یا bypass حل نمی‌شود.
+- این ownership همهٔ SMSهای محصول، ازجمله OTP، invitation و recovery را پوشش می‌دهد؛
+  OTP علاوه بر آن generation/TTL/attempt guard سخت‌گیرانهٔ بالا را دارد.
+
+### قرارداد Product Session
+
+- policy فعلی refresh session سی‌روزه و limit/device-primary حفظ می‌شود، ولی هر
+  credential حداقل به `session_id + site_id + writer_generation + user_id` bind است.
+- هر Writer switch تمام Product sessionهای نسل قبلی را نامعتبر می‌کند؛ sessionهای
+  Operations Console از آن مستقل‌اند و با Web Writer switch revoke نمی‌شوند.
+- session row قدیمی برای retention/audit باقی می‌ماند، اما refresh/access آن هرگز
+  generation جدید نمی‌سازد. login جدید در current Writer session محلی تازه می‌سازد.
+- direct remote Session Authority از مسیر partition حذف می‌شود. سایت قدیمی Web-fenced
+  است و درخواست mutation را proxy نمی‌کند؛ identity/account policy لازم از snapshot/
+  sync محلی خوانده می‌شود.
+- frontend پاسخ typed مانند `SESSION_SITE_CHANGED` را فقط یک‌بار handle، token محلی
+  را پاک و صفحهٔ login با توضیح تغییر سرور نشان می‌دهد؛ generic loop، silent refresh
+  یا نمایش «رمز اشتباه» ممنوع است.
+
+### قرارداد Notification
+
+- notification از `notification_public_id` و `dedupe_key` سراسری استفاده می‌کند؛
+  integer ID محلی identity sync/UI نیست. create/audience مشترک، read monotonic و
+  delete یک terminal tombstone است که replay قدیمی آن را زنده نمی‌کند.
+- `mark all read` یک Boolean یا timestamp حدسی نیست؛ per-source vector watermark ثبت
+  می‌کند تا notification دیررس قبل watermark خوانده و notification واقعاً جدید unread
+  بماند. preferences با conflict rule محدودکنندهٔ `P2-05` merge می‌شوند.
+- DB/read model محلی truth unread است و Redis فقط cache. missing/stale cache موجب DB
+  recompute می‌شود؛ sync apply و read/delete cache را idempotently invalidate/rebuild
+  می‌کنند.
+- SSE/WebSocket فقط از current Writer و state محلی publish می‌شود؛ reconnect با
+  cursor/public ID gap را از API پر می‌کند و event transient source of truth نیست.
+- notification ساخته‌شده در Iran که Telegram intent دارد پس از sync فقط در Finland
+  execute می‌شود. freshness class الزامی است:
+  - `CRITICAL`: یک‌بار با زمان اصلی، حتی با تأخیر، ارسال شود؛
+  - `ACTIONABLE`: فقط اگر action هنوز معتبر است؛
+  - `EPHEMERAL`: پس از deadline ارسال نشود؛
+  - `SUPERSEDED`: اگر intent جدیدتر آن را بی‌اثر کرده، ارسال نشود.
+- Web Push از Web Writer پیروی می‌کند. subscription، VAPID/provider credential و
+  receipt محلی‌اند؛ پس از Writer switch مرورگر re-register می‌کند. Push در قطعی
+  best-effort است و in-app notification/realtime مسیر اصلی و قابل‌بازیابی است.
+
+### قرارداد Messenger
+
+- chat، membership، message create/edit/delete/reply/forward، reaction، mention،
+  read cursor، pin/hide/mute، file metadata و referenced media blob دوطرفه sync می‌شوند.
+- connection، WebSocket/SSE state، Redis cache، device state، browser draft، upload
+  session و chunk ناقص محلی می‌مانند؛ آن‌ها نباید `FULL_SYNC` را state business جلوه دهند.
+- هر پیام `message_public_id` یا client-generated message ID پایدار دارد. ID/payload
+  یکسان no-op؛ ID یکسان با payload متفاوت conflict/quarantine است. integer local ID
+  برای reply/read/dedupe/sync ممنوع است.
+- create immutable است؛ edit revision افزایشی، delete tombstone terminal، reaction
+  با actor/type dedupe و read cursor monotonic است. last-message و unread derived read
+  model هستند و با LWW خام sync نمی‌شوند.
+- media ابتدا روی storage بادوام local commit می‌شود. metadata ممکن است زودتر از blob
+  به peer برسد و UI `MEDIA_PENDING` قابل‌retry نشان دهد؛ تا verify شدن content ID/hash/
+  size/reference، `FULL_SYNC` برقرار نیست.
+- اگر Writer وسط upload عوض شود، upload ناقص منتقل نمی‌شود و client پاسخ typed
+  `UPLOAD_SITE_CHANGED` می‌گیرد. کاربر upload را تکرار می‌کند؛ اگر message commit قبلاً
+  انجام شده باشد، client message ID از ساخت پیام دوم جلوگیری می‌کند.
+
+### سناریوهای تأییدشده
+
+| وضعیت و رخداد | رفتار الزامی | مانع ایمنی و evidence |
+| --- | --- | --- |
+| Finland Writer؛ کاربر Telegram-linked وارد می‌شود | OTP محلی با Telegram اول و همان کد پس از ۴۰s از SMS Finland fallback می‌شود | یک request/code/expiry؛ Telegram فقط Finland و SMS فقط Writer همان generation |
+| Finland Writer؛ کاربر Telegram ندارد | SMS Executor Finland بی‌نیاز از Iran فرمان محلی را اجرا می‌کند | credential/provider readiness Finland لازم؛ relay cross-site مسیر عادی نیست |
+| Iran Writer در partition | login/registration مجاز فقط با snapshot/invitation موجود و SMS Iran است | Telegram/token/remote session call در Iran ممنوع؛ حساب غایب حدس زده نمی‌شود |
+| پاسخ SMS timeout یا مبهم است | همان OTP تا expiry معتبر و status `AMBIGUOUS` است؛ UI وضعیت غیرقطعی می‌دهد | ارسال کور/کد تازه/ادعای success ممنوع؛ local command/receipt audit می‌ماند |
+| Writer هنگام OTP یا session عوض می‌شود | generation قدیم invalid و کاربر `SESSION_SITE_CHANGED`/درخواست OTP تازه می‌گیرد | delayed SMS یا stale refresh در مقصد پذیرفته نمی‌شود؛ Ops session باقی است |
+| internet برمی‌گردد ولی Iran هنوز Writer است | SMS، session، realtime و Push Iran ادامه دارند؛ sync catch-up می‌کند | reconnect خودکار executor/role را جابه‌جا نمی‌کند؛ Telegram executor Finland ثابت است |
+| notification در Iran partition ساخته می‌شود | in-app فوراً حاضر و shared intent بعداً sync می‌شود؛ Telegram طبق freshness اجرا/expire می‌شود | provider execution replay نمی‌شود؛ public ID/dedupe و action validity لازم است |
+| user روی یک سایت notification را read/delete می‌کند | read monotonic یا tombstone در peer اعمال و unread از DB بازسازی می‌شود | event قدیمی state را unread/undeleted نمی‌کند؛ Redis truth نیست |
+| پیام در Iran partition ساخته/ویرایش/حذف می‌شود | history محلی ادامه و reconnect با revision/public ID merge می‌شود | collision یا revision نامعتبر quarantine و `FULL_SYNC` block؛ LWW ممنوع |
+| metadata پیام پیش از media می‌رسد | peer متن/placeholder و `MEDIA_PENDING` نشان می‌دهد و blob را repair می‌کند | دانلود شکسته یا FULL_SYNC کاذب ممنوع؛ hash/size/reference باید verify شود |
+| switch وسط upload رخ می‌دهد | upload قبلی متوقف و روی Writer جدید از نو آغاز می‌شود | chunk/temp sync نمی‌شود؛ client message ID duplicate message را می‌بندد |
+| Redis/cache/realtime از دست می‌رود | session generation از store معتبر و notification/Messenger read model از DB بازسازی می‌شود | cache miss عدد صفر یا authority تازه تولید نمی‌کند |
+
+### Task Card فنی Cursor
+
+1. تمام OTP purposeها، registration/login/recovery pathها، Product/Ops sessionها،
+   SMS/Telegram/Push producer/executorها، notification producerها و Messenger table/
+   Redis/file/object pathها را inventory و به `P2-00` machine registry وصل کند.
+2. OTP orchestrator را از Telegram/SMS channel executor جدا کند؛ code store محلی،
+   request ID/TTL/attempt/generation contract و typed outcomes را یکسان کند.
+3. Telegram Executor را Finland-only نگه دارد؛ SMS Executor را روی هر دو سایت با
+   `WEB_ROLE + writer_generation + fence` guard بسازد و Iran-only validation فعلی را
+   فقط پس از fixture/test و config migration نسخه‌دار جایگزین کند.
+4. Finland Telegram-first/۴۰s same-code fallback، Finland SMS-direct و Iran SMS-only
+   را با provider fake، timeout/429/lost response/crash-after-call و late delivery تست کند.
+5. session schema/token claims را site/generation-bound و remote Session Authority را
+   از partition path حذف کند؛ invalidation همهٔ Product sessionها و استقلال Console را
+   در `FI→IR→FI` ثابت کند.
+6. frontend error contractهای `SESSION_SITE_CHANGED`، standby-user-missing و OTP
+   ambiguous/expired را بدون retry loop یا اطلاعات گمراه‌کننده پیاده و browser-test کند.
+7. notification public ID/dedupe، monotonic read، delete tombstone و vector `mark all`
+   را با event/replay/gap contract `P2-01` پیاده و Redis را cache قابل‌بازسازی کند.
+8. Telegram intent را از local execution queue/receipt جدا و freshness/supersession
+   validator را پیش از enqueue Finland enforce کند؛ duplicate side effect fault-test شود.
+9. Web Push را Writer-aware کند، subscription/VAPID/receipt را local نگه دارد و
+   re-registration پس از Writer switch و نبود Push در outage را با in-app recovery تست کند.
+10. Messenger registry فعلی را از `NO_SYNC` به eventهای shared نسخه‌دار برای metadata/
+    read/media تبدیل و stable ID، revisions، tombstone، reactions، cursor و derived read
+    models را با concurrent/offline property tests پوشش دهد.
+11. media manifest/blob repair و `MEDIA_PENDING/FULL_SYNC` را به `P2-02/P2-03` متصل،
+    switch-mid-upload، committed-before-lost-response و orphan/missing/corrupt blob را تست کند.
+12. matrix اتصال/partition/reconnect، role mismatch، stale generation، دو Executor،
+    provider ambiguity، cache loss، delayed notification و Messenger conflict را در
+    `P2-10` اجرا و dashboard metric/alert/action را برای هر failure ثبت کند.
+
+Gate خروج: هر OTP فقط در Writer/generation خودش قابل مصرف است؛ Telegram فقط Finland
+و SMS فقط current Writer اجرا می‌شوند؛ switch همهٔ Product sessionهای قدیم را می‌بندد
+ولی Console را نه؛ notification/read/delete و Messenger history/media بدون duplicate
+یا LWW همگام‌اند؛ Push/cache/realtime از دست‌رفتنی‌اند و truth نیستند؛ تمام provider،
+partition، reconnect، media و session faultها evidence سبز دارند.
+
+Gate طراحی در 2026-09-02 تأیید شد: Telegram Executor فقط Finland، SMS Executor روی
+هر دو سایت ولی role-bound به current Web Writer، Finland Telegram-first با fallback
+همان OTP پس از ۴۰ ثانیه، Iran SMS-only، invalidation همهٔ Product sessionها در هر
+Writer switch، چهار freshness class Telegram، sync کامل metadata/media نهایی Messenger،
+state موقت محلی و Web Push Writer-aware/best-effort پذیرفته شدند. این تأیید مجوز
+schema/code/config/credential change، provider probe/send، data sync، deploy، role/DNS
+mutation یا هیچ اقدام production نیست.
 
 ## `P2-10` — staging و fault matrix
 
