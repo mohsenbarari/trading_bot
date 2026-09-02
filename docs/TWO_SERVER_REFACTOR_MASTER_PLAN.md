@@ -220,6 +220,11 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
   lease/browser/provider delivery/Telegram runtime محلی‌اند. PII فقط حداقلی و
   رمزگذاری‌شده منتقل و mixed writer در سطح row/field/command authority می‌گیرد؛
   `UNKNOWN` و LWW مالی ممنوع‌اند.
+- `D-15`: sync از streamهای محدود domain-based، sequence پیوسته و aggregate version
+  استفاده می‌کند؛ timestamp ترتیب نیست. ACK فقط پس از commit state/inbox/local
+  intent است؛ rejection checkpoint را جلو نمی‌برد. gap بیش از ۳۰ ثانیه readiness
+  همان stream/dependentها را می‌بندد و repair فقط immutable original یا bootstrap
+  مصوب است.
 
 ### نیازمند تأیید در بازبینی این پلن
 
@@ -1402,26 +1407,87 @@ object transfer، credential access یا فعال‌سازی sync نیست.
 
 ## `P2-01` — قرارداد event و stream
 
-وضعیت: `PROPOSED`
+وضعیت: `PROPOSED — قرارداد سناریویی event/stream در 2026-09-02 تأیید شد؛ اجرا مسدود است`
 
 پاکت حداقل شامل این موارد است:
 
 ```text
 contract_version, event_id, stream_id, source_site, source_sequence,
 authority_class, authority_generation, aggregate_type, aggregate_public_id, operation,
+aggregate_version, idempotency_key, causation_id, correlation_id, dependencies,
 occurred_at_utc, available_at_utc, persisted_at_utc,
 payload_hash, previous_hash, schema_version, payload
 ```
+
+Stream Registry اولیه `product`, `messenger`, `media`, `notification`,
+`market-facts:{source}`, `market-models` و `ops-control` است. این فهرست از
+Data Ownership Matrix نهایی تولید و نسخه‌گذاری می‌شود: یک stream جهانی که خرابی
+Market را به Product سرایت دهد و stream جدا برای هر جدول که dependency graph را
+بی‌دلیل پیچیده کند هر دو ممنوع‌اند.
+
+### سناریوهای تأییدشده
+
+| وضعیت اولیه و رخداد | رفتار مورد انتظار و مانع ایمنی |
+| --- | --- |
+| mutation business commit یا rollback می‌شود | business row و outbox event در یک transaction‌اند؛ commit هر دو و rollback هیچ‌کدام را می‌سازد و publish مستقیم پیش از commit ممنوع است. |
+| sender پس از commit و پیش از publish crash می‌کند | همان outbox/event immutable بعد از restart ارسال می‌شود؛ event تازه با identity دیگر ساخته نمی‌شود. |
+| receiver پس از apply commit و پیش از ACK crash می‌کند | replay با inbox receipt no-op است؛ business row و local side effect دوباره ساخته نمی‌شوند. |
+| ACK صادر می‌شود | فقط پس از commit اتمیک state، inbox، aggregate version و local side-effect intent است و receiver/stream/highest contiguous sequence/event hash را حمل می‌کند؛ اجرای provider شرط ACK نیست. |
+| sequence 102 پیش از 101 می‌رسد | 102 نگه داشته ولی apply/checkpoint نمی‌شود، repair 101 درخواست می‌شود و gap سالم بیش از ۳۰ ثانیه `SYNC_READY=false` می‌کند؛ فقط همان stream/dependentها block می‌شوند. |
+| duplicate یا collision می‌رسد | identity/sequence/hash برابر no-op؛ event ID یا sequence/version برابر با hash متفاوت conflict/tamper و quarantine است. |
+| aggregate version قدیمی می‌رسد | state عقب نمی‌رود و timestamp جدیدتر overwrite نمی‌کند؛ history/dependency بررسی می‌شود و LWW ممنوع است. |
+| event dependency میان streamها دارد | تا dependency exact حاضر و applied نباشد `WAITING_DEPENDENCY` می‌ماند؛ Messenger/Market readiness کامل و side effect تکراری ساخته نمی‌شود. |
+| event معتبر موجب oversell/negative balance/settlement می‌شود | state تغییر نمی‌کند، event quarantine و product stream/FULL_SYNC block می‌شود تا repair یا تصمیم انسانی audited. |
+| schema ناشناخته به receiver قدیمی می‌رسد | receiver-first rollout لازم است؛ payload drop/partial apply ممنوع، event immutable/quarantined و upcaster فقط نسخه‌دار و تست‌شده است. |
+| event رد می‌شود | `REJECTED_RECEIPT` علت را ثبت می‌کند ولی success ACK نیست و checkpoint را جلو نمی‌برد؛ blind retry بی‌نهایت نیز انجام نمی‌شود. |
+| repair لازم است | range دقیق و اصل byteهای immutable بازنشر می‌شود؛ بازسازی با همان sequence ممنوع و loss واقعی فقط با snapshot/bootstrap و gate انسانی حل می‌شود. |
 
 قواعد:
 
 - source sequence مستقل و افزایشی برای هر stream است؛ integer PK جدول نیست.
 - outbox در همان transaction کسب‌وکار نوشته می‌شود.
 - receiver فقط contiguous sequence را apply می‌کند.
-- ACK فقط بعد از commit و شامل hash همان event است.
+- ACK فقط بعد از commit اتمیک business state، inbox receipt و local side-effect
+  intent و شامل receiver، stream، highest contiguous sequence و hash همان event است.
 - duplicate با همان hash idempotent؛ sequence برابر با hash متفاوت conflict است.
-- gap بعدی را متوقف می‌کند و repair request می‌سازد.
-- event ردشده برای audit سینک/نگهداری می‌شود، اما state کسب‌وکار را تغییر نمی‌دهد.
+- gap بعدی را در همان stream و dependentهایش متوقف و repair request می‌سازد؛ age
+  بیش از ۳۰ ثانیه در اتصال سالم readiness را می‌بندد.
+- event ردشده با `REJECTED_RECEIPT` برای audit نگهداری می‌شود، state کسب‌وکار و
+  checkpoint را تغییر نمی‌دهد و ACK موفق محسوب نمی‌شود.
+- ordering فقط با source sequence، aggregate version و dependency است؛ timestamp
+  فقط audit evidence است.
+- schema، authority، hash یا invariant نامعتبر fail closed و quarantine می‌شود.
+
+### Task Card فنی Cursor
+
+1. JSON Schema نسخه‌دار event، ACK، rejection و repair request و canonical
+   serialization یکسان دو سایت را تعریف کند؛ schema/hash fixture cross-language
+   یا cross-runtime باید byte-identical باشد.
+2. Stream Registry و dependency graph ماشین‌خوان را از `P2-00` بسازد و هر event
+   type را به stream، authority، aggregate version rule و side-effect policy متصل کند.
+3. sender transaction، immutable outbox، publisher retry و receiver transaction
+   شامل inbox/apply/local intent را با crash-pointهای قبل/بعد commit تست کند.
+4. unique constraintهای `event_id` و `(source_site, stream_id, source_sequence)`،
+   contiguous checkpoint، aggregate CAS و previous-hash continuity را enforce کند.
+5. stateهای pending-gap، waiting-dependency، applied، rejected و quarantined را
+   بدون پاک‌کردن evidence و با repair idempotent پیاده‌سازی و مشاهده‌پذیر کند.
+6. receiver-first schema compatibility و upcaster نسخه‌دار را تست کند؛ unknown
+   major/schema و field مؤثر ناشناخته نباید silently ignored شود.
+7. fault matrix شامل crash، lost ACK، duplicate، out-of-order، gap، hash/version/
+   authority conflict، invalid invariant و schema mismatch را اجرا کند و ثابت کند
+   replay هیچ Telegram/Push/notification/media side effect تکراری نمی‌سازد.
+8. metricهای published/applied/ACKed sequence، lag، gap age، dependency wait،
+   rejection/quarantine و repair را برای Dashboard صادر کند.
+
+Gate خروج: contract fixture و تمام fault tests سبز، business apply دقیقاً یک‌بار،
+gap/collision/invariant بدون عبور checkpoint، و هیچ diff ناشناخته میان دو runtime
+باقی نماند.
+
+Gate طراحی در 2026-09-02 تأیید شد: streamهای domain-based، sequence/aggregate
+ordering، transactionهای sender/receiver، ACK پس از commit، gap سی‌ثانیه‌ای محدود
+به stream/dependent، rejection غیرموفق، schema receiver-first، quarantine و repair
+immutable پذیرفته شدند. این تأیید مجوز schema/outbox/inbox write، event publication،
+Object Storage access یا فعال‌سازی sync نیست.
 
 ## `P2-02` — Object Storage transport
 

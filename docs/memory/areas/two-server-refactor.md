@@ -1,14 +1,10 @@
 # Two-Server Refactor
 
-- 2026-09-02 | Owner approved `P1-02..05`: typed capabilities separate origin
-  and human Writer; Finland uses two Web replicas, singleton jobs, split Bot and
-  separate app/Market DBs. Shared app DB removes local sync via ordered outbox/
-  inbox. Merge uses table/row authority, preserves valid sessions, maps IDs/media,
-  quarantines ambiguity/financial conflicts and must repeat within 4m/90m limits.
-  `P1-06` also requires isolated differential staging, 465/465 mapping, six closed
-  evidence gaps, Web/Bot/browser/failure matrices, relative performance guards,
-  a 24h soak and restore/rollback proof. Legacy waits for `P1-08`; no operation is
-  authorized and these budgets are not later deploy SLOs.
+- 2026-09-02 | Owner approved `P1-02..06`: Finland uses two Web replicas, singleton
+  jobs, split Bot and separate app/Market DBs. Shared app DB removes local sync;
+  deterministic merge preserves sessions/IDs/media and blocks ambiguous/financial
+  conflicts. Differential staging needs 465/465 mapping, six closed gaps, failure/
+  browser/load proof, 24h soak and restore/rollback; no operation is authorized.
 - 2026-09-02 | Owner approved `P1-00`: twelve behavior families, Web/Bot and
   provenance contracts, six mandatory evidence gaps and runtime-ownership seed.
   Unknown parity still blocks implementation.
@@ -23,15 +19,14 @@
 - 2026-09-02 | Owner approved `P2-00`: durable Messenger/read/media and logical
   notification/read sync; sessions, OTP, upload/browser/provider and Telegram
   runtime stay local. Minimal encrypted PII and row/field/command authority are
-  mandatory; every SQL/Redis/file/object item must be registered with zero unknowns.
-- 2026-09-01 | Offer origin is immutable and separate from `home_site`; Trade
-  snapshots Offer/Request origin, execution surface, policy version and sensitive
-  actor/role/tier context.
+  mandatory; Offer/Request origins and Trade context remain immutable and every
+  SQL/Redis/file/object item must be registered with zero unknowns.
+- 2026-09-02 | Owner approved `P2-01`: domain streams use contiguous sequence and
+  aggregate version, never timestamps/LWW. ACK follows atomic apply; rejection does
+  not advance checkpoints. A 30s healthy gap blocks only that stream/dependencies;
+  events are immutable and repair replays originals or uses an approved bootstrap.
 - 2026-09-01 | No provisioning, deploy, migration, cleanup, DNS or cutover occurs
   before full-plan approval; production Stages still need explicit authorization.
-- 2026-09-01 | Initial Finland cutover reserves 90m with at most 4m interruption,
-  24h soak, steady CPU <=60% and RAM/disk/pool <=70%; observe 2h, fence sources 7d
-  and retain the approved backup 30d. These are not later deploy SLOs.
 - 2026-09-01 | Web Writer handover is human-only without lease or auto failover:
   fence/drain source, transfer signed receipt, verify Arvan DNS and sync gates,
   then explicitly activate destination. Bot remains independent.
