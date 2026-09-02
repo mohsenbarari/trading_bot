@@ -98,6 +98,8 @@ def initialize_export_ledger(connection: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS market_fact_export_history_event_idx
         ON market_fact_export_history(event_key,fact_revision);
+        CREATE INDEX IF NOT EXISTS idx_market_observations_export_available
+        ON market_observations(available_at_utc DESC,id DESC);
         CREATE TABLE IF NOT EXISTS market_xau_model_input_buckets (
             bucket_number INTEGER PRIMARY KEY,
             selected_event_key BLOB NOT NULL UNIQUE,
@@ -301,48 +303,81 @@ def _pending_export_rows(
             keys,
         ).fetchall()
     _refresh_xau_model_input_buckets(market, max_rows=max_rows)
-    return market.execute(
-        f"""
-        WITH candidates AS (
-            SELECT o.* FROM market_observations o WHERE o.source_code<>'XAUUSD'
-            UNION ALL
-            SELECT o.*
+    eligible = f"""
+        (o.source_code<>'XAUUSD' OR EXISTS (
+            SELECT 1
             FROM market_xau_model_input_buckets b
-            JOIN market_observations o ON o.event_key=b.selected_event_key
-            WHERE CAST(strftime('%s','now') AS INTEGER) >=
+            WHERE b.selected_event_key=o.event_key
+              AND CAST(strftime('%s','now') AS INTEGER) >=
                   (b.bucket_number + 1) * {XAU_MODEL_INPUT_BUCKET_SECONDS}
                   + {XAU_MODEL_INPUT_EXPORT_SETTLE_SECONDS}
+        ))
+    """
+    pending = """
+        (l.event_key IS NULL
+         OR l.observation_inserted_at_utc<>o.inserted_at_utc
+         OR (
+              l.status='SUCCESS'
+              AND (
+                  s.event_key IS NULL
+                  OR s.observation_inserted_at_utc<>o.inserted_at_utc
+              )
+            )
+         OR (
+              l.status='REJECTED'
+              AND instr(COALESCE(l.reason_code,''),'fact_payload_hash_mismatch')>0
+            )
         )
-        SELECT o.*
-        FROM candidates o
-        LEFT JOIN market_fact_export_ledger l ON l.event_key=o.event_key
-        LEFT JOIN market_fact_export_semantics s ON s.event_key=o.event_key
-        WHERE (l.event_key IS NULL
-           OR l.observation_inserted_at_utc<>o.inserted_at_utc
-           OR (
-                l.status='SUCCESS'
-                AND (
-                    s.event_key IS NULL
-                    OR s.observation_inserted_at_utc<>o.inserted_at_utc
-                )
-              )
-           OR (
-                l.status='REJECTED'
-                AND instr(COALESCE(l.reason_code,''),'fact_payload_hash_mismatch')>0
-              )
-          )
-        ORDER BY CASE
-                   WHEN o.available_at_utc >=
-                        strftime('%Y-%m-%dT%H:%M:%SZ','now','-10 minutes')
-                   THEN 0 ELSE 1
-                 END,
-                 o.event_time_utc,
-                 CASE o.event_type WHEN 'OFFER' THEN 0 WHEN 'TRADE' THEN 1 ELSE 2 END,
-                 o.event_key
-        LIMIT ?
-        """,
-        (max_rows,),
-    ).fetchall()
+    """
+
+    def select(extra_where: str, parameters: tuple[object, ...], limit: int):
+        return market.execute(
+            f"""
+            SELECT o.*
+            FROM market_observations o
+            LEFT JOIN market_fact_export_ledger l ON l.event_key=o.event_key
+            LEFT JOIN market_fact_export_semantics s ON s.event_key=o.event_key
+            WHERE {eligible} AND {pending} {extra_where}
+            LIMIT ?
+            """,
+            (*parameters, limit),
+        ).fetchall()
+
+    # Never let a historical re-projection queue hide events that just arrived.
+    # The recency index makes this a bounded lookup instead of sorting the full
+    # multi-million-row candidate set on every live cycle.
+    rows = select(
+        "AND o.available_at_utc >= "
+        "strftime('%Y-%m-%dT%H:%M:%SZ','now','-10 minutes') "
+        "ORDER BY o.available_at_utc DESC,o.id DESC",
+        (),
+        max_rows,
+    )
+    remaining = max_rows - len(rows)
+    if remaining:
+        selected = tuple(bytes(row["event_key"]) for row in rows)
+        exclusion = ""
+        if selected:
+            exclusion = (
+                "AND o.event_key NOT IN ("
+                + ",".join("?" for _ in selected)
+                + ") "
+            )
+        rows.extend(
+            select(
+                exclusion + "ORDER BY o.id",
+                selected,
+                remaining,
+            )
+        )
+    rows.sort(
+        key=lambda row: (
+            str(row["event_time_utc"]),
+            {"OFFER": 0, "TRADE": 1}.get(str(row["event_type"]), 2),
+            bytes(row["event_key"]),
+        )
+    )
+    return rows
 
 
 def _quality(value: str) -> str:
