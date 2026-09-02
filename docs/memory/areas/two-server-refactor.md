@@ -16,15 +16,12 @@
   7d quarantine; old edge needs 48h zero valid traffic then 24h monitoring. Old
   Bot/Web hosts retire sequentially 24h apart; the 30d migration backup needs a
   restore-tested replacement. Every deletion and WA-IR branch removal stays gated.
-- 2026-09-02 | Owner approved `P2-00`: durable Messenger/read/media and logical
-  notification/read sync; sessions, OTP, upload/browser/provider and Telegram
-  runtime stay local. Minimal encrypted PII and row/field/command authority are
-  mandatory; Offer/Request origins and Trade context remain immutable and every
-  SQL/Redis/file/object item must be registered with zero unknowns.
-- 2026-09-02 | Owner approved `P2-01`: domain streams use contiguous sequence and
-  aggregate version, never timestamps/LWW. ACK follows atomic apply; rejection does
-  not advance checkpoints. A 30s healthy gap blocks only that stream/dependencies;
-  events are immutable and repair replays originals or uses an approved bootstrap.
+- 2026-09-02 | Owner approved `P2-00..02`: all SQL/Redis/file/object state has typed
+  ownership with durable Messenger/notification sync, local ephemeral/provider/
+  Telegram state and minimal encrypted PII. Domain streams use sequence/version,
+  atomic ACK, blocking rejection/gap and immutable repair. Iran Object Storage has
+  split buckets/credentials, client encryption/site signing, immutable objects,
+  14d+30% spool, opaque media IDs and 7d/24h/30d transport retention.
 - 2026-09-01 | No provisioning, deploy, migration, cleanup, DNS or cutover occurs
   before full-plan approval; production Stages still need explicit authorization.
 - 2026-09-01 | Web Writer handover is human-only without lease or auto failover:

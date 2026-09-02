@@ -225,6 +225,11 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
   intent است؛ rejection checkpoint را جلو نمی‌برد. gap بیش از ۳۰ ثانیه readiness
   همان stream/dependentها را می‌بندد و repair فقط immutable original یا bootstrap
   مصوب است.
+- `D-16`: Object Storage ایران transport است، نه truth/Writer/backup. Control، media،
+  model، release و backup bucket/credential جدا دارند؛ payload client-side و
+  directional AEAD و با signing key مستقل هر سایت محافظت می‌شود. object immutable،
+  head فقط hint، local spool برابر ۱۴ روز peak +۳۰٪ و cleanup فقط با credential و
+  approval مستقل است.
 
 ### نیازمند تأیید در بازبینی این پلن
 
@@ -1491,37 +1496,99 @@ Object Storage access یا فعال‌سازی sync نیست.
 
 ## `P2-02` — Object Storage transport
 
-وضعیت: `PROPOSED`
+وضعیت: `PROPOSED — قرارداد سناریویی Object Storage در 2026-09-02 تأیید شد؛ اجرا مسدود است`
+
+Object Storage ایران فقط mailbox/transport بادوام است؛ source of truth کسب‌وکار،
+Writer authority، lock/lease یا backup محسوب نمی‌شود. `sync-control`, `sync-media`,
+`sync-models`, `release-archive` و `backup` bucket و credential جدا دارند و staging
+نیز از production کاملاً جداست.
 
 namespace پیشنهادی:
 
 ```text
-v1/events/{source_site}/{stream_id}/{sequence}
-v1/acks/{source_site}/{stream_id}/{sequence}/{receiver_site}
-v1/heads/{source_site}/{stream_id}
-v1/snapshots/{site}/{snapshot_id}/...
-v1/checksums/{site}/{cutoff}/...
-v1/media/{content_digest}
-v1/models/{model_name}/{version}/...
-v1/releases/{release_digest}/...
+{environment}/v1/events/{source_site}/{stream_id}/{sequence}
+{environment}/v1/acks/{source_site}/{stream_id}/{sequence}/{receiver_site}
+{environment}/v1/rejections/{source_site}/{stream_id}/{sequence}/{receiver_site}
+{environment}/v1/repairs/{receiver_site}/{stream_id}/{request_id}
+{environment}/v1/heads/{source_site}/{stream_id}
+{environment}/v1/snapshots/{site}/{snapshot_id}/...
+{environment}/v1/checksums/{site}/{cutoff}/...
+{environment}/v1/media/{opaque_content_id}
+{environment}/v1/models/{model_name}/{version}/...
+{environment}/v1/releases/{release_digest}/...
 ```
+
+object key هیچ PII، mobile، user identity، message text، commodity label یا secret
+ندارد. media از keyed/opaque content ID برای dedupe bytes استفاده می‌کند ولی
+logical owner/referenceهای متفاوت را یکی نمی‌کند.
+
+### سناریوهای تأییدشده
+
+| وضعیت اولیه و رخداد | رفتار مورد انتظار و مانع ایمنی |
+| --- | --- |
+| event عادی منتشر و ACK می‌شود | outbox محلی truth است؛ encrypted/signed object با create-only write منتشر، receiver verify/apply و ACK پس از commit می‌کند؛ object نهایی overwrite نمی‌شود. |
+| bucket قطع یا cross-country path unavailable است | محصول محلی ادامه و event در spool/outbox بادوام می‌ماند؛ retry bounded/backoff و dashboard backlog/oldest age را نشان می‌دهد؛ نقش Writer خودکار عوض نمی‌شود. |
+| partition طولانی می‌شود | هر سایت مستقل جمع می‌کند و از آخرین contiguous ACK resume می‌شود؛ counter/evidence reset ممنوع و spool حداقل ۱۴ روز peak +۳۰٪ headroom دارد. |
+| multipart وسط upload قطع می‌شود | partial هرگز visible-final نیست، resume/restart امن و incomplete upload پس از ۲۴ ساعت lifecycle می‌شود؛ receiver فقط manifest/size/digest کامل را می‌پذیرد. |
+| دو uploader همان immutable key را می‌نویسند | conditional create فقط یکی را می‌پذیرد و object موجود فقط با identity/manifest برابر idempotent است؛ محتوای متفاوت conflict امنیتی است. |
+| provider CAS/conditional consistency کافی ندارد | correctness به mutable head وابسته نمی‌شود؛ unique immutable key، sequence scan و ledger محلی fallback است و capability probe implementation را تعیین می‌کند. |
+| head/list کهنه یا جلوتر است | checkpoint عقب/جلو نمی‌رود و gap skip نمی‌شود؛ `FULL_SYNC` فقط از sequence/ACK/hash/business checksum می‌آید. |
+| object خراب/دستکاری‌شده است | environment/source/key/signature/AEAD/hash/schema پیش از apply verify و failure quarantine می‌شود؛ stream و readiness block و plaintext پردازش نمی‌شود. |
+| encryption/signing key rotate می‌شود | receiver اول dual-read، sender بعد new-write و old key فقط پس از صفرشدن backlog/retention retire می‌شود؛ re-encrypt history و downtime لازم نیست. |
+| media bytes تکراری است | opaque keyed ID storage dedupe می‌کند ولی owner/reference ledger جدا می‌ماند؛ حذف یک reference blob موردنیاز دیگری را حذف نمی‌کند. |
+| retention سررسید می‌شود | unacked حذف نمی‌شود؛ applied event فقط ۷ روز پس از contiguous ACK و verified snapshot، partial پس از ۲۴h و rejection/quarantine پس از ۳۰d مگر incident حذف‌پذیر است؛ audit identity/hash می‌ماند. |
+| application credential compromise می‌شود | publisher فقط prefix خود، receiver فقط read و ACK خودش، app بدون delete/lifecycle و cleanup/backup با credential جداست؛ rotation evidence را پاک نمی‌کند. |
+| backlog بزرگ reconnect می‌شود | product/ops پیش از media/market خدمت می‌گیرند ولی داخل هر stream ترتیب حفظ و rate limit از DB/disk/network محافظت می‌کند؛ Writer gate تا streamهای الزامی بسته است. |
 
 کار:
 
 - قابلیت واقعی conditional write/ETag/CAS، multipart، lifecycle و consistency
   سرویس‌دهنده آزمایش شود؛ S3-compatible بودن به‌تنهایی اثبات نیست.
-- envelope و blob قبل از upload با AEAD رمز و integrity-bound شوند.
-- key rotation و dual-read window تعریف شود.
+- envelope و blob قبل از upload با AEAD جهت‌دار رمز و با signing key مستقل سایت
+  امضا شوند؛ private/encryption key فقط secret mount محلی است.
+- key rotation به‌ترتیب receiver dual-read، sender new-write و retirement پس از
+  صفرشدن backlog/retention باشد.
 - head فقط hint است؛ correctness از sequence scan و ledger می‌آید.
 - event/ACK تأییدنشده خودکار پاک نشود؛ ACKed data طبق retention و checkpoint
   پاک شود.
-- media با content digest و reference ledger deduplicate شود.
+- media با keyed opaque content ID و reference ledger deduplicate شود.
+
+### Task Card فنی Cursor
+
+1. capability probe غیرتولیدی Arvan را برای conditional create، ETag/CAS، list/
+   consistency، range، multipart، versioning و lifecycle اجرا و fallback هر قابلیت
+   را پیش از implementation ثبت کند.
+2. bucket/prefix/IAM matrix ماشین‌خوان بسازد: publisher فقط source prefix، receiver
+   read + ACK خودش، application بدون delete/lifecycle، cleanup و backup جدا.
+3. canonical encrypted envelope، directional AEAD، per-site signature، key ID، nonce
+   policy و rotation state را نسخه‌گذاری و با fixture دوطرفه test کند.
+4. uploader/downloader/spool را resumable، idempotent، disk-bounded و مستقل از head
+   بسازد؛ capacity را از ۱۴ روز peak واقعی +۳۰٪ محاسبه و disk guard/backpressure
+   را failure-inject کند.
+5. multipart visibility، immutable collision، corruption/missing/out-of-order،
+   stale list/head، credential rotation و reconnect backlog را در integration test
+   پوشش دهد.
+6. lifecycle را ابتدا dry-run و سپس فقط روی fixture غیرتولیدی اثبات کند؛ event
+   applied=۷d پس از ACK+snapshot، partial=۲۴h، rejection/quarantine=۳۰d مگر incident،
+   و media/model/release/backup طبق registry مستقل باشد.
+7. bucket inspection ثابت کند plaintext PII/secret/payload و raw content digest در
+   key/metadata دیده نمی‌شود؛ backup credential و namespace با sync مشترک نیست.
+8. metricهای request/byte/cost، backlog/oldest age، upload/ACK latency، gap، partial,
+   quarantine و key version را برای Dashboard صادر کند.
 
 Gate خروج:
 
 - corruption، missing object، duplicate، out-of-order، partial multipart و credential
   rotation در integration test پوشش داشته باشند.
 - هیچ plaintext PII/secret در bucket inspection دیده نشود.
+- capability و IAM probe واقعی، lifecycle dry-run، ۱۴روز capacity proof و اثبات
+  اینکه storage نه Writer authority و نه backup است ثبت شوند.
+
+Gate طراحی در 2026-09-02 تأیید شد: جداسازی bucket/credential، client-side
+directional AEAD و per-site signing، object immutable و head اختیاری، spool ۱۴ روز
+peak +۳۰٪، opaque media ID، retentionهای 7d/24h/30d، app بدون delete و capability
+probe واقعی Arvan پذیرفته شدند. این تأیید مجوز خواندن credential، ساخت bucket/key،
+upload/download، lifecycle mutation یا هر تماس Object Storage نیست.
 
 ## `P2-03` — bootstrap، snapshot و parity
 
