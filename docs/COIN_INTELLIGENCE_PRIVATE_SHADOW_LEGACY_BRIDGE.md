@@ -81,6 +81,17 @@ Heartbeat بدون payload:
 شامل schema، SHA دقیق، شمارش projected/updated/unchanged/removed، watermark،
 lag و دلیل شکست است.
 
+همین اجرای release-bound پس از projection موفق گروه‌ها، وضعیت استاندارد
+`COIN_GROUP_PROJECTION` را نیز به‌صورت اتمیک در فایل زیر به‌روز می‌کند:
+
+`estimator-live/conversation/group-event-health.json`
+
+جزئیات این probe فقط زمان واقعی جدیدترین رویداد canonical و جدیدترین رویداد
+واجد شرایط هر گروه و شمارش‌های کنترل کیفیت را دارد. زمان رویداد از ساعت اجرای
+bridge ساخته نمی‌شود. اگر projection شکست بخورد probe نیز `FAILED` می‌شود؛ در
+نتیجه داشبورد دیگر heartbeat گیرندهٔ Legacy خاموش را به‌عنوان دریافت زنده نشان
+نمی‌دهد.
+
 ## پشتیبان و بازگردانی
 
 قبل از اولین نوشتن تولید، از هر دو مقصد با SQLite online backup API نسخه گرفته

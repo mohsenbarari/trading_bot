@@ -199,6 +199,7 @@ class ShadowLegacyBridgeTests(unittest.TestCase):
         self.ledger = self.root / "ledger.sqlite"
         self.conversation = self.root / "conversation.sqlite3"
         self.heartbeat = self.root / "health.json"
+        self.group_projection_health = self.root / "group-event-health.json"
         self.market_lock = self.root / "market.lock"
         self.conversation_lock = self.root / "conversation.lock"
         self.when = datetime(2026, 8, 29, 9, 0, tzinfo=timezone.utc)
@@ -866,6 +867,20 @@ class ShadowLegacyBridgeTests(unittest.TestCase):
         self.assertEqual(health["status"], "OK")
         self.assertEqual(health["release_sha"], _SHA)
         self.assertNotIn("alice", health)
+        group_health = json.loads(
+            self.group_projection_health.read_text(encoding="utf-8")
+        )
+        probe = group_health["sources"]["COIN_GROUP_PROJECTION"]
+        self.assertEqual(probe["status"], "HEALTHY")
+        self.assertEqual(
+            probe["details"]["group_1_latest_canonical_event_utc"],
+            "2026-08-29T09:00:00Z",
+        )
+        self.assertEqual(
+            probe["details"]["group_2_latest_eligible_event_utc"],
+            "2026-08-29T09:00:00Z",
+        )
+        self.assertEqual(probe["details"]["group_1_pending_review_total"], 0)
         groups = project_groups(self.shadow, self.conversation)
         self.assertGreaterEqual(int(groups["eligible_offers"]), 2)
 
@@ -1101,5 +1116,9 @@ class BridgeInstallerTests(unittest.TestCase):
             self.assertEqual(service, again)
             self.assertIn(_SHA, service)
             self.assertIn("ProtectSystem=strict", service)
+            self.assertIn(
+                str(estimator / "conversation" / "group-event-health.json"),
+                service,
+            )
             self.assertEqual(len(list(systemd.glob("*.service"))), 1)
             self.assertEqual(len(list(systemd.glob("*.timer"))), 1)

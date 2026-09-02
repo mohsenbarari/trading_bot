@@ -46,6 +46,7 @@ MARKET_LOCK="$MARKET_RUNTIME_ROOT/staging/.market-store-writer.lock"
 CONVERSATION_LOCK="$ESTIMATOR_RUNTIME_ROOT/.conversation-writer.lock"
 LEDGER="$BRIDGE_STATE_ROOT/projection-ledger.sqlite"
 HEARTBEAT="$BRIDGE_STATE_ROOT/health.json"
+GROUP_PROJECTION_HEALTH="$ESTIMATOR_RUNTIME_ROOT/conversation/group-event-health.json"
 RELEASE_ROOT="$RELEASE_ROOT_BASE/$RELEASE_SHA"
 SHADOW_STORE_DIR="$(dirname -- "$SHADOW_MARKET_STORE")"
 
@@ -64,7 +65,8 @@ validate_absolute_local_path() {
 for candidate in \
     "$PROJECT_DIR" "$RELEASE_ROOT_BASE" "$SHADOW_MARKET_STORE" \
     "$MARKET_RUNTIME_ROOT" "$ESTIMATOR_RUNTIME_ROOT" "$BRIDGE_STATE_ROOT" \
-    "$SYSTEMD_DIR" "$LEGACY_MARKET_STORE" "$CONVERSATION_DB"; do
+    "$SYSTEMD_DIR" "$LEGACY_MARKET_STORE" "$CONVERSATION_DB" \
+    "$GROUP_PROJECTION_HEALTH"; do
     validate_absolute_local_path "$candidate"
 done
 
@@ -118,14 +120,16 @@ python3 - \
     "$RELEASE_ROOT" "$SHADOW_STORE_DIR" "$SHADOW_MARKET_STORE" \
     "$MARKET_RUNTIME_ROOT" "$ESTIMATOR_RUNTIME_ROOT" "$BRIDGE_STATE_ROOT" \
     "$LEGACY_MARKET_STORE" "$CONVERSATION_DB" "$LEDGER" "$HEARTBEAT" \
-    "$RELEASE_SHA" "$CUTOFF_UTC" "$MARKET_LOCK" "$CONVERSATION_LOCK" <<'PY'
+    "$GROUP_PROJECTION_HEALTH" "$RELEASE_SHA" "$CUTOFF_UTC" \
+    "$MARKET_LOCK" "$CONVERSATION_LOCK" <<'PY'
 from pathlib import Path
 import sys
 
 (
     source, destination, release_root, shadow_dir, shadow_store,
     market_root, estimator_root, bridge_root, legacy_store, conversation,
-    ledger, heartbeat, release_sha, cutoff, market_lock, conversation_lock,
+    ledger, heartbeat, group_projection_health, release_sha, cutoff,
+    market_lock, conversation_lock,
 ) = sys.argv[1:]
 rendered = Path(source).read_text(encoding="utf-8")
 replacements = {
@@ -139,6 +143,7 @@ replacements = {
     "@CONVERSATION_DB@": conversation,
     "@LEDGER@": ledger,
     "@HEARTBEAT@": heartbeat,
+    "@GROUP_PROJECTION_HEALTH@": group_projection_health,
     "@RELEASE_SHA@": release_sha,
     "@CUTOFF_UTC@": cutoff,
     "@MARKET_LOCK@": market_lock,
