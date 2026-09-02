@@ -616,6 +616,68 @@ class Stage8TransportTests(unittest.TestCase):
             )
             market.close()
 
+    def test_pending_export_does_not_let_fresh_reference_starve_coin_group(self):
+        with tempfile.TemporaryDirectory() as directory:
+            market = connect_market_store(Path(directory) / "market.sqlite3")
+            initialize_market_store(market)
+            initialize_export_ledger(market)
+            now = datetime.now(timezone.utc).replace(microsecond=0)
+            group_time = (now - timedelta(hours=2)).isoformat().replace(
+                "+00:00", "Z"
+            )
+            fresh = now.isoformat().replace("+00:00", "Z")
+            upsert_observation(
+                market,
+                MarketObservation(
+                    event_key=derive_event_key("stage8-export-fairness", "group"),
+                    source_code="GROUP_1",
+                    source_family="GROUP",
+                    event_time_utc=group_time,
+                    available_at_utc=group_time,
+                    instrument="COIN_IMAM",
+                    market_label="GROUP_COIN_IMAM",
+                    settlement_term="CASH",
+                    trade_form="PHYSICAL",
+                    event_type="OFFER",
+                    side="SELL",
+                    price="228000",
+                    price_unit="PROJECT_THOUSAND_TOMAN",
+                    currency="TOMAN",
+                    quantity="8",
+                    quantity_unit="COIN_COUNT",
+                    parser_version="stage8-test-v1",
+                ),
+            )
+            upsert_observation(
+                market,
+                MarketObservation(
+                    event_key=derive_event_key(
+                        "stage8-export-fairness", "reference"
+                    ),
+                    source_code="BINANCE_PAXG_PUBLIC_API",
+                    source_family="EXTERNAL_MARKET",
+                    event_time_utc=fresh,
+                    available_at_utc=fresh,
+                    instrument="PAXG_USD_PROXY",
+                    market_label="EXTERNAL_REFERENCE",
+                    settlement_term="SPOT",
+                    trade_form="NOT_APPLICABLE",
+                    event_type="REFERENCE",
+                    side="MID",
+                    price="3480",
+                    price_unit="USD_PER_TROY_OUNCE",
+                    currency="USD",
+                    parser_version="stage8-test-v1",
+                ),
+            )
+            market.commit()
+
+            rows = _pending_export_rows(market, max_rows=1)
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(str(rows[0]["source_code"]), "GROUP_1")
+            market.close()
+
     def test_xau_export_keeps_only_latest_real_quote_per_closed_fifteen_second_bucket(self):
         with tempfile.TemporaryDirectory() as directory:
             market = connect_market_store(Path(directory) / "market.sqlite3")

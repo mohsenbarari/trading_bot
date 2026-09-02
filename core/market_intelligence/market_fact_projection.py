@@ -343,35 +343,52 @@ def _pending_export_rows(
             (*parameters, limit),
         ).fetchall()
 
-    # Never let a historical re-projection queue hide events that just arrived.
-    # The recency index makes this a bounded lookup instead of sorting the full
-    # multi-million-row candidate set on every live cycle.
+    # Coin-group facts are the primary estimator input and must not be starved
+    # by the continuous public-reference stream. Offers sort ahead of trades,
+    # so dependent trades follow their offer roots in this or an earlier batch.
     rows = select(
-        "AND o.event_time_utc >= "
-        "strftime('%Y-%m-%dT%H:%M:%SZ','now','-10 minutes') "
-        "ORDER BY CASE o.event_type WHEN 'OFFER' THEN 0 "
-        "WHEN 'TRADE' THEN 1 ELSE 2 END,"
+        "AND o.source_code IN ('GROUP_1','GROUP_2') "
+        "ORDER BY CASE o.event_type WHEN 'OFFER' THEN 0 ELSE 1 END,"
         "o.event_time_utc DESC,o.id DESC",
         (),
         max_rows,
     )
-    rows.sort(
-        key=lambda row: (
-            str(row["event_time_utc"]),
-            {"OFFER": 0, "TRADE": 1}.get(str(row["event_type"]), 2),
-            bytes(row["event_key"]),
-        )
-    )
     remaining = max_rows - len(rows)
     if remaining:
         selected = tuple(bytes(row["event_key"]) for row in rows)
-        exclusion = ""
-        if selected:
-            exclusion = (
-                "AND o.event_key NOT IN ("
-                + ",".join("?" for _ in selected)
-                + ") "
+        exclusion = (
+            "AND o.event_key NOT IN ("
+            + ",".join("?" for _ in selected)
+            + ") "
+            if selected
+            else ""
+        )
+        fresh = select(
+            exclusion
+            + "AND o.event_time_utc >= "
+            + "strftime('%Y-%m-%dT%H:%M:%SZ','now','-10 minutes') "
+            + "ORDER BY o.event_time_utc DESC,o.id DESC",
+            selected,
+            remaining,
+        )
+        fresh.sort(
+            key=lambda row: (
+                str(row["event_time_utc"]),
+                {"OFFER": 0, "TRADE": 1}.get(str(row["event_type"]), 2),
+                bytes(row["event_key"]),
             )
+        )
+        rows.extend(fresh)
+        remaining -= len(fresh)
+    if remaining:
+        selected = tuple(bytes(row["event_key"]) for row in rows)
+        exclusion = (
+            "AND o.event_key NOT IN ("
+            + ",".join("?" for _ in selected)
+            + ") "
+            if selected
+            else ""
+        )
         rows.extend(
             select(
                 exclusion + "ORDER BY o.id",
