@@ -626,7 +626,7 @@ Rollback: موارد قابل‌حذف ابتدا تا پایان بازهٔ م�
 
 ## `P1-02` — واژگان و configuration بدون topology تاریخی
 
-وضعیت: `PROPOSED`
+وضعیت: `PROPOSED — قرارداد سناریویی در 2026-09-02 تأیید شد؛ اجرا مسدود است`
 
 Dependency: `P1-00`، `P4-00` و تأیید Feature Parity Contract.
 
@@ -636,23 +636,43 @@ Dependency: `P1-00`، `P4-00` و تأیید Feature Parity Contract.
 کسی Writer، Bot owner یا collector است. محل فیزیکی، نقش runtime و منشأ درخواست سه
 مفهوم جدا هستند. این جداسازی شرط ادغام Finland و بعداً ساخت Iran Standby است.
 
+### سناریوهای تأییدشده
+
+| سناریو | رفتار الزامی |
+| --- | --- |
+| اتصال عادی | Web فلاند Writer، Web ایران Standby و Bot فلاند مستقل است؛ هر process فقط capability مصوب خود را دارد. |
+| Offer از Web/Bot روی یک host | `origin_surface` تفاوت محصول را حفظ می‌کند و `site_id` جای آن را نمی‌گیرد. |
+| خرابی Web فلاند | Bot ادامه می‌دهد و ایران خودکار Writer نمی‌شود؛ تصمیم انتقال انسانی است. |
+| انتقال انسانی به ایران | عامل، Finland Web را drain/fence می‌کند، DNS را تغییر می‌دهد و سپس ایران را صریحاً فعال می‌کند؛ هیچ lease/timeout دخیل نیست. |
+| قطعی ارتباط مستقیم | writer ایران و Bot فلاند مستقل کار می‌کنند؛ outboxها پایدارند و source/home از topology حدس زده نمی‌شود. |
+| بازگشت به فلاند | ایران fence، DNS فلاند verify و tail sync/parity کامل می‌شود؛ فقط سپس عامل Finland Writer را فعال می‌کند. قطعی write تا 3–4 دقیقه پذیرفته است. |
+| config متناقض | دو Telegram owner، دو Writer، schema ناشناخته یا secret mount غایب قبل از readiness fail closed می‌شود؛ انتخاب خودکار ممنوع است. |
+| تغییر IP/domain | فقط manifest خصوصی و endpoint registry تغییر می‌کند؛ کد و policy ثابت می‌ماند. |
+| مهاجرت legacy | config قدیم/جدید فقط در صورت برابری dual-read می‌شوند؛ mismatch startup را متوقف می‌کند و adapter پس از صفرشدن مصرف در `P1-08` حذف می‌شود. |
+
+در promotion عادی، sync lag ناشناخته یا بیش از 30 ثانیه مانع فعال‌سازی است.
+Emergency override بخشی از قرارداد مصوب نیست و در صورت نیاز به تصمیم جداگانه
+احتیاج دارد. `P1-02` فقط مدل config را تعریف می‌کند و handover را اجرا نمی‌کند.
+
 ### Task Card فنی Cursor
 
 1. تمام `foreign/iran/finland/server_mode`، IP/domain/path ثابت، compose project
    name و شرط‌هایی که topology را از Web/Bot surface حدس می‌زنند inventory کند.
 2. schema typed و versioned تعریف کند که حداقل این مفاهیم را جدا نگه دارد:
-   `site_id`, `topology_role`, `web_mode`, `telegram_execution_enabled`,
-   `collector_capabilities`, `database_role`, `redis_role`, `object_storage_route`,
-   `source_surface`, `policy_version`.
+   `site_id`, `service_role`, `capabilities`, `writer_eligibility`,
+   `database_role`, `redis_role`, `endpoint_registry`, `origin_surface`,
+   `policy_version`, `config_schema_version`.
 3. invariantها را صریح کند: روی target Finland، Web/API و Bot هم‌مکان‌اند؛ فقط یک
-   Telegram executor مجاز است؛ `source_surface` writer/site را تعیین نمی‌کند؛
-   config متناقض پیش از اتصال به DB/Telegram fail می‌شود.
+   Telegram executor مجاز است؛ `origin_surface` writer/site را تعیین نمی‌کند؛
+   eligibility ثابت از `active_web_writer_site` انسانی و بدون expiry جداست؛ config
+   متناقض پیش از اتصال به DB/Telegram fail می‌شود.
 4. manifest عمومی بدون secret و manifest خصوصی محیط را جدا کند. secret فقط از
    mount/store مجاز resolve شود؛ generated config باید schema validation و hash
    قابل‌ثبت داشته باشد.
-5. adapter سازگاری برای `server_mode` قدیمی بسازد: در فاز اول dual-read با warning
-   و metric، در فاز دوم callsiteها روی schema جدید، و حذف adapter فقط در `P1-08`
-   پس از صفرشدن مصرف. dual-write authority ممنوع است.
+5. adapter سازگاری برای `server_mode` قدیمی بسازد: در فاز اول dual-read فقط هنگام
+   برابری معنایی با warning و metric، و در mismatch توقف startup؛ در فاز دوم
+   callsiteها روی schema جدید، و حذف adapter فقط در `P1-08` پس از صفرشدن مصرف.
+   dual-write authority ممنوع است.
 6. callsiteها را domain به domain و با commit کوچک migrate کند؛ پس از هر دسته،
    golden/characterization tests همان behavior اجرا شود.
 7. fixtureهای IP/domain تاریخی را با placeholder مستند جایگزین کند؛ testی که
@@ -672,6 +692,11 @@ Dependency: `P1-00`، `P4-00` و تأیید Feature Parity Contract.
 - با تغییر IP/domain فقط manifest خصوصی و artifact تولیدشده تغییر کند.
 - حذف legacy name یا adapter در این Stage ممنوع؛ مالک قرارداد config و diff رفتار
   را قبل از merge تأیید کند.
+
+Gate طراحی در 2026-09-02 تأیید شد: تفکیک `site_id/service_role/capabilities`،
+استقلال Writer انسانی از DNS/config ثابت، adapter موقت fail-closed، عدم تغییر
+schema/data/policy و جداسازی manifest عمومی از private پذیرفته شدند. این تأیید
+مجوز implementation، config runtime، DNS یا writer handover نیست.
 
 Rollback: callsiteها به adapter سازگار برمی‌گردند؛ schema/data product rollback یا
 تغییر runtime تولید در این Stage وجود ندارد.
