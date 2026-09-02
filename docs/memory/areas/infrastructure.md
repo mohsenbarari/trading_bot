@@ -1,5 +1,9 @@
 # Infrastructure
 
+- 2026-09-02 | Architecture Full Matrix uses the final Finland host, existing Iran
+  host and existing Object Storage; no separate VM. Acceptance stacks, DB/Redis,
+  Control Store, DNS and storage namespace/IAM remain isolated. Host-wide faults run
+  pre-production or in an explicitly authorized maintenance window, never by simulation.
 - 2026-09-02 | DNS mutation authority stays on Finland: one root-mounted least-privilege
   Arvan token can change only the registered product A record; Iran verifies only.
   Provider-panel fallback remains human, reconciled and fully verified/audited.

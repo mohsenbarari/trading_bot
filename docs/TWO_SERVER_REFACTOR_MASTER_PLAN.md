@@ -2520,27 +2520,429 @@ mutation یا هیچ اقدام production نیست.
 
 ## `P2-10` — staging و fault matrix
 
-وضعیت: `PROPOSED`
+وضعیت: `PROPOSED — قرارداد Full Matrix حداکثری در 2026-09-02 تأیید شد؛ اجرا مسدود است`
 
-سناریوهای حداقل:
+این Stage گیت پذیرش تغییر معماری است، نه smoke test و نه گیت ثابت هر deploy. «Full»
+با تعداد rowهای تولیدشده تعریف نمی‌شود: هر requirement، مسیر mutation، transition،
+جهت sync، fault boundary و invariant مؤثر باید driver واقعاً اجراشده، assertion چندلایه،
+evidence digest و cleanup proof داشته باشد. سناریوی generated-only، `SKIPPED` یا شاهد
+چهار تست برای هزاران ترکیب، پوشش محسوب نمی‌شود.
 
-1. اتصال سالم با lag زیر ۳۰ ثانیه
-2. bucket قطع برای Finland، Iran یا هر دو
-3. partition وسط upload و وسط ACK
-4. gap و object خراب
-5. duplicate و out-of-order
-6. درخواست هم‌زمان فعال‌سازی انسانی در دو dashboard
-7. stale DNS cache
-8. restart Writer و standby
-9. disk full و clock skew
-10. media ناقص
-11. offer/trade هم‌زمان روی home siteهای متفاوت
-12. negative inventory conflict
-13. reconnect دوباره قطع شود
-14. failback بعد از final drain شکست بخورد
-15. dashboard یا provider API unavailable باشد
+Dependency اجرایی: `P2-00..P2-09` و `P3-08` باید قرارداد نهایی و implementation
+قابل‌آزمون داشته باشند. framework این Stage زودتر ساخته می‌شود، اما بدون Market matrix
+برآمده از `P3` حق `COMPLETE` شدن ندارد. deploy/rollback chaos متناظر با همین matrix در
+`P4-07/P4-10` اجرا می‌شود و اینجا دوباره با نام دیگر ساخته نمی‌شود.
 
-هر سناریو expected state، user-visible behavior، alert و recovery command دارد.
+### ممیزی baseline و سیاست reuse
+
+زیرساخت قبلی `STAGING_TWO_SERVER_FULL_MATRIX` فقط seed است و target نیست:
+
+- WebApp را Iran-only، Messenger sync را خارج scope و هویت را `SERVER_MODE=iran/
+  foreign` تعریف می‌کند؛ همه با معماری جدید تعارض دارند.
+- manifest فعلی ۵۶۱۱ مورد می‌سازد ولی evidence موجود فقط چهار driver mutating را
+  ثابت می‌کند. این چهار نتیجه retained historical input هستند، نه Full Matrix جدید.
+- no-soak، branch/host قدیمی و تکثیر evidence در `tmp/claude` و `tmp/chatgpt` به target
+  منتقل نمی‌شوند.
+- redaction-before-write، production-identity guard، prefix cleanup، JSONL resumability،
+  DB/Redis separation probe و parity/health capture قابل reuse هستند، اما فقط پس از
+  mapping و regression test با `SITE_ID/WEB_ROLE/generation`.
+
+Cursor پیش از توسعه یک Reuse Ledger می‌سازد: هر سند/script/test قدیمی یکی از
+`REUSE`, `ADAPT`, `REPLACE`, `RETIRE` می‌گیرد و دلیل، owner، replacement و deletion
+gate دارد. کپی یا rename runner قدیمی بدون این ledger ممنوع است.
+
+### محیط واقعی مورد تأیید
+
+VM جدا ساخته نمی‌شود. Full Matrix روی همان دو میزبان مقصد اجرا می‌شود:
+
+- Finland Primary نهایی `65.109.214.203`؛
+- سرور موجود Iran که standby نهایی خواهد شد؛
+- Object Storage موجود پروژه، با namespace و دسترسی staging جدا.
+
+روی هر میزبان یک Architecture-Acceptance stack غیرتولیدی با exact candidate image
+digest ساخته می‌شود. تفاوت config فقط موارد ثبت‌شدهٔ site/role/secret projection است.
+هر stack Compose project، network، port، DB/Redis، volume، uploads، Control Store،
+log، secret mount، hostname/TLS و resource quota مستقل دارد. production DB/Redis/
+volume/env/domain/user/bot/channel نباید mount، route یا read شوند.
+
+Object Storage همان account/provider موجود است، نه provider یا VM تازه، ولی keyspace
+به‌شکل زیر یا bucketهای هم‌ارز جدا می‌شود:
+
+```text
+staging/architecture-v1/{run_id}/events/
+staging/architecture-v1/{run_id}/acks/
+staging/architecture-v1/{run_id}/rejections/
+staging/architecture-v1/{run_id}/repairs/
+staging/architecture-v1/{run_id}/media/
+staging/architecture-v1/{run_id}/models/
+staging/architecture-v1/{run_id}/snapshots/
+staging/architecture-v1/{run_id}/evidence/
+```
+
+credential مخصوص staging/prefix ترجیح و least-privilege آن probe می‌شود. اگر provider
+جداسازی IAM قابل‌اثبات در یک bucket ندهد، bucket جدا در همان Object Storage اجباری است.
+cleanup فقط exact `run_id` را می‌بیند؛ list/delete production prefix حتی برای admin
+runner مجاز نیست.
+
+دو Console hostname مستقیم و یک Product hostname اختصاصی staging وجود دارد. Product
+A-record با TTL سی ثانیه و token محدود همان رکورد در حساب موجود Arvan آزموده می‌شود؛
+`coin.gold-trade.ir` و token تولید هرگز target تست نیستند.
+
+### Coverage Ledger؛ تعریف ماشینی «کامل»
+
+یک registry نسخه‌دار source واحد انسان/ماشین با حداقل فیلدهای زیر ساخته می‌شود:
+
+```text
+requirement_id, behavior_id, source_stage, domain, source_code_paths,
+mutation_path, authority_class, initial_state, writer_generation,
+source_site, destination_site, origin_surface, actor/persona/tier,
+network_state, dependency_state, fault_point, action,
+expected_http_ui, expected_db, expected_event_ack, expected_side_effect,
+expected_observability, recovery_action, cleanup_scope,
+driver_id, executed_result, evidence_paths, evidence_digest
+```
+
+- هر ۴۶۵ behavior seed `P1-00/P1-06` باید به اجرای reference و candidate متصل باشد.
+- تمام requirementهای جدید `P2-00..P2-09` و `P3-00..P3-08` ID و owner دارند.
+- تمام endpoint/handler/job/CLI/raw SQL/ORM hook/importer و key/object namespace از
+  static/runtime inventory به ledger map می‌شوند؛ orphan صفر است.
+- reduction یک Cartesian product فقط وقتی مجاز است که equivalence class، ابعاد
+  مستقل، representative و property proof ثبت و عامل انسانی آن را تأیید کند. ابعاد
+  authority، money/inventory، direction، Writer، surface، conflict و side effect
+  قابل حذف با pairwise حدسی نیستند.
+- `MISSING_REQUIREMENT`, `NO_DRIVER`, `NOT_EXECUTED`, `SKIPPED`, `XFAIL`,
+  `UNKNOWN_DIFF`, `MISSING_EVIDENCE` یا `CLEANUP_UNPROVEN` هرکدام gate را قرمز می‌کند.
+
+### Matrix ۱ — topology، config و startup
+
+برای هر service شامل edge، دو Web replica، API، Bot primary/executor/publisherها،
+sync publisher/receiver، object worker، Market collector/parser/model، jobs، DB، Redis،
+Console و monitoring این حالت‌ها اجرا می‌شوند:
+
+- `SITE_ID=finland/iran/unknown/missing`؛
+- تمام `WEB_ROLE`های مجاز و مقدار unknown؛
+- generation برابر/قدیمی/جلوتر/خراب؛
+- Control Store/OS marker/DB row برابر، غایب یا متناقض؛
+- credential لازم/ممنوع/اضافی؛
+- Telegram owner یک/صفر/دو، SMS Writer-bound درست/نادرست؛
+- exact/wrong image، schema، registry، migration و config digest؛
+- dependency ready/stale/unreachable/partial.
+
+هر startup یا read/write باید expected `RUN`, `READ_ONLY`, `SAFE_FENCED` یا
+`FAIL_START` داشته باشد؛ silent default به Finland/Writer/foreign ممنوع است.
+
+### Matrix ۲ — state machine و انتقال انسانی
+
+تمام edgeهای مجاز و غیرمجاز میان `STANDBY`, `ARMED`, `WRITER`, `DRAINING` و
+`SAFE_FENCED` و تمام مراحل Journal از `PLANNED` تا `CLOSED` در هر دو جهت `FI→IR`
+و `IR→FI` اجرا می‌شوند. برای هر edge، no-fault و fault در قبل/بعد commit وجود دارد:
+
+- plan expiry، cancel پیش از Fence و cancel ممنوع پس از Fence؛
+- double-click، دو operator/Console هم‌زمان و transition خلاف جهت؛
+- crash/restart مبدأ یا مقصد در Drain/Fence/Armed/DNS/Activation/Closure؛
+- Receipt غایب، قدیمی، replay، wrong target/generation، hash-chain شکسته یا signature
+  دستکاری‌شده؛
+- Activation Receipt برگشتی گم/تکراری و source acknowledgment دیررس؛
+- DNS success مبهم، provider error، manual-panel reconciliation و stale resolver؛
+- DB/Redis/Control Store failure و restore عقب‌رفته؛
+- Bot event هم‌زمان با هر مرحله و active Iran Offer rehome در failback.
+
+هیچ تست control plane مجاز نیست برای سبزشدن lease، timeout، network detection، DNS،
+host یا restart را به Writer authority تبدیل کند.
+
+### Matrix ۳ — event، sync و Object Storage
+
+برای هر stream registry و هر دو جهت، این حالات در sender/outbox، uploader/storage،
+receiver/inbox/apply و ACK/cleanup اجرا می‌شوند:
+
+- event عادی، duplicate، out-of-order، gap اول/وسط/آخر، lost ACK و ACK replay؛
+- source sequence/version برابر با hash برابر یا متفاوت؛
+- dependency حاضر، دیررس، missing، cyclic و rejected؛
+- schema current، compatible older/newer و unknown major/field مؤثر؛
+- signature/AEAD/key ID/nonce/environment/source/key/hash معتبر و نامعتبر؛
+- object missing، partial multipart، corrupt، truncated، stale list/head، collision و
+  conditional-create unsupported؛
+- bucket Finland path، Iran path یا هر دو unavailable و reconnectهای متناوب؛
+- spool thresholdهای عادی/هشدار/سخت، backpressure، disk pressure و ۱۴روز+۳۰٪ capacity؛
+- key rotation با dual-read/new-write/retire و backlog روی key قدیم؛
+- repair exact range، repair replay، snapshot bootstrap، cutoff+1 و parity barrier؛
+- retention boundary برای unacked/applied/partial/quarantine/snapshot/media.
+
+Apply کسب‌وکار دقیقاً یک‌بار است؛ transport حداقل یک‌بار می‌ماند. هیچ test provider
+خارجی نمی‌تواند exactly-once غیرقابل‌اثبات ادعا کند.
+
+### Matrix ۴ — behavior و provenance Web/Bot
+
+تمام ۱۲ خانوادهٔ رفتار current-state و چهار quadrant زیر اجرا می‌شوند:
+
+```text
+Web Offer → Web Request
+Web Offer → Bot Request
+Bot Offer → Web Request
+Bot Offer → Bot Request
+```
+
+ابعاد اجباری شامل buy/sell، commodityها و alias canonical، wholesale/retail و دو/
+سه lot، full/partial fill، direct/customer/accountant/admin، tier 1/2، relation owner،
+normal/overtime، active/limited/blocked/inactive/deleted، create/edit/cancel/manual-
+expire/time-expire/market-close/reject/republish و Finland/Iran Writer است.
+
+در هر نتیجه `origin_surface`, `home_site`, Offer/Request origin، execution surface،
+policy version و actor/role/tier/overtime snapshot مستقل assert می‌شوند. هم‌مکانی Web/
+Bot یا authority transfer حق تغییر provenance و policy ندارد.
+
+### Matrix ۵ — concurrency و invariant مالی
+
+- ۲، ۸، ۱۲ و load-profile واقعی contender روی یک wholesale/lot؛
+- mixed-lot contention، Web/Bot simultaneous request و دو home متفاوت؛
+- Trade در رقابت با cancel، manual/time/market-close expiry و authority transfer؛
+- retry پس از lost response، duplicate idempotency key و دو key برای intent یکسان؛
+- partial settlement، commission/rounding boundary و replay terminal state؛
+- event قدیمی پس از trade/settlement جدید و conflict هنگام reconnect.
+
+هر سناریو row/lock/event/receipt/notification و final balance/inventory را assert می‌کند.
+negative inventory، oversell، duplicate trade/settlement/commission یا state نیمه‌commit
+صفر است؛ رخداد متعارض apply نمی‌شود و quarantine/readiness blocker می‌سازد.
+
+### Matrix ۶ — OTP، Session و outbound side effect
+
+- Finland Telegram-first، همان OTP در fallback چهل‌ثانیه‌ای، Finland SMS-direct و
+  Iran SMS-only؛ linked/unlinked/missing-stale user و registration invitation؛
+- OTP درست/غلط/replay/expired، attempt/IP rate-limit، provider accepted/failed/
+  ambiguous/timeout/429/late response و crash-after-call؛
+- switch Writer پیش/پس از issue/send/verify/session commit و delayed SMS نسل قدیم؛
+- access/refresh سی‌روزه، primary device/session limit، revoke و site/generation mismatch؛
+- استقلال Console session ۲۴ساعته از Product session invalidation؛
+- notification create/read/mark-all/delete و چهار freshness class Telegram؛
+- Web Push subscription/re-register/revoke/expired endpoint و provider outage؛
+- audience/privacy/eligibility و side-effect dedupe برای تمام producerها.
+
+Provider fake تمام faultها را deterministic پوشش می‌دهد؛ سپس smoke واقعی محدود با
+Telegram staging، شمارهٔ SMS مصوب، Web Push staging و evidence redacted انجام می‌شود.
+
+### Matrix ۷ — Messenger و media
+
+در هر دو Writer و سه وضعیت connected/partition/recovering، chat/member، text، reply،
+forward، edit revision، delete tombstone، reaction، mention، pin/hide/mute، read cursor،
+mark unread، pagination، search و realtime reconnect اجرا می‌شوند.
+
+media شامل upload/download، نوع/اندازه/ACL، album ID/index، metadata-before-blob،
+blob-before-metadata، partial/corrupt/missing/orphan/duplicate blob، writer-switch وسط
+upload، committed-before-lost-response و concurrent edit/delete است. `MEDIA_PENDING`
+قابل‌بازیابی و stable client/message ID duplicate را می‌بندد؛ referenced blob ناقص
+حتماً `FULL_SYNC` را قرمز می‌کند.
+
+### Matrix ۸ — Market، parser و model
+
+پس از تأیید `P3-00..P3-08`، Coverage Ledger از registry همان بخش برای تک‌تک source،
+collector، raw input، Canonical Fact، parser/version، correction، feature، artifact،
+profile و commodity تولید می‌شود. حداقل ابعاد اجباری:
+
+- capture و transfer سالم/قطع/دیررس/duplicate/corrected/gap برای G1/G2، سایر رویدادهای
+  Telegram، بورس، تتر، آبشده و اونس در صورت فراهم‌شدن مسیر؛
+- replay deterministic، point-in-time/availability cutoff و cross-site fact hash؛
+- `FULL_CONNECTED` و profileهای continuity ایران با input کامل/کم/قدیمی/متعارض؛
+- widening monotonic هنگام کاهش evidence و contraction فقط پس از evidence معتبر؛
+- quiet/no-data window و ساعات بدون داده بدون خاموش‌شدن خودکار مدل؛
+- model artifact current/old/missing/corrupt، cross-site output parity و promotion guard؛
+- Price Guard در boundaryهای band، shock، single-event و estimate stale/degraded.
+
+هیچ synthetic value برای عبور scientific/business gate مجاز نیست؛ fixture فقط رفتار
+کد را می‌آزماید و evidence واقعی staging جدا لازم است.
+
+### Matrix ۹ — Dashboard، observability و رفتار کاربر
+
+هر fault علاوه بر state backend، UI هر دو Console، Product Web و alert/metric را assert
+می‌کند: state محلی، peer age، generation، backlog/gap/quarantine، `FULL_SYNC`,
+`MARKET_READY`, DNS proof، action بعدی، cancelable/forward-only و علت block باید درست
+و بدون green کاذب باشند.
+
+username/password/TOTP، session expiry ۲۴h، re-auth حساس، CSRF/origin، rate limit،
+recovery code، Audit و دسترسی roleها positive/negative تست می‌شوند. خرابی Console،
+Grafana یا peer observation Writer فعلی را تغییر نمی‌دهد؛ CLI فقط hard-fence/evidence
+را طبق `P2-06` دارد.
+
+### Matrix ۱۰ — runtime، resource و security fault
+
+- kill/restart هر Web replica، کل Web، Bot component، job owner، sync/object/Market
+  worker، Nginx، DB و Redis در ترتیب‌ها و هم‌زمانی‌های کنترل‌شده؛
+- CPU/RAM/DB-pool/file-descriptor/network latency/loss/bandwidth pressure؛
+- disk-full فقط در bounded test volume، نه host filesystem؛
+- clock skew/expiry فقط با injected clock، نه تغییر ساعت host که TLS/TOTP را خراب کند؛
+- host reboot واقعی Finland و Iran یک‌بار پیش از production؛ پس از production فقط در
+  maintenance window و با مجوز جدا، و هرگز با شبیه‌سازی «passed» اعلام نمی‌شود؛
+- forged/replayed Receipt/event، wrong environment/target، unauthorized Console/API/
+  actuator، secret/PII leakage و staging-to-production routing؛
+- production DB/Redis/domain/bucket/prefix/Bot/channel/SMS recipient/DNS record match
+  پیش از اولین mutation runner را متوقف می‌کند.
+
+اگر سرور موجود Iran هنگام این Stage workload زنده دارد، reboot یا host-wide fault تا
+پنجرهٔ نگهداری و مجوز صریح blocked است؛ container-level substitute شاهد host failure
+محسوب نمی‌شود.
+
+### Matrix ۱۱ — browser، client و network edge
+
+Chromium/Firefox/WebKit در viewportهای mobile/desktop، PWA installed/uninstalled،
+online/offline/reload/back-forward، stale service worker، expired session، old/new DNS،
+SSE/WebSocket reconnect و writer-switch اجرا می‌شوند. API/DB/event/side-effect assertion
+در کنار UI لازم است؛ screenshot تنها evidence behavior نیست.
+
+probeهای DNS از resolver authoritative، recursiveهای مستقل و مسیرهای Iran/Finland
+old/new answer را ثبت می‌کنند. client روی source fenced فقط typed read-only/moved
+response می‌گیرد و write proxy/replay نمی‌شود.
+
+### fault boundary اجباری
+
+برای هر mutation/event مرتبط، fault در همهٔ مرزهای قابل‌وقوع زیر map می‌شود:
+
+| مرز | assertion اصلی |
+| --- | --- |
+| پیش از DB transaction | هیچ state/intent/side effect ساخته نشود |
+| داخل transaction | rollback همهٔ business/outbox تغییرها را حذف کند |
+| پس از business write و پیش از outbox | atomicity اجازهٔ commit ناقص ندهد |
+| پس از outbox و پیش از commit | restart event تازه با identity دیگر نسازد |
+| پس از commit و پیش از publish | outbox همان event را resume کند |
+| وسط upload/object finalize | partial visible/applicable نباشد و resume امن باشد |
+| پس از publish و پیش از receive | redelivery همان immutable event باشد |
+| پس از receive و پیش از apply | checkpoint جلو نرود |
+| پس از apply و پیش از ACK | replay از inbox no-op و side effect تکراری صفر باشد |
+| پس از ACK و پیش از cleanup | evidence/retention ACKed را امن نگه دارد |
+| وسط retry/repair/reconnect | range/sequence/generation عقب نرود یا skip نشود |
+
+### سناریوهای چرخهٔ واقعی
+
+| وضعیت و رخداد | رفتار الزامی | مانع قبولی |
+| --- | --- | --- |
+| Finland Writer و ارتباط سالم | تمام corpus Web/Bot/Market/Messenger اجرا و state لازم ≤۳۰s به Iran می‌رسد | lag، hash diff، owner collision یا side effect بی‌حساب |
+| sync path قطع و handover درخواست نشده | Finland Writer و Iran Standby ثابت؛ backlog بادوام و dashboard قرمز/زرد درست | role/DNS خودکار، drop، reset یا FULL_SYNC کاذب |
+| outage ایران و انتقال انسانی | Finland Web drain/fence، Receipt دستی، DNS staging، Iran activation در نسل بعد | دو Writer، bypass Receipt یا downtime کاربر بیش از ۴m |
+| Bot هم‌زمان فعال | Telegram lane و business eventهای Bot ادامه دارند | توقف Bot یا آمیختن global cutoff با Web barrier |
+| Iran Writer ۲۴h partition | Product/SMS/Messenger/Market continuity و spool محلی ادامه دارد | peer dependency پنهان، resource growth بی‌حد یا ازکارافتادن مدل برخلاف قرارداد |
+| link flapping هنگام catch-up | از contiguous ACK resume و progress حفظ می‌شود | replay business، reset counter یا failback خودکار |
+| conflict مالی هنگام merge | event apply نشده، quarantine و FULL_SYNC blocker می‌شود | LWW، موجودی منفی یا repair مستقیم DB |
+| reconnect کامل | priority product/ops سپس media/Market با ordering داخلی؛ parity در barrier واحد | queue=0 بدون hash/media/model evidence |
+| failback Iran→Finland | final delta، rehome اتمیک active offers، Fence، DNS و activation نسل بعد | expire به‌جای rehome یا mutation source قدیمی |
+| failure پس از hard fence | forward recovery تا destination Writer ادامه می‌یابد | generic rollback یا بازکردن source با نسل قبلی |
+| DNS/provider/Console unavailable | Writer فعلی ثابت و failure قابل‌مشاهده است | Force Activate، DNS-as-authority یا silent success |
+| restore قدیمی | high-watermark mismatch هر write را fence می‌کند | resurrection یک Writer قدیمی |
+
+### اجرای زمانی، load و تکرار
+
+پذیرش اولیه شامل همهٔ موارد زیر است:
+
+1. soak متصل ۲۴ساعته با Finland Writer و job/queue/backup/log rotation فعال؛
+2. soak قطعی ۲۴ساعته با Iran Writer و Bot فعال Finland؛
+3. reconnect، catch-up، parity و failback پس از soak قطعی؛
+4. workload فشردهٔ معادل حداقل ۱۴ روز peak واقعی +۳۰٪ برای spool/retention/capacity؛
+5. حداقل ده چرخهٔ کامل و متوالی `FI→IR→FI` بدون DB edit، evidence reset یا cleanup
+   میان‌چرخه‌ای که defect را پنهان کند؛
+6. حداقل سه چرخه با A-record واقعی staging و probe چند resolver/مسیر؛
+7. fault schedule deterministic و seed ثبت‌شده در حین soak، سپس rerun همان seed؛
+8. load هم‌زمان Web، Bot، Messenger، Sync، Market، dashboard و backup؛
+9. restore exact backup و اجرای دوبارهٔ corpus/business hash پس از هر دستهٔ اصلی.
+
+بودجهٔ `P1-06` اعمال می‌شود: نسبت به reference افت `p95≤10%` و `p99≤15%`،
+infrastructure `5xx≤0.1%`، invariant failure صفر، steady CPU≤60% و RAM/disk/DB-pool
+≤70%؛ SLO سخت‌گیرانه‌تر موجود مقدم است. این acceptance معماری است و full soak روی
+هر deploy/hotfix تکرار نمی‌شود؛ `P4-05` subset را فقط از impact map انتخاب می‌کند.
+
+### Runner، safety و resumability
+
+یک CLI canonical با modeهای `plan`, `preflight`, `execute`, `resume`, `recover`,
+`cleanup`, `verify-clean`, `report` ساخته می‌شود. `plan/preflight` side-effect-free و
+`execute/recover/cleanup` نیازمند environment fingerprint، exact release digest، run ID،
+scope preview و تأیید صریح هستند.
+
+- controller از data plane role مستقل است و قطع FI↔IR نباید recovery command یا evidence
+  محلی را از بین ببرد؛ fault agent هر سایت plan محدود و expiry ایمن دارد.
+- network fault فقط exact acceptance containers/routes را می‌بندد؛ SSH، Console و
+  production namespace خارج scope‌اند. host-wide fault فقط سناریوی صریح نگهداری است.
+- runner fail-fast روی invariant/security/production-identity و resumable از آخرین
+  scenario commit است؛ resume result قبلی را overwrite نمی‌کند.
+- continue-after-failure فقط evidence gathering و با status کلی `FAILED` است؛ green
+  کردن run با re-run انتخابی بدون manifest/seed/run lineage ممنوع است.
+
+### Evidence، cleanup و retention
+
+هر run فقط یک مسیر canonical untracked دارد:
+
+```text
+.local/evidence/p2-10/{run_id}/
+```
+
+حداقل شامل metadata، immutable manifest، Coverage Ledger، scenario JSONL، normalized
+reference/candidate diff، config/release/schema/registry digests، state/transition/DNS
+Receiptها، DB/event/ACK/business/media/model parity، resource/load/soak timeline،
+provider fake/real receipts، redacted logs، cleanup plans/proofs و final signed summary
+است. هیچ secret، raw OTP/mobile/private payload یا production data وارد artifact نیست.
+
+- هر fixture با run prefix/tenant یکتا و allowlist جداول/keyspace/objectها ساخته می‌شود.
+- cleanup ابتدا dry-run immutable، سپس exact delete جدا روی هر DB/Redis/Object prefix و
+  در پایان zero-proof می‌گیرد؛ به sync برای حذف peer متکی نیست.
+- raw log موفق ۱۴ روز؛ evidence release فعال/rollback تا retirement+۳۰ روز؛ evidence
+  failure تا incident closure+۳۰ روز؛ data/object آزمایشی پس از zero-proof فوراً حذف
+  می‌شوند. active/rollback/open-incident evidence بدون replacement پاک نمی‌شود.
+- Git فقط schema/runner، summary redacted لازم و evidence index/digest را می‌گیرد؛ raw
+  output یا دو کپی agent-specific دوباره ساخته نمی‌شود.
+
+### Task Card فنی Cursor
+
+1. تمام اسناد/runner/testهای Full Matrix قدیمی را audit و Reuse Ledger چهارحالته با
+   owner/replacement/deletion gate بسازد؛ assumptionهای Web-Iran-only، `SERVER_MODE`,
+   Messenger-out-of-scope، no-soak و generated-only را blocker کند.
+2. requirement extractor و Coverage Ledger انسان/ماشین را از `P1/P2/P3/P4`، ۴۶۵ seed،
+   Data/Stream/Job/Mutation registries بسازد و CI orphan/missing-driver را fail کند.
+3. exact acceptance topology روی دو میزبان نهایی و Object Storage موجود را به‌صورت
+   declarative طراحی کند: project/network/port/volume/env/secret/domain/resource isolation
+   و production fingerprint denylist؛ ایجاد/اجرا مجوز جدا می‌خواهد.
+4. manifest generator را coverage-driven و versioned کند؛ semantic cross-product،
+   equivalence proof و mandatory dimension lint داشته باشد و count را معیار قبولی نداند.
+5. CLI canonical و fault-agent محدود را با plan/preflight/confirm/resume/recover/cleanup،
+   immutable run lineage، crash-safe journal و no-production guards پیاده کند.
+6. fault adapters برای network/TLS/DNS/S3/DB/Redis/process/resource/bounded-disk/
+   injected-clock/provider را بسازد؛ هر fault apply/observe/recover/verify-clean دارد.
+7. topology/startup و تمام state-machine edge/faultهای دو جهت را همراه Console/browser/
+   receipt evidence اجراپذیر کند؛ host reboot procedure را جدا و human-gated نگه دارد.
+8. event/sync/storage matrix را برای تک‌تک stream/direction/fault boundary و bootstrap/
+   parity/repair/retention پوشش دهد؛ business exactly-once و no-false-ready assert شود.
+9. ۴۶۵ baseline و تمام Web/Bot quadrant/role/tier/overtime/terminal/concurrency paths را
+   به reference/candidate differential driver واقعی وصل کند؛ unknown diff blocker باشد.
+10. OTP/session/SMS/Telegram/Push/notification و Messenger/media matrix `P2-09` را با
+    fake faults و smoke provider staging واقعی، privacy/redaction و generation switch بسازد.
+11. Market matrix را فقط از registry نهایی `P3-00..08` تولید و fact/input/model/output/
+    widening/guard parity را با evidence واقعی و fixture deterministic تفکیک کند.
+12. سه-browser/two-viewport/PWA/network/service-worker matrix را به assertionهای API/
+    DB/event/provider متصل کند؛ visual-only pass ممنوع باشد.
+13. load/soak harness دو ۲۴h، backlog معادل ۱۴روز+۳۰٪، ده چرخه و سه DNS cycle را با
+    seed، resource budget و leak/growth/owner-collision detection اجراپذیر کند.
+14. backup/restore/old-control-state، host/process restart و forward-only failure را با
+    exact artifact و post-restore corpus/hash تست کند.
+15. evidence writer را redaction-before-write، digest/index، retention metadata و single
+    canonical path کند؛ cleanup allowlist/dry-run/zero-proof را پیش از mutation تست کند.
+16. final report را fail-closed بسازد: coverage صددرصد، zero skipped/orphan/unknown diff،
+    business/security/readiness/performance gates، human sign-off و remaining-risk صفر یا
+    صریحاً blocker؛ هیچ auto-waiver یا synthetic pass وجود ندارد.
+
+### Gate خروج
+
+`P2-10` فقط وقتی قابل قبول است که Coverage Ledger برای تمام requirementها و mutation
+pathها `EXECUTED_PASS` و evidence معتبر داشته باشد؛ تمام mandatory cells اجرا شده و
+skipped/xfail/generated-only/orphan/unknown diff صفر باشند؛ split-brain، standby write،
+duplicate business/settlement، oversell، negative inventory، lost mutation و unaccounted
+side effect صفر باشد؛ connected sync lag حداکثر ۳۰ ثانیه و downtime انتقال هدف حداکثر
+چهار دقیقه باشد؛ دو soak، ظرفیت ۱۴روز+۳۰٪، ده handover، سه DNS cycle، reboot دو host،
+restore و provider smoke سبز باشند؛ final `FULL_SYNC/MARKET_READY` و business/media/
+model parity واقعی و cleanup صفر هر دو سایت ثبت شود؛ انسان از روی Runbook و Cursor از
+روی Skill اجرای هم‌ارز داشته باشند و مالک summary نهایی را امضا کند.
+
+Gate طراحی در 2026-09-02 تأیید شد: کامل‌ترین پوشش اجرایی، نه sampling، روی سرور نهایی
+Finland و سرور موجود Iran بدون VM جدا و با Object Storage موجود اما namespace/IAM
+ایزوله؛ همهٔ matrices، fault boundaryها، host reboot، دو soak ۲۴h، backlog معادل
+۱۴روز+۳۰٪، ده چرخه، سه DNS cycle، provider staging واقعی، Coverage Ledger صددرصد و
+retention/cleanup بالا پذیرفته شدند. این Full Matrix فقط گیت معماری/تغییر پرریسک است
+و نباید به هر deploy یا hotfix نامرتبط تحمیل شود. این تأیید مجوز provisioning، ساخت
+namespace/bucket/record، خواندن credential، deploy staging/production، fault injection،
+reboot، provider send، data copy/cleanup یا هیچ اقدام عملیاتی نیست.
 
 ## `P2-11` — production standby activation
 

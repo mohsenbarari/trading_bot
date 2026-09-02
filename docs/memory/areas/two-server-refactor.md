@@ -1,34 +1,28 @@
 # Two-Server Refactor
 
-- 2026-09-02 | Owner approved `P2-09`: Product OTP/session are local and Writer-
-  generation-bound; every switch forces Product re-login but not Console re-login.
-  Notification/read and final Messenger metadata/media sync with stable IDs and
-  monotonic/tombstone rules; Push, cache, realtime, drafts and incomplete uploads stay
-  local. Telegram delays use freshness classes and final media gates `FULL_SYNC`.
-- 2026-09-02 | Owner approved `P2-06..08`: independent site Consoles use local
-  password/TOTP, 24h sessions and narrow actuators; Product Admin/Grafana stay separate.
-  `coin.gold-trade.ir` is one DNS-only A with TTL≤30s and Finland-only human Arvan
-  control. Fixed site/human Web role, Finland Telegram owner, 30/90s observed peer,
-  root control state, pre-fence cancel/post-fence forward-only, signed return receipts
-  and vector barriers prevent split-brain while Bot continues.
-- 2026-09-02 | Owner approved `P1-02..06`: Finland uses two Web replicas, singleton
-  jobs, split Bot and separate app/Market DBs. Shared app DB removes local sync;
-  deterministic merge preserves sessions/IDs/media and blocks ambiguous/financial
-  conflicts. Differential staging needs 465/465 mapping, six closed gaps, failure/
-  browser/load proof, 24h soak and restore/rollback; no operation is authorized.
-- 2026-09-02 | Owner approved `P1-00`: twelve behavior families, Web/Bot and
-  provenance contracts, six mandatory evidence gaps and runtime-ownership seed.
-  Unknown parity still blocks implementation.
-- 2026-09-02 | Owner approved `P1-07..08`: initial cutover is 90m/4m with 30s TTL,
-  human checkpoints, exclusive Bot handoff and old-edge proxy. Target DB becomes
-  canonical after first write. Closure waits for `P2-11` plus 7d quarantine; old
-  Bot/Web retire 24h apart and backups require tested replacements; operations stay gated.
-- 2026-09-02 | Owner approved `P2-00..05`: typed state ownership, durable Messenger/
-  notification sync and minimal encrypted PII; versioned streams have atomic ACK,
-  blocking gaps/rejections and immutable repair. Encrypted signed Object Storage uses
-  split credentials and 14d+30% spool. Cutoff/replay, aligned hash barriers, separate
-  FULL_SYNC/MARKET_READY and protected snapshots gate human signed forward-only
-  handover. Home alone mutates; active Iran offers rehome atomically. Per-site quota
-  budgets and field-level restrictive-wins require human conflict resolution, never LWW.
+- 2026-09-02 | Maximal `P2-10` runs on final FI/IR hosts and isolated existing storage:
+  every requirement/mutation/fault needs executed evidence, never sampling. It covers
+  465 baseline plus P2/P3, two 24h soaks, 14d+30% load, ten handovers, three DNS cycles,
+  reboot/restore/provider smoke and zero skipped/orphan/unknown diff. This is an
+  architecture/high-risk gate, not a blanket hotfix gate.
+- 2026-09-02 | `P2-09`: Product OTP/session are local and generation-bound; switches
+  force Product, not Console, re-login. Stable-ID notification/read and final Messenger
+  state/media sync monotonically; Push/cache/realtime/draft/incomplete upload stay local.
+- 2026-09-02 | `P2-06..08`: independent local-password/TOTP Consoles use 24h sessions
+  and narrow actuators. One DNS-only A/TTL≤30s has Finland-only human Arvan control.
+  Fixed site/human Web role, Finland Telegram, 30/90s peer observation, durable control,
+  signed receipts and vector barriers prevent split-brain without stopping Bot.
+- 2026-09-02 | `P1-00..06`: twelve behavior/provenance families and six evidence gaps
+  define parity. Finland has two Web replicas, singleton jobs, split Bot and separate
+  app/Market DBs; its shared app DB removes internal sync. Deterministic merge and
+  465/465 differential, browser/load/24h/restore proof block unknown or financial drift.
+- 2026-09-02 | `P1-07..08`: initial cutover is 90m/4m/TTL30s with human checkpoints,
+  exclusive Bot handoff and old-edge proxy. Target DB stays canonical after first write;
+  closure needs `P2-11`, 7d quarantine, staggered retirement and replacement backups.
+- 2026-09-02 | `P2-00..05`: typed ownership and versioned streams use atomic ACK,
+  blocking gaps/rejections and immutable repair. Signed encrypted storage has split
+  credentials and 14d+30% spool. Aligned hashes plus distinct `FULL_SYNC/MARKET_READY`
+  gate signed forward-only handover. Home alone mutates; Iran offers rehome atomically;
+  restrictive field conflicts require humans, never LWW.
 - 2026-09-01 | No provisioning, deploy, migration, cleanup, DNS or cutover occurs
   before full-plan approval; production Stages still need explicit authorization.
