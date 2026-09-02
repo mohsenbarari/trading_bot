@@ -60,6 +60,8 @@ Discover optional memory without loading it. Entries here are not default loads.
 - None enabled.
 
 ### Enabled areas
+- `areas/two-server-refactor.md` — load for the two-server master plan, Finland
+  consolidation/runtime/data merge, human Writer handover, or its cutover gates.
 - `areas/infrastructure.md` — load for Finland/Iran server inventory,
   provisioning, host identity, SSH access, failover topology, or cutover work.
 - `areas/frontend-uiux.md` — load for Vue/PWA UI/UX refactoring, Design System V2, Figma/Sites evidence, or shared UI changes that can affect protected surfaces.

@@ -895,7 +895,7 @@ Rollback: تا closure، schema و adapter قدیمی قابل‌خواندن م
 
 ## `P1-05` — rehearsal ادغام دادهٔ دو Finland
 
-وضعیت: `PROPOSED`
+وضعیت: `PROPOSED — قرارداد سناریویی merge در 2026-09-02 تأیید شد؛ اجرا مسدود است`
 
 Dependency: `P1-04`، `P2-05` و `P4-04`. مجوز production data فقط read-only backup
 و طبق قرارداد امنیتی جداگانه است.
@@ -906,6 +906,22 @@ Dependency: `P1-04`، `P2-05` و `P4-04`. مجوز production data فقط read-o
 می‌شوند و merge دقیقاً مانند روز cutover اجرا می‌شود. تا زمانی که اجرای دوم همان
 نتیجه، hash و conflict report را نسازد، مهاجرت آماده نیست.
 
+### سناریوهای تأییدشده
+
+| وضعیت اولیه و رخداد | رفتار مورد انتظار و مانع ایمنی |
+| --- | --- |
+| backup واقعی برای rehearsal لازم است | snapshot رمزنگاری و root-only در محیط ایزوله restore و خود restore اثبات می‌شود؛ data/secret وارد Git یا log نمی‌شود و گرفتن production backup مجوز جدا می‌خواهد. |
+| دو copy از 23 جدول shared وجود دارد | انتخاب canonical براساس table/row authority و business hash است؛ union کل DB، timestamp-only و LWW ممنوع‌اند. |
+| 33 جدول local وارد target می‌شوند | Web session/Messenger/upload/Push از Web source و Telegram queue/FSM/delivery از Bot source؛ mixed table فقط با mapping؛ bookkeeping rebuild می‌شود. |
+| session معتبر Web وجود دارد | session و key امن حفظ می‌شوند؛ OTP/lock/cache موقت Redis مهاجرت نمی‌کند و کاربر فقط برای state موقت دوباره اقدام می‌کند. |
+| ID محلی collision دارد | shared ID معتبر حفظ؛ collision با mapping قدیم→جدید و بازنویسی همهٔ FKها حل؛ تطبیق با نام/ID تصادفی ممنوع است. |
+| media منتقل می‌شود | content hash، owner و FK اثبات؛ missing referenced blob blocker و orphan بی‌مرجع quarantine است؛ hash مساوی رکوردهای با owner متفاوت را یکی نمی‌کند. |
+| conflict مالی/موجودی/settlement دیده می‌شود | runner متوقف و مورد report/quarantine می‌شود؛ پذیرش فقط با صفر conflict unresolved است. |
+| runner در میانه kill می‌شود | checkpoint resume idempotent است؛ دو clean run و یک kill/resume باید business hash و conflict report یکسان بسازند. |
+| target clone بالا می‌آید | Web/Bot و 12 خانوادهٔ رفتار با providerهای fake/off اجرا می‌شوند؛ هیچ Telegram/SMS/WebPush/DNS/Object Storage production side effect مجاز نیست. |
+| زمان cutover سنجیده می‌شود | کار حجیم pre-stage؛ final drain/delta/validation/activation حداکثر 4 دقیقه freeze و کل window حداکثر 90 دقیقه؛ تجاوز یعنی redesign. |
+| Market archive حاضر است | Market DB با app DB merge نمی‌شود؛ فقط reference/هماهنگی اینجا و migration کامل در بخش سوم است. |
+
 ### Task Card فنی Cursor
 
 1. برای هر source، شناسهٔ host/database، snapshot time، WAL/binlog boundary، schema
@@ -914,7 +930,8 @@ Dependency: `P1-04`، `P2-05` و `P4-04`. مجوز production data فقط read-o
 2. از هر backup یک restore مستقل روی محیط ایزوله انجام و با query read-only، schema،
    row count، FK و sample hash صحت restore را ثابت کند. «backup command موفق شد»
    به‌تنهایی کافی نیست.
-3. table-by-table policy بنویسد: source/authority، stable identity، duplicate key،
+3. table-by-table و در صورت نیاز row-partition policy بنویسد: source/authority،
+   business hash، stable identity، duplicate key،
    FK mapping، sequence strategy، merge rule، conflict rule، excluded field، media
    rule، verification query و rollback consequence.
 4. users/account/relation/invitation و identityهای مشترک را پیش از dependentها حل
@@ -925,18 +942,21 @@ Dependency: `P1-04`، `P2-05` و `P4-04`. مجوز production data فقط read-o
 6. money، inventory، settlement، balance و trade conflict را فقط report/quarantine
    کند. auto-sum، overwrite و last-write-wins بدون rule مصوب ممنوع است.
 7. media/upload/object reference را با hash، owner entity و existence check منتقل
-   کند؛ orphan، collision و missing blob باید report جدا داشته باشد.
+   کند؛ missing referenced blob blocker، orphan بی‌مرجع quarantine و collision
+   report جدا دارد؛ content hash برابر به‌تنهایی identity رکورد نیست.
 8. sequence/identity، FK، unique constraint، timezone/collation و extensionها را
    پس از load validate و sequenceها را بالاتر از max معتبر تنظیم کند.
-9. Redis را از state دائمی جدا کند. فقط queue/session/cache state دارای قرارداد
-   مصوب migrate شود؛ cache قابل‌بازسازی flush/rebuild می‌شود و source truth نیست.
+9. session معتبر PostgreSQL و secret لازم آن را حفظ کند؛ Redis را از state دائمی
+   جدا کند. OTP/lock/cache موقت migrate نمی‌شود؛ durable queue فقط طبق قرارداد
+   PostgreSQL منتقل و cache قابل‌بازسازی flush/rebuild می‌شود.
 10. migration/merge runner را resumable، checkpointed، deterministic و idempotent
     بسازد؛ kill/restart در میانه نباید duplicate یا state نیمه‌معتبر ایجاد کند.
 11. پس از merge، row count، canonical business hash، balance/inventory invariant،
     orphan query، event/outbox count، media hash و نمونهٔ behavior contract را اجرا
     کند.
-12. همان input را دو بار از صفر و یک‌بار به‌صورت resume اجرا کند؛ output hash و
-    conflict report باید یکسان باشند.
+12. همان input را دو بار از صفر و یک‌بار به‌صورت kill/resume اجرا کند؛ output hash
+    و conflict report باید یکسان باشند. زمان full window و final freeze را جدا
+    بسنجد و به‌ترتیب حدود 90 دقیقه و 4 دقیقه را رد نکند.
 13. app و Bot target را با side effect خارجی خاموش روی clone بالا بیاورد و full
     parity smoke را اجرا کند.
 14. rollback rehearsal را با نابودکردن فقط target آزمایشی، restore مجدد source
@@ -950,6 +970,12 @@ Dependency: `P1-04`، `P2-05` و `P4-04`. مجوز production data فقط read-o
 - دو اجرای clean و یک resume نتیجهٔ business-equivalent بدهند.
 - مالک conflict policy و report نهایی را تأیید کند؛ این Stage هیچ writer تولید را
   freeze، migrate یا تغییر نمی‌دهد.
+
+Gate طراحی در 2026-09-02 تأیید شد: canonical مبتنی بر table/row authority، حفظ
+session معتبر، کنارگذاشتن Redis موقت، ID mapping، media blocker/quarantine، صفر
+conflict مالی، دو clean + یک kill/resume، سقف 4/90 دقیقه، جدایی Market و الزام
+مجوز جدا برای production backup پذیرفته شدند. این تأیید مجوز backup، restore،
+کپی PII، اجرای runner یا freeze تولید نیست.
 
 Rollback: target rehearsal disposable است؛ source backupها immutable و تا پایان
 cutover + retention محافظت می‌شوند.
