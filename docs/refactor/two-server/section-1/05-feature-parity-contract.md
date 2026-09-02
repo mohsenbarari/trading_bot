@@ -1,6 +1,6 @@
 # Feature Parity Contract
 
-Status: static behavior seeds complete; scenario characterization and owner review open
+Status: owner review approved; scenario characterization and evidence resolution open
 
 ## Definition of parity
 
@@ -214,7 +214,7 @@ At minimum the target must preserve:
 | current runtime child/poller/timer owner seed manifest | `COMPLETE` |
 | exact target compose/credential/readiness binding | future `P1-03` |
 | persona/tier/time/failure scenario records | `OPEN` |
-| owner approval of human-readable scenario contract | `OPEN` |
+| owner approval of human-readable scenario contract | `COMPLETE — 2026-09-02` |
 | current-vs-target differential execution | future `P1-06` |
 
 `P1-00` becomes complete only after the open current-state items have evidence or
@@ -236,3 +236,7 @@ The human review is limited to these four assertions:
 
 Approval of this gate freezes the human-readable baseline; it is not approval to
 implement, deploy, delete a handler or waive any evidence gap.
+
+**Decision (2026-09-02): APPROVED.** The owner accepted all four assertions. The
+six evidence items and concrete scenario records remain mandatory technical
+gates; this approval grants no operational or implementation authorization.

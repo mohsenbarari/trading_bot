@@ -484,7 +484,7 @@ docs/refactor/two-server/section-1/
 
 ## `P1-00` — Current-State Architecture و Behavior Baseline
 
-وضعیت: `IN_PROGRESS — ممیزی فنی آمادهٔ بازبینی مالک؛ Gate انسانی باز است`
+وضعیت: `IN_PROGRESS — Gate انسانی در 2026-09-02 تأیید شد؛ تکمیل شواهد و rehearsal باز است`
 
 Dependency: تأیید همین پلن؛ برای مشاهدهٔ runtime، مجوز read-only جداگانه.
 
@@ -544,7 +544,9 @@ Dependency: تأیید همین پلن؛ برای مشاهدهٔ runtime، مج�
 
 ### Gate انسانی و معیار خروج
 
-- مالک صریحاً Dossier، Drift Register و Feature Parity Contract را تأیید کند.
+- مالک در 2026-09-02، Dossier، Drift Register، قرارداد دوازده خانوادهٔ رفتاری،
+  حفظ تفاوت‌های Web/Bot و provenance، رسیدگی اجباری به شش شکاف مدرک و baseline
+  مالکیت runtime را تأیید کرد. این تأیید فقط baseline را freeze می‌کند.
 - هیچ service، writer، scheduler، Telegram identity یا data store ناشناخته نماند.
 - هر secret فقط با نام و محل mount دیده شود و audit هیچ write خارجی نداشته باشد.
 - هر behavior جاری یا contract/test دارد یا blocker مصوب؛ «احتمالاً استفاده

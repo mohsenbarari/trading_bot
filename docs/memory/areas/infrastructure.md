@@ -1,5 +1,9 @@
 # Infrastructure
 
+- 2026-09-02 | Owner approved the `P1-00` human baseline: twelve behavior
+  families, preserved Web/Bot distinctions and provenance, mandatory evidence
+  for six gaps, and the runtime-ownership seed. Exact target binding stays in
+  `P1-03`; approval authorizes no implementation or operation.
 - 2026-09-01 | Offer keeps immutable Web/Bot/Internal origin separate from
   `home_site`. Trade snapshots Offer origin, Request origin, execution surface,
   policy version and policy-sensitive actor/role/tier context so topology or

@@ -1,11 +1,11 @@
 # Section 1 Stage Ledger
 
-Last updated: 2026-09-01 UTC
+Last updated: 2026-09-02 UTC
 Plan branch: `plan/two-server-refactor-v1`
 
 | Stage | Status | Gate | Primary output |
 | --- | --- | --- | --- |
-| `P1-00` | `IN_PROGRESS` | owner review pending | current-state dossier and blocker register |
+| `P1-00` | `IN_PROGRESS` | owner review approved; evidence and rehearsal gates open | current-state dossier and blocker register |
 | `P1-01` | `PROPOSED` | blocked by `P1-00` and cleanup approval | cleanup/retention execution |
 | `P1-02` | `PROPOSED` | blocked by `P1-00` | topology-neutral configuration |
 | `P1-03` | `PROPOSED` | dependencies not complete | target runtime topology |
@@ -47,14 +47,14 @@ Completed technical evidence:
 
 ## Why `P1-00` is not `COMPLETE`
 
-The technical dossier is ready for review, but the Stage contract deliberately
-requires more than a host inventory. These gates remain open:
+The owner approved the dossier, drift register, twelve-family behavior baseline,
+Web/Bot contracts and runtime-ownership seed on 2026-09-02. The Stage contract
+still requires more than owner approval. These technical gates remain open:
 
-1. The owner has not yet approved the dossier, drift register and parity contract.
-2. Every discovered route/handler/job has a unique family seed and none is
+1. Every discovered route/handler/job has a unique family seed and none is
    unclassified, but 6 items need direct evidence resolution and concrete
    persona/tier/time/failure scenario records.
-3. Baseline deploy/restart/backup/restore duration needs an observed rehearsal;
+2. Baseline deploy/restart/backup/restore duration needs an observed rehearsal;
    production operations were intentionally outside this audit.
 
 Until those gates close, `P1-01` may be reviewed but no cleanup is authorized and
