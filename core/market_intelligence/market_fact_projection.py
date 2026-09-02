@@ -98,8 +98,8 @@ def initialize_export_ledger(connection: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS market_fact_export_history_event_idx
         ON market_fact_export_history(event_key,fact_revision);
-        CREATE INDEX IF NOT EXISTS idx_market_observations_export_available
-        ON market_observations(available_at_utc DESC,id DESC);
+        CREATE INDEX IF NOT EXISTS idx_market_observations_export_event_time
+        ON market_observations(event_time_utc DESC,id DESC);
         CREATE TABLE IF NOT EXISTS market_xau_model_input_buckets (
             bucket_number INTEGER PRIMARY KEY,
             selected_event_key BLOB NOT NULL UNIQUE,
@@ -347,11 +347,20 @@ def _pending_export_rows(
     # The recency index makes this a bounded lookup instead of sorting the full
     # multi-million-row candidate set on every live cycle.
     rows = select(
-        "AND o.available_at_utc >= "
+        "AND o.event_time_utc >= "
         "strftime('%Y-%m-%dT%H:%M:%SZ','now','-10 minutes') "
-        "ORDER BY o.available_at_utc DESC,o.id DESC",
+        "ORDER BY CASE o.event_type WHEN 'OFFER' THEN 0 "
+        "WHEN 'TRADE' THEN 1 ELSE 2 END,"
+        "o.event_time_utc DESC,o.id DESC",
         (),
         max_rows,
+    )
+    rows.sort(
+        key=lambda row: (
+            str(row["event_time_utc"]),
+            {"OFFER": 0, "TRADE": 1}.get(str(row["event_type"]), 2),
+            bytes(row["event_key"]),
+        )
     )
     remaining = max_rows - len(rows)
     if remaining:
@@ -370,13 +379,6 @@ def _pending_export_rows(
                 remaining,
             )
         )
-    rows.sort(
-        key=lambda row: (
-            str(row["event_time_utc"]),
-            {"OFFER": 0, "TRADE": 1}.get(str(row["event_type"]), 2),
-            bytes(row["event_key"]),
-        )
-    )
     return rows
 
 

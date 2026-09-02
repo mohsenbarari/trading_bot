@@ -514,6 +514,108 @@ class Stage8TransportTests(unittest.TestCase):
             self.assertEqual(str(rows[0]["available_at_utc"]), fresh)
             market.close()
 
+    def test_pending_export_prioritizes_fresh_offer_before_dependent_trade(self):
+        with tempfile.TemporaryDirectory() as directory:
+            market = connect_market_store(Path(directory) / "market.sqlite3")
+            initialize_market_store(market)
+            initialize_export_ledger(market)
+            now = datetime.now(timezone.utc).replace(microsecond=0)
+            offer_time = (now - timedelta(seconds=10)).isoformat().replace(
+                "+00:00", "Z"
+            )
+            trade_time = now.isoformat().replace("+00:00", "Z")
+            offer_key = derive_event_key("stage8-export-priority", "fresh-offer")
+            common = {
+                "source_code": "GROUP_2",
+                "source_family": "GROUP",
+                "instrument": "COIN_IMAM",
+                "market_label": "GROUP_COIN_IMAM",
+                "settlement_term": "TOMORROW",
+                "trade_form": "PHYSICAL",
+                "side": "SELL",
+                "price_unit": "PROJECT_THOUSAND_TOMAN",
+                "currency": "TOMAN",
+                "quantity_unit": "COIN_COUNT",
+                "parser_version": "stage8-test-v1",
+            }
+            upsert_observation(
+                market,
+                MarketObservation(
+                    event_key=offer_key,
+                    event_time_utc=offer_time,
+                    available_at_utc=trade_time,
+                    event_type="OFFER",
+                    price="228000",
+                    quantity="8",
+                    **common,
+                ),
+            )
+            upsert_observation(
+                market,
+                MarketObservation(
+                    event_key=derive_event_key(
+                        "stage8-export-priority", "fresh-trade"
+                    ),
+                    event_time_utc=trade_time,
+                    available_at_utc=trade_time,
+                    event_type="TRADE",
+                    price="228000",
+                    quantity="8",
+                    attributes={"root_offer_event_key": offer_key.hex()},
+                    **common,
+                ),
+            )
+            market.commit()
+
+            rows = _pending_export_rows(market, max_rows=1)
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(str(rows[0]["event_type"]), "OFFER")
+            self.assertEqual(bytes(rows[0]["event_key"]), offer_key)
+            market.close()
+
+    def test_pending_export_keeps_fresh_rows_ahead_of_backlog_in_return_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            market = connect_market_store(Path(directory) / "market.sqlite3")
+            initialize_market_store(market)
+            initialize_export_ledger(market)
+            now = datetime.now(timezone.utc).replace(microsecond=0)
+            old = (now - timedelta(days=2)).isoformat().replace("+00:00", "Z")
+            fresh = now.isoformat().replace("+00:00", "Z")
+            for identity, timestamp in (("old", old), ("fresh", fresh)):
+                upsert_observation(
+                    market,
+                    MarketObservation(
+                        event_key=derive_event_key(
+                            "stage8-export-return-order", identity
+                        ),
+                        source_code="GROUP_1",
+                        source_family="GROUP",
+                        event_time_utc=timestamp,
+                        available_at_utc=timestamp,
+                        instrument="COIN_IMAM",
+                        market_label="GROUP_COIN_IMAM",
+                        settlement_term="CASH",
+                        trade_form="PHYSICAL",
+                        event_type="OFFER",
+                        side="SELL",
+                        price="228000",
+                        price_unit="PROJECT_THOUSAND_TOMAN",
+                        currency="TOMAN",
+                        quantity="8",
+                        quantity_unit="COIN_COUNT",
+                        parser_version="stage8-test-v1",
+                    ),
+                )
+            market.commit()
+
+            rows = _pending_export_rows(market, max_rows=2)
+
+            self.assertEqual(
+                [str(row["event_time_utc"]) for row in rows], [fresh, old]
+            )
+            market.close()
+
     def test_xau_export_keeps_only_latest_real_quote_per_closed_fifteen_second_bucket(self):
         with tempfile.TemporaryDirectory() as directory:
             market = connect_market_store(Path(directory) / "market.sqlite3")
