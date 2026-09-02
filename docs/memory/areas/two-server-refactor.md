@@ -1,5 +1,9 @@
 # Two-Server Refactor
 
+- 2026-09-02 | Owner approved `P2-07`: keep `coin.gold-trade.ir` as one DNS-only A
+  record with TTL≤30s and no AAAA/CNAME/proxy. Human Arvan changes use a Finland-only
+  root-mounted token, CAS-like plan/apply, multi-layer signed proof and manual partition
+  receipts; panel fallback is audited, and DNS never changes Writer automatically.
 - 2026-09-02 | Owner approved `P2-06`: each site has an independent Operations
   Console on a product-independent HTTPS hostname with no IP allowlist. Local
   username/password/Google-Authenticator-compatible TOTP, absolute 24h sessions,

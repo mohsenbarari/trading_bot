@@ -1996,16 +1996,155 @@ creation، deploy، firewall، role change، sync، cleanup یا هیچ اقدا
 
 ## `P2-07` — DNS control و route verification
 
-وضعیت: `PROPOSED؛ D-02 تثبیت شده و طراحی/اجرا باز است`
+وضعیت: `PROPOSED — قرارداد سناریویی DNS در 2026-09-02 تأیید شد؛ اجرا مسدود است`
 
-- فقط یک A record allowlisted بین دو IP تأییدشده قابل تغییر است.
-- dashboard درخواست را plan و human confirm می‌کند؛ backend با token root-only
-  provider API را CAS-like اجرا می‌کند.
-- مقدار unexpected، multi-record یا provider ambiguity mutation را block می‌کند.
-- موفقیت API کافی نیست؛ authoritative DNS، resolverهای منتخب و signed site probe
-  باید destination و writer generation درست را ثابت کنند.
-- هر تغییر before/after، operator، request id و provider receipt دارد.
-- fallback دستی پنل provider مستند است ولی bypass audit نیست؛ نتیجه باید ثبت شود.
+### مبنای واقعی و مرز اختیار
+
+- دامنهٔ پایدار محصول `coin.gold-trade.ir` باقی می‌ماند؛ تغییر نام دامنه migration
+  جداست، زیرا linkهای Bot/PWA، CORS، certificate، test و deploy فعلی به آن وابسته‌اند.
+- در repository فعلی DNS controller آروان وجود ندارد. چند مسیر deploy/test hostname
+  را ثابت کرده‌اند و `docker-compose.yml` در چند service آن را با `extra_hosts` به IP
+  پیش‌فرض نگاشت می‌کند؛ این پاسخ محلی DNS proof نیست و defaultهای قدیمی target نیستند.
+- DNS فقط route کاربران است، نه authority یا Writer. هیچ network event، timeout، sync
+  state، resolver answer یا provider webhook حق تغییر DNS یا role خودکار ندارد؛ reverse
+  خودکار نیز ممنوع است.
+- تغییر DNS یک workflow چهاربخشی `PLAN → HUMAN CONFIRM → ARVAN UPDATE → VERIFY` است.
+  ساخت plan و probe read-only هستند؛ فقط operator دارای TOTP تازه و transition معتبر
+  mutation را اجرا می‌کند.
+
+### DNS Target Registry و secret placement
+
+- registry محلی root-owned و نسخه‌دار فقط zone/record ID دقیق `coin.gold-trade.ir`،
+  نوع `A`، Finland IP تأییدشده `65.109.214.203`، Iran IP پس از inventory واقعی، TTL
+  حداکثر ۳۰ ثانیه و mode برابر `DNS_ONLY` را می‌پذیرد؛ هیچ runtime default ندارد.
+- رکورد محصول دقیقاً یک `A` است. `AAAA`، `CNAME`، چند A، wildcard ambiguity، Arvan
+  proxy/CDN یا value خارج از دو IP ثبت‌شده `DNS_DRIFT` و blocker هستند. این target
+  restriction با حذف IP allowlist ورود Dashboard در `P2-06` ارتباطی ندارد.
+- TTL همیشه و پیش از بحران حداکثر ۳۰ ثانیه می‌ماند؛ پایین‌آوردن TTL هنگام partition
+  cacheهای دارای TTL قبلی را اصلاح نمی‌کند. deviation دائماً alert و readiness را می‌بندد.
+- hostname ثابت Operations Consoleهای Finland/Iran و رکوردهای ACME challenge هرگز
+  target این command نیستند.
+- token تغییر A record فقط در secure mount ریشه‌ای Operations Console فلاند است؛
+  ایران فقط DNS probe/verification دارد. token در Git، `.env`، Docker environment،
+  browser، log یا artifact قرار نمی‌گیرد و adapter حق mutation هیچ record دیگری ندارد.
+- credential محلی موجود پیش از انتقال فقط بدون نمایش secret از نظر scope/validity
+  ممیزی می‌شود؛ اگر least privilege کافی نداشته باشد، credential اختصاصی جایگزین لازم
+  است. نبود adapter فلاند مسیر اضطراری پنل انسانی آروان را فعال می‌کند، نه token دوم.
+
+### قرارداد plan، apply و اثبات
+
+- `DNSChangePlan` حداقل transition ID، writer generation فعلی/بعدی، source/destination،
+  record identity، expected before value/fingerprint، desired value، TTL، operator،
+  expiry و idempotency key دارد. Plan منقضی، مربوط به generation دیگر یا با state تازهٔ
+  provider ناسازگار پیش از mutation باطل می‌شود.
+- پیش از apply، adapter مقدار provider را دوباره می‌خواند. فقط exact expected-before
+  اجازهٔ write دارد؛ CAS-like read/compare/write/read اجرا می‌شود و نبود CAS واقعی
+  provider با verification و drift detection جبران می‌شود.
+- timeout پاسخ مبهم است و retry کور ممنوع: read-back اگر old باشد همان idempotency key
+  قابل retry، اگر target باشد apply موفق و verification ادامه‌دار، و اگر مقدار سوم/
+  چندگانه/نامعلوم باشد `DNS_AMBIGUOUS` و توقف کامل است.
+- پاسخ موفق API فقط `PROVIDER_APPLIED` است، نه `DNS_READY`. تمام authoritative
+  nameserverهای ثبت‌شده، دست‌کم دو resolver مستقل ایران و دو resolver مستقل Finland،
+  و HTTPS probe امضاشده باید target یکسان را ثابت کنند.
+- proof مستقیم destination با IP pinned فقط service/TLS/site readiness را می‌سنجد؛
+  proof مسیر عمومی بدون `/etc/hosts`، Docker `extra_hosts`، proxy اجباری یا DNS override
+  اجرا می‌شود و `site_id`، transition و generation مورد انتظار را از endpoint امضاشده
+  می‌گیرد. TLS verification و SNI دامنهٔ واقعی هرگز غیرفعال نمی‌شوند.
+- پاسخ‌ها باید در دو sample متوالی با فاصلهٔ ده ثانیه برابر باشند و proof نهایی هنگام
+  activation حداکثر سی ثانیه عمر داشته باشد. under-partition هر سایت proof محلی را در
+  `DNS Verification Receipt` canonical و امضاشده صادر و عامل فایل Finland را دستی به
+  ایران منتقل می‌کند؛ bucket/SSH شرط Gate نیست.
+- `DNS_READY` به transition/target/generation مشخص bind و پس از مصرف، drift، expiry یا
+  plan جدید باطل می‌شود. هیچ success کلی و قابل reuse میان transitionها وجود ندارد.
+
+### ترتیب با Writer handover
+
+مقصد پیش از DNS فقط `ARMED/read-only` است. ترتیب مصوب هر جهت این است:
+
+```text
+source drain + hard fence
+  → signed Fence Receipt at destination
+  → destination pinned readiness/TLS proof
+  → human DNS plan/confirm/apply
+  → provider + authoritative + resolver + routed signed proof
+  → fresh DNS_READY receipt at destination
+  → human destination activation
+```
+
+این ترتیب عمداً بازهٔ صفر Writer/read-only دارد و split-brain را به availability
+ترجیح می‌دهد. client دارای DNS cache قدیمی به source fenced می‌رسد و mutation با
+`WRITER_MOVED` رد می‌شود؛ source حق forward/proxy یا replay خودکار write را ندارد.
+
+هر دو سرور باید پیش از standby readiness گواهی معتبر `coin.gold-trade.ir` داشته باشند.
+صدور/تمدید گواهی standby نباید به route شدن product DNS به آن وابسته باشد؛ DNS-01 یا
+راه معادل کنترل‌شده لازم است و credential challenge از token تغییر A record جداست.
+
+### سناریوهای تأییدشده
+
+| وضعیت و رخداد | رفتار الزامی | مانع ایمنی و evidence |
+| --- | --- | --- |
+| اتصال عادی، Finland Writer | expected/provider/authoritative/resolver/signed route همگی Finland را نشان می‌دهند | اختلاف هر لایه `DRIFT/PROPAGATING` است؛ green کلی جای detail را نمی‌گیرد |
+| انتقال `FI→IR` | Finland fenced، Receipt در Iran verify، DNS از Console Finland انسانی تغییر، proof Finland دستی به Iran و proof محلی Iran ترکیب، سپس activation انسانی است | readiness اضطراری `P2-05/P3`، Fence Receipt، TOTP و DNS receipt تازه لازم‌اند؛ API success کافی نیست |
+| reconnect و `IR→FI` | ابتدا `FULL_SYNC/MARKET_READY`، سپس drain/final parity/Receipt، تغییر و اثبات DNS و activation Finland انجام می‌شود | sync/model/parity و DNS دو مانع مستقل‌اند و هیچ‌کدام دیگری را imply نمی‌کند |
+| API timeout یا پاسخ گم می‌شود | write دوباره حدس زده نمی‌شود؛ provider/authoritative read-back old/target/ambiguous را تعیین می‌کند | مقدار target همان apply را تکمیل، old retry idempotent و مقدار سوم همه‌چیز را block می‌کند |
+| provider target است ولی DNS پخش نشده | state `DNS_PROPAGATING` و مقصد inactive می‌ماند؛ resolver/name server عقب‌مانده دیده می‌شود | تا دو sample کامل و proof تازه `DNS_READY` ساخته نمی‌شود |
+| record دستی یا مهاجم تغییرش می‌دهد | `DNS_DRIFT` و alert بحرانی؛ Writer موجود خودکار demote نمی‌شود و عامل route را repair می‌کند | DNS authority نیست؛ before/after/discovery/repair در Audit می‌ماند |
+| API فلاند در دسترس نیست | عامل پنل آروان را به‌صورت fallback به کار می‌برد، سپس Console change را `MANUAL_PROVIDER_PANEL` reconcile و verify می‌کند | panel bypass نیست؛ transition/reason/TOTP/read-back/full proof و Audit لازم‌اند |
+| دو کلیک یا plan رقیب | همان idempotency نتیجهٔ قبلی را برمی‌گرداند؛ target/generation/fingerprint متفاوت conflict است | تنها یک record receipt برای transition؛ plan منقضی/مصرف‌شده رد می‌شود |
+| `extra_hosts` یا resolver دستکاری‌شده target را می‌گوید | فقط local diagnostic است و در proof set پذیرفته نمی‌شود | verifier مستقل public/authoritative و signed routed probe لازم است |
+| DNS پس از activation برمی‌گردد | alert فوری و route repair انسانی؛ Writer درست به کار ادامه می‌دهد | auto role/DNS rollback ممنوع؛ standby قدیمی mutation را رد می‌کند |
+
+### State machine و Audit
+
+```text
+IDLE → PLANNED → CONFIRMED → APPLYING
+     → PROVIDER_APPLIED → PROPAGATING → DNS_READY → CONSUMED
+```
+
+`EXPIRED`، `DRIFT` و `AMBIGUOUS` stateهای blocking هستند. timeout فقط request/UI را
+منقضی می‌کند و هیچ route یا role را تغییر نمی‌دهد. Audit append-only شامل operator،
+transition/idempotency، record ID، before/after بدون secret، plan hash، API request/
+response metadata، provider receipt، تمام observationها و final result است.
+
+### Task Card فنی Cursor
+
+1. با operation کاملاً read-only وضعیت واقعی zone/record ID/type/value/TTL/proxy،
+   A/AAAA/CNAME/wildcard و authoritative NSها را inventory و Iran IP را با inventory
+   سرور تطبیق دهد؛ هیچ credential value را چاپ/hash/copy نکند.
+2. همهٔ hard-code/default/`extra_hosts`/local resolver/proxy و health scriptهایی را که
+   می‌توانند proof کاذب بسازند فهرست و public route probe مستقل تعریف کند؛ حذف/تغییر
+   آنها در بخش deploy هماهنگ می‌شود.
+3. DNS Target Registry بدون default و schemaهای نسخه‌دار `DNSChangePlan`، provider
+   fingerprint، observation، `DNSVerificationReceipt` و Audit را طراحی کند.
+4. Arvan adapter محدود `inspect/plan/apply/read-back/verify` را پشت actuator فلاند
+   بسازد؛ command عمومی create/delete/update record، token در app env و response حاوی
+   secret ممنوع است.
+5. CAS-like compare، idempotency، expiry، transition/generation binding و state machine
+   را durable کند؛ crash/timeout/restart در هر مرز فقط state قابل reconcile بسازد.
+6. verifier authoritative/resolver و endpoint signed site probe را مستقل در هر سایت
+   بسازد؛ SNI/TLS، pinned readiness، public routed proof، clock skew و receipt انتقال
+   دستی را تست کند.
+7. Wizard `P2-06` را برای preview کامل before/after، عبارت transition، TOTP، progress،
+   علت block، provider-panel reconciliation و download/upload receipt متصل کند.
+8. گواهی مشترک product hostname و renewal مستقل standby را بدون route production
+   rehearsal کند؛ ACME secret از A-record token جدا و expiry در readiness دیده شود.
+9. unit/integration/browser/fault tests را برای direct API bypass، چند کلیک، plan
+   رقیب، API 2xx با read-back غلط، timeout-before/after-write، TTL>30، multiple A/AAAA/
+   CNAME/proxy، stale/split resolver، `/etc/hosts` poisoning، bad TLS/site/generation،
+   panel drift و DNS rollback پس از activation اجرا کند.
+
+Gate خروج: فقط `coin.gold-trade.ir` میان دو IP inventory‌شده با TTL≤۳۰ و DNS-only
+قابل تغییر است؛ هر apply اقدام انسانی audit‌شده و idempotent دارد؛ success آروان بدون
+authoritative/resolver/signed-route proof مقصد را فعال نمی‌کند؛ partition با Receipt
+دستی قابل عبور است و هیچ timeout، drift، refresh، panel action یا DNS rollback Writer
+را خودکار تغییر نمی‌دهد.
+
+Gate طراحی در 2026-09-02 تأیید شد: حفظ `coin.gold-trade.ir`، یک A record DNS-only بدون
+AAAA/CNAME/proxy و TTL حداکثر ۳۰ ثانیه، token تغییر DNS فقط در secure mount فلاند،
+پنل آروان به‌عنوان fallback انسانی، verification چندلایه و دو-sample، Receipt امضاشده
+در partition، TLS معتبر دو مقصد و ممنوعیت local override به‌عنوان proof پذیرفته شدند.
+این تأیید مجوز credential read/move/create، Arvan API call، DNS/TLS/hostname mutation،
+deploy، role change، probe production یا هیچ اقدام production نیست.
 
 ## `P2-08` — state machine اتصال، قطعی و اتصال مجدد
 

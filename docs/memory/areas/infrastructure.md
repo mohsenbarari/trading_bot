@@ -1,5 +1,8 @@
 # Infrastructure
 
+- 2026-09-02 | DNS mutation authority stays on Finland: one root-mounted least-privilege
+  Arvan token can change only the registered product A record; Iran verifies only.
+  Provider-panel fallback remains human, reconciled and fully verified/audited.
 - 2026-09-01 | Arvan API is approved only for explicitly human-triggered DNS and
   required storage operations. Validate and least-privilege the existing local
   credentials, then move them from quarantine to a secure mount without exposure.
