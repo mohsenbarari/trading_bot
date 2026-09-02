@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import stat
 import threading
 from typing import Mapping
 
@@ -252,6 +253,23 @@ def _paths(*, mode: str, state_directory: Path) -> CoinProcessorPaths:
             else None
         )
     state_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    sqlite_tmp = state_directory / "sqlite-tmp"
+    if sqlite_tmp.is_symlink():
+        raise CoinProcessorError("coin_processor_sqlite_tmp_invalid")
+    sqlite_tmp.mkdir(mode=0o700, exist_ok=True)
+    sqlite_tmp_info = sqlite_tmp.stat()
+    if (
+        not stat.S_ISDIR(sqlite_tmp_info.st_mode)
+        or stat.S_IMODE(sqlite_tmp_info.st_mode) != 0o700
+        or sqlite_tmp_info.st_uid != os.geteuid()
+    ):
+        raise CoinProcessorError("coin_processor_sqlite_tmp_invalid")
+    # The container-wide /tmp is intentionally tiny. Large, indexed retention
+    # deletes can require a statement journal bigger than that tmpfs and SQLite
+    # then reports the misleading `database or disk is full`. Keep temporary
+    # spill files beside the processor state: private, durable for the duration
+    # of the statement, and on the data filesystem with monitored capacity.
+    os.environ["SQLITE_TMPDIR"] = str(sqlite_tmp)
     return CoinProcessorPaths(
         spool_directory=spool,
         staging_database=state_directory / "capture-staging.sqlite3",

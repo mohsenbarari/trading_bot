@@ -282,6 +282,19 @@ class MarketPipelineStage5CoinProcessorTests(unittest.TestCase):
                 ):
                     _paths(mode="live", state_directory=root / "state")
 
+    def test_paths_bind_sqlite_temp_files_to_private_processor_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "capture" / "account2").mkdir(parents=True)
+            environment = {
+                "MARKET_PIPELINE_CAPTURE_ROOT": str(root / "capture"),
+            }
+            with patch.dict(os.environ, environment, clear=False):
+                _paths(mode="fixture", state_directory=root / "state")
+                sqlite_tmp = root / "state" / "sqlite-tmp"
+                self.assertEqual(os.environ["SQLITE_TMPDIR"], str(sqlite_tmp))
+                self.assertEqual(sqlite_tmp.stat().st_mode & 0o777, 0o700)
+
     def test_expired_raw_exact_review_projects_and_marks_feedback_applied(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
