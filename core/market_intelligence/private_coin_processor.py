@@ -105,6 +105,7 @@ TEMPORARY_PUBLIC_MELTED_SOURCES = frozenset(
     {"MELTED_AGGREGATE", "MELTED_FLOW"}
 )
 TEMPORARY_PUBLIC_MELTED_RETENTION = timedelta(days=3)
+MAX_TEMPORARY_PUBLIC_PURGE_PER_TABLE_PER_CYCLE = 500
 _PREDICTION_REQUIRED_COLUMNS = frozenset(
     {
         "id",
@@ -655,9 +656,10 @@ def _purge_temporary_public_melted(
     purged = 0
     for table in ("market_observations", "market_observations_archive"):
         result = market.execute(
-            f"DELETE FROM {table} WHERE source_code IN ({placeholders}) "
-            "AND available_at_utc<=?",
-            parameters,
+            f"DELETE FROM {table} WHERE id IN ("
+            f"SELECT id FROM {table} WHERE source_code IN ({placeholders}) "
+            "AND available_at_utc<=? ORDER BY available_at_utc,id LIMIT ?)",
+            (*parameters, MAX_TEMPORARY_PUBLIC_PURGE_PER_TABLE_PER_CYCLE),
         )
         purged += max(0, int(result.rowcount or 0))
     return purged
