@@ -13,7 +13,7 @@ Plan branch: `plan/two-server-refactor-v1`
 | `P1-05` | `PROPOSED` | scenario/merge contract approved; dependencies and execution authorization open | deterministic data-merge rehearsal |
 | `P1-06` | `PROPOSED` | scenario/acceptance contract approved; dependencies and execution evidence open | differential staging acceptance |
 | `P1-07` | `PROPOSED` | scenario/cutover contract approved; dependencies, evidence and production authorization open | controlled cutover |
-| `P1-08` | `PROPOSED` | cutover, Iran standby and retention required | closure/decommission |
+| `P1-08` | `PROPOSED` | scenario/closure contract approved; cutover, Iran standby, evidence and per-resource authorization open | closure/decommission |
 
 ## `P1-00` execution receipt
 

@@ -16,6 +16,10 @@
   TTL, human checkpoints, exclusive Bot handoff, old-edge proxy without local
   writes, 2h observation and numeric rollback alerts. After target's first write,
   its DB stays canonical; production execution remains separately unauthorized.
+- 2026-09-02 | Owner approved `P1-08` design: closure waits for Iran `P2-11` and
+  7d quarantine; old edge needs 48h zero valid traffic then 24h monitoring. Old
+  Bot/Web hosts retire sequentially 24h apart; the 30d migration backup needs a
+  restore-tested replacement. Every deletion and WA-IR branch removal stays gated.
 - 2026-09-01 | Offer origin is immutable and separate from `home_site`; Trade
   snapshots Offer/Request origin, execution surface, policy version and sensitive
   actor/role/tier context.

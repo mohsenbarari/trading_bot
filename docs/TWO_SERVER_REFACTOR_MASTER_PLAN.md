@@ -211,6 +211,10 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
 - `D-12`: پس از اولین mutation تولیدی target، DB جدید canonical می‌ماند؛ rollback
   عادی فقط application rollback یا forward recovery روی همان DB است. بازگشت به
   DB قدیمی، restore یا reverse migration به runbook و مجوز جدا نیاز دارد.
+- `D-13`: closure فقط پس از `P2-11` و حداقل هفت روز quarantine است. old edge بعد
+  از ۴۸ ساعت ترافیک معتبر صفر و DNS سالم خاموش و ۲۴ ساعت پایش می‌شود؛ old Bot host
+  پیش از old Web host و با ۲۴ ساعت فاصله حذف می‌شود. backup مهاجرت پس از ۳۰ روز
+  فقط با جایگزین restore-tested و مجوز صریح نامزد حذف است.
 
 ### نیازمند تأیید در بازبینی این پلن
 
@@ -1189,7 +1193,7 @@ process stop، deploy یا cutover صادر نمی‌کند.
 
 ## `P1-08` — closure و حذف بدهی توپولوژی قدیمی
 
-وضعیت: `PROPOSED`
+وضعیت: `PROPOSED — قرارداد سناریویی closure در 2026-09-02 تأیید شد؛ اجرا و حذف مسدود است`
 
 Dependency: `P1-07`، `P2-11` و تأیید retention/backup/decommission. این dependency
 عمداً باعث می‌شود منابع قدیمی پیش از عملیاتی‌شدن Iran Standby حذف نشوند.
@@ -1200,6 +1204,21 @@ Dependency: `P1-07`، `P2-11` و تأیید retention/backup/decommission. ای�
 job، backup، monitoring، rollback یا runbookی به توپولوژی قدیمی وابسته نیست. سپس
 منابع در چند gate جدا بازنشسته می‌شوند تا راه بازگشت زودتر از موعد از بین نرود.
 
+### سناریوهای تأییدشده
+
+| وضعیت اولیه و رخداد | رفتار مورد انتظار و مانع ایمنی |
+| --- | --- |
+| هفت روز از `P1-07` گذشته است | زمان به‌تنهایی مجوز حذف نیست؛ `P2-11`، نبود incident/diff و restore سالم لازم است و old sourceها بدون write/Telegram/job/sync می‌مانند. |
+| reference قدیمی در repo/runtime/ops پیدا می‌شود | هر مورد `ACTIVE`, `ROLLBACK_ONLY`, `HISTORICAL_DOC`, `STALE` یا `UNKNOWN` می‌شود؛ `ACTIVE` و `UNKNOWN` و rollback window باز، decommission را می‌بندند. |
+| adapter/config/script توپولوژی قدیمی حذف می‌شود | حذف در batch و commit کوچک با scan و full parity قبل/بعد است؛ feature یا policy Web/Bot همراه آن تغییر نمی‌کند. |
+| old edge هنوز درخواست می‌گیرد | proxy باقی می‌ماند؛ فقط پس از حداقل هفت روز، ۴۸ ساعت ترافیک معتبر صفر و اثبات DNS خاموش و سپس ۲۴ ساعت پایش می‌شود. ترافیک معتبر تازه proxy را موقتاً برمی‌گرداند. |
+| credential یا access قدیمی باید revoke شود | اختصاصی/مشترک بودن و دسترسی سالم target ابتدا اثبات می‌شود؛ shared secret ابتدا rotate و rollback credential تا پایان protected window حفظ می‌شود. |
+| backup مهاجرت به روز سی‌ام می‌رسد | فقط با backup تازهٔ Finland دارای off-host restore receipt، Iran DR سالم و نبود incident باز نامزد حذف می‌شود؛ حذف واقعی receipt و تأیید انسانی می‌خواهد. |
+| دو host قدیمی آمادهٔ حذف‌اند | old Bot host ابتدا، ۲۴ ساعت پایش و سپس old Web host بعد از پایان proxy حذف می‌شود؛ هر host/volume/snapshot/credential مجوز دقیق جدا دارد. |
+| host حذف شده ولی resource جانبی مانده است | DNS/firewall/monitoring/backup schedule/inventory/billing/release orphan کشف و تعیین تکلیف می‌شود؛ closure با orphan باز ممنوع است. |
+| `candidate/wa-ir-standby-v1` دیده می‌شود | خودکار حذف نمی‌شود؛ ابتدا معماری/مستندات لازم استخراج و حذف فقط با دستور صریح مستقل، ترجیحاً در closure کل پلن، انجام می‌شود. |
+| پس از decommission بازیابی لازم است | فقط off-host backup دارای restore receipt یا Iran Standby مسیر recovery است؛ نبود هر دو decommission را از ابتدا ممنوع می‌کند. |
+
 ### Task Card فنی Cursor
 
 1. مدت quarantine/observation مصوب را از receipt `P1-07` کنترل و incident، alert،
@@ -1209,8 +1228,10 @@ job، backup، monitoring، rollback یا runbookی به توپولوژی قدی
    به host/IP/path/role قدیمی اسکن کند.
 3. هر reference را `ACTIVE`, `ROLLBACK_ONLY`, `HISTORICAL_DOC`, `STALE` یا
    `UNKNOWN` طبقه‌بندی کند. وجود `ACTIVE` یا `UNKNOWN` مانع decommission است.
-4. telemetry اثبات کند sourceهای قدیمی هیچ write، Telegram call، scheduler run،
-   inbound product traffic یا sync production ندارند و target backup/restore سالم است.
+4. telemetry اثبات کند sourceهای قدیمی هیچ write، Telegram call، scheduler run یا
+   sync production ندارند و target backup/restore سالم است. old edge فقط در نقش
+   proxy مجاز است؛ shutdown آن به حداقل هفت روز quarantine، ۴۸ ساعت ترافیک معتبر
+   صفر و DNS probe سالم نیاز دارد و پس از آن ۲۴ ساعت پایش می‌شود.
 5. adapter `server_mode`، local-sync transport، env key، compose profile، script،
    test fixture و docs قدیمی را در commitهای کوچک حذف کند؛ قبل و بعد هر دسته
    hardcode/reference scan و full parity suite اجرا شود.
@@ -1219,8 +1240,10 @@ job، backup، monitoring، rollback یا runbookی به توپولوژی قدی
 7. credential و access قدیمی را فقط پس از backup و audit با manifest revoke کند؛
    rollback credential تا پایان protected window حذف نمی‌شود.
 8. volume، snapshot، backup، release و server را بر اساس retention manifest و با
-   approval مستقل decommission کند. هر حذف material باید target دقیق و recovery
-   status داشته باشد.
+   approval مستقل decommission کند. old Bot host ابتدا و old Web host فقط پس از
+   ۲۴ ساعت پایش و پایان proxy حذف شود. backup مهاجرت پس از ۳۰ روز فقط با backup
+   تازهٔ off-host و restore-tested Finland، Iran DR سالم و نبود incident باز نامزد
+   حذف است. هر حذف material باید target دقیق و recovery status داشته باشد.
 9. monitoring، alert routing، inventory/CMDB، billing، DNS record، firewall allowlist
    و backup schedule orphan را پاک یا منتقل و نتیجه را verify کند.
 10. final architecture، cost/capacity، restore receipt، data hash و owner matrix را
@@ -1237,6 +1260,13 @@ job، backup، monitoring، rollback یا runbookی به توپولوژی قدی
 - decommission هر host/volume/backup/credential نیازمند تأیید جداگانهٔ مالک است.
 - پس از closure، repository و runbookها فقط معماری فعال و history صریحاً منسوخ را
   نشان دهند؛ هیچ billing/monitoring/backup orphan باقی نماند.
+
+Gate طراحی در 2026-09-02 تأیید شد: وابستگی قطعی closure به `P2-11`، طبقه‌بندی
+تمام referenceها، cleanup مرحله‌ای و parity-checked، خاموشی old edge پس از 48h
+ترافیک معتبر صفر و 24h پایش، حذف old Bot سپس old Web با 24h فاصله، و نامزدی حذف
+backup مهاجرت پس از 30 روز و restore جایگزین پذیرفته شدند. هر حذف material و حذف
+`candidate/wa-ir-standby-v1` همچنان مجوز صریح مستقل می‌خواهد؛ این تأیید هیچ حذف،
+revoke، shutdown یا decommission را مجاز نمی‌کند.
 
 Rollback: پیش از حذف نهایی، sourceها fenced و recoverable می‌مانند. پس از حذف،
 rollback فقط از backup off-host دارای restore receipt است؛ اگر چنین backupی نیست،
