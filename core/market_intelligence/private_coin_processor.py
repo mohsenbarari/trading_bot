@@ -72,6 +72,7 @@ PROCESSOR_HEARTBEAT_SCHEMA = "market_processor/4.0"
 PROCESSOR_VERSION = "market-processor-v4-fact-archive-shadow"
 MAX_RECORD_BYTES = 256 * 1024
 MAX_RECORDS_PER_CYCLE = 20_000
+DEFAULT_MAX_MARKET_PROJECTIONS_PER_CYCLE = 16
 SPOOL_NAME = re.compile(r"^events-\d{4}-\d{2}-\d{2}\.jsonl$")
 PROCESSOR_SOURCES = frozenset(
     {
@@ -696,6 +697,7 @@ def process_coin_spool_cycle(
     paths: CoinProcessorPaths,
     mode: str,
     now_utc: str | None = None,
+    max_market_projections: int | None = None,
 ) -> dict[str, object]:
     """Run one restart-safe shadow cycle and return redacted counters only."""
 
@@ -785,6 +787,7 @@ def process_coin_spool_cycle(
             as_of_utc=now,
             group_additional_anchors=anchors,
             group_parser_feedback=feedback,
+            max_market_messages=max_market_projections,
         )
         pipeline_applied = set(
             projection.group_pipeline.applied_feedback_event_keys
@@ -952,6 +955,17 @@ def run_coin_processor_service(
         raise CoinProcessorError("coin_processor_interval_invalid") from exc
     if not 0.25 <= interval <= 30:
         raise CoinProcessorError("coin_processor_interval_invalid")
+    try:
+        max_market_projections = int(
+            os.environ.get(
+                "MARKET_PROCESSOR_MAX_MARKET_PROJECTIONS_PER_CYCLE",
+                str(DEFAULT_MAX_MARKET_PROJECTIONS_PER_CYCLE),
+            )
+        )
+    except ValueError as exc:
+        raise CoinProcessorError("coin_processor_market_projection_limit_invalid") from exc
+    if not 1 <= max_market_projections <= 1_000:
+        raise CoinProcessorError("coin_processor_market_projection_limit_invalid")
     started_at = utc_text()
     health_path = state_directory / "health.json"
     last_projection_causal_inputs = {
@@ -982,7 +996,11 @@ def run_coin_processor_service(
 
     def cycle_and_write(*, stopped: bool = False) -> None:
         nonlocal last_projection_causal_inputs
-        counters = process_coin_spool_cycle(paths=paths, mode=mode)
+        counters = process_coin_spool_cycle(
+            paths=paths,
+            mode=mode,
+            max_market_projections=max_market_projections,
+        )
         if (
             int(counters["changes"])
             or int(counters["tombstones"])

@@ -479,6 +479,72 @@ class CaptureEventAdapterTests(unittest.TestCase):
         self.assertTrue(str(rows[0]["event_id"]).endswith("000000000999"))
         self.assertTrue(str(rows[1]["event_id"]).endswith("000000000001"))
 
+    def test_market_projection_limit_does_not_starve_dirty_coin_groups(self) -> None:
+        self._stage_group(
+            group_event(
+                1001,
+                text="امام فروش فردا 190000 / 5 تا",
+                message_id=1001,
+                sender="owner00000001001",
+            )
+        )
+        self.staging.executemany(
+            "INSERT INTO capture_dirty_market_messages("
+            "source_id,message_id,event_time_utc,available_at_utc) "
+            "VALUES(?,?,?,?)",
+            [
+                ("USD_HERAT", message_id, "2026-08-24T09:59:00Z", available)
+                for message_id, available in (
+                    (2001, "2026-08-24T10:00:01Z"),
+                    (2002, "2026-08-24T10:00:02Z"),
+                    (2003, "2026-08-24T10:00:03Z"),
+                )
+            ],
+        )
+        self.staging.commit()
+
+        report = project_capture_changes(
+            self.staging,
+            self.market,
+            as_of_utc="2026-08-24T10:02:00Z",
+            max_market_messages=1,
+        )
+        self.market.commit()
+        self.staging.commit()
+
+        self.assertEqual(report.market_messages_reprojected, 0)
+        self.assertIsNotNone(report.group_pipeline)
+        self.assertEqual(
+            self.staging.execute(
+                "SELECT COUNT(*) FROM capture_dirty_market_messages"
+            ).fetchone()[0],
+            2,
+        )
+        self.assertEqual(
+            self.staging.execute(
+                "SELECT COUNT(*) FROM capture_dirty_groups"
+            ).fetchone()[0],
+            0,
+        )
+        self.assertIsNotNone(
+            self.market.execute(
+                "SELECT 1 FROM market_observations "
+                "WHERE source_code='GROUP_1' AND event_type='OFFER'"
+            ).fetchone()
+        )
+
+    def test_market_projection_limit_rejects_non_positive_values(self) -> None:
+        with self.assertRaisesRegex(
+            CaptureEventContractError,
+            "capture_market_projection_limit_invalid",
+        ):
+            project_capture_changes(
+                self.staging,
+                self.market,
+                as_of_utc="2026-08-24T10:02:00Z",
+                max_market_messages=0,
+            )
+
     def test_never_exported_dependency_retraction_does_not_requeue(self) -> None:
         self._stage_market(
             market_event(

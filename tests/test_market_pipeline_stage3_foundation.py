@@ -230,6 +230,14 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
         self.assertIn("cap_drop:", base)
         self.assertNotIn("market_capture_account", bot)
         self.assertNotIn("market_bot_transport", web)
+        capture_account1 = web.split("  market-capture-account1:", 1)[1].split(
+            "  market-capture-account2:", 1
+        )[0]
+        capture_account2 = web.split("  market-capture-account2:", 1)[1].split(
+            "  market-capture-external:", 1
+        )[0]
+        self.assertIn('restart: "on-failure"', capture_account1)
+        self.assertIn('restart: "on-failure"', capture_account2)
         self.assertEqual(web.count("ports:"), 1)
         self.assertEqual(bot.count("ports:"), 1)
         receiver_mount = bot.split(

@@ -65,6 +65,11 @@ services:
       file: compose.yml
       service: market-runtime-base
     profiles: [web]
+    # Telegram can terminate a session owner on transient DC/update-state
+    # faults. Keep the single owner fail-closed, then restart the same durable
+    # cursor until Telegram is reachable again; a finite retry budget can
+    # otherwise leave capture silently stopped for the rest of the day.
+    restart: "on-failure"
     command: [service, --role, market-capture-account1]
     environment:
       MARKET_PIPELINE_SESSION_ROOT: /var/lib/market-data/session
@@ -103,6 +108,7 @@ services:
       file: compose.yml
       service: market-runtime-base
     profiles: [web]
+    restart: "on-failure"
     command: [service, --role, market-capture-account2]
     environment:
       MARKET_PIPELINE_SESSION_ROOT: /var/lib/market-data/session

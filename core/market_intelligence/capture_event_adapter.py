@@ -2167,10 +2167,13 @@ def project_capture_changes(
     as_of_utc: datetime | str,
     group_additional_anchors: Iterable[CoinPriceAnchor] = (),
     group_parser_feedback: Mapping[bytes, CoinGroupParserFeedback] | None = None,
+    max_market_messages: int | None = None,
 ) -> CaptureProjectionReport:
     """Project every dirty current revision; callers commit both databases."""
 
     as_of = normalize_utc(as_of_utc, field_name="capture_projection_as_of_utc")
+    if max_market_messages is not None and max_market_messages < 1:
+        raise CaptureEventContractError("capture_market_projection_limit_invalid")
     initialize_market_store(market)
     projection_reconciliation = projection_reconciliation_pending(staging)
     due_primary = staging.execute(
@@ -2199,10 +2202,16 @@ def project_capture_changes(
             ),
             available_at_utc=as_of,
         )
-    dirty = staging.execute(
-        "SELECT * FROM capture_dirty_market_messages WHERE available_at_utc<=? ORDER BY available_at_utc,source_id,message_id",
-        (as_of,),
-    ).fetchall()
+    dirty_query = (
+        "SELECT * FROM capture_dirty_market_messages "
+        "WHERE available_at_utc<=? "
+        "ORDER BY available_at_utc,source_id,message_id"
+    )
+    dirty_parameters: tuple[object, ...] = (as_of,)
+    if max_market_messages is not None:
+        dirty_query += " LIMIT ?"
+        dirty_parameters = (as_of, max_market_messages)
+    dirty = staging.execute(dirty_query, dirty_parameters).fetchall()
     projected = upserted = retracted = 0
     private_trades = private_finalized = private_ambiguous = 0
     primary_changed = False
