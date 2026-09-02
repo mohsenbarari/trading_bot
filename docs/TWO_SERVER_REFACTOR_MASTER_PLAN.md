@@ -703,7 +703,7 @@ Rollback: callsiteها به adapter سازگار برمی‌گردند؛ schema/
 
 ## `P1-03` — compose و service ownership هدف Finland
 
-وضعیت: `PROPOSED`
+وضعیت: `PROPOSED — قرارداد سناریویی و ownership در 2026-09-02 تأیید شد؛ اجرا مسدود است`
 
 Dependency: `P1-02`، `P4-02` و `P4-03`. این Stage ساخت artifact است، نه deploy.
 
@@ -718,19 +718,42 @@ owner هر job/credential دقیقاً یکی است.
 | service class | مسئولیت | قید ownership |
 | --- | --- | --- |
 | edge/nginx | TLS و route Web/API/dashboard | بدون Telegram/DB write مستقیم |
-| web-api | رفتار Web و admin | process مستقل از Bot |
-| telegram-bot/executor | update، callback و side effect تلگرام | تنها token/session owner |
-| postgres | source of truth محلی Finland | یک cluster/authority |
+| web-api ×2 | رفتار Web و admin | دو replica بدون job داخلی، مستقل از Bot |
+| web-jobs | jobهای Web/API | singleton و جدا از API replicaها |
+| bot-primary/executor/publishers | update، callback و side effect تلگرام | Queue-v1 split؛ token/session فقط برای owner مربوط |
+| app-postgres | source of truth برنامه در Finland | یک cluster/authority برای Web و Bot |
+| market-postgres | archive و state مستقل Market | volume/pool/resource مستقل از app DB |
 | redis | queue/cache/coordination قراردادی | source of truth مالی نیست |
-| workers/schedulers | jobهای product و Queue-v1 | یک owner برای هر job key |
+| migration | schema transition | one-shot با lock؛ پیش از readiness برنامه |
 | outbox transport | sync Finland↔Iran | هرگز loopback محلی |
 | collectors/parser/estimator | Market pipeline مجاز | capability صریح |
-| ops dashboard | مشاهده/عملیات مصوب | auth و audit اجباری |
+| ops-control/dashboard | مشاهده و command مصوب | backend محدود و مستقل؛ auth/audit اجباری |
 | backup/log/metrics | durability و observability | بدون product mutation |
+
+### سناریوهای تأییدشده
+
+| وضعیت اولیه و رخداد | رفتار مورد انتظار و مانع ایمنی |
+| --- | --- |
+| host از صفر boot می‌شود | DB/Redis → migration locked → schema/config check → app → side-effect workers؛ failure در هر gate مانع readiness بعدی است. |
+| Web و Bot mutation عادی دارند | هر دو یک app DB را می‌بینند؛ sync داخلی Finland وجود ندارد و فقط outbox لازم برای Iran ایجاد می‌شود؛ origin Web/Bot حفظ می‌شود. |
+| یک Web API crash می‌کند | replica دوم traffic را می‌گیرد؛ Bot و `web-jobs` restart نمی‌شوند و هیچ job در API replica تکثیر نمی‌شود. |
+| Bot primary/executor restart می‌شود | Web ادامه می‌دهد؛ queue پایدار resume می‌شود؛ ACK/dedupe مانع ارسال دوباره است و Queue-v1 با legacy overlap ندارد. |
+| owner دوم Telegram/job ظاهر می‌شود | preflight و runtime guard fail closed؛ owner تصادفی یا takeover خودکار ممنوع است. |
+| Redis یا app DB از دسترس می‌رود | عملیات نیازمند lock/queue/idempotency fail closed؛ PostgreSQL truth حفظ می‌شود؛ DB failure هر دو surface را not-ready می‌کند اما Iran را خودکار Writer نمی‌کند. |
+| Market فشار شدید ایجاد می‌کند | DB، volume، pool و resource limit مستقل، Web/Bot را محافظت می‌کند؛ کل CPU پایدار ≤60% و RAM/disk/pool ≤70% می‌ماند. |
+| اپراتور Dashboard را باز می‌کند | release/digest، health، owner، queue، sync، capacity و backup receipt را بدون secret می‌بیند؛ commandها audit می‌شوند و product table مستقیم تغییر نمی‌کند. |
+| کل host Finland می‌افتد | Iran فقط هشدار و آخرین checkpoint را نشان می‌دهد؛ Writer فقط انسانی منتقل می‌شود و Bot تا بازگشت Finland در Iran اجرا نمی‌شود. |
+
+بودجهٔ اولیهٔ RAM که باید با load rehearsal تصحیح شود: حداقل 8 GiB headroom
+سیستم، app DB حدود 3، Market DB حدود 5، Redis حدود 1.5، Web/jobs حدود 3،
+Bot/executor/publishers حدود 2.5، Market pipeline حدود 3 و edge/ops/support حدود
+2 GiB. عبور از envelope مانع acceptance است، نه مجوز کاهش پنهانی safety margin.
 
 ### Task Card فنی Cursor
 
-1. Service Ownership Matrix را از `P1-00` به service، command، image، port،
+1. Service Ownership Matrix را برای دو Web API بدون job، singleton `web-jobs`،
+   Bot Queue-v1 split، DBهای app/Market، cross-site sync، Market و ops از `P1-00`
+   به service، command، image، port،
    network، volume، secret، healthcheck، restart policy، resource budget و owner
    تبدیل کند.
 2. تمام image/artifactهای release را content-addressed بسازد و roleهای backend را
@@ -742,10 +765,12 @@ owner هر job/credential دقیقاً یکی است.
 4. migration را به یک one-shot service با lock و schema compatibility check تبدیل
    کند. app فقط بعد از migration موفق ready و side-effect workerها بعد از app
    ready فعال شوند.
-5. Web/API و Bot را به PostgreSQL/Redis مشترک وصل کند، اما command، healthcheck،
-   lifecycle و restart domain آن‌ها را جدا نگه دارد.
-6. Telegram credential را فقط برای executor مجاز mount کند. تمام serviceهای دیگر
-   هم در compose و هم runtime guard باید بدون credential باشند.
+5. Web/API و Bot را به app PostgreSQL/Redis مشترک وصل کند، اما Market PostgreSQL
+   و volume/pool آن را مستقل و همهٔ command، healthcheck، lifecycle و restart
+   domainها را جدا نگه دارد.
+6. credential اصلی/publisher را فقط برای Bot process مالک همان identity mount
+   کند. Web، sync، migration، Market و ops هم در compose و هم runtime guard باید
+   فاقد Telegram credential نامرتبط باشند؛ env-file مشترک همهٔ serviceها ممنوع است.
 7. برای هر cron/timer/scheduler/job یک `job_key`, owner service، cadence، lock،
    retry، idempotency و missed-run policy ثبت کند؛ startup با owner تکراری fail شود.
 8. health را به liveness و readiness تفکیک کند. readiness واقعی باید DB، Redis،
@@ -769,6 +794,11 @@ owner هر job/credential دقیقاً یکی است.
   loop یا side effect دوباره.
 - مالک service/credential/job ownership و resource budget را پیش از `P1-04`
   تأیید کند. deploy روی `65.109.214.203` در این Stage ممنوع است.
+
+Gate طراحی در 2026-09-02 تأیید شد: دو Web API، `web-jobs` مستقل، Bot Queue-v1
+split، DBهای جداگانهٔ app/Market، `ops-control` محدود، envelope اولیهٔ منابع،
+singletonهای fail-closed و نبود failover خودکار Writer/Bot پذیرفته شدند. این
+تأیید مجوز ساخت یا اجرای compose، migration، volume یا deploy نیست.
 
 Rollback: artifactهای compose/config به commit قبلی برمی‌گردند؛ volume یا دیتای
 واقعی ایجاد/حذف نمی‌شود.
