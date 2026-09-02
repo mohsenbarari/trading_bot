@@ -12,6 +12,10 @@
 - 2026-09-02 | Owner approved `P1-00`: twelve behavior families, Web/Bot and
   provenance contracts, six mandatory evidence gaps and runtime-ownership seed.
   Unknown parity still blocks implementation.
+- 2026-09-02 | Owner approved `P1-07` design: initial cutover is 90m/4m with 30s
+  TTL, human checkpoints, exclusive Bot handoff, old-edge proxy without local
+  writes, 2h observation and numeric rollback alerts. After target's first write,
+  its DB stays canonical; production execution remains separately unauthorized.
 - 2026-09-01 | Offer origin is immutable and separate from `home_site`; Trade
   snapshots Offer/Request origin, execution surface, policy version and sensitive
   actor/role/tier context.

@@ -200,17 +200,26 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
   دارد؛ تمام preflightها پیش از freeze انجام می‌شوند، توقف دسترسی/write حداکثر
   ۴ دقیقه است و اگر target تا آن زمان آماده نباشد عملیات abort می‌شود. این تصمیم
   SLO دیپلوی‌های بعدی نیست.
+- `D-02`: TTL محصول برای آماده‌سازی و cutover برابر ۳۰ ثانیه است و حداقل به‌اندازهٔ
+  TTL قبلی پیش از پنجره پایین آورده می‌شود. طی observation دوساعته همین مقدار و
+  طی quarantine هفت‌روزه Edge قدیمی فقط به‌عنوان reverse proxy بدون DB/job/write
+  محلی به target باقی می‌ماند؛ TTL عادی بعدی در بخش عملیات تعیین می‌شود.
+- `D-11`: triggerهای cutover عبارت‌اند از توقف فوری برای invariant/hash/durability
+  یا owner تکراری، `5xx > 2%` برای ۵ دقیقه، `p95 > 2x baseline` برای ۱۰ دقیقه و
+  queue lag بیش از ۳۰ ثانیه برای ۵ دقیقه. monitor فقط alert/checkpoint block می‌کند
+  و تصمیم rollback یا ادامه فقط انسانی است.
+- `D-12`: پس از اولین mutation تولیدی target، DB جدید canonical می‌ماند؛ rollback
+  عادی فقط application rollback یا forward recovery روی همان DB است. بازگشت به
+  DB قدیمی، restore یا reverse migration به runbook و مجوز جدا نیاز دارد.
 
 ### نیازمند تأیید در بازبینی این پلن
 
 | ID | تصمیم پیشنهادی | مقدار اولیه | وضعیت |
 | --- | --- | --- | --- |
-| `D-02` | DNS TTL محصول | ۳۰ ثانیه در دورهٔ آماده‌سازی/cutover؛ مقدار عادی پس از soak جدا تعیین شود | باز؛ سقف قطعی ۴ دقیقه تأیید شده، TTL هنوز نیازمند تأیید است |
 | `D-03` | SLO deploy hotfix بدون migration | حداکثر ۱۵ دقیقه از artifact تأییدشده تا health سبز | موکول به بررسی عمیق بخش ۴ |
 | `D-04` | SLO release عادی دو سرور | حداکثر ۳۰ دقیقه در حالت اتصال سالم | موکول به بررسی عمیق بخش ۴ |
 | `D-05` | SLO rollback کد بدون DB restore | حداکثر ۱۰ دقیقه | موکول به بررسی عمیق بخش ۴ |
 | `D-06` | artifact distribution | registry اصلی + OCI archive امضاشده در Object Storage ایران برای Iran/offline | باز؛ پس از توضیح و بررسی بخش ۴ |
-| `D-11` | trigger عددی rollback cutover | invariant/duplicate-owner/hash/durability فوراً؛ error rate >۲٪ برای ۵ دقیقه، p95 >۲× baseline برای ۱۰ دقیقه یا queue lag >۳۰ثانیه برای ۵ دقیقه | باز؛ نیازمند تأیید آستانه‌ها و انسانی‌بودن فرمان rollback |
 
 این موارد تا تأیید مالک، requirement پیشنهادی‌اند و Cursor حق تثبیت پنهان آن‌ها
 در کد را ندارد.
@@ -1067,7 +1076,7 @@ Rollback: staging به artifact قبلی بازمی‌گردد یا rebuild می
 
 ## `P1-07` — cutover کنترل‌شده به Finland Primary
 
-وضعیت: `PROPOSED — نیازمند مجوز تولید جدا`
+وضعیت: `PROPOSED — قرارداد سناریویی cutover در 2026-09-02 تأیید شد؛ نیازمند مجوز تولید جدا`
 
 Dependency: `P1-06`، `P4-07`، `P4-10`، change set اتمیک `P4-08` و مجوز صریح
 تولید. تأیید سند به معنی این مجوز نیست.
@@ -1078,6 +1087,22 @@ Dependency: `P1-06`، `P4-07`، `P4-10`، change set اتمیک `P4-08` و مج�
 target ابتدا در حالت dark بررسی می‌شود. Bot قدیمی باید پیش از دسترسی Bot جدید به
 token/session به‌طور قطعی متوقف شود. در هر checkpoint عامل انسانی یا ادامه می‌دهد
 یا rollback می‌کند؛ failover خودکار در این Stage وجود ندارد.
+
+### سناریوهای تأییدشده
+
+| وضعیت اولیه و رخداد | رفتار مورد انتظار و مانع ایمنی |
+| --- | --- |
+| پیش از maintenance window | exact release/config/migration/runner، قبولی `P1-06`، ظرفیت، TLS، monitoring و restore receipt قفل‌اند؛ نبود هر شاهد cutover را پیش از اختلال لغو می‌کند. |
+| عامل پنجره را آغاز می‌کند | change ticket و checkpoint انسانی لازم است؛ timer/script حق شروع، ادامه یا تغییر نقش خودکار ندارد. |
+| Web و Bot قدیمی drain می‌شوند | mutation تازه بسته، کار جاری تمام و `QUIESCED` transaction/event/queue receipt صادر می‌شود؛ اختلال کل حداکثر ۴ دقیقه است. |
+| final app/media/Market delta منتقل می‌شود | Market DB جدا می‌ماند و hash/FK/sequence/inventory/settlement/media بررسی می‌شود؛ conflict حل‌نشده یا عبور از ۴ دقیقه یعنی abort/redesign. |
+| target به‌صورت dark بالا می‌آید | migration locked/idempotent و smoke بدون side effect انجام می‌شود؛ تا readiness/hash کامل، traffic، Web Writer و Telegram credential بسته‌اند. |
+| Telegram owner منتقل می‌شود | توقف تمام ownerهای قدیمی با receipt اثبات و سپس credential فقط روی target mount می‌شود؛ Bot جدید با مشاهدهٔ owner قدیمی fail closed است. |
+| DNS به target تغییر می‌کند | Web قدیمی ابتدا fenced، Arvan change با CAS/receipt و authoritative/resolver/TLS/site probe اثبات و سپس انسان Web Writer target را فعال می‌کند؛ API success به‌تنهایی `DNS_READY` نیست. |
+| client با DNS cache قدیمی به old edge می‌رسد | edge قدیمی طی quarantine فقط reverse proxy به target است و DB/job/write محلی ندارد؛ دو Writer ساخته نمی‌شود. |
+| target وارد observation می‌شود | دو ساعت ownership، latency/error، queue، DB/Redis، jobs، disk، backup و invariant پایش می‌شوند؛ sourceها هفت روز fenced و backup مصوب سی روز حفظ می‌شود. |
+| failure پیش از اولین target mutation رخ می‌دهد | target/traffic بسته، DNS برگردانده و sourceها از receipt قبلی باز می‌شوند؛ rollback انسانی و قابل‌اثبات است. |
+| failure پس از اولین target mutation رخ می‌دهد | DB target canonical می‌ماند و application rollback/forward recovery روی همان DB اجرا می‌شود؛ روشن‌کردن مستقیم DB قدیمی ممنوع است. |
 
 ### Task Card فنی Cursor
 
@@ -1092,7 +1117,9 @@ token/session به‌طور قطعی متوقف شود. در هر checkpoint ع�
 4. backup نهایی هر دو source و media را با encryption/checksum بگیرد و حداقل یک
    restore off-source تأییدشده داشته باشد. backup فاقد restore receipt مانع cutover است.
 5. DNS/route فعلی، TTL، old endpoint، target dark endpoint و روش rollback را ثبت
-   کند؛ تغییر واقعی فقط در checkpoint مربوط و با مجوز انجام می‌شود.
+   کند؛ TTL را حداقل به‌اندازهٔ TTL قبلی پیش از پنجره به ۳۰ ثانیه برساند و proxy
+   موقت old edge را بدون دسترسی DB/job/write طراحی کند. تغییر واقعی فقط در
+   checkpoint مربوط و با مجوز انجام می‌شود.
 6. baseline smoke، queue depth، sync lag، active session/job و business hash را
    بگیرد و mutationهایی را که باید quiesce شوند فهرست کند.
 
@@ -1117,14 +1144,20 @@ token/session به‌طور قطعی متوقف شود. در هر checkpoint ع�
 13. Bot و job ownerهای target را با exact release فعال کند؛ duplicate owner guard،
     queue state و side-effect ledger بررسی شوند. پیام تست تولید فقط اگر change
     ticket صریحاً اجازه دهد ارسال می‌شود.
-14. edge/DNS را طبق بخش deploy به target تغییر دهد و از resolver/probeهای مصوب
-    مقصد IP/TLS/health را اثبات کند. موفقیت API provider به‌تنهایی کافی نیست.
+14. پس از fence مبدأ، edge/DNS را طبق بخش deploy به target تغییر دهد و از
+    authoritative DNS، resolver و probeهای مصوب مقصد IP/TLS/release/health را
+    اثبات کند. سپس عامل با command جدا Web Writer target را فعال و old edge را
+    فقط به reverse proxy موقت تبدیل کند؛ موفقیت API provider به‌تنهایی کافی نیست.
 15. smoke matrix بحرانی Web و Bot، login، Offer/Request/Trade، realtime، Queue،
     Market و backup را اجرا و response/state/side effect را با baseline مقایسه کند.
-16. در observation window، error rate، latency، DB/Redis، queue، Telegram، jobs،
-    disk، backup و business invariant را پایش کند. پایان window نیازمند رسید انسان است.
-17. sourceهای قدیمی را خاموش/حذف نکند؛ آن‌ها را network-fenced و read-only در
-    quarantine نگه دارد و از accidental writer شدن alert بسازد.
+16. در observation دوساعته، error rate، latency، DB/Redis، queue، Telegram، jobs،
+    disk، backup و business invariant را پایش کند. invariant/hash/durability یا
+    owner تکراری فوراً checkpoint را می‌بندد؛ `5xx > 2%` برای ۵ دقیقه، `p95 > 2x`
+    baseline برای ۱۰ دقیقه یا queue lag بیش از ۳۰ ثانیه برای ۵ دقیقه alert و
+    human go/no-go می‌سازد. پایان window نیازمند رسید انسان است.
+17. sourceهای قدیمی را خاموش/حذف نکند؛ runtime/DB آن‌ها را network-fenced و
+    read-only در quarantine نگه دارد و از accidental writer شدن alert بسازد. فقط
+    edge قدیمی مجاز است بدون اتصال DB/job/write به target proxy کند.
 
 ### مرز rollback
 
@@ -1135,7 +1168,9 @@ token/session به‌طور قطعی متوقف شود. در هر checkpoint ع�
   و مجوز مالک ممکن است؛ روشن‌کردن مستقیم آن خطر دو history دارد و ممنوع است.
 - triggerهای rollback باید پیشاپیش عددی/مشاهده‌پذیر باشند: invariant failure،
   duplicate Telegram owner، migration/hash mismatch، critical parity regression،
-  DB durability failure یا error budget breach.
+  DB durability failure، `5xx > 2%` برای ۵ دقیقه، `p95 > 2x baseline` برای ۱۰
+  دقیقه یا queue lag بیش از ۳۰ ثانیه برای ۵ دقیقه. alert و checkpoint block
+  خودکار است ولی فرمان rollback/continue فقط انسانی است.
 
 ### خروجی و Gate انسانی
 
@@ -1144,6 +1179,13 @@ token/session به‌طور قطعی متوقف شود. در هر checkpoint ع�
 - target تنها Web Writer Finland و تنها Telegram owner باشد؛ old sourceها fenced.
 - Feature Parity Contract کامل باشد و topology تنها تفاوت عمدی ثبت‌شده بماند.
 - هیچ decommission، credential revoke دائمی یا حذف backup در این Stage انجام نشود.
+
+Gate طراحی در 2026-09-02 تأیید شد: پنجرهٔ 90 دقیقه/اختلال حداکثر 4 دقیقه، dark
+target، final delta و validation، handoff انحصاری Bot، TTL سی‌ثانیه، Arvan DNS با
+probe واقعی، activation انسانی Web Writer، reverse proxy موقت old edge، observation
+دوساعته و triggerهای عددی انسانی پذیرفته شدند. پس از اولین mutation، rollback
+مستقیم به DB قدیمی ممنوع است. این تأیید هیچ مجوز production، backup، DNS، secret،
+process stop، deploy یا cutover صادر نمی‌کند.
 
 ## `P1-08` — closure و حذف بدهی توپولوژی قدیمی
 
@@ -1436,7 +1478,7 @@ Dashboard summary نباید جزئیات conflict را پنهان کند؛ dril
 
 ## `P2-07` — DNS control و route verification
 
-وضعیت: `PROPOSED؛ D-02 باید تأیید شود`
+وضعیت: `PROPOSED؛ D-02 تثبیت شده و طراحی/اجرا باز است`
 
 - فقط یک A record allowlisted بین دو IP تأییدشده قابل تغییر است.
 - dashboard درخواست را plan و human confirm می‌کند؛ backend با token root-only
