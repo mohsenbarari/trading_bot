@@ -235,6 +235,11 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
   barrier هم‌مرز و business/media hash سنجیده می‌شود؛ `FULL_SYNC` و `MARKET_READY`
   مستقل‌اند. دو snapshot آخر حفظ و قدیمی‌تر پس از ۳۰ روز فقط با جایگزین
   restore+replay-tested نامزد حذف است.
+- `D-18`: انتقال Web Writer کاملاً انسانی است. پس از Fence Receipt مسیر عادی
+  forward-only، نسل بعدی یکتا و فعال‌سازی مقصد فقط با Receipt، gateهای جهت انتقال
+  و `DNS_READY` ممکن است. اختلاف marker سیستم‌عامل و DB، restart یا خطا fail-closed
+  است؛ بدون Emergency Fence Bundle معتبر Force Activation وجود ندارد و Bot از
+  generation وب مستقل می‌ماند.
 
 ### نیازمند تأیید در بازبینی این پلن
 
@@ -1661,19 +1666,24 @@ DB create/reset/import/restore، replay یا data mutation نیست.
 
 ## `P2-04` — Manual Writer Handover، generation و fencing
 
-وضعیت: `PROPOSED؛ تصمیم معماری انتقال کاملاً انسانی تثبیت شده است`
+وضعیت: `PROPOSED — قرارداد سناریویی handover در 2026-09-02 تأیید شد؛ اجرا مسدود است`
 
-اصل:
+اصل‌های تغییرناپذیر:
 
 - نقش پایدار محلی هر Web Server یکی از `WEB_WRITER`، `WEB_DRAINING` یا
   `WEB_STANDBY` است و پس از restart حفظ می‌شود.
 - فقط عامل انسانی احراز هویت‌شده با username/password/TOTP و تأیید صریح می‌تواند
   transition را آغاز یا تکمیل کند. هیچ network event، timeout، DNS، sync state،
   process restart یا scheduler حق promotion/demotion خودکار ندارد.
-- انتقال از dashboard مبدأ آغاز می‌شود: mutation جدید Web بسته، transactionهای
-  جاری drain، نقش `WEB_STANDBY` پایدار و Fence Receipt امضاشده صادر می‌شود.
-- Receipt حداقل `transition_id`، `source_site`، `previous_writer_generation`،
-  `last_web_mutation_id`، drain result، زمان، release digest و امضا دارد.
+- در transition داشتن صفر Web Writer مجاز است؛ داشتن دو Web Writer هرگز مجاز نیست.
+- DNS مسیر client است، نه مرجع authority. Object Storage نیز Writer، lease یا
+  محرک تغییر نقش نیست.
+- انتقال از dashboard مبدأ آغاز می‌شود: admission mutation جدید Web بسته،
+  transactionهای جاری drain، Web jobهای مولد mutation متوقف، event/outboxهای
+  commit‌شده durable و نقش `WEB_STANDBY` پایدار می‌شود؛ سپس Receipt صادر می‌شود.
+- Receipt حداقل `protocol_version`، `transition_id`، hash انتقال قبلی، source/destination،
+  نسل فعلی و مقصد، final sequence هر stream، `last_web_mutation_id`، وضعیت
+  transaction/outbox، زمان، release/schema digest و امضای مستقل سایت دارد.
 - عامل Receipt را به dashboard مقصد منتقل می‌کند. مقصد replay، tamper، generation
   mismatch یا Receipt مربوط به انتقال دیگر را رد می‌کند.
 - تغییر DNS آروان یک اقدام انسانی جدا با preview، TOTP، provider receipt و
@@ -1683,11 +1693,48 @@ DB create/reset/import/restore، replay یا data mutation نیست.
 - `writer_generation` منقضی یا renew نمی‌شود؛ فقط شمارهٔ انتقال انسانی برای audit،
   event provenance و رد mutation نسل قدیمی است. generation وب روی event مستقل
   `TELEGRAM_OWNER` اعمال نمی‌شود.
-- اگر dashboard مبدأ در دسترس نباشد، Runbook دستی ابتدا Web/API مبدأ را از طریق
-  SSH یا provider hard-fence و نقش restart آن را `WEB_STANDBY` می‌کند. مقصد بدون
-  evidence این عملیات دکمهٔ Force Activate ندارد.
-- Object Storage مسیر sync و نگهداری نسخهٔ audit receipt است؛ مرجع Writer، lease
-  یا محرک تغییر نقش نیست.
+- پس از صدور Receipt، مسیر عادی forward-only است؛ مبدأ حق بازفعال‌شدن با همان نسل
+  را ندارد. خرابی بین fence و activation به downtime/read-only منجر می‌شود، نه
+  بازگشت خودکار یا split-brain.
+- Writer فقط با تطابق marker محلی root-only و رکورد کنترل محلی DB فعال است. نبود یا
+  اختلاف این دو standby است. Web command، transaction DB و Web job/side effect هر
+  سه fence را enforce می‌کنند؛ credential و authority بات جدا می‌ماند.
+
+### سناریوهای تأییدشده
+
+| سناریو | رفتار الزامی | مانع ایمنی و evidence |
+| --- | --- | --- |
+| کار عادی | Finland نسل `N` Writer، Iran همان نسل Standby و DNS روی Finland است | lag/peer می‌تواند alert دهد ولی هرگز role را تغییر نمی‌دهد؛ Bot در Finland مستقل است |
+| قطعی و انتقال `FI→IR` | عامل Finland را drain، Receipt را به Iran منتقل، DNS را با فرمان جدا تغییر و سپس Iran را روی `N+1` فعال می‌کند | Receipt معتبر، readiness محلی و gate اضطراری دادهٔ `P2-05` و `DNS_READY` لازم‌اند؛ نمایش stale point و unsynced sequence اجباری و `FULL_SYNC` جعلی ممنوع است |
+| reconnect و `IR→FI` | Iran تا catch-up Writer می‌ماند؛ پس از آمادگی drain و final delta تا cutoff Receipt روی Finland اعمال می‌شود؛ سپس DNS و activation انجام می‌شوند | `FULL_SYNC` و `MARKET_READY` پیش از drain و parity barrier نهایی پس از drain لازم‌اند؛ DNS دومین مانع مستقل است |
+| خرابی DNS پس از fence | مقصد inactive و مبدأ fenced می‌ماند؛ عامل API یا پنل آروان را retry و نتیجه را ثبت می‌کند | API success به‌تنهایی کافی نیست؛ authoritative DNS، resolver و signed destination probe باید `DNS_READY` بسازند |
+| دو کلیک/دو dashboard | drain و activation با `transition_id` و CAS idempotent اجرا می‌شوند | یک Receipt و یک increment؛ retry نتیجهٔ قبلی را برمی‌گرداند و Receipt مصرف‌شده رد می‌شود |
+| restart وسط drain/activation | وضعیت durable خوانده می‌شود و عدم تطابق به standby می‌رود | restart، timeout و scheduler حق promotion ندارند؛ activation ناقص fail-closed است |
+| client با DNS قدیمی | source قبلی mutation را با `WRITER_MOVED` رد می‌کند؛ write به مقصد proxy یا خودکار replay نمی‌شود | idempotency key از duplicate محافظت می‌کند؛ non-idempotent request فقط با اقدام صریح client تکرار می‌شود |
+| dashboard مبدأ خراب | عامل با SSH، CLI محلی امضاشده را برای توقف write service/credential و ثبت marker پایدار اجرا و Bundle را دستی منتقل می‌کند | مقصد فقط `Emergency Fence Bundle` معتبر را می‌پذیرد؛ Force Activate بدون evidence وجود ندارد |
+
+Receipt یک فایل JSON نسخه‌دار، canonical و امضاشده است که از dashboard مبدأ دانلود
+و در dashboard مقصد بارگذاری می‌شود. نسخهٔ audit آن پس از دسترسی در Object Storage
+ذخیره می‌شود، اما دسترسی به bucket شرط authority یا انتقال اضطراری نیست.
+
+### Task Card فنی Cursor
+
+1. تمام مسیرهای Web mutation، Web jobs، callbackها، DB credentialها و side effectها
+   را inventory و از مسیر مستقل Bot/`TELEGRAM_OWNER` جدا کند؛ مورد `UNKNOWN` blocker است.
+2. state machine پایدار و transition journal append-only را با stateهای
+   `WRITER → DRAINING → STANDBY` و `STANDBY → ARMED → WRITER` بسازد؛ هیچ jump مجاز نیست.
+3. actuator محدود و root-owned برای marker سیستم‌عامل و DB control record بسازد؛
+   update نیمه‌کاره یا mismatch باید safe standby بسازد و restore حق احیای Writer ندارد.
+4. drain barrier را برای بستن admission، صفرشدن transaction، توقف producerهای Web
+   و durableشدن event/outbox پیاده و Receipt schema/canonicalization/signature را تست کند.
+5. verifier مقصد را برای allowlist سایت، زنجیرهٔ hash، exact next generation، target،
+   signature، replay و one-time consumption و activation اتمیک/CAS پیاده کند.
+6. interface gateهای جهت‌دار را بسازد: `FI→IR` به readiness ایمن `P2-05/P3` و
+   `IR→FI` به `FULL_SYNC`، `MARKET_READY` و final parity وابسته است؛ DNS به `P2-07`.
+7. CLI اضطراری فقط hard-fence و evidence bundle تولید کند؛ command عمومی activate،
+   bypass، receipt fabrication یا unfence همان نسل نداشته باشد.
+8. unit/property/integration/browser test برای concurrent click، crash در هر مرز،
+   پاسخ گم‌شده، Receipt خراب/قدیمی/مصرف‌شده، stale DNS، DB restore و جدایی Bot اجرا کند.
 
 تست‌های بحرانی:
 
@@ -1699,7 +1746,15 @@ DB create/reset/import/restore، replay یا data mutation نیست.
 - مسیر دستی hard-fence و بازیابی کنترل‌شده rehearsal می‌شود.
 
 Gate خروج: هر transition رسید انسانی کامل دارد، خطا فقط downtime/read-only ایجاد
-می‌کند و هیچ تستی دو commit معتبر Web از دو generation/site هم‌زمان نمی‌سازد.
+می‌کند؛ restart/restore/دو dashboard/Receipt replay دو commit معتبر Web از دو
+generation/site هم‌زمان نمی‌سازند و Bot در Finland بدون تغییر policy ادامه می‌دهد.
+
+Gate طراحی در 2026-09-02 تأیید شد: handover کاملاً انسانی، forward-only پس از
+Receipt، فایل امضاشدهٔ قابل انتقال، generation دائمی، fence سه‌لایه، تطابق marker
+سیستم‌عامل و DB، DNS verification و ممنوعیت Force Activation بدون Emergency Fence
+Bundle پذیرفته شدند. policy دادهٔ stale و authority هنگام قطعی در `P2-05` بسته
+می‌شود. این تأیید مجوز drain/fence، role change، DNS، SSH، secret access، deploy یا
+هیچ اقدام production نیست.
 
 ## `P2-05` — authority و conflict policy
 

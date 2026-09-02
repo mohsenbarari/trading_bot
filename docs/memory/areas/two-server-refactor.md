@@ -8,22 +8,19 @@
 - 2026-09-02 | Owner approved `P1-00`: twelve behavior families, Web/Bot and
   provenance contracts, six mandatory evidence gaps and runtime-ownership seed.
   Unknown parity still blocks implementation.
-- 2026-09-02 | Owner approved `P1-07` design: initial cutover is 90m/4m with 30s
-  TTL, human checkpoints, exclusive Bot handoff, old-edge proxy without local
-  writes, 2h observation and numeric rollback alerts. After target's first write,
-  its DB stays canonical; production execution remains separately unauthorized.
-- 2026-09-02 | Owner approved `P1-08` design: closure waits for Iran `P2-11` and
-  7d quarantine; old edge needs 48h zero valid traffic then 24h monitoring. Old
-  Bot/Web hosts retire sequentially 24h apart; the 30d migration backup needs a
-  restore-tested replacement. Every deletion and WA-IR branch removal stays gated.
-- 2026-09-02 | Owner approved `P2-00..03`: all SQL/Redis/file/object state has typed
+- 2026-09-02 | Owner approved `P1-07..08`: initial cutover is 90m/4m with 30s TTL,
+  human checkpoints, exclusive Bot handoff and old-edge proxy. Target DB becomes
+  canonical after first write. Closure waits for `P2-11` plus 7d quarantine; old
+  Bot/Web retire 24h apart and backups require tested replacements; operations stay gated.
+- 2026-09-02 | Owner approved `P2-00..04`: all SQL/Redis/file/object state has typed
   ownership with durable Messenger/notification sync, local ephemeral/provider/
   Telegram state and minimal encrypted PII. Domain streams use sequence/version,
   atomic ACK, blocking rejection/gap and immutable repair. Iran Object Storage has
   split buckets/credentials, client encryption/site signing, immutable objects,
   14d+30% spool and bounded retention. Bootstrap uses consistent cutoff+replay,
   aligned barriers/business-media hashes, separate FULL_SYNC/MARKET_READY gates and
-  two protected restore-tested snapshots.
+  two protected restore-tested snapshots. Writer handover is human, signed,
+  forward-only and fail-closed across OS/DB fences; no evidenced fence means no activation.
 - 2026-09-01 | No provisioning, deploy, migration, cleanup, DNS or cutover occurs
   before full-plan approval; production Stages still need explicit authorization.
 - 2026-09-01 | Web Writer handover is human-only without lease or auto failover:
