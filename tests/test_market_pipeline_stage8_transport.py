@@ -1,5 +1,5 @@
 import copy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import sqlite3
 import tempfile
@@ -469,6 +469,51 @@ class Stage8ReceiverTests(unittest.TestCase):
 
 
 class Stage8TransportTests(unittest.TestCase):
+    def test_pending_export_prioritizes_fresh_events_over_old_backlog(self):
+        with tempfile.TemporaryDirectory() as directory:
+            market = connect_market_store(Path(directory) / "market.sqlite3")
+            initialize_market_store(market)
+            initialize_export_ledger(market)
+            now = datetime.now(timezone.utc).replace(microsecond=0)
+            old = (now.replace(microsecond=0) - timedelta(days=2)).isoformat().replace(
+                "+00:00", "Z"
+            )
+            fresh = now.isoformat().replace("+00:00", "Z")
+            for identity, source, timestamp in (
+                ("old-1", "GROUP_1", old),
+                ("old-2", "GROUP_2", old),
+                ("fresh", "GROUP_1", fresh),
+            ):
+                upsert_observation(
+                    market,
+                    MarketObservation(
+                        event_key=derive_event_key("stage8-export-priority", identity),
+                        source_code=source,
+                        source_family="GROUP",
+                        event_time_utc=timestamp,
+                        available_at_utc=timestamp,
+                        instrument="COIN_IMAM",
+                        market_label="GROUP_COIN_IMAM",
+                        settlement_term="CASH",
+                        trade_form="PHYSICAL",
+                        event_type="OFFER",
+                        side="SELL",
+                        price="187500",
+                        price_unit="PROJECT_THOUSAND_TOMAN",
+                        currency="TOMAN",
+                        quantity="5",
+                        quantity_unit="COIN_COUNT",
+                        parser_version="stage8-test-v1",
+                    ),
+                )
+            market.commit()
+
+            rows = _pending_export_rows(market, max_rows=1)
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(str(rows[0]["available_at_utc"]), fresh)
+            market.close()
+
     def test_xau_export_keeps_only_latest_real_quote_per_closed_fifteen_second_bucket(self):
         with tempfile.TemporaryDirectory() as directory:
             market = connect_market_store(Path(directory) / "market.sqlite3")

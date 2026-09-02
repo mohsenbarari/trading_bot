@@ -257,6 +257,7 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
         self.assertIn(
             "MARKET_PROCESSOR_MAX_MARKET_PROJECTIONS_PER_CYCLE:", processor
         )
+        self.assertIn("MARKET_PROCESSOR_MAX_FACT_EXPORTS_PER_CYCLE:", processor)
         self.assertIn("MARKET_PROCESSOR_MAINTENANCE_INTERVAL_SECONDS:", processor)
         self.assertIn("timeout: 8s", receiver)
         estimator = bot.split("  coin-estimator:", 1)[1].split(

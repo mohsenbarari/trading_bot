@@ -331,7 +331,12 @@ def _pending_export_rows(
                 AND instr(COALESCE(l.reason_code,''),'fact_payload_hash_mismatch')>0
               )
           )
-        ORDER BY o.event_time_utc,
+        ORDER BY CASE
+                   WHEN o.available_at_utc >=
+                        strftime('%Y-%m-%dT%H:%M:%SZ','now','-10 minutes')
+                   THEN 0 ELSE 1
+                 END,
+                 o.event_time_utc,
                  CASE o.event_type WHEN 'OFFER' THEN 0 WHEN 'TRADE' THEN 1 ELSE 2 END,
                  o.event_key
         LIMIT ?
