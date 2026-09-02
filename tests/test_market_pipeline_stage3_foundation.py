@@ -251,6 +251,13 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
         receiver = bot.split("  market-fact-receiver:", 1)[1].split(
             "  market-store-adapter:", 1
         )[0]
+        processor = web.split("  market-processor:", 1)[1].split(
+            "  market-fact-sync-worker:", 1
+        )[0]
+        self.assertIn(
+            "MARKET_PROCESSOR_MAX_MARKET_PROJECTIONS_PER_CYCLE:", processor
+        )
+        self.assertIn("MARKET_PROCESSOR_MAINTENANCE_INTERVAL_SECONDS:", processor)
         self.assertIn("timeout: 8s", receiver)
         estimator = bot.split("  coin-estimator:", 1)[1].split(
             "  estimator-snapshot-sender:", 1
