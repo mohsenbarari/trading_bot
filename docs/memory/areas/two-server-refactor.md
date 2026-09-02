@@ -12,7 +12,7 @@
   human checkpoints, exclusive Bot handoff and old-edge proxy. Target DB becomes
   canonical after first write. Closure waits for `P2-11` plus 7d quarantine; old
   Bot/Web retire 24h apart and backups require tested replacements; operations stay gated.
-- 2026-09-02 | Owner approved `P2-00..04`: all SQL/Redis/file/object state has typed
+- 2026-09-02 | Owner approved `P2-00..05`: all SQL/Redis/file/object state has typed
   ownership with durable Messenger/notification sync, local ephemeral/provider/
   Telegram state and minimal encrypted PII. Domain streams use sequence/version,
   atomic ACK, blocking rejection/gap and immutable repair. Iran Object Storage has
@@ -20,9 +20,8 @@
   14d+30% spool and bounded retention. Bootstrap uses consistent cutoff+replay,
   aligned barriers/business-media hashes, separate FULL_SYNC/MARKET_READY gates and
   two protected restore-tested snapshots. Writer handover is human, signed,
-  forward-only and fail-closed across OS/DB fences; no evidenced fence means no activation.
+  forward-only and fail-closed across OS/DB fences. Aggregate home alone mutates;
+  active Iran offers rehome atomically on failback. Global quotas reserve per-site
+  budgets; field conflicts use temporary restrictive-wins plus human resolution, never LWW.
 - 2026-09-01 | No provisioning, deploy, migration, cleanup, DNS or cutover occurs
   before full-plan approval; production Stages still need explicit authorization.
-- 2026-09-01 | Web Writer handover is human-only without lease or auto failover:
-  fence/drain source, transfer signed receipt, verify Arvan DNS and sync gates,
-  then explicitly activate destination. Bot remains independent.

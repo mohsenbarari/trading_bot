@@ -240,6 +240,11 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
   و `DNS_READY` ممکن است. اختلاف marker سیستم‌عامل و DB، restart یا خطا fail-closed
   است؛ بدون Emergency Fence Bundle معتبر Force Activation وجود ندارد و Bot از
   generation وب مستقل می‌ماند.
+- `D-19`: origin و created site تغییرناپذیر و `home_site` مرجع فعلی mutation است؛
+  rehome فقط امضاشده و generationدار است. partition فقط aggregate محلی را قابل
+  mutation می‌کند، failback آفرهای فعال Iran را اتمیک به Finland منتقل می‌کند،
+  quotaهای واقعاً سراسری budget رزروشده دارند و conflict هم‌field بدون LWW با
+  restrictive-wins موقت و تصمیم انسانی حل می‌شود.
 
 ### نیازمند تأیید در بازبینی این پلن
 
@@ -1758,31 +1763,116 @@ Bundle پذیرفته شدند. policy دادهٔ stale و authority هنگام 
 
 ## `P2-05` — authority و conflict policy
 
-وضعیت: `PROPOSED`
+وضعیت: `PROPOSED — قرارداد سناریویی authority/conflict در 2026-09-02 تأیید شد؛ اجرا مسدود است`
 
-- offer/trade mutation فقط روی `home_site` انجام می‌شود.
-- آفر Finland در partition روی Iran فقط historical/read-only است و قابل execute
-  نیست؛ آفر تازهٔ Iran، `home_site=ir` دارد.
-- Bot در Finland هنگام Iran Web Writer تمام قابلیت‌های فعلی خود را بدون محدودیت
-  ادامه می‌دهد؛ تغییر Web Writer به‌تنهایی مجاز نیست هیچ command بات را
-  `unavailable`، read-only یا متوقف کند.
-- هر command بات باید در Data Ownership Matrix به authority مستقل
-  `TELEGRAM_OWNER`، `HOME_SITE=fi` یا aggregate صریحاً Bot-owned نگاشت شود. اگر
-  دامنه‌ای اکنون هم از Web و هم از Bot mutation می‌پذیرد، این Stage باید قرارداد
-  authority/merge آن را سناریومحور طراحی کند؛ خاموش‌کردن Bot راه‌حل قابل‌قبول نیست.
-- command به home غیرقابل‌دسترس pending نامحدود نمی‌ماند؛ نتیجهٔ صریح
-  `HOME_SITE_UNREACHABLE` می‌دهد.
-- admin/global state به‌صورت blanket تابع Web Writer generation نیست؛ authority هر
-  command و aggregate باید صریح باشد تا Web ایران و Bot فنلاند بدون split-brain
-  و بدون محدودکردن Bot کار کنند.
-- immutable append events merge می‌شوند؛ mutable aggregateها state machine دارند.
-- money، quantity و inventory هرگز LWW نیستند.
-- eventی که oversell/negative inventory بسازد quarantine می‌شود، sync green را
-  می‌بندد و تصمیم انسانی/repair audited می‌خواهد.
-- field local مثل Telegram message ID یا dashboard transition session به peer
-  business state وارد نمی‌شود.
+### مبنای واقعی کد و شکاف هدف
 
-Gate خروج: conflict matrix برای تمام `SYNC` tables تست تولیدی و property-based دارد.
+- `Offer` اکنون `home_server`، `offer_public_id`، idempotency، optimistic version و
+  constraint ماندهٔ غیرمنفی دارد. trade نیز advisory/row lock، idempotency و
+  transaction اتمیک دارد؛ این محافظ‌ها باید حفظ و تقویت شوند، نه جایگزین کور.
+- `trade_number_seq` فعلی Finland/foreign را زوج و Iran را فرد می‌سازد؛ این قرارداد
+  collision-free و نمایش عددی حفظ می‌شود، ولی `trade_public_id` شناسهٔ cross-site
+  پایدار و مستقل از PK محلی خواهد بود.
+- در مدل فعلی wallet یا موجودی کل دارایی کاربر وجود ندارد. invariant مالی موجود
+  در این دامنه، `remaining_quantity >= 0`، مصرف یکتای lot، قیمت/تعداد قطعی Trade و
+  limit/counterهاست؛ سند نباید ledger ناموجود اختراع کند.
+- نگاشت فعلی `core/offer_source.py`، Web را همیشه Iran-home و Bot را foreign-home
+  می‌کند و `core/admin_authority.py` authority مشترک را همیشه Iran می‌داند. هر دو
+  hard-code با Writer متحرک ناسازگارند و باید با registry صریح جایگزین شوند.
+- Trade فعلی همهٔ provenance مصوب را نگه نمی‌دارد؛ schema هدف باید منشأ آفر و
+  درخواست، execution surface، actor/tier، policy version و authority را immutable
+  snapshot کند.
+
+### قرارداد identity و authority
+
+| مفهوم | معنا | امکان تغییر |
+| --- | --- | --- |
+| `origin_surface` | Web، Bot یا Internal که عمل را آغاز کرده است | هرگز |
+| `created_site` | سایت ایجاد اولیهٔ aggregate | هرگز |
+| `home_site` / `authority_site` | تنها سایت مجاز به mutation فعلی aggregate | فقط `AUTHORITY_TRANSFER` امضاشده |
+| `authority_generation` | نسل صعودی authority همان aggregate | فقط دقیقاً `+1` در transfer |
+
+Web creation از site دارای Web Writer، Bot creation از Finland/`TELEGRAM_OWNER` و
+Request/Trade/expiry/republish/overtime از home فعلی Offer authority می‌گیرند. admin،
+user، relation و setting به‌صورت blanket تابع Web Writer نیستند؛ هر command و field
+در registry کلاس `WEB_WRITER`، `TELEGRAM_OWNER`، `AGGREGATE_HOME`، `ACTOR_OWNER` یا
+authority صریح دیگری دارد. entry ناشناخته blocker است.
+
+### سناریوهای تأییدشده
+
+| وضعیت و رخداد | رفتار الزامی | مانع ایمنی |
+| --- | --- | --- |
+| اتصال سالم و Finland Writer است | Offerهای Web و Bot هر دو `home=fi` ولی origin/policy مستقل دارند | هم‌مکانی حق یکسان‌کردن tier، overtime، publication یا notification را ندارد |
+| `FI→IR` در partition | Offerهای قبلی FI فقط historical/read-only در Iran؛ Offer تازهٔ Web `home=ir` و Offer تازهٔ Bot `home=fi` است | mirror حق trade/expire/cancel/republish ندارد؛ Bot عمومی خاموش نمی‌شود |
+| دو درخواست ۷ و ۵ برای ماندهٔ ۱۰ می‌رسند | فقط home با lock/transaction یکی را commit و دیگری را با ماندهٔ تازه رد می‌کند | همان Offer هرگز دو authority ندارد؛ ماندهٔ منفی یا lot دوباره مصرف‌شده apply نمی‌شود |
+| command برای remote-home در اتصال سالم | command/result امضاشده با idempotency از Object Storage عبور می‌کند؛ پاسخ سریع عادی و نتیجهٔ مبهم `PENDING_RECONCILIATION` است | retry همان نتیجه را می‌دهد؛ HTTP/SSH مسیر authority یا sync هدف نیست |
+| همان command در partition پیش از send قطع است | `HOME_SITE_UNREACHABLE` فوری و قابل‌فهم برمی‌گردد | pending نامحدود و mutation حدسی mirror ممنوع است |
+| send انجام شده ولی پاسخ گم شده | command با همان key reconcile می‌شود و نتیجهٔ قطعی بعداً نمایش می‌یابد | key یکسان با payload متفاوت conflict/tamper است؛ commit دوم ممنوع است |
+| reconnect و failback | پس از sync و drain، Offer فعال Iran همراه remaining/lot/request/reservation در یک bundle روی barrier نهایی با `AUTHORITY_TRANSFER` به FI می‌رود | transfer اتمیک و نسل `+1`؛ origin/created site ثابت، terminal history بدون rehome و failure کل bundle را متوقف می‌کند |
+| دو سایت fieldهای مستقل aggregate را تغییر داده‌اند | field-versionهای مستقل merge می‌شوند | aggregate/table timestamp مبنای overwrite نیست |
+| یک field از دو سایت متعارض تغییر کرده | هر دو event حفظ، field conflicted و تغییر محدودکننده موقتاً effective می‌شود؛ رفع فقط با `RESOLVE_CONFLICT` انسانی است | unblock/افزایش دسترسی یا limit تا حل معلق؛ LWW و site-priority ممنوع |
+| identity یکسان با دو رکورد متفاوت ساخته شده | هر دو quarantine و login/mutation حساس همان identity محدود می‌شود | mobile/account collision خودکار merge نمی‌شود و `FULL_SYNC` را می‌بندد |
+| quota سراسری در partition مصرف می‌شود | remaining capacity در آخرین barrier به budgetهای site-bound تقسیم و فقط budget محلی خرج/آزاد می‌شود | مجموع budget از سقف عبور نمی‌کند؛ ظرفیت استفاده‌نشدهٔ peer بدون reconnect قرض گرفته نمی‌شود |
+
+### قرارداد quota هنگام partition
+
+- registry باید scope هر limit را `GLOBAL`، `PER_SITE`، `PER_HOME` یا `DISPLAY_ONLY`
+  ثبت کند؛ رفتار فعلی per-home مانند occupancy وقت اضافه بی‌دلیل global نمی‌شود.
+- quotaهای واقعاً global مانند سقف آفر/درخواست/معامله/حجم، policy version، timezone،
+  روز و allocation ratio مشخص دارند. budget روزانه با الگوریتم deterministic و
+  مجموع دقیقاً کمتر یا مساوی limit ساخته می‌شود.
+- active-capacity باقی‌مانده در barrier تقسیم می‌شود؛ terminal شدن aggregate فقط
+  token همان site را آزاد می‌کند. تغییر محدودکنندهٔ local فوراً local است ولی
+  relaxation نمی‌تواند budget مصوب partition را افزایش دهد.
+- تمام featureهای Bot فعال‌اند و business limitهای موجود اعمال می‌شوند؛ budget
+  معماری مجوز خاموش‌کردن command family، Telegram executor یا Queue نیست.
+
+### قواعد conflict و quarantine
+
+- append-only event و counter delta با identity یکتا merge می‌شوند؛ duplicate/hash
+  برابر no-op و identity/hash متفاوت conflict است.
+- tombstone، block، deactivate، revoke و محدودیت سخت با update یا relaxation عادی
+  overwrite نمی‌شوند؛ restrictive-wins فقط effective safety state است و evidence
+  طرف دیگر را حذف نمی‌کند.
+- price، quantity و Trade snapshot immutable هستند. mutable status فقط از state
+  machine و home authority عبور می‌کند.
+- eventی که oversell، ماندهٔ منفی، مصرف دوبارهٔ lot، transition نامعتبر یا نقض
+  settlement بسازد apply/ACK موفق نمی‌شود؛ quarantine، همان stream و `FULL_SYNC`
+  را تا repair یا resolution انسانی می‌بندد.
+- field محلی مانند Telegram message ID، provider receipt، lease، dashboard session
+  یا local FK وارد business merge و parity نمی‌شود.
+
+### Task Card فنی Cursor
+
+1. از inventory `P2-00` برای تمام endpoint/handler/job/script/raw SQL یک Command
+   Authority Matrix تولید کند؛ table-wide حدس، hard-code Iran و `UNKNOWN` ممنوع است.
+2. schema پیشنهادی `origin_surface`، `created_site`، `home_site`، aggregate generation،
+   public IDs و Trade policy snapshot را expand/backfill/compatibility-first طراحی کند.
+3. `offer_home_server_for_source` را به «site پذیرفته‌شده توسط authority» تبدیل و
+   policy Web/Bot را مستقل نگه دارد؛ sequence زوج/فرد Trade را حفظ و collision تست کند.
+4. home guard را در command، DB transaction و sync apply enforce و Offer/Request/
+   Trade/outbox/delivery intent را در یک commit idempotent نگه دارد.
+5. command/result stream remote-home را روی قرارداد `P2-01/P2-02` با statusهای
+   definite-unreachable، ambiguous-pending و terminal-result و بدون direct RPC بسازد.
+6. aggregate transfer bundle را برای Offer فعال و request/reservation وابسته، با
+   exact cutoff/hash/CAS/rollback کامل طراحی و crash در هر مرز را تست کند.
+7. Quota Registry، deterministic partition budget، مصرف/آزادسازی token، midnight/
+   timezone، policy change و reconnect reconciliation را property-test کند.
+8. conflict engine field-level، restrictive effective state، identity quarantine و
+   resolution event انسانی را بسازد؛ هیچ repair مستقیم DB یا evidence deletion مجاز نیست.
+9. matrix شامل Web↔Bot، connected/partition/reconnect، concurrent limit، overtime،
+   duplicate، out-of-order، negative remaining، stale home و rehome نیمه‌کاره را اجرا کند.
+
+Gate خروج: تمام `SYNC` mutationها authority و conflict rule ماشین‌خوان دارند؛ Web
+و Bot policy فعلی حفظ، Bot در Finland فعال، aggregate فقط یک home دارد، combined
+global quota از budget تجاوز نمی‌کند، rehome اتمیک است و هیچ LWW، oversell، collision
+یا conflict حل‌نشده‌ای اجازهٔ `FULL_SYNC` نمی‌دهد.
+
+Gate طراحی در 2026-09-02 تأیید شد: identity چهارلایه، home-only mutation، remote
+command بادوام، rehome اتمیک آفرهای فعال Iran، حفظ Trade number زوج/فرد همراه
+`trade_public_id`، budget رزروشدهٔ quota، merge field-level، restrictive-wins موقت
+و resolution انسانی پذیرفته شدند. این تأیید مجوز schema migration، data rehome،
+command publication، quota mutation، quarantine repair یا هیچ اقدام production نیست.
 
 ## `P2-06` — dashboard مستقل دو سرور
 
