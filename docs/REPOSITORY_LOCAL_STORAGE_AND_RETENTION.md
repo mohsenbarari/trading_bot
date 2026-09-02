@@ -1,8 +1,8 @@
 # Repository-local storage and retention policy
 
-Status: initial policy for the repository cleanup/refactor
+Status: owner-approved planning baseline — no cleanup execution authorized
 Owner: project owner
-Last verified: 2026-08-31
+Last verified: 2026-09-02
 
 ## Canonical local root
 

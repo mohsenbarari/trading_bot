@@ -2,7 +2,7 @@
 
 Entries are newest first.
 
-- 2026-08-31 | `main` is the only long-lived branch; `candidate/wa-ir-standby-v1` stays local-only and is not a merge source. The canonical checkout owns ignored artifacts with bounded retention.
+- 2026-09-02 | Owner approved `P1-01`: `main` alone is long-lived; WA-IR stays local-only; one worktree uses bounded `.local` artifacts. Execution remains separately gated.
 
 - 2026-08-29 | `PRIVATE_PRIMARY` adopts Shadow roots in-place and mounts secrets from `/srv/trading-bot/secure/market-data`. Both-role preflight and equal image digest are required. No live cutover; Product stays `LEGACY`.
 - 2026-08-28 | Urgent `PRIVATE_PRIMARY` may skip staging/soak, but Product stays `LEGACY` until exact release/off-host backup/single owner/nine-source gap/fresh complete-grid `OK`/CAS. `NO_DATA` requires a proven missing same-commodity one-gram anchor and fresh melted data; no synthetic/waiver. After `PRIMARY_COMMITTED`, rollback is Product-only.

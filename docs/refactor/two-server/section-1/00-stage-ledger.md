@@ -6,7 +6,7 @@ Plan branch: `plan/two-server-refactor-v1`
 | Stage | Status | Gate | Primary output |
 | --- | --- | --- | --- |
 | `P1-00` | `IN_PROGRESS` | owner review approved; evidence and rehearsal gates open | current-state dossier and blocker register |
-| `P1-01` | `PROPOSED` | blocked by `P1-00` and cleanup approval | cleanup/retention execution |
+| `P1-01` | `PROPOSED` | policy approved; execution blocked by `P1-00` and exact batch receipts | cleanup/retention execution |
 | `P1-02` | `PROPOSED` | blocked by `P1-00` | topology-neutral configuration |
 | `P1-03` | `PROPOSED` | dependencies not complete | target runtime topology |
 | `P1-04` | `PROPOSED` | dependencies not complete | shared Finland data plane |

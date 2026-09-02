@@ -1,6 +1,14 @@
 # Repository and Runtime Cleanup Manifest
 
-Status: inventory/proposal only — no deletion authorized
+Status: policy approved 2026-09-02 — inventory completion and execution authorization open
+
+## Owner review receipt
+
+The owner approved the canonical storage layout, quarantine-first grouped cleanup,
+retention defaults, large-path treatment, required manifest expansion and the
+separate audit boundary for host runtimes on 2026-09-02. This freezes the cleanup
+policy only: it does not authorize moving or deleting any file, branch, worktree,
+backup, data set, container, volume or runtime.
 
 The manifest deliberately separates discover/classify from execution. Sizes are
 point-in-time observations; every execution Task Card must re-resolve an exact,
@@ -9,7 +17,10 @@ root-bounded path and re-check references, locks and protection metadata.
 | Path/class | Tracked | Size/state | Proposed action | Required proof / retention |
 | --- | --- | --- | --- | --- |
 | repository worktree | mixed | one canonical worktree | `KEEP` | remain clean; no extra worktree |
+| `main` | Git branch | only long-lived branch | `KEEP` | canonical integration source |
+| `plan/two-server-refactor-v1` | Git branch | temporary planning branch | `KEEP` until reviewed integration | remove only after the approved plan is preserved on `main` |
 | `candidate/wa-ir-standby-v1` | Git branch | local-only candidate | `KEEP` | owner explicitly deferred deletion; never push/merge as source |
+| Cursor-named Git branch / extra worktree | Git metadata | none observed on 2026-09-02 | `KEEP` absent | any future discovery requires unique-commit audit and exact receipt |
 | `tmp/production-release/` | ignored | ~1.2 GiB / 6,106 files | `QUARANTINE` then `DELETE` candidate | prove no active release/rollback reference; set expiry and reversible quarantine receipt |
 | `frontend/node_modules/` | ignored | ~571 MiB | `KEEP` as reproducible cache or `DELETE` under cache quota | lockfile install must reproduce it; never treat as source/backup |
 | `mutants/` | ignored | ~22 MiB | `DELETE` candidate | test tooling/reference scan; results needed for an open review move to `.local/test-results` first |
@@ -21,7 +32,7 @@ root-bounded path and re-check references, locks and protection metadata.
 | Web host obsolete three-site stack | external | active for about five weeks | `BLOCKED` pending ownership audit | prove zero traffic/write/scheduler/credential use before decommission |
 | Market staging-shadow paths | external | production consumers observed | `MOVE` only in later migration | content hash, consumer map, replay test and rollback mount required |
 
-## Retention contract to approve in `P1-01`
+## Approved retention contract for `P1-01`
 
 Every backup, release, log, test result, raw Telegram partition and quarantine
 entry must carry:
@@ -45,6 +56,29 @@ Minimum safety rules:
    idempotent;
 6. any target not present in the human-approved manifest requires a new gate.
 
+Approved defaults are defined in `docs/REPOSITORY_LOCAL_STORAGE_AND_RETENTION.md`:
+14-day rotated logs, 7-day/2-GiB local test results, two successful releases plus
+one verified rollback, 7-day failed releases and transfer backups, 7-day
+quarantine, 14-day hot Telegram raw data with at most 90 compressed days when
+replay is required, 30-day/rebuildable caches, and active plus one verified
+rollback map-data version. Incident, replay, active-release and last-restorable
+holds override expiry.
+
+## Required inventory expansion before execution
+
+The execution manifest must still classify, without reading secret values:
+
+- `.env*.bak` and any credential-bearing local archive;
+- `mini_app_dist*` and other generated frontend bundles;
+- `.venv`, Python/pytest caches and dependency caches;
+- `audit_trail`, estimator runtime review artifacts and generated test evidence;
+- agent/IDE state, `pip_packages`, offline map data, uploads and any scattered
+  host-side project copy discovered inside an explicitly approved scan root.
+
+Required source/docs move into the canonical repository path. Runtime state moves
+to a declared `.local` class or persistent volume; credentials, live databases
+and the durable backup copy stay outside Git in access-controlled storage.
+
 ## Execution order after approval
 
 1. add metadata/retention tooling and test it against fixtures;
@@ -57,5 +91,7 @@ Minimum safety rules:
    receipt;
 7. verify a second cleanup run makes no additional change.
 
-This file is not an `rm` list. It is the input to the owner review required before
-`P1-01` can execute.
+This file is not an `rm` list. Before `P1-01` can execute, `P1-00` must close and
+each exact homogeneous cleanup batch needs a receipt. Material branches,
+worktrees, backups, data sets and runtimes require independent receipts; cache or
+log files in one approved class do not require per-file approval.

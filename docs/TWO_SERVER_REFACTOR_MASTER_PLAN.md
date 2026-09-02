@@ -559,7 +559,7 @@ Rollback با revert همان commit انجام و artifactهای محلی audit
 
 ## `P1-01` — پاکسازی و یکپارچگی repository محلی
 
-وضعیت: `PROPOSED`
+وضعیت: `PROPOSED — سیاست و Retention در 2026-09-02 تأیید شد؛ اجرا هنوز مسدود است`
 
 Dependency: `P1-00` و تأیید انسانی Cleanup Manifest قبل از هر حذف.
 
@@ -613,7 +613,13 @@ Telegram data و test output یا باید در مسیر local مدیریت‌ش
 - dry-run test، path-escape/symlink test، protected-artifact test و اجرای دوم
   idempotent بدون حذف تازه.
 - repository تمیز، یک worktree canonical و هیچ runtime artifact جدید tracked نباشد.
-- حذف هر branch، worktree، backup یا فایل material یک رسید انسانی مستقل می‌خواهد.
+- هر batch دقیق و هم‌نوع از cache/log یک رسید گروهی می‌خواهد؛ branch، worktree،
+  backup، data set یا runtime مادی هرکدام رسید انسانی مستقل می‌خواهند.
+
+Gate سیاست در 2026-09-02 تأیید شد: layout canonical، حذف گروهی quarantine-first،
+بازه‌های retention، رفتار مسیرهای حجیم، تکمیل اجباری manifest و مرز جداگانهٔ
+runtimeهای سرور پذیرفته شدند. این تأیید مجوز جابه‌جایی یا حذف نیست؛ اجرای هر batch
+پس از بسته‌شدن `P1-00` و با receipt دقیق انجام می‌شود.
 
 Rollback: موارد قابل‌حذف ابتدا تا پایان بازهٔ مصوب به quarantine قابل‌بازگشت منتقل
 شوند؛ حذف نهایی فقط بعد از expiry و اثبات نبود reference انجام شود.
