@@ -16,12 +16,14 @@
   7d quarantine; old edge needs 48h zero valid traffic then 24h monitoring. Old
   Bot/Web hosts retire sequentially 24h apart; the 30d migration backup needs a
   restore-tested replacement. Every deletion and WA-IR branch removal stays gated.
-- 2026-09-02 | Owner approved `P2-00..02`: all SQL/Redis/file/object state has typed
+- 2026-09-02 | Owner approved `P2-00..03`: all SQL/Redis/file/object state has typed
   ownership with durable Messenger/notification sync, local ephemeral/provider/
   Telegram state and minimal encrypted PII. Domain streams use sequence/version,
   atomic ACK, blocking rejection/gap and immutable repair. Iran Object Storage has
   split buckets/credentials, client encryption/site signing, immutable objects,
-  14d+30% spool, opaque media IDs and 7d/24h/30d transport retention.
+  14d+30% spool and bounded retention. Bootstrap uses consistent cutoff+replay,
+  aligned barriers/business-media hashes, separate FULL_SYNC/MARKET_READY gates and
+  two protected restore-tested snapshots.
 - 2026-09-01 | No provisioning, deploy, migration, cleanup, DNS or cutover occurs
   before full-plan approval; production Stages still need explicit authorization.
 - 2026-09-01 | Web Writer handover is human-only without lease or auto failover:

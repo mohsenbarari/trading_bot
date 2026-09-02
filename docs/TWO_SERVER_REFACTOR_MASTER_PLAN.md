@@ -230,6 +230,11 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
   directional AEAD و با signing key مستقل هر سایت محافظت می‌شود. object immutable،
   head فقط hint، local spool برابر ۱۴ روز peak +۳۰٪ و cleanup فقط با credential و
   approval مستقل است.
+- `D-17`: bootstrap از consistent snapshot با per-stream cutoff و replay از
+  `cutoff+1` است و target تا پایان بدون write/side effect می‌ماند. parity فقط روی
+  barrier هم‌مرز و business/media hash سنجیده می‌شود؛ `FULL_SYNC` و `MARKET_READY`
+  مستقل‌اند. دو snapshot آخر حفظ و قدیمی‌تر پس از ۳۰ روز فقط با جایگزین
+  restore+replay-tested نامزد حذف است.
 
 ### نیازمند تأیید در بازبینی این پلن
 
@@ -1592,7 +1597,29 @@ upload/download، lifecycle mutation یا هر تماس Object Storage نیست.
 
 ## `P2-03` — bootstrap، snapshot و parity
 
-وضعیت: `PROPOSED`
+وضعیت: `PROPOSED — قرارداد سناریویی bootstrap/parity در 2026-09-02 تأیید شد؛ اجرا مسدود است`
+
+Snapshot در این Stage sync seed است، نه backup. manifest آن حداقل snapshot/source
+identity، writer generation، release/schema/ownership version، creation time،
+per-stream cutoff، chunk range/count/size/hash، per-table count/business hash،
+media manifest hash، model reference، encryption key ID و signature را ثبت می‌کند.
+
+### سناریوهای تأییدشده
+
+| وضعیت اولیه و رخداد | رفتار مورد انتظار و مانع ایمنی |
+| --- | --- |
+| Finland در حال write و snapshot ساخته می‌شود | consistent read و cutoff تمام streamها در یک مرز گرفته می‌شود؛ write تازه در outbox بعد cutoff می‌ماند و توقف طولانی لازم نیست؛ فشار transaction/WAL خطرناک abort است. |
+| registry export می‌شود | فقط shared durable state و PII allowlisted/encrypted وارد می‌شود؛ session/OTP/browser/upload temp/push/Telegram/sync-runtime/dashboard secret حذف‌اند. |
+| snapshot chunk و منتقل می‌شود | sort با stable identity و chunk deterministic/encrypted/signed است؛ numeric local PK ordering نیست و retry فقط chunk ناقص را تکرار می‌کند. |
+| Iran snapshot را import می‌کند | state `BOOTSTRAPPING` با product write/external side effect بسته و Telegram capability غایب است؛ load در DB/schema موقت و promotion فقط پس از validation است. |
+| importer وسط کار crash می‌کند | chunk receipt resume و replay قبلی no-op است؛ دو clean و یک kill/resume hash یکسان می‌سازند و source هرگز reset نمی‌شود. |
+| snapshot تا sequence 5000 است | incremental دقیقاً از 5001 می‌آید؛ داخل-snapshot دوباره apply و head/sequence حدسی استفاده نمی‌شود. |
+| source هنگام مقایسه تغییر می‌کند | `PARITY_BARRIER` cutoff همهٔ streamها را pin می‌کند و هر دو سایت فقط در همان مرز hash می‌شوند؛ زمان نزدیک یا live row count parity نیست. |
+| business hash محاسبه می‌شود | stable sort و canonical money/decimal/UTC precision با field exclusions registry است؛ schema، metadata/local و business drift جدا گزارش می‌شوند. |
+| DB row حاضر ولی media ناقص است | metadata/blob/content ID/size/owner/reference همگی لازم‌اند؛ missing referenced blob `FULL_SYNC` را می‌بندد. |
+| Product برابر ولی Market ناقص است | `FULL_SYNC` و `MARKET_READY` مستقل گزارش می‌شوند؛ Initial Standby و handoverهای نیازمند هر دو، بدون یکی فعال نمی‌شوند. |
+| parity diff دیده می‌شود | expected-local جدا، schema block، business partition repair، financial/inventory/settlement کل `FULL_SYNC` block و unknown بدون auto-overwrite است. |
+| snapshot retention سررسید می‌شود | latest و previous verified حفظ‌اند؛ older پس از ۳۰ روز فقط با replacement restore+replay+business/media parity نامزد حذف و last-restorable هرگز auto-delete نمی‌شود. |
 
 - bootstrap از snapshot transactionally consistent و cutoff-bound انجام شود.
 - snapshot chunk، manifest، row count، schema digest و per-table business hash دارد.
@@ -1601,8 +1628,36 @@ upload/download، lifecycle mutation یا هر تماس Object Storage نیست.
   events است.
 - row count برابر بدون hash برابر `FULL_SYNC` نیست.
 
-Gate خروج: bootstrap وسط crash قابل resume است و اجرای دوباره state را تغییر
-نمی‌دهد.
+### Task Card فنی Cursor
+
+1. manifest/chunk schema نسخه‌دار و deterministic exporter را از `P2-00` بسازد؛
+   consistent DB snapshot و per-stream cutoff در یک boundary ثبت شود.
+2. field allowlist و local/secret exclusion را enforce و chunkها را با stable
+   identity، AEAD/signature و receipt قابل resume بسازد؛ chunk size از benchmark
+   انتخاب شود، نه حدس ثابت.
+3. importer را فقط روی write-blocked temporary DB/schema اجرا و FK/unique/sequence،
+   schema/registry، business invariant و media reference را پیش از promotion چک کند.
+4. incremental receiver را دقیقاً از `cutoff+1` آغاز و duplicate/gap/dependency را
+   طبق `P2-01` مدیریت کند؛ bootstrap bookkeeping تازه است و watermark قدیمی truth نیست.
+5. `PARITY_BARRIER` و hash canonical هم‌مرز در سطح table/partition/snapshot را
+   پیاده کند؛ local-only، schema/metadata و business drift خروجی جدا داشته باشند.
+6. `FULL_SYNC` را فقط با schema/release/registry سازگار، mandatory streamهای applied+
+   ACKed تا barrier، صفر gap/rejection/quarantine، business hash برابر، media کامل،
+   authority درست و lag جاری ≤۳۰s بسازد؛ `MARKET_READY` جدا بماند.
+7. دو clean import و یک kill/resume و failureهای corrupt/missing chunk، schema
+   mismatch، disk full و restart را اجرا کند؛ repair فقط replay یا snapshot مصوب است.
+8. Dashboard progress/chunk receipt/cutoff/replay lag/hash diff/media gap و Gateهای
+   مستقل delivery/parity/market را نشان دهد و retention dry-run را ثبت کند.
+
+Gate خروج: bootstrap وسط crash قابل resume و اجرای دوباره no-op باشد؛ clean/resume
+hashها برابر، `FULL_SYNC` فقط با barrier هم‌مرز و media کامل، `MARKET_READY` مستقل،
+و هیچ financial/unknown diff یا direct-DB repair باقی نماند.
+
+Gate طراحی در 2026-09-02 تأیید شد: snapshot بدون توقف Writer و با cutoff اتمیک،
+target ایزوله و side-effect-free، replay از `cutoff+1`، barrier/hash هم‌مرز، تعریف
+ترکیبی `FULL_SYNC`، جدایی `MARKET_READY`، دو snapshot محافظت‌شده و حذف مشروط پس از
+۳۰ روز پذیرفته شدند. این تأیید مجوز snapshot/export، production read، object upload،
+DB create/reset/import/restore، replay یا data mutation نیست.
 
 ## `P2-04` — Manual Writer Handover، generation و fencing
 
