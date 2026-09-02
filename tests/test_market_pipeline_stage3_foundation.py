@@ -259,6 +259,10 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
         )
         self.assertIn("MARKET_PROCESSOR_MAX_FACT_EXPORTS_PER_CYCLE:", processor)
         self.assertIn("MARKET_PROCESSOR_MAINTENANCE_INTERVAL_SECONDS:", processor)
+        self.assertIn(
+            "SQLITE_TMPDIR: /var/lib/market-data/state/market-processor/sqlite-tmp",
+            processor,
+        )
         self.assertIn("timeout: 8s", receiver)
         estimator = bot.split("  coin-estimator:", 1)[1].split(
             "  estimator-snapshot-sender:", 1
