@@ -1,10 +1,10 @@
 # Infrastructure
 
-- 2026-09-02 | Owner approved `P1-02/03`: typed capability config separates
-  origin and human Writer state; Finland uses two job-free Web replicas,
-  singleton Web jobs, split Bot Queue-v1, separate app/Market DBs and limited
-  ops control. Ownership fails closed; legacy removal waits for `P1-08`; no
-  runtime action is authorized.
+- 2026-09-02 | Owner approved `P1-02..04`: typed capability config separates
+  origin/Writer; Finland has two job-free Web replicas, singleton jobs, split Bot
+  and separate app/Market DBs. Shared app DB removes local sync; cross-site uses
+  durable ordered outbox/inbox and local side-effect queues. Conflicts fail
+  closed; legacy waits for `P1-08`; no runtime action is authorized.
 - 2026-09-02 | Owner approved the `P1-00` human baseline: twelve behavior
   families, preserved Web/Bot distinctions and provenance, mandatory evidence
   for six gaps, and the runtime-ownership seed. Exact target binding stays in

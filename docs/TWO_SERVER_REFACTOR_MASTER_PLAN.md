@@ -805,7 +805,7 @@ Rollback: artifactهای compose/config به commit قبلی برمی‌گردن
 
 ## `P1-04` — دادهٔ مشترک و حذف sync داخلی Finland
 
-وضعیت: `PROPOSED`
+وضعیت: `PROPOSED — قرارداد سناریویی داده در 2026-09-02 تأیید شد؛ اجرا مسدود است`
 
 Dependency: `P1-03`، `P2-00` و `P2-01`؛ Data Ownership Matrix باید مصوب باشد.
 
@@ -816,6 +816,27 @@ Dependency: `P1-03`، `P2-00` و `P2-01`؛ Data Ownership Matrix باید مصو
 در همان transaction ساخته می‌شود. منشأ Web/Bot پاک نمی‌شود، چون policyهای محصول
 ممکن است بر اساس آن متفاوت باشند.
 
+### سناریوهای تأییدشده
+
+| وضعیت اولیه و رخداد | رفتار مورد انتظار و مانع ایمنی |
+| --- | --- |
+| Web یا Bot در Finland Offer می‌سازد | row، provenance، cross-site outbox لازم و local side-effect record اتمیک commit می‌شوند؛ surface دیگر بدون network hop همان row را می‌بیند. |
+| یک موجودی آخر هم‌زمان از Web و Bot درخواست می‌شود | lock/CAS فقط یک نتیجه می‌سازد؛ بازنده conflict قطعی می‌گیرد؛ inventory منفی، oversell و event دوم ممنوع است. |
+| process قبل یا بعد commit crash می‌کند | قبل commit هیچ اثر؛ بعد commit outbox قابل retry؛ پس از side effect و قبل ACK، receipt/dedupe مانع تکرار می‌شود. |
+| ارتباط Iran قطع است | business محلی ادامه و PostgreSQL outbox تا ACK حفظ می‌شود؛ Redis محل یگانهٔ backlog نیست. استثناهای نیازمند remote ACK باید صریح ثبت شوند. |
+| event Iran دوباره تحویل می‌شود | transport حداقل یک‌بار است ولی inbox receipt باعث یک‌بار اعمال‌شدن نتیجهٔ business می‌شود؛ side effect محلی replay نمی‌شود. |
+| Web و Bot به DB مشترک وصل‌اند اما sync داخلی قدیمی روشن است | DB/site loop guard readiness را fail می‌کند؛ transport داخلی پیش از اتصال مشترک fence می‌شود. |
+| state محلی دو runtime ادغام می‌شود | 23 جدول shared یک canonical copy؛ Web-local از Web source، Telegram-local از Bot source؛ bookkeeping قدیمی rebuild و Redis cache بازسازی می‌شود. |
+| provenance قدیمی ناقص است | backfill فقط با rule قطعی و ثبت confidence؛ مورد مبهم quarantine و بدون حدس است. |
+| conflict مالی/موجودی/settlement دیده می‌شود | stage متوقف و مورد quarantine/report می‌شود؛ LWW، auto-sum و overwrite ممنوع است. |
+| rollback لازم می‌شود | field/adapter legacy تا `P1-08` خواندنی می‌ماند؛ transport قدیمی فقط پس از fence target و روی topology جدا قابل‌بازگشت است، نه روی DB مشترک. |
+
+Event envelope مرکزی برای cross-site شامل `event_id`, `origin_site_sequence`,
+`aggregate_type/id/version`, `origin_site/surface`, `schema_version`,
+`idempotency_key`, payload و hash است. Queueها و receiptهای Telegram/Web
+side effect محلی و از این transport جدا می‌مانند. جدول‌های دقیق Finland↔Iran در
+`P2-00/P2-01` تصویب می‌شوند؛ local data به‌طور پیش‌فرض sync نمی‌شود.
+
 ### Task Card فنی Cursor
 
 1. تمام مسیرهای sync فعلی میان Bot-Finland و Web-Finland شامل HTTP client/server،
@@ -825,7 +846,8 @@ Dependency: `P1-03`، `P2-00` و `P2-01`؛ Data Ownership Matrix باید مصو
    `REMOVE_LOCAL_TRANSPORT`, `CONVERT_TO_CROSS_SITE_OUTBOX`, `KEEP_LOCAL`,
    `BLOCKED_UNKNOWN`. دستهٔ آخر مانع implementation است.
 3. برای هر mutation، transaction boundary و stable identity را مشخص کند. business
-   row و outbox لازم باید atomic commit شوند؛ publish مستقیم پیش از commit ممنوع است.
+   row، cross-site outbox لازم و local side-effect record باید atomic commit شوند؛
+   publish مستقیم پیش از commit ممنوع است.
 4. مدل provenance را برای entityهای در scope تثبیت کند: حداقل `origin_site`,
    `origin_surface`, `actor_id/role`, `customer_tier_snapshot`, `policy_version`,
    `created_at` و identityهای Offer/Request/Trade. نام دقیق field پس از audit schema
@@ -838,11 +860,13 @@ Dependency: `P1-03`، `P2-00` و `P2-01`؛ Data Ownership Matrix باید مصو
 7. mappingهای legacy مانند `offer_home_server_for_source` را با تست characterize
    و سپس به site authority + surface policy تفکیک کند. حذف یک branch شرطی فقط وقتی
    مجاز است که parity test ثابت کند behavior از دست نمی‌رود.
-8. outbox را با event id پایدار، aggregate/version، origin site/surface، payload
-   schema version و idempotency key تعریف کند. local consumer نباید event Finland
-   را دوباره به DB Finland loopback کند.
-9. side-effect ledger تلگرام و notification را local و idempotent نگه دارد؛ replay
-   cross-site نباید پیام، callback answer، publication یا notification تکراری بسازد.
+8. یک cross-site event envelope مرکزی و inbox receipt با event id پایدار، source
+   sequence، aggregate/version، origin site/surface، payload schema version، hash
+   و idempotency key تعریف کند. delivery می‌تواند تکرار شود اما business apply
+   باید deduplicated باشد؛ local consumer نباید event Finland را loopback کند.
+9. side-effect queue/ledger تلگرام و notification را local، جدا از cross-site
+   transport و idempotent نگه دارد؛ replay نباید پیام، callback answer، publication
+   یا notification تکراری بسازد.
 10. ORM hook، raw SQL، bulk update و maintenance pathهایی را که outbox/ledger را
     دور می‌زنند با registry مقایسه و پوشش دهد یا با دلیل `LOCAL_ONLY` اعلام کند.
 11. migration را expand/migrate/contract طراحی کند: schema افزایشی و backward-
@@ -857,6 +881,13 @@ Dependency: `P1-03`، `P2-00` و `P2-01`؛ Data Ownership Matrix باید مصو
 - یک logical mutation دقیقاً یک business result و حداکثر یک event/side effect
   idempotent بسازد؛ visibility محلی نیازمند network hop نباشد.
 - مالک هر تفاوت policy Web/Bot و تمام legacy mappingهای حذف‌شونده را تأیید کند.
+
+Gate طراحی در 2026-09-02 تأیید شد: event envelope و inbox receipt مرکزی،
+`at-least-once` transport با deduplicated business apply، source sequence همراه
+aggregate version، جدایی side-effect queueهای محلی، loop guard، backfill قطعی،
+حفظ legacy تا `P1-08` و quarantine conflictهای مالی پذیرفته شدند. دامنهٔ دقیق
+Finland↔Iran عمداً برای بخش دوم باز است. این تأیید مجوز schema/data migration یا
+خاموش‌کردن sync فعلی نیست.
 
 Rollback: تا closure، schema و adapter قدیمی قابل‌خواندن می‌مانند. transport قدیمی
 فقط در topology جداگانهٔ پیش از cutover قابل‌فعال‌شدن است؛ فعال‌کردن آن روی DB
