@@ -2,17 +2,21 @@
 
 Tombstones are newest first.
 
+- Never use `SERVER_MODE`, host, connectivity, Redis, DNS or restart as Writer authority;
+  nor add leases/timeouts/automatic role changes. Site is fixed, Web role human;
+  peer is observational and unknown/mismatch fences.
 - Never mix feature/policy/UX/timing/side-effect/bug changes into the Finland
   topology refactor; unresolved parity blocks it.
-- Never implement a renewable Web Writer lease, timeout-based role change, or
-  automatic promotion/demotion; Writer handover is explicitly human-controlled.
-- Never pass Market gates via synthetic anchors/events, source waiver, evidence deletion, counter/checkpoint reset, or `occurrences` as event cardinality. Redelivery is allowed; duplicate application is not.
+- Never pass Market gates via synthetic data, waivers, evidence deletion, counter reset
+  or `occurrences` as cardinality. Redelivery is allowed; duplicate application is not.
 - Never escape Docker template quotes; run them before writer quiescence.
 - Never hash raw schema dumps; strip only PostgreSQL random `\\restrict`/`\\unrestrict` keys and version banners.
-- Never restore retired Release0/WA-IR/FI/Writer-Witness/Object-Delta or three-site v2/v3 controls; they conflict with signed sync, multi-publisher Queue and canonical migrations.
+- Never restore retired Release0/WA-IR/FI/Writer-Witness/Object-Delta or three-site
+  controls; they conflict with signed sync, multi-publisher Queue and canonical migrations.
 - Never restore deleted market-monitoring branches; redesign from current `main` Queue/privacy contracts.
 - Never restore retired Emergency-IR fast-track artifacts; their base/schema was obsolete and unconsolidated. Redesign fallback from current `main`.
-- Never resurrect `candidate/coin-price-intelligence`; its app is already hardened on `main`, while remaining Shadow/Gemma/direct-promotion/DR paths are incompatible or unpromoted.
+- Never resurrect `candidate/coin-price-intelligence`; its app is on `main` and remaining
+  Shadow/Gemma/direct-promotion/DR paths are incompatible or unpromoted.
 - Never layer obsolete single-bot limiter/skew or direct-send bypass onto multi-publisher B2B; separately review architecture-independent fixes.
 - Never gate runtime with legacy-compatible `has_bot_access`; use authoritative `account_status`.
 - Do not present developer-only login shortcuts as end-user product features.

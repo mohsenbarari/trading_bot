@@ -1,14 +1,11 @@
 # Two-Server Refactor
 
-- 2026-09-02 | Owner approved `P2-07`: keep `coin.gold-trade.ir` as one DNS-only A
-  record with TTL≤30s and no AAAA/CNAME/proxy. Human Arvan changes use a Finland-only
-  root-mounted token, CAS-like plan/apply, multi-layer signed proof and manual partition
-  receipts; panel fallback is audited, and DNS never changes Writer automatically.
-- 2026-09-02 | Owner approved `P2-06`: each site has an independent Operations
-  Console on a product-independent HTTPS hostname with no IP allowlist. Local
-  username/password/Google-Authenticator-compatible TOTP, absolute 24h sessions,
-  sensitive-action re-auth, bounded audit/retention and a narrow actuator are required;
-  Product Admin/Grafana stay separate and peer stale state can never appear current.
+- 2026-09-02 | Owner approved `P2-06..08`: independent site Consoles use local
+  password/TOTP, 24h sessions and narrow actuators; Product Admin/Grafana stay separate.
+  `coin.gold-trade.ir` is one DNS-only A with TTL≤30s and Finland-only human Arvan
+  control. Fixed site/human Web role, Finland Telegram owner, 30/90s observed peer,
+  root control state, pre-fence cancel/post-fence forward-only, signed return receipts
+  and vector barriers prevent split-brain while Bot continues.
 - 2026-09-02 | Owner approved `P1-02..06`: Finland uses two Web replicas, singleton
   jobs, split Bot and separate app/Market DBs. Shared app DB removes local sync;
   deterministic merge preserves sessions/IDs/media and blocks ambiguous/financial
@@ -21,16 +18,12 @@
   human checkpoints, exclusive Bot handoff and old-edge proxy. Target DB becomes
   canonical after first write. Closure waits for `P2-11` plus 7d quarantine; old
   Bot/Web retire 24h apart and backups require tested replacements; operations stay gated.
-- 2026-09-02 | Owner approved `P2-00..05`: all SQL/Redis/file/object state has typed
-  ownership with durable Messenger/notification sync, local ephemeral/provider/
-  Telegram state and minimal encrypted PII. Domain streams use sequence/version,
-  atomic ACK, blocking rejection/gap and immutable repair. Iran Object Storage has
-  split buckets/credentials, client encryption/site signing, immutable objects,
-  14d+30% spool and bounded retention. Bootstrap uses consistent cutoff+replay,
-  aligned barriers/business-media hashes, separate FULL_SYNC/MARKET_READY gates and
-  two protected restore-tested snapshots. Writer handover is human, signed,
-  forward-only and fail-closed across OS/DB fences. Aggregate home alone mutates;
-  active Iran offers rehome atomically on failback. Global quotas reserve per-site
-  budgets; field conflicts use temporary restrictive-wins plus human resolution, never LWW.
+- 2026-09-02 | Owner approved `P2-00..05`: typed state ownership, durable Messenger/
+  notification sync and minimal encrypted PII; versioned streams have atomic ACK,
+  blocking gaps/rejections and immutable repair. Encrypted signed Object Storage uses
+  split credentials and 14d+30% spool. Cutoff/replay, aligned hash barriers, separate
+  FULL_SYNC/MARKET_READY and protected snapshots gate human signed forward-only
+  handover. Home alone mutates; active Iran offers rehome atomically. Per-site quota
+  budgets and field-level restrictive-wins require human conflict resolution, never LWW.
 - 2026-09-01 | No provisioning, deploy, migration, cleanup, DNS or cutover occurs
   before full-plan approval; production Stages still need explicit authorization.

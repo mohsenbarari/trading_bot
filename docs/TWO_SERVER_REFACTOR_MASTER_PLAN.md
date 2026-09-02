@@ -2148,27 +2148,176 @@ deploy، role change، probe production یا هیچ اقدام production نیس
 
 ## `P2-08` — state machine اتصال، قطعی و اتصال مجدد
 
-وضعیت: `PROPOSED`
+وضعیت: `PROPOSED — قرارداد سناریویی state machine در 2026-09-02 تأیید شد؛ اجرا مسدود است`
+
+### شکاف وضع موجود و مدل حالت هدف
+
+- `SERVER_MODE` فعلی site، Web surface، Bot/job authority و routing را مخلوط می‌کند؛
+  مقدار ناشناخته را نیز به `foreign` تبدیل می‌کند. `main.py` Web را روی foreign ثابت
+  می‌بندد، connectivity ایران را Boolean در Redis نگه می‌دارد و foreign را همواره
+  connected فرض می‌کند. این قراردادها مرجع State Machine هدف نیستند.
+- recovery gate فعلی Redis-only است و خطای read آن می‌تواند fail-open شود؛ deploy
+  production نیز offline scenario را اجرا نمی‌کند و recovery قدیمی ممکن است active
+  offer را expire کند، درحالی‌که `P2-05` rehome اتمیک را الزام کرده است.
+- یک global state مرکزی نداریم؛ هنگام partition هیچ سایت truth زندهٔ peer را ندارد.
+  هر سایت state پایدار محلی دارد و Receiptهای canonical امضاشده transition دو طرف را
+  به هم متصل می‌کنند.
+
+چهار محور مستقل جای `SERVER_MODE` چندمعنا را می‌گیرند:
+
+| محور | مقدار نمونه | ماهیت و اثر |
+| --- | --- | --- |
+| `SITE_ID` | `finland` / `iran` | ثابت؛ unknown startup را fail می‌کند و هرگز default نمی‌شود |
+| `WEB_ROLE` | `WRITER/DRAINING/STANDBY/ARMED/SAFE_FENCED` | پایدار؛ فقط transition انسانی تغییرش می‌دهد |
+| `PEER_STATE` | `FRESH/STALE/UNREACHABLE/RECOVERING` | مشاهده‌ای؛ فقط UI/alert و هرگز role/DNS را تغییر نمی‌دهد |
+| readiness | per-stream Sync، `FULL_SYNC/MARKET_READY/DNS_READY` | Gate جهت‌دار؛ خود authority یا trigger نیست |
+
+`TELEGRAM_OWNER=FINLAND` محور ثابت و مستقل است. Web Role، Generation، Drain یا Fence
+هیچ‌وقت Bot، Telegram executor یا Telegram-owned jobs را متوقف نمی‌کند.
+
+### Local Web Role و Control Store
 
 ```text
-CONNECTED_FI_WRITER
-  → HUMAN_REQUESTS_FI_DRAIN
-  → FI_STANDBY_RECEIPT_VERIFIED
-  → DNS_TO_IR_VERIFIED
-  → HUMAN_ACTIVATES_IR
-  → IR_WRITER
-  → RECONNECTING_IR_WRITER
-  → FULL_SYNC_AND_MARKET_READY
-  → HUMAN_REQUESTS_IR_DRAIN
-  → IR_STANDBY_RECEIPT_VERIFIED
-  → DNS_TO_FI_VERIFIED
-  → HUMAN_ACTIVATES_FI
-  → CONNECTED_FI_WRITER
+STANDBY --valid Fence Receipt--> ARMED
+ARMED --human + directional gates--> WRITER
+WRITER --human drain--> DRAINING
+DRAINING --drain barrier + hard fence + receipt--> STANDBY
+ANY MISMATCH/AMBIGUITY ---------------------------> SAFE_FENCED
 ```
 
-هر transition باید precondition، mutation، timeout، audit، observable proof و
-rollback/forward-recovery داشته باشد. timeout فقط درخواست UI را منقضی می‌کند و
-حق تغییر role ندارد. dashboard حق جهش مستقیم بین stateها را ندارد.
+- state و generation high-watermark در transactional/fsync local Control Store
+  root-owned خارج از Product DB و Redis ثبت می‌شوند؛ transition journal و مصرف Receipt
+  نیز آنجاست. نسخهٔ امضاشده و backup محدود دارد، اما میان دو سایت merge نمی‌شود.
+- Writer فقط با تطابق هم‌زمان Control Store، OS marker و Application DB control row
+  فعال است. هر نبود/اختلاف، restore عقب‌رفته یا state unreadable برابر `SAFE_FENCED`
+  و بسته‌شدن Web mutation است.
+- دو Web replica فلاند یک role/generation سایت را اجرا می‌کنند؛ هیچ process-local
+  flag یا leader lock به‌تنهایی authority نیست. edge admission، API command، DB
+  transaction و Web-owned job همگی generation/fence را enforce می‌کنند.
+- `SAFE_FENCED` Writer یا Standby سالم نیست؛ فقط observation، hard-fence، evidence و
+  repair هدایت‌شده دارد. repair حق ساخت generation تازه یا Force Activate ندارد.
+
+### Transition Journal و Receipt chain
+
+```text
+PLANNED
+  → SOURCE_DRAINING
+  → SOURCE_FENCED
+  → DESTINATION_ARMED
+  → DNS_SWITCHING
+  → DNS_READY
+  → DESTINATION_ACTIVATING
+  → DESTINATION_WRITER
+  → SOURCE_ACKNOWLEDGED
+  → CLOSED
+```
+
+- هر transition شناسه، direction، source/destination، generation `N→N+1`، previous
+  receipt hash، release/schema/registry، operator، gate evidence و idempotency دارد.
+- `Fence Receipt` پایان Web-owned mutation مبدأ، `DNS Verification Receipt` مسیر
+  مقصد، `Activation Receipt` commit مقصد و `Closure Receipt` ثبت پایان در هر دو
+  dashboard را ثابت می‌کنند. under-partition عامل فایل‌ها را دستی جابه‌جا می‌کند.
+- destination پس از activation حتماً Activation Receipt را به source برمی‌گرداند؛
+  بدون آن source fenced می‌ماند و transition را `AWAITING_DESTINATION_PROOF` نشان
+  می‌دهد، حتی اگر محصول روی مقصد درحال کار باشد.
+- plan تأییدنشده پس از ده دقیقه منقضی می‌شود. transition پس از شروع mutation timeout
+  یا rollback خودکار ندارد؛ عبور از زمان هدف alert/incident است و state/evidence حفظ
+  می‌شود.
+
+### Peer observation و reconnect
+
+- snapshot امضاشده با age حداکثر سی ثانیه `FRESH` است؛ بعد از آن `STALE` و پس از سه
+  probe ناموفق پیاپی، حدود نود ثانیه، `UNREACHABLE` می‌شود. clock/signature/schema
+  نامعتبر نیز fresh محسوب نمی‌شوند.
+- برگشت حداقل یک مسیر معتبر، `RECOVERING` را نشان می‌دهد؛ این فقط link recovery است.
+  تا gap/rejection/quarantine صفر، barrier/hash/media کامل و `FULL_SYNC` برقرار نشود،
+  dashboard اجازهٔ failback نمی‌دهد.
+- detection خودکار فقط status/alert می‌سازد. اعلام outage، آغاز drain، انتقال Receipt،
+  DNS و activation همگی اقدامات جداگانهٔ انسانی‌اند.
+
+### Barrier بدون توقف Bot
+
+Fence Receipt نباید falsely ادعا کند همهٔ eventهای Finland متوقف شده‌اند. Barrier یک
+vector بر اساس stream/authority lane است:
+
+```text
+web_writer_lane: frozen at sequence X
+telegram_owner_lane: continues after sequence Y
+aggregate_home_lanes: follow each aggregate authority
+```
+
+- فقط Web-owned admission/job/streamهای مبدأ freeze می‌شوند. Bot و Telegram در
+  Finland فعال می‌مانند و eventهای بعدی آن‌ها Fence وب را باطل نمی‌کنند.
+- hash/parity/final delta با cutoff هم‌مرز هر lane محاسبه و eventهای بعد cutoff طبق
+  replay عادی اعمال می‌شوند؛ یک global sequence یا توقف Bot برای گرفتن snapshot ممنوع است.
+- هنگام failback، active Iran-home Offerها و request/reservation/lotهای وابسته در
+  final vector barrier با `AUTHORITY_TRANSFER` اتمیک به Finland می‌روند؛ expire کردن
+  recovery قدیمی جایگزین rehome نیست.
+
+### سناریوهای تأییدشده
+
+| وضعیت و رخداد | رفتار الزامی | مانع ایمنی و evidence |
+| --- | --- | --- |
+| steady connected | Finland `WRITER/N`، Iran `STANDBY/N`، DNS Finland و Bot Finland است | peer/gate فقط monitor؛ هیچ automatic transition وجود ندارد |
+| peer قطع ولی handover درخواست نشده | در ۳۰s `STALE` و پس از سه failure حدود ۹۰s `UNREACHABLE` می‌شود؛ roleها ثابت‌اند | detection هیچ drain/DNS/promotion نمی‌سازد؛ مدیر می‌تواند اصلاً انتقال ندهد |
+| انتقال `FI→IR` | Finland فقط Web را drain/fence و Receipt را به Iran می‌دهد؛ Iran armed، DNS verified و سپس با اقدام انسانی `WRITER/N+1` می‌شود؛ Activation Receipt به Finland برمی‌گردد | readiness اضطراری، Fence/DNS receipt، TOTP و exact generation لازم‌اند؛ Bot Finland همهٔ مراحل فعال است |
+| Bot هم‌زمان event می‌سازد | Telegram lane جلو می‌رود و Web lane روی cutoff Receipt ثابت است | vector barrier از false mismatch جلوگیری می‌کند؛ توقف Bot یا global-final-sequence ممنوع است |
+| internet باز می‌شود | Iran Writer و DNS Iran باقی می‌مانند؛ event/model/media catch-up و state `RECOVERING` است | reconnect Writer را تغییر نمی‌دهد؛ conflict/gap یا Market not-ready failback را می‌بندد |
+| `IR→FI` | pre-drain `FULL_SYNC/MARKET_READY`، drain Iran، final delta/parity و rehome اتمیک، Fence Receipt، DNS Finland، activation `N+1` و Receipt برگشتی انجام می‌شود | پنجرهٔ هدف ≤۴m است؛ تجاوز incident است، نه bypass یا بازگشت Iran با نسل قدیم |
+| لغو پیش از hard fence | اگر Receipt/DNS/Armed/generation change وجود ندارد، عامل با TOTP transition را cancel و source را با همان نسل باز می‌کند | cancel audit/CAS دارد؛ هیچ recovery خودکار نیست |
+| خطا پس از hard fence | state `FORWARD_RECOVERY_ONLY`؛ destination/DNS/sync repair و همان transition تکمیل می‌شود | source همان نسل دوباره Writer نمی‌شود؛ availability قربانی safety می‌ماند |
+| source وسط drain crash می‌کند | restart state را می‌خواند و Web بسته می‌ماند؛ عامل resume یا cancel-before-fence می‌کند | restart/timeout role نمی‌سازد و journal ناقص fail-closed است |
+| destination در Armed/Activation crash می‌کند | Armed پس از restart inactive است؛ commit مبهم از Store/marker/DB reconcile و idempotent کامل می‌شود | نسل دوم ساخته نمی‌شود؛ mismatch `SAFE_FENCED` است |
+| Product DB قدیمی restore می‌شود | high-watermark و receipt chain rollback را تشخیص و سایت را fence می‌کنند | backup قدیمی Writer را احیا نمی‌کند؛ ابتدا control/data reconciliation لازم است |
+| دو dashboard هم‌زمان عمل می‌کنند | CAS و transition/receipt chain فقط یک direction و `N+1` را می‌پذیرند | replay، target دیگر یا payload متفاوت conflict و blocker است |
+| DNS drift بعد activation | route alert/repair انسانی می‌شود و Writer سالم خودکار demote نمی‌شود | DNS authority نیست؛ old standby mutation را رد می‌کند |
+
+### رفتار user-visible و failure recovery
+
+- dashboard در هر state «وضعیت محلی»، «آخرین peer proof»، «عمل انسانی بعدی»، علت
+  block و اینکه transition هنوز cancelable یا forward-only است را جدا نشان می‌دهد.
+- خطا پیش از mutation فقط plan را می‌بندد. خطا در drain admission را بسته نگه می‌دارد؛
+  خطا پس از Fence صفر Writer/read-only، و خطای پس از activation Writer مقصد را حفظ
+  می‌کند. هیچ generic rollback button وجود ندارد.
+- old-DNS client روی source fenced پیام پایدار `WRITER_MOVED/READ_ONLY` می‌گیرد و
+  non-idempotent write proxy/replay نمی‌شود. رفتار login/session/notification در
+  `P2-09` بسته می‌شود.
+
+### Task Card فنی Cursor
+
+1. تمام `SERVER_MODE`/host inference، foreign surface guard، connectivity Redis key،
+   recovery/publication gate، background authority، deploy mode و raw mutation path را
+   inventory کند و برای هرکدام mapping هدف `SITE_ID/WEB_ROLE/OWNER/PEER_STATE` بسازد.
+2. ADR و machine-readable registry/state schemas را بنویسد؛ unknown site/role/job/
+   transition startup یا mutation را fail کند، نه اینکه به foreign/Finland default شود.
+3. root-owned Control Store، signed append-only journal، high-watermark، Receipt
+   consumption، OS marker و DB control row را با atomicity/fsync/crash recovery بسازد.
+4. local role state machine و transition journal را با CAS/idempotency، plan expiry،
+   cancel-before-fence، forward-only after-fence و safe reconciliation پیاده کند.
+5. تمام Web mutationها و Web jobs را سه‌لایه fence و generation-check کند؛ Bot/API
+   producer، Telegram executor و aggregate-home commandها را با authority خود جدا نگه دارد.
+6. lane registry و vector barrier را برای Web/Bot/aggregate streams بسازد؛ final
+   delta/hash، Iran active-offer rehome و event-after-cutoff را property/integration test کند.
+7. signed `Fence/DNS/Activation/Closure` receiptها و انتقال دستی/connected را با
+   hash-chain، exact target/generation، replay rejection و redacted Audit متصل کند.
+8. Peer observer سی/نودثانیه‌ای و `RECOVERING` را بدون side effect role/DNS بسازد و
+   Dashboard `P2-06` را به state واقعی، نه guessed global state، وصل کند.
+9. crash/restart در هر edge، DB/Redis/Control Store failure، partial marker/DB commit،
+   restore قدیمی، double click، stale/replayed Receipt، split-brain attempt، DNS drift،
+   reconnect دوباره‌قطع‌شده، عبور از ۴m و Bot continuity را تست کند.
+
+Gate خروج: `SITE_ID` ثابت از `WEB_ROLE` انسانی و `PEER_STATE` مشاهده‌ای جداست؛ هر
+Transition در هر دو Console Receipt chain بسته دارد؛ pre-fence cancel و post-fence
+forward-only دقیق‌اند؛ restore/crash/Redis/DNS/stale peer دو Writer نمی‌سازد؛ vector
+barrier بدون توقف Bot parity قابل اثبات می‌دهد و active Iran offers فقط اتمیک rehome
+می‌شوند.
+
+Gate طراحی در 2026-09-02 تأیید شد: Peer در ۳۰ ثانیه stale و پس از سه failure حدود
+۹۰ ثانیه unreachable است ولی role را تغییر نمی‌دهد؛ لغو فقط پیش از hard fence، مسیر
+پس از Receipt forward-only، Activation Receipt برگشتی، Control Store root-owned خارج
+از Product DB/Redis، تفکیک Site/Web/Telegram/Peer، vector barrier و ادامهٔ بدون توقف
+Bot پذیرفته شدند. این تأیید مجوز schema/control-store creation، process/job change،
+drain/fence، receipt generation، DNS/role mutation، deploy یا هیچ اقدام production نیست.
 
 ## `P2-09` — OTP، session، notification و Messenger در قطعی
 
