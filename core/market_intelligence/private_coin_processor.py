@@ -18,6 +18,7 @@ import re
 import sqlite3
 import stat
 import threading
+import time
 from typing import Mapping
 
 from .capture_event_adapter import (
@@ -74,6 +75,7 @@ PROCESSOR_VERSION = "market-processor-v4-fact-archive-shadow"
 MAX_RECORD_BYTES = 256 * 1024
 MAX_RECORDS_PER_CYCLE = 20_000
 DEFAULT_MAX_MARKET_PROJECTIONS_PER_CYCLE = 16
+DEFAULT_MAINTENANCE_INTERVAL_SECONDS = 3_600
 SPOOL_NAME = re.compile(r"^events-\d{4}-\d{2}-\d{2}\.jsonl$")
 PROCESSOR_SOURCES = frozenset(
     {
@@ -718,6 +720,7 @@ def process_coin_spool_cycle(
     mode: str,
     now_utc: str | None = None,
     max_market_projections: int | None = None,
+    run_expensive_maintenance: bool = True,
 ) -> dict[str, object]:
     """Run one restart-safe shadow cycle and return redacted counters only."""
 
@@ -840,9 +843,13 @@ def process_coin_spool_cycle(
                 )
             except CoinGroupReviewProjectionError as exc:
                 raise CoinProcessorError(str(exc)) from exc
-        temporary_public_melted_purged = _purge_temporary_public_melted(
-            market,
-            as_of_utc=now,
+        temporary_public_melted_purged = (
+            _purge_temporary_public_melted(
+                market,
+                as_of_utc=now,
+            )
+            if run_expensive_maintenance
+            else 0
         )
         input_snapshot = materialize_input_snapshot(market, as_of_utc=now)
         outcome_counts = {
@@ -986,6 +993,18 @@ def run_coin_processor_service(
         raise CoinProcessorError("coin_processor_market_projection_limit_invalid") from exc
     if not 1 <= max_market_projections <= 1_000:
         raise CoinProcessorError("coin_processor_market_projection_limit_invalid")
+    try:
+        maintenance_interval = float(
+            os.environ.get(
+                "MARKET_PROCESSOR_MAINTENANCE_INTERVAL_SECONDS",
+                str(DEFAULT_MAINTENANCE_INTERVAL_SECONDS),
+            )
+        )
+    except ValueError as exc:
+        raise CoinProcessorError("coin_processor_maintenance_interval_invalid") from exc
+    if not 60 <= maintenance_interval <= 86_400:
+        raise CoinProcessorError("coin_processor_maintenance_interval_invalid")
+    next_maintenance = time.monotonic() + maintenance_interval
     started_at = utc_text()
     health_path = state_directory / "health.json"
     last_projection_causal_inputs = {
@@ -1015,12 +1034,16 @@ def run_coin_processor_service(
         pass
 
     def cycle_and_write(*, stopped: bool = False) -> None:
-        nonlocal last_projection_causal_inputs
+        nonlocal last_projection_causal_inputs, next_maintenance
+        maintenance_due = time.monotonic() >= next_maintenance
         counters = process_coin_spool_cycle(
             paths=paths,
             mode=mode,
             max_market_projections=max_market_projections,
+            run_expensive_maintenance=maintenance_due,
         )
+        if maintenance_due:
+            next_maintenance = time.monotonic() + maintenance_interval
         if (
             int(counters["changes"])
             or int(counters["tombstones"])
