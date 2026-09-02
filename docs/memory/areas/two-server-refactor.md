@@ -1,5 +1,10 @@
 # Two-Server Refactor
 
+- 2026-09-02 | Owner approved `P2-06`: each site has an independent Operations
+  Console on a product-independent HTTPS hostname with no IP allowlist. Local
+  username/password/Google-Authenticator-compatible TOTP, absolute 24h sessions,
+  sensitive-action re-auth, bounded audit/retention and a narrow actuator are required;
+  Product Admin/Grafana stay separate and peer stale state can never appear current.
 - 2026-09-02 | Owner approved `P1-02..06`: Finland uses two Web replicas, singleton
   jobs, split Bot and separate app/Market DBs. Shared app DB removes local sync;
   deterministic merge preserves sessions/IDs/media and blocks ambiguous/financial

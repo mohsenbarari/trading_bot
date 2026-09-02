@@ -1876,29 +1876,123 @@ command publication، quota mutation، quarantine repair یا هیچ اقدام 
 
 ## `P2-06` — dashboard مستقل دو سرور
 
-وضعیت: `PROPOSED`
+وضعیت: `PROPOSED — قرارداد سناریویی dashboard در 2026-09-02 تأیید شد؛ اجرا مسدود است`
 
-امنیت:
+### مرز مسئولیت و معماری
 
-- hostname ثابت جدا از محصول
-- HTTPS، local username/password/TOTP
-- cookie/session جدا، کوتاه‌عمر، SameSite/CSRF و rate limit
-- bootstrap حساب فقط حضوری/کنترل‌شده؛ TOTP secret sync نمی‌شود
-- audit append-only برای login، writer handover، DNS، repair و override
+- هر سایت یک Operations Console مستقل، با build/digest یکسان و تنظیم/هویت محلی
+  دارد. hostnameهای ثابت HTTPS مانند `ops-fi.<domain>` و `ops-ir.<domain>` از hostname
+  محصول و A record جابه‌جاشوندهٔ آن جدا هستند.
+- IP allowlist وجود ندارد. ورود با username، password و TOTP استاندارد RFC 6238
+  سازگار با Google Authenticator انجام می‌شود؛ credential، password hash، TOTP secret،
+  recovery code و session هر سایت محلی است و sync نمی‌شود.
+- Operations Console با Product Admin و Grafana یکی نیست: Product Admin فقط امور
+  محصول، Grafana فقط telemetry/history/alert و Console تنها workflow کنترل‌شدهٔ
+  sync/Writer/DNS/conflict/repair را ارائه می‌کنند. Grafana حق mutation ندارد.
+- Console از local control/read model، receiver/outbox/receipt و collectorهای محلی
+  می‌خواند و render صفحه به RPC، SSH یا زنده‌بودن peer وابسته نیست. وضعیت peer آخرین
+  snapshot امضاشده است و همیشه `observed_at`، age و freshness label دارد؛ stale هرگز
+  current/green نمایش داده نمی‌شود.
+- backend بدون shell/SQL عمومی فقط commandهای allowlisted و idempotent را به actuator
+  محلی root-owned با interface محدود می‌دهد. UI و API هر دو تمام gateها را enforce
+  می‌کنند؛ disabled button به‌تنهایی کنترل امنیتی نیست.
+- خرابی Console، Grafana یا peer نقش را تغییر نمی‌دهد و به Data Plane محصول سرایت
+  نمی‌کند. CLI اضطراری فقط همان state machine و guardهای `P2-04` را اجرا می‌کند و
+  Force Activate، Receipt fabrication یا bypass gate ندارد.
 
-نمای لازم:
+### Authentication، session و audit
 
-- نقش و writer generation محلی/peer
-- آخرین transition، Fence Receipt و وضعیت drain مبدأ
-- bucket reachability و آخرین peer-seen
-- local/published/ACKed/applied sequence برای هر stream
-- gap، unpublished، unacked، apply backlog و rejected count
-- business checksum و media backlog
-- active release/model/schema/registry fingerprint هر دو سرور
-- DNS expected/observed و probeهای داخلی/خارجی
-- `SYNC_READY`, `MARKET_READY`, `DNS_READY`, `WRITER_READY`
+- حداقل roleهای `VIEWER` و `OPERATOR` وجود دارند؛ فقط `OPERATOR` عملیات حساس را
+  می‌بیند و اجرا می‌کند. bootstrap حساب و reset آن کنترل‌شده و محلی است.
+- session از لحظهٔ login حداکثر ۲۴ ساعت اعتبار مطلق دارد، sliding-renew نمی‌شود و پس
+  از آن login کامل لازم است. Writer/DNS/repair/conflict action مستقل از عمر session،
+  TOTP تازه با اعتبار حداکثر دو دقیقه و عبارت تأیید شامل transition ID می‌خواهد.
+- cookieها `Secure`، `HttpOnly` و `SameSite=Strict` هستند و CSRF token، Origin check،
+  rate limit، login backoff و rotation session پس از login/re-auth اجباری‌اند.
+- recovery فقط با code یک‌بارمصرف محلی یا CLI محدود root و ثبت Audit انجام می‌شود؛
+  به Telegram، SMS، email، دیتابیس محصول یا peer وابسته نیست.
+- Audit عملیاتی append-only و hash-chained است و operator/site/session reference،
+  transition، action، reason، before/after hash، release و result را ثبت می‌کند. anchor
+  امضاشده هنگام دسترسی off-host می‌رود، اما Object Storage مرجع authority نیست.
+- retention محدود است: metric خام ۳۰ روز، login/security log نود روز و audit حساس
+  Writer/DNS/repair/conflict سیصدوشصت‌وپنج روز. Receipt قدیمی فقط پس از signed chain
+  checkpoint و بسته‌شدن incident حذف می‌شود؛ evidence incident باز حذف نمی‌شود.
 
-Dashboard summary نباید جزئیات conflict را پنهان کند؛ drill-down event-level لازم است.
+### نمای عملیاتی الزامی
+
+1. نوار حقیقت، `LOCAL` را از `PEER LAST SEEN` و gate انتقال جدا نشان می‌دهد: site/role/
+   generation، زمان snapshot peer، writer فعلی، transition باز و DNS observed.
+2. صفحهٔ Sync برای هر stream شماره‌های local/published/uploaded/applied/ACKed، lag،
+   gap، unpublished، unacked، apply backlog، rejected/quarantined، barrier و hash را
+   نشان می‌دهد؛ media backlog و bucket/spool/disk نیز جدا هستند.
+3. Writer Wizard فقط مرحلهٔ مجاز state machine را نشان می‌دهد: drain مبدأ، صدور/
+   دانلود Receipt، upload/verify در مقصد، gateهای جهت‌دار، DNS و activation. پرش مرحله
+   یا تکمیل فقط در یکی از دو dashboard ممکن نیست.
+4. صفحهٔ Conflict/Quarantine شمارنده را با drill-down event-level، علت، authority و
+   مسیر resolution نشان می‌دهد؛ PII/secret خام وارد UI، URL، log یا export نمی‌شود.
+5. صفحهٔ Market mode، ورودی‌ها، freshness، artifact/model fingerprint، confidence و
+   `MARKET_READY` را مستقل از business `FULL_SYNC` نشان می‌دهد.
+6. صفحهٔ DNS مقدار expected/observed، provider receipt و probeهای authoritative،
+   resolver و destination-signed را نشان می‌دهد؛ mutation آن تابع `P2-07` است.
+7. release/schema/registry fingerprint، service health، storage و Audit/anchor status
+   برای هر سایت قابل مشاهده‌اند. زمان canonical به UTC و زمان ایران به‌صورت صریح، نه
+   relative-only، نمایش داده می‌شود.
+
+`SYNC_READY` برای هر stream است؛ `FULL_SYNC` قرارداد مرکب `P2-03`، `MARKET_READY`
+مستقل، و `DNS_READY` تابع `P2-07` است. `WRITER_READY` فقط نتیجهٔ نمایشی AND کردن
+gateهای جهت‌دار است، authority یا محرک خودکار محسوب نمی‌شود و علت هر block را دقیق
+نشان می‌دهد.
+
+### سناریوهای تأییدشده
+
+| وضعیت و رخداد | رفتار الزامی | مانع ایمنی |
+| --- | --- | --- |
+| اتصال عادی، Finland Writer | هر dashboard local live و peer snapshot تازه را با stream/gateهای جدا نشان می‌دهد | یک چراغ سبز کلی جای gap/hash/model/DNS detail را نمی‌گیرد؛ Bot مستقل است |
+| ارتباط دو سایت قطع می‌شود | هر Console محلی باز می‌ماند؛ peer `STALE/UNREACHABLE` با age و آخرین sequence دیده می‌شود | timeout/stale هیچ role یا DNS را تغییر نمی‌دهد و peer قدیمی green نمی‌شود |
+| انتقال اضطراری `FI→IR` | عامل Finland را drain و Receipt را دستی به Iran می‌برد؛ Iran freshness/RPO/gap و readiness اضطراری را نشان می‌دهد؛ DNS و activation انسانی‌اند | Fence Receipt، gate جهت‌دار `P2-05/P3`، TOTP تازه و `DNS_READY` لازم‌اند؛ `FULL_SYNC` جعلی و override آزاد ممنوع است |
+| reconnect با sync ناقص | Iran Writer می‌ماند و dashboard stream/hash/model مانع را دقیق نشان می‌دهد | failback در UI و API تا `FULL_SYNC` و `MARKET_READY` بسته است |
+| بازگشت `IR→FI` | sync اولیه، drain Iran، final delta/barrier، Receipt دستی، DNS و activation Finland مرحله‌به‌مرحله اجرا می‌شوند | `FULL_SYNC` و `MARKET_READY` پیش از drain، parity نهایی پس از drain و `DNS_READY` لازم‌اند؛ پنجرهٔ قطع کنترل‌شده حداکثر ۴ دقیقه است |
+| دو dashboard اختلاف role/generation دارند | `ROLE_CONFLICT` و evidence هر دو طرف نمایش داده می‌شود؛ فقط drain/evidence/repair هدایت‌شده مجاز است | LWW، site-priority، activation و پاک‌کردن evidence ممنوع‌اند |
+| dashboard یا Grafana خراب است | محصول و Writer فعلی بدون تغییر می‌مانند؛ CLI محدود فقط برای hard-fence/evidence قابل استفاده است | خرابی control UI مجوز bypass یا promotion نیست |
+| login یا action مشکوک است | backoff/rate-limit اعمال و action حساس re-auth می‌شود؛ recovery محلی audit دارد | session محصول، peer، Telegram/SMS/email و secret مشترک مسیر بازیابی نیستند |
+
+### Task Card فنی Cursor
+
+1. `/admin`، `/api/sync/health`، `/metrics`، Grafana/Loki، sampler/timerها و تمام
+   credential/SSH dependencyهای فعلی را inventory کند؛ legacy ChangeLog/Redis counter
+   را با قرارداد per-stream هدف اشتباه نگیرد.
+2. ADR مرز Product Admin/Grafana/Operations Console/Actuator و schema نسخه‌دار
+   `SiteStatus`، `PeerSnapshot`، `SyncStreamStatus`، `GateResult` و `TransitionView`
+   را پیش از UI بنویسد؛ هر status source و freshness دارد.
+3. collector/read model محلی و snapshot canonical امضاشده را بسازد؛ partition، clock
+   skew، replay، signature mismatch و schema mismatch باید fail-closed و قابل‌تشخیص باشند.
+4. identity store محلی، password hashing مصوب، TOTP Google-Authenticator-compatible،
+   session مطلق ۲۴ساعته، step-up دو دقیقه‌ای، recovery و roleها را بدون Product JWT/
+   DB پیاده و secret leakage را تست کند.
+5. actuator root-owned را با command schema allowlisted، transition ID/CAS، Unix
+   permission محدود و Audit اتمیک بسازد؛ web process root، shell یا raw SQL نمی‌گیرد.
+6. Console فارسی و mobile-usable را با Overview، Sync، Writer Wizard، Conflict، Market،
+   DNS، Audit و Infra بسازد؛ status فقط رنگ نیست و disabled control علت machine-readable
+   و human-readable دارد.
+7. Grafana را read-only نگه دارد، credential fallback ناامن را حذف و alert محلی را
+   مستقل از peer کند؛ health sampling هدف به SSH و اجرای دستی dashboard وابسته نباشد.
+8. API/UI/security/browser test برای refresh/back/double-submit، direct API bypass،
+   ۲۴h expiry، TOTP replay، CSRF/origin، stale peer، partition، Console/Product/DB/
+   Grafana failure و receipt/generation conflict اجرا کند.
+9. retention job را dry-run-first و root-bound بسازد؛ incident hold، signed checkpoint،
+   disk pressure و پاکسازی هر کلاس داده evidence و Audit قابل بازبینی داشته باشند.
+
+Gate خروج: هر دو Console زیر partition مستقل قابل ورود و مشاهده‌اند؛ local/peer و
+fresh/stale اشتباه نمی‌شوند؛ هیچ مسیر UI/API/CLI/Grafana بدون Receipt و gateهای مصوب
+Writer یا DNS را تغییر نمی‌دهد؛ session پس از ۲۴ ساعت منقضی و action حساس re-auth
+می‌شود؛ failure داشبورد به محصول سرایت نمی‌کند و retention محدود و آزموده است.
+
+Gate طراحی در 2026-09-02 تأیید شد: دو hostname مستقل بدون IP allowlist، ورود محلی
+username/password/TOTP سازگار با Google Authenticator، session مطلق ۲۴ساعته، re-auth
+عملیات حساس، role/recovery محلی، Console مستقل از Product Admin/Grafana و peer،
+نمایش freshness و gateهای جدا، actuator محدود، Audit زنجیره‌شده و retention محدود
+پذیرفته شدند. این تأیید مجوز hostname/DNS، account bootstrap، secret access، service
+creation، deploy، firewall، role change، sync، cleanup یا هیچ اقدام production نیست.
 
 ## `P2-07` — DNS control و route verification
 
