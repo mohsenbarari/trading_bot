@@ -884,6 +884,68 @@ class ShadowLegacyBridgeTests(unittest.TestCase):
         groups = project_groups(self.shadow, self.conversation)
         self.assertGreaterEqual(int(groups["eligible_offers"]), 2)
 
+    def test_orchestrator_preserves_last_successful_group_details_until_commit(self) -> None:
+        self.seed_shadow(
+            [_group(key=derive_event_key("orch-stable-g1", 1), source="GROUP_1", when=self.when)]
+        )
+        _conversation(self.conversation)
+        self.group_projection_health.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "sources": {
+                        "COIN_GROUP_PROJECTION": {
+                            "status": "HEALTHY",
+                            "heartbeat_at_utc": "2026-08-29T08:59:00Z",
+                            "last_success_at_utc": "2026-08-29T08:59:00Z",
+                            "error_code": None,
+                            "details": {"stable_marker": "prior-success"},
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        observed: dict[str, object] = {}
+
+        def inspect_before_projection(market_store: Path, conversation_db: Path):
+            payload = json.loads(self.group_projection_health.read_text(encoding="utf-8"))
+            observed.update(payload["sources"]["COIN_GROUP_PROJECTION"]["details"])
+            return project_groups(market_store, conversation_db)
+
+        with patch(
+            "scripts.run_private_shadow_legacy_estimator_bridge.project_groups",
+            side_effect=inspect_before_projection,
+        ):
+            code = orchestrator_main(
+                [
+                    "--shadow-market-store",
+                    str(self.shadow),
+                    "--legacy-market-store",
+                    str(self.legacy),
+                    "--conversation-db",
+                    str(self.conversation),
+                    "--ledger",
+                    str(self.ledger),
+                    "--heartbeat",
+                    str(self.heartbeat),
+                    "--release-sha",
+                    _SHA,
+                    "--market-lock",
+                    str(self.market_lock),
+                    "--conversation-lock",
+                    str(self.conversation_lock),
+                    "--skip-quick-check",
+                ]
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual(observed, {"stable_marker": "prior-success"})
+        current = json.loads(self.group_projection_health.read_text(encoding="utf-8"))
+        self.assertNotIn(
+            "stable_marker",
+            current["sources"]["COIN_GROUP_PROJECTION"]["details"],
+        )
+
     def test_model_on_clone_keeps_fourteen_cells(self) -> None:
         now = datetime.now(timezone.utc).replace(microsecond=0)
         fresh = now - timedelta(seconds=30)

@@ -156,13 +156,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         args.group_projection_health
         or args.conversation_db.parent / "group-event-health.json"
     )
-    if not args.dry_run:
-        update_probe_state(
-            group_projection_health,
-            source="COIN_GROUP_PROJECTION",
-            status="RUNNING",
-            successful=None,
-        )
     conversation_lock = _exclusive_lock(
         args.conversation_lock, args.lock_timeout_seconds
     )
