@@ -215,6 +215,11 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
   از ۴۸ ساعت ترافیک معتبر صفر و DNS سالم خاموش و ۲۴ ساعت پایش می‌شود؛ old Bot host
   پیش از old Web host و با ۲۴ ساعت فاصله حذف می‌شود. backup مهاجرت پس از ۳۰ روز
   فقط با جایگزین restore-tested و مجوز صریح نامزد حذف است.
+- `D-14`: Data Ownership تمام SQL/Redis/file/object state را پوشش می‌دهد. Messenger
+  metadata/read/media و logical notification/read مشترک‌اند؛ session/OTP/upload
+  lease/browser/provider delivery/Telegram runtime محلی‌اند. PII فقط حداقلی و
+  رمزگذاری‌شده منتقل و mixed writer در سطح row/field/command authority می‌گیرد؛
+  `UNKNOWN` و LWW مالی ممنوع‌اند.
 
 ### نیازمند تأیید در بازبینی این پلن
 
@@ -1300,7 +1305,7 @@ decommission مجاز نیست.
 
 ## `P2-00` — Data Ownership Matrix
 
-وضعیت: `PROPOSED`
+وضعیت: `PROPOSED — قرارداد سناریویی ownership در 2026-09-02 تأیید شد؛ اجرا مسدود است`
 
 برای تک‌تک مدل‌ها/جدول‌ها این فیلدها ثبت شود:
 
@@ -1329,6 +1334,55 @@ repair method
 - Market Facts/raw/audit/model artifacts/snapshots
 - operational audit و dashboard state
 
+### قرارداد سطح بالا
+
+| دامنه | ownership و sync تأییدشده |
+| --- | --- |
+| user/relation/invitation/block/trading policy | product state مشترک؛ authority هر mutation صریح |
+| Offer/Request/Trade | مشترک با `home_site` و provenance مستقل Web/Bot؛ Trade snapshot کامل policy context |
+| Messenger نهایی | message/chat/member/read metadata و blob لازم دوطرفه؛ upload lease/chunk/cache محلی |
+| auth/browser | session، OTP، login request، browser state و TOTP محلی؛ تغییر Writer نیازمند login مجدد |
+| notification | intent/audience/read state مشترک؛ Web Push و Telegram provider execution/receipt محلی و non-replayable |
+| Telegram runtime | queue/FSM/command/message ID/retry فقط Finland؛ business result طبق authority مشترک می‌شود |
+| Market | Fact/input/artifact/snapshot در registry ولی قرارداد جزئی در بخش سوم؛ runtime/audit محلی طبق owner |
+| sync bookkeeping | watermark/retry/lock/cache محلی و نه product truth |
+| dashboard/ops | transition/fence/DNS receipt لازم مشترک؛ account/session/TOTP و credential محلی |
+
+### سناریوهای تأییدشده
+
+| وضعیت اولیه و رخداد | رفتار مورد انتظار و مانع ایمنی |
+| --- | --- |
+| اتصال سالم و Finland Writer است | product/Messenger/Market state لازم حداکثر با lag مصوب به Iran می‌رسد؛ session/cache/upload lease/push/Telegram runtime منتقل نمی‌شود و Iran write-blocked است. |
+| ارتباط قطع و Iran انسانی Writer می‌شود | Web Iran دادهٔ بادوام جدید را با site/surface/home/authority/policy provenance می‌سازد و Bot Finland با authority مستقل ادامه می‌دهد؛ overlap ناشناخته block است. |
+| Offer و Request از Web/Bot ترکیب می‌شوند | هر چهار مسیر Web↔Bot منشأهای مستقل را حفظ و Trade context را snapshot می‌کند؛ host یا DNS جای origin نیست. |
+| کاربر Messenger را روی Writer جدید باز می‌کند | history/read marker/media نهایی حاضر است؛ missing referenced blob یا owner نامعتبر `FULL_SYNC` را می‌بندد و state موقت upload منتقل نمی‌شود. |
+| notification روی peer replay می‌شود | logical notification/read state همگام است ولی Push/Telegram delivery دوباره اجرا نمی‌شود؛ provider ID و receipt local می‌ماند. |
+| PII برای Login ایران لازم است | فقط field ضروری رمزگذاری‌شده منتقل می‌شود؛ secret/OTP/session/TOTP/provider credential و PII در object name/log/manifest/dashboard ممنوع است. |
+| Setting یا admin command چند writer دارد | authority در سطح row/field/command و رفتار partition تعیین می‌شود؛ خاموش‌کردن پنهانی Bot یا table-wide guess مجاز نیست و ابهام `UNKNOWN` است. |
+| event تکراری، قدیمی یا متعارض می‌رسد | same identity/hash بی‌اثر، stale version رد و same sequence/version با hash متفاوت conflict است؛ oversell/negative balance/settlement quarantine و LWW ممنوع است. |
+| دادهٔ موقت یا archive ساخته می‌شود | retention، owner، cleanup proof و incident exception اجباری است؛ cache/raw/quarantine/snapshot/backup بدون expiry پذیرفته نمی‌شود. |
+
+### Task Card فنی Cursor
+
+1. همهٔ 59 مدل ORM، raw SQL path، Redis keyspace، file store و object namespace را
+   inventory و به entry ماشین‌خوان و انسان‌خوان یکتا متصل کند؛ registry فعلی
+   `23 shared / 33 local / 3 bookkeeping` فقط audit seed است.
+2. برای هر entry، stable identity، writer/reader، authority، origin/home، direction،
+   field exclusion، conflict، side-effect owner، retention، bootstrap، parity hash،
+   repair و evidence را ثبت کند؛ integer PK محلی stable identity نیست.
+3. writerهای ORM hook، raw/bulk SQL، background job، API، Bot، maintenance script
+   و importer را با registry مقایسه کند؛ مسیر bypass یا بدون ownership blocker است.
+4. tableهای mixed را در سطح row/field/command تفکیک و business state را از provider
+   side effect جدا کند. notification replay، Telegram execution در Iran و sync
+   کردن credential/runtime ID ممنوع است.
+5. Messenger metadata/read/media را با stable identity و blob reference دوطرفه کند،
+   ولی upload session/chunk/cache را local نگه دارد و orphan/missing blob query بسازد.
+6. PII allowlist و encryption/retention را field-level بنویسد و test کند هیچ value
+   حساس وارد log، object key، manifest یا dashboard نمی‌شود.
+7. CI/schema lint اضافه کند که model/object/keyspace/mutation بدون registry، entry
+   ناقص، authority overlap و وضعیت `UNKNOWN` را رد کند؛ خروجی human/machine باید
+   از یک source تولید و diffپذیر باشد.
+
 Blocker صریح: registry فعلی بعضی جدول‌های Messenger مانند chat/message/file را
 local-only می‌داند. این وضعیت برای standby دارای «تمام قابلیت‌های وب‌اپ» کافی
 نیست. business message metadata و media لازم برای مشاهدهٔ تاریخچه باید contract
@@ -1336,8 +1390,15 @@ cross-site بگیرند؛ upload lease، browser cache، provider/runtime ID و 
 همچنان local می‌مانند. Cursor حق ندارد `NO_SYNC` فعلی را بدون بازبینی به معماری
 جدید منتقل کند.
 
-Gate خروج: هیچ مدل SQLAlchemy، object blob یا file store در registry با وضعیت
-`UNKNOWN` باقی نماند.
+Gate خروج: هیچ مدل SQLAlchemy، raw SQL mutation، Redis keyspace، object blob یا
+file store در registry با وضعیت `UNKNOWN` باقی نماند؛ همهٔ writer/readerها پوشش
+داشته باشند و lint CI، matrix انسان‌خوان/ماشین‌خوان و سناریوهای بالا سبز باشند.
+
+Gate طراحی در 2026-09-02 تأیید شد: Messenger metadata/read/media و logical
+notification/read مشترک، stateهای session/OTP/upload/browser/provider/Telegram
+محلی، PII حداقلی رمزگذاری‌شده، authority چندسطحی، retention اجباری و صفر
+`UNKNOWN` پذیرفته شدند. این تأیید مجوز schema migration، data copy، Redis/file/
+object transfer، credential access یا فعال‌سازی sync نیست.
 
 ## `P2-01` — قرارداد event و stream
 

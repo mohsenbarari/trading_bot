@@ -20,6 +20,10 @@
   7d quarantine; old edge needs 48h zero valid traffic then 24h monitoring. Old
   Bot/Web hosts retire sequentially 24h apart; the 30d migration backup needs a
   restore-tested replacement. Every deletion and WA-IR branch removal stays gated.
+- 2026-09-02 | Owner approved `P2-00`: durable Messenger/read/media and logical
+  notification/read sync; sessions, OTP, upload/browser/provider and Telegram
+  runtime stay local. Minimal encrypted PII and row/field/command authority are
+  mandatory; every SQL/Redis/file/object item must be registered with zero unknowns.
 - 2026-09-01 | Offer origin is immutable and separate from `home_site`; Trade
   snapshots Offer/Request origin, execution surface, policy version and sensitive
   actor/role/tier context.
