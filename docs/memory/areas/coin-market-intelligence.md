@@ -8,9 +8,10 @@
 - Estimator: facts-only `/shadow`, 120s; no-data=0/failure=3. Inputs gold/Herat/XAU/G1/G2; weak evidence abstains. Dashboard uses accepted `PRIVATE_PRIMARY`, never legacy.
 - Staging mirrors Iran; snapshots read-only. v3 bands ±10%; ties require choice. Packs are ×100/`PACK_ONLY`; oldest-first.
 - Capture: `market_channel_event/1.0`,`coin_group_event/2.0`; receipt/revision/reply/allowlist authoritative; raw=3d, Store opaque.
-- Parser v10/linker v7. Promotion needs version bump+production dominance; replay needs raw/Store/feedback/causal `MAIN_ONLINE`; ambiguity=REVIEW.
+- Parser v10/linker v7. Promote with version bump+production dominance; replay requires raw/Store/feedback/causal `MAIN_ONLINE`; ambiguity=REVIEW.
 - Private melted: immutable price/quantity; lifetime=120s, freshness=900s. Lower remaining=cumulative fill; zero=full; positive close=no-trade; edit≠trade; inconsistency=ambiguous; partials finalize at deadline.
 - Private quote uses first canonical header amount; ignore amounts after `توضیحات/شرایط`. Filter out-of-range per message, never process-wide.
 - Cutover needs real 7d coin/gold/Herat; predated coins abstain; never synthesize anchors.
-- 2026-08-29/30: Shadow→Legacy feeds G1/G2/private-gold; Product=`LEGACY`. Review causal; syntax needs raw; `human-feedback-r*`.
-- 2026-08-31 temporary bridge: 22:00–23:00 Tehran carries only melted/Herat fresh at 22:00, labels `AFTER_CLOSE_HOLD`, and widens 0.4%. Never revive earlier/previous-day data; stop at 23:00. The 120s hard guard stays fail-open on effective age.
+- 2026-08-29/30: Shadow→Legacy feeds G1/G2/private-gold; Product=`LEGACY`. Causal review; syntax needs raw; `human-feedback-r*`.
+- 2026-08-31: 22–23 Tehran bridge carries only melted/Herat fresh at 22:00 (`AFTER_CLOSE_HOLD`, +0.4%). Never revive earlier/previous-day data; 120s guard remains fail-open.
+- 2026-09-02: Account2 solely owns live G1/G2 capture. Shadow→Legacy must atomically write estimator `COIN_GROUP_PROJECTION` health from actual results; never Legacy heartbeat or wall-clock event freshness.
