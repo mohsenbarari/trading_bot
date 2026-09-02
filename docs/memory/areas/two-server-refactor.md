@@ -5,7 +5,10 @@
   separate app/Market DBs. Shared app DB removes local sync via ordered outbox/
   inbox. Merge uses table/row authority, preserves valid sessions, maps IDs/media,
   quarantines ambiguity/financial conflicts and must repeat within 4m/90m limits.
-  Legacy waits for `P1-08`; no operation is authorized.
+  `P1-06` also requires isolated differential staging, 465/465 mapping, six closed
+  evidence gaps, Web/Bot/browser/failure matrices, relative performance guards,
+  a 24h soak and restore/rollback proof. Legacy waits for `P1-08`; no operation is
+  authorized and these budgets are not later deploy SLOs.
 - 2026-09-02 | Owner approved `P1-00`: twelve behavior families, Web/Bot and
   provenance contracts, six mandatory evidence gaps and runtime-ownership seed.
   Unknown parity still blocks implementation.

@@ -982,7 +982,7 @@ cutover + retention محافظت می‌شوند.
 
 ## `P1-06` — staging یکپارچه Finland
 
-وضعیت: `PROPOSED`
+وضعیت: `PROPOSED — قرارداد سناریویی پذیرش در 2026-09-02 تأیید شد؛ اجرا مسدود است`
 
 Dependency: `P1-05` و change set اتمیک `P4-07`.
 
@@ -992,6 +992,21 @@ staging باید نسخهٔ کوچک و واقعی معماری هدف باشد�
 سناریوها هم روی معماری جاری و هم هدف اجرا می‌شود. پاسخ، state و side effectها پس
 از حذف timestamp/IDهای غیرقطعی باید برابر باشند؛ «صفحه باز شد» معیار پذیرش نیست.
 
+### سناریوهای تأییدشده
+
+| وضعیت اولیه و رخداد | رفتار مورد انتظار و مانع ایمنی |
+| --- | --- |
+| reference دو-Finland و candidate تک-Finland با داده، clock و corpus یکسان بالا می‌آیند | artifact/config/migration/dataset هر دو pin و محیط‌ها ایزوله‌اند؛ تفاوت فقط باید از topology بیاید و هیچ provider تولیدی قابل‌دسترسی نیست. |
+| corpus کامل اجرا می‌شود | هر 465 behavior seed به سناریو و شاهد متصل است و شش شکاف evidence پیش از پذیرش بسته‌اند؛ line coverage جای این mapping را نمی‌گیرد. |
+| Offer، Request یا Trade میان Web و Bot ادامه می‌یابد | ماتریس Web→Web، Web→Bot، Bot→Web و Bot→Bot برای tier 1/2 و normal/overtime یکسانی business را ثابت می‌کند؛ provenance و policyهای متفاوت surface حفظ می‌شوند. |
+| دو عملیات concurrent، retry تکراری یا crash کنار commit رخ می‌دهد | inventory منفی/oversell، business apply و side effect تکراری، lost mutation و state مبهم صفر است؛ نتیجه commit کامل یا rollback کامل دارد. |
+| API، Bot، worker، Redis، PostgreSQL یا Object Storage مستقل fail/recover می‌شود | owner و job یکتا، queue قابل ادامه و readiness واقعی می‌ماند؛ dependency مشکوک fail closed است و promotion خودکار رخ نمی‌دهد. |
+| Login/Messenger/media/realtime روی desktop/mobile و سه browser اجرا می‌شود | assertion پاسخ، DB، queue و side-effect ledger علاوه بر UI لازم است؛ screenshot به‌تنهایی مدرک قبولی نیست. |
+| بار production-shaped به هر دو محیط وارد می‌شود | `p95` حداکثر 10٪ و `p99` حداکثر 15٪ بدتر از reference، infrastructure `5xx` حداکثر 0.1٪ و invariant failure صفر است؛ SLO سخت‌گیرانه‌تر موجود مقدم می‌ماند. |
+| candidate با job، queue، backup و log rotation به‌مدت 24 ساعت کار می‌کند | growth پیوستهٔ RAM/disk/queue، leak connection، job تکراری/گم‌شده و owner collision صفر است؛ steady CPU ≤60% و RAM/disk/pool ≤70% می‌ماند. |
+| backup، restore و application rollback در staging انجام می‌شود | exact artifact و data receipt استفاده و همان corpus/hash دوباره اجرا می‌شود؛ production برای سبزکردن آزمون تغییر نمی‌کند. |
+| میان reference و candidate اختلاف دیده می‌شود | فقط `EXPECTED_TOPOLOGY` از پیش مصوب عبور می‌کند؛ `REGRESSION` blocker، تست غیرقطعی نیازمند اصلاح/re-run و baseline bug نیازمند ثبت و تصمیم صریح است. ایراد مالی/موجودی/تسویه/امنیتی/side-effect بدون رفع یا تصمیم صریح عبور نمی‌کند. |
+
 ### Task Card فنی Cursor
 
 1. exact image digest، config hash، migration version، dataset hash و test corpus
@@ -999,7 +1014,8 @@ staging باید نسخهٔ کوچک و واقعی معماری هدف باشد�
    side effect واقعی بزند.
 2. دو محیط مقایسه بسازد: current-topology reference و target-single-Finland. داده
    production-shaped ولی sanitised و seed deterministic باشد.
-3. corpus را برای Web/Bot/admin/internal، personaها، accountant، tier 1/2، Offer
+3. هر 465 behavior seed و شش شکاف evidence را به scenario/evidence نسخه‌دار متصل
+   و سپس corpus را برای Web/Bot/admin/internal، personaها، accountant، tier 1/2، Offer
    surface، Request surface، overtime/normal time، success/failure/retry و concurrent
    action تولید کند.
 4. auth/login/registration/OTP/session، invitation/relation، Offer/Request/Trade،
@@ -1009,30 +1025,42 @@ staging باید نسخهٔ کوچک و واقعی معماری هدف باشد�
 6. خروجی دو محیط را normalize و API status/schema/copy، Bot result، DB business
    hash، outbox/event، queue state، notification audience، ordering، retry و
    side-effect ledger را مقایسه کند.
-7. مرورگرهای تعریف‌شده در acceptance matrix، mobile/desktop viewport و reconnect
-   realtime را اجرا کند؛ screenshot به‌تنهایی جای assertion را نمی‌گیرد.
+7. Chromium، Firefox و WebKit را در mobile/desktop viewport همراه reconnect
+   realtime اجرا کند؛ screenshot به‌تنهایی جای assertion پاسخ، state و side effect
+   را نمی‌گیرد.
 8. restart مستقل Web/API، Bot و worker و نیز failure/recovery Redis، PostgreSQL و
    Object Storage را تزریق کند. duplicate message، lost mutation و false-ready
    نباید رخ دهد.
 9. backup/restore و application rollback را با exact artifact اجرا کند و پس از آن
    همان corpus و business hash را دوباره بسنجد.
 10. load profile مبتنی بر baseline `P1-00` را اجرا و latency/error/queue lag، CPU،
-    RAM، disk I/O، connection pool و storage growth را ثبت کند. budget قبل از test
-    در Task Card عددگذاری و توسط مالک تأیید شود.
-11. حداقل soak پیشنهادی ۲۴ ساعت را با jobها، log rotation، backup و queue فعال
-    اجرا کند؛ مدت نهایی باید در Gate انسانی ثبت شود و قابل حدس‌زدن نیست.
+    RAM، disk I/O، connection pool و storage growth را ثبت کند. در هر family، افت
+    `p95` حداکثر 10٪ و `p99` حداکثر 15٪، infrastructure `5xx` حداکثر 0.1٪،
+    invariant failure صفر، steady CPU حداکثر 60٪ و RAM/disk/pool حداکثر 70٪ است؛
+    SLO مطلق سخت‌گیرانه‌تر مقدم می‌ماند و عدد مطلق از reference اندازه‌گیری می‌شود.
+11. soak بیست‌وچهارساعته را با jobها، log rotation، backup و queue فعال اجرا کند و
+    leak، growth پیوسته، missed/duplicate job و owner collision را بسنجد.
 12. هر diff را به `EXPECTED_TOPOLOGY`, `KNOWN_BASELINE_BUG`, `REGRESSION` یا
-    `NONDETERMINISTIC_TEST` طبقه‌بندی کند. فقط اولی بدون تصمیم رفتار قابل‌قبول است؛
-    سه مورد دیگر resolution یا waiver صریح می‌خواهند.
+    `NONDETERMINISTIC_TEST` طبقه‌بندی کند. فقط تفاوت topology از پیش مصوب عبور
+    می‌کند؛ regression blocker است، تست غیرقطعی اصلاح/re-run می‌شود و baseline bug
+    ثبت و تعیین تکلیف صریح می‌خواهد. waiver پنهان ممنوع است.
 
 ### خروجی، آزمون و Gate انسانی
 
 - `11-staging-acceptance.md`، corpus/version، differential report، browser matrix،
   chaos/restart، performance، soak، backup/restore و rollback receipts.
-- تمام `behavior_id`ها test passing و coverage صددرصد یا blocker مصوب داشته باشند.
+- هر 465 `behavior_id` به سناریو/شاهد متصل و شش شکاف evidence بسته باشد؛ regression
+  پذیرفته نمی‌شود و baseline bug غیرحیاتی فقط با waiver صریح مالک عبور می‌کند.
 - Telegram identity collision، double job owner، unexplained behavior diff و data
   invariant failure باید صفر باشد.
-- مالک budget، soak duration، waiverهای احتمالی و آمادگی cutover را امضا کند.
+- مالک differential report، budget، soak بیست‌وچهارساعته، waiverهای احتمالی و
+  آمادگی cutover را امضا کند.
+
+Gate طراحی در 2026-09-02 تأیید شد: دو محیط ایزولهٔ reference/candidate، mapping
+`465/465`، بستن شش شکاف evidence، ماتریس Web/Bot و browser، failure injection،
+بودجه‌های نسبی performance، soak بیست‌وچهارساعته، restore/rollback و سیاست صریح
+diff پذیرفته شدند. این بودجه‌ها acceptance معماری‌اند، نه SLO دیپلویهای آینده؛
+این تأیید مجوز ساخت staging، استفاده از دادهٔ تولید یا اجرای هیچ عملیات خارجی نیست.
 
 Rollback: staging به artifact قبلی بازمی‌گردد یا rebuild می‌شود؛ هیچ dependency
 تولید برای سبزکردن تست تغییر نمی‌کند.
