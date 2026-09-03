@@ -31,7 +31,7 @@ from .xau_model_input import (
 
 PROJECTION_VERSION = "market-fact-projection-v2-xau-model-input"
 MAX_EXPORT_PER_CYCLE = 5_000
-XAU_MODEL_INPUT_REFRESH_PER_CYCLE = 5_000
+XAU_MODEL_INPUT_REFRESH_PER_CYCLE = 50_000
 _REASON_TOKEN = re.compile(r"[^A-Z0-9_]+")
 _FACT_PAYLOAD_ADAPTER = TypeAdapter(FactPayload)
 
