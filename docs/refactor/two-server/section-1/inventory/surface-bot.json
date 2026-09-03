@@ -25,7 +25,9 @@
       "CRUD_MUTATION": 120,
       "BROADCAST": 1,
       "MENU_NAV": 36,
-      "READ_QUERY": 20,
+      "PROVIDER_REPLY": 9,
+      "READ_QUERY": 7,
+      "DOCUMENT_SEND": 4,
       "DELIVERY_COMMAND": 5
     }
   },
@@ -876,7 +878,7 @@
         "tests/test_bot_admin_users_search_process.py"
       ],
       "mutation_class": "READ_OR_STREAM",
-      "operation_kind": "READ_QUERY"
+      "operation_kind": "PROVIDER_REPLY"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-SETTINGS-L742",
@@ -1065,7 +1067,7 @@
         "tests/test_bot_commodity_catalog.py"
       ],
       "mutation_class": "READ_OR_STREAM",
-      "operation_kind": "READ_QUERY"
+      "operation_kind": "PROVIDER_REPLY"
     },
     {
       "behavior_id": "BOT-OFFER-CALLBACK-QUERY-COMMODITY-CATALOG-PAGINATE-COMMODITY-CATALOG-L248",
@@ -1429,7 +1431,7 @@
         "tests/test_bot_panel_simple_settings.py"
       ],
       "mutation_class": "READ_OR_STREAM",
-      "operation_kind": "READ_QUERY"
+      "operation_kind": "PROVIDER_REPLY"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-SHOW-MY-PROFILE-AND-CHANGE-KEYBOARD-L211",
@@ -1444,7 +1446,7 @@
         "tests/test_bot_panel_standard_actions.py"
       ],
       "mutation_class": "READ_OR_STREAM",
-      "operation_kind": "READ_QUERY"
+      "operation_kind": "PROVIDER_REPLY"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-SHOW-ADMIN-PANEL-AND-CHANGE-KEYBOARD-L294",
@@ -1459,7 +1461,7 @@
         "tests/test_bot_panel_persistent_anchor_queue.py"
       ],
       "mutation_class": "READ_OR_STREAM",
-      "operation_kind": "READ_QUERY"
+      "operation_kind": "PROVIDER_REPLY"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-HANDLE-USER-SETTINGS-BUTTON-L323",
@@ -1504,7 +1506,7 @@
         "tests/test_bot_panel_navigation_handoff.py"
       ],
       "mutation_class": "READ_OR_STREAM",
-      "operation_kind": "READ_QUERY"
+      "operation_kind": "PROVIDER_REPLY"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-SHOW-COLLEAGUES-LIST-L470",
@@ -1519,7 +1521,7 @@
         "tests/test_bot_panel_navigation_handoff.py"
       ],
       "mutation_class": "READ_OR_STREAM",
-      "operation_kind": "READ_QUERY"
+      "operation_kind": "PROVIDER_REPLY"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-SHOW-RECENT-TRADES-PDF-L534",
@@ -1533,7 +1535,7 @@
         "tests/test_bot_panel_terminal_interaction_queue.py"
       ],
       "mutation_class": "READ_OR_STREAM",
-      "operation_kind": "READ_QUERY"
+      "operation_kind": "DOCUMENT_SEND"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-SHOW-USER-PANEL-BLOCKED-USERS-L597",
@@ -1589,7 +1591,7 @@
         "tests/test_bot_panel_interaction_queue.py"
       ],
       "mutation_class": "READ_OR_STREAM",
-      "operation_kind": "READ_QUERY"
+      "operation_kind": "PROVIDER_REPLY"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-SHOW-USER-PANEL-CUSTOMERS-CALLBACK-L805",
@@ -2741,7 +2743,7 @@
         "tests/test_bot_trade_history_interaction_queue.py"
       ],
       "mutation_class": "READ_OR_STREAM",
-      "operation_kind": "READ_QUERY"
+      "operation_kind": "PROVIDER_REPLY"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-CHANGE-HISTORY-MONTHS-L253",
@@ -2769,7 +2771,7 @@
         "tests/test_bot_trade_history_interaction_queue.py"
       ],
       "mutation_class": "READ_OR_STREAM",
-      "operation_kind": "READ_QUERY"
+      "operation_kind": "DOCUMENT_SEND"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-EXPORT-PDF-L440",
@@ -2783,7 +2785,7 @@
         "tests/test_bot_trade_history_export_pdf.py"
       ],
       "mutation_class": "READ_OR_STREAM",
-      "operation_kind": "READ_QUERY"
+      "operation_kind": "DOCUMENT_SEND"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-EXPORT-PROFILE-TRADE-PDF-L498",
@@ -2797,7 +2799,7 @@
         "tests/test_bot_trade_history_export_pdf.py"
       ],
       "mutation_class": "READ_OR_STREAM",
-      "operation_kind": "READ_QUERY"
+      "operation_kind": "DOCUMENT_SEND"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-SHOW-PUBLIC-PROFILE-USERNAME-UNAVAILABLE-L52",

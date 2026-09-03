@@ -191,6 +191,8 @@ OPERATION_KINDS = {
     "BROADCAST",
     "SESSION_MUTATION",
     "DELIVERY_COMMAND",
+    "DOCUMENT_SEND",
+    "PROVIDER_REPLY",
     "SYNC_APPLY",
     "SCHEDULED_JOB",
 }
@@ -209,6 +211,14 @@ BLOCKER_REGISTRY_FIELDS = {
 }
 MENU_NAV_EXAMPLE = "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-MANAGE-COMMODITIES-L305"
 BROADCAST_EXAMPLE = "API-ADMIN-POST-ADMIN-MESSAGES-CREATE-BROADCAST-L261"
+DOCUMENT_SEND_EXAMPLE = "BOT-TG-MESSAGE-PANEL-SHOW-RECENT-TRADES-PDF-L534"
+CRUD_BROADCAST_PHRASES = (
+    "broadcast payload",
+    "committed broadcast identity",
+    "broadcast fanout",
+    "broadcast receipt",
+    "broadcast audience",
+)
 FAMILY_TEST_TOKENS = {
     "AUTH": ("test_auth_", "test_session_", "test_stage6_otp"),
     "IDENTITY": (
@@ -740,6 +750,15 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
                 self.assertTrue(contract["db_mutations"].get("reason"), contract["contract_id"])
             if contract.get("operation_kind"):
                 self.assertIn(contract["operation_kind"], OPERATION_KINDS, contract["contract_id"])
+            if contract.get("operation_kind") == "READ_QUERY":
+                self.assertEqual(contract["side_effects"]["status"], "NOT_APPLICABLE", contract["contract_id"])
+                self.assertTrue(contract["side_effects"].get("reason"), contract["contract_id"])
+                self.assertNotIn("handler does send", contract_text)
+            if contract.get("operation_kind") == "CRUD_MUTATION":
+                self.assertFalse(
+                    any(phrase in contract_text for phrase in CRUD_BROADCAST_PHRASES),
+                    contract["contract_id"],
+                )
 
     def test_every_surface_seed_maps_once_with_seed_specific_behavioral_evidence(self):
         payload = _load_json("scenario-records.json")
@@ -818,6 +837,33 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
         self.assertEqual(broadcast_contract["db_mutations"]["status"], "APPLICABLE")
         self.assertEqual(broadcast_contract["events_outbox"]["status"], "APPLICABLE")
         self.assertEqual(broadcast_contract["side_effects"]["status"], "APPLICABLE")
+
+    def test_pdf_export_seed_is_not_mapped_to_a_no_send_read_contract(self):
+        payload = _load_json("scenario-records.json")
+        seeds = {
+            entry["behavior_id"]: entry
+            for name in ("surface-api.json", "surface-bot.json", "surface-web.json", "surface-jobs.json")
+            for entry in _load_json(name)["entries"]
+        }
+        seed = seeds[DOCUMENT_SEND_EXAMPLE]
+        self.assertEqual(seed["handler"], "panel.show_recent_trades_pdf")
+        self.assertEqual(seed["source"], "bot/handlers/panel.py:534")
+        self.assertEqual(seed["operation_kind"], "DOCUMENT_SEND")
+        contract_id = next(
+            rule["contract_id"]
+            for rule in payload["seed_mapping"]["rules"]
+            if rule["family"] == seed["family"] and rule["operation_kind"] == seed["operation_kind"]
+        )
+        self.assertNotEqual(contract_id, "BC-TG-READ_QUERY-V1")
+        contract = next(item for item in payload["behavior_contracts"] if item["contract_id"] == contract_id)
+        self.assertEqual(contract["operation_kind"], "DOCUMENT_SEND")
+        self.assertEqual(contract["side_effects"]["status"], "APPLICABLE")
+        self.assertEqual(contract["response"]["status"], "APPLICABLE")
+        talk = json.dumps(contract, ensure_ascii=False).lower()
+        self.assertTrue("send_private_document_via_runtime" in talk or "document" in talk)
+        self.assertNotIn("this read does not send", talk)
+        read_contract = next(item for item in payload["behavior_contracts"] if item["contract_id"] == "BC-TG-READ_QUERY-V1")
+        self.assertEqual(read_contract["side_effects"]["status"], "NOT_APPLICABLE")
 
     def test_matrix_axes_resolve_definite_eligibility_and_outcome(self):
         payload = _load_json("scenario-records.json")

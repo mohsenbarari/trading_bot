@@ -179,7 +179,8 @@ Empty per-row Cartesian records are forbidden. The reviewable source is
   outcome to a `contract_id` with a definite eligibility decision.
 - each of the 465 surface seeds maps to exactly one family×operation_kind
   contract; a `MENU_NAV` / `READ_QUERY` seed must not share a `BROADCAST` or
-  `CRUD_MUTATION` contract. Seed-specific evidence is the inventory `test_refs`,
+  `CRUD_MUTATION` contract, and a send-document seed must not share a no-send
+  `READ_QUERY` contract. Seed-specific evidence is the inventory `test_refs`,
   not the schema meta-test.
 - Cartesian expansion, if needed later, is generated outside Git.
 

@@ -12,7 +12,7 @@
     "normalization_note": "The tracked file is the reviewable source. Cartesian scenario expansion is generated only by tests or later evidence runners."
   },
   "coverage": {
-    "behavior_contracts": 46,
+    "behavior_contracts": 52,
     "surface_seeds": 465,
     "surface_seed_mapping": "EXACTLY_ONE_CONTRACT_PER_SEED_BY_FAMILY_AND_OPERATION_KIND",
     "origin_variants": 6,
@@ -148,13 +148,13 @@
       "input": {
         "status": "APPLICABLE",
         "rules": [
-          "Broadcast payload, audience, and idempotency key."
+          "Admin entity identity, mutation payload, and actor role. Not an audience-fanout command."
         ]
       },
       "response": {
         "status": "APPLICABLE",
         "rules": [
-          "Committed broadcast identity or deterministic replay/denial."
+          "Committed admin entity/setting state or deterministic denial. No audience-fanout identity."
         ]
       },
       "db_mutations": {
@@ -166,52 +166,50 @@
       "events_outbox": {
         "status": "APPLICABLE",
         "rules": [
-          "Durable broadcast delivery intent is recorded before provider work."
+          "Shared admin row changes use durable change-log paths when the command mutates a synced table."
         ]
       },
       "side_effects": {
         "status": "APPLICABLE",
         "rules": [
-          "Telegram/Web notify fanout happens only for a committed broadcast identity."
+          "Cache invalidation or local UI update follows the committed admin row. Audience notify send belongs to the BROADCAST operation kind."
         ]
       },
       "ordering": {
         "status": "APPLICABLE",
         "rules": [
-          "Authorize, persist broadcast/receipts, then deliver. Group selection alone is FSM_PROMPT."
+          "Authorize the admin actor, validate the target, commit the entity row, then invalidate cache."
         ]
       },
       "timeouts_retries": {
         "status": "APPLICABLE",
         "rules": [
-          "Retry reuses the broadcast receipt and does not fan out twice."
+          "Retry reuses the admin command identity and does not create a second entity row."
         ]
       },
       "idempotency_key": {
         "status": "APPLICABLE",
         "rules": [
-          "Broadcast creation/confirm key selects one authoritative fanout."
+          "Admin command identity selects one authoritative entity result."
         ]
       },
       "failure_cases": {
         "status": "APPLICABLE",
         "rules": [
-          "Unauthorized, empty audience, or duplicate confirm is denied/replayed without a second fanout."
+          "Non-admin, invalid target, or stale entity is denied with no row write and no audience notify send."
         ]
       },
       "reference_evidence": {
         "status": "EVIDENCED",
         "sources": [
-          "api/routers/admin_messages.py",
-          "bot/handlers/admin.py",
-          "bot/handlers/admin_broadcast.py",
-          "core/services/telegram_admin_broadcast_service.py"
+          "bot/handlers/admin_commodities.py",
+          "api/routers/commodities.py",
+          "bot/handlers/admin_users.py"
         ]
       },
       "regression_tests": [
-        "tests/test_admin_messages_router.py",
-        "tests/test_bot_admin_broadcast_handler.py",
-        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
+        "tests/test_bot_admin_commodities_add_create.py",
+        "tests/test_commodities_router_alias_mutations.py",
         "tests/test_p1_00_characterization_six_gaps.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
@@ -1730,20 +1728,20 @@
       "preconditions": {
         "status": "APPLICABLE",
         "rules": [
-          "Authenticated actor owns the notification/preferences/subscription or has explicit admin test authority.",
-          "Web Push configuration is validated before send."
+          "Authenticated actor owns the notification, preference, or subscription being changed.",
+          "Admin test-push send is a BROADCAST contract, not this CRUD contract."
         ]
       },
       "input": {
         "status": "APPLICABLE",
         "rules": [
-          "Broadcast payload, audience, and idempotency key."
+          "Notification, preference, or subscription identity plus the mark-read/delete/update command."
         ]
       },
       "response": {
         "status": "APPLICABLE",
         "rules": [
-          "Committed broadcast identity or deterministic replay/denial."
+          "Committed notification/preference row state or deterministic noop/denial. No audience notify send."
         ]
       },
       "db_mutations": {
@@ -1753,39 +1751,35 @@
         ]
       },
       "events_outbox": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Durable broadcast delivery intent is recorded before provider work."
-        ]
+        "status": "NOT_APPLICABLE",
+        "reason": "NOTIFY CRUD mark-read/delete/preference writes do not enqueue an audience-notify outbox."
       },
       "side_effects": {
         "status": "APPLICABLE",
         "rules": [
-          "Telegram/Web notify fanout happens only for a committed broadcast identity."
+          "Unread counter or preference projection updates after the row commit. Web Push/Telegram fanout belongs to BROADCAST."
         ]
       },
       "ordering": {
         "status": "APPLICABLE",
         "rules": [
-          "Authorize, persist broadcast/receipts, then deliver. Group selection alone is FSM_PROMPT."
+          "Authorize the owner, persist the notification/preference row, then sync the counter."
         ]
       },
       "timeouts_retries": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Retry reuses the broadcast receipt and does not fan out twice."
-        ]
+        "status": "NOT_APPLICABLE",
+        "reason": "NOTIFY CRUD row updates have no provider receipt to retry."
       },
       "idempotency_key": {
         "status": "APPLICABLE",
         "rules": [
-          "Broadcast creation/confirm key selects one authoritative fanout."
+          "Repeat mark-read/delete on the same notification is a noop, not a second send."
         ]
       },
       "failure_cases": {
         "status": "APPLICABLE",
         "rules": [
-          "Unauthorized, empty audience, or duplicate confirm is denied/replayed without a second fanout."
+          "Wrong owner or missing row is denied with no send and no extra preference write."
         ]
       },
       "reference_evidence": {
@@ -3559,6 +3553,430 @@
       "operation_kind": "SCHEDULED_JOB"
     },
     {
+      "contract_id": "BC-TG-DOCUMENT_SEND-V1",
+      "family": "TG",
+      "scope": "TG DOCUMENT_SEND only. Not a no-send READ_QUERY.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authenticated Bot actor may view the requested history/export.",
+          "One Telegram executor owns the private lane used to send the file."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Actor identity plus export/list range. This is a send-document command, not a GET-only view."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Telegram document/file is delivered, or an explicit empty/error text is sent. The handler does send."
+        ]
+      },
+      "db_mutations": {
+        "status": "NOT_APPLICABLE",
+        "reason": "TG DOCUMENT_SEND generates a transient export file and does not persist a new product row."
+      },
+      "events_outbox": {
+        "status": "NOT_APPLICABLE",
+        "reason": "TG DOCUMENT_SEND does not append a product outbox row."
+      },
+      "side_effects": {
+        "status": "APPLICABLE",
+        "rules": [
+          "send_private_document_via_runtime delivers the file, or answer_incoming_message_via_runtime sends the empty/error text."
+        ]
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authorize the actor, build the export, send the document, then delete the temporary file."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Generate/send failure returns error text and removes the temp file. It does not invent a product row."
+        ]
+      },
+      "idempotency_key": {
+        "status": "NOT_APPLICABLE",
+        "reason": "TG DOCUMENT_SEND has no durable export command identity."
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Missing actor, empty history, or export/send failure is answered without a product-row write."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "bot/handlers/panel.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_bot_panel_standard_actions.py",
+        "tests/test_bot_panel_terminal_interaction_queue.py"
+      ],
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "DOCUMENT_SEND"
+    },
+    {
+      "contract_id": "BC-TRADE-DOCUMENT_SEND-V1",
+      "family": "TRADE",
+      "scope": "TRADE DOCUMENT_SEND only. Not a no-send READ_QUERY.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authenticated Bot actor may view the requested history/export.",
+          "One Telegram executor owns the private lane used to send the file."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Actor identity plus export/list range. This is a send-document command, not a GET-only view."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Telegram document/file is delivered, or an explicit empty/error text is sent. The handler does send."
+        ]
+      },
+      "db_mutations": {
+        "status": "NOT_APPLICABLE",
+        "reason": "TRADE DOCUMENT_SEND generates a transient export file and does not persist a new product row."
+      },
+      "events_outbox": {
+        "status": "NOT_APPLICABLE",
+        "reason": "TRADE DOCUMENT_SEND does not append a product outbox row."
+      },
+      "side_effects": {
+        "status": "APPLICABLE",
+        "rules": [
+          "send_private_document_via_runtime delivers the file, or answer_incoming_message_via_runtime sends the empty/error text."
+        ]
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authorize the actor, build the export, send the document, then delete the temporary file."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Generate/send failure returns error text and removes the temp file. It does not invent a product row."
+        ]
+      },
+      "idempotency_key": {
+        "status": "NOT_APPLICABLE",
+        "reason": "TRADE DOCUMENT_SEND has no durable export command identity."
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Missing actor, empty history, or export/send failure is answered without a product-row write."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "bot/handlers/trade_history.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_bot_trade_history_export_pdf.py",
+        "tests/test_bot_trade_history_export_excel.py"
+      ],
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "DOCUMENT_SEND"
+    },
+    {
+      "contract_id": "BC-TG-PROVIDER_REPLY-V1",
+      "family": "TG",
+      "scope": "TG PROVIDER_REPLY only. Not a no-send READ_QUERY.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authenticated Bot actor may see the requested panel/list.",
+          "One Telegram executor owns the private reply lane."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Panel/list identity for a provider reply. This command sends Telegram text."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Telegram text/keyboard is sent to the actor. The handler does send."
+        ]
+      },
+      "db_mutations": {
+        "status": "NOT_APPLICABLE",
+        "reason": "TG PROVIDER_REPLY does not persist a product row."
+      },
+      "events_outbox": {
+        "status": "NOT_APPLICABLE",
+        "reason": "TG PROVIDER_REPLY does not append a product outbox row."
+      },
+      "side_effects": {
+        "status": "APPLICABLE",
+        "rules": [
+          "answer_incoming_message_via_runtime sends the list, profile, catalog, or support copy."
+        ]
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authorize the actor, load the projection, then send the Telegram reply."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "NOT_APPLICABLE",
+        "reason": "TG PROVIDER_REPLY has no durable send receipt to retry."
+      },
+      "idempotency_key": {
+        "status": "NOT_APPLICABLE",
+        "reason": "TG PROVIDER_REPLY has no product command identity."
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Unauthorized or empty projection is answered or denied without a product-row write."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "bot/handlers/panel.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_bot_panel_standard_actions.py",
+        "tests/test_bot_panel_navigation_handoff.py"
+      ],
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "PROVIDER_REPLY"
+    },
+    {
+      "contract_id": "BC-ADMIN-PROVIDER_REPLY-V1",
+      "family": "ADMIN",
+      "scope": "ADMIN PROVIDER_REPLY only. Not a no-send READ_QUERY.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authenticated Bot actor may see the requested panel/list.",
+          "One Telegram executor owns the private reply lane."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Panel/list identity for a provider reply. This command sends Telegram text."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Telegram text/keyboard is sent to the actor. The handler does send."
+        ]
+      },
+      "db_mutations": {
+        "status": "NOT_APPLICABLE",
+        "reason": "ADMIN PROVIDER_REPLY does not persist a product row."
+      },
+      "events_outbox": {
+        "status": "NOT_APPLICABLE",
+        "reason": "ADMIN PROVIDER_REPLY does not append a product outbox row."
+      },
+      "side_effects": {
+        "status": "APPLICABLE",
+        "rules": [
+          "answer_incoming_message_via_runtime sends the list, profile, catalog, or support copy."
+        ]
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authorize the actor, load the projection, then send the Telegram reply."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "NOT_APPLICABLE",
+        "reason": "ADMIN PROVIDER_REPLY has no durable send receipt to retry."
+      },
+      "idempotency_key": {
+        "status": "NOT_APPLICABLE",
+        "reason": "ADMIN PROVIDER_REPLY has no product command identity."
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Unauthorized or empty projection is answered or denied without a product-row write."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "bot/handlers/admin_users.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_bot_admin_users_helpers.py",
+        "tests/test_p1_00_characterization_six_gaps.py"
+      ],
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "PROVIDER_REPLY"
+    },
+    {
+      "contract_id": "BC-OFFER-PROVIDER_REPLY-V1",
+      "family": "OFFER",
+      "scope": "OFFER PROVIDER_REPLY only. Not a no-send READ_QUERY.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authenticated Bot actor may see the requested panel/list.",
+          "One Telegram executor owns the private reply lane."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Panel/list identity for a provider reply. This command sends Telegram text."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Telegram text/keyboard is sent to the actor. The handler does send."
+        ]
+      },
+      "db_mutations": {
+        "status": "NOT_APPLICABLE",
+        "reason": "OFFER PROVIDER_REPLY does not persist a product row."
+      },
+      "events_outbox": {
+        "status": "NOT_APPLICABLE",
+        "reason": "OFFER PROVIDER_REPLY does not append a product outbox row."
+      },
+      "side_effects": {
+        "status": "APPLICABLE",
+        "rules": [
+          "answer_incoming_message_via_runtime sends the list, profile, catalog, or support copy."
+        ]
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authorize the actor, load the projection, then send the Telegram reply."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "NOT_APPLICABLE",
+        "reason": "OFFER PROVIDER_REPLY has no durable send receipt to retry."
+      },
+      "idempotency_key": {
+        "status": "NOT_APPLICABLE",
+        "reason": "OFFER PROVIDER_REPLY has no product command identity."
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Unauthorized or empty projection is answered or denied without a product-row write."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "bot/handlers/commodity_catalog.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_bot_commodity_catalog.py",
+        "tests/test_p1_00_characterization_six_gaps.py"
+      ],
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "PROVIDER_REPLY"
+    },
+    {
+      "contract_id": "BC-TRADE-PROVIDER_REPLY-V1",
+      "family": "TRADE",
+      "scope": "TRADE PROVIDER_REPLY only. Not a no-send READ_QUERY.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authenticated Bot actor may see the requested panel/list.",
+          "One Telegram executor owns the private reply lane."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Panel/list identity for a provider reply. This command sends Telegram text."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Telegram text/keyboard is sent to the actor. The handler does send."
+        ]
+      },
+      "db_mutations": {
+        "status": "NOT_APPLICABLE",
+        "reason": "TRADE PROVIDER_REPLY does not persist a product row."
+      },
+      "events_outbox": {
+        "status": "NOT_APPLICABLE",
+        "reason": "TRADE PROVIDER_REPLY does not append a product outbox row."
+      },
+      "side_effects": {
+        "status": "APPLICABLE",
+        "rules": [
+          "answer_incoming_message_via_runtime sends the list, profile, catalog, or support copy."
+        ]
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authorize the actor, load the projection, then send the Telegram reply."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "NOT_APPLICABLE",
+        "reason": "TRADE PROVIDER_REPLY has no durable send receipt to retry."
+      },
+      "idempotency_key": {
+        "status": "NOT_APPLICABLE",
+        "reason": "TRADE PROVIDER_REPLY has no product command identity."
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Unauthorized or empty projection is answered or denied without a product-row write."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "bot/handlers/trade_history.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_bot_trade_history_show.py",
+        "tests/test_bot_trade_history_keyboard.py"
+      ],
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "PROVIDER_REPLY"
+    },
+    {
       "contract_id": "BC-SURFACE-POLICY-CURRENT-V1",
       "family": "SURFACE_POLICY",
       "scope": "Offer origin, Request/action origin, actor/persona, tier and time-context policy composition.",
@@ -3736,24 +4154,9 @@
     "resolution": "For each seed, select the single rule whose family and operation_kind both match. mutation_class alone is not a behavior-equivalent operation boundary.",
     "rules": [
       {
-        "family": "IDENTITY",
-        "operation_kind": "READ_QUERY",
-        "contract_id": "BC-IDENTITY-READ_QUERY-V1"
-      },
-      {
-        "family": "IDENTITY",
-        "operation_kind": "CRUD_MUTATION",
-        "contract_id": "BC-IDENTITY-CRUD_MUTATION-V1"
-      },
-      {
-        "family": "IDENTITY",
-        "operation_kind": "SESSION_MUTATION",
-        "contract_id": "BC-IDENTITY-SESSION_MUTATION-V1"
-      },
-      {
         "family": "ADMIN",
-        "operation_kind": "READ_QUERY",
-        "contract_id": "BC-ADMIN-READ_QUERY-V1"
+        "operation_kind": "BROADCAST",
+        "contract_id": "BC-ADMIN-BROADCAST-V1"
       },
       {
         "family": "ADMIN",
@@ -3762,8 +4165,28 @@
       },
       {
         "family": "ADMIN",
-        "operation_kind": "BROADCAST",
-        "contract_id": "BC-ADMIN-BROADCAST-V1"
+        "operation_kind": "FSM_PROMPT",
+        "contract_id": "BC-ADMIN-FSM_PROMPT-V1"
+      },
+      {
+        "family": "ADMIN",
+        "operation_kind": "MENU_NAV",
+        "contract_id": "BC-ADMIN-MENU_NAV-V1"
+      },
+      {
+        "family": "ADMIN",
+        "operation_kind": "PROVIDER_REPLY",
+        "contract_id": "BC-ADMIN-PROVIDER_REPLY-V1"
+      },
+      {
+        "family": "ADMIN",
+        "operation_kind": "READ_QUERY",
+        "contract_id": "BC-ADMIN-READ_QUERY-V1"
+      },
+      {
+        "family": "AUTH",
+        "operation_kind": "CRUD_MUTATION",
+        "contract_id": "BC-AUTH-CRUD_MUTATION-V1"
       },
       {
         "family": "AUTH",
@@ -3772,13 +4195,58 @@
       },
       {
         "family": "AUTH",
+        "operation_kind": "SCHEDULED_JOB",
+        "contract_id": "BC-AUTH-SCHEDULED_JOB-V1"
+      },
+      {
+        "family": "AUTH",
         "operation_kind": "SESSION_MUTATION",
         "contract_id": "BC-AUTH-SESSION_MUTATION-V1"
       },
       {
-        "family": "AUTH",
+        "family": "IDENTITY",
         "operation_kind": "CRUD_MUTATION",
-        "contract_id": "BC-AUTH-CRUD_MUTATION-V1"
+        "contract_id": "BC-IDENTITY-CRUD_MUTATION-V1"
+      },
+      {
+        "family": "IDENTITY",
+        "operation_kind": "FSM_PROMPT",
+        "contract_id": "BC-IDENTITY-FSM_PROMPT-V1"
+      },
+      {
+        "family": "IDENTITY",
+        "operation_kind": "MENU_NAV",
+        "contract_id": "BC-IDENTITY-MENU_NAV-V1"
+      },
+      {
+        "family": "IDENTITY",
+        "operation_kind": "READ_QUERY",
+        "contract_id": "BC-IDENTITY-READ_QUERY-V1"
+      },
+      {
+        "family": "IDENTITY",
+        "operation_kind": "SCHEDULED_JOB",
+        "contract_id": "BC-IDENTITY-SCHEDULED_JOB-V1"
+      },
+      {
+        "family": "IDENTITY",
+        "operation_kind": "SESSION_MUTATION",
+        "contract_id": "BC-IDENTITY-SESSION_MUTATION-V1"
+      },
+      {
+        "family": "MARKET",
+        "operation_kind": "READ_QUERY",
+        "contract_id": "BC-MARKET-READ_QUERY-V1"
+      },
+      {
+        "family": "MARKET",
+        "operation_kind": "SCHEDULED_JOB",
+        "contract_id": "BC-MARKET-SCHEDULED_JOB-V1"
+      },
+      {
+        "family": "MSG",
+        "operation_kind": "CRUD_MUTATION",
+        "contract_id": "BC-MSG-CRUD_MUTATION-V1"
       },
       {
         "family": "MSG",
@@ -3787,18 +4255,13 @@
       },
       {
         "family": "MSG",
-        "operation_kind": "CRUD_MUTATION",
-        "contract_id": "BC-MSG-CRUD_MUTATION-V1"
-      },
-      {
-        "family": "OPS",
-        "operation_kind": "READ_QUERY",
-        "contract_id": "BC-OPS-READ_QUERY-V1"
+        "operation_kind": "STREAM_SUBSCRIBE",
+        "contract_id": "BC-MSG-STREAM_SUBSCRIBE-V1"
       },
       {
         "family": "NOTIFY",
-        "operation_kind": "READ_QUERY",
-        "contract_id": "BC-NOTIFY-READ_QUERY-V1"
+        "operation_kind": "BROADCAST",
+        "contract_id": "BC-NOTIFY-BROADCAST-V1"
       },
       {
         "family": "NOTIFY",
@@ -3807,8 +4270,8 @@
       },
       {
         "family": "NOTIFY",
-        "operation_kind": "BROADCAST",
-        "contract_id": "BC-NOTIFY-BROADCAST-V1"
+        "operation_kind": "READ_QUERY",
+        "contract_id": "BC-NOTIFY-READ_QUERY-V1"
       },
       {
         "family": "NOTIFY",
@@ -3822,18 +4285,43 @@
       },
       {
         "family": "OFFER",
+        "operation_kind": "FSM_PROMPT",
+        "contract_id": "BC-OFFER-FSM_PROMPT-V1"
+      },
+      {
+        "family": "OFFER",
+        "operation_kind": "PROVIDER_REPLY",
+        "contract_id": "BC-OFFER-PROVIDER_REPLY-V1"
+      },
+      {
+        "family": "OFFER",
         "operation_kind": "READ_QUERY",
         "contract_id": "BC-OFFER-READ_QUERY-V1"
       },
       {
-        "family": "MARKET",
-        "operation_kind": "READ_QUERY",
-        "contract_id": "BC-MARKET-READ_QUERY-V1"
+        "family": "OFFER",
+        "operation_kind": "SCHEDULED_JOB",
+        "contract_id": "BC-OFFER-SCHEDULED_JOB-V1"
       },
       {
-        "family": "MSG",
-        "operation_kind": "STREAM_SUBSCRIBE",
-        "contract_id": "BC-MSG-STREAM_SUBSCRIBE-V1"
+        "family": "OPS",
+        "operation_kind": "READ_QUERY",
+        "contract_id": "BC-OPS-READ_QUERY-V1"
+      },
+      {
+        "family": "OPS",
+        "operation_kind": "SCHEDULED_JOB",
+        "contract_id": "BC-OPS-SCHEDULED_JOB-V1"
+      },
+      {
+        "family": "REQUEST",
+        "operation_kind": "CRUD_MUTATION",
+        "contract_id": "BC-REQUEST-CRUD_MUTATION-V1"
+      },
+      {
+        "family": "REQUEST",
+        "operation_kind": "READ_QUERY",
+        "contract_id": "BC-REQUEST-READ_QUERY-V1"
       },
       {
         "family": "SYNC",
@@ -3846,39 +4334,9 @@
         "contract_id": "BC-SYNC-READ_QUERY-V1"
       },
       {
-        "family": "TRADE",
-        "operation_kind": "CRUD_MUTATION",
-        "contract_id": "BC-TRADE-CRUD_MUTATION-V1"
-      },
-      {
-        "family": "REQUEST",
-        "operation_kind": "READ_QUERY",
-        "contract_id": "BC-REQUEST-READ_QUERY-V1"
-      },
-      {
-        "family": "REQUEST",
-        "operation_kind": "CRUD_MUTATION",
-        "contract_id": "BC-REQUEST-CRUD_MUTATION-V1"
-      },
-      {
-        "family": "TRADE",
-        "operation_kind": "READ_QUERY",
-        "contract_id": "BC-TRADE-READ_QUERY-V1"
-      },
-      {
-        "family": "ADMIN",
-        "operation_kind": "FSM_PROMPT",
-        "contract_id": "BC-ADMIN-FSM_PROMPT-V1"
-      },
-      {
-        "family": "ADMIN",
-        "operation_kind": "MENU_NAV",
-        "contract_id": "BC-ADMIN-MENU_NAV-V1"
-      },
-      {
-        "family": "IDENTITY",
-        "operation_kind": "MENU_NAV",
-        "contract_id": "BC-IDENTITY-MENU_NAV-V1"
+        "family": "SYNC",
+        "operation_kind": "SCHEDULED_JOB",
+        "contract_id": "BC-SYNC-SCHEDULED_JOB-V1"
       },
       {
         "family": "TG",
@@ -3886,9 +4344,14 @@
         "contract_id": "BC-TG-CRUD_MUTATION-V1"
       },
       {
-        "family": "OFFER",
-        "operation_kind": "FSM_PROMPT",
-        "contract_id": "BC-OFFER-FSM_PROMPT-V1"
+        "family": "TG",
+        "operation_kind": "DELIVERY_COMMAND",
+        "contract_id": "BC-TG-DELIVERY_COMMAND-V1"
+      },
+      {
+        "family": "TG",
+        "operation_kind": "DOCUMENT_SEND",
+        "contract_id": "BC-TG-DOCUMENT_SEND-V1"
       },
       {
         "family": "TG",
@@ -3897,48 +4360,13 @@
       },
       {
         "family": "TG",
-        "operation_kind": "READ_QUERY",
-        "contract_id": "BC-TG-READ_QUERY-V1"
-      },
-      {
-        "family": "IDENTITY",
-        "operation_kind": "FSM_PROMPT",
-        "contract_id": "BC-IDENTITY-FSM_PROMPT-V1"
+        "operation_kind": "PROVIDER_REPLY",
+        "contract_id": "BC-TG-PROVIDER_REPLY-V1"
       },
       {
         "family": "TG",
-        "operation_kind": "DELIVERY_COMMAND",
-        "contract_id": "BC-TG-DELIVERY_COMMAND-V1"
-      },
-      {
-        "family": "TRADE",
-        "operation_kind": "MENU_NAV",
-        "contract_id": "BC-TRADE-MENU_NAV-V1"
-      },
-      {
-        "family": "OPS",
-        "operation_kind": "SCHEDULED_JOB",
-        "contract_id": "BC-OPS-SCHEDULED_JOB-V1"
-      },
-      {
-        "family": "MARKET",
-        "operation_kind": "SCHEDULED_JOB",
-        "contract_id": "BC-MARKET-SCHEDULED_JOB-V1"
-      },
-      {
-        "family": "OFFER",
-        "operation_kind": "SCHEDULED_JOB",
-        "contract_id": "BC-OFFER-SCHEDULED_JOB-V1"
-      },
-      {
-        "family": "AUTH",
-        "operation_kind": "SCHEDULED_JOB",
-        "contract_id": "BC-AUTH-SCHEDULED_JOB-V1"
-      },
-      {
-        "family": "SYNC",
-        "operation_kind": "SCHEDULED_JOB",
-        "contract_id": "BC-SYNC-SCHEDULED_JOB-V1"
+        "operation_kind": "READ_QUERY",
+        "contract_id": "BC-TG-READ_QUERY-V1"
       },
       {
         "family": "TG",
@@ -3946,9 +4374,29 @@
         "contract_id": "BC-TG-SCHEDULED_JOB-V1"
       },
       {
-        "family": "IDENTITY",
-        "operation_kind": "SCHEDULED_JOB",
-        "contract_id": "BC-IDENTITY-SCHEDULED_JOB-V1"
+        "family": "TRADE",
+        "operation_kind": "CRUD_MUTATION",
+        "contract_id": "BC-TRADE-CRUD_MUTATION-V1"
+      },
+      {
+        "family": "TRADE",
+        "operation_kind": "DOCUMENT_SEND",
+        "contract_id": "BC-TRADE-DOCUMENT_SEND-V1"
+      },
+      {
+        "family": "TRADE",
+        "operation_kind": "MENU_NAV",
+        "contract_id": "BC-TRADE-MENU_NAV-V1"
+      },
+      {
+        "family": "TRADE",
+        "operation_kind": "PROVIDER_REPLY",
+        "contract_id": "BC-TRADE-PROVIDER_REPLY-V1"
+      },
+      {
+        "family": "TRADE",
+        "operation_kind": "READ_QUERY",
+        "contract_id": "BC-TRADE-READ_QUERY-V1"
       },
       {
         "family": "TRADE",
@@ -4003,15 +4451,17 @@
       "TRADE:READ_OR_STREAM": 15,
       "TRADE:SCHEDULED_JOB": 2
     },
-    "resolved_index_sha256": "70941e8c32cfb090999d0a6363a3c1b41bd48e18fa71ab53efa6c2acc223bdc0",
+    "resolved_index_sha256": "6997d1b5c3dcc01ddf548f2659b66d9651bd2d4568b2506b0929477a0737ff5e",
     "expected_operation_kind_counts": {
-      "READ_QUERY": 130,
+      "READ_QUERY": 117,
       "CRUD_MUTATION": 221,
       "SESSION_MUTATION": 30,
       "BROADCAST": 3,
       "STREAM_SUBSCRIBE": 4,
       "FSM_PROMPT": 21,
       "MENU_NAV": 36,
+      "PROVIDER_REPLY": 9,
+      "DOCUMENT_SEND": 4,
       "DELIVERY_COMMAND": 5,
       "SCHEDULED_JOB": 15
     },
@@ -4019,7 +4469,7 @@
       "IDENTITY:READ_QUERY": 31,
       "IDENTITY:CRUD_MUTATION": 32,
       "IDENTITY:SESSION_MUTATION": 3,
-      "ADMIN:READ_QUERY": 15,
+      "ADMIN:READ_QUERY": 14,
       "ADMIN:CRUD_MUTATION": 53,
       "ADMIN:BROADCAST": 2,
       "AUTH:READ_QUERY": 10,
@@ -4033,7 +4483,7 @@
       "NOTIFY:BROADCAST": 1,
       "NOTIFY:STREAM_SUBSCRIBE": 1,
       "OFFER:CRUD_MUTATION": 24,
-      "OFFER:READ_QUERY": 9,
+      "OFFER:READ_QUERY": 8,
       "MARKET:READ_QUERY": 2,
       "MSG:STREAM_SUBSCRIBE": 3,
       "SYNC:CRUD_MUTATION": 3,
@@ -4041,17 +4491,23 @@
       "TRADE:CRUD_MUTATION": 37,
       "REQUEST:READ_QUERY": 3,
       "REQUEST:CRUD_MUTATION": 6,
-      "TRADE:READ_QUERY": 15,
+      "TRADE:READ_QUERY": 11,
       "ADMIN:FSM_PROMPT": 16,
       "ADMIN:MENU_NAV": 8,
+      "ADMIN:PROVIDER_REPLY": 1,
       "IDENTITY:MENU_NAV": 5,
+      "OFFER:PROVIDER_REPLY": 1,
       "TG:CRUD_MUTATION": 8,
       "OFFER:FSM_PROMPT": 3,
       "TG:MENU_NAV": 17,
-      "TG:READ_QUERY": 9,
+      "TG:PROVIDER_REPLY": 6,
+      "TG:DOCUMENT_SEND": 1,
+      "TG:READ_QUERY": 2,
       "IDENTITY:FSM_PROMPT": 2,
       "TG:DELIVERY_COMMAND": 5,
       "TRADE:MENU_NAV": 6,
+      "TRADE:PROVIDER_REPLY": 1,
+      "TRADE:DOCUMENT_SEND": 3,
       "OPS:SCHEDULED_JOB": 1,
       "MARKET:SCHEDULED_JOB": 2,
       "OFFER:SCHEDULED_JOB": 2,
