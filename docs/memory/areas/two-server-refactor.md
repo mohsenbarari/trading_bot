@@ -1,5 +1,10 @@
 # Two-Server Refactor
 
+- 2026-09-03 | `P2-11` is one-time Iran Production Standby admission, not routine
+  deploy or Writer activation. Clean bootstrap follows restore-tested quarantine;
+  Product stays blocked, Finland/DNS stay primary, and a critical readiness failure
+  restarts the seven-day soak. Only rebuild, irreparable drift or fundamental
+  architecture change repeats it; operations still require separate permission.
 - 2026-09-02 | Maximal `P2-10` runs on final FI/IR hosts and isolated existing storage:
   every requirement/mutation/fault needs executed evidence, never sampling. It covers
   465 baseline plus P2/P3, two 24h soaks, 14d+30% load, ten handovers, three DNS cycles,

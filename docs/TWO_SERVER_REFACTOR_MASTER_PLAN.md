@@ -245,6 +245,10 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
   mutation می‌کند، failback آفرهای فعال Iran را اتمیک به Finland منتقل می‌کند،
   quotaهای واقعاً سراسری budget رزروشده دارند و conflict هم‌field بدون LWW با
   restrictive-wins موقت و تصمیم انسانی حل می‌شود.
+- `D-20`: `P2-11` پذیرش اولیه و یک‌بارهٔ Iran در topology تولید به‌عنوان Standby
+  همگام است، نه مسیر deploy روزمره و نه فعال‌سازی Web Writer. تکرار آن فقط پس از
+  rebuild/restore کامل، واگرایی غیرقابل repair یا تغییر بنیادی معماری لازم می‌شود؛
+  release و hotfix عادی gateهای متناسب و مستقل بخش ۴ را دارند.
 
 ### نیازمند تأیید در بازبینی این پلن
 
@@ -310,7 +314,7 @@ release، hotfix و rollbackهای روزمرهٔ معماری جدید قرار
 | `W4` | `P1-05`, `P2-06` تا `P2-09`, `P3-06` تا `P3-08`, `P4-06` | ادغام داده rehearsal، dashboard و continuity model |
 | `W5` | `P1-06`, `P2-10`, `P3-09`, `P4-07`, `P4-10` | staging/fault/restore کامل بدون cutover تولید |
 | `W6` | `P1-07` + `P4-08` به‌صورت change set اتمیک | انتقال کنترل‌شدهٔ تولید به Finland Primary |
-| `W7` | `P2-11` + `P4-09` به‌صورت change set اتمیک | فعال‌سازی Iran به‌عنوان standby بدون failover واقعی |
+| `W7` | `P2-11` + نخستین اجرای `P4-09` به‌صورت change set اتمیک | پذیرش اولیهٔ Iran به‌عنوان standby بدون failover واقعی |
 | `W8` | `P2-12`, `P3-10`, مستندات متناظر `P5-03/P5-04` | drill قطع/وصل/failback و پذیرش عملیاتی |
 | `W9` | `P1-08`, `P5-05`, `P5-08` | حذف بدهی قدیمی و closure مستندات |
 
@@ -344,7 +348,7 @@ Cursor پیش از شروع هر Stage باید تمام dependencyهای زیر
 | `P2-08` | `P2-04`, `P2-06`, `P2-07` |
 | `P2-09` | `P2-05`, `P2-08` |
 | `P2-10` | `P2-01..P2-09`, `P3-08` |
-| `P2-11` + `P4-09` | `P1-07`, `P2-10`, `P3-09`, `P4-07`, مجوز تولید |
+| `P2-11` + نخستین `P4-09` | `P1-07`, `P2-10`, `P3-09`, `P4-07`, `P4-10`، مجوز تولید |
 | `P2-12` | `P2-11`, `P3-10`, `P4-10`, مجوز drill |
 | `P3-01` | `P3-00`, `P2-01` |
 | `P3-02` | `P3-01`, `P2-02` |
@@ -2944,15 +2948,165 @@ retention/cleanup بالا پذیرفته شدند. این Full Matrix فقط گ
 namespace/bucket/record، خواندن credential، deploy staging/production، fault injection،
 reboot، provider send، data copy/cleanup یا هیچ اقدام عملیاتی نیست.
 
-## `P2-11` — production standby activation
+## `P2-11` — پذیرش اولیهٔ Iran به‌عنوان Production Standby
 
-وضعیت: `PROPOSED — مجوز جدا`
+وضعیت: `APPROVED در سطح طراحی در 2026-09-03 — اجرا و هر mutation تولیدی نیازمند مجوز جدا`
 
-- Iran ابتدا receiver-only و product-blocked نصب می‌شود.
-- snapshot و replay تا parity کامل اجرا می‌شود.
-- dashboard و auth جدا enroll می‌شوند.
-- DNS محصول تغییر نمی‌کند.
-- soak حداقل یک دورهٔ مصوب با lag، checksum، backup و model shadow انجام می‌شود.
+این Stage، Iran را برای نخستین بار عضو واقعی topology تولید و sync می‌کند. منظور از
+«پذیرش/فعال‌سازی Standby» فقط آماده‌شدن receiverها، state محلی، dashboard، backup و
+shadow inference است؛ DNS محصول و Web Writer همچنان Finland می‌مانند. `P2-11` نه
+failover است، نه deploy همیشگی دو سایت و نه گیتی که بعد از هر تغییر کد تکرار شود.
+
+### مرز با deploy روزمره
+
+| رخداد | مسیر درست | آیا `P2-11` تکرار می‌شود؟ |
+| --- | --- | --- |
+| ورود اولیهٔ Iran به production | نخستین `P4-09` برای نصب exact release + همین Stage برای bootstrap/parity/soak | بله؛ یک بار |
+| release یا تغییر معمولی کد | مسیرهای `P4-05` و production deploy بخش ۴ روی سایت‌های متأثر | خیر |
+| hotfix محدود | quick lane مصوب `P4-06` و gateهای فقط همان blast radius | خیر |
+| تغییر schema، sync، Writer یا Market contract | deploy پرریسک بخش ۴ و subset/full matrix متناسب با تغییر | فقط اگر عضویت Standby باید از نو ساخته شود |
+| از دست‌رفتن کامل DB/state ایران یا rebuild/restore کامل میزبان | bootstrap و پذیرش دوباره با cutoff تازه | بله |
+| gap/conflict قابل repair در sync | `P2-03` repair و parity دوباره؛ ایران تا رفع مشکل not-ready می‌ماند | خیر |
+| واگرایی غیرقابل repair یا تغییر بنیادی topology/protocol | طراحی/Full Matrix تازه و پذیرش مجدد | بله |
+
+جزئیات ترتیب، SLO و این‌که در هر release ابتدا کدام سایت deploy شود، تصمیم بخش ۴ است.
+دورهٔ هفت‌روزه و Full Matrix معماری نباید به release یا hotfix نامرتبط تحمیل شوند.
+
+### پیش‌شرط‌های سخت
+
+- `P1-07` کامل است و Finland Primary مرجع canonical تولید است.
+- `P2-10`، `P3-09`، `P4-07` و `P4-10` با evidence محیط هدف سبز هستند.
+- نخستین deploy ایران در `P4-09` همان release digest، schema و config contract پذیرفته‌شده
+  را دارد؛ receiver قدیمی اجازهٔ مصرف stream جدید را ندارد.
+- inventory واقعی Iran، ظرفیت، ساعت، TLS/firewall، disk headroom، backup destination،
+  bucket/IAMهای جدا و مسیر مستقل Operations Console تأیید شده‌اند.
+- snapshot/copy، deploy و mutationهای Object Storage هرکدام plan redacted، target دقیق،
+  dry-run در صورت امکان و مجوز production جدا دارند.
+
+### سناریو ۱ — پاک‌سازی کنترل‌شدهٔ وضعیت قبلی Iran
+
+1. عامل inventory read-only از process/container، DB/Redis، فایل، object prefix، cron/job،
+   credential projection و DNS binding موجود می‌گیرد؛ IP یا مسیر تاریخی حقیقت فرض نمی‌شود.
+2. تمام runtime قدیمی product، writer، sender و side-effect executor ایران fence می‌شود؛
+   وجود Telegram token/session/executor یک blocker مطلق است.
+3. دادهٔ موجود بدون merge حدسی، backup نسخه‌دار و restore-test می‌شود و سپس در quarantine
+   با owner و تاریخ بازبینی نگه داشته می‌شود. حذف آن فقط طبق `P4-10` و مجوز جداست و backup
+   بی‌انتها باقی نمی‌ماند.
+4. DB/Redis هدف از پایهٔ تمیز و schema exact release ساخته می‌شوند. دادهٔ ناشناخته یا قدیمی
+   مستقیم وارد state canonical یا sync stream نمی‌شود؛ استخراج لازم change set جدا دارد.
+
+اگر backup یا restore proof شکست بخورد، Stage قبل از bootstrap متوقف می‌شود و Finland
+بدون تغییر به سرویس‌دهی ادامه می‌دهد.
+
+### سناریو ۲ — نصب Dark Standby بدون کاربر و side effect
+
+1. profile `ir-standby` با receiver، materializer، collectorهای مجاز ایران، shadow model،
+   monitoring و Operations Console نصب می‌شود.
+2. تمام Web mutationها، Web jobها، SMS execution و provider side effect با
+   `WEB_ROLE=STANDBY` و generation guard بسته‌اند. receiver و collector مجاز، Product
+   Writer محسوب نمی‌شوند.
+3. هیچ Telegram secret، polling/webhook، update cursor، Queue executor یا fallback relay
+   روی ایران وجود ندارد؛ negative proof جزو evidence است.
+4. دسترسی مستقیم به Product ایران، تا انتقال انسانی Writer در آینده، پاسخ typed و پایدار
+   `STANDBY_NOT_ACTIVE` می‌دهد؛ redirect/proxy پنهان و mutation آزمایشی تولیدی ممنوع است.
+5. Operations Console ایران مستقل، با username/password + TOTP و Session ۲۴ساعته enroll
+   و recovery آن از Product auth جدا آزمایش می‌شود.
+6. DNS محصول همچنان Finland است. health probe یا نصب TLS حق تغییر record یا role ندارد.
+
+### سناریو ۳ — bootstrap و رسیدن به همگامی واقعی
+
+1. از Finland canonical یک consistent snapshot با cutoff مستقل هر stream و manifest
+   امضاشده گرفته می‌شود؛ target در تمام restore بدون Product write/side effect می‌ماند.
+2. snapshot روی Iran restore و replay دقیقاً از `cutoff+1` آغاز می‌شود. duplicate delivery
+   ممکن است، اما duplicate business apply، پرش sequence یا پیشروی ACK روی rejection ممنوع است.
+3. جهت Iran→Finland نیز collectorهای IME/بورس و USDT با namespace واقعی ولی محدود آغاز
+   می‌شود؛ loop و دو بار شمردن event با origin/stream ID بسته می‌شود.
+4. business، identity/policy حداقلی، notification/Messenger/media، Market Facts، model
+   input/artifact/snapshot هرکدام barrier و checksum قرارداد خود را پاس می‌کنند.
+5. فقط پس از gap/backlog/conflict صفر، hashهای هم‌مرز و readiness مستقل، dashboard هر دو
+   سایت `FULL_SYNC` و `MARKET_READY` معتبر نشان می‌دهند. یکی جای دیگری را جعل نمی‌کند.
+
+رویداد rejected/quarantined حذف یا به success تبدیل نمی‌شود. repair از original immutable
+یا bootstrap مصوب است؛ تا آن زمان Iran نصب‌شده ولی `NOT_READY` باقی می‌ماند.
+
+### سناریو ۴ — soak هفت‌روزهٔ پذیرش اولیه
+
+پس از اولین readiness کامل، یک soak پیوستهٔ هفت‌روزه روی جریان واقعی تولید آغاز می‌شود:
+
+- Finland تنها Web Writer و Telegram owner باقی می‌ماند؛ Iran هیچ ترافیک Product یا
+  side effect تولیدی نمی‌گیرد.
+- connected lag عادی هر stream حداکثر ۳۰ ثانیه، sequence gap و hash mismatch صفر و backlog
+  bounded است؛ warning گذرا ثبت می‌شود اما failure readiness نادیده گرفته نمی‌شود.
+- shadow inference ایران ورودی، artifact، profile، snapshot و widening را با Finland
+  مقایسه می‌کند؛ shadow حق Product publish یا offer rejection ندارد.
+- backup زمان‌بندی‌شدهٔ Iran ساخته و حداقل یک restore ایزوله با replay تا barrier جاری
+  اثبات می‌شود؛ sync هرگز جای backup معرفی نمی‌شود.
+- restart process و interruption/recovery کنترل‌شدهٔ transport باید بدون owner collision،
+  data loss، ACK کاذب یا side effect تکراری recover شود.
+- dashboard، alert delivery، log rotation، disk growth، spool headroom و retention در تمام
+  دوره پایش می‌شوند.
+
+نقض critical readiness مانند gap حل‌نشده، hash/schema/signature mismatch، duplicate
+business apply، lost mutation، standby write، Telegram presence، backup غیرقابل restore
+یا `FULL_SYNC/MARKET_READY` کاذب، soak را fail می‌کند. پس از root-cause، fix و repair،
+زمان‌سنج هفت‌روزه از صفر شروع می‌شود؛ warning غیرcritical که readiness را قرمز نمی‌کند
+صرفاً ثبت و طبق budget بررسی می‌شود.
+
+### سناریوی شکست و بازگشت امن
+
+- شکست پیش از restore ایران: state هدف تغییر نمی‌کند؛ artifact موقت با retention مشخص
+  پاک یا quarantine می‌شود.
+- شکست حین restore/replay: receiverها متوقف، target همچنان Product-blocked و bootstrap
+  با run ID تازه resume یا از نو اجرا می‌شود؛ Finland و DNS دست‌نخورده‌اند.
+- mismatch در soak: ایران `NOT_READY` می‌شود، ولی role خودکار عوض نمی‌شود. علت repair و
+  evidence جدید تولید می‌شود؛ برای سبزکردن gate حذف event/counter یا waiver ممنوع است.
+- کمبود ظرفیت/دیسک: ingest کور ادامه نمی‌یابد؛ alert و backpressure فعال و spool/backup
+  طبق runbook حفاظت می‌شوند. cleanup نمی‌تواند active release، آخرین rollback یا آخرین
+  restore-tested backup را حذف کند.
+- در هیچ failure این Stage، rollback شامل تغییر DNS یا Web Writer نیست؛ زیرا این دو از
+  ابتدا تغییر نکرده‌اند.
+
+### Task Card فنی Cursor
+
+1. preflight و inventory read-only ایران را با allowlist منابع و report redacted بسازد؛
+   legacy process/job/credential/data را `KEEP/EXTRACT/QUARANTINE/DELETE_CANDIDATE` کند.
+2. shutdown/fence و negative-proof اتوماتیک Telegram، Writer، SMS و provider side effect
+   را قبل و بعد از restart پیاده کند؛ unknown نتیجه را blocker نگه دارد.
+3. backup/quarantine/restore-test وضعیت قدیمی و bootstrap DB/Redis تمیز را با run ID،
+   cutoff، digest، owner، expiry review و no-implicit-merge اجراپذیر کند.
+4. نخستین `P4-09` را فقط برای exact accepted release به onboarding workflow وصل کند؛
+   generic production deploy بعدی نباید به‌طور پیش‌فرض `P2-11` را invoke کند.
+5. Product hard block و پاسخ `STANDBY_NOT_ACTIVE` را برای endpoint، worker، scheduler،
+   WebSocket و background mutation تست کند؛ Console/receiver/collector مجاز سالم بمانند.
+6. bootstrap snapshot/replay `cutoff+1`، two-way stream start، ACK/gap/rejection، aligned
+   hash و business/media/model parity را با crash/resume و immutable journal پیاده کند.
+7. enrollment و recovery جداگانهٔ Console، Session ۲۴ساعته، audit و عدم dependency به
+   Product login را با browser test واقعی اثبات کند.
+8. soak runner هفت‌روزه را resume-aware ولی fail-closed بسازد؛ critical readiness failure
+   timer را invalidate کند و شروع دوباره نیازمند fix/repair receipt باشد.
+9. alert/metric/evidence برای lag، checksum، gap، backlog، sync direction، model shadow،
+   backup/restore، disk/spool و forbidden owner/process را در هر دو dashboard متقارن کند.
+10. abort/retry/cleanup را exact-target، dry-run-first و idempotent کند؛ هیچ command این
+    Stage API آروان، Product DNS یا Web Writer generation را mutate نکند.
+
+### Gate خروج و معنای پذیرش
+
+`P2-11` فقط وقتی `COMPLETE` است که exact release و schema روی Iran ثابت، دادهٔ قبلی
+restore-tested و quarantine‌شده، bootstrap/replay تا barrier جاری کامل، تمام streamها
+بدون gap/conflict/unknown و در سقف ۳۰ ثانیه، business/media/model parity معتبر، backup
+Iran قابل restore، Console مستقل سالم و soak پیوستهٔ هفت‌روزه سبز باشد. Telegram presence،
+Product write، provider side effect، DNS mutation، Writer mutation و skipped/waived gate
+باید صفر باشند.
+
+نتیجهٔ موفق فقط این است: `IRAN = PRODUCTION_STANDBY_READY`. Finland همچنان Web Writer،
+Telegram owner و مقصد DNS است. اجازهٔ failover یا تمرین آن فقط در `P2-12` و با مجوز
+مستقل صادر می‌شود.
+
+Gate طراحی در 2026-09-03 تأیید شد: این Stage onboarding اولیه است و پس از هر تغییر کد
+تکرار نمی‌شود؛ clean bootstrap پس از backup/quarantine وضعیت موجود، Product block با
+`STANDBY_NOT_ACTIVE`، parity واقعی و soak پیوستهٔ هفت‌روزه با شروع مجدد پس از critical
+readiness failure پذیرفته شدند. این تأیید مجوز دسترسی credential، deploy، snapshot/data
+copy، bucket write، process stop/start، cleanup، DNS/Writer change یا عملیات production نیست.
 
 ## `P2-12` — failover/failback drill
 
