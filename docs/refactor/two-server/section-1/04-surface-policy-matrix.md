@@ -42,11 +42,11 @@ between rows.
 
 | Offer origin | Request/action origin | Personas to cover | Time contexts | Required assertion |
 | --- | --- | --- | --- | --- |
-| Web | Web | owner, customer tier 1/2, accountant, admin | normal, overtime, closed/expired | Web-origin rules and Web notifications unchanged |
-| Web | Bot | linked/unlinked user, tier 1/2, accountant/admin where allowed | normal, overtime, retry | cross-surface request keeps both origins; Bot copy/callback and Web state agree |
-| Bot | Web | owner, tier 1/2, accountant/admin where allowed | normal, overtime, retry | Web request does not turn Bot offer into Web-origin |
-| Bot | Bot | linked/unlinked user, tier 1/2, accountant, admin | normal, overtime, close/republish | Telegram publication/callback/delivery ownership remains sole and idempotent |
-| Internal/system | either | scheduled job/reconciliation/operator | expiry, retry, outage recovery | action source and business origin remain separately auditable |
+| Web | Web | owner ELIGIBLE; tier-1 ELIGIBLE; tier-2 ELIGIBLE_FOR_REQUEST_ONLY; accountant INELIGIBLE; admin ELIGIBLE with command guards | normal, overtime, closed/expired | Web-origin rules and Web notifications unchanged |
+| Web | Bot | linked owner/tier-1/admin ELIGIBLE with Bot-role guards; unlinked Bot INELIGIBLE; accountant INELIGIBLE; tier-2 Bot INELIGIBLE | normal, overtime, retry | cross-surface request keeps both origins; Bot copy/callback and Web state agree |
+| Bot | Web | owner/tier-1 ELIGIBLE; tier-2 ELIGIBLE_FOR_REQUEST_ONLY; accountant INELIGIBLE; admin ELIGIBLE with command guards | normal, overtime, retry | Web request does not turn Bot offer into Web-origin |
+| Bot | Bot | linked owner/tier-1/admin ELIGIBLE with one Telegram executor; unlinked Bot INELIGIBLE; accountant INELIGIBLE; tier-2 Bot INELIGIBLE | normal, overtime, close/republish | Telegram publication/callback/delivery ownership remains sole and idempotent |
+| Internal/system | either | scheduled job/reconciliation/operator; INTERNAL cannot impersonate a user surface | expiry, retry, outage recovery | action source and business origin remain separately auditable |
 
 For each row, tests must cover at least:
 

@@ -28,7 +28,8 @@
     "composed_eligibility_cells": 30,
     "telegram_link_variants": 2,
     "invalid_combinations": 6,
-    "policy_effects": 7
+    "policy_effects": 7,
+    "family_boundary_variants": 72
   },
   "contract_field_policy": {
     "required_fields": [
@@ -1581,7 +1582,7 @@
         "applicability": "APPLICABLE",
         "eligibility": {
           "decision": "ELIGIBLE",
-          "predicate": "market_open=true AND Offer.status=active AND now < created_at+normal_window AND persona×surface is not INELIGIBLE"
+          "predicate": "market_open=true AND Offer.status=active AND now < created_at+normal_window"
         },
         "expected_outcome": "Run normal confirmation/quota/commission/publication/notification. Overtime owner-approval is not required.",
         "rule_sources": [
@@ -1597,7 +1598,7 @@
         "applicability": "APPLICABLE",
         "eligibility": {
           "decision": "ELIGIBLE",
-          "predicate": "persona×surface is not INELIGIBLE AND overtime_minutes_snapshot>0 AND receipt after normal deadline AND before final deadline AND request still nonterminal"
+          "predicate": "overtime_minutes_snapshot>0 AND receipt after normal deadline AND before final deadline AND request still nonterminal"
         },
         "expected_outcome": "Create/replay durable overtime request, require a fresh owner decision, then execute at most once.",
         "rule_sources": [
@@ -1708,7 +1709,7 @@
         "variant_id": "FAILURE-BEFORE-DB-COMMIT",
         "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
         "failure_boundary": "failure_before_db_commit",
-        "applicability": "APPLICABLE_TO_MUTATING_BEHAVIOR; READ_ONLY_VARIANTS_RESOLVE_NOT_APPLICABLE_WITH_REASON",
+        "applicability": "SHARED_EVIDENCE_TEMPLATE",
         "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
         "evidence_refs": [
           "tests/test_offers_router_create_success.py",
@@ -1720,16 +1721,13 @@
           "tests/test_offer_overtime_request_service.py",
           "tests/test_sync_router_apply_item_success.py"
         ],
-        "eligibility": {
-          "decision": "ELIGIBLE",
-          "predicate": "APPLICABLE_TO_MUTATING_BEHAVIOR; READ_ONLY_VARIANTS_RESOLVE_NOT_APPLICABLE_WITH_REASON"
-        }
+        "resolution": "Decisions are in family_boundary_variants; this row only shares evidence."
       },
       {
         "variant_id": "COMMIT-BEFORE-EVENT-SIDE-EFFECT",
         "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
         "failure_boundary": "commit_before_event_side_effect",
-        "applicability": "APPLICABLE_TO_DURABLE_MUTATION_WITH_ASYNC_EFFECT; OTHERWISE_NOT_APPLICABLE_WITH_REASON",
+        "applicability": "SHARED_EVIDENCE_TEMPLATE",
         "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
         "evidence_refs": [
           "tests/test_offer_publication_worker.py",
@@ -1741,16 +1739,13 @@
           "tests/test_trade_delivery_worker.py",
           "tests/test_telegram_notification_outbox_worker.py"
         ],
-        "eligibility": {
-          "decision": "ELIGIBLE",
-          "predicate": "APPLICABLE_TO_DURABLE_MUTATION_WITH_ASYNC_EFFECT; OTHERWISE_NOT_APPLICABLE_WITH_REASON"
-        }
+        "resolution": "Decisions are in family_boundary_variants; this row only shares evidence."
       },
       {
         "variant_id": "SIDE-EFFECT-BEFORE-ACK",
         "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
         "failure_boundary": "side_effect_before_ack",
-        "applicability": "APPLICABLE_TO_EXTERNAL_OR_REALTIME_EFFECT; OTHERWISE_NOT_APPLICABLE_WITH_REASON",
+        "applicability": "SHARED_EVIDENCE_TEMPLATE",
         "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
         "evidence_refs": [
           "tests/test_telegram_delivery_queue_postgres.py",
@@ -1762,16 +1757,13 @@
           "tests/test_telegram_delivery_queue_contract.py",
           "tests/test_web_push.py"
         ],
-        "eligibility": {
-          "decision": "ELIGIBLE",
-          "predicate": "APPLICABLE_TO_EXTERNAL_OR_REALTIME_EFFECT; OTHERWISE_NOT_APPLICABLE_WITH_REASON"
-        }
+        "resolution": "Decisions are in family_boundary_variants; this row only shares evidence."
       },
       {
         "variant_id": "TWO-CONCURRENT-COMMANDS",
         "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
         "failure_boundary": "two_concurrent_commands",
-        "applicability": "APPLICABLE_TO_MUTATING_BEHAVIOR; READ_ONLY_VARIANTS_RESOLVE_NOT_APPLICABLE_WITH_REASON",
+        "applicability": "SHARED_EVIDENCE_TEMPLATE",
         "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
         "evidence_refs": [
           "tests/test_offer_request_ledger_service.py",
@@ -1783,17 +1775,14 @@
           "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
           "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
         ],
-        "eligibility": {
-          "decision": "ELIGIBLE",
-          "predicate": "APPLICABLE_TO_MUTATING_BEHAVIOR; READ_ONLY_VARIANTS_RESOLVE_NOT_APPLICABLE_WITH_REASON"
-        }
+        "resolution": "Decisions are in family_boundary_variants; this row only shares evidence."
       },
       {
         "variant_id": "PROCESS-RESTART",
         "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
         "failure_boundary": "process_restart",
-        "applicability": "APPLICABLE",
-        "expected_outcome": "Durable queue/FSM/outbox/checkpoint resumes without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+        "applicability": "SHARED_EVIDENCE_TEMPLATE",
+        "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
         "evidence_refs": [
           "tests/test_main_lifespan.py",
           "tests/test_sync_worker.py",
@@ -1804,16 +1793,13 @@
           "tests/test_sync_worker.py",
           "tests/test_telegram_notification_outbox_worker.py"
         ],
-        "eligibility": {
-          "decision": "ELIGIBLE",
-          "predicate": "APPLICABLE"
-        }
+        "resolution": "Decisions are in family_boundary_variants; this row only shares evidence."
       },
       {
         "variant_id": "UNKNOWN-AUTHORITY-SCHEMA-HASH",
         "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
         "failure_boundary": "unknown_authority_schema_hash",
-        "applicability": "APPLICABLE",
+        "applicability": "SHARED_EVIDENCE_TEMPLATE",
         "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
         "evidence_refs": [
           "tests/test_background_job_authority.py",
@@ -1825,10 +1811,7 @@
           "tests/test_sync_router_signature.py",
           "tests/test_sync_field_policy.py"
         ],
-        "eligibility": {
-          "decision": "ELIGIBLE",
-          "predicate": "APPLICABLE"
-        }
+        "resolution": "Decisions are in family_boundary_variants; this row only shares evidence."
       }
     ],
     "expanded_variant_count": 72
@@ -1878,7 +1861,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "account_status=active AND authenticated owner context AND not accountant_context AND market_open=true AND Offer.status=active AND now < created_at+normal_window AND persona×surface is not INELIGIBLE"
+        "predicate": "account_status=active AND authenticated owner context AND not accountant_context AND market_open=true AND Offer.status=active AND now < created_at+normal_window"
       },
       "expected_outcome": "May own Offers and create/decide Requests on Web. Run normal confirmation/quota/commission/publication/notification. Overtime owner-approval is not required.",
       "rule_sources": [
@@ -1898,7 +1881,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "account_status=active AND authenticated owner context AND not accountant_context AND persona×surface is not INELIGIBLE AND overtime_minutes_snapshot>0 AND receipt after normal deadline AND before final deadline AND request still nonterminal"
+        "predicate": "account_status=active AND authenticated owner context AND not accountant_context AND overtime_minutes_snapshot>0 AND receipt after normal deadline AND before final deadline AND request still nonterminal"
       },
       "expected_outcome": "May own Offers and create/decide Requests on Web. Create/replay durable overtime request, require a fresh owner decision, then execute at most once.",
       "rule_sources": [
@@ -1919,7 +1902,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "INELIGIBLE_FOR_NEW_MARKET_MUTATION",
-        "predicate": "account_status=active AND authenticated owner context AND not accountant_context AND market closed OR Offer final deadline/status is terminal"
+        "predicate": "market closed OR Offer final deadline/status is terminal"
       },
       "expected_outcome": "Reject new Offer/Request/Trade mutation; allow only separately contracted read/terminal inspection or idempotent terminal replay.",
       "rule_sources": [
@@ -1938,7 +1921,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "evaluate_bot_access allows: active, role in {standard,police,middle_manager,super_admin}, telegram linked, not accountant, no tier-2 relation AND market_open=true AND Offer.status=active AND now < created_at+normal_window AND persona×surface is not INELIGIBLE"
+        "predicate": "evaluate_bot_access allows: active, role in {standard,police,middle_manager,super_admin}, telegram linked, not accountant, no tier-2 relation AND market_open=true AND Offer.status=active AND now < created_at+normal_window"
       },
       "expected_outcome": "Bot command/callback is admitted under Bot-specific policy. Run normal confirmation/quota/commission/publication/notification. Overtime owner-approval is not required.",
       "rule_sources": [
@@ -1958,7 +1941,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "evaluate_bot_access allows: active, role in {standard,police,middle_manager,super_admin}, telegram linked, not accountant, no tier-2 relation AND persona×surface is not INELIGIBLE AND overtime_minutes_snapshot>0 AND receipt after normal deadline AND before final deadline AND request still nonterminal"
+        "predicate": "evaluate_bot_access allows: active, role in {standard,police,middle_manager,super_admin}, telegram linked, not accountant, no tier-2 relation AND overtime_minutes_snapshot>0 AND receipt after normal deadline AND before final deadline AND request still nonterminal"
       },
       "expected_outcome": "Bot command/callback is admitted under Bot-specific policy. Create/replay durable overtime request, require a fresh owner decision, then execute at most once.",
       "rule_sources": [
@@ -1979,7 +1962,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "INELIGIBLE_FOR_NEW_MARKET_MUTATION",
-        "predicate": "evaluate_bot_access allows: active, role in {standard,police,middle_manager,super_admin}, telegram linked, not accountant, no tier-2 relation AND market closed OR Offer final deadline/status is terminal"
+        "predicate": "market closed OR Offer final deadline/status is terminal"
       },
       "expected_outcome": "Reject new Offer/Request/Trade mutation; allow only separately contracted read/terminal inspection or idempotent terminal replay.",
       "rule_sources": [
@@ -1998,7 +1981,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "active authenticated tier-1 relation AND command-specific limits pass AND not accountant AND market_open=true AND Offer.status=active AND now < created_at+normal_window AND persona×surface is not INELIGIBLE"
+        "predicate": "active authenticated tier-1 relation AND command-specific limits pass AND not accountant AND market_open=true AND Offer.status=active AND now < created_at+normal_window"
       },
       "expected_outcome": "Preserve tier-1 owner/request and snapshotted commission/quota. Run normal confirmation/quota/commission/publication/notification. Overtime owner-approval is not required.",
       "rule_sources": [
@@ -2018,7 +2001,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "active authenticated tier-1 relation AND command-specific limits pass AND not accountant AND persona×surface is not INELIGIBLE AND overtime_minutes_snapshot>0 AND receipt after normal deadline AND before final deadline AND request still nonterminal"
+        "predicate": "active authenticated tier-1 relation AND command-specific limits pass AND not accountant AND overtime_minutes_snapshot>0 AND receipt after normal deadline AND before final deadline AND request still nonterminal"
       },
       "expected_outcome": "Preserve tier-1 owner/request and snapshotted commission/quota. Create/replay durable overtime request, require a fresh owner decision, then execute at most once.",
       "rule_sources": [
@@ -2039,7 +2022,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "INELIGIBLE_FOR_NEW_MARKET_MUTATION",
-        "predicate": "active authenticated tier-1 relation AND command-specific limits pass AND not accountant AND market closed OR Offer final deadline/status is terminal"
+        "predicate": "market closed OR Offer final deadline/status is terminal"
       },
       "expected_outcome": "Reject new Offer/Request/Trade mutation; allow only separately contracted read/terminal inspection or idempotent terminal replay.",
       "rule_sources": [
@@ -2059,7 +2042,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "evaluate_bot_access_projection allows customer_tier=tier1 AND telegram linked AND account active AND market_open=true AND Offer.status=active AND now < created_at+normal_window AND persona×surface is not INELIGIBLE"
+        "predicate": "evaluate_bot_access_projection allows customer_tier=tier1 AND telegram linked AND account active AND market_open=true AND Offer.status=active AND now < created_at+normal_window"
       },
       "expected_outcome": "Preserve tier-1 Bot behavior and surface provenance. Run normal confirmation/quota/commission/publication/notification. Overtime owner-approval is not required.",
       "rule_sources": [
@@ -2079,7 +2062,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "evaluate_bot_access_projection allows customer_tier=tier1 AND telegram linked AND account active AND persona×surface is not INELIGIBLE AND overtime_minutes_snapshot>0 AND receipt after normal deadline AND before final deadline AND request still nonterminal"
+        "predicate": "evaluate_bot_access_projection allows customer_tier=tier1 AND telegram linked AND account active AND overtime_minutes_snapshot>0 AND receipt after normal deadline AND before final deadline AND request still nonterminal"
       },
       "expected_outcome": "Preserve tier-1 Bot behavior and surface provenance. Create/replay durable overtime request, require a fresh owner decision, then execute at most once.",
       "rule_sources": [
@@ -2100,7 +2083,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "INELIGIBLE_FOR_NEW_MARKET_MUTATION",
-        "predicate": "evaluate_bot_access_projection allows customer_tier=tier1 AND telegram linked AND account active AND market closed OR Offer final deadline/status is terminal"
+        "predicate": "market closed OR Offer final deadline/status is terminal"
       },
       "expected_outcome": "Reject new Offer/Request/Trade mutation; allow only separately contracted read/terminal inspection or idempotent terminal replay.",
       "rule_sources": [
@@ -2120,7 +2103,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "ELIGIBLE_FOR_REQUEST_ONLY",
-        "predicate": "active authenticated tier-2 relation; Offer ownership and overtime preference are forbidden AND market_open=true AND Offer.status=active AND now < created_at+normal_window AND persona×surface is not INELIGIBLE"
+        "predicate": "active authenticated tier-2 relation; Offer ownership and overtime preference are forbidden AND market_open=true AND Offer.status=active AND now < created_at+normal_window"
       },
       "expected_outcome": "May request against another eligible owner's Offer; commission/policy snapshots are retained; repeatable-offer list is empty. Run normal confirmation/quota/commission/publication/notification. Overtime owner-approval is not required.",
       "rule_sources": [
@@ -2140,7 +2123,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "ELIGIBLE_FOR_REQUEST_ONLY",
-        "predicate": "active authenticated tier-2 relation; Offer ownership and overtime preference are forbidden AND persona×surface is not INELIGIBLE AND overtime_minutes_snapshot>0 AND receipt after normal deadline AND before final deadline AND request still nonterminal"
+        "predicate": "active authenticated tier-2 relation; Offer ownership and overtime preference are forbidden AND overtime_minutes_snapshot>0 AND receipt after normal deadline AND before final deadline AND request still nonterminal"
       },
       "expected_outcome": "May request against another eligible owner's Offer; commission/policy snapshots are retained; repeatable-offer list is empty. Create/replay durable overtime request, require a fresh owner decision, then execute at most once.",
       "rule_sources": [
@@ -2160,7 +2143,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "INELIGIBLE_FOR_NEW_MARKET_MUTATION",
-        "predicate": "active authenticated tier-2 relation; Offer ownership and overtime preference are forbidden AND market closed OR Offer final deadline/status is terminal"
+        "predicate": "market closed OR Offer final deadline/status is terminal"
       },
       "expected_outcome": "Reject new Offer/Request/Trade mutation; allow only separately contracted read/terminal inspection or idempotent terminal replay.",
       "rule_sources": [
@@ -2179,7 +2162,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "INELIGIBLE",
-        "predicate": "customer_tier=tier2 → BotAccessDecision(False, customer_tier2) AND market_open=true AND Offer.status=active AND now < created_at+normal_window AND persona×surface is not INELIGIBLE"
+        "predicate": "customer_tier=tier2 → BotAccessDecision(False, customer_tier2)"
       },
       "expected_outcome": "Deny Bot access with customer_tier2 copy; no market mutation.",
       "rule_sources": [
@@ -2199,7 +2182,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "INELIGIBLE",
-        "predicate": "customer_tier=tier2 → BotAccessDecision(False, customer_tier2) AND persona×surface is not INELIGIBLE AND overtime_minutes_snapshot>0 AND receipt after normal deadline AND before final deadline AND request still nonterminal"
+        "predicate": "customer_tier=tier2 → BotAccessDecision(False, customer_tier2)"
       },
       "expected_outcome": "Deny Bot access with customer_tier2 copy; no market mutation.",
       "rule_sources": [
@@ -2219,7 +2202,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "INELIGIBLE",
-        "predicate": "customer_tier=tier2 → BotAccessDecision(False, customer_tier2) AND market closed OR Offer final deadline/status is terminal"
+        "predicate": "customer_tier=tier2 → BotAccessDecision(False, customer_tier2)"
       },
       "expected_outcome": "Deny Bot access with customer_tier2 copy; no market mutation.",
       "rule_sources": [
@@ -2238,7 +2221,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "INELIGIBLE",
-        "predicate": "is_accountant_context=true → _ensure_accountant_market_access_allowed rejects AND market_open=true AND Offer.status=active AND now < created_at+normal_window AND persona×surface is not INELIGIBLE"
+        "predicate": "is_accountant_context=true → _ensure_accountant_market_access_allowed rejects"
       },
       "expected_outcome": "Deny market action; no Offer/Request/Trade mutation. Accountant Web workspace outside this matrix remains separately authorized.",
       "rule_sources": [
@@ -2258,7 +2241,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "INELIGIBLE",
-        "predicate": "is_accountant_context=true → _ensure_accountant_market_access_allowed rejects AND persona×surface is not INELIGIBLE AND overtime_minutes_snapshot>0 AND receipt after normal deadline AND before final deadline AND request still nonterminal"
+        "predicate": "is_accountant_context=true → _ensure_accountant_market_access_allowed rejects"
       },
       "expected_outcome": "Deny market action; no Offer/Request/Trade mutation. Accountant Web workspace outside this matrix remains separately authorized.",
       "rule_sources": [
@@ -2278,7 +2261,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "INELIGIBLE",
-        "predicate": "is_accountant_context=true → _ensure_accountant_market_access_allowed rejects AND market closed OR Offer final deadline/status is terminal"
+        "predicate": "is_accountant_context=true → _ensure_accountant_market_access_allowed rejects"
       },
       "expected_outcome": "Deny market action; no Offer/Request/Trade mutation. Accountant Web workspace outside this matrix remains separately authorized.",
       "rule_sources": [
@@ -2297,7 +2280,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "INELIGIBLE",
-        "predicate": "is_accountant=true → BotAccessDecision(False, accountant) AND market_open=true AND Offer.status=active AND now < created_at+normal_window AND persona×surface is not INELIGIBLE"
+        "predicate": "is_accountant=true → BotAccessDecision(False, accountant)"
       },
       "expected_outcome": "Deny Bot access with accountant copy; no market mutation.",
       "rule_sources": [
@@ -2317,7 +2300,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "INELIGIBLE",
-        "predicate": "is_accountant=true → BotAccessDecision(False, accountant) AND persona×surface is not INELIGIBLE AND overtime_minutes_snapshot>0 AND receipt after normal deadline AND before final deadline AND request still nonterminal"
+        "predicate": "is_accountant=true → BotAccessDecision(False, accountant)"
       },
       "expected_outcome": "Deny Bot access with accountant copy; no market mutation.",
       "rule_sources": [
@@ -2337,7 +2320,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "INELIGIBLE",
-        "predicate": "is_accountant=true → BotAccessDecision(False, accountant) AND market closed OR Offer final deadline/status is terminal"
+        "predicate": "is_accountant=true → BotAccessDecision(False, accountant)"
       },
       "expected_outcome": "Deny Bot access with accountant copy; no market mutation.",
       "rule_sources": [
@@ -2356,7 +2339,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "active authenticated admin AND command-specific admin/market guard passes AND not accountant_context AND market_open=true AND Offer.status=active AND now < created_at+normal_window AND persona×surface is not INELIGIBLE"
+        "predicate": "active authenticated admin AND command-specific admin/market guard passes AND not accountant_context AND market_open=true AND Offer.status=active AND now < created_at+normal_window"
       },
       "expected_outcome": "Admin command or direct-principal market action follows its own policy and audit. Run normal confirmation/quota/commission/publication/notification. Overtime owner-approval is not required.",
       "rule_sources": [
@@ -2377,7 +2360,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "active authenticated admin AND command-specific admin/market guard passes AND not accountant_context AND persona×surface is not INELIGIBLE AND overtime_minutes_snapshot>0 AND receipt after normal deadline AND before final deadline AND request still nonterminal"
+        "predicate": "active authenticated admin AND command-specific admin/market guard passes AND not accountant_context AND overtime_minutes_snapshot>0 AND receipt after normal deadline AND before final deadline AND request still nonterminal"
       },
       "expected_outcome": "Admin command or direct-principal market action follows its own policy and audit. Create/replay durable overtime request, require a fresh owner decision, then execute at most once.",
       "rule_sources": [
@@ -2398,7 +2381,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "INELIGIBLE_FOR_NEW_MARKET_MUTATION",
-        "predicate": "active authenticated admin AND command-specific admin/market guard passes AND not accountant_context AND market closed OR Offer final deadline/status is terminal"
+        "predicate": "market closed OR Offer final deadline/status is terminal"
       },
       "expected_outcome": "Reject new Offer/Request/Trade mutation; allow only separately contracted read/terminal inspection or idempotent terminal replay.",
       "rule_sources": [
@@ -2418,7 +2401,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "role in BOT_ACCESS_ALLOWED_ROLE_VALUES AND telegram linked AND not accountant AND not tier-2 AND market_open=true AND Offer.status=active AND now < created_at+normal_window AND persona×surface is not INELIGIBLE"
+        "predicate": "role in BOT_ACCESS_ALLOWED_ROLE_VALUES AND telegram linked AND not accountant AND not tier-2 AND market_open=true AND Offer.status=active AND now < created_at+normal_window"
       },
       "expected_outcome": "Bot-specific admin/direct action is admitted and audited. Run normal confirmation/quota/commission/publication/notification. Overtime owner-approval is not required.",
       "rule_sources": [
@@ -2439,7 +2422,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "role in BOT_ACCESS_ALLOWED_ROLE_VALUES AND telegram linked AND not accountant AND not tier-2 AND persona×surface is not INELIGIBLE AND overtime_minutes_snapshot>0 AND receipt after normal deadline AND before final deadline AND request still nonterminal"
+        "predicate": "role in BOT_ACCESS_ALLOWED_ROLE_VALUES AND telegram linked AND not accountant AND not tier-2 AND overtime_minutes_snapshot>0 AND receipt after normal deadline AND before final deadline AND request still nonterminal"
       },
       "expected_outcome": "Bot-specific admin/direct action is admitted and audited. Create/replay durable overtime request, require a fresh owner decision, then execute at most once.",
       "rule_sources": [
@@ -2460,7 +2443,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "INELIGIBLE_FOR_NEW_MARKET_MUTATION",
-        "predicate": "role in BOT_ACCESS_ALLOWED_ROLE_VALUES AND telegram linked AND not accountant AND not tier-2 AND market closed OR Offer final deadline/status is terminal"
+        "predicate": "market closed OR Offer final deadline/status is terminal"
       },
       "expected_outcome": "Reject new Offer/Request/Trade mutation; allow only separately contracted read/terminal inspection or idempotent terminal replay.",
       "rule_sources": [
@@ -2697,10 +2680,1236 @@
         "decision": "ELIGIBLE",
         "predicate": "named failure boundary applies to a mutating command"
       },
-      "expected_outcome": "Use failure_timeline boundaries. Read-only commands resolve NOT_APPLICABLE with reason at that boundary.",
+      "expected_outcome": "Use family_boundary_variants. Eleven mutating families are ELIGIBLE at all six boundaries. OPS is NOT_APPLICABLE for the four mutation/side-effect boundaries and ELIGIBLE for process_restart and unknown_authority_schema_hash.",
       "rule_sources": [
         "tests/test_offers_router_create_success.py",
         "tests/test_sync_router_apply_item_success.py"
+      ]
+    }
+  ],
+  "family_boundary_variants": [
+    {
+      "variant_id": "AUTH__FAILURE-BEFORE-DB-COMMIT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "AUTH",
+      "failure_boundary": "failure_before_db_commit",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "AUTH: family command mutates durable product state"
+      },
+      "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
+      "rule_sources": [
+        "tests/test_offers_router_create_success.py",
+        "tests/test_offer_overtime_request_service.py",
+        "tests/test_sync_router_apply_item_success.py"
+      ]
+    },
+    {
+      "variant_id": "AUTH__COMMIT-BEFORE-EVENT-SIDE-EFFECT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "AUTH",
+      "failure_boundary": "commit_before_event_side_effect",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "AUTH: family command commits then emits an async outbox or delivery intent"
+      },
+      "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
+      "rule_sources": [
+        "tests/test_offer_publication_worker.py",
+        "tests/test_trade_delivery_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "AUTH__SIDE-EFFECT-BEFORE-ACK",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "AUTH",
+      "failure_boundary": "side_effect_before_ack",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "AUTH: family command has an external or realtime provider side effect"
+      },
+      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
+      "rule_sources": [
+        "tests/test_telegram_delivery_queue_postgres.py",
+        "tests/test_telegram_delivery_queue_contract.py",
+        "tests/test_web_push.py"
+      ]
+    },
+    {
+      "variant_id": "AUTH__TWO-CONCURRENT-COMMANDS",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "AUTH",
+      "failure_boundary": "two_concurrent_commands",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "AUTH: two overlapping mutating commands share a durable identity"
+      },
+      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
+      "rule_sources": [
+        "tests/test_offer_request_ledger_service.py",
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
+        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
+      ]
+    },
+    {
+      "variant_id": "AUTH__PROCESS-RESTART",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "AUTH",
+      "failure_boundary": "process_restart",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "AUTH: process restart must resume durable family state or expose independent API/Bot lifecycle"
+      },
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "rule_sources": [
+        "tests/test_main_lifespan.py",
+        "tests/test_sync_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "AUTH__UNKNOWN-AUTHORITY-SCHEMA-HASH",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "AUTH",
+      "failure_boundary": "unknown_authority_schema_hash",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "AUTH: unknown actor, schema, hash or owner must fail closed"
+      },
+      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
+      "rule_sources": [
+        "tests/test_background_job_authority.py",
+        "tests/test_sync_router_signature.py",
+        "tests/test_sync_field_policy.py"
+      ]
+    },
+    {
+      "variant_id": "IDENTITY__FAILURE-BEFORE-DB-COMMIT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "IDENTITY",
+      "failure_boundary": "failure_before_db_commit",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "IDENTITY: family command mutates durable product state"
+      },
+      "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
+      "rule_sources": [
+        "tests/test_offers_router_create_success.py",
+        "tests/test_offer_overtime_request_service.py",
+        "tests/test_sync_router_apply_item_success.py"
+      ]
+    },
+    {
+      "variant_id": "IDENTITY__COMMIT-BEFORE-EVENT-SIDE-EFFECT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "IDENTITY",
+      "failure_boundary": "commit_before_event_side_effect",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "IDENTITY: family command commits then emits an async outbox or delivery intent"
+      },
+      "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
+      "rule_sources": [
+        "tests/test_offer_publication_worker.py",
+        "tests/test_trade_delivery_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "IDENTITY__SIDE-EFFECT-BEFORE-ACK",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "IDENTITY",
+      "failure_boundary": "side_effect_before_ack",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "IDENTITY: family command has an external or realtime provider side effect"
+      },
+      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
+      "rule_sources": [
+        "tests/test_telegram_delivery_queue_postgres.py",
+        "tests/test_telegram_delivery_queue_contract.py",
+        "tests/test_web_push.py"
+      ]
+    },
+    {
+      "variant_id": "IDENTITY__TWO-CONCURRENT-COMMANDS",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "IDENTITY",
+      "failure_boundary": "two_concurrent_commands",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "IDENTITY: two overlapping mutating commands share a durable identity"
+      },
+      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
+      "rule_sources": [
+        "tests/test_offer_request_ledger_service.py",
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
+        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
+      ]
+    },
+    {
+      "variant_id": "IDENTITY__PROCESS-RESTART",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "IDENTITY",
+      "failure_boundary": "process_restart",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "IDENTITY: process restart must resume durable family state or expose independent API/Bot lifecycle"
+      },
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "rule_sources": [
+        "tests/test_main_lifespan.py",
+        "tests/test_sync_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "IDENTITY__UNKNOWN-AUTHORITY-SCHEMA-HASH",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "IDENTITY",
+      "failure_boundary": "unknown_authority_schema_hash",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "IDENTITY: unknown actor, schema, hash or owner must fail closed"
+      },
+      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
+      "rule_sources": [
+        "tests/test_background_job_authority.py",
+        "tests/test_sync_router_signature.py",
+        "tests/test_sync_field_policy.py"
+      ]
+    },
+    {
+      "variant_id": "OFFER__FAILURE-BEFORE-DB-COMMIT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "OFFER",
+      "failure_boundary": "failure_before_db_commit",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "OFFER: family command mutates durable product state"
+      },
+      "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
+      "rule_sources": [
+        "tests/test_offers_router_create_success.py",
+        "tests/test_offer_overtime_request_service.py",
+        "tests/test_sync_router_apply_item_success.py"
+      ]
+    },
+    {
+      "variant_id": "OFFER__COMMIT-BEFORE-EVENT-SIDE-EFFECT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "OFFER",
+      "failure_boundary": "commit_before_event_side_effect",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "OFFER: family command commits then emits an async outbox or delivery intent"
+      },
+      "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
+      "rule_sources": [
+        "tests/test_offer_publication_worker.py",
+        "tests/test_trade_delivery_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "OFFER__SIDE-EFFECT-BEFORE-ACK",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "OFFER",
+      "failure_boundary": "side_effect_before_ack",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "OFFER: family command has an external or realtime provider side effect"
+      },
+      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
+      "rule_sources": [
+        "tests/test_telegram_delivery_queue_postgres.py",
+        "tests/test_telegram_delivery_queue_contract.py",
+        "tests/test_web_push.py"
+      ]
+    },
+    {
+      "variant_id": "OFFER__TWO-CONCURRENT-COMMANDS",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "OFFER",
+      "failure_boundary": "two_concurrent_commands",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "OFFER: two overlapping mutating commands share a durable identity"
+      },
+      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
+      "rule_sources": [
+        "tests/test_offer_request_ledger_service.py",
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
+        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
+      ]
+    },
+    {
+      "variant_id": "OFFER__PROCESS-RESTART",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "OFFER",
+      "failure_boundary": "process_restart",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "OFFER: process restart must resume durable family state or expose independent API/Bot lifecycle"
+      },
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "rule_sources": [
+        "tests/test_main_lifespan.py",
+        "tests/test_sync_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "OFFER__UNKNOWN-AUTHORITY-SCHEMA-HASH",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "OFFER",
+      "failure_boundary": "unknown_authority_schema_hash",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "OFFER: unknown actor, schema, hash or owner must fail closed"
+      },
+      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
+      "rule_sources": [
+        "tests/test_background_job_authority.py",
+        "tests/test_sync_router_signature.py",
+        "tests/test_sync_field_policy.py"
+      ]
+    },
+    {
+      "variant_id": "REQUEST__FAILURE-BEFORE-DB-COMMIT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "REQUEST",
+      "failure_boundary": "failure_before_db_commit",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "REQUEST: family command mutates durable product state"
+      },
+      "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
+      "rule_sources": [
+        "tests/test_offers_router_create_success.py",
+        "tests/test_offer_overtime_request_service.py",
+        "tests/test_sync_router_apply_item_success.py"
+      ]
+    },
+    {
+      "variant_id": "REQUEST__COMMIT-BEFORE-EVENT-SIDE-EFFECT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "REQUEST",
+      "failure_boundary": "commit_before_event_side_effect",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "REQUEST: family command commits then emits an async outbox or delivery intent"
+      },
+      "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
+      "rule_sources": [
+        "tests/test_offer_publication_worker.py",
+        "tests/test_trade_delivery_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "REQUEST__SIDE-EFFECT-BEFORE-ACK",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "REQUEST",
+      "failure_boundary": "side_effect_before_ack",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "REQUEST: family command has an external or realtime provider side effect"
+      },
+      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
+      "rule_sources": [
+        "tests/test_telegram_delivery_queue_postgres.py",
+        "tests/test_telegram_delivery_queue_contract.py",
+        "tests/test_web_push.py"
+      ]
+    },
+    {
+      "variant_id": "REQUEST__TWO-CONCURRENT-COMMANDS",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "REQUEST",
+      "failure_boundary": "two_concurrent_commands",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "REQUEST: two overlapping mutating commands share a durable identity"
+      },
+      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
+      "rule_sources": [
+        "tests/test_offer_request_ledger_service.py",
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
+        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
+      ]
+    },
+    {
+      "variant_id": "REQUEST__PROCESS-RESTART",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "REQUEST",
+      "failure_boundary": "process_restart",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "REQUEST: process restart must resume durable family state or expose independent API/Bot lifecycle"
+      },
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "rule_sources": [
+        "tests/test_main_lifespan.py",
+        "tests/test_sync_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "REQUEST__UNKNOWN-AUTHORITY-SCHEMA-HASH",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "REQUEST",
+      "failure_boundary": "unknown_authority_schema_hash",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "REQUEST: unknown actor, schema, hash or owner must fail closed"
+      },
+      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
+      "rule_sources": [
+        "tests/test_background_job_authority.py",
+        "tests/test_sync_router_signature.py",
+        "tests/test_sync_field_policy.py"
+      ]
+    },
+    {
+      "variant_id": "TRADE__FAILURE-BEFORE-DB-COMMIT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "TRADE",
+      "failure_boundary": "failure_before_db_commit",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "TRADE: family command mutates durable product state"
+      },
+      "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
+      "rule_sources": [
+        "tests/test_offers_router_create_success.py",
+        "tests/test_offer_overtime_request_service.py",
+        "tests/test_sync_router_apply_item_success.py"
+      ]
+    },
+    {
+      "variant_id": "TRADE__COMMIT-BEFORE-EVENT-SIDE-EFFECT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "TRADE",
+      "failure_boundary": "commit_before_event_side_effect",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "TRADE: family command commits then emits an async outbox or delivery intent"
+      },
+      "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
+      "rule_sources": [
+        "tests/test_offer_publication_worker.py",
+        "tests/test_trade_delivery_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "TRADE__SIDE-EFFECT-BEFORE-ACK",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "TRADE",
+      "failure_boundary": "side_effect_before_ack",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "TRADE: family command has an external or realtime provider side effect"
+      },
+      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
+      "rule_sources": [
+        "tests/test_telegram_delivery_queue_postgres.py",
+        "tests/test_telegram_delivery_queue_contract.py",
+        "tests/test_web_push.py"
+      ]
+    },
+    {
+      "variant_id": "TRADE__TWO-CONCURRENT-COMMANDS",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "TRADE",
+      "failure_boundary": "two_concurrent_commands",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "TRADE: two overlapping mutating commands share a durable identity"
+      },
+      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
+      "rule_sources": [
+        "tests/test_offer_request_ledger_service.py",
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
+        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
+      ]
+    },
+    {
+      "variant_id": "TRADE__PROCESS-RESTART",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "TRADE",
+      "failure_boundary": "process_restart",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "TRADE: process restart must resume durable family state or expose independent API/Bot lifecycle"
+      },
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "rule_sources": [
+        "tests/test_main_lifespan.py",
+        "tests/test_sync_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "TRADE__UNKNOWN-AUTHORITY-SCHEMA-HASH",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "TRADE",
+      "failure_boundary": "unknown_authority_schema_hash",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "TRADE: unknown actor, schema, hash or owner must fail closed"
+      },
+      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
+      "rule_sources": [
+        "tests/test_background_job_authority.py",
+        "tests/test_sync_router_signature.py",
+        "tests/test_sync_field_policy.py"
+      ]
+    },
+    {
+      "variant_id": "MARKET__FAILURE-BEFORE-DB-COMMIT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "MARKET",
+      "failure_boundary": "failure_before_db_commit",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "MARKET: family command mutates durable product state"
+      },
+      "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
+      "rule_sources": [
+        "tests/test_offers_router_create_success.py",
+        "tests/test_offer_overtime_request_service.py",
+        "tests/test_sync_router_apply_item_success.py"
+      ]
+    },
+    {
+      "variant_id": "MARKET__COMMIT-BEFORE-EVENT-SIDE-EFFECT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "MARKET",
+      "failure_boundary": "commit_before_event_side_effect",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "MARKET: family command commits then emits an async outbox or delivery intent"
+      },
+      "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
+      "rule_sources": [
+        "tests/test_offer_publication_worker.py",
+        "tests/test_trade_delivery_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "MARKET__SIDE-EFFECT-BEFORE-ACK",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "MARKET",
+      "failure_boundary": "side_effect_before_ack",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "MARKET: family command has an external or realtime provider side effect"
+      },
+      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
+      "rule_sources": [
+        "tests/test_telegram_delivery_queue_postgres.py",
+        "tests/test_telegram_delivery_queue_contract.py",
+        "tests/test_web_push.py"
+      ]
+    },
+    {
+      "variant_id": "MARKET__TWO-CONCURRENT-COMMANDS",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "MARKET",
+      "failure_boundary": "two_concurrent_commands",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "MARKET: two overlapping mutating commands share a durable identity"
+      },
+      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
+      "rule_sources": [
+        "tests/test_offer_request_ledger_service.py",
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
+        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
+      ]
+    },
+    {
+      "variant_id": "MARKET__PROCESS-RESTART",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "MARKET",
+      "failure_boundary": "process_restart",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "MARKET: process restart must resume durable family state or expose independent API/Bot lifecycle"
+      },
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "rule_sources": [
+        "tests/test_main_lifespan.py",
+        "tests/test_sync_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "MARKET__UNKNOWN-AUTHORITY-SCHEMA-HASH",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "MARKET",
+      "failure_boundary": "unknown_authority_schema_hash",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "MARKET: unknown actor, schema, hash or owner must fail closed"
+      },
+      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
+      "rule_sources": [
+        "tests/test_background_job_authority.py",
+        "tests/test_sync_router_signature.py",
+        "tests/test_sync_field_policy.py"
+      ]
+    },
+    {
+      "variant_id": "MSG__FAILURE-BEFORE-DB-COMMIT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "MSG",
+      "failure_boundary": "failure_before_db_commit",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "MSG: family command mutates durable product state"
+      },
+      "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
+      "rule_sources": [
+        "tests/test_offers_router_create_success.py",
+        "tests/test_offer_overtime_request_service.py",
+        "tests/test_sync_router_apply_item_success.py"
+      ]
+    },
+    {
+      "variant_id": "MSG__COMMIT-BEFORE-EVENT-SIDE-EFFECT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "MSG",
+      "failure_boundary": "commit_before_event_side_effect",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "MSG: family command commits then emits an async outbox or delivery intent"
+      },
+      "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
+      "rule_sources": [
+        "tests/test_offer_publication_worker.py",
+        "tests/test_trade_delivery_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "MSG__SIDE-EFFECT-BEFORE-ACK",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "MSG",
+      "failure_boundary": "side_effect_before_ack",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "MSG: family command has an external or realtime provider side effect"
+      },
+      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
+      "rule_sources": [
+        "tests/test_telegram_delivery_queue_postgres.py",
+        "tests/test_telegram_delivery_queue_contract.py",
+        "tests/test_web_push.py"
+      ]
+    },
+    {
+      "variant_id": "MSG__TWO-CONCURRENT-COMMANDS",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "MSG",
+      "failure_boundary": "two_concurrent_commands",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "MSG: two overlapping mutating commands share a durable identity"
+      },
+      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
+      "rule_sources": [
+        "tests/test_offer_request_ledger_service.py",
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
+        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
+      ]
+    },
+    {
+      "variant_id": "MSG__PROCESS-RESTART",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "MSG",
+      "failure_boundary": "process_restart",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "MSG: process restart must resume durable family state or expose independent API/Bot lifecycle"
+      },
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "rule_sources": [
+        "tests/test_main_lifespan.py",
+        "tests/test_sync_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "MSG__UNKNOWN-AUTHORITY-SCHEMA-HASH",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "MSG",
+      "failure_boundary": "unknown_authority_schema_hash",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "MSG: unknown actor, schema, hash or owner must fail closed"
+      },
+      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
+      "rule_sources": [
+        "tests/test_background_job_authority.py",
+        "tests/test_sync_router_signature.py",
+        "tests/test_sync_field_policy.py"
+      ]
+    },
+    {
+      "variant_id": "NOTIFY__FAILURE-BEFORE-DB-COMMIT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "NOTIFY",
+      "failure_boundary": "failure_before_db_commit",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "NOTIFY: family command mutates durable product state"
+      },
+      "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
+      "rule_sources": [
+        "tests/test_offers_router_create_success.py",
+        "tests/test_offer_overtime_request_service.py",
+        "tests/test_sync_router_apply_item_success.py"
+      ]
+    },
+    {
+      "variant_id": "NOTIFY__COMMIT-BEFORE-EVENT-SIDE-EFFECT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "NOTIFY",
+      "failure_boundary": "commit_before_event_side_effect",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "NOTIFY: family command commits then emits an async outbox or delivery intent"
+      },
+      "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
+      "rule_sources": [
+        "tests/test_offer_publication_worker.py",
+        "tests/test_trade_delivery_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "NOTIFY__SIDE-EFFECT-BEFORE-ACK",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "NOTIFY",
+      "failure_boundary": "side_effect_before_ack",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "NOTIFY: family command has an external or realtime provider side effect"
+      },
+      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
+      "rule_sources": [
+        "tests/test_telegram_delivery_queue_postgres.py",
+        "tests/test_telegram_delivery_queue_contract.py",
+        "tests/test_web_push.py"
+      ]
+    },
+    {
+      "variant_id": "NOTIFY__TWO-CONCURRENT-COMMANDS",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "NOTIFY",
+      "failure_boundary": "two_concurrent_commands",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "NOTIFY: two overlapping mutating commands share a durable identity"
+      },
+      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
+      "rule_sources": [
+        "tests/test_offer_request_ledger_service.py",
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
+        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
+      ]
+    },
+    {
+      "variant_id": "NOTIFY__PROCESS-RESTART",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "NOTIFY",
+      "failure_boundary": "process_restart",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "NOTIFY: process restart must resume durable family state or expose independent API/Bot lifecycle"
+      },
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "rule_sources": [
+        "tests/test_main_lifespan.py",
+        "tests/test_sync_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "NOTIFY__UNKNOWN-AUTHORITY-SCHEMA-HASH",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "NOTIFY",
+      "failure_boundary": "unknown_authority_schema_hash",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "NOTIFY: unknown actor, schema, hash or owner must fail closed"
+      },
+      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
+      "rule_sources": [
+        "tests/test_background_job_authority.py",
+        "tests/test_sync_router_signature.py",
+        "tests/test_sync_field_policy.py"
+      ]
+    },
+    {
+      "variant_id": "TG__FAILURE-BEFORE-DB-COMMIT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "TG",
+      "failure_boundary": "failure_before_db_commit",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "TG: family command mutates durable product state"
+      },
+      "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
+      "rule_sources": [
+        "tests/test_offers_router_create_success.py",
+        "tests/test_offer_overtime_request_service.py",
+        "tests/test_sync_router_apply_item_success.py"
+      ]
+    },
+    {
+      "variant_id": "TG__COMMIT-BEFORE-EVENT-SIDE-EFFECT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "TG",
+      "failure_boundary": "commit_before_event_side_effect",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "TG: family command commits then emits an async outbox or delivery intent"
+      },
+      "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
+      "rule_sources": [
+        "tests/test_offer_publication_worker.py",
+        "tests/test_trade_delivery_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "TG__SIDE-EFFECT-BEFORE-ACK",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "TG",
+      "failure_boundary": "side_effect_before_ack",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "TG: family command has an external or realtime provider side effect"
+      },
+      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
+      "rule_sources": [
+        "tests/test_telegram_delivery_queue_postgres.py",
+        "tests/test_telegram_delivery_queue_contract.py",
+        "tests/test_web_push.py"
+      ]
+    },
+    {
+      "variant_id": "TG__TWO-CONCURRENT-COMMANDS",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "TG",
+      "failure_boundary": "two_concurrent_commands",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "TG: two overlapping mutating commands share a durable identity"
+      },
+      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
+      "rule_sources": [
+        "tests/test_offer_request_ledger_service.py",
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
+        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
+      ]
+    },
+    {
+      "variant_id": "TG__PROCESS-RESTART",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "TG",
+      "failure_boundary": "process_restart",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "TG: process restart must resume durable family state or expose independent API/Bot lifecycle"
+      },
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "rule_sources": [
+        "tests/test_main_lifespan.py",
+        "tests/test_sync_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "TG__UNKNOWN-AUTHORITY-SCHEMA-HASH",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "TG",
+      "failure_boundary": "unknown_authority_schema_hash",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "TG: unknown actor, schema, hash or owner must fail closed"
+      },
+      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
+      "rule_sources": [
+        "tests/test_background_job_authority.py",
+        "tests/test_sync_router_signature.py",
+        "tests/test_sync_field_policy.py"
+      ]
+    },
+    {
+      "variant_id": "ADMIN__FAILURE-BEFORE-DB-COMMIT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "ADMIN",
+      "failure_boundary": "failure_before_db_commit",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "ADMIN: family command mutates durable product state"
+      },
+      "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
+      "rule_sources": [
+        "tests/test_offers_router_create_success.py",
+        "tests/test_offer_overtime_request_service.py",
+        "tests/test_sync_router_apply_item_success.py"
+      ]
+    },
+    {
+      "variant_id": "ADMIN__COMMIT-BEFORE-EVENT-SIDE-EFFECT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "ADMIN",
+      "failure_boundary": "commit_before_event_side_effect",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "ADMIN: family command commits then emits an async outbox or delivery intent"
+      },
+      "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
+      "rule_sources": [
+        "tests/test_offer_publication_worker.py",
+        "tests/test_trade_delivery_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "ADMIN__SIDE-EFFECT-BEFORE-ACK",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "ADMIN",
+      "failure_boundary": "side_effect_before_ack",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "ADMIN: family command has an external or realtime provider side effect"
+      },
+      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
+      "rule_sources": [
+        "tests/test_telegram_delivery_queue_postgres.py",
+        "tests/test_telegram_delivery_queue_contract.py",
+        "tests/test_web_push.py"
+      ]
+    },
+    {
+      "variant_id": "ADMIN__TWO-CONCURRENT-COMMANDS",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "ADMIN",
+      "failure_boundary": "two_concurrent_commands",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "ADMIN: two overlapping mutating commands share a durable identity"
+      },
+      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
+      "rule_sources": [
+        "tests/test_offer_request_ledger_service.py",
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
+        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
+      ]
+    },
+    {
+      "variant_id": "ADMIN__PROCESS-RESTART",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "ADMIN",
+      "failure_boundary": "process_restart",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "ADMIN: process restart must resume durable family state or expose independent API/Bot lifecycle"
+      },
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "rule_sources": [
+        "tests/test_main_lifespan.py",
+        "tests/test_sync_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "ADMIN__UNKNOWN-AUTHORITY-SCHEMA-HASH",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "ADMIN",
+      "failure_boundary": "unknown_authority_schema_hash",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "ADMIN: unknown actor, schema, hash or owner must fail closed"
+      },
+      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
+      "rule_sources": [
+        "tests/test_background_job_authority.py",
+        "tests/test_sync_router_signature.py",
+        "tests/test_sync_field_policy.py"
+      ]
+    },
+    {
+      "variant_id": "SYNC__FAILURE-BEFORE-DB-COMMIT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "SYNC",
+      "failure_boundary": "failure_before_db_commit",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "SYNC: family command mutates durable product state"
+      },
+      "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
+      "rule_sources": [
+        "tests/test_offers_router_create_success.py",
+        "tests/test_offer_overtime_request_service.py",
+        "tests/test_sync_router_apply_item_success.py"
+      ]
+    },
+    {
+      "variant_id": "SYNC__COMMIT-BEFORE-EVENT-SIDE-EFFECT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "SYNC",
+      "failure_boundary": "commit_before_event_side_effect",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "SYNC: family command commits then emits an async outbox or delivery intent"
+      },
+      "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
+      "rule_sources": [
+        "tests/test_offer_publication_worker.py",
+        "tests/test_trade_delivery_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "SYNC__SIDE-EFFECT-BEFORE-ACK",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "SYNC",
+      "failure_boundary": "side_effect_before_ack",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "SYNC: family command has an external or realtime provider side effect"
+      },
+      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
+      "rule_sources": [
+        "tests/test_telegram_delivery_queue_postgres.py",
+        "tests/test_telegram_delivery_queue_contract.py",
+        "tests/test_web_push.py"
+      ]
+    },
+    {
+      "variant_id": "SYNC__TWO-CONCURRENT-COMMANDS",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "SYNC",
+      "failure_boundary": "two_concurrent_commands",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "SYNC: two overlapping mutating commands share a durable identity"
+      },
+      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
+      "rule_sources": [
+        "tests/test_offer_request_ledger_service.py",
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
+        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
+      ]
+    },
+    {
+      "variant_id": "SYNC__PROCESS-RESTART",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "SYNC",
+      "failure_boundary": "process_restart",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "SYNC: process restart must resume durable family state or expose independent API/Bot lifecycle"
+      },
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "rule_sources": [
+        "tests/test_main_lifespan.py",
+        "tests/test_sync_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "SYNC__UNKNOWN-AUTHORITY-SCHEMA-HASH",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "SYNC",
+      "failure_boundary": "unknown_authority_schema_hash",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "SYNC: unknown actor, schema, hash or owner must fail closed"
+      },
+      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
+      "rule_sources": [
+        "tests/test_background_job_authority.py",
+        "tests/test_sync_router_signature.py",
+        "tests/test_sync_field_policy.py"
+      ]
+    },
+    {
+      "variant_id": "OPS__FAILURE-BEFORE-DB-COMMIT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "OPS",
+      "failure_boundary": "failure_before_db_commit",
+      "applicability": "NOT_APPLICABLE",
+      "eligibility": {
+        "decision": "NOT_APPLICABLE",
+        "reason": "Live OPS seeds are config/metrics/frontend/connectivity observation and do not mutate product tables, so there is no pre-commit business rollback path."
+      },
+      "expected_outcome": "Do not invent a product mutation, outbox or provider ACK for live OPS seeds.",
+      "rule_sources": [
+        "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
+        "tests/test_core_connectivity.py",
+        "tests/test_main_lifespan.py"
+      ]
+    },
+    {
+      "variant_id": "OPS__COMMIT-BEFORE-EVENT-SIDE-EFFECT",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "OPS",
+      "failure_boundary": "commit_before_event_side_effect",
+      "applicability": "NOT_APPLICABLE",
+      "eligibility": {
+        "decision": "NOT_APPLICABLE",
+        "reason": "Live OPS seeds emit no product outbox or delivery receipt."
+      },
+      "expected_outcome": "Do not invent a product mutation, outbox or provider ACK for live OPS seeds.",
+      "rule_sources": [
+        "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
+        "tests/test_core_connectivity.py",
+        "tests/test_main_lifespan.py"
+      ]
+    },
+    {
+      "variant_id": "OPS__SIDE-EFFECT-BEFORE-ACK",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "OPS",
+      "failure_boundary": "side_effect_before_ack",
+      "applicability": "NOT_APPLICABLE",
+      "eligibility": {
+        "decision": "NOT_APPLICABLE",
+        "reason": "Live OPS seeds have no product provider ACK; redis:connectivity:global is observational only."
+      },
+      "expected_outcome": "Do not invent a product mutation, outbox or provider ACK for live OPS seeds.",
+      "rule_sources": [
+        "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
+        "tests/test_core_connectivity.py",
+        "tests/test_main_lifespan.py"
+      ]
+    },
+    {
+      "variant_id": "OPS__TWO-CONCURRENT-COMMANDS",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "OPS",
+      "failure_boundary": "two_concurrent_commands",
+      "applicability": "NOT_APPLICABLE",
+      "eligibility": {
+        "decision": "NOT_APPLICABLE",
+        "reason": "Live OPS seeds are read-only GETs or probes and have no mutating command identity to contend."
+      },
+      "expected_outcome": "Do not invent a product mutation, outbox or provider ACK for live OPS seeds.",
+      "rule_sources": [
+        "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
+        "tests/test_core_connectivity.py",
+        "tests/test_main_lifespan.py"
+      ]
+    },
+    {
+      "variant_id": "OPS__PROCESS-RESTART",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "OPS",
+      "failure_boundary": "process_restart",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "OPS: process restart must resume durable family state or expose independent API/Bot lifecycle"
+      },
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "rule_sources": [
+        "tests/test_main_lifespan.py",
+        "tests/test_sync_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ]
+    },
+    {
+      "variant_id": "OPS__UNKNOWN-AUTHORITY-SCHEMA-HASH",
+      "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
+      "family": "OPS",
+      "failure_boundary": "unknown_authority_schema_hash",
+      "applicability": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "OPS: unknown actor, schema, hash or owner must fail closed"
+      },
+      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
+      "rule_sources": [
+        "tests/test_background_job_authority.py",
+        "tests/test_sync_router_signature.py",
+        "tests/test_sync_field_policy.py"
       ]
     }
   ]

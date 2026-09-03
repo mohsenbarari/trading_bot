@@ -88,9 +88,11 @@ machine manifests prove that every line is assigned to one of them.
 ## Mandatory Web/Bot combination matrix
 
 Offer and Request parity is not satisfied by testing “one Web case and one Bot
-case.” Every row below expands across owner/customer/accountant/admin where
-allowed, tier 1/2, normal/overtime/closed time and success/reject/retry/concurrent
-paths.
+case.” Every row below expands across these definite decisions: owner and tier-1
+are ELIGIBLE; tier-2 is ELIGIBLE_FOR_REQUEST_ONLY on Web and INELIGIBLE on Bot;
+accountant is INELIGIBLE; admin is ELIGIBLE with command or Bot-role guards;
+unlinked Bot is INELIGIBLE. Cover normal/overtime/closed time and
+success/reject/retry/concurrent paths.
 
 | Offer origin | Request/action origin | Required result |
 | --- | --- | --- |

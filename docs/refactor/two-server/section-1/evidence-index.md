@@ -20,7 +20,7 @@ Refresh: `WA-P1-00-REFRESH-20260903-001` against `aa2c06a573dfd60051e142146f55d7
 | Web route inventory | `inventory/surface-web.json` | SHA-256 `bda6f6eb401b8213d8ca494caf5a3a1d987f970e03204eae92b59ed2a218d2b1` |
 | Job authority inventory | `inventory/surface-jobs.json` | SHA-256 `35dda75326daa4e2bb38a8d09b7164df447dcd07493049afeb3316d12239732b` |
 | Runtime task ownership | `inventory/runtime-task-ownership.json` | SHA-256 `071e273e5168db736bf9330aab93233adcd32cd03a7033b89e5e17d84f47ef14` |
-| Scenario records | `inventory/scenario-records.json` | SHA-256 `dcf8075e788ac6ad3a038192bda61c16daf18a325e3a38d47a52166bde880600` |
+| Scenario records | `inventory/scenario-records.json` | SHA-256 `9ea5ed5d2780f4053ba04c0d177d84e5f3885ffeda2d1deeafa7ae89df24298b` |
 | Task Card | `stages/P1-00.md` | correction candidate after `CHANGES_REQUIRED`; Codex Final Review pending |
 
 ## Evidence handling

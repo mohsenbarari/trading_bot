@@ -112,6 +112,14 @@ AMBIGUOUS_POLICY_PHRASES = {
     "if allowed",
     "probably",
 }
+DEFERRAL_TOKENS = {
+    "READ_ONLY_VARIANTS_RESOLVE",
+    "OTHERWISE_NOT_APPLICABLE",
+}
+INHERIT_PREDICATE_PHRASE = "persona×surface is not ineligible"
+HUMAN_MATRIX = REPO_ROOT / "docs/refactor/two-server/section-1/04-surface-policy-matrix.md"
+DENIAL_DECISIONS = {"INELIGIBLE", "INELIGIBLE_FOR_NEW_MARKET_MUTATION", "NOT_APPLICABLE"}
+ADMISSION_DECISIONS = {"ELIGIBLE", "ELIGIBLE_FOR_REQUEST_ONLY", "ELIGIBLE_FOR_READ_OR_TERMINAL_REPLAY"}
 FORBIDDEN_ELIGIBILITY_DECISIONS = {
     "INHERIT_PERSONA_ELIGIBILITY",
     "INHERIT",
@@ -338,14 +346,45 @@ def _iter_eligibility_nodes(value: object):
             yield from _iter_eligibility_nodes(child)
 
 
+def _normalized(text: str) -> str:
+    return re.sub(r"\s+", " ", text).lower()
+
+
+def _assert_no_deferred_or_ambiguous_text(test, text: str, label: str) -> None:
+    compact = _normalized(text)
+    test.assertFalse(any(phrase in compact for phrase in AMBIGUOUS_POLICY_PHRASES), label)
+    test.assertFalse(any(token.lower() in compact for token in DEFERRAL_TOKENS), label)
+    test.assertNotIn(INHERIT_PREDICATE_PHRASE, compact, label)
+    test.assertNotIn("inherit_persona_eligibility", compact, label)
+
+
+def _assert_predicate_matches_decision(test, decision: str, node: dict, label: str) -> None:
+    predicate = _normalized(str(node.get("predicate") or ""))
+    reason = _normalized(str(node.get("reason") or ""))
+    if decision in DENIAL_DECISIONS:
+        test.assertNotIn("is not ineligible", predicate, label)
+        test.assertFalse(predicate.startswith("eligible"), label)
+        if decision == "NOT_APPLICABLE":
+            test.assertTrue(node.get("reason"), label)
+        else:
+            test.assertTrue(predicate or reason, label)
+    if decision in ADMISSION_DECISIONS:
+        test.assertTrue(node.get("predicate"), label)
+        test.assertNotIn("botaccessdecision(false", predicate.replace(" ", ""), label)
+
+
 def _assert_definite_variant(test, variant: dict, *, require_rule_sources: bool = True) -> None:
-    test.assertEqual(variant.get("contract_id", ""), variant.get("contract_id"))
     test.assertTrue(variant.get("contract_id"), variant)
-    test.assertTrue(variant.get("applicability") or variant.get("eligibility"), variant)
+    applicability = variant.get("applicability")
+    test.assertIn(
+        applicability,
+        {"ELIGIBLE", "NOT_APPLICABLE", "APPLICABLE", "SHARED_EVIDENCE_TEMPLATE"},
+        variant,
+    )
+    if applicability == "NOT_APPLICABLE":
+        test.assertTrue(variant.get("reason") or (variant.get("eligibility") or {}).get("reason"), variant)
     test.assertTrue(variant.get("expected_outcome"), variant.get("variant_id") or variant)
-    text = json.dumps(variant, ensure_ascii=False).lower()
-    test.assertFalse(any(phrase in text for phrase in AMBIGUOUS_POLICY_PHRASES), variant)
-    test.assertNotIn("inherit_persona_eligibility", text)
+    _assert_no_deferred_or_ambiguous_text(test, json.dumps(variant, ensure_ascii=False), variant.get("variant_id") or "variant")
     if require_rule_sources:
         sources = variant.get("rule_sources") or variant.get("evidence_refs") or []
         test.assertTrue(sources, variant.get("variant_id") or variant)
@@ -355,6 +394,7 @@ def _assert_definite_variant(test, variant: dict, *, require_rule_sources: bool 
         decision = node["decision"]
         test.assertNotIn(decision, FORBIDDEN_ELIGIBILITY_DECISIONS, variant)
         test.assertIn(decision, DEFINITE_ELIGIBILITY_DECISIONS, variant)
+        _assert_predicate_matches_decision(test, decision, node, variant.get("variant_id") or decision)
         if decision == "NOT_APPLICABLE":
             test.assertTrue(node.get("reason"), variant)
         else:
@@ -597,6 +637,10 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
         seen = set()
         for cell in cells:
             _assert_definite_variant(self, cell)
+            predicate = cell["eligibility"]["predicate"]
+            decision = cell["eligibility"]["decision"]
+            self.assertNotIn(INHERIT_PREDICATE_PHRASE, _normalized(predicate), cell["variant_id"])
+            _assert_predicate_matches_decision(self, decision, cell["eligibility"], cell["variant_id"])
             key = (cell["persona_variant_id"], cell["request_origin"], cell["time_variant_id"])
             self.assertIn(key, expected)
             seen.add(key)
@@ -661,14 +705,50 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
             len(timeline["families"]) * len(timeline["boundaries"]),
             timeline["expanded_variant_count"],
         )
+        scenario_text = json.dumps(payload, ensure_ascii=False)
+        _assert_no_deferred_or_ambiguous_text(self, scenario_text, "scenario-records.json")
         for boundary in timeline["boundaries"]:
-            _assert_definite_variant(self, boundary)
             self.assertEqual(boundary["contract_id"], timeline["contract_id"])
-            self.assertTrue(boundary["applicability"])
+            self.assertEqual(boundary["applicability"], "SHARED_EVIDENCE_TEMPLATE")
+            self.assertNotIn("eligibility", boundary)
             self.assertTrue(boundary["expected_outcome"])
             self.assertTrue(boundary["evidence_refs"])
+            _assert_no_deferred_or_ambiguous_text(self, json.dumps(boundary, ensure_ascii=False), boundary["variant_id"])
             for ref in boundary["evidence_refs"]:
                 self.assertTrue((REPO_ROOT / ref).exists(), ref)
+
+        cells = payload["family_boundary_variants"]
+        self.assertEqual(len(cells), 72)
+        self.assertEqual(payload["coverage"]["family_boundary_variants"], 72)
+        expected_pairs = {
+            (family, boundary)
+            for family in timeline["families"]
+            for boundary in FAILURE_BOUNDARIES
+        }
+        seen_pairs = set()
+        for cell in cells:
+            _assert_definite_variant(self, cell)
+            self.assertIn(cell["applicability"], {"ELIGIBLE", "NOT_APPLICABLE"})
+            if cell["applicability"] == "NOT_APPLICABLE":
+                self.assertEqual(cell["eligibility"]["decision"], "NOT_APPLICABLE")
+                self.assertTrue(cell["eligibility"]["reason"])
+            else:
+                self.assertEqual(cell["eligibility"]["decision"], "ELIGIBLE")
+                self.assertTrue(cell["eligibility"]["predicate"])
+            seen_pairs.add((cell["family"], cell["failure_boundary"]))
+        self.assertEqual(seen_pairs, expected_pairs)
+        ops = {item["failure_boundary"]: item["applicability"] for item in cells if item["family"] == "OPS"}
+        self.assertEqual(
+            ops,
+            {
+                "failure_before_db_commit": "NOT_APPLICABLE",
+                "commit_before_event_side_effect": "NOT_APPLICABLE",
+                "side_effect_before_ack": "NOT_APPLICABLE",
+                "two_concurrent_commands": "NOT_APPLICABLE",
+                "process_restart": "ELIGIBLE",
+                "unknown_authority_schema_hash": "ELIGIBLE",
+            },
+        )
 
         self.assertEqual(len(payload["deferred_blockers"]), 1)
         timing = payload["deferred_blockers"][0]
@@ -704,6 +784,15 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
         self.assertEqual(leaks, [])
         self.assertTrue(all(marker in Path(__file__).read_text(encoding="utf-8") for marker in SECRET_MARKERS))
         self.assertIn(SECRET_SCAN_RESULT, EVIDENCE_INDEX.read_text(encoding="utf-8"))
+
+    def test_human_matrix_and_scenario_source_have_no_ambiguous_eligibility(self):
+        matrix_text = HUMAN_MATRIX.read_text(encoding="utf-8")
+        _assert_no_deferred_or_ambiguous_text(self, matrix_text, "04-surface-policy-matrix.md")
+        self.assertIn("accountant INELIGIBLE", matrix_text)
+        self.assertIn("tier-2 Bot INELIGIBLE", matrix_text)
+        self.assertIn("admin ELIGIBLE with command", matrix_text)
+        scenario_text = json.dumps(_load_json("scenario-records.json"), ensure_ascii=False)
+        _assert_no_deferred_or_ambiguous_text(self, scenario_text, "scenario-records.json")
 
 
 if __name__ == "__main__":
