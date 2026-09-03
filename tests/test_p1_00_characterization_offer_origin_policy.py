@@ -6,11 +6,19 @@ import inspect
 import json
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from core.enums import UserRole
 from core.offer_source import OfferSourceSurface, offer_home_server_for_source
 from core.services.bot_access_policy import evaluate_invitation_bot_access
+from core.services.offer_expiry_service import OfferExpiryCommand, OfferNotAuthoritativeError, ensure_offer_expiry_authority
+from core.services.offer_publication_state_service import (
+    publication_dedupe_key,
+    publication_owner_server_for_surface,
+)
 from core.services.offer_request_ledger_service import OfferRequestLedgerCommand
+from models.offer_publication_state import OfferPublicationSurface
 from models.customer_relation import CustomerTier
 from models.invitation import InvitationKind
 
@@ -123,6 +131,28 @@ class P100OfferOriginPolicyCharacterizationTests(unittest.TestCase):
         self.assertNotEqual(web.request_source_surface, bot.request_source_surface)
         self.assertNotEqual(web.request_home_server, bot.request_home_server)
 
+    def test_publication_and_expiry_consume_surface_or_home(self):
+        self.assertEqual(
+            publication_owner_server_for_surface(OfferPublicationSurface.WEBAPP_MARKET),
+            "iran",
+        )
+        self.assertEqual(
+            publication_owner_server_for_surface(OfferPublicationSurface.TELEGRAM_CHANNEL),
+            "foreign",
+        )
+        web_key = publication_dedupe_key("ofr_origin", OfferPublicationSurface.WEBAPP_MARKET)
+        bot_key = publication_dedupe_key("ofr_origin", OfferPublicationSurface.TELEGRAM_CHANNEL)
+        self.assertNotEqual(web_key, bot_key)
+        self.assertEqual(publication_dedupe_key("ofr_origin", OfferPublicationSurface.WEBAPP_MARKET), web_key)
+        web_offer = SimpleNamespace(home_server=offer_home_server_for_source(OfferSourceSurface.WEBAPP))
+        bot_offer = SimpleNamespace(home_server=offer_home_server_for_source(OfferSourceSurface.TELEGRAM_BOT))
+        with patch("core.services.offer_expiry_service.current_server", return_value="iran"):
+            ensure_offer_expiry_authority(web_offer)
+            with self.assertRaises(OfferNotAuthoritativeError):
+                ensure_offer_expiry_authority(bot_offer)
+        command = OfferExpiryCommand(reason="closed", source_surface="webapp", source_server="iran")
+        self.assertEqual(command.source_surface, "webapp")
+
     def test_bot_access_api_has_no_origin_parameter(self):
         params = inspect.signature(evaluate_invitation_bot_access).parameters
         self.assertNotIn("origin", params)
@@ -158,7 +188,7 @@ class P100OfferOriginPolicyCharacterizationTests(unittest.TestCase):
             self.assertNotIn(key, seen, key)
             seen.add(key)
             self.assertIn(row["interaction"], REQUIRED_INTERACTIONS)
-            self.assertIn(row["disposition"], {"EQUIVALENT_TO_REPRESENTATIVE", "HIGH_BLOCKER"})
+            self.assertIn(row["disposition"], {"EQUIVALENT_TO_REPRESENTATIVE", "DEFERRED_BLOCKER"})
             if row["disposition"] == "EQUIVALENT_TO_REPRESENTATIVE":
                 self.assertTrue(row["representative_id"])
                 self.assertTrue(row["live_function"])
@@ -168,9 +198,12 @@ class P100OfferOriginPolicyCharacterizationTests(unittest.TestCase):
                 blocker_id = row["named_blocker"]["blocker_id"]
                 self.assertIn(blocker_id, registry)
                 self.assertEqual(registry[blocker_id]["severity"], "HIGH")
-                self.assertNotEqual(row.get("expected_outcome"), "SUCCESS")
+                self.assertEqual(registry[blocker_id]["disposition"], "DEFERRED_BLOCKER")
+                self.assertNotEqual(registry[blocker_id]["resolution_stage"], "CODEX_FINAL_REVIEW")
+                self.assertTrue(registry[blocker_id]["observed_fact"])
         self.assertTrue(any(row["disposition"] == "EQUIVALENT_TO_REPRESENTATIVE" for row in rows))
-        self.assertTrue(any(row["interaction"] == "RETRY" and row["disposition"] == "HIGH_BLOCKER" for row in rows))
+        self.assertTrue(any(row["interaction"] == "RETRY" and row["disposition"] == "EQUIVALENT_TO_REPRESENTATIVE" for row in rows))
+        self.assertTrue(any(row["interaction"] == "POLICY-SNAPSHOT" and row["disposition"] == "DEFERRED_BLOCKER" for row in rows))
 
     def test_admission_cells_do_not_use_a_three_value_origin_array(self):
         payload = _load_json("scenario-records.json")

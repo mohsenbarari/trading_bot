@@ -60,14 +60,12 @@ For each row, tests must cover at least:
 - failure before commit, after commit/before side effect and side-effect retry.
 
 P1-00 materializes those interactions in `inventory/scenario-records.json`
-`origin_required_interactions`. Home/publication and request surface are proven
-by live functions that take origin (`offer_home_server_for_source`,
-`OfferRequestLedgerCommand`). Admission/permission-denied are an equivalence
-class because `evaluate_invitation_bot_access` has no origin parameter. Retry,
-concurrent, unlinked-Bot, expiry/terminal, snapshot, notification, and failure
-phases are High blockers (`P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED`);
-current product functions do not take origin for those effects, so those cells
-are not recorded as green outcomes.
+`origin_required_interactions`. Home, publication owner, publication dedupe
+key, expiry authority, and request surface are proven by live functions.
+Admission/permission-denied and unlinked-Bot use the telegram-link overlay
+or `evaluate_invitation_bot_access`, which has no origin parameter. Snapshot,
+notification audience, and failure-phase origin cells are `DEFERRED_BLOCKER`
+for `P1-04` because no current function takes origin for those effects.
 
 ## Approved semantic contract for the next ADR
 

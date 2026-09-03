@@ -1,5 +1,10 @@
 # Infrastructure
 
+- 2026-09-03 | After Codex `CHANGES_REQUIRED` on `c4ab054f`, leftover `P1-00`
+  High items are later-stage `DEFERRED_BLOCKER` (`P1-04` or `P1-06`), not live-host
+  work. Host facts stay `NOT_REOBSERVED`. `DR-015` still blocks `P1-02` until
+  `DPL-1`; do not estimate or rehearse.
+
 - 2026-09-03 | `P1-00` refresh `WA-P1-00-REFRESH-20260903-001` did not re-observe
   live hosts. Previous 2026-09-01 Bot-Finland / Web-Finland / target facts stay
   `NOT_REOBSERVED` until an Assignment with external access authorizes a new

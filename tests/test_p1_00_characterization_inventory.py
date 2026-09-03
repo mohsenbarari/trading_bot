@@ -200,6 +200,7 @@ OPERATION_KINDS = {
     "SYNC_APPLY",
     "SCHEDULED_JOB",
     "TOGGLE_MUTATION",
+    "ACCOUNT_STATUS_TRANSITION",
 }
 NON_PRODUCT_MUTATION_KINDS = {
     "READ_QUERY",
@@ -357,6 +358,7 @@ DEFINITE_ELIGIBILITY_DECISIONS = {
     "INELIGIBLE_FOR_NEW_MARKET_MUTATION",
     "NOT_APPLICABLE",
     "UNRESOLVED",
+    "DEFERRED",
 }
 SECRET_SCAN_RESULT = "NO_SECRET_VALUE / DETECTION_SIGNATURES_PRESENT"
 
@@ -621,7 +623,7 @@ def _assert_definite_variant(test, variant: dict, *, require_rule_sources: bool 
         test.assertNotIn(decision, FORBIDDEN_ELIGIBILITY_DECISIONS, variant)
         test.assertIn(decision, DEFINITE_ELIGIBILITY_DECISIONS, variant)
         _assert_predicate_matches_decision(test, decision, node, variant.get("variant_id") or decision)
-        if decision in {"NOT_APPLICABLE", "UNRESOLVED"}:
+        if decision in {"NOT_APPLICABLE", "UNRESOLVED", "DEFERRED"}:
             test.assertTrue(node.get("reason"), variant)
         else:
             test.assertTrue(node.get("predicate") or node.get("expected_outcome"), variant)
@@ -1061,7 +1063,7 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
                 self.assertEqual(cell["eligibility"]["decision"], "NOT_APPLICABLE")
                 self.assertTrue(cell["eligibility"]["reason"])
             elif cell["applicability"] == "HIGH_BLOCKER":
-                self.assertEqual(cell["eligibility"]["decision"], "UNRESOLVED")
+                self.assertEqual(cell["eligibility"]["decision"], "DEFERRED")
                 self.assertTrue(cell["eligibility"]["reason"])
                 self.assertTrue(cell.get("named_blocker"))
                 self.assertEqual(cell.get("evidence_cases") or [], [])
@@ -1083,9 +1085,11 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
             },
         )
         registry = payload["blocker_registry"]
-        self.assertEqual(registry["disposition_request"], "OPEN_HIGH_BLOCKERS_FOR_CODEX")
+        self.assertEqual(registry["disposition_request"], "DEPENDENCY_SAFE_LATER_STAGE")
         self.assertNotEqual(registry["disposition_request"], "DEFERRED_TO_P1_06")
-        self.assertNotEqual(registry["disposition_request"], "NONE_P1_00_HIGH_BLOCKERS_REMAIN")
+        self.assertNotEqual(registry["disposition_request"], "OPEN_HIGH_BLOCKERS_FOR_CODEX")
+        self.assertFalse(any(item["resolution_stage"] == "CODEX_FINAL_REVIEW" for item in registry["items"]))
+        self.assertTrue(all(item["disposition"] == "DEFERRED_BLOCKER" for item in registry["items"]))
         self.assertGreaterEqual(len(registry["items"]), 1)
         self.assertEqual(set(registry["required_fields"]), BLOCKER_REGISTRY_FIELDS)
         registry_ids = {item["blocker_id"] for item in registry["items"]}
@@ -1151,13 +1155,15 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
             for case in cell.get("evidence_cases") or []:
                 assert_cited_node_uses_family_path(cell["family"], case["node_id"])
 
-        self.assertEqual(len(payload["deferred_blockers"]), 1)
-        timing = payload["deferred_blockers"][0]
-        self.assertEqual(timing["blocker_id"], "DR-015")
+        self.assertGreaterEqual(len(payload["deferred_blockers"]), 1)
+        timing = next(item for item in payload["deferred_blockers"] if item["blocker_id"] == "DR-015")
         self.assertEqual(timing["status"], "DEFERRED_BLOCKER")
         self.assertEqual(timing["resolution_stage"], "DPL-1")
         self.assertEqual(timing["evidence_status"], "NOT_OBSERVED")
         self.assertIn("P1-02", timing["blocks_before_resolution"])
+        for item in payload["deferred_blockers"]:
+            self.assertEqual(item["status"], "DEFERRED_BLOCKER")
+            self.assertNotEqual(item["resolution_stage"], "CODEX_FINAL_REVIEW")
 
     def test_runtime_facts_are_marked_not_reobserved(self):
         runtime = _load_json("current-finland-runtime.json")

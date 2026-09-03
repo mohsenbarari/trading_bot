@@ -10,7 +10,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INV_DIR = REPO_ROOT / "docs/refactor/two-server/section-1/inventory"
 ADMIN_SCAN_MODULES = ("admin", "admin_users", "admin_commodities")
-PRODUCT_KIND = {"CRUD_MUTATION", "BROADCAST", "TOGGLE_MUTATION"}
+PRODUCT_KIND = {"CRUD_MUTATION", "BROADCAST", "TOGGLE_MUTATION", "ACCOUNT_STATUS_TRANSITION"}
 NON_PRODUCT_KIND = {
     "FSM_PROMPT",
     "MENU_NAV",

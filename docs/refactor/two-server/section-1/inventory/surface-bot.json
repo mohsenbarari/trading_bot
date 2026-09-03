@@ -25,7 +25,8 @@
       "CRUD_MUTATION": 77,
       "BROADCAST": 1,
       "MENU_NAV": 37,
-      "TOGGLE_MUTATION": 2,
+      "ACCOUNT_STATUS_TRANSITION": 1,
+      "TOGGLE_MUTATION": 1,
       "PROVIDER_REPLY": 9,
       "READ_QUERY": 7,
       "ACK_ONLY": 17,
@@ -600,10 +601,12 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_bot_access.py",
         "tests/test_p1_00_characterization_admin_seed_semantics.py",
-        "tests/test_p1_00_characterization_admin_toggle_behavior.py"
+        "tests/test_p1_00_characterization_admin_toggle_behavior.py",
+        "tests/test_p1_00_characterization_admin_account_status.py",
+        "tests/test_user_account_status_service.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "TOGGLE_MUTATION"
+      "operation_kind": "ACCOUNT_STATUS_TRANSITION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-DELETE-REQUEST-L1186",

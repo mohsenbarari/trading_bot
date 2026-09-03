@@ -10,20 +10,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from bot.handlers.admin_users import handle_admin_toggle_block, handle_user_toggle_account_status
+from bot.handlers.admin_users import handle_admin_toggle_block
 from core.enums import UserAccountStatus, UserRole
-from core.services.user_account_status_service import get_user_account_status
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INV_DIR = REPO_ROOT / "docs/refactor/two-server/section-1/inventory"
 TOGGLE_SEEDS = {
     "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-TOGGLE-BLOCK-L1649": {
         "handler": "admin_users.handle_admin_toggle_block",
-        "operation_kind": "TOGGLE_MUTATION",
-        "contract_id": "BC-ADMIN-TOGGLE_MUTATION-V1",
-    },
-    "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-TOGGLE-ACCOUNT-STATUS-L1134": {
-        "handler": "admin_users.handle_user_toggle_account_status",
         "operation_kind": "TOGGLE_MUTATION",
         "contract_id": "BC-ADMIN-TOGGLE_MUTATION-V1",
     },
@@ -139,61 +133,6 @@ class P100AdminToggleBehaviorTests(unittest.IsolatedAsyncioTestCase):
             await handle_admin_toggle_block(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
         missing.commit.assert_not_awaited()
         callback.answer.assert_awaited()
-
-    async def test_toggle_account_status_second_invoke_flips_again(self):
-        target = _target(account_status=UserAccountStatus.ACTIVE)
-        session = FakeSession(target)
-        transitions = []
-
-        async def _transition(_db, user, new_status):
-            transitions.append(new_status)
-            user.account_status = new_status
-
-        with patch("core.admin_authority.current_server", return_value="iran"), patch(
-            "bot.handlers.admin_users.AsyncSessionLocal", return_value=session
-        ), patch(
-            "bot.handlers.admin_users.transition_user_account_status",
-            new=AsyncMock(side_effect=_transition),
-        ), patch(
-            "bot.handlers.admin_users.get_user_profile_text",
-            new=AsyncMock(return_value="profile"),
-        ), patch(
-            "bot.handlers.admin_users.get_user_settings_keyboard",
-            return_value="KB",
-        ), patch(
-            "bot.handlers.admin_users.edit_callback_message_via_runtime",
-            new=AsyncMock(),
-        ):
-            await handle_user_toggle_account_status(
-                _callback("user_toggle_account_status_9"),
-                user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
-            )
-            self.assertEqual(get_user_account_status(target), UserAccountStatus.INACTIVE)
-            await handle_user_toggle_account_status(
-                _callback("user_toggle_account_status_9"),
-                user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
-            )
-            self.assertEqual(get_user_account_status(target), UserAccountStatus.ACTIVE)
-        self.assertEqual(transitions, [UserAccountStatus.INACTIVE, UserAccountStatus.ACTIVE])
-        self.assertEqual(session.commit.await_count, 2)
-        source = inspect.getsource(handle_user_toggle_account_status)
-        self.assertNotIn("idempotency", source)
-
-    async def test_toggle_account_status_denied_paths_do_not_write(self):
-        protected = _target(role=UserRole.SUPER_ADMIN)
-        session = FakeSession(protected)
-        transition = AsyncMock()
-        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=session), patch(
-            "bot.handlers.admin_users.transition_user_account_status",
-            new=transition,
-        ):
-            await handle_user_toggle_account_status(_callback("user_toggle_account_status_9"), user=None)
-            await handle_user_toggle_account_status(
-                _callback("user_toggle_account_status_9"),
-                user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER),
-            )
-        transition.assert_not_awaited()
-        session.commit.assert_not_awaited()
 
     def test_toggle_seeds_do_not_use_crud_retry_identity(self):
         payload = _load_json("scenario-records.json")

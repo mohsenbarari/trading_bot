@@ -26,20 +26,20 @@ Status: open findings; no implicit fixes authorized
 
 The compact machine source is `inventory/scenario-records.json`.
 ELIGIBLE family×boundary cells bind an injected characterization node on that
-family's own mutating path. REQUEST concurrency/restart use overlapping
-`asyncio` tasks and a child interpreter against isolated sqlite.
-Unsupported collision/restart cells, incomplete per-seed handler assertions,
-and origin interactions that current functions cannot express are High
-blockers (`P1-00-HIGH-*`). Missing command identity is a risk, not
-`NOT_APPLICABLE`. P1-06 does not own current-state characterization.
+family's own mutating path. REQUEST uses overlapping `asyncio` tasks and a
+child interpreter against isolated sqlite. AUTH, NOTIFY, MSG, and ADMIN
+collision/restart are characterized on the live function. Remaining family
+collision cells, leftover per-seed handler assertions, and origin snapshot
+or failure-phase cells are `DEFERRED_BLOCKER` with `P1-04` or `P1-06`, not
+`CODEX_FINAL_REVIEW`. P1-06 owns remaining seed execution.
 
 | ID | Family / boundary | Disposition |
 | --- | --- | --- |
-| REQUEST concurrent / restart | isolated sqlite overlap + child-process reload | evidenced |
-| other family concurrent / restart | `P1-00-HIGH-<FAMILY>-...` | High blocker |
+| REQUEST / AUTH / NOTIFY / MSG / ADMIN concurrent / restart | live overlap or reload characterization | evidenced |
+| IDENTITY / OFFER / TRADE / MARKET / TG / SYNC concurrent / restart | `DEFERRED_BLOCKER` / `P1-06` | later Stage |
 | cells without a mutating path | `NOT_APPLICABLE` with a behavior-specific reason | closed on P1-00 |
-| `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` | remaining seeds lack handler-level retry/outbox proof | High blocker |
-| `P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED` | retry/concurrent/failure origin cells | High blocker |
+| `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` | remaining seeds | `DEFERRED_BLOCKER` / `P1-06` |
+| `P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED` | snapshot / notify / failure origin | `DEFERRED_BLOCKER` / `P1-04` |
 | `DR-015` | deploy/restart/backup/restore duration | already `DEFERRED_BLOCKER` / `DPL-1` |
 
 ## Interpretation

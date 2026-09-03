@@ -101,6 +101,7 @@ FAMILY_OWNED_HELPERS = {
     "ADMIN": {
         "create_telegram_admin_broadcast",
         "deliver_claimed_telegram_admin_broadcast_receipt",
+        "handle_admin_toggle_block",
         "JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY",
     },
     "SYNC": {
@@ -1497,15 +1498,13 @@ class P100FailureBoundaryCharacterizationTests(unittest.IsolatedAsyncioTestCase)
         """MSG commit_before_event_side_effect: injects persist_sent_direct_message then threading."""
         await _inject_msg_commit_before()
 
-    def test_msg_two_concurrent_and_restart_are_high_blockers(self):
-        """MSG persist has no command identity, so concurrency/restart stay High blockers."""
+    def test_msg_two_concurrent_and_restart_are_evidenced(self):
+        """MSG persist has no command identity; overlap appends two rows and restart appends again."""
         payload = _load_json("scenario-records.json")
         for variant_id in ("MSG__TWO-CONCURRENT-COMMANDS", "MSG__PROCESS-RESTART"):
             cell = next(item for item in payload["family_boundary_variants"] if item["variant_id"] == variant_id)
-            self.assertEqual(cell["applicability"], "HIGH_BLOCKER")
-            self.assertEqual(cell["eligibility"]["decision"], "UNRESOLVED")
-            self.assertIn("P1-00-HIGH-MSG", cell["named_blocker"]["blocker_id"])
-            self.assertEqual(cell.get("evidence_cases") or [], [])
+            self.assertEqual(cell["applicability"], "ELIGIBLE")
+            self.assertIn("test_p1_00_characterization_concurrent_restart.py", cell["evidence_refs"][0])
         self.assertNotIn(("MSG", "two_concurrent_commands"), INJECTORS)
         self.assertNotIn(("MSG", "process_restart"), INJECTORS)
 
@@ -1620,6 +1619,9 @@ class P100FailureBoundaryCharacterizationTests(unittest.IsolatedAsyncioTestCase)
             if cell["applicability"] != "ELIGIBLE":
                 continue
             if cell["failure_boundary"] not in {"two_concurrent_commands", "process_restart"}:
+                continue
+            refs = cell.get("evidence_refs") or []
+            if any("test_p1_00_characterization_concurrent_restart.py" in ref for ref in refs):
                 continue
             injector = INJECTORS[(cell["family"], cell["failure_boundary"])]
             src = inspect.getsource(injector)
