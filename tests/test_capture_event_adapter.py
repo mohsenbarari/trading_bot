@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 from core.market_intelligence.capture_event_adapter import (
+    CAPTURE_ADAPTER_SCHEMA_VERSION,
     CaptureEventContractError,
     decode_coin_group_event,
     decode_market_channel_event,
@@ -533,6 +534,35 @@ class CaptureEventAdapterTests(unittest.TestCase):
             ).fetchone()
         )
 
+    def test_dirty_market_batches_use_causal_ready_index_and_upgrade_v8(self) -> None:
+        self.staging.execute("DROP INDEX idx_capture_dirty_market_ready")
+        self.staging.execute(
+            "UPDATE capture_adapter_metadata SET schema_version=8 WHERE singleton=1"
+        )
+        self.staging.commit()
+
+        initialize_capture_adapter(self.staging)
+
+        self.assertEqual(
+            self.staging.execute(
+                "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
+            ).fetchone()[0],
+            CAPTURE_ADAPTER_SCHEMA_VERSION,
+        )
+        plan = self.staging.execute(
+            "EXPLAIN QUERY PLAN SELECT * FROM capture_dirty_market_messages "
+            "WHERE available_at_utc<=? "
+            "ORDER BY available_at_utc,source_id,message_id LIMIT ?",
+            ("2026-08-24T10:02:00Z", 256),
+        ).fetchall()
+        self.assertTrue(
+            any(
+                "idx_capture_dirty_market_ready" in str(row[3])
+                for row in plan
+            ),
+            [str(row[3]) for row in plan],
+        )
+
     def test_market_projection_limit_rejects_non_positive_values(self) -> None:
         with self.assertRaisesRegex(
             CaptureEventContractError,
@@ -740,7 +770,7 @@ class CaptureEventAdapterTests(unittest.TestCase):
         row = self.staging.execute(
             "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
         ).fetchone()
-        self.assertEqual(row["schema_version"], 8)
+        self.assertEqual(row["schema_version"], CAPTURE_ADAPTER_SCHEMA_VERSION)
         self.assertEqual(
             self.staging.execute(
                 "SELECT COUNT(*) FROM capture_market_message_revisions"
@@ -794,7 +824,7 @@ class CaptureEventAdapterTests(unittest.TestCase):
             self.staging.execute(
                 "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
             ).fetchone()[0],
-            8,
+            CAPTURE_ADAPTER_SCHEMA_VERSION,
         )
         self.assertEqual(
             self.staging.execute(
