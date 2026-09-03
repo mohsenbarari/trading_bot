@@ -249,6 +249,11 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
   همگام است، نه مسیر deploy روزمره و نه فعال‌سازی Web Writer. تکرار آن فقط پس از
   rebuild/restore کامل، واگرایی غیرقابل repair یا تغییر بنیادی معماری لازم می‌شود؛
   release و hotfix عادی gateهای متناسب و مستقل بخش ۴ را دارند.
+- `D-21`: `P2-12` یک drill واقعی production با DNS حقیقی و mutation محدود به
+  حساب‌های `drill_id` است؛ Iran بین ۶۰ تا ۹۰ دقیقه Writer می‌ماند و هر handover
+  حداکثر چهار دقیقه توقف دارد. drill پیش از retirement، سپس هر سه ماه و بعد از
+  تغییر بنیادی Writer/DNS/Sync/Auth تکرار می‌شود، نه پس از release/hotfix عادی؛
+  evidence آن از Market/training/آمار واقعی حذف منطقی ولی فیزیکی پاک نمی‌شود.
 
 ### نیازمند تأیید در بازبینی این پلن
 
@@ -3110,12 +3115,248 @@ copy، bucket write، process stop/start، cleanup، DNS/Writer change یا عم
 
 ## `P2-12` — failover/failback drill
 
-وضعیت: `PROPOSED — مجوز جدا`
+وضعیت: `APPROVED در سطح طراحی در 2026-09-03 — هر اجرای production مجوز جدا می‌خواهد`
 
-- drill برنامه‌ریزی‌شده با کاربران/دادهٔ کنترل‌شده اجرا می‌شود.
-- زمان fence، فعال‌سازی انسانی، DNS، login، RPO، sync recovery و failback اندازه‌گیری می‌شود.
-- هیچ موفقیتی بدون evidence دو dashboard و business parity پذیرفته نمی‌شود.
-- rollback و incident report بخشی از gate است.
+این Stage نخستین چرخهٔ واقعی `Finland → Iran → Finland` را روی topology production
+اثبات می‌کند. deploy روزمره نیست: DNS واقعی جابه‌جا می‌شود، Data Plane واقعاً partition
+می‌شود و Writer فقط با اقدام انسانی تغییر می‌کند، اما mutation Product فقط برای
+identityهای کنترل‌شدهٔ drill باز است. کاربران دیگر در پنجرهٔ کنترل‌شده پاسخ نگهداری/
+read-only شفاف می‌گیرند؛ Dashboard هیچ IP allowlist ندارد و طبق `P2-06` احراز می‌شود.
+
+### زمان‌بندی و تکرار
+
+- نخستین Full Drill پس از `P2-11` و پیش از retirement نهایی میزبان‌های قدیمی اجرا می‌شود.
+- Iran حداقل ۶۰ دقیقه و حداکثر ۹۰ دقیقه Writer آزمایشی می‌ماند. ۶۰ دقیقه به‌تنهایی
+  success نیست؛ Coverage Ledger سناریوها نیز باید کامل باشد. در ۹۰ دقیقه اگر coverage
+  کامل نشده، partition پایان می‌یابد و recovery/failback به‌عنوان incident مدیریت می‌شود.
+- توقف قابل‌مشاهدهٔ کاربر برای هر handover، از بسته‌شدن admission مبدأ تا پذیرش اولین
+  mutation امضاشدهٔ مقصد، حداکثر چهار دقیقه است؛ دو جهت هرکدام budget مستقل دارند.
+- پس از Failback حداقل دو ساعت observation فعال انجام می‌شود؛ این زمان downtime نیست.
+- Full Drill سپس هر سه ماه و پس از تغییر بنیادی در Writer state machine، DNS controller،
+  sync protocol/data ownership یا Product Auth/Session تکرار می‌شود. release، frontend،
+  backend یا hotfix عادی آن را trigger نمی‌کند مگر risk classifier بخش ۴ تغییر بنیادی را
+  اثبات کند.
+
+### پیش‌شرط‌ها و No-Go
+
+1. `P2-11` با soak هفت‌روزه `COMPLETE` و Iran برابر `PRODUCTION_STANDBY_READY` است.
+2. `P3-10` و `P4-10` کامل، backup هر سایت restore-tested و runbookهای `P5-03/P5-04`
+   با نسخهٔ runtime یکسان‌اند.
+3. هر دو سایت exact release/schema/registry سازگار دارند؛ Finland `WRITER/N`، Iran
+   `STANDBY/N`، DNS روی Finland و `FULL_SYNC/MARKET_READY` سبز است.
+4. Telegram owner و تمام token/session/executorهای آن فقط Finland هستند؛ SMS capability
+   هر سایت healthy ولی فقط Writer generation مجاز است.
+5. TTL محصول حداکثر ۳۰ ثانیه، TLS هر دو مقصد معتبر، Arvan plan/apply/read-back و مسیر
+   provider-panel fallback rehearsal شده و Operations Consoleهای ثابت در دسترس‌اند.
+6. incident باز، migration/deploy/backup destructive هم‌زمان، gap/rejection/quarantine،
+   capacity/disk پایین، ساعت نامعتبر، alert خاموش یا Session/TOTP عامل نزدیک expiry برابر
+   `NO_GO` است.
+7. change record شامل مدیر پاسخ‌گو، زمان، communication plan، transition ID، دو checkpoint
+   انسانی، abort point، emergency contacts و مجوزهای دقیق production امضا شده است.
+
+preflight فقط گزارش سبز نمی‌سازد: exact evidence age و source را نشان می‌دهد. وضعیت
+`UNKNOWN`، peer snapshot stale یا هشدار suppressشده، شروع Hard Fence را مسدود می‌کند.
+
+### داده و کاربران کنترل‌شده
+
+- Drill Access Gate بر اساس identity/account و نه IP، فقط حساب‌های از پیش مصوب را برای
+  mutation باز می‌کند. bypass admin عمومی، header مخفی یا query parameter وجود ندارد.
+- هر command/event/Offer/Request/Trade/notification/message/media مربوط به تمرین
+  `drill_id`، identity مصوب، transition/generation، expected outcome و retention class دارد.
+- حساب و event تمرینی از limit/quota و authority واقعی عبور می‌کنند تا مسیر کسب‌وکار
+  واقعاً تست شود؛ تغییر constraint یا write مستقیم DB برای سبزکردن سناریو ممنوع است.
+- `DRILL` یک provenance/quality class صریح و immutable است. این داده برای اثبات sync،
+  exactly-once و parity معتبر است، اما estimator input، model training/promotion، Market
+  evidence، گزارش فروش و KPI واقعی آن را مصرف نمی‌کنند.
+- در پایان، Offer/Requestهای باز از API/command عادی به terminal state می‌روند. Trade و
+  Audit/Receipt حذف یا بازنویسی نمی‌شوند؛ viewهای تجاری آن‌ها را با فیلتر نوع داده کنار
+  می‌گذارند و retention مصوب evidence اعمال می‌شود.
+- seeded/synthetic market value یا معاملهٔ صوری evidence علمی نیست. تست Market از Facts
+  واقعی همان window و بررسی exclude بودن eventهای `DRILL` استفاده می‌کند.
+
+### سناریو ۱ — baseline و ایجاد partition کنترل‌شده
+
+1. عامل در هر دو Console نوار حقیقت، role/generation، DNS، release/schema/registry،
+   stream sequence/ACK/hash، model artifact/profile، backup و forbidden owner را تطبیق
+   و Baseline Receipt امضا می‌کند.
+2. یک mutation کوچک pre-drill از حساب کنترل‌شده روی Finland اجرا و در Iran تا ACK/hash
+   مشاهده می‌شود؛ سپس terminal می‌شود تا مسیر سالم اولیه ثابت شود.
+3. fault actuator فقط Data Plane میان دو سایت را برای run ID همان drill قطع می‌کند:
+   sync/Object transfer دو جهت و ورودی‌های خارجی منتخب ایران مطابق Scenario Manifest
+   block می‌شوند، ولی دسترسی مستقل مدیر به دو Console و Arvan control path حفظ می‌شود.
+4. Dashboard پس از حداکثر ۳۰ ثانیه peer را `STALE` و پس از سه probe ناموفق حدود ۹۰ ثانیه
+   `UNREACHABLE` نشان می‌دهد. Finland Writer و Iran Standby می‌مانند؛ هیچ drain، DNS یا
+   promotion خودکار رخ نمی‌دهد.
+5. marker و firewall rule/fault scope به‌صورت exact و TTLدار ثبت می‌شود؛ expiry فقط alert
+   می‌دهد و حق برگرداندن شبکه، role یا DNS بدون اقدام انسانی ندارد.
+
+این fault بازتولید کنترل‌شدهٔ state application در قطع ارتباط است، نه ادعای بازسازی تمام
+رفتار شبکهٔ ملی. carrier/provider/network matrix گسترده‌تر قبلاً در `P2-10` اجرا شده است.
+
+### سناریو ۲ — Failover انسانی `FI→IR`
+
+1. عامل از Console Finland plan را می‌سازد، affected user message و وضعیت حساب‌های drill
+   را می‌بیند، با TOTP تازه تأیید و Web admission را می‌بندد.
+2. Finland فقط Web-owned transaction/job را drain می‌کند، event/outboxهای commit‌شده را
+   durable و vector barrier را برای Web lane freeze می‌کند؛ Bot/Telegram/aggregateهای
+   Finland-home بدون توقف ادامه می‌دهند.
+3. پس از صفرشدن transaction و hard fence، Finland `STANDBY/N` و Fence Receipt امضاشده
+   صادر می‌کند. تا این نقطه لغو ممکن بود؛ بعد از Receipt مسیر `FORWARD_RECOVERY_ONLY` است.
+4. عامل Receipt را دستی به Iran می‌دهد. Console ایران exact generation، آخرین ACK، age،
+   unsynced sequence، source coverage و readiness اضطراری را نشان می‌دهد و ایران فقط
+   `ARMED` می‌شود؛ `FULL_SYNC` کاذب شرط نیست.
+5. عامل از Console Finland DNS plan را با TOTP جدا apply می‌کند. success API آروان با
+   read-back، authoritative NS، resolverهای Iran/Finland و destination-signed HTTPS در
+   دو sample ثابت می‌شود؛ Receipt DNS دستی به Iran می‌رسد.
+6. عامل در Iran activation جدا را تأیید می‌کند؛ `WRITER/N+1` اتمیک می‌شود، اولین mutation
+   کنترل‌شده پذیرفته و Activation Receipt به Finland برگردانده می‌شود.
+
+`RTO` از آغاز hard fence تا پذیرش mutation مقصد محاسبه می‌شود و باید ≤۴ دقیقه باشد.
+`failover visible staleness` برابر آخرین ACK هر stream تا Fence است و دقیق نمایش داده
+می‌شود؛ event بعد از partition پنهانی «گم‌شده» اعلام یا از ایران حدس زده نمی‌شود.
+
+### سناریو ۳ — ۶۰ تا ۹۰ دقیقه Iran Writer در partition
+
+Coverage Ledger حداقل این رفتارهای واقعی و کنترل‌شده را می‌بندد:
+
+| خانواده | اقدام/مشاهدهٔ لازم | invariant |
+| --- | --- | --- |
+| Auth | Session فلاند رد؛ login/OTP و recovery مصوب با SMS Iran | Product session site/generation-bound؛ Console session مستقل |
+| Web Offer | create/edit/cancel/overtime با origin=`web`, created/home=`ir` | policy tier/overtime و `created_at` حفظ؛ duplicate صفر |
+| Request/Trade | request و یک trade کنترل‌شده با concurrency/idempotency | مانده منفی، overfill، lot دوباره و settlement drift صفر |
+| remote home | تلاش ایران برای mutation aggregate `home=fi` | read-only/`HOME_SITE_UNREACHABLE`؛ هیچ proxy یا حدس mutation |
+| Bot | command/Offer/Request/Trade کنترل‌شده در Finland ادامه می‌یابد | origin=`bot`, home=`fi`، Telegram latency/Queue بدون owner collision |
+| quota/conflict | مصرف budget site-bound و یک conflict غیرمالی محدود | global limit از مجموع budget رد نمی‌شود؛ restrictive state و quarantine دیده می‌شود |
+| Notification | create/read/delete و Telegram intent با freshness | in-app محلی؛ Telegram execution فقط Finland و dedupe معتبر |
+| Messenger | create/edit/delete/read و media کامل؛ upload ناقص کنترل‌شده | public ID/revision/tombstone؛ temp chunk منتقل نمی‌شود |
+| Market | IME/USDT/Product Facts واقعی و نبود/وجود optional inputs | `IR_CONTINUITY_*`، age/confidence و widening؛ `DRILL` estimator-ineligible |
+| failure UX | old-DNS، stale session، media pending و peer unreachable | typed response؛ loop، generic 500 یا write replay پنهان صفر |
+
+در تمام window، کاربران غیرمجاز mutation نمی‌فرستند و پیام برنامه‌ریزی‌شدهٔ نگهداری/
+read-only با زمان و وضعیت روشن می‌بینند. عملیات view-only که disclosure یا consistency
+آن تضمین نشده باشد نیز باز نمی‌ماند؛ access policy دقیق در Scenario Manifest ثبت می‌شود.
+
+### سناریو ۴ — reconnect بدون تغییر نقش
+
+1. عامل fault scope را با plan exact و TOTP/authorization لازم برمی‌دارد و connectivity
+   را اثبات می‌کند. صرف برگشت probe، role یا DNS را تغییر نمی‌دهد.
+2. Iran همچنان `WRITER/N+1` و مقصد DNS است؛ هر دو جهت از checkpoint قبلی replay می‌شوند.
+3. Finland رویدادهای Web ایران و Iran رویدادهای Bot/aggregate/Market فلاند را می‌گیرند؛
+   business، notification، Messenger/media و model contracts barrier مستقل دارند.
+4. duplicate/hash برابر no-op، hash متفاوت quarantine، rejection بدون ACK و gap با repair
+   immutable مدیریت می‌شود. conflict تمرینی باید در Console دیده و فقط با resolution
+   event انسانی بسته شود.
+5. دکمهٔ Failback در UI و API تا gap/backlog/rejection/quarantine صفر، aligned business/
+   media hash، `FULL_SYNC` و `MARKET_READY` معتبر غیرفعال می‌ماند.
+
+`eventual committed-data RPO` باید صفر باشد: هیچ mutation متعهدشده‌ای پس از reconciliation
+گم نمی‌شود. این با visible staleness لحظهٔ Failover یکی نیست؛ هر دو عدد جدا گزارش می‌شوند.
+آرام‌شدن queue یا برابرشدن row count بدون sequence/hash/side-effect parity success نیست.
+
+### سناریو ۵ — Failback انسانی `IR→FI`
+
+1. پس از readiness کامل، عامل Iran را با TOTP وارد drain می‌کند؛ Web admission/job بسته
+   و final vector barrier/Receipt ساخته می‌شود.
+2. final delta تا cutoff روی Finland apply و hash می‌شود. active Iran-home Offerها همراه
+   request/reservation/lot وابسته در یک bundle و با `AUTHORITY_TRANSFER` اتمیک به Finland
+   rehome می‌شوند؛ failure یک جزء کل bundle را متوقف می‌کند.
+3. Iran hard-fenced و Fence Receipt آن در Finland verify می‌شود. session/OTP/SMS command
+   نسل Iran نامعتبر و provider result مبهم طبق `P2-09` reconcile می‌شود.
+4. عامل از Console Finland DNS را با plan تازه به Finland برمی‌گرداند؛ تمام proofهای
+   provider/authoritative/resolver/routed/TLS دوباره و مستقل اجرا می‌شوند.
+5. Finland فقط با `DNS_READY` تازه و final parity در `WRITER/N+2` فعال می‌شود، mutation
+   کنترل‌شدهٔ نهایی را می‌پذیرد و Activation/Closure Receipt به Iran برمی‌گردد.
+6. Iran `STANDBY/N+2` و Product-blocked می‌شود؛ حساب کنترل‌شده Session تازه Finland
+   می‌گیرد و mutation نسل قبلی در هر دو سایت رد می‌شود.
+
+`RTO` جهت برگشت نیز مستقل و ≤۴ دقیقه است. بیش از چهار دقیقه incident/SLO failure است،
+نه مجوز skip کردن sync، DNS، Receipt یا فعال‌کردن نسل قبلی Iran.
+
+### سناریوهای شکست و Recovery
+
+| نقطهٔ شکست | رفتار اجباری |
+| --- | --- |
+| پیش از hard fence Finland | plan/cutoff/fault قابل لغو و Data Plane با اقدام انسانی recover؛ Finland همان نسل Writer می‌ماند |
+| پس از fence و پیش از DNS/activation Iran | صفر Writer و مسیر forward-only؛ DNS/Receipt/readiness repair و همان transition تکمیل می‌شود |
+| DNS timeout/partial propagation | read-back و proof وضعیت را تعیین؛ مقصد inactive و source fenced، بدون retry کور یا bypass |
+| Iran پس از activation degrade می‌شود | اگر Writer هنوز امن است repair می‌شود؛ برای برگشت، ابتدا link/sync و reverse handover مصوب لازم است، نه rollback button |
+| reconnect یا sync دوباره قطع می‌شود | Iran Writer می‌ماند، backlog durable و Failback بسته؛ fault state و spool capacity alert می‌شوند |
+| conflict مالی/oversell/negative remaining | apply و ACK متوقف، stream quarantine و `FULL_SYNC` قرمز؛ حذف event/counter/waiver ممنوع |
+| Console یا Arvan adapter خراب است | Product role خودکار عوض نمی‌شود؛ CLI hard-fence یا پنل provider فقط با همان Receipt/gate/Audit قرارداد |
+| عبور Iran از ۹۰ دقیقه | partition تعمدی پایان می‌یابد؛ علت coverage failure ثبت و recovery/failback بدون کاهش gate انجام می‌شود |
+| failure در final rehome | Iran fenced و Finland inactive می‌ماند؛ bundle repair و transition forward-only ادامه می‌یابد |
+
+در هیچ failure، شبکه/DNS/role با timeout خودکار برنمی‌گردد. امنیت ممکن است downtime
+بسازد، ولی state مبهم نباید دو Writer یا business mutation حدسی بسازد.
+
+### Evidence و گزارش نهایی
+
+هر run مسیر canonical و retentionدار زیر دارد، بدون secret/OTP/PII/raw production payload:
+
+```text
+.local/evidence/p2-12/{drill_id}/
+```
+
+حداقل شامل authorization/change record، Scenario/Coverage Manifest، preflight/baseline،
+timeline UTC+Tehran، fault apply/remove receipts، هر دو Dashboard export، Fence/DNS/
+Activation/Closure chain، Arvan metadata و DNS observations، browser/provider receipts،
+per-stream sequence/ACK/hash، business/media/model parity، RTO/staleness/RPO، Bot/Queue/SMS
+continuity، test-data ledger، cleanup/terminalization proof و final report امضاشده است.
+
+- raw log موفق ۱۴ روز؛ summary/Receipt/metric لازم حداقل تا drill بعدی+۳۰ روز و open
+  incident تا closure+۳۰ روز حفظ می‌شود. active control high-watermark و آخرین chain
+  معتبر با cleanup حذف نمی‌شوند.
+- test recordهای business فیزیکی حذف نمی‌شوند؛ retention فقط artifact/log/objectهای
+  جانبی را با dry-run و exact allowlist پاک می‌کند.
+- هر SLO miss، gate false-positive، skipped scenario، provider ambiguity، manual workaround
+  یا user-visible defect حتی اگر recovery موفق باشد issue/incident مستقل و مانع sign-off است.
+
+### Task Card فنی Cursor
+
+1. runbook و machine Scenario Manifest را با dependency، owner، permissions، time budget،
+   account allowlist، expected events، abort/forward-only point و evidence schema بسازد.
+2. Drill Access Gate identity-based را در edge/API/job و direct API تست کند؛ حالت inactive
+   هیچ رفتار محصولی نداشته و header/query/admin bypass نداشته باشد.
+3. `drill_id/DRILL` provenance را end-to-end روی command/event/business/Market projection
+   حمل و exclusion آن از estimator/training/KPI را با negative tests ثابت کند.
+4. fault actuator محدود و TTL-aware برای Data Plane دو جهت بسازد؛ exact pre/post rules،
+   management-path preservation، crash/restart و remove idempotent evidence داشته باشد.
+5. orchestrator را read-only guide نگه دارد: فقط وضعیت/گام مجاز را نمایش دهد و هیچ timer،
+   network event یا test runner نتواند human TOTP/Receipt/DNS/activation را اجرا کند.
+6. تمام سناریوهای جدول Iran Writer را با حساب‌های مستقل، idempotency و expected DB/event/
+   provider result پیاده کند؛ cleanup فقط terminalization و artifact retention باشد.
+7. RTO، visible staleness، backlog drain و eventual RPO را با timestamp/sequence canonical
+   محاسبه کند؛ clock skew، missing sample یا unknown result success تولید نکند.
+8. reconnect/final barrier/rehome را با conflict، gap، duplicate، media pending و model
+   readiness تست کند؛ UI/API failback guard مستقیم bypass نشود.
+9. failure matrix هر edge transition، Console/DNS/provider/process/DB/Redis/Object failure،
+   second partition، ۹۰m ceiling و four-minute SLO miss را اجرا و recovery receipt بگیرد.
+10. report generator coverage صددرصد، zero skipped/unknown/waiver، user-impact و remaining
+    risk را fail-closed جمع‌بندی و recurring due date سه‌ماهه/trigger change را ثبت کند.
+
+### Gate خروج
+
+`P2-12` فقط وقتی `COMPLETE` است که دو handover واقعی با DNS production و اقدام انسانی،
+هرکدام در حداکثر چهار دقیقه، Receipt chain بسته و بدون دو Writer اجرا شده باشند؛ Iran
+۶۰ تا ۹۰ دقیقه تمام Coverage Ledger را پاس کرده، کاربران خارج allowlist mutation نکرده،
+Bot/Telegram Finland بدون interruption/owner collision ادامه یافته، SMS/Auth/Business/
+Notification/Messenger/Media/Market سناریوها evidence داشته، `DRILL` وارد مدل/KPI نشده،
+reconnect بدون role change انجام و committed-data RPO پس از parity صفر باشد. هیچ skipped،
+unknown، unresolved conflict، duplicate business apply، lost mutation، negative remaining،
+oversell، false `FULL_SYNC/MARKET_READY` یا workaround ثبت‌نشده پذیرفته نیست.
+
+حالت نهایی باید دقیقاً Finland `WRITER/N+2` و Telegram owner، Iran `STANDBY/N+2`، DNS
+Finland، هر دو sync/model ready، داده‌های drill terminal/excluded و observation دوساعته
+سبز باشد. گزارش نهایی و تاریخ drill بعدی ثبت می‌شوند؛ failure گزارش‌شده با «موفقیت کلی»
+پنهان نمی‌شود.
+
+Gate طراحی در 2026-09-03 تأیید شد: DNS واقعی production، حساب‌های identity-allowlisted،
+Iran Writer برای ۶۰ تا ۹۰ دقیقه، دو handover با budget مستقل چهار دقیقه، Data Plane
+partition واقعی، Bot پیوسته در Finland، reconnect بدون role change، committed-data RPO
+صفر پس از reconciliation، `drill_id` غیرقابل حذف و excluded از Market/KPI، دو ساعت
+observation و تکرار سه‌ماهه/پس از تغییر بنیادی پذیرفته شدند. این تأیید مجوز deploy،
+fault/network change، DNS، role transition، provider call، ساخت/تغییر داده، cleanup یا
+هیچ عملیات production نیست.
 
 ---
 
