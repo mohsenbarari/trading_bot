@@ -1,5 +1,6 @@
 # Telegram Delivery
 
+- 2026-09-03 | Queue-v1 redeploy may adopt only the exact durable `AUTHORITY_TRANSFERRED` Market lock after journal/quiescence proof; it holds the same inode through the two-host release and returns it unchanged.
 - 2026-09-03 | Untraded expiry and final-tail preserve Telegram posts/buttons; overtime entry adds `⏳`. Stale clicks fail authoritative validation; trade edits are unchanged.
 - 2026-08-29 | Outbox dependency waits are durable and back off 1/5/15/60s. Split-runtime teardown uses `docker rm -fv`, avoiding anonymous PG volume leaks.
 - 2026-08-28 | Unknown channel sends fail closed and are never blindly retried. Only audited CLI reconciliation recovers confirmed absence across active Publisher lanes.

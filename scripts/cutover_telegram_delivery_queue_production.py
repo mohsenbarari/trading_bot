@@ -74,6 +74,9 @@ RECONCILE_REDEPLOY_CONFIRMATION = (
 )
 ROLLBACK_CONFIRMATION = "ROLLBACK PRODUCTION TELEGRAM DELIVERY TO LEGACY"
 DEFAULT_ARTIFACT_DIR = Path("/root/secure-envs/trading-bot/queue-cutover-artifacts")
+DEFAULT_MARKET_HANDOFF_DIR = Path(
+    "/root/secure-envs/trading-bot/market-pipeline-cutover"
+)
 FENCED_DEPLOY_SUPERVISOR = REPO_ROOT / "scripts/run_fenced_production_deploy.py"
 CONTROL_PAYLOAD_MANIFEST = REPO_ROOT / "control-payload.sha256"
 PREFLIGHT_MAXIMUM_AGE_SECONDS = 900
@@ -513,6 +516,118 @@ class ExclusiveRunLock:
         self.inode = metadata.st_ino
         self.held = True
 
+    def adopt_transferred_market_pipeline_maintenance(
+        self,
+        *,
+        handoff_dir: Path = DEFAULT_MARKET_HANDOFF_DIR,
+        allow_recovery_journal: Path | None = None,
+        allow_interrupted_journal: Path | None = None,
+    ) -> None:
+        """Adopt a durable capture-transfer lock for a Queue-v1 redeploy.
+
+        The Market capture handoff and Queue-v1 release intentionally share
+        the production operation-lock path.  A routine Queue-v1 code release
+        must hold that exact inode for its whole official two-host deploy and
+        then return it unchanged; deleting or replacing it would remove the
+        fail-closed guard that keeps legacy Market collectors disabled.
+        """
+
+        self._assert_phase_journals_terminal(
+            allow_recovery_journal=allow_recovery_journal,
+            allow_interrupted_journal=allow_interrupted_journal,
+        )
+        try:
+            descriptor = os.open(
+                self.path,
+                os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+            )
+        except OSError as exc:
+            raise ProductionCutoverError("BLOCKED_MARKET_MAINTENANCE_LOCK") from exc
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            metadata = os.fstat(descriptor)
+            path_metadata = self.path.lstat()
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            maintenance = json.loads(os.read(descriptor, 8192).decode("utf-8"))
+            release_sha = str(maintenance.get("release_sha") or "")
+            journal = handoff_dir / f"bot-legacy-handoff-{release_sha[:8]}.json"
+            if (
+                self.path.is_symlink()
+                or not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != os.geteuid()
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+                or metadata.st_nlink != 1
+                or path_metadata.st_dev != metadata.st_dev
+                or path_metadata.st_ino != metadata.st_ino
+                or maintenance.get("schema")
+                != "market_pipeline_maintenance_lock/1.0"
+                or maintenance.get("environment") != "production"
+                or maintenance.get("host_role") != "bot"
+                or not re.fullmatch(r"[0-9a-f]{40}", release_sha)
+                or not re.fullmatch(
+                    r"[0-9a-f]{64}", str(maintenance.get("nonce_sha256") or "")
+                )
+                or maintenance.get("journal_path_sha256")
+                != hashlib.sha256(str(journal).encode("utf-8")).hexdigest()
+                or maintenance.get("device") != metadata.st_dev
+                or maintenance.get("inode") != metadata.st_ino
+            ):
+                raise ProductionCutoverError("BLOCKED_MARKET_MAINTENANCE_LOCK")
+            try:
+                journal_digest = _sha256(journal)
+                market_handoff.validate_transferred_handoff(
+                    journal=journal,
+                    expected_journal_sha256=journal_digest,
+                    release_sha=release_sha,
+                    host_role="bot",
+                    expected_maintenance_lock=maintenance,
+                )
+            except (OSError, market_handoff.CollectorHandoffError) as exc:
+                raise ProductionCutoverError(
+                    "BLOCKED_MARKET_MAINTENANCE_JOURNAL"
+                ) from exc
+        except BaseException:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+            raise
+        self.adopted_market_maintenance = dict(maintenance)
+        self.binding_nonce_sha256 = str(maintenance["nonce_sha256"])
+        self.descriptor = descriptor
+        self.device = metadata.st_dev
+        self.inode = metadata.st_ino
+        self.held = True
+
+    def acquire_for_queue_redeploy(
+        self,
+        *,
+        handoff_dir: Path = DEFAULT_MARKET_HANDOFF_DIR,
+        allow_recovery_journal: Path | None = None,
+        allow_interrupted_journal: Path | None = None,
+    ) -> None:
+        if self.path.is_symlink():
+            raise ProductionCutoverError("BLOCKED_CONCURRENT_OR_INTERRUPTED_CUTOVER")
+        if self.path.exists():
+            try:
+                payload = json.loads(self.path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                payload = None
+            if (
+                isinstance(payload, dict)
+                and payload.get("schema")
+                == "market_pipeline_maintenance_lock/1.0"
+            ):
+                self.adopt_transferred_market_pipeline_maintenance(
+                    handoff_dir=handoff_dir,
+                    allow_recovery_journal=allow_recovery_journal,
+                    allow_interrupted_journal=allow_interrupted_journal,
+                )
+                return
+        self.acquire(
+            allow_recovery_journal=allow_recovery_journal,
+            allow_interrupted_journal=allow_interrupted_journal,
+        )
+
     def restore_adopted_market_pipeline_maintenance(self) -> None:
         """Return an unsuccessful promotion to the durable maintenance state.
 
@@ -610,6 +725,13 @@ class ExclusiveRunLock:
                 self.held = False
                 self.adopted_market_maintenance = None
                 self.binding_nonce_sha256 = None
+
+
+def _release_queue_redeploy_run_lock(run_lock: ExclusiveRunLock) -> None:
+    if run_lock.adopted_market_maintenance is not None:
+        run_lock.restore_adopted_market_pipeline_maintenance()
+    else:
+        run_lock.release()
 
 
 class PhaseJournal:
@@ -3726,6 +3848,7 @@ def _recover_interrupted_phase(
     operations_factory: Callable[[Path], ProductionOperations],
     recovery_backup_dir: Path | None = None,
     private_primary_attestation: PrivatePrimaryDeployAttestation | None = None,
+    market_handoff_dir: Path = DEFAULT_MARKET_HANDOFF_DIR,
     drain_timeout_seconds: int = 300,
     drain_poll_seconds: float = 2.0,
 ) -> dict[str, Any] | None:
@@ -3768,17 +3891,27 @@ def _recover_interrupted_phase(
 
     ops = operations_factory(manifest)
     run_lock = ExclusiveRunLock(artifact_dir)
-    if original_payload.get("status") == "recovery_failed":
+    if command == "redeploy" and original_payload.get("status") == "recovery_failed":
+        run_lock.acquire_for_queue_redeploy(
+            handoff_dir=market_handoff_dir,
+            allow_recovery_journal=path,
+        )
+    elif command == "redeploy":
+        run_lock.acquire_for_queue_redeploy(
+            handoff_dir=market_handoff_dir,
+            allow_interrupted_journal=path,
+        )
+    elif original_payload.get("status") == "recovery_failed":
         run_lock.acquire(allow_recovery_journal=path)
     else:
         run_lock.acquire(allow_interrupted_journal=path)
     try:
         recovered_payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        run_lock.release()
+        _release_queue_redeploy_run_lock(run_lock)
         raise ProductionCutoverError("BLOCKED_PENDING_PHASE_JOURNAL") from None
     if recovered_payload.get("status") in PHASE_TERMINAL_STATES:
-        run_lock.release()
+        _release_queue_redeploy_run_lock(run_lock)
         return {
             "status": recovered_payload.get("status"),
             "terminal_receipt_recovered": True,
@@ -3792,7 +3925,7 @@ def _recover_interrupted_phase(
         journal = PhaseJournal.adopt(path, run_lock=run_lock)
     except BaseException:
         source_lock.release()
-        run_lock.release()
+        _release_queue_redeploy_run_lock(run_lock)
         raise
 
     receipt: dict[str, Any] = {
@@ -3964,7 +4097,7 @@ def _recover_interrupted_phase(
         raise ProductionCutoverError(code, receipt_sha256=digest) from None
     finally:
         source_lock.release()
-        run_lock.release()
+        _release_queue_redeploy_run_lock(run_lock)
 
 
 def apply_cutover(
@@ -4263,6 +4396,7 @@ def redeploy_queue_v1(
     private_primary_attestation: PrivatePrimaryDeployAttestation | None = None,
     operations_factory: Callable[[Path], ProductionOperations] = ProductionOperations,
     preflight_runner: Callable[..., dict[str, Any]] = run_redeploy_preflight,
+    market_handoff_dir: Path = DEFAULT_MARKET_HANDOFF_DIR,
 ) -> dict[str, Any]:
     """Redeploy a newer official release while Queue-v1 remains the owner.
 
@@ -4315,6 +4449,7 @@ def redeploy_queue_v1(
         binding=binding,
         operations_factory=operations_factory,
         private_primary_attestation=private_primary_attestation,
+        market_handoff_dir=market_handoff_dir,
     )
     if interrupted and interrupted.get("status") == "redeployed":
         return {**interrupted, "source_profile": "queue-v1", "secrets_disclosed": False}
@@ -4344,7 +4479,7 @@ def redeploy_queue_v1(
         raise ProductionCutoverError("BLOCKED_LIVE_REDEPLOY_PREFLIGHT")
     ops = operations_factory(manifest)
     run_lock = ExclusiveRunLock(artifact_dir)
-    run_lock.acquire()
+    run_lock.acquire_for_queue_redeploy(handoff_dir=market_handoff_dir)
     source_lock = ImmutableSourceLock(source)
     try:
         source_lock.acquire()
@@ -4357,7 +4492,7 @@ def redeploy_queue_v1(
         )
     except BaseException:
         source_lock.release()
-        run_lock.release()
+        _release_queue_redeploy_run_lock(run_lock)
         raise
     receipt: dict[str, Any] = {
         "schema_version": 1,
@@ -4456,7 +4591,7 @@ def redeploy_queue_v1(
             terminal_status="redeployed",
         )
         source_lock.release()
-        run_lock.release()
+        _release_queue_redeploy_run_lock(run_lock)
         return {
             "status": "redeployed",
             "receipt_file": receipt_path.name,
@@ -4539,7 +4674,7 @@ def redeploy_queue_v1(
             error_code=code,
         )
         source_lock.release()
-        run_lock.release()
+        _release_queue_redeploy_run_lock(run_lock)
         raise ProductionCutoverError(code, receipt_sha256=digest) from None
 
 
