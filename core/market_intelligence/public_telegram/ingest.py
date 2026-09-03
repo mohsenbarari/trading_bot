@@ -122,6 +122,7 @@ def _link_melted_flow_trade_sides(
               AND instrument='MELTED_GOLD_FLOW'
               AND event_type='TRADE'
               AND side='UNKNOWN'
+              AND trade_form='PAPER_NORMAL'
               AND quality_state='ELIGIBLE'
               AND price_num=?
               AND settlement_term=?
