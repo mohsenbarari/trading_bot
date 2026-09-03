@@ -2,6 +2,8 @@
 
 Entries are newest first.
 
+- 2026-09-03 | Refactor Section 3 is approved and closed. Cursor executes `MKT-0..MKT-13` in dependency order from audited baseline through storage, capture, parse, projection, two-site sync, models, retention, backfill and Full Matrix. Activation waits for Section 4; done requires no High/Critical gaps, no behavior drift and proven restore/rebuild/parity. Resource limits and adaptive thresholds remain evidence-derived gates.
+
 - 2026-09-02 | Owner approved `P1-01`: `main` alone is long-lived; WA-IR stays local-only; one worktree uses bounded `.local` artifacts. Execution remains separately gated.
 
 - 2026-08-29 | `PRIVATE_PRIMARY` adopts Shadow roots in-place and mounts secrets from `/srv/trading-bot/secure/market-data`. Both-role preflight and equal image digest are required. No live cutover; Product stays `LEGACY`.

@@ -1,5 +1,7 @@
 # Infrastructure
 
+- 2026-09-03 | Initial provisioning and later infrastructure maintenance use version-controlled, idempotent Ansible against verified inventory; no operator shell execution is required. This neither automates Writer/DNS transfer nor authorizes server work before the refactor plan enters its explicitly approved execution phase.
+
 - 2026-09-02 | Architecture Full Matrix uses the final Finland host, existing Iran
   host and existing Object Storage; no separate VM. Acceptance stacks, DB/Redis,
   Control Store, DNS and storage namespace/IAM remain isolated. Host-wide faults run
