@@ -6,8 +6,9 @@ Resume base: `aa2c06a573dfd60051e142146f55d7965f2242a7`
 
 | Stage | Status | Gate | Primary output |
 | --- | --- | --- | --- |
-| `P1-00` | `IN_PROGRESS` | correction candidate prepared after Codex `CHANGES_REQUIRED`; Final Review of the new commit is still open | current-state dossier and blocker register |
-| `P1-01` | `PROPOSED` | policy approved; execution blocked by `P1-00` and exact batch receipts | cleanup/retention execution |
+| `P1-00` | `IN_PROGRESS` | amended exit gate after Codex `CHANGES_REQUIRED` on `5ec75ec5`; leftover freeze is `P1-00b` | current-state dossier and blocker register |
+| `P1-00b` | `PROPOSED` | canonical-plan amendment; execution after Codex APPROVE and Coordinator `execution-order.yaml` update | remaining current-behavior freeze |
+| `P1-01` | `PROPOSED` | policy approved; execution blocked by `P1-00`, `P1-00b` and exact batch receipts | cleanup/retention execution |
 | `P1-02` | `PROPOSED` | scenario contract approved; blocked by `P1-00`, `DPL-1` (including `DR-015` measured durations) and `DOC-3` | topology-neutral configuration |
 | `P1-03` | `PROPOSED` | scenario/ownership contract approved; dependencies not complete | target runtime topology |
 | `P1-04` | `PROPOSED` | scenario/data contract approved; dependencies not complete | shared Finland data plane |
@@ -69,4 +70,6 @@ Residual items that do not by themselves keep `P1-00` blocked:
 
 Until Codex Final Reviewer issues `APPROVE` for the exact integration commit,
 `P1-01` may be reviewed but no cleanup is authorized and `P1-02..P1-07` must not
-change application behavior.
+change application behavior. Coordinator updates `execution-order.yaml` for
+`P1-00b` only after that `APPROVE`. The amended `P1-00` exit gate has no
+unresolved High; leftover current-behavior freeze is owned by `P1-00b`.

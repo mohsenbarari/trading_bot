@@ -177,33 +177,117 @@ class P100OfferOriginPolicyCharacterizationTests(unittest.TestCase):
         self.assertTrue(tier1.allowed)
         self.assertFalse(tier2.allowed)
 
-    def test_required_origin_interactions_are_equivalence_or_high_blockers(self):
+    def test_required_origin_interactions_are_executed_or_owned_by_p1_00b(self):
         payload = _load_json("scenario-records.json")
         rows = payload["origin_required_interactions"]
         self.assertEqual(len(rows), len(ORIGIN_PAIRS) * len(REQUIRED_INTERACTIONS))
         seen = set()
         registry = {item["blocker_id"]: item for item in payload["blocker_registry"]["items"]}
+        executed = {
+            "OUTCOME-SUCCESS",
+            "OUTCOME-REJECT",
+            "PERMISSION-DENIED",
+            "RETRY",
+            "CONCURRENT",
+        }
         for row in rows:
             key = (row["offer_origin"], row["request_origin"], row["interaction"])
             self.assertNotIn(key, seen, key)
             seen.add(key)
             self.assertIn(row["interaction"], REQUIRED_INTERACTIONS)
-            self.assertIn(row["disposition"], {"EQUIVALENT_TO_REPRESENTATIVE", "DEFERRED_BLOCKER"})
+            self.assertIn(row["disposition"], {"EQUIVALENT_TO_REPRESENTATIVE", "TRANSFERRED_TO_P1_00B"})
             if row["disposition"] == "EQUIVALENT_TO_REPRESENTATIVE":
+                self.assertIn(row["interaction"], executed)
                 self.assertTrue(row["representative_id"])
                 self.assertTrue(row["live_function"])
                 self.assertTrue(row["equivalence_reason"])
+                self.assertIn("policy effect", row["equivalence_reason"].lower())
                 self.assertNotIn("self-compared", json.dumps(row, ensure_ascii=False))
             else:
                 blocker_id = row["named_blocker"]["blocker_id"]
                 self.assertIn(blocker_id, registry)
                 self.assertEqual(registry[blocker_id]["severity"], "HIGH")
-                self.assertEqual(registry[blocker_id]["disposition"], "DEFERRED_BLOCKER")
-                self.assertNotEqual(registry[blocker_id]["resolution_stage"], "CODEX_FINAL_REVIEW")
+                self.assertEqual(registry[blocker_id]["disposition"], "TRANSFERRED_TO_P1_00B")
+                self.assertEqual(registry[blocker_id]["resolution_stage"], "P1-00b")
                 self.assertTrue(registry[blocker_id]["observed_fact"])
-        self.assertTrue(any(row["disposition"] == "EQUIVALENT_TO_REPRESENTATIVE" for row in rows))
-        self.assertTrue(any(row["interaction"] == "RETRY" and row["disposition"] == "EQUIVALENT_TO_REPRESENTATIVE" for row in rows))
-        self.assertTrue(any(row["interaction"] == "POLICY-SNAPSHOT" and row["disposition"] == "DEFERRED_BLOCKER" for row in rows))
+                self.assertNotEqual(row.get("applicability"), "ELIGIBLE")
+        self.assertTrue(any(row["interaction"] == "OUTCOME-SUCCESS" and row["disposition"] == "EQUIVALENT_TO_REPRESENTATIVE" for row in rows))
+        self.assertTrue(any(row["interaction"] == "POLICY-SNAPSHOT" and row["disposition"] == "TRANSFERRED_TO_P1_00B" for row in rows))
+
+    def test_combined_live_policy_effects_for_each_origin_pair(self):
+        import asyncio
+        import tempfile
+
+        from sqlalchemy.orm import sessionmaker
+
+        from tests.test_p1_00_characterization_concurrent_restart import (
+            OfferRequestLedgerCommand,
+            _AsyncSessionAdapter,
+            _make_engine,
+            create_offer_request_ledger_entry,
+        )
+
+        for offer_origin, request_origin in ORIGIN_PAIRS:
+            offer_home = _home(offer_origin)
+            request_surface = "telegram_bot" if request_origin == "TELEGRAM_BOT" else "webapp"
+            request_home = "foreign" if request_origin == "TELEGRAM_BOT" else "iran"
+            accountant = evaluate_invitation_bot_access(
+                role=UserRole.STANDARD,
+                invitation_kind=InvitationKind.ACCOUNTANT,
+                customer_tier=None,
+            )
+            tier1 = evaluate_invitation_bot_access(
+                role=UserRole.STANDARD,
+                invitation_kind=InvitationKind.CUSTOMER,
+                customer_tier=CustomerTier.TIER_1,
+            )
+            self.assertFalse(accountant.allowed, (offer_origin, request_origin))
+            self.assertTrue(tier1.allowed, (offer_origin, request_origin))
+            with tempfile.TemporaryDirectory() as tmp:
+                db_path = str(Path(tmp) / f"{offer_origin}-{request_origin}.sqlite")
+                engine = _make_engine(db_path)
+                Session = sessionmaker(bind=engine, future=True, expire_on_commit=False)
+                db = _AsyncSessionAdapter(Session())
+                command = OfferRequestLedgerCommand(
+                    local_offer_id=None,
+                    offer_public_id=f"ofr_{offer_origin}_{request_origin}",
+                    requested_quantity=1,
+                    request_home_server=request_home,
+                    requester_user_id=None,
+                    actor_user_id=None,
+                    request_source_surface=request_surface,
+                    request_source_server=request_home,
+                    idempotency_key=f"origin-{offer_origin}-{request_origin}",
+                )
+
+                async def _run():
+                    created = await create_offer_request_ledger_entry(db, command)
+                    await db.commit()
+                    replay = await create_offer_request_ledger_entry(db, command)
+                    other = OfferRequestLedgerCommand(
+                        local_offer_id=None,
+                        offer_public_id=command.offer_public_id,
+                        requested_quantity=1,
+                        request_home_server=request_home,
+                        requester_user_id=None,
+                        actor_user_id=None,
+                        request_source_surface="telegram_bot" if request_surface == "webapp" else "webapp",
+                        request_source_server="foreign" if request_home == "iran" else "iran",
+                        idempotency_key=f"origin-other-{offer_origin}-{request_origin}",
+                    )
+                    second = await create_offer_request_ledger_entry(db, other)
+                    await db.commit()
+                    return created, replay, second
+
+                created, replay, second = asyncio.run(_run())
+                self.assertFalse(created.duplicate_replay)
+                self.assertTrue(replay.duplicate_replay)
+                self.assertFalse(second.duplicate_replay)
+                surface = created.ledger.request_source_surface
+                self.assertEqual(getattr(surface, "value", surface), request_surface)
+                self.assertIn(offer_home, {"iran", "foreign"})
+                db.close()
+                engine.dispose()
 
     def test_admission_cells_do_not_use_a_three_value_origin_array(self):
         payload = _load_json("scenario-records.json")

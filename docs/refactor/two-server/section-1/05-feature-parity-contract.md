@@ -234,14 +234,17 @@ At minimum the target must preserve:
 | manual resolution of 6 evidence-review items | `COMPLETE — characterization linked` |
 | current runtime child/poller/timer owner seed manifest | `COMPLETE` |
 | exact target compose/credential/readiness binding | future `P1-03` |
-| persona/tier/time/failure scenario records | `IN_PROGRESS` — account-status contract split with live transition evidence; selected family overlap characterized; leftover High items are later-stage `DEFERRED_BLOCKER`; `target_result NOT_RUN`; not `COMPLETE` |
+| persona/tier/time/failure scenario records | `IN_PROGRESS` — account-status inner-commit contract evidenced; REQUEST sqlite overlap evidenced; leftover current-behavior freeze transferred to `P1-00b`; `target_result NOT_RUN`; not `COMPLETE` |
 | owner approval of human-readable scenario contract | `COMPLETE — 2026-09-02` |
 | deploy/restart/backup/restore duration (`DR-015`) | `DEFERRED_BLOCKER` / `DPL-1` / `NOT_OBSERVED` |
 | current-vs-target differential execution | future `P1-06` |
 
-`P1-00` becomes complete only after the open current-state items have evidence or
-a Codex-approved blocker. `P1-06` later proves the target against this frozen
-contract; it does not invent the contract after implementation.
+`P1-00` becomes complete only after Codex approves the exact commit whose
+amended exit gate has no unresolved High. Leftover current-behavior freeze is
+the new non-implementation Stage `P1-00b`, a prerequisite of `P1-01`, `P1-04`
+and `P1-06`. `P1-06` later proves the target against this frozen contract; it
+does not invent the contract after implementation. Coordinator updates
+`execution-order.yaml` only after Codex `APPROVE` of this `P1-00` candidate.
 
 ## Owner review gate
 

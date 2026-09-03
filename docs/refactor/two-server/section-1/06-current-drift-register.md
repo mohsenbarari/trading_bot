@@ -25,21 +25,20 @@ Status: open findings; no implicit fixes authorized
 ## `P1-00` failure-boundary registry
 
 The compact machine source is `inventory/scenario-records.json`.
-ELIGIBLE family×boundary cells bind an injected characterization node on that
-family's own mutating path. REQUEST uses overlapping `asyncio` tasks and a
-child interpreter against isolated sqlite. AUTH, NOTIFY, MSG, and ADMIN
-collision/restart are characterized on the live function. Remaining family
-collision cells, leftover per-seed handler assertions, and origin snapshot
-or failure-phase cells are `DEFERRED_BLOCKER` with `P1-04` or `P1-06`, not
-`CODEX_FINAL_REVIEW`. P1-06 owns remaining seed execution.
+ELIGIBLE family×boundary collision cells are only REQUEST: overlapping
+`asyncio` tasks against isolated sqlite and a child interpreter. Other family
+collision/restart cells, leftover per-seed handler assertions, and unexecuted
+origin interactions are `UNRESOLVED` / `TRANSFERRED_TO_P1_00B`. They are not
+EVIDENCED and are not owned by `P1-04` or `P1-06`. The amended `P1-00` exit
+gate has zero unresolved High.
 
 | ID | Family / boundary | Disposition |
 | --- | --- | --- |
-| REQUEST / AUTH / NOTIFY / MSG / ADMIN concurrent / restart | live overlap or reload characterization | evidenced |
-| IDENTITY / OFFER / TRADE / MARKET / TG / SYNC concurrent / restart | `DEFERRED_BLOCKER` / `P1-06` | later Stage |
+| REQUEST concurrent / restart | isolated sqlite overlap + child-process reload | evidenced |
+| AUTH / IDENTITY / OFFER / TRADE / MARKET / NOTIFY / MSG / TG / ADMIN / SYNC concurrent / restart | `TRANSFERRED_TO_P1_00B` / `UNRESOLVED` | `P1-00b` |
 | cells without a mutating path | `NOT_APPLICABLE` with a behavior-specific reason | closed on P1-00 |
-| `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` | remaining seeds | `DEFERRED_BLOCKER` / `P1-06` |
-| `P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED` | snapshot / notify / failure origin | `DEFERRED_BLOCKER` / `P1-04` |
+| `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` | remaining seeds | `TRANSFERRED_TO_P1_00B` |
+| `P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED` | unlinked / expiry / snapshot / notify / failure origin | `TRANSFERRED_TO_P1_00B` |
 | `DR-015` | deploy/restart/backup/restore duration | already `DEFERRED_BLOCKER` / `DPL-1` |
 
 ## Interpretation

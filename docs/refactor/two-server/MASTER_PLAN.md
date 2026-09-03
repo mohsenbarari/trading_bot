@@ -342,7 +342,7 @@ release، hotfix و rollbackهای روزمرهٔ معماری جدید قرار
 
 | موج | Stageهای اصلی | نتیجه |
 | --- | --- | --- |
-| `W0` | `P1-00`, `P2-00`, `MKT-0`, `DPL-1`, `DOC-1/2/3/5` | baseline، ownership، contract و deploy audit بدون تغییر رفتار |
+| `W0` | `P1-00`, `P1-00b`, `P2-00`, `MKT-0`, `DPL-1`, `DOC-1/2/3/5` | baseline، تکمیل فریز رفتار جاری، ownership، contract و deploy audit بدون تغییر رفتار |
 | `W1` | `P1-01/02`, `DPL-2/3/6/7/8`, `DOC-6/8/10` | repository/config/release/CI و handoff foundation |
 | `W2` | `P1-03/04/05`, `MKT-1..6`, `DPL-4/5` | Finland یکپارچه و Market canonical در محیط ایزوله |
 | `W3` | `P2-01..09`, `MKT-7..12`, `DOC-4/7` | sync، Writer control، continuity، dashboard و runbook |
@@ -420,16 +420,17 @@ migration یا شرط لازم یک side effect آماده نباشد، سروی
 ### ترتیب قابل‌مرور برای Final Reviewer
 
 1. `P1-00`: بفهمیم اکنون دقیقاً چه داریم و چه رفتاری باید حفظ شود.
-2. `P1-01`: repository و artifactها را با manifest و retention پاکسازی کنیم.
-3. `P1-02`: config را از نام‌ها و IPهای تاریخی مستقل کنیم.
-4. `P1-03`: runtime هدف یک‌سروره را بدون deploy تولید بسازیم.
-5. `P1-04`: sync محلی دو Finland را به DB transaction/outbox درست تبدیل کنیم.
-6. `P1-05`: ادغام واقعی داده را چندبار روی clone تمرین و rollback کنیم.
-7. `P1-06`: رفتار معماری جاری و هدف را در staging به‌صورت differential بسنجیم.
-8. `P1-07`: فقط با receipt تولیدی Codex، cutover اتمیک داده/runtime/deploy را انجام دهیم.
-9. `P1-08`: پس از دورهٔ اطمینان، بدهی و منابع قدیمی را کنترل‌شده ببندیم.
+2. `P1-00b`: باقی فریز رفتار جاری را قبل از هر پیاده‌سازی ادغام کامل کنیم.
+3. `P1-01`: repository و artifactها را با manifest و retention پاکسازی کنیم.
+4. `P1-02`: config را از نام‌ها و IPهای تاریخی مستقل کنیم.
+5. `P1-03`: runtime هدف یک‌سروره را بدون deploy تولید بسازیم.
+6. `P1-04`: sync محلی دو Finland را به DB transaction/outbox درست تبدیل کنیم.
+7. `P1-05`: ادغام واقعی داده را چندبار روی clone تمرین و rollback کنیم.
+8. `P1-06`: رفتار معماری جاری و هدف را در staging به‌صورت differential بسنجیم.
+9. `P1-07`: فقط با receipt تولیدی Codex، cutover اتمیک داده/runtime/deploy را انجام دهیم.
+10. `P1-08`: پس از دورهٔ اطمینان، بدهی و منابع قدیمی را کنترل‌شده ببندیم.
 
-`P1-02..P1-07` تا زمان تأیید artifactهای `P1-00` اجازهٔ تغییر behavior ندارند.
+`P1-01` و `P1-02..P1-07` تا زمان تأیید artifactهای `P1-00` و تکمیل فریز `P1-00b` اجازهٔ تغییر behavior ندارند.
 `P1-07` با `DPL-10` یک change set عملیاتی است؛ جداسازی آن دو ممنوع است.
 
 ### قرارداد اجرایی Cursor برای تمام Stageهای بخش ۱
@@ -508,7 +509,7 @@ docs/refactor/two-server/section-1/
 ├── 12-cutover-runbook.md
 ├── 13-closure-and-decommission.md
 ├── evidence-index.md
-└── stages/P1-00.md ... stages/P1-08.md
+└── stages/P1-00.md, stages/P1-00b.md ... stages/P1-08.md
 ```
 
 فایل‌های `00..07` و Task Card `P1-00` در همین شاخه با ممیزی read-only ایجاد
@@ -591,11 +592,42 @@ bug. تغییر repository فقط به docs و characterization testهای ای�
 Rollback با revert همان commit انجام و artifactهای محلی audit طبق retention حذف
 می‌شوند؛ خود audit نسبت به runtime و دادهٔ خارجی کاملاً read-only است.
 
+Gate خروج اصلاح‌شدهٔ `P1-00`: dossier جاری، موجودی sanitised، شش شکاف اولیه،
+قرارداد واقعی وضعیت حساب، سلول‌های برخورد خانوادهٔ درخواست روی sqlite و فرایند
+فرزند، و تعامل مبدأیی که مسیر سیاست زنده‌اش اجرا شده است. باقی فریز رفتار جاری
+High نیستِ داخل همین Gate؛ مالک آن مرحلهٔ غیرپیاده‌سازی `P1-00b` است. Coordinator
+فقط پس از `APPROVE` Codex همین نامزد، `execution-order.yaml` را برای `P1-00b`
+به‌روز می‌کند.
+
+## `P1-00b` — تکمیل فریز رفتار جاری قبل از پیاده‌سازی
+
+وضعیت: `PROPOSED — الحاقیهٔ طرح پس از CHANGES_REQUIRED روی P1-00؛ اجرا پس از APPROVE Codex و به‌روزرسانی execution-order`
+
+Dependency: `P1-00` `COMPLETE`. این Stage پیش‌نیاز `P1-01`، `P1-04`، `P1-06` و هر
+Stage پیاده‌سازی ادغام است. مالک فریز `P1-04` یا `P1-06` نیست. `P1-06` هدف را
+نسبت به قرارداد از قبل فریزشده می‌سنجد و حق اختراع قرارداد را ندارد.
+
+### هدف
+
+تکمیل شواهد سطح assertion برای سلول‌های رفتار جاری که `P1-00` نتوانست بدون تغییر
+محصول یا بدون sqlite + فرایند فرزند ثابت کند: برخورد/restart خانواده‌های غیر
+درخواست، باقی assertion سطح handler برای دانه‌ها، و تعامل مبدأ اثبات‌نشده
+(ربات بدون پیوند، انقضا/پایان، تصویر سیاست، اطلاع مخاطب، سه فاز شکست).
+
+### غیرهدف
+
+هیچ پیاده‌سازی ادغام، rename، migration، deploy، یا اصلاح رفتار محصول.
+
+### Gate
+
+تا `P1-00b` کامل نشود، `P1-01` و Stageهای پیاده‌سازی شروع نمی‌شوند. سلول‌های
+منتقل‌شده `EVIDENCED` نیستند.
+
 ## `P1-01` — پاکسازی و یکپارچگی repository محلی
 
 وضعیت: `PROPOSED — سیاست تأییدشده؛ منتظر تکمیل dependency و Assignment است`
 
-Dependency: `P1-00` و receipt نهایی Codex برای Cleanup Manifest قبل از هر حذف.
+Dependency: `P1-00`، `P1-00b` و receipt نهایی Codex برای Cleanup Manifest قبل از هر حذف.
 
 ### برداشت انسانی
 
@@ -663,7 +695,7 @@ Rollback: موارد قابل‌حذف ابتدا تا پایان بازهٔ م�
 
 وضعیت: `PROPOSED — قرارداد سناریویی تأییدشده؛ منتظر dependency و Assignment است`
 
-Dependency: `P1-00`، `DPL-1` و تأیید Feature Parity Contract.
+Dependency: `P1-00`، `P1-00b`، `DPL-1` و تأیید Feature Parity Contract.
 
 ### برداشت انسانی
 
@@ -842,7 +874,7 @@ Rollback: artifactهای compose/config به commit قبلی برمی‌گردن
 
 وضعیت: `PROPOSED — قرارداد سناریویی داده تأییدشده؛ منتظر dependency و Assignment است`
 
-Dependency: `P1-03`، `P2-00` و `P2-01`؛ Data Ownership Matrix باید مصوب باشد.
+Dependency: `P1-00b`، `P1-03`، `P2-00` و `P2-01`؛ Data Ownership Matrix باید مصوب باشد. این Stage فریز رفتار جاری را اختراع نمی‌کند.
 
 ### برداشت انسانی
 
@@ -1020,7 +1052,7 @@ cutover + retention محافظت می‌شوند.
 
 وضعیت: `PROPOSED — قرارداد سناریویی پذیرش تأییدشده؛ منتظر dependency و Assignment است`
 
-Dependency: `P1-05` و `DPL-9`.
+Dependency: `P1-00b`، `P1-05` و `DPL-9`. این Stage هدف را نسبت به قرارداد فریزشده می‌سنجد و قرارداد را اختراع نمی‌کند.
 
 ### برداشت انسانی
 

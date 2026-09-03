@@ -60,12 +60,10 @@ For each row, tests must cover at least:
 - failure before commit, after commit/before side effect and side-effect retry.
 
 P1-00 materializes those interactions in `inventory/scenario-records.json`
-`origin_required_interactions`. Home, publication owner, publication dedupe
-key, expiry authority, and request surface are proven by live functions.
-Admission/permission-denied and unlinked-Bot use the telegram-link overlay
-or `evaluate_invitation_bot_access`, which has no origin parameter. Snapshot,
-notification audience, and failure-phase origin cells are `DEFERRED_BLOCKER`
-for `P1-04` because no current function takes origin for those effects.
+`origin_required_interactions`. Admission reject/allow, request ledger persist,
+same-key retry, and a second request-origin row are executed for every origin
+pair. Unlinked-Bot, expiry/terminal, policy snapshot, notification audience,
+and the three failure phases are not EVIDENCED here; they move to `P1-00b`.
 
 ## Approved semantic contract for the next ADR
 

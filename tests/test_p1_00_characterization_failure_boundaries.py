@@ -1498,13 +1498,14 @@ class P100FailureBoundaryCharacterizationTests(unittest.IsolatedAsyncioTestCase)
         """MSG commit_before_event_side_effect: injects persist_sent_direct_message then threading."""
         await _inject_msg_commit_before()
 
-    def test_msg_two_concurrent_and_restart_are_evidenced(self):
-        """MSG persist has no command identity; overlap appends two rows and restart appends again."""
+    def test_msg_two_concurrent_and_restart_are_not_evidenced(self):
+        """MSG persist has no command identity; collision cells stay unresolved for P1-00b."""
         payload = _load_json("scenario-records.json")
         for variant_id in ("MSG__TWO-CONCURRENT-COMMANDS", "MSG__PROCESS-RESTART"):
             cell = next(item for item in payload["family_boundary_variants"] if item["variant_id"] == variant_id)
-            self.assertEqual(cell["applicability"], "ELIGIBLE")
-            self.assertIn("test_p1_00_characterization_concurrent_restart.py", cell["evidence_refs"][0])
+            self.assertEqual(cell["applicability"], "HIGH_BLOCKER")
+            self.assertEqual(cell["eligibility"]["decision"], "UNRESOLVED")
+            self.assertEqual(cell["named_blocker"]["resolution_stage"], "P1-00b")
         self.assertNotIn(("MSG", "two_concurrent_commands"), INJECTORS)
         self.assertNotIn(("MSG", "process_restart"), INJECTORS)
 
