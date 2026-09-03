@@ -6,8 +6,9 @@
 - Reviewed head SHA:
 - Review date (UTC):
 - Verdict: `<APPROVE|CHANGES_REQUIRED|REJECT|BLOCKED>`
-- Receipt type: `<STAGE_FINAL|PAIRING|EXTERNAL_ACTION>`
+- Receipt type: `<PLAN_GOVERNANCE_FINAL|STAGE_FINAL|PAIRING|BRANCH_BARRIER|EXTERNAL_ACTION>`
 - Receipt expiry / one-time target, if applicable:
+- Target branch/environment/action, if applicable:
 
 ## Scope and dependency verification
 
