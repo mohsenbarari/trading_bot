@@ -77,22 +77,71 @@ def _event_key(
 def _link_melted_flow_trade_sides(
     connection: sqlite3.Connection,
     *,
+    changed_event_keys: tuple[bytes, ...],
     maximum_offer_age_seconds: int = 180,
 ) -> int:
-    """Use a strictly prior matching offer to enrich side-less paper trades."""
+    """Enrich only trades causally affected by the current message.
 
-    trades = connection.execute(
-        """
-        SELECT id, price_num, settlement_term, event_time_utc
+    A newly stored trade can use an already-present strictly prior offer.  A
+    late-arriving offer can in turn unlock only unknown trades in its bounded
+    180-second future window.  Scanning every historical unknown trade after
+    every MELTED_FLOW message makes a large durable replay quadratic without
+    changing the eventual result.
+    """
+
+    if not changed_event_keys:
+        return 0
+    placeholders = ",".join("?" for _ in changed_event_keys)
+    changed = connection.execute(
+        f"""
+        SELECT id,event_type,side,price_num,settlement_term,event_time_utc
         FROM market_observations
-        WHERE source_code = 'MELTED_FLOW'
-          AND instrument = 'MELTED_GOLD_FLOW'
-          AND event_type = 'TRADE'
-          AND side = 'UNKNOWN'
-          AND quality_state = 'ELIGIBLE'
-        ORDER BY event_time_utc, id
-        """
+        WHERE event_key IN ({placeholders})
+          AND source_code='MELTED_FLOW'
+          AND instrument='MELTED_GOLD_FLOW'
+          AND quality_state='ELIGIBLE'
+        """,
+        changed_event_keys,
     ).fetchall()
+    candidate_trades: dict[int, sqlite3.Row] = {
+        int(row["id"]): row
+        for row in changed
+        if str(row["event_type"]) == "TRADE" and str(row["side"]) == "UNKNOWN"
+    }
+    for offer in changed:
+        if str(offer["event_type"]) != "OFFER" or str(offer["side"]) not in {
+            "BUY",
+            "SELL",
+        }:
+            continue
+        for trade in connection.execute(
+            """
+            SELECT id,event_type,side,price_num,settlement_term,event_time_utc
+            FROM market_observations
+            WHERE source_code='MELTED_FLOW'
+              AND instrument='MELTED_GOLD_FLOW'
+              AND event_type='TRADE'
+              AND side='UNKNOWN'
+              AND quality_state='ELIGIBLE'
+              AND price_num=?
+              AND settlement_term=?
+              AND event_time_utc>?
+              AND (julianday(event_time_utc)-julianday(?))*86400.0
+                  BETWEEN 0 AND ?
+            ORDER BY event_time_utc,id
+            """,
+            (
+                offer["price_num"],
+                offer["settlement_term"],
+                offer["event_time_utc"],
+                offer["event_time_utc"],
+                maximum_offer_age_seconds,
+            ),
+        ).fetchall():
+            candidate_trades[int(trade["id"])] = trade
+    trades = tuple(
+        candidate_trades[key] for key in sorted(candidate_trades)
+    )
     linked = 0
     for trade in trades:
         offer = connection.execute(
@@ -186,6 +235,7 @@ def ingest_public_message(
     compact_replaced = False
     compact_older_message_ignored = False
     stored = 0
+    changed_event_keys: list[bytes] = []
     for index, parsed in enumerate(parsed_events):
         normalized_price = parsed.price
         normalized_confidence = parsed.parse_confidence
@@ -265,6 +315,7 @@ def ingest_public_message(
                 attributes=parsed.attributes or {},
             ),
         )
+        changed_event_keys.append(event_key)
         stored += 1
     advance_source_checkpoint(
         connection,
@@ -272,7 +323,14 @@ def ingest_public_message(
         message_id=message.message_id,
         event_time_utc=event_time_utc,
     )
-    linked = _link_melted_flow_trade_sides(connection) if source.code == "MELTED_FLOW" else 0
+    linked = (
+        _link_melted_flow_trade_sides(
+            connection,
+            changed_event_keys=tuple(changed_event_keys),
+        )
+        if source.code == "MELTED_FLOW"
+        else 0
+    )
     return PublicIngestResult(
         source_code=source.code,
         event_count=stored,
