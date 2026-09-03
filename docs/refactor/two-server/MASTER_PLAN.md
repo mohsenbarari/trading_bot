@@ -1,11 +1,12 @@
 # پلن جامع ریفکتور معماری دو سروره
 
-وضعیت: `APPROVED — طراحی بخش‌های ۱ تا ۵ تأیید شده؛ اجرای هر Stage و هر اقدام عملیاتی همچنان مجوز جدا می‌خواهد`
+وضعیت: `APPROVED / EXECUTION_AUTHORIZED_CODEX_GATED — اجرای استاندارد پس از dependency مجاز است؛ پذیرش نهایی و اقدام خارجی با Codex Final Reviewer`
 شاخهٔ تدوین: `plan/two-server-refactor-v1`
-مبنای همگام‌سازی سند: `main` در `2a03cde1205c7425af180cda19afe85fa68a6d80`
+مبنای همگام‌سازی سند: `main` در `f3be9ae2c4e9df0da31abaa41e91f327eb9573a2`
 منبع حقیقت انسانی: `docs/refactor/two-server/MASTER_PLAN.md`
 ترتیب ماشینی: `docs/refactor/two-server/execution-order.yaml`
-مجری آینده: Cursor Agent، مرحله‌به‌مرحله و فقط پس از تأیید این سند
+حاکمیت اجرا: `docs/refactor/two-server/EXECUTION_GOVERNANCE.md`
+مجری: Cursor Coordinator/Worker؛ مرجع پذیرش نهایی: `Codex Final Reviewer`
 دامنهٔ این شاخه: مستندات و طراحی؛ نه deploy، نه DNS، نه تغییر نقش، نه دادهٔ تولید
 
 این سند برنامهٔ مرجع مهاجرت پروژه از دو میزبان فنلاند به یک Finland Primary و
@@ -29,8 +30,10 @@
 
 ### مخاطب AI Agent
 
-هر Stage یک واحد مستقل اجراست. Cursor در یک درخواست فقط یک Stage را اجرا
-می‌کند، مگر اینکه این سند صریحاً چند Stage را یک change set اتمیک اعلام کند.
+هر Stage یک واحد مستقل اجراست. هر Cursor Worker در یک درخواست فقط یک Stage را
+اجرا می‌کند، مگر اینکه این سند صریحاً چند Stage را یک change set اتمیک اعلام کند.
+Coordinator می‌تواند حداکثر دو Worker داشته باشد، ولی نویسندهٔ دوم فقط با
+`PAIRING_APPROVED` از Codex و طبق `EXECUTION_GOVERNANCE.md` مجاز است.
 عبارت «کد نوشته شد» یا «تست واحد سبز شد» برای complete بودن کافی نیست.
 
 هر Stage فقط وقتی `COMPLETE` است که هم‌زمان این موارد وجود داشته باشد:
@@ -41,35 +44,44 @@
 4. diff فقط در scope همان Stage باشد.
 5. وضعیت، commandهای اجراشده و نتیجهٔ gate در tracker ثبت شده باشد.
 6. اگر Stage عملیاتی است، رسید محیط هدف و نه fixture حافظه‌ای وجود داشته باشد.
+7. Codex Final Reviewer همان commit دقیق را با verdict برابر `APPROVE` پذیرفته باشد.
 
 وضعیت مجاز Stage:
 
 ```text
-PROPOSED → APPROVED → IN_PROGRESS → BLOCKED | COMPLETE → SUPERSEDED
+PROPOSED → READY → IN_PROGRESS → COMPLETE_CANDIDATE → FINAL_REVIEW → COMPLETE
+                         ↘ BLOCKED | FAILED               ↘ REJECTED
 ```
 
-Cursor حق ندارد `APPROVED` را از متن حدس بزند، `BLOCKED` را با workaround
-پنهان کند یا برای سبزکردن gate داده/رویداد مصنوعی بسازد.
+Cursor حق ندارد خروجی خود را `COMPLETE` کند، `BLOCKED` را با workaround پنهان
+کند یا برای سبزکردن gate داده/رویداد مصنوعی بسازد.
 
 ### ترتیب منابع حقیقت
 
 در صورت تعارض، ترتیب زیر معتبر است:
 
-1. تصمیم صریح جدید مالک
-2. همین سند پس از تأیید مالک
-3. قراردادها و تست‌های جاری `main`
-4. ADRهای جدید این ریفکتور
-5. مستندات جاری و غیرمنسوخ پروژه
-6. شاخهٔ `candidate/wa-ir-standby-v1` فقط به‌عنوان مرجع تاریخی
+1. نیازمندی صریح جدید مالک پروژه
+2. تصمیم ثبت‌شدهٔ `Codex Final Reviewer` برای اجرای این پلن
+3. همین سند و `EXECUTION_GOVERNANCE.md`
+4. قراردادها و تست‌های جاری `main`
+5. ADRهای جدید این ریفکتور
+6. مستندات جاری و غیرمنسوخ پروژه
+7. شاخهٔ `candidate/wa-ir-standby-v1` فقط به‌عنوان مرجع تاریخی
 
 از شاخهٔ سه‌سروره code merge انجام نمی‌شود. کنترل‌پلین‌های بازنشستهٔ
 `WA-IR`، `Writer-Witness` و `Object-Delta` نباید زنده شوند.
 
-### مجوزها
+### مجوزها و تفویض اختیار
 
-تأیید این پلن به معنی مجوز موارد زیر نیست:
+مالک پروژه در ۲۰۲۶-۰۹-۰۳ شروع و مدیریت Stageها و پذیرش نهایی تغییرات این پلن را
+به Codex Final Reviewer تفویض کرد. Stage استاندارد و غیرعملیاتی پس از کامل‌شدن
+dependencyها standing authorization دارد و به تأیید مرحله‌ای کاربر نیاز ندارد.
+Cursor حق self-approval ندارد و Stage فقط با receipt نهایی Codex `COMPLETE` می‌شود.
 
-- push یا merge
+اقدامات زیر علاوه بر پذیرش Stage، receipt محدود، زمان‌دار و مقید به SHA/target از
+Codex Final Reviewer می‌خواهند:
+
+- push به remote یا promotion/merge به `main`
 - provisioning سرور
 - نوشتن روی Object Storage واقعی
 - deploy staging یا production
@@ -78,7 +90,18 @@ Cursor حق ندارد `APPROVED` را از متن حدس بزند، `BLOCKED` �
 - انتقال Writer
 - غیرفعال یا حذف‌کردن سرورهای فعلی
 
-هر مورد بالا gate و مجوز جدا دارد.
+هر مورد بالا gate و receipt جدا دارد. نقش انسانی Dashboard برای انتقال Web Writer
+همچنان پابرجاست و این تفویض آن invariant محصول را به automation تبدیل نمی‌کند.
+
+### تفسیر receiptهای تاریخی
+
+عبارت‌های قدیمی‌تر این سند مانند «این تأیید مجوز اجرا نیست»، «Gate انسانی» یا
+«تصمیم/مجوز مالک» وضعیت زمان تصویب همان قرارداد را ثبت کرده‌اند. از ۲۰۲۶-۰۹-۰۳،
+برای اجرای آینده، `EXECUTION_GOVERNANCE.md` بر آن عبارت‌های تاریخی مقدم است:
+Stage استاندارد standing authorization دارد، تصمیم و پذیرش با Codex Final Reviewer
+است و اقدام خارجی receipt موردی Codex می‌خواهد. تنها استثنا اقدام انسانی Dashboard
+برای Web Writer/DNS است؛ تصمیم rollback/continue از evidence به Codex Final Reviewer
+تعلق دارد و اجرای click همچنان انسانی می‌ماند.
 
 ---
 
@@ -113,7 +136,7 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
 
 ### سناریوی قطع اینترنت ایران
 
-1. عامل انسانی که طبق تصمیم مالک به هر دو سرور دسترسی دارد، در dashboard
+1. عامل انسانی مجاز که به هر دو سرور دسترسی دارد، در dashboard
    Finland فرمان `DRAIN WEB WRITER` را صادر می‌کند. Finland mutation جدید Web
    را می‌بندد، تراکنش‌های جاری را تمام می‌کند و `Fence Receipt` امضاشده می‌دهد؛
    Bot بدون محدودیت ادامه می‌دهد.
@@ -188,16 +211,16 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
 - Trade هنگام ایجاد، منشأ Offer، منشأ Request، surface اجرای نهایی، policy version
   و context حساس actor/role/tier را snapshot و تغییرناپذیر می‌کند تا تصمیم تاریخی
   بدون اتکا به وضعیت بعدی رکوردهای مرتبط قابل‌بازتولید باشد.
-- تا کامل‌شدن و تأیید کل پلن، هیچ provisioning، deploy، migration، DNS change،
-  cleanup runtime یا cutover عملیاتی انجام نمی‌شود. تأیید پلن نیز مجوز خودکار
-  اجرای Stageهای تولیدی نیست.
+- طراحی کل پلن کامل و اختیار اجرا تفویض شده است. Stageهای استاندارد فقط پس از
+  dependency و Assignment معتبر اجرا می‌شوند؛ اقدام خارجی/تولیدی همچنان receipt
+  موردی Codex Final Reviewer می‌خواهد.
 - `D-07`: budget اولیهٔ staging در بار مرجع CPU پایدار حداکثر ۶۰٪، RAM و disk
   حداکثر ۷۰٪ و DB pool حداکثر ۷۰٪ است؛ baseline می‌تواند بازبینی عددی را الزام کند.
 - `D-08`: حداقل soak معماری یکپارچهٔ Finland برابر ۲۴ ساعت با job، queue، backup،
   log rotation و fault telemetry فعال است.
 - `D-10`: پس از cutover، پایش فعال ۲ ساعت است؛ sourceهای قدیمی حداقل ۷ روز fenced
   و قابل‌بازیابی و backup مصوب ۳۰ روز نگه داشته می‌شود. پایان retention حذف خودکار
-  نیست و `P1-08/P2-11` و مجوز جدا همچنان الزامی‌اند.
+  نیست و `P1-08/P2-11` و receipt مربوط Codex همچنان الزامی‌اند.
 - `D-09`: cutover یک‌بارهٔ ادغام دو Finland فعلی یک پنجرهٔ رزروشدهٔ ۹۰ دقیقه‌ای
   دارد؛ تمام preflightها پیش از freeze انجام می‌شوند، توقف دسترسی/write حداکثر
   ۴ دقیقه است و اگر target تا آن زمان آماده نباشد عملیات abort می‌شود. این تصمیم
@@ -210,14 +233,15 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
 - `D-11`: triggerهای cutover عبارت‌اند از توقف فوری برای invariant/hash/durability
   یا owner تکراری، `5xx > 2%` برای ۵ دقیقه، `p95 > 2x baseline` برای ۱۰ دقیقه و
   queue lag بیش از ۳۰ ثانیه برای ۵ دقیقه. monitor فقط alert/checkpoint block می‌کند
-  و تصمیم rollback یا ادامه فقط انسانی است.
+  و تصمیم rollback یا ادامه فقط با Codex Final Reviewer بر پایهٔ evidence است؛
+  عملیات Dashboard لازم همچنان توسط عامل انسانی انجام می‌شود.
 - `D-12`: پس از اولین mutation تولیدی target، DB جدید canonical می‌ماند؛ rollback
   عادی فقط application rollback یا forward recovery روی همان DB است. بازگشت به
-  DB قدیمی، restore یا reverse migration به runbook و مجوز جدا نیاز دارد.
+  DB قدیمی، restore یا reverse migration به runbook و receipt موردی Codex نیاز دارد.
 - `D-13`: closure فقط پس از `P2-11` و حداقل هفت روز quarantine است. old edge بعد
   از ۴۸ ساعت ترافیک معتبر صفر و DNS سالم خاموش و ۲۴ ساعت پایش می‌شود؛ old Bot host
   پیش از old Web host و با ۲۴ ساعت فاصله حذف می‌شود. backup مهاجرت پس از ۳۰ روز
-  فقط با جایگزین restore-tested و مجوز صریح نامزد حذف است.
+  فقط با جایگزین restore-tested و receipt مخربِ محدود Codex نامزد حذف است.
 - `D-14`: Data Ownership تمام SQL/Redis/file/object state را پوشش می‌دهد. Messenger
   metadata/read/media و logical notification/read مشترک‌اند؛ session/OTP/upload
   lease/browser/provider delivery/Telegram runtime محلی‌اند. نام و Telegram ID
@@ -233,7 +257,7 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
   امضا و hash می‌شوند؛ client-side AEAD فقط برای class حساس الزامی است و Market/parse/
   estimate غیرمحرمانه به encryption برنامه‌ای نیاز ندارد. object immutable،
   head فقط hint، local spool برابر ۱۴ روز peak +۳۰٪ و cleanup فقط با credential و
-  approval مستقل است.
+  receipt مستقل Codex است.
 - `D-17`: bootstrap از consistent snapshot با per-stream cutoff و replay از
   `cutoff+1` است و target تا پایان بدون write/side effect می‌ماند. parity فقط روی
   barrier هم‌مرز و business/media hash سنجیده می‌شود؛ `FULL_SYNC` و `MARKET_READY`
@@ -268,8 +292,9 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
 | `D-05` | rollback بدون DB restore | Web/API ≤۲ دقیقه؛ rollback کامل R0/R1 ≤۵ دقیقه | `APPROVED` |
 | `D-06` | توزیع artifact | registry اصلی + bundle/OCI archive امضاشده و transport-independent؛ cache ایران برای `Active/Previous/Candidate` و import آفلاین | `APPROVED` |
 
-تصمیم مالکِ باز در این نسخه وجود ندارد. R2/R3 سقف عمومی ۳۰ دقیقه ندارد و پیش از
-اجرا باید زمان، downtime و recovery همان migration را به‌صورت case-specific دریافت کند.
+تصمیم طراحیِ باز در این نسخه وجود ندارد. تصمیم فنی تازه به Codex Final Reviewer
+ارجاع می‌شود. R2/R3 سقف عمومی ۳۰ دقیقه ندارد و پیش از اجرا باید زمان، downtime و
+recovery همان migration را به‌صورت case-specific دریافت کند.
 
 `D-09` تأییدشده فقط انتقال اولیه از دو میزبان Finland قدیمی به Finland Primary است.
 release، hotfix و rollbackهای روزمرهٔ معماری جدید قرارداد، زمان و gate مستقل خود
@@ -297,7 +322,8 @@ release، hotfix و rollbackهای روزمرهٔ معماری جدید قرار
 11. event/availability/persisted timestamps برای Point-in-Time حفظ می‌شوند.
 12. secret وارد Git، log، artifact، prompt، `/tmp` یا Object Storage plaintext نمی‌شود.
 13. هیچ deploy از dirty tree یا artifact بدون commit/digest انجام نمی‌شود.
-14. staging قبل از production الزامی است؛ production permission جدا دارد.
+14. staging قبل از production الزامی است؛ production به receipt موردی Codex Final
+    Reviewer مقید به SHA و target نیاز دارد.
 15. guardهای deploy متناسب با نوع تغییرند؛ gate نامرتبط نباید hotfix را ساعت‌ها
     متوقف کند.
 16. active release، آخرین rollback و آخرین backup قابل‌بازیابی هرگز با cleanup
@@ -321,13 +347,13 @@ release، hotfix و rollbackهای روزمرهٔ معماری جدید قرار
 | `W2` | `P1-03/04/05`, `MKT-1..6`, `DPL-4/5` | Finland یکپارچه و Market canonical در محیط ایزوله |
 | `W3` | `P2-01..09`, `MKT-7..12`, `DOC-4/7` | sync، Writer control، continuity، dashboard و runbook |
 | `W4` | `P1-06`, `P2-10`, `MKT-13`, `DPL-9` | Full Matrix، fault/load/restore و staging acceptance |
-| `W5` | `P1-07` + `DPL-10` | cutover یک‌باره Finland با مجوز production جدا |
+| `W5` | `P1-07` + `DPL-10` | cutover یک‌باره Finland با receipt تولیدی Codex |
 | `W6` | `P2-11` | پذیرش Iran به‌عنوان standby همگام بدون تغییر Writer |
-| `W7` | `P2-12` | drill واقعی `FI→IR→FI` با مجوز جدا |
+| `W7` | `P2-12` | drill واقعی `FI→IR→FI` با receipt عملیاتی Codex |
 | `W8` | `P1-08`, `DOC-9` | retirement توپولوژی و اسناد قدیمی پس از retention/evidence |
 
-Stage تولیدی یک موج فقط با مجوز جدا اجرا می‌شود. کامل‌شدن Stage کدنویسی، مجوز
-ورود خودکار به موج تولید نیست.
+Stage تولیدی یک موج فقط با receipt محدود Codex Final Reviewer اجرا می‌شود.
+کامل‌شدن Stage کدنویسی، مجوز ورود خودکار به موج تولید نیست.
 
 ### dependency registry الزام‌آور
 
@@ -335,7 +361,7 @@ Cursor پیش از شروع هر Stage باید تمام `depends_on`های آن
 [`execution-order.yaml`](execution-order.yaml) با state واقعی `COMPLETE` و evidence
 قابل‌خواندن ببیند. YAML تنها مرجع ماشینی order/dependency/permission flag است؛ این
 جدول خلاصهٔ انسانی است. dependency چرخه‌ای مجاز نیست و atomic group مجوز production
-یا عبور از gate انسانی ایجاد نمی‌کند.
+یا عبور از gate Codex/اقدام خارجی ایجاد نمی‌کند.
 
 ---
 
@@ -351,7 +377,7 @@ IP فعلی `65.109.214.203` است. Web/API و Bot همچنان process/contain
 یکی‌کردن برنامه، handler، policy یا تجربهٔ Web و Bot نیست. منشأ Web/Bot باید
 به‌عنوان provenance تغییرناپذیر و ورودی policy نسخه‌دار باقی بماند. تفاوت‌های
 موجود در tier 2، overtime، quota، confirmation، publication، notification،
-commission و هر رفتار دیگری فقط با تصمیم جداگانهٔ مالک قابل‌تغییر است.
+commission و هر رفتار دیگری فقط با تصمیم جداگانهٔ Codex Final Reviewer قابل‌تغییر است.
 
 ### روایت انسانی: قبل، بعد و هنگام خطا
 
@@ -384,14 +410,14 @@ migration یا شرط لازم یک side effect آماده نباشد، سروی
 | در scope | خارج از scope |
 | --- | --- |
 | inventory و مدل دقیق معماری جاری | اصلاح رفتار محصول یا bug نامرتبط |
-| پاکسازی repository/worktree/artifact با approval | حذف خودکار فایل، branch، backup یا سرور |
-| config و compose مستقل از IP تاریخی | deploy تولید بدون مجوز جدا |
+| پاکسازی repository/worktree/artifact با receipt Codex | حذف خودکار فایل، branch، backup یا سرور |
+| config و compose مستقل از IP تاریخی | deploy تولید بدون receipt Codex |
 | هم‌مکان‌کردن Web، Bot، DB و Redis | یکی‌کردن Web و Bot در یک process |
 | حذف transport داخلی میان دو Finland | حذف outbox/sync میان Finland و Iran |
 | rehearsal، staging، cutover و rollback قابل‌اثبات | تغییر DNS، token یا دادهٔ تولید در شاخهٔ پلن |
 | حفظ و تست تفاوت policy میان surfaceها | برابر فرض‌کردن Offer/Request وب و بات |
 
-### ترتیب قابل‌مرور برای مالک
+### ترتیب قابل‌مرور برای Final Reviewer
 
 1. `P1-00`: بفهمیم اکنون دقیقاً چه داریم و چه رفتاری باید حفظ شود.
 2. `P1-01`: repository و artifactها را با manifest و retention پاکسازی کنیم.
@@ -400,7 +426,7 @@ migration یا شرط لازم یک side effect آماده نباشد، سروی
 5. `P1-04`: sync محلی دو Finland را به DB transaction/outbox درست تبدیل کنیم.
 6. `P1-05`: ادغام واقعی داده را چندبار روی clone تمرین و rollback کنیم.
 7. `P1-06`: رفتار معماری جاری و هدف را در staging به‌صورت differential بسنجیم.
-8. `P1-07`: فقط با مجوز جدا، cutover اتمیک داده/runtime/deploy را انجام دهیم.
+8. `P1-07`: فقط با receipt تولیدی Codex، cutover اتمیک داده/runtime/deploy را انجام دهیم.
 9. `P1-08`: پس از دورهٔ اطمینان، بدهی و منابع قدیمی را کنترل‌شده ببندیم.
 
 `P1-02..P1-07` تا زمان تأیید artifactهای `P1-00` اجازهٔ تغییر behavior ندارند.
@@ -418,7 +444,7 @@ docs/refactor/two-server/section-1/stages/P1-XX.md
 
 ```text
 status
-approved_by / approved_at
+assignment_id / issued_by / issued_at
 base_branch / base_commit
 goal / non_goals
 dependencies and their evidence
@@ -428,10 +454,10 @@ pre-change snapshot
 ordered implementation steps
 tests: success / failure / idempotency / rollback / parity
 evidence paths and SHA-256
-known gaps / owner decisions
+known gaps / final-review decisions
 rollback trigger / rollback steps / rollback verification
 resulting commits
-human gate receipt
+Codex final-review receipt
 ```
 
 قواعد اجرای Task Card:
@@ -452,16 +478,16 @@ human gate receipt
    نباید چاپ، commit یا داخل evidence ذخیره شود. فقط نام secret، mount و نتیجهٔ
    validation ثبت می‌شود.
 8. هر command مخرب ابتدا dry-run و manifest هدف می‌خواهد. حذف branch، worktree،
-   backup، volume، host یا داده نیازمند gate انسانی همان Stage است.
+   backup، volume، host یا داده نیازمند receipt محدود Codex برای همان Stage است.
 9. دسترسی read-only به runtime و دسترسی write به staging/production دو مجوز
    متفاوت‌اند. نبود مجوز با حدس یا fixture پنهان جبران نمی‌شود.
 10. اگر response، state، ordering، timeout، copy یا side effect جاری با سند فرق
     داشت، Cursor آن را در Drift Register ثبت و Stage را `BLOCKED` می‌کند؛ انتخاب
-    یکی از دو رفتار بدون تصمیم مالک ممنوع است.
+    یکی از دو رفتار فقط با تصمیم Codex Final Reviewer مجاز است.
 11. هر command و exit code، commit، image digest، migration version و checksum
     لازم برای بازتولید نتیجه در Evidence Index ثبت شود.
-12. Cursor حق اجرای Stage بعدی را فقط با `human gate receipt` مرحلهٔ قبلی و
-    dependencyهای سبز دارد.
+12. Cursor حق اجرای Stage وابسته را فقط با `CODEX_FINAL_REVIEW_RECEIPT` مرحلهٔ
+    قبلی و dependencyهای سبز دارد. Stage مستقل طبق governance می‌تواند موازی شود.
 
 ساختار artifactهای tracked این بخش:
 
@@ -491,9 +517,10 @@ docs/refactor/two-server/section-1/
 
 ## `P1-00` — Current-State Architecture و Behavior Baseline
 
-وضعیت: `IN_PROGRESS — Gate انسانی در 2026-09-02 تأیید شد؛ تکمیل شواهد و rehearsal باز است`
+وضعیت: `IN_PROGRESS — baseline انسانی در 2026-09-02 پذیرفته شد؛ تکمیل شواهد و Final Review باز است`
 
-Dependency: تأیید همین پلن؛ برای مشاهدهٔ runtime، مجوز read-only جداگانه.
+Dependency: Assignment معتبر؛ مشاهدهٔ runtime زنده در scope همان Assignment و
+در صورت نیاز با receipt خارجی Codex انجام می‌شود.
 
 ### برداشت انسانی
 
@@ -536,10 +563,10 @@ Dependency: تأیید همین پلن؛ برای مشاهدهٔ runtime، مج�
 10. **Characterization:** برای رفتارهای پرریسک فاقد تست، ابتدا test مشاهده‌ای یا
     golden fixture بدون side effect خارجی بسازد. این تست‌ها رفتار موجود را ثبت
     می‌کنند و مجوز درست‌دانستن bug نیستند.
-11. **Drift review:** اختلاف تصمیم مالک، code، runtime، test و docs را با severity،
+11. **Drift review:** اختلاف نیازمندی ثبت‌شده، code، runtime، test و docs را با severity،
     impact و evidence ثبت کند. هیچ اختلافی خودکار resolve نشود.
-12. **Human review:** Dossier، Runtime Inventory، Dataflow، Surface Policy Matrix،
-    Feature Parity Contract و Drift Register را برای review مالک آماده کند.
+12. **Final review:** Dossier، Runtime Inventory، Dataflow، Surface Policy Matrix،
+    Feature Parity Contract و Drift Register را برای Codex Final Review آماده کند.
 
 ### خروجی و شواهد
 
@@ -549,7 +576,7 @@ Dependency: تأیید همین پلن؛ برای مشاهدهٔ runtime، مج�
 - Coverage report که endpoint، callback، job و side effect بدون `behavior_id` را
   صفر یا blocker نشان دهد.
 
-### Gate انسانی و معیار خروج
+### Gate نهایی Codex و معیار خروج
 
 - مالک در 2026-09-02، Dossier، Drift Register، قرارداد دوازده خانوادهٔ رفتاری،
   حفظ تفاوت‌های Web/Bot و provenance، رسیدگی اجباری به شش شکاف مدرک و baseline
@@ -566,9 +593,9 @@ Rollback با revert همان commit انجام و artifactهای محلی audit
 
 ## `P1-01` — پاکسازی و یکپارچگی repository محلی
 
-وضعیت: `PROPOSED — سیاست و Retention در 2026-09-02 تأیید شد؛ اجرا هنوز مسدود است`
+وضعیت: `PROPOSED — سیاست تأییدشده؛ منتظر تکمیل dependency و Assignment است`
 
-Dependency: `P1-00` و تأیید انسانی Cleanup Manifest قبل از هر حذف.
+Dependency: `P1-00` و receipt نهایی Codex برای Cleanup Manifest قبل از هر حذف.
 
 ### برداشت انسانی
 
@@ -591,10 +618,10 @@ Telegram data و test output یا باید در مسیر local مدیریت‌ش
    مورد بدون owner/reference analysis به `DELETE` نرود.
 5. تمام branch/worktreeهای نامزد حذف و branch مربوط به Cursor را با diff نسبت به
    مبنای مناسب، unique commits و artifactهای مستندی ممیزی کند. اگر ارزش مستقلی
-   ندارد، حذف آن فقط پس از درج SHA و تأیید مالک انجام شود.
+   ندارد، حذف آن فقط پس از درج SHA و receipt محدود Codex انجام شود.
 6. `candidate/wa-ir-standby-v1` را فقط برای استخراج تصمیم، test idea و docs مفید
-   ممیزی کند؛ merge/cherry-pick کد ممنوع است. این branch تا دستور جداگانهٔ مالک
-   باقی می‌ماند، حتی اگر در این Stage مرجع مفیدی پیدا نشود.
+   ممیزی کند؛ merge/cherry-pick کد ممنوع است. این branch تا تصمیم closure و receipt
+   صریح Codex باقی می‌ماند، حتی اگر در این Stage مرجع مفیدی پیدا نشود.
 7. tracked `tmp/`، log، screenshot، dump، generated report و test output را پیدا
    و مصرف‌کنندهٔ واقعی آن را ثابت کند. مورد لازم به مسیر source/docs canonical
    منتقل می‌شود؛ مورد runtime به `.local` و `.gitignore` contract می‌رود.
@@ -610,18 +637,19 @@ Telegram data و test output یا باید در مسیر local مدیریت‌ش
 11. cleanup tooling را ابتدا dry-run کند. ابزار باید root-bound، allowlist-based،
     symlink-safe، lock-aware و idempotent باشد و active release/current rollback/
     protected backup را رد کند.
-12. پس از gate انسانی، فقط موارد دقیق manifest را اجرا و سپس reference scan، test،
+12. پس از receipt محدود Codex، فقط موارد دقیق manifest را اجرا و سپس reference scan، test،
     `git status` و اندازهٔ قبل/بعد را ثبت کند. مورد متفاوت از manifest نیازمند gate
     جدید است.
 
-### خروجی، آزمون و Gate انسانی
+### خروجی، آزمون و Gate نهایی Codex
 
 - Cleanup Manifest، retention matrix، branch/worktree audit و size report قبل/بعد.
 - dry-run test، path-escape/symlink test، protected-artifact test و اجرای دوم
   idempotent بدون حذف تازه.
-- repository تمیز، یک worktree canonical و هیچ runtime artifact جدید tracked نباشد.
+- repository تمیز، یک integration worktree canonical، حداکثر دو stage worktree
+  موقتِ ثبت‌شده و هیچ runtime artifact جدید tracked نباشد.
 - هر batch دقیق و هم‌نوع از cache/log یک رسید گروهی می‌خواهد؛ branch، worktree،
-  backup، data set یا runtime مادی هرکدام رسید انسانی مستقل می‌خواهند.
+  backup، data set یا runtime مادی هرکدام receipt مستقل Codex می‌خواهند.
 
 Gate سیاست در 2026-09-02 تأیید شد: layout canonical، حذف گروهی quarantine-first،
 بازه‌های retention، رفتار مسیرهای حجیم، تکمیل اجباری manifest و مرز جداگانهٔ
@@ -633,7 +661,7 @@ Rollback: موارد قابل‌حذف ابتدا تا پایان بازهٔ م�
 
 ## `P1-02` — واژگان و configuration بدون topology تاریخی
 
-وضعیت: `PROPOSED — قرارداد سناریویی در 2026-09-02 تأیید شد؛ اجرا مسدود است`
+وضعیت: `PROPOSED — قرارداد سناریویی تأییدشده؛ منتظر dependency و Assignment است`
 
 Dependency: `P1-00`، `DPL-1` و تأیید Feature Parity Contract.
 
@@ -691,7 +719,7 @@ Emergency override بخشی از قرارداد مصوب نیست و در صور
 10. config matrix فعلی و هدف را generate و diff کند؛ تنها تفاوت‌های topology
     مصوب‌اند. response schema، callback data، copy و policy نباید تغییر کند.
 
-### خروجی، آزمون و Gate انسانی
+### خروجی، آزمون و Gate نهایی Codex
 
 - `08-target-configuration-contract.md` شامل schema، example sanitised، invariant،
   compatibility phases و deprecation ledger.
@@ -710,7 +738,7 @@ Rollback: callsiteها به adapter سازگار برمی‌گردند؛ schema/
 
 ## `P1-03` — compose و service ownership هدف Finland
 
-وضعیت: `PROPOSED — قرارداد سناریویی و ownership در 2026-09-02 تأیید شد؛ اجرا مسدود است`
+وضعیت: `PROPOSED — قرارداد سناریویی و ownership تأییدشده؛ منتظر dependency و Assignment است`
 
 Dependency: `P1-02`، `DPL-2` و `DPL-6`. این Stage ساخت artifact است، نه deploy.
 
@@ -792,7 +820,7 @@ Bot/executor/publishers حدود 2.5، Market pipeline حدود 3 و edge/ops/su
 12. `docker compose config`، image digest، SBOM/scan طبق P4، port exposure، mount
     و ownership checks را در Evidence Index ثبت کند.
 
-### خروجی، آزمون و Gate انسانی
+### خروجی، آزمون و Gate نهایی Codex
 
 - `09-target-runtime-topology.md`، Service Ownership Matrix و compose diagrams.
 - compose validation و contract/integration test برای یک Telegram owner، یک job
@@ -812,7 +840,7 @@ Rollback: artifactهای compose/config به commit قبلی برمی‌گردن
 
 ## `P1-04` — دادهٔ مشترک و حذف sync داخلی Finland
 
-وضعیت: `PROPOSED — قرارداد سناریویی داده در 2026-09-02 تأیید شد؛ اجرا مسدود است`
+وضعیت: `PROPOSED — قرارداد سناریویی داده تأییدشده؛ منتظر dependency و Assignment است`
 
 Dependency: `P1-03`، `P2-00` و `P2-01`؛ Data Ownership Matrix باید مصوب باشد.
 
@@ -881,13 +909,14 @@ side effect محلی و از این transport جدا می‌مانند. جدول
 12. contract tests را برای ماتریس surface/role/tier/time و نیز duplicate، retry،
     crash-before/after-commit، ordering و loop prevention اجرا کند.
 
-### خروجی، آزمون و Gate انسانی
+### خروجی، آزمون و Gate نهایی Codex
 
 - Dataflow/ownership به‌روز، event registry، migration contract و parity mapping.
 - CI باید receiver coverage، registry coverage و mutation emission را مقایسه کند.
 - یک logical mutation دقیقاً یک business result و حداکثر یک event/side effect
   idempotent بسازد؛ visibility محلی نیازمند network hop نباشد.
-- مالک هر تفاوت policy Web/Bot و تمام legacy mappingهای حذف‌شونده را تأیید کند.
+- Codex Final Reviewer هر تفاوت policy Web/Bot و تمام legacy mappingهای حذف‌شونده
+  را روی evidence همان Stage تأیید کند.
 
 Gate طراحی در 2026-09-02 تأیید شد: event envelope و inbox receipt مرکزی،
 `at-least-once` transport با deduplicated business apply، source sequence همراه
@@ -902,10 +931,10 @@ Rollback: تا closure، schema و adapter قدیمی قابل‌خواندن م
 
 ## `P1-05` — rehearsal ادغام دادهٔ دو Finland
 
-وضعیت: `PROPOSED — قرارداد سناریویی merge در 2026-09-02 تأیید شد؛ اجرا مسدود است`
+وضعیت: `PROPOSED — قرارداد سناریویی merge تأییدشده؛ منتظر dependency و Assignment است`
 
-Dependency: `P1-04`، `P2-05` و `DPL-4`. مجوز production data فقط read-only backup
-و طبق قرارداد امنیتی جداگانه است.
+Dependency: `P1-04`، `P2-05` و `DPL-4`. دسترسی به production data فقط read-only
+backup و با receipt محدود Codex و قرارداد امنیتی مجاز است.
 
 ### برداشت انسانی
 
@@ -917,7 +946,7 @@ Dependency: `P1-04`، `P2-05` و `DPL-4`. مجوز production data فقط read-o
 
 | وضعیت اولیه و رخداد | رفتار مورد انتظار و مانع ایمنی |
 | --- | --- |
-| backup واقعی برای rehearsal لازم است | snapshot رمزنگاری و root-only در محیط ایزوله restore و خود restore اثبات می‌شود؛ data/secret وارد Git یا log نمی‌شود و گرفتن production backup مجوز جدا می‌خواهد. |
+| backup واقعی برای rehearsal لازم است | snapshot رمزنگاری و root-only در محیط ایزوله restore و خود restore اثبات می‌شود؛ data/secret وارد Git یا log نمی‌شود و گرفتن production backup receipt موردی Codex می‌خواهد. |
 | دو copy از 23 جدول shared وجود دارد | انتخاب canonical براساس table/row authority و business hash است؛ union کل DB، timestamp-only و LWW ممنوع‌اند. |
 | 33 جدول local وارد target می‌شوند | Web session/Messenger/upload/Push از Web source و Telegram queue/FSM/delivery از Bot source؛ mixed table فقط با mapping؛ bookkeeping rebuild می‌شود. |
 | session معتبر Web وجود دارد | session و key امن حفظ می‌شوند؛ OTP/lock/cache موقت Redis مهاجرت نمی‌کند و کاربر فقط برای state موقت دوباره اقدام می‌کند. |
@@ -969,19 +998,19 @@ Dependency: `P1-04`، `P2-05` و `DPL-4`. مجوز production data فقط read-o
 14. rollback rehearsal را با نابودکردن فقط target آزمایشی، restore مجدد source
     cloneها و بازاجرای runbook اثبات کند؛ backupهای اصلی دست‌نخورده بمانند.
 
-### خروجی، آزمون و Gate انسانی
+### خروجی، آزمون و Gate نهایی Codex
 
 - `10-finland-data-merge-contract.md`، mapping جدول‌ها، conflict/quarantine report،
   restore receipt، run hashes و rollback receipt.
 - هیچ conflict مالی/موجودی unresolved و هیچ missing media/FK پنهان باقی نماند.
 - دو اجرای clean و یک resume نتیجهٔ business-equivalent بدهند.
-- مالک conflict policy و report نهایی را تأیید کند؛ این Stage هیچ writer تولید را
+- Codex Final Reviewer conflict policy و report نهایی را تأیید کند؛ این Stage هیچ writer تولید را
   freeze، migrate یا تغییر نمی‌دهد.
 
 Gate طراحی در 2026-09-02 تأیید شد: canonical مبتنی بر table/row authority، حفظ
 session معتبر، کنارگذاشتن Redis موقت، ID mapping، media blocker/quarantine، صفر
 conflict مالی، دو clean + یک kill/resume، سقف 4/90 دقیقه، جدایی Market و الزام
-مجوز جدا برای production backup پذیرفته شدند. این تأیید مجوز backup، restore،
+receipt جدا برای production backup پذیرفته شدند. این تأیید تاریخی مجوز backup، restore،
 کپی PII، اجرای runner یا freeze تولید نیست.
 
 Rollback: target rehearsal disposable است؛ source backupها immutable و تا پایان
@@ -989,7 +1018,7 @@ cutover + retention محافظت می‌شوند.
 
 ## `P1-06` — staging یکپارچه Finland
 
-وضعیت: `PROPOSED — قرارداد سناریویی پذیرش در 2026-09-02 تأیید شد؛ اجرا مسدود است`
+وضعیت: `PROPOSED — قرارداد سناریویی پذیرش تأییدشده؛ منتظر dependency و Assignment است`
 
 Dependency: `P1-05` و `DPL-9`.
 
@@ -1052,7 +1081,7 @@ staging باید نسخهٔ کوچک و واقعی معماری هدف باشد�
     می‌کند؛ regression blocker است، تست غیرقطعی اصلاح/re-run می‌شود و baseline bug
     ثبت و تعیین تکلیف صریح می‌خواهد. waiver پنهان ممنوع است.
 
-### خروجی، آزمون و Gate انسانی
+### خروجی، آزمون و Gate نهایی Codex
 
 - `11-staging-acceptance.md`، corpus/version، differential report، browser matrix،
   chaos/restart، performance، soak، backup/restore و rollback receipts.
@@ -1074,10 +1103,10 @@ Rollback: staging به artifact قبلی بازمی‌گردد یا rebuild می
 
 ## `P1-07` — cutover کنترل‌شده به Finland Primary
 
-وضعیت: `PROPOSED — قرارداد سناریویی cutover در 2026-09-02 تأیید شد؛ نیازمند مجوز تولید جدا`
+وضعیت: `PROPOSED — قرارداد cutover تأییدشده؛ منتظر dependency و receipt تولیدی Codex`
 
-Dependency: `P1-06`، `DPL-9`، change set اتمیک `DPL-10` و مجوز صریح
-تولید. تأیید سند به معنی این مجوز نیست.
+Dependency: `P1-06`، `DPL-9`، change set اتمیک `DPL-10` و receipt صریح تولیدی
+Codex. standing authorization به معنی receipt تولیدی نیست.
 
 ### برداشت انسانی
 
@@ -1163,14 +1192,14 @@ token/session به‌طور قطعی متوقف شود. در هر checkpoint ع�
   sourceها از همان checkpoint باز، route/DNS برگردانده و smoke ثبت می‌شود.
 - **پس از اولین mutation target:** rollback برنامه روی همان DB target انجام می‌شود.
   بازگرداندن source DB قدیمی فقط با runbook reverse-migration/reconciliation تازه
-  و مجوز مالک ممکن است؛ روشن‌کردن مستقیم آن خطر دو history دارد و ممنوع است.
+  و receipt موردی Codex ممکن است؛ روشن‌کردن مستقیم آن خطر دو history دارد و ممنوع است.
 - triggerهای rollback باید پیشاپیش عددی/مشاهده‌پذیر باشند: invariant failure،
   duplicate Telegram owner، migration/hash mismatch، critical parity regression،
   DB durability failure، `5xx > 2%` برای ۵ دقیقه، `p95 > 2x baseline` برای ۱۰
   دقیقه یا queue lag بیش از ۳۰ ثانیه برای ۵ دقیقه. alert و checkpoint block
   خودکار است ولی فرمان rollback/continue فقط انسانی است.
 
-### خروجی و Gate انسانی
+### خروجی و Gate نهایی Codex
 
 - `12-cutover-runbook.md` تکمیل‌شده، timeline، تمام checkpoint receiptها، digestها،
   backup/restore، ownership، DNS/route، smoke و observation evidence.
@@ -1187,9 +1216,9 @@ process stop، deploy یا cutover صادر نمی‌کند.
 
 ## `P1-08` — closure و حذف بدهی توپولوژی قدیمی
 
-وضعیت: `PROPOSED — قرارداد سناریویی closure در 2026-09-02 تأیید شد؛ اجرا و حذف مسدود است`
+وضعیت: `PROPOSED — قرارداد closure تأییدشده؛ منتظر dependency و receipt مخرب Codex`
 
-Dependency: `P1-07`، `P2-11` و تأیید retention/backup/decommission. این dependency
+Dependency: `P1-07`، `P2-11` و receipt Codex برای retention/backup/decommission. این dependency
 عمداً باعث می‌شود منابع قدیمی پیش از عملیاتی‌شدن Iran Standby حذف نشوند.
 
 ### برداشت انسانی
@@ -1207,10 +1236,10 @@ job، backup، monitoring، rollback یا runbookی به توپولوژی قدی
 | adapter/config/script توپولوژی قدیمی حذف می‌شود | حذف در batch و commit کوچک با scan و full parity قبل/بعد است؛ feature یا policy Web/Bot همراه آن تغییر نمی‌کند. |
 | old edge هنوز درخواست می‌گیرد | proxy باقی می‌ماند؛ فقط پس از حداقل هفت روز، ۴۸ ساعت ترافیک معتبر صفر و اثبات DNS خاموش و سپس ۲۴ ساعت پایش می‌شود. ترافیک معتبر تازه proxy را موقتاً برمی‌گرداند. |
 | credential یا access قدیمی باید revoke شود | اختصاصی/مشترک بودن و دسترسی سالم target ابتدا اثبات می‌شود؛ shared secret ابتدا rotate و rollback credential تا پایان protected window حفظ می‌شود. |
-| backup مهاجرت به روز سی‌ام می‌رسد | فقط با backup تازهٔ Finland دارای off-host restore receipt، Iran DR سالم و نبود incident باز نامزد حذف می‌شود؛ حذف واقعی receipt و تأیید انسانی می‌خواهد. |
+| backup مهاجرت به روز سی‌ام می‌رسد | فقط با backup تازهٔ Finland دارای off-host restore receipt، Iran DR سالم و نبود incident باز نامزد حذف می‌شود؛ حذف واقعی receipt محدود Codex می‌خواهد. |
 | دو host قدیمی آمادهٔ حذف‌اند | old Bot host ابتدا، ۲۴ ساعت پایش و سپس old Web host بعد از پایان proxy حذف می‌شود؛ هر host/volume/snapshot/credential مجوز دقیق جدا دارد. |
 | host حذف شده ولی resource جانبی مانده است | DNS/firewall/monitoring/backup schedule/inventory/billing/release orphan کشف و تعیین تکلیف می‌شود؛ closure با orphan باز ممنوع است. |
-| `candidate/wa-ir-standby-v1` دیده می‌شود | خودکار حذف نمی‌شود؛ ابتدا معماری/مستندات لازم استخراج و حذف فقط با دستور صریح مستقل، ترجیحاً در closure کل پلن، انجام می‌شود. |
+| `candidate/wa-ir-standby-v1` دیده می‌شود | خودکار حذف نمی‌شود؛ ابتدا معماری/مستندات لازم استخراج و حذف فقط با receipt صریح Codex، ترجیحاً در closure کل پلن، انجام می‌شود. |
 | پس از decommission بازیابی لازم است | فقط off-host backup دارای restore receipt یا Iran Standby مسیر recovery است؛ نبود هر دو decommission را از ابتدا ممنوع می‌کند. |
 
 ### Task Card فنی Cursor
@@ -1234,7 +1263,7 @@ job، backup، monitoring، rollback یا runbookی به توپولوژی قدی
 7. credential و access قدیمی را فقط پس از backup و audit با manifest revoke کند؛
    rollback credential تا پایان protected window حذف نمی‌شود.
 8. volume، snapshot، backup، release و server را بر اساس retention manifest و با
-   approval مستقل decommission کند. old Bot host ابتدا و old Web host فقط پس از
+   receipt مستقل Codex decommission کند. old Bot host ابتدا و old Web host فقط پس از
    ۲۴ ساعت پایش و پایان proxy حذف شود. backup مهاجرت پس از ۳۰ روز فقط با backup
    تازهٔ off-host و restore-tested Finland، Iran DR سالم و نبود incident باز نامزد
    حذف است. هر حذف material باید target دقیق و recovery status داشته باشد.
@@ -1243,15 +1272,15 @@ job، backup، monitoring، rollback یا runbookی به توپولوژی قدی
 10. final architecture، cost/capacity، restore receipt، data hash و owner matrix را
     ثبت و Stage Ledger را به `COMPLETE` ببرد.
 11. `candidate/wa-ir-standby-v1` در این Stage خودکار حذف نمی‌شود. حذف آن فقط پس از
-    پایان استخراج معماری/مستندات و دستور صریح مالک، ترجیحاً در closure کل پلن است.
+    پایان استخراج معماری/مستندات و receipt صریح Codex، ترجیحاً در closure کل پلن است.
 
-### خروجی، آزمون و Gate انسانی
+### خروجی، آزمون و Gate نهایی Codex
 
 - `13-closure-and-decommission.md`، no-reference report، deprecation ledger،
   credential/resource deletion manifest و final topology receipt.
 - hardcode/reference scan، full parity suite، backup restore و disaster recovery
   smoke پس از cleanup سبز باشند.
-- decommission هر host/volume/backup/credential نیازمند تأیید جداگانهٔ مالک است.
+- decommission هر host/volume/backup/credential نیازمند receipt جداگانهٔ Codex است.
 - پس از closure، repository و runbookها فقط معماری فعال و history صریحاً منسوخ را
   نشان دهند؛ هیچ billing/monitoring/backup orphan باقی نماند.
 
@@ -1259,7 +1288,7 @@ Gate طراحی در 2026-09-02 تأیید شد: وابستگی قطعی closure
 تمام referenceها، cleanup مرحله‌ای و parity-checked، خاموشی old edge پس از 48h
 ترافیک معتبر صفر و 24h پایش، حذف old Bot سپس old Web با 24h فاصله، و نامزدی حذف
 backup مهاجرت پس از 30 روز و restore جایگزین پذیرفته شدند. هر حذف material و حذف
-`candidate/wa-ir-standby-v1` همچنان مجوز صریح مستقل می‌خواهد؛ این تأیید هیچ حذف،
+`candidate/wa-ir-standby-v1` همچنان receipt مخرب مستقل Codex می‌خواهد؛ این تأیید هیچ حذف،
 revoke، shutdown یا decommission را مجاز نمی‌کند.
 
 Rollback: پیش از حذف نهایی، sourceها fenced و recoverable می‌مانند. پس از حذف،
@@ -1270,7 +1299,7 @@ decommission مجاز نیست.
 
 بخش ادغام فقط زمانی بسته است که همهٔ موارد زیر هم‌زمان برقرار باشند:
 
-1. تمام `P1-00..P1-08` با dependency، evidence و gate انسانی `COMPLETE` باشند.
+1. تمام `P1-00..P1-08` با dependency، evidence و Final Review Codex `COMPLETE` باشند.
 2. Web/API و Bot روی Finland Primary جدا اجرا شوند و PostgreSQL/Redis مشترک داشته
    باشند؛ restart و failure domain آن‌ها مستقل باشد.
 3. تنها یک Telegram executor و تنها یک owner برای هر scheduler/job وجود داشته باشد.
@@ -1294,7 +1323,7 @@ decommission مجاز نیست.
 
 ## `P2-00` — Data Ownership Matrix
 
-وضعیت: `PROPOSED — قرارداد سناریویی ownership در 2026-09-02 تأیید شد؛ اجرا مسدود است`
+وضعیت: `PROPOSED — قرارداد سناریویی ownership تأییدشده؛ منتظر dependency و Assignment است`
 
 برای تک‌تک مدل‌ها/جدول‌ها این فیلدها ثبت شود:
 
@@ -1391,7 +1420,7 @@ object transfer، credential access یا فعال‌سازی sync نیست.
 
 ## `P2-01` — قرارداد event و stream
 
-وضعیت: `PROPOSED — قرارداد سناریویی event/stream در 2026-09-02 تأیید شد؛ اجرا مسدود است`
+وضعیت: `PROPOSED — قرارداد سناریویی event/stream تأییدشده؛ منتظر dependency و Assignment است`
 
 پاکت حداقل شامل این موارد است:
 
@@ -1424,7 +1453,7 @@ Market را به Product سرایت دهد و stream جدا برای هر جدو
 | event معتبر موجب oversell/negative balance/settlement می‌شود | state تغییر نمی‌کند، event quarantine و product stream/FULL_SYNC block می‌شود تا repair یا تصمیم انسانی audited. |
 | schema ناشناخته به receiver قدیمی می‌رسد | receiver-first rollout لازم است؛ payload drop/partial apply ممنوع، event immutable/quarantined و upcaster فقط نسخه‌دار و تست‌شده است. |
 | event رد می‌شود | `REJECTED_RECEIPT` علت را ثبت می‌کند ولی success ACK نیست و checkpoint را جلو نمی‌برد؛ blind retry بی‌نهایت نیز انجام نمی‌شود. |
-| repair لازم است | range دقیق و اصل byteهای immutable بازنشر می‌شود؛ بازسازی با همان sequence ممنوع و loss واقعی فقط با snapshot/bootstrap و gate انسانی حل می‌شود. |
+| repair لازم است | range دقیق و اصل byteهای immutable بازنشر می‌شود؛ بازسازی با همان sequence ممنوع و loss واقعی فقط با snapshot/bootstrap، تصمیم ثبت‌شدهٔ Codex و receipt عملیاتی محدود حل می‌شود. |
 
 قواعد:
 
@@ -1475,7 +1504,7 @@ Object Storage access یا فعال‌سازی sync نیست.
 
 ## `P2-02` — Object Storage transport
 
-وضعیت: `PROPOSED — قرارداد سناریویی Object Storage در 2026-09-02 تأیید شد؛ اجرا مسدود است`
+وضعیت: `PROPOSED — قرارداد سناریویی Object Storage تأییدشده؛ منتظر dependency و Assignment است`
 
 Object Storage ایران فقط mailbox/transport بادوام است؛ source of truth کسب‌وکار،
 Writer authority، lock/lease یا backup محسوب نمی‌شود. `sync-control`, `sync-media`,
@@ -1576,7 +1605,7 @@ download، lifecycle mutation یا تماس Object Storage نیست.
 
 ## `P2-03` — bootstrap، snapshot و parity
 
-وضعیت: `PROPOSED — قرارداد سناریویی bootstrap/parity در 2026-09-02 تأیید شد؛ اجرا مسدود است`
+وضعیت: `PROPOSED — قرارداد bootstrap/parity تأییدشده؛ منتظر dependency و Assignment است`
 
 Snapshot در این Stage sync seed است، نه backup. manifest آن حداقل snapshot/source
 identity، writer generation، release/schema/ownership version، creation time،
@@ -1640,7 +1669,7 @@ DB create/reset/import/restore، replay یا data mutation نیست.
 
 ## `P2-04` — Manual Writer Handover، generation و fencing
 
-وضعیت: `PROPOSED — قرارداد سناریویی handover در 2026-09-02 تأیید شد؛ اجرا مسدود است`
+وضعیت: `PROPOSED — قرارداد سناریویی handover تأییدشده؛ منتظر dependency و Assignment است`
 
 اصل‌های تغییرناپذیر:
 
@@ -1732,7 +1761,7 @@ Bundle پذیرفته شدند. policy دادهٔ stale و authority هنگام 
 
 ## `P2-05` — authority و conflict policy
 
-وضعیت: `PROPOSED — قرارداد سناریویی authority/conflict در 2026-09-02 تأیید شد؛ اجرا مسدود است`
+وضعیت: `PROPOSED — قرارداد authority/conflict تأییدشده؛ منتظر dependency و Assignment است`
 
 ### مبنای واقعی کد و شکاف هدف
 
@@ -1845,7 +1874,7 @@ command publication، quota mutation، quarantine repair یا هیچ اقدام 
 
 ## `P2-06` — dashboard مستقل دو سرور
 
-وضعیت: `PROPOSED — قرارداد سناریویی dashboard در 2026-09-02 تأیید شد؛ اجرا مسدود است`
+وضعیت: `PROPOSED — قرارداد dashboard تأییدشده؛ منتظر dependency و Assignment است`
 
 ### مرز مسئولیت و معماری
 
@@ -1965,7 +1994,7 @@ creation، deploy، firewall، role change، sync، cleanup یا هیچ اقدا
 
 ## `P2-07` — DNS control و route verification
 
-وضعیت: `PROPOSED — قرارداد سناریویی DNS در 2026-09-02 تأیید شد؛ اجرا مسدود است`
+وضعیت: `PROPOSED — قرارداد DNS تأییدشده؛ منتظر dependency و Assignment است`
 
 ### مبنای واقعی و مرز اختیار
 
@@ -2117,7 +2146,7 @@ deploy، role change، probe production یا هیچ اقدام production نیس
 
 ## `P2-08` — state machine اتصال، قطعی و اتصال مجدد
 
-وضعیت: `PROPOSED — قرارداد سناریویی state machine در 2026-09-02 تأیید شد؛ اجرا مسدود است`
+وضعیت: `PROPOSED — قرارداد state machine تأییدشده؛ منتظر dependency و Assignment است`
 
 ### شکاف وضع موجود و مدل حالت هدف
 
@@ -2290,7 +2319,7 @@ drain/fence، receipt generation، DNS/role mutation، deploy یا هیچ اقد
 
 ## `P2-09` — OTP، session، notification و Messenger در قطعی
 
-وضعیت: `PROPOSED — قرارداد سناریویی continuity در 2026-09-02 تأیید شد؛ اجرا مسدود است`
+وضعیت: `PROPOSED — قرارداد continuity تأییدشده؛ منتظر dependency و Assignment است`
 
 این Stage چهار مفهوم را از هم جدا می‌کند: identity مشترک، credential/session محلی،
 intent بادوام کسب‌وکار و side effect خارجی. Writer عوض‌شده نباید session یا OTP سایت
@@ -2489,7 +2518,7 @@ mutation یا هیچ اقدام production نیست.
 
 ## `P2-10` — staging و fault matrix
 
-وضعیت: `PROPOSED — قرارداد Full Matrix حداکثری در 2026-09-02 تأیید شد؛ اجرا مسدود است`
+وضعیت: `PROPOSED — قرارداد Full Matrix تأییدشده؛ منتظر dependency و Assignment است`
 
 این Stage گیت پذیرش تغییر معماری است، نه smoke test و نه گیت ثابت هر deploy. «Full»
 با تعداد rowهای تولیدشده تعریف نمی‌شود: هر requirement، مسیر mutation، transition،
@@ -2739,14 +2768,14 @@ Grafana یا peer observation Writer فعلی را تغییر نمی‌دهد؛ 
 - disk-full فقط در bounded test volume، نه host filesystem؛
 - clock skew/expiry فقط با injected clock، نه تغییر ساعت host که TLS/TOTP را خراب کند؛
 - host reboot واقعی Finland و Iran یک‌بار پیش از production؛ پس از production فقط در
-  maintenance window و با مجوز جدا، و هرگز با شبیه‌سازی «passed» اعلام نمی‌شود؛
+  maintenance window و با receipt موردی Codex، و هرگز با شبیه‌سازی «passed» اعلام نمی‌شود؛
 - forged/replayed Receipt/event، wrong environment/target، unauthorized Console/API/
   actuator، secret/PII leakage و staging-to-production routing؛
 - production DB/Redis/domain/bucket/prefix/Bot/channel/SMS recipient/DNS record match
   پیش از اولین mutation runner را متوقف می‌کند.
 
 اگر سرور موجود Iran هنگام این Stage workload زنده دارد، reboot یا host-wide fault تا
-پنجرهٔ نگهداری و مجوز صریح blocked است؛ container-level substitute شاهد host failure
+پنجرهٔ نگهداری و receipt عملیاتی Codex blocked است؛ container-level substitute شاهد host failure
 محسوب نمی‌شود.
 
 ### Matrix ۱۱ — browser، client و network edge
@@ -2863,7 +2892,7 @@ provider fake/real receipts، redacted logs، cleanup plans/proofs و final sign
    Data/Stream/Job/Mutation registries بسازد و CI orphan/missing-driver را fail کند.
 3. exact acceptance topology روی دو میزبان نهایی و Object Storage موجود را به‌صورت
    declarative طراحی کند: project/network/port/volume/env/secret/domain/resource isolation
-   و production fingerprint denylist؛ ایجاد/اجرا مجوز جدا می‌خواهد.
+   و production fingerprint denylist؛ ایجاد/اجرا receipt موردی Codex می‌خواهد.
 4. manifest generator را coverage-driven و versioned کند؛ semantic cross-product،
    equivalence proof و mandatory dimension lint داشته باشد و count را معیار قبولی نداند.
 5. CLI canonical و fault-agent محدود را با plan/preflight/confirm/resume/recover/cleanup،
@@ -2871,7 +2900,8 @@ provider fake/real receipts، redacted logs، cleanup plans/proofs و final sign
 6. fault adapters برای network/TLS/DNS/S3/DB/Redis/process/resource/bounded-disk/
    injected-clock/provider را بسازد؛ هر fault apply/observe/recover/verify-clean دارد.
 7. topology/startup و تمام state-machine edge/faultهای دو جهت را همراه Console/browser/
-   receipt evidence اجراپذیر کند؛ host reboot procedure را جدا و human-gated نگه دارد.
+   receipt evidence اجراپذیر کند؛ host reboot procedure را جدا و مقید به receipt
+   عملیاتی Codex نگه دارد.
 8. event/sync/storage matrix را برای تک‌تک stream/direction/fault boundary و bootstrap/
    parity/repair/retention پوشش دهد؛ business exactly-once و no-false-ready assert شود.
 9. ۴۶۵ baseline و تمام Web/Bot quadrant/role/tier/overtime/terminal/concurrency paths را
@@ -2889,7 +2919,7 @@ provider fake/real receipts، redacted logs، cleanup plans/proofs و final sign
 15. evidence writer را redaction-before-write، digest/index، retention metadata و single
     canonical path کند؛ cleanup allowlist/dry-run/zero-proof را پیش از mutation تست کند.
 16. final report را fail-closed بسازد: coverage صددرصد، zero skipped/orphan/unknown diff،
-    business/security/readiness/performance gates، human sign-off و remaining-risk صفر یا
+    business/security/readiness/performance gates، Codex final sign-off و remaining-risk صفر یا
     صریحاً blocker؛ هیچ auto-waiver یا synthetic pass وجود ندارد.
 
 ### Gate خروج
@@ -2915,7 +2945,7 @@ reboot، provider send، data copy/cleanup یا هیچ اقدام عملیاتی
 
 ## `P2-11` — پذیرش اولیهٔ Iran به‌عنوان Production Standby
 
-وضعیت: `APPROVED در سطح طراحی در 2026-09-03 — اجرا و هر mutation تولیدی نیازمند مجوز جدا`
+وضعیت: `APPROVED در سطح طراحی — اجرا و هر mutation تولیدی نیازمند receipt موردی Codex`
 
 این Stage، Iran را برای نخستین بار عضو واقعی topology تولید و sync می‌کند. منظور از
 «پذیرش/فعال‌سازی Standby» فقط آماده‌شدن receiverها، state محلی، dashboard، backup و
@@ -2955,7 +2985,7 @@ failover است، نه deploy همیشگی دو سایت و نه گیتی که �
 2. تمام runtime قدیمی product، writer، sender و side-effect executor ایران fence می‌شود؛
    وجود Telegram token/session/executor یک blocker مطلق است.
 3. دادهٔ موجود بدون merge حدسی، backup نسخه‌دار و restore-test می‌شود و سپس در quarantine
-   با owner و تاریخ بازبینی نگه داشته می‌شود. حذف آن فقط طبق `DPL-10` و مجوز جداست و backup
+   با owner و تاریخ بازبینی نگه داشته می‌شود. حذف آن فقط طبق `DPL-10` و receipt Codex است و backup
    بی‌انتها باقی نمی‌ماند.
 4. DB/Redis هدف از پایهٔ تمیز و schema exact release ساخته می‌شوند. دادهٔ ناشناخته یا قدیمی
    مستقیم وارد state canonical یا sync stream نمی‌شود؛ استخراج لازم change set جدا دارد.
@@ -3064,18 +3094,19 @@ Product write، provider side effect، DNS mutation، Writer mutation و skipped
 باید صفر باشند.
 
 نتیجهٔ موفق فقط این است: `IRAN = PRODUCTION_STANDBY_READY`. Finland همچنان Web Writer،
-Telegram owner و مقصد DNS است. اجازهٔ failover یا تمرین آن فقط در `P2-12` و با مجوز
-مستقل صادر می‌شود.
+Telegram owner و مقصد DNS است. اجازهٔ failover یا تمرین آن فقط در `P2-12` و با
+receipt عملیاتی Codex صادر می‌شود.
 
 Gate طراحی در 2026-09-03 تأیید شد: این Stage onboarding اولیه است و پس از هر تغییر کد
 تکرار نمی‌شود؛ clean bootstrap پس از backup/quarantine وضعیت موجود، Product block با
 `STANDBY_NOT_ACTIVE`، parity واقعی و soak پیوستهٔ هفت‌روزه با شروع مجدد پس از critical
-readiness failure پذیرفته شدند. این تأیید مجوز دسترسی credential، deploy، snapshot/data
-copy، bucket write، process stop/start، cleanup، DNS/Writer change یا عملیات production نیست.
+readiness failure پذیرفته شدند. اجرای credential access، deploy، snapshot/data copy،
+bucket write، process stop/start، cleanup، DNS/Writer change یا عملیات production به
+receipt محدود Codex Final Reviewer نیاز دارد.
 
 ## `P2-12` — failover/failback drill
 
-وضعیت: `APPROVED در سطح طراحی در 2026-09-03 — هر اجرای production مجوز جدا می‌خواهد`
+وضعیت: `APPROVED در سطح طراحی — هر اجرای production receipt موردی Codex می‌خواهد`
 
 این Stage نخستین چرخهٔ واقعی `Finland → Iran → Finland` را روی topology production
 اثبات می‌کند. deploy روزمره نیست: DNS واقعی جابه‌جا می‌شود، Data Plane واقعاً partition
@@ -3426,7 +3457,7 @@ price, quantity, status, occurred_at, price_origin, model_snapshot_id
 - هر دو سایت inference deterministic روی artifact امضاشده اجرا می‌کنند.
 - artifact شامل model weights، feature/schema version، training cutoff، data digest،
   code/release digest، evaluation و signature است.
-- artifact فقط پس از shadow parity و تأیید انسانی promote می‌شود.
+- artifact فقط پس از shadow parity و receipt نهایی Codex promote می‌شود.
 - cache، optimizer state یا online learner state دوطرفه merge نمی‌شود.
 - Iran در partition artifact آخرین نسخهٔ تأییدشده را freeze می‌کند و local inference
   را ادامه می‌دهد.
@@ -3521,14 +3552,14 @@ Gate:
 
 ## `P3-10` — promotion و reconnect model gate
 
-وضعیت: `PROPOSED — مجوز جدا برای Product`
+وضعیت: `PROPOSED — منتظر dependency و receipt Product از Codex`
 
 `MARKET_READY` فقط وقتی سبز است که:
 
 - Fact streams تا cutoff توافق‌شده gap ندارند.
 - artifact/version/schema هر دو سایت برابر است.
 - replay checksum و snapshot comparison در tolerance مصوب است.
-- rejected conflict حل یا صریحاً waiver انسانی با دامنه محدود دارد؛ synthetic evidence
+- rejected conflict حل یا صریحاً تصمیم محدود Codex Final Reviewer دارد؛ synthetic evidence
   waiver ممنوع است.
 - Iran Writer تا پایان این gate model output خود را ادامه می‌دهد.
 
@@ -3542,7 +3573,8 @@ Gate:
 
 زیرعنوان‌های `P4-*` دسته‌بندی انسانی شکاف‌ها هستند. execution IDهای تأییدشده فقط
 `DPL-1..DPL-10` در [`section-4/EXECUTION_PLAN.md`](section-4/EXECUTION_PLAN.md) هستند؛
-شروع اجرا و هر production mutation مجوز جدا می‌خواهد.
+شروع Stage استاندارد طبق governance مجاز است؛ هر production mutation receipt موردی
+Codex Final Reviewer می‌خواهد.
 `PROPOSED` در زیر به معنی «اجرای موضوع هنوز شروع نشده» است؛ طراحی آن تأیید شده است.
 
 ## `P4-00` — audit خط فعلی deploy
@@ -3614,7 +3646,7 @@ deploy cleanup --dry-run
 - standby قبل از Writer برای schema/sync upgrade می‌شود.
 - API canary و readiness پیش از traffic؛ Bot/Queue فقط پس از owner fence.
 - migration backup، lock timeout، disk headroom و idempotent second pass دارد.
-- destructive contract migration فقط پس از soak release قبلی و مجوز جدا.
+- destructive contract migration فقط پس از soak release قبلی و receipt Codex.
 
 ## `P4-05` — risk-scoped gate matrix
 
@@ -3677,7 +3709,7 @@ Gate خروج: هر failure state معلوم دارد و اجرای دوباره
 
 ## `P4-08` — deploy تولید Finland
 
-وضعیت: `PROPOSED — مجوز جدا`
+وضعیت: `PROPOSED — منتظر dependency و receipt تولیدی Codex`
 
 - از exact release پذیرفته‌شدهٔ `P1-07` استفاده می‌کند.
 - backup/off-host receipt، capacity، TLS، firewall و observability قبل از traffic.
@@ -3686,7 +3718,7 @@ Gate خروج: هر failure state معلوم دارد و اجرای دوباره
 
 ## `P4-09` — deploy تولید Iran Standby
 
-وضعیت: `PROPOSED — مجوز جدا`
+وضعیت: `PROPOSED — منتظر dependency و receipt تولیدی Codex`
 
 - Iran ابتدا standby و product write-blocked است.
 - artifact از مسیر داخلی قابل دسترس و digest برابر Finland دارد.
@@ -3836,30 +3868,35 @@ CANONICAL | SUPPORTING | HISTORICAL | SUPERSEDED | DELETE_CANDIDATE
 
 ## `P5-06` — AI execution ledger
 
-وضعیت: `PROPOSED`
+وضعیت: `COMPLETE در سطح قرارداد اجرایی؛ Stageهای واقعی مستقل اجرا می‌شوند`
 
 برای هر Stage یک task card تولید می‌شود:
 
 ```yaml
 id: P2-04
-status: APPROVED
+status: READY
 depends_on: [P2-01, P2-02]
+assignment_id: <unique-id>
+base_sha: <full-sha>
 allowed_scope: [...]
 forbidden_actions: [...]
+locks: [...]
+parallel_peer: null
 required_reads: [...]
 deliverables: [...]
 tests: [...]
 failure_tests: [...]
 rollback_test: ...
-owner_decisions: [...]
+final_reviewer_decisions: [...]
 ```
 
-Cursor قبل از اجرا branch/status/base را کنترل، سپس source را inspect و در پایان
-diff/test receipt خلاصه می‌کند. raw command log tracked نمی‌شود.
+Coordinator قبل از اجرا dependency/branch/status/base/lock را کنترل و Assignment صادر
+می‌کند. Worker source را inspect و در پایان diff/test bundle می‌سازد؛ Codex Final
+Reviewer آن را می‌پذیرد یا برای اصلاح بازمی‌گرداند. raw command log tracked نمی‌شود.
 
 ## `P5-07` — تبدیل پلن به Cursor Skill و Rules
 
-وضعیت: `COMPLETE در سطح بسته‌بندی پلن؛ استفاده برای اجرای Stage مجوز جدا می‌خواهد`
+وضعیت: `COMPLETE در سطح بسته‌بندی؛ اجرای Stage استاندارد standing authorization دارد`
 
 این پروژه هم‌اکنون `.cursor/skills/` و `.cursor/rules/` دارد؛ بنابراین تبدیل
 ممکن است. خروجی پیشنهادی:
@@ -3867,6 +3904,7 @@ diff/test receipt خلاصه می‌کند. raw command log tracked نمی‌ش�
 ```text
 .cursor/skills/two-site-refactor/SKILL.md
 .cursor/rules/two-site-refactor-safety.mdc
+docs/refactor/two-server/EXECUTION_GOVERNANCE.md
 ```
 
 Skill فقط workflow و routing را نگه می‌دارد و متن این پلن را duplicate نمی‌کند.
@@ -3875,11 +3913,12 @@ Skill فقط workflow و routing را نگه می‌دارد و متن این پ
 - نام `two-site-refactor` و invocation فقط صریح با `disable-model-invocation: true`
 - invocation ترجیحاً صریح برای اجرای Stage
 - الزام خواندن task card و source-of-truthهای Stage
-- ممنوعیت push/merge/deploy/DNS/production بدون دستور جدا
-- یک Stage در هر invocation
-- توقف روی owner decision باز
+- ممنوعیت push به remote، merge به `main`، deploy، DNS و production بدون receipt لازم
+- یک Stage برای هر Worker و یک integration queue ترتیبی
+- یک Worker نویسنده به‌صورت پیش‌فرض و حداکثر دو با Pairing Receipt
+- توقف روی تصمیم باز و ارجاع آن به Codex Final Reviewer
 - تست failure و rollback اجباری
-- ممنوعیت complete اعلام‌کردن با fixture-only evidence
+- ممنوعیت self-approval و complete اعلام‌کردن با fixture-only evidence
 
 Rule کوچک و همیشه‌اعمال فقط invariantهای ایمنی را نگه می‌دارد؛ جزئیات حجیم در
 Skill و docs باقی می‌ماند.
@@ -3899,8 +3938,8 @@ Gate نهایی:
 - تمام تصمیم‌های باز بسته یا به‌صورت صریح deferred شده‌اند.
 - architecture، runtime، manifest، dashboard و runbook یک واژگان دارند.
 - commandهای مستند در clean environment آزمایش شده‌اند.
-- یک عامل انسانی از روی runbook و یک Cursor Agent از روی Skill، rehearsal یکسان
-  را بدون دانش شفاهی انجام می‌دهند.
+- Coordinator و Worker از روی Skill و Codex از روی Final Review template، rehearsal
+  یکسان را بدون دانش شفاهی یا تأیید مرحله‌ای کاربر انجام می‌دهند.
 - سند منسوخ به‌عنوان مرجع جاری در search result داخلی باقی نمانده است.
 - restore، failover، failback و rollback receipt واقعی staging موجود است.
 
@@ -3924,12 +3963,16 @@ Gate نهایی:
 ## قرارداد commit و branch برای اجرا
 
 - این شاخه فقط تدوین پلن است.
-- پس از مجوز شروع implementation، شاخهٔ موقت تازه از `main` ساخته می‌شود:
+- پس از ثبت baseline نهایی، Coordinator شاخهٔ موقت تازه از `main` می‌سازد:
   `refactor/two-site-architecture`.
+- هر Worker در branch موقت `refactor/stage/<STAGE_ID>-<slug>` و worktree ثبت‌شده
+  کار می‌کند؛ یک Worker نویسنده پیش‌فرض و حداکثر دو Worker مجاز است.
 - هر Stage یک یا چند commit منسجم با Stage ID در subject دارد.
 - unrelated changes وارد Stage نمی‌شوند.
 - قبل و بعد هر Stage `git status`, branch و base ثبت می‌شوند.
-- merge فقط پس از review مستقل و gate همان موج است.
+- Coordinator کاندیداها را یکی‌یکی روی integration branch اعمال و تست می‌کند؛
+  `COMPLETE` فقط پس از review همان integration commit است و promotion به `main`
+  در branch barrier، receipt جداگانهٔ Codex می‌خواهد.
 - branch پس از merge/رد شدن طبق retention حذف می‌شود؛ branch backup دائمی نیست.
 
 ## Definition of Done کل پروژه
@@ -3940,7 +3983,7 @@ Gate نهایی:
 2. Finland دقیقاً یک Telegram owner و Iran صفر Telegram credential داشته باشد.
 3. Iran در حالت عادی standby همگام و product-write-blocked باشد.
 4. انتقال انسانی، Fence Receipt مبدأ و گارد ترتیب dashboard دو Web Writer را ببندند.
-5. failover، reconnect و failback در staging و سپس با مجوز در production ثابت شوند.
+5. failover، reconnect و failback در staging و سپس با receipt Codex در production ثابت شوند.
 6. تمام داده‌های shared و Market Facts registry، sequence، ACK، checksum و repair
    قابل اثبات داشته باشند.
 7. مدل‌های `FULL_CONNECTED` و `IR_CONTINUITY_*` با widening و confidence درست
@@ -3956,7 +3999,7 @@ Gate نهایی:
 ## مواردی که این نسخه عمداً انجام نداده است
 
 - هیچ کدی را refactor نکرده است.
-- هیچ Stage را `APPROVED` یا `COMPLETE` اعلام نکرده است.
+- هیچ Stage فنی را `COMPLETE` اعلام نکرده است؛ `P1-00` همچنان `IN_PROGRESS` است.
 - هیچ secret یا manifest خصوصی را نخوانده یا ثبت نکرده است.
 - هیچ server inventory زنده، deploy، DNS، bucket write یا database write انجام نداده است.
 - Cursor Skill و Rule فقط برای اجرای کنترل‌شدهٔ Stage ساخته شده‌اند؛ هیچ Stage فنی،

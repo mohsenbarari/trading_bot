@@ -2,7 +2,7 @@
 
 وضعیت طراحی: `APPROVED`
 
-وضعیت اجرا: `NOT_AUTHORIZED`
+وضعیت اجرا: `AUTHORIZED_CODEX_GATED`
 
 منبع معنا: [Master Plan](../MASTER_PLAN.md#بخش-۵--مستندات-کامل-قابل-نگهداری-و-قابل-اجرای-ai)
 
@@ -48,17 +48,21 @@ docs/
 
 1. Dashboard وضعیت را با vocabulary مشترک نشان می‌دهد و runbook دقیق را لینک می‌کند.
 2. runbook قبل/بعد، prerequisite، زمان/downtime، step ID، انتظار dashboard/log، stop/abort و recovery دارد.
-3. انسان مجوز می‌دهد؛ Codex/Ansible/controller stepها را اجرا می‌کنند. Dashboard و emergency
-   CLI همان state machine را دارند و deploy به Writer/DNS دست نمی‌زند.
+3. Codex Final Reviewer receipt موردی می‌دهد؛ Coordinator/Ansible/controller stepها را
+   اجرا می‌کنند. اقدام Dashboard برای انتقال Writer/DNS همچنان انسانی است و deploy به
+   Writer/DNS دست نمی‌زند.
 4. receipt و incident evidence خارج Git و با retention مصوب ذخیره می‌شود.
 
 ### Cursor یک Stage را اجرا می‌کند
 
 1. Skill به Master Plan، YAML و Stage Card route می‌کند و clean baseline را ثبت می‌کند.
-2. Cursor فقط یک dependency-ready Stage و diff محدود آن را اجرا می‌کند.
+2. هر Worker فقط یک dependency-ready Stage و diff محدود آن را اجرا می‌کند؛ Worker
+   نویسندهٔ دوم فقط با Pairing Receipt مجاز است.
 3. success، failure و rollback tests و evidence واقعی ثبت می‌شوند؛ fixture-only برای High/Critical کافی نیست.
-4. Cursor گزارش فارسی می‌سازد اما `APPROVED/COMPLETE` را به‌جای مالک اعلام نمی‌کند.
-5. production/migration/DNS/Writer/secret/destructive/legacy-retirement در hard stop می‌ماند.
+4. Cursor گزارش فارسی می‌سازد اما self-approval نمی‌کند؛ فقط Codex Final Reviewer
+   می‌تواند commit دقیق را `COMPLETE` کند.
+5. production/migration/DNS/Writer/secret/destructive/legacy-retirement تا receipt
+   موردی Codex در hard stop می‌ماند.
 
 ### سند یا قرارداد تغییر می‌کند
 
@@ -80,7 +84,7 @@ docs/
 | `DOC-7` | dashboard/observability docs | control-plane guide، signal dictionary، alert catalog و Grafana guide | `STALE/UNKNOWN` سبز نیست؛ peer unreachable≠failed؛ alert owner/runbook/test دارد |
 | `DOC-8` | developer/operator docs | getting-started، code map، local env، config، commands، DB، debug، hygiene و contribution | fresh checkout بدون secret/hidden file از مسیر تست‌شده بالا می‌آید |
 | `DOC-9` | governance و cleanup | `KEEP/MERGE/ARCHIVE/DELETE` inventory، trace map، CI policy و retention ledger | unique content پیش از حذف منتقل؛ canonical file بدون تاریخ؛ stale authority صفر |
-| `DOC-10` | plan packaging و Cursor handoff | Master Plan، YAML، section ledgers، templates، Skill و scoped Rules | Skill manually invoked، one-stage، dependency-aware و safety-gated؛ جزئیات را duplicate نکند |
+| `DOC-10` | plan packaging و Cursor handoff | Master Plan، Governance، YAML، ledger، Assignment/Review templates، Skill و scoped Rules | یک Stage در هر Worker، حداکثر دو نویسنده با Pairing Receipt، integration ترتیبی و Codex-gated؛ جزئیات را duplicate نکند |
 
 ## Evidence retention
 
@@ -95,8 +99,9 @@ docs/
 
 ## معیار پایان بخش ۵
 
-- یک انسان و یک Cursor Agent از روی منابع یکسان rehearsal یکسان را بدون دانش شفاهی اجرا کنند.
+- Coordinator، Worker و Codex Reviewer از روی منابع یکسان rehearsal یکسان را بدون
+  دانش شفاهی یا تأیید مرحله‌ای کاربر اجرا کنند.
 - link/path/command/schema checks روی checkout تمیز سبز باشند.
 - search داخلی هیچ سند منسوخ را به‌عنوان authority جاری برنگرداند.
 - تمام تصمیم‌ها، gapها، receiptها و Stageها با ID یکتا و وضعیت واقعی trace شوند.
-- حذف سند، artifact یا branch فقط با retention و approval مربوط انجام شود.
+- حذف سند، artifact یا branch فقط با retention و receipt محدود Codex انجام شود.

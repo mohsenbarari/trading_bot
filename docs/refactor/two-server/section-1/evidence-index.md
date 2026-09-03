@@ -19,7 +19,7 @@ Status: sanitised tracked index; raw runtime output is intentionally untracked
 | Web route inventory | `inventory/surface-web.json` | SHA-256 `c3a13651720969c7920ad695b0cbc6fb8ff3b520ec46c2c4ab4cf57ffe646758` |
 | Job authority inventory | `inventory/surface-jobs.json` | SHA-256 `a324637d0c2d62ca0dcb3243414144b286ec08d8089052b659dacb4dd7781645` |
 | Runtime task ownership | `inventory/runtime-task-ownership.json` | SHA-256 `3290bc262460b682d35badd21efca59f0ca4f0c8629e13c295b3e55df521e7ac` |
-| Task Card | `stages/P1-00.md` | human gate pending |
+| Task Card | `stages/P1-00.md` | evidence closure and Codex Final Review pending |
 
 ## Evidence handling
 

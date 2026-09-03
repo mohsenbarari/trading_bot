@@ -2,7 +2,7 @@
 
 وضعیت طراحی: `APPROVED`
 
-وضعیت اجرا: `NOT_AUTHORIZED`
+وضعیت اجرا: `AUTHORIZED_CODEX_GATED`
 
 شرح انسانی و Task Cardها: [Master Plan](../MASTER_PLAN.md#بخش-۱--ادغام-bot-و-webapp-روی-finland-primary)
 
@@ -30,10 +30,11 @@ schedule یا side effect را ندارد. defect کشف‌شده ثبت می‌
 ## ترتیب تصمیم‌گیری انسانی
 
 1. `P1-00` هر رفتار و ownership فعلی را با code/runtime/evidence ثابت می‌کند.
-2. مالک gapهای رفتار را به `PRESERVE`, `APPROVED_DEFECT` یا `UNRESOLVED` طبقه‌بندی می‌کند.
+2. Codex Final Reviewer gapهای رفتار را به `PRESERVE`, `APPROVED_DEFECT` یا
+   `UNRESOLVED` طبقه‌بندی می‌کند.
 3. فقط پس از صفرشدن ambiguity بحرانی، repository/config/runtime/data rehearsal ساخته می‌شود.
 4. staging و soak باید parity Web/Bot/API/job/data/resource را ثابت کنند.
-5. `P1-07` production permission جدا می‌خواهد؛ تصویب این برنامه مجوز cutover نیست.
+5. `P1-07` receipt تولیدی جدا از Codex می‌خواهد؛ standing authorization مجوز cutover نیست.
 6. `P1-08` پس از Iran admission، drill، retention و backup replacement قابل اجراست.
 
 ## اسناد ممیزی موجود

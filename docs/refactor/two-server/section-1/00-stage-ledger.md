@@ -1,16 +1,16 @@
 # Section 1 Stage Ledger
 
-Last updated: 2026-09-02 UTC
+Last updated: 2026-09-03 UTC
 Plan branch: `plan/two-server-refactor-v1`
 
 | Stage | Status | Gate | Primary output |
 | --- | --- | --- | --- |
-| `P1-00` | `IN_PROGRESS` | owner review approved; evidence and rehearsal gates open | current-state dossier and blocker register |
+| `P1-00` | `IN_PROGRESS` | historical baseline accepted; evidence and Codex Final Review open | current-state dossier and blocker register |
 | `P1-01` | `PROPOSED` | policy approved; execution blocked by `P1-00` and exact batch receipts | cleanup/retention execution |
-| `P1-02` | `PROPOSED` | scenario contract approved; blocked by `P1-00` and `P4-00` | topology-neutral configuration |
+| `P1-02` | `PROPOSED` | scenario contract approved; blocked by `P1-00`, `DPL-1` and `DOC-3` | topology-neutral configuration |
 | `P1-03` | `PROPOSED` | scenario/ownership contract approved; dependencies not complete | target runtime topology |
 | `P1-04` | `PROPOSED` | scenario/data contract approved; dependencies not complete | shared Finland data plane |
-| `P1-05` | `PROPOSED` | scenario/merge contract approved; dependencies and execution authorization open | deterministic data-merge rehearsal |
+| `P1-05` | `PROPOSED` | scenario/merge contract approved; dependencies and Assignment open | deterministic data-merge rehearsal |
 | `P1-06` | `PROPOSED` | scenario/acceptance contract approved; dependencies and execution evidence open | differential staging acceptance |
 | `P1-07` | `PROPOSED` | scenario/cutover contract approved; dependencies, evidence and production authorization open | controlled cutover |
 | `P1-08` | `PROPOSED` | scenario/closure contract approved; cutover, Iran standby, evidence and per-resource authorization open | closure/decommission |
@@ -47,9 +47,9 @@ Completed technical evidence:
 
 ## Why `P1-00` is not `COMPLETE`
 
-The owner approved the dossier, drift register, twelve-family behavior baseline,
-Web/Bot contracts and runtime-ownership seed on 2026-09-02. The Stage contract
-still requires more than owner approval. These technical gates remain open:
+The owner historically accepted the dossier, drift register, twelve-family behavior
+baseline, Web/Bot contracts and runtime-ownership seed on 2026-09-02. The Stage
+contract still requires technical closure and Codex Final Review. These gates remain open:
 
 1. Every discovered route/handler/job has a unique family seed and none is
    unclassified, but 6 items need direct evidence resolution and concrete

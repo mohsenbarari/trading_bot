@@ -103,8 +103,8 @@ decommission candidates, not authorization to stop or delete them.
 | `/srv/trading-bot/releases` on Bot-Finland | roughly 760 MiB across observed release dirs | protect active and rollback releases |
 
 Only one Git worktree is present. Current local branches are `main`, the plan
-branch and `candidate/wa-ir-standby-v1`; the candidate remains local-only by
-explicit owner decision.
+branch and `candidate/wa-ir-standby-v1`; the candidate remains local-only under
+the recorded retention decision until Codex-reviewed closure.
 
 ## Read-only parity receipt
 

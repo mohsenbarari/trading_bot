@@ -1,6 +1,6 @@
 # Feature Parity Contract
 
-Status: owner review approved; scenario characterization and evidence resolution open
+Status: historical owner review accepted; characterization/evidence and Codex Final Review open
 
 ## Definition of parity
 
@@ -63,7 +63,7 @@ the new item has no family/behavior seed.
 
 ## Human-readable scenario contract
 
-The owner reviews these domain scenarios, not hundreds of decorator lines. The
+Codex Final Reviewer reviews these domain scenarios, not hundreds of decorator lines. The
 machine manifests prove that every line is assigned to one of them.
 
 | Family | Real user/operator scenario | State and side effects that must remain equivalent |
@@ -218,7 +218,7 @@ At minimum the target must preserve:
 | current-vs-target differential execution | future `P1-06` |
 
 `P1-00` becomes complete only after the open current-state items have evidence or
-an owner-approved blocker. `P1-06` later proves the target against this frozen
+a Codex-approved blocker. `P1-06` later proves the target against this frozen
 contract; it does not invent the contract after implementation.
 
 ## Owner review gate

@@ -1,10 +1,13 @@
 # Stage Report — `<STAGE_ID>`
 
-- Status: `<IN_PROGRESS|BLOCKED|COMPLETE_CANDIDATE>`
+- Status: `<IN_PROGRESS|BLOCKED|FAILED|COMPLETE_CANDIDATE|FINAL_REVIEW|COMPLETE>`
+- Assignment ID / execution role:
 - Branch / base SHA / head SHA:
+- Worktree registry ID / expiry:
+- Locks / parallel peer:
 - Scope requested:
 - Connectivity / Writer / release / schema state:
-- Human authorization reference:
+- Standing authorization or Codex external-action receipt:
 
 ## Before
 
@@ -31,8 +34,12 @@ Include success, failure and rollback. High/Critical acceptance cannot rely only
 - Data consequence:
 - Verified result:
 
-## Residual risk and owner review
+## Residual risk and final review
 
 - New gaps/decisions:
-- Deferred tests with owner/deadline:
-- Recommended next state; only the owner may accept it:
+- Deferred tests with authority/deadline:
+- Recommended next state:
+- Codex Final Review receipt / exact reviewed SHA:
+
+Cursor may recommend `COMPLETE`, but only `CODEX_FINAL_REVIEWER` may approve the
+exact commit and change the authoritative Stage state to `COMPLETE`.

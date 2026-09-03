@@ -1,8 +1,8 @@
 # Repository and Runtime Cleanup Manifest
 
-Status: policy approved 2026-09-02 — inventory completion and execution authorization open
+Status: policy approved 2026-09-02 — inventory completion and Codex deletion receipts open
 
-## Owner review receipt
+## Historical owner review receipt
 
 The owner approved the canonical storage layout, quarantine-first grouped cleanup,
 retention defaults, large-path treatment, required manifest expansion and the
@@ -16,11 +16,11 @@ root-bounded path and re-check references, locks and protection metadata.
 
 | Path/class | Tracked | Size/state | Proposed action | Required proof / retention |
 | --- | --- | --- | --- | --- |
-| repository worktree | mixed | one canonical worktree | `KEEP` | remain clean; no extra worktree |
+| repository worktrees | mixed | one canonical integration worktree | `KEEP` + bounded stage worktrees | at most two registered stage worktrees under `EXECUTION_GOVERNANCE.md`; remove within 24h after close |
 | `main` | Git branch | only long-lived branch | `KEEP` | canonical integration source |
 | `plan/two-server-refactor-v1` | Git branch | temporary planning branch | `KEEP` until reviewed integration | remove only after the approved plan is preserved on `main` |
 | `candidate/wa-ir-standby-v1` | Git branch | local-only candidate | `KEEP` | owner explicitly deferred deletion; never push/merge as source |
-| Cursor-named Git branch / extra worktree | Git metadata | none observed on 2026-09-02 | `KEEP` absent | any future discovery requires unique-commit audit and exact receipt |
+| Cursor stage branch / worktree | Git metadata | none observed on 2026-09-02 | `CREATE/KEEP` only while assigned | exact Stage/base/owner/locks/expiry registry; no shared or unregistered worktree |
 | `tmp/production-release/` | ignored | ~1.2 GiB / 6,106 files | `QUARANTINE` then `DELETE` candidate | prove no active release/rollback reference; set expiry and reversible quarantine receipt |
 | `frontend/node_modules/` | ignored | ~571 MiB | `KEEP` as reproducible cache or `DELETE` under cache quota | lockfile install must reproduce it; never treat as source/backup |
 | `mutants/` | ignored | ~22 MiB | `DELETE` candidate | test tooling/reference scan; results needed for an open review move to `.local/test-results` first |
@@ -54,7 +54,7 @@ Minimum safety rules:
 4. quarantine is recoverable and expiring, not a permanent second trash pile;
 5. cleanup is allowlist/root-bound, symlink-safe, lock-aware, dry-run first and
    idempotent;
-6. any target not present in the human-approved manifest requires a new gate.
+6. any target not present in the reviewed manifest requires a new Codex gate.
 
 Approved defaults are defined in `docs/REPOSITORY_LOCAL_STORAGE_AND_RETENTION.md`:
 14-day rotated logs, 7-day/2-GiB local test results, two successful releases plus
@@ -92,6 +92,6 @@ and the durable backup copy stay outside Git in access-controlled storage.
 7. verify a second cleanup run makes no additional change.
 
 This file is not an `rm` list. Before `P1-01` can execute, `P1-00` must close and
-each exact homogeneous cleanup batch needs a receipt. Material branches,
+each exact homogeneous cleanup batch needs a Codex receipt. Material branches,
 worktrees, backups, data sets and runtimes require independent receipts; cache or
 log files in one approved class do not require per-file approval.

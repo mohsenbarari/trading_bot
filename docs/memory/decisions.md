@@ -2,9 +2,11 @@
 
 Entries are newest first.
 
+- 2026-09-03 | Codex owns two-site acceptance and external-action receipts; user Stage approval is removed, but human Web Writer action remains. Cursor uses one Coordinator, one writer by default, at most two with Codex pairing, and serial integration.
+
 - 2026-09-03 | Refactor Section 3 is approved and closed. Cursor executes `MKT-0..MKT-13` in dependency order from audited baseline through storage, capture, parse, projection, two-site sync, models, retention, backfill and Full Matrix. Activation waits for Section 4; done requires no High/Critical gaps, no behavior drift and proven restore/rebuild/parity. Resource limits and adaptive thresholds remain evidence-derived gates.
 
-- 2026-09-02 | Owner approved `P1-01`: `main` alone is long-lived; WA-IR stays local-only; one worktree uses bounded `.local` artifacts. Execution remains separately gated.
+- 2026-09-02 | `P1-01`: only `main` is long-lived; WA-IR is local and `.local` bounded. Registered, expiring Stage worktrees supersede its one-worktree rule.
 
 - 2026-08-26 | Parity freezes one HMAC owner window, pinned lanes, and one clock. Compare final facts/aligned snapshots; separate value, metadata, and schema drift. Minute XAU is no event oracle.
 - 2026-08-25 | Market Intelligence is Docker-native. One immutable image exposes isolated commands; persistent data/models/sessions/secrets stay mounted. Shadow-first cutover forbids dual Telegram-session owners.

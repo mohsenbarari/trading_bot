@@ -1,21 +1,77 @@
-schema_version: "1.0"
+schema_version: "1.1"
 plan_id: two-site-refactor-v1
 human_source: docs/refactor/two-server/MASTER_PLAN.md
-branch: plan/two-server-refactor-v1
+governance_source: docs/refactor/two-server/EXECUTION_GOVERNANCE.md
+stage_state_source: docs/refactor/two-server/execution-order.yaml#stages
+stage_history_source: docs/refactor/two-server/CHANGE_LEDGER.md
+plan_branch: plan/two-server-refactor-v1
 design_status: APPROVED
-execution_status: NOT_AUTHORIZED
+execution_status: AUTHORIZED_CODEX_GATED
+
+authorization:
+  delegated_by: project_owner
+  delegated_at: "2026-09-03"
+  coordinator: CURSOR_COORDINATOR
+  worker: CURSOR_WORKER
+  final_reviewer: CODEX_FINAL_REVIEWER
+  user_stage_approval_required: false
+  user_stage_acceptance_required: false
+  standard_non_external_stage_start: STANDING_AUTHORIZATION
+  stage_completion_requires: CODEX_FINAL_REVIEW_RECEIPT
+  external_action_requires: CODEX_SCOPED_PRE_ACTION_RECEIPT
+  human_writer_dashboard_action_required: true
 
 rules:
-  one_stage_per_run: true
+  one_stage_per_worker_run: true
   require_clean_main_baseline: true
-  require_human_stage_start: true
-  require_human_stage_acceptance: true
-  no_implicit_production_permission: true
+  require_clean_integration_baseline: true
+  require_codex_final_acceptance: true
+  no_worker_self_approval: true
+  no_coordinator_self_approval: true
+  no_implicit_external_action: true
   no_implicit_dns_or_writer_change: true
   no_implicit_secret_access: true
   no_implicit_destructive_action: true
   no_fixture_only_high_critical_evidence: true
-  stop_on_open_owner_decision: true
+  route_open_decision_to_codex_final_reviewer: true
+  stop_on_high_or_critical_gap: true
+
+parallel_execution:
+  integration_branch: refactor/two-site-architecture
+  default_writer_workers: 1
+  max_writer_workers: 2
+  second_writer_requires: CODEX_PAIRING_APPROVED
+  read_only_second_worker_without_pairing: true
+  integrate_serially: true
+  candidate_integration_requires: COORDINATOR_ASSIGNMENT_AND_CLEAN_HEAD
+  stage_completion_requires: CODEX_REVIEW_OF_EXACT_INTEGRATION_COMMIT
+  main_promotion_requires: CODEX_BRANCH_BARRIER_RECEIPT
+  full_matrix_serial_on_integrated_head: true
+  worker_branch_pattern: refactor/stage/<STAGE_ID>-<slug>
+  canonical_integration_worktrees: 1
+  max_ephemeral_stage_worktrees: 2
+  worktree_registry: .local/two-site-refactor/worktrees.yaml
+  default_assignment_expiry_days: 7
+  remove_stage_worktree_within_hours_after_close: 24
+  pairing_requirements:
+    - dependencies_complete
+    - exact_base_sha
+    - disjoint_allowed_paths
+    - disjoint_resource_locks
+    - independent_rollback
+    - post_merge_integration_tests
+
+exclusive_locks:
+  - integration-branch
+  - change-ledger
+  - database-migrations
+  - domain-event-contracts
+  - runtime-compose-and-config
+  - ansible-and-release-control
+  - writer-dns-state-machine
+  - shared-test-fixtures
+  - production-environment
+  - iran-object-storage-mutation
 
 atomic_groups:
   - id: finland_initial_cutover
@@ -51,63 +107,63 @@ waves:
     stages: [P1-08, DOC-9]
 
 stages:
-  P1-00: {section: 1, depends_on: [], production: false}
-  P1-01: {section: 1, depends_on: [P1-00], production: false}
-  P1-02: {section: 1, depends_on: [P1-00, DPL-1, DOC-3], production: false}
-  P1-03: {section: 1, depends_on: [P1-02, DPL-2, DPL-6], production: false}
-  P1-04: {section: 1, depends_on: [P1-03, P2-00, MKT-1], production: false}
-  P1-05: {section: 1, depends_on: [P1-04, P2-05, DPL-4], production: false}
-  P1-06: {section: 1, depends_on: [P1-05, P2-10, MKT-13, DPL-9], production: false}
-  P1-07: {section: 1, depends_on: [P1-06], production: true}
-  P1-08: {section: 1, depends_on: [P1-07, P2-11, P2-12, DOC-9], destructive: true}
+  P1-00: {state: IN_PROGRESS, section: 1, depends_on: [], production: false}
+  P1-01: {state: PROPOSED, section: 1, depends_on: [P1-00], production: false}
+  P1-02: {state: PROPOSED, section: 1, depends_on: [P1-00, DPL-1, DOC-3], production: false}
+  P1-03: {state: PROPOSED, section: 1, depends_on: [P1-02, DPL-2, DPL-6], production: false}
+  P1-04: {state: PROPOSED, section: 1, depends_on: [P1-03, P2-00, MKT-1], production: false}
+  P1-05: {state: PROPOSED, section: 1, depends_on: [P1-04, P2-05, DPL-4], production: false}
+  P1-06: {state: PROPOSED, section: 1, depends_on: [P1-05, P2-10, MKT-13, DPL-9], production: false}
+  P1-07: {state: PROPOSED, section: 1, depends_on: [P1-06], production: true}
+  P1-08: {state: PROPOSED, section: 1, depends_on: [P1-07, P2-11, P2-12, DOC-9], destructive: true}
 
-  P2-00: {section: 2, depends_on: [P1-00, DOC-3], production: false}
-  P2-01: {section: 2, depends_on: [P2-00], production: false}
-  P2-02: {section: 2, depends_on: [P2-01, DPL-2, DPL-8], production: false}
-  P2-03: {section: 2, depends_on: [P2-01, P2-02], production: false}
-  P2-04: {section: 2, depends_on: [P2-03, DPL-5], writer_change: true}
-  P2-05: {section: 2, depends_on: [P2-00, P2-01, P2-04], production: false}
-  P2-06: {section: 2, depends_on: [P2-03, P2-04, P2-05, DPL-5, DPL-6], production: false}
-  P2-07: {section: 2, depends_on: [P2-04, P2-06], dns_change: true}
-  P2-08: {section: 2, depends_on: [P2-04, P2-06, P2-07], production: false}
-  P2-09: {section: 2, depends_on: [P2-05, P2-08], production: false}
-  P2-10: {section: 2, depends_on: [P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08, P2-09, MKT-10], production: false}
-  P2-11: {section: 2, depends_on: [P1-07, P2-10, MKT-13, DPL-9, DPL-10], production: true}
-  P2-12: {section: 2, depends_on: [P2-11, MKT-11, DPL-9, DOC-4, DOC-7], production: true, dns_change: true, writer_change: true}
+  P2-00: {state: PROPOSED, section: 2, depends_on: [P1-00, DOC-3], production: false}
+  P2-01: {state: PROPOSED, section: 2, depends_on: [P2-00], production: false}
+  P2-02: {state: PROPOSED, section: 2, depends_on: [P2-01, DPL-2, DPL-8], production: false}
+  P2-03: {state: PROPOSED, section: 2, depends_on: [P2-01, P2-02], production: false}
+  P2-04: {state: PROPOSED, section: 2, depends_on: [P2-03, DPL-5], writer_change: true}
+  P2-05: {state: PROPOSED, section: 2, depends_on: [P2-00, P2-01, P2-04], production: false}
+  P2-06: {state: PROPOSED, section: 2, depends_on: [P2-03, P2-04, P2-05, DPL-5, DPL-6], production: false}
+  P2-07: {state: PROPOSED, section: 2, depends_on: [P2-04, P2-06], dns_change: true}
+  P2-08: {state: PROPOSED, section: 2, depends_on: [P2-04, P2-06, P2-07], production: false}
+  P2-09: {state: PROPOSED, section: 2, depends_on: [P2-05, P2-08], production: false}
+  P2-10: {state: PROPOSED, section: 2, depends_on: [P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08, P2-09, MKT-10], production: false}
+  P2-11: {state: PROPOSED, section: 2, depends_on: [P1-07, P2-10, MKT-13, DPL-9, DPL-10], production: true}
+  P2-12: {state: PROPOSED, section: 2, depends_on: [P2-11, MKT-11, DPL-9, DOC-4, DOC-7], production: true, dns_change: true, writer_change: true}
 
-  MKT-0: {section: 3, depends_on: [P1-00, DOC-3, DOC-5], production: false}
-  MKT-1: {section: 3, depends_on: [MKT-0, P2-00], production: false}
-  MKT-2: {section: 3, depends_on: [MKT-1], production: false}
-  MKT-3: {section: 3, depends_on: [MKT-1, MKT-2], production: false}
-  MKT-4: {section: 3, depends_on: [MKT-1, P1-04], production: false}
-  MKT-5: {section: 3, depends_on: [MKT-3, MKT-4], production: false}
-  MKT-6: {section: 3, depends_on: [MKT-1, MKT-5], production: false}
-  MKT-7: {section: 3, depends_on: [MKT-6, P2-01, P2-02], production: false}
-  MKT-8: {section: 3, depends_on: [MKT-4, MKT-5, MKT-7], production: false}
-  MKT-9: {section: 3, depends_on: [MKT-8, DPL-2], production: false}
-  MKT-10: {section: 3, depends_on: [MKT-8, MKT-9], production: false}
-  MKT-11: {section: 3, depends_on: [MKT-7, MKT-9, MKT-10, P2-08], production: false}
-  MKT-12: {section: 3, depends_on: [MKT-6, MKT-7, MKT-9], production: false}
-  MKT-13: {section: 3, depends_on: [MKT-2, MKT-3, MKT-4, MKT-5, MKT-6, MKT-7, MKT-8, MKT-9, MKT-10, MKT-11, MKT-12, P2-10, DPL-9], production: false}
+  MKT-0: {state: PROPOSED, section: 3, depends_on: [P1-00, DOC-3, DOC-5], production: false}
+  MKT-1: {state: PROPOSED, section: 3, depends_on: [MKT-0, P2-00], production: false}
+  MKT-2: {state: PROPOSED, section: 3, depends_on: [MKT-1], production: false}
+  MKT-3: {state: PROPOSED, section: 3, depends_on: [MKT-1, MKT-2], production: false}
+  MKT-4: {state: PROPOSED, section: 3, depends_on: [MKT-1, P1-04], production: false}
+  MKT-5: {state: PROPOSED, section: 3, depends_on: [MKT-3, MKT-4], production: false}
+  MKT-6: {state: PROPOSED, section: 3, depends_on: [MKT-1, MKT-5], production: false}
+  MKT-7: {state: PROPOSED, section: 3, depends_on: [MKT-6, P2-01, P2-02], production: false}
+  MKT-8: {state: PROPOSED, section: 3, depends_on: [MKT-4, MKT-5, MKT-7], production: false}
+  MKT-9: {state: PROPOSED, section: 3, depends_on: [MKT-8, DPL-2], production: false}
+  MKT-10: {state: PROPOSED, section: 3, depends_on: [MKT-8, MKT-9], production: false}
+  MKT-11: {state: PROPOSED, section: 3, depends_on: [MKT-7, MKT-9, MKT-10, P2-08], production: false}
+  MKT-12: {state: PROPOSED, section: 3, depends_on: [MKT-6, MKT-7, MKT-9], production: false}
+  MKT-13: {state: PROPOSED, section: 3, depends_on: [MKT-2, MKT-3, MKT-4, MKT-5, MKT-6, MKT-7, MKT-8, MKT-9, MKT-10, MKT-11, MKT-12, P2-10, DPL-9], production: false}
 
-  DPL-1: {section: 4, depends_on: [P1-00, DOC-5], production: false}
-  DPL-2: {section: 4, depends_on: [DPL-1], production: false}
-  DPL-3: {section: 4, depends_on: [DPL-1, DPL-2], production: false}
-  DPL-4: {section: 4, depends_on: [DPL-2, DPL-6], production: false}
-  DPL-5: {section: 4, depends_on: [DPL-2, DPL-6], production: false}
-  DPL-6: {section: 4, depends_on: [P1-02, DPL-2], production: false, secret_change: true}
-  DPL-7: {section: 4, depends_on: [DPL-2, DPL-3, DPL-6], production: false}
-  DPL-8: {section: 4, depends_on: [DPL-2, DPL-3], production: false}
-  DPL-9: {section: 4, depends_on: [DPL-3, DPL-4, DPL-5, DPL-6, DPL-7, DPL-8, DOC-6, DOC-7], production: false}
-  DPL-10: {section: 4, depends_on: [P1-06, DPL-9, DOC-4], production: true, destructive: true}
+  DPL-1: {state: PROPOSED, section: 4, depends_on: [P1-00, DOC-5], production: false}
+  DPL-2: {state: PROPOSED, section: 4, depends_on: [DPL-1], production: false}
+  DPL-3: {state: PROPOSED, section: 4, depends_on: [DPL-1, DPL-2], production: false}
+  DPL-4: {state: PROPOSED, section: 4, depends_on: [DPL-2, DPL-6], production: false}
+  DPL-5: {state: PROPOSED, section: 4, depends_on: [DPL-2, DPL-6], production: false}
+  DPL-6: {state: PROPOSED, section: 4, depends_on: [P1-02, DPL-2], production: false, secret_change: true}
+  DPL-7: {state: PROPOSED, section: 4, depends_on: [DPL-2, DPL-3, DPL-6], production: false}
+  DPL-8: {state: PROPOSED, section: 4, depends_on: [DPL-2, DPL-3], production: false}
+  DPL-9: {state: PROPOSED, section: 4, depends_on: [DPL-3, DPL-4, DPL-5, DPL-6, DPL-7, DPL-8, DOC-6, DOC-7], production: false}
+  DPL-10: {state: PROPOSED, section: 4, depends_on: [P1-06, DPL-9, DOC-4], production: true, destructive: true}
 
-  DOC-1: {section: 5, depends_on: [], production: false}
-  DOC-2: {section: 5, depends_on: [DOC-1, P1-00], production: false}
-  DOC-3: {section: 5, depends_on: [DOC-1], production: false}
-  DOC-4: {section: 5, depends_on: [DOC-1, DOC-2, DOC-3], production: false}
-  DOC-5: {section: 5, depends_on: [DOC-1, P1-00], production: false}
-  DOC-6: {section: 5, depends_on: [DOC-3, DOC-5], production: false}
-  DOC-7: {section: 5, depends_on: [DOC-2, DOC-4], production: false}
-  DOC-8: {section: 5, depends_on: [DOC-1, P1-01, DPL-6], production: false}
-  DOC-9: {section: 5, depends_on: [DOC-1, DOC-2, DOC-3, DOC-4, DOC-5, DOC-6, DOC-7, DOC-8], destructive: true}
-  DOC-10: {section: 5, depends_on: [DOC-1, DOC-4, DOC-6], production: false}
+  DOC-1: {state: PROPOSED, section: 5, depends_on: [], production: false}
+  DOC-2: {state: PROPOSED, section: 5, depends_on: [DOC-1, P1-00], production: false}
+  DOC-3: {state: PROPOSED, section: 5, depends_on: [DOC-1], production: false}
+  DOC-4: {state: PROPOSED, section: 5, depends_on: [DOC-1, DOC-2, DOC-3], production: false}
+  DOC-5: {state: PROPOSED, section: 5, depends_on: [DOC-1, P1-00], production: false}
+  DOC-6: {state: PROPOSED, section: 5, depends_on: [DOC-3, DOC-5], production: false}
+  DOC-7: {state: PROPOSED, section: 5, depends_on: [DOC-2, DOC-4], production: false}
+  DOC-8: {state: PROPOSED, section: 5, depends_on: [DOC-1, P1-01, DPL-6], production: false}
+  DOC-9: {state: PROPOSED, section: 5, depends_on: [DOC-1, DOC-2, DOC-3, DOC-4, DOC-5, DOC-6, DOC-7, DOC-8], destructive: true}
+  DOC-10: {state: PROPOSED, section: 5, depends_on: [DOC-1, DOC-4, DOC-6], production: false}

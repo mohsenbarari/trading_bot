@@ -1,6 +1,6 @@
 # Current Finland Architecture Dossier
 
-Status: technical baseline ready for owner review
+Status: historical baseline accepted; refreshed evidence and Codex Final Review pending
 Observed: 2026-09-01 UTC
 
 ## Human scenario

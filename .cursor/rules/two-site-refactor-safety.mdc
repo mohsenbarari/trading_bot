@@ -8,11 +8,15 @@ alwaysApply: false
 
 - Canonical plan: `docs/refactor/two-server/MASTER_PLAN.md`
 - Machine order: `docs/refactor/two-server/execution-order.yaml`
-- Design approval is not Stage-start or production authorization.
-- Execute one dependency-ready Stage at a time and require success, failure and rollback evidence.
+- Execution governance: `docs/refactor/two-server/EXECUTION_GOVERNANCE.md`
+- Standard non-external Stages have standing start authorization only after dependencies are complete.
+- Execute one Stage per Worker; default to one writer and allow a second only with a Codex pairing receipt.
+- Coordinator alone owns the integration branch and ledger; integrate candidates serially.
+- Require success, failure, rollback and post-integration evidence.
 - Deploy never changes DNS or Web Writer; only an explicit human dashboard action may do so.
 - Finland is the sole Telegram Executor; SMS executes only on the current Web Writer/generation.
 - Stop before production, migration/restore, real bucket mutation, secret access, DNS/Writer,
-  destructive cleanup or legacy retirement unless that exact action is separately authorized.
+  destructive cleanup or legacy retirement unless Codex Final Reviewer authorized that exact action.
 - Do not mark High/Critical gates green with fixtures, synthetic Market events, reset checkpoints
-  or deleted evidence. Do not declare `COMPLETE` on behalf of the owner.
+  or deleted evidence. Cursor cannot self-approve; only an exact Codex final-review receipt marks
+  a Stage `COMPLETE`.

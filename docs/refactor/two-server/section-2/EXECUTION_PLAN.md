@@ -2,7 +2,7 @@
 
 وضعیت طراحی: `APPROVED`
 
-وضعیت اجرا: `NOT_AUTHORIZED`
+وضعیت اجرا: `AUTHORIZED_CODEX_GATED`
 
 شرح کامل سناریوها و Task Cardها: [Master Plan](../MASTER_PLAN.md#بخش-۲--iran-standby-و-انتقال-کنترلشدهٔ-web-writer)
 
@@ -64,4 +64,4 @@ Finland را generation بعدی Writer می‌کند. هیچ مرحلهٔ خو�
 - تمام identity/generation/receiptها durable، امضاشده، auditشده و restart-safe باشند.
 - full matrix دو Writer، duplicate Bot/Executor/Job، loss/duplicate apply و oversell را صفر کند.
 - dashboardها وضعیت واقعی و علت block هر action را نشان دهند.
-- `P2-11` و `P2-12` فقط با مجوز production/drill جدا اجرا شوند.
+- `P2-11` و `P2-12` فقط با receipt موردی production/drill از Codex اجرا شوند.

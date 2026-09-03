@@ -2,7 +2,7 @@
 
 وضعیت طراحی: `APPROVED`
 
-وضعیت اجرا: `NOT_AUTHORIZED`
+وضعیت اجرا: `AUTHORIZED_CODEX_GATED`
 
 منبع معنا و سناریوهای محصول: [Master Plan](../MASTER_PLAN.md#بخش-۳--تطبیق-parser-و-مدلهای-تخمین-با-معماری-جدید)
 
@@ -100,7 +100,7 @@ integrity اجباری‌اند. secret، OTP، session و credential اصلاً
 | `MKT-10` | profiles، freshness decay، widening و Price Guard | `FULL_CONNECTED`, `IR_CONTINUITY_BASE/ENRICHED` و reason codes | سکوت widening monotonic؛ technical failure fail-open برای guard و fail-closed برای publication |
 | `MKT-11` | reconnect barrier و model parity | cutoff protocol، input/output hash comparator و dashboard state | divergent outputs regenerate؛ `MARKET_READY` فقط پس از parity واقعی |
 | `MKT-12` | backpressure، capacity، backfill و restore/rebuild | quotas، schedulers، resume journal و archive restore drill | foreground سالم؛ bounded catch-up؛ restart بدون reset checkpoint یا delete evidence |
-| `MKT-13` | کامل‌ترین matrix علمی/عملیاتی و promotion gate | machine matrix، backtest، shadow، fault/load/restore evidence | صفر High/Critical gap، صفر behavior drift و تأیید انسانی جدا برای Product promotion |
+| `MKT-13` | کامل‌ترین matrix علمی/عملیاتی و promotion gate | machine matrix، backtest، shadow، fault/load/restore evidence | صفر High/Critical gap، صفر behavior drift و receipt جداگانهٔ Codex برای Product promotion |
 
 ## معیار پایان بخش ۳
 
@@ -108,4 +108,4 @@ integrity اجباری‌اند. secret، OTP، session و credential اصلاً
 - هر source حداقل یک trace غیرصفر capture→parse→Fact→archive/sync→input→snapshot داشته باشد.
 - replay، rebuild، restore و reconnect parity از دادهٔ واقعی و cutoff ثابت سبز باشند.
 - resource thresholdهای نهایی فقط از baseline/load/replay تعیین و در decision ledger ثبت شوند.
-- هیچ activation مدل، deploy یا تغییر Product در نتیجهٔ تأیید طراحی این سند مجاز نیست.
+- activation مدل، deploy یا تغییر Product فقط با receipt موردی Codex Final Reviewer مجاز است.

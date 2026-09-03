@@ -2,7 +2,7 @@
 
 وضعیت طراحی: `APPROVED`
 
-وضعیت اجرا: `NOT_AUTHORIZED`
+وضعیت اجرا: `AUTHORIZED_CODEX_GATED`
 
 منبع معنا: [Master Plan](../MASTER_PLAN.md#بخش-۴--ریفکتور-deploy-و-رفع-نواقص-تحویل)
 
@@ -24,7 +24,7 @@
 | rollback کامل R0/R1 | تصمیم rollback | تمام componentهای در scope سالم | ≤۵ دقیقه |
 
 routine security gate، retry، build و smoke داخل ساعت اندازه‌گیری می‌شوند. توقف ساعت
-فقط برای pause صریح مالک یا outage خارجی ثبت‌شده مجاز است و نتیجه همچنان با برچسب
+فقط برای pause صریح Codex Final Reviewer یا outage خارجی ثبت‌شده مجاز است و نتیجه همچنان با برچسب
 `SLO_EXTERNAL_BLOCK` گزارش می‌شود؛ زمان پنهان نمی‌شود. R2/R3 پیش از اجرا سقف و downtime
 مخصوص خود را می‌گیرند و به زور داخل ۳۰ دقیقه قرار نمی‌گیرند.
 
@@ -39,20 +39,21 @@ routine security gate، retry، build و smoke داخل ساعت اندازه‌
   نسخهٔ هم‌زمان، handoff تک‌مالک دارند.
 - Ansible فقط host، Docker/proxy/firewall/layout/monitoring/controller/config mount و
   cacheهای سیستم را idempotently provision/maintain می‌کند. عامل انسانی روی shell
-  سرورها command اجرا نمی‌کند؛ با این حال mutation اولیه و production permission جداست.
+  سرورها command اجرا نمی‌کند؛ با این حال mutation اولیه receipt موردی Codex می‌خواهد.
 - production هیچ `pip install`، `npm install/build` یا dependency download ندارد.
   Finland registry و bundle امضاشده را می‌گیرد؛ Iran `Active/Previous/Candidate` را
   cache می‌کند و از Object Storage ایران یا import دستی digest-verified تغذیه می‌شود.
 - یک artifact digest روی هر دو سایت اجرا می‌شود؛ تفاوت role فقط typed config و secret
   projection کمینه است. secret در Git/artifact/sync/Object Storage/log/dashboard نیست.
 
-## سناریوهای مالک
+## سناریوهای اجرای کنترل‌شده
 
 ### Release عادی و اینترنت متصل
 
 1. merge به `main`، CI را فعال می‌کند؛ test scope از diff و risk class استخراج می‌شود.
 2. CI یک artifact می‌سازد، امضا می‌کند و با evidence معتبر `READY` می‌نماید.
-3. مالک در یکی از dashboardها `Plan` را می‌بیند و activation را صریحاً شروع می‌کند.
+3. Coordinator پس از receipt لازم، `Plan` را می‌بیند و activation را از مسیر
+   controller/Ansible شروع می‌کند؛ انتقال Writer/DNS در Dashboard همچنان انسانی است.
 4. controllerها mutex می‌گیرند؛ Iran Standby ابتدا stage/smoke/commit می‌شود.
 5. Finland slot غیرفعال را آماده و smoke می‌کند؛ proxy سپس با downtime ≤۳۰ ثانیه عوض می‌شود.
 6. singleton jobs و Bot/Executor با journal و ownership fence handoff می‌شوند.
@@ -82,7 +83,8 @@ routine security gate، retry، build و smoke داخل ساعت اندازه‌
 
 ### اولین نصب ایران
 
-1. پس از مجوز جدا، Codex inventory/fingerprint/capacity را verify و Ansible را dry-run می‌کند.
+1. پس از receipt موردی Codex Final Reviewer، inventory/fingerprint/capacity verify و
+   Ansible dry-run می‌شود.
 2. Ansible host hardening، container runtime، proxy/TLS، path/volume، controller، dashboard،
    metrics/logs و cache داخلی را از نسخه‌های pin‌شده نصب می‌کند.
 3. artifact و config typed جدا وارد می‌شوند؛ secretها per-service و root-only projection دارند.
@@ -95,7 +97,7 @@ routine security gate، retry، build و smoke داخل ساعت اندازه‌
 - R2 additive فقط با runner امضاشده، lock timeout، idempotency و backup اجرا می‌شود؛ در
   partition فقط اگر قبلاً `partition_safe` اثبات شده باشد.
 - R3 destructive فقط در اتصال کامل، پس از expand/backfill/soak، WAL پیوسته، base backup
-  روزانه، restore proof و مجوز downtime case-specific اجرا می‌شود. failure آن forward-fix
+  روزانه، restore proof و receipt موردی downtime از Codex اجرا می‌شود. failure آن forward-fix
   انسانی یا restore دقیق دو سایت است؛ auto downgrade schema ممنوع است.
 - قطع SSH، شکست registry/bucket، digest mismatch، health failure، disk pressure یا owner
   تکراری state معلوم دارد: قبل از commit، slot فعلی دست‌نخورده می‌ماند؛ بعد از commit
@@ -130,4 +132,4 @@ routine security gate، retry، build و smoke داخل ساعت اندازه‌
 - deploy متصل، partitioned Iran/Finland، first install، hotfix، migration، rollback، restore
   و failureهای transport/controller/disk در matrix سبز باشند.
 - دو release عادی، یک hotfix ≤۱۰ دقیقه، یک rollback، یک partition/reconnect و یک restore
-  پیش از حذف legacy path اجرا شده باشند؛ production هرکدام مجوز جدا می‌خواهد.
+  پیش از حذف legacy path اجرا شده باشند؛ production هرکدام receipt موردی Codex می‌خواهد.

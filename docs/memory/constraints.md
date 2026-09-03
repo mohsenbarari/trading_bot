@@ -8,7 +8,8 @@
   historical cutoff; pin SQLite before timestamping and transfer before generation.
 - Estimator research cannot write beside live models; staging flag and separate manual promotion are mandatory.
 - Parity freezes time and aligns XAU; minute buckets do not prove loss. Field presence is schema, not financial, drift.
-- Preserve user changes and one canonical worktree; sibling copies need task, owner and expiry.
+- Preserve user changes; use one integration worktree plus at most two
+  expiring Stage worktrees with task/base/locks/owner and cleanup.
 - Generated artifacts have bounded retention; keep active/rollback releases, open-incident evidence and the last restorable backup.
 - Keep IDE state and non-example `.env*.local` untracked.
 - External deploy/production/sync/destruction requires scoped verification and explicit authorization.

@@ -35,4 +35,4 @@ Status: open findings; no implicit fixes authorized
   assert the server is production-ready.
 
 No entry is authorization to fix production, delete an artifact or change data.
-Resolution must point to an approved Stage, commit, test and human gate receipt.
+Resolution must point to an approved Stage, commit, test and Codex Final Review receipt.

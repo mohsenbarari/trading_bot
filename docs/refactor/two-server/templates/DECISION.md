@@ -1,7 +1,7 @@
 # Decision — `<DECISION_ID>`
 
 - Status: `<PROPOSED|APPROVED|REJECTED|SUPERSEDED>`
-- Owner:
+- Decision authority: `CODEX_FINAL_REVIEWER`
 - Date:
 - Affected stages/contracts:
 
@@ -20,8 +20,9 @@
 ## Recommendation and decision
 
 - Recommended option and evidence:
-- Owner decision:
+- Final Reviewer decision:
 - Consequences and follow-up:
 - Supersedes / superseded by:
 
-Cursor نباید مقدار پیشنهادی را بدون تصمیم صریح مالک به `APPROVED` تبدیل کند.
+Cursor نباید مقدار پیشنهادی را به `APPROVED` تبدیل کند. فقط receipt صریح
+`CODEX_FINAL_REVIEWER` روی همان scope و commit معتبر است.
