@@ -1697,12 +1697,14 @@ guard_production_release_command() {
             || die "Immutable production source has an invalid Telegram execution profile."
         return 0
     fi
-    if [[ "$COMMAND" == "prepare-private-primary-control-release" \
+    if [[ "$COMMAND" =~ ^(prepare-release-evidence|verify-release-evidence|prepare-private-primary-control-release)$ \
         && -e "$PRODUCTION_RELEASE_LOCK_PATH" \
         && ! -L "$PRODUCTION_RELEASE_LOCK_PATH" ]]; then
-        # Artifact preparation is non-runtime work.  When PRIVATE_PRIMARY
-        # capture already owns the durable Market maintenance lock, hold and
-        # validate that exact inode instead of deleting or replacing it.
+        # These artifact-only commands do not change services, databases,
+        # Queue ownership, capture ownership, or Product authority.  When
+        # PRIVATE_PRIMARY capture already owns the durable Market maintenance
+        # lock, hold and validate that exact inode instead of deleting or
+        # replacing the fail-closed handoff guard.
         adopt_market_maintenance_lock_for_control_release_prepare
     else
         acquire_production_operation_lock
