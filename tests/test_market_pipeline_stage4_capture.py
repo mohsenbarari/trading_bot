@@ -21,6 +21,7 @@ from pydantic import ValidationError
 from core.market_intelligence import private_capture as capture
 from core.market_intelligence import private_capture_service as capture_service
 from core.market_intelligence.capture_event_adapter import (
+    CAPTURE_ADAPTER_SCHEMA_VERSION,
     CaptureEventContractError,
     decode_coin_group_event,
     decode_market_channel_event,
@@ -2583,7 +2584,7 @@ class ExplicitBackfillAdapterTests(unittest.TestCase):
         self.staging.commit()
         self.market.commit()
 
-    def test_schema_v6_migrates_to_v8_lineage_without_raw_columns(self) -> None:
+    def test_schema_v6_migrates_to_current_lineage_without_raw_columns(self) -> None:
         self.staging.execute("DROP TABLE capture_explicit_backfill_lineage")
         self.staging.execute(
             "UPDATE capture_adapter_metadata SET schema_version=6 WHERE singleton=1"
@@ -2596,7 +2597,7 @@ class ExplicitBackfillAdapterTests(unittest.TestCase):
             self.staging.execute(
                 "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
             ).fetchone()[0],
-            8,
+            CAPTURE_ADAPTER_SCHEMA_VERSION,
         )
         columns = {
             str(row["name"])
