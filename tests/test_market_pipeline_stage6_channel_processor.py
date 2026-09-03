@@ -295,6 +295,43 @@ class MarketPipelineStage6ChannelProcessorTests(unittest.TestCase):
                 connection.close()
             self.assertEqual(sources, {"XAUUSD"})
 
+    def test_live_cycle_can_defer_expensive_retention_without_losing_facts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            paths = self._paths(Path(directory))
+            self._write(
+                paths,
+                [
+                    market_event(
+                        32,
+                        source="MELTED_FLOW",
+                        message_id=32,
+                        text="79,270,000 باحواله فروش",
+                        published="2026-08-24T10:00:00Z",
+                        available="2026-08-24T10:00:01Z",
+                    )
+                ],
+            )
+
+            report = process_coin_spool_cycle(
+                paths=paths,
+                mode="fixture",
+                now_utc="2026-08-28T10:00:02Z",
+                run_expensive_maintenance=False,
+            )
+
+            self.assertEqual(report["temporary_public_melted_facts_purged"], 0)
+            connection = sqlite3.connect(paths.market_database)
+            try:
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM market_observations "
+                        "WHERE source_code='MELTED_FLOW'"
+                    ).fetchone()[0],
+                    1,
+                )
+            finally:
+                connection.close()
+
 
 if __name__ == "__main__":
     unittest.main()

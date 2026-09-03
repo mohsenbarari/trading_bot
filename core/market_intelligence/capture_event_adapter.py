@@ -54,7 +54,7 @@ from .public_telegram.parser import parse_public_message, should_ignore_public_m
 from .public_telegram.sources import source_for_code
 
 
-CAPTURE_ADAPTER_SCHEMA_VERSION = 8
+CAPTURE_ADAPTER_SCHEMA_VERSION = 9
 CAPTURE_ADAPTER_VERSION = "capture-event-adapter-v10-terminal-lineage"
 CAPTURE_RAW_RETENTION = timedelta(days=3)
 COIN_GROUP_ACTIVE_REPLAY_WINDOW = timedelta(hours=6)
@@ -249,6 +249,8 @@ CREATE TABLE IF NOT EXISTS capture_dirty_market_messages (
     available_at_utc TEXT NOT NULL,
     PRIMARY KEY(source_id,message_id)
 );
+CREATE INDEX IF NOT EXISTS idx_capture_dirty_market_ready
+    ON capture_dirty_market_messages(available_at_utc,source_id,message_id);
 
 CREATE TABLE IF NOT EXISTS capture_dirty_groups (
     group_number INTEGER PRIMARY KEY CHECK(group_number IN (1,2)),
@@ -987,6 +989,25 @@ def initialize_capture_adapter(connection: sqlite3.Connection) -> None:
         )
         connection.execute(
             "UPDATE capture_adapter_metadata SET schema_version=8 WHERE singleton=1"
+        )
+        connection.commit()
+        metadata = connection.execute(
+            "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
+        ).fetchone()
+    if metadata is not None and int(metadata[0]) == 8:
+        # Projection drains this table in causal availability order.  Without
+        # the matching index every bounded batch scans and sorts the complete
+        # backlog, which makes recovery progressively slower as replay grows.
+        connection.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS idx_capture_dirty_market_ready
+                ON capture_dirty_market_messages(
+                  available_at_utc,source_id,message_id
+                );
+            UPDATE capture_adapter_metadata
+               SET schema_version=9
+             WHERE singleton=1;
+            """
         )
         connection.commit()
         metadata = connection.execute(
@@ -2167,10 +2188,13 @@ def project_capture_changes(
     as_of_utc: datetime | str,
     group_additional_anchors: Iterable[CoinPriceAnchor] = (),
     group_parser_feedback: Mapping[bytes, CoinGroupParserFeedback] | None = None,
+    max_market_messages: int | None = None,
 ) -> CaptureProjectionReport:
     """Project every dirty current revision; callers commit both databases."""
 
     as_of = normalize_utc(as_of_utc, field_name="capture_projection_as_of_utc")
+    if max_market_messages is not None and max_market_messages < 1:
+        raise CaptureEventContractError("capture_market_projection_limit_invalid")
     initialize_market_store(market)
     projection_reconciliation = projection_reconciliation_pending(staging)
     due_primary = staging.execute(
@@ -2199,10 +2223,16 @@ def project_capture_changes(
             ),
             available_at_utc=as_of,
         )
-    dirty = staging.execute(
-        "SELECT * FROM capture_dirty_market_messages WHERE available_at_utc<=? ORDER BY available_at_utc,source_id,message_id",
-        (as_of,),
-    ).fetchall()
+    dirty_query = (
+        "SELECT * FROM capture_dirty_market_messages "
+        "WHERE available_at_utc<=? "
+        "ORDER BY available_at_utc,source_id,message_id"
+    )
+    dirty_parameters: tuple[object, ...] = (as_of,)
+    if max_market_messages is not None:
+        dirty_query += " LIMIT ?"
+        dirty_parameters = (as_of, max_market_messages)
+    dirty = staging.execute(dirty_query, dirty_parameters).fetchall()
     projected = upserted = retracted = 0
     private_trades = private_finalized = private_ambiguous = 0
     primary_changed = False

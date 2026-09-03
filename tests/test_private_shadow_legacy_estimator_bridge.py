@@ -199,6 +199,7 @@ class ShadowLegacyBridgeTests(unittest.TestCase):
         self.ledger = self.root / "ledger.sqlite"
         self.conversation = self.root / "conversation.sqlite3"
         self.heartbeat = self.root / "health.json"
+        self.group_projection_health = self.root / "group-event-health.json"
         self.market_lock = self.root / "market.lock"
         self.conversation_lock = self.root / "conversation.lock"
         self.when = datetime(2026, 8, 29, 9, 0, tzinfo=timezone.utc)
@@ -866,8 +867,84 @@ class ShadowLegacyBridgeTests(unittest.TestCase):
         self.assertEqual(health["status"], "OK")
         self.assertEqual(health["release_sha"], _SHA)
         self.assertNotIn("alice", health)
+        group_health = json.loads(
+            self.group_projection_health.read_text(encoding="utf-8")
+        )
+        probe = group_health["sources"]["COIN_GROUP_PROJECTION"]
+        self.assertEqual(probe["status"], "HEALTHY")
+        self.assertEqual(
+            probe["details"]["group_1_latest_canonical_event_utc"],
+            "2026-08-29T09:00:00Z",
+        )
+        self.assertEqual(
+            probe["details"]["group_2_latest_eligible_event_utc"],
+            "2026-08-29T09:00:00Z",
+        )
+        self.assertEqual(probe["details"]["group_1_pending_review_total"], 0)
         groups = project_groups(self.shadow, self.conversation)
         self.assertGreaterEqual(int(groups["eligible_offers"]), 2)
+
+    def test_orchestrator_preserves_last_successful_group_details_until_commit(self) -> None:
+        self.seed_shadow(
+            [_group(key=derive_event_key("orch-stable-g1", 1), source="GROUP_1", when=self.when)]
+        )
+        _conversation(self.conversation)
+        self.group_projection_health.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "sources": {
+                        "COIN_GROUP_PROJECTION": {
+                            "status": "HEALTHY",
+                            "heartbeat_at_utc": "2026-08-29T08:59:00Z",
+                            "last_success_at_utc": "2026-08-29T08:59:00Z",
+                            "error_code": None,
+                            "details": {"stable_marker": "prior-success"},
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        observed: dict[str, object] = {}
+
+        def inspect_before_projection(market_store: Path, conversation_db: Path):
+            payload = json.loads(self.group_projection_health.read_text(encoding="utf-8"))
+            observed.update(payload["sources"]["COIN_GROUP_PROJECTION"]["details"])
+            return project_groups(market_store, conversation_db)
+
+        with patch(
+            "scripts.run_private_shadow_legacy_estimator_bridge.project_groups",
+            side_effect=inspect_before_projection,
+        ):
+            code = orchestrator_main(
+                [
+                    "--shadow-market-store",
+                    str(self.shadow),
+                    "--legacy-market-store",
+                    str(self.legacy),
+                    "--conversation-db",
+                    str(self.conversation),
+                    "--ledger",
+                    str(self.ledger),
+                    "--heartbeat",
+                    str(self.heartbeat),
+                    "--release-sha",
+                    _SHA,
+                    "--market-lock",
+                    str(self.market_lock),
+                    "--conversation-lock",
+                    str(self.conversation_lock),
+                    "--skip-quick-check",
+                ]
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual(observed, {"stable_marker": "prior-success"})
+        current = json.loads(self.group_projection_health.read_text(encoding="utf-8"))
+        self.assertNotIn(
+            "stable_marker",
+            current["sources"]["COIN_GROUP_PROJECTION"]["details"],
+        )
 
     def test_model_on_clone_keeps_fourteen_cells(self) -> None:
         now = datetime.now(timezone.utc).replace(microsecond=0)
@@ -1101,5 +1178,9 @@ class BridgeInstallerTests(unittest.TestCase):
             self.assertEqual(service, again)
             self.assertIn(_SHA, service)
             self.assertIn("ProtectSystem=strict", service)
+            self.assertIn(
+                str(estimator / "conversation" / "group-event-health.json"),
+                service,
+            )
             self.assertEqual(len(list(systemd.glob("*.service"))), 1)
             self.assertEqual(len(list(systemd.glob("*.timer"))), 1)

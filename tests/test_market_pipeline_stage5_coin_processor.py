@@ -84,6 +84,32 @@ class MarketPipelineStage5CoinProcessorTests(unittest.TestCase):
             prediction_database=None,
         )
 
+    def test_processor_only_sqlite_cache_is_bounded_and_opt_in(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            paths = self._fixture(Path(directory))
+            report = process_coin_spool_cycle(
+                paths=paths,
+                mode="fixture",
+                now_utc="2026-08-24T10:02:00Z",
+                sqlite_cache_kib_per_store=64,
+            )
+            self.assertEqual(report["records"], 0)
+
+        with tempfile.TemporaryDirectory() as directory:
+            paths = self._fixture(Path(directory))
+            with self.assertRaisesRegex(
+                CoinProcessorError,
+                "coin_processor_sqlite_cache_invalid",
+            ):
+                process_coin_spool_cycle(
+                    paths=paths,
+                    mode="fixture",
+                    now_utc="2026-08-24T10:02:00Z",
+                    sqlite_cache_kib_per_store=131_073,
+                )
+            self.assertFalse(paths.staging_database.exists())
+            self.assertFalse(paths.market_database.exists())
+
     def test_fixture_cycle_projects_both_groups_and_exact_reply_branch(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             paths = self._fixture(Path(directory))
@@ -281,6 +307,19 @@ class MarketPipelineStage5CoinProcessorTests(unittest.TestCase):
                     CoinProcessorError, "causal_inputs_required"
                 ):
                     _paths(mode="live", state_directory=root / "state")
+
+    def test_paths_bind_sqlite_temp_files_to_private_processor_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "capture" / "account2").mkdir(parents=True)
+            environment = {
+                "MARKET_PIPELINE_CAPTURE_ROOT": str(root / "capture"),
+            }
+            with patch.dict(os.environ, environment, clear=False):
+                _paths(mode="fixture", state_directory=root / "state")
+                sqlite_tmp = root / "state" / "sqlite-tmp"
+                self.assertEqual(os.environ["SQLITE_TMPDIR"], str(sqlite_tmp))
+                self.assertEqual(sqlite_tmp.stat().st_mode & 0o777, 0o700)
 
     def test_expired_raw_exact_review_projects_and_marks_feedback_applied(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

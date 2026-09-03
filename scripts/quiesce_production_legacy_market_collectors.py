@@ -1126,6 +1126,79 @@ def validate_committed_handoff(
     return payload
 
 
+def validate_transferred_handoff(
+    *,
+    journal: Path,
+    expected_journal_sha256: str,
+    release_sha: str,
+    host_role: str,
+    expected_maintenance_lock: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate a durable capture-authority transfer without mutating it.
+
+    Queue-v1 code releases may run while the Market pipeline deliberately
+    keeps the production operation-lock inode.  This validator proves that
+    the lock belongs to a completed capture-authority transfer and that every
+    legacy collector is still quiesced.  It intentionally does not promote
+    Product authority or relax the later ``PRIMARY_COMMITTED`` contract.
+    """
+
+    if not HEX64.fullmatch(expected_journal_sha256):
+        raise CollectorHandoffError("collector_handoff_transferred_binding_invalid")
+    _secure_file(journal)
+    if _digest(journal) != expected_journal_sha256:
+        raise CollectorHandoffError("collector_handoff_transferred_binding_invalid")
+    payload = _read(journal, release_sha=release_sha, host_role=host_role)
+    expected_keys = {
+        "schema",
+        "status",
+        "host_role",
+        "release_sha",
+        "created_at_utc",
+        "verified_at_utc",
+        "prior_units",
+        "current_units",
+        "maintenance_lock",
+        "primary_verification_sha256",
+        "primary_rollback_sha256",
+        "authority_transfer",
+        "state_deleted",
+        "secrets_disclosed",
+    }
+    maintenance = payload.get("maintenance_lock")
+    authority_transfer = payload.get("authority_transfer")
+    if (
+        set(payload) != expected_keys
+        or payload.get("status") != "AUTHORITY_TRANSFERRED"
+        or payload.get("primary_verification_sha256") is not None
+        or payload.get("primary_rollback_sha256") is not None
+        or payload.get("state_deleted") is not False
+        or payload.get("secrets_disclosed") is not False
+        or not isinstance(maintenance, dict)
+        or (
+            expected_maintenance_lock is not None
+            and maintenance != dict(expected_maintenance_lock)
+        )
+        or not isinstance(authority_transfer, dict)
+        or set(authority_transfer)
+        != {
+            "bluegreen_journal_path_sha256",
+            "prepared_bluegreen_journal_sha256",
+            "authorization_bluegreen_journal_sha256",
+            "marker_authority_sha256",
+        }
+        or any(
+            not HEX64.fullmatch(str(value or ""))
+            for value in authority_transfer.values()
+        )
+    ):
+        raise CollectorHandoffError("collector_handoff_transferred_binding_invalid")
+    live = _assert_quiesced(host_role)
+    if live != payload.get("current_units"):
+        raise CollectorHandoffError("collector_handoff_live_state_drift")
+    return payload
+
+
 def _complete_quiesce_from_prepared(
     *,
     journal: Path,

@@ -252,17 +252,15 @@ class TelegramDeliveryOfferFreshnessTests(unittest.IsolatedAsyncioTestCase):
             TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT,
         )
 
-    async def test_every_current_offer_action_accepts_only_its_canonical_payload(self):
+    async def test_every_provider_edit_action_accepts_only_its_canonical_payload(self):
         statuses = {
             TelegramDeliveryAction.OFFER_PUBLISH: OfferStatus.ACTIVE,
             TelegramDeliveryAction.PARTIAL_OFFER_EDIT: OfferStatus.ACTIVE,
             TelegramDeliveryAction.OTHER_ACTIVE_OFFER_EDIT: OfferStatus.ACTIVE,
             TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT: OfferStatus.ACTIVE,
-            TelegramDeliveryAction.FINAL_TAIL_CHANNEL_EDIT: OfferStatus.ACTIVE,
             TelegramDeliveryAction.INVALID_ACTION_BUTTON_EDIT: OfferStatus.ACTIVE,
             TelegramDeliveryAction.RECONCILIATION_EDIT: OfferStatus.ACTIVE,
             TelegramDeliveryAction.TRADED_OFFER_EDIT: OfferStatus.COMPLETED,
-            TelegramDeliveryAction.EXPIRED_OFFER_EDIT: OfferStatus.EXPIRED,
             TelegramDeliveryAction.CANCELLED_OFFER_EDIT: OfferStatus.CANCELLED,
         }
 
@@ -278,6 +276,41 @@ class TelegramDeliveryOfferFreshnessTests(unittest.IsolatedAsyncioTestCase):
                     ),
                 )
                 self.assertEqual(decision.outcome, TelegramFreshnessOutcome.SEND)
+
+    async def test_untraded_expiry_and_final_tail_are_delivery_noops(self):
+        expired = await self.decide(
+            make_job(TelegramDeliveryAction.EXPIRED_OFFER_EDIT),
+            offer=make_offer(
+                status=OfferStatus.EXPIRED,
+                quantity=10,
+                remaining_quantity=10,
+            ),
+            state=make_state(),
+        )
+        with patch.object(
+            freshness,
+            "_channel_lifecycle_for_payload",
+            return_value=SimpleNamespace(
+                phase=SimpleNamespace(value="final_tail"),
+                accepts_new_public_interaction=False,
+            ),
+        ):
+            final_tail = await self.decide(
+                make_job(TelegramDeliveryAction.FINAL_TAIL_CHANNEL_EDIT),
+                offer=make_offer(status=OfferStatus.ACTIVE),
+                state=make_state(),
+            )
+
+        self.assertEqual(expired.outcome, TelegramFreshnessOutcome.SENT_NOOP)
+        self.assertEqual(
+            expired.reason,
+            "untraded_expired_channel_post_preserved",
+        )
+        self.assertEqual(final_tail.outcome, TelegramFreshnessOutcome.SENT_NOOP)
+        self.assertEqual(
+            final_tail.reason,
+            "overtime_final_channel_post_preserved",
+        )
 
     async def test_publish_terminal_missing_or_expired_offer_is_superseded(self):
         cases = (
@@ -457,7 +490,7 @@ class TelegramDeliveryOfferFreshnessTests(unittest.IsolatedAsyncioTestCase):
         }
         malformed = await self.decide(bad_keyboard)
 
-        self.assertEqual(current.outcome, TelegramFreshnessOutcome.SEND)
+        self.assertEqual(current.outcome, TelegramFreshnessOutcome.SENT_NOOP)
         self.assertEqual(changed.outcome, TelegramFreshnessOutcome.RECLASSIFY)
         self.assertEqual(
             changed.replacement_action,

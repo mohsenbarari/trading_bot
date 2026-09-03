@@ -41,6 +41,7 @@ from core.market_intelligence.market_store import (
     connect_market_store_read_only,
 )
 from core.market_intelligence.market_contracts import MarketStoreContractError
+from core.market_intelligence.input_health import update_probe_state
 from scripts.project_group_market_to_estimator import (
     ProjectionError,
     project as project_groups,
@@ -54,6 +55,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--conversation-db", type=Path, required=True)
     parser.add_argument("--ledger", type=Path, required=True)
     parser.add_argument("--heartbeat", type=Path, required=True)
+    parser.add_argument(
+        "--group-projection-health",
+        type=Path,
+        help=(
+            "Estimator-compatible group projection heartbeat; defaults beside "
+            "the conversation database."
+        ),
+    )
     parser.add_argument("--release-sha", required=True)
     parser.add_argument("--cutoff-utc", default=AUTHORIZED_CUTOFF_UTC)
     parser.add_argument("--market-lock", type=Path, required=True)
@@ -143,6 +152,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         )
     finally:
         market_lock.close()
+    group_projection_health = (
+        args.group_projection_health
+        or args.conversation_db.parent / "group-event-health.json"
+    )
     conversation_lock = _exclusive_lock(
         args.conversation_lock, args.lock_timeout_seconds
     )
@@ -160,6 +173,18 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         )
     finally:
         conversation_lock.close()
+    if not args.dry_run:
+        update_probe_state(
+            group_projection_health,
+            source="COIN_GROUP_PROJECTION",
+            status="HEALTHY",
+            successful=True,
+            details={
+                str(key): value
+                for key, value in groups.items()
+                if key != "status"
+            },
+        )
     source_latest = _watermarks(args.shadow_market_store, sorted(MARKET_BRIDGE_SOURCES))
     dest_latest = _watermarks(args.legacy_market_store, sorted(MARKET_BRIDGE_SOURCES))
     completed = utc_now()
@@ -215,6 +240,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     heartbeat = args.heartbeat
+    group_projection_health = (
+        args.group_projection_health
+        or args.conversation_db.parent / "group-event-health.json"
+    )
     release_sha = str(args.release_sha or "").strip().lower()
     try:
         result = run(args)
@@ -238,6 +267,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             write_health(heartbeat, failure)
         except OSError:
             pass
+        if not args.dry_run:
+            try:
+                update_probe_state(
+                    group_projection_health,
+                    source="COIN_GROUP_PROJECTION",
+                    status="FAILED",
+                    successful=False,
+                    error_code=f"GROUP_PROJECTION_{_reason(exc)}",
+                )
+            except OSError:
+                pass
         print(json.dumps({"status": "FAILED", "reason": _reason(exc)}, sort_keys=True), flush=True)
         return 2
     print(json.dumps(result, sort_keys=True), flush=True)

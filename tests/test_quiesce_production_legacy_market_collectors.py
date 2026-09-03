@@ -455,6 +455,47 @@ class LegacyMarketCollectorHandoffTests(unittest.TestCase):
                 )
             self.assertFalse(any(self.active.values()))
 
+    def test_transferred_handoff_can_be_validated_without_changing_authority(self) -> None:
+        context = self.context()
+        with context[0], context[1], context[2], context[3]:
+            handoff.quiesce(**self.common())
+            self.record_transferred_authority()
+            before = self.journal.read_bytes()
+            payload = json.loads(before)
+            validated = handoff.validate_transferred_handoff(
+                journal=self.journal,
+                expected_journal_sha256=sha256(before).hexdigest(),
+                release_sha=RELEASE,
+                host_role=self.host_role,
+                expected_maintenance_lock=payload["maintenance_lock"],
+            )
+            self.assertEqual(validated["status"], "AUTHORITY_TRANSFERRED")
+            self.assertEqual(self.journal.read_bytes(), before)
+            self.assertTrue(self.operation_lock.exists())
+            self.assertFalse(any(self.active.values()))
+
+    def test_transferred_handoff_validator_rejects_incomplete_authority_binding(self) -> None:
+        context = self.context()
+        with context[0], context[1], context[2], context[3]:
+            handoff.quiesce(**self.common())
+            self.record_transferred_authority()
+            payload = json.loads(self.journal.read_text(encoding="utf-8"))
+            payload["authority_transfer"]["marker_authority_sha256"] = None
+            handoff._atomic(self.journal, payload)
+            with self.assertRaisesRegex(
+                handoff.CollectorHandoffError,
+                "transferred_binding_invalid",
+            ):
+                handoff.validate_transferred_handoff(
+                    journal=self.journal,
+                    expected_journal_sha256=sha256(
+                        self.journal.read_bytes()
+                    ).hexdigest(),
+                    release_sha=RELEASE,
+                    host_role=self.host_role,
+                    expected_maintenance_lock=payload["maintenance_lock"],
+                )
+
     def test_primary_commit_rejects_an_unrelated_pass_receipt(self) -> None:
         context = self.context()
         with context[0], context[1], context[2], context[3]:

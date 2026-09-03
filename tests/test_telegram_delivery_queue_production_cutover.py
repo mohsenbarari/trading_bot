@@ -3043,6 +3043,111 @@ verify_queue_cutover_deploy_authority
             self.assertEqual(payload["synthetic_customer_mutations"], 0)
             live.assert_called_once()
 
+    def test_queue_redeploy_preserves_transferred_market_maintenance_lock(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            source, staging, manifest = self.fixture(root)
+            self.write_env(
+                source,
+                planner.queue_target_values(planner.parse_env_file(source)),
+            )
+            backup_receipt = root / "backup.json"
+            backup_receipt.write_text("{}", encoding="utf-8")
+            backup_digest = hashlib.sha256(backup_receipt.read_bytes()).hexdigest()
+            manifest_values = planner.parse_env_file(manifest)
+            manifest_values.update(
+                {
+                    "PRODUCTION_BACKUP_RECEIPT_PATH": str(backup_receipt),
+                    "PRODUCTION_BACKUP_RECEIPT_SHA256": backup_digest,
+                }
+            )
+            self.write_env(manifest, manifest_values)
+            source_digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            binding = self.binding()
+            artifacts = root / "artifacts"
+            artifacts.mkdir(mode=0o700)
+            handoffs = root / "handoffs"
+            handoffs.mkdir(mode=0o700)
+            release = "b" * 40
+            journal = handoffs / f"bot-legacy-handoff-{release[:8]}.json"
+            lock_path = artifacts / "production-release.lock"
+            lock_path.touch(mode=0o600)
+            metadata = lock_path.stat()
+            maintenance = {
+                "schema": "market_pipeline_maintenance_lock/1.0",
+                "environment": "production",
+                "host_role": "bot",
+                "release_sha": release,
+                "nonce_sha256": "7" * 64,
+                "journal_path_sha256": hashlib.sha256(
+                    str(journal).encode("utf-8")
+                ).hexdigest(),
+                "device": metadata.st_dev,
+                "inode": metadata.st_ino,
+            }
+            lock_path.write_text(
+                json.dumps(maintenance, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            lock_path.chmod(0o600)
+            journal.write_text(
+                json.dumps(
+                    {
+                        "schema": "production_legacy_market_collector_handoff/1.1",
+                        "status": "AUTHORITY_TRANSFERRED",
+                        "host_role": "bot",
+                        "release_sha": release,
+                        "maintenance_lock": maintenance,
+                        "state_deleted": False,
+                        "secrets_disclosed": False,
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            journal.chmod(0o600)
+            preflight = root / "redeploy-preflight.json"
+            preflight_digest = self.write_redeploy_preflight(
+                preflight, binding, backup_digest, source_digest
+            )
+            fake = FakeRedeployOperations(manifest)
+            live = Mock(
+                return_value={
+                    "status": "READY_FOR_QUEUE_V1_REDEPLOY",
+                    "source_sha256": source_digest,
+                    "git": binding,
+                }
+            )
+            with (
+                patch.object(cutover, "git_binding", return_value=binding),
+                patch.object(
+                    cutover.market_handoff,
+                    "validate_transferred_handoff",
+                    return_value={},
+                ) as validate,
+            ):
+                result = cutover.redeploy_queue_v1(
+                    manifest=manifest,
+                    staging_env=staging,
+                    preflight_report=preflight,
+                    preflight_digest=preflight_digest,
+                    backup_receipt=backup_receipt,
+                    backup_digest=backup_digest,
+                    artifact_dir=artifacts,
+                    confirmation=cutover.REDEPLOY_CONFIRMATION,
+                    operations_factory=lambda _manifest: fake,
+                    preflight_runner=live,
+                    market_handoff_dir=handoffs,
+                )
+            self.assertEqual(result["status"], "redeployed")
+            self.assertTrue(lock_path.exists())
+            self.assertEqual(lock_path.stat().st_ino, metadata.st_ino)
+            self.assertEqual(
+                json.loads(lock_path.read_text(encoding="utf-8")), maintenance
+            )
+            validate.assert_called_once()
+
     def test_queue_owned_redeploy_threads_exact_private_primary_attestation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

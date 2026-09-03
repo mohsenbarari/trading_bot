@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 from core.market_intelligence.capture_event_adapter import (
+    CAPTURE_ADAPTER_SCHEMA_VERSION,
     CaptureEventContractError,
     decode_coin_group_event,
     decode_market_channel_event,
@@ -479,6 +480,101 @@ class CaptureEventAdapterTests(unittest.TestCase):
         self.assertTrue(str(rows[0]["event_id"]).endswith("000000000999"))
         self.assertTrue(str(rows[1]["event_id"]).endswith("000000000001"))
 
+    def test_market_projection_limit_does_not_starve_dirty_coin_groups(self) -> None:
+        self._stage_group(
+            group_event(
+                1001,
+                text="امام فروش فردا 190000 / 5 تا",
+                message_id=1001,
+                sender="owner00000001001",
+            )
+        )
+        self.staging.executemany(
+            "INSERT INTO capture_dirty_market_messages("
+            "source_id,message_id,event_time_utc,available_at_utc) "
+            "VALUES(?,?,?,?)",
+            [
+                ("USD_HERAT", message_id, "2026-08-24T09:59:00Z", available)
+                for message_id, available in (
+                    (2001, "2026-08-24T10:00:01Z"),
+                    (2002, "2026-08-24T10:00:02Z"),
+                    (2003, "2026-08-24T10:00:03Z"),
+                )
+            ],
+        )
+        self.staging.commit()
+
+        report = project_capture_changes(
+            self.staging,
+            self.market,
+            as_of_utc="2026-08-24T10:02:00Z",
+            max_market_messages=1,
+        )
+        self.market.commit()
+        self.staging.commit()
+
+        self.assertEqual(report.market_messages_reprojected, 0)
+        self.assertIsNotNone(report.group_pipeline)
+        self.assertEqual(
+            self.staging.execute(
+                "SELECT COUNT(*) FROM capture_dirty_market_messages"
+            ).fetchone()[0],
+            2,
+        )
+        self.assertEqual(
+            self.staging.execute(
+                "SELECT COUNT(*) FROM capture_dirty_groups"
+            ).fetchone()[0],
+            0,
+        )
+        self.assertIsNotNone(
+            self.market.execute(
+                "SELECT 1 FROM market_observations "
+                "WHERE source_code='GROUP_1' AND event_type='OFFER'"
+            ).fetchone()
+        )
+
+    def test_dirty_market_batches_use_causal_ready_index_and_upgrade_v8(self) -> None:
+        self.staging.execute("DROP INDEX idx_capture_dirty_market_ready")
+        self.staging.execute(
+            "UPDATE capture_adapter_metadata SET schema_version=8 WHERE singleton=1"
+        )
+        self.staging.commit()
+
+        initialize_capture_adapter(self.staging)
+
+        self.assertEqual(
+            self.staging.execute(
+                "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
+            ).fetchone()[0],
+            CAPTURE_ADAPTER_SCHEMA_VERSION,
+        )
+        plan = self.staging.execute(
+            "EXPLAIN QUERY PLAN SELECT * FROM capture_dirty_market_messages "
+            "WHERE available_at_utc<=? "
+            "ORDER BY available_at_utc,source_id,message_id LIMIT ?",
+            ("2026-08-24T10:02:00Z", 256),
+        ).fetchall()
+        self.assertTrue(
+            any(
+                "idx_capture_dirty_market_ready" in str(row[3])
+                for row in plan
+            ),
+            [str(row[3]) for row in plan],
+        )
+
+    def test_market_projection_limit_rejects_non_positive_values(self) -> None:
+        with self.assertRaisesRegex(
+            CaptureEventContractError,
+            "capture_market_projection_limit_invalid",
+        ):
+            project_capture_changes(
+                self.staging,
+                self.market,
+                as_of_utc="2026-08-24T10:02:00Z",
+                max_market_messages=0,
+            )
+
     def test_never_exported_dependency_retraction_does_not_requeue(self) -> None:
         self._stage_market(
             market_event(
@@ -674,7 +770,7 @@ class CaptureEventAdapterTests(unittest.TestCase):
         row = self.staging.execute(
             "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
         ).fetchone()
-        self.assertEqual(row["schema_version"], 8)
+        self.assertEqual(row["schema_version"], CAPTURE_ADAPTER_SCHEMA_VERSION)
         self.assertEqual(
             self.staging.execute(
                 "SELECT COUNT(*) FROM capture_market_message_revisions"
@@ -728,7 +824,7 @@ class CaptureEventAdapterTests(unittest.TestCase):
             self.staging.execute(
                 "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
             ).fetchone()[0],
-            8,
+            CAPTURE_ADAPTER_SCHEMA_VERSION,
         )
         self.assertEqual(
             self.staging.execute(

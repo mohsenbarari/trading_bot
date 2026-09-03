@@ -23,6 +23,7 @@ from core.services.telegram_offer_channel_service import (
     build_offer_channel_message,
     build_offer_channel_reply_markup,
     get_offer_channel_history_tag,
+    offer_channel_visual_noop_reason,
     project_offer_channel_lifecycle,
 )
 from core.telegram_delivery_queue_contract import (
@@ -619,6 +620,24 @@ async def validate_offer_telegram_delivery_freshness(
     )
     if identity_decision is not None:
         return identity_decision
+    visual_phase = None
+    if action == TelegramDeliveryAction.FINAL_TAIL_CHANNEL_EDIT:
+        visual_phase = _enum_value(
+            getattr(
+                _channel_lifecycle_for_payload(offer, as_of=now),
+                "phase",
+                None,
+            )
+        )
+    visual_noop_reason = offer_channel_visual_noop_reason(
+        offer,
+        lifecycle_phase=visual_phase,
+    )
+    if visual_noop_reason is not None:
+        return _decision(
+            TelegramFreshnessOutcome.SENT_NOOP,
+            reason=visual_noop_reason,
+        )
     lifecycle_decision = _active_lifecycle_reclassification(
         offer,
         action=action,

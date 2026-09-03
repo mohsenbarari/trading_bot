@@ -15,6 +15,10 @@ from core.services.telegram_offer_publication_service import (
     get_or_create_telegram_publication_state,
     mark_telegram_publication_success,
 )
+from core.services.telegram_offer_channel_service import (
+    OVERTIME_FINAL_CHANNEL_POST_PRESERVED,
+    UNTRADED_EXPIRED_CHANNEL_POST_PRESERVED,
+)
 from core.services.telegram_offer_queue_service import (
     TelegramOfferQueueError,
     enqueue_current_offer_delivery,
@@ -55,6 +59,12 @@ _HOLD_OUTCOMES = frozenset(
         TelegramDeliveryOutcome.AMBIGUOUS,
         TelegramDeliveryOutcome.AMBIGUOUS_UNRESOLVED,
         TelegramDeliveryOutcome.QUARANTINED,
+    }
+)
+_CHANNEL_VISUAL_NOOP_REASONS = frozenset(
+    {
+        OVERTIME_FINAL_CHANNEL_POST_PRESERVED,
+        UNTRADED_EXPIRED_CHANNEL_POST_PRESERVED,
     }
 )
 
@@ -442,6 +452,20 @@ class TelegramOfferQueueLifecycleFeedback:
                     offer,
                     now=now,
                     reason=reason,
+                )
+            elif (
+                action not in OFFER_PUBLISH_ACTIONS
+                and reason in _CHANNEL_VISUAL_NOOP_REASONS
+            ):
+                # The product intentionally keeps the existing Telegram post,
+                # but the queue still has to acknowledge the current Offer
+                # version. Otherwise the edit feeder would rediscover the same
+                # visual no-op forever.
+                _mark_edit_success(
+                    state,
+                    offer,
+                    action=action,
+                    now=now,
                 )
         elif outcome == TelegramFreshnessOutcome.SUPERSEDED:
             if action in OFFER_PUBLISH_ACTIONS and _positive_int(

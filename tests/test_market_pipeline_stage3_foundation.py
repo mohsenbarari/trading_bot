@@ -230,6 +230,14 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
         self.assertIn("cap_drop:", base)
         self.assertNotIn("market_capture_account", bot)
         self.assertNotIn("market_bot_transport", web)
+        capture_account1 = web.split("  market-capture-account1:", 1)[1].split(
+            "  market-capture-account2:", 1
+        )[0]
+        capture_account2 = web.split("  market-capture-account2:", 1)[1].split(
+            "  market-capture-external:", 1
+        )[0]
+        self.assertIn('restart: "on-failure"', capture_account1)
+        self.assertIn('restart: "on-failure"', capture_account2)
         self.assertEqual(web.count("ports:"), 1)
         self.assertEqual(bot.count("ports:"), 1)
         receiver_mount = bot.split(
@@ -243,6 +251,18 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
         receiver = bot.split("  market-fact-receiver:", 1)[1].split(
             "  market-store-adapter:", 1
         )[0]
+        processor = web.split("  market-processor:", 1)[1].split(
+            "  market-fact-sync-worker:", 1
+        )[0]
+        self.assertIn(
+            "MARKET_PROCESSOR_MAX_MARKET_PROJECTIONS_PER_CYCLE:", processor
+        )
+        self.assertIn("MARKET_PROCESSOR_MAX_FACT_EXPORTS_PER_CYCLE:", processor)
+        self.assertIn("MARKET_PROCESSOR_MAINTENANCE_INTERVAL_SECONDS:", processor)
+        self.assertIn(
+            "SQLITE_TMPDIR: /var/lib/market-data/state/market-processor/sqlite-tmp",
+            processor,
+        )
         self.assertIn("timeout: 8s", receiver)
         estimator = bot.split("  coin-estimator:", 1)[1].split(
             "  estimator-snapshot-sender:", 1

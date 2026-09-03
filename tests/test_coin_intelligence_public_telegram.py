@@ -242,6 +242,48 @@ class PublicTelegramIngestionTests(unittest.TestCase):
         self.assertEqual(row["parse_confidence"], 0.97)
         self.assertIn("+offer-link-v1", row["parser_version"])
 
+    def test_late_melted_flow_offer_rechecks_only_its_bounded_trade_window(self) -> None:
+        first = self.ingest(
+            "MELTED_FLOW",
+            2,
+            "2026-08-04T05:35:30Z",
+            "79,270,000⏳باحواله✅معامله",
+        )
+        self.assertEqual(first.linked_melted_flow_trades, 0)
+        result = self.ingest(
+            "MELTED_FLOW",
+            1,
+            "2026-08-04T05:35:00Z",
+            "79,270,000⏳باحواله🔵خرید",
+            available_at_utc="2026-08-04T05:36:00Z",
+        )
+        row = self.connection.execute(
+            "SELECT side,parser_version FROM market_observations "
+            "WHERE event_type='TRADE'"
+        ).fetchone()
+        self.assertEqual(result.linked_melted_flow_trades, 1)
+        self.assertEqual(row["side"], "BUY")
+        self.assertIn("+offer-link-v1", row["parser_version"])
+
+    def test_unrelated_melted_flow_offer_does_not_rescan_unknown_history(self) -> None:
+        self.ingest(
+            "MELTED_FLOW",
+            2,
+            "2026-08-04T05:35:30Z",
+            "79,270,000⏳باحواله✅معامله",
+        )
+        result = self.ingest(
+            "MELTED_FLOW",
+            3,
+            "2026-08-04T05:35:31Z",
+            "80,000,000⏳باحواله🔴فروش",
+        )
+        row = self.connection.execute(
+            "SELECT side FROM market_observations WHERE event_type='TRADE'"
+        ).fetchone()
+        self.assertEqual(result.linked_melted_flow_trades, 0)
+        self.assertEqual(row["side"], "UNKNOWN")
+
     def test_schema_v1_upgrades_to_current_schema_and_restores_checkpoint(self) -> None:
         self.connection.execute("DROP TABLE market_source_checkpoints")
         self.connection.execute(

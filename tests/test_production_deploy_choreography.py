@@ -548,53 +548,60 @@ guard_production_release_command
         self.assertNotEqual(rejected.returncode, 0)
         self.assertIn("guarded cutover authority", rejected.stderr)
 
-    def test_control_release_prepare_adopts_valid_market_maintenance_lock(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="market-lock-adopt-") as temporary:
-            root = Path(temporary)
-            queue = root / "queue"
-            handoff = root / "handoff"
-            queue.mkdir(mode=0o700)
-            handoff.mkdir(mode=0o700)
-            lock = queue / "production-release.lock"
-            lock.touch(mode=0o600)
-            release = "a" * 40
-            journal = handoff / f"bot-legacy-handoff-{release[:8]}.json"
-            lock_stat = lock.stat()
-            lock_payload = {
-                "schema": "market_pipeline_maintenance_lock/1.0",
-                "environment": "production",
-                "host_role": "bot",
-                "release_sha": release,
-                "journal_path_sha256": sha256(str(journal).encode()).hexdigest(),
-                "nonce_sha256": "b" * 64,
-                "device": lock_stat.st_dev,
-                "inode": lock_stat.st_ino,
-            }
-            lock.write_text(json.dumps(lock_payload) + "\n", encoding="utf-8")
-            lock.chmod(0o600)
-            journal.write_text(
-                json.dumps(
-                    {
-                        "schema": "production_legacy_market_collector_handoff/1.1",
-                        "status": "AUTHORITY_TRANSFERRED",
-                        "host_role": "bot",
-                        "release_sha": release,
-                        "maintenance_lock": lock_payload,
-                        "state_deleted": False,
-                        "secrets_disclosed": False,
-                    }
+    def test_artifact_only_prepare_adopts_valid_market_maintenance_lock(self) -> None:
+        for command in (
+            "prepare-release-evidence",
+            "verify-release-evidence",
+            "prepare-private-primary-control-release",
+        ):
+            with self.subTest(command=command), tempfile.TemporaryDirectory(
+                prefix="market-lock-adopt-"
+            ) as temporary:
+                root = Path(temporary)
+                queue = root / "queue"
+                handoff = root / "handoff"
+                queue.mkdir(mode=0o700)
+                handoff.mkdir(mode=0o700)
+                lock = queue / "production-release.lock"
+                lock.touch(mode=0o600)
+                release = "a" * 40
+                journal = handoff / f"bot-legacy-handoff-{release[:8]}.json"
+                lock_stat = lock.stat()
+                lock_payload = {
+                    "schema": "market_pipeline_maintenance_lock/1.0",
+                    "environment": "production",
+                    "host_role": "bot",
+                    "release_sha": release,
+                    "journal_path_sha256": sha256(str(journal).encode()).hexdigest(),
+                    "nonce_sha256": "b" * 64,
+                    "device": lock_stat.st_dev,
+                    "inode": lock_stat.st_ino,
+                }
+                lock.write_text(json.dumps(lock_payload) + "\n", encoding="utf-8")
+                lock.chmod(0o600)
+                journal.write_text(
+                    json.dumps(
+                        {
+                            "schema": "production_legacy_market_collector_handoff/1.1",
+                            "status": "AUTHORITY_TRANSFERRED",
+                            "host_role": "bot",
+                            "release_sha": release,
+                            "maintenance_lock": lock_payload,
+                            "state_deleted": False,
+                            "secrets_disclosed": False,
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
                 )
-                + "\n",
-                encoding="utf-8",
-            )
-            journal.chmod(0o600)
-            result = run_sourced_script(
-                """
+                journal.chmod(0o600)
+                result = run_sourced_script(
+                    """
 PRODUCTION_RELEASE_LOCK_DIR="$2/queue"
 PRODUCTION_RELEASE_LOCK_PATH="$2/queue/production-release.lock"
 PRODUCTION_MARKET_HANDOFF_DIR="$2/handoff"
 PRODUCTION_PRIVATE_PRIMARY_CHOREOGRAPHY_LOCK="$2/no-choreography.lock"
-COMMAND=prepare-private-primary-control-release
+COMMAND="$3"
 acquire_production_source_lock() { :; }
 production_runtime_source_profile() { printf 'queue-v1\n'; }
 guard_production_release_command
@@ -605,11 +612,12 @@ printf '%s|%s|%s\n' \
 release_production_locks
 test -f "$PRODUCTION_RELEASE_LOCK_PATH"
 """,
-                str(root),
-            )
-            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-            self.assertEqual(result.stdout.strip(), "1|0|present")
-            self.assertTrue(lock.exists())
+                    str(root),
+                    command,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                self.assertEqual(result.stdout.strip(), "1|0|present")
+                self.assertTrue(lock.exists())
 
     def test_control_release_prepare_rejects_unbound_market_lock(self) -> None:
         with tempfile.TemporaryDirectory(prefix="market-lock-reject-") as temporary:

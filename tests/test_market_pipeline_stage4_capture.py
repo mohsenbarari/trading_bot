@@ -21,6 +21,7 @@ from pydantic import ValidationError
 from core.market_intelligence import private_capture as capture
 from core.market_intelligence import private_capture_service as capture_service
 from core.market_intelligence.capture_event_adapter import (
+    CAPTURE_ADAPTER_SCHEMA_VERSION,
     CaptureEventContractError,
     decode_coin_group_event,
     decode_market_channel_event,
@@ -50,6 +51,87 @@ from scripts import audit_production_market_catchup as catchup_audit
 
 
 UTC = timezone.utc
+
+
+class ReplayManifestDigestTests(unittest.TestCase):
+    def test_streaming_summary_matches_existing_canonical_contract(self):
+        run_id = "a" * 64
+        rows = iter(
+            (
+                (
+                    "account1",
+                    "MELTED_PRIMARY_FLOW",
+                    7,
+                    "b" * 64,
+                    "event-1",
+                    "message_snapshot",
+                    "explicit_backfill",
+                    "text",
+                    "2026-09-03T08:00:00.000000Z",
+                    "2026-09-03T08:00:01.000000Z",
+                    "accepted",
+                    "c" * 64,
+                ),
+                (
+                    "account1",
+                    "USD_HERAT",
+                    8,
+                    "d" * 64,
+                    "event-2",
+                    "message_snapshot",
+                    "explicit_backfill",
+                    "text",
+                    None,
+                    "2026-09-03T08:00:02.000000Z",
+                    "duplicate",
+                    "e" * 64,
+                ),
+            )
+        )
+        expected_rows = [
+            [
+                "account1",
+                "MELTED_PRIMARY_FLOW",
+                7,
+                "b" * 64,
+                "event-1",
+                "message_snapshot",
+                "explicit_backfill",
+                "text",
+                "2026-09-03T08:00:00.000000Z",
+                "2026-09-03T08:00:01.000000Z",
+                "accepted",
+                "c" * 64,
+            ],
+            [
+                "account1",
+                "USD_HERAT",
+                8,
+                "d" * 64,
+                "event-2",
+                "message_snapshot",
+                "explicit_backfill",
+                "text",
+                None,
+                "2026-09-03T08:00:02.000000Z",
+                "duplicate",
+                "e" * 64,
+            ],
+        ]
+        expected = sha256(
+            capture.canonical_json(
+                {
+                    "schema": capture.REPLAY_MANIFEST_SCHEMA,
+                    "run_id": run_id,
+                    "entries": expected_rows,
+                }
+            )
+        ).hexdigest()
+
+        self.assertEqual(
+            capture._replay_manifest_summary(rows, run_id=run_id),
+            (2, expected),
+        )
 
 
 def audited_resolution_bundle(
@@ -401,6 +483,75 @@ class CaptureFixture(unittest.TestCase):
             self.state.connection.execute(
                 "DELETE FROM capture_replay_runs WHERE run_id=?", (run_id,)
             )
+
+    def test_replay_completion_accepts_only_empty_retry_after_durable_manifest(self):
+        cutoff = datetime(2026, 8, 25, 9, 33, tzinfo=UTC)
+        moment = cutoff + timedelta(minutes=1)
+        source = "MELTED_PRIMARY_FLOW"
+        message = snapshot(91, published=moment, text="95,000,000 فروش")
+        document = telegram_capture.build_market_event(
+            SOURCE_POLICIES[source],
+            message,
+            event_type="message_snapshot",
+            received_at=moment,
+            backfill=True,
+            explicit_backfill=True,
+        )
+        accepted = self.engine.accept(document, now=moment)
+        run_id = self.state.begin_replay_run(
+            cutoff=cutoff,
+            upper_bound=moment + timedelta(minutes=1),
+            source_codes={source},
+            release_sha="a" * 40,
+            now=moment,
+        )
+        identity = capture.QuarantineEventIdentity(
+            account="account1",
+            source_code=source,
+            message_id=91,
+            revision_sha256=telegram_capture._revision(message),
+            event_type="message_snapshot",
+            origin="explicit_backfill",
+        )
+        available = self.state.event_available_at(accepted.event_id)
+        self.assertIsNotNone(available)
+        self.state.record_replay_manifest_entry(
+            run_id=run_id,
+            identity=identity,
+            event_id=accepted.event_id,
+            content_type="text",
+            event_time_utc=capture.utc_text(moment),
+            available_at_utc=str(available),
+            capture_status="accepted",
+        )
+
+        # A first empty attempt cannot certify a non-empty run manifest.
+        self.state.begin_backfill(source, cutoff, now=moment)
+        self.state.mark_backfill_complete(
+            source,
+            cutoff,
+            expected_attempted=0,
+            exhaustion="cutoff_crossed",
+            now=moment,
+        )
+        with self.assertRaisesRegex(
+            capture.CaptureRuntimeError, "capture_replay_source_incomplete"
+        ):
+            self.state.complete_replay_run(run_id, now=moment)
+
+        # On a later retry, the immutable durable manifest is retained while
+        # the empty global counters no longer poison run completion.
+        self.state.begin_backfill(source, cutoff, now=moment)
+        self.state.mark_backfill_complete(
+            source,
+            cutoff,
+            expected_attempted=0,
+            exhaustion="cutoff_crossed",
+            now=moment,
+        )
+        count, digest = self.state.complete_replay_run(run_id, now=moment)
+        self.assertEqual(count, 1)
+        self.assertRegex(digest, r"^[0-9a-f]{64}$")
 
     def test_exact_resolution_is_idempotent_and_new_occurrence_reopens_it(self):
         cutoff = datetime(2026, 8, 25, 9, 33, tzinfo=UTC)
@@ -1267,14 +1418,23 @@ class CaptureFixture(unittest.TestCase):
 
         class FakeClient:
             calls = 0
+            min_ids: list[int] = []
 
             async def iter_messages(
-                self, _entity, *, limit, reverse=False, offset_date=None
+                self,
+                _entity,
+                *,
+                limit,
+                reverse=False,
+                offset_date=None,
+                min_id=0,
             ):
                 self.calls += 1
-                yield SimpleNamespace(
-                    id=1, date=cutoff, edit_date=None, message="2,349.50"
-                )
+                self.min_ids.append(min_id)
+                if min_id < 1:
+                    yield SimpleNamespace(
+                        id=1, date=cutoff, edit_date=None, message="2,349.50"
+                    )
                 if self.calls == 1:
                     raise ConnectionError("fixture_transport_interrupted")
                 yield SimpleNamespace(
@@ -1325,10 +1485,11 @@ class CaptureFixture(unittest.TestCase):
         )
         self.assertTrue(self.state.backfill_covers("MELTED_PRIMARY_FLOW", cutoff))
         status = self.state.backfill_status("MELTED_PRIMARY_FLOW")
+        self.assertEqual(client.min_ids, [0, 1])
         self.assertEqual(status["run_attempts"], 2)
         self.assertEqual(status["attempted"], 2)
-        self.assertEqual(status["accepted"], 1)
-        self.assertEqual(status["duplicate"], 1)
+        self.assertEqual(status["accepted"], 2)
+        self.assertEqual(status["duplicate"], 0)
         self.assertEqual(status["exhaustion"], "cutoff_crossed")
 
     def test_explicit_backfill_includes_exact_cutoff_across_many_results(self):
@@ -2423,7 +2584,7 @@ class ExplicitBackfillAdapterTests(unittest.TestCase):
         self.staging.commit()
         self.market.commit()
 
-    def test_schema_v6_migrates_to_v8_lineage_without_raw_columns(self) -> None:
+    def test_schema_v6_migrates_to_current_lineage_without_raw_columns(self) -> None:
         self.staging.execute("DROP TABLE capture_explicit_backfill_lineage")
         self.staging.execute(
             "UPDATE capture_adapter_metadata SET schema_version=6 WHERE singleton=1"
@@ -2436,7 +2597,7 @@ class ExplicitBackfillAdapterTests(unittest.TestCase):
             self.staging.execute(
                 "SELECT schema_version FROM capture_adapter_metadata WHERE singleton=1"
             ).fetchone()[0],
-            8,
+            CAPTURE_ADAPTER_SCHEMA_VERSION,
         )
         columns = {
             str(row["name"])

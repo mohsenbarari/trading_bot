@@ -381,6 +381,38 @@ class TelegramOfferQueueFeedbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(job.terminal_at)
         self.db.flush.assert_awaited_once()
 
+    async def test_visual_noop_edit_advances_rendered_offer_version(self):
+        job = make_job(TelegramDeliveryAction.EXPIRED_OFFER_EDIT)
+        decision = TelegramFreshnessDecision(
+            TelegramFreshnessOutcome.SENT_NOOP,
+            reason="untraded_expired_channel_post_preserved",
+        )
+        self.offer.status = OfferStatus.EXPIRED
+        self.state.telegram_message_id = 901
+
+        with patch.object(
+            feedback_module,
+            "_load_offer_and_state_for_update",
+            new=self.load,
+        ), patch.object(
+            feedback_module,
+            "_mark_edit_success",
+        ) as mark_edit:
+            await self.feedback.apply_freshness(
+                self.db,
+                job,
+                decision,
+                utc_now(),
+            )
+
+        mark_edit.assert_called_once_with(
+            self.state,
+            self.offer,
+            action=TelegramDeliveryAction.EXPIRED_OFFER_EDIT,
+            now=mark_edit.call_args.kwargs["now"],
+        )
+        self.db.flush.assert_awaited_once()
+
     async def test_supersede_without_offer_does_not_raise(self):
         job = make_job(TelegramDeliveryAction.OFFER_PUBLISH, source_version=1)
         job.state = TelegramDeliveryState.SUPERSEDED

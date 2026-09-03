@@ -1,5 +1,5 @@
 import copy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import sqlite3
 import tempfile
@@ -469,6 +469,215 @@ class Stage8ReceiverTests(unittest.TestCase):
 
 
 class Stage8TransportTests(unittest.TestCase):
+    def test_pending_export_prioritizes_fresh_events_over_old_backlog(self):
+        with tempfile.TemporaryDirectory() as directory:
+            market = connect_market_store(Path(directory) / "market.sqlite3")
+            initialize_market_store(market)
+            initialize_export_ledger(market)
+            now = datetime.now(timezone.utc).replace(microsecond=0)
+            old = (now.replace(microsecond=0) - timedelta(days=2)).isoformat().replace(
+                "+00:00", "Z"
+            )
+            fresh = now.isoformat().replace("+00:00", "Z")
+            for identity, source, timestamp in (
+                ("old-1", "GROUP_1", old),
+                ("old-2", "GROUP_2", old),
+                ("fresh", "GROUP_1", fresh),
+            ):
+                upsert_observation(
+                    market,
+                    MarketObservation(
+                        event_key=derive_event_key("stage8-export-priority", identity),
+                        source_code=source,
+                        source_family="GROUP",
+                        event_time_utc=timestamp,
+                        available_at_utc=timestamp,
+                        instrument="COIN_IMAM",
+                        market_label="GROUP_COIN_IMAM",
+                        settlement_term="CASH",
+                        trade_form="PHYSICAL",
+                        event_type="OFFER",
+                        side="SELL",
+                        price="187500",
+                        price_unit="PROJECT_THOUSAND_TOMAN",
+                        currency="TOMAN",
+                        quantity="5",
+                        quantity_unit="COIN_COUNT",
+                        parser_version="stage8-test-v1",
+                    ),
+                )
+            market.commit()
+
+            rows = _pending_export_rows(market, max_rows=1)
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(str(rows[0]["available_at_utc"]), fresh)
+            market.close()
+
+    def test_pending_export_prioritizes_fresh_offer_before_dependent_trade(self):
+        with tempfile.TemporaryDirectory() as directory:
+            market = connect_market_store(Path(directory) / "market.sqlite3")
+            initialize_market_store(market)
+            initialize_export_ledger(market)
+            now = datetime.now(timezone.utc).replace(microsecond=0)
+            offer_time = (now - timedelta(seconds=10)).isoformat().replace(
+                "+00:00", "Z"
+            )
+            trade_time = now.isoformat().replace("+00:00", "Z")
+            offer_key = derive_event_key("stage8-export-priority", "fresh-offer")
+            common = {
+                "source_code": "GROUP_2",
+                "source_family": "GROUP",
+                "instrument": "COIN_IMAM",
+                "market_label": "GROUP_COIN_IMAM",
+                "settlement_term": "TOMORROW",
+                "trade_form": "PHYSICAL",
+                "side": "SELL",
+                "price_unit": "PROJECT_THOUSAND_TOMAN",
+                "currency": "TOMAN",
+                "quantity_unit": "COIN_COUNT",
+                "parser_version": "stage8-test-v1",
+            }
+            upsert_observation(
+                market,
+                MarketObservation(
+                    event_key=offer_key,
+                    event_time_utc=offer_time,
+                    available_at_utc=trade_time,
+                    event_type="OFFER",
+                    price="228000",
+                    quantity="8",
+                    **common,
+                ),
+            )
+            upsert_observation(
+                market,
+                MarketObservation(
+                    event_key=derive_event_key(
+                        "stage8-export-priority", "fresh-trade"
+                    ),
+                    event_time_utc=trade_time,
+                    available_at_utc=trade_time,
+                    event_type="TRADE",
+                    price="228000",
+                    quantity="8",
+                    attributes={"root_offer_event_key": offer_key.hex()},
+                    **common,
+                ),
+            )
+            market.commit()
+
+            rows = _pending_export_rows(market, max_rows=1)
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(str(rows[0]["event_type"]), "OFFER")
+            self.assertEqual(bytes(rows[0]["event_key"]), offer_key)
+            market.close()
+
+    def test_pending_export_keeps_fresh_rows_ahead_of_backlog_in_return_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            market = connect_market_store(Path(directory) / "market.sqlite3")
+            initialize_market_store(market)
+            initialize_export_ledger(market)
+            now = datetime.now(timezone.utc).replace(microsecond=0)
+            old = (now - timedelta(days=2)).isoformat().replace("+00:00", "Z")
+            fresh = now.isoformat().replace("+00:00", "Z")
+            for identity, timestamp in (("old", old), ("fresh", fresh)):
+                upsert_observation(
+                    market,
+                    MarketObservation(
+                        event_key=derive_event_key(
+                            "stage8-export-return-order", identity
+                        ),
+                        source_code="GROUP_1",
+                        source_family="GROUP",
+                        event_time_utc=timestamp,
+                        available_at_utc=timestamp,
+                        instrument="COIN_IMAM",
+                        market_label="GROUP_COIN_IMAM",
+                        settlement_term="CASH",
+                        trade_form="PHYSICAL",
+                        event_type="OFFER",
+                        side="SELL",
+                        price="228000",
+                        price_unit="PROJECT_THOUSAND_TOMAN",
+                        currency="TOMAN",
+                        quantity="8",
+                        quantity_unit="COIN_COUNT",
+                        parser_version="stage8-test-v1",
+                    ),
+                )
+            market.commit()
+
+            rows = _pending_export_rows(market, max_rows=2)
+
+            self.assertEqual(
+                [str(row["event_time_utc"]) for row in rows], [fresh, old]
+            )
+            market.close()
+
+    def test_pending_export_does_not_let_fresh_reference_starve_coin_group(self):
+        with tempfile.TemporaryDirectory() as directory:
+            market = connect_market_store(Path(directory) / "market.sqlite3")
+            initialize_market_store(market)
+            initialize_export_ledger(market)
+            now = datetime.now(timezone.utc).replace(microsecond=0)
+            group_time = (now - timedelta(hours=2)).isoformat().replace(
+                "+00:00", "Z"
+            )
+            fresh = now.isoformat().replace("+00:00", "Z")
+            upsert_observation(
+                market,
+                MarketObservation(
+                    event_key=derive_event_key("stage8-export-fairness", "group"),
+                    source_code="GROUP_1",
+                    source_family="GROUP",
+                    event_time_utc=group_time,
+                    available_at_utc=group_time,
+                    instrument="COIN_IMAM",
+                    market_label="GROUP_COIN_IMAM",
+                    settlement_term="CASH",
+                    trade_form="PHYSICAL",
+                    event_type="OFFER",
+                    side="SELL",
+                    price="228000",
+                    price_unit="PROJECT_THOUSAND_TOMAN",
+                    currency="TOMAN",
+                    quantity="8",
+                    quantity_unit="COIN_COUNT",
+                    parser_version="stage8-test-v1",
+                ),
+            )
+            upsert_observation(
+                market,
+                MarketObservation(
+                    event_key=derive_event_key(
+                        "stage8-export-fairness", "reference"
+                    ),
+                    source_code="BINANCE_PAXG_PUBLIC_API",
+                    source_family="EXTERNAL_MARKET",
+                    event_time_utc=fresh,
+                    available_at_utc=fresh,
+                    instrument="PAXG_USD_PROXY",
+                    market_label="EXTERNAL_REFERENCE",
+                    settlement_term="SPOT",
+                    trade_form="NOT_APPLICABLE",
+                    event_type="REFERENCE",
+                    side="MID",
+                    price="3480",
+                    price_unit="USD_PER_TROY_OUNCE",
+                    currency="USD",
+                    parser_version="stage8-test-v1",
+                ),
+            )
+            market.commit()
+
+            rows = _pending_export_rows(market, max_rows=1)
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(str(rows[0]["source_code"]), "GROUP_1")
+            market.close()
+
     def test_xau_export_keeps_only_latest_real_quote_per_closed_fifteen_second_bucket(self):
         with tempfile.TemporaryDirectory() as directory:
             market = connect_market_store(Path(directory) / "market.sqlite3")

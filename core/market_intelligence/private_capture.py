@@ -103,6 +103,55 @@ def canonical_json(value: Mapping[str, Any]) -> bytes:
     ).encode("utf-8")
 
 
+def _replay_manifest_summary(
+    rows: Iterable[Sequence[object]], *, run_id: str
+) -> tuple[int, str]:
+    """Hash the canonical replay manifest without materializing every row.
+
+    Replay manifests can contain hundreds of thousands of entries.  Building
+    one Python list plus one serialized copy makes completion depend on the
+    container's RAM and SQLite temporary-file allowance.  The byte stream
+    below is deliberately identical to ``canonical_json`` for the existing
+    manifest contract, so completed historical digests remain valid.
+    """
+
+    digest = sha256()
+    digest.update(b'{"entries":[')
+    count = 0
+    for row in rows:
+        if count:
+            digest.update(b",")
+        digest.update(
+            json.dumps(
+                list(row),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+        count += 1
+    digest.update(b'],"run_id":')
+    digest.update(
+        json.dumps(
+            run_id,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    digest.update(b',"schema":')
+    digest.update(
+        json.dumps(
+            REPLAY_MANIFEST_SCHEMA,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    digest.update(b"}")
+    return count, digest.hexdigest()
+
+
 def value_free_set_digest(rows: Iterable[Sequence[object]]) -> tuple[int, str]:
     """Return the audit-compatible digest of a value-free identity set."""
 
@@ -786,6 +835,104 @@ class CaptureState:
         except BaseException:
             self.connection.rollback()
             raise
+
+    def resume_replay_source_backfill(
+        self,
+        run_id: str,
+        source_code: str,
+        cutoff: datetime,
+        *,
+        now: datetime | None = None,
+    ) -> tuple[int | None, int]:
+        """Resume one replay source from its durable manifest high-water.
+
+        Telegram history is consumed oldest-first, and message identifiers are
+        monotonic within a source.  A process failure after a manifest append
+        must therefore resume strictly after the greatest durable message id,
+        rather than replaying an unbounded source from the beginning.  The
+        source counters are rebuilt from the immutable run-bound manifest in
+        the same transaction that starts the new attempt.
+        """
+
+        if source_code not in ACCOUNT_SOURCES[self.account]:
+            raise CaptureRuntimeError("capture_backfill_source_invalid")
+        requested = self._backfill_cutoff(cutoff)
+        moment = now or utc_now()
+        if moment.tzinfo is None or moment.utcoffset() is None:
+            raise CaptureRuntimeError("capture_backfill_now_timezone_required")
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            run = self.connection.execute(
+                "SELECT account,cutoff_utc,source_inventory_json "
+                "FROM capture_replay_runs WHERE run_id=? AND completed_at_utc IS NULL",
+                (run_id,),
+            ).fetchone()
+            if run is None:
+                raise CaptureRuntimeError("capture_replay_run_missing")
+            if (
+                str(run["account"]) != self.account
+                or source_code not in json.loads(str(run["source_inventory_json"]))
+            ):
+                raise CaptureRuntimeError("capture_replay_entry_source_invalid")
+            if parse_utc(run["cutoff_utc"], field="capture_replay_cutoff") != requested:
+                raise CaptureRuntimeError("capture_backfill_cutoff_mismatch")
+            progress = self.connection.execute(
+                "SELECT MAX(message_id) AS high_water_message_id,"
+                "SUM(CASE WHEN capture_status='accepted' THEN 1 ELSE 0 END) AS accepted,"
+                "SUM(CASE WHEN capture_status='duplicate' THEN 1 ELSE 0 END) AS duplicate "
+                "FROM capture_replay_manifest_entries "
+                "WHERE run_id=? AND account=? AND source_code=?",
+                (run_id, self.account, source_code),
+            ).fetchone()
+            high_water = (
+                int(progress["high_water_message_id"])
+                if progress["high_water_message_id"] is not None
+                else None
+            )
+            accepted = int(progress["accepted"] or 0)
+            duplicate = int(progress["duplicate"] or 0)
+            attempted = accepted + duplicate
+            existing = self.connection.execute(
+                "SELECT run_attempts FROM capture_backfill_status WHERE source_code=?",
+                (source_code,),
+            ).fetchone()
+            attempts = int(existing["run_attempts"]) + 1 if existing is not None else 1
+            self.connection.execute(
+                """
+                INSERT INTO capture_backfill_status(
+                  source_code,cutoff_utc,status,run_attempts,attempted,accepted,
+                  duplicate,quarantined,started_at_utc,updated_at_utc,
+                  completed_at_utc,exhaustion
+                ) VALUES(?,?,'running',?,?,?,?,0,?,?,NULL,NULL)
+                ON CONFLICT(source_code) DO UPDATE SET
+                  cutoff_utc=excluded.cutoff_utc,
+                  status='running',
+                  run_attempts=excluded.run_attempts,
+                  attempted=excluded.attempted,
+                  accepted=excluded.accepted,
+                  duplicate=excluded.duplicate,
+                  quarantined=0,
+                  started_at_utc=excluded.started_at_utc,
+                  updated_at_utc=excluded.updated_at_utc,
+                  completed_at_utc=NULL,
+                  exhaustion=NULL
+                """,
+                (
+                    source_code,
+                    utc_text(requested),
+                    attempts,
+                    attempted,
+                    accepted,
+                    duplicate,
+                    utc_text(moment),
+                    utc_text(moment),
+                ),
+            )
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
+        return high_water, attempted
 
     def note_backfill_outcome(
         self,
@@ -1588,23 +1735,19 @@ class CaptureState:
         ).fetchone()
         if run is None:
             raise CaptureRuntimeError("capture_replay_run_missing")
+        # Constrain the query by the leading columns of the existing unique
+        # index.  SQLite can then preserve the historical manifest order with
+        # only a bounded final-key sort instead of spilling the complete run
+        # into the container's small /tmp filesystem.
         rows = self.connection.execute(
             "SELECT account,source_code,message_id,revision_sha256,event_id,"
             "event_type,origin,content_type,event_time_utc,available_at_utc,"
             "capture_status,marker_sha256 FROM capture_replay_manifest_entries "
-            "WHERE run_id=? ORDER BY source_code,message_id,revision_sha256,event_id",
-            (run_id,),
-        ).fetchall()
-        manifest_hash = sha256(
-            canonical_json(
-                {
-                    "schema": REPLAY_MANIFEST_SCHEMA,
-                    "run_id": run_id,
-                    "entries": [list(row) for row in rows],
-                }
-            )
-        ).hexdigest()
-        count = len(rows)
+            "WHERE run_id=? AND account=? "
+            "ORDER BY source_code,message_id,revision_sha256,event_id",
+            (run_id, str(run["account"])),
+        )
+        count, manifest_hash = _replay_manifest_summary(rows, run_id=run_id)
         if run["completed_at_utc"] is not None:
             if (
                 int(run["manifest_count"]) != count
@@ -1618,17 +1761,40 @@ class CaptureState:
             source_manifest_count = self.replay_source_manifest_count(
                 run_id, str(source)
             )
+            attempted = int(status["attempted"]) if status is not None else -1
+            accepted = int(status["accepted"]) if status is not None else -1
+            duplicate = int(status["duplicate"]) if status is not None else -1
+            quarantined = (
+                int(status["quarantined"]) if status is not None else -1
+            )
+            accounted = accepted + duplicate + quarantined
+            # A process can finish and durably record a large fixed-window
+            # manifest, then restart before completing the run.  A later
+            # provider retry may legitimately return an empty historical
+            # window and overwrite the global (not run-bound) counters with
+            # zeros.  Accept only that narrow recovery shape: a non-empty,
+            # immutable run manifest, no quarantine, and evidence of at least
+            # one prior attempt.  Non-zero counter disagreements remain
+            # fail-closed.
+            empty_retry_after_durable_manifest = (
+                status is not None
+                and source_manifest_count > 0
+                and int(status["run_attempts"]) > 1
+                and attempted == 0
+                and accepted == 0
+                and duplicate == 0
+                and quarantined == 0
+            )
             if (
                 status is None
                 or status["status"] != "complete"
                 or status["cutoff_utc"] != str(run["cutoff_utc"])
-                or int(status["quarantined"]) != 0
-                or int(status["attempted"])
-                != int(status["accepted"])
-                + int(status["duplicate"])
-                + int(status["quarantined"])
-                or source_manifest_count
-                != int(status["accepted"]) + int(status["duplicate"])
+                or quarantined != 0
+                or attempted != accounted
+                or (
+                    source_manifest_count != accepted + duplicate
+                    and not empty_retry_after_durable_manifest
+                )
             ):
                 raise CaptureRuntimeError("capture_replay_source_incomplete")
         completed = now or utc_now()

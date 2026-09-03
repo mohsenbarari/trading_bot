@@ -16,7 +16,9 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import stat
 import threading
+import time
 from typing import Mapping
 
 from .capture_event_adapter import (
@@ -72,6 +74,11 @@ PROCESSOR_HEARTBEAT_SCHEMA = "market_processor/4.0"
 PROCESSOR_VERSION = "market-processor-v4-fact-archive-shadow"
 MAX_RECORD_BYTES = 256 * 1024
 MAX_RECORDS_PER_CYCLE = 20_000
+DEFAULT_MAX_MARKET_PROJECTIONS_PER_CYCLE = 16
+DEFAULT_SQLITE_CACHE_KIB_PER_STORE = 0
+MAX_SQLITE_CACHE_KIB_PER_STORE = 131_072
+DEFAULT_MAX_FACT_EXPORTS_PER_CYCLE = 100
+DEFAULT_MAINTENANCE_INTERVAL_SECONDS = 3_600
 SPOOL_NAME = re.compile(r"^events-\d{4}-\d{2}-\d{2}\.jsonl$")
 PROCESSOR_SOURCES = frozenset(
     {
@@ -103,6 +110,7 @@ TEMPORARY_PUBLIC_MELTED_SOURCES = frozenset(
     {"MELTED_AGGREGATE", "MELTED_FLOW"}
 )
 TEMPORARY_PUBLIC_MELTED_RETENTION = timedelta(days=3)
+MAX_TEMPORARY_PUBLIC_PURGE_PER_TABLE_PER_CYCLE = 500
 _PREDICTION_REQUIRED_COLUMNS = frozenset(
     {
         "id",
@@ -251,6 +259,23 @@ def _paths(*, mode: str, state_directory: Path) -> CoinProcessorPaths:
             else None
         )
     state_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    sqlite_tmp = state_directory / "sqlite-tmp"
+    if sqlite_tmp.is_symlink():
+        raise CoinProcessorError("coin_processor_sqlite_tmp_invalid")
+    sqlite_tmp.mkdir(mode=0o700, exist_ok=True)
+    sqlite_tmp_info = sqlite_tmp.stat()
+    if (
+        not stat.S_ISDIR(sqlite_tmp_info.st_mode)
+        or stat.S_IMODE(sqlite_tmp_info.st_mode) != 0o700
+        or sqlite_tmp_info.st_uid != os.geteuid()
+    ):
+        raise CoinProcessorError("coin_processor_sqlite_tmp_invalid")
+    # The container-wide /tmp is intentionally tiny. Large, indexed retention
+    # deletes can require a statement journal bigger than that tmpfs and SQLite
+    # then reports the misleading `database or disk is full`. Keep temporary
+    # spill files beside the processor state: private, durable for the duration
+    # of the statement, and on the data filesystem with monitored capacity.
+    os.environ["SQLITE_TMPDIR"] = str(sqlite_tmp)
     return CoinProcessorPaths(
         spool_directory=spool,
         staging_database=state_directory / "capture-staging.sqlite3",
@@ -636,9 +661,10 @@ def _purge_temporary_public_melted(
     purged = 0
     for table in ("market_observations", "market_observations_archive"):
         result = market.execute(
-            f"DELETE FROM {table} WHERE source_code IN ({placeholders}) "
-            "AND available_at_utc<=?",
-            parameters,
+            f"DELETE FROM {table} WHERE id IN ("
+            f"SELECT id FROM {table} WHERE source_code IN ({placeholders}) "
+            "AND available_at_utc<=? ORDER BY available_at_utc,id LIMIT ?)",
+            (*parameters, MAX_TEMPORARY_PUBLIC_PURGE_PER_TABLE_PER_CYCLE),
         )
         purged += max(0, int(result.rowcount or 0))
     return purged
@@ -696,6 +722,10 @@ def process_coin_spool_cycle(
     paths: CoinProcessorPaths,
     mode: str,
     now_utc: str | None = None,
+    max_market_projections: int | None = None,
+    max_fact_exports: int = DEFAULT_MAX_FACT_EXPORTS_PER_CYCLE,
+    run_expensive_maintenance: bool = True,
+    sqlite_cache_kib_per_store: int = DEFAULT_SQLITE_CACHE_KIB_PER_STORE,
 ) -> dict[str, object]:
     """Run one restart-safe shadow cycle and return redacted counters only."""
 
@@ -703,9 +733,18 @@ def process_coin_spool_cycle(
         now_utc or datetime.now(timezone.utc),
         field_name="coin_processor_now_utc",
     )
+    if not 0 <= sqlite_cache_kib_per_store <= MAX_SQLITE_CACHE_KIB_PER_STORE:
+        raise CoinProcessorError("coin_processor_sqlite_cache_invalid")
     staging = connect_coin_group_staging(paths.staging_database)
     market = connect_market_store(paths.market_database)
     corpus = _corpus_connection(paths.corpus_database)
+    if sqlite_cache_kib_per_store:
+        # SQLite's negative cache_size form is an approximate KiB budget.
+        # Keep this processor-only and opt-in: recovery operators can reduce
+        # random reads over a large durable projection backlog without
+        # changing database contents, ordering, or global connection defaults.
+        for connection in (staging, market):
+            connection.execute(f"PRAGMA cache_size=-{sqlite_cache_kib_per_store}")
     totals: dict[str, int] = {
         "records": 0,
         "accepted": 0,
@@ -785,6 +824,7 @@ def process_coin_spool_cycle(
             as_of_utc=now,
             group_additional_anchors=anchors,
             group_parser_feedback=feedback,
+            max_market_messages=max_market_projections,
         )
         pipeline_applied = set(
             projection.group_pipeline.applied_feedback_event_keys
@@ -817,9 +857,13 @@ def process_coin_spool_cycle(
                 )
             except CoinGroupReviewProjectionError as exc:
                 raise CoinProcessorError(str(exc)) from exc
-        temporary_public_melted_purged = _purge_temporary_public_melted(
-            market,
-            as_of_utc=now,
+        temporary_public_melted_purged = (
+            _purge_temporary_public_melted(
+                market,
+                as_of_utc=now,
+            )
+            if run_expensive_maintenance
+            else 0
         )
         input_snapshot = materialize_input_snapshot(market, as_of_utc=now)
         outcome_counts = {
@@ -841,6 +885,7 @@ def process_coin_spool_cycle(
                     archive_report = export_market_store_facts(
                         market,
                         archive,
+                        max_rows=max_fact_exports,
                         capture_staging=staging,
                         research_key=research_key,
                     )
@@ -952,6 +997,51 @@ def run_coin_processor_service(
         raise CoinProcessorError("coin_processor_interval_invalid") from exc
     if not 0.25 <= interval <= 30:
         raise CoinProcessorError("coin_processor_interval_invalid")
+    try:
+        max_market_projections = int(
+            os.environ.get(
+                "MARKET_PROCESSOR_MAX_MARKET_PROJECTIONS_PER_CYCLE",
+                str(DEFAULT_MAX_MARKET_PROJECTIONS_PER_CYCLE),
+            )
+        )
+    except ValueError as exc:
+        raise CoinProcessorError("coin_processor_market_projection_limit_invalid") from exc
+    if not 1 <= max_market_projections <= 1_000:
+        raise CoinProcessorError("coin_processor_market_projection_limit_invalid")
+    try:
+        max_fact_exports = int(
+            os.environ.get(
+                "MARKET_PROCESSOR_MAX_FACT_EXPORTS_PER_CYCLE",
+                str(DEFAULT_MAX_FACT_EXPORTS_PER_CYCLE),
+            )
+        )
+    except ValueError as exc:
+        raise CoinProcessorError("coin_processor_fact_export_limit_invalid") from exc
+    if not 1 <= max_fact_exports <= 5_000:
+        raise CoinProcessorError("coin_processor_fact_export_limit_invalid")
+    try:
+        sqlite_cache_kib_per_store = int(
+            os.environ.get(
+                "MARKET_PROCESSOR_SQLITE_CACHE_KIB_PER_STORE",
+                str(DEFAULT_SQLITE_CACHE_KIB_PER_STORE),
+            )
+        )
+    except ValueError as exc:
+        raise CoinProcessorError("coin_processor_sqlite_cache_invalid") from exc
+    if not 0 <= sqlite_cache_kib_per_store <= MAX_SQLITE_CACHE_KIB_PER_STORE:
+        raise CoinProcessorError("coin_processor_sqlite_cache_invalid")
+    try:
+        maintenance_interval = float(
+            os.environ.get(
+                "MARKET_PROCESSOR_MAINTENANCE_INTERVAL_SECONDS",
+                str(DEFAULT_MAINTENANCE_INTERVAL_SECONDS),
+            )
+        )
+    except ValueError as exc:
+        raise CoinProcessorError("coin_processor_maintenance_interval_invalid") from exc
+    if not 60 <= maintenance_interval <= 86_400:
+        raise CoinProcessorError("coin_processor_maintenance_interval_invalid")
+    next_maintenance = time.monotonic() + maintenance_interval
     started_at = utc_text()
     health_path = state_directory / "health.json"
     last_projection_causal_inputs = {
@@ -981,8 +1071,18 @@ def run_coin_processor_service(
         pass
 
     def cycle_and_write(*, stopped: bool = False) -> None:
-        nonlocal last_projection_causal_inputs
-        counters = process_coin_spool_cycle(paths=paths, mode=mode)
+        nonlocal last_projection_causal_inputs, next_maintenance
+        maintenance_due = time.monotonic() >= next_maintenance
+        counters = process_coin_spool_cycle(
+            paths=paths,
+            mode=mode,
+            max_market_projections=max_market_projections,
+            max_fact_exports=max_fact_exports,
+            run_expensive_maintenance=maintenance_due,
+            sqlite_cache_kib_per_store=sqlite_cache_kib_per_store,
+        )
+        if maintenance_due:
+            next_maintenance = time.monotonic() + maintenance_interval
         if (
             int(counters["changes"])
             or int(counters["tombstones"])
@@ -1006,6 +1106,7 @@ def run_coin_processor_service(
                 "version": PROCESSOR_VERSION,
                 "role": role,
                 "mode": mode,
+                "sqlite_cache_kib_per_store": sqlite_cache_kib_per_store,
                 "release_sha": release_sha,
                 "pid": os.getpid(),
                 "started_at_utc": started_at,
