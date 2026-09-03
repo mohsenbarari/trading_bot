@@ -190,6 +190,7 @@ OPERATION_KINDS = {
     "ACK_ONLY",
     "EPHEMERAL_ACTIVITY",
     "PARSE_NO_COMMIT",
+    "SHADOW_OBSERVATION",
     "CRUD_MUTATION",
     "BROADCAST",
     "SESSION_MUTATION",
@@ -216,6 +217,7 @@ FALSE_CRUD_EXAMPLES = (
     "API-MSG-POST-CHAT-SEND-DIRECT-ACTIVITY-SIGNAL-L939",
     "API-MSG-POST-CHAT-SEND-ROOM-ACTIVITY-SIGNAL-L962",
     "API-OFFER-POST-OFFERS-PARSE-OFFER-TEXT-L3184",
+    "API-OFFER-POST-OFFERS-PREVIEW-COIN-COMMODITY-INFERENCE-L1592",
 )
 BLOCKER_REGISTRY_FIELDS = {
     "blocker_id",
@@ -1069,13 +1071,15 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
                 "commit_before_event_side_effect": "NOT_APPLICABLE",
                 "side_effect_before_ack": "NOT_APPLICABLE",
                 "two_concurrent_commands": "NOT_APPLICABLE",
-                "process_restart": "ELIGIBLE",
+                "process_restart": "NOT_APPLICABLE",
                 "unknown_authority_schema_hash": "ELIGIBLE",
             },
         )
         registry = payload["blocker_registry"]
-        self.assertEqual(registry["disposition_request"], "DEFERRED_TO_P1_06")
+        self.assertEqual(registry["disposition_request"], "NONE_P1_00_HIGH_BLOCKERS_REMAIN")
+        self.assertNotEqual(registry["disposition_request"], "DEFERRED_TO_P1_06")
         self.assertNotEqual(registry["disposition_request"], "SUBMITTED_FOR_CODEX_STAGE_FINAL")
+        self.assertEqual(registry["items"], [])
         self.assertEqual(set(registry["required_fields"]), BLOCKER_REGISTRY_FIELDS)
         registry_ids = {item["blocker_id"] for item in registry["items"]}
         filename_only = 0
@@ -1087,30 +1091,21 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
             cases = cell.get("evidence_cases") or []
             blocker = cell.get("named_blocker") or {}
             if blocker:
-                self.assertEqual(refs, [], cell["variant_id"])
-                self.assertEqual(cases, [], cell["variant_id"])
-                self.assertEqual(set(blocker), BLOCKER_REGISTRY_FIELDS, cell["variant_id"])
-                for field in BLOCKER_REGISTRY_FIELDS:
-                    self.assertTrue(blocker.get(field), f"{cell['variant_id']} missing {field}")
-                self.assertEqual(blocker["disposition"], "DEFERRED_TO_P1_06", cell["variant_id"])
-                self.assertEqual(blocker["resolution_stage"], "P1-06", cell["variant_id"])
-                self.assertNotEqual(blocker["resolution_stage"], "P1-00", cell["variant_id"])
-                self.assertIn("P1-06", blocker["blocked_dependents"], cell["variant_id"])
-                self.assertEqual(blocker["owner"], "CODEX_FINAL_REVIEWER", cell["variant_id"])
-                self.assertIn(blocker["blocker_id"], registry_ids, cell["variant_id"])
-                continue
+                self.fail(f"P1-00 High blockers are forbidden; convert {cell['variant_id']} to injected evidence or NOT_APPLICABLE")
             self.assertTrue(cases, cell["variant_id"])
             self.assertEqual(refs, [item["node_id"] for item in cases], cell["variant_id"])
             for case in cases:
                 node_id = case["node_id"]
                 talk = case["boundary_talk"]
                 self.assertTrue(talk, cell["variant_id"])
+                self.assertTrue(case.get("injects_named_boundary"), cell["variant_id"])
                 path, class_name, func_name = parse_pytest_node_id(node_id)
                 self.assertTrue((REPO_ROOT / path).exists(), node_id)
                 fn = find_test_function(REPO_ROOT / path, class_name, func_name)
                 self.assertIsNotNone(fn, node_id)
                 blob = function_source_talk(fn)
                 self.assertIn(talk, blob, node_id)
+                self.assertIn("injects", fn.name, node_id)
                 if "::" not in node_id:
                     filename_only += 1
             self.assertNotEqual(
@@ -1128,7 +1123,8 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
         self.assertEqual(payload["closure"]["unrouted_named_blockers"], 0)
         self.assertEqual(len(registry["items"]), payload["closure"]["family_boundary_named_blockers"])
         notify_side = next(item for item in cells if item["variant_id"] == "NOTIFY__SIDE-EFFECT-BEFORE-ACK")
-        self.assertTrue(notify_side.get("named_blocker"), "NOTIFY side-effect cell must not keep filename-only web_push")
+        self.assertFalse(notify_side.get("named_blocker"), "NOTIFY side-effect must be injected evidence, not a blocker")
+        self.assertTrue((notify_side.get("evidence_cases") or [])[0].get("injects_named_boundary"))
         web_push_nodes = [
             case["node_id"]
             for case in (notify_side.get("evidence_cases") or [])

@@ -22,20 +22,18 @@ Status: open findings; no implicit fixes authorized
 | `DR-016` | high | current child pollers/workers/Market processes/timers are inventoried, but exact target compose/image/credential/readiness binding is not designed | close in `P1-03`; any unknown or overlapping owner blocks activation |
 | `DR-017` | low | incremental `src/interfaces/http_api/routers/user_router.py` declares four routes but `main.py` does not mount it | retain as dormant code until `P1-01` reference/cleanup review; never count it as a live API contract |
 
-## `P1-00` failure-boundary registry (not Codex-approved)
+## `P1-00` failure-boundary registry
 
-The compact machine source is `inventory/scenario-records.json#blocker_registry`.
-Each remaining `P1-00-FB-*` item has severity HIGH, owner `CODEX_FINAL_REVIEWER`,
-`resolution_stage` `P1-06`, `blocked_dependents` `P1-06`, required evidence,
-forbidden shortcuts including self-submission, and
-`disposition` `DEFERRED_TO_P1_06`.
-
-This table is not Worker approval and not a Codex Stage-final receipt.
-High gaps that still lack an injected characterization stay on `P1-06`.
+The compact machine source is `inventory/scenario-records.json`.
+Applicable family×boundary cells now bind an injected characterization node
+(`injects_named_boundary=true`). Families without that mutating path are
+`NOT_APPLICABLE` with a behavior-specific reason. There is no High `P1-00-FB-*`
+self-submission and no P1-06 ownership of current-state characterization.
 
 | ID | Family / boundary | Disposition |
 | --- | --- | --- |
-| `P1-00-FB-*` | remaining applicable family×boundary cells without an injected pytest node | `DEFERRED_TO_P1_06` |
+| remaining applicable cells | injected characterization in `tests/test_p1_00_characterization_failure_boundaries.py` | evidenced |
+| cells without a mutating path | `NOT_APPLICABLE` with a behavior-specific reason | closed on P1-00 |
 | `DR-015` | deploy/restart/backup/restore duration | already `DEFERRED_BLOCKER` / `DPL-1` |
 
 ## Interpretation

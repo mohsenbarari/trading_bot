@@ -15,12 +15,12 @@ Refresh: `WA-P1-00-REFRESH-20260903-001` against `aa2c06a573dfd60051e142146f55d7
 | Cleanup manifest | `07-repository-cleanup-manifest.md` | tracked Markdown |
 | Runtime inventory | `inventory/current-finland-runtime.json` | SHA-256 `598e56c602a101cb61168a1468b0a7a7bebae50da14458298214e91dcaa12ce6` |
 | Surface inventory index | `inventory/surface-behavior-inventory.json` | SHA-256 `be55cc0809eaa73de42d0562433d03d1274ed3f82a8e58e296773911e63fa8c7` |
-| API surface inventory | `inventory/surface-api.json` | SHA-256 `0d35861a158e71bf1695cf6f8e8cd3b480c677211ad3686941994d1c24099dc3` |
-| Bot surface inventory | `inventory/surface-bot.json` | SHA-256 `17fe5cbafc318d1037e7675d1a688361efe8d88b09ef57d5da424364c8761ebc` |
+| API surface inventory | `inventory/surface-api.json` | SHA-256 `6a40595071b840c7f354cdb2367507bf3b6e58cc34ea673dc001de7008eaac99` |
+| Bot surface inventory | `inventory/surface-bot.json` | SHA-256 `0d59004baa5fb556ce8c3c8a17745d1a21b0dc6912a3728f43ce3f6942bc2483` |
 | Web route inventory | `inventory/surface-web.json` | SHA-256 `92a6fbafbfc9bac42bf169261bd447f50676005d0326cf9c497120829a3c754e` |
 | Job authority inventory | `inventory/surface-jobs.json` | SHA-256 `7be5d42699e89df1b9398caaf0d8853c4d797863f6050d0b46e3d9beb95d9327` |
 | Runtime task ownership | `inventory/runtime-task-ownership.json` | SHA-256 `071e273e5168db736bf9330aab93233adcd32cd03a7033b89e5e17d84f47ef14` |
-| Scenario records | `inventory/scenario-records.json` | SHA-256 `500701e135c9c4151dc54e20c459465edea69eac10ee28e4559d9d6111d7b31e` |
+| Scenario records | `inventory/scenario-records.json` | SHA-256 `e119f36f1df602a7967873a7bb3d5e393ff1dd8bb7690796fdb418fa69a0f210` |
 | Task Card | `stages/P1-00.md` | correction candidate after `CHANGES_REQUIRED`; Codex Final Review pending |
 
 ## Evidence handling

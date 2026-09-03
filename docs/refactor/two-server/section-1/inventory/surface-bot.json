@@ -55,10 +55,11 @@
       "source": "bot/handlers/admin.py:160",
       "test_refs": [
         "tests/test_bot_keyboards.py",
-        "tests/test_bot_admin_start_creation.py"
+        "tests/test_bot_admin_start_creation.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-ACCOUNT-NAME-L183",
@@ -108,10 +109,11 @@
       "source": "bot/handlers/admin.py:402",
       "test_refs": [
         "tests/test_bot_keyboards.py",
-        "tests/test_bot_admin_cancel.py"
+        "tests/test_bot_admin_cancel.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-BROADCAST-START-TELEGRAM-ADMIN-BROADCAST-L179",
@@ -341,10 +343,11 @@
       "handler": "admin_commodities.handle_alias_add_start",
       "source": "bot/handlers/admin_commodities.py:350",
       "test_refs": [
-        "tests/test_bot_admin_commodities_alias_add.py"
+        "tests/test_bot_admin_commodities_alias_add.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-ALIAS-ADD-NAME-L365",
@@ -369,10 +372,11 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_commodities_alias_delete.py",
-        "tests/test_bot_admin_commodities_alias_edit.py"
+        "tests/test_bot_admin_commodities_alias_edit.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-ALIAS-EDIT-NAME-L429",
@@ -397,10 +401,11 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_commodities_alias_delete.py",
-        "tests/test_bot_admin_commodities_alias_edit.py"
+        "tests/test_bot_admin_commodities_alias_edit.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ALIAS-DELETE-YES-L487",
@@ -424,10 +429,11 @@
       "handler": "admin_commodities.handle_commodity_edit_start",
       "source": "bot/handlers/admin_commodities.py:523",
       "test_refs": [
-        "tests/test_bot_admin_commodities_commodity_edit.py"
+        "tests/test_bot_admin_commodities_commodity_edit.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-COMMODITY-EDIT-NAME-L537",
@@ -452,10 +458,11 @@
       "test_refs": [
         "tests/test_bot_admin_commodities_add_flow.py",
         "tests/test_bot_admin_commodities_show_list.py",
-        "tests/test_bot_admin_commodities_add_create.py"
+        "tests/test_bot_admin_commodities_add_create.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-ADD-NAME-L583",
@@ -494,10 +501,11 @@
       "source": "bot/handlers/admin_commodities.py:671",
       "test_refs": [
         "tests/test_bot_keyboards.py",
-        "tests/test_bot_admin_commodities_delete_cancel.py"
+        "tests/test_bot_admin_commodities_delete_cancel.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-DELETE-YES-L685",
@@ -522,10 +530,11 @@
       "source": "bot/handlers/admin_commodities.py:719",
       "test_refs": [
         "tests/test_bot_keyboards.py",
-        "tests/test_bot_admin_commodities_delete_cancel.py"
+        "tests/test_bot_admin_commodities_delete_cancel.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-EDIT-ROLE-L1078",
@@ -602,10 +611,11 @@
       "source": "bot/handlers/admin_users.py:1252",
       "test_refs": [
         "tests/test_bot_admin_users_limit_start.py",
-        "tests/test_offers_router_create_guards.py"
+        "tests/test_offers_router_create_guards.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-SET-TRADES-L1312",
@@ -681,10 +691,11 @@
       "handler": "admin_users.handle_limit_cancel",
       "source": "bot/handlers/admin_users.py:1563",
       "test_refs": [
-        "tests/test_bot_admin_users_limit_flow.py"
+        "tests/test_bot_admin_users_limit_flow.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-BLOCK-SETTINGS-L1607",
@@ -862,10 +873,11 @@
       "handler": "admin_users.handle_user_search_cancel",
       "source": "bot/handlers/admin_users.py:657",
       "test_refs": [
-        "tests/test_bot_admin_users_search_entry_cancel.py"
+        "tests/test_bot_admin_users_search_entry_cancel.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-USERS-PROCESS-SEARCH-QUERY-L678",
@@ -1401,10 +1413,11 @@
       "handler": "panel.handle_settings_reset_cancel",
       "source": "bot/handlers/panel.py:1435",
       "test_refs": [
-        "tests/test_bot_panel_settings_reset.py"
+        "tests/test_bot_panel_settings_reset.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "ACK_ONLY"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-HANDLE-BACK-TO-MAIN-MENU-L1450",
@@ -2444,10 +2457,11 @@
       "handler": "trade_create.handle_stale_trade_creation_callback",
       "source": "bot/handlers/trade_create.py:3504",
       "test_refs": [
-        "tests/test_bot_trade_create_stale_state_text_offer.py"
+        "tests/test_bot_trade_create_stale_state_text_offer.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "ACK_ONLY"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3505",
@@ -2457,10 +2471,11 @@
       "handler": "trade_create.handle_stale_trade_creation_callback",
       "source": "bot/handlers/trade_create.py:3505",
       "test_refs": [
-        "tests/test_bot_trade_create_stale_state_text_offer.py"
+        "tests/test_bot_trade_create_stale_state_text_offer.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "ACK_ONLY"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3506",
@@ -2470,10 +2485,11 @@
       "handler": "trade_create.handle_stale_trade_creation_callback",
       "source": "bot/handlers/trade_create.py:3506",
       "test_refs": [
-        "tests/test_bot_trade_create_stale_state_text_offer.py"
+        "tests/test_bot_trade_create_stale_state_text_offer.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "ACK_ONLY"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3507",
@@ -2483,10 +2499,11 @@
       "handler": "trade_create.handle_stale_trade_creation_callback",
       "source": "bot/handlers/trade_create.py:3507",
       "test_refs": [
-        "tests/test_bot_trade_create_stale_state_text_offer.py"
+        "tests/test_bot_trade_create_stale_state_text_offer.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "ACK_ONLY"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3508",
@@ -2496,10 +2513,11 @@
       "handler": "trade_create.handle_stale_trade_creation_callback",
       "source": "bot/handlers/trade_create.py:3508",
       "test_refs": [
-        "tests/test_bot_trade_create_stale_state_text_offer.py"
+        "tests/test_bot_trade_create_stale_state_text_offer.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "ACK_ONLY"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3509",
@@ -2509,10 +2527,11 @@
       "handler": "trade_create.handle_stale_trade_creation_callback",
       "source": "bot/handlers/trade_create.py:3509",
       "test_refs": [
-        "tests/test_bot_trade_create_stale_state_text_offer.py"
+        "tests/test_bot_trade_create_stale_state_text_offer.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "ACK_ONLY"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3510",
@@ -2522,10 +2541,11 @@
       "handler": "trade_create.handle_stale_trade_creation_callback",
       "source": "bot/handlers/trade_create.py:3510",
       "test_refs": [
-        "tests/test_bot_trade_create_stale_state_text_offer.py"
+        "tests/test_bot_trade_create_stale_state_text_offer.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "ACK_ONLY"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3511",
@@ -2535,10 +2555,11 @@
       "handler": "trade_create.handle_stale_trade_creation_callback",
       "source": "bot/handlers/trade_create.py:3511",
       "test_refs": [
-        "tests/test_bot_trade_create_stale_state_text_offer.py"
+        "tests/test_bot_trade_create_stale_state_text_offer.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "ACK_ONLY"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3512",
@@ -2548,10 +2569,11 @@
       "handler": "trade_create.handle_stale_trade_creation_callback",
       "source": "bot/handlers/trade_create.py:3512",
       "test_refs": [
-        "tests/test_bot_trade_create_stale_state_text_offer.py"
+        "tests/test_bot_trade_create_stale_state_text_offer.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "ACK_ONLY"
     },
     {
       "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3513",
@@ -2561,10 +2583,11 @@
       "handler": "trade_create.handle_stale_trade_creation_callback",
       "source": "bot/handlers/trade_create.py:3513",
       "test_refs": [
-        "tests/test_bot_trade_create_stale_state_text_offer.py"
+        "tests/test_bot_trade_create_stale_state_text_offer.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "ACK_ONLY"
     },
     {
       "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3514",
@@ -2574,10 +2597,11 @@
       "handler": "trade_create.handle_stale_trade_creation_callback",
       "source": "bot/handlers/trade_create.py:3514",
       "test_refs": [
-        "tests/test_bot_trade_create_stale_state_text_offer.py"
+        "tests/test_bot_trade_create_stale_state_text_offer.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "ACK_ONLY"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3515",
@@ -2587,10 +2611,11 @@
       "handler": "trade_create.handle_stale_trade_creation_callback",
       "source": "bot/handlers/trade_create.py:3515",
       "test_refs": [
-        "tests/test_bot_trade_create_stale_state_text_offer.py"
+        "tests/test_bot_trade_create_stale_state_text_offer.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "ACK_ONLY"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3516",
@@ -2600,10 +2625,11 @@
       "handler": "trade_create.handle_stale_trade_creation_callback",
       "source": "bot/handlers/trade_create.py:3516",
       "test_refs": [
-        "tests/test_bot_trade_create_stale_state_text_offer.py"
+        "tests/test_bot_trade_create_stale_state_text_offer.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "ACK_ONLY"
     },
     {
       "behavior_id": "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-TRADE-BUTTON-L645",

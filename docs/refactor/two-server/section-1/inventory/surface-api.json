@@ -2027,9 +2027,10 @@
       "source": "api/routers/offers.py:1592",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_coin_intelligence_preview_api.py"
+        "tests/test_coin_intelligence_preview_api.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "SHADOW_OBSERVATION"
     },
     {
       "behavior_id": "API-OFFER-POST-OFFERS-CREATE-OFFER-L1659",

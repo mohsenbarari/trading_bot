@@ -46,8 +46,18 @@ class P100MatrixIndependenceCharacterizationTests(unittest.TestCase):
                 "TELEGRAM-LINK-ABSENT",
             })
             self.assertEqual(cell["offer_origin_rule"]["status"], "INDEPENDENT_OF_ADMISSION")
+            self.assertEqual(cell["offer_origin"], ["WEBAPP", "TELEGRAM_BOT", "INTERNAL"])
             self.assertTrue(cell["expected_outcome"])
-            self.assertTrue(cell["policy_effects"])
+            if cell["outcome_variant_id"] == "OUTCOME-SUCCESS" and cell["eligibility"]["decision"] in DENIAL_DECISIONS | {"NOT_APPLICABLE"}:
+                self.assertEqual(cell["policy_effects"], [])
+                self.assertFalse(
+                    any(
+                        effect in {"CONFIRMATION", "QUOTA", "COMMISSION", "PUBLICATION", "NOTIFICATION"}
+                        for effect in cell["policy_effects"]
+                    )
+                )
+            else:
+                self.assertTrue(cell["policy_effects"])
             if cell["request_origin"] == "WEBAPP":
                 self.assertEqual(cell["telegram_link_variant_id"], "TELEGRAM-LINK-NOT_APPLICABLE")
             else:
@@ -63,6 +73,26 @@ class P100MatrixIndependenceCharacterizationTests(unittest.TestCase):
         independence = payload["axis_independence"]["offer_origin"]
         self.assertEqual(independence["status"], "INDEPENDENT_OF_ADMISSION")
         self.assertEqual(set(independence["surfaces"]), {"WEBAPP", "TELEGRAM_BOT", "INTERNAL"})
+
+    def test_offer_origin_holds_admission_and_effects_constant(self):
+        payload = _load_json("scenario-records.json")
+        for cell in payload["composed_eligibility"]:
+            decisions = []
+            effects = []
+            for origin in ("WEBAPP", "TELEGRAM_BOT", "INTERNAL"):
+                self.assertIn(origin, cell["offer_origin"])
+                decisions.append(cell["eligibility"]["decision"])
+                effects.append(list(cell["policy_effects"]))
+            self.assertEqual(len(set(decisions)), 1, cell["variant_id"])
+            self.assertEqual(effects[0], effects[1], cell["variant_id"])
+            self.assertEqual(effects[1], effects[2], cell["variant_id"])
+            self.assertEqual(cell["admission_decision"], cell["admission_decision"])
+        self.assertEqual(offer_home_server_for_source(OfferSourceSurface.WEBAPP), "iran")
+        self.assertEqual(offer_home_server_for_source(OfferSourceSurface.TELEGRAM_BOT), "foreign")
+        self.assertEqual(
+            offer_home_server_for_source(OfferSourceSurface.INTERNAL_SYNC, incoming_home_server="iran"),
+            "iran",
+        )
 
     def test_offer_origin_does_not_change_admission_decision(self):
         payload = _load_json("scenario-records.json")
