@@ -1074,9 +1074,12 @@ class TelegramCaptureProvider:
         # preserves the required oldest-to-newest capture sequence while the
         # lower offset keeps the exact owner cutoff inclusive.
         exhaustion = "cutoff_crossed"
-        self.engine.state.begin_backfill(policy.source_code, cutoff)
-        attempted_total = 0
-        messages_seen = 0
+        resume_message_id, attempted_total = (
+            self.engine.state.resume_replay_source_backfill(
+                replay_run_id, policy.source_code, cutoff
+            )
+        )
+        messages_seen = attempted_total
 
         def record_results(results: list[StageResult]) -> None:
             nonlocal attempted_total
@@ -1088,12 +1091,21 @@ class TelegramCaptureProvider:
                 )
                 attempted_total += 1
 
-        async for message in client.iter_messages(  # type: ignore[attr-defined]
+        remaining_limit = self.backfill_max_messages - attempted_total + 1
+        if remaining_limit < 1:
+            raise CaptureRuntimeError("telegram_backfill_limit_exceeded")
+        history = client.iter_messages(  # type: ignore[attr-defined]
             entity,
-            limit=self.backfill_max_messages + 1,
+            limit=remaining_limit,
             reverse=True,
             offset_date=cutoff - timedelta(microseconds=1),
-        ):
+            **(
+                {"min_id": resume_message_id}
+                if resume_message_id is not None
+                else {}
+            ),
+        )
+        async for message in history:
             if self.stop.is_set():
                 raise CaptureRuntimeError("telegram_backfill_interrupted")
             published = _aware(

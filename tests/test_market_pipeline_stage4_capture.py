@@ -1417,14 +1417,23 @@ class CaptureFixture(unittest.TestCase):
 
         class FakeClient:
             calls = 0
+            min_ids: list[int] = []
 
             async def iter_messages(
-                self, _entity, *, limit, reverse=False, offset_date=None
+                self,
+                _entity,
+                *,
+                limit,
+                reverse=False,
+                offset_date=None,
+                min_id=0,
             ):
                 self.calls += 1
-                yield SimpleNamespace(
-                    id=1, date=cutoff, edit_date=None, message="2,349.50"
-                )
+                self.min_ids.append(min_id)
+                if min_id < 1:
+                    yield SimpleNamespace(
+                        id=1, date=cutoff, edit_date=None, message="2,349.50"
+                    )
                 if self.calls == 1:
                     raise ConnectionError("fixture_transport_interrupted")
                 yield SimpleNamespace(
@@ -1475,10 +1484,11 @@ class CaptureFixture(unittest.TestCase):
         )
         self.assertTrue(self.state.backfill_covers("MELTED_PRIMARY_FLOW", cutoff))
         status = self.state.backfill_status("MELTED_PRIMARY_FLOW")
+        self.assertEqual(client.min_ids, [0, 1])
         self.assertEqual(status["run_attempts"], 2)
         self.assertEqual(status["attempted"], 2)
-        self.assertEqual(status["accepted"], 1)
-        self.assertEqual(status["duplicate"], 1)
+        self.assertEqual(status["accepted"], 2)
+        self.assertEqual(status["duplicate"], 0)
         self.assertEqual(status["exhaustion"], "cutoff_crossed")
 
     def test_explicit_backfill_includes_exact_cutoff_across_many_results(self):

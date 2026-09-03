@@ -836,6 +836,104 @@ class CaptureState:
             self.connection.rollback()
             raise
 
+    def resume_replay_source_backfill(
+        self,
+        run_id: str,
+        source_code: str,
+        cutoff: datetime,
+        *,
+        now: datetime | None = None,
+    ) -> tuple[int | None, int]:
+        """Resume one replay source from its durable manifest high-water.
+
+        Telegram history is consumed oldest-first, and message identifiers are
+        monotonic within a source.  A process failure after a manifest append
+        must therefore resume strictly after the greatest durable message id,
+        rather than replaying an unbounded source from the beginning.  The
+        source counters are rebuilt from the immutable run-bound manifest in
+        the same transaction that starts the new attempt.
+        """
+
+        if source_code not in ACCOUNT_SOURCES[self.account]:
+            raise CaptureRuntimeError("capture_backfill_source_invalid")
+        requested = self._backfill_cutoff(cutoff)
+        moment = now or utc_now()
+        if moment.tzinfo is None or moment.utcoffset() is None:
+            raise CaptureRuntimeError("capture_backfill_now_timezone_required")
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            run = self.connection.execute(
+                "SELECT account,cutoff_utc,source_inventory_json "
+                "FROM capture_replay_runs WHERE run_id=? AND completed_at_utc IS NULL",
+                (run_id,),
+            ).fetchone()
+            if run is None:
+                raise CaptureRuntimeError("capture_replay_run_missing")
+            if (
+                str(run["account"]) != self.account
+                or source_code not in json.loads(str(run["source_inventory_json"]))
+            ):
+                raise CaptureRuntimeError("capture_replay_entry_source_invalid")
+            if parse_utc(run["cutoff_utc"], field="capture_replay_cutoff") != requested:
+                raise CaptureRuntimeError("capture_backfill_cutoff_mismatch")
+            progress = self.connection.execute(
+                "SELECT MAX(message_id) AS high_water_message_id,"
+                "SUM(CASE WHEN capture_status='accepted' THEN 1 ELSE 0 END) AS accepted,"
+                "SUM(CASE WHEN capture_status='duplicate' THEN 1 ELSE 0 END) AS duplicate "
+                "FROM capture_replay_manifest_entries "
+                "WHERE run_id=? AND account=? AND source_code=?",
+                (run_id, self.account, source_code),
+            ).fetchone()
+            high_water = (
+                int(progress["high_water_message_id"])
+                if progress["high_water_message_id"] is not None
+                else None
+            )
+            accepted = int(progress["accepted"] or 0)
+            duplicate = int(progress["duplicate"] or 0)
+            attempted = accepted + duplicate
+            existing = self.connection.execute(
+                "SELECT run_attempts FROM capture_backfill_status WHERE source_code=?",
+                (source_code,),
+            ).fetchone()
+            attempts = int(existing["run_attempts"]) + 1 if existing is not None else 1
+            self.connection.execute(
+                """
+                INSERT INTO capture_backfill_status(
+                  source_code,cutoff_utc,status,run_attempts,attempted,accepted,
+                  duplicate,quarantined,started_at_utc,updated_at_utc,
+                  completed_at_utc,exhaustion
+                ) VALUES(?,?,'running',?,?,?,?,0,?,?,NULL,NULL)
+                ON CONFLICT(source_code) DO UPDATE SET
+                  cutoff_utc=excluded.cutoff_utc,
+                  status='running',
+                  run_attempts=excluded.run_attempts,
+                  attempted=excluded.attempted,
+                  accepted=excluded.accepted,
+                  duplicate=excluded.duplicate,
+                  quarantined=0,
+                  started_at_utc=excluded.started_at_utc,
+                  updated_at_utc=excluded.updated_at_utc,
+                  completed_at_utc=NULL,
+                  exhaustion=NULL
+                """,
+                (
+                    source_code,
+                    utc_text(requested),
+                    attempts,
+                    attempted,
+                    accepted,
+                    duplicate,
+                    utc_text(moment),
+                    utc_text(moment),
+                ),
+            )
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
+        return high_water, attempted
+
     def note_backfill_outcome(
         self,
         source_code: str,
