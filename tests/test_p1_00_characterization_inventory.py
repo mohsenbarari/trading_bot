@@ -91,6 +91,31 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def classify_failure_test_family(path: str) -> str | None:
+    name = Path(path).name
+    hits: list[tuple[int, str, str]] = []
+    for family, tokens in FAMILY_TEST_TOKENS.items():
+        for token in tokens:
+            if token in name:
+                hits.append((len(token), family, token))
+    if not hits:
+        return None
+    hits.sort(reverse=True)
+    best_len, best_family, _ = hits[0]
+    if any(length == best_len and family != best_family for length, family, _ in hits[1:]):
+        return None
+    return best_family
+
+
+def failure_test_covers_boundary(path: str, boundary: str) -> bool:
+    name = Path(path).name
+    return any(token in name for token in BOUNDARY_NAME_TOKENS[boundary])
+
+
+def is_family_boundary_evidence(path: str, family: str, boundary: str) -> bool:
+    return classify_failure_test_family(path) == family and failure_test_covers_boundary(path, boundary)
+
+
 CORE_CONTRACT_FIELDS = {
     "preconditions",
     "input",
@@ -127,6 +152,104 @@ INHERIT_SEMANTIC_PATTERNS = (
     r"otherwise_not_applicable",
 )
 MUTATION_CLASSES = {"READ_OR_STREAM", "MUTATION_OR_COMMAND", "SCHEDULED_JOB"}
+FAMILY_TEST_TOKENS = {
+    "AUTH": ("test_auth_", "test_session_", "test_stage6_otp"),
+    "IDENTITY": (
+        "test_bot_link",
+        "test_users_router",
+        "test_users_public",
+        "test_invitation",
+        "test_user_account",
+    ),
+    "OFFER": ("test_offers_", "test_offer_publication", "test_offer_source", "test_offer_price"),
+    "REQUEST": ("test_offer_request", "test_offer_overtime", "test_overtime_request"),
+    "TRADE": ("test_trade_", "test_trades_", "test_bot_trade_"),
+    "MARKET": ("test_market_", "test_estimator", "test_coin_market"),
+    "MSG": ("test_chat_", "test_messages_", "test_realtime_", "test_messenger_", "test_album_"),
+    "NOTIFY": ("test_notification", "test_web_push"),
+    "TG": (
+        "test_telegram_delivery",
+        "test_telegram_publisher",
+        "test_telegram_notification",
+        "test_telegram_queue",
+        "test_telegram_otp",
+        "test_telegram_dispatch",
+        "test_telegram_gateway",
+        "test_telegram_interaction",
+        "test_telegram_multi_publisher",
+        "test_telegram_split_runtime",
+    ),
+    "ADMIN": ("test_admin_", "test_bot_admin_", "test_commodities_", "test_telegram_admin_"),
+    "SYNC": ("test_sync_",),
+    "OPS": (
+        "test_deployment",
+        "test_main_lifespan",
+        "test_main_metrics",
+        "test_main_foreign",
+        "test_background_job_authority",
+        "test_telegram_bot_runtime_role",
+        "test_server_routing",
+    ),
+}
+BOUNDARY_NAME_TOKENS = {
+    "failure_before_db_commit": (
+        "_guards",
+        "_guard",
+        "_mutations",
+        "_mutation",
+        "_login",
+        "_session_flows",
+        "_create",
+        "_delete",
+        "_atomicity",
+        "direct_mutations",
+    ),
+    "commit_before_event_side_effect": (
+        "outbox",
+        "publication_worker",
+        "delivery_worker",
+        "delivery_service",
+        "delivery_receipt",
+        "otp_delivery",
+        "sync_worker",
+    ),
+    "side_effect_before_ack": (
+        "otp_delivery",
+        "web_push",
+        "idempotenc",
+        "outbox",
+        "delivery_queue",
+        "delivery_contract",
+        "trade_telegram_delivery",
+        "trade_webapp_delivery",
+    ),
+    "two_concurrent_commands": (
+        "idempotenc",
+        "concurrent",
+        "claim_index",
+        "contention",
+    ),
+    "process_restart": (
+        "lifespan",
+        "resume",
+        "restart",
+    ),
+    "unknown_authority_schema_hash": (
+        "authority",
+        "signature",
+        "foreign_surface",
+        "field_policy",
+        "schema_hash",
+        "metrics_guard",
+    ),
+}
+CROSS_FAMILY_FORBIDDEN_EXAMPLES = (
+    ("IDENTITY", "commit_before_event_side_effect", "tests/test_offer_publication_worker.py"),
+    ("IDENTITY", "commit_before_event_side_effect", "tests/test_trade_delivery_reconciliation_service.py"),
+    ("MARKET", "failure_before_db_commit", "tests/test_offers_router_create_success.py"),
+    ("MSG", "side_effect_before_ack", "tests/test_telegram_admin_broadcast_confirm_idempotency.py"),
+    ("MSG", "side_effect_before_ack", "tests/test_telegram_delivery_queue_production_cutover.py"),
+)
 HUMAN_MATRIX = REPO_ROOT / "docs/refactor/two-server/section-1/04-surface-policy-matrix.md"
 DENIAL_DECISIONS = {"INELIGIBLE", "INELIGIBLE_FOR_NEW_MARKET_MUTATION", "NOT_APPLICABLE"}
 ADMISSION_DECISIONS = {"ELIGIBLE", "ELIGIBLE_FOR_REQUEST_ONLY", "ELIGIBLE_FOR_READ_OR_TERMINAL_REPLAY"}
@@ -777,12 +900,9 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
                 "unknown_authority_schema_hash": "ELIGIBLE",
             },
         )
-        family_tests = {family: set() for family in FAMILIES}
-        for name in ("surface-api.json", "surface-bot.json", "surface-web.json", "surface-jobs.json"):
-            for entry in _load_json(name)["entries"]:
-                family_tests[entry["family"]].update(
-                    ref for ref in entry.get("test_refs") or [] if ref.startswith("tests/")
-                )
+        self.assertEqual(set(FAMILY_TEST_TOKENS), FAMILIES)
+        self.assertEqual(set(BOUNDARY_NAME_TOKENS), FAILURE_BOUNDARIES)
+        cross_family = 0
         for cell in cells:
             if cell["applicability"] != "ELIGIBLE":
                 continue
@@ -792,11 +912,29 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
                 self.assertEqual(refs, [], cell["variant_id"])
                 self.assertTrue(blocker.get("blocker_id"), cell["variant_id"])
                 self.assertTrue(blocker.get("reason"), cell["variant_id"])
+                self.assertNotIn("inventory test_ref", blocker["reason"], cell["variant_id"])
                 continue
             self.assertTrue(refs, cell["variant_id"])
             for ref in refs:
-                self.assertIn(ref, family_tests[cell["family"]], f"{cell['variant_id']} cites cross-family {ref}")
+                self.assertTrue(
+                    is_family_boundary_evidence(ref, cell["family"], cell["failure_boundary"]),
+                    f"{cell['variant_id']} cites {ref} classified as "
+                    f"{classify_failure_test_family(ref)} covering="
+                    f"{failure_test_covers_boundary(ref, cell['failure_boundary'])}",
+                )
                 self.assertTrue((REPO_ROOT / ref).exists(), ref)
+            cross_family += sum(
+                1
+                for ref in refs
+                if not is_family_boundary_evidence(ref, cell["family"], cell["failure_boundary"])
+            )
+        for family, boundary, ref in CROSS_FAMILY_FORBIDDEN_EXAMPLES:
+            self.assertFalse(
+                is_family_boundary_evidence(ref, family, boundary),
+                f"{family} {boundary} must not accept {ref}",
+            )
+        self.assertEqual(cross_family, payload["closure"]["cross_family_failure_evidence"])
+        self.assertEqual(payload["closure"]["cross_family_failure_evidence"], 0)
 
         self.assertEqual(len(payload["deferred_blockers"]), 1)
         timing = payload["deferred_blockers"][0]

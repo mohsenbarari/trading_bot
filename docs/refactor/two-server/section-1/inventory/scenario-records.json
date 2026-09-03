@@ -3411,7 +3411,9 @@
     "cross_family_failure_evidence": 0,
     "scenario_work_item": "READY_FOR_CODEX_FINAL_REVIEW",
     "target_result": "NOT_RUN",
-    "complete_forbidden_until": "Codex confirms operation-class contracts, family-bound failure evidence and explicit eligibility."
+    "complete_forbidden_until": "Codex confirms operation-class contracts, allowlisted family+boundary failure evidence and explicit eligibility.",
+    "family_boundary_evidenced_cells": 27,
+    "family_boundary_named_blockers": 41
   },
   "composed_eligibility": [
     {
@@ -4321,14 +4323,13 @@
       "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect. Evidence for this AUTH boundary is the named blocker P1-00-FB-AUTH-TWO_CONCURRENT_COMMANDS.",
       "rule_sources": [
         "api/routers/auth.py",
-        "api/routers/sessions.py",
-        "frontend/src/router/index.ts"
+        "api/routers/sessions.py"
       ],
       "evidence_refs": [],
       "named_blocker": {
         "blocker_id": "P1-00-FB-AUTH-TWO_CONCURRENT_COMMANDS",
         "status": "NAMED_BLOCKER",
-        "reason": "No AUTH inventory test_ref is bound to two_concurrent_commands. Another family's Offer/sync/Telegram tests are not reused."
+        "reason": "No allowlisted AUTH test filename covers two_concurrent_commands. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
       }
     },
     {
@@ -4344,14 +4345,13 @@
       "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion. Evidence for this AUTH boundary is the named blocker P1-00-FB-AUTH-PROCESS_RESTART.",
       "rule_sources": [
         "api/routers/auth.py",
-        "api/routers/sessions.py",
-        "frontend/src/router/index.ts"
+        "api/routers/sessions.py"
       ],
       "evidence_refs": [],
       "named_blocker": {
         "blocker_id": "P1-00-FB-AUTH-PROCESS_RESTART",
         "status": "NAMED_BLOCKER",
-        "reason": "No AUTH inventory test_ref is bound to process_restart. Another family's Offer/sync/Telegram tests are not reused."
+        "reason": "No allowlisted AUTH test filename covers process_restart. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
       }
     },
     {
@@ -4366,13 +4366,9 @@
       },
       "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
       "rule_sources": [
-        "tests/test_background_job_authority.py",
-        "tests/test_main_foreign_surface_guard.py",
         "tests/test_session_authority.py"
       ],
       "evidence_refs": [
-        "tests/test_background_job_authority.py",
-        "tests/test_main_foreign_surface_guard.py",
         "tests/test_session_authority.py"
       ]
     },
@@ -4389,12 +4385,10 @@
       "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
       "rule_sources": [
         "tests/test_bot_link_account_guards.py",
-        "tests/test_bot_trade_create_text_offer_parse_flow.py",
         "tests/test_users_router_mutation_authority.py"
       ],
       "evidence_refs": [
         "tests/test_bot_link_account_guards.py",
-        "tests/test_bot_trade_create_text_offer_parse_flow.py",
         "tests/test_users_router_mutation_authority.py"
       ]
     },
@@ -4408,15 +4402,17 @@
         "decision": "ELIGIBLE",
         "predicate": "IDENTITY: family command commits then emits an async outbox or delivery intent"
       },
-      "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
+      "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure. Evidence for this IDENTITY boundary is the named blocker P1-00-FB-IDENTITY-COMMIT_BEFORE_EVENT_SIDE_EFFECT.",
       "rule_sources": [
-        "tests/test_offer_publication_worker.py",
-        "tests/test_trade_delivery_reconciliation_service.py"
+        "api/routers/users.py",
+        "core/services/bot_access_policy.py"
       ],
-      "evidence_refs": [
-        "tests/test_offer_publication_worker.py",
-        "tests/test_trade_delivery_reconciliation_service.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-IDENTITY-COMMIT_BEFORE_EVENT_SIDE_EFFECT",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted IDENTITY test filename covers commit_before_event_side_effect. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "IDENTITY__SIDE-EFFECT-BEFORE-ACK",
@@ -4428,13 +4424,17 @@
         "decision": "ELIGIBLE",
         "predicate": "IDENTITY: family command has an external or realtime provider side effect"
       },
-      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
+      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice. Evidence for this IDENTITY boundary is the named blocker P1-00-FB-IDENTITY-SIDE_EFFECT_BEFORE_ACK.",
       "rule_sources": [
-        "tests/test_web_push.py"
+        "api/routers/users.py",
+        "core/services/bot_access_policy.py"
       ],
-      "evidence_refs": [
-        "tests/test_web_push.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-IDENTITY-SIDE_EFFECT_BEFORE_ACK",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted IDENTITY test filename covers side_effect_before_ack. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "IDENTITY__TWO-CONCURRENT-COMMANDS",
@@ -4446,13 +4446,17 @@
         "decision": "ELIGIBLE",
         "predicate": "IDENTITY: two overlapping mutating commands share a durable identity"
       },
-      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
+      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect. Evidence for this IDENTITY boundary is the named blocker P1-00-FB-IDENTITY-TWO_CONCURRENT_COMMANDS.",
       "rule_sources": [
-        "tests/test_bot_start_confirm_trade.py"
+        "api/routers/users.py",
+        "core/services/bot_access_policy.py"
       ],
-      "evidence_refs": [
-        "tests/test_bot_start_confirm_trade.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-IDENTITY-TWO_CONCURRENT_COMMANDS",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted IDENTITY test filename covers two_concurrent_commands. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "IDENTITY__PROCESS-RESTART",
@@ -4464,13 +4468,17 @@
         "decision": "ELIGIBLE",
         "predicate": "IDENTITY: process restart must resume durable family state or expose independent API/Bot lifecycle"
       },
-      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion. Evidence for this IDENTITY boundary is the named blocker P1-00-FB-IDENTITY-PROCESS_RESTART.",
       "rule_sources": [
-        "tests/test_offer_publication_worker.py"
+        "api/routers/users.py",
+        "core/services/bot_access_policy.py"
       ],
-      "evidence_refs": [
-        "tests/test_offer_publication_worker.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-IDENTITY-PROCESS_RESTART",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted IDENTITY test filename covers process_restart. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "IDENTITY__UNKNOWN-AUTHORITY-SCHEMA-HASH",
@@ -4484,13 +4492,9 @@
       },
       "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
       "rule_sources": [
-        "tests/test_background_job_authority.py",
-        "tests/test_bot_link_account_guards.py",
         "tests/test_users_router_mutation_authority.py"
       ],
       "evidence_refs": [
-        "tests/test_background_job_authority.py",
-        "tests/test_bot_link_account_guards.py",
         "tests/test_users_router_mutation_authority.py"
       ]
     },
@@ -4506,14 +4510,12 @@
       },
       "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
       "rule_sources": [
-        "tests/test_bot_trade_create_helper_cancel.py",
-        "tests/test_bot_trade_create_repeat_offer.py",
-        "tests/test_bot_trade_create_stale_state_text_offer.py"
+        "tests/test_offers_router_create_success.py",
+        "tests/test_offers_router_create_guards.py"
       ],
       "evidence_refs": [
-        "tests/test_bot_trade_create_helper_cancel.py",
-        "tests/test_bot_trade_create_repeat_offer.py",
-        "tests/test_bot_trade_create_stale_state_text_offer.py"
+        "tests/test_offers_router_create_success.py",
+        "tests/test_offers_router_create_guards.py"
       ]
     },
     {
@@ -4528,12 +4530,10 @@
       },
       "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
       "rule_sources": [
-        "tests/test_offer_publication_worker.py",
-        "tests/test_telegram_delivery_callsite_inventory.py"
+        "tests/test_offer_publication_worker.py"
       ],
       "evidence_refs": [
-        "tests/test_offer_publication_worker.py",
-        "tests/test_telegram_delivery_callsite_inventory.py"
+        "tests/test_offer_publication_worker.py"
       ]
     },
     {
@@ -4546,13 +4546,17 @@
         "decision": "ELIGIBLE",
         "predicate": "OFFER: family command has an external or realtime provider side effect"
       },
-      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
+      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice. Evidence for this OFFER boundary is the named blocker P1-00-FB-OFFER-SIDE_EFFECT_BEFORE_ACK.",
       "rule_sources": [
-        "tests/test_web_push.py"
+        "api/routers/offers.py",
+        "core/offer_publication_worker.py"
       ],
-      "evidence_refs": [
-        "tests/test_web_push.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-OFFER-SIDE_EFFECT_BEFORE_ACK",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted OFFER test filename covers side_effect_before_ack. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "OFFER__TWO-CONCURRENT-COMMANDS",
@@ -4564,13 +4568,17 @@
         "decision": "ELIGIBLE",
         "predicate": "OFFER: two overlapping mutating commands share a durable identity"
       },
-      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
+      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect. Evidence for this OFFER boundary is the named blocker P1-00-FB-OFFER-TWO_CONCURRENT_COMMANDS.",
       "rule_sources": [
-        "tests/test_bot_trade_create_text_offer_warning_confirm.py"
+        "api/routers/offers.py",
+        "core/offer_publication_worker.py"
       ],
-      "evidence_refs": [
-        "tests/test_bot_trade_create_text_offer_warning_confirm.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-OFFER-TWO_CONCURRENT_COMMANDS",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted OFFER test filename covers two_concurrent_commands. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "OFFER__PROCESS-RESTART",
@@ -4582,13 +4590,17 @@
         "decision": "ELIGIBLE",
         "predicate": "OFFER: process restart must resume durable family state or expose independent API/Bot lifecycle"
       },
-      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion. Evidence for this OFFER boundary is the named blocker P1-00-FB-OFFER-PROCESS_RESTART.",
       "rule_sources": [
-        "tests/test_offer_publication_worker.py"
+        "api/routers/offers.py",
+        "core/offer_publication_worker.py"
       ],
-      "evidence_refs": [
-        "tests/test_offer_publication_worker.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-OFFER-PROCESS_RESTART",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted OFFER test filename covers process_restart. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "OFFER__UNKNOWN-AUTHORITY-SCHEMA-HASH",
@@ -4600,17 +4612,17 @@
         "decision": "ELIGIBLE",
         "predicate": "OFFER: unknown actor, schema, hash or owner must fail closed"
       },
-      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
+      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence. Evidence for this OFFER boundary is the named blocker P1-00-FB-OFFER-UNKNOWN_AUTHORITY_SCHEMA_HASH.",
       "rule_sources": [
-        "tests/test_background_job_authority.py",
-        "tests/test_bot_trade_create_text_offer_guards.py",
-        "tests/test_main_foreign_surface_guard.py"
+        "api/routers/offers.py",
+        "core/offer_publication_worker.py"
       ],
-      "evidence_refs": [
-        "tests/test_background_job_authority.py",
-        "tests/test_bot_trade_create_text_offer_guards.py",
-        "tests/test_main_foreign_surface_guard.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-OFFER-UNKNOWN_AUTHORITY_SCHEMA_HASH",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted OFFER test filename covers unknown_authority_schema_hash. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "REQUEST__FAILURE-BEFORE-DB-COMMIT",
@@ -4624,14 +4636,13 @@
       },
       "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect. Evidence for this REQUEST boundary is the named blocker P1-00-FB-REQUEST-FAILURE_BEFORE_DB_COMMIT.",
       "rule_sources": [
-        "api/routers/trades.py",
-        "bot/handlers/offer_overtime_callbacks.py"
+        "core/services/offer_request_ledger_service.py"
       ],
       "evidence_refs": [],
       "named_blocker": {
         "blocker_id": "P1-00-FB-REQUEST-FAILURE_BEFORE_DB_COMMIT",
         "status": "NAMED_BLOCKER",
-        "reason": "No REQUEST inventory test_ref is bound to failure_before_db_commit. Another family's Offer/sync/Telegram tests are not reused."
+        "reason": "No allowlisted REQUEST test filename covers failure_before_db_commit. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
       }
     },
     {
@@ -4644,15 +4655,16 @@
         "decision": "ELIGIBLE",
         "predicate": "REQUEST: family command commits then emits an async outbox or delivery intent"
       },
-      "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
+      "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure. Evidence for this REQUEST boundary is the named blocker P1-00-FB-REQUEST-COMMIT_BEFORE_EVENT_SIDE_EFFECT.",
       "rule_sources": [
-        "tests/test_telegram_delivery_overtime_owner_approval_contract.py",
-        "tests/test_telegram_notification_outbox_service.py"
+        "core/services/offer_request_ledger_service.py"
       ],
-      "evidence_refs": [
-        "tests/test_telegram_delivery_overtime_owner_approval_contract.py",
-        "tests/test_telegram_notification_outbox_service.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-REQUEST-COMMIT_BEFORE_EVENT_SIDE_EFFECT",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted REQUEST test filename covers commit_before_event_side_effect. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "REQUEST__SIDE-EFFECT-BEFORE-ACK",
@@ -4664,13 +4676,16 @@
         "decision": "ELIGIBLE",
         "predicate": "REQUEST: family command has an external or realtime provider side effect"
       },
-      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
+      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice. Evidence for this REQUEST boundary is the named blocker P1-00-FB-REQUEST-SIDE_EFFECT_BEFORE_ACK.",
       "rule_sources": [
-        "tests/test_telegram_notification_outbox_service.py"
+        "core/services/offer_request_ledger_service.py"
       ],
-      "evidence_refs": [
-        "tests/test_telegram_notification_outbox_service.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-REQUEST-SIDE_EFFECT_BEFORE_ACK",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted REQUEST test filename covers side_effect_before_ack. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "REQUEST__TWO-CONCURRENT-COMMANDS",
@@ -4684,14 +4699,13 @@
       },
       "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect. Evidence for this REQUEST boundary is the named blocker P1-00-FB-REQUEST-TWO_CONCURRENT_COMMANDS.",
       "rule_sources": [
-        "api/routers/trades.py",
-        "bot/handlers/offer_overtime_callbacks.py"
+        "core/services/offer_request_ledger_service.py"
       ],
       "evidence_refs": [],
       "named_blocker": {
         "blocker_id": "P1-00-FB-REQUEST-TWO_CONCURRENT_COMMANDS",
         "status": "NAMED_BLOCKER",
-        "reason": "No REQUEST inventory test_ref is bound to two_concurrent_commands. Another family's Offer/sync/Telegram tests are not reused."
+        "reason": "No allowlisted REQUEST test filename covers two_concurrent_commands. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
       }
     },
     {
@@ -4706,14 +4720,13 @@
       },
       "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion. Evidence for this REQUEST boundary is the named blocker P1-00-FB-REQUEST-PROCESS_RESTART.",
       "rule_sources": [
-        "api/routers/trades.py",
-        "bot/handlers/offer_overtime_callbacks.py"
+        "core/services/offer_request_ledger_service.py"
       ],
       "evidence_refs": [],
       "named_blocker": {
         "blocker_id": "P1-00-FB-REQUEST-PROCESS_RESTART",
         "status": "NAMED_BLOCKER",
-        "reason": "No REQUEST inventory test_ref is bound to process_restart. Another family's Offer/sync/Telegram tests are not reused."
+        "reason": "No allowlisted REQUEST test filename covers process_restart. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
       }
     },
     {
@@ -4728,14 +4741,13 @@
       },
       "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence. Evidence for this REQUEST boundary is the named blocker P1-00-FB-REQUEST-UNKNOWN_AUTHORITY_SCHEMA_HASH.",
       "rule_sources": [
-        "api/routers/trades.py",
-        "bot/handlers/offer_overtime_callbacks.py"
+        "core/services/offer_request_ledger_service.py"
       ],
       "evidence_refs": [],
       "named_blocker": {
         "blocker_id": "P1-00-FB-REQUEST-UNKNOWN_AUTHORITY_SCHEMA_HASH",
         "status": "NAMED_BLOCKER",
-        "reason": "No REQUEST inventory test_ref is bound to unknown_authority_schema_hash. Another family's Offer/sync/Telegram tests are not reused."
+        "reason": "No allowlisted REQUEST test filename covers unknown_authority_schema_hash. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
       }
     },
     {
@@ -4750,14 +4762,12 @@
       },
       "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
       "rule_sources": [
-        "tests/test_bot_trade_create_accept_suggested_lots.py",
-        "tests/test_bot_trade_create_back_cancel.py",
-        "tests/test_bot_trade_create_commodity_page.py"
+        "tests/test_trades_router_authoritative_guards.py",
+        "tests/test_trade_atomicity_hardening.py"
       ],
       "evidence_refs": [
-        "tests/test_bot_trade_create_accept_suggested_lots.py",
-        "tests/test_bot_trade_create_back_cancel.py",
-        "tests/test_bot_trade_create_commodity_page.py"
+        "tests/test_trades_router_authoritative_guards.py",
+        "tests/test_trade_atomicity_hardening.py"
       ]
     },
     {
@@ -4772,14 +4782,12 @@
       },
       "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
       "rule_sources": [
-        "tests/test_offer_publication_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py",
-        "tests/test_trade_delivery_staging_validation_report.py"
+        "tests/test_trade_delivery_receipt_service.py",
+        "tests/test_trade_delivery_worker.py"
       ],
       "evidence_refs": [
-        "tests/test_offer_publication_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py",
-        "tests/test_trade_delivery_staging_validation_report.py"
+        "tests/test_trade_delivery_receipt_service.py",
+        "tests/test_trade_delivery_worker.py"
       ]
     },
     {
@@ -4794,12 +4802,12 @@
       },
       "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
       "rule_sources": [
-        "tests/test_telegram_notification_outbox_worker.py",
-        "tests/test_web_push.py"
+        "tests/test_trade_telegram_delivery_service.py",
+        "tests/test_trade_webapp_delivery_service.py"
       ],
       "evidence_refs": [
-        "tests/test_telegram_notification_outbox_worker.py",
-        "tests/test_web_push.py"
+        "tests/test_trade_telegram_delivery_service.py",
+        "tests/test_trade_webapp_delivery_service.py"
       ]
     },
     {
@@ -4814,12 +4822,10 @@
       },
       "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
       "rule_sources": [
-        "tests/test_bot_trade_create_text_offer_warning_confirm.py",
-        "tests/test_bot_trade_utils_quantity_confirm_keyboards.py"
+        "tests/test_trade_contention_gate.py"
       ],
       "evidence_refs": [
-        "tests/test_bot_trade_create_text_offer_warning_confirm.py",
-        "tests/test_bot_trade_utils_quantity_confirm_keyboards.py"
+        "tests/test_trade_contention_gate.py"
       ]
     },
     {
@@ -4832,17 +4838,17 @@
         "decision": "ELIGIBLE",
         "predicate": "TRADE: process restart must resume durable family state or expose independent API/Bot lifecycle"
       },
-      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion. Evidence for this TRADE boundary is the named blocker P1-00-FB-TRADE-PROCESS_RESTART.",
       "rule_sources": [
-        "tests/test_main_lifespan.py",
-        "tests/test_offer_publication_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
+        "api/routers/trades.py",
+        "bot/handlers/trade_create.py"
       ],
-      "evidence_refs": [
-        "tests/test_main_lifespan.py",
-        "tests/test_offer_publication_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-TRADE-PROCESS_RESTART",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted TRADE test filename covers process_restart. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "TRADE__UNKNOWN-AUTHORITY-SCHEMA-HASH",
@@ -4854,17 +4860,17 @@
         "decision": "ELIGIBLE",
         "predicate": "TRADE: unknown actor, schema, hash or owner must fail closed"
       },
-      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
+      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence. Evidence for this TRADE boundary is the named blocker P1-00-FB-TRADE-UNKNOWN_AUTHORITY_SCHEMA_HASH.",
       "rule_sources": [
-        "tests/test_background_job_authority.py",
-        "tests/test_bot_trade_create_remaining_guards.py",
-        "tests/test_bot_trade_execute_offer_guards.py"
+        "api/routers/trades.py",
+        "bot/handlers/trade_create.py"
       ],
-      "evidence_refs": [
-        "tests/test_background_job_authority.py",
-        "tests/test_bot_trade_create_remaining_guards.py",
-        "tests/test_bot_trade_execute_offer_guards.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-TRADE-UNKNOWN_AUTHORITY_SCHEMA_HASH",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted TRADE test filename covers unknown_authority_schema_hash. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "MARKET__FAILURE-BEFORE-DB-COMMIT",
@@ -4876,13 +4882,16 @@
         "decision": "ELIGIBLE",
         "predicate": "MARKET: family command mutates durable product state"
       },
-      "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
+      "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect. Evidence for this MARKET boundary is the named blocker P1-00-FB-MARKET-FAILURE_BEFORE_DB_COMMIT.",
       "rule_sources": [
-        "tests/test_offers_router_create_success.py"
+        "core/services/market_schedule_service.py"
       ],
-      "evidence_refs": [
-        "tests/test_offers_router_create_success.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-MARKET-FAILURE_BEFORE_DB_COMMIT",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted MARKET test filename covers failure_before_db_commit. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "MARKET__COMMIT-BEFORE-EVENT-SIDE-EFFECT",
@@ -4896,13 +4905,13 @@
       },
       "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure. Evidence for this MARKET boundary is the named blocker P1-00-FB-MARKET-COMMIT_BEFORE_EVENT_SIDE_EFFECT.",
       "rule_sources": [
-        "api/routers/offers.py"
+        "core/services/market_schedule_service.py"
       ],
       "evidence_refs": [],
       "named_blocker": {
         "blocker_id": "P1-00-FB-MARKET-COMMIT_BEFORE_EVENT_SIDE_EFFECT",
         "status": "NAMED_BLOCKER",
-        "reason": "No MARKET inventory test_ref is bound to commit_before_event_side_effect. Another family's Offer/sync/Telegram tests are not reused."
+        "reason": "No allowlisted MARKET test filename covers commit_before_event_side_effect. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
       }
     },
     {
@@ -4917,13 +4926,13 @@
       },
       "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice. Evidence for this MARKET boundary is the named blocker P1-00-FB-MARKET-SIDE_EFFECT_BEFORE_ACK.",
       "rule_sources": [
-        "api/routers/offers.py"
+        "core/services/market_schedule_service.py"
       ],
       "evidence_refs": [],
       "named_blocker": {
         "blocker_id": "P1-00-FB-MARKET-SIDE_EFFECT_BEFORE_ACK",
         "status": "NAMED_BLOCKER",
-        "reason": "No MARKET inventory test_ref is bound to side_effect_before_ack. Another family's Offer/sync/Telegram tests are not reused."
+        "reason": "No allowlisted MARKET test filename covers side_effect_before_ack. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
       }
     },
     {
@@ -4938,13 +4947,13 @@
       },
       "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect. Evidence for this MARKET boundary is the named blocker P1-00-FB-MARKET-TWO_CONCURRENT_COMMANDS.",
       "rule_sources": [
-        "api/routers/offers.py"
+        "core/services/market_schedule_service.py"
       ],
       "evidence_refs": [],
       "named_blocker": {
         "blocker_id": "P1-00-FB-MARKET-TWO_CONCURRENT_COMMANDS",
         "status": "NAMED_BLOCKER",
-        "reason": "No MARKET inventory test_ref is bound to two_concurrent_commands. Another family's Offer/sync/Telegram tests are not reused."
+        "reason": "No allowlisted MARKET test filename covers two_concurrent_commands. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
       }
     },
     {
@@ -4959,13 +4968,13 @@
       },
       "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion. Evidence for this MARKET boundary is the named blocker P1-00-FB-MARKET-PROCESS_RESTART.",
       "rule_sources": [
-        "api/routers/offers.py"
+        "core/services/market_schedule_service.py"
       ],
       "evidence_refs": [],
       "named_blocker": {
         "blocker_id": "P1-00-FB-MARKET-PROCESS_RESTART",
         "status": "NAMED_BLOCKER",
-        "reason": "No MARKET inventory test_ref is bound to process_restart. Another family's Offer/sync/Telegram tests are not reused."
+        "reason": "No allowlisted MARKET test filename covers process_restart. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
       }
     },
     {
@@ -4980,13 +4989,13 @@
       },
       "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence. Evidence for this MARKET boundary is the named blocker P1-00-FB-MARKET-UNKNOWN_AUTHORITY_SCHEMA_HASH.",
       "rule_sources": [
-        "api/routers/offers.py"
+        "core/services/market_schedule_service.py"
       ],
       "evidence_refs": [],
       "named_blocker": {
         "blocker_id": "P1-00-FB-MARKET-UNKNOWN_AUTHORITY_SCHEMA_HASH",
         "status": "NAMED_BLOCKER",
-        "reason": "No MARKET inventory test_ref is bound to unknown_authority_schema_hash. Another family's Offer/sync/Telegram tests are not reused."
+        "reason": "No allowlisted MARKET test filename covers unknown_authority_schema_hash. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
       }
     },
     {
@@ -5002,12 +5011,10 @@
       "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
       "rule_sources": [
         "tests/test_chat_router_direct_mutations.py",
-        "tests/test_main_foreign_surface_guard.py",
         "tests/test_realtime_router_websocket_guards.py"
       ],
       "evidence_refs": [
         "tests/test_chat_router_direct_mutations.py",
-        "tests/test_main_foreign_surface_guard.py",
         "tests/test_realtime_router_websocket_guards.py"
       ]
     },
@@ -5021,15 +5028,17 @@
         "decision": "ELIGIBLE",
         "predicate": "MSG: family command commits then emits an async outbox or delivery intent"
       },
-      "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
+      "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure. Evidence for this MSG boundary is the named blocker P1-00-FB-MSG-COMMIT_BEFORE_EVENT_SIDE_EFFECT.",
       "rule_sources": [
-        "tests/test_telegram_delivery_queue_production_cutover.py",
-        "tests/test_telegram_delivery_queue_production_plan.py"
+        "api/routers/chat.py",
+        "api/routers/realtime.py"
       ],
-      "evidence_refs": [
-        "tests/test_telegram_delivery_queue_production_cutover.py",
-        "tests/test_telegram_delivery_queue_production_plan.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-MSG-COMMIT_BEFORE_EVENT_SIDE_EFFECT",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted MSG test filename covers commit_before_event_side_effect. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "MSG__SIDE-EFFECT-BEFORE-ACK",
@@ -5041,17 +5050,17 @@
         "decision": "ELIGIBLE",
         "predicate": "MSG: family command has an external or realtime provider side effect"
       },
-      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
+      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice. Evidence for this MSG boundary is the named blocker P1-00-FB-MSG-SIDE_EFFECT_BEFORE_ACK.",
       "rule_sources": [
-        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
-        "tests/test_telegram_delivery_queue_production_cutover.py",
-        "tests/test_telegram_delivery_queue_production_plan.py"
+        "api/routers/chat.py",
+        "api/routers/realtime.py"
       ],
-      "evidence_refs": [
-        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
-        "tests/test_telegram_delivery_queue_production_cutover.py",
-        "tests/test_telegram_delivery_queue_production_plan.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-MSG-SIDE_EFFECT_BEFORE_ACK",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted MSG test filename covers side_effect_before_ack. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "MSG__TWO-CONCURRENT-COMMANDS",
@@ -5063,13 +5072,17 @@
         "decision": "ELIGIBLE",
         "predicate": "MSG: two overlapping mutating commands share a durable identity"
       },
-      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
+      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect. Evidence for this MSG boundary is the named blocker P1-00-FB-MSG-TWO_CONCURRENT_COMMANDS.",
       "rule_sources": [
-        "tests/test_telegram_admin_broadcast_confirm_idempotency.py"
+        "api/routers/chat.py",
+        "api/routers/realtime.py"
       ],
-      "evidence_refs": [
-        "tests/test_telegram_admin_broadcast_confirm_idempotency.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-MSG-TWO_CONCURRENT_COMMANDS",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted MSG test filename covers two_concurrent_commands. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "MSG__PROCESS-RESTART",
@@ -5084,14 +5097,13 @@
       "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion. Evidence for this MSG boundary is the named blocker P1-00-FB-MSG-PROCESS_RESTART.",
       "rule_sources": [
         "api/routers/chat.py",
-        "api/routers/realtime.py",
-        "frontend/src/router/index.ts"
+        "api/routers/realtime.py"
       ],
       "evidence_refs": [],
       "named_blocker": {
         "blocker_id": "P1-00-FB-MSG-PROCESS_RESTART",
         "status": "NAMED_BLOCKER",
-        "reason": "No MSG inventory test_ref is bound to process_restart. Another family's Offer/sync/Telegram tests are not reused."
+        "reason": "No allowlisted MSG test filename covers process_restart. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
       }
     },
     {
@@ -5104,15 +5116,17 @@
         "decision": "ELIGIBLE",
         "predicate": "MSG: unknown actor, schema, hash or owner must fail closed"
       },
-      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
+      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence. Evidence for this MSG boundary is the named blocker P1-00-FB-MSG-UNKNOWN_AUTHORITY_SCHEMA_HASH.",
       "rule_sources": [
-        "tests/test_main_foreign_surface_guard.py",
-        "tests/test_realtime_router_websocket_guards.py"
+        "api/routers/chat.py",
+        "api/routers/realtime.py"
       ],
-      "evidence_refs": [
-        "tests/test_main_foreign_surface_guard.py",
-        "tests/test_realtime_router_websocket_guards.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-MSG-UNKNOWN_AUTHORITY_SCHEMA_HASH",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted MSG test filename covers unknown_authority_schema_hash. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "NOTIFY__FAILURE-BEFORE-DB-COMMIT",
@@ -5144,14 +5158,13 @@
       },
       "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure. Evidence for this NOTIFY boundary is the named blocker P1-00-FB-NOTIFY-COMMIT_BEFORE_EVENT_SIDE_EFFECT.",
       "rule_sources": [
-        "api/routers/notifications.py",
-        "frontend/src/router/index.ts"
+        "api/routers/notifications.py"
       ],
       "evidence_refs": [],
       "named_blocker": {
         "blocker_id": "P1-00-FB-NOTIFY-COMMIT_BEFORE_EVENT_SIDE_EFFECT",
         "status": "NAMED_BLOCKER",
-        "reason": "No NOTIFY inventory test_ref is bound to commit_before_event_side_effect. Another family's Offer/sync/Telegram tests are not reused."
+        "reason": "No allowlisted NOTIFY test filename covers commit_before_event_side_effect. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
       }
     },
     {
@@ -5184,14 +5197,13 @@
       },
       "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect. Evidence for this NOTIFY boundary is the named blocker P1-00-FB-NOTIFY-TWO_CONCURRENT_COMMANDS.",
       "rule_sources": [
-        "api/routers/notifications.py",
-        "frontend/src/router/index.ts"
+        "api/routers/notifications.py"
       ],
       "evidence_refs": [],
       "named_blocker": {
         "blocker_id": "P1-00-FB-NOTIFY-TWO_CONCURRENT_COMMANDS",
         "status": "NAMED_BLOCKER",
-        "reason": "No NOTIFY inventory test_ref is bound to two_concurrent_commands. Another family's Offer/sync/Telegram tests are not reused."
+        "reason": "No allowlisted NOTIFY test filename covers two_concurrent_commands. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
       }
     },
     {
@@ -5206,14 +5218,13 @@
       },
       "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion. Evidence for this NOTIFY boundary is the named blocker P1-00-FB-NOTIFY-PROCESS_RESTART.",
       "rule_sources": [
-        "api/routers/notifications.py",
-        "frontend/src/router/index.ts"
+        "api/routers/notifications.py"
       ],
       "evidence_refs": [],
       "named_blocker": {
         "blocker_id": "P1-00-FB-NOTIFY-PROCESS_RESTART",
         "status": "NAMED_BLOCKER",
-        "reason": "No NOTIFY inventory test_ref is bound to process_restart. Another family's Offer/sync/Telegram tests are not reused."
+        "reason": "No allowlisted NOTIFY test filename covers process_restart. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
       }
     },
     {
@@ -5228,14 +5239,13 @@
       },
       "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence. Evidence for this NOTIFY boundary is the named blocker P1-00-FB-NOTIFY-UNKNOWN_AUTHORITY_SCHEMA_HASH.",
       "rule_sources": [
-        "api/routers/notifications.py",
-        "frontend/src/router/index.ts"
+        "api/routers/notifications.py"
       ],
       "evidence_refs": [],
       "named_blocker": {
         "blocker_id": "P1-00-FB-NOTIFY-UNKNOWN_AUTHORITY_SCHEMA_HASH",
         "status": "NAMED_BLOCKER",
-        "reason": "No NOTIFY inventory test_ref is bound to unknown_authority_schema_hash. Another family's Offer/sync/Telegram tests are not reused."
+        "reason": "No allowlisted NOTIFY test filename covers unknown_authority_schema_hash. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
       }
     },
     {
@@ -5248,17 +5258,16 @@
         "decision": "ELIGIBLE",
         "predicate": "TG: family command mutates durable product state"
       },
-      "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
+      "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect. Evidence for this TG boundary is the named blocker P1-00-FB-TG-FAILURE_BEFORE_DB_COMMIT.",
       "rule_sources": [
-        "tests/test_bot_trade_create_text_offer_parse_flow.py",
-        "tests/test_bot_trade_create_wizard.py",
-        "tests/test_offers_router_create_success.py"
+        "core/services/telegram_delivery_queue_service.py"
       ],
-      "evidence_refs": [
-        "tests/test_bot_trade_create_text_offer_parse_flow.py",
-        "tests/test_bot_trade_create_wizard.py",
-        "tests/test_offers_router_create_success.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-TG-FAILURE_BEFORE_DB_COMMIT",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted TG test filename covers failure_before_db_commit. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "TG__COMMIT-BEFORE-EVENT-SIDE-EFFECT",
@@ -5272,14 +5281,12 @@
       },
       "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
       "rule_sources": [
-        "tests/test_offer_publication_worker.py",
-        "tests/test_telegram_admin_broadcast_delivery_service.py",
-        "tests/test_telegram_delivery_callsite_inventory.py"
+        "tests/test_telegram_notification_outbox_service.py",
+        "tests/test_telegram_notification_outbox_worker.py"
       ],
       "evidence_refs": [
-        "tests/test_offer_publication_worker.py",
-        "tests/test_telegram_admin_broadcast_delivery_service.py",
-        "tests/test_telegram_delivery_callsite_inventory.py"
+        "tests/test_telegram_notification_outbox_service.py",
+        "tests/test_telegram_notification_outbox_worker.py"
       ]
     },
     {
@@ -5334,12 +5341,10 @@
       },
       "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
       "rule_sources": [
-        "tests/test_offer_publication_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
+        "tests/test_telegram_delivery_resume_service.py"
       ],
       "evidence_refs": [
-        "tests/test_offer_publication_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
+        "tests/test_telegram_delivery_resume_service.py"
       ]
     },
     {
@@ -5352,15 +5357,16 @@
         "decision": "ELIGIBLE",
         "predicate": "TG: unknown actor, schema, hash or owner must fail closed"
       },
-      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
+      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence. Evidence for this TG boundary is the named blocker P1-00-FB-TG-UNKNOWN_AUTHORITY_SCHEMA_HASH.",
       "rule_sources": [
-        "tests/test_background_job_authority.py",
-        "tests/test_sync_router_signature.py"
+        "core/services/telegram_delivery_queue_service.py"
       ],
-      "evidence_refs": [
-        "tests/test_background_job_authority.py",
-        "tests/test_sync_router_signature.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-TG-UNKNOWN_AUTHORITY_SCHEMA_HASH",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted TG test filename covers unknown_authority_schema_hash. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "ADMIN__FAILURE-BEFORE-DB-COMMIT",
@@ -5396,14 +5402,10 @@
       },
       "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
       "rule_sources": [
-        "tests/test_telegram_delivery_queue_limiter.py",
-        "tests/test_telegram_delivery_queue_limiter_redis.py",
-        "tests/test_telegram_delivery_queue_postgres.py"
+        "tests/test_telegram_admin_broadcast_delivery_service.py"
       ],
       "evidence_refs": [
-        "tests/test_telegram_delivery_queue_limiter.py",
-        "tests/test_telegram_delivery_queue_limiter_redis.py",
-        "tests/test_telegram_delivery_queue_postgres.py"
+        "tests/test_telegram_admin_broadcast_delivery_service.py"
       ]
     },
     {
@@ -5418,14 +5420,10 @@
       },
       "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
       "rule_sources": [
-        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
-        "tests/test_telegram_delivery_queue_limiter.py",
-        "tests/test_telegram_delivery_queue_limiter_redis.py"
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py"
       ],
       "evidence_refs": [
-        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
-        "tests/test_telegram_delivery_queue_limiter.py",
-        "tests/test_telegram_delivery_queue_limiter_redis.py"
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py"
       ]
     },
     {
@@ -5458,15 +5456,14 @@
       },
       "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion. Evidence for this ADMIN boundary is the named blocker P1-00-FB-ADMIN-PROCESS_RESTART.",
       "rule_sources": [
-        "api/routers/admin_messages.py",
-        "api/routers/commodities.py",
-        "api/routers/trading_settings.py"
+        "bot/handlers/admin.py",
+        "api/routers/commodities.py"
       ],
       "evidence_refs": [],
       "named_blocker": {
         "blocker_id": "P1-00-FB-ADMIN-PROCESS_RESTART",
         "status": "NAMED_BLOCKER",
-        "reason": "No ADMIN inventory test_ref is bound to process_restart. Another family's Offer/sync/Telegram tests are not reused."
+        "reason": "No allowlisted ADMIN test filename covers process_restart. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
       }
     },
     {
@@ -5479,15 +5476,17 @@
         "decision": "ELIGIBLE",
         "predicate": "ADMIN: unknown actor, schema, hash or owner must fail closed"
       },
-      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
+      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence. Evidence for this ADMIN boundary is the named blocker P1-00-FB-ADMIN-UNKNOWN_AUTHORITY_SCHEMA_HASH.",
       "rule_sources": [
-        "tests/test_main_foreign_surface_guard.py",
-        "tests/test_offers_router_create_guards.py"
+        "bot/handlers/admin.py",
+        "api/routers/commodities.py"
       ],
-      "evidence_refs": [
-        "tests/test_main_foreign_surface_guard.py",
-        "tests/test_offers_router_create_guards.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-ADMIN-UNKNOWN_AUTHORITY_SCHEMA_HASH",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted ADMIN test filename covers unknown_authority_schema_hash. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "SYNC__FAILURE-BEFORE-DB-COMMIT",
@@ -5499,13 +5498,17 @@
         "decision": "ELIGIBLE",
         "predicate": "SYNC: family command mutates durable product state"
       },
-      "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
+      "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect. Evidence for this SYNC boundary is the named blocker P1-00-FB-SYNC-FAILURE_BEFORE_DB_COMMIT.",
       "rule_sources": [
-        "tests/test_main_foreign_surface_guard.py"
+        "api/routers/sync.py",
+        "core/sync_worker.py"
       ],
-      "evidence_refs": [
-        "tests/test_main_foreign_surface_guard.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-SYNC-FAILURE_BEFORE_DB_COMMIT",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted SYNC test filename covers failure_before_db_commit. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "SYNC__COMMIT-BEFORE-EVENT-SIDE-EFFECT",
@@ -5537,13 +5540,14 @@
       },
       "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice. Evidence for this SYNC boundary is the named blocker P1-00-FB-SYNC-SIDE_EFFECT_BEFORE_ACK.",
       "rule_sources": [
-        "api/routers/sync.py"
+        "api/routers/sync.py",
+        "core/sync_worker.py"
       ],
       "evidence_refs": [],
       "named_blocker": {
         "blocker_id": "P1-00-FB-SYNC-SIDE_EFFECT_BEFORE_ACK",
         "status": "NAMED_BLOCKER",
-        "reason": "No SYNC inventory test_ref is bound to side_effect_before_ack. Another family's Offer/sync/Telegram tests are not reused."
+        "reason": "No allowlisted SYNC test filename covers side_effect_before_ack. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
       }
     },
     {
@@ -5558,13 +5562,14 @@
       },
       "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect. Evidence for this SYNC boundary is the named blocker P1-00-FB-SYNC-TWO_CONCURRENT_COMMANDS.",
       "rule_sources": [
-        "api/routers/sync.py"
+        "api/routers/sync.py",
+        "core/sync_worker.py"
       ],
       "evidence_refs": [],
       "named_blocker": {
         "blocker_id": "P1-00-FB-SYNC-TWO_CONCURRENT_COMMANDS",
         "status": "NAMED_BLOCKER",
-        "reason": "No SYNC inventory test_ref is bound to two_concurrent_commands. Another family's Offer/sync/Telegram tests are not reused."
+        "reason": "No allowlisted SYNC test filename covers two_concurrent_commands. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
       }
     },
     {
@@ -5577,13 +5582,17 @@
         "decision": "ELIGIBLE",
         "predicate": "SYNC: process restart must resume durable family state or expose independent API/Bot lifecycle"
       },
-      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion. Evidence for this SYNC boundary is the named blocker P1-00-FB-SYNC-PROCESS_RESTART.",
       "rule_sources": [
-        "tests/test_sync_worker.py"
+        "api/routers/sync.py",
+        "core/sync_worker.py"
       ],
-      "evidence_refs": [
-        "tests/test_sync_worker.py"
-      ]
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-SYNC-PROCESS_RESTART",
+        "status": "NAMED_BLOCKER",
+        "reason": "No allowlisted SYNC test filename covers process_restart. Inventory test_refs union is not proof; other-family Offer/Trade/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "SYNC__UNKNOWN-AUTHORITY-SCHEMA-HASH",
@@ -5597,11 +5606,9 @@
       },
       "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
       "rule_sources": [
-        "tests/test_main_foreign_surface_guard.py",
         "tests/test_sync_router_signature.py"
       ],
       "evidence_refs": [
-        "tests/test_main_foreign_surface_guard.py",
         "tests/test_sync_router_signature.py"
       ]
     },
@@ -5713,5 +5720,136 @@
         "tests/test_main_metrics_guard.py"
       ]
     }
-  ]
+  ],
+  "failure_evidence_classifier": {
+    "rule": "An ELIGIBLE family_boundary_variants citation is valid only when the test filename matches this family's exclusive token allowlist and a boundary filename token. Membership in a family's inventory test_refs union is not proof.",
+    "family_tokens": {
+      "AUTH": [
+        "test_auth_",
+        "test_session_",
+        "test_stage6_otp"
+      ],
+      "IDENTITY": [
+        "test_bot_link",
+        "test_users_router",
+        "test_users_public",
+        "test_invitation",
+        "test_user_account"
+      ],
+      "OFFER": [
+        "test_offers_",
+        "test_offer_publication",
+        "test_offer_source",
+        "test_offer_price"
+      ],
+      "REQUEST": [
+        "test_offer_request",
+        "test_offer_overtime",
+        "test_overtime_request"
+      ],
+      "TRADE": [
+        "test_trade_",
+        "test_trades_",
+        "test_bot_trade_"
+      ],
+      "MARKET": [
+        "test_market_",
+        "test_estimator",
+        "test_coin_market"
+      ],
+      "MSG": [
+        "test_chat_",
+        "test_messages_",
+        "test_realtime_",
+        "test_messenger_",
+        "test_album_"
+      ],
+      "NOTIFY": [
+        "test_notification",
+        "test_web_push"
+      ],
+      "TG": [
+        "test_telegram_delivery",
+        "test_telegram_publisher",
+        "test_telegram_notification",
+        "test_telegram_queue",
+        "test_telegram_otp",
+        "test_telegram_dispatch",
+        "test_telegram_gateway",
+        "test_telegram_interaction",
+        "test_telegram_multi_publisher",
+        "test_telegram_split_runtime"
+      ],
+      "ADMIN": [
+        "test_admin_",
+        "test_bot_admin_",
+        "test_commodities_",
+        "test_telegram_admin_"
+      ],
+      "SYNC": [
+        "test_sync_"
+      ],
+      "OPS": [
+        "test_deployment",
+        "test_main_lifespan",
+        "test_main_metrics",
+        "test_main_foreign",
+        "test_background_job_authority",
+        "test_telegram_bot_runtime_role",
+        "test_server_routing"
+      ]
+    },
+    "boundary_tokens": {
+      "failure_before_db_commit": [
+        "_guards",
+        "_guard",
+        "_mutations",
+        "_mutation",
+        "_login",
+        "_session_flows",
+        "_create",
+        "_delete",
+        "_atomicity",
+        "direct_mutations"
+      ],
+      "commit_before_event_side_effect": [
+        "outbox",
+        "publication_worker",
+        "delivery_worker",
+        "delivery_service",
+        "delivery_receipt",
+        "otp_delivery",
+        "sync_worker"
+      ],
+      "side_effect_before_ack": [
+        "otp_delivery",
+        "web_push",
+        "idempotenc",
+        "outbox",
+        "delivery_queue",
+        "delivery_contract",
+        "trade_telegram_delivery",
+        "trade_webapp_delivery"
+      ],
+      "two_concurrent_commands": [
+        "idempotenc",
+        "concurrent",
+        "claim_index",
+        "contention"
+      ],
+      "process_restart": [
+        "lifespan",
+        "resume",
+        "restart"
+      ],
+      "unknown_authority_schema_hash": [
+        "authority",
+        "signature",
+        "foreign_surface",
+        "field_policy",
+        "schema_hash",
+        "metrics_guard"
+      ]
+    }
+  }
 }

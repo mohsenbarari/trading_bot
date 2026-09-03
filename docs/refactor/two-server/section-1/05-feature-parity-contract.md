@@ -56,7 +56,7 @@ test before the gate closes.
 | `inventory/surface-web.json` | path/name/component/guard/family/test references for 30 routes |
 | `inventory/surface-jobs.json` | current/target authority, tables and side effects for 15 registered jobs |
 | `inventory/runtime-task-ownership.json` | API/Bot/Market child process, poller, worker and timer ownership seeds |
-| `inventory/scenario-records.json` | compact v2 source: family×mutation_class contracts, 465-seed mapping, persona/time/origin/outcome axes, composed eligibility, invalid combinations and family-bound failure cells |
+| `inventory/scenario-records.json` | compact v2 source: family×mutation_class contracts, 465-seed mapping, persona/time/origin/outcome axes, composed eligibility, invalid combinations and 72 failure cells cited only by family+boundary allowlisted tests or named blockers |
 
 Surface inventories keep their original `generated_from_commit`
 `19087ff0686c9260b55f1c6c35782b758be6673e` and record
@@ -230,7 +230,7 @@ At minimum the target must preserve:
 | manual resolution of 6 evidence-review items | `COMPLETE — characterization linked` |
 | current runtime child/poller/timer owner seed manifest | `COMPLETE` |
 | exact target compose/credential/readiness binding | future `P1-03` |
-| persona/tier/time/failure scenario records | `READY_FOR_CODEX_FINAL_REVIEW` — compact v2 contracts and definite eligibility written; `target_result NOT_RUN`; not `COMPLETE` until Codex accepts the correction |
+| persona/tier/time/failure scenario records | `READY_FOR_CODEX_FINAL_REVIEW` — compact v2 contracts, explicit eligibility, and allowlisted family+boundary failure evidence; `target_result NOT_RUN`; not `COMPLETE` until Codex accepts the correction |
 | owner approval of human-readable scenario contract | `COMPLETE — 2026-09-02` |
 | deploy/restart/backup/restore duration (`DR-015`) | `DEFERRED_BLOCKER` / `DPL-1` / `NOT_OBSERVED` |
 | current-vs-target differential execution | future `P1-06` |
