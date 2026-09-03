@@ -140,6 +140,54 @@ class CaptureEventAdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(CaptureEventContractError, "available_at_utc_required"):
             decode_coin_group_event(legacy)
 
+    def test_xau_replay_batch_preserves_every_quote_and_terminal_lineage(self) -> None:
+        for message_id in range(1, 51):
+            second = message_id % 50
+            stage_capture_event(
+                self.staging,
+                decode_market_channel_event(
+                    market_event(
+                        1_000 + message_id,
+                        source="XAUUSD",
+                        message_id=message_id,
+                        text=f"{4500 + message_id / 100:.2f}",
+                        published=f"2026-08-24T10:00:{second:02d}Z",
+                        available=f"2026-08-24T10:01:{second:02d}Z",
+                    )
+                ),
+            )
+        self.staging.commit()
+        report = project_capture_changes(
+            self.staging,
+            self.market,
+            as_of_utc="2026-08-24T10:02:00Z",
+            max_market_messages=50,
+        )
+        self.market.commit()
+        self.staging.commit()
+        self.assertEqual(report.market_messages_reprojected, 50)
+        self.assertEqual(report.market_facts_upserted, 50)
+        self.assertEqual(
+            self.market.execute(
+                "SELECT COUNT(*) FROM market_observations "
+                "WHERE source_code='XAUUSD'"
+            ).fetchone()[0],
+            50,
+        )
+        self.assertEqual(
+            self.staging.execute(
+                "SELECT COUNT(*) FROM capture_event_lineage "
+                "WHERE source_id='XAUUSD' AND status='PARSED'"
+            ).fetchone()[0],
+            50,
+        )
+        self.assertEqual(
+            self.staging.execute(
+                "SELECT COUNT(*) FROM capture_dirty_market_messages"
+            ).fetchone()[0],
+            0,
+        )
+
     def test_primary_source_uses_dedicated_dimensions_and_edit_is_not_a_trade(self) -> None:
         self._stage_market(
             market_event(

@@ -52,6 +52,7 @@ from .private_gold_trade_revisions import (
 from .public_telegram.ingest import (
     PublicTelegramMessage,
     ingest_public_message,
+    ingest_xau_messages_batch,
     link_melted_flow_trade_sides,
 )
 from .public_telegram.parser import parse_public_message, should_ignore_public_message
@@ -1830,6 +1831,148 @@ def _project_public_row(
     return result.event_count, (keys if source_id == "MELTED_FLOW" else ())
 
 
+def _chunks(values: list[int], size: int = 800) -> Iterable[list[int]]:
+    for start in range(0, len(values), size):
+        yield values[start : start + size]
+
+
+def _project_xau_batch(
+    staging: sqlite3.Connection,
+    market: sqlite3.Connection,
+    items: list[sqlite3.Row],
+    *,
+    as_of_utc: str,
+) -> tuple[int, int, int]:
+    """Project one causal XAU batch without per-message SQLite round trips."""
+
+    message_ids = [int(item["message_id"]) for item in items]
+    retracted = 0
+    for chunk in _chunks(message_ids):
+        placeholders = ",".join("?" for _ in chunk)
+        prior = staging.execute(
+            f"SELECT event_key FROM capture_projection_keys "
+            f"WHERE source_id=? AND message_id IN ({placeholders})",
+            ("XAUUSD", *chunk),
+        ).fetchall()
+        retracted += sum(
+            _retract_fact(market, bytes(row["event_key"]), as_of_utc)
+            for row in prior
+        )
+        staging.execute(
+            f"DELETE FROM capture_projection_keys "
+            f"WHERE source_id=? AND message_id IN ({placeholders})",
+            ("XAUUSD", *chunk),
+        )
+
+    current_by_id: dict[int, sqlite3.Row] = {}
+    for chunk in _chunks(message_ids):
+        placeholders = ",".join("?" for _ in chunk)
+        for row in staging.execute(
+            f"SELECT * FROM capture_market_messages "
+            f"WHERE source_id=? AND message_id IN ({placeholders}) "
+            "AND available_at_utc<=?",
+            ("XAUUSD", *chunk, as_of_utc),
+        ).fetchall():
+            current_by_id[int(row["message_id"])] = row
+
+    current_rows = [
+        current_by_id[message_id]
+        for message_id in message_ids
+        if message_id in current_by_id
+    ]
+    batch = ingest_xau_messages_batch(
+        market,
+        tuple(
+            PublicTelegramMessage(
+                message_id=int(row["message_id"]),
+                published_at_utc=str(row["event_time_utc"]),
+                available_at_utc=str(row["available_at_utc"]),
+                text=str(row["message_text"]),
+                is_forwarded=bool(row["is_forwarded"]),
+            )
+            for row in current_rows
+        ),
+    )
+    projection_rows = [
+        ("XAUUSD", message_id, event_key, str(current_by_id[message_id]["event_time_utc"])[:16])
+        for message_id, event_keys in batch.event_keys_by_message.items()
+        for event_key in event_keys
+    ]
+    if projection_rows:
+        staging.executemany(
+            "INSERT OR IGNORE INTO capture_projection_keys("
+            "source_id,message_id,event_key,bucket_utc) VALUES(?,?,?,?)",
+            projection_rows,
+        )
+
+    missing_ids = [
+        message_id for message_id in message_ids if message_id not in current_by_id
+    ]
+    for message_id in missing_ids:
+        _finish_capture_lineage(
+            staging,
+            stream="market",
+            source_id="XAUUSD",
+            message_id=message_id,
+            status="FILTERED",
+            disposition_code="CURRENT_ROW_UNAVAILABLE_AT_PARSE",
+            completed_at_utc=as_of_utc,
+        )
+
+    current_ids = [int(row["message_id"]) for row in current_rows]
+    multiple_pending: set[int] = set()
+    for chunk in _chunks(current_ids):
+        placeholders = ",".join("?" for _ in chunk)
+        multiple_pending.update(
+            int(row["message_id"])
+            for row in staging.execute(
+                f"SELECT message_id FROM capture_event_lineage "
+                f"WHERE stream=? AND source_id=? AND status='PENDING' "
+                f"AND message_id IN ({placeholders}) "
+                "GROUP BY message_id HAVING COUNT(*)>1",
+                ("market", "XAUUSD", *chunk),
+            ).fetchall()
+        )
+    for forwarded in (False, True):
+        simple_ids = [
+            int(row["message_id"])
+            for row in current_rows
+            if bool(row["is_forwarded"]) is forwarded
+            and int(row["message_id"]) not in multiple_pending
+        ]
+        for chunk in _chunks(simple_ids):
+            placeholders = ",".join("?" for _ in chunk)
+            staging.execute(
+                f"UPDATE capture_event_lineage SET status='PARSED',"
+                "disposition_code=?,terminal_at_utc=? "
+                f"WHERE stream=? AND source_id=? AND status='PENDING' "
+                f"AND message_id IN ({placeholders})",
+                (
+                    "FORWARDED_FILTERED" if forwarded else "PARSER_EXECUTED",
+                    as_of_utc,
+                    "market",
+                    "XAUUSD",
+                    *chunk,
+                ),
+            )
+    for message_id in sorted(multiple_pending):
+        row = current_by_id[message_id]
+        _finish_capture_lineage(
+            staging,
+            stream="market",
+            source_id="XAUUSD",
+            message_id=message_id,
+            status="PARSED",
+            disposition_code=(
+                "FORWARDED_FILTERED"
+                if bool(row["is_forwarded"])
+                else "PARSER_EXECUTED"
+            ),
+            completed_at_utc=as_of_utc,
+        )
+    return len(current_rows), batch.event_count, retracted
+
+
 def _primary_source_event_id(message_id: int) -> str:
     return f"market-capture-v1:{_PRIMARY_SOURCE_CODE}:{int(message_id)}"
 
@@ -2247,8 +2390,21 @@ def project_capture_changes(
     primary_changed = False
     primary_minutes: set[str] = set()
     changed_melted_flow_keys: list[bytes] = []
+    xau_items = [item for item in dirty if str(item["source_id"]) == "XAUUSD"]
+    if xau_items:
+        xau_projected, xau_upserted, xau_retracted = _project_xau_batch(
+            staging,
+            market,
+            xau_items,
+            as_of_utc=as_of,
+        )
+        projected += xau_projected
+        upserted += xau_upserted
+        retracted += xau_retracted
     for item in dirty:
         source_id = str(item["source_id"])
+        if source_id == "XAUUSD":
+            continue
         retracted += _clear_projection(
             staging,
             market,
