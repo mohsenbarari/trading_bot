@@ -187,6 +187,9 @@ OPERATION_KINDS = {
     "STREAM_SUBSCRIBE",
     "MENU_NAV",
     "FSM_PROMPT",
+    "ACK_ONLY",
+    "EPHEMERAL_ACTIVITY",
+    "PARSE_NO_COMMIT",
     "CRUD_MUTATION",
     "BROADCAST",
     "SESSION_MUTATION",
@@ -196,7 +199,24 @@ OPERATION_KINDS = {
     "SYNC_APPLY",
     "SCHEDULED_JOB",
 }
-NON_PRODUCT_MUTATION_KINDS = {"READ_QUERY", "STREAM_SUBSCRIBE", "MENU_NAV", "FSM_PROMPT"}
+NON_PRODUCT_MUTATION_KINDS = {
+    "READ_QUERY",
+    "STREAM_SUBSCRIBE",
+    "MENU_NAV",
+    "FSM_PROMPT",
+    "ACK_ONLY",
+    "EPHEMERAL_ACTIVITY",
+    "PARSE_NO_COMMIT",
+}
+FALSE_CRUD_EXAMPLES = (
+    "BOT-TG-CALLBACK-QUERY-DEFAULT-ACKNOWLEDGE-NOOP-CALLBACK-L17",
+    "BOT-TG-CALLBACK-QUERY-DEFAULT-HANDLE-UNMATCHED-CALLBACK-L24",
+    "BOT-TG-MESSAGE-DEFAULT-HANDLE-UNAUTHORIZED-MESSAGES-L43",
+    "API-MSG-POST-CHAT-SEND-TYPING-SIGNAL-L918",
+    "API-MSG-POST-CHAT-SEND-DIRECT-ACTIVITY-SIGNAL-L939",
+    "API-MSG-POST-CHAT-SEND-ROOM-ACTIVITY-SIGNAL-L962",
+    "API-OFFER-POST-OFFERS-PARSE-OFFER-TEXT-L3184",
+)
 BLOCKER_REGISTRY_FIELDS = {
     "blocker_id",
     "severity",
@@ -759,6 +779,10 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
                     any(phrase in contract_text for phrase in CRUD_BROADCAST_PHRASES),
                     contract["contract_id"],
                 )
+                self.assertEqual(contract["db_mutations"]["status"], "APPLICABLE", contract["contract_id"])
+            if contract.get("operation_kind") in {"ACK_ONLY", "EPHEMERAL_ACTIVITY", "PARSE_NO_COMMIT"}:
+                self.assertEqual(contract["db_mutations"]["status"], "NOT_APPLICABLE", contract["contract_id"])
+                self.assertEqual(contract["events_outbox"]["status"], "NOT_APPLICABLE", contract["contract_id"])
 
     def test_every_surface_seed_maps_once_with_seed_specific_behavioral_evidence(self):
         payload = _load_json("scenario-records.json")
@@ -806,6 +830,9 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
             hashlib.sha256(resolved).hexdigest(),
             payload["seed_mapping"]["resolved_index_sha256"],
         )
+        for behavior_id in FALSE_CRUD_EXAMPLES:
+            seed = next(item for item in seeds if item["behavior_id"] == behavior_id)
+            self.assertNotEqual(seed["operation_kind"], "CRUD_MUTATION", behavior_id)
 
     def test_bot_menu_and_api_broadcast_do_not_share_a_mutation_contract(self):
         payload = _load_json("scenario-records.json")
@@ -876,11 +903,11 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
             {(item["offer_origin"], item["request_origin"]) for item in origin_variants},
             ORIGIN_ROWS,
         )
-        self.assertEqual(
-            len(origin_variants) * len(persona_variants) * len(time_variants) * len(outcome_variants),
-            matrix["expanded_variant_count"],
-        )
-        self.assertEqual(matrix["expanded_variant_count"], 360)
+        self.assertEqual(matrix["expanded_variant_count"], len(payload["composed_eligibility"]))
+        self.assertEqual(matrix["expanded_variant_count"], 180)
+        self.assertNotEqual(matrix["expanded_variant_count"], 360)
+        self.assertEqual(len(origin_variants), 6)
+        self.assertEqual(len(persona_variants) * 2 * len(time_variants), 30)
 
         for variant in [*origin_variants, *persona_variants, *time_variants, *outcome_variants]:
             self.assertEqual(variant["contract_id"], matrix["contract_id"])
@@ -912,42 +939,51 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
         payload = _load_json("scenario-records.json")
         personas = [item["variant_id"] for item in payload["matrix"]["persona_variants"]]
         times = [item["variant_id"] for item in payload["matrix"]["time_variants"]]
-        surfaces = ("WEBAPP", "TELEGRAM_BOT")
-        expected = {
-            (persona, surface, time)
-            for persona in personas
-            for surface in surfaces
-            for time in times
-        }
+        outcomes = [item["variant_id"] for item in payload["matrix"]["outcome_variants"]]
         cells = payload["composed_eligibility"]
-        self.assertEqual(len(cells), 30)
-        self.assertEqual(payload["coverage"]["composed_eligibility_cells"], 30)
+        self.assertEqual(len(cells), 180)
+        self.assertEqual(payload["coverage"]["composed_eligibility_cells"], 180)
         seen = set()
         for cell in cells:
             _assert_definite_variant(self, cell)
-            predicate = cell["eligibility"]["predicate"]
             decision = cell["eligibility"]["decision"]
-            self.assertNotIn(INHERIT_PREDICATE_PHRASE, _normalized(predicate), cell["variant_id"])
             _assert_predicate_matches_decision(self, decision, cell["eligibility"], cell["variant_id"])
-            key = (cell["persona_variant_id"], cell["request_origin"], cell["time_variant_id"])
-            self.assertIn(key, expected)
-            seen.add(key)
-        self.assertEqual(seen, expected)
-        accountant_bot = next(
+            self.assertIn(cell["offer_origin_rule"]["status"], {"INDEPENDENT_OF_ADMISSION"})
+            self.assertIn(cell["outcome_variant_id"], outcomes)
+            seen.add(
+                (
+                    cell["persona_variant_id"],
+                    cell["request_origin"],
+                    cell["time_variant_id"],
+                    cell["telegram_link_variant_id"],
+                    cell["outcome_variant_id"],
+                )
+            )
+        self.assertEqual(len(seen), 180)
+        self.assertEqual({item[0] for item in seen}, set(personas))
+        self.assertEqual({item[2] for item in seen}, set(times))
+        accountant_reject = next(
             item
             for item in cells
             if item["persona_variant_id"] == "PERSONA-ACCOUNTANT"
             and item["request_origin"] == "TELEGRAM_BOT"
+            and item["time_variant_id"] == "TIME-NORMAL"
+            and item["telegram_link_variant_id"] == "TELEGRAM-LINK-PRESENT"
+            and item["outcome_variant_id"] == "OUTCOME-REJECT"
         )
-        self.assertEqual(accountant_bot["eligibility"]["decision"], "INELIGIBLE")
-        tier2_bot = next(
+        self.assertEqual(accountant_reject["admission_decision"], "INELIGIBLE")
+        self.assertEqual(accountant_reject["eligibility"]["decision"], "ELIGIBLE")
+        tier2_bot_success = next(
             item
             for item in cells
             if item["persona_variant_id"] == "PERSONA-CUSTOMER-TIER2"
             and item["request_origin"] == "TELEGRAM_BOT"
             and item["time_variant_id"] == "TIME-NORMAL"
+            and item["telegram_link_variant_id"] == "TELEGRAM-LINK-PRESENT"
+            and item["outcome_variant_id"] == "OUTCOME-SUCCESS"
         )
-        self.assertEqual(tier2_bot["eligibility"]["decision"], "INELIGIBLE")
+        self.assertEqual(tier2_bot_success["admission_decision"], "INELIGIBLE")
+        self.assertEqual(tier2_bot_success["eligibility"]["decision"], "NOT_APPLICABLE")
 
     def test_invalid_combinations_and_policy_effects_are_explicit(self):
         payload = _load_json("scenario-records.json")
@@ -973,7 +1009,7 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
             _assert_definite_variant(self, item)
 
         links = payload["telegram_link_variants"]
-        self.assertEqual(len(links), 2)
+        self.assertEqual(len(links), 3)
         absent = next(item for item in links if item["variant_id"] == "TELEGRAM-LINK-ABSENT")
         self.assertEqual(absent["eligibility"]["TELEGRAM_BOT"]["decision"], "INELIGIBLE")
         self.assertEqual(absent["eligibility"]["WEBAPP"]["decision"], "NOT_APPLICABLE")
@@ -1038,7 +1074,8 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
             },
         )
         registry = payload["blocker_registry"]
-        self.assertEqual(registry["disposition_request"], "SUBMITTED_FOR_CODEX_STAGE_FINAL")
+        self.assertEqual(registry["disposition_request"], "DEFERRED_TO_P1_06")
+        self.assertNotEqual(registry["disposition_request"], "SUBMITTED_FOR_CODEX_STAGE_FINAL")
         self.assertEqual(set(registry["required_fields"]), BLOCKER_REGISTRY_FIELDS)
         registry_ids = {item["blocker_id"] for item in registry["items"]}
         filename_only = 0
@@ -1055,7 +1092,10 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
                 self.assertEqual(set(blocker), BLOCKER_REGISTRY_FIELDS, cell["variant_id"])
                 for field in BLOCKER_REGISTRY_FIELDS:
                     self.assertTrue(blocker.get(field), f"{cell['variant_id']} missing {field}")
-                self.assertEqual(blocker["disposition"], "SUBMITTED_FOR_CODEX_STAGE_FINAL", cell["variant_id"])
+                self.assertEqual(blocker["disposition"], "DEFERRED_TO_P1_06", cell["variant_id"])
+                self.assertEqual(blocker["resolution_stage"], "P1-06", cell["variant_id"])
+                self.assertNotEqual(blocker["resolution_stage"], "P1-00", cell["variant_id"])
+                self.assertIn("P1-06", blocker["blocked_dependents"], cell["variant_id"])
                 self.assertEqual(blocker["owner"], "CODEX_FINAL_REVIEWER", cell["variant_id"])
                 self.assertIn(blocker["blocker_id"], registry_ids, cell["variant_id"])
                 continue

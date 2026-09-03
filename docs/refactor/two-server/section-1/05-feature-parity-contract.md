@@ -56,7 +56,7 @@ test before the gate closes.
 | `inventory/surface-web.json` | path/name/component/guard/family/test references for 30 routes |
 | `inventory/surface-jobs.json` | current/target authority, tables and side effects for 15 registered jobs |
 | `inventory/runtime-task-ownership.json` | API/Bot/Market child process, poller, worker and timer ownership seeds |
-| `inventory/scenario-records.json` | compact source: family×operation_kind contracts, 465-seed mapping, persona/time/origin/outcome axes, 72 failure cells with pytest node IDs or a submitted P1-00-FB registry |
+| `inventory/scenario-records.json` | compact source: family×operation_kind contracts including ACK_ONLY / EPHEMERAL_ACTIVITY / PARSE_NO_COMMIT, 465-seed mapping, 180 composed persona/request/time/link/outcome decisions, 72 failure cells with injected node IDs or a P1-06 High blocker |
 
 Surface inventories keep their original `generated_from_commit`
 `19087ff0686c9260b55f1c6c35782b758be6673e` and record
@@ -175,8 +175,9 @@ Empty per-row Cartesian records are forbidden. The reviewable source is
 - `behavior_contracts` hold the real current fields (`preconditions` through
   `failure_cases`, evidence and tests). Irrelevant fields are
   `NOT_APPLICABLE` with a reason, never empty.
-- `variants` / `composed_eligibility` bind persona, tier, time, origin and
-  outcome to a `contract_id` with a definite eligibility decision.
+- `variants` / `composed_eligibility` bind persona, tier, time, request origin,
+  telegram-link, outcome and independent offer-origin provenance to a
+  `contract_id` with a definite eligibility decision.
 - each of the 465 surface seeds maps to exactly one family×operation_kind
   contract; a `MENU_NAV` / `READ_QUERY` seed must not share a `BROADCAST` or
   `CRUD_MUTATION` contract, and a send-document seed must not share a no-send
@@ -233,7 +234,7 @@ At minimum the target must preserve:
 | manual resolution of 6 evidence-review items | `COMPLETE — characterization linked` |
 | current runtime child/poller/timer owner seed manifest | `COMPLETE` |
 | exact target compose/credential/readiness binding | future `P1-03` |
-| persona/tier/time/failure scenario records | `READY_FOR_CODEX_FINAL_REVIEW` — family×operation_kind contracts, node-id failure evidence, and P1-00-FB registry submitted for Codex disposition; `target_result NOT_RUN`; not `COMPLETE` |
+| persona/tier/time/failure scenario records | `READY_FOR_CODEX_FINAL_REVIEW` — family×operation_kind contracts with ack/activity/parse exceptions, 180 composed decisions, injected failure nodes or P1-06 High blockers; `target_result NOT_RUN`; not `COMPLETE` |
 | owner approval of human-readable scenario contract | `COMPLETE — 2026-09-02` |
 | deploy/restart/backup/restore duration (`DR-015`) | `DEFERRED_BLOCKER` / `DPL-1` / `NOT_OBSERVED` |
 | current-vs-target differential execution | future `P1-06` |

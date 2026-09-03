@@ -25,17 +25,17 @@ Status: open findings; no implicit fixes authorized
 ## `P1-00` failure-boundary registry (not Codex-approved)
 
 The compact machine source is `inventory/scenario-records.json#blocker_registry`.
-Each `P1-00-FB-*` item has severity, owner `CODEX_FINAL_REVIEWER`,
-`resolution_stage` `P1-00`, `blocked_dependents` including `P1-06`,
-required evidence, forbidden shortcuts, and
-`disposition` `SUBMITTED_FOR_CODEX_STAGE_FINAL`.
+Each remaining `P1-00-FB-*` item has severity HIGH, owner `CODEX_FINAL_REVIEWER`,
+`resolution_stage` `P1-06`, `blocked_dependents` `P1-06`, required evidence,
+forbidden shortcuts including self-submission, and
+`disposition` `DEFERRED_TO_P1_06`.
 
-This table is the human index. It is a disposition request for the next exact-SHA
-Final Review. It is not Worker approval and not a Codex receipt.
+This table is not Worker approval and not a Codex Stage-final receipt.
+High gaps that still lack an injected characterization stay on `P1-06`.
 
 | ID | Family / boundary | Disposition |
 | --- | --- | --- |
-| `P1-00-FB-*` | remaining applicable family×boundary cells without a proven pytest node | `SUBMITTED_FOR_CODEX_STAGE_FINAL` |
+| `P1-00-FB-*` | remaining applicable family×boundary cells without an injected pytest node | `DEFERRED_TO_P1_06` |
 | `DR-015` | deploy/restart/backup/restore duration | already `DEFERRED_BLOCKER` / `DPL-1` |
 
 ## Interpretation

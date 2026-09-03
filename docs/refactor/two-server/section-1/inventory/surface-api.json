@@ -1408,9 +1408,10 @@
       "source": "api/routers/chat.py:918",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_chat_router_direct_reads.py"
+        "tests/test_chat_router_direct_reads.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "EPHEMERAL_ACTIVITY"
     },
     {
       "behavior_id": "API-MSG-POST-CHAT-SEND-DIRECT-ACTIVITY-SIGNAL-L939",
@@ -1423,9 +1424,10 @@
       "test_refs": [
         "tests/test_chat_router_direct_reads.py",
         "frontend/src/utils/chatRoomRouting.test.ts",
-        "frontend/src/services/chatUploadBackground.test.ts"
+        "frontend/src/services/chatUploadBackground.test.ts",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "EPHEMERAL_ACTIVITY"
     },
     {
       "behavior_id": "API-MSG-POST-CHAT-SEND-ROOM-ACTIVITY-SIGNAL-L962",
@@ -1436,9 +1438,10 @@
       "source": "api/routers/chat.py:962",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_chat_router_rooms.py"
+        "tests/test_chat_router_rooms.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "EPHEMERAL_ACTIVITY"
     },
     {
       "behavior_id": "API-ADMIN-GET-COMMODITIES-READ-COMMODITY-L131",
@@ -2214,9 +2217,10 @@
       "test_refs": [
         "tests/test_bot_trade_create_text_offer_parse_flow.py",
         "tests/test_bot_trade_create_text_offer_warning_flow_integration.py",
-        "tests/test_bot_trade_create_text_offer_guards.py"
+        "tests/test_bot_trade_create_text_offer_guards.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "PARSE_NO_COMMIT"
     },
     {
       "behavior_id": "API-MSG-WEBSOCKET-REALTIME-WEBSOCKET-ENDPOINT-L370",

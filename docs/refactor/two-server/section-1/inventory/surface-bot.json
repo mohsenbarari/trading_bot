@@ -1092,10 +1092,11 @@
       "test_refs": [
         "tests/test_sync_router_apply_item_success.py",
         "tests/test_telegram_delivery_queue_contract.py",
-        "tests/test_production_private_primary_choreography.py"
+        "tests/test_production_private_primary_choreography.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "ACK_ONLY"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-DEFAULT-HANDLE-UNMATCHED-CALLBACK-L24",
@@ -1105,10 +1106,11 @@
       "handler": "default.handle_unmatched_callback",
       "source": "bot/handlers/default.py:24",
       "test_refs": [
-        "tests/test_bot_default_unauthorized.py"
+        "tests/test_bot_default_unauthorized.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "ACK_ONLY"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-DEFAULT-HANDLE-UNAUTHORIZED-MESSAGES-L43",
@@ -1118,10 +1120,11 @@
       "handler": "default.handle_unauthorized_messages",
       "source": "bot/handlers/default.py:43",
       "test_refs": [
-        "tests/test_bot_default_unauthorized.py"
+        "tests/test_bot_default_unauthorized.py",
+        "tests/test_p1_00_characterization_operation_exceptions.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "ACK_ONLY"
     },
     {
       "behavior_id": "BOT-IDENTITY-MESSAGE-LINK-ACCOUNT-CMD-LINK-L423",
