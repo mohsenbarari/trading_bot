@@ -21,12 +21,14 @@
       "READ_OR_STREAM": 20
     },
     "operation_kind_counts": {
-      "FSM_PROMPT": 21,
-      "CRUD_MUTATION": 120,
+      "FSM_PROMPT": 44,
+      "CRUD_MUTATION": 77,
       "BROADCAST": 1,
-      "MENU_NAV": 36,
+      "MENU_NAV": 37,
+      "TOGGLE_MUTATION": 2,
       "PROVIDER_REPLY": 9,
       "READ_QUERY": 7,
+      "ACK_ONLY": 17,
       "DOCUMENT_SEND": 4,
       "DELIVERY_COMMAND": 5
     }
@@ -597,10 +599,11 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_bot_access.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00_characterization_admin_toggle_behavior.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "TOGGLE_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-DELETE-REQUEST-L1186",
@@ -757,10 +760,11 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_block_settings.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00_characterization_admin_toggle_behavior.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "TOGGLE_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-SET-MAX-BLOCK-L1698",

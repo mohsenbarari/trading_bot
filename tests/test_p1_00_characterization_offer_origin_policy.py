@@ -1,7 +1,8 @@
-"""HIGH-3: offer_origin is a single composed key and changes home, not admission."""
+"""HIGH-3: origin is applied to live home/request functions; other cells are blockers or equivalence."""
 
 from __future__ import annotations
 
+import inspect
 import json
 import unittest
 from pathlib import Path
@@ -23,20 +24,38 @@ ORIGIN_PAIRS = {
     ("INTERNAL", "WEBAPP"),
     ("INTERNAL", "TELEGRAM_BOT"),
 }
-MUTATING_EFFECTS = {"CONFIRMATION", "QUOTA", "COMMISSION", "PUBLICATION", "NOTIFICATION"}
-DENIAL_DECISIONS = {"INELIGIBLE", "INELIGIBLE_FOR_NEW_MARKET_MUTATION", "NOT_APPLICABLE"}
+REQUIRED_INTERACTIONS = {
+    "OUTCOME-SUCCESS",
+    "OUTCOME-REJECT",
+    "PERMISSION-DENIED",
+    "RETRY",
+    "CONCURRENT",
+    "UNLINKED-BOT",
+    "EXPIRY-CANCEL-REPUBLISH-TERMINAL",
+    "POLICY-SNAPSHOT",
+    "NOTIFICATION",
+    "FAILURE-BEFORE-COMMIT",
+    "FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
+    "SIDE-EFFECT-RETRY",
+}
 
 
 def _load_json(name: str) -> dict:
     return json.loads((INV_DIR / name).read_text(encoding="utf-8"))
 
 
-def _home(origin: str) -> str:
+def _surface(origin: str) -> OfferSourceSurface:
     if origin == "TELEGRAM_BOT":
-        return offer_home_server_for_source(OfferSourceSurface.TELEGRAM_BOT)
+        return OfferSourceSurface.TELEGRAM_BOT
     if origin == "WEBAPP":
-        return offer_home_server_for_source(OfferSourceSurface.WEBAPP)
-    return offer_home_server_for_source(OfferSourceSurface.INTERNAL_SYNC, incoming_home_server="iran")
+        return OfferSourceSurface.WEBAPP
+    return OfferSourceSurface.INTERNAL_SYNC
+
+
+def _home(origin: str) -> str:
+    if origin == "INTERNAL":
+        return offer_home_server_for_source(OfferSourceSurface.INTERNAL_SYNC, incoming_home_server="iran")
+    return offer_home_server_for_source(_surface(origin))
 
 
 class P100OfferOriginPolicyCharacterizationTests(unittest.TestCase):
@@ -45,13 +64,11 @@ class P100OfferOriginPolicyCharacterizationTests(unittest.TestCase):
         records = payload["composed_origin_matrix"]
         self.assertEqual(len(records), 180)
         self.assertEqual(payload["coverage"]["composed_origin_matrix"], 180)
-        self.assertEqual(len(payload["offer_origin_interaction"]), 180)
         seen = set()
         pairs = set()
         for record in records:
             self.assertIsInstance(record["offer_origin"], str)
             self.assertNotIsInstance(record["offer_origin"], list)
-            self.assertIn(record["offer_origin"], {"WEBAPP", "TELEGRAM_BOT", "INTERNAL"})
             key = (
                 record["offer_origin"],
                 record["request_origin"],
@@ -62,97 +79,98 @@ class P100OfferOriginPolicyCharacterizationTests(unittest.TestCase):
             self.assertNotIn(key, seen, record["variant_id"])
             seen.add(key)
             pairs.add((record["offer_origin"], record["request_origin"]))
-            self.assertIn(f"OFFER-ORIGIN-{record['offer_origin']}", record["variant_id"])
             self.assertEqual(record["offer_home"], _home(record["offer_origin"]))
-            self.assertEqual(record["publication_home"], record["offer_home"])
-            self.assertEqual(
-                record["request_source_surface"],
-                "telegram_bot" if record["request_origin"] == "TELEGRAM_BOT" else "webapp",
-            )
-            if (
-                record["outcome_variant_id"] == "OUTCOME-SUCCESS"
-                and record["eligibility"]["decision"] in DENIAL_DECISIONS
-            ):
-                self.assertEqual(record["policy_effects"], [])
-                self.assertFalse(MUTATING_EFFECTS & set(record["policy_effects"]))
-        self.assertEqual(pairs, ORIGIN_PAIRS)
-        self.assertEqual(len(seen), 180)
-
-    def test_origin_pairs_apply_home_and_request_surfaces(self):
-        payload = _load_json("scenario-records.json")
-        for record in payload["composed_origin_matrix"]:
-            command = OfferRequestLedgerCommand(
-                local_offer_id=1,
-                offer_public_id="ofr_origin",
-                requested_quantity=1,
-                request_home_server="iran" if record["request_origin"] == "WEBAPP" else "foreign",
-                requester_user_id=1,
-                actor_user_id=1,
-                request_source_surface=record["request_source_surface"],
-                request_source_server="iran" if record["request_origin"] == "WEBAPP" else "foreign",
-                idempotency_key=f"origin-{record['variant_id']}",
-            )
-            self.assertEqual(command.request_source_surface, record["request_source_surface"])
-            if record["offer_origin"] != record["request_origin"]:
-                self.assertNotEqual(
-                    str(command.request_source_surface).lower(),
-                    record["offer_origin"].lower(),
-                )
             self.assertEqual(record["publication_home"], _home(record["offer_origin"]))
-            if record["offer_origin"] == "TELEGRAM_BOT" and record["request_origin"] == "WEBAPP":
-                self.assertEqual(record["offer_home"], "foreign")
-                self.assertEqual(command.request_source_surface, "webapp")
-                self.assertNotEqual(record["offer_home"], command.request_home_server)
-            if record["offer_origin"] == "WEBAPP" and record["request_origin"] == "TELEGRAM_BOT":
-                self.assertEqual(record["offer_home"], "iran")
-                self.assertEqual(command.request_source_surface, "telegram_bot")
+        self.assertEqual(pairs, ORIGIN_PAIRS)
 
-    def test_bot_admission_ignores_offer_origin(self):
-        origins = (
-            OfferSourceSurface.WEBAPP,
-            OfferSourceSurface.TELEGRAM_BOT,
-            OfferSourceSurface.INTERNAL_SYNC,
+    def test_live_home_and_ledger_functions_consume_origin(self):
+        self.assertEqual(offer_home_server_for_source(OfferSourceSurface.WEBAPP), "iran")
+        self.assertEqual(offer_home_server_for_source(OfferSourceSurface.TELEGRAM_BOT), "foreign")
+        self.assertEqual(
+            offer_home_server_for_source(OfferSourceSurface.INTERNAL_SYNC, incoming_home_server="iran"),
+            "iran",
         )
-        accountant = [
-            evaluate_invitation_bot_access(
-                role=UserRole.STANDARD,
-                invitation_kind=InvitationKind.ACCOUNTANT,
-                customer_tier=None,
-            )
-            for _ in origins
-        ]
-        tier1 = [
-            evaluate_invitation_bot_access(
-                role=UserRole.STANDARD,
-                invitation_kind=InvitationKind.CUSTOMER,
-                customer_tier=CustomerTier.TIER_1,
-            )
-            for _ in origins
-        ]
-        tier2 = [
-            evaluate_invitation_bot_access(
-                role=UserRole.STANDARD,
-                invitation_kind=InvitationKind.CUSTOMER,
-                customer_tier=CustomerTier.TIER_2,
-            )
-            for _ in origins
-        ]
-        self.assertEqual({item.allowed for item in accountant}, {False})
-        self.assertEqual({item.allowed for item in tier1}, {True})
-        self.assertEqual({item.allowed for item in tier2}, {False})
+        self.assertNotEqual(
+            offer_home_server_for_source(OfferSourceSurface.WEBAPP),
+            offer_home_server_for_source(OfferSourceSurface.TELEGRAM_BOT),
+        )
+        home_params = inspect.signature(offer_home_server_for_source).parameters
+        self.assertIn("source_surface", home_params)
+        web = OfferRequestLedgerCommand(
+            local_offer_id=1,
+            offer_public_id="ofr_origin",
+            requested_quantity=1,
+            request_home_server="iran",
+            requester_user_id=1,
+            actor_user_id=1,
+            request_source_surface="webapp",
+            request_source_server="iran",
+            idempotency_key="origin-web",
+        )
+        bot = OfferRequestLedgerCommand(
+            local_offer_id=1,
+            offer_public_id="ofr_origin",
+            requested_quantity=1,
+            request_home_server="foreign",
+            requester_user_id=1,
+            actor_user_id=1,
+            request_source_surface="telegram_bot",
+            request_source_server="foreign",
+            idempotency_key="origin-bot",
+        )
+        self.assertEqual(web.request_source_surface, "webapp")
+        self.assertEqual(bot.request_source_surface, "telegram_bot")
+        self.assertNotEqual(web.request_source_surface, bot.request_source_surface)
+        self.assertNotEqual(web.request_home_server, bot.request_home_server)
+
+    def test_bot_access_api_has_no_origin_parameter(self):
+        params = inspect.signature(evaluate_invitation_bot_access).parameters
+        self.assertNotIn("origin", params)
+        self.assertNotIn("offer_origin", params)
+        self.assertNotIn("source_surface", params)
+        accountant = evaluate_invitation_bot_access(
+            role=UserRole.STANDARD,
+            invitation_kind=InvitationKind.ACCOUNTANT,
+            customer_tier=None,
+        )
+        tier1 = evaluate_invitation_bot_access(
+            role=UserRole.STANDARD,
+            invitation_kind=InvitationKind.CUSTOMER,
+            customer_tier=CustomerTier.TIER_1,
+        )
+        tier2 = evaluate_invitation_bot_access(
+            role=UserRole.STANDARD,
+            invitation_kind=InvitationKind.CUSTOMER,
+            customer_tier=CustomerTier.TIER_2,
+        )
+        self.assertFalse(accountant.allowed)
+        self.assertTrue(tier1.allowed)
+        self.assertFalse(tier2.allowed)
+
+    def test_required_origin_interactions_are_equivalence_or_high_blockers(self):
         payload = _load_json("scenario-records.json")
-        grouped = {}
-        for record in payload["composed_origin_matrix"]:
-            if record["outcome_variant_id"] != "OUTCOME-SUCCESS":
-                continue
-            key = (
-                record["persona_variant_id"],
-                record["request_origin"],
-                record["time_variant_id"],
-            )
-            grouped.setdefault(key, set()).add(record["admission_decision"])
-        for decisions in grouped.values():
-            self.assertEqual(len(decisions), 1)
+        rows = payload["origin_required_interactions"]
+        self.assertEqual(len(rows), len(ORIGIN_PAIRS) * len(REQUIRED_INTERACTIONS))
+        seen = set()
+        registry = {item["blocker_id"]: item for item in payload["blocker_registry"]["items"]}
+        for row in rows:
+            key = (row["offer_origin"], row["request_origin"], row["interaction"])
+            self.assertNotIn(key, seen, key)
+            seen.add(key)
+            self.assertIn(row["interaction"], REQUIRED_INTERACTIONS)
+            self.assertIn(row["disposition"], {"EQUIVALENT_TO_REPRESENTATIVE", "HIGH_BLOCKER"})
+            if row["disposition"] == "EQUIVALENT_TO_REPRESENTATIVE":
+                self.assertTrue(row["representative_id"])
+                self.assertTrue(row["live_function"])
+                self.assertTrue(row["equivalence_reason"])
+                self.assertNotIn("self-compared", json.dumps(row, ensure_ascii=False))
+            else:
+                blocker_id = row["named_blocker"]["blocker_id"]
+                self.assertIn(blocker_id, registry)
+                self.assertEqual(registry[blocker_id]["severity"], "HIGH")
+                self.assertNotEqual(row.get("expected_outcome"), "SUCCESS")
+        self.assertTrue(any(row["disposition"] == "EQUIVALENT_TO_REPRESENTATIVE" for row in rows))
+        self.assertTrue(any(row["interaction"] == "RETRY" and row["disposition"] == "HIGH_BLOCKER" for row in rows))
 
     def test_admission_cells_do_not_use_a_three_value_origin_array(self):
         payload = _load_json("scenario-records.json")

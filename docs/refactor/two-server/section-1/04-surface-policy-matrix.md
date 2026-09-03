@@ -59,6 +59,16 @@ For each row, tests must cover at least:
 - notification audience, Web realtime/Web Push and Telegram publication/delivery;
 - failure before commit, after commit/before side effect and side-effect retry.
 
+P1-00 materializes those interactions in `inventory/scenario-records.json`
+`origin_required_interactions`. Home/publication and request surface are proven
+by live functions that take origin (`offer_home_server_for_source`,
+`OfferRequestLedgerCommand`). Admission/permission-denied are an equivalence
+class because `evaluate_invitation_bot_access` has no origin parameter. Retry,
+concurrent, unlinked-Bot, expiry/terminal, snapshot, notification, and failure
+phases are High blockers (`P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED`);
+current product functions do not take origin for those effects, so those cells
+are not recorded as green outcomes.
+
 ## Approved semantic contract for the next ADR
 
 The semantics below are approved. The ADR may refine physical column names and

@@ -199,6 +199,7 @@ OPERATION_KINDS = {
     "PROVIDER_REPLY",
     "SYNC_APPLY",
     "SCHEDULED_JOB",
+    "TOGGLE_MUTATION",
 }
 NON_PRODUCT_MUTATION_KINDS = {
     "READ_QUERY",
@@ -355,6 +356,7 @@ DEFINITE_ELIGIBILITY_DECISIONS = {
     "INELIGIBLE",
     "INELIGIBLE_FOR_NEW_MARKET_MUTATION",
     "NOT_APPLICABLE",
+    "UNRESOLVED",
 }
 SECRET_SCAN_RESULT = "NO_SECRET_VALUE / DETECTION_SIGNATURES_PRESENT"
 
@@ -602,11 +604,11 @@ def _assert_definite_variant(test, variant: dict, *, require_rule_sources: bool 
     applicability = variant.get("applicability")
     test.assertIn(
         applicability,
-        {"ELIGIBLE", "NOT_APPLICABLE", "APPLICABLE", "SHARED_EVIDENCE_TEMPLATE"},
+        {"ELIGIBLE", "NOT_APPLICABLE", "APPLICABLE", "SHARED_EVIDENCE_TEMPLATE", "HIGH_BLOCKER"},
         variant,
     )
-    if applicability == "NOT_APPLICABLE":
-        test.assertTrue(variant.get("reason") or (variant.get("eligibility") or {}).get("reason"), variant)
+    if applicability in {"NOT_APPLICABLE", "HIGH_BLOCKER"}:
+        test.assertTrue(variant.get("reason") or (variant.get("eligibility") or {}).get("reason") or variant.get("named_blocker"), variant)
     test.assertTrue(variant.get("expected_outcome"), variant.get("variant_id") or variant)
     _assert_no_deferred_or_ambiguous_text(test, json.dumps(variant, ensure_ascii=False), variant.get("variant_id") or "variant")
     if require_rule_sources:
@@ -619,7 +621,7 @@ def _assert_definite_variant(test, variant: dict, *, require_rule_sources: bool 
         test.assertNotIn(decision, FORBIDDEN_ELIGIBILITY_DECISIONS, variant)
         test.assertIn(decision, DEFINITE_ELIGIBILITY_DECISIONS, variant)
         _assert_predicate_matches_decision(test, decision, node, variant.get("variant_id") or decision)
-        if decision == "NOT_APPLICABLE":
+        if decision in {"NOT_APPLICABLE", "UNRESOLVED"}:
             test.assertTrue(node.get("reason"), variant)
         else:
             test.assertTrue(node.get("predicate") or node.get("expected_outcome"), variant)
@@ -1054,10 +1056,15 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
         seen_pairs = set()
         for cell in cells:
             _assert_definite_variant(self, cell)
-            self.assertIn(cell["applicability"], {"ELIGIBLE", "NOT_APPLICABLE"})
+            self.assertIn(cell["applicability"], {"ELIGIBLE", "NOT_APPLICABLE", "HIGH_BLOCKER"})
             if cell["applicability"] == "NOT_APPLICABLE":
                 self.assertEqual(cell["eligibility"]["decision"], "NOT_APPLICABLE")
                 self.assertTrue(cell["eligibility"]["reason"])
+            elif cell["applicability"] == "HIGH_BLOCKER":
+                self.assertEqual(cell["eligibility"]["decision"], "UNRESOLVED")
+                self.assertTrue(cell["eligibility"]["reason"])
+                self.assertTrue(cell.get("named_blocker"))
+                self.assertEqual(cell.get("evidence_cases") or [], [])
             else:
                 self.assertEqual(cell["eligibility"]["decision"], "ELIGIBLE")
                 self.assertTrue(cell["eligibility"]["predicate"])
@@ -1076,22 +1083,26 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
             },
         )
         registry = payload["blocker_registry"]
-        self.assertEqual(registry["disposition_request"], "NONE_P1_00_HIGH_BLOCKERS_REMAIN")
+        self.assertEqual(registry["disposition_request"], "OPEN_HIGH_BLOCKERS_FOR_CODEX")
         self.assertNotEqual(registry["disposition_request"], "DEFERRED_TO_P1_06")
-        self.assertNotEqual(registry["disposition_request"], "SUBMITTED_FOR_CODEX_STAGE_FINAL")
-        self.assertEqual(registry["items"], [])
+        self.assertNotEqual(registry["disposition_request"], "NONE_P1_00_HIGH_BLOCKERS_REMAIN")
+        self.assertGreaterEqual(len(registry["items"]), 1)
         self.assertEqual(set(registry["required_fields"]), BLOCKER_REGISTRY_FIELDS)
         registry_ids = {item["blocker_id"] for item in registry["items"]}
         filename_only = 0
         unrouted = 0
         for cell in cells:
+            if cell["applicability"] == "HIGH_BLOCKER":
+                blocker = cell.get("named_blocker") or {}
+                self.assertTrue(blocker, cell["variant_id"])
+                self.assertIn(blocker["blocker_id"], registry_ids, cell["variant_id"])
+                self.assertEqual(cell.get("evidence_cases") or [], [])
+                continue
             if cell["applicability"] != "ELIGIBLE":
                 continue
             refs = cell.get("evidence_refs") or []
             cases = cell.get("evidence_cases") or []
-            blocker = cell.get("named_blocker") or {}
-            if blocker:
-                self.fail(f"P1-00 High blockers are forbidden; convert {cell['variant_id']} to injected evidence or NOT_APPLICABLE")
+            self.assertFalse(cell.get("named_blocker"), cell["variant_id"])
             self.assertTrue(cases, cell["variant_id"])
             self.assertEqual(refs, [item["node_id"] for item in cases], cell["variant_id"])
             for case in cases:
@@ -1121,7 +1132,11 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
                 unrouted += 1
         self.assertEqual(unrouted, payload["closure"]["unrouted_named_blockers"])
         self.assertEqual(payload["closure"]["unrouted_named_blockers"], 0)
-        self.assertEqual(len(registry["items"]), payload["closure"]["family_boundary_named_blockers"])
+        self.assertEqual(len(registry["items"]), payload["closure"]["named_high_blockers"])
+        self.assertEqual(
+            sum(1 for cell in cells if cell["applicability"] == "HIGH_BLOCKER"),
+            payload["closure"]["family_boundary_named_blockers"],
+        )
         notify_side = next(item for item in cells if item["variant_id"] == "NOTIFY__SIDE-EFFECT-BEFORE-ACK")
         self.assertEqual(notify_side["applicability"], "NOT_APPLICABLE")
         self.assertEqual(notify_side["eligibility"]["decision"], "NOT_APPLICABLE")

@@ -10,7 +10,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INV_DIR = REPO_ROOT / "docs/refactor/two-server/section-1/inventory"
 ADMIN_SCAN_MODULES = ("admin", "admin_users", "admin_commodities")
-PRODUCT_KIND = {"CRUD_MUTATION", "BROADCAST"}
+PRODUCT_KIND = {"CRUD_MUTATION", "BROADCAST", "TOGGLE_MUTATION"}
 NON_PRODUCT_KIND = {
     "FSM_PROMPT",
     "MENU_NAV",
@@ -68,7 +68,7 @@ CODEX_EXACT_EXAMPLES = {
     },
     "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-TOGGLE-BLOCK-L1649": {
         "handler": "admin_users.handle_admin_toggle_block",
-        "operation_kind": "CRUD_MUTATION",
+        "operation_kind": "TOGGLE_MUTATION",
         "source": "bot/handlers/admin_users.py",
         "class": "PRODUCT_COMMIT",
     },
@@ -117,9 +117,9 @@ class P100AdminSeedSemanticsCharacterizationTests(unittest.TestCase):
             self.assertEqual(seed["handler"], expected["handler"], behavior_id)
             self.assertEqual(seed["operation_kind"], expected["operation_kind"], behavior_id)
             if expected["class"] == "FSM_OR_UI_ONLY":
-                self.assertNotEqual(seed["operation_kind"], "CRUD_MUTATION", behavior_id)
+                self.assertNotIn(seed["operation_kind"], PRODUCT_KIND, behavior_id)
             else:
-                self.assertEqual(seed["operation_kind"], "CRUD_MUTATION", behavior_id)
+                self.assertIn(seed["operation_kind"], PRODUCT_KIND, behavior_id)
             classified = classify_admin_handler(
                 REPO_ROOT / expected["source"],
                 expected["handler"].split(".", 1)[1],

@@ -3,7 +3,7 @@
   "generated_from_commit": "aa2c06a573dfd60051e142146f55d7965f2242a7",
   "generated_date": "2026-09-03 UTC",
   "assignment_id": "WA-P1-00-REFRESH-20260903-001",
-  "scope": "Normalized current-behavior contracts at family×operation_kind, deterministic 465-seed mapping, 180 admission cells, and a composed offer_origin matrix with one origin per key for the six Web/Bot/Internal request pairs.",
+  "scope": "Normalized current-behavior contracts at family×operation_kind, deterministic 465-seed mapping, 180 admission cells, 180 composed_origin_matrix rows with one origin per key, origin_required_interactions with live-function equivalence or High blockers, and honest High blockers for unproven collision/restart.",
   "provenance": {
     "contract_source": "Repository code and behavioral tests at the Assignment base SHA.",
     "live_host_reobservation": "NOT_REOBSERVED",
@@ -12,7 +12,7 @@
     "normalization_note": "The tracked file is the reviewable source. Cartesian scenario expansion is generated only by tests or later evidence runners."
   },
   "coverage": {
-    "behavior_contracts": 58,
+    "behavior_contracts": 59,
     "surface_seeds": 465,
     "surface_seed_mapping": "EXACTLY_ONE_CONTRACT_PER_SEED_BY_FAMILY_AND_OPERATION_KIND",
     "origin_variants": 6,
@@ -31,7 +31,9 @@
     "policy_effects": 7,
     "family_boundary_variants": 72,
     "offer_origin_interaction": 180,
-    "composed_origin_matrix": 180
+    "composed_origin_matrix": 180,
+    "origin_required_interactions": 72,
+    "named_high_blockers": 22
   },
   "contract_field_policy": {
     "required_fields": [
@@ -139,7 +141,7 @@
     {
       "contract_id": "BC-ADMIN-CRUD_MUTATION-V1",
       "family": "ADMIN",
-      "scope": "ADMIN CRUD_MUTATION only. Not a different operation signature.",
+      "scope": "ADMIN CRUD_MUTATION only. Toggle-without-identity seeds use BC-ADMIN-TOGGLE_MUTATION-V1.",
       "preconditions": {
         "status": "APPLICABLE",
         "rules": [
@@ -186,13 +188,13 @@
       "timeouts_retries": {
         "status": "APPLICABLE",
         "rules": [
-          "Retry reuses the admin command identity and does not create a second entity row."
+          "Retry reuses the admin command identity only when that command has a durable identity. Toggle seeds are a different contract."
         ]
       },
       "idempotency_key": {
         "status": "APPLICABLE",
         "rules": [
-          "Admin command identity selects one authoritative entity result."
+          "Admin command identity selects one authoritative entity result only for identity-bearing CRUD. Toggle seeds are excluded."
         ]
       },
       "failure_cases": {
@@ -212,10 +214,83 @@
       "regression_tests": [
         "tests/test_bot_admin_commodities_add_create.py",
         "tests/test_commodities_router_alias_mutations.py",
-        "tests/test_p1_00_characterization_six_gaps.py"
+        "tests/test_p1_00_characterization_six_gaps.py",
+        "tests/test_p1_00_characterization_admin_toggle_behavior.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
+    },
+    {
+      "contract_id": "BC-ADMIN-TOGGLE_MUTATION-V1",
+      "family": "ADMIN",
+      "scope": "ADMIN TOGGLE_MUTATION only. Not CRUD_MUTATION and not a retry-identity command.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Current actor has the admin user-management role.",
+          "Target user exists and is a current management target."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Callback identity of the target user. There is no command or idempotency key."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Callback text reports the flipped capability or account status, or a deterministic denial."
+        ]
+      },
+      "db_mutations": {
+        "status": "APPLICABLE",
+        "rules": [
+          "One user-row commit per successful invoke. The boolean or account-status field flips each time."
+        ]
+      },
+      "events_outbox": {
+        "status": "NOT_APPLICABLE",
+        "reason": "handle_admin_toggle_block and handle_user_toggle_account_status issue no outbox or change-log write on the handler path."
+      },
+      "side_effects": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Local callback edit and answer follow the committed flip. No audience notify send."
+        ]
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authorize actor, reject unauthorized target, flip the field, commit, then edit the callback."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "NOT_APPLICABLE",
+        "reason": "A second successful invoke flips the same field again; retry is not a reuse of one command identity."
+      },
+      "idempotency_key": {
+        "status": "NOT_APPLICABLE",
+        "reason": "These toggles have no command identity; the callback only names the target user."
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Missing actor, non-admin actor, unauthorized target, or missing user is denied with no row write."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "bot/handlers/admin_users.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_bot_admin_users_block_settings.py",
+        "tests/test_p1_00_characterization_admin_toggle_behavior.py"
+      ],
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "TOGGLE_MUTATION"
     },
     {
       "contract_id": "BC-ADMIN-FSM_PROMPT-V1",
@@ -4587,6 +4662,11 @@
       },
       {
         "family": "ADMIN",
+        "operation_kind": "TOGGLE_MUTATION",
+        "contract_id": "BC-ADMIN-TOGGLE_MUTATION-V1"
+      },
+      {
+        "family": "ADMIN",
         "operation_kind": "FSM_PROMPT",
         "contract_id": "BC-ADMIN-FSM_PROMPT-V1"
       },
@@ -4903,10 +4983,10 @@
       "TRADE:READ_OR_STREAM": 15,
       "TRADE:SCHEDULED_JOB": 2
     },
-    "resolved_index_sha256": "15f85b0080f05266cb08e43209c5098d6c545dff460895dfd58e5f3881851153",
+    "resolved_index_sha256": "6c82670edf3ab575d6bfed6f3351d92db20ba1ffbb28c19a42d85d7c6708f3e7",
     "expected_operation_kind_counts": {
       "READ_QUERY": 117,
-      "CRUD_MUTATION": 175,
+      "CRUD_MUTATION": 173,
       "SESSION_MUTATION": 30,
       "BROADCAST": 3,
       "EPHEMERAL_ACTIVITY": 3,
@@ -4915,6 +4995,7 @@
       "PARSE_NO_COMMIT": 1,
       "FSM_PROMPT": 44,
       "MENU_NAV": 37,
+      "TOGGLE_MUTATION": 2,
       "PROVIDER_REPLY": 9,
       "ACK_ONLY": 17,
       "DOCUMENT_SEND": 4,
@@ -4926,7 +5007,7 @@
       "IDENTITY:CRUD_MUTATION": 32,
       "IDENTITY:SESSION_MUTATION": 3,
       "ADMIN:READ_QUERY": 14,
-      "ADMIN:CRUD_MUTATION": 29,
+      "ADMIN:CRUD_MUTATION": 27,
       "ADMIN:BROADCAST": 2,
       "AUTH:READ_QUERY": 10,
       "AUTH:SESSION_MUTATION": 27,
@@ -4953,6 +5034,7 @@
       "TRADE:READ_QUERY": 11,
       "ADMIN:FSM_PROMPT": 39,
       "ADMIN:MENU_NAV": 9,
+      "ADMIN:TOGGLE_MUTATION": 2,
       "ADMIN:PROVIDER_REPLY": 1,
       "IDENTITY:MENU_NAV": 5,
       "OFFER:PROVIDER_REPLY": 1,
@@ -5515,11 +5597,12 @@
     "cross_family_failure_evidence": 0,
     "scenario_work_item": "READY_FOR_CODEX_FINAL_REVIEW",
     "target_result": "NOT_RUN",
-    "complete_forbidden_until": "Codex approves the exact head after admin seed semantic gate, same-identity concurrency/restart or honest NOT_APPLICABLE, and composed_origin_matrix with one offer_origin per key.",
-    "family_boundary_evidenced_cells": 53,
-    "family_boundary_named_blockers": 0,
+    "complete_forbidden_until": "Codex approves the exact head after toggle contracts with handler-level flip/denial proof, REQUEST sqlite overlap/restart or honest High blockers for other families, and origin interactions that are either live-function equivalence or High blockers.",
+    "family_boundary_evidenced_cells": 35,
+    "family_boundary_named_blockers": 20,
     "filename_only_failure_evidence": 0,
-    "unrouted_named_blockers": 0
+    "unrouted_named_blockers": 0,
+    "named_high_blockers": 22
   },
   "composed_eligibility": [
     {
@@ -12436,52 +12519,76 @@
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "AUTH",
       "failure_boundary": "two_concurrent_commands",
-      "applicability": "ELIGIBLE",
+      "applicability": "HIGH_BLOCKER",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "AUTH owns a mutating path that can hit two_concurrent_commands"
+        "decision": "UNRESOLVED",
+        "reason": "AUTH two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
       },
-      "expected_outcome": "Injected AUTH two_concurrent_commands on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Dependents must not assume collision or restart safety for this family.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py",
+        "docs/refactor/two-server/section-1/06-current-drift-register.md"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_auth_two_concurrent_commands_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_auth_two_concurrent_commands_injects",
-          "boundary_talk": "two_concurrent_commands",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-AUTH-TWO-CONCURRENT-COMMANDS",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "AUTH two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      }
     },
     {
       "variant_id": "AUTH__PROCESS-RESTART",
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "AUTH",
       "failure_boundary": "process_restart",
-      "applicability": "ELIGIBLE",
+      "applicability": "HIGH_BLOCKER",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "AUTH owns a mutating path that can hit process_restart"
+        "decision": "UNRESOLVED",
+        "reason": "AUTH process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
       },
-      "expected_outcome": "Injected AUTH process_restart on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Dependents must not assume collision or restart safety for this family.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py",
+        "docs/refactor/two-server/section-1/06-current-drift-register.md"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_auth_process_restart_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_auth_process_restart_injects",
-          "boundary_talk": "process_restart",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-AUTH-PROCESS-RESTART",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "AUTH process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      }
     },
     {
       "variant_id": "AUTH__UNKNOWN-AUTHORITY-SCHEMA-HASH",
@@ -12576,52 +12683,76 @@
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "IDENTITY",
       "failure_boundary": "two_concurrent_commands",
-      "applicability": "ELIGIBLE",
+      "applicability": "HIGH_BLOCKER",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "IDENTITY owns a mutating path that can hit two_concurrent_commands"
+        "decision": "UNRESOLVED",
+        "reason": "IDENTITY two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
       },
-      "expected_outcome": "Injected IDENTITY two_concurrent_commands on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Dependents must not assume collision or restart safety for this family.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py",
+        "docs/refactor/two-server/section-1/06-current-drift-register.md"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_identity_two_concurrent_commands_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_identity_two_concurrent_commands_injects",
-          "boundary_talk": "two_concurrent_commands",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-IDENTITY-TWO-CONCURRENT-COMMANDS",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "IDENTITY two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      }
     },
     {
       "variant_id": "IDENTITY__PROCESS-RESTART",
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "IDENTITY",
       "failure_boundary": "process_restart",
-      "applicability": "ELIGIBLE",
+      "applicability": "HIGH_BLOCKER",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "IDENTITY owns a mutating path that can hit process_restart"
+        "decision": "UNRESOLVED",
+        "reason": "IDENTITY process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
       },
-      "expected_outcome": "Injected IDENTITY process_restart on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Dependents must not assume collision or restart safety for this family.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py",
+        "docs/refactor/two-server/section-1/06-current-drift-register.md"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_identity_process_restart_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_identity_process_restart_injects",
-          "boundary_talk": "process_restart",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-IDENTITY-PROCESS-RESTART",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "IDENTITY process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      }
     },
     {
       "variant_id": "IDENTITY__UNKNOWN-AUTHORITY-SCHEMA-HASH",
@@ -12732,52 +12863,76 @@
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "OFFER",
       "failure_boundary": "two_concurrent_commands",
-      "applicability": "ELIGIBLE",
+      "applicability": "HIGH_BLOCKER",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "OFFER owns a mutating path that can hit two_concurrent_commands"
+        "decision": "UNRESOLVED",
+        "reason": "OFFER two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
       },
-      "expected_outcome": "Injected OFFER two_concurrent_commands on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Dependents must not assume collision or restart safety for this family.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py",
+        "docs/refactor/two-server/section-1/06-current-drift-register.md"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_offer_two_concurrent_commands_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_offer_two_concurrent_commands_injects",
-          "boundary_talk": "two_concurrent_commands",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-OFFER-TWO-CONCURRENT-COMMANDS",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "OFFER two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      }
     },
     {
       "variant_id": "OFFER__PROCESS-RESTART",
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "OFFER",
       "failure_boundary": "process_restart",
-      "applicability": "ELIGIBLE",
+      "applicability": "HIGH_BLOCKER",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "OFFER owns a mutating path that can hit process_restart"
+        "decision": "UNRESOLVED",
+        "reason": "OFFER process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
       },
-      "expected_outcome": "Injected OFFER process_restart on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Dependents must not assume collision or restart safety for this family.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py",
+        "docs/refactor/two-server/section-1/06-current-drift-register.md"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_offer_process_restart_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_offer_process_restart_injects",
-          "boundary_talk": "process_restart",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-OFFER-PROCESS-RESTART",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "OFFER process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      }
     },
     {
       "variant_id": "OFFER__UNKNOWN-AUTHORITY-SCHEMA-HASH",
@@ -12875,18 +13030,18 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "REQUEST owns a mutating path that can hit two_concurrent_commands"
+        "predicate": "REQUEST create_offer_request_ledger_entry has a durable same-key identity on isolated sqlite"
       },
-      "expected_outcome": "Injected REQUEST two_concurrent_commands on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Overlapping asyncio tasks or a child interpreter against sqlite keep one committed row for the same idempotency key; the loser is IntegrityError or duplicate_replay.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py"
       ],
       "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_request_two_concurrent_commands_injects"
+        "tests/test_p1_00_characterization_concurrent_restart.py::P100RequestConcurrentRestartTests.test_request_two_concurrent_commands_injects"
       ],
       "evidence_cases": [
         {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_request_two_concurrent_commands_injects",
+          "node_id": "tests/test_p1_00_characterization_concurrent_restart.py::P100RequestConcurrentRestartTests.test_request_two_concurrent_commands_injects",
           "boundary_talk": "two_concurrent_commands",
           "talk_source": "test_function_name_or_doc_or_assert",
           "injects_named_boundary": true
@@ -12901,18 +13056,18 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "REQUEST owns a mutating path that can hit process_restart"
+        "predicate": "REQUEST create_offer_request_ledger_entry has a durable same-key identity on isolated sqlite"
       },
-      "expected_outcome": "Injected REQUEST process_restart on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Overlapping asyncio tasks or a child interpreter against sqlite keep one committed row for the same idempotency key; the loser is IntegrityError or duplicate_replay.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py"
       ],
       "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_request_process_restart_injects"
+        "tests/test_p1_00_characterization_concurrent_restart.py::P100RequestConcurrentRestartTests.test_request_process_restart_injects"
       ],
       "evidence_cases": [
         {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_request_process_restart_injects",
+          "node_id": "tests/test_p1_00_characterization_concurrent_restart.py::P100RequestConcurrentRestartTests.test_request_process_restart_injects",
           "boundary_talk": "process_restart",
           "talk_source": "test_function_name_or_doc_or_assert",
           "injects_named_boundary": true
@@ -13012,52 +13167,76 @@
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "TRADE",
       "failure_boundary": "two_concurrent_commands",
-      "applicability": "ELIGIBLE",
+      "applicability": "HIGH_BLOCKER",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "TRADE owns a mutating path that can hit two_concurrent_commands"
+        "decision": "UNRESOLVED",
+        "reason": "TRADE two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
       },
-      "expected_outcome": "Injected TRADE two_concurrent_commands on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Dependents must not assume collision or restart safety for this family.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py",
+        "docs/refactor/two-server/section-1/06-current-drift-register.md"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_trade_two_concurrent_commands_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_trade_two_concurrent_commands_injects",
-          "boundary_talk": "two_concurrent_commands",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-TRADE-TWO-CONCURRENT-COMMANDS",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "TRADE two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      }
     },
     {
       "variant_id": "TRADE__PROCESS-RESTART",
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "TRADE",
       "failure_boundary": "process_restart",
-      "applicability": "ELIGIBLE",
+      "applicability": "HIGH_BLOCKER",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "TRADE owns a mutating path that can hit process_restart"
+        "decision": "UNRESOLVED",
+        "reason": "TRADE process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
       },
-      "expected_outcome": "Injected TRADE process_restart on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Dependents must not assume collision or restart safety for this family.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py",
+        "docs/refactor/two-server/section-1/06-current-drift-register.md"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_trade_process_restart_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_trade_process_restart_injects",
-          "boundary_talk": "process_restart",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-TRADE-PROCESS-RESTART",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "TRADE process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      }
     },
     {
       "variant_id": "TRADE__UNKNOWN-AUTHORITY-SCHEMA-HASH",
@@ -13160,52 +13339,76 @@
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "MARKET",
       "failure_boundary": "two_concurrent_commands",
-      "applicability": "ELIGIBLE",
+      "applicability": "HIGH_BLOCKER",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "MARKET owns a mutating path that can hit two_concurrent_commands"
+        "decision": "UNRESOLVED",
+        "reason": "MARKET two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
       },
-      "expected_outcome": "Injected MARKET two_concurrent_commands on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Dependents must not assume collision or restart safety for this family.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py",
+        "docs/refactor/two-server/section-1/06-current-drift-register.md"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_market_two_concurrent_commands_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_market_two_concurrent_commands_injects",
-          "boundary_talk": "two_concurrent_commands",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-MARKET-TWO-CONCURRENT-COMMANDS",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "MARKET two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      }
     },
     {
       "variant_id": "MARKET__PROCESS-RESTART",
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "MARKET",
       "failure_boundary": "process_restart",
-      "applicability": "ELIGIBLE",
+      "applicability": "HIGH_BLOCKER",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "MARKET owns a mutating path that can hit process_restart"
+        "decision": "UNRESOLVED",
+        "reason": "MARKET process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
       },
-      "expected_outcome": "Injected MARKET process_restart on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Dependents must not assume collision or restart safety for this family.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py",
+        "docs/refactor/two-server/section-1/06-current-drift-register.md"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_market_process_restart_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_market_process_restart_injects",
-          "boundary_talk": "process_restart",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-MARKET-PROCESS-RESTART",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "MARKET process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      }
     },
     {
       "variant_id": "MARKET__UNKNOWN-AUTHORITY-SCHEMA-HASH",
@@ -13308,34 +13511,76 @@
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "MSG",
       "failure_boundary": "two_concurrent_commands",
-      "applicability": "NOT_APPLICABLE",
+      "applicability": "HIGH_BLOCKER",
       "eligibility": {
-        "decision": "NOT_APPLICABLE",
-        "reason": "persist_sent_direct_message has no durable command identity; two contents are two commands and a single happy-path persist does not reconstruct an interrupted command. Characterization cannot prove same-identity collision or restart without inventing an idempotency key the product does not have."
+        "decision": "UNRESOLVED",
+        "reason": "MSG two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
       },
-      "expected_outcome": "Do not claim MSG concurrency or restart evidence; persist has no command identity.",
+      "expected_outcome": "Dependents must not assume collision or restart safety for this family.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py",
+        "docs/refactor/two-server/section-1/06-current-drift-register.md"
       ],
       "evidence_refs": [],
-      "evidence_cases": []
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-MSG-TWO-CONCURRENT-COMMANDS",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "MSG two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      }
     },
     {
       "variant_id": "MSG__PROCESS-RESTART",
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "MSG",
       "failure_boundary": "process_restart",
-      "applicability": "NOT_APPLICABLE",
+      "applicability": "HIGH_BLOCKER",
       "eligibility": {
-        "decision": "NOT_APPLICABLE",
-        "reason": "persist_sent_direct_message has no durable command identity; two contents are two commands and a single happy-path persist does not reconstruct an interrupted command. Characterization cannot prove same-identity collision or restart without inventing an idempotency key the product does not have."
+        "decision": "UNRESOLVED",
+        "reason": "MSG process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
       },
-      "expected_outcome": "Do not claim MSG concurrency or restart evidence; persist has no command identity.",
+      "expected_outcome": "Dependents must not assume collision or restart safety for this family.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py",
+        "docs/refactor/two-server/section-1/06-current-drift-register.md"
       ],
       "evidence_refs": [],
-      "evidence_cases": []
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-MSG-PROCESS-RESTART",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "MSG process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      }
     },
     {
       "variant_id": "MSG__UNKNOWN-AUTHORITY-SCHEMA-HASH",
@@ -13430,52 +13675,76 @@
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "NOTIFY",
       "failure_boundary": "two_concurrent_commands",
-      "applicability": "ELIGIBLE",
+      "applicability": "HIGH_BLOCKER",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "NOTIFY owns a mutating path that can hit two_concurrent_commands"
+        "decision": "UNRESOLVED",
+        "reason": "NOTIFY two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
       },
-      "expected_outcome": "Injected NOTIFY two_concurrent_commands on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Dependents must not assume collision or restart safety for this family.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py",
+        "docs/refactor/two-server/section-1/06-current-drift-register.md"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_notify_two_concurrent_commands_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_notify_two_concurrent_commands_injects",
-          "boundary_talk": "two_concurrent_commands",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-NOTIFY-TWO-CONCURRENT-COMMANDS",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "NOTIFY two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      }
     },
     {
       "variant_id": "NOTIFY__PROCESS-RESTART",
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "NOTIFY",
       "failure_boundary": "process_restart",
-      "applicability": "ELIGIBLE",
+      "applicability": "HIGH_BLOCKER",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "NOTIFY owns a mutating path that can hit process_restart"
+        "decision": "UNRESOLVED",
+        "reason": "NOTIFY process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
       },
-      "expected_outcome": "Injected NOTIFY process_restart on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Dependents must not assume collision or restart safety for this family.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py",
+        "docs/refactor/two-server/section-1/06-current-drift-register.md"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_notify_process_restart_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_notify_process_restart_injects",
-          "boundary_talk": "process_restart",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-NOTIFY-PROCESS-RESTART",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "NOTIFY process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      }
     },
     {
       "variant_id": "NOTIFY__UNKNOWN-AUTHORITY-SCHEMA-HASH",
@@ -13578,52 +13847,76 @@
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "TG",
       "failure_boundary": "two_concurrent_commands",
-      "applicability": "ELIGIBLE",
+      "applicability": "HIGH_BLOCKER",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "TG owns a mutating path that can hit two_concurrent_commands"
+        "decision": "UNRESOLVED",
+        "reason": "TG two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
       },
-      "expected_outcome": "Injected TG two_concurrent_commands on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Dependents must not assume collision or restart safety for this family.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py",
+        "docs/refactor/two-server/section-1/06-current-drift-register.md"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_tg_two_concurrent_commands_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_tg_two_concurrent_commands_injects",
-          "boundary_talk": "two_concurrent_commands",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-TG-TWO-CONCURRENT-COMMANDS",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "TG two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      }
     },
     {
       "variant_id": "TG__PROCESS-RESTART",
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "TG",
       "failure_boundary": "process_restart",
-      "applicability": "ELIGIBLE",
+      "applicability": "HIGH_BLOCKER",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "TG owns a mutating path that can hit process_restart"
+        "decision": "UNRESOLVED",
+        "reason": "TG process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
       },
-      "expected_outcome": "Injected TG process_restart on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Dependents must not assume collision or restart safety for this family.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py",
+        "docs/refactor/two-server/section-1/06-current-drift-register.md"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_tg_process_restart_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_tg_process_restart_injects",
-          "boundary_talk": "process_restart",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-TG-PROCESS-RESTART",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "TG process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      }
     },
     {
       "variant_id": "TG__UNKNOWN-AUTHORITY-SCHEMA-HASH",
@@ -13734,52 +14027,76 @@
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "ADMIN",
       "failure_boundary": "two_concurrent_commands",
-      "applicability": "ELIGIBLE",
+      "applicability": "HIGH_BLOCKER",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "ADMIN owns a mutating path that can hit two_concurrent_commands"
+        "decision": "UNRESOLVED",
+        "reason": "ADMIN two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
       },
-      "expected_outcome": "Injected ADMIN two_concurrent_commands on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Dependents must not assume collision or restart safety for this family.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py",
+        "docs/refactor/two-server/section-1/06-current-drift-register.md"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_admin_two_concurrent_commands_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_admin_two_concurrent_commands_injects",
-          "boundary_talk": "two_concurrent_commands",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ADMIN-TWO-CONCURRENT-COMMANDS",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "ADMIN two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      }
     },
     {
       "variant_id": "ADMIN__PROCESS-RESTART",
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "ADMIN",
       "failure_boundary": "process_restart",
-      "applicability": "ELIGIBLE",
+      "applicability": "HIGH_BLOCKER",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "ADMIN owns a mutating path that can hit process_restart"
+        "decision": "UNRESOLVED",
+        "reason": "ADMIN process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
       },
-      "expected_outcome": "Injected ADMIN process_restart on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Dependents must not assume collision or restart safety for this family.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py",
+        "docs/refactor/two-server/section-1/06-current-drift-register.md"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_admin_process_restart_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_admin_process_restart_injects",
-          "boundary_talk": "process_restart",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ADMIN-PROCESS-RESTART",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "ADMIN process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      }
     },
     {
       "variant_id": "ADMIN__UNKNOWN-AUTHORITY-SCHEMA-HASH",
@@ -13882,52 +14199,76 @@
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "SYNC",
       "failure_boundary": "two_concurrent_commands",
-      "applicability": "ELIGIBLE",
+      "applicability": "HIGH_BLOCKER",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "SYNC owns a mutating path that can hit two_concurrent_commands"
+        "decision": "UNRESOLVED",
+        "reason": "SYNC two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
       },
-      "expected_outcome": "Injected SYNC two_concurrent_commands on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Dependents must not assume collision or restart safety for this family.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py",
+        "docs/refactor/two-server/section-1/06-current-drift-register.md"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_sync_two_concurrent_commands_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_sync_two_concurrent_commands_injects",
-          "boundary_talk": "two_concurrent_commands",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-SYNC-TWO-CONCURRENT-COMMANDS",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "SYNC two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      }
     },
     {
       "variant_id": "SYNC__PROCESS-RESTART",
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "SYNC",
       "failure_boundary": "process_restart",
-      "applicability": "ELIGIBLE",
+      "applicability": "HIGH_BLOCKER",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "SYNC owns a mutating path that can hit process_restart"
+        "decision": "UNRESOLVED",
+        "reason": "SYNC process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
       },
-      "expected_outcome": "Injected SYNC process_restart on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Dependents must not assume collision or restart safety for this family.",
       "rule_sources": [
-        "tests/test_p1_00_characterization_failure_boundaries.py"
+        "tests/test_p1_00_characterization_concurrent_restart.py",
+        "docs/refactor/two-server/section-1/06-current-drift-register.md"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_sync_process_restart_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_sync_process_restart_injects",
-          "boundary_talk": "process_restart",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-SYNC-PROCESS-RESTART",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "SYNC process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      }
     },
     {
       "variant_id": "SYNC__UNKNOWN-AUTHORITY-SCHEMA-HASH",
@@ -14073,12 +14414,12 @@
     }
   ],
   "failure_evidence_classifier": {
-    "rule": "An ELIGIBLE cell must cite a pytest node with injects_named_boundary=true that injects the named boundary. Pre-mutation rejects are not failure_before_db_commit proof. P1-06 is not the owner of current-state characterization."
+    "rule": "An ELIGIBLE cell must cite a pytest node with injects_named_boundary=true on that family's own path. Unsupported concurrency/restart cells must be HIGH_BLOCKER with a stable P1-00-HIGH-* id. NOT_APPLICABLE is only for a missing mutating path, not a missing identity."
   },
   "blocker_registry": {
-    "disposition_request": "NONE_P1_00_HIGH_BLOCKERS_REMAIN",
+    "disposition_request": "OPEN_HIGH_BLOCKERS_FOR_CODEX",
     "owner": "CODEX_FINAL_REVIEWER",
-    "note": "Remaining High P1-00-FB cells were either bound to an injected characterization or marked NOT_APPLICABLE with a behavior-specific reason. They are not deferred to P1-06. DR-015 timing remains a Codex-accepted DPL-1 deferral.",
+    "note": "High blockers remain for unproven family collision/restart, incomplete per-seed handler assertions, and origin interactions that current functions cannot express. They are not hidden as NOT_APPLICABLE and are not sent to P1-06 as ownership of current-state characterization.",
     "required_fields": [
       "blocker_id",
       "severity",
@@ -14091,7 +14432,447 @@
       "status",
       "reason"
     ],
-    "items": []
+    "items": [
+      {
+        "blocker_id": "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-01",
+          "P1-04"
+        ],
+        "required_evidence": "Handler-level assertions for every mapped seed, or further seed-specific contracts for each false family field.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "Family-by-kind mapping still covers seeds that do not each have handler-level response, mutation, outbox, retry, and failure assertions. Toggle seeds are split; remaining seeds are not proven behavior-equivalent one-by-one."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04"
+        ],
+        "required_evidence": "Either a live origin-parameterized path for each required interaction or an approved later Stage that adds the missing provenance behavior.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-AUTH-TWO-CONCURRENT-COMMANDS",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "AUTH two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-AUTH-PROCESS-RESTART",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "AUTH process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-IDENTITY-TWO-CONCURRENT-COMMANDS",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "IDENTITY two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-IDENTITY-PROCESS-RESTART",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "IDENTITY process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-OFFER-TWO-CONCURRENT-COMMANDS",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "OFFER two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-OFFER-PROCESS-RESTART",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "OFFER process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-TRADE-TWO-CONCURRENT-COMMANDS",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "TRADE two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-TRADE-PROCESS-RESTART",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "TRADE process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-MARKET-TWO-CONCURRENT-COMMANDS",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "MARKET two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-MARKET-PROCESS-RESTART",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "MARKET process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-MSG-TWO-CONCURRENT-COMMANDS",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "MSG two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-MSG-PROCESS-RESTART",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "MSG process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-NOTIFY-TWO-CONCURRENT-COMMANDS",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "NOTIFY two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-NOTIFY-PROCESS-RESTART",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "NOTIFY process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-TG-TWO-CONCURRENT-COMMANDS",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "TG two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-TG-PROCESS-RESTART",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "TG process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-ADMIN-TWO-CONCURRENT-COMMANDS",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "ADMIN two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-ADMIN-PROCESS-RESTART",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "ADMIN process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-SYNC-TWO-CONCURRENT-COMMANDS",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "SYNC two_concurrent_commands is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-SYNC-PROCESS-RESTART",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "CODEX_FINAL_REVIEW",
+        "blocked_dependents": [
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Overlapping asyncio tasks against an isolated transactional store with the same command identity, plus a child-process reload of persisted state, or an approved product identity.",
+        "forbidden_shortcuts": [
+          "AST-only or string-count gates",
+          "Sequential mock aliases as concurrency or restart",
+          "Self-compared manifest fields",
+          "NOT_APPLICABLE used to hide a missing identity or unproven origin cell"
+        ],
+        "disposition": "UNRESOLVED_HIGH",
+        "status": "OPEN",
+        "reason": "SYNC process_restart is not closed. Sequential mocked calls are not overlapping commands, and this Stage has no isolated durable store plus process-boundary proof for that family. Missing command identity is a collision/restart risk, not proof the cell is irrelevant."
+      }
+    ]
   },
   "axis_independence": {
     "offer_origin": {
@@ -14101,15 +14882,16 @@
         "TELEGRAM_BOT",
         "INTERNAL"
       ],
-      "reason": "Admission stays constant across composed_origin_matrix rows that share persona/request/time/outcome and differ only by a single offer_origin key. Publication/home follow offer origin; request_source_surface follows the request.",
+      "reason": "offer_home_server_for_source takes source_surface and returns home. evaluate_invitation_bot_access has no origin parameter. Retry/concurrent/failure origin cells stay High blockers rather than green copies of SUCCESS/REJECT.",
       "evidence": [
         "tests/test_offer_source_surface.py",
         "tests/test_p1_00_characterization_matrix_independence.py",
         "tests/test_p1_00_characterization_offer_origin_policy.py",
         "matrix.origin_variants"
       ],
-      "interaction_test": "tests/test_p1_00_characterization_offer_origin_policy.py::P100OfferOriginPolicyCharacterizationTests.test_origin_pairs_apply_home_and_request_surfaces",
-      "interaction_records": "composed_origin_matrix"
+      "interaction_test": "tests/test_p1_00_characterization_offer_origin_policy.py::P100OfferOriginPolicyCharacterizationTests.test_live_home_and_ledger_functions_consume_origin",
+      "interaction_records": "composed_origin_matrix",
+      "required_interactions": "origin_required_interactions"
     },
     "telegram_link": {
       "status": "OVERLAY_ON_TELEGRAM_BOT",
@@ -23266,6 +24048,908 @@
       "request_source_surface": "telegram_bot",
       "publication_home": "iran",
       "admission_independent_of_offer_origin": true
+    }
+  ],
+  "origin_required_interactions": [
+    {
+      "variant_id": "ORIGIN-WEBAPP__WEBAPP__OUTCOME-SUCCESS",
+      "offer_origin": "WEBAPP",
+      "request_origin": "WEBAPP",
+      "interaction": "OUTCOME-SUCCESS",
+      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
+      "representative_id": "composed_origin_matrix.OUTCOME-SUCCESS",
+      "live_function": "core.offer_source.offer_home_server_for_source",
+      "equivalence_reason": "Offer origin is the source_surface argument to offer_home_server_for_source; publication home equals that home. Admission stays on evaluate_invitation_bot_access which has no origin parameter.",
+      "applicability": "APPLICABLE"
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__WEBAPP__OUTCOME-REJECT",
+      "offer_origin": "WEBAPP",
+      "request_origin": "WEBAPP",
+      "interaction": "OUTCOME-REJECT",
+      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
+      "representative_id": "composed_origin_matrix.OUTCOME-REJECT",
+      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
+      "equivalence_reason": "Reject/deny admission is the persona/tier decision from evaluate_invitation_bot_access. That function has no origin parameter, so origin pairs share the same representative.",
+      "applicability": "APPLICABLE"
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__WEBAPP__PERMISSION-DENIED",
+      "offer_origin": "WEBAPP",
+      "request_origin": "WEBAPP",
+      "interaction": "PERMISSION-DENIED",
+      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
+      "representative_id": "evaluate_invitation_bot_access.accountant_or_tier2",
+      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
+      "equivalence_reason": "Permission-denied is the same live function as reject: no origin argument exists, so origin cannot change the denial.",
+      "applicability": "APPLICABLE"
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__WEBAPP__RETRY",
+      "offer_origin": "WEBAPP",
+      "request_origin": "WEBAPP",
+      "interaction": "RETRY",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__WEBAPP__CONCURRENT",
+      "offer_origin": "WEBAPP",
+      "request_origin": "WEBAPP",
+      "interaction": "CONCURRENT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__WEBAPP__UNLINKED-BOT",
+      "offer_origin": "WEBAPP",
+      "request_origin": "WEBAPP",
+      "interaction": "UNLINKED-BOT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__WEBAPP__EXPIRY-CANCEL-REPUBLISH-TERMINAL",
+      "offer_origin": "WEBAPP",
+      "request_origin": "WEBAPP",
+      "interaction": "EXPIRY-CANCEL-REPUBLISH-TERMINAL",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__WEBAPP__POLICY-SNAPSHOT",
+      "offer_origin": "WEBAPP",
+      "request_origin": "WEBAPP",
+      "interaction": "POLICY-SNAPSHOT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__WEBAPP__NOTIFICATION",
+      "offer_origin": "WEBAPP",
+      "request_origin": "WEBAPP",
+      "interaction": "NOTIFICATION",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__WEBAPP__FAILURE-BEFORE-COMMIT",
+      "offer_origin": "WEBAPP",
+      "request_origin": "WEBAPP",
+      "interaction": "FAILURE-BEFORE-COMMIT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__WEBAPP__FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
+      "offer_origin": "WEBAPP",
+      "request_origin": "WEBAPP",
+      "interaction": "FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__WEBAPP__SIDE-EFFECT-RETRY",
+      "offer_origin": "WEBAPP",
+      "request_origin": "WEBAPP",
+      "interaction": "SIDE-EFFECT-RETRY",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__OUTCOME-SUCCESS",
+      "offer_origin": "WEBAPP",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "OUTCOME-SUCCESS",
+      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
+      "representative_id": "composed_origin_matrix.OUTCOME-SUCCESS",
+      "live_function": "core.offer_source.offer_home_server_for_source",
+      "equivalence_reason": "Offer origin is the source_surface argument to offer_home_server_for_source; publication home equals that home. Admission stays on evaluate_invitation_bot_access which has no origin parameter.",
+      "applicability": "APPLICABLE"
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__OUTCOME-REJECT",
+      "offer_origin": "WEBAPP",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "OUTCOME-REJECT",
+      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
+      "representative_id": "composed_origin_matrix.OUTCOME-REJECT",
+      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
+      "equivalence_reason": "Reject/deny admission is the persona/tier decision from evaluate_invitation_bot_access. That function has no origin parameter, so origin pairs share the same representative.",
+      "applicability": "APPLICABLE"
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__PERMISSION-DENIED",
+      "offer_origin": "WEBAPP",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "PERMISSION-DENIED",
+      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
+      "representative_id": "evaluate_invitation_bot_access.accountant_or_tier2",
+      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
+      "equivalence_reason": "Permission-denied is the same live function as reject: no origin argument exists, so origin cannot change the denial.",
+      "applicability": "APPLICABLE"
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__RETRY",
+      "offer_origin": "WEBAPP",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "RETRY",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__CONCURRENT",
+      "offer_origin": "WEBAPP",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "CONCURRENT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__UNLINKED-BOT",
+      "offer_origin": "WEBAPP",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "UNLINKED-BOT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__EXPIRY-CANCEL-REPUBLISH-TERMINAL",
+      "offer_origin": "WEBAPP",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "EXPIRY-CANCEL-REPUBLISH-TERMINAL",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__POLICY-SNAPSHOT",
+      "offer_origin": "WEBAPP",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "POLICY-SNAPSHOT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__NOTIFICATION",
+      "offer_origin": "WEBAPP",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "NOTIFICATION",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__FAILURE-BEFORE-COMMIT",
+      "offer_origin": "WEBAPP",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "FAILURE-BEFORE-COMMIT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
+      "offer_origin": "WEBAPP",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__SIDE-EFFECT-RETRY",
+      "offer_origin": "WEBAPP",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "SIDE-EFFECT-RETRY",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__OUTCOME-SUCCESS",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "WEBAPP",
+      "interaction": "OUTCOME-SUCCESS",
+      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
+      "representative_id": "composed_origin_matrix.OUTCOME-SUCCESS",
+      "live_function": "core.offer_source.offer_home_server_for_source",
+      "equivalence_reason": "Offer origin is the source_surface argument to offer_home_server_for_source; publication home equals that home. Admission stays on evaluate_invitation_bot_access which has no origin parameter.",
+      "applicability": "APPLICABLE"
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__OUTCOME-REJECT",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "WEBAPP",
+      "interaction": "OUTCOME-REJECT",
+      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
+      "representative_id": "composed_origin_matrix.OUTCOME-REJECT",
+      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
+      "equivalence_reason": "Reject/deny admission is the persona/tier decision from evaluate_invitation_bot_access. That function has no origin parameter, so origin pairs share the same representative.",
+      "applicability": "APPLICABLE"
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__PERMISSION-DENIED",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "WEBAPP",
+      "interaction": "PERMISSION-DENIED",
+      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
+      "representative_id": "evaluate_invitation_bot_access.accountant_or_tier2",
+      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
+      "equivalence_reason": "Permission-denied is the same live function as reject: no origin argument exists, so origin cannot change the denial.",
+      "applicability": "APPLICABLE"
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__RETRY",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "WEBAPP",
+      "interaction": "RETRY",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__CONCURRENT",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "WEBAPP",
+      "interaction": "CONCURRENT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__UNLINKED-BOT",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "WEBAPP",
+      "interaction": "UNLINKED-BOT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__EXPIRY-CANCEL-REPUBLISH-TERMINAL",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "WEBAPP",
+      "interaction": "EXPIRY-CANCEL-REPUBLISH-TERMINAL",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__POLICY-SNAPSHOT",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "WEBAPP",
+      "interaction": "POLICY-SNAPSHOT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__NOTIFICATION",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "WEBAPP",
+      "interaction": "NOTIFICATION",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__FAILURE-BEFORE-COMMIT",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "WEBAPP",
+      "interaction": "FAILURE-BEFORE-COMMIT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "WEBAPP",
+      "interaction": "FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__SIDE-EFFECT-RETRY",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "WEBAPP",
+      "interaction": "SIDE-EFFECT-RETRY",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__OUTCOME-SUCCESS",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "OUTCOME-SUCCESS",
+      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
+      "representative_id": "composed_origin_matrix.OUTCOME-SUCCESS",
+      "live_function": "core.offer_source.offer_home_server_for_source",
+      "equivalence_reason": "Offer origin is the source_surface argument to offer_home_server_for_source; publication home equals that home. Admission stays on evaluate_invitation_bot_access which has no origin parameter.",
+      "applicability": "APPLICABLE"
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__OUTCOME-REJECT",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "OUTCOME-REJECT",
+      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
+      "representative_id": "composed_origin_matrix.OUTCOME-REJECT",
+      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
+      "equivalence_reason": "Reject/deny admission is the persona/tier decision from evaluate_invitation_bot_access. That function has no origin parameter, so origin pairs share the same representative.",
+      "applicability": "APPLICABLE"
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__PERMISSION-DENIED",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "PERMISSION-DENIED",
+      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
+      "representative_id": "evaluate_invitation_bot_access.accountant_or_tier2",
+      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
+      "equivalence_reason": "Permission-denied is the same live function as reject: no origin argument exists, so origin cannot change the denial.",
+      "applicability": "APPLICABLE"
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__RETRY",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "RETRY",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__CONCURRENT",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "CONCURRENT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__UNLINKED-BOT",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "UNLINKED-BOT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__EXPIRY-CANCEL-REPUBLISH-TERMINAL",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "EXPIRY-CANCEL-REPUBLISH-TERMINAL",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__POLICY-SNAPSHOT",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "POLICY-SNAPSHOT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__NOTIFICATION",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "NOTIFICATION",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__FAILURE-BEFORE-COMMIT",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "FAILURE-BEFORE-COMMIT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__SIDE-EFFECT-RETRY",
+      "offer_origin": "TELEGRAM_BOT",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "SIDE-EFFECT-RETRY",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__WEBAPP__OUTCOME-SUCCESS",
+      "offer_origin": "INTERNAL",
+      "request_origin": "WEBAPP",
+      "interaction": "OUTCOME-SUCCESS",
+      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
+      "representative_id": "composed_origin_matrix.OUTCOME-SUCCESS",
+      "live_function": "core.offer_source.offer_home_server_for_source",
+      "equivalence_reason": "Offer origin is the source_surface argument to offer_home_server_for_source; publication home equals that home. Admission stays on evaluate_invitation_bot_access which has no origin parameter.",
+      "applicability": "APPLICABLE"
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__WEBAPP__OUTCOME-REJECT",
+      "offer_origin": "INTERNAL",
+      "request_origin": "WEBAPP",
+      "interaction": "OUTCOME-REJECT",
+      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
+      "representative_id": "composed_origin_matrix.OUTCOME-REJECT",
+      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
+      "equivalence_reason": "Reject/deny admission is the persona/tier decision from evaluate_invitation_bot_access. That function has no origin parameter, so origin pairs share the same representative.",
+      "applicability": "APPLICABLE"
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__WEBAPP__PERMISSION-DENIED",
+      "offer_origin": "INTERNAL",
+      "request_origin": "WEBAPP",
+      "interaction": "PERMISSION-DENIED",
+      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
+      "representative_id": "evaluate_invitation_bot_access.accountant_or_tier2",
+      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
+      "equivalence_reason": "Permission-denied is the same live function as reject: no origin argument exists, so origin cannot change the denial.",
+      "applicability": "APPLICABLE"
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__WEBAPP__RETRY",
+      "offer_origin": "INTERNAL",
+      "request_origin": "WEBAPP",
+      "interaction": "RETRY",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__WEBAPP__CONCURRENT",
+      "offer_origin": "INTERNAL",
+      "request_origin": "WEBAPP",
+      "interaction": "CONCURRENT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__WEBAPP__UNLINKED-BOT",
+      "offer_origin": "INTERNAL",
+      "request_origin": "WEBAPP",
+      "interaction": "UNLINKED-BOT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__WEBAPP__EXPIRY-CANCEL-REPUBLISH-TERMINAL",
+      "offer_origin": "INTERNAL",
+      "request_origin": "WEBAPP",
+      "interaction": "EXPIRY-CANCEL-REPUBLISH-TERMINAL",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__WEBAPP__POLICY-SNAPSHOT",
+      "offer_origin": "INTERNAL",
+      "request_origin": "WEBAPP",
+      "interaction": "POLICY-SNAPSHOT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__WEBAPP__NOTIFICATION",
+      "offer_origin": "INTERNAL",
+      "request_origin": "WEBAPP",
+      "interaction": "NOTIFICATION",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__WEBAPP__FAILURE-BEFORE-COMMIT",
+      "offer_origin": "INTERNAL",
+      "request_origin": "WEBAPP",
+      "interaction": "FAILURE-BEFORE-COMMIT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__WEBAPP__FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
+      "offer_origin": "INTERNAL",
+      "request_origin": "WEBAPP",
+      "interaction": "FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__WEBAPP__SIDE-EFFECT-RETRY",
+      "offer_origin": "INTERNAL",
+      "request_origin": "WEBAPP",
+      "interaction": "SIDE-EFFECT-RETRY",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__OUTCOME-SUCCESS",
+      "offer_origin": "INTERNAL",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "OUTCOME-SUCCESS",
+      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
+      "representative_id": "composed_origin_matrix.OUTCOME-SUCCESS",
+      "live_function": "core.offer_source.offer_home_server_for_source",
+      "equivalence_reason": "Offer origin is the source_surface argument to offer_home_server_for_source; publication home equals that home. Admission stays on evaluate_invitation_bot_access which has no origin parameter.",
+      "applicability": "APPLICABLE"
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__OUTCOME-REJECT",
+      "offer_origin": "INTERNAL",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "OUTCOME-REJECT",
+      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
+      "representative_id": "composed_origin_matrix.OUTCOME-REJECT",
+      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
+      "equivalence_reason": "Reject/deny admission is the persona/tier decision from evaluate_invitation_bot_access. That function has no origin parameter, so origin pairs share the same representative.",
+      "applicability": "APPLICABLE"
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__PERMISSION-DENIED",
+      "offer_origin": "INTERNAL",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "PERMISSION-DENIED",
+      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
+      "representative_id": "evaluate_invitation_bot_access.accountant_or_tier2",
+      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
+      "equivalence_reason": "Permission-denied is the same live function as reject: no origin argument exists, so origin cannot change the denial.",
+      "applicability": "APPLICABLE"
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__RETRY",
+      "offer_origin": "INTERNAL",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "RETRY",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__CONCURRENT",
+      "offer_origin": "INTERNAL",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "CONCURRENT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__UNLINKED-BOT",
+      "offer_origin": "INTERNAL",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "UNLINKED-BOT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__EXPIRY-CANCEL-REPUBLISH-TERMINAL",
+      "offer_origin": "INTERNAL",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "EXPIRY-CANCEL-REPUBLISH-TERMINAL",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__POLICY-SNAPSHOT",
+      "offer_origin": "INTERNAL",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "POLICY-SNAPSHOT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__NOTIFICATION",
+      "offer_origin": "INTERNAL",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "NOTIFICATION",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__FAILURE-BEFORE-COMMIT",
+      "offer_origin": "INTERNAL",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "FAILURE-BEFORE-COMMIT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
+      "offer_origin": "INTERNAL",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
+    },
+    {
+      "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__SIDE-EFFECT-RETRY",
+      "offer_origin": "INTERNAL",
+      "request_origin": "TELEGRAM_BOT",
+      "interaction": "SIDE-EFFECT-RETRY",
+      "disposition": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Current product functions do not take offer origin as an input for retry, concurrent, unlinked-Bot, expiry, snapshot, notification, or failure-phase effects. Those cells are not closed as green outcomes."
     }
   ]
 }

@@ -234,7 +234,7 @@ At minimum the target must preserve:
 | manual resolution of 6 evidence-review items | `COMPLETE — characterization linked` |
 | current runtime child/poller/timer owner seed manifest | `COMPLETE` |
 | exact target compose/credential/readiness binding | future `P1-03` |
-| persona/tier/time/failure scenario records | `READY_FOR_CODEX_FINAL_REVIEW` — family-owned failure injection, 180 admission cells plus 180 composed_origin_matrix rows with one offer_origin per key; `target_result NOT_RUN`; not `COMPLETE` |
+| persona/tier/time/failure scenario records | `READY_FOR_CODEX_FINAL_REVIEW` — toggle contract split, REQUEST sqlite overlap/restart, High blockers for unproven family collision/restart and unmaterialized origin interactions; `target_result NOT_RUN`; not `COMPLETE` |
 | owner approval of human-readable scenario contract | `COMPLETE — 2026-09-02` |
 | deploy/restart/backup/restore duration (`DR-015`) | `DEFERRED_BLOCKER` / `DPL-1` / `NOT_OBSERVED` |
 | current-vs-target differential execution | future `P1-06` |

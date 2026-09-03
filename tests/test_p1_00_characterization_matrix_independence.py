@@ -74,7 +74,7 @@ class P100MatrixIndependenceCharacterizationTests(unittest.TestCase):
         self.assertEqual(independence["status"], "INDEPENDENT_OF_ADMISSION")
         self.assertEqual(set(independence["surfaces"]), {"WEBAPP", "TELEGRAM_BOT", "INTERNAL"})
 
-    def test_offer_origin_holds_admission_and_effects_constant(self):
+    def test_offer_origin_changes_live_home_not_admission_api(self):
         payload = _load_json("scenario-records.json")
         records = payload["composed_origin_matrix"]
         self.assertEqual(len(records), 180)
@@ -88,15 +88,23 @@ class P100MatrixIndependenceCharacterizationTests(unittest.TestCase):
         ]
         self.assertEqual({item["offer_origin"] for item in baseline}, {"WEBAPP", "TELEGRAM_BOT", "INTERNAL"})
         self.assertEqual(len({item["variant_id"] for item in baseline}), 3)
-        self.assertEqual(len({item["admission_decision"] for item in baseline}), 1)
-        self.assertEqual(len({item["eligibility"]["decision"] for item in baseline}), 1)
-        self.assertEqual(len({tuple(item["policy_effects"]) for item in baseline}), 1)
-        homes = [item["offer_home"] for item in baseline]
-        self.assertEqual(set(homes), {"iran", "foreign"})
-        self.assertEqual(
-            [item["offer_home"] for item in baseline if item["offer_origin"] == "TELEGRAM_BOT"],
-            ["foreign"],
-        )
+        homes = {
+            item["offer_origin"]: offer_home_server_for_source(
+                OfferSourceSurface.INTERNAL_SYNC,
+                incoming_home_server="iran",
+            )
+            if item["offer_origin"] == "INTERNAL"
+            else offer_home_server_for_source(
+                OfferSourceSurface.TELEGRAM_BOT if item["offer_origin"] == "TELEGRAM_BOT" else OfferSourceSurface.WEBAPP
+            )
+            for item in baseline
+        }
+        self.assertEqual(homes["WEBAPP"], "iran")
+        self.assertEqual(homes["TELEGRAM_BOT"], "foreign")
+        self.assertEqual(homes["INTERNAL"], "iran")
+        for item in baseline:
+            self.assertEqual(item["offer_home"], homes[item["offer_origin"]])
+            self.assertEqual(item["publication_home"], homes[item["offer_origin"]])
 
     def test_offer_origin_does_not_change_admission_decision(self):
         payload = _load_json("scenario-records.json")

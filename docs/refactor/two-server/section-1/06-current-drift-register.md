@@ -25,17 +25,21 @@ Status: open findings; no implicit fixes authorized
 ## `P1-00` failure-boundary registry
 
 The compact machine source is `inventory/scenario-records.json`.
-Applicable family×boundary cells now bind an injected characterization node
-(`injects_named_boundary=true`) on that family's own mutating path. Shared
-Offer-publication or Telegram-outbox helpers are not evidence unless the family
-owns that path. Families without that mutating path are `NOT_APPLICABLE` with a
-behavior-specific reason. There is no High `P1-00-FB-*` self-submission and no
-P1-06 ownership of current-state characterization.
+ELIGIBLE family×boundary cells bind an injected characterization node on that
+family's own mutating path. REQUEST concurrency/restart use overlapping
+`asyncio` tasks and a child interpreter against isolated sqlite.
+Unsupported collision/restart cells, incomplete per-seed handler assertions,
+and origin interactions that current functions cannot express are High
+blockers (`P1-00-HIGH-*`). Missing command identity is a risk, not
+`NOT_APPLICABLE`. P1-06 does not own current-state characterization.
 
 | ID | Family / boundary | Disposition |
 | --- | --- | --- |
-| remaining applicable cells | injected characterization in `tests/test_p1_00_characterization_failure_boundaries.py` | evidenced |
+| REQUEST concurrent / restart | isolated sqlite overlap + child-process reload | evidenced |
+| other family concurrent / restart | `P1-00-HIGH-<FAMILY>-...` | High blocker |
 | cells without a mutating path | `NOT_APPLICABLE` with a behavior-specific reason | closed on P1-00 |
+| `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` | remaining seeds lack handler-level retry/outbox proof | High blocker |
+| `P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED` | retry/concurrent/failure origin cells | High blocker |
 | `DR-015` | deploy/restart/backup/restore duration | already `DEFERRED_BLOCKER` / `DPL-1` |
 
 ## Interpretation

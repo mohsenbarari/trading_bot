@@ -1497,14 +1497,14 @@ class P100FailureBoundaryCharacterizationTests(unittest.IsolatedAsyncioTestCase)
         """MSG commit_before_event_side_effect: injects persist_sent_direct_message then threading."""
         await _inject_msg_commit_before()
 
-    def test_msg_two_concurrent_and_restart_are_not_applicable(self):
-        """MSG persist has no command identity, so concurrency/restart stay NOT_APPLICABLE."""
+    def test_msg_two_concurrent_and_restart_are_high_blockers(self):
+        """MSG persist has no command identity, so concurrency/restart stay High blockers."""
         payload = _load_json("scenario-records.json")
         for variant_id in ("MSG__TWO-CONCURRENT-COMMANDS", "MSG__PROCESS-RESTART"):
             cell = next(item for item in payload["family_boundary_variants"] if item["variant_id"] == variant_id)
-            self.assertEqual(cell["applicability"], "NOT_APPLICABLE")
-            self.assertEqual(cell["eligibility"]["decision"], "NOT_APPLICABLE")
-            self.assertIn("no durable command identity", cell["eligibility"]["reason"])
+            self.assertEqual(cell["applicability"], "HIGH_BLOCKER")
+            self.assertEqual(cell["eligibility"]["decision"], "UNRESOLVED")
+            self.assertIn("P1-00-HIGH-MSG", cell["named_blocker"]["blocker_id"])
             self.assertEqual(cell.get("evidence_cases") or [], [])
         self.assertNotIn(("MSG", "two_concurrent_commands"), INJECTORS)
         self.assertNotIn(("MSG", "process_restart"), INJECTORS)
