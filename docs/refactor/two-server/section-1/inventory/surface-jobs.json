@@ -17,7 +17,10 @@
     },
     "with_direct_static_test_reference": 15,
     "without_direct_static_test_reference": 0,
-    "unclassified": 0
+    "unclassified": 0,
+    "mutation_class_counts": {
+      "SCHEDULED_JOB": 15
+    }
   },
   "entries": [
     {
@@ -41,7 +44,8 @@
         "tests/test_background_job_authority.py",
         "tests/test_main_lifespan.py",
         "tests/test_core_connectivity.py"
-      ]
+      ],
+      "mutation_class": "SCHEDULED_JOB"
     },
     {
       "behavior_id": "JOB-MARKET-MARKET-SCHEDULE",
@@ -72,7 +76,8 @@
         "tests/test_core_events.py",
         "tests/test_offers_router_create_success.py",
         "tests/test_sync_router_apply_item_success.py"
-      ]
+      ],
+      "mutation_class": "SCHEDULED_JOB"
     },
     {
       "behavior_id": "JOB-OFFER-OFFER-EXPIRY",
@@ -101,7 +106,8 @@
         "tests/test_web_push.py",
         "tests/test_offers_router_create_success.py",
         "tests/test_sync_router_apply_item_success.py"
-      ]
+      ],
+      "mutation_class": "SCHEDULED_JOB"
     },
     {
       "behavior_id": "JOB-OFFER-OFFER-TELEGRAM-PUBLICATION",
@@ -130,7 +136,8 @@
         "tests/test_offer_publication_worker.py",
         "tests/test_background_job_authority.py",
         "tests/test_run_bot_telegram_execution_ownership.py"
-      ]
+      ],
+      "mutation_class": "SCHEDULED_JOB"
     },
     {
       "behavior_id": "JOB-AUTH-OTP-SMS-FALLBACK",
@@ -154,7 +161,8 @@
         "tests/test_background_job_authority.py",
         "tests/test_stage8_registration_observability.py",
         "tests/test_sync_health_endpoint.py"
-      ]
+      ],
+      "mutation_class": "SCHEDULED_JOB"
     },
     {
       "behavior_id": "JOB-AUTH-SESSION-EXPIRY",
@@ -178,7 +186,8 @@
         "tests/test_background_job_authority.py",
         "tests/test_job_logging.py",
         "tests/test_core_session_expiry.py"
-      ]
+      ],
+      "mutation_class": "SCHEDULED_JOB"
     },
     {
       "behavior_id": "JOB-SYNC-SYNC-WORKER",
@@ -205,7 +214,8 @@
         "tests/test_deploy_surface_smoke.py",
         "tests/test_production_coin_inference_snapshot_relay.py",
         "tests/test_sync_worker.py"
-      ]
+      ],
+      "mutation_class": "SCHEDULED_JOB"
     },
     {
       "behavior_id": "JOB-TG-TELEGRAM-ADMIN-BROADCAST-DELIVERY",
@@ -233,7 +243,8 @@
         "tests/test_telegram_admin_broadcast_delivery_service.py",
         "tests/test_telegram_admin_broadcast_video.py",
         "tests/test_telegram_admin_broadcast_queue_feeder.py"
-      ]
+      ],
+      "mutation_class": "SCHEDULED_JOB"
     },
     {
       "behavior_id": "JOB-TG-TELEGRAM-DELIVERY-QUEUE",
@@ -269,7 +280,8 @@
         "tests/test_bot_trade_create_text_offer_parse_flow.py",
         "tests/test_promote_production_private_primary_product.py",
         "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
-      ]
+      ],
+      "mutation_class": "SCHEDULED_JOB"
     },
     {
       "behavior_id": "JOB-MARKET-TELEGRAM-MARKET-NOTICE-DELIVERY",
@@ -294,7 +306,8 @@
       ],
       "test_refs": [
         "tests/test_run_bot_telegram_execution_ownership.py"
-      ]
+      ],
+      "mutation_class": "SCHEDULED_JOB"
     },
     {
       "behavior_id": "JOB-TG-TELEGRAM-NOTIFICATION-OUTBOX-DELIVERY",
@@ -321,7 +334,8 @@
         "tests/test_telegram_notification_outbox_worker.py",
         "tests/test_background_job_authority.py",
         "tests/test_telegram_notification_outbox_queue_feeder.py"
-      ]
+      ],
+      "mutation_class": "SCHEDULED_JOB"
     },
     {
       "behavior_id": "JOB-IDENTITY-TELEGRAM-REGISTRATION-RECONCILIATION",
@@ -346,7 +360,8 @@
         "tests/test_stage8_registration_observability.py",
         "tests/test_stage5_direct_telegram_registration.py",
         "tests/test_sync_health_endpoint.py"
-      ]
+      ],
+      "mutation_class": "SCHEDULED_JOB"
     },
     {
       "behavior_id": "JOB-TRADE-TRADE-TELEGRAM-DELIVERY",
@@ -373,7 +388,8 @@
         "tests/test_background_job_authority.py",
         "tests/test_trade_delivery_worker.py",
         "tests/test_telegram_trade_result_queue_bridge_postgres.py"
-      ]
+      ],
+      "mutation_class": "SCHEDULED_JOB"
     },
     {
       "behavior_id": "JOB-TRADE-TRADE-WEBAPP-DELIVERY",
@@ -400,7 +416,8 @@
         "tests/test_background_job_authority.py",
         "tests/test_trade_delivery_worker.py",
         "tests/test_main_lifespan.py"
-      ]
+      ],
+      "mutation_class": "SCHEDULED_JOB"
     },
     {
       "behavior_id": "JOB-IDENTITY-USER-ACCOUNT-STATUS",
@@ -429,7 +446,8 @@
         "tests/test_bot_admin_users_bot_access.py",
         "tests/test_account_status_lifecycle_smoke.py",
         "tests/test_background_job_authority.py"
-      ]
+      ],
+      "mutation_class": "SCHEDULED_JOB"
     }
   ],
   "generated_date": "2026-09-03 UTC",

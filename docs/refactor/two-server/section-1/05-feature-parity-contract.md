@@ -56,7 +56,7 @@ test before the gate closes.
 | `inventory/surface-web.json` | path/name/component/guard/family/test references for 30 routes |
 | `inventory/surface-jobs.json` | current/target authority, tables and side effects for 15 registered jobs |
 | `inventory/runtime-task-ownership.json` | API/Bot/Market child process, poller, worker and timer ownership seeds |
-| `inventory/scenario-records.json` | compact v2 source: family contracts, 465-seed mapping, persona/time/origin/outcome axes, composed eligibility, invalid combinations and six failure boundaries |
+| `inventory/scenario-records.json` | compact v2 source: family×mutation_class contracts, 465-seed mapping, persona/time/origin/outcome axes, composed eligibility, invalid combinations and family-bound failure cells |
 
 Surface inventories keep their original `generated_from_commit`
 `19087ff0686c9260b55f1c6c35782b758be6673e` and record
@@ -177,13 +177,15 @@ Empty per-row Cartesian records are forbidden. The reviewable source is
   `NOT_APPLICABLE` with a reason, never empty.
 - `variants` / `composed_eligibility` bind persona, tier, time, origin and
   outcome to a `contract_id` with a definite eligibility decision.
-- each of the 465 surface seeds maps to exactly one contract; seed-specific
-  evidence is the inventory `test_refs`, not the schema meta-test.
+- each of the 465 surface seeds maps to exactly one family×mutation_class
+  contract; a `READ_OR_STREAM` seed cannot inherit a mutation contract.
+  Seed-specific evidence is the inventory `test_refs`, not the schema meta-test.
 - Cartesian expansion, if needed later, is generated outside Git.
 
 ```yaml
-contract_id: BC-OFFER-CURRENT-V1
+contract_id: BC-OFFER-MUTATION-V1
 family: OFFER
+mutation_class: MUTATION_OR_COMMAND
 preconditions: {status: APPLICABLE, rules: [...]}
 input: {status: APPLICABLE, rules: [...]}
 response: {status: APPLICABLE, rules: [...]}

@@ -3,7 +3,7 @@
   "generated_from_commit": "aa2c06a573dfd60051e142146f55d7965f2242a7",
   "generated_date": "2026-09-03 UTC",
   "assignment_id": "WA-P1-00-REFRESH-20260903-001",
-  "scope": "Normalized current-behavior contracts, deterministic 465-seed mapping, and compact persona/tier/time/outcome/failure axes.",
+  "scope": "Normalized current-behavior contracts at family×mutation_class, deterministic 465-seed mapping, and compact persona/tier/time/outcome/failure axes.",
   "provenance": {
     "contract_source": "Repository code and behavioral tests at the Assignment base SHA.",
     "live_host_reobservation": "NOT_REOBSERVED",
@@ -12,9 +12,9 @@
     "normalization_note": "The tracked file is the reviewable source. Cartesian scenario expansion is generated only by tests or later evidence runners."
   },
   "coverage": {
-    "behavior_contracts": 14,
+    "behavior_contracts": 32,
     "surface_seeds": 465,
-    "surface_seed_mapping": "EXACTLY_ONE_CONTRACT_PER_SEED_BY_FAMILY",
+    "surface_seed_mapping": "EXACTLY_ONE_CONTRACT_PER_SEED_BY_FAMILY_AND_MUTATION_CLASS",
     "origin_variants": 6,
     "persona_variants": 5,
     "time_variants": 3,
@@ -48,13 +48,172 @@
     ],
     "empty_or_null": "FORBIDDEN",
     "not_applicable": "Allowed only as an object with status=NOT_APPLICABLE and a non-empty reason.",
-    "evidence_rule": "Every seed inherits its own non-meta test_refs from the surface inventory and the mapped contract's behavioral references."
+    "evidence_rule": "Every seed uses its own non-meta test_refs from the surface inventory and the mapped contract's behavioral references."
   },
   "behavior_contracts": [
     {
-      "contract_id": "BC-AUTH-CURRENT-V1",
+      "contract_id": "BC-ADMIN-MUTATION-V1",
+      "family": "ADMIN",
+      "scope": "Mutating/command ADMIN surfaces. Not a read/stream or scheduled job.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Current actor has the route/command-specific admin role.",
+          "Target entity and requested transition are current and valid."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Validated admin command including actor, target, before/after intent and idempotency context where available."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Unauthorized actor is denied without mutation.",
+          "Success returns the committed entity/setting/broadcast state."
+        ]
+      },
+      "db_mutations": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Admin-managed entity, audit-relevant state and delivery receipts commit according to the command transaction."
+        ]
+      },
+      "events_outbox": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Shared admin mutations and broadcast delivery intents use durable change/outbox paths."
+        ]
+      },
+      "side_effects": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Cache invalidation, notifications and broadcasts happen only for committed authorized commands and resolved audience."
+        ]
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authorize, validate target/transition, commit/audit, then invalidate cache or deliver.",
+          "Broadcast group selection is stored before confirmation/send."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Retry reuses command/broadcast receipt and does not fan out twice.",
+          "Stale target/confirmation is rejected."
+        ]
+      },
+      "idempotency_key": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Admin command or broadcast receipt identifies the authoritative result and recipient fanout."
+        ]
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Non-admin, invalid target/group/value, stale state or duplicate confirmation is denied/no-op deterministically."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "api/routers/admin_messages.py",
+          "bot/handlers/admin.py",
+          "bot/handlers/admin_broadcast.py",
+          "core/services/telegram_admin_broadcast_service.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_admin_messages_router.py",
+        "tests/test_bot_admin_broadcast_handler.py",
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
+        "tests/test_p1_00_characterization_six_gaps.py"
+      ],
+      "mutation_class": "MUTATION_OR_COMMAND"
+    },
+    {
+      "contract_id": "BC-ADMIN-READ-V1",
+      "family": "ADMIN",
+      "scope": "Read/stream ADMIN surfaces only. No product-row command.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Current actor has the admin role required by the viewed route or Bot admin screen.",
+          "Target entity exists and is visible to that admin role."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Stable admin entity or settings identity for a GET/view, not a mutating command payload."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Return the current admin projection or an explicit denial.",
+          "Unauthorized actor is denied and no product row is written."
+        ]
+      },
+      "db_mutations": {
+        "status": "NOT_APPLICABLE",
+        "reason": "ADMIN READ_OR_STREAM seeds do not persist product rows; mutations belong to the mutation/job contracts."
+      },
+      "events_outbox": {
+        "status": "NOT_APPLICABLE",
+        "reason": "ADMIN READ_OR_STREAM seeds do not append a product outbox row."
+      },
+      "side_effects": {
+        "status": "NOT_APPLICABLE",
+        "reason": "ADMIN READ_OR_STREAM seeds do not send Telegram, Web Push, or publication side effects."
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authorize the admin actor, then read the current projection.",
+          "Cache invalidation and broadcast send belong to the mutation/job contracts."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "NOT_APPLICABLE",
+        "reason": "ADMIN READ_OR_STREAM views have no product retry/receipt identity."
+      },
+      "idempotency_key": {
+        "status": "NOT_APPLICABLE",
+        "reason": "Read/stream operations have no product command identity."
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Non-admin or missing target is denied without mutation or broadcast."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "api/routers/admin_messages.py",
+          "api/routers/commodities.py",
+          "api/routers/trading_settings.py",
+          "bot/handlers/admin.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/api_load_test.py",
+        "tests/test_admin_messages_router.py",
+        "tests/test_bot_admin_account_name.py",
+        "tests/test_bot_admin_broadcast_handler.py"
+      ],
+      "mutation_class": "READ_OR_STREAM"
+    },
+    {
+      "contract_id": "BC-AUTH-MUTATION-V1",
       "family": "AUTH",
-      "scope": "OTP, login, session approval/recovery/revocation, registration authentication, logout and expiry.",
+      "scope": "Mutating/command AUTH surfaces. Not a read/stream or scheduled job.",
       "preconditions": {
         "status": "APPLICABLE",
         "rules": [
@@ -136,12 +295,174 @@
         "tests/test_auth_router_session_flows.py",
         "tests/test_sessions_router_login_requests.py",
         "tests/test_stage6_otp_delivery.py"
-      ]
+      ],
+      "mutation_class": "MUTATION_OR_COMMAND"
     },
     {
-      "contract_id": "BC-IDENTITY-CURRENT-V1",
+      "contract_id": "BC-AUTH-READ-V1",
+      "family": "AUTH",
+      "scope": "Read/stream AUTH surfaces only. No product-row command.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Session or invitation context is evaluated only to decide what the current view may disclose.",
+          "Read/stream AUTH surfaces do not create OTP, login or session rows."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authenticated actor or public auth-page identity for a GET/view.",
+          "Surface choice is an input to the view, not a login command."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Return the current auth-page or session-view result without disclosing whether a protected login request exists.",
+          "Terminal login/session success belongs to the mutation contract."
+        ]
+      },
+      "db_mutations": {
+        "status": "NOT_APPLICABLE",
+        "reason": "AUTH READ_OR_STREAM seeds do not persist product rows; mutations belong to the mutation/job contracts."
+      },
+      "events_outbox": {
+        "status": "NOT_APPLICABLE",
+        "reason": "AUTH READ_OR_STREAM seeds do not append a product outbox row."
+      },
+      "side_effects": {
+        "status": "NOT_APPLICABLE",
+        "reason": "AUTH READ_OR_STREAM seeds do not send Telegram, Web Push, or publication side effects."
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Resolve current session/invitation visibility, then render the view.",
+          "Persist, revoke and deliver belong to AUTH mutation/job contracts."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "NOT_APPLICABLE",
+        "reason": "AUTH READ_OR_STREAM views have no OTP/session receipt to retry."
+      },
+      "idempotency_key": {
+        "status": "NOT_APPLICABLE",
+        "reason": "Read/stream operations have no product command identity."
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Unknown, inactive or unauthorized account is denied visibility with no session mutation."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "api/routers/auth.py",
+          "api/routers/sessions.py",
+          "frontend/src/router/index.ts"
+        ]
+      },
+      "regression_tests": [
+        "tests/api_load_test.py",
+        "tests/customer_live_auth_smoke.py",
+        "tests/test_account_status_lifecycle_smoke.py",
+        "tests/test_audit_anchor_export.py"
+      ],
+      "mutation_class": "READ_OR_STREAM"
+    },
+    {
+      "contract_id": "BC-AUTH-JOB-V1",
+      "family": "AUTH",
+      "scope": "Scheduled AUTH jobs: otp_sms_fallback, session_expiry.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Job authority and current_allowed_servers are evaluated before AUTH job work.",
+          "Exactly one authorized owner may run the job."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Scheduler/lease trigger for one of: otp_sms_fallback, session_expiry."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Job completes, retries, or fails closed without claiming product HTTP success."
+        ]
+      },
+      "db_mutations": {
+        "status": "APPLICABLE",
+        "rules": [
+          "May persist only user_sessions."
+        ]
+      },
+      "events_outbox": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Durable job/receipt or outbound intent is recorded before provider work when the job uses one."
+        ]
+      },
+      "side_effects": {
+        "status": "APPLICABLE",
+        "rules": [
+          "No named product side_effects array; only listed external_state is touched.",
+          "external_state SMS.ir",
+          "external_state redis:otp_delivery:*"
+        ]
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Validate authority and quota, persist request/session state, then deliver or acknowledge.",
+          "Revocation precedes acceptance of a replacement session generation."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Expired OTP/login/session requests fail closed.",
+          "Provider-ambiguous OTP delivery is not blindly resent with the same code."
+        ]
+      },
+      "idempotency_key": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Login/session request identity and delivery receipt prevent duplicate terminalization."
+        ]
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Unknown, inactive or deleted account is denied.",
+          "Missing authority, stale generation or expired request causes no successful session."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "api/routers/auth.py",
+          "api/routers/sessions.py",
+          "core/services/bot_access_policy.py",
+          "core/background_job_authority.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_background_job_authority.py",
+        "tests/test_stage8_registration_observability.py",
+        "tests/test_sync_health_endpoint.py",
+        "tests/test_job_logging.py"
+      ],
+      "mutation_class": "SCHEDULED_JOB"
+    },
+    {
+      "contract_id": "BC-IDENTITY-MUTATION-V1",
       "family": "IDENTITY",
-      "scope": "Invitation, user/relation/accountant management, Telegram linking, block/flag and account-state projection.",
+      "scope": "Mutating/command IDENTITY surfaces. Not a read/stream or scheduled job.",
       "preconditions": {
         "status": "APPLICABLE",
         "rules": [
@@ -223,12 +544,652 @@
         "tests/test_customers_router.py",
         "tests/test_authoritative_registration_service.py",
         "tests/test_bot_link_account_guards.py"
-      ]
+      ],
+      "mutation_class": "MUTATION_OR_COMMAND"
     },
     {
-      "contract_id": "BC-OFFER-CURRENT-V1",
+      "contract_id": "BC-IDENTITY-READ-V1",
+      "family": "IDENTITY",
+      "scope": "Read/stream IDENTITY surfaces only. No product-row command.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Actor role and owner/accountant/customer relation are resolved from authoritative rows before the view is shown.",
+          "Telegram eligibility projection is read-only on these seeds."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Stable user, invitation or relation identity for a GET/view."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Visibility and denial copy follow actor/relation policy.",
+          "Unknown or stale projection does not grant access and does not write identity rows."
+        ]
+      },
+      "db_mutations": {
+        "status": "NOT_APPLICABLE",
+        "reason": "IDENTITY READ_OR_STREAM seeds do not persist product rows; mutations belong to the mutation/job contracts."
+      },
+      "events_outbox": {
+        "status": "NOT_APPLICABLE",
+        "reason": "IDENTITY READ_OR_STREAM seeds do not append a product outbox row."
+      },
+      "side_effects": {
+        "status": "NOT_APPLICABLE",
+        "reason": "IDENTITY READ_OR_STREAM seeds do not send Telegram, Web Push, or publication side effects."
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Resolve relation and account projection, then render.",
+          "Link, grant and reconciliation writes belong to IDENTITY mutation/job contracts."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "NOT_APPLICABLE",
+        "reason": "IDENTITY READ_OR_STREAM views have no invitation/link receipt to retry."
+      },
+      "idempotency_key": {
+        "status": "NOT_APPLICABLE",
+        "reason": "Read/stream operations have no product command identity."
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Accountant and tier-2 customer remain unable to gain Bot market access from a read.",
+          "Unknown relation is denied without creating a User."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "api/routers/accountants.py",
+          "api/routers/blocks.py",
+          "api/routers/customers.py",
+          "api/routers/invitations.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/customer_live_auth_smoke.py",
+        "tests/test_account_status_lifecycle_smoke.py",
+        "tests/test_accountants_router.py",
+        "tests/test_authoritative_registration_postgres.py"
+      ],
+      "mutation_class": "READ_OR_STREAM"
+    },
+    {
+      "contract_id": "BC-IDENTITY-JOB-V1",
+      "family": "IDENTITY",
+      "scope": "Scheduled IDENTITY jobs: telegram_registration_reconciliation, user_account_status.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Job authority and current_allowed_servers are evaluated before IDENTITY job work.",
+          "Exactly one authorized owner may run the job."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Scheduler/lease trigger for one of: telegram_registration_reconciliation, user_account_status."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Job completes, retries, or fails closed without claiming product HTTP success."
+        ]
+      },
+      "db_mutations": {
+        "status": "APPLICABLE",
+        "rules": [
+          "May persist only notifications, telegram_registration_intents, user_sessions, users."
+        ]
+      },
+      "events_outbox": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Durable job/receipt or outbound intent is recorded before provider work when the job uses one."
+        ]
+      },
+      "side_effects": {
+        "status": "APPLICABLE",
+        "rules": [
+          "local session revocation",
+          "optional Telegram notification via foreign-safe gateway path",
+          "user/accountant notifications",
+          "external_state Iran signed registration endpoint"
+        ]
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Validate invitation/relation and current account state before link or access grant.",
+          "Authoritative mutation becomes visible before reconciliation finalizes local intent."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Expired invitation/link intent is rejected.",
+          "Reconciliation retries without creating a foreign authoritative User."
+        ]
+      },
+      "idempotency_key": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Invitation/link identity and intent receipt prevent duplicate relation or account creation."
+        ]
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Accountant and tier-2 customer cannot gain Bot market access.",
+          "Unknown relation, duplicate identity or stale intent fails closed."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "api/routers/accountants.py",
+          "api/routers/customers.py",
+          "core/services/authoritative_registration_service.py",
+          "core/services/bot_access_policy.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_stage8_registration_observability.py",
+        "tests/test_stage5_direct_telegram_registration.py",
+        "tests/test_sync_health_endpoint.py",
+        "tests/test_bot_admin_users_bot_access.py"
+      ],
+      "mutation_class": "SCHEDULED_JOB"
+    },
+    {
+      "contract_id": "BC-MARKET-READ-V1",
+      "family": "MARKET",
+      "scope": "Read/stream MARKET surfaces only. No product-row command.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Published schedule/fact/snapshot already exists or the view reports explicit no-data.",
+          "No synthetic value may satisfy a business/scientific gate."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Read identity for schedule, fact, snapshot or published estimate."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Published estimate/guard result exposes freshness/confidence or explicit no-data/degraded state."
+        ]
+      },
+      "db_mutations": {
+        "status": "NOT_APPLICABLE",
+        "reason": "MARKET READ_OR_STREAM seeds do not persist product rows; mutations belong to the mutation/job contracts."
+      },
+      "events_outbox": {
+        "status": "NOT_APPLICABLE",
+        "reason": "MARKET READ_OR_STREAM seeds do not append a product outbox row."
+      },
+      "side_effects": {
+        "status": "NOT_APPLICABLE",
+        "reason": "MARKET READ_OR_STREAM seeds do not send Telegram, Web Push, or publication side effects."
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Read the published projection; capture, commit and channel notice belong to MARKET jobs."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Stale published inputs remain stale/degraded; they are not refreshed by this read."
+        ]
+      },
+      "idempotency_key": {
+        "status": "NOT_APPLICABLE",
+        "reason": "Read/stream operations have no product command identity."
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Unknown unit/schema/source or missing data stays explicit and is not replaced by fabricated evidence."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "api/routers/offers.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_chat_upload_session_service.py",
+        "tests/test_core_events.py",
+        "tests/test_observability_config.py",
+        "tests/test_offers_router_create_success.py"
+      ],
+      "mutation_class": "READ_OR_STREAM"
+    },
+    {
+      "contract_id": "BC-MARKET-JOB-V1",
+      "family": "MARKET",
+      "scope": "Scheduled MARKET jobs: market_schedule, telegram_market_notice_delivery.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Job authority and current_allowed_servers are evaluated before MARKET job work.",
+          "Exactly one authorized owner may run the job."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Scheduler/lease trigger for one of: market_schedule, telegram_market_notice_delivery."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Job completes, retries, or fails closed without claiming product HTTP success."
+        ]
+      },
+      "db_mutations": {
+        "status": "APPLICABLE",
+        "rules": [
+          "May persist only market_channel_notice_receipts, market_runtime_state, offers."
+        ]
+      },
+      "events_outbox": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Durable job/receipt or outbound intent is recorded before provider work when the job uses one."
+        ]
+      },
+      "side_effects": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Telegram market open/close channel notice",
+          "active-offer cache decrement",
+          "foreign Telegram market notice when gateway allows it",
+          "market realtime events",
+          "external_state Telegram Bot API"
+        ]
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Capture and validate before projection/model publication.",
+          "Schedule commit precedes offer-expiry and notice side effects."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Stale inputs widen confidence/range according to approved policy rather than silently becoming fresh.",
+          "Retries preserve point-in-time bounds."
+        ]
+      },
+      "idempotency_key": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Stable fact/event and notice receipt identity prevent duplicate projection and channel notice."
+        ]
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Unknown unit/schema/source/hash, gap or invalid magnitude is rejected/quarantined.",
+          "Missing data remains explicit and cannot be replaced by fabricated evidence."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "core/market_intelligence",
+          "core/services/offer_model_price_guard.py",
+          "core/background_job_authority.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_core_events.py",
+        "tests/test_offers_router_create_success.py",
+        "tests/test_sync_router_apply_item_success.py",
+        "tests/test_run_bot_telegram_execution_ownership.py"
+      ],
+      "mutation_class": "SCHEDULED_JOB"
+    },
+    {
+      "contract_id": "BC-MSG-MUTATION-V1",
+      "family": "MSG",
+      "scope": "Mutating/command MSG surfaces. Not a read/stream or scheduled job.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authenticated actor is a permitted room member and relation/privacy checks pass.",
+          "Referenced media/upload session is owned, complete and current."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Stable room/message/media identity plus command revision and actor context."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Return the authoritative message/room revision and deterministic unread/seen state.",
+          "Unauthorized membership is not disclosed."
+        ]
+      },
+      "db_mutations": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Message/revision/membership/read state and media reference update atomically for each command.",
+          "Incomplete upload remains local transient state."
+        ]
+      },
+      "events_outbox": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Committed final Messenger state emits realtime/sync intent with stable IDs and revision ordering."
+        ]
+      },
+      "side_effects": {
+        "status": "APPLICABLE",
+        "rules": [
+          "WebSocket/SSE/Web Push audience matches room membership and does not duplicate committed messages."
+        ]
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authorize and validate revision before mutation; commit before realtime/push.",
+          "Revision order, unread and seen markers are monotonic."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Expired upload session is rejected and cleaned by retention.",
+          "Reconnect/retry resumes from stable revision without adjacent-media inference."
+        ]
+      },
+      "idempotency_key": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Stable message/public ID and revision prevent duplicate send/edit/delete application."
+        ]
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Missing membership, stale revision, incomplete upload or referenced blob mismatch fails closed/quarantines sync."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "api/routers/chat.py",
+          "core/services/chat_service.py",
+          "core/services/chat_room_service.py",
+          "api/routers/realtime.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_chat_router_direct_mutations.py",
+        "tests/test_chat_router_media.py",
+        "tests/test_chat_router_rooms.py",
+        "tests/test_realtime_router_websocket_guards.py"
+      ],
+      "mutation_class": "MUTATION_OR_COMMAND"
+    },
+    {
+      "contract_id": "BC-MSG-READ-V1",
+      "family": "MSG",
+      "scope": "Read/stream MSG surfaces only. No product-row command.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authenticated actor is a permitted room member and relation/privacy checks pass.",
+          "Referenced media exists and is owned by an authorized member."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Stable room/message/media identity plus actor context for list/get/stream."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Return the authoritative message/room revision and deterministic unread/seen projection.",
+          "Unauthorized membership is not disclosed."
+        ]
+      },
+      "db_mutations": {
+        "status": "NOT_APPLICABLE",
+        "reason": "MSG READ_OR_STREAM seeds do not persist product rows; mutations belong to the mutation/job contracts."
+      },
+      "events_outbox": {
+        "status": "NOT_APPLICABLE",
+        "reason": "MSG READ_OR_STREAM seeds do not append a product outbox row."
+      },
+      "side_effects": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Opening Messenger realtime/SSE attaches a connection for an authorized member and does not insert a message row."
+        ]
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authorize membership, then read or attach the stream.",
+          "Message insert, unread mutation and push belong to the mutation contract."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Reconnect/retry resumes from a stable revision without adjacent-media inference."
+        ]
+      },
+      "idempotency_key": {
+        "status": "NOT_APPLICABLE",
+        "reason": "Read/stream operations have no product command identity."
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Missing membership, stale revision or referenced blob mismatch fails closed and writes no message row."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "api/routers/chat.py",
+          "api/routers/realtime.py",
+          "frontend/src/router/index.ts"
+        ]
+      },
+      "regression_tests": [
+        "tests/api_load_test.py",
+        "tests/test_admin_messages_router.py",
+        "tests/test_bot_admin_users_helpers.py",
+        "tests/test_bot_admin_users_interaction_queue.py"
+      ],
+      "mutation_class": "READ_OR_STREAM"
+    },
+    {
+      "contract_id": "BC-NOTIFY-MUTATION-V1",
+      "family": "NOTIFY",
+      "scope": "Mutating/command NOTIFY surfaces. Not a read/stream or scheduled job.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authenticated actor owns the notification/preferences/subscription or has explicit admin test authority.",
+          "Web Push configuration is validated before send."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Notification/audience identity, read/delete/preference command or validated Push payload."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Unread count and row state reflect the committed command.",
+          "Unconfigured test Push returns 503 and sends nothing."
+        ]
+      },
+      "db_mutations": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Notification/read/delete/preference/subscription state commits once for the owning user."
+        ]
+      },
+      "events_outbox": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Durable notification row/outbox intent precedes asynchronous local Push or Telegram delivery."
+        ]
+      },
+      "side_effects": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Realtime/Web Push/Telegram notification targets only the resolved audience and is receipt guarded."
+        ]
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authorize and persist audience state before stream/push delivery.",
+          "Preference/subscription state is read before selecting a provider."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Provider failure remains retryable or terminal per receipt without duplicating the notification row."
+        ]
+      },
+      "idempotency_key": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Notification/outbox/provider receipt identity prevents duplicate delivery."
+        ]
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Wrong owner, missing configuration, invalid subscription or stale notification is rejected with no unintended send."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "api/routers/notifications.py",
+          "core/web_push.py",
+          "core/services/telegram_notification_outbox_queue_service.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_notifications_router_mutations.py",
+        "tests/test_notifications_router_reads.py",
+        "tests/test_web_push.py",
+        "tests/test_p1_00_characterization_six_gaps.py"
+      ],
+      "mutation_class": "MUTATION_OR_COMMAND"
+    },
+    {
+      "contract_id": "BC-NOTIFY-READ-V1",
+      "family": "NOTIFY",
+      "scope": "Read/stream NOTIFY surfaces only. No product-row command.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authenticated actor owns the notification/preferences/subscription being viewed.",
+          "Admin test-push send is a mutation and is not part of this contract."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Notification, preference or subscription identity for GET/unread-count/view."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Unread count and row projection reflect already-committed state.",
+          "This contract does not send Web Push."
+        ]
+      },
+      "db_mutations": {
+        "status": "NOT_APPLICABLE",
+        "reason": "NOTIFY READ_OR_STREAM seeds do not persist product rows; mutations belong to the mutation/job contracts."
+      },
+      "events_outbox": {
+        "status": "NOT_APPLICABLE",
+        "reason": "NOTIFY READ_OR_STREAM seeds do not append a product outbox row."
+      },
+      "side_effects": {
+        "status": "NOT_APPLICABLE",
+        "reason": "NOTIFY READ_OR_STREAM seeds do not send Telegram, Web Push, or publication side effects."
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authorize the owner, then read preference/subscription/unread projection."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "NOT_APPLICABLE",
+        "reason": "NOTIFY READ_OR_STREAM views have no provider receipt to retry."
+      },
+      "idempotency_key": {
+        "status": "NOT_APPLICABLE",
+        "reason": "Read/stream operations have no product command identity."
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Wrong owner or missing row is denied with no send and no preference write."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "api/routers/notifications.py",
+          "frontend/src/router/index.ts"
+        ]
+      },
+      "regression_tests": [
+        "tests/api_load_test.py",
+        "tests/test_notifications_preferences.py",
+        "tests/test_notifications_router_mutations.py",
+        "tests/test_notifications_router_reads.py"
+      ],
+      "mutation_class": "READ_OR_STREAM"
+    },
+    {
+      "contract_id": "BC-OFFER-MUTATION-V1",
       "family": "OFFER",
-      "scope": "Create, parse, list, repeat, expire, cancel, republish and Telegram publication of Offers.",
+      "scope": "Mutating/command OFFER surfaces. Not a read/stream or scheduled job.",
       "preconditions": {
         "status": "APPLICABLE",
         "rules": [
@@ -315,12 +1276,338 @@
         "tests/test_offer_source_surface.py",
         "tests/test_offer_publication_worker.py",
         "tests/test_bot_trade_create_text_offer_parse_flow.py"
-      ]
+      ],
+      "mutation_class": "MUTATION_OR_COMMAND"
     },
     {
-      "contract_id": "BC-REQUEST-CURRENT-V1",
+      "contract_id": "BC-OFFER-READ-V1",
+      "family": "OFFER",
+      "scope": "Read/stream OFFER surfaces only. No product-row command.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authenticated actor may view the requested Offer projection.",
+          "Tier-2 customer cannot own Offers; get_my_repeatable_offers returns [] for tier-2.",
+          "Accountant context remains rejected for market Offer views."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Offer identity or list filter for a GET/view. Creation payload belongs to the mutation contract."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Return the current Offer projection or an empty/denied list.",
+          "This contract does not claim Offer creation or publication."
+        ]
+      },
+      "db_mutations": {
+        "status": "NOT_APPLICABLE",
+        "reason": "OFFER READ_OR_STREAM seeds do not persist product rows; mutations belong to the mutation/job contracts."
+      },
+      "events_outbox": {
+        "status": "NOT_APPLICABLE",
+        "reason": "OFFER READ_OR_STREAM seeds do not append a product outbox row."
+      },
+      "side_effects": {
+        "status": "NOT_APPLICABLE",
+        "reason": "OFFER READ_OR_STREAM seeds do not send Telegram, Web Push, or publication side effects."
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Resolve actor visibility, then read the Offer projection.",
+          "Commit, outbox and Telegram publication belong to OFFER mutation/job contracts."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "NOT_APPLICABLE",
+        "reason": "OFFER READ_OR_STREAM views have no Offer command identity to replay."
+      },
+      "idempotency_key": {
+        "status": "NOT_APPLICABLE",
+        "reason": "Read/stream operations have no product command identity."
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Unauthorized, accountant, watch-role or missing Offer is denied without creating a row."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "api/routers/offers.py",
+          "bot/handlers/commodity_catalog.py",
+          "bot/handlers/offer_overtime_preference.py",
+          "bot/handlers/trade_create.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/api_load_test.py",
+        "tests/test_active_offer_pagination.py",
+        "tests/test_background_job_authority.py",
+        "tests/test_bot_commodity_catalog.py"
+      ],
+      "mutation_class": "READ_OR_STREAM"
+    },
+    {
+      "contract_id": "BC-OFFER-JOB-V1",
+      "family": "OFFER",
+      "scope": "Scheduled OFFER jobs: offer_expiry, offer_telegram_publication.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Job authority and current_allowed_servers are evaluated before OFFER job work.",
+          "Exactly one authorized owner may run the job."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Scheduler/lease trigger for one of: offer_expiry, offer_telegram_publication."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Job completes, retries, or fails closed without claiming product HTTP success."
+        ]
+      },
+      "db_mutations": {
+        "status": "APPLICABLE",
+        "rules": [
+          "May persist only offer_publication_states, offers."
+        ]
+      },
+      "events_outbox": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Durable job/receipt or outbound intent is recorded before provider work when the job uses one."
+        ]
+      },
+      "side_effects": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Telegram channel offer message text/markup",
+          "Telegram channel offer post",
+          "active-offer cache decrement",
+          "foreign Telegram terminal channel state",
+          "local realtime offer:expired",
+          "external_state Telegram Bot API"
+        ]
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Resolve actor and policy, final market admission, commit Offer/outbox, then publish/notify.",
+          "Terminal transition precedes terminal presentation update."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Repeat/expiry use immutable created_at and the snapshotted overtime deadline.",
+          "Idempotent replay of the same key returns the existing Offer without a second publication.",
+          "Market-close at final admission rejects with no Offer row and no side effect.",
+          "Final quota rejection maps to a deterministic error with no side effect."
+        ]
+      },
+      "idempotency_key": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Offer creation command key and publication state prevent duplicate Offer and Telegram post."
+        ]
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Accountant, watch-role, temporarily restricted, closed market, invalid price, wrong home or stale state is rejected.",
+          "Same idempotency key with a different payload conflicts; it does not create a second Offer.",
+          "Publication/cache/SSE failure after commit keeps the Offer and is retryable without changing provenance."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "api/routers/offers.py",
+          "bot/handlers/trade_create.py",
+          "core/offer_lifecycle.py",
+          "core/offer_publication_worker.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_web_push.py",
+        "tests/test_offers_router_create_success.py",
+        "tests/test_sync_router_apply_item_success.py",
+        "tests/test_offer_publication_worker.py"
+      ],
+      "mutation_class": "SCHEDULED_JOB"
+    },
+    {
+      "contract_id": "BC-OPS-READ-V1",
+      "family": "OPS",
+      "scope": "Read/stream OPS surfaces only. No product-row command.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Public config and metrics handlers expose non-secret runtime facts already available to the process.",
+          "Frontend/home/account/settings/system-recovery routes render or recover the shell without claiming backend readiness.",
+          "connectivity_monitor is an observational job authorized on historical iran and writes only redis:connectivity:global."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "HTTP GET for /api/config, /metrics, /, /{full_path:path}, or the matching frontend routes; or the scheduled connectivity probe."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Health/config/metrics report UNKNOWN/STALE/FAILED honestly and never paint missing evidence green.",
+          "Frontend shell recovery does not imply API or Bot readiness."
+        ]
+      },
+      "db_mutations": {
+        "status": "NOT_APPLICABLE",
+        "reason": "OPS READ_OR_STREAM seeds do not persist product rows; mutations belong to the mutation/job contracts."
+      },
+      "events_outbox": {
+        "status": "NOT_APPLICABLE",
+        "reason": "OPS READ_OR_STREAM seeds do not append a product outbox row."
+      },
+      "side_effects": {
+        "status": "NOT_APPLICABLE",
+        "reason": "OPS READ_OR_STREAM seeds do not send Telegram, Web Push, or publication side effects."
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Readiness/config/metrics observation is independent of Bot restart and of Web Writer state.",
+          "Shared PostgreSQL/Redis failure must be exposed, not masked as healthy."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Probe timeout becomes unknown/stale, not inferred healthy or automatic failover.",
+          "Measured deploy/restart/backup/restore durations are NOT_OBSERVED and are not estimated here."
+        ]
+      },
+      "idempotency_key": {
+        "status": "NOT_APPLICABLE",
+        "reason": "Read/stream operations have no product command identity."
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Unknown release/schema/config/owner or failed readiness blocks activation claims.",
+          "No lease, timer or connectivity signal changes Web Writer."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "frontend/src/router/index.ts",
+          "main.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_auth_router_registration_flows.py",
+        "tests/test_authoritative_registration_postgres.py",
+        "tests/test_background_job_authority.py",
+        "tests/test_bot_link_account_cmd.py"
+      ],
+      "mutation_class": "READ_OR_STREAM"
+    },
+    {
+      "contract_id": "BC-OPS-JOB-V1",
+      "family": "OPS",
+      "scope": "Scheduled OPS jobs: connectivity_monitor.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Job authority and current_allowed_servers are evaluated before OPS job work.",
+          "Exactly one authorized owner may run the job."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Scheduler/lease trigger for one of: connectivity_monitor."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Job completes, retries, or fails closed without claiming product HTTP success."
+        ]
+      },
+      "db_mutations": {
+        "status": "NOT_APPLICABLE",
+        "reason": "OPS jobs in the current inventory have empty mutated_tables."
+      },
+      "events_outbox": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Durable job/receipt or outbound intent is recorded before provider work when the job uses one."
+        ]
+      },
+      "side_effects": {
+        "status": "APPLICABLE",
+        "rules": [
+          "No named product side_effects array; only listed external_state is touched.",
+          "external_state redis:connectivity:global"
+        ]
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Readiness/config/metrics observation is independent of Bot restart and of Web Writer state.",
+          "Shared PostgreSQL/Redis failure must be exposed, not masked as healthy."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Probe timeout becomes unknown/stale, not inferred healthy or automatic failover.",
+          "Measured deploy/restart/backup/restore durations are NOT_OBSERVED and are not estimated here."
+        ]
+      },
+      "idempotency_key": {
+        "status": "NOT_APPLICABLE",
+        "reason": "Read-only config/metrics/frontend and observational connectivity have no product command identity; later DPL-1 operation journals own deploy/restore idempotency."
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Unknown release/schema/config/owner or failed readiness blocks activation claims.",
+          "No lease, timer or connectivity signal changes Web Writer."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "main.py",
+          "core/background_job_authority.py",
+          "docs/refactor/two-server/section-1/inventory/surface-jobs.json"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_background_job_authority.py",
+        "tests/test_main_lifespan.py",
+        "tests/test_core_connectivity.py"
+      ],
+      "mutation_class": "SCHEDULED_JOB"
+    },
+    {
+      "contract_id": "BC-REQUEST-MUTATION-V1",
       "family": "REQUEST",
-      "scope": "Normal and overtime requests against Offers, owner decision, cancellation and forwarding.",
+      "scope": "Mutating/command REQUEST surfaces. Not a read/stream or scheduled job.",
       "preconditions": {
         "status": "APPLICABLE",
         "rules": [
@@ -401,12 +1688,571 @@
         "tests/test_offer_overtime_request_service.py",
         "tests/test_offer_overtime_request_cancel_forwarding.py",
         "tests/test_offer_overtime_webapp_api_contract.py"
-      ]
+      ],
+      "mutation_class": "MUTATION_OR_COMMAND"
     },
     {
-      "contract_id": "BC-TRADE-CURRENT-V1",
+      "contract_id": "BC-REQUEST-READ-V1",
+      "family": "REQUEST",
+      "scope": "Read/stream REQUEST surfaces only. No product-row command.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Actor may view the referenced Offer/request projection on the chosen surface."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Offer or request identity for a GET/view. Acceptance/cancel payloads belong to the mutation contract."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Return the current request/Offer status projection.",
+          "This contract does not accept, queue or cancel a request."
+        ]
+      },
+      "db_mutations": {
+        "status": "NOT_APPLICABLE",
+        "reason": "REQUEST READ_OR_STREAM seeds do not persist product rows; mutations belong to the mutation/job contracts."
+      },
+      "events_outbox": {
+        "status": "NOT_APPLICABLE",
+        "reason": "REQUEST READ_OR_STREAM seeds do not append a product outbox row."
+      },
+      "side_effects": {
+        "status": "NOT_APPLICABLE",
+        "reason": "REQUEST READ_OR_STREAM seeds do not send Telegram, Web Push, or publication side effects."
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authorize visibility, then read current status.",
+          "Reserve, commit and owner decision belong to the mutation contract."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "NOT_APPLICABLE",
+        "reason": "REQUEST READ_OR_STREAM views have no request receipt to retry."
+      },
+      "idempotency_key": {
+        "status": "NOT_APPLICABLE",
+        "reason": "Read/stream operations have no product command identity."
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Expired/ineligible or unauthorized projection is denied without ledger write."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "api/routers/trades.py",
+          "bot/handlers/offer_overtime_callbacks.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_bot_overtime_callbacks_contract.py",
+        "tests/test_offer_overtime_request_cancel_forwarding.py",
+        "tests/test_offer_overtime_webapp_api_contract.py",
+        "tests/test_telegram_delivery_overtime_owner_approval_contract.py"
+      ],
+      "mutation_class": "READ_OR_STREAM"
+    },
+    {
+      "contract_id": "BC-SYNC-MUTATION-V1",
+      "family": "SYNC",
+      "scope": "Mutating/command SYNC surfaces. Not a read/stream or scheduled job.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Table/version/field policy, source authority, sequence/hash/signature and peer identity are known.",
+          "Sensitive/local-only fields are excluded."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Stable event identity, source/site, sequence, schema version, payload hash/signature and allowlisted mutation."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Return applied, duplicate, retryable, rejected or quarantined with visible reason.",
+          "Unknown authority/schema/hash never returns applied."
+        ]
+      },
+      "db_mutations": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Business apply and checkpoint/dedupe update are atomic.",
+          "Duplicate delivery changes no business state."
+        ]
+      },
+      "events_outbox": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Local authoritative commit appends immutable outbound change; ACK only follows peer durable acceptance."
+        ]
+      },
+      "side_effects": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Peer transport/retry queue and operator health evidence reflect gaps/rejections without deleting history."
+        ]
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Verify envelope and sequence before business apply, commit apply/checkpoint atomically, then ACK.",
+          "Gap repair is forward-only."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Unavailable peer keeps local change pending with bounded retry.",
+          "Duplicate event replays acknowledgement without reapplication."
+        ]
+      },
+      "idempotency_key": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Stable event ID plus source sequence/hash is the dedupe and ordering identity."
+        ]
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Unknown table/version/authority, forbidden field, signature/hash mismatch, gap or invariant violation fails closed/quarantines."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "api/routers/sync.py",
+          "core/sync_registry.py",
+          "core/sync_field_policy.py",
+          "core/sync_worker.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_sync_router_apply_item_success.py",
+        "tests/test_sync_router_signature.py",
+        "tests/test_sync_router_resync.py",
+        "tests/test_sync_worker.py"
+      ],
+      "mutation_class": "MUTATION_OR_COMMAND"
+    },
+    {
+      "contract_id": "BC-SYNC-READ-V1",
+      "family": "SYNC",
+      "scope": "Read/stream SYNC surfaces only. No product-row command.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Actor may inspect sync status or allowlisted projection already stored locally."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Read identity for sync status, checkpoint or allowlisted projection."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Return current applied/pending/rejected/quarantined projection.",
+          "This contract does not apply an inbound event."
+        ]
+      },
+      "db_mutations": {
+        "status": "NOT_APPLICABLE",
+        "reason": "SYNC READ_OR_STREAM seeds do not persist product rows; mutations belong to the mutation/job contracts."
+      },
+      "events_outbox": {
+        "status": "NOT_APPLICABLE",
+        "reason": "SYNC READ_OR_STREAM seeds do not append a product outbox row."
+      },
+      "side_effects": {
+        "status": "NOT_APPLICABLE",
+        "reason": "SYNC READ_OR_STREAM seeds do not send Telegram, Web Push, or publication side effects."
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authorize the inspector, then read checkpoint/status.",
+          "Envelope verify, apply and ACK belong to SYNC mutation/job contracts."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "NOT_APPLICABLE",
+        "reason": "SYNC READ_OR_STREAM views do not retry peer apply."
+      },
+      "idempotency_key": {
+        "status": "NOT_APPLICABLE",
+        "reason": "Read/stream operations have no product command identity."
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Unknown authority/schema/hash remains unapplied and is not returned as applied."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "api/routers/sync.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_deploy_surface_smoke.py",
+        "tests/test_main_foreign_surface_guard.py",
+        "tests/test_notification_and_sync_helpers.py",
+        "tests/test_observe_production_private_primary.py"
+      ],
+      "mutation_class": "READ_OR_STREAM"
+    },
+    {
+      "contract_id": "BC-SYNC-JOB-V1",
+      "family": "SYNC",
+      "scope": "Scheduled SYNC jobs: sync_worker.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Job authority and current_allowed_servers are evaluated before SYNC job work.",
+          "Exactly one authorized owner may run the job."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Scheduler/lease trigger for one of: sync_worker."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Job completes, retries, or fails closed without claiming product HTTP success."
+        ]
+      },
+      "db_mutations": {
+        "status": "APPLICABLE",
+        "rules": [
+          "May persist only change_log."
+        ]
+      },
+      "events_outbox": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Durable job/receipt or outbound intent is recorded before provider work when the job uses one."
+        ]
+      },
+      "side_effects": {
+        "status": "APPLICABLE",
+        "rules": [
+          "No named product side_effects array; only listed external_state is touched.",
+          "external_state redis:sync:outbound",
+          "external_state redis:sync:retry"
+        ]
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Verify envelope and sequence before business apply, commit apply/checkpoint atomically, then ACK.",
+          "Gap repair is forward-only."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Unavailable peer keeps local change pending with bounded retry.",
+          "Duplicate event replays acknowledgement without reapplication."
+        ]
+      },
+      "idempotency_key": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Stable event ID plus source sequence/hash is the dedupe and ordering identity."
+        ]
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Unknown table/version/authority, forbidden field, signature/hash mismatch, gap or invariant violation fails closed/quarantines."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "api/routers/sync.py",
+          "core/sync_registry.py",
+          "core/sync_field_policy.py",
+          "core/sync_worker.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_deploy_surface_smoke.py",
+        "tests/test_production_coin_inference_snapshot_relay.py",
+        "tests/test_sync_worker.py"
+      ],
+      "mutation_class": "SCHEDULED_JOB"
+    },
+    {
+      "contract_id": "BC-TG-MUTATION-V1",
+      "family": "TG",
+      "scope": "Mutating/command TG surfaces. Not a read/stream or scheduled job.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "User/Bot access and callback/FSM freshness pass.",
+          "Exactly one credentialed Telegram executor owns the enabled lane."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Telegram update/callback or durable delivery job with identity, lane, payload hash and receipt context."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Callback is acknowledged once and message/FSM state reflects the authoritative command.",
+          "Denied/stale action gets deterministic copy."
+        ]
+      },
+      "db_mutations": {
+        "status": "APPLICABLE",
+        "rules": [
+          "FSM/anchor/queue/provider receipt changes use legal transitions and atomic claim/ACK."
+        ]
+      },
+      "events_outbox": {
+        "status": "APPLICABLE",
+        "rules": [
+          "API/domain producers persist Telegram intent; the executor consumes without becoming business authority."
+        ]
+      },
+      "side_effects": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Only the Telegram executor sends/edits/answers through Bot API and records a nonsecret provider outcome."
+        ]
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Validate freshness/authority, persist or claim receipt, execute provider call, then ACK/finalize.",
+          "Business commit is never inferred from provider success."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Transient safe failures retry with bounded backoff.",
+          "Provider-ambiguous send enters reconciliation instead of blind replay."
+        ]
+      },
+      "idempotency_key": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Delivery job/receipt/payload identity and callback freshness prevent duplicate provider side effect."
+        ]
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Second owner, stale callback/FSM, invalid lane/permission or ambiguous outcome fails closed/reconciles."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "run_bot.py",
+          "core/services/telegram_delivery_queue_service.py",
+          "core/telegram_delivery_queue_worker.py",
+          "bot/handlers"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_telegram_delivery_queue_contract.py",
+        "tests/test_telegram_notification_outbox_worker.py",
+        "tests/test_telegram_multi_publisher_contract.py",
+        "tests/test_p1_00_characterization_six_gaps.py"
+      ],
+      "mutation_class": "MUTATION_OR_COMMAND"
+    },
+    {
+      "contract_id": "BC-TG-READ-V1",
+      "family": "TG",
+      "scope": "Read/stream TG surfaces only. No product-row command.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "User/Bot access allows the viewed Telegram screen or status.",
+          "Exactly one credentialed Telegram executor owns enabled lanes, but this read does not send."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Telegram screen, status or receipt identity for a view. Callback/send payloads belong to mutation/job contracts."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Return current FSM/screen or delivery-status projection.",
+          "This contract does not ACK a callback or send a Telegram message."
+        ]
+      },
+      "db_mutations": {
+        "status": "NOT_APPLICABLE",
+        "reason": "TG READ_OR_STREAM seeds do not persist product rows; mutations belong to the mutation/job contracts."
+      },
+      "events_outbox": {
+        "status": "NOT_APPLICABLE",
+        "reason": "TG READ_OR_STREAM seeds do not append a product outbox row."
+      },
+      "side_effects": {
+        "status": "NOT_APPLICABLE",
+        "reason": "TG READ_OR_STREAM seeds do not send Telegram, Web Push, or publication side effects."
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Authorize the viewer, then read current FSM/status.",
+          "Persist receipt, provider call and ACK belong to TG mutation/job contracts."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "NOT_APPLICABLE",
+        "reason": "TG READ_OR_STREAM views have no delivery job to retry."
+      },
+      "idempotency_key": {
+        "status": "NOT_APPLICABLE",
+        "reason": "Read/stream operations have no product command identity."
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Denied or stale view is rejected with no provider send."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "bot/handlers/default.py",
+          "bot/handlers/panel.py",
+          "bot/handlers/telegram_publisher_b2b.py",
+          "bot/handlers/telegram_publisher_channel_callbacks.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_background_job_authority.py",
+        "tests/test_block_service.py",
+        "tests/test_bot_default_unauthorized.py",
+        "tests/test_bot_keyboards.py"
+      ],
+      "mutation_class": "READ_OR_STREAM"
+    },
+    {
+      "contract_id": "BC-TG-JOB-V1",
+      "family": "TG",
+      "scope": "Scheduled TG jobs: telegram_admin_broadcast_delivery, telegram_delivery_queue, telegram_notification_outbox_delivery.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Job authority and current_allowed_servers are evaluated before TG job work.",
+          "Exactly one authorized owner may run the job."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Scheduler/lease trigger for one of: telegram_admin_broadcast_delivery, telegram_delivery_queue, telegram_notification_outbox_delivery."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Job completes, retries, or fails closed without claiming product HTTP success."
+        ]
+      },
+      "db_mutations": {
+        "status": "APPLICABLE",
+        "rules": [
+          "May persist only market_channel_notice_receipts, telegram_admin_broadcast_receipts, telegram_admin_broadcasts, telegram_delivery_jobs, telegram_delivery_provider_outcomes, telegram_delivery_reconciliation_evidence, telegram_delivery_runtime_gates, telegram_interaction_anchor_states, telegram_notification_outbox, trade_delivery_receipts."
+        ]
+      },
+      "events_outbox": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Durable job/receipt or outbound intent is recorded before provider work when the job uses one."
+        ]
+      },
+      "side_effects": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Telegram private admin broadcast message",
+          "Telegram private generic notification message",
+          "all queued Telegram send/edit/callback methods after cutover",
+          "external_state Telegram Bot API"
+        ]
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Validate freshness/authority, persist or claim receipt, execute provider call, then ACK/finalize.",
+          "Business commit is never inferred from provider success."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Transient safe failures retry with bounded backoff.",
+          "Provider-ambiguous send enters reconciliation instead of blind replay."
+        ]
+      },
+      "idempotency_key": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Delivery job/receipt/payload identity and callback freshness prevent duplicate provider side effect."
+        ]
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Second owner, stale callback/FSM, invalid lane/permission or ambiguous outcome fails closed/reconciles."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "run_bot.py",
+          "core/services/telegram_delivery_queue_service.py",
+          "core/telegram_delivery_queue_worker.py",
+          "bot/handlers"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_telegram_admin_broadcast_delivery_service.py",
+        "tests/test_telegram_admin_broadcast_video.py",
+        "tests/test_telegram_admin_broadcast_queue_feeder.py",
+        "tests/test_bot_trade_create_text_offer_parse_flow.py"
+      ],
+      "mutation_class": "SCHEDULED_JOB"
+    },
+    {
+      "contract_id": "BC-TRADE-MUTATION-V1",
       "family": "TRADE",
-      "scope": "Trade wizard, execution, inventory/commission/settlement, history/export and delivery.",
+      "scope": "Mutating/command TRADE surfaces. Not a read/stream or scheduled job.",
       "preconditions": {
         "status": "APPLICABLE",
         "rules": [
@@ -488,589 +2334,169 @@
         "tests/test_bot_trade_execute_local_success.py",
         "tests/test_trade_delivery_worker.py",
         "tests/test_p1_00_characterization_six_gaps.py"
-      ]
+      ],
+      "mutation_class": "MUTATION_OR_COMMAND"
     },
     {
-      "contract_id": "BC-MARKET-CURRENT-V1",
-      "family": "MARKET",
-      "scope": "Market schedule, fact/snapshot visibility, estimator state, notices and Offer price guard.",
+      "contract_id": "BC-TRADE-READ-V1",
+      "family": "TRADE",
+      "scope": "Read/stream TRADE surfaces only. No product-row command.",
       "preconditions": {
         "status": "APPLICABLE",
         "rules": [
-          "Schedule and Market facts satisfy source, timestamp, schema, unit and quality policy.",
-          "No synthetic value may satisfy a business/scientific gate."
+          "Actor is a permitted participant or authorized viewer of the Trade/history projection."
         ]
       },
       "input": {
         "status": "APPLICABLE",
         "rules": [
-          "Versioned schedule/fact/snapshot with event, availability and local-insert time bounds."
+          "Trade, Offer or history identity for a GET/view. Execution payloads belong to the mutation contract."
         ]
       },
       "response": {
         "status": "APPLICABLE",
         "rules": [
-          "Published estimate/guard result exposes freshness/confidence or explicit no-data/degraded state."
-        ]
-      },
-      "db_mutations": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Market runtime state, canonical facts/projections and notice receipts use their owning transaction and immutable fact identity."
-        ]
-      },
-      "events_outbox": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Eligible committed Market transition/fact emits a durable projection or delivery intent."
-        ]
-      },
-      "side_effects": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Realtime Market state, price guard and Telegram notice use committed eligible data and one delivery owner."
-        ]
-      },
-      "ordering": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Capture and validate before projection/model publication.",
-          "Schedule commit precedes offer-expiry and notice side effects."
-        ]
-      },
-      "timeouts_retries": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Stale inputs widen confidence/range according to approved policy rather than silently becoming fresh.",
-          "Retries preserve point-in-time bounds."
-        ]
-      },
-      "idempotency_key": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Stable fact/event and notice receipt identity prevent duplicate projection and channel notice."
-        ]
-      },
-      "failure_cases": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Unknown unit/schema/source/hash, gap or invalid magnitude is rejected/quarantined.",
-          "Missing data remains explicit and cannot be replaced by fabricated evidence."
-        ]
-      },
-      "reference_evidence": {
-        "status": "EVIDENCED",
-        "sources": [
-          "core/market_intelligence",
-          "core/services/offer_model_price_guard.py",
-          "core/background_job_authority.py"
-        ]
-      },
-      "regression_tests": [
-        "tests/test_coin_intelligence_private_gold_pipeline.py",
-        "tests/test_offers_router_create_success.py",
-        "tests/test_run_bot_telegram_execution_ownership.py"
-      ]
-    },
-    {
-      "contract_id": "BC-MSG-CURRENT-V1",
-      "family": "MSG",
-      "scope": "Messenger rooms, messages, edits/deletes/reactions, media/upload, unread/seen and realtime.",
-      "preconditions": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Authenticated actor is a permitted room member and relation/privacy checks pass.",
-          "Referenced media/upload session is owned, complete and current."
-        ]
-      },
-      "input": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Stable room/message/media identity plus command revision and actor context."
-        ]
-      },
-      "response": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Return the authoritative message/room revision and deterministic unread/seen state.",
-          "Unauthorized membership is not disclosed."
-        ]
-      },
-      "db_mutations": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Message/revision/membership/read state and media reference update atomically for each command.",
-          "Incomplete upload remains local transient state."
-        ]
-      },
-      "events_outbox": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Committed final Messenger state emits realtime/sync intent with stable IDs and revision ordering."
-        ]
-      },
-      "side_effects": {
-        "status": "APPLICABLE",
-        "rules": [
-          "WebSocket/SSE/Web Push audience matches room membership and does not duplicate committed messages."
-        ]
-      },
-      "ordering": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Authorize and validate revision before mutation; commit before realtime/push.",
-          "Revision order, unread and seen markers are monotonic."
-        ]
-      },
-      "timeouts_retries": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Expired upload session is rejected and cleaned by retention.",
-          "Reconnect/retry resumes from stable revision without adjacent-media inference."
-        ]
-      },
-      "idempotency_key": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Stable message/public ID and revision prevent duplicate send/edit/delete application."
-        ]
-      },
-      "failure_cases": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Missing membership, stale revision, incomplete upload or referenced blob mismatch fails closed/quarantines sync."
-        ]
-      },
-      "reference_evidence": {
-        "status": "EVIDENCED",
-        "sources": [
-          "api/routers/chat.py",
-          "core/services/chat_service.py",
-          "core/services/chat_room_service.py",
-          "api/routers/realtime.py"
-        ]
-      },
-      "regression_tests": [
-        "tests/test_chat_router_direct_mutations.py",
-        "tests/test_chat_router_media.py",
-        "tests/test_chat_router_rooms.py",
-        "tests/test_realtime_router_websocket_guards.py"
-      ]
-    },
-    {
-      "contract_id": "BC-NOTIFY-CURRENT-V1",
-      "family": "NOTIFY",
-      "scope": "Notification create/read/delete/preferences/subscription, stream and test Web Push.",
-      "preconditions": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Authenticated actor owns the notification/preferences/subscription or has explicit admin test authority.",
-          "Web Push configuration is validated before send."
-        ]
-      },
-      "input": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Notification/audience identity, read/delete/preference command or validated Push payload."
-        ]
-      },
-      "response": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Unread count and row state reflect the committed command.",
-          "Unconfigured test Push returns 503 and sends nothing."
-        ]
-      },
-      "db_mutations": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Notification/read/delete/preference/subscription state commits once for the owning user."
-        ]
-      },
-      "events_outbox": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Durable notification row/outbox intent precedes asynchronous local Push or Telegram delivery."
-        ]
-      },
-      "side_effects": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Realtime/Web Push/Telegram notification targets only the resolved audience and is receipt guarded."
-        ]
-      },
-      "ordering": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Authorize and persist audience state before stream/push delivery.",
-          "Preference/subscription state is read before selecting a provider."
-        ]
-      },
-      "timeouts_retries": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Provider failure remains retryable or terminal per receipt without duplicating the notification row."
-        ]
-      },
-      "idempotency_key": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Notification/outbox/provider receipt identity prevents duplicate delivery."
-        ]
-      },
-      "failure_cases": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Wrong owner, missing configuration, invalid subscription or stale notification is rejected with no unintended send."
-        ]
-      },
-      "reference_evidence": {
-        "status": "EVIDENCED",
-        "sources": [
-          "api/routers/notifications.py",
-          "core/web_push.py",
-          "core/services/telegram_notification_outbox_queue_service.py"
-        ]
-      },
-      "regression_tests": [
-        "tests/test_notifications_router_mutations.py",
-        "tests/test_notifications_router_reads.py",
-        "tests/test_web_push.py",
-        "tests/test_p1_00_characterization_six_gaps.py"
-      ]
-    },
-    {
-      "contract_id": "BC-TG-CURRENT-V1",
-      "family": "TG",
-      "scope": "Bot messages/callbacks/FSM anchors, publisher dispatch and Telegram provider execution.",
-      "preconditions": {
-        "status": "APPLICABLE",
-        "rules": [
-          "User/Bot access and callback/FSM freshness pass.",
-          "Exactly one credentialed Telegram executor owns the enabled lane."
-        ]
-      },
-      "input": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Telegram update/callback or durable delivery job with identity, lane, payload hash and receipt context."
-        ]
-      },
-      "response": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Callback is acknowledged once and message/FSM state reflects the authoritative command.",
-          "Denied/stale action gets deterministic copy."
-        ]
-      },
-      "db_mutations": {
-        "status": "APPLICABLE",
-        "rules": [
-          "FSM/anchor/queue/provider receipt changes use legal transitions and atomic claim/ACK."
-        ]
-      },
-      "events_outbox": {
-        "status": "APPLICABLE",
-        "rules": [
-          "API/domain producers persist Telegram intent; the executor consumes without becoming business authority."
-        ]
-      },
-      "side_effects": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Only the Telegram executor sends/edits/answers through Bot API and records a nonsecret provider outcome."
-        ]
-      },
-      "ordering": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Validate freshness/authority, persist or claim receipt, execute provider call, then ACK/finalize.",
-          "Business commit is never inferred from provider success."
-        ]
-      },
-      "timeouts_retries": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Transient safe failures retry with bounded backoff.",
-          "Provider-ambiguous send enters reconciliation instead of blind replay."
-        ]
-      },
-      "idempotency_key": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Delivery job/receipt/payload identity and callback freshness prevent duplicate provider side effect."
-        ]
-      },
-      "failure_cases": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Second owner, stale callback/FSM, invalid lane/permission or ambiguous outcome fails closed/reconciles."
-        ]
-      },
-      "reference_evidence": {
-        "status": "EVIDENCED",
-        "sources": [
-          "run_bot.py",
-          "core/services/telegram_delivery_queue_service.py",
-          "core/telegram_delivery_queue_worker.py",
-          "bot/handlers"
-        ]
-      },
-      "regression_tests": [
-        "tests/test_telegram_delivery_queue_contract.py",
-        "tests/test_telegram_notification_outbox_worker.py",
-        "tests/test_telegram_multi_publisher_contract.py",
-        "tests/test_p1_00_characterization_six_gaps.py"
-      ]
-    },
-    {
-      "contract_id": "BC-ADMIN-CURRENT-V1",
-      "family": "ADMIN",
-      "scope": "Admin user/commodity/settings management, broadcasts and market/operator messages.",
-      "preconditions": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Current actor has the route/command-specific admin role.",
-          "Target entity and requested transition are current and valid."
-        ]
-      },
-      "input": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Validated admin command including actor, target, before/after intent and idempotency context where available."
-        ]
-      },
-      "response": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Unauthorized actor is denied without mutation.",
-          "Success returns the committed entity/setting/broadcast state."
-        ]
-      },
-      "db_mutations": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Admin-managed entity, audit-relevant state and delivery receipts commit according to the command transaction."
-        ]
-      },
-      "events_outbox": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Shared admin mutations and broadcast delivery intents use durable change/outbox paths."
-        ]
-      },
-      "side_effects": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Cache invalidation, notifications and broadcasts happen only for committed authorized commands and resolved audience."
-        ]
-      },
-      "ordering": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Authorize, validate target/transition, commit/audit, then invalidate cache or deliver.",
-          "Broadcast group selection is stored before confirmation/send."
-        ]
-      },
-      "timeouts_retries": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Retry reuses command/broadcast receipt and does not fan out twice.",
-          "Stale target/confirmation is rejected."
-        ]
-      },
-      "idempotency_key": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Admin command or broadcast receipt identifies the authoritative result and recipient fanout."
-        ]
-      },
-      "failure_cases": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Non-admin, invalid target/group/value, stale state or duplicate confirmation is denied/no-op deterministically."
-        ]
-      },
-      "reference_evidence": {
-        "status": "EVIDENCED",
-        "sources": [
-          "api/routers/admin_messages.py",
-          "bot/handlers/admin.py",
-          "bot/handlers/admin_broadcast.py",
-          "core/services/telegram_admin_broadcast_service.py"
-        ]
-      },
-      "regression_tests": [
-        "tests/test_admin_messages_router.py",
-        "tests/test_bot_admin_broadcast_handler.py",
-        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
-        "tests/test_p1_00_characterization_six_gaps.py"
-      ]
-    },
-    {
-      "contract_id": "BC-SYNC-CURRENT-V1",
-      "family": "SYNC",
-      "scope": "Committed change emission, delivery, signature/version validation, apply, gap/conflict and repair.",
-      "preconditions": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Table/version/field policy, source authority, sequence/hash/signature and peer identity are known.",
-          "Sensitive/local-only fields are excluded."
-        ]
-      },
-      "input": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Stable event identity, source/site, sequence, schema version, payload hash/signature and allowlisted mutation."
-        ]
-      },
-      "response": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Return applied, duplicate, retryable, rejected or quarantined with visible reason.",
-          "Unknown authority/schema/hash never returns applied."
-        ]
-      },
-      "db_mutations": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Business apply and checkpoint/dedupe update are atomic.",
-          "Duplicate delivery changes no business state."
-        ]
-      },
-      "events_outbox": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Local authoritative commit appends immutable outbound change; ACK only follows peer durable acceptance."
-        ]
-      },
-      "side_effects": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Peer transport/retry queue and operator health evidence reflect gaps/rejections without deleting history."
-        ]
-      },
-      "ordering": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Verify envelope and sequence before business apply, commit apply/checkpoint atomically, then ACK.",
-          "Gap repair is forward-only."
-        ]
-      },
-      "timeouts_retries": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Unavailable peer keeps local change pending with bounded retry.",
-          "Duplicate event replays acknowledgement without reapplication."
-        ]
-      },
-      "idempotency_key": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Stable event ID plus source sequence/hash is the dedupe and ordering identity."
-        ]
-      },
-      "failure_cases": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Unknown table/version/authority, forbidden field, signature/hash mismatch, gap or invariant violation fails closed/quarantines."
-        ]
-      },
-      "reference_evidence": {
-        "status": "EVIDENCED",
-        "sources": [
-          "api/routers/sync.py",
-          "core/sync_registry.py",
-          "core/sync_field_policy.py",
-          "core/sync_worker.py"
-        ]
-      },
-      "regression_tests": [
-        "tests/test_sync_router_apply_item_success.py",
-        "tests/test_sync_router_signature.py",
-        "tests/test_sync_router_resync.py",
-        "tests/test_sync_worker.py"
-      ]
-    },
-    {
-      "contract_id": "BC-OPS-CURRENT-V1",
-      "family": "OPS",
-      "scope": "Live OPS seeds only: public config, metrics, frontend serve, home/account/settings shell, catch-all system-recovery, and connectivity_monitor. Deploy/restart/backup/restore duration is not one of these seeds; it is DR-015.",
-      "preconditions": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Public config and metrics handlers expose non-secret runtime facts already available to the process.",
-          "Frontend/home/account/settings/system-recovery routes render or recover the shell without claiming backend readiness.",
-          "connectivity_monitor is an observational job authorized on historical iran and writes only redis:connectivity:global."
-        ]
-      },
-      "input": {
-        "status": "APPLICABLE",
-        "rules": [
-          "HTTP GET for /api/config, /metrics, /, /{full_path:path}, or the matching frontend routes; or the scheduled connectivity probe."
-        ]
-      },
-      "response": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Health/config/metrics report UNKNOWN/STALE/FAILED honestly and never paint missing evidence green.",
-          "Frontend shell recovery does not imply API or Bot readiness."
+          "Return current Trade/history projection; visibility follows participant and relation privacy.",
+          "This contract does not create or apply a Trade."
         ]
       },
       "db_mutations": {
         "status": "NOT_APPLICABLE",
-        "reason": "The ten live OPS seeds do not mutate product tables. connectivity_monitor.mutated_tables is empty; backup/restore mutations are not present in this inventory and stay under DR-015/DPL-1."
+        "reason": "TRADE READ_OR_STREAM seeds do not persist product rows; mutations belong to the mutation/job contracts."
       },
       "events_outbox": {
         "status": "NOT_APPLICABLE",
-        "reason": "Live OPS seeds emit no product outbox/event row; operator connectivity evidence is local Redis observation."
+        "reason": "TRADE READ_OR_STREAM seeds do not append a product outbox row."
       },
       "side_effects": {
-        "status": "APPLICABLE",
-        "rules": [
-          "connectivity_monitor may refresh redis:connectivity:global and must not change Web Writer, DNS or Telegram ownership.",
-          "Frontend static serve and shell recovery have no production deploy/restart/backup side effect."
-        ]
+        "status": "NOT_APPLICABLE",
+        "reason": "TRADE READ_OR_STREAM seeds do not send Telegram, Web Push, or publication side effects."
       },
       "ordering": {
         "status": "APPLICABLE",
         "rules": [
-          "Readiness/config/metrics observation is independent of Bot restart and of Web Writer state.",
-          "Shared PostgreSQL/Redis failure must be exposed, not masked as healthy."
+          "Authorize visibility, then read the projection.",
+          "Lock, commit and delivery belong to TRADE mutation/job contracts."
         ]
       },
       "timeouts_retries": {
-        "status": "APPLICABLE",
-        "rules": [
-          "Probe timeout becomes unknown/stale, not inferred healthy or automatic failover.",
-          "Measured deploy/restart/backup/restore durations are NOT_OBSERVED and are not estimated here."
-        ]
+        "status": "NOT_APPLICABLE",
+        "reason": "TRADE READ_OR_STREAM views have no Trade receipt to retry."
       },
       "idempotency_key": {
         "status": "NOT_APPLICABLE",
-        "reason": "Read-only config/metrics/frontend and observational connectivity have no product command identity; later DPL-1 operation journals own deploy/restore idempotency."
+        "reason": "Read/stream operations have no product command identity."
       },
       "failure_cases": {
         "status": "APPLICABLE",
         "rules": [
-          "Unknown release/schema/config/owner or failed readiness blocks activation claims.",
-          "No lease, timer or connectivity signal changes Web Writer."
+          "Unauthorized or missing Trade is denied without inventory or receipt write."
         ]
       },
       "reference_evidence": {
         "status": "EVIDENCED",
         "sources": [
-          "main.py",
-          "core/background_job_authority.py",
-          "docs/refactor/two-server/section-1/inventory/surface-jobs.json"
+          "api/routers/trades.py",
+          "bot/handlers/trade_create.py",
+          "bot/handlers/trade_execute.py",
+          "bot/handlers/trade_history.py"
         ]
       },
       "regression_tests": [
-        "tests/test_main_lifespan.py",
-        "tests/test_main_foreign_surface_guard.py",
-        "tests/test_deployment_surface_guard.py",
-        "tests/test_core_connectivity.py"
-      ]
+        "tests/api_load_test.py",
+        "tests/test_background_job_authority.py",
+        "tests/test_bot_admin_commodities_show_aliases.py",
+        "tests/test_bot_keyboards.py"
+      ],
+      "mutation_class": "READ_OR_STREAM"
+    },
+    {
+      "contract_id": "BC-TRADE-JOB-V1",
+      "family": "TRADE",
+      "scope": "Scheduled TRADE jobs: trade_telegram_delivery, trade_webapp_delivery.",
+      "preconditions": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Job authority and current_allowed_servers are evaluated before TRADE job work.",
+          "Exactly one authorized owner may run the job."
+        ]
+      },
+      "input": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Scheduler/lease trigger for one of: trade_telegram_delivery, trade_webapp_delivery."
+        ]
+      },
+      "response": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Job completes, retries, or fails closed without claiming product HTTP success."
+        ]
+      },
+      "db_mutations": {
+        "status": "APPLICABLE",
+        "rules": [
+          "May persist only notifications, trade_delivery_receipts."
+        ]
+      },
+      "events_outbox": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Durable job/receipt or outbound intent is recorded before provider work when the job uses one."
+        ]
+      },
+      "side_effects": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Telegram private trade message",
+          "local Web Push notification",
+          "local realtime notification event",
+          "external_state Telegram Bot API"
+        ]
+      },
+      "ordering": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Lock/revalidate Offer and limits, commit business facts/receipts, then deliver.",
+          "Wizard back/cancel changes FSM presentation only when its state is current."
+        ]
+      },
+      "timeouts_retries": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Stale Offer/request/FSM state is rejected.",
+          "Delivery retries do not apply the Trade or notify twice."
+        ]
+      },
+      "idempotency_key": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Request/Trade receipt and contention guard select one winner for retries and concurrent commands."
+        ]
+      },
+      "failure_cases": {
+        "status": "APPLICABLE",
+        "rules": [
+          "Oversell, negative inventory, limit breach, stale wizard, wrong authority or invalid transition fails closed.",
+          "Post-commit delivery failure leaves a repairable receipt."
+        ]
+      },
+      "reference_evidence": {
+        "status": "EVIDENCED",
+        "sources": [
+          "api/routers/trades.py",
+          "bot/handlers/trade_create.py",
+          "bot/handlers/trade_execute.py",
+          "core/trade_delivery_worker.py"
+        ]
+      },
+      "regression_tests": [
+        "tests/test_background_job_authority.py",
+        "tests/test_trade_delivery_worker.py",
+        "tests/test_telegram_trade_result_queue_bridge_postgres.py",
+        "tests/test_main_lifespan.py"
+      ],
+      "mutation_class": "SCHEDULED_JOB"
     },
     {
       "contract_id": "BC-SURFACE-POLICY-CURRENT-V1",
@@ -1247,55 +2673,157 @@
       "inventory/surface-web.json",
       "inventory/surface-jobs.json"
     ],
-    "resolution": "For each seed, select the single rule whose family equals seed.family; inherit that seed's handler/path/filter/source and non-meta test_refs as seed-specific evidence.",
+    "resolution": "For each seed, select the single rule whose family and mutation_class both match; use that seed's handler/path/filter/source and non-meta test_refs as seed-specific evidence.",
     "rules": [
       {
-        "family": "AUTH",
-        "contract_id": "BC-AUTH-CURRENT-V1"
-      },
-      {
-        "family": "IDENTITY",
-        "contract_id": "BC-IDENTITY-CURRENT-V1"
-      },
-      {
-        "family": "OFFER",
-        "contract_id": "BC-OFFER-CURRENT-V1"
-      },
-      {
-        "family": "REQUEST",
-        "contract_id": "BC-REQUEST-CURRENT-V1"
-      },
-      {
-        "family": "TRADE",
-        "contract_id": "BC-TRADE-CURRENT-V1"
-      },
-      {
-        "family": "MARKET",
-        "contract_id": "BC-MARKET-CURRENT-V1"
-      },
-      {
-        "family": "MSG",
-        "contract_id": "BC-MSG-CURRENT-V1"
-      },
-      {
-        "family": "NOTIFY",
-        "contract_id": "BC-NOTIFY-CURRENT-V1"
-      },
-      {
-        "family": "TG",
-        "contract_id": "BC-TG-CURRENT-V1"
+        "family": "ADMIN",
+        "mutation_class": "MUTATION_OR_COMMAND",
+        "contract_id": "BC-ADMIN-MUTATION-V1"
       },
       {
         "family": "ADMIN",
-        "contract_id": "BC-ADMIN-CURRENT-V1"
+        "mutation_class": "READ_OR_STREAM",
+        "contract_id": "BC-ADMIN-READ-V1"
       },
       {
-        "family": "SYNC",
-        "contract_id": "BC-SYNC-CURRENT-V1"
+        "family": "AUTH",
+        "mutation_class": "MUTATION_OR_COMMAND",
+        "contract_id": "BC-AUTH-MUTATION-V1"
+      },
+      {
+        "family": "AUTH",
+        "mutation_class": "READ_OR_STREAM",
+        "contract_id": "BC-AUTH-READ-V1"
+      },
+      {
+        "family": "AUTH",
+        "mutation_class": "SCHEDULED_JOB",
+        "contract_id": "BC-AUTH-JOB-V1"
+      },
+      {
+        "family": "IDENTITY",
+        "mutation_class": "MUTATION_OR_COMMAND",
+        "contract_id": "BC-IDENTITY-MUTATION-V1"
+      },
+      {
+        "family": "IDENTITY",
+        "mutation_class": "READ_OR_STREAM",
+        "contract_id": "BC-IDENTITY-READ-V1"
+      },
+      {
+        "family": "IDENTITY",
+        "mutation_class": "SCHEDULED_JOB",
+        "contract_id": "BC-IDENTITY-JOB-V1"
+      },
+      {
+        "family": "MARKET",
+        "mutation_class": "READ_OR_STREAM",
+        "contract_id": "BC-MARKET-READ-V1"
+      },
+      {
+        "family": "MARKET",
+        "mutation_class": "SCHEDULED_JOB",
+        "contract_id": "BC-MARKET-JOB-V1"
+      },
+      {
+        "family": "MSG",
+        "mutation_class": "MUTATION_OR_COMMAND",
+        "contract_id": "BC-MSG-MUTATION-V1"
+      },
+      {
+        "family": "MSG",
+        "mutation_class": "READ_OR_STREAM",
+        "contract_id": "BC-MSG-READ-V1"
+      },
+      {
+        "family": "NOTIFY",
+        "mutation_class": "MUTATION_OR_COMMAND",
+        "contract_id": "BC-NOTIFY-MUTATION-V1"
+      },
+      {
+        "family": "NOTIFY",
+        "mutation_class": "READ_OR_STREAM",
+        "contract_id": "BC-NOTIFY-READ-V1"
+      },
+      {
+        "family": "OFFER",
+        "mutation_class": "MUTATION_OR_COMMAND",
+        "contract_id": "BC-OFFER-MUTATION-V1"
+      },
+      {
+        "family": "OFFER",
+        "mutation_class": "READ_OR_STREAM",
+        "contract_id": "BC-OFFER-READ-V1"
+      },
+      {
+        "family": "OFFER",
+        "mutation_class": "SCHEDULED_JOB",
+        "contract_id": "BC-OFFER-JOB-V1"
       },
       {
         "family": "OPS",
-        "contract_id": "BC-OPS-CURRENT-V1"
+        "mutation_class": "READ_OR_STREAM",
+        "contract_id": "BC-OPS-READ-V1"
+      },
+      {
+        "family": "OPS",
+        "mutation_class": "SCHEDULED_JOB",
+        "contract_id": "BC-OPS-JOB-V1"
+      },
+      {
+        "family": "REQUEST",
+        "mutation_class": "MUTATION_OR_COMMAND",
+        "contract_id": "BC-REQUEST-MUTATION-V1"
+      },
+      {
+        "family": "REQUEST",
+        "mutation_class": "READ_OR_STREAM",
+        "contract_id": "BC-REQUEST-READ-V1"
+      },
+      {
+        "family": "SYNC",
+        "mutation_class": "MUTATION_OR_COMMAND",
+        "contract_id": "BC-SYNC-MUTATION-V1"
+      },
+      {
+        "family": "SYNC",
+        "mutation_class": "READ_OR_STREAM",
+        "contract_id": "BC-SYNC-READ-V1"
+      },
+      {
+        "family": "SYNC",
+        "mutation_class": "SCHEDULED_JOB",
+        "contract_id": "BC-SYNC-JOB-V1"
+      },
+      {
+        "family": "TG",
+        "mutation_class": "MUTATION_OR_COMMAND",
+        "contract_id": "BC-TG-MUTATION-V1"
+      },
+      {
+        "family": "TG",
+        "mutation_class": "READ_OR_STREAM",
+        "contract_id": "BC-TG-READ-V1"
+      },
+      {
+        "family": "TG",
+        "mutation_class": "SCHEDULED_JOB",
+        "contract_id": "BC-TG-JOB-V1"
+      },
+      {
+        "family": "TRADE",
+        "mutation_class": "MUTATION_OR_COMMAND",
+        "contract_id": "BC-TRADE-MUTATION-V1"
+      },
+      {
+        "family": "TRADE",
+        "mutation_class": "READ_OR_STREAM",
+        "contract_id": "BC-TRADE-READ-V1"
+      },
+      {
+        "family": "TRADE",
+        "mutation_class": "SCHEDULED_JOB",
+        "contract_id": "BC-TRADE-JOB-V1"
       }
     ],
     "expected_seed_count": 465,
@@ -1313,7 +2841,39 @@
       "SYNC": 6,
       "OPS": 10
     },
-    "resolved_index_sha256": "5b009ae7b2fa979f36e5e91dc9b12cdc150a6efd80436f4d7aed4c3062efae0f"
+    "expected_class_counts": {
+      "ADMIN:MUTATION_OR_COMMAND": 79,
+      "ADMIN:READ_OR_STREAM": 15,
+      "AUTH:MUTATION_OR_COMMAND": 38,
+      "AUTH:READ_OR_STREAM": 10,
+      "AUTH:SCHEDULED_JOB": 2,
+      "IDENTITY:MUTATION_OR_COMMAND": 42,
+      "IDENTITY:READ_OR_STREAM": 31,
+      "IDENTITY:SCHEDULED_JOB": 2,
+      "MARKET:READ_OR_STREAM": 2,
+      "MARKET:SCHEDULED_JOB": 2,
+      "MSG:MUTATION_OR_COMMAND": 40,
+      "MSG:READ_OR_STREAM": 21,
+      "NOTIFY:MUTATION_OR_COMMAND": 8,
+      "NOTIFY:READ_OR_STREAM": 8,
+      "OFFER:MUTATION_OR_COMMAND": 27,
+      "OFFER:READ_OR_STREAM": 9,
+      "OFFER:SCHEDULED_JOB": 2,
+      "OPS:READ_OR_STREAM": 9,
+      "OPS:SCHEDULED_JOB": 1,
+      "REQUEST:MUTATION_OR_COMMAND": 6,
+      "REQUEST:READ_OR_STREAM": 3,
+      "SYNC:MUTATION_OR_COMMAND": 3,
+      "SYNC:READ_OR_STREAM": 2,
+      "SYNC:SCHEDULED_JOB": 1,
+      "TG:MUTATION_OR_COMMAND": 30,
+      "TG:READ_OR_STREAM": 9,
+      "TG:SCHEDULED_JOB": 3,
+      "TRADE:MUTATION_OR_COMMAND": 43,
+      "TRADE:READ_OR_STREAM": 15,
+      "TRADE:SCHEDULED_JOB": 2
+    },
+    "resolved_index_sha256": "d69d483a8eeeb4274b9809c897ab96a403d2409bcf399ab9d0b4244894806131"
   },
   "matrix": {
     "contract_id": "BC-SURFACE-POLICY-CURRENT-V1",
@@ -1334,7 +2894,7 @@
         "applicability": "APPLICABLE",
         "eligibility": {
           "decision": "ELIGIBLE",
-          "predicate": "composed persona×WEBAPP×time is not INELIGIBLE"
+          "predicate": "request_origin=WEBAPP AND persona in {PERSONA-DIRECT-OWNER, PERSONA-CUSTOMER-TIER1, PERSONA-ADMIN with command guards} or PERSONA-CUSTOMER-TIER2 request-only AND time_context in {normal, overtime}"
         },
         "expected_outcome": "Offer remains WEBAPP-origin and Request/action remains WEBAPP-origin; Web confirmation/notification unchanged.",
         "rule_sources": [
@@ -1352,7 +2912,7 @@
         "applicability": "APPLICABLE",
         "eligibility": {
           "decision": "ELIGIBLE",
-          "predicate": "composed persona×TELEGRAM_BOT×time is ELIGIBLE and telegram link is present"
+          "predicate": "request_origin=TELEGRAM_BOT AND telegram identity is linked AND persona in {PERSONA-DIRECT-OWNER, PERSONA-CUSTOMER-TIER1, PERSONA-ADMIN} with evaluate_bot_access allowing the role AND time_context in {normal, overtime}"
         },
         "expected_outcome": "Offer remains WEBAPP-origin; Request records TELEGRAM_BOT and keeps Bot callback/copy.",
         "rule_sources": [
@@ -1371,7 +2931,7 @@
         "applicability": "APPLICABLE",
         "eligibility": {
           "decision": "ELIGIBLE",
-          "predicate": "composed persona×WEBAPP×time is not INELIGIBLE"
+          "predicate": "request_origin=WEBAPP AND persona in {PERSONA-DIRECT-OWNER, PERSONA-CUSTOMER-TIER1, PERSONA-ADMIN with command guards} or PERSONA-CUSTOMER-TIER2 request-only AND time_context in {normal, overtime}"
         },
         "expected_outcome": "Offer remains TELEGRAM_BOT-origin; Web action cannot rewrite publication or origin.",
         "rule_sources": [
@@ -1389,7 +2949,7 @@
         "applicability": "APPLICABLE",
         "eligibility": {
           "decision": "ELIGIBLE",
-          "predicate": "composed persona×TELEGRAM_BOT×time is ELIGIBLE and one Telegram executor owns the lane"
+          "predicate": "request_origin=TELEGRAM_BOT AND telegram identity is linked AND persona in {PERSONA-DIRECT-OWNER, PERSONA-CUSTOMER-TIER1, PERSONA-ADMIN} with evaluate_bot_access allowing the role AND time_context in {normal, overtime} AND one Telegram executor owns the lane"
         },
         "expected_outcome": "Both provenances stay explicit; one Telegram executor owns callbacks/delivery.",
         "rule_sources": [
@@ -1847,9 +3407,11 @@
     "orphan_contracts": 0,
     "orphan_seeds": 0,
     "not_applicable_without_reason": 0,
+    "read_mapped_to_mutation_contract": 0,
+    "cross_family_failure_evidence": 0,
     "scenario_work_item": "READY_FOR_CODEX_FINAL_REVIEW",
     "target_result": "NOT_RUN",
-    "complete_forbidden_until": "Codex confirms real contracts, definite eligibility, seed evidence and compact source."
+    "complete_forbidden_until": "Codex confirms operation-class contracts, family-bound failure evidence and explicit eligibility."
   },
   "composed_eligibility": [
     {
@@ -2467,11 +4029,11 @@
         },
         "TELEGRAM_BOT": {
           "decision": "ELIGIBLE",
-          "predicate": "telegram identity is linked AND composed persona×TELEGRAM_BOT×time is not INELIGIBLE",
+          "predicate": "telegram identity is linked AND persona in {PERSONA-DIRECT-OWNER, PERSONA-CUSTOMER-TIER1, PERSONA-ADMIN} AND evaluate_bot_access allows the role AND time_context in {normal, overtime}",
           "expected_outcome": "Bot market command may proceed under Bot policy."
         }
       },
-      "expected_outcome": "Linked Bot users follow composed persona×time; Web is unchanged.",
+      "expected_outcome": "Linked admitted Bot personas may run Bot market commands in normal/overtime; Web is unchanged.",
       "rule_sources": [
         "core/services/bot_access_policy.py",
         "tests/test_bot_link_account_guards.py"
@@ -2594,7 +4156,7 @@
       "applicability": "APPLICABLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "composed decision is not INELIGIBLE"
+        "predicate": "Request/Trade confirmation applies when persona is owner, tier-1, admin-with-guards, or tier-2-request-only on WEBAPP, or a linked admitted Bot persona, and time_context is normal or overtime"
       },
       "expected_outcome": "Normal Request requires owner decision before Trade. Overtime requires a fresh owner decision. Offer create is self-authorizing. Denied personas have no confirmation path.",
       "rule_sources": [
@@ -2700,9 +4262,14 @@
       },
       "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
       "rule_sources": [
-        "tests/test_offers_router_create_success.py",
-        "tests/test_offer_overtime_request_service.py",
-        "tests/test_sync_router_apply_item_success.py"
+        "tests/test_auth_router_login_otp_flows.py",
+        "tests/test_auth_router_session_flows.py",
+        "tests/test_auth_router_special_logins.py"
+      ],
+      "evidence_refs": [
+        "tests/test_auth_router_login_otp_flows.py",
+        "tests/test_auth_router_session_flows.py",
+        "tests/test_auth_router_special_logins.py"
       ]
     },
     {
@@ -2717,9 +4284,10 @@
       },
       "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
       "rule_sources": [
-        "tests/test_offer_publication_worker.py",
-        "tests/test_trade_delivery_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
+        "tests/test_stage6_otp_delivery.py"
+      ],
+      "evidence_refs": [
+        "tests/test_stage6_otp_delivery.py"
       ]
     },
     {
@@ -2734,9 +4302,10 @@
       },
       "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
       "rule_sources": [
-        "tests/test_telegram_delivery_queue_postgres.py",
-        "tests/test_telegram_delivery_queue_contract.py",
-        "tests/test_web_push.py"
+        "tests/test_stage6_otp_delivery.py"
+      ],
+      "evidence_refs": [
+        "tests/test_stage6_otp_delivery.py"
       ]
     },
     {
@@ -2749,12 +4318,18 @@
         "decision": "ELIGIBLE",
         "predicate": "AUTH: two overlapping mutating commands share a durable identity"
       },
-      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
+      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect. Evidence for this AUTH boundary is the named blocker P1-00-FB-AUTH-TWO_CONCURRENT_COMMANDS.",
       "rule_sources": [
-        "tests/test_offer_request_ledger_service.py",
-        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
-        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
-      ]
+        "api/routers/auth.py",
+        "api/routers/sessions.py",
+        "frontend/src/router/index.ts"
+      ],
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-AUTH-TWO_CONCURRENT_COMMANDS",
+        "status": "NAMED_BLOCKER",
+        "reason": "No AUTH inventory test_ref is bound to two_concurrent_commands. Another family's Offer/sync/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "AUTH__PROCESS-RESTART",
@@ -2766,12 +4341,18 @@
         "decision": "ELIGIBLE",
         "predicate": "AUTH: process restart must resume durable family state or expose independent API/Bot lifecycle"
       },
-      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion. Evidence for this AUTH boundary is the named blocker P1-00-FB-AUTH-PROCESS_RESTART.",
       "rule_sources": [
-        "tests/test_main_lifespan.py",
-        "tests/test_sync_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
-      ]
+        "api/routers/auth.py",
+        "api/routers/sessions.py",
+        "frontend/src/router/index.ts"
+      ],
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-AUTH-PROCESS_RESTART",
+        "status": "NAMED_BLOCKER",
+        "reason": "No AUTH inventory test_ref is bound to process_restart. Another family's Offer/sync/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "AUTH__UNKNOWN-AUTHORITY-SCHEMA-HASH",
@@ -2786,8 +4367,13 @@
       "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
       "rule_sources": [
         "tests/test_background_job_authority.py",
-        "tests/test_sync_router_signature.py",
-        "tests/test_sync_field_policy.py"
+        "tests/test_main_foreign_surface_guard.py",
+        "tests/test_session_authority.py"
+      ],
+      "evidence_refs": [
+        "tests/test_background_job_authority.py",
+        "tests/test_main_foreign_surface_guard.py",
+        "tests/test_session_authority.py"
       ]
     },
     {
@@ -2802,9 +4388,14 @@
       },
       "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
       "rule_sources": [
-        "tests/test_offers_router_create_success.py",
-        "tests/test_offer_overtime_request_service.py",
-        "tests/test_sync_router_apply_item_success.py"
+        "tests/test_bot_link_account_guards.py",
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_users_router_mutation_authority.py"
+      ],
+      "evidence_refs": [
+        "tests/test_bot_link_account_guards.py",
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_users_router_mutation_authority.py"
       ]
     },
     {
@@ -2820,8 +4411,11 @@
       "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
       "rule_sources": [
         "tests/test_offer_publication_worker.py",
-        "tests/test_trade_delivery_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
+        "tests/test_trade_delivery_reconciliation_service.py"
+      ],
+      "evidence_refs": [
+        "tests/test_offer_publication_worker.py",
+        "tests/test_trade_delivery_reconciliation_service.py"
       ]
     },
     {
@@ -2836,8 +4430,9 @@
       },
       "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
       "rule_sources": [
-        "tests/test_telegram_delivery_queue_postgres.py",
-        "tests/test_telegram_delivery_queue_contract.py",
+        "tests/test_web_push.py"
+      ],
+      "evidence_refs": [
         "tests/test_web_push.py"
       ]
     },
@@ -2853,9 +4448,10 @@
       },
       "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
       "rule_sources": [
-        "tests/test_offer_request_ledger_service.py",
-        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
-        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
+        "tests/test_bot_start_confirm_trade.py"
+      ],
+      "evidence_refs": [
+        "tests/test_bot_start_confirm_trade.py"
       ]
     },
     {
@@ -2870,9 +4466,10 @@
       },
       "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
       "rule_sources": [
-        "tests/test_main_lifespan.py",
-        "tests/test_sync_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
+        "tests/test_offer_publication_worker.py"
+      ],
+      "evidence_refs": [
+        "tests/test_offer_publication_worker.py"
       ]
     },
     {
@@ -2888,8 +4485,13 @@
       "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
       "rule_sources": [
         "tests/test_background_job_authority.py",
-        "tests/test_sync_router_signature.py",
-        "tests/test_sync_field_policy.py"
+        "tests/test_bot_link_account_guards.py",
+        "tests/test_users_router_mutation_authority.py"
+      ],
+      "evidence_refs": [
+        "tests/test_background_job_authority.py",
+        "tests/test_bot_link_account_guards.py",
+        "tests/test_users_router_mutation_authority.py"
       ]
     },
     {
@@ -2904,9 +4506,14 @@
       },
       "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
       "rule_sources": [
-        "tests/test_offers_router_create_success.py",
-        "tests/test_offer_overtime_request_service.py",
-        "tests/test_sync_router_apply_item_success.py"
+        "tests/test_bot_trade_create_helper_cancel.py",
+        "tests/test_bot_trade_create_repeat_offer.py",
+        "tests/test_bot_trade_create_stale_state_text_offer.py"
+      ],
+      "evidence_refs": [
+        "tests/test_bot_trade_create_helper_cancel.py",
+        "tests/test_bot_trade_create_repeat_offer.py",
+        "tests/test_bot_trade_create_stale_state_text_offer.py"
       ]
     },
     {
@@ -2922,8 +4529,11 @@
       "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
       "rule_sources": [
         "tests/test_offer_publication_worker.py",
-        "tests/test_trade_delivery_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
+        "tests/test_telegram_delivery_callsite_inventory.py"
+      ],
+      "evidence_refs": [
+        "tests/test_offer_publication_worker.py",
+        "tests/test_telegram_delivery_callsite_inventory.py"
       ]
     },
     {
@@ -2938,8 +4548,9 @@
       },
       "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
       "rule_sources": [
-        "tests/test_telegram_delivery_queue_postgres.py",
-        "tests/test_telegram_delivery_queue_contract.py",
+        "tests/test_web_push.py"
+      ],
+      "evidence_refs": [
         "tests/test_web_push.py"
       ]
     },
@@ -2955,9 +4566,10 @@
       },
       "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
       "rule_sources": [
-        "tests/test_offer_request_ledger_service.py",
-        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
-        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
+        "tests/test_bot_trade_create_text_offer_warning_confirm.py"
+      ],
+      "evidence_refs": [
+        "tests/test_bot_trade_create_text_offer_warning_confirm.py"
       ]
     },
     {
@@ -2972,9 +4584,10 @@
       },
       "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
       "rule_sources": [
-        "tests/test_main_lifespan.py",
-        "tests/test_sync_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
+        "tests/test_offer_publication_worker.py"
+      ],
+      "evidence_refs": [
+        "tests/test_offer_publication_worker.py"
       ]
     },
     {
@@ -2990,8 +4603,13 @@
       "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
       "rule_sources": [
         "tests/test_background_job_authority.py",
-        "tests/test_sync_router_signature.py",
-        "tests/test_sync_field_policy.py"
+        "tests/test_bot_trade_create_text_offer_guards.py",
+        "tests/test_main_foreign_surface_guard.py"
+      ],
+      "evidence_refs": [
+        "tests/test_background_job_authority.py",
+        "tests/test_bot_trade_create_text_offer_guards.py",
+        "tests/test_main_foreign_surface_guard.py"
       ]
     },
     {
@@ -3004,12 +4622,17 @@
         "decision": "ELIGIBLE",
         "predicate": "REQUEST: family command mutates durable product state"
       },
-      "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
+      "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect. Evidence for this REQUEST boundary is the named blocker P1-00-FB-REQUEST-FAILURE_BEFORE_DB_COMMIT.",
       "rule_sources": [
-        "tests/test_offers_router_create_success.py",
-        "tests/test_offer_overtime_request_service.py",
-        "tests/test_sync_router_apply_item_success.py"
-      ]
+        "api/routers/trades.py",
+        "bot/handlers/offer_overtime_callbacks.py"
+      ],
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-REQUEST-FAILURE_BEFORE_DB_COMMIT",
+        "status": "NAMED_BLOCKER",
+        "reason": "No REQUEST inventory test_ref is bound to failure_before_db_commit. Another family's Offer/sync/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "REQUEST__COMMIT-BEFORE-EVENT-SIDE-EFFECT",
@@ -3023,9 +4646,12 @@
       },
       "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
       "rule_sources": [
-        "tests/test_offer_publication_worker.py",
-        "tests/test_trade_delivery_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
+        "tests/test_telegram_delivery_overtime_owner_approval_contract.py",
+        "tests/test_telegram_notification_outbox_service.py"
+      ],
+      "evidence_refs": [
+        "tests/test_telegram_delivery_overtime_owner_approval_contract.py",
+        "tests/test_telegram_notification_outbox_service.py"
       ]
     },
     {
@@ -3040,9 +4666,10 @@
       },
       "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
       "rule_sources": [
-        "tests/test_telegram_delivery_queue_postgres.py",
-        "tests/test_telegram_delivery_queue_contract.py",
-        "tests/test_web_push.py"
+        "tests/test_telegram_notification_outbox_service.py"
+      ],
+      "evidence_refs": [
+        "tests/test_telegram_notification_outbox_service.py"
       ]
     },
     {
@@ -3055,12 +4682,17 @@
         "decision": "ELIGIBLE",
         "predicate": "REQUEST: two overlapping mutating commands share a durable identity"
       },
-      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
+      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect. Evidence for this REQUEST boundary is the named blocker P1-00-FB-REQUEST-TWO_CONCURRENT_COMMANDS.",
       "rule_sources": [
-        "tests/test_offer_request_ledger_service.py",
-        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
-        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
-      ]
+        "api/routers/trades.py",
+        "bot/handlers/offer_overtime_callbacks.py"
+      ],
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-REQUEST-TWO_CONCURRENT_COMMANDS",
+        "status": "NAMED_BLOCKER",
+        "reason": "No REQUEST inventory test_ref is bound to two_concurrent_commands. Another family's Offer/sync/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "REQUEST__PROCESS-RESTART",
@@ -3072,12 +4704,17 @@
         "decision": "ELIGIBLE",
         "predicate": "REQUEST: process restart must resume durable family state or expose independent API/Bot lifecycle"
       },
-      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion. Evidence for this REQUEST boundary is the named blocker P1-00-FB-REQUEST-PROCESS_RESTART.",
       "rule_sources": [
-        "tests/test_main_lifespan.py",
-        "tests/test_sync_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
-      ]
+        "api/routers/trades.py",
+        "bot/handlers/offer_overtime_callbacks.py"
+      ],
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-REQUEST-PROCESS_RESTART",
+        "status": "NAMED_BLOCKER",
+        "reason": "No REQUEST inventory test_ref is bound to process_restart. Another family's Offer/sync/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "REQUEST__UNKNOWN-AUTHORITY-SCHEMA-HASH",
@@ -3089,12 +4726,17 @@
         "decision": "ELIGIBLE",
         "predicate": "REQUEST: unknown actor, schema, hash or owner must fail closed"
       },
-      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
+      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence. Evidence for this REQUEST boundary is the named blocker P1-00-FB-REQUEST-UNKNOWN_AUTHORITY_SCHEMA_HASH.",
       "rule_sources": [
-        "tests/test_background_job_authority.py",
-        "tests/test_sync_router_signature.py",
-        "tests/test_sync_field_policy.py"
-      ]
+        "api/routers/trades.py",
+        "bot/handlers/offer_overtime_callbacks.py"
+      ],
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-REQUEST-UNKNOWN_AUTHORITY_SCHEMA_HASH",
+        "status": "NAMED_BLOCKER",
+        "reason": "No REQUEST inventory test_ref is bound to unknown_authority_schema_hash. Another family's Offer/sync/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "TRADE__FAILURE-BEFORE-DB-COMMIT",
@@ -3108,9 +4750,14 @@
       },
       "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
       "rule_sources": [
-        "tests/test_offers_router_create_success.py",
-        "tests/test_offer_overtime_request_service.py",
-        "tests/test_sync_router_apply_item_success.py"
+        "tests/test_bot_trade_create_accept_suggested_lots.py",
+        "tests/test_bot_trade_create_back_cancel.py",
+        "tests/test_bot_trade_create_commodity_page.py"
+      ],
+      "evidence_refs": [
+        "tests/test_bot_trade_create_accept_suggested_lots.py",
+        "tests/test_bot_trade_create_back_cancel.py",
+        "tests/test_bot_trade_create_commodity_page.py"
       ]
     },
     {
@@ -3126,8 +4773,13 @@
       "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
       "rule_sources": [
         "tests/test_offer_publication_worker.py",
-        "tests/test_trade_delivery_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
+        "tests/test_telegram_notification_outbox_worker.py",
+        "tests/test_trade_delivery_staging_validation_report.py"
+      ],
+      "evidence_refs": [
+        "tests/test_offer_publication_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py",
+        "tests/test_trade_delivery_staging_validation_report.py"
       ]
     },
     {
@@ -3142,8 +4794,11 @@
       },
       "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
       "rule_sources": [
-        "tests/test_telegram_delivery_queue_postgres.py",
-        "tests/test_telegram_delivery_queue_contract.py",
+        "tests/test_telegram_notification_outbox_worker.py",
+        "tests/test_web_push.py"
+      ],
+      "evidence_refs": [
+        "tests/test_telegram_notification_outbox_worker.py",
         "tests/test_web_push.py"
       ]
     },
@@ -3159,9 +4814,12 @@
       },
       "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
       "rule_sources": [
-        "tests/test_offer_request_ledger_service.py",
-        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
-        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
+        "tests/test_bot_trade_create_text_offer_warning_confirm.py",
+        "tests/test_bot_trade_utils_quantity_confirm_keyboards.py"
+      ],
+      "evidence_refs": [
+        "tests/test_bot_trade_create_text_offer_warning_confirm.py",
+        "tests/test_bot_trade_utils_quantity_confirm_keyboards.py"
       ]
     },
     {
@@ -3177,7 +4835,12 @@
       "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
       "rule_sources": [
         "tests/test_main_lifespan.py",
-        "tests/test_sync_worker.py",
+        "tests/test_offer_publication_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ],
+      "evidence_refs": [
+        "tests/test_main_lifespan.py",
+        "tests/test_offer_publication_worker.py",
         "tests/test_telegram_notification_outbox_worker.py"
       ]
     },
@@ -3194,8 +4857,13 @@
       "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
       "rule_sources": [
         "tests/test_background_job_authority.py",
-        "tests/test_sync_router_signature.py",
-        "tests/test_sync_field_policy.py"
+        "tests/test_bot_trade_create_remaining_guards.py",
+        "tests/test_bot_trade_execute_offer_guards.py"
+      ],
+      "evidence_refs": [
+        "tests/test_background_job_authority.py",
+        "tests/test_bot_trade_create_remaining_guards.py",
+        "tests/test_bot_trade_execute_offer_guards.py"
       ]
     },
     {
@@ -3210,9 +4878,10 @@
       },
       "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
       "rule_sources": [
-        "tests/test_offers_router_create_success.py",
-        "tests/test_offer_overtime_request_service.py",
-        "tests/test_sync_router_apply_item_success.py"
+        "tests/test_offers_router_create_success.py"
+      ],
+      "evidence_refs": [
+        "tests/test_offers_router_create_success.py"
       ]
     },
     {
@@ -3225,12 +4894,16 @@
         "decision": "ELIGIBLE",
         "predicate": "MARKET: family command commits then emits an async outbox or delivery intent"
       },
-      "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
+      "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure. Evidence for this MARKET boundary is the named blocker P1-00-FB-MARKET-COMMIT_BEFORE_EVENT_SIDE_EFFECT.",
       "rule_sources": [
-        "tests/test_offer_publication_worker.py",
-        "tests/test_trade_delivery_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
-      ]
+        "api/routers/offers.py"
+      ],
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-MARKET-COMMIT_BEFORE_EVENT_SIDE_EFFECT",
+        "status": "NAMED_BLOCKER",
+        "reason": "No MARKET inventory test_ref is bound to commit_before_event_side_effect. Another family's Offer/sync/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "MARKET__SIDE-EFFECT-BEFORE-ACK",
@@ -3242,12 +4915,16 @@
         "decision": "ELIGIBLE",
         "predicate": "MARKET: family command has an external or realtime provider side effect"
       },
-      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
+      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice. Evidence for this MARKET boundary is the named blocker P1-00-FB-MARKET-SIDE_EFFECT_BEFORE_ACK.",
       "rule_sources": [
-        "tests/test_telegram_delivery_queue_postgres.py",
-        "tests/test_telegram_delivery_queue_contract.py",
-        "tests/test_web_push.py"
-      ]
+        "api/routers/offers.py"
+      ],
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-MARKET-SIDE_EFFECT_BEFORE_ACK",
+        "status": "NAMED_BLOCKER",
+        "reason": "No MARKET inventory test_ref is bound to side_effect_before_ack. Another family's Offer/sync/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "MARKET__TWO-CONCURRENT-COMMANDS",
@@ -3259,12 +4936,16 @@
         "decision": "ELIGIBLE",
         "predicate": "MARKET: two overlapping mutating commands share a durable identity"
       },
-      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
+      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect. Evidence for this MARKET boundary is the named blocker P1-00-FB-MARKET-TWO_CONCURRENT_COMMANDS.",
       "rule_sources": [
-        "tests/test_offer_request_ledger_service.py",
-        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
-        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
-      ]
+        "api/routers/offers.py"
+      ],
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-MARKET-TWO_CONCURRENT_COMMANDS",
+        "status": "NAMED_BLOCKER",
+        "reason": "No MARKET inventory test_ref is bound to two_concurrent_commands. Another family's Offer/sync/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "MARKET__PROCESS-RESTART",
@@ -3276,12 +4957,16 @@
         "decision": "ELIGIBLE",
         "predicate": "MARKET: process restart must resume durable family state or expose independent API/Bot lifecycle"
       },
-      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion. Evidence for this MARKET boundary is the named blocker P1-00-FB-MARKET-PROCESS_RESTART.",
       "rule_sources": [
-        "tests/test_main_lifespan.py",
-        "tests/test_sync_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
-      ]
+        "api/routers/offers.py"
+      ],
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-MARKET-PROCESS_RESTART",
+        "status": "NAMED_BLOCKER",
+        "reason": "No MARKET inventory test_ref is bound to process_restart. Another family's Offer/sync/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "MARKET__UNKNOWN-AUTHORITY-SCHEMA-HASH",
@@ -3293,12 +4978,16 @@
         "decision": "ELIGIBLE",
         "predicate": "MARKET: unknown actor, schema, hash or owner must fail closed"
       },
-      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
+      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence. Evidence for this MARKET boundary is the named blocker P1-00-FB-MARKET-UNKNOWN_AUTHORITY_SCHEMA_HASH.",
       "rule_sources": [
-        "tests/test_background_job_authority.py",
-        "tests/test_sync_router_signature.py",
-        "tests/test_sync_field_policy.py"
-      ]
+        "api/routers/offers.py"
+      ],
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-MARKET-UNKNOWN_AUTHORITY_SCHEMA_HASH",
+        "status": "NAMED_BLOCKER",
+        "reason": "No MARKET inventory test_ref is bound to unknown_authority_schema_hash. Another family's Offer/sync/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "MSG__FAILURE-BEFORE-DB-COMMIT",
@@ -3312,9 +5001,14 @@
       },
       "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
       "rule_sources": [
-        "tests/test_offers_router_create_success.py",
-        "tests/test_offer_overtime_request_service.py",
-        "tests/test_sync_router_apply_item_success.py"
+        "tests/test_chat_router_direct_mutations.py",
+        "tests/test_main_foreign_surface_guard.py",
+        "tests/test_realtime_router_websocket_guards.py"
+      ],
+      "evidence_refs": [
+        "tests/test_chat_router_direct_mutations.py",
+        "tests/test_main_foreign_surface_guard.py",
+        "tests/test_realtime_router_websocket_guards.py"
       ]
     },
     {
@@ -3329,9 +5023,12 @@
       },
       "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
       "rule_sources": [
-        "tests/test_offer_publication_worker.py",
-        "tests/test_trade_delivery_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
+        "tests/test_telegram_delivery_queue_production_cutover.py",
+        "tests/test_telegram_delivery_queue_production_plan.py"
+      ],
+      "evidence_refs": [
+        "tests/test_telegram_delivery_queue_production_cutover.py",
+        "tests/test_telegram_delivery_queue_production_plan.py"
       ]
     },
     {
@@ -3346,9 +5043,14 @@
       },
       "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
       "rule_sources": [
-        "tests/test_telegram_delivery_queue_postgres.py",
-        "tests/test_telegram_delivery_queue_contract.py",
-        "tests/test_web_push.py"
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
+        "tests/test_telegram_delivery_queue_production_cutover.py",
+        "tests/test_telegram_delivery_queue_production_plan.py"
+      ],
+      "evidence_refs": [
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
+        "tests/test_telegram_delivery_queue_production_cutover.py",
+        "tests/test_telegram_delivery_queue_production_plan.py"
       ]
     },
     {
@@ -3363,9 +5065,10 @@
       },
       "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
       "rule_sources": [
-        "tests/test_offer_request_ledger_service.py",
-        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
-        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py"
+      ],
+      "evidence_refs": [
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py"
       ]
     },
     {
@@ -3378,12 +5081,18 @@
         "decision": "ELIGIBLE",
         "predicate": "MSG: process restart must resume durable family state or expose independent API/Bot lifecycle"
       },
-      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion. Evidence for this MSG boundary is the named blocker P1-00-FB-MSG-PROCESS_RESTART.",
       "rule_sources": [
-        "tests/test_main_lifespan.py",
-        "tests/test_sync_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
-      ]
+        "api/routers/chat.py",
+        "api/routers/realtime.py",
+        "frontend/src/router/index.ts"
+      ],
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-MSG-PROCESS_RESTART",
+        "status": "NAMED_BLOCKER",
+        "reason": "No MSG inventory test_ref is bound to process_restart. Another family's Offer/sync/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "MSG__UNKNOWN-AUTHORITY-SCHEMA-HASH",
@@ -3397,9 +5106,12 @@
       },
       "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
       "rule_sources": [
-        "tests/test_background_job_authority.py",
-        "tests/test_sync_router_signature.py",
-        "tests/test_sync_field_policy.py"
+        "tests/test_main_foreign_surface_guard.py",
+        "tests/test_realtime_router_websocket_guards.py"
+      ],
+      "evidence_refs": [
+        "tests/test_main_foreign_surface_guard.py",
+        "tests/test_realtime_router_websocket_guards.py"
       ]
     },
     {
@@ -3414,9 +5126,10 @@
       },
       "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
       "rule_sources": [
-        "tests/test_offers_router_create_success.py",
-        "tests/test_offer_overtime_request_service.py",
-        "tests/test_sync_router_apply_item_success.py"
+        "tests/test_notifications_router_mutations.py"
+      ],
+      "evidence_refs": [
+        "tests/test_notifications_router_mutations.py"
       ]
     },
     {
@@ -3429,12 +5142,17 @@
         "decision": "ELIGIBLE",
         "predicate": "NOTIFY: family command commits then emits an async outbox or delivery intent"
       },
-      "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
+      "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure. Evidence for this NOTIFY boundary is the named blocker P1-00-FB-NOTIFY-COMMIT_BEFORE_EVENT_SIDE_EFFECT.",
       "rule_sources": [
-        "tests/test_offer_publication_worker.py",
-        "tests/test_trade_delivery_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
-      ]
+        "api/routers/notifications.py",
+        "frontend/src/router/index.ts"
+      ],
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-NOTIFY-COMMIT_BEFORE_EVENT_SIDE_EFFECT",
+        "status": "NAMED_BLOCKER",
+        "reason": "No NOTIFY inventory test_ref is bound to commit_before_event_side_effect. Another family's Offer/sync/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "NOTIFY__SIDE-EFFECT-BEFORE-ACK",
@@ -3448,8 +5166,9 @@
       },
       "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
       "rule_sources": [
-        "tests/test_telegram_delivery_queue_postgres.py",
-        "tests/test_telegram_delivery_queue_contract.py",
+        "tests/test_web_push.py"
+      ],
+      "evidence_refs": [
         "tests/test_web_push.py"
       ]
     },
@@ -3463,12 +5182,17 @@
         "decision": "ELIGIBLE",
         "predicate": "NOTIFY: two overlapping mutating commands share a durable identity"
       },
-      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
+      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect. Evidence for this NOTIFY boundary is the named blocker P1-00-FB-NOTIFY-TWO_CONCURRENT_COMMANDS.",
       "rule_sources": [
-        "tests/test_offer_request_ledger_service.py",
-        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
-        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
-      ]
+        "api/routers/notifications.py",
+        "frontend/src/router/index.ts"
+      ],
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-NOTIFY-TWO_CONCURRENT_COMMANDS",
+        "status": "NAMED_BLOCKER",
+        "reason": "No NOTIFY inventory test_ref is bound to two_concurrent_commands. Another family's Offer/sync/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "NOTIFY__PROCESS-RESTART",
@@ -3480,12 +5204,17 @@
         "decision": "ELIGIBLE",
         "predicate": "NOTIFY: process restart must resume durable family state or expose independent API/Bot lifecycle"
       },
-      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion. Evidence for this NOTIFY boundary is the named blocker P1-00-FB-NOTIFY-PROCESS_RESTART.",
       "rule_sources": [
-        "tests/test_main_lifespan.py",
-        "tests/test_sync_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
-      ]
+        "api/routers/notifications.py",
+        "frontend/src/router/index.ts"
+      ],
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-NOTIFY-PROCESS_RESTART",
+        "status": "NAMED_BLOCKER",
+        "reason": "No NOTIFY inventory test_ref is bound to process_restart. Another family's Offer/sync/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "NOTIFY__UNKNOWN-AUTHORITY-SCHEMA-HASH",
@@ -3497,12 +5226,17 @@
         "decision": "ELIGIBLE",
         "predicate": "NOTIFY: unknown actor, schema, hash or owner must fail closed"
       },
-      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
+      "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence. Evidence for this NOTIFY boundary is the named blocker P1-00-FB-NOTIFY-UNKNOWN_AUTHORITY_SCHEMA_HASH.",
       "rule_sources": [
-        "tests/test_background_job_authority.py",
-        "tests/test_sync_router_signature.py",
-        "tests/test_sync_field_policy.py"
-      ]
+        "api/routers/notifications.py",
+        "frontend/src/router/index.ts"
+      ],
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-NOTIFY-UNKNOWN_AUTHORITY_SCHEMA_HASH",
+        "status": "NAMED_BLOCKER",
+        "reason": "No NOTIFY inventory test_ref is bound to unknown_authority_schema_hash. Another family's Offer/sync/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "TG__FAILURE-BEFORE-DB-COMMIT",
@@ -3516,9 +5250,14 @@
       },
       "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
       "rule_sources": [
-        "tests/test_offers_router_create_success.py",
-        "tests/test_offer_overtime_request_service.py",
-        "tests/test_sync_router_apply_item_success.py"
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_trade_create_wizard.py",
+        "tests/test_offers_router_create_success.py"
+      ],
+      "evidence_refs": [
+        "tests/test_bot_trade_create_text_offer_parse_flow.py",
+        "tests/test_bot_trade_create_wizard.py",
+        "tests/test_offers_router_create_success.py"
       ]
     },
     {
@@ -3534,8 +5273,13 @@
       "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
       "rule_sources": [
         "tests/test_offer_publication_worker.py",
-        "tests/test_trade_delivery_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
+        "tests/test_telegram_admin_broadcast_delivery_service.py",
+        "tests/test_telegram_delivery_callsite_inventory.py"
+      ],
+      "evidence_refs": [
+        "tests/test_offer_publication_worker.py",
+        "tests/test_telegram_admin_broadcast_delivery_service.py",
+        "tests/test_telegram_delivery_callsite_inventory.py"
       ]
     },
     {
@@ -3550,9 +5294,14 @@
       },
       "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
       "rule_sources": [
-        "tests/test_telegram_delivery_queue_postgres.py",
         "tests/test_telegram_delivery_queue_contract.py",
-        "tests/test_web_push.py"
+        "tests/test_telegram_notification_outbox_queue_feeder.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ],
+      "evidence_refs": [
+        "tests/test_telegram_delivery_queue_contract.py",
+        "tests/test_telegram_notification_outbox_queue_feeder.py",
+        "tests/test_telegram_notification_outbox_worker.py"
       ]
     },
     {
@@ -3567,8 +5316,9 @@
       },
       "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
       "rule_sources": [
-        "tests/test_offer_request_ledger_service.py",
-        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
+        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
+      ],
+      "evidence_refs": [
         "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
       ]
     },
@@ -3584,8 +5334,11 @@
       },
       "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
       "rule_sources": [
-        "tests/test_main_lifespan.py",
-        "tests/test_sync_worker.py",
+        "tests/test_offer_publication_worker.py",
+        "tests/test_telegram_notification_outbox_worker.py"
+      ],
+      "evidence_refs": [
+        "tests/test_offer_publication_worker.py",
         "tests/test_telegram_notification_outbox_worker.py"
       ]
     },
@@ -3602,8 +5355,11 @@
       "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
       "rule_sources": [
         "tests/test_background_job_authority.py",
-        "tests/test_sync_router_signature.py",
-        "tests/test_sync_field_policy.py"
+        "tests/test_sync_router_signature.py"
+      ],
+      "evidence_refs": [
+        "tests/test_background_job_authority.py",
+        "tests/test_sync_router_signature.py"
       ]
     },
     {
@@ -3618,9 +5374,14 @@
       },
       "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
       "rule_sources": [
-        "tests/test_offers_router_create_success.py",
-        "tests/test_offer_overtime_request_service.py",
-        "tests/test_sync_router_apply_item_success.py"
+        "tests/test_bot_admin_commodities_add_aliases_create.py",
+        "tests/test_bot_admin_commodities_add_create.py",
+        "tests/test_commodities_router_alias_mutations.py"
+      ],
+      "evidence_refs": [
+        "tests/test_bot_admin_commodities_add_aliases_create.py",
+        "tests/test_bot_admin_commodities_add_create.py",
+        "tests/test_commodities_router_alias_mutations.py"
       ]
     },
     {
@@ -3635,9 +5396,14 @@
       },
       "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
       "rule_sources": [
-        "tests/test_offer_publication_worker.py",
-        "tests/test_trade_delivery_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
+        "tests/test_telegram_delivery_queue_limiter.py",
+        "tests/test_telegram_delivery_queue_limiter_redis.py",
+        "tests/test_telegram_delivery_queue_postgres.py"
+      ],
+      "evidence_refs": [
+        "tests/test_telegram_delivery_queue_limiter.py",
+        "tests/test_telegram_delivery_queue_limiter_redis.py",
+        "tests/test_telegram_delivery_queue_postgres.py"
       ]
     },
     {
@@ -3652,9 +5418,14 @@
       },
       "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
       "rule_sources": [
-        "tests/test_telegram_delivery_queue_postgres.py",
-        "tests/test_telegram_delivery_queue_contract.py",
-        "tests/test_web_push.py"
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
+        "tests/test_telegram_delivery_queue_limiter.py",
+        "tests/test_telegram_delivery_queue_limiter_redis.py"
+      ],
+      "evidence_refs": [
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
+        "tests/test_telegram_delivery_queue_limiter.py",
+        "tests/test_telegram_delivery_queue_limiter_redis.py"
       ]
     },
     {
@@ -3669,9 +5440,10 @@
       },
       "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
       "rule_sources": [
-        "tests/test_offer_request_ledger_service.py",
-        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
-        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py"
+      ],
+      "evidence_refs": [
+        "tests/test_telegram_admin_broadcast_confirm_idempotency.py"
       ]
     },
     {
@@ -3684,12 +5456,18 @@
         "decision": "ELIGIBLE",
         "predicate": "ADMIN: process restart must resume durable family state or expose independent API/Bot lifecycle"
       },
-      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+      "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion. Evidence for this ADMIN boundary is the named blocker P1-00-FB-ADMIN-PROCESS_RESTART.",
       "rule_sources": [
-        "tests/test_main_lifespan.py",
-        "tests/test_sync_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
-      ]
+        "api/routers/admin_messages.py",
+        "api/routers/commodities.py",
+        "api/routers/trading_settings.py"
+      ],
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-ADMIN-PROCESS_RESTART",
+        "status": "NAMED_BLOCKER",
+        "reason": "No ADMIN inventory test_ref is bound to process_restart. Another family's Offer/sync/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "ADMIN__UNKNOWN-AUTHORITY-SCHEMA-HASH",
@@ -3703,9 +5481,12 @@
       },
       "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
       "rule_sources": [
-        "tests/test_background_job_authority.py",
-        "tests/test_sync_router_signature.py",
-        "tests/test_sync_field_policy.py"
+        "tests/test_main_foreign_surface_guard.py",
+        "tests/test_offers_router_create_guards.py"
+      ],
+      "evidence_refs": [
+        "tests/test_main_foreign_surface_guard.py",
+        "tests/test_offers_router_create_guards.py"
       ]
     },
     {
@@ -3720,9 +5501,10 @@
       },
       "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
       "rule_sources": [
-        "tests/test_offers_router_create_success.py",
-        "tests/test_offer_overtime_request_service.py",
-        "tests/test_sync_router_apply_item_success.py"
+        "tests/test_main_foreign_surface_guard.py"
+      ],
+      "evidence_refs": [
+        "tests/test_main_foreign_surface_guard.py"
       ]
     },
     {
@@ -3737,9 +5519,10 @@
       },
       "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
       "rule_sources": [
-        "tests/test_offer_publication_worker.py",
-        "tests/test_trade_delivery_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
+        "tests/test_sync_worker.py"
+      ],
+      "evidence_refs": [
+        "tests/test_sync_worker.py"
       ]
     },
     {
@@ -3752,12 +5535,16 @@
         "decision": "ELIGIBLE",
         "predicate": "SYNC: family command has an external or realtime provider side effect"
       },
-      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
+      "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice. Evidence for this SYNC boundary is the named blocker P1-00-FB-SYNC-SIDE_EFFECT_BEFORE_ACK.",
       "rule_sources": [
-        "tests/test_telegram_delivery_queue_postgres.py",
-        "tests/test_telegram_delivery_queue_contract.py",
-        "tests/test_web_push.py"
-      ]
+        "api/routers/sync.py"
+      ],
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-SYNC-SIDE_EFFECT_BEFORE_ACK",
+        "status": "NAMED_BLOCKER",
+        "reason": "No SYNC inventory test_ref is bound to side_effect_before_ack. Another family's Offer/sync/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "SYNC__TWO-CONCURRENT-COMMANDS",
@@ -3769,12 +5556,16 @@
         "decision": "ELIGIBLE",
         "predicate": "SYNC: two overlapping mutating commands share a durable identity"
       },
-      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
+      "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect. Evidence for this SYNC boundary is the named blocker P1-00-FB-SYNC-TWO_CONCURRENT_COMMANDS.",
       "rule_sources": [
-        "tests/test_offer_request_ledger_service.py",
-        "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
-        "tests/test_telegram_publisher_dispatch_claim_index_postgres.py"
-      ]
+        "api/routers/sync.py"
+      ],
+      "evidence_refs": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-FB-SYNC-TWO_CONCURRENT_COMMANDS",
+        "status": "NAMED_BLOCKER",
+        "reason": "No SYNC inventory test_ref is bound to two_concurrent_commands. Another family's Offer/sync/Telegram tests are not reused."
+      }
     },
     {
       "variant_id": "SYNC__PROCESS-RESTART",
@@ -3788,9 +5579,10 @@
       },
       "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
       "rule_sources": [
-        "tests/test_main_lifespan.py",
-        "tests/test_sync_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
+        "tests/test_sync_worker.py"
+      ],
+      "evidence_refs": [
+        "tests/test_sync_worker.py"
       ]
     },
     {
@@ -3805,9 +5597,12 @@
       },
       "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
       "rule_sources": [
-        "tests/test_background_job_authority.py",
-        "tests/test_sync_router_signature.py",
-        "tests/test_sync_field_policy.py"
+        "tests/test_main_foreign_surface_guard.py",
+        "tests/test_sync_router_signature.py"
+      ],
+      "evidence_refs": [
+        "tests/test_main_foreign_surface_guard.py",
+        "tests/test_sync_router_signature.py"
       ]
     },
     {
@@ -3890,9 +5685,10 @@
       },
       "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
       "rule_sources": [
-        "tests/test_main_lifespan.py",
-        "tests/test_sync_worker.py",
-        "tests/test_telegram_notification_outbox_worker.py"
+        "tests/test_main_lifespan.py"
+      ],
+      "evidence_refs": [
+        "tests/test_main_lifespan.py"
       ]
     },
     {
@@ -3908,8 +5704,13 @@
       "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
       "rule_sources": [
         "tests/test_background_job_authority.py",
-        "tests/test_sync_router_signature.py",
-        "tests/test_sync_field_policy.py"
+        "tests/test_main_foreign_surface_guard.py",
+        "tests/test_main_metrics_guard.py"
+      ],
+      "evidence_refs": [
+        "tests/test_background_job_authority.py",
+        "tests/test_main_foreign_surface_guard.py",
+        "tests/test_main_metrics_guard.py"
       ]
     }
   ]

@@ -117,6 +117,16 @@ DEFERRAL_TOKENS = {
     "OTHERWISE_NOT_APPLICABLE",
 }
 INHERIT_PREDICATE_PHRASE = "persona×surface is not ineligible"
+INHERIT_SEMANTIC_PATTERNS = (
+    r"not\s+ineligible",
+    r"is not ineligible",
+    r"\binherit\b",
+    r"where current policy allows",
+    r"where allowed",
+    r"read_only_variants_resolve",
+    r"otherwise_not_applicable",
+)
+MUTATION_CLASSES = {"READ_OR_STREAM", "MUTATION_OR_COMMAND", "SCHEDULED_JOB"}
 HUMAN_MATRIX = REPO_ROOT / "docs/refactor/two-server/section-1/04-surface-policy-matrix.md"
 DENIAL_DECISIONS = {"INELIGIBLE", "INELIGIBLE_FOR_NEW_MARKET_MUTATION", "NOT_APPLICABLE"}
 ADMISSION_DECISIONS = {"ELIGIBLE", "ELIGIBLE_FOR_REQUEST_ONLY", "ELIGIBLE_FOR_READ_OR_TERMINAL_REPLAY"}
@@ -356,6 +366,8 @@ def _assert_no_deferred_or_ambiguous_text(test, text: str, label: str) -> None:
     test.assertFalse(any(token.lower() in compact for token in DEFERRAL_TOKENS), label)
     test.assertNotIn(INHERIT_PREDICATE_PHRASE, compact, label)
     test.assertNotIn("inherit_persona_eligibility", compact, label)
+    for pattern in INHERIT_SEMANTIC_PATTERNS:
+        test.assertIsNone(re.search(pattern, compact), f"{label}: {pattern}")
 
 
 def _assert_predicate_matches_decision(test, decision: str, node: dict, label: str) -> None:
@@ -541,8 +553,11 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
             contract_text = json.dumps(contract, ensure_ascii=False).lower()
             self.assertFalse(any(phrase in contract_text for phrase in AMBIGUOUS_POLICY_PHRASES))
             self.assertNotIn("inherit_persona_eligibility", contract_text)
-            if contract["contract_id"] != "BC-OPS-CURRENT-V1":
+            if contract.get("mutation_class") != "SCHEDULED_JOB" or contract["family"] != "OPS":
                 self.assertNotIn("this assignment authorizes no", contract_text)
+            if contract.get("mutation_class") == "READ_OR_STREAM":
+                self.assertEqual(contract["db_mutations"]["status"], "NOT_APPLICABLE", contract["contract_id"])
+                self.assertTrue(contract["db_mutations"].get("reason"), contract["contract_id"])
 
     def test_every_surface_seed_maps_once_with_seed_specific_behavioral_evidence(self):
         payload = _load_json("scenario-records.json")
@@ -558,10 +573,23 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
         family_counts = Counter(item["family"] for item in seeds)
         self.assertEqual(dict(family_counts), payload["seed_mapping"]["expected_family_counts"])
         for seed in seeds:
-            matches = [rule for rule in rules if rule["family"] == seed["family"]]
+            self.assertIn(seed.get("mutation_class"), MUTATION_CLASSES, seed["behavior_id"])
+            matches = [
+                rule
+                for rule in rules
+                if rule["family"] == seed["family"] and rule["mutation_class"] == seed["mutation_class"]
+            ]
             self.assertEqual(len(matches), 1, seed["behavior_id"])
             contract_id = matches[0]["contract_id"]
             self.assertIn(contract_id, contract_ids)
+            contract = next(item for item in payload["behavior_contracts"] if item["contract_id"] == contract_id)
+            self.assertEqual(contract.get("mutation_class"), seed["mutation_class"], seed["behavior_id"])
+            if seed["mutation_class"] == "READ_OR_STREAM":
+                self.assertEqual(
+                    contract["db_mutations"]["status"],
+                    "NOT_APPLICABLE",
+                    f"READ seed mapped to mutation contract: {seed['behavior_id']} -> {contract_id}",
+                )
             self.assertTrue(seed["test_refs"], seed["behavior_id"])
             self.assertTrue(
                 set(seed["test_refs"]) - GENERIC_META_TESTS,
@@ -749,6 +777,26 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
                 "unknown_authority_schema_hash": "ELIGIBLE",
             },
         )
+        family_tests = {family: set() for family in FAMILIES}
+        for name in ("surface-api.json", "surface-bot.json", "surface-web.json", "surface-jobs.json"):
+            for entry in _load_json(name)["entries"]:
+                family_tests[entry["family"]].update(
+                    ref for ref in entry.get("test_refs") or [] if ref.startswith("tests/")
+                )
+        for cell in cells:
+            if cell["applicability"] != "ELIGIBLE":
+                continue
+            refs = cell.get("evidence_refs") or []
+            blocker = cell.get("named_blocker") or {}
+            if blocker:
+                self.assertEqual(refs, [], cell["variant_id"])
+                self.assertTrue(blocker.get("blocker_id"), cell["variant_id"])
+                self.assertTrue(blocker.get("reason"), cell["variant_id"])
+                continue
+            self.assertTrue(refs, cell["variant_id"])
+            for ref in refs:
+                self.assertIn(ref, family_tests[cell["family"]], f"{cell['variant_id']} cites cross-family {ref}")
+                self.assertTrue((REPO_ROOT / ref).exists(), ref)
 
         self.assertEqual(len(payload["deferred_blockers"]), 1)
         timing = payload["deferred_blockers"][0]

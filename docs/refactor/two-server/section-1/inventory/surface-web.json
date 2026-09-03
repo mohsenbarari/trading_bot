@@ -16,7 +16,10 @@
     },
     "with_direct_static_test_reference": 30,
     "without_direct_static_test_reference": 0,
-    "unclassified": 0
+    "unclassified": 0,
+    "mutation_class_counts": {
+      "READ_OR_STREAM": 30
+    }
   },
   "entries": [
     {
@@ -33,7 +36,8 @@
         "frontend/src/App.test.ts",
         "frontend/src/utils/routeRequest.test.ts",
         "frontend/src/views/ProfileView.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-AUTH-SETUP-PASSWORD",
@@ -48,7 +52,8 @@
       "test_refs": [
         "frontend/src/App.test.ts",
         "frontend/src/router/uiRouteContract.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-AUTH-LOGIN",
@@ -62,7 +67,8 @@
         "tests/test_audit_anchor_export.py",
         "frontend/src/App.test.ts",
         "frontend/src/utils/authNavigation.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-OFFER-MARKET",
@@ -79,7 +85,8 @@
         "tests/test_stage9_runtime_evidence.py",
         "tests/test_coin_intelligence_private_gold_pipeline.py",
         "tests/test_stage9_test_matrix.py"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-IDENTITY-OPERATIONS",
@@ -95,7 +102,8 @@
         "frontend/src/views/CustomerWorkspaceView.test.ts",
         "frontend/src/views/AccountantWorkspaceView.test.ts",
         "frontend/src/router/uiRouteContract.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-IDENTITY-OPERATIONS-CUSTOMERS",
@@ -112,7 +120,8 @@
         "frontend/src/App.test.ts",
         "frontend/src/views/CustomerWorkspaceView.test.ts",
         "frontend/src/views/OperationsView.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-IDENTITY-OPERATIONS-CUSTOMERS-DETAIL",
@@ -129,7 +138,8 @@
         "frontend/src/App.test.ts",
         "frontend/src/views/CustomerWorkspaceView.test.ts",
         "frontend/src/router/uiRouteContract.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-IDENTITY-OPERATIONS-ACCOUNTANTS",
@@ -146,7 +156,8 @@
         "frontend/src/views/AccountantWorkspaceView.test.ts",
         "frontend/src/views/PublicProfileView.test.ts",
         "frontend/src/views/ProfileView.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-IDENTITY-OPERATIONS-ACCOUNTANTS-DETAIL",
@@ -163,7 +174,8 @@
         "frontend/src/views/AccountantWorkspaceView.test.ts",
         "frontend/src/router/uiRouteContract.test.ts",
         "frontend/src/router/index.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-OPS-ACCOUNT",
@@ -179,7 +191,8 @@
         "tests/test_provision_private_primary_secrets.py",
         "tests/test_authoritative_registration_postgres.py",
         "tests/test_registration_stage1_migration_postgres.py"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-AUTH-ACCOUNT-SECURITY",
@@ -195,7 +208,8 @@
         "frontend/src/views/SettingsView.test.ts",
         "frontend/src/views/AccountHubView.test.ts",
         "frontend/src/router/uiRouteContract.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-OPS-ACCOUNT-STORAGE",
@@ -211,7 +225,8 @@
         "frontend/src/views/SettingsView.test.ts",
         "frontend/src/views/AccountHubView.test.ts",
         "frontend/src/views/ProfileView.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-NOTIFY-ACCOUNT-NOTIFICATIONS",
@@ -227,7 +242,8 @@
         "frontend/src/views/NotificationsView.test.ts",
         "frontend/src/views/AccountHubView.test.ts",
         "frontend/src/router/uiRouteContract.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-MSG-MESSENGER",
@@ -243,7 +259,8 @@
         "tests/test_trading_core_mixed_load_helpers.py",
         "tests/test_final_release_gate.py",
         "frontend/src/App.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-IDENTITY-PUBLIC-PROFILE",
@@ -259,7 +276,8 @@
         "frontend/src/App.test.ts",
         "frontend/src/utils/httpErrorPolicy.test.ts",
         "frontend/src/views/MessengerView.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-IDENTITY-PROFILE",
@@ -275,7 +293,8 @@
         "tests/test_logging_foundation.py",
         "frontend/src/views/CustomerWorkspaceView.test.ts",
         "frontend/src/views/MessengerView.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-OPS-SETTINGS",
@@ -291,7 +310,8 @@
         "tests/test_invitations_router.py",
         "tests/test_bot_link_account_cmd.py",
         "tests/test_auth_router_registration_flows.py"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-ADMIN-ADMIN",
@@ -308,7 +328,8 @@
         "tests/test_core_events.py",
         "tests/test_admin_messages_router.py",
         "tests/test_chat_schemas.py"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-ADMIN-ADMIN-INVITATIONS",
@@ -325,7 +346,8 @@
         "frontend/src/App.test.ts",
         "frontend/src/views/AdminView.test.ts",
         "frontend/src/router/uiRouteContract.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-ADMIN-ADMIN-CHANNELS",
@@ -342,7 +364,8 @@
         "frontend/src/App.test.ts",
         "frontend/src/views/AdminView.test.ts",
         "frontend/src/router/uiRouteContract.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-IDENTITY-ADMIN-USERS",
@@ -359,7 +382,8 @@
         "frontend/src/App.test.ts",
         "frontend/src/views/AdminView.test.ts",
         "frontend/src/router/uiRouteContract.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-IDENTITY-ADMIN-USER-PROFILE",
@@ -376,7 +400,8 @@
         "frontend/src/App.test.ts",
         "frontend/src/views/AdminView.test.ts",
         "frontend/src/views/PublicProfileView.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-ADMIN-ADMIN-COMMODITIES",
@@ -392,7 +417,8 @@
       "test_refs": [
         "frontend/src/router/uiRouteContract.test.ts",
         "frontend/src/router/index.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-ADMIN-ADMIN-MESSAGES",
@@ -409,7 +435,8 @@
         "frontend/src/App.test.ts",
         "frontend/src/views/AdminView.test.ts",
         "frontend/src/router/uiRouteContract.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-ADMIN-ADMIN-SYSTEM",
@@ -426,7 +453,8 @@
         "frontend/src/App.test.ts",
         "frontend/src/views/OperationsView.test.ts",
         "frontend/src/views/AdminView.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-IDENTITY-INVITE-LANDING",
@@ -440,7 +468,8 @@
         "frontend/src/utils/authNavigation.test.ts",
         "frontend/src/router/uiRouteContract.test.ts",
         "frontend/src/router/index.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-IDENTITY-WEB-REGISTER",
@@ -454,7 +483,8 @@
         "frontend/src/App.test.ts",
         "frontend/src/utils/authNavigation.test.ts",
         "frontend/src/views/InviteLanding.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-NOTIFY-NOTIFICATIONS",
@@ -470,7 +500,8 @@
         "tests/test_web_push.py",
         "tests/test_sync_router_apply_item_success.py",
         "tests/test_seed_shared_sync_tables.py"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-MSG-SHARE-RECEIVE",
@@ -485,7 +516,8 @@
       "test_refs": [
         "frontend/src/App.test.ts",
         "frontend/src/router/uiRouteContract.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     },
     {
       "behavior_id": "WEB-OPS-SYSTEM-RECOVERY",
@@ -499,7 +531,8 @@
         "frontend/src/main.test.ts",
         "frontend/src/App.test.ts",
         "frontend/src/composables/useNotificationRuntime.test.ts"
-      ]
+      ],
+      "mutation_class": "READ_OR_STREAM"
     }
   ],
   "generated_date": "2026-09-03 UTC",
