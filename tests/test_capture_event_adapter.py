@@ -724,6 +724,36 @@ class CaptureEventAdapterTests(unittest.TestCase):
             1,
         )
 
+    def test_flow_batch_links_trade_when_prior_offer_arrives_late(self) -> None:
+        self._stage_market(
+            market_event(
+                301,
+                source="MELTED_FLOW",
+                message_id=2,
+                text="79,270,000⏳باحواله✅معامله",
+                published="2026-08-24T10:00:30Z",
+                available="2026-08-24T10:01:00Z",
+            )
+        )
+        self._stage_market(
+            market_event(
+                302,
+                source="MELTED_FLOW",
+                message_id=1,
+                text="79,270,000⏳باحواله🔵خرید",
+                published="2026-08-24T10:00:00Z",
+                available="2026-08-24T10:01:01Z",
+            )
+        )
+        report = self._project("2026-08-24T10:02:00Z")
+        row = self.market.execute(
+            "SELECT side,parser_version FROM market_observations "
+            "WHERE event_type='TRADE'"
+        ).fetchone()
+        self.assertEqual(report.market_messages_reprojected, 2)
+        self.assertEqual(row["side"], "BUY")
+        self.assertIn("+offer-link-v1", row["parser_version"])
+
     def test_duplicate_delivery_keeps_first_receipt_and_skips_reprojection(self) -> None:
         first = decode_market_channel_event(
             market_event(31, source="MELTED_FLOW", text="95,000,000 باحواله فروش")
