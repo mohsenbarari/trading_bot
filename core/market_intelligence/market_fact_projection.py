@@ -31,6 +31,7 @@ from .xau_model_input import (
 
 PROJECTION_VERSION = "market-fact-projection-v2-xau-model-input"
 MAX_EXPORT_PER_CYCLE = 5_000
+XAU_MODEL_INPUT_REFRESH_PER_CYCLE = 50_000
 _REASON_TOKEN = re.compile(r"[^A-Z0-9_]+")
 _FACT_PAYLOAD_ADAPTER = TypeAdapter(FactPayload)
 
@@ -302,7 +303,14 @@ def _pending_export_rows(
             """,
             keys,
         ).fetchall()
-    _refresh_xau_model_input_buckets(market, max_rows=max_rows)
+    # Indexing raw XAU observations is local SQLite work and must not inherit
+    # the much smaller network export batch.  Coupling both limits made a
+    # replay leave the latest 15-second XAU bucket hours behind even after all
+    # raw observations had been projected successfully.
+    _refresh_xau_model_input_buckets(
+        market,
+        max_rows=max(max_rows, XAU_MODEL_INPUT_REFRESH_PER_CYCLE),
+    )
     eligible = f"""
         (o.source_code<>'XAUUSD' OR EXISTS (
             SELECT 1
