@@ -103,6 +103,55 @@ def canonical_json(value: Mapping[str, Any]) -> bytes:
     ).encode("utf-8")
 
 
+def _replay_manifest_summary(
+    rows: Iterable[Sequence[object]], *, run_id: str
+) -> tuple[int, str]:
+    """Hash the canonical replay manifest without materializing every row.
+
+    Replay manifests can contain hundreds of thousands of entries.  Building
+    one Python list plus one serialized copy makes completion depend on the
+    container's RAM and SQLite temporary-file allowance.  The byte stream
+    below is deliberately identical to ``canonical_json`` for the existing
+    manifest contract, so completed historical digests remain valid.
+    """
+
+    digest = sha256()
+    digest.update(b'{"entries":[')
+    count = 0
+    for row in rows:
+        if count:
+            digest.update(b",")
+        digest.update(
+            json.dumps(
+                list(row),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+        count += 1
+    digest.update(b'],"run_id":')
+    digest.update(
+        json.dumps(
+            run_id,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    digest.update(b',"schema":')
+    digest.update(
+        json.dumps(
+            REPLAY_MANIFEST_SCHEMA,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    digest.update(b"}")
+    return count, digest.hexdigest()
+
+
 def value_free_set_digest(rows: Iterable[Sequence[object]]) -> tuple[int, str]:
     """Return the audit-compatible digest of a value-free identity set."""
 
@@ -1588,23 +1637,19 @@ class CaptureState:
         ).fetchone()
         if run is None:
             raise CaptureRuntimeError("capture_replay_run_missing")
+        # Constrain the query by the leading columns of the existing unique
+        # index.  SQLite can then preserve the historical manifest order with
+        # only a bounded final-key sort instead of spilling the complete run
+        # into the container's small /tmp filesystem.
         rows = self.connection.execute(
             "SELECT account,source_code,message_id,revision_sha256,event_id,"
             "event_type,origin,content_type,event_time_utc,available_at_utc,"
             "capture_status,marker_sha256 FROM capture_replay_manifest_entries "
-            "WHERE run_id=? ORDER BY source_code,message_id,revision_sha256,event_id",
-            (run_id,),
-        ).fetchall()
-        manifest_hash = sha256(
-            canonical_json(
-                {
-                    "schema": REPLAY_MANIFEST_SCHEMA,
-                    "run_id": run_id,
-                    "entries": [list(row) for row in rows],
-                }
-            )
-        ).hexdigest()
-        count = len(rows)
+            "WHERE run_id=? AND account=? "
+            "ORDER BY source_code,message_id,revision_sha256,event_id",
+            (run_id, str(run["account"])),
+        )
+        count, manifest_hash = _replay_manifest_summary(rows, run_id=run_id)
         if run["completed_at_utc"] is not None:
             if (
                 int(run["manifest_count"]) != count

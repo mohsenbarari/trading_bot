@@ -52,6 +52,87 @@ from scripts import audit_production_market_catchup as catchup_audit
 UTC = timezone.utc
 
 
+class ReplayManifestDigestTests(unittest.TestCase):
+    def test_streaming_summary_matches_existing_canonical_contract(self):
+        run_id = "a" * 64
+        rows = iter(
+            (
+                (
+                    "account1",
+                    "MELTED_PRIMARY_FLOW",
+                    7,
+                    "b" * 64,
+                    "event-1",
+                    "message_snapshot",
+                    "explicit_backfill",
+                    "text",
+                    "2026-09-03T08:00:00.000000Z",
+                    "2026-09-03T08:00:01.000000Z",
+                    "accepted",
+                    "c" * 64,
+                ),
+                (
+                    "account1",
+                    "USD_HERAT",
+                    8,
+                    "d" * 64,
+                    "event-2",
+                    "message_snapshot",
+                    "explicit_backfill",
+                    "text",
+                    None,
+                    "2026-09-03T08:00:02.000000Z",
+                    "duplicate",
+                    "e" * 64,
+                ),
+            )
+        )
+        expected_rows = [
+            [
+                "account1",
+                "MELTED_PRIMARY_FLOW",
+                7,
+                "b" * 64,
+                "event-1",
+                "message_snapshot",
+                "explicit_backfill",
+                "text",
+                "2026-09-03T08:00:00.000000Z",
+                "2026-09-03T08:00:01.000000Z",
+                "accepted",
+                "c" * 64,
+            ],
+            [
+                "account1",
+                "USD_HERAT",
+                8,
+                "d" * 64,
+                "event-2",
+                "message_snapshot",
+                "explicit_backfill",
+                "text",
+                None,
+                "2026-09-03T08:00:02.000000Z",
+                "duplicate",
+                "e" * 64,
+            ],
+        ]
+        expected = sha256(
+            capture.canonical_json(
+                {
+                    "schema": capture.REPLAY_MANIFEST_SCHEMA,
+                    "run_id": run_id,
+                    "entries": expected_rows,
+                }
+            )
+        ).hexdigest()
+
+        self.assertEqual(
+            capture._replay_manifest_summary(rows, run_id=run_id),
+            (2, expected),
+        )
+
+
 def audited_resolution_bundle(
     state: capture.CaptureState,
     root: Path,
