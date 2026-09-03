@@ -18,7 +18,7 @@ Status: open findings; no implicit fixes authorized
 | `DR-012` | medium | role-specific app image IDs differ while release SHA matches | artifact manifest must bind role, commit, digest, config and schema |
 | `DR-013` | resolved-doc | all 217 FastAPI decorators, 203 Bot handlers, 30 Web routes and 15 authority jobs have unique family seeds; the six empty `test_refs` now link to `tests/test_p1_00_characterization_six_gaps.py` and scenario records exist | keep the handlers; implementation Stages must not treat characterization as a product change |
 | `DR-014` | high | Market archive is ~3.95 GiB with million-row outbox/revision/fact tables and no approved consolidation retention/replay contract | design Market migration separately from app DB merge |
-| `DR-015` | blocker-codex | no already-observed deploy/restart/backup/restore duration exists; this refresh cannot manufacture timing and live re-inspection is unauthorized | explicit Codex-review blocker; do not estimate from script length or policy RTO/RPO targets; an authorized later rehearsal must collect measured durations if Codex requires them for `P1-00` close |
+| `DR-015` | deferred-blocker | no already-observed deploy/restart/backup/restore duration exists; this refresh cannot manufacture timing and live re-inspection is unauthorized | Codex decision 2026-09-03: `DEFERRED_BLOCKER`, `resolution_stage: DPL-1`. Required evidence is measured deploy, independent API/Bot restart, backup, and restore+verification durations. Forbidden: estimate from script length, treat RTO/RPO as observation, or run an unauthorized production rehearsal. Absence of timing does not block closing `P1-00`. Because of this dependency, `P1-02` must not start before `DPL-1` completes. |
 | `DR-016` | high | current child pollers/workers/Market processes/timers are inventoried, but exact target compose/image/credential/readiness binding is not designed | close in `P1-03`; any unknown or overlapping owner blocks activation |
 | `DR-017` | low | incremental `src/interfaces/http_api/routers/user_router.py` declares four routes but `main.py` does not mount it | retain as dormant code until `P1-01` reference/cleanup review; never count it as a live API contract |
 
@@ -30,6 +30,9 @@ Status: open findings; no implicit fixes authorized
 - `blocker-op` prevents provisioning/staging/cutover but not documentation.
 - `blocker-codex` is an explicit Codex Final Reviewer decision; Cursor must not
   close it with estimate, fixture or unauthorized rehearsal.
+- `deferred-blocker` is a Codex decision that keeps the evidence gap open in a
+  named later Stage; it does not authorize estimate, fixture or rehearsal, and
+  it does not by itself close `P1-00`.
 - `high` requires a named resolution and test before its dependent gate.
 - `medium` may be scheduled, but cannot be hidden if it changes parity or
   operational safety.

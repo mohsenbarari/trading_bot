@@ -113,7 +113,7 @@
     "assignment_id": "WA-P1-00-REFRESH-20260903-001",
     "base_sha": "aa2c06a573dfd60051e142146f55d7965f2242a7",
     "refreshed_at": "2026-09-03 UTC",
-    "static_surface_verification": "REGENERATED_AND_MATCHED",
+    "static_surface_verification": "VERIFIED_AGAINST_COMMIT",
     "live_host_reobservation": "NOT_REOBSERVED",
     "external_access": "NONE",
     "note": "Host capacity, release SHA, schema and runtime process facts remain the 2026-09-01 read-only snapshot."

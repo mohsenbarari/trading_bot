@@ -6,9 +6,9 @@ Resume base: `aa2c06a573dfd60051e142146f55d7965f2242a7`
 
 | Stage | Status | Gate | Primary output |
 | --- | --- | --- | --- |
-| `P1-00` | `IN_PROGRESS` | refresh candidate prepared; Codex Final Review open | current-state dossier and blocker register |
+| `P1-00` | `IN_PROGRESS` | correction candidate prepared after Codex `CHANGES_REQUIRED`; Final Review of the new commit is still open | current-state dossier and blocker register |
 | `P1-01` | `PROPOSED` | policy approved; execution blocked by `P1-00` and exact batch receipts | cleanup/retention execution |
-| `P1-02` | `PROPOSED` | scenario contract approved; blocked by `P1-00`, `DPL-1` and `DOC-3` | topology-neutral configuration |
+| `P1-02` | `PROPOSED` | scenario contract approved; blocked by `P1-00`, `DPL-1` (including `DR-015` measured durations) and `DOC-3` | topology-neutral configuration |
 | `P1-03` | `PROPOSED` | scenario/ownership contract approved; dependencies not complete | target runtime topology |
 | `P1-04` | `PROPOSED` | scenario/data contract approved; dependencies not complete | shared Finland data plane |
 | `P1-05` | `PROPOSED` | scenario/merge contract approved; dependencies and Assignment open | deterministic data-merge rehearsal |
@@ -36,27 +36,36 @@ data or delete anything.
 
 Completed technical evidence in this refresh:
 
-- static inventory regenerated/verified against `aa2c06a5...`; live decorator,
-  route and job counts still 217 / 203 / 30 / 15 with zero unclassified items;
+- static inventories keep original `generated_from_commit` `19087ff0...` and add
+  `verified_against_commit` `aa2c06a5...`; live method/path/filter/guard/job
+  semantics still match 217 / 203 / 30 / 15 with zero unclassified items;
 - six previously empty `test_refs` closed by
   `tests/test_p1_00_characterization_six_gaps.py`;
-- persona/tier/time/failure scenario records added in
-  `inventory/scenario-records.json`;
-- `DR-015` classified as explicit Codex-review blocker (`NOT_OBSERVED`);
+- persona/tier/time/failure source compacted to
+  `inventory/scenario-records.json` schema `two-server-refactor.scenario-records.v2`
+  with real family contracts, definite composed eligibility, seed mapping and
+  named invalid combinations; Cartesian expansion is not stored in Git;
+- `DR-015` classified `DEFERRED_BLOCKER` / `DPL-1` (`NOT_OBSERVED`); measured
+  durations are required later; estimate and production rehearsal remain forbidden;
 - sanitised checksums recomputed in `evidence-index.md`.
 
 ## Why `P1-00` is not `COMPLETE`
 
 The owner historically accepted the dossier, drift register, twelve-family
 behavior baseline, Web/Bot contracts and runtime-ownership seed on 2026-09-02.
-The Stage still requires Codex Final Review of the exact refreshed commit.
+The Stage still requires Codex Final Review of the exact correction commit on
+this Stage branch. Worker status is only `COMPLETE_CANDIDATE`.
 
-Residual Codex item:
+Residual items that do not by themselves keep `P1-00` blocked:
 
 1. `DR-015` — deploy/restart/backup/restore duration has no already-observed
-   measurement. This Assignment forbade a production rehearsal. Codex must
-   decide whether `NOT_OBSERVED` timing may remain open until an authorized
-   later Stage, or whether `P1-00` stays blocked.
+   measurement. Codex decided this is `DEFERRED_BLOCKER` with
+   `resolution_stage: DPL-1`. Required evidence is measured deploy, independent
+   API/Bot restart, backup, and restore+verification durations. Do not estimate
+   or rehearse in production. `P1-02` must not start before `DPL-1` completes.
+2. Live host capacity/release/schema facts remain `NOT_REOBSERVED` because this
+   Assignment has `external_access: NONE`. That is accepted for this snapshot and
+   is not enough for later staging/cutover.
 
 Until Codex Final Reviewer issues `APPROVE` for the exact integration commit,
 `P1-01` may be reviewed but no cleanup is authorized and `P1-02..P1-07` must not

@@ -19,7 +19,7 @@ schedule یا side effect را ندارد. defect کشف‌شده ثبت می‌
 | --- | --- | --- |
 | `P1-00` | Current-State Architecture و Behavior Baseline | [`stages/P1-00.md`](stages/P1-00.md) و [`evidence-index.md`](evidence-index.md) |
 | `P1-01` | پاکسازی branch/worktree/path/artifact/backup با retention | [`07-repository-cleanup-manifest.md`](07-repository-cleanup-manifest.md) |
-| `P1-02` | vocabulary و typed config مستقل از نام سرور تاریخی | Master Plan Task Card |
+| `P1-02` | vocabulary و typed config مستقل از نام سرور تاریخی؛ شروع فقط پس از `P1-00` و `DPL-1` (از جمله زمان‌های اندازه‌گیری‌شده `DR-015`) | Master Plan Task Card |
 | `P1-03` | یک runtime واحد Finland با service ownership صریح | inventoryها و compose/runtime evidence |
 | `P1-04` | PostgreSQL/Redis مشترک و حذف sync داخلی دو Finland | dataflow/ownership و migration contract |
 | `P1-05` | rehearsal idempotent ادغام داده و media | merge receipts، conflict ledger و restore proof |

@@ -1,6 +1,6 @@
 # Feature Parity Contract
 
-Status: historical owner review accepted; static evidence and scenario records refreshed on 2026-09-03; Codex Final Review open
+Status: historical owner review accepted; static inventories verified and scenario contracts corrected on 2026-09-03; Codex Final Review of the correction commit is open
 
 ## Definition of parity
 
@@ -56,12 +56,14 @@ test before the gate closes.
 | `inventory/surface-web.json` | path/name/component/guard/family/test references for 30 routes |
 | `inventory/surface-jobs.json` | current/target authority, tables and side effects for 15 registered jobs |
 | `inventory/runtime-task-ownership.json` | API/Bot/Market child process, poller, worker and timer ownership seeds |
-| `inventory/scenario-records.json` | persona/tier/time/failure records, Web/Bot matrix and six failure boundaries |
+| `inventory/scenario-records.json` | compact v2 source: family contracts, 465-seed mapping, persona/time/origin/outcome axes, composed eligibility, invalid combinations and six failure boundaries |
 
-These files were regenerated/verified against commit
-`aa2c06a573dfd60051e142146f55d7965f2242a7`. A later code change that
-adds/removes a route, handler or job must regenerate the inventory and fail CI if
-the new item has no family/behavior seed.
+Surface inventories keep their original `generated_from_commit`
+`19087ff0686c9260b55f1c6c35782b758be6673e` and record
+`verified_against_commit` `aa2c06a573dfd60051e142146f55d7965f2242a7`. They are
+not claimed as a fresh regeneration. A later code change that adds/removes a
+route, handler or job must refresh verification and fail CI if the new item has
+no family/behavior seed.
 
 ## Human-readable scenario contract
 
@@ -165,25 +167,34 @@ current task or overlapping owner still blocks `P1-00`.
 
 ## Contract record required for each scenario variant
 
+Empty per-row Cartesian records are forbidden. The reviewable source is
+`inventory/scenario-records.json` schema `two-server-refactor.scenario-records.v2`:
+
+- `behavior_contracts` hold the real current fields (`preconditions` through
+  `failure_cases`, evidence and tests). Irrelevant fields are
+  `NOT_APPLICABLE` with a reason, never empty.
+- `variants` / `composed_eligibility` bind persona, tier, time, origin and
+  outcome to a `contract_id` with a definite eligibility decision.
+- each of the 465 surface seeds maps to exactly one contract; seed-specific
+  evidence is the inventory `test_refs`, not the schema meta-test.
+- Cartesian expansion, if needed later, is generated outside Git.
+
 ```yaml
-behavior_id: OFFER-WEB-CREATE-TIER2-NORMAL
-seed_ids: [API-OFFER-POST-OFFERS-CREATE-OFFER-L...]
-surface: WEBAPP
-persona_role: customer
-customer_tier: 2
-time_context: normal
-preconditions: []
-input: {}
-response: {status: null, schema: null, copy_key: null}
-db_mutations: []
-events_outbox: []
-side_effects: []
-ordering: []
-timeouts_retries: {}
-idempotency_key: null
-failure_cases: []
-reference_evidence: null
-regression_tests: []
+contract_id: BC-OFFER-CURRENT-V1
+family: OFFER
+preconditions: {status: APPLICABLE, rules: [...]}
+input: {status: APPLICABLE, rules: [...]}
+response: {status: APPLICABLE, rules: [...]}
+db_mutations: {status: APPLICABLE, rules: [...]}
+events_outbox: {status: APPLICABLE, rules: [...]}
+side_effects: {status: APPLICABLE, rules: [...]}
+ordering: {status: APPLICABLE, rules: [...]}
+timeouts_retries: {status: APPLICABLE, rules: [...]}
+idempotency_key: {status: APPLICABLE, rules: [...]}
+failure_cases: {status: APPLICABLE, rules: [...]}
+reference_evidence: {status: EVIDENCED, sources: [...]}
+regression_tests: [existing behavioral tests]
+composed_eligibility.PERSONA-CUSTOMER-TIER2.WEBAPP.TIME-NORMAL: ELIGIBLE_FOR_REQUEST_ONLY
 target_result: NOT_RUN
 ```
 
@@ -215,9 +226,9 @@ At minimum the target must preserve:
 | manual resolution of 6 evidence-review items | `COMPLETE — characterization linked` |
 | current runtime child/poller/timer owner seed manifest | `COMPLETE` |
 | exact target compose/credential/readiness binding | future `P1-03` |
-| persona/tier/time/failure scenario records | `COMPLETE — records written; target_result NOT_RUN` |
+| persona/tier/time/failure scenario records | `READY_FOR_CODEX_FINAL_REVIEW` — compact v2 contracts and definite eligibility written; `target_result NOT_RUN`; not `COMPLETE` until Codex accepts the correction |
 | owner approval of human-readable scenario contract | `COMPLETE — 2026-09-02` |
-| deploy/restart/backup/restore duration (`DR-015`) | `CODEX_REVIEW_BLOCKER` / `NOT_OBSERVED` |
+| deploy/restart/backup/restore duration (`DR-015`) | `DEFERRED_BLOCKER` / `DPL-1` / `NOT_OBSERVED` |
 | current-vs-target differential execution | future `P1-06` |
 
 `P1-00` becomes complete only after the open current-state items have evidence or

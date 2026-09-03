@@ -1,6 +1,7 @@
 {
   "schema_version": "two-server-refactor.surface-behavior-inventory.v1",
-  "generated_from_commit": "aa2c06a573dfd60051e142146f55d7965f2242a7",
+  "generated_from_commit": "19087ff0686c9260b55f1c6c35782b758be6673e",
+  "verified_against_commit": "aa2c06a573dfd60051e142146f55d7965f2242a7",
   "section": "web",
   "coverage": {
     "total": 30,
@@ -55,10 +56,7 @@
       "path": "/login",
       "name": "login",
       "component": "LoginView",
-      "guards": [
-        "requiresAuth",
-        "requiresMarketAccess"
-      ],
+      "guards": [],
       "source": "frontend/src/router/index.ts:41",
       "test_refs": [
         "tests/test_audit_anchor_export.py",
@@ -90,8 +88,7 @@
       "name": "operations",
       "component": "OperationsView.vue",
       "guards": [
-        "requiresAuth",
-        "requiresOwnerAccess"
+        "requiresAuth"
       ],
       "source": "frontend/src/router/index.ts:53",
       "test_refs": [
@@ -287,7 +284,6 @@
       "name": "settings",
       "component": "SettingsView.vue",
       "guards": [
-        "requiresAdmin",
         "requiresAuth"
       ],
       "source": "frontend/src/router/index.ts:131",
@@ -452,9 +448,7 @@
       "path": "/register",
       "name": "web-register",
       "component": "WebRegister.vue",
-      "guards": [
-        "requiresAuth"
-      ],
+      "guards": [],
       "source": "frontend/src/router/index.ts:191",
       "test_refs": [
         "frontend/src/App.test.ts",
@@ -467,7 +461,7 @@
       "family": "NOTIFY",
       "path": "/notifications",
       "name": "notifications",
-      "component": "ShareReceiveView.vue",
+      "component": "REDIRECT:account-notifications",
       "guards": [
         "requiresAuth"
       ],

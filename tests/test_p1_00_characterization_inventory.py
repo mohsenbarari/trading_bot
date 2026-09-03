@@ -11,11 +11,16 @@ import unittest
 from collections import Counter
 from pathlib import Path
 
+from core.background_job_authority import (
+    REQUIRED_BACKGROUND_JOBS,
+    background_job_authority_entries,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INV_DIR = REPO_ROOT / "docs/refactor/two-server/section-1/inventory"
 EVIDENCE_INDEX = REPO_ROOT / "docs/refactor/two-server/section-1/evidence-index.md"
 EXPECTED_COMMIT = "aa2c06a573dfd60051e142146f55d7965f2242a7"
+ORIGINAL_INVENTORY_COMMIT = "19087ff0686c9260b55f1c6c35782b758be6673e"
 SIX_BEHAVIOR_IDS = (
     "API-NOTIFY-POST-NOTIFICATIONS-SEND-TEST-PUSH-NOTIFICATION-L201",
     "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-TOGGLE-GROUP-RECIPIENT-L240",
@@ -86,18 +91,133 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _fastapi_names() -> list[str]:
-    names = []
+CORE_CONTRACT_FIELDS = {
+    "preconditions",
+    "input",
+    "response",
+    "db_mutations",
+    "events_outbox",
+    "side_effects",
+    "ordering",
+    "timeouts_retries",
+    "idempotency_key",
+    "failure_cases",
+    "reference_evidence",
+    "regression_tests",
+}
+GENERIC_META_TESTS = {"tests/test_p1_00_characterization_inventory.py"}
+AMBIGUOUS_POLICY_PHRASES = {
+    "where current policy allows",
+    "where allowed",
+    "if allowed",
+    "probably",
+}
+FORBIDDEN_ELIGIBILITY_DECISIONS = {
+    "INHERIT_PERSONA_ELIGIBILITY",
+    "INHERIT",
+    "WHERE_POLICY_ALLOWS",
+    "ELIGIBLE_IF",
+}
+DEFINITE_ELIGIBILITY_DECISIONS = {
+    "ELIGIBLE",
+    "ELIGIBLE_FOR_REQUEST_ONLY",
+    "ELIGIBLE_FOR_READ_OR_TERMINAL_REPLAY",
+    "INELIGIBLE",
+    "INELIGIBLE_FOR_NEW_MARKET_MUTATION",
+    "NOT_APPLICABLE",
+}
+SECRET_SCAN_RESULT = "NO_SECRET_VALUE / DETECTION_SIGNATURES_PRESENT"
+
+
+def _literal_string(node: ast.AST | None) -> str:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    raise AssertionError(f"expected static string literal, got {ast.dump(node) if node else None}")
+
+
+def _api_mount_prefixes() -> dict[str, str]:
+    tree = ast.parse((REPO_ROOT / "main.py").read_text(encoding="utf-8"), filename="main.py")
+    prefixes: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr != "include_router" or not isinstance(node.func.value, ast.Name):
+            continue
+        if node.func.value.id != "api_router" or not node.args:
+            continue
+        router_ref = node.args[0]
+        if not (
+            isinstance(router_ref, ast.Attribute)
+            and router_ref.attr == "router"
+            and isinstance(router_ref.value, ast.Name)
+        ):
+            continue
+        prefix_node = next((kw.value for kw in node.keywords if kw.arg == "prefix"), None)
+        prefixes[router_ref.value.id] = "/api" + _literal_string(prefix_node)
+    return prefixes
+
+
+def _fastapi_contracts() -> list[tuple[str, str, str, str, str]]:
+    contracts: list[tuple[str, str, str, str, str]] = []
+    prefixes = _api_mount_prefixes()
+    attrs = {"get", "post", "put", "patch", "delete", "websocket"}
     for path in sorted((REPO_ROOT / "api/routers").glob("*.py")):
         if path.name == "__init__.py":
             continue
-        names.extend(_decorator_names(path, {"get", "post", "put", "patch", "delete", "websocket"}))
-    names.extend(_decorator_names(REPO_ROOT / "main.py", {"get", "post", "put", "patch", "delete", "websocket"}))
-    return names
+        module = path.stem
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for dec in node.decorator_list:
+                if not (
+                    isinstance(dec, ast.Call)
+                    and isinstance(dec.func, ast.Attribute)
+                    and dec.func.attr in attrs
+                    and isinstance(dec.func.value, ast.Name)
+                    and dec.func.value.id == "router"
+                ):
+                    continue
+                method = dec.func.attr.upper()
+                full_path = prefixes[module] + _literal_string(dec.args[0])
+                mutation_class = (
+                    "READ_OR_STREAM" if method in {"GET", "WEBSOCKET"} else "MUTATION_OR_COMMAND"
+                )
+                source = f"{path.relative_to(REPO_ROOT)}:{dec.lineno}"
+                contracts.append((method, full_path, f"{module}.{node.name}", source, mutation_class))
+
+    path = REPO_ROOT / "main.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for dec in node.decorator_list:
+            if not (
+                isinstance(dec, ast.Call)
+                and isinstance(dec.func, ast.Attribute)
+                and dec.func.attr in attrs
+                and isinstance(dec.func.value, ast.Name)
+                and dec.func.value.id == "app"
+            ):
+                continue
+            method = dec.func.attr.upper()
+            mutation_class = (
+                "READ_OR_STREAM" if method in {"GET", "WEBSOCKET"} else "MUTATION_OR_COMMAND"
+            )
+            contracts.append(
+                (
+                    method,
+                    _literal_string(dec.args[0]),
+                    f"main.{node.name}",
+                    f"main.py:{dec.lineno}",
+                    mutation_class,
+                )
+            )
+    return contracts
 
 
-def _bot_names() -> list[str]:
-    names = []
+def _bot_contracts() -> list[tuple[str, str, str, str]]:
+    contracts: list[tuple[str, str, str, str]] = []
     kinds = {
         "message",
         "callback_query",
@@ -114,8 +234,29 @@ def _bot_names() -> list[str]:
     for path in sorted((REPO_ROOT / "bot/handlers").glob("*.py")):
         if path.name == "__init__.py":
             continue
-        names.extend(_decorator_names(path, kinds))
-    return names
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for dec in node.decorator_list:
+                if not (
+                    isinstance(dec, ast.Call)
+                    and isinstance(dec.func, ast.Attribute)
+                    and dec.func.attr in kinds
+                    and isinstance(dec.func.value, ast.Name)
+                    and dec.func.value.id == "router"
+                ):
+                    continue
+                filter_expr = ", ".join(ast.unparse(item) for item in dec.args)
+                contracts.append(
+                    (
+                        dec.func.attr,
+                        filter_expr,
+                        f"{path.stem}.{node.name}",
+                        f"{path.relative_to(REPO_ROOT)}:{dec.lineno}",
+                    )
+                )
+    return contracts
 
 
 def _decorator_names(path: Path, attrs: set[str]) -> list[str]:
@@ -130,9 +271,94 @@ def _decorator_names(path: Path, attrs: set[str]) -> list[str]:
     return found
 
 
-def _web_names() -> set[str]:
-    text = (REPO_ROOT / "frontend/src/router/index.ts").read_text(encoding="utf-8")
-    return set(re.findall(r"name:\s*'([^']+)'", text))
+def _web_contracts() -> list[tuple[str, str, str, tuple[str, ...], str]]:
+    path = REPO_ROOT / "frontend/src/router/index.ts"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    contracts: list[tuple[str, str, str, tuple[str, ...], str]] = []
+    for line_no, line in enumerate(lines, start=1):
+        path_match = re.match(r"\s{6}path:\s*'([^']+)',", line)
+        if not path_match:
+            continue
+        block = [line]
+        for later in lines[line_no:]:
+            if later == "    },":
+                break
+            block.append(later)
+        block_text = "\n".join(block)
+        name_match = re.search(r"\bname:\s*'([^']+)'", block_text)
+        if not name_match:
+            raise AssertionError(f"route at line {line_no} has no static name")
+        import_component = re.search(r"component:\s*\(\)\s*=>\s*import\('\.\./views/([^']+)'\)", block_text)
+        named_component = re.search(r"component:\s*([A-Za-z][A-Za-z0-9_]*)", block_text)
+        redirect = re.search(r"redirect:\s*\{\s*name:\s*'([^']+)'", block_text)
+        if import_component:
+            component = import_component.group(1)
+        elif named_component:
+            component = named_component.group(1)
+        elif redirect:
+            component = f"REDIRECT:{redirect.group(1)}"
+        else:
+            raise AssertionError(f"route {name_match.group(1)} has no component/redirect")
+        guards = tuple(sorted(set(re.findall(r"(requires[A-Za-z]+):\s*true", block_text))))
+        contracts.append(
+            (
+                path_match.group(1),
+                name_match.group(1),
+                component,
+                guards,
+                f"frontend/src/router/index.ts:{line_no}",
+            )
+        )
+    return contracts
+
+
+def _nonempty_contract_value(value: object) -> bool:
+    if value is None or value == "" or value == [] or value == {}:
+        return False
+    if isinstance(value, dict):
+        if value.get("status") == "NOT_APPLICABLE":
+            return bool(value.get("reason"))
+        if value.get("status") == "APPLICABLE":
+            return bool(value.get("rules"))
+        if value.get("decision") == "NOT_APPLICABLE":
+            return bool(value.get("reason"))
+        if value.get("decision") in DEFINITE_ELIGIBILITY_DECISIONS:
+            return bool(value.get("predicate") or value.get("reason"))
+    return True
+
+
+def _iter_eligibility_nodes(value: object):
+    if isinstance(value, dict):
+        if "decision" in value:
+            yield value
+        for child in value.values():
+            yield from _iter_eligibility_nodes(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _iter_eligibility_nodes(child)
+
+
+def _assert_definite_variant(test, variant: dict, *, require_rule_sources: bool = True) -> None:
+    test.assertEqual(variant.get("contract_id", ""), variant.get("contract_id"))
+    test.assertTrue(variant.get("contract_id"), variant)
+    test.assertTrue(variant.get("applicability") or variant.get("eligibility"), variant)
+    test.assertTrue(variant.get("expected_outcome"), variant.get("variant_id") or variant)
+    text = json.dumps(variant, ensure_ascii=False).lower()
+    test.assertFalse(any(phrase in text for phrase in AMBIGUOUS_POLICY_PHRASES), variant)
+    test.assertNotIn("inherit_persona_eligibility", text)
+    if require_rule_sources:
+        sources = variant.get("rule_sources") or variant.get("evidence_refs") or []
+        test.assertTrue(sources, variant.get("variant_id") or variant)
+        for ref in sources:
+            test.assertTrue((REPO_ROOT / ref).exists(), ref)
+    for node in _iter_eligibility_nodes(variant.get("eligibility")):
+        decision = node["decision"]
+        test.assertNotIn(decision, FORBIDDEN_ELIGIBILITY_DECISIONS, variant)
+        test.assertIn(decision, DEFINITE_ELIGIBILITY_DECISIONS, variant)
+        if decision == "NOT_APPLICABLE":
+            test.assertTrue(node.get("reason"), variant)
+        else:
+            test.assertTrue(node.get("predicate") or node.get("expected_outcome"), variant)
 
 
 class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
@@ -144,16 +370,16 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, EXPECTED_COMMIT)
 
-    def test_live_surface_counts_still_match_refreshed_inventory(self):
+    def test_live_surface_semantics_match_verified_inventory(self):
         api_inv = _load_json("surface-api.json")
         bot_inv = _load_json("surface-bot.json")
         web_inv = _load_json("surface-web.json")
         jobs_inv = _load_json("surface-jobs.json")
         index = _load_json("surface-behavior-inventory.json")
 
-        live_api = _fastapi_names()
-        live_bot = _bot_names()
-        live_web = _web_names()
+        live_api = _fastapi_contracts()
+        live_bot = _bot_contracts()
+        live_web = _web_contracts()
         dormant = _decorator_names(
             REPO_ROOT / "src/interfaces/http_api/routers/user_router.py",
             {"get", "post", "put", "patch", "delete", "websocket"},
@@ -168,22 +394,66 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
         self.assertEqual(web_inv["coverage"]["total"], 30)
         self.assertEqual(jobs_inv["coverage"]["total"], 15)
         self.assertEqual(index["counts"]["live_api_decorators_including_main"], 217)
-        self.assertEqual(Counter(live_api), Counter(e["handler"].split(".")[-1] for e in api_inv["entries"]))
-        self.assertEqual(Counter(live_bot), Counter(e["handler"].split(".")[-1] for e in bot_inv["entries"]))
-        self.assertEqual(live_web, {e["name"] for e in web_inv["entries"]})
+        self.assertEqual(
+            Counter(live_api),
+            Counter(
+                (
+                    item["method"],
+                    item["path"],
+                    item["handler"],
+                    item["source"],
+                    item["mutation_class"],
+                )
+                for item in api_inv["entries"]
+            ),
+        )
+        self.assertEqual(
+            Counter(live_bot),
+            Counter(
+                (item["kind"], item["filter"], item["handler"], item["source"])
+                for item in bot_inv["entries"]
+            ),
+        )
+        self.assertEqual(
+            Counter(live_web),
+            Counter(
+                (
+                    item["path"],
+                    item["name"],
+                    item["component"],
+                    tuple(sorted(item["guards"])),
+                    item["source"],
+                )
+                for item in web_inv["entries"]
+            ),
+        )
 
-    def test_inventories_are_stamped_to_assignment_base(self):
+        authority = background_job_authority_entries()
+        by_name = {item["job_name"]: item for item in jobs_inv["entries"]}
+        self.assertEqual(set(by_name), set(authority))
+        for job_name, actual in authority.items():
+            recorded = by_name[job_name]
+            self.assertEqual(recorded["required_registry_member"], job_name in REQUIRED_BACKGROUND_JOBS)
+            self.assertEqual(recorded["current_allowed_servers"], list(actual.allowed_servers))
+            self.assertEqual(recorded["mutated_tables"], list(actual.mutated_tables))
+            self.assertEqual(recorded["local_runtime"], actual.local_runtime)
+            self.assertEqual(recorded["external_state"], list(actual.external_state))
+            self.assertEqual(recorded["side_effects"], list(actual.side_effects))
+            self.assertTrue(recorded["target_authority_candidates"])
+
+    def test_inventory_provenance_preserves_origin_and_records_verification(self):
         for name in (
             "surface-api.json",
             "surface-bot.json",
             "surface-web.json",
             "surface-jobs.json",
             "surface-behavior-inventory.json",
-            "scenario-records.json",
         ):
             payload = _load_json(name)
-            self.assertEqual(payload["generated_from_commit"], EXPECTED_COMMIT)
-            self.assertNotEqual(payload["generated_from_commit"], "19087ff0686c9260b55f1c6c35782b758be6673e")
+            self.assertEqual(payload["generated_from_commit"], ORIGINAL_INVENTORY_COMMIT)
+            self.assertEqual(payload["verified_against_commit"], EXPECTED_COMMIT)
+        scenarios = _load_json("scenario-records.json")
+        self.assertEqual(scenarios["generated_from_commit"], EXPECTED_COMMIT)
 
     def test_no_unclassified_or_empty_required_test_refs(self):
         empty = []
@@ -210,42 +480,203 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
             self.assertTrue(refs, behavior_id)
             self.assertIn("tests/test_p1_00_characterization_six_gaps.py", refs)
 
-    def test_scenario_records_cover_families_matrix_and_failure_timeline(self):
+    def test_normalized_behavior_contracts_are_real_and_complete(self):
         payload = _load_json("scenario-records.json")
-        records = payload["records"]
-        families = {item["family"] for item in records}
-        self.assertEqual(FAMILIES, families)
-        matrix = {
-            (item["offer_origin"], item["request_origin"])
-            for item in records
-            if item.get("record_class") == "web_bot_combination_matrix"
+        contracts = payload["behavior_contracts"]
+        self.assertEqual(len(contracts), payload["coverage"]["behavior_contracts"])
+        ids = {item["contract_id"] for item in contracts}
+        self.assertEqual(len(ids), len(contracts))
+        self.assertEqual(FAMILIES, {item["family"] for item in contracts if item["family"] in FAMILIES})
+        for contract in contracts:
+            self.assertEqual(CORE_CONTRACT_FIELDS - set(contract), set(), contract["contract_id"])
+            for field in CORE_CONTRACT_FIELDS:
+                self.assertTrue(
+                    _nonempty_contract_value(contract[field]),
+                    f"{contract['contract_id']}:{field}",
+                )
+            self.assertTrue(all((REPO_ROOT / ref).exists() for ref in contract["regression_tests"]))
+            self.assertTrue(set(contract["regression_tests"]) - GENERIC_META_TESTS, contract["contract_id"])
+            for source in contract["reference_evidence"]["sources"]:
+                self.assertTrue((REPO_ROOT / source).exists(), f"{contract['contract_id']} -> {source}")
+            contract_text = json.dumps(contract, ensure_ascii=False).lower()
+            self.assertFalse(any(phrase in contract_text for phrase in AMBIGUOUS_POLICY_PHRASES))
+            self.assertNotIn("inherit_persona_eligibility", contract_text)
+            if contract["contract_id"] != "BC-OPS-CURRENT-V1":
+                self.assertNotIn("this assignment authorizes no", contract_text)
+
+    def test_every_surface_seed_maps_once_with_seed_specific_behavioral_evidence(self):
+        payload = _load_json("scenario-records.json")
+        contract_ids = {item["contract_id"] for item in payload["behavior_contracts"]}
+        rules = payload["seed_mapping"]["rules"]
+        seeds = []
+        for name in ("surface-api.json", "surface-bot.json", "surface-web.json", "surface-jobs.json"):
+            seeds.extend(_load_json(name)["entries"])
+
+        self.assertEqual(len(seeds), 465)
+        self.assertEqual(len({item["behavior_id"] for item in seeds}), 465)
+        mapped_lines = []
+        family_counts = Counter(item["family"] for item in seeds)
+        self.assertEqual(dict(family_counts), payload["seed_mapping"]["expected_family_counts"])
+        for seed in seeds:
+            matches = [rule for rule in rules if rule["family"] == seed["family"]]
+            self.assertEqual(len(matches), 1, seed["behavior_id"])
+            contract_id = matches[0]["contract_id"]
+            self.assertIn(contract_id, contract_ids)
+            self.assertTrue(seed["test_refs"], seed["behavior_id"])
+            self.assertTrue(
+                set(seed["test_refs"]) - GENERIC_META_TESTS,
+                f"generic-only evidence: {seed['behavior_id']}",
+            )
+            for ref in seed["test_refs"]:
+                self.assertTrue((REPO_ROOT / ref).exists(), f"{seed['behavior_id']} -> {ref}")
+            mapped_lines.append(f"{seed['behavior_id']}={contract_id}")
+
+        resolved = ("\n".join(sorted(mapped_lines)) + "\n").encode()
+        self.assertEqual(
+            hashlib.sha256(resolved).hexdigest(),
+            payload["seed_mapping"]["resolved_index_sha256"],
+        )
+
+    def test_matrix_axes_resolve_definite_eligibility_and_outcome(self):
+        payload = _load_json("scenario-records.json")
+        matrix = payload["matrix"]
+        origin_variants = matrix["origin_variants"]
+        persona_variants = matrix["persona_variants"]
+        time_variants = matrix["time_variants"]
+        outcome_variants = matrix["outcome_variants"]
+        self.assertEqual(
+            {(item["offer_origin"], item["request_origin"]) for item in origin_variants},
+            ORIGIN_ROWS,
+        )
+        self.assertEqual(
+            len(origin_variants) * len(persona_variants) * len(time_variants) * len(outcome_variants),
+            matrix["expanded_variant_count"],
+        )
+        self.assertEqual(matrix["expanded_variant_count"], 360)
+
+        for variant in [*origin_variants, *persona_variants, *time_variants, *outcome_variants]:
+            self.assertEqual(variant["contract_id"], matrix["contract_id"])
+            _assert_definite_variant(self, variant)
+
+        for persona in persona_variants:
+            tier = persona["customer_tier"]
+            if tier["value"] == "NOT_APPLICABLE":
+                self.assertTrue(tier["reason"])
+            for surface in ("WEBAPP", "TELEGRAM_BOT"):
+                decision = persona["eligibility"][surface]
+                self.assertIn(decision["decision"], DEFINITE_ELIGIBILITY_DECISIONS)
+                self.assertNotIn(decision["decision"], FORBIDDEN_ELIGIBILITY_DECISIONS)
+                self.assertTrue(decision["predicate"])
+                self.assertTrue(decision["expected_outcome"])
+        self.assertEqual(
+            next(item for item in time_variants if item["variant_id"] == "TIME-NORMAL")["eligibility"]["decision"],
+            "ELIGIBLE",
+        )
+        tier2 = next(item for item in persona_variants if item["variant_id"] == "PERSONA-CUSTOMER-TIER2")
+        self.assertEqual(tier2["eligibility"]["TELEGRAM_BOT"]["decision"], "INELIGIBLE")
+        accountant = next(item for item in persona_variants if item["variant_id"] == "PERSONA-ACCOUNTANT")
+        self.assertEqual(
+            {item["decision"] for item in accountant["eligibility"].values()},
+            {"INELIGIBLE"},
+        )
+
+    def test_composed_eligibility_covers_every_persona_surface_time_cell(self):
+        payload = _load_json("scenario-records.json")
+        personas = [item["variant_id"] for item in payload["matrix"]["persona_variants"]]
+        times = [item["variant_id"] for item in payload["matrix"]["time_variants"]]
+        surfaces = ("WEBAPP", "TELEGRAM_BOT")
+        expected = {
+            (persona, surface, time)
+            for persona in personas
+            for surface in surfaces
+            for time in times
         }
-        self.assertEqual(ORIGIN_ROWS, matrix)
-        for offer_origin, request_origin in ORIGIN_ROWS:
-            row = [
-                item
-                for item in records
-                if item.get("record_class") == "web_bot_combination_matrix"
-                and item["offer_origin"] == offer_origin
-                and item["request_origin"] == request_origin
-            ]
-            personas = {item["persona_role"] for item in row}
-            tiers = {item.get("customer_tier") for item in row}
-            times = {item["time_context"] for item in row}
-            outcomes = {item["outcome"] for item in row}
-            self.assertTrue({"owner", "customer", "accountant", "admin"} <= personas)
-            self.assertTrue({1, 2} <= tiers)
-            self.assertEqual({"normal", "overtime", "closed"}, times)
-            self.assertEqual({"success", "reject", "retry", "concurrent"}, outcomes)
-        failures = {
-            (item["family"], item["failure_boundary"])
-            for item in records
-            if item.get("record_class") == "failure_timeline"
-        }
-        self.assertEqual({(family, boundary) for family in FAMILIES for boundary in FAILURE_BOUNDARIES}, failures)
-        timing = next(item for item in records if item["behavior_id"] == "OPS-DR015-DEPLOY-RESTART-BACKUP-RESTORE-DURATION")
-        self.assertEqual(timing["classification"], "CODEX_REVIEW_BLOCKER")
+        cells = payload["composed_eligibility"]
+        self.assertEqual(len(cells), 30)
+        self.assertEqual(payload["coverage"]["composed_eligibility_cells"], 30)
+        seen = set()
+        for cell in cells:
+            _assert_definite_variant(self, cell)
+            key = (cell["persona_variant_id"], cell["request_origin"], cell["time_variant_id"])
+            self.assertIn(key, expected)
+            seen.add(key)
+        self.assertEqual(seen, expected)
+        accountant_bot = next(
+            item
+            for item in cells
+            if item["persona_variant_id"] == "PERSONA-ACCOUNTANT"
+            and item["request_origin"] == "TELEGRAM_BOT"
+        )
+        self.assertEqual(accountant_bot["eligibility"]["decision"], "INELIGIBLE")
+        tier2_bot = next(
+            item
+            for item in cells
+            if item["persona_variant_id"] == "PERSONA-CUSTOMER-TIER2"
+            and item["request_origin"] == "TELEGRAM_BOT"
+            and item["time_variant_id"] == "TIME-NORMAL"
+        )
+        self.assertEqual(tier2_bot["eligibility"]["decision"], "INELIGIBLE")
+
+    def test_invalid_combinations_and_policy_effects_are_explicit(self):
+        payload = _load_json("scenario-records.json")
+        combinations = payload["invalid_combinations"]
+        self.assertEqual(len(combinations), payload["coverage"]["invalid_combinations"])
+        self.assertEqual(len(combinations), 6)
+        for item in combinations:
+            _assert_definite_variant(self, item)
+            self.assertEqual(item["applicability"], "NOT_APPLICABLE")
+            self.assertTrue(item["reason"])
+
+        effects = payload["policy_effects"]
+        self.assertEqual({item["effect_id"] for item in effects}, {
+            "CONFIRMATION",
+            "QUOTA",
+            "COMMISSION",
+            "PUBLICATION",
+            "NOTIFICATION",
+            "TIMEOUT",
+            "FAILURE",
+        })
+        for item in effects:
+            _assert_definite_variant(self, item)
+
+        links = payload["telegram_link_variants"]
+        self.assertEqual(len(links), 2)
+        absent = next(item for item in links if item["variant_id"] == "TELEGRAM-LINK-ABSENT")
+        self.assertEqual(absent["eligibility"]["TELEGRAM_BOT"]["decision"], "INELIGIBLE")
+        self.assertEqual(absent["eligibility"]["WEBAPP"]["decision"], "NOT_APPLICABLE")
+        self.assertTrue(absent["eligibility"]["WEBAPP"]["reason"])
+        for item in links:
+            _assert_definite_variant(self, item)
+
+    def test_failure_axes_and_dr015_deferral_are_explicit(self):
+        payload = _load_json("scenario-records.json")
+        timeline = payload["failure_timeline"]
+        self.assertEqual(set(timeline["families"]), FAMILIES)
+        self.assertEqual(
+            {item["failure_boundary"] for item in timeline["boundaries"]},
+            FAILURE_BOUNDARIES,
+        )
+        self.assertEqual(
+            len(timeline["families"]) * len(timeline["boundaries"]),
+            timeline["expanded_variant_count"],
+        )
+        for boundary in timeline["boundaries"]:
+            _assert_definite_variant(self, boundary)
+            self.assertEqual(boundary["contract_id"], timeline["contract_id"])
+            self.assertTrue(boundary["applicability"])
+            self.assertTrue(boundary["expected_outcome"])
+            self.assertTrue(boundary["evidence_refs"])
+            for ref in boundary["evidence_refs"]:
+                self.assertTrue((REPO_ROOT / ref).exists(), ref)
+
+        self.assertEqual(len(payload["deferred_blockers"]), 1)
+        timing = payload["deferred_blockers"][0]
+        self.assertEqual(timing["blocker_id"], "DR-015")
+        self.assertEqual(timing["status"], "DEFERRED_BLOCKER")
+        self.assertEqual(timing["resolution_stage"], "DPL-1")
         self.assertEqual(timing["evidence_status"], "NOT_OBSERVED")
+        self.assertIn("P1-02", timing["blocks_before_resolution"])
 
     def test_runtime_facts_are_marked_not_reobserved(self):
         runtime = _load_json("current-finland-runtime.json")
@@ -261,7 +692,7 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
             self.assertIn(digest, index_text, label)
             self.assertRegex(index_text, rf"`{re.escape(label)}`.*SHA-256 `{digest}`")
 
-    def test_tracked_refresh_artifacts_have_no_secret_material(self):
+    def test_tracked_refresh_artifacts_have_no_secret_values(self):
         paths = list((REPO_ROOT / "docs/refactor/two-server/section-1").rglob("*"))
         leaks = []
         for path in paths:
@@ -271,6 +702,8 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
             if any(marker in text for marker in SECRET_MARKERS):
                 leaks.append(str(path.relative_to(REPO_ROOT)))
         self.assertEqual(leaks, [])
+        self.assertTrue(all(marker in Path(__file__).read_text(encoding="utf-8") for marker in SECRET_MARKERS))
+        self.assertIn(SECRET_SCAN_RESULT, EVIDENCE_INDEX.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

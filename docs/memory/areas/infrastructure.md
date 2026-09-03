@@ -3,7 +3,9 @@
 - 2026-09-03 | `P1-00` refresh `WA-P1-00-REFRESH-20260903-001` did not re-observe
   live hosts. Previous 2026-09-01 Bot-Finland / Web-Finland / target facts stay
   `NOT_REOBSERVED` until an Assignment with external access authorizes a new
-  read-only inspection.
+  read-only inspection. Codex classified missing deploy/restart/backup/restore
+  durations as `DR-015` `DEFERRED_BLOCKER` for `DPL-1`; do not estimate or
+  rehearse, and do not start `P1-02` before `DPL-1`.
 
 - 2026-09-03 | Initial provisioning and later infrastructure maintenance use version-controlled, idempotent Ansible against verified inventory; no operator shell execution is required. This neither automates Writer/DNS transfer nor authorizes server work before the refactor plan enters its explicitly approved execution phase.
 
