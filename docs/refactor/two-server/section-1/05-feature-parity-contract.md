@@ -56,7 +56,7 @@ test before the gate closes.
 | `inventory/surface-web.json` | path/name/component/guard/family/test references for 30 routes |
 | `inventory/surface-jobs.json` | current/target authority, tables and side effects for 15 registered jobs |
 | `inventory/runtime-task-ownership.json` | API/Bot/Market child process, poller, worker and timer ownership seeds |
-| `inventory/scenario-records.json` | compact v2 source: family×mutation_class contracts, 465-seed mapping, persona/time/origin/outcome axes, composed eligibility, invalid combinations and 72 failure cells cited only by family+boundary allowlisted tests or named blockers |
+| `inventory/scenario-records.json` | compact source: family×operation_kind contracts, 465-seed mapping, persona/time/origin/outcome axes, 72 failure cells with pytest node IDs or a submitted P1-00-FB registry |
 
 Surface inventories keep their original `generated_from_commit`
 `19087ff0686c9260b55f1c6c35782b758be6673e` and record
@@ -177,14 +177,16 @@ Empty per-row Cartesian records are forbidden. The reviewable source is
   `NOT_APPLICABLE` with a reason, never empty.
 - `variants` / `composed_eligibility` bind persona, tier, time, origin and
   outcome to a `contract_id` with a definite eligibility decision.
-- each of the 465 surface seeds maps to exactly one family×mutation_class
-  contract; a `READ_OR_STREAM` seed cannot inherit a mutation contract.
-  Seed-specific evidence is the inventory `test_refs`, not the schema meta-test.
+- each of the 465 surface seeds maps to exactly one family×operation_kind
+  contract; a `MENU_NAV` / `READ_QUERY` seed must not share a `BROADCAST` or
+  `CRUD_MUTATION` contract. Seed-specific evidence is the inventory `test_refs`,
+  not the schema meta-test.
 - Cartesian expansion, if needed later, is generated outside Git.
 
 ```yaml
-contract_id: BC-OFFER-MUTATION-V1
+contract_id: BC-OFFER-CRUD_MUTATION-V1
 family: OFFER
+operation_kind: CRUD_MUTATION
 mutation_class: MUTATION_OR_COMMAND
 preconditions: {status: APPLICABLE, rules: [...]}
 input: {status: APPLICABLE, rules: [...]}
@@ -230,7 +232,7 @@ At minimum the target must preserve:
 | manual resolution of 6 evidence-review items | `COMPLETE — characterization linked` |
 | current runtime child/poller/timer owner seed manifest | `COMPLETE` |
 | exact target compose/credential/readiness binding | future `P1-03` |
-| persona/tier/time/failure scenario records | `READY_FOR_CODEX_FINAL_REVIEW` — compact v2 contracts, explicit eligibility, and allowlisted family+boundary failure evidence; `target_result NOT_RUN`; not `COMPLETE` until Codex accepts the correction |
+| persona/tier/time/failure scenario records | `READY_FOR_CODEX_FINAL_REVIEW` — family×operation_kind contracts, node-id failure evidence, and P1-00-FB registry submitted for Codex disposition; `target_result NOT_RUN`; not `COMPLETE` |
 | owner approval of human-readable scenario contract | `COMPLETE — 2026-09-02` |
 | deploy/restart/backup/restore duration (`DR-015`) | `DEFERRED_BLOCKER` / `DPL-1` / `NOT_OBSERVED` |
 | current-vs-target differential execution | future `P1-06` |

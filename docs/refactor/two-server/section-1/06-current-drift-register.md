@@ -22,6 +22,22 @@ Status: open findings; no implicit fixes authorized
 | `DR-016` | high | current child pollers/workers/Market processes/timers are inventoried, but exact target compose/image/credential/readiness binding is not designed | close in `P1-03`; any unknown or overlapping owner blocks activation |
 | `DR-017` | low | incremental `src/interfaces/http_api/routers/user_router.py` declares four routes but `main.py` does not mount it | retain as dormant code until `P1-01` reference/cleanup review; never count it as a live API contract |
 
+## `P1-00` failure-boundary registry (not Codex-approved)
+
+The compact machine source is `inventory/scenario-records.json#blocker_registry`.
+Each `P1-00-FB-*` item has severity, owner `CODEX_FINAL_REVIEWER`,
+`resolution_stage` `P1-00`, `blocked_dependents` including `P1-06`,
+required evidence, forbidden shortcuts, and
+`disposition` `SUBMITTED_FOR_CODEX_STAGE_FINAL`.
+
+This table is the human index. It is a disposition request for the next exact-SHA
+Final Review. It is not Worker approval and not a Codex receipt.
+
+| ID | Family / boundary | Disposition |
+| --- | --- | --- |
+| `P1-00-FB-*` | remaining applicable family×boundary cells without a proven pytest node | `SUBMITTED_FOR_CODEX_STAGE_FINAL` |
+| `DR-015` | deploy/restart/backup/restore duration | already `DEFERRED_BLOCKER` / `DPL-1` |
+
 ## Interpretation
 
 - `blocker` prevents the relevant implementation Stage.

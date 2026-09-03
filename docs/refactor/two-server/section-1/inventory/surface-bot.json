@@ -19,6 +19,14 @@
     "mutation_class_counts": {
       "MUTATION_OR_COMMAND": 183,
       "READ_OR_STREAM": 20
+    },
+    "operation_kind_counts": {
+      "FSM_PROMPT": 21,
+      "CRUD_MUTATION": 120,
+      "BROADCAST": 1,
+      "MENU_NAV": 36,
+      "READ_QUERY": 20,
+      "DELIVERY_COMMAND": 5
     }
   },
   "entries": [
@@ -33,7 +41,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_start_creation.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-START-INVITATION-CREATION-INLINE-L160",
@@ -46,7 +55,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_start_creation.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-ACCOUNT-NAME-L183",
@@ -58,7 +68,8 @@
       "test_refs": [
         "tests/test_bot_admin_account_name.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-MOBILE-L230",
@@ -70,7 +81,8 @@
       "test_refs": [
         "tests/test_bot_admin_mobile.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-PROCESS-INVITATION-ROLE-L278",
@@ -82,7 +94,8 @@
       "test_refs": [
         "tests/test_bot_admin_role.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-CANCEL-INVITATION-CREATION-L402",
@@ -95,7 +108,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_cancel.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-BROADCAST-START-TELEGRAM-ADMIN-BROADCAST-L179",
@@ -109,7 +123,8 @@
         "tests/test_bot_admin_broadcast_interaction_queue.py",
         "tests/test_bot_panel_navigation_handoff.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CANCEL-TELEGRAM-ADMIN-BROADCAST-L194",
@@ -123,7 +138,8 @@
         "tests/test_telegram_delivery_queue_limiter.py",
         "tests/test_bot_overtime_callbacks_contract.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CHOOSE-ALL-RECIPIENTS-L208",
@@ -137,7 +153,8 @@
         "tests/test_bot_admin_broadcast_interaction_queue.py",
         "tests/test_core_cache.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CHOOSE-GROUP-RECIPIENTS-L221",
@@ -149,7 +166,8 @@
       "test_refs": [
         "tests/test_bot_admin_broadcast_interaction_queue.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-TOGGLE-GROUP-RECIPIENT-L240",
@@ -161,7 +179,8 @@
       "test_refs": [
         "tests/test_p1_00_characterization_six_gaps.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-FINISH-GROUP-SELECTION-L270",
@@ -173,7 +192,8 @@
       "test_refs": [
         "tests/test_bot_admin_broadcast_interaction_queue.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CHOOSE-SELECTED-RECIPIENTS-L286",
@@ -185,7 +205,8 @@
       "test_refs": [
         "tests/test_bot_admin_broadcast_interaction_queue.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-BROADCAST-PROCESS-SELECTED-RECIPIENT-SEARCH-L308",
@@ -197,7 +218,8 @@
       "test_refs": [
         "tests/test_bot_admin_broadcast_interaction_queue.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-TOGGLE-SELECTED-USER-L334",
@@ -209,7 +231,8 @@
       "test_refs": [
         "tests/test_bot_admin_broadcast_interaction_queue.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-SEARCH-AGAIN-L377",
@@ -221,7 +244,8 @@
       "test_refs": [
         "tests/test_bot_admin_broadcast_interaction_queue.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-FINISH-SELECTED-RECIPIENTS-L395",
@@ -233,7 +257,8 @@
       "test_refs": [
         "tests/test_bot_admin_broadcast_interaction_queue.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-BROADCAST-PROCESS-BROADCAST-MESSAGE-TEXT-L411",
@@ -246,7 +271,8 @@
         "tests/test_telegram_admin_broadcast_video.py",
         "tests/test_bot_admin_broadcast_interaction_queue.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CONFIRM-TELEGRAM-ADMIN-BROADCAST-L593",
@@ -260,7 +286,8 @@
         "tests/test_telegram_admin_broadcast_video.py",
         "tests/test_bot_admin_broadcast_interaction_queue.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "BROADCAST"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-MANAGE-COMMODITIES-L305",
@@ -274,7 +301,8 @@
         "tests/test_bot_commodity_catalog.py",
         "tests/test_bot_panel_navigation_handoff.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-BACK-TO-LIST-L318",
@@ -287,7 +315,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_commodities_entry_points.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-MANAGE-ALIASES-L333",
@@ -299,7 +328,8 @@
       "test_refs": [
         "tests/test_bot_admin_commodities_entry_points.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ALIAS-ADD-START-L350",
@@ -311,7 +341,8 @@
       "test_refs": [
         "tests/test_bot_admin_commodities_alias_add.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-ALIAS-ADD-NAME-L365",
@@ -323,7 +354,8 @@
       "test_refs": [
         "tests/test_bot_admin_commodities_alias_add.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ALIAS-EDIT-START-L408",
@@ -337,7 +369,8 @@
         "tests/test_bot_admin_commodities_alias_delete.py",
         "tests/test_bot_admin_commodities_alias_edit.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-ALIAS-EDIT-NAME-L429",
@@ -349,7 +382,8 @@
       "test_refs": [
         "tests/test_bot_admin_commodities_alias_edit.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ALIAS-DELETE-START-L466",
@@ -363,7 +397,8 @@
         "tests/test_bot_admin_commodities_alias_delete.py",
         "tests/test_bot_admin_commodities_alias_edit.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ALIAS-DELETE-YES-L487",
@@ -376,7 +411,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_commodities_alias_delete.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-COMMODITY-EDIT-START-L523",
@@ -388,7 +424,8 @@
       "test_refs": [
         "tests/test_bot_admin_commodities_commodity_edit.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-COMMODITY-EDIT-NAME-L537",
@@ -400,7 +437,8 @@
       "test_refs": [
         "tests/test_bot_admin_commodities_commodity_edit.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ADD-START-L572",
@@ -414,7 +452,8 @@
         "tests/test_bot_admin_commodities_show_list.py",
         "tests/test_bot_admin_commodities_add_create.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-ADD-NAME-L583",
@@ -427,7 +466,8 @@
         "tests/test_bot_admin_commodities_add_flow.py",
         "tests/test_bot_admin_commodities_add_create.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-ADD-ALIASES-AND-CREATE-L622",
@@ -440,7 +480,8 @@
         "tests/test_bot_admin_commodities_add_create.py",
         "tests/test_bot_admin_commodities_add_aliases_create.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-DELETE-CONFIRM-L671",
@@ -453,7 +494,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_commodities_delete_cancel.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-DELETE-YES-L685",
@@ -466,7 +508,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_commodities_delete_cancel.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-CANCEL-FSM-L719",
@@ -479,7 +522,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_commodities_delete_cancel.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-EDIT-ROLE-L1078",
@@ -491,7 +535,8 @@
       "test_refs": [
         "tests/test_bot_admin_users_role_actions.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-SET-USER-ROLE-L1090",
@@ -503,7 +548,8 @@
       "test_refs": [
         "tests/test_bot_admin_users_role_actions.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-TOGGLE-ACCOUNT-STATUS-L1134",
@@ -516,7 +562,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_bot_access.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-DELETE-REQUEST-L1186",
@@ -528,7 +575,8 @@
       "test_refs": [
         "tests/test_bot_admin_users_delete_flow.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-DELETE-CONFIRM-L1203",
@@ -540,7 +588,8 @@
       "test_refs": [
         "tests/test_bot_admin_users_delete_flow.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-LIMIT-START-L1252",
@@ -553,7 +602,8 @@
         "tests/test_bot_admin_users_limit_start.py",
         "tests/test_offers_router_create_guards.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-SET-TRADES-L1312",
@@ -565,7 +615,8 @@
       "test_refs": [
         "tests/test_bot_admin_users_limit_start.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-SET-COMMODITIES-L1336",
@@ -577,7 +628,8 @@
       "test_refs": [
         "tests/test_bot_admin_users_limit_start.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-SET-REQUESTS-L1360",
@@ -589,7 +641,8 @@
       "test_refs": [
         "tests/test_bot_admin_users_limit_start.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-USERS-PROCESS-LIMIT-VALUE-L1384",
@@ -601,7 +654,8 @@
       "test_refs": [
         "tests/test_bot_admin_users_limit_flow.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-LIMIT-CONFIRM-L1438",
@@ -614,7 +668,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_limit_flow.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-LIMIT-CANCEL-L1563",
@@ -626,7 +681,8 @@
       "test_refs": [
         "tests/test_bot_admin_users_limit_flow.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-BLOCK-SETTINGS-L1607",
@@ -639,7 +695,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_block_settings.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-TOGGLE-BLOCK-L1649",
@@ -652,7 +709,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_block_settings.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-SET-MAX-BLOCK-L1698",
@@ -664,7 +722,8 @@
       "test_refs": [
         "tests/test_bot_admin_users_block_settings.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-MAX-BLOCK-SET-L1723",
@@ -676,7 +735,8 @@
       "test_refs": [
         "tests/test_bot_admin_users_block_settings.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-MAX-BLOCK-CUSTOM-L1772",
@@ -689,7 +749,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_block_custom.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-USERS-PROCESS-CUSTOM-MAX-BLOCK-L1799",
@@ -701,7 +762,8 @@
       "test_refs": [
         "tests/test_bot_admin_users_block_custom.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-USERS-HANDLE-USERS-MENU-L489",
@@ -715,7 +777,8 @@
         "tests/test_bot_admin_users_entry_navigation.py",
         "tests/test_bot_panel_navigation_handoff.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-USERS-HANDLE-USERS-LIST-COMMAND-L512",
@@ -728,7 +791,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_entry_navigation.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USERS-PAGINATION-L527",
@@ -741,7 +805,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_entry_navigation.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-VIEW-USER-PROFILE-L548",
@@ -755,7 +820,8 @@
         "tests/test_bot_admin_users_profile_text.py",
         "tests/test_bot_admin_users_bot_access.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-USERS-HANDLE-BACK-TO-ADMIN-L602",
@@ -769,7 +835,8 @@
         "tests/test_bot_admin_users_interaction_queue.py",
         "tests/test_bot_admin_users_entry_navigation.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-USERS-START-SEARCH-USER-L635",
@@ -782,7 +849,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_search_entry_cancel.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-SEARCH-CANCEL-L657",
@@ -794,7 +862,8 @@
       "test_refs": [
         "tests/test_bot_admin_users_search_entry_cancel.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-USERS-PROCESS-SEARCH-QUERY-L678",
@@ -806,7 +875,8 @@
       "test_refs": [
         "tests/test_bot_admin_users_search_process.py"
       ],
-      "mutation_class": "READ_OR_STREAM"
+      "mutation_class": "READ_OR_STREAM",
+      "operation_kind": "READ_QUERY"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-SETTINGS-L742",
@@ -820,7 +890,8 @@
         "tests/test_bot_panel_user_settings.py",
         "tests/test_bot_admin_users_bot_access.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-BLOCK-ACTIONS-L798",
@@ -834,7 +905,8 @@
         "tests/test_core_events.py",
         "tests/test_sync_router_apply_item_success.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-UNBLOCK-L925",
@@ -847,7 +919,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_unblock_unlimit.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-UNLIMIT-L998",
@@ -860,7 +933,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_unblock_unlimit.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-SHOW-BLOCK-MENU-L223",
@@ -874,7 +948,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_offer_publication_worker.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-SHOW-BLOCKED-LIST-L244",
@@ -888,7 +963,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_offer_publication_worker.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-START-SEARCH-L282",
@@ -902,7 +978,8 @@
         "tests/test_block_service.py",
         "tests/test_backup_market_pipeline_archive.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-IDENTITY-MESSAGE-BLOCK-MANAGE-HANDLE-SEARCH-QUERY-L314",
@@ -914,7 +991,8 @@
       "test_refs": [
         "tests/test_bot_block_manage_search_query.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-HANDLE-BLOCK-USER-L372",
@@ -928,7 +1006,8 @@
         "tests/test_offer_publication_worker.py",
         "tests/test_web_push.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-HANDLE-UNBLOCK-USER-L408",
@@ -942,7 +1021,8 @@
         "tests/test_users_router_update_limits.py",
         "tests/test_block_service.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-HANDLE-BACK-L466",
@@ -956,7 +1036,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_offer_publication_worker.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-BACK-TO-USER-PANEL-FROM-BLOCK-MENU-L489",
@@ -970,7 +1051,8 @@
         "tests/test_bot_panel_admin_menu.py",
         "tests/test_bot_panel_simple_settings.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-OFFER-MESSAGE-COMMODITY-CATALOG-SHOW-COMMODITY-CATALOG-L225",
@@ -982,7 +1064,8 @@
       "test_refs": [
         "tests/test_bot_commodity_catalog.py"
       ],
-      "mutation_class": "READ_OR_STREAM"
+      "mutation_class": "READ_OR_STREAM",
+      "operation_kind": "READ_QUERY"
     },
     {
       "behavior_id": "BOT-OFFER-CALLBACK-QUERY-COMMODITY-CATALOG-PAGINATE-COMMODITY-CATALOG-L248",
@@ -994,7 +1077,8 @@
       "test_refs": [
         "tests/test_bot_commodity_catalog.py"
       ],
-      "mutation_class": "READ_OR_STREAM"
+      "mutation_class": "READ_OR_STREAM",
+      "operation_kind": "READ_QUERY"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-DEFAULT-ACKNOWLEDGE-NOOP-CALLBACK-L17",
@@ -1008,7 +1092,8 @@
         "tests/test_telegram_delivery_queue_contract.py",
         "tests/test_production_private_primary_choreography.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-DEFAULT-HANDLE-UNMATCHED-CALLBACK-L24",
@@ -1020,7 +1105,8 @@
       "test_refs": [
         "tests/test_bot_default_unauthorized.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-DEFAULT-HANDLE-UNAUTHORIZED-MESSAGES-L43",
@@ -1032,7 +1118,8 @@
       "test_refs": [
         "tests/test_bot_default_unauthorized.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-IDENTITY-MESSAGE-LINK-ACCOUNT-CMD-LINK-L423",
@@ -1046,7 +1133,8 @@
         "tests/test_core_events.py",
         "tests/test_promote_production_private_primary_product.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-IDENTITY-MESSAGE-LINK-ACCOUNT-HANDLE-CONTACT-L446",
@@ -1060,7 +1148,8 @@
         "tests/test_stage5_direct_telegram_registration.py",
         "tests/test_bot_link_account_guards.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-IDENTITY-MESSAGE-LINK-ACCOUNT-HANDLE-ADDRESS-COMPLETION-L689",
@@ -1073,7 +1162,8 @@
         "tests/test_bot_link_account_guards.py",
         "tests/test_bot_link_account_success.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-REQUEST-CALLBACK-QUERY-OFFER-OVERTIME-CALLBACKS-HANDLE-OVERTIME-OWNER-DECISION-L191",
@@ -1087,7 +1177,8 @@
         "tests/test_telegram_overtime_owner_approval_legacy_service.py",
         "tests/test_telegram_notification_outbox_service.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-REQUEST-CALLBACK-QUERY-OFFER-OVERTIME-CALLBACKS-HANDLE-OVERTIME-REQUESTER-CANCEL-L74",
@@ -1100,7 +1191,8 @@
         "tests/test_offer_overtime_request_cancel_forwarding.py",
         "tests/test_bot_overtime_callbacks_contract.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-OFFER-MESSAGE-OFFER-OVERTIME-PREFERENCE-START-OFFER-OVERTIME-PREFERENCE-L116",
@@ -1112,7 +1204,8 @@
       "test_refs": [
         "tests/test_p1_00_characterization_six_gaps.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-OFFER-MESSAGE-OFFER-OVERTIME-PREFERENCE-PROCESS-OFFER-OVERTIME-PREFERENCE-VALUE-L141",
@@ -1124,7 +1217,8 @@
       "test_refs": [
         "tests/test_bot_offer_overtime_preference.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-OFFER-CALLBACK-QUERY-OFFER-OVERTIME-PREFERENCE-CONFIRM-OFFER-OVERTIME-PREFERENCE-L191",
@@ -1138,7 +1232,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_core_events.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-OFFER-CALLBACK-QUERY-OFFER-OVERTIME-PREFERENCE-CANCEL-OFFER-OVERTIME-PREFERENCE-L265",
@@ -1152,7 +1247,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_web_push.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-PROCESS-CUSTOMER-INVITE-MOBILE-L1005",
@@ -1164,7 +1260,8 @@
       "test_refs": [
         "tests/test_bot_panel_customer_invite_interaction_queue.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-CONFIRM-CUSTOMER-INVITE-TIER1-L1076",
@@ -1178,7 +1275,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_core_events.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-CANCEL-CUSTOMER-INVITE-TIER1-L1175",
@@ -1192,7 +1290,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_web_push.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-BACK-TO-USER-PANEL-FROM-CUSTOMERS-L1187",
@@ -1206,7 +1305,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_offer_publication_worker.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-HANDLE-ADMIN-SETTINGS-BUTTON-L1255",
@@ -1219,7 +1319,8 @@
         "tests/test_bot_panel_interaction_queue.py",
         "tests/test_bot_panel_admin_settings_entry.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-HANDLE-SETTINGS-EDIT-CLICK-L1272",
@@ -1231,7 +1332,8 @@
       "test_refs": [
         "tests/test_bot_panel_admin_settings_entry.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-HANDLE-SETTINGS-NEW-VALUE-L1310",
@@ -1244,7 +1346,8 @@
         "tests/test_bot_panel_settings_new_value.py",
         "tests/test_bot_panel_terminal_interaction_queue.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-HANDLE-SETTINGS-CANCEL-L1370",
@@ -1256,7 +1359,8 @@
       "test_refs": [
         "tests/test_bot_panel_settings_reset.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-HANDLE-SETTINGS-RESET-L1386",
@@ -1268,7 +1372,8 @@
       "test_refs": [
         "tests/test_bot_panel_settings_reset.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-HANDLE-SETTINGS-RESET-CONFIRM-L1411",
@@ -1280,7 +1385,8 @@
       "test_refs": [
         "tests/test_bot_panel_settings_reset.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-HANDLE-SETTINGS-RESET-CANCEL-L1435",
@@ -1292,7 +1398,8 @@
       "test_refs": [
         "tests/test_bot_panel_settings_reset.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-HANDLE-BACK-TO-MAIN-MENU-L1450",
@@ -1306,7 +1413,8 @@
         "tests/test_bot_offer_overtime_preference.py",
         "tests/test_bot_trade_create_wizard.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-SHOW-MY-PROFILE-AND-CHANGE-KEYBOARD-L210",
@@ -1320,7 +1428,8 @@
         "tests/test_bot_panel_admin_menu.py",
         "tests/test_bot_panel_simple_settings.py"
       ],
-      "mutation_class": "READ_OR_STREAM"
+      "mutation_class": "READ_OR_STREAM",
+      "operation_kind": "READ_QUERY"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-SHOW-MY-PROFILE-AND-CHANGE-KEYBOARD-L211",
@@ -1334,7 +1443,8 @@
         "tests/test_bot_panel_settings_new_value.py",
         "tests/test_bot_panel_standard_actions.py"
       ],
-      "mutation_class": "READ_OR_STREAM"
+      "mutation_class": "READ_OR_STREAM",
+      "operation_kind": "READ_QUERY"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-SHOW-ADMIN-PANEL-AND-CHANGE-KEYBOARD-L294",
@@ -1348,7 +1458,8 @@
         "tests/test_bot_panel_admin_menu.py",
         "tests/test_bot_panel_persistent_anchor_queue.py"
       ],
-      "mutation_class": "READ_OR_STREAM"
+      "mutation_class": "READ_OR_STREAM",
+      "operation_kind": "READ_QUERY"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-HANDLE-USER-SETTINGS-BUTTON-L323",
@@ -1362,7 +1473,8 @@
         "tests/test_bot_panel_user_settings.py",
         "tests/test_bot_panel_interaction_queue.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-HANDLE-SIMPLE-SETTINGS-BUTTON-L361",
@@ -1376,7 +1488,8 @@
         "tests/test_bot_panel_simple_settings.py",
         "tests/test_bot_panel_interaction_queue.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-SHOW-SUPPORT-CONTACT-L405",
@@ -1390,7 +1503,8 @@
         "tests/test_bot_panel_interaction_queue.py",
         "tests/test_bot_panel_navigation_handoff.py"
       ],
-      "mutation_class": "READ_OR_STREAM"
+      "mutation_class": "READ_OR_STREAM",
+      "operation_kind": "READ_QUERY"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-SHOW-COLLEAGUES-LIST-L470",
@@ -1404,7 +1518,8 @@
         "tests/test_bot_panel_terminal_interaction_queue.py",
         "tests/test_bot_panel_navigation_handoff.py"
       ],
-      "mutation_class": "READ_OR_STREAM"
+      "mutation_class": "READ_OR_STREAM",
+      "operation_kind": "READ_QUERY"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-SHOW-RECENT-TRADES-PDF-L534",
@@ -1417,7 +1532,8 @@
         "tests/test_bot_panel_standard_actions.py",
         "tests/test_bot_panel_terminal_interaction_queue.py"
       ],
-      "mutation_class": "READ_OR_STREAM"
+      "mutation_class": "READ_OR_STREAM",
+      "operation_kind": "READ_QUERY"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-SHOW-USER-PANEL-BLOCKED-USERS-L597",
@@ -1429,7 +1545,8 @@
       "test_refs": [
         "tests/test_bot_panel_standard_actions.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-UNBLOCK-USER-FROM-USER-PANEL-L606",
@@ -1443,7 +1560,8 @@
         "tests/test_users_router_update_limits.py",
         "tests/test_block_service.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-BACK-TO-USER-PANEL-FROM-BLOCKED-L640",
@@ -1457,7 +1575,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_offer_publication_worker.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-SHOW-USER-PANEL-CUSTOMERS-L789",
@@ -1469,7 +1588,8 @@
       "test_refs": [
         "tests/test_bot_panel_interaction_queue.py"
       ],
-      "mutation_class": "READ_OR_STREAM"
+      "mutation_class": "READ_OR_STREAM",
+      "operation_kind": "READ_QUERY"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-SHOW-USER-PANEL-CUSTOMERS-CALLBACK-L805",
@@ -1483,7 +1603,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_offer_publication_worker.py"
       ],
-      "mutation_class": "READ_OR_STREAM"
+      "mutation_class": "READ_OR_STREAM",
+      "operation_kind": "READ_QUERY"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-SHOW-USER-PANEL-CUSTOMER-DETAIL-L823",
@@ -1497,7 +1618,8 @@
         "tests/test_users_router_read_one.py",
         "tests/test_offers_router_create_success.py"
       ],
-      "mutation_class": "READ_OR_STREAM"
+      "mutation_class": "READ_OR_STREAM",
+      "operation_kind": "READ_QUERY"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-ASK-UNLINK-USER-PANEL-CUSTOMER-L844",
@@ -1509,7 +1631,8 @@
       "test_refs": [
         "tests/test_bot_panel_standard_actions.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-CONFIRM-UNLINK-USER-PANEL-CUSTOMER-L853",
@@ -1521,7 +1644,8 @@
       "test_refs": [
         "tests/test_bot_panel_standard_actions.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-USER-PANEL-CUSTOMER-INVITE-TIER2-WEBAPP-ONLY-L931",
@@ -1533,7 +1657,8 @@
       "test_refs": [
         "tests/test_bot_panel_standard_actions.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-PANEL-START-USER-PANEL-CUSTOMER-INVITE-TIER1-L936",
@@ -1546,7 +1671,8 @@
         "tests/test_bot_panel_standard_actions.py",
         "tests/test_bot_panel_customer_invite_interaction_queue.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-PANEL-PROCESS-CUSTOMER-INVITE-MANAGEMENT-NAME-L967",
@@ -1558,7 +1684,8 @@
       "test_refs": [
         "tests/test_bot_panel_customer_invite_interaction_queue.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-IDENTITY-MESSAGE-START-HANDLE-START-WITHOUT-TOKEN-L1018",
@@ -1571,7 +1698,8 @@
         "tests/test_stage5_direct_telegram_registration.py",
         "tests/test_bot_start_without_token.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-IDENTITY-MESSAGE-START-HANDLE-CONTACT-L1064",
@@ -1585,7 +1713,8 @@
         "tests/test_stage5_direct_telegram_registration.py",
         "tests/test_bot_link_account_guards.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-IDENTITY-MESSAGE-START-HANDLE-CONTACT-NON-CONTACT-L1152",
@@ -1597,7 +1726,8 @@
       "test_refs": [
         "tests/test_stage5_direct_telegram_registration.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-IDENTITY-MESSAGE-START-HANDLE-ADDRESS-L1163",
@@ -1611,7 +1741,8 @@
         "tests/test_bot_link_account_guards.py",
         "tests/test_bot_start_registration_address.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-START-HANDLE-REGISTRATION-EDIT-ADDRESS-L1248",
@@ -1623,7 +1754,8 @@
       "test_refs": [
         "tests/test_stage5_direct_telegram_registration.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-START-HANDLE-REGISTRATION-CONFIRM-L1301",
@@ -1635,7 +1767,8 @@
       "test_refs": [
         "tests/test_stage5_direct_telegram_registration.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-IDENTITY-MESSAGE-START-HANDLE-REGISTRATION-CONFIRMATION-MESSAGE-L1514",
@@ -1647,7 +1780,8 @@
       "test_refs": [
         "tests/test_stage5_direct_telegram_registration.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-IDENTITY-CHAT-JOIN-REQUEST-START-HANDLE-CHANNEL-JOIN-REQUEST-L1524",
@@ -1660,7 +1794,8 @@
         "tests/test_bot_channel_join_requests.py",
         "tests/test_bot_start_join_request.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-START-HANDLE-OFFER-TUTORIAL-ACK-L1606",
@@ -1672,7 +1807,8 @@
       "test_refs": [
         "tests/test_bot_start_join_request.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-START-HANDLE-CUSTOMER-TUTORIAL-ACK-L1611",
@@ -1684,7 +1820,8 @@
       "test_refs": [
         "tests/test_bot_start_join_request.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-START-HANDLE-CONFIRM-TRADE-L1678",
@@ -1696,7 +1833,8 @@
       "test_refs": [
         "tests/test_bot_start_confirm_trade.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-IDENTITY-CALLBACK-QUERY-START-HANDLE-CANCEL-RESPOND-L1694",
@@ -1708,7 +1846,8 @@
       "test_refs": [
         "tests/test_bot_start_cancel_respond.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-IDENTITY-MESSAGE-START-HANDLE-START-WITH-TOKEN-L749",
@@ -1722,7 +1861,8 @@
         "tests/test_bot_start_profile_token_success.py",
         "tests/test_stage5_direct_telegram_registration.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-TELEGRAM-PUBLISHER-B2B-RECEIVE-DISPATCH-L27",
@@ -1736,7 +1876,8 @@
         "tests/test_telegram_publisher_dispatch_service.py",
         "tests/test_telegram_delivery_callsite_inventory.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "DELIVERY_COMMAND"
     },
     {
       "behavior_id": "BOT-TG-MESSAGE-TELEGRAM-PUBLISHER-B2B-RECEIVE-ACK-L44",
@@ -1749,7 +1890,8 @@
         "tests/test_telegram_publisher_dispatch_service.py",
         "tests/test_telegram_publisher_b2b_runtime.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "DELIVERY_COMMAND"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-TELEGRAM-PUBLISHER-CHANNEL-CALLBACKS-TRADE-CALLBACK-L31",
@@ -1763,7 +1905,8 @@
         "tests/test_trading_core_mixed_load_helpers.py",
         "tests/test_bot_trade_execute_local_success.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "DELIVERY_COMMAND"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-TELEGRAM-PUBLISHER-CHANNEL-CALLBACKS-PUBLIC-TRADE-CALLBACK-L46",
@@ -1775,7 +1918,8 @@
       "test_refs": [
         "tests/test_p1_00_characterization_six_gaps.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "DELIVERY_COMMAND"
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-TELEGRAM-PUBLISHER-CHANNEL-CALLBACKS-EXPIRY-CALLBACK-L61",
@@ -1787,7 +1931,8 @@
       "test_refs": [
         "tests/test_bot_trade_manage_success.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "DELIVERY_COMMAND"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-LOT-WHOLESALE-L1001",
@@ -1801,7 +1946,8 @@
         "tests/test_offer_publication_worker.py",
         "tests/test_core_events.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-LOT-SPLIT-L1016",
@@ -1815,7 +1961,8 @@
         "tests/test_telegram_publisher_live_matrix.py",
         "tests/test_bot_webapp_comprehensive_load_matrix.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-MESSAGE-TRADE-CREATE-HANDLE-LOT-SIZES-INPUT-L1027",
@@ -1829,7 +1976,8 @@
         "tests/test_bot_trade_create_remaining_guards.py",
         "tests/test_bot_trade_create_lot_sizes_input.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-ACCEPT-SUGGESTED-LOTS-L1089",
@@ -1841,7 +1989,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_accept_suggested_lots.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-MESSAGE-TRADE-CREATE-HANDLE-PRICE-INPUT-L1118",
@@ -1855,7 +2004,8 @@
         "tests/test_bot_trade_create_stale_state_text_offer.py",
         "tests/test_bot_trade_create_price_input.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-SKIP-NOTES-L1148",
@@ -1869,7 +2019,8 @@
         "tests/test_offer_publication_worker.py",
         "tests/test_core_events.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-MESSAGE-TRADE-CREATE-HANDLE-NOTES-INPUT-L1159",
@@ -1883,7 +2034,8 @@
         "tests/test_bot_trade_create_notes_flow.py",
         "tests/test_bot_trade_create_remaining_guards.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-WIZARD-EDIT-L1236",
@@ -1897,7 +2049,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_offer_publication_worker.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-WIZARD-EDIT-FIELD-L1257",
@@ -1909,7 +2062,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_wizard.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-WIZARD-RETURN-TO-REVIEW-L1346",
@@ -1923,7 +2077,8 @@
         "tests/test_bot_trade_create_back_cancel.py",
         "tests/test_trade_delivery_staging_validation_report.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-WIZARD-CONTINUE-L1361",
@@ -1937,7 +2092,8 @@
         "tests/test_production_private_primary_choreography.py",
         "tests/test_bot_trade_create_wizard.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-WIZARD-CANCEL-L1386",
@@ -1951,7 +2107,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_web_push.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TRADE-CONFIRM-L2125",
@@ -1965,7 +2122,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_core_events.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TRADE-WARNING-CONFIRM-L2141",
@@ -1979,7 +2137,8 @@
         "tests/test_bot_trade_create_text_offer_warning_confirm.py",
         "tests/test_bot_trade_create_repeat_offer.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-BACK-TO-TYPE-L2158",
@@ -1993,7 +2152,8 @@
         "tests/test_bot_trade_create_remaining_guards.py",
         "tests/test_bot_trade_create_stale_state_text_offer.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-BACK-TO-SETTLEMENT-L2174",
@@ -2005,7 +2165,8 @@
       "test_refs": [
         "tests/test_bot_trade_utils_commodities_keyboard_single_page.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-BACK-TO-COMMODITY-L2187",
@@ -2018,7 +2179,8 @@
         "tests/test_bot_trade_utils_quantity_confirm_keyboards.py",
         "tests/test_bot_admin_commodities_show_aliases.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-BACK-TO-QUANTITY-L2202",
@@ -2030,7 +2192,8 @@
       "test_refs": [
         "tests/test_bot_trade_utils_lot_type_keyboard.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-BACK-TO-LOT-TYPE-L2221",
@@ -2042,7 +2205,8 @@
       "test_refs": [
         "tests/test_p1_00_characterization_six_gaps.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-BACK-TO-PRICE-L2234",
@@ -2054,7 +2218,8 @@
       "test_refs": [
         "tests/test_p1_00_characterization_six_gaps.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TRADE-CANCEL-L2243",
@@ -2068,7 +2233,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_web_push.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-CANCEL-ALL-OFFERS-BOT-L2380",
@@ -2081,7 +2247,8 @@
         "tests/test_bot_trade_create_helper_cancel.py",
         "tests/test_bot_trade_create_validation_interaction_queue.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-REPEAT-OFFER-BUTTON-L2969",
@@ -2095,7 +2262,8 @@
         "tests/test_bot_trade_create_repeat_offer.py",
         "tests/test_bot_panel_navigation_handoff.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-TEXT-OFFER-L3047",
@@ -2109,7 +2277,8 @@
         "tests/test_bot_trade_create_helper_cancel.py",
         "tests/test_bot_trade_create_text_offer_warning_flow_integration.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-TEXT-OFFER-WHILE-CONFIRMATION-PENDING-L3066",
@@ -2121,7 +2290,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_stale_state_text_offer.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-TEXT-OFFER-FROM-STALE-TRADE-STATE-L3167",
@@ -2133,7 +2303,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_stale_state_text_offer.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-UNEXPECTED-TRADE-BUILDER-MESSAGE-L3191",
@@ -2145,7 +2316,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_stale_state_text_offer.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-INFERENCE-CHOICE-L3229",
@@ -2157,7 +2329,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_text_offer_parse_flow.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-INFERENCE-SUGGESTION-CONFIRM-L3305",
@@ -2169,7 +2342,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_text_offer_parse_flow.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-INFERENCE-SUGGESTION-EDIT-L3360",
@@ -2181,7 +2355,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_text_offer_parse_flow.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-INFERENCE-SUGGESTION-EDIT-L3364",
@@ -2193,7 +2368,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_text_offer_parse_flow.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-INFERENCE-CHOICE-CANCEL-L3432",
@@ -2207,7 +2383,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_web_push.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-CONFIRM-L3447",
@@ -2221,7 +2398,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_core_events.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-WARNING-CONFIRM-L3470",
@@ -2235,7 +2413,8 @@
         "tests/test_bot_trade_create_text_offer_warning_confirm.py",
         "tests/test_bot_trade_create_repeat_offer.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TEXT-OFFER-CANCEL-L3493",
@@ -2249,7 +2428,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_web_push.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3504",
@@ -2261,7 +2441,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_stale_state_text_offer.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3505",
@@ -2273,7 +2454,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_stale_state_text_offer.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3506",
@@ -2285,7 +2467,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_stale_state_text_offer.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3507",
@@ -2297,7 +2480,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_stale_state_text_offer.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3508",
@@ -2309,7 +2493,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_stale_state_text_offer.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3509",
@@ -2321,7 +2506,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_stale_state_text_offer.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3510",
@@ -2333,7 +2519,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_stale_state_text_offer.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3511",
@@ -2345,7 +2532,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_stale_state_text_offer.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3512",
@@ -2357,7 +2545,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_stale_state_text_offer.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3513",
@@ -2369,7 +2558,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_stale_state_text_offer.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-OFFER-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3514",
@@ -2381,7 +2571,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_stale_state_text_offer.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3515",
@@ -2393,7 +2584,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_stale_state_text_offer.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-STALE-TRADE-CREATION-CALLBACK-L3516",
@@ -2405,7 +2597,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_stale_state_text_offer.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-TRADE-BUTTON-L645",
@@ -2419,7 +2612,8 @@
         "tests/test_bot_trade_create_start.py",
         "tests/test_bot_trade_create_validation_interaction_queue.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TRADE-TYPE-SELECTION-L709",
@@ -2432,7 +2626,8 @@
         "tests/test_bot_trade_create_trade_type.py",
         "tests/test_bot_trade_create_remaining_guards.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-SETTLEMENT-TYPE-SELECTION-L743",
@@ -2444,7 +2639,8 @@
       "test_refs": [
         "tests/test_bot_trade_create_wizard.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-COMMODITY-PAGE-L781",
@@ -2457,7 +2653,8 @@
         "tests/test_bot_trade_create_commodity_page.py",
         "tests/test_bot_trade_create_remaining_guards.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-COMMODITY-SELECTION-L812",
@@ -2470,7 +2667,8 @@
         "tests/test_bot_trade_create_remaining_guards.py",
         "tests/test_bot_trade_create_commodity_selection.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-QUICK-QUANTITY-L869",
@@ -2484,7 +2682,8 @@
         "tests/test_bot_trade_create_quick_quantity.py",
         "tests/test_bot_trade_create_validation_interaction_queue.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-MESSAGE-TRADE-CREATE-HANDLE-MANUAL-QUANTITY-L929",
@@ -2498,7 +2697,8 @@
         "tests/test_bot_trade_create_manual_quantity.py",
         "tests/test_bot_trade_create_remaining_guards.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-L810",
@@ -2512,7 +2712,8 @@
         "tests/test_bot_trade_execute_offer_guards.py",
         "tests/test_bot_trade_execute_blocked.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-PUBLIC-L829",
@@ -2524,7 +2725,8 @@
       "test_refs": [
         "tests/test_bot_trade_execute_local_success.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-TRADE-MESSAGE-TRADE-HISTORY-SHOW-MY-TRADE-HISTORY-L231",
@@ -2538,7 +2740,8 @@
         "tests/test_bot_trade_history_show.py",
         "tests/test_bot_trade_history_interaction_queue.py"
       ],
-      "mutation_class": "READ_OR_STREAM"
+      "mutation_class": "READ_OR_STREAM",
+      "operation_kind": "READ_QUERY"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-CHANGE-HISTORY-MONTHS-L253",
@@ -2550,7 +2753,8 @@
       "test_refs": [
         "tests/test_bot_trade_history_show.py"
       ],
-      "mutation_class": "READ_OR_STREAM"
+      "mutation_class": "READ_OR_STREAM",
+      "operation_kind": "READ_QUERY"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-EXPORT-EXCEL-L381",
@@ -2564,7 +2768,8 @@
         "tests/test_trade_history_export_service.py",
         "tests/test_bot_trade_history_interaction_queue.py"
       ],
-      "mutation_class": "READ_OR_STREAM"
+      "mutation_class": "READ_OR_STREAM",
+      "operation_kind": "READ_QUERY"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-EXPORT-PDF-L440",
@@ -2577,7 +2782,8 @@
         "tests/test_bot_trade_history_interaction_queue.py",
         "tests/test_bot_trade_history_export_pdf.py"
       ],
-      "mutation_class": "READ_OR_STREAM"
+      "mutation_class": "READ_OR_STREAM",
+      "operation_kind": "READ_QUERY"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-EXPORT-PROFILE-TRADE-PDF-L498",
@@ -2590,7 +2796,8 @@
         "tests/test_bot_trade_history_interaction_queue.py",
         "tests/test_bot_trade_history_export_pdf.py"
       ],
-      "mutation_class": "READ_OR_STREAM"
+      "mutation_class": "READ_OR_STREAM",
+      "operation_kind": "READ_QUERY"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-SHOW-PUBLIC-PROFILE-USERNAME-UNAVAILABLE-L52",
@@ -2602,7 +2809,8 @@
       "test_refs": [
         "tests/test_bot_trade_history_show.py"
       ],
-      "mutation_class": "READ_OR_STREAM"
+      "mutation_class": "READ_OR_STREAM",
+      "operation_kind": "READ_QUERY"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-BACK-TO-PROFILE-L554",
@@ -2614,7 +2822,8 @@
       "test_refs": [
         "tests/test_bot_trade_history_back_to_profile.py"
       ],
-      "mutation_class": "READ_OR_STREAM"
+      "mutation_class": "READ_OR_STREAM",
+      "operation_kind": "READ_QUERY"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-HISTORY-SHOW-MUTUAL-TRADE-HISTORY-L607",
@@ -2626,7 +2835,8 @@
       "test_refs": [
         "tests/test_bot_trade_history_show.py"
       ],
-      "mutation_class": "READ_OR_STREAM"
+      "mutation_class": "READ_OR_STREAM",
+      "operation_kind": "READ_QUERY"
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-MANAGE-HANDLE-EXPIRE-OFFER-L118",
@@ -2640,7 +2850,8 @@
         "tests/test_bot_trade_manage_rate_limit.py",
         "tests/test_bot_trade_manage_success.py"
       ],
-      "mutation_class": "MUTATION_OR_COMMAND"
+      "mutation_class": "MUTATION_OR_COMMAND",
+      "operation_kind": "CRUD_MUTATION"
     }
   ],
   "generated_date": "2026-09-03 UTC",

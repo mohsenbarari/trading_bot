@@ -15,12 +15,12 @@ Refresh: `WA-P1-00-REFRESH-20260903-001` against `aa2c06a573dfd60051e142146f55d7
 | Cleanup manifest | `07-repository-cleanup-manifest.md` | tracked Markdown |
 | Runtime inventory | `inventory/current-finland-runtime.json` | SHA-256 `598e56c602a101cb61168a1468b0a7a7bebae50da14458298214e91dcaa12ce6` |
 | Surface inventory index | `inventory/surface-behavior-inventory.json` | SHA-256 `be55cc0809eaa73de42d0562433d03d1274ed3f82a8e58e296773911e63fa8c7` |
-| API surface inventory | `inventory/surface-api.json` | SHA-256 `764de4d1fbf549dbc691b459cf138c728813356283a76cd6c07a8f46e8d8b17e` |
-| Bot surface inventory | `inventory/surface-bot.json` | SHA-256 `f3c3ead14701fe8cccefa7db293320953eeabfef6cfe74a54ecfef1a8ff35122` |
-| Web route inventory | `inventory/surface-web.json` | SHA-256 `21313ad604e87bac857c302beab78728cfa2a148457b95d053bad8bbe5994f6b` |
-| Job authority inventory | `inventory/surface-jobs.json` | SHA-256 `2489860d5337f71b77fb39ed688b8754a32bdcaf107ba23807531ea4c70da06d` |
+| API surface inventory | `inventory/surface-api.json` | SHA-256 `6a9095187464f73c333a6411f7839c9cab0a3efbf983d835dd4cf4ada318906b` |
+| Bot surface inventory | `inventory/surface-bot.json` | SHA-256 `1891e349f1ad4008b111196af729ac60623414b258f554aff2af3c51706b3363` |
+| Web route inventory | `inventory/surface-web.json` | SHA-256 `92a6fbafbfc9bac42bf169261bd447f50676005d0326cf9c497120829a3c754e` |
+| Job authority inventory | `inventory/surface-jobs.json` | SHA-256 `7be5d42699e89df1b9398caaf0d8853c4d797863f6050d0b46e3d9beb95d9327` |
 | Runtime task ownership | `inventory/runtime-task-ownership.json` | SHA-256 `071e273e5168db736bf9330aab93233adcd32cd03a7033b89e5e17d84f47ef14` |
-| Scenario records | `inventory/scenario-records.json` | SHA-256 `6d93e3b2aeb73bd931688b8a3cc3f2cc1b3297f5a59c92147d1b6f2a263d6081` |
+| Scenario records | `inventory/scenario-records.json` | SHA-256 `edff006ce1a58307a69404c73ba1fa96696de356d33e7dcd5554677e6c431697` |
 | Task Card | `stages/P1-00.md` | correction candidate after `CHANGES_REQUIRED`; Codex Final Review pending |
 
 ## Evidence handling

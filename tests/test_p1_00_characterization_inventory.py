@@ -116,6 +116,36 @@ def is_family_boundary_evidence(path: str, family: str, boundary: str) -> bool:
     return classify_failure_test_family(path) == family and failure_test_covers_boundary(path, boundary)
 
 
+def parse_pytest_node_id(node_id: str) -> tuple[str, str | None, str]:
+    path, separator, rest = node_id.partition("::")
+    if not separator or not rest:
+        raise AssertionError(f"evidence must be a pytest node id, not a filename: {node_id}")
+    if "." in rest:
+        class_name, _, func_name = rest.partition(".")
+        return path, class_name, func_name
+    return path, None, rest
+
+
+def find_test_function(path: Path, class_name: str | None, func_name: str):
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in tree.body:
+        if class_name and isinstance(node, ast.ClassDef) and node.name == class_name:
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == func_name:
+                    return item
+        if class_name is None and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == func_name:
+            return node
+    return None
+
+
+def function_source_talk(fn) -> str:
+    parts = [fn.name, ast.get_docstring(fn) or ""]
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            parts.append(node.value)
+    return " ".join(parts)
+
+
 CORE_CONTRACT_FIELDS = {
     "preconditions",
     "input",
@@ -152,6 +182,33 @@ INHERIT_SEMANTIC_PATTERNS = (
     r"otherwise_not_applicable",
 )
 MUTATION_CLASSES = {"READ_OR_STREAM", "MUTATION_OR_COMMAND", "SCHEDULED_JOB"}
+OPERATION_KINDS = {
+    "READ_QUERY",
+    "STREAM_SUBSCRIBE",
+    "MENU_NAV",
+    "FSM_PROMPT",
+    "CRUD_MUTATION",
+    "BROADCAST",
+    "SESSION_MUTATION",
+    "DELIVERY_COMMAND",
+    "SYNC_APPLY",
+    "SCHEDULED_JOB",
+}
+NON_PRODUCT_MUTATION_KINDS = {"READ_QUERY", "STREAM_SUBSCRIBE", "MENU_NAV", "FSM_PROMPT"}
+BLOCKER_REGISTRY_FIELDS = {
+    "blocker_id",
+    "severity",
+    "owner",
+    "resolution_stage",
+    "blocked_dependents",
+    "required_evidence",
+    "forbidden_shortcuts",
+    "disposition",
+    "status",
+    "reason",
+}
+MENU_NAV_EXAMPLE = "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-MANAGE-COMMODITIES-L305"
+BROADCAST_EXAMPLE = "API-ADMIN-POST-ADMIN-MESSAGES-CREATE-BROADCAST-L261"
 FAMILY_TEST_TOKENS = {
     "AUTH": ("test_auth_", "test_session_", "test_stage6_otp"),
     "IDENTITY": (
@@ -678,9 +735,11 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
             self.assertNotIn("inherit_persona_eligibility", contract_text)
             if contract.get("mutation_class") != "SCHEDULED_JOB" or contract["family"] != "OPS":
                 self.assertNotIn("this assignment authorizes no", contract_text)
-            if contract.get("mutation_class") == "READ_OR_STREAM":
+            if contract.get("mutation_class") == "READ_OR_STREAM" or contract.get("operation_kind") in NON_PRODUCT_MUTATION_KINDS:
                 self.assertEqual(contract["db_mutations"]["status"], "NOT_APPLICABLE", contract["contract_id"])
                 self.assertTrue(contract["db_mutations"].get("reason"), contract["contract_id"])
+            if contract.get("operation_kind"):
+                self.assertIn(contract["operation_kind"], OPERATION_KINDS, contract["contract_id"])
 
     def test_every_surface_seed_maps_once_with_seed_specific_behavioral_evidence(self):
         payload = _load_json("scenario-records.json")
@@ -697,21 +756,22 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
         self.assertEqual(dict(family_counts), payload["seed_mapping"]["expected_family_counts"])
         for seed in seeds:
             self.assertIn(seed.get("mutation_class"), MUTATION_CLASSES, seed["behavior_id"])
+            self.assertIn(seed.get("operation_kind"), OPERATION_KINDS, seed["behavior_id"])
             matches = [
                 rule
                 for rule in rules
-                if rule["family"] == seed["family"] and rule["mutation_class"] == seed["mutation_class"]
+                if rule["family"] == seed["family"] and rule["operation_kind"] == seed["operation_kind"]
             ]
             self.assertEqual(len(matches), 1, seed["behavior_id"])
             contract_id = matches[0]["contract_id"]
             self.assertIn(contract_id, contract_ids)
             contract = next(item for item in payload["behavior_contracts"] if item["contract_id"] == contract_id)
-            self.assertEqual(contract.get("mutation_class"), seed["mutation_class"], seed["behavior_id"])
-            if seed["mutation_class"] == "READ_OR_STREAM":
+            self.assertEqual(contract.get("operation_kind"), seed["operation_kind"], seed["behavior_id"])
+            if seed["operation_kind"] in NON_PRODUCT_MUTATION_KINDS:
                 self.assertEqual(
                     contract["db_mutations"]["status"],
                     "NOT_APPLICABLE",
-                    f"READ seed mapped to mutation contract: {seed['behavior_id']} -> {contract_id}",
+                    f"{seed['operation_kind']} seed mapped to mutation contract: {seed['behavior_id']} -> {contract_id}",
                 )
             self.assertTrue(seed["test_refs"], seed["behavior_id"])
             self.assertTrue(
@@ -727,6 +787,37 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
             hashlib.sha256(resolved).hexdigest(),
             payload["seed_mapping"]["resolved_index_sha256"],
         )
+
+    def test_bot_menu_and_api_broadcast_do_not_share_a_mutation_contract(self):
+        payload = _load_json("scenario-records.json")
+        seeds = {}
+        for name in ("surface-api.json", "surface-bot.json", "surface-web.json", "surface-jobs.json"):
+            for entry in _load_json(name)["entries"]:
+                seeds[entry["behavior_id"]] = entry
+        menu = seeds[MENU_NAV_EXAMPLE]
+        broadcast = seeds[BROADCAST_EXAMPLE]
+        self.assertEqual(menu["operation_kind"], "MENU_NAV")
+        self.assertEqual(broadcast["operation_kind"], "BROADCAST")
+        rules = payload["seed_mapping"]["rules"]
+        menu_contract_id = next(
+            rule["contract_id"]
+            for rule in rules
+            if rule["family"] == menu["family"] and rule["operation_kind"] == menu["operation_kind"]
+        )
+        broadcast_contract_id = next(
+            rule["contract_id"]
+            for rule in rules
+            if rule["family"] == broadcast["family"] and rule["operation_kind"] == broadcast["operation_kind"]
+        )
+        self.assertNotEqual(menu_contract_id, broadcast_contract_id)
+        menu_contract = next(item for item in payload["behavior_contracts"] if item["contract_id"] == menu_contract_id)
+        broadcast_contract = next(
+            item for item in payload["behavior_contracts"] if item["contract_id"] == broadcast_contract_id
+        )
+        self.assertEqual(menu_contract["db_mutations"]["status"], "NOT_APPLICABLE")
+        self.assertEqual(broadcast_contract["db_mutations"]["status"], "APPLICABLE")
+        self.assertEqual(broadcast_contract["events_outbox"]["status"], "APPLICABLE")
+        self.assertEqual(broadcast_contract["side_effects"]["status"], "APPLICABLE")
 
     def test_matrix_axes_resolve_definite_eligibility_and_outcome(self):
         payload = _load_json("scenario-records.json")
@@ -900,41 +991,64 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
                 "unknown_authority_schema_hash": "ELIGIBLE",
             },
         )
-        self.assertEqual(set(FAMILY_TEST_TOKENS), FAMILIES)
-        self.assertEqual(set(BOUNDARY_NAME_TOKENS), FAILURE_BOUNDARIES)
-        cross_family = 0
+        registry = payload["blocker_registry"]
+        self.assertEqual(registry["disposition_request"], "SUBMITTED_FOR_CODEX_STAGE_FINAL")
+        self.assertEqual(set(registry["required_fields"]), BLOCKER_REGISTRY_FIELDS)
+        registry_ids = {item["blocker_id"] for item in registry["items"]}
+        filename_only = 0
+        unrouted = 0
         for cell in cells:
             if cell["applicability"] != "ELIGIBLE":
                 continue
             refs = cell.get("evidence_refs") or []
+            cases = cell.get("evidence_cases") or []
             blocker = cell.get("named_blocker") or {}
             if blocker:
                 self.assertEqual(refs, [], cell["variant_id"])
-                self.assertTrue(blocker.get("blocker_id"), cell["variant_id"])
-                self.assertTrue(blocker.get("reason"), cell["variant_id"])
-                self.assertNotIn("inventory test_ref", blocker["reason"], cell["variant_id"])
+                self.assertEqual(cases, [], cell["variant_id"])
+                self.assertEqual(set(blocker), BLOCKER_REGISTRY_FIELDS, cell["variant_id"])
+                for field in BLOCKER_REGISTRY_FIELDS:
+                    self.assertTrue(blocker.get(field), f"{cell['variant_id']} missing {field}")
+                self.assertEqual(blocker["disposition"], "SUBMITTED_FOR_CODEX_STAGE_FINAL", cell["variant_id"])
+                self.assertEqual(blocker["owner"], "CODEX_FINAL_REVIEWER", cell["variant_id"])
+                self.assertIn(blocker["blocker_id"], registry_ids, cell["variant_id"])
                 continue
-            self.assertTrue(refs, cell["variant_id"])
-            for ref in refs:
-                self.assertTrue(
-                    is_family_boundary_evidence(ref, cell["family"], cell["failure_boundary"]),
-                    f"{cell['variant_id']} cites {ref} classified as "
-                    f"{classify_failure_test_family(ref)} covering="
-                    f"{failure_test_covers_boundary(ref, cell['failure_boundary'])}",
-                )
-                self.assertTrue((REPO_ROOT / ref).exists(), ref)
-            cross_family += sum(
-                1
-                for ref in refs
-                if not is_family_boundary_evidence(ref, cell["family"], cell["failure_boundary"])
+            self.assertTrue(cases, cell["variant_id"])
+            self.assertEqual(refs, [item["node_id"] for item in cases], cell["variant_id"])
+            for case in cases:
+                node_id = case["node_id"]
+                talk = case["boundary_talk"]
+                self.assertTrue(talk, cell["variant_id"])
+                path, class_name, func_name = parse_pytest_node_id(node_id)
+                self.assertTrue((REPO_ROOT / path).exists(), node_id)
+                fn = find_test_function(REPO_ROOT / path, class_name, func_name)
+                self.assertIsNotNone(fn, node_id)
+                blob = function_source_talk(fn)
+                self.assertIn(talk, blob, node_id)
+                if "::" not in node_id:
+                    filename_only += 1
+            self.assertNotEqual(
+                {Path(case["node_id"].split("::", 1)[0]).name for case in cases},
+                set(),
             )
-        for family, boundary, ref in CROSS_FAMILY_FORBIDDEN_EXAMPLES:
-            self.assertFalse(
-                is_family_boundary_evidence(ref, family, boundary),
-                f"{family} {boundary} must not accept {ref}",
-            )
-        self.assertEqual(cross_family, payload["closure"]["cross_family_failure_evidence"])
-        self.assertEqual(payload["closure"]["cross_family_failure_evidence"], 0)
+        self.assertEqual(filename_only, payload["closure"]["filename_only_failure_evidence"])
+        self.assertEqual(payload["closure"]["filename_only_failure_evidence"], 0)
+        for item in registry["items"]:
+            missing = BLOCKER_REGISTRY_FIELDS - set(item)
+            self.assertEqual(missing, set(), item.get("blocker_id"))
+            if any(not item.get(field) for field in BLOCKER_REGISTRY_FIELDS):
+                unrouted += 1
+        self.assertEqual(unrouted, payload["closure"]["unrouted_named_blockers"])
+        self.assertEqual(payload["closure"]["unrouted_named_blockers"], 0)
+        self.assertEqual(len(registry["items"]), payload["closure"]["family_boundary_named_blockers"])
+        notify_side = next(item for item in cells if item["variant_id"] == "NOTIFY__SIDE-EFFECT-BEFORE-ACK")
+        self.assertTrue(notify_side.get("named_blocker"), "NOTIFY side-effect cell must not keep filename-only web_push")
+        web_push_nodes = [
+            case["node_id"]
+            for case in (notify_side.get("evidence_cases") or [])
+            if "test_web_push.py" in case["node_id"]
+        ]
+        self.assertEqual(web_push_nodes, [])
 
         self.assertEqual(len(payload["deferred_blockers"]), 1)
         timing = payload["deferred_blockers"][0]
