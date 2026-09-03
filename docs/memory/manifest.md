@@ -60,6 +60,20 @@ Discover optional memory without loading it. Entries here are not default loads.
 - None enabled.
 
 ### Enabled areas
+- `areas/documentation-execution.md` — load for developer onboarding,
+  documentation governance, plan packaging, or Cursor execution handoff.
+- `areas/documentation-quality.md` — load for product-behavior documentation,
+  documentation tests/evidence, traceability, or documentation quality gates.
+- `areas/documentation.md` — load for documentation information architecture,
+  source-of-truth ownership, repository document cleanup, or agent handoff design.
+- `areas/deployment-cutover.md` — load for migration from legacy release paths,
+  deployment-authority cutover, initial target activation, or legacy cleanup.
+- `areas/deployment-validation.md` — load for two-site release matrices,
+  deploy fault injection, acceptance thresholds, drills, or validation evidence.
+- `areas/release-ci.md` — load for GitHub Actions, release creation/signing,
+  Operations Dashboard controls, deploy telemetry, or CI/CD fallback work.
+- `areas/deployment.md` — load for release classification, CI/evidence,
+  immutable artifacts, activation/rollback, migration, backup, or deploy orchestration work.
 - `areas/infrastructure.md` — load for Finland/Iran server inventory,
   provisioning, host identity, SSH access, failover topology, or cutover work.
 - `areas/frontend-uiux.md` — load for Vue/PWA UI/UX refactoring, Design System V2, Figma/Sites evidence, or shared UI changes that can affect protected surfaces.

@@ -2,6 +2,8 @@
 
 Entries are newest first.
 
+- 2026-09-03 | Refactor Section 3 is approved and closed. Cursor must execute `MKT-0..MKT-13` in order from audited baseline through canonical storage/capture/parse/project outbox/materialization/two-site sync/model roles/retention/backpressure/backfill/full matrix; no activation precedes Section 4. Done requires no High/Critical gaps, no behavior drift, and proven restore/rebuild/parity. Resource quotas and adaptive evidence/range thresholds remain evidence-derived gates after inventory/replay.
+
 - 2026-08-31 | `main` is the only long-lived branch; `candidate/wa-ir-standby-v1` stays local-only and is not a merge source. The canonical checkout owns ignored artifacts with bounded retention.
 
 - 2026-08-29 | `PRIVATE_PRIMARY` adopts Shadow roots in-place and mounts secrets from `/srv/trading-bot/secure/market-data`. Both-role preflight and equal image digest are required. No live cutover; Product stays `LEGACY`.
