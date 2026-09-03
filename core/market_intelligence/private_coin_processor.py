@@ -75,6 +75,8 @@ PROCESSOR_VERSION = "market-processor-v4-fact-archive-shadow"
 MAX_RECORD_BYTES = 256 * 1024
 MAX_RECORDS_PER_CYCLE = 20_000
 DEFAULT_MAX_MARKET_PROJECTIONS_PER_CYCLE = 16
+DEFAULT_SQLITE_CACHE_KIB_PER_STORE = 0
+MAX_SQLITE_CACHE_KIB_PER_STORE = 131_072
 DEFAULT_MAX_FACT_EXPORTS_PER_CYCLE = 100
 DEFAULT_MAINTENANCE_INTERVAL_SECONDS = 3_600
 SPOOL_NAME = re.compile(r"^events-\d{4}-\d{2}-\d{2}\.jsonl$")
@@ -723,6 +725,7 @@ def process_coin_spool_cycle(
     max_market_projections: int | None = None,
     max_fact_exports: int = DEFAULT_MAX_FACT_EXPORTS_PER_CYCLE,
     run_expensive_maintenance: bool = True,
+    sqlite_cache_kib_per_store: int = DEFAULT_SQLITE_CACHE_KIB_PER_STORE,
 ) -> dict[str, object]:
     """Run one restart-safe shadow cycle and return redacted counters only."""
 
@@ -730,9 +733,18 @@ def process_coin_spool_cycle(
         now_utc or datetime.now(timezone.utc),
         field_name="coin_processor_now_utc",
     )
+    if not 0 <= sqlite_cache_kib_per_store <= MAX_SQLITE_CACHE_KIB_PER_STORE:
+        raise CoinProcessorError("coin_processor_sqlite_cache_invalid")
     staging = connect_coin_group_staging(paths.staging_database)
     market = connect_market_store(paths.market_database)
     corpus = _corpus_connection(paths.corpus_database)
+    if sqlite_cache_kib_per_store:
+        # SQLite's negative cache_size form is an approximate KiB budget.
+        # Keep this processor-only and opt-in: recovery operators can reduce
+        # random reads over a large durable projection backlog without
+        # changing database contents, ordering, or global connection defaults.
+        for connection in (staging, market):
+            connection.execute(f"PRAGMA cache_size=-{sqlite_cache_kib_per_store}")
     totals: dict[str, int] = {
         "records": 0,
         "accepted": 0,
@@ -1008,6 +1020,17 @@ def run_coin_processor_service(
     if not 1 <= max_fact_exports <= 5_000:
         raise CoinProcessorError("coin_processor_fact_export_limit_invalid")
     try:
+        sqlite_cache_kib_per_store = int(
+            os.environ.get(
+                "MARKET_PROCESSOR_SQLITE_CACHE_KIB_PER_STORE",
+                str(DEFAULT_SQLITE_CACHE_KIB_PER_STORE),
+            )
+        )
+    except ValueError as exc:
+        raise CoinProcessorError("coin_processor_sqlite_cache_invalid") from exc
+    if not 0 <= sqlite_cache_kib_per_store <= MAX_SQLITE_CACHE_KIB_PER_STORE:
+        raise CoinProcessorError("coin_processor_sqlite_cache_invalid")
+    try:
         maintenance_interval = float(
             os.environ.get(
                 "MARKET_PROCESSOR_MAINTENANCE_INTERVAL_SECONDS",
@@ -1056,6 +1079,7 @@ def run_coin_processor_service(
             max_market_projections=max_market_projections,
             max_fact_exports=max_fact_exports,
             run_expensive_maintenance=maintenance_due,
+            sqlite_cache_kib_per_store=sqlite_cache_kib_per_store,
         )
         if maintenance_due:
             next_maintenance = time.monotonic() + maintenance_interval
@@ -1082,6 +1106,7 @@ def run_coin_processor_service(
                 "version": PROCESSOR_VERSION,
                 "role": role,
                 "mode": mode,
+                "sqlite_cache_kib_per_store": sqlite_cache_kib_per_store,
                 "release_sha": release_sha,
                 "pid": os.getpid(),
                 "started_at_utc": started_at,
