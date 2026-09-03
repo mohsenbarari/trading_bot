@@ -74,7 +74,7 @@ def _event_key(
     )
 
 
-def _link_melted_flow_trade_sides(
+def link_melted_flow_trade_sides(
     connection: sqlite3.Connection,
     *,
     changed_event_keys: tuple[bytes, ...],
@@ -199,6 +199,7 @@ def ingest_public_message(
     *,
     source_code: str,
     message: PublicTelegramMessage,
+    link_melted_flow_trades: bool = True,
 ) -> PublicIngestResult:
     """Normalize one approved public message without retaining raw content.
 
@@ -325,11 +326,11 @@ def ingest_public_message(
         event_time_utc=event_time_utc,
     )
     linked = (
-        _link_melted_flow_trade_sides(
+        link_melted_flow_trade_sides(
             connection,
             changed_event_keys=tuple(changed_event_keys),
         )
-        if source.code == "MELTED_FLOW"
+        if source.code == "MELTED_FLOW" and link_melted_flow_trades
         else 0
     )
     return PublicIngestResult(

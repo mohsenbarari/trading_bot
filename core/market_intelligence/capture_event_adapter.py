@@ -49,7 +49,11 @@ from .private_gold_trade_revisions import (
     PrivateGoldTradeDecision,
     extract_private_gold_trade,
 )
-from .public_telegram.ingest import PublicTelegramMessage, ingest_public_message
+from .public_telegram.ingest import (
+    PublicTelegramMessage,
+    ingest_public_message,
+    link_melted_flow_trade_sides,
+)
 from .public_telegram.parser import parse_public_message, should_ignore_public_message
 from .public_telegram.sources import source_for_code
 
@@ -1798,10 +1802,11 @@ def _project_public_row(
     staging: sqlite3.Connection,
     market: sqlite3.Connection,
     row: sqlite3.Row,
-) -> int:
+) -> tuple[int, tuple[bytes, ...]]:
+    source_id = str(row["source_id"])
     result = ingest_public_message(
         market,
-        source_code=str(row["source_id"]),
+        source_code=source_id,
         message=PublicTelegramMessage(
             message_id=int(row["message_id"]),
             published_at_utc=str(row["event_time_utc"]),
@@ -1809,6 +1814,10 @@ def _project_public_row(
             text=str(row["message_text"]),
             is_forwarded=bool(row["is_forwarded"]),
         ),
+        # Durable replay reconciles all affected MELTED_FLOW facts once per
+        # causal batch below.  The direct/public ingest API keeps its normal
+        # per-message behavior for live callers.
+        link_melted_flow_trades=source_id != "MELTED_FLOW",
     )
     keys = _public_keys(row)
     _remember_projection(
@@ -1818,7 +1827,7 @@ def _project_public_row(
         event_keys=keys,
         bucket_utc=(str(row["event_time_utc"])[:16] if str(row["source_id"]) == "XAUUSD" else None),
     )
-    return result.event_count
+    return result.event_count, (keys if source_id == "MELTED_FLOW" else ())
 
 
 def _primary_source_event_id(message_id: int) -> str:
@@ -2237,6 +2246,7 @@ def project_capture_changes(
     private_trades = private_finalized = private_ambiguous = 0
     primary_changed = False
     primary_minutes: set[str] = set()
+    changed_melted_flow_keys: list[bytes] = []
     for item in dirty:
         source_id = str(item["source_id"])
         retracted += _clear_projection(
@@ -2326,7 +2336,9 @@ def project_capture_changes(
                     (as_of, source_id, int(item["message_id"])),
                 )
         else:
-            upserted += _project_public_row(staging, market, row)
+            public_upserted, flow_keys = _project_public_row(staging, market, row)
+            upserted += public_upserted
+            changed_melted_flow_keys.extend(flow_keys)
         _finish_capture_lineage(
             staging,
             stream="market",
@@ -2340,6 +2352,11 @@ def project_capture_changes(
             ),
             completed_at_utc=as_of,
             parse_all_pending=source_id == _PRIMARY_SOURCE_CODE,
+        )
+    if changed_melted_flow_keys:
+        link_melted_flow_trade_sides(
+            market,
+            changed_event_keys=tuple(changed_melted_flow_keys),
         )
     if dirty:
         staging.executemany(
