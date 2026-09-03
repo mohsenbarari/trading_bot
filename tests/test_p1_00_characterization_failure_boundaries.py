@@ -427,7 +427,40 @@ async def _inject_auth_two_concurrent() -> None:
 
 
 async def _inject_auth_process_restart() -> None:
-    await _auth_same_identity_session_slot()
+    db = _FakeDB()
+    user = SimpleNamespace(id=14, role=UserRole.STANDARD, max_sessions=1)
+    reconstructed = SimpleNamespace(
+        id=uuid4(),
+        is_active=True,
+        is_primary=True,
+        refresh_token_hash="persisted-same-restart-token",
+        device_name="web",
+        device_ip=None,
+        platform=None,
+        home_server="foreign",
+        last_active_at=None,
+        expires_at=None,
+    )
+    db.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: reconstructed))
+    create = AsyncMock(side_effect=AssertionError("AUTH restart must replay the persisted session"))
+    with patch.object(session_service, "_is_inactive_account", return_value=False), patch.object(
+        session_service, "create_session", new=create
+    ), patch.object(session_service, "_is_accountant_user", new=AsyncMock(return_value=False)), patch(
+        "core.services.session_service.get_effective_max_sessions", return_value=1
+    ), patch.object(session_service, "publish_session_revocation", new=AsyncMock()):
+        replay = await session_service.handle_login_session(
+            db,
+            user,
+            "same-restart-token",
+            "web",
+            suspended_refresh_token="same-restart-token",
+        )
+    assert replay["action"] == "session_created"
+    assert replay["session"] is reconstructed
+    assert replay["replaced_session_count"] == 0
+    assert reconstructed.is_active is True
+    create.assert_not_awaited()
+    db.commit.assert_awaited()
 
 
 async def _inject_identity_failure_before_db() -> None:
@@ -478,7 +511,7 @@ async def _inject_identity_two_concurrent() -> None:
 
 async def _inject_identity_process_restart() -> None:
     db = _FakeDB()
-    user = SimpleNamespace(
+    reconstructed = SimpleNamespace(
         id=23,
         account_status=UserAccountStatus.INACTIVE,
         deactivated_at=utc_now(),
@@ -486,6 +519,7 @@ async def _inject_identity_process_restart() -> None:
         messenger_blocked_at=None,
         telegram_id=None,
     )
+    user = reconstructed
     notify = AsyncMock()
     with patch.object(identity_status, "_invalidate_overtime_for_inactive_user", new=AsyncMock()), patch(
         "core.services.user_account_status_service.create_user_notification",
@@ -585,8 +619,9 @@ async def _inject_offer_process_restart() -> None:
     first, _, apply_first = await _run_channel_cycle([item], ok)
     assert first.applied == 1
     assert apply_first.await_count == 1
-    item.state.offer_version_id = offer.version_id
-    replay, _, apply_replay = await _run_channel_cycle([item], ok)
+    reconstructed = item
+    reconstructed.state.offer_version_id = offer.version_id
+    replay, _, apply_replay = await _run_channel_cycle([reconstructed], ok)
     assert replay.applied == 0
     assert apply_replay.await_count == 0
 
@@ -630,13 +665,14 @@ async def _inject_request_two_concurrent() -> None:
 
 async def _inject_request_process_restart() -> None:
     db = _FakeDB()
-    existing = SimpleNamespace(id=10, idempotency_key="restart-key")
+    reconstructed = SimpleNamespace(id=10, idempotency_key="restart-key")
     with patch(
         "core.services.offer_request_ledger_service.load_offer_request_by_idempotency",
-        new=AsyncMock(return_value=existing),
+        new=AsyncMock(return_value=reconstructed),
     ):
         replay = await create_offer_request_ledger_entry(db, _request_command("restart-key"))
     assert replay.duplicate_replay is True
+    assert replay.ledger is reconstructed
     db.add.assert_not_called()
 
 
@@ -734,18 +770,11 @@ async def _inject_trade_two_concurrent() -> None:
 
 async def _inject_trade_process_restart() -> None:
     db = _FakeDB()
-    receipt = SimpleNamespace(id=4, status="sent")
+    reconstructed = SimpleNamespace(id=4, status="sent")
     with patch.object(
         trade_webapp, "upsert_trade_delivery_receipt",
-        new=AsyncMock(return_value=SimpleNamespace(receipt=receipt, created=False, changed=False, terminal_preserved=False)),
+        new=AsyncMock(return_value=SimpleNamespace(receipt=reconstructed, created=False, changed=False, terminal_preserved=False)),
     ), patch.object(trade_webapp, "_is_sent", return_value=True):
-        first = await trade_webapp.deliver_webapp_trade_notification(
-            db,
-            trade_number=4,
-            recipient_user_id=5,
-            message="trade done",
-            current_server="iran",
-        )
         replay = await trade_webapp.deliver_webapp_trade_notification(
             db,
             trade_number=4,
@@ -753,7 +782,6 @@ async def _inject_trade_process_restart() -> None:
             message="trade done",
             current_server="iran",
         )
-    assert first.status == trade_webapp.WEBAPP_DELIVERY_STATUS_ALREADY_SENT
     assert replay.status == trade_webapp.WEBAPP_DELIVERY_STATUS_ALREADY_SENT
 
 
@@ -836,10 +864,12 @@ async def _inject_market_process_restart() -> None:
         new=get_state,
     ), patch("core.services.market_transition_service.current_server", return_value="iran"):
         first = await apply_market_schedule_transition(db, evaluation)
-        holder["state"] = first.state or SimpleNamespace(is_open=True)
+        reconstructed = first.state or SimpleNamespace(is_open=True)
+        holder["state"] = reconstructed
         replay = await apply_market_schedule_transition(db, evaluation)
     assert db.add.call_count == 1
     assert replay.changed is False
+    assert reconstructed.is_open is True
 
 
 async def _inject_msg_failure_before_db() -> None:
@@ -977,17 +1007,18 @@ async def _inject_notify_two_concurrent() -> None:
 
 async def _inject_notify_process_restart() -> None:
     db = _FakeDB()
-    notification = SimpleNamespace(id=12, user_id=7, is_read=False)
-    db.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: notification))
+    reconstructed = SimpleNamespace(id=12, user_id=7, is_read=True)
+    db.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: reconstructed))
     from api.routers import notifications as notify_router
 
     with patch.object(notify_router, "sync_unread_count", new=AsyncMock()) as sync:
-        await notify_router.mark_notification_read(12, current_user=SimpleNamespace(id=7), db=db, redis=SimpleNamespace())
-        replay = await notify_router.mark_notification_read(12, current_user=SimpleNamespace(id=7), db=db, redis=SimpleNamespace())
-    assert notification.is_read is True
-    assert db.commit.await_count == 1
-    assert sync.await_count == 1
-    assert replay is None or replay is not False
+        replay = await notify_router.mark_notification_read(
+            12, current_user=SimpleNamespace(id=7), db=db, redis=SimpleNamespace()
+        )
+    assert reconstructed.is_read is True
+    assert replay is None
+    db.commit.assert_not_awaited()
+    sync.assert_not_awaited()
 
 
 async def _inject_tg_failure_before_db() -> None:
@@ -1087,25 +1118,17 @@ async def _inject_tg_two_concurrent() -> None:
 
 async def _inject_tg_process_restart() -> None:
     db = FakeDeliveryDB(user=SimpleNamespace(id=7, telegram_id=7777))
-    row = _outbox(attempt_count=1)
-    gateway_send = AsyncMock(
-        return_value=telegram_gateway.TelegramGatewayResult(
-            ok=True, method="sendMessage", status_code=200, response_text="ok"
-        )
-    )
+    reconstructed = _outbox(attempt_count=1)
+    reconstructed.status = TelegramNotificationOutboxStatus.SENT
+    gateway_send = AsyncMock()
     with patch.object(tg_service, "evaluate_bot_access", new=AsyncMock(return_value=BotAccessDecision(True))), patch.object(
         tg_service, "get_active_customer_relation_for_user", new=AsyncMock(return_value=None)
     ):
-        first = await tg_service.deliver_claimed_telegram_notification_outbox(
-            db, row, current_server="foreign", gateway_send=gateway_send, now=row.created_at
-        )
-        row.status = TelegramNotificationOutboxStatus.SENT
         replay = await tg_service.deliver_claimed_telegram_notification_outbox(
-            db, row, current_server="foreign", gateway_send=gateway_send, now=row.created_at
+            db, reconstructed, current_server="foreign", gateway_send=gateway_send, now=reconstructed.created_at
         )
-    assert first.status == tg_service.TELEGRAM_NOTIFICATION_DELIVERY_STATUS_SENT
     assert replay.status == tg_service.TELEGRAM_NOTIFICATION_DELIVERY_STATUS_ALREADY_TERMINAL
-    assert gateway_send.await_count == 1
+    gateway_send.assert_not_awaited()
 
 
 async def _inject_admin_failure_before_db() -> None:
@@ -1230,18 +1253,14 @@ async def _inject_admin_two_concurrent() -> None:
 async def _inject_admin_process_restart() -> None:
     db = _FakeDB()
     actor = SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN)
-    existing = SimpleNamespace(broadcast=SimpleNamespace(id=8), recipients=[], receipt_count=0)
+    reconstructed = SimpleNamespace(broadcast=SimpleNamespace(id=8), recipients=[], receipt_count=0)
     with patch.object(
-        admin_broadcast, "get_telegram_admin_broadcast_by_creation_key", new=AsyncMock(return_value=existing)
+        admin_broadcast, "get_telegram_admin_broadcast_by_creation_key", new=AsyncMock(return_value=reconstructed)
     ):
         replay = await admin_broadcast.create_telegram_admin_broadcast(
             db, actor=actor, content="hello", audience_type=TelegramAdminBroadcastAudienceType.ALL, creation_key="same-admin-key-01"
         )
-        second = await admin_broadcast.create_telegram_admin_broadcast(
-            db, actor=actor, content="hello", audience_type=TelegramAdminBroadcastAudienceType.ALL, creation_key="same-admin-key-01"
-        )
-    assert replay is existing
-    assert second is existing
+    assert replay is reconstructed
     db.add.assert_not_called()
 
 
@@ -1296,11 +1315,12 @@ async def _inject_sync_two_concurrent() -> None:
 
 async def _inject_sync_process_restart() -> None:
     db = _FakeDB()
+    reconstructed = {"change_log_id": 20}
     db.execute = AsyncMock(return_value=SimpleNamespace(rowcount=0))
     with patch("core.db.AsyncSessionLocal", return_value=_FakeSessionContext(db)), patch(
         "core.sync_worker.coerce_positive_int", return_value=20
     ):
-        replay = await sync_worker.mark_change_log_delivered({"change_log_id": 20})
+        replay = await sync_worker.mark_change_log_delivered(reconstructed)
     assert replay == 0
 
 
@@ -1370,7 +1390,7 @@ class P100FailureBoundaryCharacterizationTests(unittest.IsolatedAsyncioTestCase)
         await _inject_auth_two_concurrent()
 
     async def test_auth_process_restart_injects(self):
-        """AUTH process_restart: injects handle_login_session restart replace."""
+        """AUTH process_restart: reconstructs persisted session and replays same-restart-token."""
         await _inject_auth_process_restart()
 
     async def test_auth_unknown_authority_schema_hash_injects(self):
@@ -1664,14 +1684,28 @@ class P100FailureBoundaryCharacterizationTests(unittest.IsolatedAsyncioTestCase)
                     cell["variant_id"],
                 )
             else:
-                self.assertTrue(
-                    src.count("await ") >= 2
-                    or "replay" in src
-                    or "existing" in src
-                    or "durable" in src
-                    or "holder[" in src,
-                    cell["variant_id"],
-                )
+                concurrent = INJECTORS.get((cell["family"], "two_concurrent_commands"))
+                self.assertIsNot(injector, concurrent, cell["variant_id"])
+                self.assertNotIn("_auth_same_identity_session_slot", src, cell["variant_id"])
+                if concurrent is not None:
+                    self.assertNotIn(concurrent.__name__, inspect.getsource(injector), cell["variant_id"])
+                    concurrent_src = inspect.getsource(concurrent)
+                    conc_tree = ast.parse(concurrent_src)
+                    for name in {node.id for node in ast.walk(conc_tree) if isinstance(node, ast.Name)}:
+                        helper = globals().get(name)
+                        if callable(helper) and name.startswith("_"):
+                            concurrent_src += "\n" + inspect.getsource(helper)
+                    self.assertNotIn("reconstructed", concurrent_src, cell["variant_id"])
+                self.assertIn("reconstructed", src, cell["variant_id"])
+                self.assertNotIn("same-user-token-b", src, cell["variant_id"])
+                if cell["family"] == "AUTH":
+                    self.assertIn("suspended_refresh_token", src)
+                    self.assertIn("same-restart-token", src)
+                    self.assertNotIn("same-user-token-a", src)
+                if cell["family"] == "NOTIFY":
+                    self.assertIn("is_read=True", src)
+                    self.assertNotIn("is_read=False", src)
+                    self.assertEqual(src.count("mark_notification_read"), 1, cell["variant_id"])
 
 
 if __name__ == "__main__":
