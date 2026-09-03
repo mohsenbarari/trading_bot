@@ -29,7 +29,8 @@
     "telegram_link_variants": 3,
     "invalid_combinations": 6,
     "policy_effects": 7,
-    "family_boundary_variants": 72
+    "family_boundary_variants": 72,
+    "offer_origin_interaction": 3
   },
   "contract_field_policy": {
     "required_fields": [
@@ -5372,7 +5373,7 @@
         "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
         "failure_boundary": "failure_before_db_commit",
         "applicability": "SHARED_EVIDENCE_TEMPLATE",
-        "expected_outcome": "Rollback leaves no durable business state, outbox/receipt or external side effect.",
+        "expected_outcome": "Use family_boundary_variants. Each ELIGIBLE cell injects the named boundary on that family's own mutating path. Families without that path are NOT_APPLICABLE with a behavior-specific reason. Shared Offer-publication or Telegram-outbox helpers are not evidence unless the family owns that path. DR-015 timing remains a DPL-1 deferral.",
         "evidence_refs": [
           "tests/test_offers_router_create_success.py",
           "tests/test_offer_overtime_request_service.py",
@@ -5390,7 +5391,7 @@
         "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
         "failure_boundary": "commit_before_event_side_effect",
         "applicability": "SHARED_EVIDENCE_TEMPLATE",
-        "expected_outcome": "Committed business state keeps a durable retryable outbox/receipt and the user is not given false terminal failure.",
+        "expected_outcome": "Use family_boundary_variants. Each ELIGIBLE cell injects the named boundary on that family's own mutating path. Families without that path are NOT_APPLICABLE with a behavior-specific reason. Shared Offer-publication or Telegram-outbox helpers are not evidence unless the family owns that path. DR-015 timing remains a DPL-1 deferral.",
         "evidence_refs": [
           "tests/test_offer_publication_worker.py",
           "tests/test_trade_delivery_worker.py",
@@ -5408,7 +5409,7 @@
         "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
         "failure_boundary": "side_effect_before_ack",
         "applicability": "SHARED_EVIDENCE_TEMPLATE",
-        "expected_outcome": "Retry consults provider/idempotency evidence and never blindly sends or applies twice.",
+        "expected_outcome": "Use family_boundary_variants. Each ELIGIBLE cell injects the named boundary on that family's own mutating path. Families without that path are NOT_APPLICABLE with a behavior-specific reason. Shared Offer-publication or Telegram-outbox helpers are not evidence unless the family owns that path. DR-015 timing remains a DPL-1 deferral.",
         "evidence_refs": [
           "tests/test_telegram_delivery_queue_postgres.py",
           "tests/test_telegram_delivery_queue_contract.py",
@@ -5426,7 +5427,7 @@
         "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
         "failure_boundary": "two_concurrent_commands",
         "applicability": "SHARED_EVIDENCE_TEMPLATE",
-        "expected_outcome": "One authoritative result commits; the loser receives deterministic conflict/replay and no duplicate business or provider effect.",
+        "expected_outcome": "Use family_boundary_variants. Each ELIGIBLE cell injects the named boundary on that family's own mutating path. Families without that path are NOT_APPLICABLE with a behavior-specific reason. Shared Offer-publication or Telegram-outbox helpers are not evidence unless the family owns that path. DR-015 timing remains a DPL-1 deferral.",
         "evidence_refs": [
           "tests/test_offer_request_ledger_service.py",
           "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
@@ -5444,7 +5445,7 @@
         "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
         "failure_boundary": "process_restart",
         "applicability": "SHARED_EVIDENCE_TEMPLATE",
-        "expected_outcome": "Durable queue/FSM/outbox/checkpoint or independent process resume without lost committed mutation, duplicate delivery or automatic Writer/owner promotion.",
+        "expected_outcome": "Use family_boundary_variants. Each ELIGIBLE cell injects the named boundary on that family's own mutating path. Families without that path are NOT_APPLICABLE with a behavior-specific reason. Shared Offer-publication or Telegram-outbox helpers are not evidence unless the family owns that path. DR-015 timing remains a DPL-1 deferral.",
         "evidence_refs": [
           "tests/test_main_lifespan.py",
           "tests/test_sync_worker.py",
@@ -5462,7 +5463,7 @@
         "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
         "failure_boundary": "unknown_authority_schema_hash",
         "applicability": "SHARED_EVIDENCE_TEMPLATE",
-        "expected_outcome": "Fail closed and expose/quarantine the mismatch; do not apply, promote, use LWW or synthesize evidence.",
+        "expected_outcome": "Use family_boundary_variants. Each ELIGIBLE cell injects the named boundary on that family's own mutating path. Families without that path are NOT_APPLICABLE with a behavior-specific reason. Shared Offer-publication or Telegram-outbox helpers are not evidence unless the family owns that path. DR-015 timing remains a DPL-1 deferral.",
         "evidence_refs": [
           "tests/test_background_job_authority.py",
           "tests/test_sync_router_signature.py",
@@ -5513,8 +5514,8 @@
     "cross_family_failure_evidence": 0,
     "scenario_work_item": "READY_FOR_CODEX_FINAL_REVIEW",
     "target_result": "NOT_RUN",
-    "complete_forbidden_until": "Codex approves the exact head after shadow-observation remap, injected failure evidence, and composed offer_origin interaction.",
-    "family_boundary_evidenced_cells": 64,
+    "complete_forbidden_until": "Codex approves the exact head after family-owned failure injection and three distinct offer_origin interaction records.",
+    "family_boundary_evidenced_cells": 55,
     "family_boundary_named_blockers": 0,
     "filename_only_failure_evidence": 0,
     "unrouted_named_blockers": 0
@@ -13079,9 +13080,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "AUTH has a mutating path that can hit failure_before_db_commit"
+        "predicate": "AUTH owns a mutating path that can hit failure_before_db_commit"
       },
-      "expected_outcome": "Injected AUTH failure_before_db_commit leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected AUTH failure_before_db_commit on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13105,9 +13106,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "AUTH has a mutating path that can hit commit_before_event_side_effect"
+        "predicate": "AUTH owns a mutating path that can hit commit_before_event_side_effect"
       },
-      "expected_outcome": "Injected AUTH commit_before_event_side_effect leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected AUTH commit_before_event_side_effect on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13131,9 +13132,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "AUTH has a mutating path that can hit side_effect_before_ack"
+        "predicate": "AUTH owns a mutating path that can hit side_effect_before_ack"
       },
-      "expected_outcome": "Injected AUTH side_effect_before_ack leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected AUTH side_effect_before_ack on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13157,9 +13158,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "AUTH has a mutating path that can hit two_concurrent_commands"
+        "predicate": "AUTH owns a mutating path that can hit two_concurrent_commands"
       },
-      "expected_outcome": "Injected AUTH two_concurrent_commands leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected AUTH two_concurrent_commands on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13183,9 +13184,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "AUTH has a mutating path that can hit process_restart"
+        "predicate": "AUTH owns a mutating path that can hit process_restart"
       },
-      "expected_outcome": "Injected AUTH process_restart leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected AUTH process_restart on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13209,9 +13210,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "AUTH has a mutating path that can hit unknown_authority_schema_hash"
+        "predicate": "AUTH owns a mutating path that can hit unknown_authority_schema_hash"
       },
-      "expected_outcome": "Injected AUTH unknown_authority_schema_hash leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected AUTH unknown_authority_schema_hash on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13235,9 +13236,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "IDENTITY has a mutating path that can hit failure_before_db_commit"
+        "predicate": "IDENTITY owns a mutating path that can hit failure_before_db_commit"
       },
-      "expected_outcome": "Injected IDENTITY failure_before_db_commit leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected IDENTITY failure_before_db_commit on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13258,52 +13259,36 @@
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "IDENTITY",
       "failure_boundary": "commit_before_event_side_effect",
-      "applicability": "ELIGIBLE",
+      "applicability": "NOT_APPLICABLE",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "IDENTITY has a mutating path that can hit commit_before_event_side_effect"
+        "decision": "NOT_APPLICABLE",
+        "reason": "IDENTITY persist is account_status plus an in-transaction notification row. It does not commit then emit an IDENTITY-owned provider event. Telegram enqueue is TG-owned."
       },
-      "expected_outcome": "Injected IDENTITY commit_before_event_side_effect leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "No IDENTITY-owned mutating path exists for commit_before_event_side_effect.",
       "rule_sources": [
+        "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_identity_commit_before_event_side_effect_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_identity_commit_before_event_side_effect_injects",
-          "boundary_talk": "commit_before_event_side_effect",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": []
     },
     {
       "variant_id": "IDENTITY__SIDE-EFFECT-BEFORE-ACK",
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "IDENTITY",
       "failure_boundary": "side_effect_before_ack",
-      "applicability": "ELIGIBLE",
+      "applicability": "NOT_APPLICABLE",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "IDENTITY has a mutating path that can hit side_effect_before_ack"
+        "decision": "NOT_APPLICABLE",
+        "reason": "IDENTITY has no provider-send-before-ack of its own. Telegram delivery of account-status copy is TG-owned."
       },
-      "expected_outcome": "Injected IDENTITY side_effect_before_ack leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "No IDENTITY-owned mutating path exists for side_effect_before_ack.",
       "rule_sources": [
+        "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_identity_side_effect_before_ack_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_identity_side_effect_before_ack_injects",
-          "boundary_talk": "side_effect_before_ack",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": []
     },
     {
       "variant_id": "IDENTITY__TWO-CONCURRENT-COMMANDS",
@@ -13313,9 +13298,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "IDENTITY has a mutating path that can hit two_concurrent_commands"
+        "predicate": "IDENTITY owns a mutating path that can hit two_concurrent_commands"
       },
-      "expected_outcome": "Injected IDENTITY two_concurrent_commands leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected IDENTITY two_concurrent_commands on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13339,9 +13324,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "IDENTITY has a mutating path that can hit process_restart"
+        "predicate": "IDENTITY owns a mutating path that can hit process_restart"
       },
-      "expected_outcome": "Injected IDENTITY process_restart leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected IDENTITY process_restart on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13365,9 +13350,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "IDENTITY has a mutating path that can hit unknown_authority_schema_hash"
+        "predicate": "IDENTITY owns a mutating path that can hit unknown_authority_schema_hash"
       },
-      "expected_outcome": "Injected IDENTITY unknown_authority_schema_hash leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected IDENTITY unknown_authority_schema_hash on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13391,9 +13376,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "OFFER has a mutating path that can hit failure_before_db_commit"
+        "predicate": "OFFER owns a mutating path that can hit failure_before_db_commit"
       },
-      "expected_outcome": "Injected OFFER failure_before_db_commit leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected OFFER failure_before_db_commit on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13417,9 +13402,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "OFFER has a mutating path that can hit commit_before_event_side_effect"
+        "predicate": "OFFER owns a mutating path that can hit commit_before_event_side_effect"
       },
-      "expected_outcome": "Injected OFFER commit_before_event_side_effect leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected OFFER commit_before_event_side_effect on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13443,9 +13428,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "OFFER has a mutating path that can hit side_effect_before_ack"
+        "predicate": "OFFER owns a mutating path that can hit side_effect_before_ack"
       },
-      "expected_outcome": "Injected OFFER side_effect_before_ack leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected OFFER side_effect_before_ack on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13469,9 +13454,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "OFFER has a mutating path that can hit two_concurrent_commands"
+        "predicate": "OFFER owns a mutating path that can hit two_concurrent_commands"
       },
-      "expected_outcome": "Injected OFFER two_concurrent_commands leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected OFFER two_concurrent_commands on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13495,9 +13480,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "OFFER has a mutating path that can hit process_restart"
+        "predicate": "OFFER owns a mutating path that can hit process_restart"
       },
-      "expected_outcome": "Injected OFFER process_restart leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected OFFER process_restart on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13521,9 +13506,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "OFFER has a mutating path that can hit unknown_authority_schema_hash"
+        "predicate": "OFFER owns a mutating path that can hit unknown_authority_schema_hash"
       },
-      "expected_outcome": "Injected OFFER unknown_authority_schema_hash leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected OFFER unknown_authority_schema_hash on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13547,9 +13532,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "REQUEST has a mutating path that can hit failure_before_db_commit"
+        "predicate": "REQUEST owns a mutating path that can hit failure_before_db_commit"
       },
-      "expected_outcome": "Injected REQUEST failure_before_db_commit leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected REQUEST failure_before_db_commit on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13570,52 +13555,36 @@
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "REQUEST",
       "failure_boundary": "commit_before_event_side_effect",
-      "applicability": "ELIGIBLE",
+      "applicability": "NOT_APPLICABLE",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "REQUEST has a mutating path that can hit commit_before_event_side_effect"
+        "decision": "NOT_APPLICABLE",
+        "reason": "create_offer_request_ledger_entry writes OfferRequest only. Confirmation and notification fanout belong to NOTIFY/TG, not a REQUEST outbox."
       },
-      "expected_outcome": "Injected REQUEST commit_before_event_side_effect leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "No REQUEST-owned mutating path exists for commit_before_event_side_effect.",
       "rule_sources": [
+        "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_request_commit_before_event_side_effect_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_request_commit_before_event_side_effect_injects",
-          "boundary_talk": "commit_before_event_side_effect",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": []
     },
     {
       "variant_id": "REQUEST__SIDE-EFFECT-BEFORE-ACK",
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "REQUEST",
       "failure_boundary": "side_effect_before_ack",
-      "applicability": "ELIGIBLE",
+      "applicability": "NOT_APPLICABLE",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "REQUEST has a mutating path that can hit side_effect_before_ack"
+        "decision": "NOT_APPLICABLE",
+        "reason": "create_offer_request_ledger_entry does not send a provider message before ack."
       },
-      "expected_outcome": "Injected REQUEST side_effect_before_ack leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "No REQUEST-owned mutating path exists for side_effect_before_ack.",
       "rule_sources": [
+        "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_request_side_effect_before_ack_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_request_side_effect_before_ack_injects",
-          "boundary_talk": "side_effect_before_ack",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": []
     },
     {
       "variant_id": "REQUEST__TWO-CONCURRENT-COMMANDS",
@@ -13625,9 +13594,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "REQUEST has a mutating path that can hit two_concurrent_commands"
+        "predicate": "REQUEST owns a mutating path that can hit two_concurrent_commands"
       },
-      "expected_outcome": "Injected REQUEST two_concurrent_commands leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected REQUEST two_concurrent_commands on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13651,9 +13620,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "REQUEST has a mutating path that can hit process_restart"
+        "predicate": "REQUEST owns a mutating path that can hit process_restart"
       },
-      "expected_outcome": "Injected REQUEST process_restart leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected REQUEST process_restart on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13679,7 +13648,7 @@
         "decision": "NOT_APPLICABLE",
         "reason": "REQUEST live seeds have no job-factory or schema-hash gate; unknown actor is ordinary permission denial on the CRUD path."
       },
-      "expected_outcome": "No REQUEST mutating path exists for unknown_authority_schema_hash.",
+      "expected_outcome": "No REQUEST-owned mutating path exists for unknown_authority_schema_hash.",
       "rule_sources": [
         "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
         "tests/test_p1_00_characterization_failure_boundaries.py"
@@ -13695,9 +13664,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "TRADE has a mutating path that can hit failure_before_db_commit"
+        "predicate": "TRADE owns a mutating path that can hit failure_before_db_commit"
       },
-      "expected_outcome": "Injected TRADE failure_before_db_commit leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected TRADE failure_before_db_commit on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13721,9 +13690,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "TRADE has a mutating path that can hit commit_before_event_side_effect"
+        "predicate": "TRADE owns a mutating path that can hit commit_before_event_side_effect"
       },
-      "expected_outcome": "Injected TRADE commit_before_event_side_effect leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected TRADE commit_before_event_side_effect on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13744,26 +13713,18 @@
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "TRADE",
       "failure_boundary": "side_effect_before_ack",
-      "applicability": "ELIGIBLE",
+      "applicability": "NOT_APPLICABLE",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "TRADE has a mutating path that can hit side_effect_before_ack"
+        "decision": "NOT_APPLICABLE",
+        "reason": "deliver_webapp_trade_notification commits the receipt before realtime publish. There is no TRADE provider-send-before-ack on this path."
       },
-      "expected_outcome": "Injected TRADE side_effect_before_ack leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "No TRADE-owned mutating path exists for side_effect_before_ack.",
       "rule_sources": [
+        "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_trade_side_effect_before_ack_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_trade_side_effect_before_ack_injects",
-          "boundary_talk": "side_effect_before_ack",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": []
     },
     {
       "variant_id": "TRADE__TWO-CONCURRENT-COMMANDS",
@@ -13773,9 +13734,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "TRADE has a mutating path that can hit two_concurrent_commands"
+        "predicate": "TRADE owns a mutating path that can hit two_concurrent_commands"
       },
-      "expected_outcome": "Injected TRADE two_concurrent_commands leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected TRADE two_concurrent_commands on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13799,9 +13760,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "TRADE has a mutating path that can hit process_restart"
+        "predicate": "TRADE owns a mutating path that can hit process_restart"
       },
-      "expected_outcome": "Injected TRADE process_restart leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected TRADE process_restart on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13825,9 +13786,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "TRADE has a mutating path that can hit unknown_authority_schema_hash"
+        "predicate": "TRADE owns a mutating path that can hit unknown_authority_schema_hash"
       },
-      "expected_outcome": "Injected TRADE unknown_authority_schema_hash leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected TRADE unknown_authority_schema_hash on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13851,9 +13812,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "MARKET has a mutating path that can hit failure_before_db_commit"
+        "predicate": "MARKET owns a mutating path that can hit failure_before_db_commit"
       },
-      "expected_outcome": "Injected MARKET failure_before_db_commit leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected MARKET failure_before_db_commit on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13877,9 +13838,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "MARKET has a mutating path that can hit commit_before_event_side_effect"
+        "predicate": "MARKET owns a mutating path that can hit commit_before_event_side_effect"
       },
-      "expected_outcome": "Injected MARKET commit_before_event_side_effect leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected MARKET commit_before_event_side_effect on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13900,26 +13861,18 @@
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "MARKET",
       "failure_boundary": "side_effect_before_ack",
-      "applicability": "ELIGIBLE",
+      "applicability": "NOT_APPLICABLE",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "MARKET has a mutating path that can hit side_effect_before_ack"
+        "decision": "NOT_APPLICABLE",
+        "reason": "apply_market_schedule_transition commits MarketRuntimeState then invalidates cache. It does not send a provider message before ack."
       },
-      "expected_outcome": "Injected MARKET side_effect_before_ack leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "No MARKET-owned mutating path exists for side_effect_before_ack.",
       "rule_sources": [
+        "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_market_side_effect_before_ack_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_market_side_effect_before_ack_injects",
-          "boundary_talk": "side_effect_before_ack",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": []
     },
     {
       "variant_id": "MARKET__TWO-CONCURRENT-COMMANDS",
@@ -13929,9 +13882,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "MARKET has a mutating path that can hit two_concurrent_commands"
+        "predicate": "MARKET owns a mutating path that can hit two_concurrent_commands"
       },
-      "expected_outcome": "Injected MARKET two_concurrent_commands leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected MARKET two_concurrent_commands on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13955,9 +13908,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "MARKET has a mutating path that can hit process_restart"
+        "predicate": "MARKET owns a mutating path that can hit process_restart"
       },
-      "expected_outcome": "Injected MARKET process_restart leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected MARKET process_restart on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -13981,9 +13934,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "MARKET has a mutating path that can hit unknown_authority_schema_hash"
+        "predicate": "MARKET owns a mutating path that can hit unknown_authority_schema_hash"
       },
-      "expected_outcome": "Injected MARKET unknown_authority_schema_hash leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected MARKET unknown_authority_schema_hash on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14007,9 +13960,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "MSG has a mutating path that can hit failure_before_db_commit"
+        "predicate": "MSG owns a mutating path that can hit failure_before_db_commit"
       },
-      "expected_outcome": "Injected MSG failure_before_db_commit leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected MSG failure_before_db_commit on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14033,9 +13986,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "MSG has a mutating path that can hit commit_before_event_side_effect"
+        "predicate": "MSG owns a mutating path that can hit commit_before_event_side_effect"
       },
-      "expected_outcome": "Injected MSG commit_before_event_side_effect leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected MSG commit_before_event_side_effect on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14056,26 +14009,18 @@
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "MSG",
       "failure_boundary": "side_effect_before_ack",
-      "applicability": "ELIGIBLE",
+      "applicability": "NOT_APPLICABLE",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "MSG has a mutating path that can hit side_effect_before_ack"
+        "decision": "NOT_APPLICABLE",
+        "reason": "persist_sent_direct_message commits the Message row before threading sync. MSG has no provider-send-before-ack."
       },
-      "expected_outcome": "Injected MSG side_effect_before_ack leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "No MSG-owned mutating path exists for side_effect_before_ack.",
       "rule_sources": [
+        "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_msg_side_effect_before_ack_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_msg_side_effect_before_ack_injects",
-          "boundary_talk": "side_effect_before_ack",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": []
     },
     {
       "variant_id": "MSG__TWO-CONCURRENT-COMMANDS",
@@ -14085,9 +14030,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "MSG has a mutating path that can hit two_concurrent_commands"
+        "predicate": "MSG owns a mutating path that can hit two_concurrent_commands"
       },
-      "expected_outcome": "Injected MSG two_concurrent_commands leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected MSG two_concurrent_commands on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14111,9 +14056,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "MSG has a mutating path that can hit process_restart"
+        "predicate": "MSG owns a mutating path that can hit process_restart"
       },
-      "expected_outcome": "Injected MSG process_restart leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected MSG process_restart on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14137,9 +14082,9 @@
       "applicability": "NOT_APPLICABLE",
       "eligibility": {
         "decision": "NOT_APPLICABLE",
-        "reason": "MSG live seeds authorize by membership and revision, not a schema-hash or job-factory gate."
+        "reason": "MSG live seeds have no job-factory or schema-hash gate; unknown actor is ordinary permission denial on the chat path."
       },
-      "expected_outcome": "No MSG mutating path exists for unknown_authority_schema_hash.",
+      "expected_outcome": "No MSG-owned mutating path exists for unknown_authority_schema_hash.",
       "rule_sources": [
         "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
         "tests/test_p1_00_characterization_failure_boundaries.py"
@@ -14155,9 +14100,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "NOTIFY has a mutating path that can hit failure_before_db_commit"
+        "predicate": "NOTIFY owns a mutating path that can hit failure_before_db_commit"
       },
-      "expected_outcome": "Injected NOTIFY failure_before_db_commit leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected NOTIFY failure_before_db_commit on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14181,9 +14126,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "NOTIFY has a mutating path that can hit commit_before_event_side_effect"
+        "predicate": "NOTIFY owns a mutating path that can hit commit_before_event_side_effect"
       },
-      "expected_outcome": "Injected NOTIFY commit_before_event_side_effect leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected NOTIFY commit_before_event_side_effect on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14204,26 +14149,18 @@
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "NOTIFY",
       "failure_boundary": "side_effect_before_ack",
-      "applicability": "ELIGIBLE",
+      "applicability": "NOT_APPLICABLE",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "NOTIFY has a mutating path that can hit side_effect_before_ack"
+        "decision": "NOT_APPLICABLE",
+        "reason": "mark_notification_read commits then syncs unread count. NOTIFY has no provider-send-before-ack on this path."
       },
-      "expected_outcome": "Injected NOTIFY side_effect_before_ack leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "No NOTIFY-owned mutating path exists for side_effect_before_ack.",
       "rule_sources": [
+        "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_notify_side_effect_before_ack_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_notify_side_effect_before_ack_injects",
-          "boundary_talk": "side_effect_before_ack",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": []
     },
     {
       "variant_id": "NOTIFY__TWO-CONCURRENT-COMMANDS",
@@ -14233,9 +14170,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "NOTIFY has a mutating path that can hit two_concurrent_commands"
+        "predicate": "NOTIFY owns a mutating path that can hit two_concurrent_commands"
       },
-      "expected_outcome": "Injected NOTIFY two_concurrent_commands leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected NOTIFY two_concurrent_commands on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14259,9 +14196,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "NOTIFY has a mutating path that can hit process_restart"
+        "predicate": "NOTIFY owns a mutating path that can hit process_restart"
       },
-      "expected_outcome": "Injected NOTIFY process_restart leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected NOTIFY process_restart on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14285,9 +14222,9 @@
       "applicability": "NOT_APPLICABLE",
       "eligibility": {
         "decision": "NOT_APPLICABLE",
-        "reason": "NOTIFY live seeds have no schema-hash or background-job factory gate."
+        "reason": "NOTIFY live seeds have no job-factory or schema-hash gate; unknown actor is ordinary permission denial on the notification path."
       },
-      "expected_outcome": "No NOTIFY mutating path exists for unknown_authority_schema_hash.",
+      "expected_outcome": "No NOTIFY-owned mutating path exists for unknown_authority_schema_hash.",
       "rule_sources": [
         "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
         "tests/test_p1_00_characterization_failure_boundaries.py"
@@ -14303,9 +14240,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "TG has a mutating path that can hit failure_before_db_commit"
+        "predicate": "TG owns a mutating path that can hit failure_before_db_commit"
       },
-      "expected_outcome": "Injected TG failure_before_db_commit leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected TG failure_before_db_commit on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14329,9 +14266,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "TG has a mutating path that can hit commit_before_event_side_effect"
+        "predicate": "TG owns a mutating path that can hit commit_before_event_side_effect"
       },
-      "expected_outcome": "Injected TG commit_before_event_side_effect leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected TG commit_before_event_side_effect on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14355,9 +14292,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "TG has a mutating path that can hit side_effect_before_ack"
+        "predicate": "TG owns a mutating path that can hit side_effect_before_ack"
       },
-      "expected_outcome": "Injected TG side_effect_before_ack leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected TG side_effect_before_ack on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14381,9 +14318,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "TG has a mutating path that can hit two_concurrent_commands"
+        "predicate": "TG owns a mutating path that can hit two_concurrent_commands"
       },
-      "expected_outcome": "Injected TG two_concurrent_commands leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected TG two_concurrent_commands on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14407,9 +14344,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "TG has a mutating path that can hit process_restart"
+        "predicate": "TG owns a mutating path that can hit process_restart"
       },
-      "expected_outcome": "Injected TG process_restart leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected TG process_restart on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14433,9 +14370,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "TG has a mutating path that can hit unknown_authority_schema_hash"
+        "predicate": "TG owns a mutating path that can hit unknown_authority_schema_hash"
       },
-      "expected_outcome": "Injected TG unknown_authority_schema_hash leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected TG unknown_authority_schema_hash on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14459,9 +14396,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "ADMIN has a mutating path that can hit failure_before_db_commit"
+        "predicate": "ADMIN owns a mutating path that can hit failure_before_db_commit"
       },
-      "expected_outcome": "Injected ADMIN failure_before_db_commit leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected ADMIN failure_before_db_commit on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14485,9 +14422,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "ADMIN has a mutating path that can hit commit_before_event_side_effect"
+        "predicate": "ADMIN owns a mutating path that can hit commit_before_event_side_effect"
       },
-      "expected_outcome": "Injected ADMIN commit_before_event_side_effect leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected ADMIN commit_before_event_side_effect on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14511,9 +14448,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "ADMIN has a mutating path that can hit side_effect_before_ack"
+        "predicate": "ADMIN owns a mutating path that can hit side_effect_before_ack"
       },
-      "expected_outcome": "Injected ADMIN side_effect_before_ack leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected ADMIN side_effect_before_ack on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14537,9 +14474,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "ADMIN has a mutating path that can hit two_concurrent_commands"
+        "predicate": "ADMIN owns a mutating path that can hit two_concurrent_commands"
       },
-      "expected_outcome": "Injected ADMIN two_concurrent_commands leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected ADMIN two_concurrent_commands on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14563,9 +14500,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "ADMIN has a mutating path that can hit process_restart"
+        "predicate": "ADMIN owns a mutating path that can hit process_restart"
       },
-      "expected_outcome": "Injected ADMIN process_restart leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected ADMIN process_restart on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14589,9 +14526,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "ADMIN has a mutating path that can hit unknown_authority_schema_hash"
+        "predicate": "ADMIN owns a mutating path that can hit unknown_authority_schema_hash"
       },
-      "expected_outcome": "Injected ADMIN unknown_authority_schema_hash leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected ADMIN unknown_authority_schema_hash on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14615,9 +14552,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "SYNC has a mutating path that can hit failure_before_db_commit"
+        "predicate": "SYNC owns a mutating path that can hit failure_before_db_commit"
       },
-      "expected_outcome": "Injected SYNC failure_before_db_commit leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected SYNC failure_before_db_commit on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14638,26 +14575,18 @@
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "SYNC",
       "failure_boundary": "commit_before_event_side_effect",
-      "applicability": "ELIGIBLE",
+      "applicability": "NOT_APPLICABLE",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "SYNC has a mutating path that can hit commit_before_event_side_effect"
+        "decision": "NOT_APPLICABLE",
+        "reason": "send_sync_item is HTTP-before-mark. The durable change_log mark happens after peer accept, so commit_before_event_side_effect is inverted and not applicable."
       },
-      "expected_outcome": "Injected SYNC commit_before_event_side_effect leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "No SYNC-owned mutating path exists for commit_before_event_side_effect.",
       "rule_sources": [
+        "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
-      "evidence_refs": [
-        "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_sync_commit_before_event_side_effect_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00_characterization_failure_boundaries.py::P100FailureBoundaryCharacterizationTests.test_sync_commit_before_event_side_effect_injects",
-          "boundary_talk": "commit_before_event_side_effect",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": []
     },
     {
       "variant_id": "SYNC__SIDE-EFFECT-BEFORE-ACK",
@@ -14667,9 +14596,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "SYNC has a mutating path that can hit side_effect_before_ack"
+        "predicate": "SYNC owns a mutating path that can hit side_effect_before_ack"
       },
-      "expected_outcome": "Injected SYNC side_effect_before_ack leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected SYNC side_effect_before_ack on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14693,9 +14622,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "SYNC has a mutating path that can hit two_concurrent_commands"
+        "predicate": "SYNC owns a mutating path that can hit two_concurrent_commands"
       },
-      "expected_outcome": "Injected SYNC two_concurrent_commands leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected SYNC two_concurrent_commands on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14719,9 +14648,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "SYNC has a mutating path that can hit process_restart"
+        "predicate": "SYNC owns a mutating path that can hit process_restart"
       },
-      "expected_outcome": "Injected SYNC process_restart leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected SYNC process_restart on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14745,9 +14674,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "SYNC has a mutating path that can hit unknown_authority_schema_hash"
+        "predicate": "SYNC owns a mutating path that can hit unknown_authority_schema_hash"
       },
-      "expected_outcome": "Injected SYNC unknown_authority_schema_hash leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected SYNC unknown_authority_schema_hash on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14773,7 +14702,7 @@
         "decision": "NOT_APPLICABLE",
         "reason": "OPS connectivity_monitor and live OPS GETs mutate no product table, so there is no OPS commit to fail."
       },
-      "expected_outcome": "No OPS mutating path exists for failure_before_db_commit.",
+      "expected_outcome": "No OPS-owned mutating path exists for failure_before_db_commit.",
       "rule_sources": [
         "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
         "tests/test_p1_00_characterization_failure_boundaries.py"
@@ -14791,7 +14720,7 @@
         "decision": "NOT_APPLICABLE",
         "reason": "OPS seeds emit no product outbox or delivery receipt after a business commit."
       },
-      "expected_outcome": "No OPS mutating path exists for commit_before_event_side_effect.",
+      "expected_outcome": "No OPS-owned mutating path exists for commit_before_event_side_effect.",
       "rule_sources": [
         "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
         "tests/test_p1_00_characterization_failure_boundaries.py"
@@ -14807,9 +14736,9 @@
       "applicability": "NOT_APPLICABLE",
       "eligibility": {
         "decision": "NOT_APPLICABLE",
-        "reason": "OPS seeds have no product provider ACK; redis:connectivity:global is observational."
+        "reason": "OPS has no provider-send-before-ack of a product row."
       },
-      "expected_outcome": "No OPS mutating path exists for side_effect_before_ack.",
+      "expected_outcome": "No OPS-owned mutating path exists for side_effect_before_ack.",
       "rule_sources": [
         "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
         "tests/test_p1_00_characterization_failure_boundaries.py"
@@ -14825,9 +14754,9 @@
       "applicability": "NOT_APPLICABLE",
       "eligibility": {
         "decision": "NOT_APPLICABLE",
-        "reason": "OPS seeds are read-only GETs or probes and have no mutating command identity to contend."
+        "reason": "OPS connectivity_monitor does not claim or persist two concurrent product commands."
       },
-      "expected_outcome": "No OPS mutating path exists for two_concurrent_commands.",
+      "expected_outcome": "No OPS-owned mutating path exists for two_concurrent_commands.",
       "rule_sources": [
         "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
         "tests/test_p1_00_characterization_failure_boundaries.py"
@@ -14843,9 +14772,9 @@
       "applicability": "NOT_APPLICABLE",
       "eligibility": {
         "decision": "NOT_APPLICABLE",
-        "reason": "OPS connectivity_monitor mutates no product table; restart does not resume an OPS business command."
+        "reason": "OPS connectivity_monitor has no product table to resume after process restart."
       },
-      "expected_outcome": "No OPS mutating path exists for process_restart.",
+      "expected_outcome": "No OPS-owned mutating path exists for process_restart.",
       "rule_sources": [
         "docs/refactor/two-server/section-1/inventory/surface-jobs.json",
         "tests/test_p1_00_characterization_failure_boundaries.py"
@@ -14861,9 +14790,9 @@
       "applicability": "ELIGIBLE",
       "eligibility": {
         "decision": "ELIGIBLE",
-        "predicate": "OPS has a mutating path that can hit unknown_authority_schema_hash"
+        "predicate": "OPS owns a mutating path that can hit unknown_authority_schema_hash"
       },
-      "expected_outcome": "Injected OPS unknown_authority_schema_hash leaves the required state, side-effect, retry, and no-duplicate outcome.",
+      "expected_outcome": "Injected OPS unknown_authority_schema_hash on that family's own mutating path leaves the required state, side-effect, retry, and no-duplicate outcome.",
       "rule_sources": [
         "tests/test_p1_00_characterization_failure_boundaries.py"
       ],
@@ -14909,13 +14838,14 @@
         "TELEGRAM_BOT",
         "INTERNAL"
       ],
-      "reason": "Admission is decided by persona, request_origin, time and telegram-link. origin_variants record provenance only; tests/test_offer_source_surface.py proves home mapping without changing eligibility.",
+      "reason": "Admission and policy effects stay constant across three distinct composed records that differ only by offer_origin WEBAPP vs TELEGRAM_BOT vs INTERNAL.",
       "evidence": [
         "tests/test_offer_source_surface.py",
         "tests/test_p1_00_characterization_matrix_independence.py",
         "matrix.origin_variants"
       ],
-      "interaction_test": "tests/test_p1_00_characterization_matrix_independence.py::P100MatrixIndependenceCharacterizationTests.test_offer_origin_holds_admission_and_effects_constant"
+      "interaction_test": "tests/test_p1_00_characterization_matrix_independence.py::P100MatrixIndependenceCharacterizationTests.test_offer_origin_holds_admission_and_effects_constant",
+      "interaction_records": "offer_origin_interaction"
     },
     "telegram_link": {
       "status": "OVERLAY_ON_TELEGRAM_BOT",
@@ -14925,5 +14855,82 @@
         "tests/test_p1_00_characterization_matrix_independence.py"
       ]
     }
-  }
+  },
+  "offer_origin_interaction": [
+    {
+      "variant_id": "PERSONA-CUSTOMER-TIER1__WEBAPP__TIME-NORMAL__TELEGRAM-LINK-NOT_APPLICABLE__OUTCOME-SUCCESS__OFFER-ORIGIN-WEBAPP",
+      "base_variant_id": "PERSONA-CUSTOMER-TIER1__WEBAPP__TIME-NORMAL__TELEGRAM-LINK-NOT_APPLICABLE__OUTCOME-SUCCESS",
+      "contract_id": "BC-SURFACE-POLICY-CURRENT-V1",
+      "persona_variant_id": "PERSONA-CUSTOMER-TIER1",
+      "request_origin": "WEBAPP",
+      "time_variant_id": "TIME-NORMAL",
+      "telegram_link_variant_id": "TELEGRAM-LINK-NOT_APPLICABLE",
+      "outcome_variant_id": "OUTCOME-SUCCESS",
+      "offer_origin": "WEBAPP",
+      "admission_decision": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "admission is open and command-specific guards pass"
+      },
+      "policy_effects": [
+        "CONFIRMATION",
+        "QUOTA",
+        "COMMISSION",
+        "PUBLICATION",
+        "NOTIFICATION"
+      ],
+      "expected_outcome": "Preserve tier-1 owner/request and snapshotted commission/quota. Run normal confirmation/quota/commission/publication/notification. Overtime owner-approval is not required. Commit one authoritative result with origin/policy snapshots; each intended side effect runs at most once. Offer origin stays an independent provenance snapshot.",
+      "applicability": "APPLICABLE"
+    },
+    {
+      "variant_id": "PERSONA-CUSTOMER-TIER1__WEBAPP__TIME-NORMAL__TELEGRAM-LINK-NOT_APPLICABLE__OUTCOME-SUCCESS__OFFER-ORIGIN-TELEGRAM_BOT",
+      "base_variant_id": "PERSONA-CUSTOMER-TIER1__WEBAPP__TIME-NORMAL__TELEGRAM-LINK-NOT_APPLICABLE__OUTCOME-SUCCESS",
+      "contract_id": "BC-SURFACE-POLICY-CURRENT-V1",
+      "persona_variant_id": "PERSONA-CUSTOMER-TIER1",
+      "request_origin": "WEBAPP",
+      "time_variant_id": "TIME-NORMAL",
+      "telegram_link_variant_id": "TELEGRAM-LINK-NOT_APPLICABLE",
+      "outcome_variant_id": "OUTCOME-SUCCESS",
+      "offer_origin": "TELEGRAM_BOT",
+      "admission_decision": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "admission is open and command-specific guards pass"
+      },
+      "policy_effects": [
+        "CONFIRMATION",
+        "QUOTA",
+        "COMMISSION",
+        "PUBLICATION",
+        "NOTIFICATION"
+      ],
+      "expected_outcome": "Preserve tier-1 owner/request and snapshotted commission/quota. Run normal confirmation/quota/commission/publication/notification. Overtime owner-approval is not required. Commit one authoritative result with origin/policy snapshots; each intended side effect runs at most once. Offer origin stays an independent provenance snapshot.",
+      "applicability": "APPLICABLE"
+    },
+    {
+      "variant_id": "PERSONA-CUSTOMER-TIER1__WEBAPP__TIME-NORMAL__TELEGRAM-LINK-NOT_APPLICABLE__OUTCOME-SUCCESS__OFFER-ORIGIN-INTERNAL",
+      "base_variant_id": "PERSONA-CUSTOMER-TIER1__WEBAPP__TIME-NORMAL__TELEGRAM-LINK-NOT_APPLICABLE__OUTCOME-SUCCESS",
+      "contract_id": "BC-SURFACE-POLICY-CURRENT-V1",
+      "persona_variant_id": "PERSONA-CUSTOMER-TIER1",
+      "request_origin": "WEBAPP",
+      "time_variant_id": "TIME-NORMAL",
+      "telegram_link_variant_id": "TELEGRAM-LINK-NOT_APPLICABLE",
+      "outcome_variant_id": "OUTCOME-SUCCESS",
+      "offer_origin": "INTERNAL",
+      "admission_decision": "ELIGIBLE",
+      "eligibility": {
+        "decision": "ELIGIBLE",
+        "predicate": "admission is open and command-specific guards pass"
+      },
+      "policy_effects": [
+        "CONFIRMATION",
+        "QUOTA",
+        "COMMISSION",
+        "PUBLICATION",
+        "NOTIFICATION"
+      ],
+      "expected_outcome": "Preserve tier-1 owner/request and snapshotted commission/quota. Run normal confirmation/quota/commission/publication/notification. Overtime owner-approval is not required. Commit one authoritative result with origin/policy snapshots; each intended side effect runs at most once. Offer origin stays an independent provenance snapshot.",
+      "applicability": "APPLICABLE"
+    }
+  ]
 }

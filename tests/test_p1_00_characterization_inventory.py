@@ -1123,14 +1123,18 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
         self.assertEqual(payload["closure"]["unrouted_named_blockers"], 0)
         self.assertEqual(len(registry["items"]), payload["closure"]["family_boundary_named_blockers"])
         notify_side = next(item for item in cells if item["variant_id"] == "NOTIFY__SIDE-EFFECT-BEFORE-ACK")
-        self.assertFalse(notify_side.get("named_blocker"), "NOTIFY side-effect must be injected evidence, not a blocker")
-        self.assertTrue((notify_side.get("evidence_cases") or [])[0].get("injects_named_boundary"))
-        web_push_nodes = [
-            case["node_id"]
-            for case in (notify_side.get("evidence_cases") or [])
-            if "test_web_push.py" in case["node_id"]
-        ]
-        self.assertEqual(web_push_nodes, [])
+        self.assertEqual(notify_side["applicability"], "NOT_APPLICABLE")
+        self.assertEqual(notify_side["eligibility"]["decision"], "NOT_APPLICABLE")
+        self.assertIn("no provider-send-before-ack", notify_side["eligibility"]["reason"])
+        self.assertFalse(notify_side.get("named_blocker"), "NOTIFY side-effect must not be a High blocker")
+        self.assertEqual(notify_side.get("evidence_cases") or [], [])
+        from tests.test_p1_00_characterization_failure_boundaries import assert_cited_node_uses_family_path
+
+        for cell in cells:
+            if cell["applicability"] != "ELIGIBLE":
+                continue
+            for case in cell.get("evidence_cases") or []:
+                assert_cited_node_uses_family_path(cell["family"], case["node_id"])
 
         self.assertEqual(len(payload["deferred_blockers"]), 1)
         timing = payload["deferred_blockers"][0]

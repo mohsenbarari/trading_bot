@@ -76,23 +76,43 @@ class P100MatrixIndependenceCharacterizationTests(unittest.TestCase):
 
     def test_offer_origin_holds_admission_and_effects_constant(self):
         payload = _load_json("scenario-records.json")
-        for cell in payload["composed_eligibility"]:
-            decisions = []
-            effects = []
-            for origin in ("WEBAPP", "TELEGRAM_BOT", "INTERNAL"):
-                self.assertIn(origin, cell["offer_origin"])
-                decisions.append(cell["eligibility"]["decision"])
-                effects.append(list(cell["policy_effects"]))
-            self.assertEqual(len(set(decisions)), 1, cell["variant_id"])
-            self.assertEqual(effects[0], effects[1], cell["variant_id"])
-            self.assertEqual(effects[1], effects[2], cell["variant_id"])
-            self.assertEqual(cell["admission_decision"], cell["admission_decision"])
-        self.assertEqual(offer_home_server_for_source(OfferSourceSurface.WEBAPP), "iran")
-        self.assertEqual(offer_home_server_for_source(OfferSourceSurface.TELEGRAM_BOT), "foreign")
-        self.assertEqual(
-            offer_home_server_for_source(OfferSourceSurface.INTERNAL_SYNC, incoming_home_server="iran"),
-            "iran",
-        )
+        records = payload["offer_origin_interaction"]
+        self.assertEqual(len(records), 3)
+        origins = [item["offer_origin"] for item in records]
+        self.assertEqual(origins, ["WEBAPP", "TELEGRAM_BOT", "INTERNAL"])
+        self.assertEqual(len({item["variant_id"] for item in records}), 3)
+        self.assertEqual(len({id(item) for item in records}), 3)
+        admissions = {item["admission_decision"] for item in records}
+        decisions = {item["eligibility"]["decision"] for item in records}
+        effects = {tuple(item["policy_effects"]) for item in records}
+        personas = {item["persona_variant_id"] for item in records}
+        requests = {item["request_origin"] for item in records}
+        times = {item["time_variant_id"] for item in records}
+        links = {item["telegram_link_variant_id"] for item in records}
+        outcomes = {item["outcome_variant_id"] for item in records}
+        self.assertEqual(len(admissions), 1)
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(len(effects), 1)
+        self.assertEqual(personas, {"PERSONA-CUSTOMER-TIER1"})
+        self.assertEqual(requests, {"WEBAPP"})
+        self.assertEqual(times, {"TIME-NORMAL"})
+        self.assertEqual(links, {"TELEGRAM-LINK-NOT_APPLICABLE"})
+        self.assertEqual(outcomes, {"OUTCOME-SUCCESS"})
+        instantiated = {
+            "WEBAPP": OfferSourceSurface.WEBAPP,
+            "TELEGRAM_BOT": OfferSourceSurface.TELEGRAM_BOT,
+            "INTERNAL": OfferSourceSurface.INTERNAL_SYNC,
+        }
+        homes = []
+        for record in records:
+            origin = instantiated[record["offer_origin"]]
+            if origin is OfferSourceSurface.INTERNAL_SYNC:
+                homes.append(offer_home_server_for_source(origin, incoming_home_server="iran"))
+            else:
+                homes.append(offer_home_server_for_source(origin))
+        self.assertEqual(homes, ["iran", "foreign", "iran"])
+        self.assertEqual(homes[0], homes[2])
+        self.assertNotEqual(homes[0], homes[1])
 
     def test_offer_origin_does_not_change_admission_decision(self):
         payload = _load_json("scenario-records.json")

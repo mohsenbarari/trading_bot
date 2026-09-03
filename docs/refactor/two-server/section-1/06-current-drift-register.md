@@ -26,9 +26,11 @@ Status: open findings; no implicit fixes authorized
 
 The compact machine source is `inventory/scenario-records.json`.
 Applicable family×boundary cells now bind an injected characterization node
-(`injects_named_boundary=true`). Families without that mutating path are
-`NOT_APPLICABLE` with a behavior-specific reason. There is no High `P1-00-FB-*`
-self-submission and no P1-06 ownership of current-state characterization.
+(`injects_named_boundary=true`) on that family's own mutating path. Shared
+Offer-publication or Telegram-outbox helpers are not evidence unless the family
+owns that path. Families without that mutating path are `NOT_APPLICABLE` with a
+behavior-specific reason. There is no High `P1-00-FB-*` self-submission and no
+P1-06 ownership of current-state characterization.
 
 | ID | Family / boundary | Disposition |
 | --- | --- | --- |
