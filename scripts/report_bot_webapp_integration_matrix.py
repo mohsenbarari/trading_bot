@@ -143,21 +143,23 @@ SCENARIOS: tuple[Scenario, ...] = (
             ref("webapp_api_sync_receive", "tests/test_offers_router_expire.py", "test_expire_offer_remote_home_outage_does_not_mutate_locally"),
         ),
         staging_checks=(
-            "Expire an Iran-home offer from WebApp and confirm the foreign Telegram post is terminal and buttonless after sync.",
+            "Expire an untraded Iran-home offer from WebApp and confirm the foreign Telegram post and its inline buttons stay visually unchanged after sync.",
+            "Press one retained button and confirm authoritative validation rejects the inactive offer without creating a trade.",
             "Expire a foreign-home offer from WebApp and confirm the WebApp forwards instead of mutating locally.",
         ),
     ),
     Scenario(
         scenario_id="S11-05",
-        title="Owner expiry from Telegram bot records bot source and removes Telegram interactions",
+        title="Owner expiry from Telegram bot records bot source while preserving the untraded channel post",
         risk_area="expiry_authority",
         coverage_refs=(
-            ref("bot_handler", "tests/test_bot_trade_manage_success.py", "test_handle_expire_offer_expires_offer_and_removes_buttons"),
-            ref("telegram_channel_state", "tests/test_telegram_offer_channel_service.py", "test_apply_pure_expired_edits_text_and_removes_buttons"),
+            ref("bot_handler", "tests/test_bot_trade_manage_success.py", "test_handle_expire_offer_expires_offer_and_closes_owner_control_message"),
+            ref("telegram_channel_state", "tests/test_telegram_offer_channel_service.py", "test_apply_pure_expired_is_noop_and_preserves_existing_post"),
             ref("webapp_api_sync_receive", "tests/test_offers_router_expire.py", "test_internal_expire_records_forwarded_source_metadata"),
         ),
         staging_checks=(
-            "Expire a foreign-home offer from the bot and confirm the channel text receives the expired marker and inline buttons are gone.",
+            "Expire an untraded foreign-home offer from the bot and confirm its channel text and inline buttons remain unchanged.",
+            "Confirm the bot's private owner-control message closes and a retained channel button cannot create a trade.",
             "Confirm Iran WebApp receives the expired state without attempting any Telegram call.",
         ),
     ),
@@ -168,7 +170,7 @@ SCENARIOS: tuple[Scenario, ...] = (
         coverage_refs=(
             ref("service_command", "tests/test_offer_expiry_service.py", "test_authoritative_expiry_records_owner_metadata_and_commits"),
             ref("webapp_api_sync_receive", "tests/test_offers_router_expire.py", "test_internal_expire_records_forwarded_source_metadata"),
-            ref("bot_handler", "tests/test_bot_trade_manage_success.py", "test_handle_expire_offer_expires_offer_and_removes_buttons"),
+            ref("bot_handler", "tests/test_bot_trade_manage_success.py", "test_handle_expire_offer_expires_offer_and_closes_owner_control_message"),
         ),
         staging_checks=(
             "Compare WebApp and bot manual expiry rows and verify expire_source_surface, expire_source_server, expired_by_user_id, and expired_by_actor_user_id.",
@@ -189,32 +191,34 @@ SCENARIOS: tuple[Scenario, ...] = (
     ),
     Scenario(
         scenario_id="S11-08",
-        title="Telegram terminal markers distinguish fully traded, partially traded, and expired offers",
+        title="Telegram markers distinguish traded offers while untraded expiry preserves the post",
         risk_area="telegram_projection",
         coverage_refs=(
             ref("telegram_channel_state", "tests/test_telegram_offer_channel_service.py", "test_history_tag_contract"),
             ref("telegram_channel_state", "tests/test_telegram_offer_channel_service.py", "test_apply_terminal_completed_edits_text_and_removes_buttons_in_one_request"),
             ref("telegram_channel_state", "tests/test_telegram_offer_channel_service.py", "test_apply_partially_traded_expired_edits_text_and_removes_buttons"),
-            ref("telegram_channel_state", "tests/test_telegram_offer_channel_service.py", "test_apply_pure_expired_edits_text_and_removes_buttons"),
+            ref("telegram_channel_state", "tests/test_telegram_offer_channel_service.py", "test_apply_pure_expired_is_noop_and_preserves_existing_post"),
         ),
         staging_checks=(
             "Inspect one full trade post for the line containing the handshake/check markers.",
             "Inspect one partial trade post for the traded quantity between the handshake/check markers.",
-            "Inspect one expired post for the expired marker line.",
+            "Inspect one untraded expired post and confirm no expired marker is added and its buttons remain visible.",
         ),
     ),
     Scenario(
         scenario_id="S11-09",
-        title="Telegram terminal edits remove inline buttons and tolerate duplicate/not-modified edits",
+        title="Telegram trade edits stay terminal while expiry and final-tail remain visual no-ops",
         risk_area="telegram_projection",
         coverage_refs=(
             ref("telegram_channel_state", "tests/test_telegram_offer_channel_service.py", "test_apply_terminal_completed_edits_text_and_removes_buttons_in_one_request"),
-            ref("telegram_channel_state", "tests/test_telegram_offer_channel_service.py", "test_apply_pure_expired_edits_text_and_removes_buttons"),
+            ref("telegram_channel_state", "tests/test_telegram_offer_channel_service.py", "test_apply_pure_expired_is_noop_and_preserves_existing_post"),
             ref("telegram_channel_state", "tests/test_telegram_offer_channel_service.py", "test_message_not_modified_is_idempotent_success"),
             ref("bot_handler", "tests/test_bot_trade_execute_update_markup.py", "test_update_offer_channel_markup_handles_missing_completed_and_active_offers"),
         ),
         staging_checks=(
-            "After trade, manual expiry, auto-expiry, and duplicate replay, confirm channel posts have no actionable buttons.",
+            "After partial and full trades, confirm the existing trade markers and button updates are unchanged.",
+            "After untraded expiry or overtime final-tail, confirm no Telegram edit occurs and retained buttons fail safely against authoritative state.",
+            "Replay the same lifecycle jobs and confirm they settle without duplicate provider edits or queue backlog.",
         ),
     ),
     Scenario(

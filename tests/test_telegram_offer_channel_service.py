@@ -156,13 +156,13 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
             channel_service.get_offer_channel_history_tag(
                 make_offer(status=OfferStatus.EXPIRED, expire_reason="time_limit", quantity=30, remaining_quantity=30)
             ),
-            "❌",
+            None,
         )
         self.assertEqual(
             channel_service.get_offer_channel_history_tag(
                 make_offer(status=OfferStatus.EXPIRED, expire_reason="manual", quantity=30, remaining_quantity=30)
             ),
-            "❌",
+            None,
         )
 
     def test_channel_message_uses_same_text_for_active_and_terminal(self):
@@ -204,7 +204,7 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("🤝 ✅", payload["text"])
         self.assertEqual(payload["reply_markup"], {"inline_keyboard": []})
 
-    async def test_apply_pure_expired_edits_text_and_removes_buttons(self):
+    async def test_apply_pure_expired_is_noop_and_preserves_existing_post(self):
         response = SimpleNamespace(status_code=200, text="")
         client = FakeHttpClientContext(response=response)
         offer = make_offer(
@@ -218,17 +218,18 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
              patch.object(channel_service.settings, "bot_token", "bot-token"), \
              patch.object(channel_service.settings, "channel_id", -100), \
              patch("core.telegram_gateway.httpx.AsyncClient", return_value=client):
-            result = await channel_service.apply_offer_channel_state(offer, reason="test")
+            result = await channel_service.apply_offer_channel_state_with_result(
+                offer,
+                reason="test",
+            )
 
-        self.assertTrue(result)
-        self.assertEqual(client.post.await_count, 1)
-        call = client.post.await_args
-        self.assertTrue(call.args[0].endswith("/editMessageText"))
-        payload = call.kwargs["json"]
-        self.assertEqual(payload["chat_id"], -100)
-        self.assertEqual(payload["message_id"], 123)
-        self.assertIn("❌", payload["text"])
-        self.assertEqual(payload["reply_markup"], {"inline_keyboard": []})
+        self.assertTrue(result.ok)
+        self.assertEqual(result.response_class, "noop")
+        self.assertEqual(
+            result.reason,
+            "untraded_expired_channel_post_preserved",
+        )
+        self.assertEqual(client.post.await_count, 0)
 
     async def test_apply_partially_traded_expired_edits_text_and_removes_buttons(self):
         response = SimpleNamespace(status_code=200, text="")
@@ -385,7 +386,7 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
             < message.index(channel_service.TELEGRAM_OFFER_OVERTIME_MARKER)
         )
 
-    def test_final_tail_keeps_marker_and_strips_trade_buttons(self):
+    def test_final_tail_renderer_keeps_marker_while_delivery_is_noop(self):
         offer = make_offer(
             status=OfferStatus.ACTIVE,
             remaining_quantity=30,
@@ -403,7 +404,7 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-    def test_terminal_overtime_trade_tag_is_atomic_and_expiry_replaces_marker(self):
+    def test_terminal_overtime_trade_tag_is_atomic_and_pure_expiry_has_no_tag(self):
         traded = make_offer(
             status=OfferStatus.COMPLETED,
             overtime_trade_committed=True,
@@ -420,7 +421,7 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         plain_message = channel_service.build_offer_channel_message(
             plain,
-            history_tag="❌",
+            history_tag=channel_service.get_offer_channel_history_tag(plain),
         )
         self.assertIn("🤝 ✅⏳", traded_message)
         self.assertNotIn(
@@ -428,7 +429,7 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
             traded_message,
         )
         self.assertNotIn(channel_service.TELEGRAM_OFFER_OVERTIME_MARKER, plain_message)
-        self.assertIn("❌", plain_message)
+        self.assertNotIn("❌", plain_message)
 
     def test_marker_coexists_with_partial_trade_history_tag(self):
         offer = make_offer(
@@ -482,6 +483,42 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
         payload = call.kwargs["json"]
         self.assertIn(channel_service.TELEGRAM_OFFER_OVERTIME_MARKER, payload["text"])
         self.assertIn("inline_keyboard", payload["reply_markup"])
+
+    async def test_apply_active_final_tail_is_noop_and_keeps_existing_overtime_post(self):
+        response = SimpleNamespace(status_code=200, text="")
+        client = FakeHttpClientContext(response=response)
+        created = datetime.now().replace(tzinfo=None) - timedelta(minutes=8)
+        offer = make_offer(
+            status=OfferStatus.ACTIVE,
+            remaining_quantity=30,
+            overtime_minutes_snapshot=5,
+            created_at=created,
+            notes=None,
+        )
+
+        with patch(
+            "core.services.telegram_offer_channel_service.current_server",
+            return_value="foreign",
+        ), patch.object(
+            channel_service.settings, "bot_token", "bot-token"
+        ), patch.object(
+            channel_service.settings, "channel_id", -100
+        ), patch(
+            "core.trading_settings.get_trading_settings",
+            return_value=SimpleNamespace(offer_expiry_minutes=2),
+        ), patch(
+            "core.telegram_gateway.httpx.AsyncClient",
+            return_value=client,
+        ):
+            result = await channel_service.apply_offer_channel_state_with_result(
+                offer,
+                reason="final-tail",
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.response_class, "noop")
+        self.assertEqual(result.reason, "overtime_final_channel_post_preserved")
+        self.assertEqual(client.post.await_count, 0)
 
 
 if __name__ == "__main__":

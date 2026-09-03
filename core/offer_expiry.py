@@ -5,8 +5,9 @@ Background task for auto-expiring offers based on trading settings.
 This task runs periodically and expires any ACTIVE offers that have 
 exceeded their time limit (offer_expiry_minutes).
 
-It also applies the terminal channel message state so users can no longer
-interact with expired offers and see the right history marker.
+It also reconciles the channel delivery state. Untraded expired posts are
+intentionally left visually unchanged; authoritative trade validation still
+rejects interactions with inactive offers.
 """
 import asyncio
 import logging
@@ -229,7 +230,8 @@ async def expire_stale_offers() -> int:
         
         logger.info(f"⏰ Auto-expired {count} offers: {offer_ids}")
         
-        # Apply terminal channel state on foreign and remove interactive buttons.
+        # Reconcile Telegram delivery state. The renderer deliberately leaves
+        # untraded expired channel posts and their existing buttons untouched.
         for offer in expiry_result.expired_offers:
             await apply_offer_channel_state(offer, reason="auto_expire_time_limit")
         

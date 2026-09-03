@@ -36,7 +36,6 @@ logger = logging.getLogger(__name__)
 INVISIBLE_CHANNEL_PADDING = "\u2800" * 35
 TELEGRAM_MESSAGE_NOT_MODIFIED = "message is not modified"
 TELEGRAM_OFFER_FULLY_TRADED_TAG = "🤝 ✅"
-TELEGRAM_OFFER_EXPIRED_TAG = "❌"
 # Telegram chooses paragraph alignment from Unicode direction. Partial-trade
 # tags used to contain the Persian word «تا», which made only that footer RTL
 # and pulled it away from the bottom-left terminal marker position. Keep the
@@ -48,6 +47,10 @@ TELEGRAM_OFFER_OVERTIME_MARKER = "⏳"
 TELEGRAM_OFFER_OVERTIME_FULLY_TRADED_TAG = (
     f"{TELEGRAM_OFFER_FULLY_TRADED_TAG}{TELEGRAM_OFFER_OVERTIME_MARKER}"
 )
+UNTRADED_EXPIRED_CHANNEL_POST_PRESERVED = (
+    "untraded_expired_channel_post_preserved"
+)
+OVERTIME_FINAL_CHANNEL_POST_PRESERVED = "overtime_final_channel_post_preserved"
 CHANNEL_LIFECYCLE_METADATA_KEY = "channel_lifecycle_phase"
 CHANNEL_STATE_REFRESH_AT_METADATA_KEY = "channel_state_reconciliation_next_retry_at"
 
@@ -235,6 +238,37 @@ def infer_traded_quantity_from_offer(offer: Any) -> int:
     return max(0, quantity - remaining)
 
 
+def offer_channel_visual_noop_reason(
+    offer: Any,
+    *,
+    traded_quantity: Optional[int] = None,
+    lifecycle_phase: str | None = None,
+) -> str | None:
+    """Return why the existing Telegram channel post must remain untouched.
+
+    Untraded expiry intentionally keeps the last useful channel presentation,
+    including its inline buttons.  Likewise, the final-tail boundary after
+    overtime is a business-state transition only: the already-rendered
+    hourglass and buttons stay in place.  Trade-driven edits are deliberately
+    excluded so partial and full trade presentation keeps its existing rules.
+    """
+    status = _status_value(getattr(offer, "status", None))
+    if status == OfferStatus.EXPIRED.value:
+        completed_quantity = (
+            traded_quantity
+            if traded_quantity is not None
+            else infer_traded_quantity_from_offer(offer)
+        )
+        if not completed_quantity or completed_quantity <= 0:
+            return UNTRADED_EXPIRED_CHANNEL_POST_PRESERVED
+    if (
+        status == OfferStatus.ACTIVE.value
+        and str(lifecycle_phase or "").strip().lower() == "final_tail"
+    ):
+        return OVERTIME_FINAL_CHANNEL_POST_PRESERVED
+    return None
+
+
 def get_offer_channel_history_tag(offer: Any, traded_quantity: Optional[int] = None) -> Optional[str]:
     """Return the terminal Telegram emoji tag for channel history posts."""
     status = _status_value(getattr(offer, "status", None))
@@ -259,7 +293,7 @@ def get_offer_channel_history_tag(offer: Any, traded_quantity: Optional[int] = N
             else tag
         )
         return tagged
-    return TELEGRAM_OFFER_EXPIRED_TAG
+    return None
 
 
 def _left_aligned_offer_channel_history_footer(history_tag: Any) -> str:
@@ -314,9 +348,9 @@ def offer_channel_overtime_marker_visible(
 ) -> bool:
     """Whether the channel post should include inventory M38 ``⏳``.
 
-    Active overtime/final-tail keep the marker. Terminal posts carry overtime
-    context inside their final trade tag (``🤝 ✅⏳``), so a later terminal
-    expiry always replaces a standalone ``⏳`` with ``❌``.
+    Active overtime/final-tail render the marker. The final-tail transition is
+    a visual no-op, so an already-rendered overtime post retains this marker.
+    Terminal trade posts carry overtime context in their trade tag.
     """
     status = _status_value(getattr(offer, "status", None))
     if status in {
@@ -496,6 +530,30 @@ async def apply_offer_channel_state_with_result(
 
     status = _status_value(getattr(offer, "status", None))
     history_tag = get_offer_channel_history_tag(offer, traded_quantity=traded_quantity)
+    projection = None
+    phase: str | None = None
+    if status == OfferStatus.ACTIVE.value:
+        from core.trading_settings import get_trading_settings
+
+        projection = project_offer_channel_lifecycle(
+            offer,
+            normal_lifetime_minutes=int(
+                getattr(get_trading_settings(), "offer_expiry_minutes", 0) or 0
+            ),
+        )
+        phase = projection.phase.value
+
+    visual_noop_reason = offer_channel_visual_noop_reason(
+        offer,
+        traded_quantity=traded_quantity,
+        lifecycle_phase=phase,
+    )
+    if visual_noop_reason is not None:
+        return OfferChannelStateApplyResult(
+            ok=True,
+            response_class="noop",
+            reason=visual_noop_reason,
+        )
 
     try:
         if status and status != OfferStatus.ACTIVE.value:
@@ -508,15 +566,8 @@ async def apply_offer_channel_state_with_result(
                 idempotency_key=f"offer-channel-state:{getattr(offer, 'id', '')}:{status}",
             )
         else:
-            from core.trading_settings import get_trading_settings
-
-            projection = project_offer_channel_lifecycle(
-                offer,
-                normal_lifetime_minutes=int(
-                    getattr(get_trading_settings(), "offer_expiry_minutes", 0) or 0
-                ),
-            )
-            phase = projection.phase.value
+            if projection is None or phase is None:
+                raise RuntimeError("active_offer_channel_projection_missing")
             markup = build_offer_channel_reply_markup(
                 offer,
                 accepts_new_public_interaction=projection.accepts_new_public_interaction,

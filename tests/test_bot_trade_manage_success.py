@@ -70,7 +70,7 @@ class BotTradeManageSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.expiry_gate_patcher.start()
         self.addCleanup(self.expiry_gate_patcher.stop)
 
-    async def test_handle_expire_offer_expires_offer_and_removes_buttons(self):
+    async def test_handle_expire_offer_expires_offer_and_closes_owner_control_message(self):
         offer = SimpleNamespace(
             id=5,
             user_id=4,
