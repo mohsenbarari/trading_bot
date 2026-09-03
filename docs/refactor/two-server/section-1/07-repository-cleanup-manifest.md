@@ -20,7 +20,7 @@ root-bounded path and re-check references, locks and protection metadata.
 | `main` | Git branch | only long-lived branch | `KEEP` | canonical integration source |
 | `plan/two-server-refactor-v1` | Git branch | temporary planning branch | `KEEP` until reviewed integration | remove only after the approved plan is preserved on `main` |
 | `candidate/wa-ir-standby-v1` | Git branch | local-only candidate | `KEEP` | owner explicitly deferred deletion; never push/merge as source |
-| Cursor stage branch / worktree | Git metadata | none observed on 2026-09-02 | `CREATE/KEEP` only while assigned | exact Stage/base/owner/locks/expiry registry; no shared or unregistered worktree |
+| Cursor stage branch / worktree | Git metadata | registered `stage-P1-00-refresh` on 2026-09-03 | `KEEP` only while assigned | exact Stage/base/owner/locks/expiry registry; no shared or unregistered worktree |
 | `tmp/production-release/` | ignored | ~1.2 GiB / 6,106 files | `QUARANTINE` then `DELETE` candidate | prove no active release/rollback reference; set expiry and reversible quarantine receipt |
 | `frontend/node_modules/` | ignored | ~571 MiB | `KEEP` as reproducible cache or `DELETE` under cache quota | lockfile install must reproduce it; never treat as source/backup |
 | `mutants/` | ignored | ~22 MiB | `DELETE` candidate | test tooling/reference scan; results needed for an open review move to `.local/test-results` first |

@@ -62,7 +62,9 @@
       "ssh_host_key_ed25519_sha256": "SHA256:bwxz2aeBwy0ZNOMMCVdRhaW//TkeALqt6etTQa3NINs",
       "provisioned": false,
       "production_authoritative": false,
-      "listening_tcp_ports": [22],
+      "listening_tcp_ports": [
+        22
+      ],
       "blockers": [
         "host_firewall_inactive",
         "ssh_password_authentication_enabled",
@@ -106,5 +108,14 @@
     "ignored_frontend_node_modules_mib": 571,
     "ignored_mutants_mib": 22,
     "local_artifacts_mib": 4.4
+  },
+  "refresh": {
+    "assignment_id": "WA-P1-00-REFRESH-20260903-001",
+    "base_sha": "aa2c06a573dfd60051e142146f55d7965f2242a7",
+    "refreshed_at": "2026-09-03 UTC",
+    "static_surface_verification": "REGENERATED_AND_MATCHED",
+    "live_host_reobservation": "NOT_REOBSERVED",
+    "external_access": "NONE",
+    "note": "Host capacity, release SHA, schema and runtime process facts remain the 2026-09-01 read-only snapshot."
   }
 }

@@ -1,6 +1,6 @@
 {
   "schema_version": "two-server-refactor.surface-behavior-inventory.v1",
-  "generated_from_commit": "19087ff0686c9260b55f1c6c35782b758be6673e",
+  "generated_from_commit": "aa2c06a573dfd60051e142146f55d7965f2242a7",
   "section": "bot",
   "coverage": {
     "total": 203,
@@ -12,8 +12,8 @@
       "TG": 39,
       "TRADE": 49
     },
-    "with_direct_static_test_reference": 198,
-    "without_direct_static_test_reference": 5,
+    "with_direct_static_test_reference": 203,
+    "without_direct_static_test_reference": 0,
     "unclassified": 0
   },
   "entries": [
@@ -143,7 +143,9 @@
       "filter": "F.data.startswith(f'{CALLBACK_PREFIX}:gt:')",
       "handler": "admin_broadcast.toggle_group_recipient",
       "source": "bot/handlers/admin_broadcast.py:240",
-      "test_refs": []
+      "test_refs": [
+        "tests/test_p1_00_characterization_six_gaps.py"
+      ]
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-FINISH-GROUP-SELECTION-L270",
@@ -1018,7 +1020,9 @@
       "filter": "F.text == M1_OVERTIME_PREFERENCE_BUTTON",
       "handler": "offer_overtime_preference.start_offer_overtime_preference",
       "source": "bot/handlers/offer_overtime_preference.py:116",
-      "test_refs": []
+      "test_refs": [
+        "tests/test_p1_00_characterization_six_gaps.py"
+      ]
     },
     {
       "behavior_id": "BOT-OFFER-MESSAGE-OFFER-OVERTIME-PREFERENCE-PROCESS-OFFER-OVERTIME-PREFERENCE-VALUE-L141",
@@ -1628,7 +1632,9 @@
       "filter": "channel_callback, ChannelTradePublicCallback.filter()",
       "handler": "telegram_publisher_channel_callbacks.public_trade_callback",
       "source": "bot/handlers/telegram_publisher_channel_callbacks.py:46",
-      "test_refs": []
+      "test_refs": [
+        "tests/test_p1_00_characterization_six_gaps.py"
+      ]
     },
     {
       "behavior_id": "BOT-TG-CALLBACK-QUERY-TELEGRAM-PUBLISHER-CHANNEL-CALLBACKS-EXPIRY-CALLBACK-L61",
@@ -1873,7 +1879,9 @@
       "filter": "TradeActionCallback.filter(F.action == 'back_to_lot_type')",
       "handler": "trade_create.handle_back_to_lot_type",
       "source": "bot/handlers/trade_create.py:2221",
-      "test_refs": []
+      "test_refs": [
+        "tests/test_p1_00_characterization_six_gaps.py"
+      ]
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-BACK-TO-PRICE-L2234",
@@ -1882,7 +1890,9 @@
       "filter": "Trade.awaiting_notes, TradeActionCallback.filter(F.action == 'back_to_price')",
       "handler": "trade_create.handle_back_to_price",
       "source": "bot/handlers/trade_create.py:2234",
-      "test_refs": []
+      "test_refs": [
+        "tests/test_p1_00_characterization_six_gaps.py"
+      ]
     },
     {
       "behavior_id": "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-TRADE-CANCEL-L2243",
@@ -2424,5 +2434,7 @@
         "tests/test_bot_trade_manage_success.py"
       ]
     }
-  ]
+  ],
+  "generated_date": "2026-09-03 UTC",
+  "refresh_assignment_id": "WA-P1-00-REFRESH-20260903-001"
 }

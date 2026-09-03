@@ -232,5 +232,11 @@
     "prove Queue-v1 versus legacy selection and publisher roles cannot overlap",
     "finalize Market capture/store/estimator ownership in P3",
     "prove obsolete staging/three-site runtimes have zero traffic, writes, credentials and schedules before decommission"
-  ]
+  ],
+  "refresh": {
+    "assignment_id": "WA-P1-00-REFRESH-20260903-001",
+    "base_sha": "aa2c06a573dfd60051e142146f55d7965f2242a7",
+    "live_host_reobservation": "NOT_REOBSERVED",
+    "static_code_verification": "PRESERVED"
+  }
 }

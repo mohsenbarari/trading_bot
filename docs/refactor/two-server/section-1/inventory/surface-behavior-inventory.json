@@ -1,7 +1,7 @@
 {
   "schema_version": "two-server-refactor.surface-behavior-inventory.v1",
-  "generated_from_commit": "19087ff0686c9260b55f1c6c35782b758be6673e",
-  "generated_date": "2026-09-01 UTC",
+  "generated_from_commit": "aa2c06a573dfd60051e142146f55d7965f2242a7",
+  "generated_date": "2026-09-03 UTC",
   "scope": "read-only static inventory; framework-generated FastAPI docs/openapi routes excluded",
   "taxonomy": [
     "AUTH",
@@ -41,8 +41,8 @@
         "SYNC": 5,
         "TRADE": 9
       },
-      "with_direct_static_test_reference": 216,
-      "without_direct_static_test_reference": 1,
+      "with_direct_static_test_reference": 217,
+      "without_direct_static_test_reference": 0,
       "unclassified": 0
     },
     "bot": {
@@ -55,8 +55,8 @@
         "TG": 39,
         "TRADE": 49
       },
-      "with_direct_static_test_reference": 198,
-      "without_direct_static_test_reference": 5,
+      "with_direct_static_test_reference": 203,
+      "without_direct_static_test_reference": 0,
       "unclassified": 0
     },
     "web": {
@@ -96,7 +96,7 @@
     "Bot publisher B2B and channel callback routers are conditional runtime surfaces but are included in the handler inventory.",
     "The 15 job authority entries do not enumerate every child coroutine, feeder, poller, systemd timer, or Market container loop; runtime-task ownership remains a separate blocker report.",
     "Direct test reference means static function/name occurrence only; absence is a review queue, not proof that behavior is untested.",
-    "A family-seeded behavior_id is not a complete scenario contract until persona/tier/time/failure/side-effect variants are linked."
+    "Persona/tier/time/failure scenario records now live in scenario-records.json; target execution remains NOT_RUN until P1-06."
   ],
   "dormant_declared_surfaces": [
     {
@@ -160,6 +160,8 @@
     "api": "surface-api.json",
     "bot": "surface-bot.json",
     "web": "surface-web.json",
-    "jobs": "surface-jobs.json"
-  }
+    "jobs": "surface-jobs.json",
+    "scenarios": "scenario-records.json"
+  },
+  "refresh_assignment_id": "WA-P1-00-REFRESH-20260903-001"
 }

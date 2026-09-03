@@ -517,7 +517,7 @@ docs/refactor/two-server/section-1/
 
 ## `P1-00` — Current-State Architecture و Behavior Baseline
 
-وضعیت: `IN_PROGRESS — baseline انسانی در 2026-09-02 پذیرفته شد؛ تکمیل شواهد و Final Review باز است`
+وضعیت: `IN_PROGRESS — baseline انسانی در 2026-09-02 پذیرفته شد؛ تازه‌سازی شواهد 2026-09-03 نامزد است؛ Final Review باز است`
 
 Dependency: Assignment معتبر؛ مشاهدهٔ runtime زنده در scope همان Assignment و
 در صورت نیاز با receipt خارجی Codex انجام می‌شود.

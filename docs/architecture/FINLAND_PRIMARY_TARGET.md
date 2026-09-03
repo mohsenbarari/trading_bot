@@ -2,6 +2,7 @@
 
 Status: accessible, inventoried read-only, unprovisioned, not production-authoritative
 Last verified: 2026-09-01 UTC
+Refresh 2026-09-03: `NOT_REOBSERVED` — Assignment `WA-P1-00-REFRESH-20260903-001` has `external_access: NONE` and did not repeat SSH or host inventory.
 
 ## Approved target
 

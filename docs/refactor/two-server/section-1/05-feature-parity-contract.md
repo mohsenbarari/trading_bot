@@ -1,6 +1,6 @@
 # Feature Parity Contract
 
-Status: historical owner review accepted; characterization/evidence and Codex Final Review open
+Status: historical owner review accepted; static evidence and scenario records refreshed on 2026-09-03; Codex Final Review open
 
 ## Definition of parity
 
@@ -29,12 +29,12 @@ discovered live item has a unique family-seeded `behavior_id`; none is
 
 | Surface | Exact discovered count | Static test evidence | Current state |
 | --- | ---: | ---: | --- |
-| FastAPI router decorators | 213 across 18 mounted router modules | included below | seeded |
-| main FastAPI app decorators | 4 | included below | seeded |
-| total live FastAPI decorators | 217 | 216 function/path references; 1 review item | seeded, variants open |
-| Bot handler decorators | 203 across 18 active/conditional modules | 198 function/filter references; 5 review items | seeded, variants open |
-| frontend router paths | 30 | 30 direct route-name references | seeded, action mapping open |
-| background authority entries | 15: 14 required classes plus local sync worker | 15 direct name references | authority baseline seeded |
+| FastAPI router decorators | 213 across 18 mounted router modules | included below | refreshed |
+| main FastAPI app decorators | 4 | included below | refreshed |
+| total live FastAPI decorators | 217 | 217 function/path references | refreshed; six-item queue closed |
+| Bot handler decorators | 203 across 18 active/conditional modules | 203 function/filter references | refreshed; six-item queue closed |
+| frontend router paths | 30 | 30 direct route-name references | refreshed |
+| background authority entries | 15: 14 required classes plus local sync worker | 15 direct name references | refreshed |
 | ORM model tables | 59 | registry coverage complete | 23 sync, 33 local, 3 bookkeeping |
 
 The earlier 212/202 counts omitted one FastAPI WebSocket decorator and one Bot
@@ -56,8 +56,10 @@ test before the gate closes.
 | `inventory/surface-web.json` | path/name/component/guard/family/test references for 30 routes |
 | `inventory/surface-jobs.json` | current/target authority, tables and side effects for 15 registered jobs |
 | `inventory/runtime-task-ownership.json` | API/Bot/Market child process, poller, worker and timer ownership seeds |
+| `inventory/scenario-records.json` | persona/tier/time/failure records, Web/Bot matrix and six failure boundaries |
 
-These files are generated from commit `19087ff0...`. A later code change that
+These files were regenerated/verified against commit
+`aa2c06a573dfd60051e142146f55d7965f2242a7`. A later code change that
 adds/removes a route, handler or job must regenerate the inventory and fail CI if
 the new item has no family/behavior seed.
 
@@ -131,16 +133,16 @@ Each mutating behavior must be characterized at these boundaries:
 
 ## Static review queue
 
-No surface is unclassified, but six items have no direct function/path/filter
-reference in the test corpus and require manual evidence linking or characterization:
+No surface is unclassified. The six former empty-`test_refs` items now have
+direct characterization in `tests/test_p1_00_characterization_six_gaps.py`:
 
 - API: the admin test-Web-Push command;
 - Bot: one admin broadcast group-toggle, one overtime-preference entry action,
   one conditional publisher public-trade callback and two trade wizard back
   actions.
 
-An evidence gap is not permission to delete or alter the handler. Each item is
-preserved until a direct test or approved higher-level scenario proves behavior.
+Those handlers remain preserved product surfaces. The new tests record current
+behavior only; they are not permission to change or delete them.
 
 ## Runtime-task ownership status
 
@@ -210,11 +212,12 @@ At minimum the target must preserve:
 | deterministic decorator/route/job extraction | `COMPLETE` |
 | unique family-seeded IDs and zero unclassified items | `COMPLETE` |
 | static function/path/filter test-reference scan | `COMPLETE` |
-| manual resolution of 6 evidence-review items | `OPEN` |
+| manual resolution of 6 evidence-review items | `COMPLETE — characterization linked` |
 | current runtime child/poller/timer owner seed manifest | `COMPLETE` |
 | exact target compose/credential/readiness binding | future `P1-03` |
-| persona/tier/time/failure scenario records | `OPEN` |
+| persona/tier/time/failure scenario records | `COMPLETE — records written; target_result NOT_RUN` |
 | owner approval of human-readable scenario contract | `COMPLETE — 2026-09-02` |
+| deploy/restart/backup/restore duration (`DR-015`) | `CODEX_REVIEW_BLOCKER` / `NOT_OBSERVED` |
 | current-vs-target differential execution | future `P1-06` |
 
 `P1-00` becomes complete only after the open current-state items have evidence or

@@ -1,6 +1,6 @@
 # Web/Bot Surface Policy Matrix
 
-Status: provenance contract approved; implementation and behavior mapping open
+Status: provenance contract approved; scenario records added 2026-09-03; implementation and target execution still open
 
 ## Rule that consolidation must preserve
 
