@@ -1064,6 +1064,34 @@ def _mark_dirty_market(
     )
 
 
+def _mark_due_primary_dirty(
+    connection: sqlite3.Connection,
+    *,
+    source_id: str,
+    message_id: int,
+    event_time_utc: str | None,
+    available_at_utc: str,
+) -> None:
+    """Schedule a due finalization without postponing existing parse work.
+
+    A primary row can already be dirty because its captured revision has not
+    reached the bounded projector yet.  Moving that row's causal availability
+    to every subsequent processor cycle would keep it behind a large replay
+    forever.  A previously projected row still needs a new dirty marker when
+    its deadline becomes due, so only the conflict path is a no-op.
+    """
+
+    connection.execute(
+        """
+        INSERT INTO capture_dirty_market_messages(
+          source_id,message_id,event_time_utc,available_at_utc
+        ) VALUES(?,?,?,?)
+        ON CONFLICT(source_id,message_id) DO NOTHING
+        """,
+        (source_id, message_id, event_time_utc, available_at_utc),
+    )
+
+
 def _mark_dirty_group(
     connection: sqlite3.Connection,
     group: int,
@@ -2364,7 +2392,7 @@ def project_capture_changes(
         (as_of,),
     ).fetchall()
     for deadline in due_primary:
-        _mark_dirty_market(
+        _mark_due_primary_dirty(
             staging,
             source_id=str(deadline["source_id"]),
             message_id=int(deadline["message_id"]),

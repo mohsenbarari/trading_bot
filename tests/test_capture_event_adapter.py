@@ -974,6 +974,70 @@ class CaptureEventAdapterTests(unittest.TestCase):
         self.assertEqual(row["parser_version"], "private-gold-trade-revisions-v1")
         self.assertEqual(row["available_at_utc"], "2026-08-24T10:02:01Z")
 
+    def test_due_primary_does_not_move_existing_dirty_row_behind_replay(self) -> None:
+        self._stage_market(
+            market_event(
+                52,
+                source="MELTED_PRIMARY_FLOW",
+                text="95,000,000 فروش 10 تا بدون حواله",
+                message_id=52,
+                published="2026-08-24T10:00:00Z",
+                available="2026-08-24T10:00:01Z",
+            )
+        )
+        self._stage_market(
+            market_event(
+                53,
+                source="XAUUSD",
+                text="4630.10",
+                message_id=53,
+                published="2026-08-24T09:59:00Z",
+                available="2026-08-24T09:59:01Z",
+            )
+        )
+
+        first = project_capture_changes(
+            self.staging,
+            self.market,
+            as_of_utc="2026-08-24T10:02:01Z",
+            max_market_messages=1,
+        )
+        self.market.commit()
+        self.staging.commit()
+
+        self.assertEqual(first.market_messages_reprojected, 1)
+        pending = self.staging.execute(
+            "SELECT available_at_utc FROM capture_dirty_market_messages "
+            "WHERE source_id='MELTED_PRIMARY_FLOW' AND message_id=52"
+        ).fetchone()
+        self.assertIsNotNone(pending)
+        assert pending is not None
+        self.assertEqual(pending["available_at_utc"], "2026-08-24T10:00:01Z")
+
+        second = project_capture_changes(
+            self.staging,
+            self.market,
+            as_of_utc="2026-08-24T10:02:02Z",
+            max_market_messages=1,
+        )
+        self.market.commit()
+        self.staging.commit()
+        self.assertEqual(second.market_messages_reprojected, 1)
+        self.assertEqual(
+            self.staging.execute(
+                "SELECT COUNT(*) FROM capture_dirty_market_messages "
+                "WHERE source_id='MELTED_PRIMARY_FLOW' AND message_id=52"
+            ).fetchone()[0],
+            0,
+        )
+        self.assertIsNotNone(
+            self.staging.execute(
+                "SELECT finalized_at_utc FROM capture_primary_trade_deadlines "
+                "WHERE source_id='MELTED_PRIMARY_FLOW' AND message_id=52 "
+                "AND finalized_at_utc IS NOT NULL"
+            ).fetchone()
+        )
+
     def test_primary_no_trade_closure_overrides_tentative_partial(self) -> None:
         self._stage_market(
             market_event(
