@@ -56,7 +56,7 @@ test before the gate closes.
 | `inventory/surface-web.json` | path/name/component/guard/family/test references for 30 routes |
 | `inventory/surface-jobs.json` | current/target authority, tables and side effects for 15 registered jobs |
 | `inventory/runtime-task-ownership.json` | API/Bot/Market child process, poller, worker and timer ownership seeds |
-| `inventory/scenario-records.json` | compact source: family×operation_kind contracts including shadow-observation exceptions, 465-seed mapping, 180 composed decisions, three distinct offer_origin interaction records, 72 failure cells injected on the family-owned path or NOT_APPLICABLE |
+| `inventory/scenario-records.json` | compact source: family×operation_kind contracts including shadow-observation exceptions, 465-seed mapping, 180 admission cells, 180 composed_origin_matrix rows with one offer_origin per key, 72 failure cells injected on the family-owned path or NOT_APPLICABLE |
 
 Surface inventories keep their original `generated_from_commit`
 `19087ff0686c9260b55f1c6c35782b758be6673e` and record
@@ -234,7 +234,7 @@ At minimum the target must preserve:
 | manual resolution of 6 evidence-review items | `COMPLETE — characterization linked` |
 | current runtime child/poller/timer owner seed manifest | `COMPLETE` |
 | exact target compose/credential/readiness binding | future `P1-03` |
-| persona/tier/time/failure scenario records | `READY_FOR_CODEX_FINAL_REVIEW` — family-owned failure injection, 180 composed decisions plus three distinct offer_origin interaction records; `target_result NOT_RUN`; not `COMPLETE` |
+| persona/tier/time/failure scenario records | `READY_FOR_CODEX_FINAL_REVIEW` — family-owned failure injection, 180 admission cells plus 180 composed_origin_matrix rows with one offer_origin per key; `target_result NOT_RUN`; not `COMPLETE` |
 | owner approval of human-readable scenario contract | `COMPLETE — 2026-09-02` |
 | deploy/restart/backup/restore duration (`DR-015`) | `DEFERRED_BLOCKER` / `DPL-1` / `NOT_OBSERVED` |
 | current-vs-target differential execution | future `P1-06` |

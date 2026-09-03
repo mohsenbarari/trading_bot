@@ -16,11 +16,11 @@ Refresh: `WA-P1-00-REFRESH-20260903-001` against `aa2c06a573dfd60051e142146f55d7
 | Runtime inventory | `inventory/current-finland-runtime.json` | SHA-256 `598e56c602a101cb61168a1468b0a7a7bebae50da14458298214e91dcaa12ce6` |
 | Surface inventory index | `inventory/surface-behavior-inventory.json` | SHA-256 `be55cc0809eaa73de42d0562433d03d1274ed3f82a8e58e296773911e63fa8c7` |
 | API surface inventory | `inventory/surface-api.json` | SHA-256 `6a40595071b840c7f354cdb2367507bf3b6e58cc34ea673dc001de7008eaac99` |
-| Bot surface inventory | `inventory/surface-bot.json` | SHA-256 `0d59004baa5fb556ce8c3c8a17745d1a21b0dc6912a3728f43ce3f6942bc2483` |
+| Bot surface inventory | `inventory/surface-bot.json` | SHA-256 `caeb844c8dcbae73912053d219a99291314a1e8bbcf9611a14ad32ea7e7e9c65` |
 | Web route inventory | `inventory/surface-web.json` | SHA-256 `92a6fbafbfc9bac42bf169261bd447f50676005d0326cf9c497120829a3c754e` |
 | Job authority inventory | `inventory/surface-jobs.json` | SHA-256 `7be5d42699e89df1b9398caaf0d8853c4d797863f6050d0b46e3d9beb95d9327` |
 | Runtime task ownership | `inventory/runtime-task-ownership.json` | SHA-256 `071e273e5168db736bf9330aab93233adcd32cd03a7033b89e5e17d84f47ef14` |
-| Scenario records | `inventory/scenario-records.json` | SHA-256 `06cb9c521eb3b52c19b3a6bb4658d35349b01ba41903408caf5fc73c24edfdc2` |
+| Scenario records | `inventory/scenario-records.json` | SHA-256 `29f610188f2ee0381847b9db177f6467dbb2e436bd7534b3891cd01f087bcc30` |
 | Task Card | `stages/P1-00.md` | correction candidate after `CHANGES_REQUIRED`; Codex Final Review pending |
 
 ## Evidence handling

@@ -41,7 +41,8 @@
       "source": "bot/handlers/admin.py:140",
       "test_refs": [
         "tests/test_bot_keyboards.py",
-        "tests/test_bot_admin_start_creation.py"
+        "tests/test_bot_admin_start_creation.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -56,7 +57,8 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_start_creation.py",
-        "tests/test_p1_00_characterization_operation_exceptions.py"
+        "tests/test_p1_00_characterization_operation_exceptions.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -69,10 +71,11 @@
       "handler": "admin.process_invitation_account_name",
       "source": "bot/handlers/admin.py:183",
       "test_refs": [
-        "tests/test_bot_admin_account_name.py"
+        "tests/test_bot_admin_account_name.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-MOBILE-L230",
@@ -82,10 +85,11 @@
       "handler": "admin.process_invitation_mobile",
       "source": "bot/handlers/admin.py:230",
       "test_refs": [
-        "tests/test_bot_admin_mobile.py"
+        "tests/test_bot_admin_mobile.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-PROCESS-INVITATION-ROLE-L278",
@@ -95,7 +99,8 @@
       "handler": "admin.process_invitation_role",
       "source": "bot/handlers/admin.py:278",
       "test_refs": [
-        "tests/test_bot_admin_role.py"
+        "tests/test_bot_admin_role.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -110,7 +115,8 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_cancel.py",
-        "tests/test_p1_00_characterization_operation_exceptions.py"
+        "tests/test_p1_00_characterization_operation_exceptions.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -303,7 +309,8 @@
       "test_refs": [
         "tests/test_bot_admin_commodities_entry_points.py",
         "tests/test_bot_commodity_catalog.py",
-        "tests/test_bot_panel_navigation_handoff.py"
+        "tests/test_bot_panel_navigation_handoff.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "MENU_NAV"
@@ -317,7 +324,8 @@
       "source": "bot/handlers/admin_commodities.py:318",
       "test_refs": [
         "tests/test_bot_keyboards.py",
-        "tests/test_bot_admin_commodities_entry_points.py"
+        "tests/test_bot_admin_commodities_entry_points.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "MENU_NAV"
@@ -330,7 +338,8 @@
       "handler": "admin_commodities.handle_manage_aliases",
       "source": "bot/handlers/admin_commodities.py:333",
       "test_refs": [
-        "tests/test_bot_admin_commodities_entry_points.py"
+        "tests/test_bot_admin_commodities_entry_points.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "MENU_NAV"
@@ -344,7 +353,8 @@
       "source": "bot/handlers/admin_commodities.py:350",
       "test_refs": [
         "tests/test_bot_admin_commodities_alias_add.py",
-        "tests/test_p1_00_characterization_operation_exceptions.py"
+        "tests/test_p1_00_characterization_operation_exceptions.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -357,7 +367,8 @@
       "handler": "admin_commodities.handle_alias_add_name",
       "source": "bot/handlers/admin_commodities.py:365",
       "test_refs": [
-        "tests/test_bot_admin_commodities_alias_add.py"
+        "tests/test_bot_admin_commodities_alias_add.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -373,7 +384,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_commodities_alias_delete.py",
         "tests/test_bot_admin_commodities_alias_edit.py",
-        "tests/test_p1_00_characterization_operation_exceptions.py"
+        "tests/test_p1_00_characterization_operation_exceptions.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -386,7 +398,8 @@
       "handler": "admin_commodities.handle_alias_edit_name",
       "source": "bot/handlers/admin_commodities.py:429",
       "test_refs": [
-        "tests/test_bot_admin_commodities_alias_edit.py"
+        "tests/test_bot_admin_commodities_alias_edit.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -402,7 +415,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_commodities_alias_delete.py",
         "tests/test_bot_admin_commodities_alias_edit.py",
-        "tests/test_p1_00_characterization_operation_exceptions.py"
+        "tests/test_p1_00_characterization_operation_exceptions.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -416,7 +430,8 @@
       "source": "bot/handlers/admin_commodities.py:487",
       "test_refs": [
         "tests/test_bot_keyboards.py",
-        "tests/test_bot_admin_commodities_alias_delete.py"
+        "tests/test_bot_admin_commodities_alias_delete.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -430,7 +445,8 @@
       "source": "bot/handlers/admin_commodities.py:523",
       "test_refs": [
         "tests/test_bot_admin_commodities_commodity_edit.py",
-        "tests/test_p1_00_characterization_operation_exceptions.py"
+        "tests/test_p1_00_characterization_operation_exceptions.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -443,7 +459,8 @@
       "handler": "admin_commodities.handle_commodity_edit_name",
       "source": "bot/handlers/admin_commodities.py:537",
       "test_refs": [
-        "tests/test_bot_admin_commodities_commodity_edit.py"
+        "tests/test_bot_admin_commodities_commodity_edit.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -459,7 +476,8 @@
         "tests/test_bot_admin_commodities_add_flow.py",
         "tests/test_bot_admin_commodities_show_list.py",
         "tests/test_bot_admin_commodities_add_create.py",
-        "tests/test_p1_00_characterization_operation_exceptions.py"
+        "tests/test_p1_00_characterization_operation_exceptions.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -473,10 +491,11 @@
       "source": "bot/handlers/admin_commodities.py:583",
       "test_refs": [
         "tests/test_bot_admin_commodities_add_flow.py",
-        "tests/test_bot_admin_commodities_add_create.py"
+        "tests/test_bot_admin_commodities_add_create.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-ADD-ALIASES-AND-CREATE-L622",
@@ -487,7 +506,8 @@
       "source": "bot/handlers/admin_commodities.py:622",
       "test_refs": [
         "tests/test_bot_admin_commodities_add_create.py",
-        "tests/test_bot_admin_commodities_add_aliases_create.py"
+        "tests/test_bot_admin_commodities_add_aliases_create.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -502,7 +522,8 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_commodities_delete_cancel.py",
-        "tests/test_p1_00_characterization_operation_exceptions.py"
+        "tests/test_p1_00_characterization_operation_exceptions.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -516,7 +537,8 @@
       "source": "bot/handlers/admin_commodities.py:685",
       "test_refs": [
         "tests/test_bot_keyboards.py",
-        "tests/test_bot_admin_commodities_delete_cancel.py"
+        "tests/test_bot_admin_commodities_delete_cancel.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -531,7 +553,8 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_commodities_delete_cancel.py",
-        "tests/test_p1_00_characterization_operation_exceptions.py"
+        "tests/test_p1_00_characterization_operation_exceptions.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -544,10 +567,11 @@
       "handler": "admin_users.handle_user_edit_role",
       "source": "bot/handlers/admin_users.py:1078",
       "test_refs": [
-        "tests/test_bot_admin_users_role_actions.py"
+        "tests/test_bot_admin_users_role_actions.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-SET-USER-ROLE-L1090",
@@ -557,7 +581,8 @@
       "handler": "admin_users.handle_set_user_role",
       "source": "bot/handlers/admin_users.py:1090",
       "test_refs": [
-        "tests/test_bot_admin_users_role_actions.py"
+        "tests/test_bot_admin_users_role_actions.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -571,10 +596,11 @@
       "source": "bot/handlers/admin_users.py:1134",
       "test_refs": [
         "tests/test_bot_keyboards.py",
-        "tests/test_bot_admin_users_bot_access.py"
+        "tests/test_bot_admin_users_bot_access.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "FSM_PROMPT"
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-DELETE-REQUEST-L1186",
@@ -584,10 +610,11 @@
       "handler": "admin_users.handle_user_delete_request",
       "source": "bot/handlers/admin_users.py:1186",
       "test_refs": [
-        "tests/test_bot_admin_users_delete_flow.py"
+        "tests/test_bot_admin_users_delete_flow.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-DELETE-CONFIRM-L1203",
@@ -597,10 +624,11 @@
       "handler": "admin_users.handle_user_delete_confirm",
       "source": "bot/handlers/admin_users.py:1203",
       "test_refs": [
-        "tests/test_bot_admin_users_delete_flow.py"
+        "tests/test_bot_admin_users_delete_flow.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-LIMIT-START-L1252",
@@ -612,7 +640,8 @@
       "test_refs": [
         "tests/test_bot_admin_users_limit_start.py",
         "tests/test_offers_router_create_guards.py",
-        "tests/test_p1_00_characterization_operation_exceptions.py"
+        "tests/test_p1_00_characterization_operation_exceptions.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -625,10 +654,11 @@
       "handler": "admin_users.handle_set_trades",
       "source": "bot/handlers/admin_users.py:1312",
       "test_refs": [
-        "tests/test_bot_admin_users_limit_start.py"
+        "tests/test_bot_admin_users_limit_start.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-SET-COMMODITIES-L1336",
@@ -638,10 +668,11 @@
       "handler": "admin_users.handle_set_commodities",
       "source": "bot/handlers/admin_users.py:1336",
       "test_refs": [
-        "tests/test_bot_admin_users_limit_start.py"
+        "tests/test_bot_admin_users_limit_start.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-SET-REQUESTS-L1360",
@@ -651,10 +682,11 @@
       "handler": "admin_users.handle_set_requests",
       "source": "bot/handlers/admin_users.py:1360",
       "test_refs": [
-        "tests/test_bot_admin_users_limit_start.py"
+        "tests/test_bot_admin_users_limit_start.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-USERS-PROCESS-LIMIT-VALUE-L1384",
@@ -664,10 +696,11 @@
       "handler": "admin_users.process_limit_value",
       "source": "bot/handlers/admin_users.py:1384",
       "test_refs": [
-        "tests/test_bot_admin_users_limit_flow.py"
+        "tests/test_bot_admin_users_limit_flow.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-LIMIT-CONFIRM-L1438",
@@ -678,7 +711,8 @@
       "source": "bot/handlers/admin_users.py:1438",
       "test_refs": [
         "tests/test_bot_keyboards.py",
-        "tests/test_bot_admin_users_limit_flow.py"
+        "tests/test_bot_admin_users_limit_flow.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -692,7 +726,8 @@
       "source": "bot/handlers/admin_users.py:1563",
       "test_refs": [
         "tests/test_bot_admin_users_limit_flow.py",
-        "tests/test_p1_00_characterization_operation_exceptions.py"
+        "tests/test_p1_00_characterization_operation_exceptions.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -706,10 +741,11 @@
       "source": "bot/handlers/admin_users.py:1607",
       "test_refs": [
         "tests/test_bot_keyboards.py",
-        "tests/test_bot_admin_users_block_settings.py"
+        "tests/test_bot_admin_users_block_settings.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-TOGGLE-BLOCK-L1649",
@@ -720,10 +756,11 @@
       "source": "bot/handlers/admin_users.py:1649",
       "test_refs": [
         "tests/test_bot_keyboards.py",
-        "tests/test_bot_admin_users_block_settings.py"
+        "tests/test_bot_admin_users_block_settings.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "FSM_PROMPT"
+      "operation_kind": "CRUD_MUTATION"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-SET-MAX-BLOCK-L1698",
@@ -733,10 +770,11 @@
       "handler": "admin_users.handle_admin_set_max_block",
       "source": "bot/handlers/admin_users.py:1698",
       "test_refs": [
-        "tests/test_bot_admin_users_block_settings.py"
+        "tests/test_bot_admin_users_block_settings.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-MAX-BLOCK-SET-L1723",
@@ -746,7 +784,8 @@
       "handler": "admin_users.handle_admin_max_block_set",
       "source": "bot/handlers/admin_users.py:1723",
       "test_refs": [
-        "tests/test_bot_admin_users_block_settings.py"
+        "tests/test_bot_admin_users_block_settings.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -760,10 +799,11 @@
       "source": "bot/handlers/admin_users.py:1772",
       "test_refs": [
         "tests/test_bot_keyboards.py",
-        "tests/test_bot_admin_users_block_custom.py"
+        "tests/test_bot_admin_users_block_custom.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "FSM_PROMPT"
     },
     {
       "behavior_id": "BOT-ADMIN-MESSAGE-ADMIN-USERS-PROCESS-CUSTOM-MAX-BLOCK-L1799",
@@ -773,7 +813,8 @@
       "handler": "admin_users.process_custom_max_block",
       "source": "bot/handlers/admin_users.py:1799",
       "test_refs": [
-        "tests/test_bot_admin_users_block_custom.py"
+        "tests/test_bot_admin_users_block_custom.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -788,7 +829,8 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_entry_navigation.py",
-        "tests/test_bot_panel_navigation_handoff.py"
+        "tests/test_bot_panel_navigation_handoff.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "MENU_NAV"
@@ -802,7 +844,8 @@
       "source": "bot/handlers/admin_users.py:512",
       "test_refs": [
         "tests/test_bot_keyboards.py",
-        "tests/test_bot_admin_users_entry_navigation.py"
+        "tests/test_bot_admin_users_entry_navigation.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "MENU_NAV"
@@ -816,7 +859,8 @@
       "source": "bot/handlers/admin_users.py:527",
       "test_refs": [
         "tests/test_bot_keyboards.py",
-        "tests/test_bot_admin_users_entry_navigation.py"
+        "tests/test_bot_admin_users_entry_navigation.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "MENU_NAV"
@@ -831,7 +875,8 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_profile_text.py",
-        "tests/test_bot_admin_users_bot_access.py"
+        "tests/test_bot_admin_users_bot_access.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "MENU_NAV"
@@ -846,7 +891,8 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_interaction_queue.py",
-        "tests/test_bot_admin_users_entry_navigation.py"
+        "tests/test_bot_admin_users_entry_navigation.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "MENU_NAV"
@@ -860,7 +906,8 @@
       "source": "bot/handlers/admin_users.py:635",
       "test_refs": [
         "tests/test_bot_keyboards.py",
-        "tests/test_bot_admin_users_search_entry_cancel.py"
+        "tests/test_bot_admin_users_search_entry_cancel.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -874,7 +921,8 @@
       "source": "bot/handlers/admin_users.py:657",
       "test_refs": [
         "tests/test_bot_admin_users_search_entry_cancel.py",
-        "tests/test_p1_00_characterization_operation_exceptions.py"
+        "tests/test_p1_00_characterization_operation_exceptions.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -887,7 +935,8 @@
       "handler": "admin_users.process_search_query",
       "source": "bot/handlers/admin_users.py:678",
       "test_refs": [
-        "tests/test_bot_admin_users_search_process.py"
+        "tests/test_bot_admin_users_search_process.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "READ_OR_STREAM",
       "operation_kind": "PROVIDER_REPLY"
@@ -902,10 +951,11 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_panel_user_settings.py",
-        "tests/test_bot_admin_users_bot_access.py"
+        "tests/test_bot_admin_users_bot_access.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
-      "operation_kind": "CRUD_MUTATION"
+      "operation_kind": "MENU_NAV"
     },
     {
       "behavior_id": "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-BLOCK-ACTIONS-L798",
@@ -917,7 +967,8 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_core_events.py",
-        "tests/test_sync_router_apply_item_success.py"
+        "tests/test_sync_router_apply_item_success.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -931,7 +982,8 @@
       "source": "bot/handlers/admin_users.py:925",
       "test_refs": [
         "tests/test_bot_keyboards.py",
-        "tests/test_bot_admin_users_unblock_unlimit.py"
+        "tests/test_bot_admin_users_unblock_unlimit.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -945,7 +997,8 @@
       "source": "bot/handlers/admin_users.py:998",
       "test_refs": [
         "tests/test_bot_keyboards.py",
-        "tests/test_bot_admin_users_unblock_unlimit.py"
+        "tests/test_bot_admin_users_unblock_unlimit.py",
+        "tests/test_p1_00_characterization_admin_seed_semantics.py"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
