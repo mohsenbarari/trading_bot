@@ -6,6 +6,7 @@
 
 | Date | Record | Status | Scope | Evidence / note |
 | --- | --- | --- | --- | --- |
+| 2026-09-03 | Plan governance final review | `APPROVE` | `90b8bf4737ba934dac02f7b04781ad9f5fd5e7d0` | `reviews/PLAN-GOVERNANCE-20260903.md`; next action is a separate `BRANCH_BARRIER`, not Stage completion |
 | 2026-09-03 | Execution authority | `AUTHORIZED_CODEX_GATED` | All Stages | supersedes prior execution-not-authorized note; owner delegated management/final acceptance to Codex; no per-Stage user approval; human Writer action unchanged |
 | 2026-09-03 | Parallel execution governance | `COMPLETE_PLAN_ARTIFACT` | Cursor/Codex workflow | one Coordinator; one writer by default; max two with Codex pairing receipt; serial integration and independent final review |
 | 2026-09-03 | Plan baseline | `REFRESHED` | `main@f3be9ae2c4e9` | three Market recovery/performance commits reviewed; 45 focused tests passed; no plan invariant invalidated; Stage baseline still refreshes at execution |

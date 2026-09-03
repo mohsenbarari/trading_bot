@@ -1,16 +1,15 @@
 # Two-Server Refactor
 
-- 2026-09-03 | Execution is `AUTHORIZED_CODEX_GATED`: Cursor runs dependency-ready work; Codex alone accepts Stages and scopes external/production actions. User Stage approval is removed; human Dashboard Writer transfer remains.
+- 2026-09-03 | Governance at `90b8bf4737ba` is approved: Cursor executes ready Stages;
+  Codex accepts/scopes external actions; no user Stage gate. Next: main barrier, then
+  one-writer `P1-00` refresh. Human Dashboard Writer remains; no Stage/action is approved.
 
-- 2026-09-03 | `P2-12`: real DNS; allowlisted `DRILL` mutations excluded from Market/KPI;
-  Iran Writer 60–90m; human handovers ≤4m. Bot stays Finland, reconnect keeps roles,
-  reconciled RPO=0; repeat quarterly or after fundamental Writer/DNS/Sync/Auth change.
-- 2026-09-03 | `P2-11`: one-time Iran Standby admission, not deploy/Writer activation.
-  Restore-tested quarantine precedes clean bootstrap; Product stays blocked; critical
-  failure restarts 7d soak. Repeat only after rebuild, irreparable drift or fundamental change.
-- 2026-09-02 | `P2-10` on final hosts/isolated storage covers 465 baseline+P2/P3,
-  2×24h soak, 14d+30% load, ten handovers, three DNS cycles, reboot/restore/provider,
-  and zero skipped/orphan/unknown. It gates architecture/high-risk changes, not every hotfix.
+- 2026-09-03 | `P2-12`: real DNS, allowlisted `DRILL`, Iran Writer 60–90m, handovers
+  ≤4m, Bot in Finland and RPO=0. Repeat quarterly or after fundamental control change.
+- 2026-09-03 | `P2-11`: one-time Iran Standby admission after restore-tested quarantine;
+  Product stays blocked and critical failure restarts 7d soak.
+- 2026-09-02 | `P2-10` covers 465 baseline+P2/P3, 2×24h soak, 14d+30% load,
+  handover/DNS/reboot/restore/provider and zero skipped/orphan/unknown; not every hotfix.
 - 2026-09-02 | `P2-09`: Product OTP/session are local and generation-bound; switches
   re-login Product, not Console. Stable-ID notification/read and final Messenger
   state/media sync; Push/cache/realtime/draft/incomplete upload stay local.
