@@ -728,6 +728,48 @@ class Stage8TransportTests(unittest.TestCase):
             )
             market.close()
 
+    def test_xau_bucket_refresh_is_not_limited_by_network_export_batch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            market = connect_market_store(Path(directory) / "market.sqlite3")
+            initialize_market_store(market)
+            initialize_export_ledger(market)
+            for identity, timestamp in (
+                ("xau-refresh-1", "2026-08-26T05:00:01Z"),
+                ("xau-refresh-2", "2026-08-26T05:00:16Z"),
+            ):
+                upsert_observation(
+                    market,
+                    MarketObservation(
+                        event_key=derive_event_key("stage8-xau-refresh", identity),
+                        source_code="XAUUSD",
+                        source_family="TELEGRAM_PUBLIC",
+                        event_time_utc=timestamp,
+                        available_at_utc=timestamp,
+                        instrument="XAUUSD",
+                        market_label="XAUUSD_SPOT",
+                        settlement_term="SPOT",
+                        trade_form="NOT_APPLICABLE",
+                        event_type="QUOTE",
+                        side="MID",
+                        price="4630.10",
+                        price_unit="USD_PER_TROY_OUNCE",
+                        currency="USD",
+                        parser_version="stage8-test-v1",
+                    ),
+                )
+            market.commit()
+
+            rows = _pending_export_rows(market, max_rows=1)
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(
+                market.execute(
+                    "SELECT COUNT(*) FROM market_xau_model_input_buckets"
+                ).fetchone()[0],
+                2,
+            )
+            market.close()
+
     def test_known_payload_hash_rejection_is_selected_for_one_time_retry(self):
         with tempfile.TemporaryDirectory() as directory:
             market = connect_market_store(Path(directory) / "market.sqlite3")
