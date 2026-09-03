@@ -29,6 +29,9 @@ DNS و فعال‌سازی Writer همچنان در Dashboard به‌صورت ا
 ### Cursor Coordinator
 
 - تنها مالک integration branch، dependency graph و صف ادغام است.
+- در حالت خودکار، همان Agent والد و بلندعمر Cursor است و Worker/Verifier را به‌شکل
+  sub-agent اجرا می‌کند؛ این نقش در Chat جداگانه‌ای که به انتقال دستی نیاز داشته باشد
+  اجرا نمی‌شود.
 - برای هر Worker یک Work Assignment با Stage، SHA، scope، lock و deadline می‌سازد.
 - Stage استاندارد و غیرعملیاتی را پس از `COMPLETE` بودن dependencyها شروع می‌کند.
 - خروجی Worker را بررسی مقدماتی می‌کند، اما آن را `COMPLETE` اعلام نمی‌کند.
@@ -164,9 +167,13 @@ expires_at: <utc>
 Invocation نمونه برای Cursor:
 
 ```text
-/two-site-refactor role=coordinator stage=P1-00
+/two-site-refactor role=coordinator mode=autonomous stage=auto
+/two-site-refactor role=coordinator mode=autonomous stage=P1-00
 /two-site-refactor role=worker stage=P1-00 assignment=<ASSIGNMENT_ID>
 ```
+
+حالت اول ورودی عادی است. `role=worker` فقط برای recovery یک Assignment صادرشده
+باقی می‌ماند و مسیر روزمرهٔ اجرا نیست.
 
 ## بستهٔ Final Review
 
@@ -186,9 +193,36 @@ Codex نتیجه را با قالب
 تست نامتناسب، drift رفتاری یا High/Critical gap باز، verdict را از `APPROVE`
 خارج می‌کند.
 
-اگر Cursor و Codex در دو گفتگو اجرا شوند، Coordinator مسیر review bundle و exact
-SHA را در handoff نهایی اعلام می‌کند. انتقال این شناسه‌ها صرفاً جابه‌جایی مکانیکی
-است و از کاربر تصمیم یا approval نمی‌خواهد؛ Codex تمام تصمیم‌های review را می‌گیرد.
+## تحویل خودکار بین Cursor و Codex
+
+انتقال دستی گزارش توسط کاربر ممنوع است. Coordinator والد در Cursor باید:
+
+1. Worker نویسنده را با sub-agent `two-site-stage-worker` اجرا و شناسهٔ آن را برای
+   resume نگه دارد؛
+2. خروجی را مستقیماً به sub-agent مستقل و read-only با نام
+   `two-site-stage-verifier` بدهد؛
+3. پس از integration و ساخت bundle، اسکریپت
+   `scripts/two_site_codex_final_review.sh` را با Stage، Assignment، base/head کامل و
+   مسیر bundle اجرا کند؛
+4. receipt ماشینی `CODEX_FINAL_REVIEW.json` را بخواند و بدون واسطهٔ کاربر، verdict
+   را به همان Worker برگرداند یا Stage پذیرفته‌شده را ببندد.
+
+پل review یک نشست headless و تازهٔ Codex را با sandbox فقط‌خواندنی اجرا می‌کند؛
+context آن از AGENTS، MemoryCustodian، منابع canonical و bundle دقیق بازسازی می‌شود.
+wrapper فقط receipt را به‌صورت atomic در مسیر ignored همان bundle می‌نویسد. نبود یا
+خرابی CLI/auth/schema، تغییر SHA یا receipt ناسازگار برابر `BLOCKED` است و هرگز
+approval ضمنی محسوب نمی‌شود.
+
+چون این review، diff و evidence انتخاب‌شدهٔ ریپازیتوری خصوصی را برای OpenAI Codex
+ارسال می‌کند، اولین اجرا نیازمند اجازهٔ صریح و یک‌بارهٔ مالک پروژه با scope دقیق
+`TWO_SITE_REFACTOR_SOURCE_AND_EVIDENCE_TO_OPENAI_CODEX` است. این اجازه فقط در مسیر
+ignored محلی `.local/two-site-refactor/authorizations/CODEX_SOURCE_REVIEW.md` ثبت
+می‌شود و هیچ Agentی حق استنتاج یا ساخت خودسرانهٔ آن از روی تفویض کلی اجرا را ندارد.
+
+راهنمای کامل چرخه در
+`.cursor/skills/two-site-refactor/references/autonomous-orchestration.md` است. کاربر
+فقط milestone و blocker واقعی خارج از اختیارات مصوب را می‌بیند؛ در handoff مکانیکی
+Worker، Coordinator و Reviewer نقشی ندارد.
 
 ## اقدامات خارجی و Production
 

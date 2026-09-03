@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "reviewer_authority",
+    "receipt_type",
+    "stage_id",
+    "assignment_id",
+    "integration_base_sha",
+    "reviewed_head_sha",
+    "reviewed_at_utc",
+    "verdict",
+    "scope",
+    "findings",
+    "verification",
+    "decision"
+  ],
+  "properties": {
+    "schema_version": {"type": "string", "const": "1.0"},
+    "reviewer_authority": {"type": "string", "const": "CODEX_FINAL_REVIEWER"},
+    "receipt_type": {"type": "string", "const": "STAGE_FINAL"},
+    "stage_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$"},
+    "assignment_id": {"type": "string", "minLength": 1},
+    "integration_base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "reviewed_head_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "reviewed_at_utc": {"type": "string", "format": "date-time"},
+    "verdict": {"enum": ["APPROVE", "CHANGES_REQUIRED", "REJECT", "BLOCKED"]},
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dependency_receipts_valid",
+        "changed_paths_within_assignment",
+        "locks_and_parallel_peer_valid",
+        "unauthorized_external_mutation"
+      ],
+      "properties": {
+        "dependency_receipts_valid": {"type": "boolean"},
+        "changed_paths_within_assignment": {"type": "boolean"},
+        "locks_and_parallel_peer_valid": {"type": "boolean"},
+        "unauthorized_external_mutation": {"type": "string"}
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "finding", "evidence", "required_action"],
+        "properties": {
+          "severity": {"enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]},
+          "finding": {"type": "string"},
+          "evidence": {"type": "string"},
+          "required_action": {"type": "string"}
+        }
+      }
+    },
+    "verification": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["check", "result", "evidence_uri"],
+        "properties": {
+          "check": {"type": "string"},
+          "result": {"enum": ["PASS", "FAIL", "NOT_RUN", "BLOCKED"]},
+          "evidence_uri": {"type": "string"}
+        }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted_commit", "residual_risk", "conditions", "next_dependency_ready_stages"],
+      "properties": {
+        "accepted_commit": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+        "residual_risk": {"type": "string"},
+        "conditions": {"type": "array", "items": {"type": "string"}},
+        "next_dependency_ready_stages": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

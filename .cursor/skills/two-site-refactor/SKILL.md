@@ -1,15 +1,28 @@
 ---
 name: two-site-refactor
-description: Coordinate or execute one assigned stage of the Finland-primary/Iran-standby refactor with bounded concurrency, independent Codex final review, evidence, rollback, and external-action gates.
+description: Autonomously coordinate or execute one assigned Stage of the Finland-primary/Iran-standby refactor with Cursor subagents, independent Codex final review, bounded concurrency, evidence, rollback, and external-action gates.
 disable-model-invocation: true
 ---
 
-# Two-Site Refactor Coordinator / Stage Worker
+# Two-Site Refactor Orchestrator / Stage Worker
 
-Use this skill only when explicitly invoked with `role=coordinator|worker` and a
-Stage ID. Cursor cannot act as `CODEX_FINAL_REVIEWER` and cannot approve its own
-output. Standard non-external Stage execution has standing authorization; live
-external or production mutation still requires an exact Codex pre-action receipt.
+Use this skill only when explicitly invoked. The normal entrypoint is one long-lived
+parent Cursor conversation:
+
+```text
+/two-site-refactor role=coordinator mode=autonomous stage=auto
+```
+
+`stage=<ID>` resumes or limits execution to one Stage; `stage=auto` continues through
+dependency-ready non-external Stages. The parent Coordinator delegates writing and
+verification to project subagents and receives their results directly. Do not require the
+project owner to copy reports between conversations. `role=worker` remains available only
+for recovery of an already-issued Assignment.
+
+Cursor cannot act as `CODEX_FINAL_REVIEWER` and cannot approve its own output. The
+Coordinator uses the local Codex bridge for independent review. Standard non-external
+Stage execution has standing authorization; live external or production mutation still
+requires an exact Codex pre-action receipt.
 
 ## Load
 
@@ -19,6 +32,8 @@ external or production mutation still requires an exact Codex pre-action receipt
 4. Read `docs/refactor/two-server/execution-order.yaml` and the matching section
    `EXECUTION_PLAN.md`.
 5. Read only the Stage-specific contracts, code, tests and evidence referenced there.
+6. For `mode=autonomous`, read
+   [`references/autonomous-orchestration.md`](references/autonomous-orchestration.md).
 
 Do not use the historical `candidate/wa-ir-standby-v1` as a merge source. It may be
 read only when the canonical plan explicitly asks for historical comparison.
@@ -63,22 +78,31 @@ Market data, checkpoint reset, evidence deletion or fixture-only High/Critical p
    return `COMPLETE_CANDIDATE`, `BLOCKED`, or `FAILED` to the Coordinator. A Worker must
    not edit the central ledger or integrate its branch.
 
-## Coordinator: integrate and hand off
+## Coordinator: orchestrate, integrate, and review
 
-1. Verify the Assignment, locks, dependency receipts, scope and Worker evidence.
-2. Apply one candidate at a time onto the current integration HEAD; this is candidate
-   assembly, not Stage approval or promotion to `main`.
-3. Run the Stage integration tests after each integration and the wave barrier when due.
-4. Assemble the exact review bundle described in `EXECUTION_GOVERNANCE.md`.
-5. Request independent Codex final review; do not start a dependent Stage before its receipt.
-6. Only after `APPROVE`, append the receipt to `CHANGE_LEDGER.md`, mark the exact integration
-   commit `COMPLETE` and remove the closed stage worktree within its retention window.
-7. Promote integration to `main` only at an approved branch barrier with a separate exact
-   head/base Codex receipt.
+1. Verify the Assignment, locks, dependency receipts and scope, then invoke the
+   `two-site-stage-worker` subagent with complete context. Keep its returned agent ID.
+2. Invoke the read-only `two-site-stage-verifier`. Route findings back by resuming the same
+   Worker; do not ask the project owner to relay them.
+3. Apply one verified candidate at a time onto the current integration HEAD; this is
+   candidate assembly, not Stage approval or promotion to `main`.
+4. Run the Stage integration tests after each integration and the wave barrier when due.
+5. Assemble the exact review bundle and run `scripts/two_site_codex_final_review.sh`.
+   Consume its JSON receipt directly. The bridge must fail closed until the project owner's
+   explicit local source-review authorization exists; never create that authorization from
+   an Agent inference or a general execution grant.
+6. For `CHANGES_REQUIRED`, resume the same Worker with every finding and repeat Worker →
+   Verifier → integration → Codex. `REJECT` or `BLOCKED` stops the affected path.
+7. Only after `APPROVE`, append the receipt to `CHANGE_LEDGER.md`, mark the exact integration
+   commit `COMPLETE`, remove the closed Stage worktree within its retention window, and
+   recompute the ready set.
+8. Continue automatically only through authorized non-external Stages. Promote integration
+   to `main` only at an approved branch barrier with a separate exact head/base Codex receipt.
 
 ## Finish
 
-Cursor reports a candidate or integration result; only `CODEX_FINAL_REVIEWER` can issue
-`APPROVE` and make a Stage `COMPLETE`. Do not push/merge to `main`, deploy, mutate an
-external system or perform destructive cleanup without the exact receipt required by the
-governance document.
+The Coordinator reports milestones to the project owner, not mechanical handoffs. Only
+`CODEX_FINAL_REVIEWER` can issue `APPROVE` and make a Stage `COMPLETE`. Do not push/merge to
+`main`, deploy, mutate an external system or perform destructive cleanup without the exact
+receipt required by the governance document. A malformed/missing Codex receipt, changed
+head, or reviewer failure is `BLOCKED`, never approval.

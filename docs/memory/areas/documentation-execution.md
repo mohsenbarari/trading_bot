@@ -1,5 +1,7 @@
 # Documentation Execution
 
+- 2026-09-03 | Cursor orchestration is one parent Coordinator conversation with project Worker and read-only Verifier subagents. It routes correction loops directly and calls the repository's read-only headless Codex bridge for exact-SHA Stage receipts; the user no longer copies handoffs between chats.
+
 - 2026-09-03 | Execution governance supersedes the single-conversation rule: one Cursor Coordinator owns serial integration, one Writer is default, and a second requires a Codex pairing receipt plus disjoint paths/locks/rollback. Codex alone issues final Stage and scoped external-action receipts; user Stage approval is not required. Human Dashboard Writer transfer remains an operational invariant.
 
 - 2026-09-03 | Branch clarification: consolidation means merging the latest `main` into `plan/two-server-refactor-v1`, so the plan branch contains all current `main` history plus its plan-only commits. It does not authorize repointing or pushing `main`, `origin/main`, or `candidate/wa-ir-standby-v1`; those refs remain unchanged unless separately requested.

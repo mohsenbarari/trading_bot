@@ -6,13 +6,12 @@
 - Market Store uses canonical Toman magnitude guards; never restore Rial or reconvert normalized legacy values.
 - Point-in-time estimates preserve event/availability/local-insert bounds and the
   historical cutoff; pin SQLite before timestamping and transfer before generation.
-- Estimator research cannot write beside live models; staging flag and separate manual promotion are mandatory.
+- Estimator research writes only to staging locations; promotion is manual.
 - Parity freezes time and aligns XAU; minute buckets do not prove loss. Field presence is schema, not financial, drift.
-- Preserve user changes; use one integration worktree plus at most two
-  expiring Stage worktrees with task/base/locks/owner and cleanup.
-- Generated artifacts have bounded retention; keep active/rollback releases, open-incident evidence and the last restorable backup.
+- Preserve user changes; use one integration and at most two registered, expiring Stage worktrees.
+- Generated artifacts are retention-bounded; keep active/rollback releases, incident evidence and the last restorable backup.
 - Keep IDE state and non-example `.env*.local` untracked.
-- External deploy/production/sync/destruction requires scoped verification and explicit authorization.
+- External mutation and headless Codex receipt review of private diffs/evidence require scoped, explicit authorization.
 - Queue-v1 is authorized; production deploy is separate. Staging/production Telegram identities stay distinct; collisions block cutover.
 - Telegram multi-publisher/B2B is fail-closed and needs explicit enablement.
 - Offer `created_at` is the immutable lifetime anchor. Staging matrices record queue entry separately and use approved test lifetime, never schema rewrite.

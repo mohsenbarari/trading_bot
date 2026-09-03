@@ -2,9 +2,9 @@
 
 Entries are newest first.
 
-- 2026-09-03 | Codex owns two-site acceptance and external-action receipts; user Stage approval is removed, but human Web Writer action remains. Cursor uses one Coordinator, one writer by default, at most two with Codex pairing, and serial integration.
+- 2026-09-03 | Two-site execution uses one Cursor parent Coordinator, one Writer by default (second needs Codex pairing), a read-only Verifier, serial integration, and headless Codex exact-SHA acceptance. User Stage approval/relay is removed; external-action receipts and human Web Writer transfer remain.
 
-- 2026-09-03 | Refactor Section 3 is approved and closed. Cursor executes `MKT-0..MKT-13` in dependency order from audited baseline through storage, capture, parse, projection, two-site sync, models, retention, backfill and Full Matrix. Activation waits for Section 4; done requires no High/Critical gaps, no behavior drift and proven restore/rebuild/parity. Resource limits and adaptive thresholds remain evidence-derived gates.
+- 2026-09-03 | Section 3 is approved: `MKT-0..MKT-13` execute in dependency order and activate only with Section 4. Completion requires no High/Critical gaps or behavior drift plus restore/rebuild/parity proof; thresholds stay evidence-derived.
 
 - 2026-09-02 | `P1-01`: only `main` is long-lived; WA-IR is local and `.local` bounded. Registered, expiring Stage worktrees supersede its one-worktree rule.
 

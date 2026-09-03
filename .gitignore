@@ -106,13 +106,15 @@ docs/architecture/*
 # Environments
 frontend/node_modules/
 .idea/
-# Cursor: only shared project rules/skills are tracked.
+# Cursor: only shared project rules/skills/subagents are tracked.
 # Local IDE state such as .cursor/settings.json stays untracked.
 .cursor/*
 !.cursor/skills/
 !.cursor/skills/**
 !.cursor/rules/
 !.cursor/rules/**
+!.cursor/agents/
+!.cursor/agents/**
 # IDE specific files
 mini_app_dist/
 mini_app_dist_staging/
