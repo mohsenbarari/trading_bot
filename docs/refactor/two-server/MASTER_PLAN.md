@@ -2,7 +2,7 @@
 
 وضعیت: `APPROVED — طراحی بخش‌های ۱ تا ۵ تأیید شده؛ اجرای هر Stage و هر اقدام عملیاتی همچنان مجوز جدا می‌خواهد`
 شاخهٔ تدوین: `plan/two-server-refactor-v1`
-مبنای همگام‌سازی سند: `main` در `60faca8a5ea7148329bf2c2958358fe996c40a8e`
+مبنای همگام‌سازی سند: `main` در `2a03cde1205c7425af180cda19afe85fa68a6d80`
 منبع حقیقت انسانی: `docs/refactor/two-server/MASTER_PLAN.md`
 ترتیب ماشینی: `docs/refactor/two-server/execution-order.yaml`
 مجری آینده: Cursor Agent، مرحله‌به‌مرحله و فقط پس از تأیید این سند
