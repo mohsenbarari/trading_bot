@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
-from typing import Iterator
+from typing import Iterable, Iterator
 
 from .market_contracts import (
     MARKET_STORE_CONTRACT_VERSION,
@@ -570,6 +570,65 @@ def upsert_observation(
         _storage_values(normalized),
     )
     return int(cursor.lastrowid or 0)
+
+
+def upsert_observations(
+    connection: sqlite3.Connection,
+    observations: Iterable[MarketObservation],
+) -> int:
+    """Bulk upsert normalized facts with the exact single-row contract."""
+
+    rows = [_storage_values(item.normalized()) for item in observations]
+    if not rows:
+        return 0
+    connection.executemany(
+        """
+        INSERT INTO market_observations(
+            event_key, source_code, source_family, event_time_utc,
+            available_at_utc, tehran_datetime, tehran_date, tehran_minute,
+            tehran_weekday, instrument, market_label, settlement_term,
+            trade_form, event_type, side, price_value, price_num, price_unit,
+            currency, quantity_value, quantity_num, quantity_unit,
+            parse_confidence, parser_version, quality_state,
+            quality_policy_version, is_conditional, attributes_json,
+            inserted_at_utc
+        ) VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?
+        )
+        ON CONFLICT(event_key) DO UPDATE SET
+            source_code = excluded.source_code,
+            source_family = excluded.source_family,
+            event_time_utc = excluded.event_time_utc,
+            available_at_utc = excluded.available_at_utc,
+            tehran_datetime = excluded.tehran_datetime,
+            tehran_date = excluded.tehran_date,
+            tehran_minute = excluded.tehran_minute,
+            tehran_weekday = excluded.tehran_weekday,
+            instrument = excluded.instrument,
+            market_label = excluded.market_label,
+            settlement_term = excluded.settlement_term,
+            trade_form = excluded.trade_form,
+            event_type = excluded.event_type,
+            side = excluded.side,
+            price_value = excluded.price_value,
+            price_num = excluded.price_num,
+            price_unit = excluded.price_unit,
+            currency = excluded.currency,
+            quantity_value = excluded.quantity_value,
+            quantity_num = excluded.quantity_num,
+            quantity_unit = excluded.quantity_unit,
+            parse_confidence = excluded.parse_confidence,
+            parser_version = excluded.parser_version,
+            quality_state = excluded.quality_state,
+            quality_policy_version = excluded.quality_policy_version,
+            is_conditional = excluded.is_conditional,
+            attributes_json = excluded.attributes_json,
+            inserted_at_utc = excluded.inserted_at_utc
+        """,
+        rows,
+    )
+    return len(rows)
 
 
 def read_source_checkpoint(
