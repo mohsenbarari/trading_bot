@@ -15,4 +15,4 @@
 - 2026-08-29/30: Shadow fed G1/G2/private-gold; causal review; syntax needs raw; `human-feedback-r*`.
 - 2026-08-31: 22–23 Tehran uses melted/Herat fresh at 22:00 (`AFTER_CLOSE_HOLD`, +0.4%). Never revive older data; guard stays fail-open.
 - 2026-09-02: Account2 alone captures G1/G2. Atomically derive projection health from results, never heartbeat/wall-clock freshness.
-- 2026-09-03: ~489k replay rows overflowed 16MiB `/tmp` via sort+`fetchall()`, restarting Account1 and staling melted/Herat/XAU. Stream digest via indexed `(run_id,account)`; never delete state/clear backfill/only enlarge `/tmp`.
+- 2026-09-03: ~489k replay rows overflowed 16MiB `/tmp`; stream digest via `(run_id,account)`. Empty retry counters may use a prior immutable nonempty manifest only after attempt>1/no quarantine. Never delete state/clear backfill.

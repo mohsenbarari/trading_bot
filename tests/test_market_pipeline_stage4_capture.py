@@ -483,6 +483,75 @@ class CaptureFixture(unittest.TestCase):
                 "DELETE FROM capture_replay_runs WHERE run_id=?", (run_id,)
             )
 
+    def test_replay_completion_accepts_only_empty_retry_after_durable_manifest(self):
+        cutoff = datetime(2026, 8, 25, 9, 33, tzinfo=UTC)
+        moment = cutoff + timedelta(minutes=1)
+        source = "MELTED_PRIMARY_FLOW"
+        message = snapshot(91, published=moment, text="95,000,000 فروش")
+        document = telegram_capture.build_market_event(
+            SOURCE_POLICIES[source],
+            message,
+            event_type="message_snapshot",
+            received_at=moment,
+            backfill=True,
+            explicit_backfill=True,
+        )
+        accepted = self.engine.accept(document, now=moment)
+        run_id = self.state.begin_replay_run(
+            cutoff=cutoff,
+            upper_bound=moment + timedelta(minutes=1),
+            source_codes={source},
+            release_sha="a" * 40,
+            now=moment,
+        )
+        identity = capture.QuarantineEventIdentity(
+            account="account1",
+            source_code=source,
+            message_id=91,
+            revision_sha256=telegram_capture._revision(message),
+            event_type="message_snapshot",
+            origin="explicit_backfill",
+        )
+        available = self.state.event_available_at(accepted.event_id)
+        self.assertIsNotNone(available)
+        self.state.record_replay_manifest_entry(
+            run_id=run_id,
+            identity=identity,
+            event_id=accepted.event_id,
+            content_type="text",
+            event_time_utc=capture.utc_text(moment),
+            available_at_utc=str(available),
+            capture_status="accepted",
+        )
+
+        # A first empty attempt cannot certify a non-empty run manifest.
+        self.state.begin_backfill(source, cutoff, now=moment)
+        self.state.mark_backfill_complete(
+            source,
+            cutoff,
+            expected_attempted=0,
+            exhaustion="cutoff_crossed",
+            now=moment,
+        )
+        with self.assertRaisesRegex(
+            capture.CaptureRuntimeError, "capture_replay_source_incomplete"
+        ):
+            self.state.complete_replay_run(run_id, now=moment)
+
+        # On a later retry, the immutable durable manifest is retained while
+        # the empty global counters no longer poison run completion.
+        self.state.begin_backfill(source, cutoff, now=moment)
+        self.state.mark_backfill_complete(
+            source,
+            cutoff,
+            expected_attempted=0,
+            exhaustion="cutoff_crossed",
+            now=moment,
+        )
+        count, digest = self.state.complete_replay_run(run_id, now=moment)
+        self.assertEqual(count, 1)
+        self.assertRegex(digest, r"^[0-9a-f]{64}$")
+
     def test_exact_resolution_is_idempotent_and_new_occurrence_reopens_it(self):
         cutoff = datetime(2026, 8, 25, 9, 33, tzinfo=UTC)
         moment = cutoff + timedelta(minutes=1)

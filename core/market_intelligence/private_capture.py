@@ -1663,17 +1663,40 @@ class CaptureState:
             source_manifest_count = self.replay_source_manifest_count(
                 run_id, str(source)
             )
+            attempted = int(status["attempted"]) if status is not None else -1
+            accepted = int(status["accepted"]) if status is not None else -1
+            duplicate = int(status["duplicate"]) if status is not None else -1
+            quarantined = (
+                int(status["quarantined"]) if status is not None else -1
+            )
+            accounted = accepted + duplicate + quarantined
+            # A process can finish and durably record a large fixed-window
+            # manifest, then restart before completing the run.  A later
+            # provider retry may legitimately return an empty historical
+            # window and overwrite the global (not run-bound) counters with
+            # zeros.  Accept only that narrow recovery shape: a non-empty,
+            # immutable run manifest, no quarantine, and evidence of at least
+            # one prior attempt.  Non-zero counter disagreements remain
+            # fail-closed.
+            empty_retry_after_durable_manifest = (
+                status is not None
+                and source_manifest_count > 0
+                and int(status["run_attempts"]) > 1
+                and attempted == 0
+                and accepted == 0
+                and duplicate == 0
+                and quarantined == 0
+            )
             if (
                 status is None
                 or status["status"] != "complete"
                 or status["cutoff_utc"] != str(run["cutoff_utc"])
-                or int(status["quarantined"]) != 0
-                or int(status["attempted"])
-                != int(status["accepted"])
-                + int(status["duplicate"])
-                + int(status["quarantined"])
-                or source_manifest_count
-                != int(status["accepted"]) + int(status["duplicate"])
+                or quarantined != 0
+                or attempted != accounted
+                or (
+                    source_manifest_count != accepted + duplicate
+                    and not empty_retry_after_durable_manifest
+                )
             ):
                 raise CaptureRuntimeError("capture_replay_source_incomplete")
         completed = now or utc_now()
