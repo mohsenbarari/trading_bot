@@ -7,9 +7,7 @@ docs/*
 !docs/refactor/
 docs/refactor/*
 !docs/refactor/two-server/
-docs/refactor/two-server/*
-!docs/refactor/two-server/section-1/
-!docs/refactor/two-server/section-1/**
+!docs/refactor/two-server/**
 !docs/uiux-stage6-admin-profile/
 docs/uiux-stage6-admin-profile/*
 !docs/uiux-stage6-admin-profile/STAGE6_CLOSURE_LEDGER.json

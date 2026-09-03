@@ -6,8 +6,6 @@ Entries are newest first.
 
 - 2026-09-02 | Owner approved `P1-01`: `main` alone is long-lived; WA-IR stays local-only; one worktree uses bounded `.local` artifacts. Execution remains separately gated.
 
-- 2026-08-29 | `PRIVATE_PRIMARY` adopts Shadow roots in-place and mounts secrets from `/srv/trading-bot/secure/market-data`. Both-role preflight and equal image digest are required. No live cutover; Product stays `LEGACY`.
-- 2026-08-28 | Urgent `PRIVATE_PRIMARY` may skip staging/soak, but Product stays `LEGACY` until exact release/off-host backup/single owner/nine-source gap/fresh complete-grid `OK`/CAS. `NO_DATA` requires a proven missing same-commodity one-gram anchor and fresh melted data; no synthetic/waiver. After `PRIMARY_COMMITTED`, rollback is Product-only.
 - 2026-08-26 | Parity freezes one HMAC owner window, pinned lanes, and one clock. Compare final facts/aligned snapshots; separate value, metadata, and schema drift. Minute XAU is no event oracle.
 - 2026-08-25 | Market Intelligence is Docker-native. One immutable image exposes isolated commands; persistent data/models/sessions/secrets stay mounted. Shadow-first cutover forbids dual Telegram-session owners.
 - 2026-08-25 | Market Facts first use an authenticated isolated private-network lane; product sync initially stays unchanged. General sync follows only after parity/failure/rollback/observability gates.

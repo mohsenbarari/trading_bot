@@ -1,0 +1,7 @@
+# Coin Market Two-Site Target
+
+- Committed Web/Bot offers and trades emit canonical facts with immutable origin metadata, without reparsing or self-evidence. Finland publishes connected Web/Bot; Iran is `VERIFY_ONLY`, then publishes Iran Web during partition while Finland Bot continues. Sparse evidence widens bounded ranges; technical/schema/artifact failure cannot publish.
+- Sync canonical facts, exact consumed-input identity, immutable model bundles and output receipts. Reconnect pins one cutoff and requires matching input/aligned-output hashes before returning Web Writer to Finland; divergent partition outputs are regenerated from converged facts, never merged.
+- Shadow candidates reuse exact Production input, run read-only/low-priority in Finland and never auto-promote. Iran Shadow only validates standby; research stays offline.
+- Pressure order: P0 product DB/Web/API/Bot/Redis/executor; P1 durable capture; P2 parse/facts/sync/Production estimator; P3 archive/backfill; P4 Shadow/research. Estimator cycles do not overlap; unchanged triggers coalesce by input hash. Poison events quarantine while independent work continues; health requires real fact/checkpoint/snapshot progress.
+- Acceptance covers every source, lifecycle, connectivity/Writer state, data condition and injected failure with all values, pairwise independent dimensions and full high-risk cross-products. Closure requires zero High/Critical gaps, loss/duplicate apply, point-in-time error or behavior drift, plus reconnect parity, projection rebuild and archive restore.

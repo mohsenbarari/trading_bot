@@ -1,8 +1,10 @@
 # پلن جامع ریفکتور معماری دو سروره
 
-وضعیت: `DRAFT — در انتظار بازبینی و تأیید مالک`
+وضعیت: `APPROVED — طراحی بخش‌های ۱ تا ۵ تأیید شده؛ اجرای هر Stage و هر اقدام عملیاتی همچنان مجوز جدا می‌خواهد`
 شاخهٔ تدوین: `plan/two-server-refactor-v1`
-مبنای کد: `main` در `d60e81b6d591c4d0a1096123a65719a3e679ced4`
+مبنای همگام‌سازی سند: `main` در `60faca8a5ea7148329bf2c2958358fe996c40a8e`
+منبع حقیقت انسانی: `docs/refactor/two-server/MASTER_PLAN.md`
+ترتیب ماشینی: `docs/refactor/two-server/execution-order.yaml`
 مجری آینده: Cursor Agent، مرحله‌به‌مرحله و فقط پس از تأیید این سند
 دامنهٔ این شاخه: مستندات و طراحی؛ نه deploy، نه DNS، نه تغییر نقش، نه دادهٔ تولید
 
@@ -200,10 +202,11 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
   دارد؛ تمام preflightها پیش از freeze انجام می‌شوند، توقف دسترسی/write حداکثر
   ۴ دقیقه است و اگر target تا آن زمان آماده نباشد عملیات abort می‌شود. این تصمیم
   SLO دیپلوی‌های بعدی نیست.
-- `D-02`: TTL محصول برای آماده‌سازی و cutover برابر ۳۰ ثانیه است و حداقل به‌اندازهٔ
-  TTL قبلی پیش از پنجره پایین آورده می‌شود. طی observation دوساعته همین مقدار و
+- `D-02`: TTL محصول در عملیات عادی، آماده‌سازی، cutover و quarantine برابر ۳۰ ثانیه
+  باقی می‌ماند و حداقل به‌اندازهٔ TTL قبلی پیش از پنجره صبر می‌شود. طی observation دوساعته همین مقدار و
   طی quarantine هفت‌روزه Edge قدیمی فقط به‌عنوان reverse proxy بدون DB/job/write
-  محلی به target باقی می‌ماند؛ TTL عادی بعدی در بخش عملیات تعیین می‌شود.
+  محلی به target باقی می‌ماند. TTL فقط زمان cache است؛ Writer authority نیست و
+  فعال‌سازی مقصد همچنان authoritative DNS verification و probe مستقل می‌خواهد.
 - `D-11`: triggerهای cutover عبارت‌اند از توقف فوری برای invariant/hash/durability
   یا owner تکراری، `5xx > 2%` برای ۵ دقیقه، `p95 > 2x baseline` برای ۱۰ دقیقه و
   queue lag بیش از ۳۰ ثانیه برای ۵ دقیقه. monitor فقط alert/checkpoint block می‌کند
@@ -217,17 +220,18 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
   فقط با جایگزین restore-tested و مجوز صریح نامزد حذف است.
 - `D-14`: Data Ownership تمام SQL/Redis/file/object state را پوشش می‌دهد. Messenger
   metadata/read/media و logical notification/read مشترک‌اند؛ session/OTP/upload
-  lease/browser/provider delivery/Telegram runtime محلی‌اند. PII فقط حداقلی و
-  رمزگذاری‌شده منتقل و mixed writer در سطح row/field/command authority می‌گیرد؛
-  `UNKNOWN` و LWW مالی ممنوع‌اند.
+  lease/browser/provider delivery/Telegram runtime محلی‌اند. نام و Telegram ID
+  محرمانه فرض نمی‌شوند؛ دادهٔ حساس واقعی فقط حداقلی و رمزگذاری‌شده منتقل می‌شود.
+  mixed writer در سطح row/field/command authority می‌گیرد و `UNKNOWN` و LWW مالی ممنوع‌اند.
 - `D-15`: sync از streamهای محدود domain-based، sequence پیوسته و aggregate version
   استفاده می‌کند؛ timestamp ترتیب نیست. ACK فقط پس از commit state/inbox/local
   intent است؛ rejection checkpoint را جلو نمی‌برد. gap بیش از ۳۰ ثانیه readiness
   همان stream/dependentها را می‌بندد و repair فقط immutable original یا bootstrap
   مصوب است.
 - `D-16`: Object Storage ایران transport است، نه truth/Writer/backup. Control، media،
-  model، release و backup bucket/credential جدا دارند؛ payload client-side و
-  directional AEAD و با signing key مستقل هر سایت محافظت می‌شود. object immutable،
+  model، release و backup bucket/credential جدا دارند. همهٔ payloadها برای integrity
+  امضا و hash می‌شوند؛ client-side AEAD فقط برای class حساس الزامی است و Market/parse/
+  estimate غیرمحرمانه به encryption برنامه‌ای نیاز ندارد. object immutable،
   head فقط hint، local spool برابر ۱۴ روز peak +۳۰٪ و cleanup فقط با credential و
   approval مستقل است.
 - `D-17`: bootstrap از consistent snapshot با per-stream cutoff و replay از
@@ -255,17 +259,17 @@ Finland Primary هدف فعلی `65.109.214.203` است. IP و هویت Iran Sta
   تغییر بنیادی Writer/DNS/Sync/Auth تکرار می‌شود، نه پس از release/hotfix عادی؛
   evidence آن از Market/training/آمار واقعی حذف منطقی ولی فیزیکی پاک نمی‌شود.
 
-### نیازمند تأیید در بازبینی این پلن
+### تصمیم‌های اجرایی نهایی
 
-| ID | تصمیم پیشنهادی | مقدار اولیه | وضعیت |
+| ID | تصمیم | قرارداد تأییدشده | وضعیت |
 | --- | --- | --- | --- |
-| `D-03` | SLO deploy hotfix بدون migration | حداکثر ۱۵ دقیقه از artifact تأییدشده تا health سبز | موکول به بررسی عمیق بخش ۴ |
-| `D-04` | SLO release عادی دو سرور | حداکثر ۳۰ دقیقه در حالت اتصال سالم | موکول به بررسی عمیق بخش ۴ |
-| `D-05` | SLO rollback کد بدون DB restore | حداکثر ۱۰ دقیقه | موکول به بررسی عمیق بخش ۴ |
-| `D-06` | artifact distribution | registry اصلی + OCI archive امضاشده در Object Storage ایران برای Iran/offline | باز؛ پس از توضیح و بررسی بخش ۴ |
+| `D-03` | SLO hotfix بدون migration | commit تأییدشده تا `READY` ≤۱۰ دقیقه؛ Finland سالم ≤۱۵ دقیقه؛ در اتصال سالم همگرایی دو سایت ≤۲۰ دقیقه | `APPROVED` |
+| `D-04` | SLO release عادی R0/R1 | merge روی `main` تا سلامت هر دو سایت ≤۳۰ دقیقه؛ routine gate/retry داخل همین زمان است | `APPROVED` |
+| `D-05` | rollback بدون DB restore | Web/API ≤۲ دقیقه؛ rollback کامل R0/R1 ≤۵ دقیقه | `APPROVED` |
+| `D-06` | توزیع artifact | registry اصلی + bundle/OCI archive امضاشده و transport-independent؛ cache ایران برای `Active/Previous/Candidate` و import آفلاین | `APPROVED` |
 
-این موارد تا تأیید مالک، requirement پیشنهادی‌اند و Cursor حق تثبیت پنهان آن‌ها
-در کد را ندارد.
+تصمیم مالکِ باز در این نسخه وجود ندارد. R2/R3 سقف عمومی ۳۰ دقیقه ندارد و پیش از
+اجرا باید زمان، downtime و recovery همان migration را به‌صورت case-specific دریافت کند.
 
 `D-09` تأییدشده فقط انتقال اولیه از دو میزبان Finland قدیمی به Finland Primary است.
 release، hotfix و rollbackهای روزمرهٔ معماری جدید قرارداد، زمان و gate مستقل خود
@@ -312,75 +316,26 @@ release، hotfix و rollbackهای روزمرهٔ معماری جدید قرار
 
 | موج | Stageهای اصلی | نتیجه |
 | --- | --- | --- |
-| `W0` | `P1-00`, `P2-00`, `P3-00`, `P4-00`, `P5-00` تا `P5-02` | baseline، ADR و inventory بدون تغییر رفتار |
-| `W1` | `P1-01`, `P1-02`, `P4-01`, `P4-02`, `P4-05`, `P5-06`, `P5-07` | ریپوی تمیز، release foundation و Cursor Skill تأییدشده |
-| `W2` | `P1-03`, `P4-03`, `P4-04` | runtime یکپارچه Finland در محیط ایزوله |
-| `W3` | `P2-01` تا `P2-05`, `P1-04`, `P3-01` تا `P3-05` | قرارداد داده، sync، authority و Market Facts |
-| `W4` | `P1-05`, `P2-06` تا `P2-09`, `P3-06` تا `P3-08`, `P4-06` | ادغام داده rehearsal، dashboard و continuity model |
-| `W5` | `P1-06`, `P2-10`, `P3-09`, `P4-07`, `P4-10` | staging/fault/restore کامل بدون cutover تولید |
-| `W6` | `P1-07` + `P4-08` به‌صورت change set اتمیک | انتقال کنترل‌شدهٔ تولید به Finland Primary |
-| `W7` | `P2-11` + نخستین اجرای `P4-09` به‌صورت change set اتمیک | پذیرش اولیهٔ Iran به‌عنوان standby بدون failover واقعی |
-| `W8` | `P2-12`, `P3-10`, مستندات متناظر `P5-03/P5-04` | drill قطع/وصل/failback و پذیرش عملیاتی |
-| `W9` | `P1-08`, `P5-05`, `P5-08` | حذف بدهی قدیمی و closure مستندات |
+| `W0` | `P1-00`, `P2-00`, `MKT-0`, `DPL-1`, `DOC-1/2/3/5` | baseline، ownership، contract و deploy audit بدون تغییر رفتار |
+| `W1` | `P1-01/02`, `DPL-2/3/6/7/8`, `DOC-6/8/10` | repository/config/release/CI و handoff foundation |
+| `W2` | `P1-03/04/05`, `MKT-1..6`, `DPL-4/5` | Finland یکپارچه و Market canonical در محیط ایزوله |
+| `W3` | `P2-01..09`, `MKT-7..12`, `DOC-4/7` | sync، Writer control، continuity، dashboard و runbook |
+| `W4` | `P1-06`, `P2-10`, `MKT-13`, `DPL-9` | Full Matrix، fault/load/restore و staging acceptance |
+| `W5` | `P1-07` + `DPL-10` | cutover یک‌باره Finland با مجوز production جدا |
+| `W6` | `P2-11` | پذیرش Iran به‌عنوان standby همگام بدون تغییر Writer |
+| `W7` | `P2-12` | drill واقعی `FI→IR→FI` با مجوز جدا |
+| `W8` | `P1-08`, `DOC-9` | retirement توپولوژی و اسناد قدیمی پس از retention/evidence |
 
 Stage تولیدی یک موج فقط با مجوز جدا اجرا می‌شود. کامل‌شدن Stage کدنویسی، مجوز
 ورود خودکار به موج تولید نیست.
 
 ### dependency registry الزام‌آور
 
-Cursor پیش از شروع هر Stage باید تمام dependencyهای زیر را `COMPLETE` ببیند.
-محدوده‌های پیوسته مثل `P2-01..P2-09` یعنی همهٔ Stageهای آن بازه.
-
-| Stage | Depends on |
-| --- | --- |
-| `P1-00`, `P3-00`, `P4-00`, `P5-00` | تأیید همین پلن |
-| `P1-01` | `P1-00` |
-| `P1-02` | `P1-00`, `P4-00` |
-| `P1-03` | `P1-02`, `P4-02`, `P4-03` |
-| `P1-04` | `P1-03`, `P2-00`, `P2-01` |
-| `P1-05` | `P1-04`, `P2-05`, `P4-04` |
-| `P1-06` + `P4-07` | `P1-05`, `P4-04`, `P4-05`, `P4-06` و تصمیم‌های `D-07`, `D-08` |
-| `P1-07` + `P4-08` | `P1-06`, `P4-07`, `P4-10`، تصمیم‌های `D-09`, `D-11` و مجوز تولید |
-| `P1-08` | `P1-07`, `P2-11`، تصمیم `D-10` و retention/backup approval |
-| `P2-00` | `P1-00` |
-| `P2-01` | `P2-00` |
-| `P2-02` | `P2-01`, `P4-02` |
-| `P2-03` | `P2-01`, `P2-02` |
-| `P2-04` | `P2-03` و تصمیم تثبیت‌شدهٔ انتقال کاملاً انسانی Writer |
-| `P2-05` | `P2-00`, `P2-01`, `P2-04` و تصمیم تثبیت‌شدهٔ استقلال کامل Bot |
-| `P2-06` | `P2-03`, `P2-04`, `P2-05` |
-| `P2-07` | `P2-04`, `P2-06`, تصمیم `D-02` |
-| `P2-08` | `P2-04`, `P2-06`, `P2-07` |
-| `P2-09` | `P2-05`, `P2-08` |
-| `P2-10` | `P2-01..P2-09`, `P3-08` |
-| `P2-11` + نخستین `P4-09` | `P1-07`, `P2-10`, `P3-09`, `P4-07`, `P4-10`، مجوز تولید |
-| `P2-12` | `P2-11`, `P3-10`, `P4-10`, مجوز drill |
-| `P3-01` | `P3-00`, `P2-01` |
-| `P3-02` | `P3-01`, `P2-02` |
-| `P3-03` | `P3-01` |
-| `P3-04` | `P3-01`, `P1-04` |
-| `P3-05` | `P3-01`, `P2-02`, `P4-02` |
-| `P3-06` | `P3-02`, `P3-04`, `P3-05` |
-| `P3-07` | `P3-06` |
-| `P3-08` | `P3-07` |
-| `P3-09` | `P3-03..P3-08` |
-| `P3-10` | `P3-09`, `P2-10` |
-| `P4-01` | `P4-00` |
-| `P4-02` | `P4-01` |
-| `P4-03` | `P4-01`, `P4-02`, `P1-02` |
-| `P4-04` | `P4-02`, `P4-03` |
-| `P4-05` | `P4-00` |
-| `P4-06` | `P4-02`, `P4-03`, `P4-05`, تصمیم‌های `D-03..D-05` |
-| `P4-10` | `P4-04`, `P4-07` |
-| `P5-01` | `P5-00` |
-| `P5-02` | `P5-00`, تصمیم‌های معماری مصوب |
-| `P5-03`, `P5-04` | همگام با Stage فنی متناظر؛ پیش از gate آن Stage |
-| `P5-05` | `P5-02..P5-04` و docs inventory |
-| `P5-06`, `P5-07` | تأیید پلن، `P5-00`, `P5-01` |
-| `P5-08` | تمام Stageهای لازم و رسیدهای پذیرش |
-
-Dependency چرخه‌ای مجاز نیست. دو جفت اتمیک جدول (`P1-06+P4-07` و Stageهای
-تولیدی مشخص‌شده) یک change set هستند، نه dependency چرخه‌ای.
+Cursor پیش از شروع هر Stage باید تمام `depends_on`های آن را در
+[`execution-order.yaml`](execution-order.yaml) با state واقعی `COMPLETE` و evidence
+قابل‌خواندن ببیند. YAML تنها مرجع ماشینی order/dependency/permission flag است؛ این
+جدول خلاصهٔ انسانی است. dependency چرخه‌ای مجاز نیست و atomic group مجوز production
+یا عبور از gate انسانی ایجاد نمی‌کند.
 
 ---
 
@@ -449,7 +404,7 @@ migration یا شرط لازم یک side effect آماده نباشد، سروی
 9. `P1-08`: پس از دورهٔ اطمینان، بدهی و منابع قدیمی را کنترل‌شده ببندیم.
 
 `P1-02..P1-07` تا زمان تأیید artifactهای `P1-00` اجازهٔ تغییر behavior ندارند.
-`P1-07` با `P4-08` یک change set عملیاتی است؛ جداسازی آن دو ممنوع است.
+`P1-07` با `DPL-10` یک change set عملیاتی است؛ جداسازی آن دو ممنوع است.
 
 ### قرارداد اجرایی Cursor برای تمام Stageهای بخش ۱
 
@@ -680,7 +635,7 @@ Rollback: موارد قابل‌حذف ابتدا تا پایان بازهٔ م�
 
 وضعیت: `PROPOSED — قرارداد سناریویی در 2026-09-02 تأیید شد؛ اجرا مسدود است`
 
-Dependency: `P1-00`، `P4-00` و تأیید Feature Parity Contract.
+Dependency: `P1-00`، `DPL-1` و تأیید Feature Parity Contract.
 
 ### برداشت انسانی
 
@@ -757,7 +712,7 @@ Rollback: callsiteها به adapter سازگار برمی‌گردند؛ schema/
 
 وضعیت: `PROPOSED — قرارداد سناریویی و ownership در 2026-09-02 تأیید شد؛ اجرا مسدود است`
 
-Dependency: `P1-02`، `P4-02` و `P4-03`. این Stage ساخت artifact است، نه deploy.
+Dependency: `P1-02`، `DPL-2` و `DPL-6`. این Stage ساخت artifact است، نه deploy.
 
 ### برداشت انسانی
 
@@ -949,7 +904,7 @@ Rollback: تا closure، schema و adapter قدیمی قابل‌خواندن م
 
 وضعیت: `PROPOSED — قرارداد سناریویی merge در 2026-09-02 تأیید شد؛ اجرا مسدود است`
 
-Dependency: `P1-04`، `P2-05` و `P4-04`. مجوز production data فقط read-only backup
+Dependency: `P1-04`، `P2-05` و `DPL-4`. مجوز production data فقط read-only backup
 و طبق قرارداد امنیتی جداگانه است.
 
 ### برداشت انسانی
@@ -1036,7 +991,7 @@ cutover + retention محافظت می‌شوند.
 
 وضعیت: `PROPOSED — قرارداد سناریویی پذیرش در 2026-09-02 تأیید شد؛ اجرا مسدود است`
 
-Dependency: `P1-05` و change set اتمیک `P4-07`.
+Dependency: `P1-05` و `DPL-9`.
 
 ### برداشت انسانی
 
@@ -1121,7 +1076,7 @@ Rollback: staging به artifact قبلی بازمی‌گردد یا rebuild می
 
 وضعیت: `PROPOSED — قرارداد سناریویی cutover در 2026-09-02 تأیید شد؛ نیازمند مجوز تولید جدا`
 
-Dependency: `P1-06`، `P4-07`، `P4-10`، change set اتمیک `P4-08` و مجوز صریح
+Dependency: `P1-06`، `DPL-9`، change set اتمیک `DPL-10` و مجوز صریح
 تولید. تأیید سند به معنی این مجوز نیست.
 
 ### برداشت انسانی
@@ -1550,15 +1505,15 @@ logical owner/referenceهای متفاوت را یکی نمی‌کند.
 
 | وضعیت اولیه و رخداد | رفتار مورد انتظار و مانع ایمنی |
 | --- | --- |
-| event عادی منتشر و ACK می‌شود | outbox محلی truth است؛ encrypted/signed object با create-only write منتشر، receiver verify/apply و ACK پس از commit می‌کند؛ object نهایی overwrite نمی‌شود. |
+| event عادی منتشر و ACK می‌شود | outbox محلی truth است؛ object همیشه signed/hash-bound و فقط در class حساس encrypted است، با create-only write منتشر می‌شود؛ receiver پس از verify/apply/commit ACK می‌دهد و object نهایی overwrite نمی‌شود. |
 | bucket قطع یا cross-country path unavailable است | محصول محلی ادامه و event در spool/outbox بادوام می‌ماند؛ retry bounded/backoff و dashboard backlog/oldest age را نشان می‌دهد؛ نقش Writer خودکار عوض نمی‌شود. |
 | partition طولانی می‌شود | هر سایت مستقل جمع می‌کند و از آخرین contiguous ACK resume می‌شود؛ counter/evidence reset ممنوع و spool حداقل ۱۴ روز peak +۳۰٪ headroom دارد. |
 | multipart وسط upload قطع می‌شود | partial هرگز visible-final نیست، resume/restart امن و incomplete upload پس از ۲۴ ساعت lifecycle می‌شود؛ receiver فقط manifest/size/digest کامل را می‌پذیرد. |
 | دو uploader همان immutable key را می‌نویسند | conditional create فقط یکی را می‌پذیرد و object موجود فقط با identity/manifest برابر idempotent است؛ محتوای متفاوت conflict امنیتی است. |
 | provider CAS/conditional consistency کافی ندارد | correctness به mutable head وابسته نمی‌شود؛ unique immutable key، sequence scan و ledger محلی fallback است و capability probe implementation را تعیین می‌کند. |
 | head/list کهنه یا جلوتر است | checkpoint عقب/جلو نمی‌رود و gap skip نمی‌شود؛ `FULL_SYNC` فقط از sequence/ACK/hash/business checksum می‌آید. |
-| object خراب/دستکاری‌شده است | environment/source/key/signature/AEAD/hash/schema پیش از apply verify و failure quarantine می‌شود؛ stream و readiness block و plaintext پردازش نمی‌شود. |
-| encryption/signing key rotate می‌شود | receiver اول dual-read، sender بعد new-write و old key فقط پس از صفرشدن backlog/retention retire می‌شود؛ re-encrypt history و downtime لازم نیست. |
+| object خراب/دستکاری‌شده است | environment/source/key/signature/hash/schema و برای class حساس AEAD پیش از apply verify می‌شود؛ failure به quarantine می‌رود و stream/readiness را می‌بندد. |
+| encryption/signing key rotate می‌شود | receiver اول dual-read/dual-verify، sender بعد new-write می‌شود و old key فقط پس از صفرشدن backlog/retention retire می‌شود؛ Market غیرحساس فقط signing rotation دارد. |
 | media bytes تکراری است | opaque keyed ID storage dedupe می‌کند ولی owner/reference ledger جدا می‌ماند؛ حذف یک reference blob موردنیاز دیگری را حذف نمی‌کند. |
 | retention سررسید می‌شود | unacked حذف نمی‌شود؛ applied event فقط ۷ روز پس از contiguous ACK و verified snapshot، partial پس از ۲۴h و rejection/quarantine پس از ۳۰d مگر incident حذف‌پذیر است؛ audit identity/hash می‌ماند. |
 | application credential compromise می‌شود | publisher فقط prefix خود، receiver فقط read و ACK خودش، app بدون delete/lifecycle و cleanup/backup با credential جداست؛ rotation evidence را پاک نمی‌کند. |
@@ -1568,8 +1523,9 @@ logical owner/referenceهای متفاوت را یکی نمی‌کند.
 
 - قابلیت واقعی conditional write/ETag/CAS، multipart، lifecycle و consistency
   سرویس‌دهنده آزمایش شود؛ S3-compatible بودن به‌تنهایی اثبات نیست.
-- envelope و blob قبل از upload با AEAD جهت‌دار رمز و با signing key مستقل سایت
-  امضا شوند؛ private/encryption key فقط secret mount محلی است.
+- همهٔ envelope/blobها با signing key مستقل سایت امضا شوند. AEAD جهت‌دار فقط برای
+  data class حساس است؛ Market/parse/estimate، نام و Telegram ID رمزگذاری برنامه‌ای
+  نمی‌شوند. private signing/encryption key فقط secret mount محلی است.
 - key rotation به‌ترتیب receiver dual-read، sender new-write و retirement پس از
   صفرشدن backlog/retention باشد.
 - head فقط hint است؛ correctness از sequence scan و ledger می‌آید.
@@ -1584,19 +1540,21 @@ logical owner/referenceهای متفاوت را یکی نمی‌کند.
    را پیش از implementation ثبت کند.
 2. bucket/prefix/IAM matrix ماشین‌خوان بسازد: publisher فقط source prefix، receiver
    read + ACK خودش، application بدون delete/lifecycle، cleanup و backup جدا.
-3. canonical encrypted envelope، directional AEAD، per-site signature، key ID، nonce
-   policy و rotation state را نسخه‌گذاری و با fixture دوطرفه test کند.
+3. canonical class-aware envelope، per-site signature و key rotation را نسخه‌گذاری
+   کند؛ data class حساس directional AEAD/key ID/nonce دارد و class غیرحساس Market
+   plaintext-at-application با integrity یکسان را در fixture دوطرفه ثابت می‌کند.
 4. uploader/downloader/spool را resumable، idempotent، disk-bounded و مستقل از head
    بسازد؛ capacity را از ۱۴ روز peak واقعی +۳۰٪ محاسبه و disk guard/backpressure
    را failure-inject کند.
 5. multipart visibility، immutable collision، corruption/missing/out-of-order،
    stale list/head، credential rotation و reconnect backlog را در integration test
    پوشش دهد.
-6. lifecycle را ابتدا dry-run و سپس فقط روی fixture غیرتولیدی اثبات کند؛ event
-   applied=۷d پس از ACK+snapshot، partial=۲۴h، rejection/quarantine=۳۰d مگر incident،
-   و media/model/release/backup طبق registry مستقل باشد.
-7. bucket inspection ثابت کند plaintext PII/secret/payload و raw content digest در
-   key/metadata دیده نمی‌شود؛ backup credential و namespace با sync مشترک نیست.
+6. lifecycle را ابتدا dry-run و سپس فقط روی fixture غیرتولیدی اثبات کند؛ transport
+   envelope تحویل‌شده=۷d پس از ACK+snapshot، partial=۲۴h و quarantine حل‌شده=۳۰d مگر
+   incident است، اما canonical Market Fact/archive طبق `MKT-6` دائمی می‌ماند.
+7. bucket inspection ثابت کند secret یا PII واقعاً حساس به‌صورت plaintext و هیچ
+   payload/identity در object key دیده نمی‌شود؛ plaintext body غیرحساس Market مجاز
+   است و backup credential/namespace با sync مشترک نیست.
 8. metricهای request/byte/cost، backlog/oldest age، upload/ACK latency، gap، partial,
    quarantine و key version را برای Dashboard صادر کند.
 
@@ -1604,15 +1562,17 @@ Gate خروج:
 
 - corruption، missing object، duplicate، out-of-order، partial multipart و credential
   rotation در integration test پوشش داشته باشند.
-- هیچ plaintext PII/secret در bucket inspection دیده نشود.
+- هیچ plaintext secret یا data class حساس در bucket inspection دیده نشود؛ Market
+  غیرحساس با signature/hash سالم نیازمند encryption برنامه‌ای نیست.
 - capability و IAM probe واقعی، lifecycle dry-run، ۱۴روز capacity proof و اثبات
   اینکه storage نه Writer authority و نه backup است ثبت شوند.
 
-Gate طراحی در 2026-09-02 تأیید شد: جداسازی bucket/credential، client-side
-directional AEAD و per-site signing، object immutable و head اختیاری، spool ۱۴ روز
-peak +۳۰٪، opaque media ID، retentionهای 7d/24h/30d، app بدون delete و capability
-probe واقعی Arvan پذیرفته شدند. این تأیید مجوز خواندن credential، ساخت bucket/key،
-upload/download، lifecycle mutation یا هر تماس Object Storage نیست.
+Gate طراحی در 2026-09-02 تأیید و سپس برای classification داده اصلاح شد: جداسازی
+bucket/credential، per-site signing، AEAD فقط برای class حساس، object immutable و head
+اختیاری، spool ۱۴ روز peak +۳۰٪، opaque media ID، retention محدود envelopeهای transport،
+app بدون delete و capability probe واقعی Arvan پذیرفته شدند. canonical Market archive
+مشمول حذف envelope نیست. این تأیید مجوز خواندن credential، ساخت bucket/key، upload/
+download، lifecycle mutation یا تماس Object Storage نیست.
 
 ## `P2-03` — bootstrap، snapshot و parity
 
@@ -2537,10 +2497,10 @@ mutation یا هیچ اقدام production نیست.
 evidence digest و cleanup proof داشته باشد. سناریوی generated-only، `SKIPPED` یا شاهد
 چهار تست برای هزاران ترکیب، پوشش محسوب نمی‌شود.
 
-Dependency اجرایی: `P2-00..P2-09` و `P3-08` باید قرارداد نهایی و implementation
+Dependency اجرایی: `P2-00..P2-09` و `MKT-10` باید قرارداد نهایی و implementation
 قابل‌آزمون داشته باشند. framework این Stage زودتر ساخته می‌شود، اما بدون Market matrix
 برآمده از `P3` حق `COMPLETE` شدن ندارد. deploy/rollback chaos متناظر با همین matrix در
-`P4-07/P4-10` اجرا می‌شود و اینجا دوباره با نام دیگر ساخته نمی‌شود.
+`DPL-9` اجرا می‌شود و اینجا دوباره با نام دیگر ساخته نمی‌شود.
 
 ### ممیزی baseline و سیاست reuse
 
@@ -2612,7 +2572,7 @@ driver_id, executed_result, evidence_paths, evidence_digest
 ```
 
 - هر ۴۶۵ behavior seed `P1-00/P1-06` باید به اجرای reference و candidate متصل باشد.
-- تمام requirementهای جدید `P2-00..P2-09` و `P3-00..P3-08` ID و owner دارند.
+- تمام requirementهای جدید `P2-00..P2-09` و `MKT-0..MKT-10` ID و owner دارند.
 - تمام endpoint/handler/job/CLI/raw SQL/ORM hook/importer و key/object namespace از
   static/runtime inventory به ledger map می‌شوند؛ orphan صفر است.
 - reduction یک Cartesian product فقط وقتی مجاز است که equivalence class، ابعاد
@@ -2743,7 +2703,7 @@ upload، committed-before-lost-response و concurrent edit/delete است. `MEDIA
 
 ### Matrix ۸ — Market، parser و model
 
-پس از تأیید `P3-00..P3-08`، Coverage Ledger از registry همان بخش برای تک‌تک source،
+پس از تأیید `MKT-0..MKT-10`، Coverage Ledger از registry همان بخش برای تک‌تک source،
 collector، raw input، Canonical Fact، parser/version، correction، feature، artifact،
 profile و commodity تولید می‌شود. حداقل ابعاد اجباری:
 
@@ -2853,7 +2813,7 @@ response می‌گیرد و write proxy/replay نمی‌شود.
 بودجهٔ `P1-06` اعمال می‌شود: نسبت به reference افت `p95≤10%` و `p99≤15%`،
 infrastructure `5xx≤0.1%`، invariant failure صفر، steady CPU≤60% و RAM/disk/DB-pool
 ≤70%؛ SLO سخت‌گیرانه‌تر موجود مقدم است. این acceptance معماری است و full soak روی
-هر deploy/hotfix تکرار نمی‌شود؛ `P4-05` subset را فقط از impact map انتخاب می‌کند.
+هر deploy/hotfix تکرار نمی‌شود؛ `DPL-1/DPL-9` subset را فقط از impact map انتخاب می‌کنند.
 
 ### Runner، safety و resumability
 
@@ -2918,7 +2878,7 @@ provider fake/real receipts، redacted logs، cleanup plans/proofs و final sign
    به reference/candidate differential driver واقعی وصل کند؛ unknown diff blocker باشد.
 10. OTP/session/SMS/Telegram/Push/notification و Messenger/media matrix `P2-09` را با
     fake faults و smoke provider staging واقعی، privacy/redaction و generation switch بسازد.
-11. Market matrix را فقط از registry نهایی `P3-00..08` تولید و fact/input/model/output/
+11. Market matrix را فقط از registry نهایی `MKT-0..MKT-13` تولید و fact/input/model/output/
     widening/guard parity را با evidence واقعی و fixture deterministic تفکیک کند.
 12. سه-browser/two-viewport/PWA/network/service-worker matrix را به assertionهای API/
     DB/event/provider متصل کند؛ visual-only pass ممنوع باشد.
@@ -2966,9 +2926,9 @@ failover است، نه deploy همیشگی دو سایت و نه گیتی که �
 
 | رخداد | مسیر درست | آیا `P2-11` تکرار می‌شود؟ |
 | --- | --- | --- |
-| ورود اولیهٔ Iran به production | نخستین `P4-09` برای نصب exact release + همین Stage برای bootstrap/parity/soak | بله؛ یک بار |
-| release یا تغییر معمولی کد | مسیرهای `P4-05` و production deploy بخش ۴ روی سایت‌های متأثر | خیر |
-| hotfix محدود | quick lane مصوب `P4-06` و gateهای فقط همان blast radius | خیر |
+| ورود اولیهٔ Iran به production | deploy subtask کنترل‌شدهٔ `P2-11` با controller `DPL-5` + bootstrap/parity/soak | بله؛ یک بار |
+| release یا تغییر معمولی کد | risk/gate/deploy مسیرهای `DPL-1`, `DPL-5` و `DPL-9` روی سایت‌های متأثر | خیر |
+| hotfix محدود | quick lane مصوب `DPL-1/DPL-3/DPL-9` و gateهای فقط همان blast radius | خیر |
 | تغییر schema، sync، Writer یا Market contract | deploy پرریسک بخش ۴ و subset/full matrix متناسب با تغییر | فقط اگر عضویت Standby باید از نو ساخته شود |
 | از دست‌رفتن کامل DB/state ایران یا rebuild/restore کامل میزبان | bootstrap و پذیرش دوباره با cutoff تازه | بله |
 | gap/conflict قابل repair در sync | `P2-03` repair و parity دوباره؛ ایران تا رفع مشکل not-ready می‌ماند | خیر |
@@ -2980,8 +2940,8 @@ failover است، نه deploy همیشگی دو سایت و نه گیتی که �
 ### پیش‌شرط‌های سخت
 
 - `P1-07` کامل است و Finland Primary مرجع canonical تولید است.
-- `P2-10`، `P3-09`، `P4-07` و `P4-10` با evidence محیط هدف سبز هستند.
-- نخستین deploy ایران در `P4-09` همان release digest، schema و config contract پذیرفته‌شده
+- `P2-10`، `MKT-13` و `DPL-9` با evidence محیط هدف سبز هستند.
+- نخستین deploy ایران در `P2-11` همان release digest، schema و config contract پذیرفته‌شده
   را دارد؛ receiver قدیمی اجازهٔ مصرف stream جدید را ندارد.
 - inventory واقعی Iran، ظرفیت، ساعت، TLS/firewall، disk headroom، backup destination،
   bucket/IAMهای جدا و مسیر مستقل Operations Console تأیید شده‌اند.
@@ -2995,7 +2955,7 @@ failover است، نه deploy همیشگی دو سایت و نه گیتی که �
 2. تمام runtime قدیمی product، writer، sender و side-effect executor ایران fence می‌شود؛
    وجود Telegram token/session/executor یک blocker مطلق است.
 3. دادهٔ موجود بدون merge حدسی، backup نسخه‌دار و restore-test می‌شود و سپس در quarantine
-   با owner و تاریخ بازبینی نگه داشته می‌شود. حذف آن فقط طبق `P4-10` و مجوز جداست و backup
+   با owner و تاریخ بازبینی نگه داشته می‌شود. حذف آن فقط طبق `DPL-10` و مجوز جداست و backup
    بی‌انتها باقی نمی‌ماند.
 4. DB/Redis هدف از پایهٔ تمیز و schema exact release ساخته می‌شوند. دادهٔ ناشناخته یا قدیمی
    مستقیم وارد state canonical یا sync stream نمی‌شود؛ استخراج لازم change set جدا دارد.
@@ -3079,7 +3039,7 @@ business apply، lost mutation، standby write، Telegram presence، backup غی
    را قبل و بعد از restart پیاده کند؛ unknown نتیجه را blocker نگه دارد.
 3. backup/quarantine/restore-test وضعیت قدیمی و bootstrap DB/Redis تمیز را با run ID،
    cutoff، digest، owner، expiry review و no-implicit-merge اجراپذیر کند.
-4. نخستین `P4-09` را فقط برای exact accepted release به onboarding workflow وصل کند؛
+4. deploy subtask `P2-11` را فقط برای exact accepted release به onboarding workflow وصل کند؛
    generic production deploy بعدی نباید به‌طور پیش‌فرض `P2-11` را invoke کند.
 5. Product hard block و پاسخ `STANDBY_NOT_ACTIVE` را برای endpoint، worker، scheduler،
    WebSocket و background mutation تست کند؛ Console/receiver/collector مجاز سالم بمانند.
@@ -3140,7 +3100,7 @@ read-only شفاف می‌گیرند؛ Dashboard هیچ IP allowlist ندارد 
 ### پیش‌شرط‌ها و No-Go
 
 1. `P2-11` با soak هفت‌روزه `COMPLETE` و Iran برابر `PRODUCTION_STANDBY_READY` است.
-2. `P3-10` و `P4-10` کامل، backup هر سایت restore-tested و runbookهای `P5-03/P5-04`
+2. `MKT-11` و `DPL-9` کامل، backup هر سایت restore-tested و runbookهای `DOC-4/DOC-7`
    با نسخهٔ runtime یکسان‌اند.
 3. هر دو سایت exact release/schema/registry سازگار دارند؛ Finland `WRITER/N`، Iran
    `STANDBY/N`، DNS روی Finland و `FULL_SYNC/MARKET_READY` سبز است.
@@ -3365,6 +3325,12 @@ fault/network change، DNS، role transition، provider call، ساخت/تغیی
 هدف این بخش تبدیل Market Intelligence به pipeline مستقل از محل capture است.
 ورودی‌ها Facts نسخه‌بندی‌شده‌اند؛ مدل بر اساس profile و evidence خروجی می‌دهد.
 
+زیرعنوان‌های `P3-*` در ادامه، دسته‌بندی انسانی طراحی‌اند و execution ID نیستند.
+Cursor فقط `MKT-0..MKT-13` را از
+[`section-3/EXECUTION_PLAN.md`](section-3/EXECUTION_PLAN.md) و registry ماشینی اجرا می‌کند.
+تمام طراحی این بخش تأیید شده، اما شروع هیچ `MKT-*` هنوز مجاز نشده است.
+بنابراین `PROPOSED` در زیر فقط وضعیت اجرای موضوع را نشان می‌دهد، نه تصمیم باز طراحی.
+
 ## `P3-00` — baseline علمی و contract inventory
 
 وضعیت: `PROPOSED`
@@ -3390,7 +3356,9 @@ quality_state, parser_version, payload_hash, lineage
 
 - raw source و normalized Fact جدا هستند.
 - rejected/quarantined Fact برای audit منتقل می‌شود ولی estimator eligible نیست.
-- PII و Telegram raw actor در Fact cross-site ممنوع است؛ identity لازم HMAC/pseudonym است.
+- Fact فقط فیلد لازم برای lineage/model را نگه می‌دارد. نام و Telegram ID محرمانه
+  محسوب نمی‌شوند و به encryption/HMAC اجباری نیاز ندارند؛ secret، OTP، session و
+  credential اصلاً جزو Market Fact نیستند. حذف فیلد اضافه برای مصرف منبع است، نه secrecy.
 - correction/revision event است؛ overwrite بدون lineage ممنوع.
 
 ## `P3-02` — مالکیت capture و جهت sync
@@ -3572,6 +3540,11 @@ Gate:
 غیرقابل حذف است، اما gate باید بر اساس blast radius تغییر انتخاب شود؛ اجرای
 تست‌های نامرتبط یا کنترل‌های تکراری نباید hotfix ساده را ساعت‌ها متوقف کند.
 
+زیرعنوان‌های `P4-*` دسته‌بندی انسانی شکاف‌ها هستند. execution IDهای تأییدشده فقط
+`DPL-1..DPL-10` در [`section-4/EXECUTION_PLAN.md`](section-4/EXECUTION_PLAN.md) هستند؛
+شروع اجرا و هر production mutation مجوز جدا می‌خواهد.
+`PROPOSED` در زیر به معنی «اجرای موضوع هنوز شروع نشده» است؛ طراحی آن تأیید شده است.
+
 ## `P4-00` — audit خط فعلی deploy
 
 وضعیت: `PROPOSED`
@@ -3610,7 +3583,7 @@ deploy cleanup --dry-run
 
 ## `P4-02` — immutable release artifact
 
-وضعیت: `PROPOSED؛ D-06 باید تأیید شود`
+وضعیت: `PROPOSED FOR EXECUTION؛ قرارداد D-06 تأیید شده است`
 
 - build یک‌بار برای exact commit/lockfiles انجام می‌شود.
 - image multi-arch یا architecture-bound با digest صریح تولید می‌شود.
@@ -3663,7 +3636,7 @@ deploy cleanup --dry-run
 
 ## `P4-06` — hotfix lane سریع ولی امن
 
-وضعیت: `PROPOSED؛ D-03 باید تأیید شود`
+وضعیت: `PROPOSED FOR EXECUTION؛ قرارداد D-03 تأیید شده است`
 
 شرایط ورود:
 
@@ -3738,6 +3711,10 @@ Gate خروج: هر failure state معلوم دارد و اجرای دوباره
 
 هدف این بخش ساخت «یک سند بزرگ دیگر» نیست؛ هدف ساخت مجموعهٔ کوچک و authoritative
 است که انسان، Cursor و عامل عملیات یک رفتار واحد از آن بفهمند.
+
+زیرعنوان‌های `P5-*` دسته‌بندی انسانی‌اند. execution IDهای مستندات `DOC-1..DOC-10`
+در [`section-5/EXECUTION_PLAN.md`](section-5/EXECUTION_PLAN.md) تعریف شده‌اند.
+`PROPOSED` در زیر وضعیت اجرای موضوع است و تصمیم باز طراحی محسوب نمی‌شود.
 
 ## `P5-00` — Documentation Information Architecture
 
@@ -3882,22 +3859,20 @@ diff/test receipt خلاصه می‌کند. raw command log tracked نمی‌ش�
 
 ## `P5-07` — تبدیل پلن به Cursor Skill و Rules
 
-وضعیت: `PROPOSED — فقط بعد از تأیید پلن`
+وضعیت: `COMPLETE در سطح بسته‌بندی پلن؛ استفاده برای اجرای Stage مجوز جدا می‌خواهد`
 
 این پروژه هم‌اکنون `.cursor/skills/` و `.cursor/rules/` دارد؛ بنابراین تبدیل
 ممکن است. خروجی پیشنهادی:
 
 ```text
-.cursor/skills/two-server-refactor/SKILL.md
-.cursor/skills/two-server-refactor/references/STAGE_PROTOCOL.md
-.cursor/skills/two-server-refactor/references/SAFETY_GATES.md
-.cursor/rules/two-server-refactor-safety.mdc
+.cursor/skills/two-site-refactor/SKILL.md
+.cursor/rules/two-site-refactor-safety.mdc
 ```
 
 Skill فقط workflow و routing را نگه می‌دارد و متن این پلن را duplicate نمی‌کند.
 ویژگی‌های لازم:
 
-- نام `two-server-refactor`
+- نام `two-site-refactor` و invocation فقط صریح با `disable-model-invocation: true`
 - invocation ترجیحاً صریح برای اجرای Stage
 - الزام خواندن task card و source-of-truthهای Stage
 - ممنوعیت push/merge/deploy/DNS/production بدون دستور جدا
@@ -3949,8 +3924,8 @@ Gate نهایی:
 ## قرارداد commit و branch برای اجرا
 
 - این شاخه فقط تدوین پلن است.
-- پس از تأیید، implementation branch تازه از `main` ساخته می‌شود؛ نام پیشنهادی:
-  `refactor/two-server-architecture-v1`.
+- پس از مجوز شروع implementation، شاخهٔ موقت تازه از `main` ساخته می‌شود:
+  `refactor/two-site-architecture`.
 - هر Stage یک یا چند commit منسجم با Stage ID در subject دارد.
 - unrelated changes وارد Stage نمی‌شوند.
 - قبل و بعد هر Stage `git status`, branch و base ثبت می‌شوند.
@@ -3984,4 +3959,5 @@ Gate نهایی:
 - هیچ Stage را `APPROVED` یا `COMPLETE` اعلام نکرده است.
 - هیچ secret یا manifest خصوصی را نخوانده یا ثبت نکرده است.
 - هیچ server inventory زنده، deploy، DNS، bucket write یا database write انجام نداده است.
-- Cursor Skill را هنوز نساخته است؛ ساخت آن پس از تأیید محتوای همین پلن انجام می‌شود.
+- Cursor Skill و Rule فقط برای اجرای کنترل‌شدهٔ Stage ساخته شده‌اند؛ هیچ Stage فنی،
+  production action یا server mutation انجام نشده است.

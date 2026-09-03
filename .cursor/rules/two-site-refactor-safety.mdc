@@ -1,0 +1,18 @@
+---
+description: Safety and authority boundaries for two-site refactor plans, deploy tooling and infrastructure files
+globs: "{docs/refactor/two-server/**,.cursor/skills/two-site-refactor/**,ansible/**,deploy/**,scripts/*deploy*,docker-compose*.yml,.github/workflows/**}"
+alwaysApply: false
+---
+
+# Two-Site Refactor Safety
+
+- Canonical plan: `docs/refactor/two-server/MASTER_PLAN.md`
+- Machine order: `docs/refactor/two-server/execution-order.yaml`
+- Design approval is not Stage-start or production authorization.
+- Execute one dependency-ready Stage at a time and require success, failure and rollback evidence.
+- Deploy never changes DNS or Web Writer; only an explicit human dashboard action may do so.
+- Finland is the sole Telegram Executor; SMS executes only on the current Web Writer/generation.
+- Stop before production, migration/restore, real bucket mutation, secret access, DNS/Writer,
+  destructive cleanup or legacy retirement unless that exact action is separately authorized.
+- Do not mark High/Critical gates green with fixtures, synthetic Market events, reset checkpoints
+  or deleted evidence. Do not declare `COMPLETE` on behalf of the owner.

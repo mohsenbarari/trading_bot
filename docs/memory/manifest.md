@@ -83,6 +83,10 @@ Discover optional memory without loading it. Entries here are not default loads.
   coin-group parsing/trade linking, and public market ingestion work.
 - `areas/coin-market-persistence.md` — also load for permanent market archives,
   cross-server input transfer, or exact estimator-input replay.
+- `areas/coin-market-two-site.md` — load for two-site Market roles, canonical Product
+  events, reconnect parity, Shadow placement, or the Market acceptance matrix.
+- `areas/coin-market-retention.md` — load for Market retention, cleanup, storage
+  namespaces, capacity pressure, backpressure, or projection lifetime.
 - `areas/offer-price-control.md` — load for estimator-range offer rejection,
   price-control tolerances, or offer-price guard rollout work.
 - `areas/telegram-delivery.md` — load for Queue-v1, Telegram execution ownership, bot/API delivery boundaries, OTP delivery, or Telegram runtime cutover work.

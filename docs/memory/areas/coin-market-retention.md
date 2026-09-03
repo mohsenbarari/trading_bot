@@ -1,0 +1,5 @@
+# Coin Market Retention and Pressure
+
+- Target retention supersedes raw=3d/quarantine=14d: successful raw and delivered envelopes expire after 7d only with both-site ACK/checkpoint; unresolved quarantine cannot auto-delete and resolved raw stays 30d. Production exact inputs/unique outputs/final reports/promoted bundles are permanent; unreferenced inputs and Shadow detail/rejected bundles=90d, Shadow daily metrics=1y, research cache=30d, debug=14d, warnings/errors=90d, incident=closure+90d.
+- Keep separate TTL `transfer`, permanent `archive` and TTL `shadow` namespaces. Cleanup requires nonpermanent class, expiry, no reference, dry-run, bounded batches and a payload-free receipt.
+- Pause Shadow above 70% for 2m; research/backfill/compaction above 80%; retain only essential work above 90%; resume below 60% for 5m. Disk gates are 70/80/85/90/95% and never delete permanent, unACKed or unresolved data. Live projection is rebuildable and keeps max Production lookback+48h and at least 7d; reconnect pauses background work until parity.

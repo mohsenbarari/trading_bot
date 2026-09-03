@@ -1,6 +1,7 @@
 ---
 description: Native iOS/Android UI/UX track — Market frozen, messenger frontend free
-alwaysApply: true
+globs: frontend/src/**/*.{vue,css,ts}
+alwaysApply: false
 ---
 
 # Native App Standardization
