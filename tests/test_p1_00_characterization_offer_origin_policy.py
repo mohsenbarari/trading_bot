@@ -223,8 +223,22 @@ class P100OfferOriginPolicyCharacterizationTests(unittest.IsolatedAsyncioTestCas
             evidenced += 1
         self.assertEqual(evidenced + not_applicable + blocked, 72)
         self.assertEqual(not_applicable, 3)
+        self.assertEqual(evidenced, 45)
+        self.assertEqual(blocked, 24)
         self.assertIn("OUTCOME-SUCCESS", {row["interaction"] for row in rows})
         self.assertIn("CONCURRENT", {row["interaction"] for row in rows})
+        self.assertTrue(
+            all(
+                row["applicability"] == "HIGH_BLOCKER"
+                for row in rows
+                if row["interaction"] in {
+                    "OUTCOME-SUCCESS",
+                    "POLICY-SNAPSHOT",
+                    "NOTIFICATION",
+                    "SIDE-EFFECT-RETRY",
+                }
+            )
+        )
 
     def test_no_combined_origin_path_is_sold_as_executed(self):
         payload = _load_json("scenario-records.json")

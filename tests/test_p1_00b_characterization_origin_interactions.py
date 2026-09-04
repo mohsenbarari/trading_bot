@@ -1063,7 +1063,22 @@ class P100bOriginInteractionCharacterizationTests(unittest.IsolatedAsyncioTestCa
                 blocked_explicit += 1
         self.assertEqual(evidenced + blocked_explicit + not_applicable, 72)
         self.assertEqual(not_applicable, 3)
-        self.assertGreaterEqual(evidenced, 63)
+        self.assertEqual(evidenced, 45)
+        self.assertEqual(blocked_explicit, 24)
+        blocked = [
+            row["interaction"]
+            for row in rows
+            if row["applicability"] == "HIGH_BLOCKER"
+        ]
+        self.assertEqual(
+            set(blocked),
+            {
+                "OUTCOME-SUCCESS",
+                "POLICY-SNAPSHOT",
+                "NOTIFICATION",
+                "SIDE-EFFECT-RETRY",
+            },
+        )
 
 
 if __name__ == "__main__":

@@ -60,18 +60,17 @@ For each row, tests must cover at least:
 - failure before commit, after commit/before side effect and side-effect retry.
 
 P1-00b materializes those interactions in `inventory/scenario-records.json`
-`origin_required_interactions`. Combined-path cells that ran
-`_execute_trade_authoritatively` on isolated sqlite are `ELIGIBLE` /
-`EVIDENCED`. Web-request `UNLINKED-BOT` is `NOT_APPLICABLE` because Web does
-not consult Telegram link state. Telegram-request `UNLINKED-BOT` is
-`EVIDENCED` on `_handle_channel_trade` / `handle_channel_trade_public`: a
-missing or locally denied user is rejected before session creation, the
-authoritative trade command, durable mutation, or provider send. Quota,
-closed-market, overtime routing, commission snapshots, exact notification
-audience, and retry cardinality are asserted on that same live execute path.
-No cell is `EQUIVALENT_TO_REPRESENTATIVE`. Isolated ledger persist and
-origin-free invitation checks are not combined-path evidence. `CONCURRENT`
-overlaps after lookup and before commit.
+`origin_required_interactions`. Only cells with durable OfferRequest proof or
+the live Telegram entry reject are `ELIGIBLE` / `EVIDENCED`: reject,
+permission-denied, retry, concurrent, expiry, both commit-failure phases, and
+Telegram-request `UNLINKED-BOT`. Web-request `UNLINKED-BOT` is
+`NOT_APPLICABLE` because Web does not consult Telegram link state.
+`OUTCOME-SUCCESS`, `POLICY-SNAPSHOT`, `NOTIFICATION`, and `SIDE-EFFECT-RETRY`
+stay `BLOCKED_EXPLICIT`: Trade is in-memory, send/counter/market helpers are
+doubled, overtime persist is mocked, replay does not retry a successful side
+effect, and persona/tier/confirmation are uncovered. `CONCURRENT` overlap
+after lookup and before commit does not close those cells. No cell is
+`EQUIVALENT_TO_REPRESENTATIVE`.
 
 ## Approved semantic contract for the next ADR
 

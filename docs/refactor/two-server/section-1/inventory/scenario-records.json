@@ -3,7 +3,7 @@
   "generated_from_commit": "aa2c06a573dfd60051e142146f55d7965f2242a7",
   "generated_date": "2026-09-03 UTC",
   "assignment_id": "WA-P1-00-SCOPE-20260903-002",
-  "scope": "Normalized contracts, executed partitions for ADMIN toggle, MSG persist, and TRADE Telegram entry, REQUEST durable collision evidence, family overlap and reload including MSG two-row overlap, and Offer/Request origin combined-path evidence including Telegram unlinked-Bot entry rejection.",
+  "scope": "Normalized contracts, one executed admin-toggle seed, REQUEST durable collision evidence, family overlap and reload including MSG two-row overlap, Telegram unlinked-Bot entry rejection, and honest demotion of origin SUCCESS/policy/notification/side-effect-retry cells.",
   "provenance": {
     "contract_source": "Repository code and behavioral tests at the Assignment base SHA.",
     "live_host_reobservation": "NOT_REOBSERVED",
@@ -33,7 +33,7 @@
     "offer_origin_interaction": 180,
     "composed_origin_matrix": 180,
     "origin_required_interactions": 72,
-    "named_high_blockers": 1
+    "named_high_blockers": 2
   },
   "contract_field_policy": {
     "required_fields": [
@@ -5682,12 +5682,12 @@
     "cross_family_failure_evidence": 0,
     "scenario_work_item": "READY_FOR_CODEX_FINAL_REVIEW",
     "target_result": "NOT_RUN",
-    "complete_forbidden_until": "Stage remains IN_PROGRESS. Seed handler assertions remain a High blocker for 401 unsupported seeds. Possible prior localhost Redis contact is NOT_REINSPECTED. Assignment WA-P1-00B-FREEZE-20260904-001 executes P1-00b. Do not mark any Stage COMPLETE.",
+    "complete_forbidden_until": "Stage remains IN_PROGRESS. Seed handler assertions remain High for 464 seeds. 24 origin SUCCESS/policy/notification/side-effect-retry cells remain High. Possible prior localhost Redis contact is NOT_REINSPECTED. Assignment WA-P1-00B-FREEZE-20260904-001 executes P1-00b. Do not mark any Stage COMPLETE.",
     "family_boundary_evidenced_cells": 55,
     "family_boundary_named_blockers": 0,
     "filename_only_failure_evidence": 0,
     "unrouted_named_blockers": 0,
-    "named_high_blockers": 1,
+    "named_high_blockers": 2,
     "unresolved_high_in_p1_00_exit_gate": 0,
     "prior_localhost_redis_contact": "NOT_REINSPECTED",
     "origin_equivalent_cells": 0
@@ -14269,7 +14269,7 @@
   "blocker_registry": {
     "disposition_request": "CANONICAL_PLAN_AMENDMENT",
     "owner": "CODEX_FINAL_REVIEWER",
-    "note": "Remaining High current-behavior cell is the unfinished 465-seed handler evidence. Telegram unlinked-Bot is evidenced on the live channel-trade entry path. MSG overlap and child-process replay are evidenced as two independent rows. P1-00b stays IN_PROGRESS.",
+    "note": "Two High leftovers remain: unfinished seed handler executions except the one admin toggle, and unproven origin SUCCESS/policy/notification/side-effect-retry dimensions. Telegram unlinked-Bot and MSG two-row overlap stay evidenced. P1-00b stays IN_PROGRESS.",
     "required_fields": [
       "blocker_id",
       "severity",
@@ -14293,19 +14293,45 @@
           "P1-04",
           "P1-06"
         ],
-        "required_evidence": "Handler-level assertions for every seed, or executed behavior-equivalent partitions that verify response, mutation, outbox, side effects, ordering, retry or idempotency, and failures. Restore this blocker for any unsupported seed.",
+        "required_evidence": "Handler-level assertions for every seed. A sibling in the same family and operation_kind does not evidence another seed.",
         "forbidden_shortcuts": [
           "AST token or path-existence membership as sole proof",
-          "Map seeds only by family and operation_kind without executing the path",
+          "Clear a seed because a sibling family and operation_kind ran",
+          "Map seeds only by family and operation_kind without executing that handler",
           "Assign ownership to P1-04 or P1-06",
           "resolution_stage CODEX_FINAL_REVIEW",
           "Self-compared manifest fields"
         ],
         "disposition": "BLOCKED_EXPLICIT",
         "status": "BLOCKED_EXPLICIT",
-        "reason": "401 of 465 seeds are outside the executed partitions ADMIN/TOGGLE_MUTATION, MSG/CRUD_MUTATION, and TRADE/CRUD_MUTATION. Inventory and AST membership tests are not handler evidence.",
-        "observed_fact": "P1-00b executed three live partitions and restored this High for every remaining seed.",
+        "reason": "464 of 465 seeds lack a live handler execution. The one evidenced seed is BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-TOGGLE-BLOCK-L1649. Sibling membership in MSG/CRUD_MUTATION or TRADE/CRUD_MUTATION does not evidence the other 63 handlers.",
+        "observed_fact": "P1-00b executed only handle_admin_toggle_block. persist_sent_direct_message and the Telegram absent-user reject do not close sibling seeds.",
         "unauthorized_reason": "Assignment forbids product mutation. Remaining seeds need handler execution or a later authorized change."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "P1-00b",
+        "blocked_dependents": [
+          "P1-01",
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Durable Trade and OfferRequest rows on isolated sqlite, unmocked side-effect cardinality, real overtime persist, a successful retried side effect, and persona/tier/confirmation on the live path.",
+        "forbidden_shortcuts": [
+          "Mark SUCCESS EVIDENCED from a mock trade_number or in-memory Trade",
+          "Cite overtime HTTP 202 as OUTCOME-SUCCESS",
+          "Treat CONCURRENT overlap as proof of the rest of the matrix",
+          "EQUIVALENT_TO_REPRESENTATIVE",
+          "Assign ownership to P1-04 or P1-06",
+          "resolution_stage CODEX_FINAL_REVIEW"
+        ],
+        "disposition": "BLOCKED_EXPLICIT",
+        "status": "BLOCKED_EXPLICIT",
+        "reason": "24 origin cells (SUCCESS, POLICY-SNAPSHOT, NOTIFICATION, SIDE-EFFECT-RETRY) lack durable Trade, unmocked side effects, overtime persist, successful side-effect retry, or persona/tier/confirmation.",
+        "observed_fact": "CONCURRENT, REJECT, PERMISSION, RETRY, EXPIRY, and both commit-failure phases keep durable OfferRequest proof. Telegram UNLINKED-BOT stays evidenced on the entry path. SUCCESS and side-effect cells were demoted.",
+        "unauthorized_reason": "Assignment forbids a product patch that would join those dimensions on one unmocked path."
       }
     ]
   },
@@ -14317,7 +14343,7 @@
         "TELEGRAM_BOT",
         "INTERNAL"
       ],
-      "reason": "offer_home_server_for_source takes source_surface and returns home. evaluate_invitation_bot_access has no origin parameter. Retry, concurrent, and failure origin cells are evidenced on the live execute path; they are not green copies of SUCCESS or REJECT.",
+      "reason": "offer_home_server_for_source takes source_surface and returns home. evaluate_invitation_bot_access has no origin parameter. Retry, concurrent, expiry, permission, reject, and commit-failure cells have durable OfferRequest proof. SUCCESS, policy-snapshot, notification, and side-effect-retry stay High blockers; they are not green copies of CONCURRENT.",
       "evidence": [
         "tests/test_offer_source_surface.py",
         "tests/test_p1_00_characterization_matrix_independence.py",
@@ -23491,31 +23517,19 @@
       "offer_origin": "WEBAPP",
       "request_origin": "WEBAPP",
       "interaction": "OUTCOME-SUCCESS",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
-          "boundary_talk": "OUTCOME-SUCCESS",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        },
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects",
-          "boundary_talk": "OUTCOME-SUCCESS",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__OUTCOME-REJECT",
@@ -23671,48 +23685,38 @@
       "offer_origin": "WEBAPP",
       "request_origin": "WEBAPP",
       "interaction": "POLICY-SNAPSHOT",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects",
-          "boundary_talk": "POLICY-SNAPSHOT",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__NOTIFICATION",
       "offer_origin": "WEBAPP",
       "request_origin": "WEBAPP",
       "interaction": "NOTIFICATION",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects",
-          "boundary_talk": "NOTIFICATION",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__FAILURE-BEFORE-COMMIT",
@@ -23767,55 +23771,38 @@
       "offer_origin": "WEBAPP",
       "request_origin": "WEBAPP",
       "interaction": "SIDE-EFFECT-RETRY",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects",
-          "boundary_talk": "SIDE-EFFECT-RETRY",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__OUTCOME-SUCCESS",
       "offer_origin": "WEBAPP",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "OUTCOME-SUCCESS",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
-          "boundary_talk": "OUTCOME-SUCCESS",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        },
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects",
-          "boundary_talk": "OUTCOME-SUCCESS",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__OUTCOME-REJECT",
@@ -23980,48 +23967,38 @@
       "offer_origin": "WEBAPP",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "POLICY-SNAPSHOT",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects",
-          "boundary_talk": "POLICY-SNAPSHOT",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__NOTIFICATION",
       "offer_origin": "WEBAPP",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "NOTIFICATION",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects",
-          "boundary_talk": "NOTIFICATION",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__FAILURE-BEFORE-COMMIT",
@@ -24076,55 +24053,38 @@
       "offer_origin": "WEBAPP",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "SIDE-EFFECT-RETRY",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects",
-          "boundary_talk": "SIDE-EFFECT-RETRY",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__OUTCOME-SUCCESS",
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "WEBAPP",
       "interaction": "OUTCOME-SUCCESS",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
-          "boundary_talk": "OUTCOME-SUCCESS",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        },
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects",
-          "boundary_talk": "OUTCOME-SUCCESS",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__OUTCOME-REJECT",
@@ -24280,48 +24240,38 @@
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "WEBAPP",
       "interaction": "POLICY-SNAPSHOT",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects",
-          "boundary_talk": "POLICY-SNAPSHOT",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__NOTIFICATION",
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "WEBAPP",
       "interaction": "NOTIFICATION",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects",
-          "boundary_talk": "NOTIFICATION",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__FAILURE-BEFORE-COMMIT",
@@ -24376,55 +24326,38 @@
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "WEBAPP",
       "interaction": "SIDE-EFFECT-RETRY",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects",
-          "boundary_talk": "SIDE-EFFECT-RETRY",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__OUTCOME-SUCCESS",
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "OUTCOME-SUCCESS",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
-          "boundary_talk": "OUTCOME-SUCCESS",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        },
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects",
-          "boundary_talk": "OUTCOME-SUCCESS",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__OUTCOME-REJECT",
@@ -24589,48 +24522,38 @@
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "POLICY-SNAPSHOT",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects",
-          "boundary_talk": "POLICY-SNAPSHOT",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__NOTIFICATION",
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "NOTIFICATION",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects",
-          "boundary_talk": "NOTIFICATION",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__FAILURE-BEFORE-COMMIT",
@@ -24685,55 +24608,38 @@
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "SIDE-EFFECT-RETRY",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects",
-          "boundary_talk": "SIDE-EFFECT-RETRY",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__OUTCOME-SUCCESS",
       "offer_origin": "INTERNAL",
       "request_origin": "WEBAPP",
       "interaction": "OUTCOME-SUCCESS",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
-          "boundary_talk": "OUTCOME-SUCCESS",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        },
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects",
-          "boundary_talk": "OUTCOME-SUCCESS",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__OUTCOME-REJECT",
@@ -24889,48 +24795,38 @@
       "offer_origin": "INTERNAL",
       "request_origin": "WEBAPP",
       "interaction": "POLICY-SNAPSHOT",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects",
-          "boundary_talk": "POLICY-SNAPSHOT",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__NOTIFICATION",
       "offer_origin": "INTERNAL",
       "request_origin": "WEBAPP",
       "interaction": "NOTIFICATION",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects",
-          "boundary_talk": "NOTIFICATION",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__FAILURE-BEFORE-COMMIT",
@@ -24985,55 +24881,38 @@
       "offer_origin": "INTERNAL",
       "request_origin": "WEBAPP",
       "interaction": "SIDE-EFFECT-RETRY",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects",
-          "boundary_talk": "SIDE-EFFECT-RETRY",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__OUTCOME-SUCCESS",
       "offer_origin": "INTERNAL",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "OUTCOME-SUCCESS",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
-          "boundary_talk": "OUTCOME-SUCCESS",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        },
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects",
-          "boundary_talk": "OUTCOME-SUCCESS",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__OUTCOME-REJECT",
@@ -25198,48 +25077,38 @@
       "offer_origin": "INTERNAL",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "POLICY-SNAPSHOT",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects",
-          "boundary_talk": "POLICY-SNAPSHOT",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__NOTIFICATION",
       "offer_origin": "INTERNAL",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "NOTIFICATION",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects",
-          "boundary_talk": "NOTIFICATION",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__FAILURE-BEFORE-COMMIT",
@@ -25294,24 +25163,19 @@
       "offer_origin": "INTERNAL",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "SIDE-EFFECT-RETRY",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Combined path executed on isolated sqlite with Offer provenance and Request ledger.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: Trade stays in-memory, send/counter/market helpers are doubled, overtime persist is mocked, side-effect retry does not re-run a successful side effect, and persona/tier/confirmation are uncovered. Durable OfferRequest overlap does not close this cell."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects",
-          "boundary_talk": "SIDE-EFFECT-RETRY",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     }
   ],
   "scenario_work_item": "READY_FOR_CODEX_FINAL_REVIEW",

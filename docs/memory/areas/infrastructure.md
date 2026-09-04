@@ -1,5 +1,9 @@
 # Infrastructure
 
+- 2026-09-04 | Verifier `CORRECTIONS_REQUIRED` on `18926961`. Origin SUCCESS
+  and sibling family-seed shortcuts were demoted. Live hosts were not
+  re-observed. `DR-018` stays `NOT_REINSPECTED`.
+
 - 2026-09-04 | Codex `CHANGES_REQUIRED` on integration `3a7344b3`. The P1-00b
   correction did not re-observe live hosts and did not read live Redis.
   `DR-018` stays `NOT_REINSPECTED`. Host facts stay `NOT_REOBSERVED`.
