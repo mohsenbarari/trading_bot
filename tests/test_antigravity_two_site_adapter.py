@@ -188,14 +188,14 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
     def test_verifier_has_no_file_write_tool(self):
         validator = load_validator()
         metadata = validator.parse_frontmatter(
-            ROOT / ".agents" / "agents" / "two-site-stage-verifier.md"
+            ROOT / ".agents" / "agents" / "two-site-stage-verifier" / "agent.md"
         )
         self.assertTrue(set(metadata["tools"]).isdisjoint(validator.WRITE_TOOLS))
         verifier = (
-            ROOT / ".agents" / "agents" / "two-site-stage-verifier.md"
+            ROOT / ".agents" / "agents" / "two-site-stage-verifier" / "agent.md"
         ).read_text(encoding="utf-8")
         coordinator = (
-            ROOT / ".agents" / "agents" / "two-site-coordinator.md"
+            ROOT / ".agents" / "agents" / "two-site-coordinator" / "agent.md"
         ).read_text(encoding="utf-8")
         self.assertIn("git status --porcelain=v1 --untracked-files=all", verifier)
         self.assertIn("byte-for-byte unchanged", verifier)
@@ -412,12 +412,51 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
         self.assertIn("--mode", smoke_command)
         self.assertIn("plan", smoke_command)
 
+    def test_runtime_validation_reports_auth_before_empty_discovery(self):
+        validator = load_validator()
+        agents_envelope = json.dumps(
+            {"status": "SUCCESS", "command": {"data": {"agents": []}}}
+        )
+
+        def runner(command, **_kwargs):
+            if command[0] == "git":
+                output = "a" * 40 + "\n" if "rev-parse" in command else ""
+                return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+            if "agents" in command:
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=agents_envelope, stderr=""
+                )
+            return subprocess.CompletedProcess(
+                command,
+                1,
+                stdout="",
+                stderr="You are not logged into Antigravity.",
+            )
+
+        with mock.patch.dict(os.environ, {"ANTIGRAVITY_CLI": "/fake/agy"}), mock.patch.object(
+            validator.subprocess, "run", side_effect=runner
+        ):
+            errors = validator.validate_runtime()
+        self.assertEqual(
+            [
+                "agy read-only coordinator smoke failed: authentication required; "
+                "complete one interactive agy login"
+            ],
+            errors,
+        )
+
     def test_runtime_validation_detects_repository_mutation(self):
         validator = load_validator()
         agents = json.dumps(
             {
                 "status": "SUCCESS",
-                "command": {"data": {"agents": [name.removesuffix(".md") for name in validator.AGENTS]}},
+                "command": {
+                    "data": {
+                        "agents": [
+                            metadata["name"] for metadata in validator.AGENTS.values()
+                        ]
+                    }
+                },
             }
         )
         smoke = json.dumps(

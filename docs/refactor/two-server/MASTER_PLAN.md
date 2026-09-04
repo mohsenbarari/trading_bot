@@ -3951,9 +3951,9 @@ Reviewer آن را می‌پذیرد یا برای اصلاح بازمی‌گر�
 ```text
 .cursor/skills/two-site-refactor/SKILL.md
 .cursor/rules/two-site-refactor-safety.mdc
-.agents/agents/two-site-coordinator.md
-.agents/agents/two-site-stage-worker.md
-.agents/agents/two-site-stage-verifier.md
+.agents/agents/two-site-coordinator/agent.md
+.agents/agents/two-site-stage-worker/agent.md
+.agents/agents/two-site-stage-verifier/agent.md
 .agents/skills/two-site-refactor/SKILL.md
 .agents/rules/two-site-refactor-safety.md
 docs/refactor/two-server/EXECUTION_GOVERNANCE.md

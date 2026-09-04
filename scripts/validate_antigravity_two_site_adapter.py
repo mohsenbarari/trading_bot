@@ -53,19 +53,19 @@ OFFICIAL_TOOLS = {
 }
 
 AGENTS: dict[str, dict[str, Any]] = {
-    "two-site-coordinator.md": {
+    "two-site-coordinator/agent.md": {
         "name": "two-site-coordinator",
         "mainAgent": True,
         "subagent": False,
         "required_tools": {"invoke_subagent", "send_message", "manage_subagents"},
     },
-    "two-site-stage-worker.md": {
+    "two-site-stage-worker/agent.md": {
         "name": "two-site-stage-worker",
         "mainAgent": False,
         "subagent": True,
         "required_tools": {"write_to_file", "replace_file_content", "run_command"},
     },
-    "two-site-stage-verifier.md": {
+    "two-site-stage-verifier/agent.md": {
         "name": "two-site-stage-verifier",
         "mainAgent": False,
         "subagent": True,
@@ -181,7 +181,7 @@ def validate(root: Path = ROOT) -> list[str]:
         missing = expected["required_tools"] - tools
         if missing:
             errors.append(f"{path.relative_to(root)}: missing required tools {sorted(missing)}")
-        if filename == "two-site-stage-verifier.md" and tools & WRITE_TOOLS:
+        if filename == "two-site-stage-verifier/agent.md" and tools & WRITE_TOOLS:
             errors.append(f"{path.relative_to(root)}: Verifier exposes write tools")
 
     try:
@@ -308,9 +308,11 @@ def validate_runtime() -> list[str]:
                 names.add(item)
             elif isinstance(item, dict) and isinstance(item.get("name"), str):
                 names.add(item["name"])
-    missing = [name[0:-3] for name in AGENTS if name[0:-3] not in names]
-    if missing:
-        return finish([f"agy did not discover custom agent: {name}" for name in missing])
+    missing = [
+        expected["name"]
+        for expected in AGENTS.values()
+        if expected["name"] not in names
+    ]
     smoke_token = "ANTIGRAVITY_RUNTIME_SMOKE_OK"
     try:
         smoke = subprocess.run(
@@ -338,12 +340,26 @@ def validate_runtime() -> list[str]:
         return finish([f"agy read-only runtime smoke could not complete: {exc}"])
     if smoke.returncode != 0:
         combined = f"{smoke.stderr}\n{smoke.stdout}"
-        detail = (
-            "authentication required; complete one interactive agy login"
-            if "Authentication required" in combined or "authentication failed" in combined
-            else "runtime command exited unsuccessfully"
-        )
-        return finish([f"agy read-only coordinator smoke failed: {detail}"])
+        normalized = combined.lower()
+        if any(
+            marker in normalized
+            for marker in (
+                "authentication required",
+                "authentication failed",
+                "not logged into antigravity",
+                "you are not logged in",
+                "sign in",
+            )
+        ):
+            return finish(
+                [
+                    "agy read-only coordinator smoke failed: authentication required; "
+                    "complete one interactive agy login"
+                ]
+            )
+        if missing:
+            return finish([f"agy did not discover custom agent: {name}" for name in missing])
+        return finish(["agy read-only coordinator smoke failed: runtime command exited unsuccessfully"])
     try:
         smoke_result = json.loads(smoke.stdout)
     except json.JSONDecodeError as exc:
@@ -355,6 +371,8 @@ def validate_runtime() -> list[str]:
         or int(smoke_result.get("num_turns", 0)) < 1
     ):
         return finish(["agy read-only coordinator smoke did not return the exact success contract"])
+    if missing:
+        return finish([f"agy did not discover custom agent: {name}" for name in missing])
     return finish([])
 
 

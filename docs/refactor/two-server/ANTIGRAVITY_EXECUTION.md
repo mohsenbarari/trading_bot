@@ -25,9 +25,9 @@ pre-review دقیق closeout، closeout commit و verify پس از commit بدو
 فایل‌های پروژه‌ای Antigravity:
 
 ```text
-.agents/agents/two-site-coordinator.md
-.agents/agents/two-site-stage-worker.md
-.agents/agents/two-site-stage-verifier.md
+.agents/agents/two-site-coordinator/agent.md
+.agents/agents/two-site-stage-worker/agent.md
+.agents/agents/two-site-stage-verifier/agent.md
 .agents/skills/two-site-refactor/SKILL.md
 .agents/skills/two-site-refactor/resources/AUTONOMOUS_ORCHESTRATION.md
 .agents/skills/two-site-refactor/resources/antigravity-state.schema.json
@@ -174,6 +174,10 @@ python3 -m unittest tests.test_antigravity_two_site_adapter
 و سپس خود `two-site-coordinator` را در `plan` و sandbox با یک prompt بدون tool/mutation
 اجرا می‌کند؛ HEAD، full status و digest وضعیت orchestration محلی قبل/بعد باید
 byte-identical و پاسخ JSON دقیق باشد.
+این smoke یک نشست headless واقعی است و تعریف Coordinator و prompt ثابت smoke را برای
+runtime Google Antigravity ارسال می‌کند؛ بنابراین فقط بعد از رضایت صریح مالک برای این
+ارسال اجرا می‌شود. هیچ secret، فایل محصول یا محتوای آزاد دیگری در prompt smoke قرار
+نمی‌گیرد.
 نبود CLI، discovery،
 authentication یا smoke واقعی به‌طور fail-closed گزارش می‌شود. validator هیچ Stage
 را اجرا نمی‌کند. تغییرات خود adapter نیز با
