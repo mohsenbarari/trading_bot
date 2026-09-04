@@ -1,5 +1,13 @@
 # Infrastructure
 
+- 2026-09-04 | P1-00b corrected four mutation-seed failure paths and bound
+  upload-session writes to a TemporaryDirectory, then evidenced four more
+  exact read handlers (stickers, room/direct pinned message, room messages).
+  Origin SUCCESS/policy/notification/side-effect-retry stay High. One hundred
+  thirty-one exact handlers are evidenced; 334 seeds stay High.
+  Invitation-role and channel-trade stay High. Live hosts were not
+  re-observed. `DR-018` stays `NOT_REINSPECTED`.
+
 - 2026-09-04 | P1-00b executed twenty-three more exact handlers (channel
   create/update/invite/unfollow, room send/read/unread/pin-order, direct
   unread/read/pin-order, message reaction/pin, upload batch/session cancel,
