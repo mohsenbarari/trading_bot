@@ -2,7 +2,7 @@
 
 Entries are newest first.
 
-- 2026-09-03 | Two-site execution uses one Cursor parent Coordinator, one Writer by default (second needs Codex pairing), a read-only Verifier, serial integration, and headless Codex exact-SHA acceptance. User Stage approval/relay is removed; external-action receipts and human Web Writer transfer remain.
+- 2026-09-04 | Cursor and Antigravity use one platform-neutral two-site workflow: parent Coordinator, one Writer by default (second needs Codex pairing), independent Verifier, serial integration, exact-SHA Stage receipt, and pre-reviewed patch-bound closeout. No owner relay/Stage approval or parallel state source; scoped external gates and human Web Writer transfer remain.
 
 - 2026-09-03 | Section 3 is approved: `MKT-0..MKT-13` execute in dependency order and activate only with Section 4. Completion requires no High/Critical gaps or behavior drift plus restore/rebuild/parity proof; thresholds stay evidence-derived.
 
@@ -11,7 +11,7 @@ Entries are newest first.
 - 2026-08-26 | Parity freezes one HMAC owner window, pinned lanes, and one clock. Compare final facts/aligned snapshots; separate value, metadata, and schema drift. Minute XAU is no event oracle.
 - 2026-08-25 | Market Intelligence is Docker-native. One immutable image exposes isolated commands; persistent data/models/sessions/secrets stay mounted. Shadow-first cutover forbids dual Telegram-session owners.
 - 2026-08-25 | Market Facts first use an authenticated isolated private-network lane; product sync initially stays unchanged. General sync follows only after parity/failure/rollback/observability gates.
-- 2026-08-24 | Normal capture uses authoritative `source_id`, receipt availability, 30m channel reconciliation, and 6h graph+2h ancestors. The 2026-08-28 cutover alone supersedes timing; one-gram `NO_DATA` still requires proven absence and gap-free transport.
+- 2026-08-24 | Normal capture uses authoritative `source_id`, receipt availability, 30m reconciliation, and 6h graph+2h ancestors. Only the 2026-08-28 cutover supersedes timing; one-gram `NO_DATA` requires proven absence and gap-free transport.
 - 2026-08-23 | Split Queue is fail-closed: `primary` polls, one `executor` owns lanes/OTP, APIs produce. Preserve rows after no-op rehearsal; pools all/executor=15+10 and primary=12+8. Retain lease ACK, 1.05s cadence, freshness/retention/`sent` index.
 - 2026-08-22 | Release signatures ignore bytecode, not source. Quiet markets may publish bound `SAFE_NO_DATA`, then replace atomically. Queue forward redeploy keeps one owner; cutover evidence is separate. Iran nginx uses `www-data` ACL.
 - 2026-08-21 | Queue-v1/guarded inference authorized; six staging identities passed and shared fleet stays off. Web/Bot limits include overtime; tier-2 cannot publish. OTP quota replaces oldest session and flags 2/24h, 5/7d, 7/30d.

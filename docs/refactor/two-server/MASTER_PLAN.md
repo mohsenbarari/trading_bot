@@ -6,7 +6,8 @@
 منبع حقیقت انسانی: `docs/refactor/two-server/MASTER_PLAN.md`
 ترتیب ماشینی: `docs/refactor/two-server/execution-order.yaml`
 حاکمیت اجرا: `docs/refactor/two-server/EXECUTION_GOVERNANCE.md`
-مجری: Cursor Coordinator/Worker؛ مرجع پذیرش نهایی: `Codex Final Reviewer`
+مجری: Execution Coordinator/Worker از طریق Cursor یا Antigravity؛ مرجع پذیرش نهایی:
+`Codex Final Reviewer`
 دامنهٔ این شاخه: مستندات و طراحی؛ نه deploy، نه DNS، نه تغییر نقش، نه دادهٔ تولید
 
 این سند برنامهٔ مرجع مهاجرت پروژه از دو میزبان فنلاند به یک Finland Primary و
@@ -30,11 +31,15 @@
 
 ### مخاطب AI Agent
 
-هر Stage یک واحد مستقل اجراست. هر Cursor Worker در یک درخواست فقط یک Stage را
+هر Stage یک واحد مستقل اجراست. هر Worker در یک Assignment فقط یک Stage را
 اجرا می‌کند، مگر اینکه این سند صریحاً چند Stage را یک change set اتمیک اعلام کند.
 Coordinator می‌تواند حداکثر دو Worker داشته باشد، ولی نویسندهٔ دوم فقط با
 `PAIRING_APPROVED` از Codex و طبق `EXECUTION_GOVERNANCE.md` مجاز است.
 عبارت «کد نوشته شد» یا «تست واحد سبز شد» برای complete بودن کافی نیست.
+
+عنوان‌های تاریخی «Task Card فنی Cursor» در ادامهٔ این سند به قرارداد مشترک
+`Execution Worker` اشاره دارند و برای Workerهای Cursor و Antigravity یکسان‌اند؛
+نام عنوان، اختیار یا state جداگانه‌ای برای Cursor ایجاد نمی‌کند.
 
 هر Stage فقط وقتی `COMPLETE` است که هم‌زمان این موارد وجود داشته باشد:
 
@@ -53,7 +58,8 @@ PROPOSED → READY → IN_PROGRESS → COMPLETE_CANDIDATE → FINAL_REVIEW → C
                          ↘ BLOCKED | FAILED               ↘ REJECTED
 ```
 
-Cursor حق ندارد خروجی خود را `COMPLETE` کند، `BLOCKED` را با workaround پنهان
+هیچ Coordinator یا Worker اجرایی حق ندارد خروجی خود را `COMPLETE` کند، `BLOCKED`
+را با workaround پنهان
 کند یا برای سبزکردن gate داده/رویداد مصنوعی بسازد.
 
 ### ترتیب منابع حقیقت
@@ -76,7 +82,8 @@ Cursor حق ندارد خروجی خود را `COMPLETE` کند، `BLOCKED` را
 مالک پروژه در ۲۰۲۶-۰۹-۰۳ شروع و مدیریت Stageها و پذیرش نهایی تغییرات این پلن را
 به Codex Final Reviewer تفویض کرد. Stage استاندارد و غیرعملیاتی پس از کامل‌شدن
 dependencyها standing authorization دارد و به تأیید مرحله‌ای کاربر نیاز ندارد.
-Cursor حق self-approval ندارد و Stage فقط با receipt نهایی Codex `COMPLETE` می‌شود.
+Cursor و Antigravity حق self-approval ندارند و Stage فقط با receipt نهایی Codex
+`COMPLETE` می‌شود.
 
 اقدامات زیر علاوه بر پذیرش Stage، receipt محدود، زمان‌دار و مقید به SHA/target از
 Codex Final Reviewer می‌خواهند:
@@ -357,7 +364,7 @@ Stage تولیدی یک موج فقط با receipt محدود Codex Final Review
 
 ### dependency registry الزام‌آور
 
-Cursor پیش از شروع هر Stage باید تمام `depends_on`های آن را در
+Execution Coordinator پیش از شروع هر Stage باید تمام `depends_on`های آن را در
 [`execution-order.yaml`](execution-order.yaml) با state واقعی `COMPLETE` و evidence
 قابل‌خواندن ببیند. YAML تنها مرجع ماشینی order/dependency/permission flag است؛ این
 جدول خلاصهٔ انسانی است. dependency چرخه‌ای مجاز نیست و atomic group مجوز production
@@ -433,9 +440,10 @@ migration یا شرط لازم یک side effect آماده نباشد، سروی
 `P1-01` و `P1-02..P1-07` تا زمان تأیید artifactهای `P1-00` و تکمیل فریز `P1-00b` اجازهٔ تغییر behavior ندارند.
 `P1-07` با `DPL-10` یک change set عملیاتی است؛ جداسازی آن دو ممنوع است.
 
-### قرارداد اجرایی Cursor برای تمام Stageهای بخش ۱
+### قرارداد اجرایی AI Agent برای تمام Stageهای بخش ۱
 
-Cursor در آغاز هر Stage باید یک Task Card در مسیر زیر ایجاد یا تکمیل کند:
+Execution Coordinator در آغاز هر Stage باید یک Task Card در مسیر زیر ایجاد یا تکمیل
+کند:
 
 ```text
 docs/refactor/two-server/section-1/stages/P1-XX.md
@@ -483,11 +491,13 @@ Codex final-review receipt
 9. دسترسی read-only به runtime و دسترسی write به staging/production دو مجوز
    متفاوت‌اند. نبود مجوز با حدس یا fixture پنهان جبران نمی‌شود.
 10. اگر response، state، ordering، timeout، copy یا side effect جاری با سند فرق
-    داشت، Cursor آن را در Drift Register ثبت و Stage را `BLOCKED` می‌کند؛ انتخاب
+    داشت، Execution Coordinator آن را در Drift Register ثبت و Stage را `BLOCKED`
+    می‌کند؛ انتخاب
     یکی از دو رفتار فقط با تصمیم Codex Final Reviewer مجاز است.
 11. هر command و exit code، commit، image digest، migration version و checksum
     لازم برای بازتولید نتیجه در Evidence Index ثبت شود.
-12. Cursor حق اجرای Stage وابسته را فقط با `CODEX_FINAL_REVIEW_RECEIPT` مرحلهٔ
+12. هیچ Agent اجرایی حق اجرای Stage وابسته را بدون `CODEX_FINAL_REVIEW_RECEIPT`
+    مرحلهٔ
     قبلی و dependencyهای سبز دارد. Stage مستقل طبق governance می‌تواند موازی شود.
 
 ساختار artifactهای tracked این بخش:
@@ -3930,24 +3940,32 @@ Coordinator قبل از اجرا dependency/branch/status/base/lock را کنت�
 می‌کند. Worker source را inspect و در پایان diff/test bundle می‌سازد؛ Codex Final
 Reviewer آن را می‌پذیرد یا برای اصلاح بازمی‌گرداند. raw command log tracked نمی‌شود.
 
-## `P5-07` — تبدیل پلن به Cursor Skill و Rules
+## `P5-07` — بسته‌بندی پلن برای Cursor و Antigravity
 
 وضعیت: `COMPLETE در سطح بسته‌بندی؛ اجرای Stage استاندارد standing authorization دارد`
 
-این پروژه هم‌اکنون `.cursor/skills/` و `.cursor/rules/` دارد؛ بنابراین تبدیل
-ممکن است. خروجی پیشنهادی:
+بستهٔ اجرایی یک هستهٔ canonical و دو آداپتر پروژه‌ای دارد. Cursor از Skill/Rule
+خود و Antigravity از custom agent، Skill و workspace Rule رسمی استفاده می‌کند؛
+هیچ‌کدام plan یا Stage state موازی ایجاد نمی‌کنند. خروجی‌ها:
 
 ```text
 .cursor/skills/two-site-refactor/SKILL.md
 .cursor/rules/two-site-refactor-safety.mdc
+.agents/agents/two-site-coordinator.md
+.agents/agents/two-site-stage-worker.md
+.agents/agents/two-site-stage-verifier.md
+.agents/skills/two-site-refactor/SKILL.md
+.agents/rules/two-site-refactor-safety.md
 docs/refactor/two-server/EXECUTION_GOVERNANCE.md
+docs/refactor/two-server/ANTIGRAVITY_EXECUTION.md
 ```
 
 Skill فقط workflow و routing را نگه می‌دارد و متن این پلن را duplicate نمی‌کند.
 ویژگی‌های لازم:
 
-- نام `two-site-refactor` و invocation فقط صریح با `disable-model-invocation: true`
-- invocation ترجیحاً صریح برای اجرای Stage
+- نام مشترک `two-site-refactor`؛ ورود Cursor صریح و ورود Antigravity از
+  `two-site-coordinator` قابل‌انتخاب در Agent Manager
+- invocation صریح برای شروع یا resume اجرای Stage
 - الزام خواندن task card و source-of-truthهای Stage
 - ممنوعیت push به remote، merge به `main`، deploy، DNS و production بدون receipt لازم
 - یک Stage برای هر Worker و یک integration queue ترتیبی
@@ -3956,13 +3974,17 @@ Skill فقط workflow و routing را نگه می‌دارد و متن این پ
 - تست failure و rollback اجباری
 - ممنوعیت self-approval و complete اعلام‌کردن با fixture-only evidence
 
-Rule کوچک و همیشه‌اعمال فقط invariantهای ایمنی را نگه می‌دارد؛ جزئیات حجیم در
-Skill و docs باقی می‌ماند.
+Rule کوچک و scope-routed فقط invariantهای ایمنی را نگه می‌دارد؛ Coordinator
+Antigravity نیز آن را در startup صریح می‌خواند. جزئیات حجیم در Skill و docs باقی
+می‌ماند.
 
-مرجع قالب و discovery باید مستندات رسمی Cursor باشد:
+مرجع قالب و discovery باید مستندات رسمی هر دو پلتفرم باشد:
 
 - <https://cursor.com/docs/skills>
 - <https://cursor.com/docs/rules>
+- <https://antigravity.google/docs/ide/skills>
+- <https://antigravity.google/docs/rules-workflows>
+- <https://antigravity.google/docs/subagents>
 
 ## `P5-08` — پذیرش نهایی و handoff
 
@@ -4027,7 +4049,7 @@ Gate نهایی:
 8. deploy عادی و hotfix از artifact immutable، یک CLI و gate متناسب استفاده کنند.
 9. rollback و restore اندازه‌گیری و قابل اجرا باشند.
 10. repository، log، test output، data و backup retention enforce شوند.
-11. مستندات canonical و Cursor Skill به‌روز و قابل اجرا باشند.
+11. مستندات canonical و آداپترهای Cursor/Antigravity به‌روز و قابل اجرا باشند.
 12. هیچ server قدیمی، script قدیمی یا سند منسوخ source of truth پنهان نباشد.
 
 ---
@@ -4038,5 +4060,5 @@ Gate نهایی:
 - بسته‌بندی اولیهٔ طرح هیچ Stage فنی را `COMPLETE` نکرد؛ اجرای بعدی `P1-00` در `a0f22b7d` با Codex `APPROVE` به `COMPLETE` رسید و فریز باقی‌مانده به `P1-00b` منتقل شد.
 - هیچ secret یا manifest خصوصی را نخوانده یا ثبت نکرده است.
 - هیچ server inventory زنده، deploy، DNS، bucket write یا database write انجام نداده است.
-- Cursor Skill و Rule فقط برای اجرای کنترل‌شدهٔ Stage ساخته شده‌اند؛ هیچ Stage فنی،
+- Skill و Ruleهای Cursor/Antigravity فقط برای اجرای کنترل‌شدهٔ Stage ساخته شده‌اند؛ هیچ Stage فنی،
   production action یا server mutation انجام نشده است.

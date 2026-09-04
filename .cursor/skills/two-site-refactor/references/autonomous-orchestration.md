@@ -11,7 +11,10 @@ project owner must relay between.
 2. Create/validate the Work Assignment and registered isolated Stage worktree.
 3. Invoke `two-site-stage-worker` with all context needed from the clean subagent
    context: exact paths, IDs, base SHA, locks, deliverables, tests, and current receipt.
-4. Invoke `two-site-stage-verifier` on the resulting candidate.
+   The Worker uses the read-only fence `worker-check` at mutation/commit boundaries.
+4. After the clean Worker commit, run fenced `stage-advance --stage-head <sha>` to prove
+   ancestry and atomically bind the registry to that candidate; only then invoke
+   `two-site-stage-verifier`.
 5. On `CORRECTIONS_REQUIRED`, resume the same Worker agent with the complete findings.
    Repeat Worker → Verifier until verified or genuinely blocked.
 6. Integrate one verified candidate onto the exact integration HEAD and run integration
@@ -19,8 +22,14 @@ project owner must relay between.
 7. Run `scripts/two_site_codex_final_review.sh` with exact Stage, Assignment, bundle,
    base, and head. Read the generated JSON receipt.
 8. On `CHANGES_REQUIRED`, resume the same Worker with the Codex findings and repeat the
-   loop. On `APPROVE`, update ledger/state for only the reviewed SHA, close the worktree,
-   recompute the ready set, and continue. `REJECT` or `BLOCKED` stops the affected path.
+   loop. On `APPROVE`, stage only the minimal ledger/state/durable-receipt closeout, get
+   a patch-bound `STAGE_CLOSEOUT_PREACTION` receipt through
+   `scripts/two_site_codex_closeout_review.sh`, commit the unchanged index, and run its
+   `--verify-commit` gate. Only then close the worktree, release dependencies, recompute
+   the ready set, commit the selected dependency-ready non-external Stage's deterministic
+   `IN_PROGRESS` opening under standing authorization, advance the fence, prepare its
+   Assignment/worktree, bind it atomically with `stage-bind`, and continue. `REJECT` or
+   `BLOCKED` stops the affected path.
 
 The parent keeps returned subagent IDs so it can resume context rather than asking the
 project owner to copy reports. Background read-only reconnaissance may run while the

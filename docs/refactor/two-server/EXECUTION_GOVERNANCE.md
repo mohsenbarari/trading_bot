@@ -5,7 +5,9 @@
 منبع ترتیب: [`execution-order.yaml`](execution-order.yaml)
 
 این سند مرجع یکتای نقش‌ها، اختیار تأیید، موازی‌سازی، branch/worktree و تحویل
-بین Cursor و Codex است. جزئیات معماری و معیار فنی هر Stage همچنان در
+بین پلتفرم اجرایی و Codex است. Cursor و Google Antigravity دو آداپتر مجاز همین
+قراردادند و هیچ‌کدام Stage state یا پلن موازی ندارند. جزئیات معماری و معیار فنی
+هر Stage همچنان در
 [`MASTER_PLAN.md`](MASTER_PLAN.md) و Task Card همان Stage قرار دارد.
 
 ## تفویض اختیار
@@ -14,7 +16,7 @@
 `Codex Final Reviewer` تفویض کرد. پس از این تفویض:
 
 - شروع و پذیرش Stage به تأیید مرحله‌ای کاربر وابسته نیست؛
-- Cursor یا Coordinator حق تأیید خروجی خود را ندارد؛
+- Cursor، Antigravity یا Coordinator حق تأیید خروجی خود را ندارد؛
 - فقط receipt نهایی Codex می‌تواند Stage را `COMPLETE` کند؛
 - تصمیم فنی باز به Codex ارجاع می‌شود؛ رفتار موجود تا تصمیم نهایی حفظ می‌شود؛
 - کاربر همچنان می‌تواند scope یا نیازمندی کسب‌وکار را تغییر دهد، اما در زنجیرهٔ
@@ -26,10 +28,10 @@ DNS و فعال‌سازی Writer همچنان در Dashboard به‌صورت ا
 
 ## نقش‌ها
 
-### Cursor Coordinator
+### Execution Coordinator (Cursor یا Antigravity)
 
 - تنها مالک integration branch، dependency graph و صف ادغام است.
-- در حالت خودکار، همان Agent والد و بلندعمر Cursor است و Worker/Verifier را به‌شکل
+- در حالت خودکار، همان Agent والد و بلندعمر پلتفرم انتخابی است و Worker/Verifier را به‌شکل
   sub-agent اجرا می‌کند؛ این نقش در Chat جداگانه‌ای که به انتقال دستی نیاز داشته باشد
   اجرا نمی‌شود.
 - برای هر Worker یک Work Assignment با Stage، SHA، scope، lock و deadline می‌سازد.
@@ -37,7 +39,7 @@ DNS و فعال‌سازی Writer همچنان در Dashboard به‌صورت ا
 - خروجی Worker را بررسی مقدماتی می‌کند، اما آن را `COMPLETE` اعلام نمی‌کند.
 - هیچ Stage وابسته‌ای را پیش از receipt نهایی Codex آغاز نمی‌کند.
 
-### Cursor Worker
+### Execution Worker
 
 - در هر نوبت دقیقاً یک Stage یا یک زیرکار صریحاً واگذارشده را اجرا می‌کند.
 - فقط در branch/worktree و مسیرهای مجاز Assignment می‌نویسد.
@@ -68,8 +70,22 @@ PROPOSED → READY → IN_PROGRESS → COMPLETE_CANDIDATE
 `READY` یعنی dependencyها و Assignment معتبرند. `COMPLETE_CANDIDATE` فقط ادعای
 Worker است. Coordinator ابتدا candidate را به‌صورت ترتیبی روی integration branch
 اعمال و تست می‌کند؛ سپس Codex همان integration commit دقیق را review می‌کند.
-`COMPLETE` فقط پس از receipt نهایی Codex برای همان commit صادر می‌شود. تغییر حتی
-یک commit بعد از review، receipt را باطل می‌کند و review تازه لازم دارد.
+receipt نهایی Codex ابتدا فقط implementation commit دقیق را می‌پذیرد و به‌تنهایی
+dependencyها را آزاد نمی‌کند. Coordinator سپس تغییر مکانیکی ثبت وضعیت را در index
+آماده می‌کند و پیش از commit، آن staged diff را با
+`scripts/two_site_codex_closeout_review.sh` به Codex می‌دهد. receipt دوم باید به
+implementation SHA، Stage/Assignment، فهرست مسیرهای محدود و SHA-256 دقیق patch مقید
+باشد. فقط پس از commit شدن عین همان patch و موفقیت حالت `--verify-commit`، Stage برای
+dependencyها `COMPLETE` محسوب می‌شود.
+
+هر commit پس از review implementation، receipt را باطل می‌کند؛ تنها استثنا یک
+closeout child است که parent آن دقیقاً implementation SHA پذیرفته‌شده باشد، صرفاً
+`execution-order.yaml`، `CHANGE_LEDGER.md` و نسخهٔ durable همان receipt را تغییر دهد،
+پیشاپیش receipt نوع `STAGE_CLOSEOUT_PREACTION` برای hash دقیق patch داشته باشد و
+بعد از commit نیز به‌صورت ماشینی verify شود. closeout حق تغییر source، test، معماری،
+scope، dependency یا evidence محتوایی را ندارد. هر اختلاف path/hash/parent یا فایل
+اضافی، هر دو receipt را برای آزادسازی dependency نامعتبر می‌کند و review تازه لازم
+دارد.
 
 ## سیاست موازی‌سازی
 
@@ -134,6 +150,9 @@ Assignment می‌تواند lock جزئی بیشتری تعریف کند. نب�
 assignment_id: <unique-id>
 stage_id: <stage-id>
 role: WORKER
+orchestrator: <CURSOR|ANTIGRAVITY>
+orchestration_epoch: <positive-integer>
+supersedes: null
 base_sha: <full-sha>
 branch: <temporary-branch>
 allowed_paths: []
@@ -150,6 +169,69 @@ expires_at: <utc>
 
 تغییر scope، base، lock یا peer پس از شروع Assignment را باطل و re-issue را
 الزامی می‌کند.
+
+## Fence و تحویل مالکیت بین Cursor و Antigravity
+
+در هر لحظه فقط یک پلتفرم می‌تواند Execution Coordinator فعال باشد. مالکیت runtime
+در فایل ignored و اتمیک `.local/two-site-refactor/orchestrator-fence.json` با schema
+`orchestrator-fence.schema.json` ثبت می‌شود. این fence «lease مربوط به Web Writer»
+نیست، expiry یا auto-failover محصول ندارد و هیچ نقش سروری را عوض نمی‌کند؛ فقط مانع
+نوشتن هم‌زمان دو ابزار توسعه روی Git/worktree می‌شود.
+
+عملیات `claim`، `activate`، `check`، `worker-check`، `stage-advance`، `stage-bind`،
+`advance` و `release` با
+`scripts/two_site_orchestrator_fence.py` انجام می‌شود؛ Agent حق ندارد JSON fence را
+با ویرایش آزاد یا بدون file lock بسازد.
+
+هر fence یک `epoch` صعودی، platform، شناسهٔ instance، integration HEAD، Assignment
+فعال و SHA-256 canonical از فیلدهای تغییرناپذیر قرارداد Assignment دارد. هر Assignment
+جدید باید platform و همان epoch را داشته و scope/path/locks/tests/external-access/expiry
+آن با digest fence یکسان بماند. `base_sha` جایگزین باید دقیقاً HEAD ثبت‌شدهٔ worktree
+باشد. Coordinator
+و Worker پیش از هر mutation phase، `git add/commit`، integration یا تغییر registry باید
+`status=ACTIVE`، branch/head و تطابق epoch/instance را دوباره بخوانند. mismatch یا
+فایل مفقود برابر `BLOCKED` است؛ Agent قدیمی با Assignment epoch قبلی حق ادامه ندارد.
+بعد از هر integration/closeout commit، مالک فعلی فقط با `advance` و اثبات direct-child
+و worktree تمیز، fence و registry را زیر همان lock جلو می‌برد؛ تا پایان transaction
+write بعدی مسدود است. تحویل عادی ابتدا `release` و سپس `claim` پلتفرم بعدی است.
+
+`worker-check` هیچ فایل یا registry را تغییر نمی‌دهد و هنگام dirty بودن مشروع candidate
+فقط ownership، scope، expiry، branch و ancestry را می‌سنجد. پس از commit تمیز Worker،
+Coordinator باید `stage-advance` را اجرا کند؛ این فرمان descendant بودن SHA جدید نسبت
+به HEAD ثبت‌شده را اثبات و registry را اتمیک به `COMPLETE_CANDIDATE` می‌برد. Verifier
+فقط بعد از این reconciliation شروع می‌شود.
+
+پس از closeout commit تأییدشده و `advance` integration، Coordinator Assignment و
+Stage بعدی dependency-ready/non-external را به‌صورت قطعی انتخاب می‌کند، فقط transition
+آن به `IN_PROGRESS` را تحت standing start authorization کامیت و fence را `advance`
+می‌کند. سپس Assignment و worktree ثبت‌شده را آماده و `stage-bind` را اجرا می‌کند. این
+transaction با همان epoch، fence را موقتاً `RECONCILING`، Stage قبلی را محلی `CLOSED`
+و registry/fence را به Assignment جدید bind می‌کند. فرمان خود نیز COMPLETE بودن Stage
+قبلی، IN_PROGRESS بودن Stage جدید، کامل بودن dependencies و غیرproduction/
+غیرdestructive بودن آن را می‌سنجد. recovery فقط با همان instance و پارامترها مجاز
+است و automatic bind فقط `external_access: NONE` را می‌پذیرد.
+
+takeover کاملاً خودکار ولی fail-closed است و فقط با این ترتیب انجام می‌شود:
+
+1. runtime پلتفرم مقصد discovery و smoke read-only موفق داشته باشد؛
+2. integration worktree و worktree ثبت‌شدهٔ Worker قبلی تمیز باشند؛ Worker قبلی در
+   registry حالت running نداشته، HEAD/path/branch آن با registry منطبق و Assignment
+   منقضی نشده باشد؛
+3. فرمان `claim` زیر قفل فایل محلی fence را با epoch بعدی `RECONCILING` کند؛ فقط
+   همین فرمان در این state اجازهٔ نوشتن transaction را دارد؛
+4. همان transaction، digest scope قرارداد قبلی را در fence تثبیت کند، Assignment قبلی
+   را بدون حذف `SUPERSEDED` و Assignment جایگزین را با `supersedes`، Stage/worktree
+   موجود، head واقعی، platform و epoch جدید صادر کند؛
+5. همان transaction، registry را به نقش‌های `EXECUTION_COORDINATOR/EXECUTION_WORKER`،
+   platform/epoch و Assignment جدید reconcile کند؛
+6. فرمان پس از تطبیق مجدد همهٔ فایل‌ها fence را `ACTIVE` کند؛ crash در میانه آن را
+   `RECONCILING` نگه می‌دارد و فقط `activate` همان instance/epoch را recovery می‌کند.
+
+اگر Agent قبلی running/unknown باشد، یکی از worktreeها dirty باشد، قرارداد/expiry/path
+drift کند، discovery مقصد fail شود یا هر فایل نیمه‌به‌روز بماند، fence `BLOCKED` می‌شود
+و هیچ دو Writerی فعال نمی‌شوند.
+Cursor conversation ID به Antigravity منتقل نمی‌شود؛ فقط Git، Assignment، evidence و
+receiptهای پایدار handoff هستند.
 
 ## Bootstrap ورود به اجرا
 
@@ -175,6 +257,11 @@ Invocation نمونه برای Cursor:
 حالت اول ورودی عادی است. `role=worker` فقط برای recovery یک Assignment صادرشده
 باقی می‌ماند و مسیر روزمرهٔ اجرا نیست.
 
+ورود Antigravity از custom agent پروژه‌ای `two-site-coordinator` در `/agents` و با
+پیام resume ثبت‌شده در [`ANTIGRAVITY_EXECUTION.md`](ANTIGRAVITY_EXECUTION.md) انجام
+می‌شود. Coordinator، Worker و Verifier آن از `.agents/` discover می‌شوند و همان
+Assignment، registry، integration branch و Codex bridge را مصرف می‌کنند.
+
 ## بستهٔ Final Review
 
 Worker باید این موارد را به Coordinator تحویل دهد و Coordinator بدون تغییر به
@@ -193,11 +280,12 @@ Codex نتیجه را با قالب
 تست نامتناسب، drift رفتاری یا High/Critical gap باز، verdict را از `APPROVE`
 خارج می‌کند.
 
-## تحویل خودکار بین Cursor و Codex
+## تحویل خودکار بین پلتفرم اجرایی و Codex
 
-انتقال دستی گزارش توسط کاربر ممنوع است. Coordinator والد در Cursor باید:
+انتقال دستی گزارش توسط کاربر ممنوع است. Coordinator والد در Cursor یا Antigravity
+باید:
 
-1. Worker نویسنده را با sub-agent `two-site-stage-worker` اجرا و شناسهٔ آن را برای
+1. Worker نویسندهٔ پلتفرم را با sub-agent `two-site-stage-worker` اجرا و شناسهٔ آن را برای
    resume نگه دارد؛
 2. خروجی را مستقیماً به sub-agent مستقل و read-only با نام
    `two-site-stage-verifier` بدهد؛
@@ -206,6 +294,10 @@ Codex نتیجه را با قالب
    مسیر bundle اجرا کند؛
 4. receipt ماشینی `CODEX_FINAL_REVIEW.json` را بخواند و بدون واسطهٔ کاربر، verdict
    را به همان Worker برگرداند یا Stage پذیرفته‌شده را ببندد.
+5. در verdict برابر `APPROVE`، closeout محدود را stage کند، با
+   `scripts/two_site_codex_closeout_review.sh` برای patch دقیق pre-approve بگیرد، همان
+   index را commit و سپس commit حاصل را با حالت `--verify-commit` کنترل کند؛ پیش از
+   این کنترل Stage وابسته‌ای شروع نمی‌شود.
 
 پل review یک نشست headless و تازهٔ Codex را با sandbox فقط‌خواندنی اجرا می‌کند؛
 context آن از AGENTS، MemoryCustodian، منابع canonical و bundle دقیق بازسازی می‌شود.
@@ -213,14 +305,21 @@ wrapper فقط receipt را به‌صورت atomic در مسیر ignored هما�
 خرابی CLI/auth/schema، تغییر SHA یا receipt ناسازگار برابر `BLOCKED` است و هرگز
 approval ضمنی محسوب نمی‌شود.
 
+تغییر خودِ حاکمیت، agent adapter یا bridge یک Stage محصولی نیست و نباید داخل
+Assignment جاری پنهان شود. این تغییر در commit مستقل و bundle مستقل با
+`scripts/two_site_codex_governance_review.sh` بازبینی می‌شود؛ فقط receipt نوع
+`EXECUTION_GOVERNANCE_AMENDMENT` روی exact SHA آن را به زیرساخت pre-reviewed تبدیل
+می‌کند و هیچ Stage completion یا اقدام خارجی اعطا نمی‌کند.
+
 چون این review، diff و evidence انتخاب‌شدهٔ ریپازیتوری خصوصی را برای OpenAI Codex
 ارسال می‌کند، اولین اجرا نیازمند اجازهٔ صریح و یک‌بارهٔ مالک پروژه با scope دقیق
 `TWO_SITE_REFACTOR_SOURCE_AND_EVIDENCE_TO_OPENAI_CODEX` است. این اجازه فقط در مسیر
 ignored محلی `.local/two-site-refactor/authorizations/CODEX_SOURCE_REVIEW.md` ثبت
 می‌شود و هیچ Agentی حق استنتاج یا ساخت خودسرانهٔ آن از روی تفویض کلی اجرا را ندارد.
 
-راهنمای کامل چرخه در
-`.cursor/skills/two-site-refactor/references/autonomous-orchestration.md` است. کاربر
+راهنمای Cursor در
+`.cursor/skills/two-site-refactor/references/autonomous-orchestration.md` و راهنمای
+Antigravity در [`ANTIGRAVITY_EXECUTION.md`](ANTIGRAVITY_EXECUTION.md) است. کاربر
 فقط milestone و blocker واقعی خارج از اختیارات مصوب را می‌بیند؛ در handoff مکانیکی
 Worker، Coordinator و Reviewer نقشی ندارد.
 

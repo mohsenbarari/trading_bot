@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "epoch",
+    "status",
+    "binding_kind",
+    "platform",
+    "coordinator_instance_id",
+    "integration_branch",
+    "integration_head_sha",
+    "previous_assignment_id",
+    "active_assignment_id",
+    "assignment_base_sha",
+    "assignment_integration_head_at_issue",
+    "immutable_contract_sha256",
+    "claimed_at_utc",
+    "supersedes"
+  ],
+  "properties": {
+    "schema_version": {"type": "string", "const": "1.0"},
+    "epoch": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["RECONCILING", "ACTIVE", "RELEASED", "BLOCKED"]},
+    "binding_kind": {"enum": ["TAKEOVER", "STAGE"]},
+    "platform": {"enum": ["CURSOR", "ANTIGRAVITY"]},
+    "coordinator_instance_id": {"type": "string", "minLength": 1},
+    "integration_branch": {"type": "string", "const": "refactor/two-site-architecture"},
+    "integration_head_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "previous_assignment_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+    "active_assignment_id": {
+      "anyOf": [
+        {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+        {"type": "null"}
+      ]
+    },
+    "assignment_base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "assignment_integration_head_at_issue": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "immutable_contract_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "claimed_at_utc": {"type": "string", "format": "date-time"},
+    "supersedes": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["epoch", "platform", "coordinator_instance_id"],
+      "properties": {
+        "epoch": {"type": "integer", "minimum": 1},
+        "platform": {"enum": ["CURSOR", "ANTIGRAVITY"]},
+        "coordinator_instance_id": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

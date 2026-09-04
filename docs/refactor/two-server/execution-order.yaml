@@ -11,8 +11,9 @@ execution_status: AUTHORIZED_CODEX_GATED
 authorization:
   delegated_by: project_owner
   delegated_at: "2026-09-03"
-  coordinator: CURSOR_COORDINATOR
-  worker: CURSOR_WORKER
+  coordinator: EXECUTION_COORDINATOR
+  worker: EXECUTION_WORKER
+  supported_orchestrators: [CURSOR, ANTIGRAVITY]
   final_reviewer: CODEX_FINAL_REVIEWER
   user_stage_approval_required: false
   user_stage_acceptance_required: false

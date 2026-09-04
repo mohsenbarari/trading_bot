@@ -42,6 +42,11 @@ read only when the canonical plan explicitly asks for historical comparison.
 
 - Require an explicit role, Stage ID and valid Work Assignment. A dependency-ready,
   non-external Stage uses the standing authorization in `execution-order.yaml`.
+- Require one ACTIVE orchestrator fence matching platform `CURSOR`, the current
+  Coordinator instance, integration HEAD, Assignment, epoch and immutable-contract digest
+  before every mutation or commit. A takeover requires clean registered worktrees and
+  supersedes the old Assignment through the fail-closed sequence in execution governance;
+  stale epochs cannot resume.
 - Verify every `depends_on` Stage is `COMPLETE` with evidence; design approval is not completion.
 - Record branch, base SHA, worktree status, connectivity, Writer, release/config/schema and
   authority state relevant to the Stage.
@@ -71,6 +76,8 @@ Market data, checkpoint reset, evidence deletion or fixture-only High/Critical p
 2. Capture or refresh the current baseline before implementation.
 3. Make only the Stage-scoped change. Preserve Web/Bot surface differences and existing
    behavior unless an approved defect/change ID explicitly authorizes a product change.
+   Use read-only `two_site_orchestrator_fence.py worker-check` before mutation and
+   add/commit boundaries; legitimate dirtiness is reported but never written to registry.
 4. Run success, failure and rollback/recovery verification proportional to risk.
 5. Store machine-readable, redacted evidence outside repository `tmp` under the approved
    retention class; never store credentials or raw sensitive payloads.
@@ -82,7 +89,9 @@ Market data, checkpoint reset, evidence deletion or fixture-only High/Critical p
 
 1. Verify the Assignment, locks, dependency receipts and scope, then invoke the
    `two-site-stage-worker` subagent with complete context. Keep its returned agent ID.
-2. Invoke the read-only `two-site-stage-verifier`. Route findings back by resuming the same
+2. After the clean Worker commit, run fenced `stage-advance --stage-head <sha>` to prove
+   ancestry and update the Stage registry atomically. Then invoke the read-only
+   `two-site-stage-verifier`. Route findings back by resuming the same
    Worker; do not ask the project owner to relay them.
 3. Apply one verified candidate at a time onto the current integration HEAD; this is
    candidate assembly, not Stage approval or promotion to `main`.
@@ -93,9 +102,13 @@ Market data, checkpoint reset, evidence deletion or fixture-only High/Critical p
    an Agent inference or a general execution grant.
 6. For `CHANGES_REQUIRED`, resume the same Worker with every finding and repeat Worker →
    Verifier → integration → Codex. `REJECT` or `BLOCKED` stops the affected path.
-7. Only after `APPROVE`, append the receipt to `CHANGE_LEDGER.md`, mark the exact integration
-   commit `COMPLETE`, remove the closed Stage worktree within its retention window, and
-   recompute the ready set.
+7. Only after `APPROVE`, stage the minimal ledger/state/durable-receipt closeout and run
+   `scripts/two_site_codex_closeout_review.sh` to obtain a Codex pre-action receipt bound
+   to the exact staged-patch SHA-256. Commit that unchanged index, run the script's
+   `--verify-commit` gate, then remove the closed Stage worktree and recompute the ready
+   set. Commit and fence-advance the deterministic `IN_PROGRESS` opening of the selected
+   ready non-external Stage, then use `stage-bind` to atomically move fence/registry to
+   its prepared Assignment. Dependents remain blocked until post-commit verification passes.
 8. Continue automatically only through authorized non-external Stages. Promote integration
    to `main` only at an approved branch barrier with a separate exact head/base Codex receipt.
 

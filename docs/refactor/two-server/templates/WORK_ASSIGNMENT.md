@@ -4,6 +4,9 @@
 stage_id: <STAGE_ID>
 role: WORKER
 status: READY
+orchestrator: <CURSOR|ANTIGRAVITY>
+orchestration_epoch: <POSITIVE_INTEGER>
+supersedes: null
 base_sha: <FULL_SHA>
 branch: refactor/stage/<STAGE_ID>-<slug>
 worktree_registry_id: <ID>
@@ -17,7 +20,7 @@ failure_tests: []
 rollback_test: null
 external_access: NONE
 expires_at: <UTC>
-issued_by: CURSOR_COORDINATOR
+issued_by: EXECUTION_COORDINATOR
 ```
 
 ## Dependency receipts

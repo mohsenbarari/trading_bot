@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "updated_at_utc",
+    "integration_branch",
+    "integration_head_sha",
+    "stage_id",
+    "assignment_id",
+    "loop_state",
+    "coordinator_conversation_id",
+    "worker",
+    "verifier",
+    "last_receipt_path"
+  ],
+  "properties": {
+    "schema_version": {"type": "string", "const": "1.0"},
+    "updated_at_utc": {"type": "string", "format": "date-time"},
+    "integration_branch": {"type": "string", "const": "refactor/two-site-architecture"},
+    "integration_head_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "stage_id": {"type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9]*-[0-9]+[a-z]?$"},
+    "assignment_id": {"type": ["string", "null"]},
+    "loop_state": {
+      "enum": [
+        "RECOVERING",
+        "WORKER_RUNNING",
+        "VERIFYING",
+        "CORRECTING",
+        "INTEGRATING",
+        "CODEX_REVIEW",
+        "CLOSEOUT_REVIEW",
+        "CLOSEOUT_COMMIT",
+        "CLOSEOUT_VERIFY",
+        "COMPLETE",
+        "BLOCKED"
+      ]
+    },
+    "coordinator_conversation_id": {"type": ["string", "null"]},
+    "worker": {
+      "allOf": [
+        {"$ref": "#/$defs/subagent"},
+        {"properties": {"type_name": {"const": "two-site-stage-worker"}}}
+      ]
+    },
+    "verifier": {
+      "allOf": [
+        {"$ref": "#/$defs/subagent"},
+        {"properties": {"type_name": {"const": "two-site-stage-verifier"}}}
+      ]
+    },
+    "last_receipt_path": {"type": ["string", "null"]}
+  },
+  "$defs": {
+    "subagent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type_name", "conversation_id", "assignment_id", "state"],
+      "properties": {
+        "type_name": {"type": "string"},
+        "conversation_id": {"type": ["string", "null"]},
+        "assignment_id": {"type": ["string", "null"]},
+        "state": {"enum": ["NOT_STARTED", "RUNNING", "IDLE", "KILLED", "UNKNOWN"]}
+      }
+    }
+  }
+}

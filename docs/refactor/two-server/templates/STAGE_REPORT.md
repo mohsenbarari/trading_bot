@@ -41,5 +41,5 @@ Include success, failure and rollback. High/Critical acceptance cannot rely only
 - Recommended next state:
 - Codex Final Review receipt / exact reviewed SHA:
 
-Cursor may recommend `COMPLETE`, but only `CODEX_FINAL_REVIEWER` may approve the
+A Worker may recommend `COMPLETE`, but only `CODEX_FINAL_REVIEWER` may approve the
 exact commit and change the authoritative Stage state to `COMPLETE`.

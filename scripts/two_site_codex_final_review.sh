@@ -26,7 +26,8 @@ require_command() {
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a Git repository"
 repo_root="$(realpath -e "$repo_root")"
-schema_path="$repo_root/.cursor/skills/two-site-refactor/assets/final-review.schema.json"
+schema_rel="docs/refactor/two-server/templates/final-review.schema.json"
+schema_path="$repo_root/$schema_rel"
 source_authorization="$repo_root/.local/two-site-refactor/authorizations/CODEX_SOURCE_REVIEW.md"
 codex_bin="$(command -v codex 2>/dev/null || true)"
 check_only=false
@@ -80,6 +81,11 @@ validate_source_authorization() {
 if $check_only; then
   "$codex_bin" login status >/dev/null 2>&1 || die "Codex CLI is not authenticated"
   validate_source_authorization || die "explicit source-review authorization is missing: $source_authorization"
+  test -z "$(git -C "$repo_root" status --porcelain=v1 --untracked-files=all)" || \
+    die "repository must be fully clean, including untracked files"
+  git -C "$repo_root" cat-file -e "HEAD:${schema_rel}" || die "review schema is not tracked at HEAD"
+  git -C "$repo_root" cat-file -e "HEAD:scripts/two_site_codex_final_review.sh" || \
+    die "review bridge is not tracked at HEAD"
   printf 'READY: Codex CLI, authentication, Git, jq, and review schema are available.\n'
   exit 0
 fi
@@ -108,8 +114,11 @@ done
 git -C "$repo_root" cat-file -e "${base_sha}^{commit}" || die "base commit does not exist"
 git -C "$repo_root" cat-file -e "${head_sha}^{commit}" || die "head commit does not exist"
 git -C "$repo_root" merge-base --is-ancestor "$base_sha" "$head_sha" || die "base is not an ancestor of head"
-git -C "$repo_root" diff --quiet || die "tracked worktree changes must be clean before review"
-git -C "$repo_root" diff --cached --quiet || die "staged changes must be clean before review"
+test -z "$(git -C "$repo_root" status --porcelain=v1 --untracked-files=all)" || \
+  die "repository must be fully clean, including staged and untracked files"
+git -C "$repo_root" cat-file -e "${head_sha}:${schema_rel}" || die "review schema is not tracked at reviewed head"
+git -C "$repo_root" cat-file -e "${head_sha}:scripts/two_site_codex_final_review.sh" || \
+  die "review bridge is not tracked at reviewed head"
 grep -Fq "$head_sha" "$bundle_abs/commit.txt" || die "commit.txt does not identify the reviewed head"
 grep -Fq "$head_sha" "$bundle_abs/FINAL_REVIEW_REQUEST.md" || die "review request does not identify the reviewed head"
 grep -Fq "$base_sha" "$bundle_abs/FINAL_REVIEW_REQUEST.md" || die "review request does not identify the integration base"
