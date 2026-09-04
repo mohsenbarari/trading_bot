@@ -15,6 +15,8 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy import Boolean, Column, DateTime, Enum, Integer, String, create_engine, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
+from tests.test_p1_00_characterization_network_isolation import install_p1_00_network_fence
+
 from bot.handlers.admin_users import handle_user_toggle_account_status
 from core.enums import NotificationCategory, NotificationLevel, UserAccountStatus, UserRole
 from core.services import user_account_status_service as status_service
@@ -27,6 +29,8 @@ from models.offer_request import (
 )
 from models.telegram_notification_outbox import TelegramNotificationOutbox
 from models.user import UserRole as ModelUserRole
+
+install_p1_00_network_fence()
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INV_DIR = REPO_ROOT / "docs/refactor/two-server/section-1/inventory"
@@ -443,7 +447,34 @@ class P100AdminAccountStatusCharacterizationTests(unittest.IsolatedAsyncioTestCa
         self.assertIsNotNone(reloaded.deactivated_at)
         self.assertEqual(fresh.query(Notification).count(), 1)
         self.assertEqual(fresh.query(TelegramNotificationOutbox).count(), 0)
+        retry_db = DurableSession(fresh)
+        retry_started = _service_patches()
+        for item in retry_started:
+            item.start()
+        try:
+            with _hermetic_network() as probe:
+                retry = await status_service.transition_user_account_status(
+                    retry_db, reloaded, UserAccountStatus.INACTIVE
+                )
+                _assert_no_localhost_redis(self, probe)
+        finally:
+            for item in retry_started:
+                item.stop()
+        self.assertFalse(retry.changed)
+        self.assertEqual(retry_db.commit_count, 0)
+        self.assertEqual(fresh.query(Notification).count(), 1)
+        self.assertEqual(fresh.query(TelegramNotificationOutbox).count(), 0)
+        self.assertEqual(fresh.query(OfferRequest).one().result_status, OfferRequestStatus.OVERTIME_INVALIDATED)
+        again, later = _reload_user(Session)
+        self.assertEqual(again.account_status, UserAccountStatus.INACTIVE)
+        self.assertEqual(later.query(Notification).count(), 1)
+        self.assertEqual(later.query(TelegramNotificationOutbox).count(), 0)
+        self.assertEqual(
+            later.query(OfferRequest).one().result_status,
+            OfferRequestStatus.OVERTIME_INVALIDATED,
+        )
         fresh.close()
+        later.close()
         engine.dispose()
 
     async def test_handler_denied_paths_do_not_write(self):
@@ -527,6 +558,7 @@ class P100AdminAccountStatusCharacterizationTests(unittest.IsolatedAsyncioTestCa
         self.assertIn("outbox", talk)
         self.assertIn("overtime", talk)
         self.assertIn("session-bound", talk)
+        self.assertIn("missing outbox", talk)
         self.assertNotIn("service writes then handler commits", talk)
         self.assertNotIn("remain in memory", talk)
         self.assertEqual(contract["events_outbox"]["status"], "APPLICABLE")

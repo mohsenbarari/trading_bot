@@ -16,12 +16,15 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
+from tests.test_p1_00_characterization_network_isolation import install_p1_00_network_fence
 from core.services.offer_request_ledger_service import (
     OfferRequestLedgerCommand,
     OfferRequestLedgerResult,
     create_offer_request_ledger_entry,
     load_offer_request_by_idempotency,
 )
+
+install_p1_00_network_fence()
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INV_DIR = REPO_ROOT / "docs/refactor/two-server/section-1/inventory"
@@ -76,11 +79,25 @@ ON offer_requests (request_home_server, idempotency_key);
 
 
 class _AsyncSessionAdapter:
-    def __init__(self, sync_session):
+    def __init__(self, sync_session, *, after_lookup=None, before_commit=None, event_log=None, worker_id=None):
         self._session = sync_session
+        self.after_lookup = after_lookup
+        self.before_commit = before_commit
+        self.event_log = event_log
+        self.worker_id = worker_id
+        self._lookups = 0
+
+    def _note(self, kind):
+        if self.event_log is not None:
+            self.event_log.append((self.worker_id, kind, self._lookups))
 
     async def execute(self, statement):
-        return self._session.execute(statement)
+        result = self._session.execute(statement)
+        self._lookups += 1
+        self._note("lookup")
+        if self.after_lookup and self._lookups == 1:
+            await self.after_lookup()
+        return result
 
     def add(self, obj):
         self._session.add(obj)
@@ -89,6 +106,10 @@ class _AsyncSessionAdapter:
         self._session.flush()
 
     async def commit(self):
+        self._note("pre_commit")
+        if self.before_commit:
+            await self.before_commit()
+        self._note("commit")
         self._session.commit()
 
     async def rollback(self):
@@ -166,11 +187,24 @@ class P100RequestConcurrentRestartTests(unittest.IsolatedAsyncioTestCase):
             db_path = str(Path(tmp) / "request-ledger.sqlite")
             engine = _make_engine(db_path)
             Session = sessionmaker(bind=engine, future=True, expire_on_commit=False)
-            barrier = asyncio.Barrier(2)
+            lookup_barrier = asyncio.Barrier(2)
+            commit_barrier = asyncio.Barrier(2)
+            events: list[tuple[str, str, int]] = []
 
-            async def worker():
-                db = _AsyncSessionAdapter(Session())
-                await barrier.wait()
+            async def after_lookup():
+                await lookup_barrier.wait()
+
+            async def before_commit():
+                await commit_barrier.wait()
+
+            async def worker(wid: str):
+                db = _AsyncSessionAdapter(
+                    Session(),
+                    after_lookup=after_lookup,
+                    before_commit=before_commit,
+                    event_log=events,
+                    worker_id=wid,
+                )
                 try:
                     result = await create_offer_request_ledger_entry(db, _command())
                     await db.commit()
@@ -186,8 +220,18 @@ class P100RequestConcurrentRestartTests(unittest.IsolatedAsyncioTestCase):
                 finally:
                     db.close()
 
-            first, second = await asyncio.gather(worker(), worker())
+            first, second = await asyncio.gather(worker("a"), worker("b"))
             engine.dispose()
+            first_lookup = {}
+            first_commit_index = None
+            for index, (wid, kind, _count) in enumerate(events):
+                if kind == "lookup" and wid not in first_lookup:
+                    first_lookup[wid] = index
+                if kind == "commit" and first_commit_index is None:
+                    first_commit_index = index
+            self.assertEqual(set(first_lookup), {"a", "b"})
+            self.assertIsNotNone(first_commit_index)
+            self.assertLess(max(first_lookup.values()), first_commit_index)
             outcomes = {first[0], second[0]}
             self.assertEqual(_row_count(db_path), 1)
             self.assertTrue(outcomes & {"winner"})
@@ -261,8 +305,11 @@ class P100RequestConcurrentRestartTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(restart["applicability"], "ELIGIBLE")
         self.assertIn("test_request_two_concurrent_commands_injects", concurrent["evidence_refs"][0])
         self.assertIn("test_request_process_restart_injects", restart["evidence_refs"][0])
-        self.assertIn("asyncio.gather", Path(__file__).read_text(encoding="utf-8"))
-        self.assertIn("subprocess.run", Path(__file__).read_text(encoding="utf-8"))
+        source = Path(__file__).read_text(encoding="utf-8")
+        self.assertIn("asyncio.gather", source)
+        self.assertIn("after_lookup", source)
+        self.assertIn("before_commit", source)
+        self.assertIn("subprocess.run", source)
 
 
 def _child_main() -> None:

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from tests.test_p1_00_characterization_network_isolation import install_p1_00_network_fence
+
+install_p1_00_network_fence()
+
 import ast
 import inspect
 import json

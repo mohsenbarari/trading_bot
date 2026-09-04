@@ -3,7 +3,7 @@
   "generated_from_commit": "aa2c06a573dfd60051e142146f55d7965f2242a7",
   "generated_date": "2026-09-03 UTC",
   "assignment_id": "WA-P1-00-SCOPE-20260903-002",
-  "scope": "Normalized contracts, 465-seed mapping, origin interactions with executed policy effects or P1-00b transfer, REQUEST durable collision evidence, and a canonical-plan amendment adding P1-00b.",
+  "scope": "Normalized contracts, 465-seed mapping, origin interactions transferred to P1-00b, REQUEST durable collision evidence with post-lookup pre-commit yield, and a canonical-plan amendment adding P1-00b.",
   "provenance": {
     "contract_source": "Repository code and behavioral tests at the Assignment base SHA.",
     "live_host_reobservation": "NOT_REOBSERVED",
@@ -342,7 +342,8 @@
       "timeouts_retries": {
         "status": "APPLICABLE",
         "rules": [
-          "Fresh-session same-status retry returns changed=False with no extra notification, outbox, or overtime write. Both activation and deactivation persist status fields after the inner commit."
+          "Fresh-session same-status retry after a successful transition returns changed=False with no extra notification, outbox, or overtime write. Both activation and deactivation persist status fields after the inner commit.",
+          "After injected outbox failure, a fresh-session same-status retry also returns changed=False. Status, notification, and overtime stay as committed; the missing Telegram outbox is not repaired and no extra commit or external side effect is added."
         ]
       },
       "idempotency_key": {
@@ -352,7 +353,7 @@
       "failure_cases": {
         "status": "APPLICABLE",
         "rules": [
-          "Missing actor, non-admin actor, or unauthorized target is denied with no transition, no notify, no outbox, and no commit. If outbox enqueue raises after the inner notification commit, the notification, overtime invalidation, and mapped User status fields stay committed and the outbox row is not persisted."
+          "Missing actor, non-admin actor, or unauthorized target is denied with no transition, no notify, no outbox, and no commit. If outbox enqueue raises after the inner notification commit, the notification, overtime invalidation, and mapped User status fields stay committed and the outbox row is not persisted. Fresh-session retry then leaves that missing outbox permanently missing."
         ]
       },
       "reference_evidence": {
@@ -5699,9 +5700,9 @@
         "P1-06"
       ],
       "evidence_status": "OBSERVED_LOCALLY",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change.",
+      "reason": "P1-00 can call origin-free invitation policy and persist a request ledger row in isolation. Those calls do not join admission with Offer and Request provenance on one live path. Origin-pair CONCURRENT used a barrier only before the operation and a non-suspending session adapter, so overlap is unproven.",
       "required_evidence": [
-        "P1-00b must execute or leave unresolved the leftover origin policy effects before implementation."
+        "P1-00b must execute a real combined Web/Bot path or leave every origin interaction unresolved before implementation."
       ],
       "forbidden_shortcuts": [
         "Mark the cell EVIDENCED without isolated sqlite plus child-process proof",
@@ -6143,13 +6144,15 @@
     "cross_family_failure_evidence": 0,
     "scenario_work_item": "READY_FOR_CODEX_FINAL_REVIEW",
     "target_result": "NOT_RUN",
-    "complete_forbidden_until": "Stage remains IN_PROGRESS. P1-00 amended exit gate has no unresolved High. Leftover current-behavior freeze is owned by new Stage P1-00b before any implementation. Assignment WA-P1-00-SCOPE-20260903-002 authorizes P1-00b machine-graph edges in this Worker commit. Do not mark any Stage COMPLETE.",
+    "complete_forbidden_until": "Stage remains IN_PROGRESS. P1-00 amended exit gate has no unresolved High. All required origin interactions and leftover freeze are owned by P1-00b. Possible prior localhost Redis contact is NOT_REINSPECTED. Assignment WA-P1-00-SCOPE-20260903-002 authorizes P1-00b machine-graph edges. Do not mark any Stage COMPLETE.",
     "family_boundary_evidenced_cells": 35,
     "family_boundary_named_blockers": 20,
     "filename_only_failure_evidence": 0,
     "unrouted_named_blockers": 0,
     "named_high_blockers": 22,
-    "unresolved_high_in_p1_00_exit_gate": 0
+    "unresolved_high_in_p1_00_exit_gate": 0,
+    "prior_localhost_redis_contact": "NOT_REINSPECTED",
+    "origin_equivalent_cells": 0
   },
   "composed_eligibility": [
     {
@@ -15073,7 +15076,7 @@
           "P1-04",
           "P1-06"
         ],
-        "required_evidence": "P1-00b must execute or leave unresolved the leftover origin policy effects before implementation.",
+        "required_evidence": "P1-00b must execute or leave unresolved every required origin interaction before implementation.",
         "forbidden_shortcuts": [
           "Mark the cell EVIDENCED without isolated sqlite plus child-process proof",
           "Assign ownership to P1-04 or P1-06",
@@ -15082,8 +15085,8 @@
         ],
         "disposition": "TRANSFERRED_TO_P1_00B",
         "status": "TRANSFERRED_TO_P1_00B",
-        "reason": "Unlinked-Bot, expiry/terminal, policy snapshot, notification audience, and the three failure-phase origin cells have no executed combined policy path in P1-00.",
-        "observed_fact": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change.",
+        "reason": "Every required Offer/Request-origin interaction lacks a live combined admission-plus-provenance-plus-mutation path in P1-00.",
+        "observed_fact": "P1-00 can call origin-free invitation policy and persist a request ledger row in isolation. Those calls do not join admission with Offer and Request provenance on one live path. Origin-pair CONCURRENT used a barrier only before the operation and a non-suspending session adapter, so overlap is unproven.",
         "unauthorized_reason": "Assignment external_access is NONE and product mutation is forbidden. P1-00 exit gate is amended so this leftover freeze is a new non-implementation Stage P1-00b before any consolidation implementation."
       },
       {
@@ -24730,55 +24733,65 @@
       "offer_origin": "WEBAPP",
       "request_origin": "WEBAPP",
       "interaction": "OUTCOME-SUCCESS",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry",
-      "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: each origin pair persists a request ledger row whose request_home_server is the Offer home from offer_home_server_for_source and whose request surface and server match the Request origin.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__OUTCOME-REJECT",
       "offer_origin": "WEBAPP",
       "request_origin": "WEBAPP",
       "interaction": "OUTCOME-REJECT",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "evaluate_invitation_bot_access",
-      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
-      "equivalence_reason": "Policy effect executed: accountant admission is denied for every Offer/Request origin pair; the live function has no origin input so the reject effect is the same class.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__PERMISSION-DENIED",
       "offer_origin": "WEBAPP",
       "request_origin": "WEBAPP",
       "interaction": "PERMISSION-DENIED",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "evaluate_invitation_bot_access",
-      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
-      "equivalence_reason": "Policy effect executed: tier-2 and accountant permission-denied is the same live admission decision for every origin pair.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__RETRY",
       "offer_origin": "WEBAPP",
       "request_origin": "WEBAPP",
       "interaction": "RETRY",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry.same_key",
-      "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: the same origin-pair idempotency key replays as duplicate_replay=True and does not add a second ledger row.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__CONCURRENT",
       "offer_origin": "WEBAPP",
       "request_origin": "WEBAPP",
       "interaction": "CONCURRENT",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry.overlapping_same_identity",
-      "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: two overlapping asyncio tasks with the same Offer-home plus Request-origin identity produce one committed row and a replay or loser; cardinality stays one.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__UNLINKED-BOT",
@@ -24791,7 +24804,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__EXPIRY-CANCEL-REPUBLISH-TERMINAL",
@@ -24804,7 +24817,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__POLICY-SNAPSHOT",
@@ -24817,7 +24830,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__NOTIFICATION",
@@ -24830,7 +24843,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__FAILURE-BEFORE-COMMIT",
@@ -24843,7 +24856,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
@@ -24856,7 +24869,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__SIDE-EFFECT-RETRY",
@@ -24869,62 +24882,72 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__OUTCOME-SUCCESS",
       "offer_origin": "WEBAPP",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "OUTCOME-SUCCESS",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry",
-      "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: each origin pair persists a request ledger row whose request_home_server is the Offer home from offer_home_server_for_source and whose request surface and server match the Request origin.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__OUTCOME-REJECT",
       "offer_origin": "WEBAPP",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "OUTCOME-REJECT",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "evaluate_invitation_bot_access",
-      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
-      "equivalence_reason": "Policy effect executed: accountant admission is denied for every Offer/Request origin pair; the live function has no origin input so the reject effect is the same class.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__PERMISSION-DENIED",
       "offer_origin": "WEBAPP",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "PERMISSION-DENIED",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "evaluate_invitation_bot_access",
-      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
-      "equivalence_reason": "Policy effect executed: tier-2 and accountant permission-denied is the same live admission decision for every origin pair.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__RETRY",
       "offer_origin": "WEBAPP",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "RETRY",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry.same_key",
-      "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: the same origin-pair idempotency key replays as duplicate_replay=True and does not add a second ledger row.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__CONCURRENT",
       "offer_origin": "WEBAPP",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "CONCURRENT",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry.overlapping_same_identity",
-      "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: two overlapping asyncio tasks with the same Offer-home plus Request-origin identity produce one committed row and a replay or loser; cardinality stays one.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__UNLINKED-BOT",
@@ -24937,7 +24960,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__EXPIRY-CANCEL-REPUBLISH-TERMINAL",
@@ -24950,7 +24973,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__POLICY-SNAPSHOT",
@@ -24963,7 +24986,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__NOTIFICATION",
@@ -24976,7 +24999,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__FAILURE-BEFORE-COMMIT",
@@ -24989,7 +25012,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
@@ -25002,7 +25025,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__SIDE-EFFECT-RETRY",
@@ -25015,62 +25038,72 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__OUTCOME-SUCCESS",
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "WEBAPP",
       "interaction": "OUTCOME-SUCCESS",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry",
-      "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: each origin pair persists a request ledger row whose request_home_server is the Offer home from offer_home_server_for_source and whose request surface and server match the Request origin.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__OUTCOME-REJECT",
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "WEBAPP",
       "interaction": "OUTCOME-REJECT",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "evaluate_invitation_bot_access",
-      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
-      "equivalence_reason": "Policy effect executed: accountant admission is denied for every Offer/Request origin pair; the live function has no origin input so the reject effect is the same class.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__PERMISSION-DENIED",
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "WEBAPP",
       "interaction": "PERMISSION-DENIED",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "evaluate_invitation_bot_access",
-      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
-      "equivalence_reason": "Policy effect executed: tier-2 and accountant permission-denied is the same live admission decision for every origin pair.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__RETRY",
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "WEBAPP",
       "interaction": "RETRY",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry.same_key",
-      "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: the same origin-pair idempotency key replays as duplicate_replay=True and does not add a second ledger row.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__CONCURRENT",
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "WEBAPP",
       "interaction": "CONCURRENT",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry.overlapping_same_identity",
-      "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: two overlapping asyncio tasks with the same Offer-home plus Request-origin identity produce one committed row and a replay or loser; cardinality stays one.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__UNLINKED-BOT",
@@ -25083,7 +25116,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__EXPIRY-CANCEL-REPUBLISH-TERMINAL",
@@ -25096,7 +25129,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__POLICY-SNAPSHOT",
@@ -25109,7 +25142,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__NOTIFICATION",
@@ -25122,7 +25155,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__FAILURE-BEFORE-COMMIT",
@@ -25135,7 +25168,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
@@ -25148,7 +25181,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__SIDE-EFFECT-RETRY",
@@ -25161,62 +25194,72 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__OUTCOME-SUCCESS",
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "OUTCOME-SUCCESS",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry",
-      "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: each origin pair persists a request ledger row whose request_home_server is the Offer home from offer_home_server_for_source and whose request surface and server match the Request origin.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__OUTCOME-REJECT",
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "OUTCOME-REJECT",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "evaluate_invitation_bot_access",
-      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
-      "equivalence_reason": "Policy effect executed: accountant admission is denied for every Offer/Request origin pair; the live function has no origin input so the reject effect is the same class.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__PERMISSION-DENIED",
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "PERMISSION-DENIED",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "evaluate_invitation_bot_access",
-      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
-      "equivalence_reason": "Policy effect executed: tier-2 and accountant permission-denied is the same live admission decision for every origin pair.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__RETRY",
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "RETRY",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry.same_key",
-      "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: the same origin-pair idempotency key replays as duplicate_replay=True and does not add a second ledger row.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__CONCURRENT",
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "CONCURRENT",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry.overlapping_same_identity",
-      "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: two overlapping asyncio tasks with the same Offer-home plus Request-origin identity produce one committed row and a replay or loser; cardinality stays one.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__UNLINKED-BOT",
@@ -25229,7 +25272,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__EXPIRY-CANCEL-REPUBLISH-TERMINAL",
@@ -25242,7 +25285,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__POLICY-SNAPSHOT",
@@ -25255,7 +25298,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__NOTIFICATION",
@@ -25268,7 +25311,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__FAILURE-BEFORE-COMMIT",
@@ -25281,7 +25324,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
@@ -25294,7 +25337,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__SIDE-EFFECT-RETRY",
@@ -25307,62 +25350,72 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__OUTCOME-SUCCESS",
       "offer_origin": "INTERNAL",
       "request_origin": "WEBAPP",
       "interaction": "OUTCOME-SUCCESS",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry",
-      "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: each origin pair persists a request ledger row whose request_home_server is the Offer home from offer_home_server_for_source and whose request surface and server match the Request origin.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__OUTCOME-REJECT",
       "offer_origin": "INTERNAL",
       "request_origin": "WEBAPP",
       "interaction": "OUTCOME-REJECT",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "evaluate_invitation_bot_access",
-      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
-      "equivalence_reason": "Policy effect executed: accountant admission is denied for every Offer/Request origin pair; the live function has no origin input so the reject effect is the same class.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__PERMISSION-DENIED",
       "offer_origin": "INTERNAL",
       "request_origin": "WEBAPP",
       "interaction": "PERMISSION-DENIED",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "evaluate_invitation_bot_access",
-      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
-      "equivalence_reason": "Policy effect executed: tier-2 and accountant permission-denied is the same live admission decision for every origin pair.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__RETRY",
       "offer_origin": "INTERNAL",
       "request_origin": "WEBAPP",
       "interaction": "RETRY",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry.same_key",
-      "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: the same origin-pair idempotency key replays as duplicate_replay=True and does not add a second ledger row.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__CONCURRENT",
       "offer_origin": "INTERNAL",
       "request_origin": "WEBAPP",
       "interaction": "CONCURRENT",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry.overlapping_same_identity",
-      "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: two overlapping asyncio tasks with the same Offer-home plus Request-origin identity produce one committed row and a replay or loser; cardinality stays one.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__UNLINKED-BOT",
@@ -25375,7 +25428,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__EXPIRY-CANCEL-REPUBLISH-TERMINAL",
@@ -25388,7 +25441,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__POLICY-SNAPSHOT",
@@ -25401,7 +25454,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__NOTIFICATION",
@@ -25414,7 +25467,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__FAILURE-BEFORE-COMMIT",
@@ -25427,7 +25480,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
@@ -25440,7 +25493,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__SIDE-EFFECT-RETRY",
@@ -25453,62 +25506,72 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__OUTCOME-SUCCESS",
       "offer_origin": "INTERNAL",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "OUTCOME-SUCCESS",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry",
-      "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: each origin pair persists a request ledger row whose request_home_server is the Offer home from offer_home_server_for_source and whose request surface and server match the Request origin.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__OUTCOME-REJECT",
       "offer_origin": "INTERNAL",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "OUTCOME-REJECT",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "evaluate_invitation_bot_access",
-      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
-      "equivalence_reason": "Policy effect executed: accountant admission is denied for every Offer/Request origin pair; the live function has no origin input so the reject effect is the same class.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__PERMISSION-DENIED",
       "offer_origin": "INTERNAL",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "PERMISSION-DENIED",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "evaluate_invitation_bot_access",
-      "live_function": "core.services.bot_access_policy.evaluate_invitation_bot_access",
-      "equivalence_reason": "Policy effect executed: tier-2 and accountant permission-denied is the same live admission decision for every origin pair.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__RETRY",
       "offer_origin": "INTERNAL",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "RETRY",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry.same_key",
-      "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: the same origin-pair idempotency key replays as duplicate_replay=True and does not add a second ledger row.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__CONCURRENT",
       "offer_origin": "INTERNAL",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "CONCURRENT",
-      "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry.overlapping_same_identity",
-      "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: two overlapping asyncio tasks with the same Offer-home plus Request-origin identity produce one committed row and a replay or loser; cardinality stays one.",
-      "applicability": "APPLICABLE"
+      "disposition": "TRANSFERRED_TO_P1_00B",
+      "applicability": "HIGH_BLOCKER",
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "severity": "HIGH"
+      },
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__UNLINKED-BOT",
@@ -25521,7 +25584,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__EXPIRY-CANCEL-REPUBLISH-TERMINAL",
@@ -25534,7 +25597,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__POLICY-SNAPSHOT",
@@ -25547,7 +25610,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__NOTIFICATION",
@@ -25560,7 +25623,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__FAILURE-BEFORE-COMMIT",
@@ -25573,7 +25636,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
@@ -25586,7 +25649,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__SIDE-EFFECT-RETRY",
@@ -25599,7 +25662,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "No live combined Web/Bot path joins admission, committed Offer provenance, Request provenance, outcome, and mutation cardinality. Isolated ledger persist and origin-free invitation checks are not a combined policy path. CONCURRENT was sequential on a non-suspending adapter and is not overlapping."
     }
   ],
   "scenario_work_item": "READY_FOR_CODEX_FINAL_REVIEW"

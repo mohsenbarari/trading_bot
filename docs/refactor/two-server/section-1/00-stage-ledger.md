@@ -2,14 +2,17 @@
 
 Last updated: 2026-09-03 UTC
 Assignment: `WA-P1-00-SCOPE-20260903-002` (supersedes invalidated `WA-P1-00-REFRESH-20260903-001`)
-Resume base: `aa2c06a573dfd60051e142146f55d7965f2242a7`
+Historical inventory baseline: `aa2c06a573dfd60051e142146f55d7965f2242a7`
+Reissued Assignment base: `492d896d67fe9a3625bd5784b795a4029b92b600`
+Worker parent: `c70839a0ece4a87244a54f2ff58e275239232980`
+Rejected integration review: `079d5cf0552d4bdc89c0430d90c50226176bc4c3`
 
 | Stage | Status | Gate | Primary output |
 | --- | --- | --- | --- |
 | `P1-00` | `IN_PROGRESS` | amended exit gate after Codex `CHANGES_REQUIRED` on `5ec75ec5`; leftover freeze is `P1-00b` | current-state dossier and blocker register |
 | `P1-00b` | `PROPOSED` | canonical-plan amendment; machine graph authorized by `WA-P1-00-SCOPE-20260903-002`; execution after Codex APPROVE of `P1-00` | remaining current-behavior freeze |
 | `P1-01` | `PROPOSED` | policy approved; execution blocked by `P1-00`, `P1-00b` and exact batch receipts | cleanup/retention execution |
-| `P1-02` | `PROPOSED` | scenario contract approved; blocked by `P1-00`, `DPL-1` (including `DR-015` measured durations) and `DOC-3` | topology-neutral configuration |
+| `P1-02` | `PROPOSED` | scenario contract approved; blocked by `P1-00`, `P1-00b`, `DPL-1` (including `DR-015` measured durations) and `DOC-3` | topology-neutral configuration |
 | `P1-03` | `PROPOSED` | scenario/ownership contract approved; dependencies not complete | target runtime topology |
 | `P1-04` | `PROPOSED` | scenario/data contract approved; dependencies not complete | shared Finland data plane |
 | `P1-05` | `PROPOSED` | scenario/merge contract approved; dependencies and Assignment open | deterministic data-merge rehearsal |

@@ -21,6 +21,7 @@ Status: open findings; no implicit fixes authorized
 | `DR-015` | deferred-blocker | no already-observed deploy/restart/backup/restore duration exists; this refresh cannot manufacture timing and live re-inspection is unauthorized | Codex decision 2026-09-03: `DEFERRED_BLOCKER`, `resolution_stage: DPL-1`. Required evidence is measured deploy, independent API/Bot restart, backup, and restore+verification durations. Forbidden: estimate from script length, treat RTO/RPO as observation, or run an unauthorized production rehearsal. Absence of timing does not block closing `P1-00`. Because of this dependency, `P1-02` must not start before `DPL-1` completes. |
 | `DR-016` | high | current child pollers/workers/Market processes/timers are inventoried, but exact target compose/image/credential/readiness binding is not designed | close in `P1-03`; any unknown or overlapping owner blocks activation |
 | `DR-017` | low | incremental `src/interfaces/http_api/routers/user_router.py` declares four routes but `main.py` does not mount it | retain as dormant code until `P1-01` reference/cleanup review; never count it as a live API contract |
+| `DR-018` | residual | Earlier P1-00 account-status characterization runs, before the fail-closed suite fence, may have contacted localhost Redis | `NOT_REINSPECTED`. Possible localhost contact. Live Redis was not read or mutated to check. Current characterization glob denies TCP to `127.0.0.1:6379` / `localhost:6379` and forbids constructing a live Redis client. |
 
 ## `P1-00` failure-boundary registry
 
@@ -34,11 +35,12 @@ gate has zero unresolved High.
 
 | ID | Family / boundary | Disposition |
 | --- | --- | --- |
-| REQUEST concurrent / restart | isolated sqlite overlap + child-process reload | evidenced |
+| REQUEST concurrent / restart | isolated sqlite overlap with post-lookup pre-commit yield + child-process reload | evidenced |
 | AUTH / IDENTITY / OFFER / TRADE / MARKET / NOTIFY / MSG / TG / ADMIN / SYNC concurrent / restart | `TRANSFERRED_TO_P1_00B` / `UNRESOLVED` | `P1-00b` |
 | cells without a mutating path | `NOT_APPLICABLE` with a behavior-specific reason | closed on P1-00 |
 | `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` | remaining seeds | `TRANSFERRED_TO_P1_00B` |
-| `P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED` | unlinked / expiry / snapshot / notify / failure origin | `TRANSFERRED_TO_P1_00B` |
+| `P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED` | every required Offer/Request-origin interaction, including SUCCESS / REJECT / PERMISSION / RETRY / CONCURRENT | `TRANSFERRED_TO_P1_00B` |
+| `DR-018` | possible prior localhost Redis contact | `NOT_REINSPECTED`; do not read live Redis |
 | `DR-015` | deploy/restart/backup/restore duration | already `DEFERRED_BLOCKER` / `DPL-1` |
 
 ## Interpretation

@@ -60,10 +60,11 @@ For each row, tests must cover at least:
 - failure before commit, after commit/before side effect and side-effect retry.
 
 P1-00 materializes those interactions in `inventory/scenario-records.json`
-`origin_required_interactions`. Admission reject/allow, request ledger persist,
-same-key retry, and a second request-origin row are executed for every origin
-pair. Unlinked-Bot, expiry/terminal, policy snapshot, notification audience,
-and the three failure phases are not EVIDENCED here; they move to `P1-00b`.
+`origin_required_interactions`. No required origin interaction is EVIDENCED or
+`EQUIVALENT_TO_REPRESENTATIVE` here: isolated ledger persist and origin-free
+invitation checks are not a combined admission-plus-provenance path, and
+origin-pair CONCURRENT was not overlapping. Every required row is
+`TRANSFERRED_TO_P1_00B`.
 
 ## Approved semantic contract for the next ADR
 

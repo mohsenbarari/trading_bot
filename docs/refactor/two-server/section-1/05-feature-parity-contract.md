@@ -234,7 +234,7 @@ At minimum the target must preserve:
 | manual resolution of 6 evidence-review items | `COMPLETE — characterization linked` |
 | current runtime child/poller/timer owner seed manifest | `COMPLETE` |
 | exact target compose/credential/readiness binding | future `P1-03` |
-| persona/tier/time/failure scenario records | `IN_PROGRESS` — account-status inner-commit contract evidenced; REQUEST sqlite overlap evidenced; leftover current-behavior freeze transferred to `P1-00b`; `target_result NOT_RUN`; not `COMPLETE` |
+| persona/tier/time/failure scenario records | `IN_PROGRESS` — account-status inner-commit contract evidenced; REQUEST sqlite overlap evidenced; every origin interaction transferred to `P1-00b`; leftover freeze transferred to `P1-00b`; `target_result NOT_RUN`; not `COMPLETE` |
 | owner approval of human-readable scenario contract | `COMPLETE — 2026-09-02` |
 | deploy/restart/backup/restore duration (`DR-015`) | `DEFERRED_BLOCKER` / `DPL-1` / `NOT_OBSERVED` |
 | current-vs-target differential execution | future `P1-06` |
