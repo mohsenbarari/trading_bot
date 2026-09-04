@@ -1,0 +1,117 @@
+{
+  "assignment_id": "WA-P1-00-SCOPE-20260903-002",
+  "decision": {
+    "accepted_commit": "a0f22b7d476429974b9d4c8a7ae3d0d5e4a99be9",
+    "conditions": [
+      "P1-00b must remain a blocking, non-implementation Stage and receive exact-SHA final approval before dependent implementation proceeds.",
+      "Transferred origin cells must not be treated as EVIDENCED until P1-00b supplies real combined-path proof.",
+      "Carry DR-018 without claiming retrospective absence; any live Redis inspection or mutation requires separately scoped authorization.",
+      "Synchronize the stale Section 1 execution plan and Assignment/baseline labels before those documents are used for downstream Assignment issuance."
+    ],
+    "next_dependency_ready_stages": [
+      "P1-00b"
+    ],
+    "residual_risk": "No unresolved High or Critical gap remains in P1-00. All unmaterialized origin interactions and remaining behavior-freeze work are explicitly unevidenced and blocked by P1-00b. DR-018 preserves the indeterminate pre-fence Redis-contact history, and several supporting human-facing documents remain stale relative to the authoritative graph and Assignment metadata."
+  },
+  "findings": [
+    {
+      "evidence": "docs/refactor/two-server/section-1/EXECUTION_PLAN.md:16-28 omits P1-00b and describes P1-02 as waiting only for P1-00 and DPL-1. execution-order.yaml correctly contains P1-00b, all nine required blocking edges, 57 unique wave entries, and an acyclic 57-Stage graph.",
+      "finding": "The supporting Section 1 execution plan is stale relative to the authoritative P1-00b dependency graph.",
+      "required_action": "Synchronize the supporting execution plan before it is used to issue dependent work; continue treating execution-order.yaml as authoritative.",
+      "severity": "MEDIUM"
+    },
+    {
+      "evidence": "docs/refactor/two-server/section-1/evidence-index.md:4,30 describes aa2c06a5 as the current Assignment base although WA-P1-00-SCOPE-20260903-002 has base 492d896d; 01-current-finland-architecture.md:5 and 02-runtime-inventory.md:5 still name the superseded WA-P1-00-REFRESH-20260903-001. The Task Card and Stage ledger correctly distinguish historical inventory, Assignment, Worker, and rejected-integration SHAs.",
+      "finding": "Assignment and baseline labels remain inconsistent in supporting evidence documents.",
+      "required_action": "Correct the supporting labels in the next authorized documentation change without recharacterizing the explicitly NOT_REOBSERVED host facts.",
+      "severity": "MEDIUM"
+    },
+    {
+      "evidence": "docs/refactor/two-server/section-1/06-current-drift-register.md records DR-018 as NOT_REINSPECTED. The corrected exact-head integration evidence records zero connect syscalls, but does not claim retrospective proof for earlier runs.",
+      "finding": "Possible localhost Redis contact from pre-fence runs under the superseded Assignment cannot be retrospectively excluded.",
+      "required_action": "Carry DR-018 into P1-00b and require separately scoped authority before inspecting or mutating live Redis.",
+      "severity": "INFO"
+    }
+  ],
+  "integration_base_sha": "079d5cf0552d4bdc89c0430d90c50226176bc4c3",
+  "receipt_type": "STAGE_FINAL",
+  "reviewed_at_utc": "2026-09-04T01:02:17Z",
+  "reviewed_head_sha": "a0f22b7d476429974b9d4c8a7ae3d0d5e4a99be9",
+  "reviewer_authority": "CODEX_FINAL_REVIEWER",
+  "schema_version": "1.0",
+  "scope": {
+    "changed_paths_within_assignment": true,
+    "dependency_receipts_valid": true,
+    "locks_and_parallel_peer_valid": true,
+    "unauthorized_external_mutation": "NONE"
+  },
+  "stage_id": "P1-00",
+  "verdict": "APPROVE",
+  "verification": [
+    {
+      "check": "MemoryCustodian startup and canonical review inputs",
+      "evidence_uri": "AGENTS.md;docs/memory/manifest.md;docs/memory/brief.md;docs/memory/decisions.md;docs/memory/constraints.md;docs/memory/do-not-use.md;docs/memory/areas/two-server-refactor.md;docs/memory/areas/documentation-execution.md;docs/memory/areas/documentation-quality.md;docs/memory/areas/infrastructure.md",
+      "result": "PASS"
+    },
+    {
+      "check": "Exact commit identity, ancestry, diff fidelity, and allowed-path scope",
+      "evidence_uri": "git-diff://079d5cf0552d4bdc89c0430d90c50226176bc4c3..a0f22b7d476429974b9d4c8a7ae3d0d5e4a99be9;patch-id://fe68c93c93ef90d54a208927dd98f2073850add2;.local/two-site-refactor/review-bundles/P1-00-WA-P1-00-SCOPE-20260903-002/diff-name-status.txt",
+      "result": "PASS"
+    },
+    {
+      "check": "Dependency and governance receipts with accepted ancestry",
+      "evidence_uri": "docs/refactor/two-server/reviews/PLAN-GOVERNANCE-20260903.md;.local/two-site-refactor/receipts/BRANCH-BARRIER-MAIN-20260903.md;.local/two-site-refactor/receipts/AUTONOMOUS-ORCHESTRATION-20260903.md;git-ancestry://90b8bf47,aa2c06a5,020f1db5-to-a0f22b7d",
+      "result": "PASS"
+    },
+    {
+      "check": "Registered worktrees, exclusive locks, null parallel peer, and serial integration",
+      "evidence_uri": ".local/two-site-refactor/worktrees.yaml;.local/two-site-refactor/COORDINATOR_LOG.md:326;.local/two-site-refactor/review-bundles/P1-00-WA-P1-00-SCOPE-20260903-002/P1-00-VERIFIER-8252c4bc-20260904.md;git-worktree-status://clean",
+      "result": "PASS"
+    },
+    {
+      "check": "Authoritative P1-00b dependency transfer and DAG integrity",
+      "evidence_uri": "docs/refactor/two-server/execution-order.yaml;docs/refactor/two-server/section-1/stages/P1-00b.md;review://yaml-graph/57-stages-57-unique-wave-entries-acyclic-9-required-dependents",
+      "result": "PASS"
+    },
+    {
+      "check": "Behavior-preserving scope and absence of application, schema, configuration, deployment, ledger, or production-resource changes",
+      "evidence_uri": "git-diff://079d5cf0552d4bdc89c0430d90c50226176bc4c3..a0f22b7d476429974b9d4c8a7ae3d0d5e4a99be9",
+      "result": "PASS"
+    },
+    {
+      "check": "Unsupported combined-origin claims removed and all 72 required interactions dependency-safely transferred",
+      "evidence_uri": "docs/refactor/two-server/section-1/inventory/scenario-records.json#origin_required_interactions;tests/test_p1_00_characterization_offer_origin_policy.py:184",
+      "result": "PASS"
+    },
+    {
+      "check": "REQUEST overlap occurs after both initial lookups and before the first commit, with one durable row and restart replay",
+      "evidence_uri": "tests/test_p1_00_characterization_concurrent_restart.py:183",
+      "result": "PASS"
+    },
+    {
+      "check": "Account-status post-inner-commit outbox failure and fresh-session retry behavior",
+      "evidence_uri": "tests/test_p1_00_characterization_admin_account_status.py:423",
+      "result": "PASS"
+    },
+    {
+      "check": "Exact-head success, failure, and integration evidence",
+      "evidence_uri": ".local/test-results/two-server-refactor/P1-00/INTEGRATION-WA-P1-00-SCOPE-20260903-002-isolate/pytest-integration.txt#199-passed;.local/test-results/two-server-refactor/P1-00/INTEGRATION-WA-P1-00-SCOPE-20260903-002-isolate/run-meta.json",
+      "result": "PASS"
+    },
+    {
+      "check": "Exact-head Redis and network isolation",
+      "evidence_uri": ".local/test-results/two-server-refactor/P1-00/INTEGRATION-WA-P1-00-SCOPE-20260903-002-isolate/strace-connect.txt;.local/test-results/two-server-refactor/P1-00/INTEGRATION-WA-P1-00-SCOPE-20260903-002-isolate/strace-6379-hits.txt;tests/test_p1_00_characterization_network_isolation.py",
+      "result": "PASS"
+    },
+    {
+      "check": "Rollback applicability and reverse-apply validation",
+      "evidence_uri": "git-apply-check://reverse/079d5cf0552d4bdc89c0430d90c50226176bc4c3..a0f22b7d476429974b9d4c8a7ae3d0d5e4a99be9;.local/two-site-refactor/review-bundles/P1-00-WA-P1-00-SCOPE-20260903-002/HANDOFF.md",
+      "result": "PASS"
+    },
+    {
+      "check": "Secret handling, syntax/format checks, inventory integrity, and clean review state",
+      "evidence_uri": "review://credential-signature-and-assigned-secret-scan/no-match;review://git-diff-check/pass;review://json-yaml-ast-parse/pass;docs/refactor/two-server/section-1/evidence-index.md;sha256://scenario-records.json/5dc3dfb609e493373cd89a006f4da9f67dd32e68a9b77dbc985c68bf8ec42582;git-status://clean",
+      "result": "PASS"
+    }
+  ]
+}

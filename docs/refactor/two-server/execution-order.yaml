@@ -107,8 +107,8 @@ waves:
     stages: [P1-08, DOC-9]
 
 stages:
-  P1-00: {state: IN_PROGRESS, section: 1, depends_on: [], production: false}
-  P1-00b: {state: PROPOSED, section: 1, depends_on: [P1-00], production: false}
+  P1-00: {state: COMPLETE, section: 1, depends_on: [], production: false}
+  P1-00b: {state: IN_PROGRESS, section: 1, depends_on: [P1-00], production: false}
   P1-01: {state: PROPOSED, section: 1, depends_on: [P1-00, P1-00b], production: false}
   P1-02: {state: PROPOSED, section: 1, depends_on: [P1-00, P1-00b, DPL-1, DOC-3], production: false}
   P1-03: {state: PROPOSED, section: 1, depends_on: [P1-02, DPL-2, DPL-6], production: false}

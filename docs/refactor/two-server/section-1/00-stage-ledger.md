@@ -1,6 +1,7 @@
 # Section 1 Stage Ledger
 
-Last updated: 2026-09-03 UTC
+Last updated: 2026-09-04 UTC
+Complete commit: `a0f22b7d476429974b9d4c8a7ae3d0d5e4a99be9`
 Assignment: `WA-P1-00-SCOPE-20260903-002` (supersedes invalidated `WA-P1-00-REFRESH-20260903-001`)
 Historical inventory baseline: `aa2c06a573dfd60051e142146f55d7965f2242a7`
 Reissued Assignment base: `492d896d67fe9a3625bd5784b795a4029b92b600`
@@ -9,8 +10,8 @@ Rejected integration review: `079d5cf0552d4bdc89c0430d90c50226176bc4c3`
 
 | Stage | Status | Gate | Primary output |
 | --- | --- | --- | --- |
-| `P1-00` | `IN_PROGRESS` | amended exit gate after Codex `CHANGES_REQUIRED` on `5ec75ec5`; leftover freeze is `P1-00b` | current-state dossier and blocker register |
-| `P1-00b` | `PROPOSED` | canonical-plan amendment; machine graph authorized by `WA-P1-00-SCOPE-20260903-002`; execution after Codex APPROVE of `P1-00` | remaining current-behavior freeze |
+| `P1-00` | `COMPLETE` | Codex `APPROVE` on `a0f22b7d476429974b9d4c8a7ae3d0d5e4a99be9` | current-state dossier and blocker register |
+| `P1-00b` | `IN_PROGRESS` | leftover freeze; Assignment `WA-P1-00B-FREEZE-20260904-001`; blocked until its own Codex `APPROVE` | remaining current-behavior freeze |
 | `P1-01` | `PROPOSED` | policy approved; execution blocked by `P1-00`, `P1-00b` and exact batch receipts | cleanup/retention execution |
 | `P1-02` | `PROPOSED` | scenario contract approved; blocked by `P1-00`, `P1-00b`, `DPL-1` (including `DR-015` measured durations) and `DOC-3` | topology-neutral configuration |
 | `P1-03` | `PROPOSED` | scenario/ownership contract approved; dependencies not complete | target runtime topology |
@@ -53,14 +54,18 @@ Completed technical evidence in this refresh:
   durations are required later; estimate and production rehearsal remain forbidden;
 - sanitised checksums recomputed in `evidence-index.md`.
 
-## Why `P1-00` is not `COMPLETE`
+## Why `P1-00` is `COMPLETE`
 
-The owner historically accepted the dossier, drift register, twelve-family
-behavior baseline, Web/Bot contracts and runtime-ownership seed on 2026-09-02.
-The Stage still requires Codex Final Review of the exact correction commit on
-this Stage branch. Worker status is only `COMPLETE_CANDIDATE`.
+Codex Final Reviewer issued `APPROVE` for exact integration commit
+`a0f22b7d476429974b9d4c8a7ae3d0d5e4a99be9` on Assignment
+`WA-P1-00-SCOPE-20260903-002`. Receipt:
+`docs/refactor/two-server/reviews/P1-00-WA-P1-00-SCOPE-20260903-002.md`.
 
-Residual items that do not by themselves keep `P1-00` blocked:
+Leftover current-behavior freeze is owned by `P1-00b`. `P1-01` and implementation
+Stages remain blocked by `P1-00b`. `DR-015` still blocks `P1-02` until `DPL-1`.
+`DR-018` stays `NOT_REINSPECTED`.
+
+Residual items that do not reopen `P1-00`:
 
 1. `DR-015` — deploy/restart/backup/restore duration has no already-observed
    measurement. Codex decided this is `DEFERRED_BLOCKER` with
@@ -70,10 +75,6 @@ Residual items that do not by themselves keep `P1-00` blocked:
 2. Live host capacity/release/schema facts remain `NOT_REOBSERVED` because this
    Assignment has `external_access: NONE`. That is accepted for this snapshot and
    is not enough for later staging/cutover.
-
-Until Codex Final Reviewer issues `APPROVE` for the exact integration commit,
-`P1-01` may be reviewed but no cleanup is authorized and `P1-02..P1-07` must not
-change application behavior. Assignment `WA-P1-00-SCOPE-20260903-002` already
-authorizes the `P1-00b` machine-graph edges in this Worker commit. The amended
-`P1-00` exit gate has no unresolved High; leftover current-behavior freeze is
-owned by `P1-00b`.
+3. Supporting human labels in some inventory docs still mention the superseded
+   Assignment; Codex recorded this as MEDIUM for the next authorized
+   documentation change (`P1-00b`).

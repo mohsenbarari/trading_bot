@@ -1,7 +1,7 @@
 # Evidence Index
 
 Status: sanitised tracked index; raw runtime output is intentionally untracked
-Refresh: `WA-P1-00-SCOPE-20260903-002` against `aa2c06a573dfd60051e142146f55d7965f2242a7`
+Refresh: Assignment `WA-P1-00-SCOPE-20260903-002` (`base_sha` `492d896d67fe9a3625bd5784b795a4029b92b600`); historical inventory baseline `aa2c06a573dfd60051e142146f55d7965f2242a7`; complete commit `a0f22b7d476429974b9d4c8a7ae3d0d5e4a99be9`
 
 | Evidence | Path | Integrity/status |
 | --- | --- | --- |
@@ -21,15 +21,16 @@ Refresh: `WA-P1-00-SCOPE-20260903-002` against `aa2c06a573dfd60051e142146f55d796
 | Job authority inventory | `inventory/surface-jobs.json` | SHA-256 `7be5d42699e89df1b9398caaf0d8853c4d797863f6050d0b46e3d9beb95d9327` |
 | Runtime task ownership | `inventory/runtime-task-ownership.json` | SHA-256 `071e273e5168db736bf9330aab93233adcd32cd03a7033b89e5e17d84f47ef14` |
 | Scenario records | `inventory/scenario-records.json` | SHA-256 `5dc3dfb609e493373cd89a006f4da9f67dd32e68a9b77dbc985c68bf8ec42582` |
-| Task Card | `stages/P1-00.md` | correction candidate after `CHANGES_REQUIRED`; Codex Final Review pending |
+| Task Card | `stages/P1-00.md` | `COMPLETE` on `a0f22b7d476429974b9d4c8a7ae3d0d5e4a99be9` |
 
 ## Evidence handling
 
 - No database dump, complete environment, secret value, SSH private key, session,
   cookie, Telegram token or user-level parity record is tracked.
-- This refresh verified static inventories against the Assignment `base_sha`
-  and kept the original `generated_from_commit`. Live host re-inspection was
-  not authorized (`external_access: NONE`).
+- Static inventories were verified against historical inventory baseline
+  `aa2c06a5...` and kept the original `generated_from_commit`. The executing
+  Assignment `base_sha` is `492d896d...`. Live host re-inspection was not
+  authorized (`external_access: NONE`).
 - Secret-pattern scan of tracked `section-1` Markdown/JSON: `NO_SECRET_VALUE / DETECTION_SIGNATURES_PRESENT`.
   Detection signatures exist only in characterization tests, not as secret values.
 - The Git commit containing these files is the integrity boundary for Markdown.

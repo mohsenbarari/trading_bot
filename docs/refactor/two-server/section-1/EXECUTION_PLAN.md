@@ -18,8 +18,9 @@ schedule یا side effect را ندارد. defect کشف‌شده ثبت می‌
 | Stage | خروجی اصلی | سند evidence |
 | --- | --- | --- |
 | `P1-00` | Current-State Architecture و Behavior Baseline | [`stages/P1-00.md`](stages/P1-00.md) و [`evidence-index.md`](evidence-index.md) |
+| `P1-00b` | تکمیل فریز رفتار جاری قبل از هر پیاده‌سازی ادغام | [`stages/P1-00b.md`](stages/P1-00b.md) |
 | `P1-01` | پاکسازی branch/worktree/path/artifact/backup با retention | [`07-repository-cleanup-manifest.md`](07-repository-cleanup-manifest.md) |
-| `P1-02` | vocabulary و typed config مستقل از نام سرور تاریخی؛ شروع فقط پس از `P1-00` و `DPL-1` (از جمله زمان‌های اندازه‌گیری‌شده `DR-015`) | Master Plan Task Card |
+| `P1-02` | vocabulary و typed config مستقل از نام سرور تاریخی؛ شروع فقط پس از `P1-00`، `P1-00b`، `DPL-1` (از جمله زمان‌های اندازه‌گیری‌شده `DR-015`) و `DOC-3` | Master Plan Task Card |
 | `P1-03` | یک runtime واحد Finland با service ownership صریح | inventoryها و compose/runtime evidence |
 | `P1-04` | PostgreSQL/Redis مشترک و حذف sync داخلی دو Finland | dataflow/ownership و migration contract |
 | `P1-05` | rehearsal idempotent ادغام داده و media | merge receipts، conflict ledger و restore proof |
@@ -30,12 +31,13 @@ schedule یا side effect را ندارد. defect کشف‌شده ثبت می‌
 ## ترتیب تصمیم‌گیری انسانی
 
 1. `P1-00` هر رفتار و ownership فعلی را با code/runtime/evidence ثابت می‌کند.
-2. Codex Final Reviewer gapهای رفتار را به `PRESERVE`, `APPROVED_DEFECT` یا
+2. `P1-00b` فریز باقی‌ماندهٔ رفتار جاری را قبل از هر پیاده‌سازی ادغام کامل می‌کند.
+3. Codex Final Reviewer gapهای رفتار را به `PRESERVE`, `APPROVED_DEFECT` یا
    `UNRESOLVED` طبقه‌بندی می‌کند.
-3. فقط پس از صفرشدن ambiguity بحرانی، repository/config/runtime/data rehearsal ساخته می‌شود.
-4. staging و soak باید parity Web/Bot/API/job/data/resource را ثابت کنند.
-5. `P1-07` receipt تولیدی جدا از Codex می‌خواهد؛ standing authorization مجوز cutover نیست.
-6. `P1-08` پس از Iran admission، drill، retention و backup replacement قابل اجراست.
+4. فقط پس از صفرشدن ambiguity بحرانی، repository/config/runtime/data rehearsal ساخته می‌شود.
+5. staging و soak باید parity Web/Bot/API/job/data/resource را ثابت کنند.
+6. `P1-07` receipt تولیدی جدا از Codex می‌خواهد؛ standing authorization مجوز cutover نیست.
+7. `P1-08` پس از Iran admission، drill، retention و backup replacement قابل اجراست.
 
 ## اسناد ممیزی موجود
 

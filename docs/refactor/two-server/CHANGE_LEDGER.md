@@ -14,6 +14,20 @@
 | 2026-09-03 | `D-02` | `APPROVED` | Product DNS TTL | permanent 30-second TTL; DNS verification/fence still required |
 | 2026-09-03 | `D-03..D-06` | `APPROVED` | Deploy SLO, rollback and artifact transport | recorded in Master Plan and Section 4 |
 | 2026-09-03 | `DOC-10` | `COMPLETE_PLAN_ARTIFACT` | Plan packaging | Master, YAML, section plans, templates and Cursor Skill created on plan branch |
+| 2026-09-04 | `P1-00` | `COMPLETE` | `a0f22b7d476429974b9d4c8a7ae3d0d5e4a99be9` | Codex `APPROVE` for Assignment `WA-P1-00-SCOPE-20260903-002`; receipt `reviews/P1-00-WA-P1-00-SCOPE-20260903-002.md`; leftover freeze owned by `P1-00b`; `DR-015` still `DPL-1`; `DR-018` `NOT_REINSPECTED` |
+
+### Record `P1-00-COMPLETE-20260904`
+
+- date: `2026-09-04`
+- stage_id: `P1-00`
+- from_state: `IN_PROGRESS`
+- to_state: `COMPLETE`
+- actor: `CURSOR_COORDINATOR` after `CODEX_FINAL_REVIEWER` `APPROVE`
+- commit: `a0f22b7d476429974b9d4c8a7ae3d0d5e4a99be9`
+- environment: integration `refactor/two-site-architecture`; no live host mutation
+- evidence_uri: `docs/refactor/two-server/reviews/P1-00-WA-P1-00-SCOPE-20260903-002.md`
+- decision_or_gap_ids: `DR-015`, `DR-018`, `P1-00b`
+- notes: leftover freeze owned by `P1-00b`; next dependency-ready Stage is `P1-00b`; `DR-015` remains `DPL-1`; `DR-018` remains `NOT_REINSPECTED`
 
 ## Append-only record contract
 

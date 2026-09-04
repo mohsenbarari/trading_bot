@@ -518,7 +518,7 @@ docs/refactor/two-server/section-1/
 
 ## `P1-00` — Current-State Architecture و Behavior Baseline
 
-وضعیت: `IN_PROGRESS — baseline انسانی در 2026-09-02 پذیرفته شد؛ اصلاح شواهد پس از CHANGES_REQUIRED در 2026-09-03 نامزد است؛ Final Review باز است. DR-015 به DPL-1 موکول شد و P1-02 قبل از DPL-1 شروع نمی‌شود`
+وضعیت: `COMPLETE` روی `a0f22b7d476429974b9d4c8a7ae3d0d5e4a99be9`؛ فریز باقی‌مانده متعلق به `P1-00b` است. `DR-015` به `DPL-1` موکول شد و `P1-02` قبل از `DPL-1` شروع نمی‌شود.
 
 Dependency: Assignment معتبر؛ مشاهدهٔ runtime زنده در scope همان Assignment و
 در صورت نیاز با receipt خارجی Codex انجام می‌شود.
@@ -4032,7 +4032,7 @@ Gate نهایی:
 ## مواردی که این نسخه عمداً انجام نداده است
 
 - هیچ کدی را refactor نکرده است.
-- هیچ Stage فنی را `COMPLETE` اعلام نکرده است؛ `P1-00` همچنان `IN_PROGRESS` است.
+- بسته‌بندی اولیهٔ طرح هیچ Stage فنی را `COMPLETE` نکرد؛ اجرای بعدی `P1-00` در `a0f22b7d` با Codex `APPROVE` به `COMPLETE` رسید و فریز باقی‌مانده به `P1-00b` منتقل شد.
 - هیچ secret یا manifest خصوصی را نخوانده یا ثبت نکرده است.
 - هیچ server inventory زنده، deploy، DNS، bucket write یا database write انجام نداده است.
 - Cursor Skill و Rule فقط برای اجرای کنترل‌شدهٔ Stage ساخته شده‌اند؛ هیچ Stage فنی،
