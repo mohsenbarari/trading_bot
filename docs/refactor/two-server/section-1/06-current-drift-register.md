@@ -31,8 +31,9 @@ isolated-sqlite overlap and child-process reload for AUTH, IDENTITY, OFFER,
 TRADE, MARKET, NOTIFY, MSG, TG, ADMIN and SYNC. MSG overlap before commit
 and child-process replay create two independent rows and duplicate threading
 side effects because persist has no command identity. Seed handler assertions
-remain a High blocker for 458 seeds; seven exact handlers are evidenced.
-Sibling family membership does not clear remaining MSG/TRADE CRUD seeds.
+remain a High blocker for 457 seeds; eight exact handlers are evidenced.
+Channel-trade confirmation with a mocked execute does not evidence those
+TRADE seeds. Sibling family membership does not clear remaining MSG/TRADE CRUD seeds.
 Origin reject/permission/retry/concurrent/expiry/commit-failure and Telegram
 `UNLINKED-BOT` are evidenced. Origin SUCCESS/policy/notification/side-effect-retry
 stay `BLOCKED_EXPLICIT`. Durable sqlite Trade rows and live overtime persist do
@@ -46,7 +47,7 @@ amended `P1-00` exit gate has zero unresolved High. `P1-00b` stays
 | AUTH / IDENTITY / OFFER / TRADE / MARKET / NOTIFY / MSG / TG / ADMIN / SYNC concurrent / restart | isolated sqlite overlap after lookup or before commit + child-process reload | evidenced in P1-00b |
 | MSG concurrent / restart | no command identity; two independent rows and duplicated threading | evidenced in P1-00b |
 | cells without a mutating path | `NOT_APPLICABLE` with a behavior-specific reason | closed on P1-00 |
-| `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` | every seed except the seven executed handlers | `BLOCKED_EXPLICIT`; 458 seeds remain |
+| `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` | every seed except the eight executed handlers | `BLOCKED_EXPLICIT`; 457 seeds remain |
 | `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN` | SUCCESS, policy-snapshot, notification, side-effect-retry | `BLOCKED_EXPLICIT`; 24 cells |
 | Telegram-request `UNLINKED-BOT` | `_handle_channel_trade` rejects missing or locally denied users before execute | evidenced in P1-00b |
 | `DR-018` | possible prior localhost Redis contact | `NOT_REINSPECTED`; do not read live Redis |
