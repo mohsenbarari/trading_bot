@@ -3,7 +3,7 @@
   "generated_from_commit": "aa2c06a573dfd60051e142146f55d7965f2242a7",
   "generated_date": "2026-09-03 UTC",
   "assignment_id": "WA-P1-00-SCOPE-20260903-002",
-  "scope": "Normalized contracts, 465-seed mapping with one-by-one handler assertions, REQUEST durable collision evidence, remaining family overlap/reload evidence except MSG, and Offer/Request origin combined-path evidence except TELEGRAM_BOT unlinked-Bot.",
+  "scope": "Normalized contracts, executed partitions for ADMIN toggle, MSG persist, and TRADE Telegram entry, REQUEST durable collision evidence, family overlap and reload including MSG two-row overlap, and Offer/Request origin combined-path evidence including Telegram unlinked-Bot entry rejection.",
   "provenance": {
     "contract_source": "Repository code and behavioral tests at the Assignment base SHA.",
     "live_host_reobservation": "NOT_REOBSERVED",
@@ -23,7 +23,7 @@
     "failure_families": 12,
     "failure_boundaries": 6,
     "expanded_failure_variants": 72,
-    "deferred_blockers": 2,
+    "deferred_blockers": 1,
     "conceptual_total_records": 622,
     "composed_eligibility_cells": 180,
     "telegram_link_variants": 3,
@@ -5668,27 +5668,6 @@
         "Treat RTO/RPO target as observation",
         "Run unauthorized production rehearsal"
       ]
-    },
-    {
-      "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
-      "status": "BLOCKED_EXPLICIT",
-      "resolution_stage": "P1-00b",
-      "blocks_before_resolution": [
-        "P1-01",
-        "P1-04",
-        "P1-06"
-      ],
-      "evidence_status": "OBSERVED_LOCALLY",
-      "reason": "TELEGRAM_BOT unlinked-Bot is not on the live _execute_trade_authoritatively path. evaluate_bot_access_local_state stays a separate local-state check. Wiring it requires a product change.",
-      "required_evidence": [
-        "Leave the three TELEGRAM_BOT unlinked-Bot cells unresolved until a combined path exists without a product change, or keep BLOCKED_EXPLICIT."
-      ],
-      "forbidden_shortcuts": [
-        "Mark the cell EVIDENCED without isolated sqlite plus child-process proof",
-        "Assign ownership to P1-04 or P1-06",
-        "resolution_stage CODEX_FINAL_REVIEW",
-        "Self-compared manifest fields"
-      ]
     }
   ],
   "closure": {
@@ -5703,8 +5682,8 @@
     "cross_family_failure_evidence": 0,
     "scenario_work_item": "READY_FOR_CODEX_FINAL_REVIEW",
     "target_result": "NOT_RUN",
-    "complete_forbidden_until": "Stage remains IN_PROGRESS. P1-00 amended exit gate has no unresolved High. Three TELEGRAM_BOT unlinked-Bot origin cells stay BLOCKED_EXPLICIT because the combined path does not consult bot-link state. Possible prior localhost Redis contact is NOT_REINSPECTED. Assignment WA-P1-00B-FREEZE-20260904-001 executes P1-00b. Do not mark any Stage COMPLETE.",
-    "family_boundary_evidenced_cells": 53,
+    "complete_forbidden_until": "Stage remains IN_PROGRESS. Seed handler assertions remain a High blocker for 401 unsupported seeds. Possible prior localhost Redis contact is NOT_REINSPECTED. Assignment WA-P1-00B-FREEZE-20260904-001 executes P1-00b. Do not mark any Stage COMPLETE.",
+    "family_boundary_evidenced_cells": 55,
     "family_boundary_named_blockers": 0,
     "filename_only_failure_evidence": 0,
     "unrouted_named_blockers": 0,
@@ -13500,34 +13479,54 @@
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "MSG",
       "failure_boundary": "two_concurrent_commands",
-      "applicability": "NOT_APPLICABLE",
+      "applicability": "ELIGIBLE",
       "eligibility": {
-        "decision": "NOT_APPLICABLE",
-        "reason": "persist_sent_direct_message has no command identity and no idempotency_key; overlapping persists create two independent rows, so same-identity collision and process-reload replay do not apply."
+        "decision": "ELIGIBLE",
+        "predicate": "persist_sent_direct_message overlaps after add and before commit; two independent rows and two threading side effects are observed because the command has no identity."
       },
-      "expected_outcome": "No MSG-owned same-identity mutating path exists for two_concurrent_commands.",
+      "expected_outcome": "Two overlapping persists create two message rows and two threading side effects.",
       "rule_sources": [
         "tests/test_p1_00b_characterization_family_overlap.py"
       ],
-      "evidence_refs": [],
-      "evidence_cases": []
+      "evidence_refs": [
+        "tests/test_p1_00b_characterization_family_overlap.py::P100bFamilyOverlapCharacterizationTests.test_msg_two_concurrent_commands_injects"
+      ],
+      "evidence_cases": [
+        {
+          "node_id": "tests/test_p1_00b_characterization_family_overlap.py::P100bFamilyOverlapCharacterizationTests.test_msg_two_concurrent_commands_injects",
+          "boundary_talk": "two_concurrent_commands",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        }
+      ],
+      "reason": "persist_sent_direct_message overlaps after add and before commit; two independent rows and two threading side effects are observed because the command has no identity."
     },
     {
       "variant_id": "MSG__PROCESS-RESTART",
       "contract_id": "BC-FAILURE-BOUNDARIES-CURRENT-V1",
       "family": "MSG",
       "failure_boundary": "process_restart",
-      "applicability": "NOT_APPLICABLE",
+      "applicability": "ELIGIBLE",
       "eligibility": {
-        "decision": "NOT_APPLICABLE",
-        "reason": "persist_sent_direct_message has no command identity and no idempotency_key; overlapping persists create two independent rows, so same-identity collision and process-reload replay do not apply."
+        "decision": "ELIGIBLE",
+        "predicate": "A fresh child process calling persist_sent_direct_message with the same payload creates another message row and another threading side effect because there is no replay identity."
       },
-      "expected_outcome": "No MSG-owned same-identity mutating path exists for process_restart.",
+      "expected_outcome": "Child-process replay creates a second message and duplicates the threading side effect.",
       "rule_sources": [
         "tests/test_p1_00b_characterization_family_overlap.py"
       ],
-      "evidence_refs": [],
-      "evidence_cases": []
+      "evidence_refs": [
+        "tests/test_p1_00b_characterization_family_overlap.py::P100bFamilyOverlapCharacterizationTests.test_msg_process_restart_injects"
+      ],
+      "evidence_cases": [
+        {
+          "node_id": "tests/test_p1_00b_characterization_family_overlap.py::P100bFamilyOverlapCharacterizationTests.test_msg_process_restart_injects",
+          "boundary_talk": "process_restart",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        }
+      ],
+      "reason": "A fresh child process calling persist_sent_direct_message with the same payload creates another message row and another threading side effect because there is no replay identity."
     },
     {
       "variant_id": "MSG__UNKNOWN-AUTHORITY-SCHEMA-HASH",
@@ -14270,7 +14269,7 @@
   "blocker_registry": {
     "disposition_request": "CANONICAL_PLAN_AMENDMENT",
     "owner": "CODEX_FINAL_REVIEWER",
-    "note": "Remaining High current-behavior cell is TELEGRAM_BOT unlinked-Bot on the combined trade path. Family overlap leftover freeze and seed handler assertions are evidenced or NOT_APPLICABLE. They are not P1-04/P1-06 work. P1-00b stays IN_PROGRESS.",
+    "note": "Remaining High current-behavior cell is the unfinished 465-seed handler evidence. Telegram unlinked-Bot is evidenced on the live channel-trade entry path. MSG overlap and child-process replay are evidenced as two independent rows. P1-00b stays IN_PROGRESS.",
     "required_fields": [
       "blocker_id",
       "severity",
@@ -14285,7 +14284,7 @@
     ],
     "items": [
       {
-        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
+        "blocker_id": "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
         "severity": "HIGH",
         "owner": "CODEX_FINAL_REVIEWER",
         "resolution_stage": "P1-00b",
@@ -14294,18 +14293,19 @@
           "P1-04",
           "P1-06"
         ],
-        "required_evidence": "Keep TELEGRAM_BOT unlinked-Bot unresolved until _execute_trade_authoritatively consults bot-link state, which needs a product change.",
+        "required_evidence": "Handler-level assertions for every seed, or executed behavior-equivalent partitions that verify response, mutation, outbox, side effects, ordering, retry or idempotency, and failures. Restore this blocker for any unsupported seed.",
         "forbidden_shortcuts": [
-          "Mark the cell EVIDENCED without isolated sqlite plus child-process proof",
+          "AST token or path-existence membership as sole proof",
+          "Map seeds only by family and operation_kind without executing the path",
           "Assign ownership to P1-04 or P1-06",
           "resolution_stage CODEX_FINAL_REVIEW",
           "Self-compared manifest fields"
         ],
         "disposition": "BLOCKED_EXPLICIT",
         "status": "BLOCKED_EXPLICIT",
-        "reason": "evaluate_bot_access_local_state is not invoked on _execute_trade_authoritatively. Isolated access-policy calls and empty sqlite are not combined-path evidence.",
-        "observed_fact": "P1-00b executed the live combined path for 66 origin cells. Three WEBAPP-request unlinked-Bot cells are NOT_APPLICABLE. Three TELEGRAM_BOT-request unlinked-Bot cells remain HIGH_BLOCKER.",
-        "unauthorized_reason": "Assignment external_access is NONE and product mutation is forbidden. P1-00 exit gate is amended so this leftover freeze is a new non-implementation Stage P1-00b before any consolidation implementation."
+        "reason": "401 of 465 seeds are outside the executed partitions ADMIN/TOGGLE_MUTATION, MSG/CRUD_MUTATION, and TRADE/CRUD_MUTATION. Inventory and AST membership tests are not handler evidence.",
+        "observed_fact": "P1-00b executed three live partitions and restored this High for every remaining seed.",
+        "unauthorized_reason": "Assignment forbids product mutation. Remaining seeds need handler execution or a later authorized change."
       }
     ]
   },
@@ -14317,7 +14317,7 @@
         "TELEGRAM_BOT",
         "INTERNAL"
       ],
-      "reason": "offer_home_server_for_source takes source_surface and returns home. evaluate_invitation_bot_access has no origin parameter. Retry/concurrent/failure origin cells stay High blockers rather than green copies of SUCCESS/REJECT.",
+      "reason": "offer_home_server_for_source takes source_surface and returns home. evaluate_invitation_bot_access has no origin parameter. Retry, concurrent, and failure origin cells are evidenced on the live execute path; they are not green copies of SUCCESS or REJECT.",
       "evidence": [
         "tests/test_offer_source_surface.py",
         "tests/test_p1_00_characterization_matrix_independence.py",
@@ -23499,11 +23499,18 @@
         "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
       },
       "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects"
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects"
       ],
       "evidence_cases": [
         {
           "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
+          "boundary_talk": "OUTCOME-SUCCESS",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        },
+        {
+          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects",
           "boundary_talk": "OUTCOME-SUCCESS",
           "talk_source": "test_function_name_or_doc_or_assert",
           "injects_named_boundary": true
@@ -23523,11 +23530,18 @@
         "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
       },
       "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_reject_injects"
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_reject_injects",
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects"
       ],
       "evidence_cases": [
         {
           "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_reject_injects",
+          "boundary_talk": "OUTCOME-REJECT",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        },
+        {
+          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects",
           "boundary_talk": "OUTCOME-REJECT",
           "talk_source": "test_function_name_or_doc_or_assert",
           "injects_named_boundary": true
@@ -23547,11 +23561,18 @@
         "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
       },
       "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_permission_denied_injects"
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_permission_denied_injects",
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects"
       ],
       "evidence_cases": [
         {
           "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_permission_denied_injects",
+          "boundary_talk": "PERMISSION-DENIED",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        },
+        {
+          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects",
           "boundary_talk": "PERMISSION-DENIED",
           "talk_source": "test_function_name_or_doc_or_assert",
           "injects_named_boundary": true
@@ -23778,11 +23799,18 @@
         "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
       },
       "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects"
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects"
       ],
       "evidence_cases": [
         {
           "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
+          "boundary_talk": "OUTCOME-SUCCESS",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        },
+        {
+          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects",
           "boundary_talk": "OUTCOME-SUCCESS",
           "talk_source": "test_function_name_or_doc_or_assert",
           "injects_named_boundary": true
@@ -23802,11 +23830,18 @@
         "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
       },
       "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_reject_injects"
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_reject_injects",
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects"
       ],
       "evidence_cases": [
         {
           "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_reject_injects",
+          "boundary_talk": "OUTCOME-REJECT",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        },
+        {
+          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects",
           "boundary_talk": "OUTCOME-REJECT",
           "talk_source": "test_function_name_or_doc_or_assert",
           "injects_named_boundary": true
@@ -23826,11 +23861,18 @@
         "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
       },
       "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_permission_denied_injects"
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_permission_denied_injects",
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects"
       ],
       "evidence_cases": [
         {
           "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_permission_denied_injects",
+          "boundary_talk": "PERMISSION-DENIED",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        },
+        {
+          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects",
           "boundary_talk": "PERMISSION-DENIED",
           "talk_source": "test_function_name_or_doc_or_assert",
           "injects_named_boundary": true
@@ -23890,19 +23932,24 @@
       "offer_origin": "WEBAPP",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "UNLINKED-BOT",
-      "disposition": "BLOCKED_EXPLICIT",
-      "applicability": "HIGH_BLOCKER",
-      "reason": "evaluate_bot_access_local_state is not invoked on _execute_trade_authoritatively. Joining them requires a product change. Isolated access-policy calls are not combined-path evidence.",
+      "disposition": "EVIDENCED",
+      "applicability": "ELIGIBLE",
+      "reason": "Telegram _handle_channel_trade and the public callback reject a missing or locally denied user before AsyncSessionLocal, the authoritative trade command, durable mutation, or provider send.",
       "eligibility": {
-        "decision": "UNRESOLVED",
-        "reason": "evaluate_bot_access_local_state is not invoked on _execute_trade_authoritatively. Joining them requires a product change. Isolated access-policy calls are not combined-path evidence."
+        "decision": "ELIGIBLE",
+        "predicate": "Missing and locally denied Telegram users stop at the channel-trade entry boundary with zero session, trade, or provider side effects."
       },
-      "named_blocker": {
-        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
-        "severity": "HIGH"
-      },
-      "evidence_refs": [],
-      "evidence_cases": []
+      "evidence_refs": [
+        "tests/test_p1_00b_characterization_telegram_unlinked.py::P100bTelegramUnlinkedCharacterizationTests.test_telegram_entry_rejects_missing_and_locally_denied_users_injects"
+      ],
+      "evidence_cases": [
+        {
+          "node_id": "tests/test_p1_00b_characterization_telegram_unlinked.py::P100bTelegramUnlinkedCharacterizationTests.test_telegram_entry_rejects_missing_and_locally_denied_users_injects",
+          "boundary_talk": "UNLINKED-BOT",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        }
+      ]
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__EXPIRY-CANCEL-REPUBLISH-TERMINAL",
@@ -24061,11 +24108,18 @@
         "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
       },
       "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects"
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects"
       ],
       "evidence_cases": [
         {
           "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
+          "boundary_talk": "OUTCOME-SUCCESS",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        },
+        {
+          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects",
           "boundary_talk": "OUTCOME-SUCCESS",
           "talk_source": "test_function_name_or_doc_or_assert",
           "injects_named_boundary": true
@@ -24085,11 +24139,18 @@
         "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
       },
       "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_reject_injects"
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_reject_injects",
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects"
       ],
       "evidence_cases": [
         {
           "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_reject_injects",
+          "boundary_talk": "OUTCOME-REJECT",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        },
+        {
+          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects",
           "boundary_talk": "OUTCOME-REJECT",
           "talk_source": "test_function_name_or_doc_or_assert",
           "injects_named_boundary": true
@@ -24109,11 +24170,18 @@
         "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
       },
       "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_permission_denied_injects"
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_permission_denied_injects",
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects"
       ],
       "evidence_cases": [
         {
           "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_permission_denied_injects",
+          "boundary_talk": "PERMISSION-DENIED",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        },
+        {
+          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects",
           "boundary_talk": "PERMISSION-DENIED",
           "talk_source": "test_function_name_or_doc_or_assert",
           "injects_named_boundary": true
@@ -24340,11 +24408,18 @@
         "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
       },
       "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects"
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects"
       ],
       "evidence_cases": [
         {
           "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
+          "boundary_talk": "OUTCOME-SUCCESS",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        },
+        {
+          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects",
           "boundary_talk": "OUTCOME-SUCCESS",
           "talk_source": "test_function_name_or_doc_or_assert",
           "injects_named_boundary": true
@@ -24364,11 +24439,18 @@
         "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
       },
       "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_reject_injects"
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_reject_injects",
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects"
       ],
       "evidence_cases": [
         {
           "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_reject_injects",
+          "boundary_talk": "OUTCOME-REJECT",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        },
+        {
+          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects",
           "boundary_talk": "OUTCOME-REJECT",
           "talk_source": "test_function_name_or_doc_or_assert",
           "injects_named_boundary": true
@@ -24388,11 +24470,18 @@
         "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
       },
       "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_permission_denied_injects"
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_permission_denied_injects",
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects"
       ],
       "evidence_cases": [
         {
           "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_permission_denied_injects",
+          "boundary_talk": "PERMISSION-DENIED",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        },
+        {
+          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects",
           "boundary_talk": "PERMISSION-DENIED",
           "talk_source": "test_function_name_or_doc_or_assert",
           "injects_named_boundary": true
@@ -24452,19 +24541,24 @@
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "UNLINKED-BOT",
-      "disposition": "BLOCKED_EXPLICIT",
-      "applicability": "HIGH_BLOCKER",
-      "reason": "evaluate_bot_access_local_state is not invoked on _execute_trade_authoritatively. Joining them requires a product change. Isolated access-policy calls are not combined-path evidence.",
+      "disposition": "EVIDENCED",
+      "applicability": "ELIGIBLE",
+      "reason": "Telegram _handle_channel_trade and the public callback reject a missing or locally denied user before AsyncSessionLocal, the authoritative trade command, durable mutation, or provider send.",
       "eligibility": {
-        "decision": "UNRESOLVED",
-        "reason": "evaluate_bot_access_local_state is not invoked on _execute_trade_authoritatively. Joining them requires a product change. Isolated access-policy calls are not combined-path evidence."
+        "decision": "ELIGIBLE",
+        "predicate": "Missing and locally denied Telegram users stop at the channel-trade entry boundary with zero session, trade, or provider side effects."
       },
-      "named_blocker": {
-        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
-        "severity": "HIGH"
-      },
-      "evidence_refs": [],
-      "evidence_cases": []
+      "evidence_refs": [
+        "tests/test_p1_00b_characterization_telegram_unlinked.py::P100bTelegramUnlinkedCharacterizationTests.test_telegram_entry_rejects_missing_and_locally_denied_users_injects"
+      ],
+      "evidence_cases": [
+        {
+          "node_id": "tests/test_p1_00b_characterization_telegram_unlinked.py::P100bTelegramUnlinkedCharacterizationTests.test_telegram_entry_rejects_missing_and_locally_denied_users_injects",
+          "boundary_talk": "UNLINKED-BOT",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        }
+      ]
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__EXPIRY-CANCEL-REPUBLISH-TERMINAL",
@@ -24623,11 +24717,18 @@
         "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
       },
       "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects"
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects"
       ],
       "evidence_cases": [
         {
           "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
+          "boundary_talk": "OUTCOME-SUCCESS",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        },
+        {
+          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects",
           "boundary_talk": "OUTCOME-SUCCESS",
           "talk_source": "test_function_name_or_doc_or_assert",
           "injects_named_boundary": true
@@ -24647,11 +24748,18 @@
         "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
       },
       "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_reject_injects"
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_reject_injects",
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects"
       ],
       "evidence_cases": [
         {
           "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_reject_injects",
+          "boundary_talk": "OUTCOME-REJECT",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        },
+        {
+          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects",
           "boundary_talk": "OUTCOME-REJECT",
           "talk_source": "test_function_name_or_doc_or_assert",
           "injects_named_boundary": true
@@ -24671,11 +24779,18 @@
         "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
       },
       "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_permission_denied_injects"
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_permission_denied_injects",
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects"
       ],
       "evidence_cases": [
         {
           "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_permission_denied_injects",
+          "boundary_talk": "PERMISSION-DENIED",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        },
+        {
+          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects",
           "boundary_talk": "PERMISSION-DENIED",
           "talk_source": "test_function_name_or_doc_or_assert",
           "injects_named_boundary": true
@@ -24902,11 +25017,18 @@
         "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
       },
       "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects"
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects"
       ],
       "evidence_cases": [
         {
           "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
+          "boundary_talk": "OUTCOME-SUCCESS",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        },
+        {
+          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_overtime_routes_to_approval_not_trade_injects",
           "boundary_talk": "OUTCOME-SUCCESS",
           "talk_source": "test_function_name_or_doc_or_assert",
           "injects_named_boundary": true
@@ -24926,11 +25048,18 @@
         "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
       },
       "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_reject_injects"
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_reject_injects",
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects"
       ],
       "evidence_cases": [
         {
           "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_reject_injects",
+          "boundary_talk": "OUTCOME-REJECT",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        },
+        {
+          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects",
           "boundary_talk": "OUTCOME-REJECT",
           "talk_source": "test_function_name_or_doc_or_assert",
           "injects_named_boundary": true
@@ -24950,11 +25079,18 @@
         "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite ledger mutation."
       },
       "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_permission_denied_injects"
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_permission_denied_injects",
+        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects"
       ],
       "evidence_cases": [
         {
           "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_permission_denied_injects",
+          "boundary_talk": "PERMISSION-DENIED",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        },
+        {
+          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_quota_and_closed_market_injects",
           "boundary_talk": "PERMISSION-DENIED",
           "talk_source": "test_function_name_or_doc_or_assert",
           "injects_named_boundary": true
@@ -25014,19 +25150,24 @@
       "offer_origin": "INTERNAL",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "UNLINKED-BOT",
-      "disposition": "BLOCKED_EXPLICIT",
-      "applicability": "HIGH_BLOCKER",
-      "reason": "evaluate_bot_access_local_state is not invoked on _execute_trade_authoritatively. Joining them requires a product change. Isolated access-policy calls are not combined-path evidence.",
+      "disposition": "EVIDENCED",
+      "applicability": "ELIGIBLE",
+      "reason": "Telegram _handle_channel_trade and the public callback reject a missing or locally denied user before AsyncSessionLocal, the authoritative trade command, durable mutation, or provider send.",
       "eligibility": {
-        "decision": "UNRESOLVED",
-        "reason": "evaluate_bot_access_local_state is not invoked on _execute_trade_authoritatively. Joining them requires a product change. Isolated access-policy calls are not combined-path evidence."
+        "decision": "ELIGIBLE",
+        "predicate": "Missing and locally denied Telegram users stop at the channel-trade entry boundary with zero session, trade, or provider side effects."
       },
-      "named_blocker": {
-        "blocker_id": "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED",
-        "severity": "HIGH"
-      },
-      "evidence_refs": [],
-      "evidence_cases": []
+      "evidence_refs": [
+        "tests/test_p1_00b_characterization_telegram_unlinked.py::P100bTelegramUnlinkedCharacterizationTests.test_telegram_entry_rejects_missing_and_locally_denied_users_injects"
+      ],
+      "evidence_cases": [
+        {
+          "node_id": "tests/test_p1_00b_characterization_telegram_unlinked.py::P100bTelegramUnlinkedCharacterizationTests.test_telegram_entry_rejects_missing_and_locally_denied_users_injects",
+          "boundary_talk": "UNLINKED-BOT",
+          "talk_source": "test_function_name_or_doc_or_assert",
+          "injects_named_boundary": true
+        }
+      ]
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__EXPIRY-CANCEL-REPUBLISH-TERMINAL",

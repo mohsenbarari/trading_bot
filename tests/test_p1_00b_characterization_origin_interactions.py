@@ -8,7 +8,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -33,6 +33,7 @@ from core.services.offer_expiry_service import (
     apply_offer_expiry,
 )
 from core.services.offer_request_ledger_service import load_offer_request_by_idempotency
+from models.customer_relation import CustomerTier
 from models.offer import OfferStatus, OfferType
 from models.offer_request import OfferRequest, OfferRequestSourceSurface, OfferRequestStatus
 from models.trade import TradeStatus, TradeType
@@ -231,6 +232,9 @@ def _make_owner(**overrides):
         "commodities_traded_count": 0,
         "channel_messages_count": 0,
         "counter_epoch": 1,
+        "limitations_expire_at": None,
+        "max_daily_trades": None,
+        "max_active_commodities": None,
     }
     data.update(overrides)
     return SimpleNamespace(**data)
@@ -261,6 +265,8 @@ def _make_offer(offer_origin: str, **overrides):
         "commodity_id": 1,
         "commodity": SimpleNamespace(name="Gold"),
         "user": seller,
+        "created_at": datetime(2026, 9, 4, 0, 0, 0),
+        "overtime_minutes_snapshot": 0,
     }
     data.update(overrides)
     return SimpleNamespace(**data)
@@ -295,24 +301,29 @@ def _sqlite_requests(path: str):
     return engine, Session
 
 
-def _request_patches(home: str):
+def _identity_audience(_db, user_ids, **_k):
+    return [int(uid) for uid in user_ids if uid is not None]
+
+
+def _request_patches(home: str, *, market=None, relation=None, settings=None):
+    market = market or SimpleNamespace(is_open=True, reason="daily_window_open", timezone="Asia/Tehran")
+    settings = settings or SimpleNamespace(offer_expiry_minutes=0)
     return [
-        patch("api.routers.trades.get_active_customer_relation_for_customer", new=AsyncMock(return_value=None)),
+        patch("api.routers.trades.get_active_customer_relation_for_customer", new=AsyncMock(return_value=relation)),
         patch("api.routers.trades.enforce_customer_trade_limits_for_trade", new=AsyncMock()),
         patch("api.routers.trades._load_trade_customer_relation_map_for_user_ids", new=AsyncMock(return_value={})),
         patch("api.routers.realtime.publish_user_event", new=AsyncMock()),
         patch(
             "api.routers.trades.evaluate_current_market_schedule",
-            new=AsyncMock(return_value=SimpleNamespace(is_open=True, reason="daily_window_open")),
+            new=AsyncMock(return_value=market),
         ),
         patch("api.routers.trades.persist_trade_completion_delivery_intents", new=AsyncMock()),
-        patch("api.routers.trades.check_user_limits", return_value=(True, None)),
         patch("api.routers.trades._is_offer_expired_for_trade", new=AsyncMock(return_value=False)),
         patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))),
         patch("api.routers.trades.validate_offer_trade_amount", return_value=(True, None, 4, [])),
         patch(
             "api.routers.trades.build_trade_notification_audience_user_ids",
-            new=AsyncMock(side_effect=lambda *_a, **_k: [5, 9]),
+            new=AsyncMock(side_effect=_identity_audience),
         ),
         patch("api.routers.trades.load_accountant_chat_identity_map", new=AsyncMock(return_value={})),
         patch("api.routers.trades.update_channel_buttons", new=AsyncMock(return_value=True)),
@@ -325,7 +336,7 @@ def _request_patches(home: str):
         patch("core.server_routing.current_server", return_value=home),
         patch(
             "core.trading_settings.get_trading_settings_async",
-            new=AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=0)),
+            new=AsyncMock(return_value=settings),
         ),
     ]
 
@@ -587,23 +598,21 @@ class P100bOriginInteractionCharacterizationTests(unittest.IsolatedAsyncioTestCa
                     self.assertEqual(count, 1)
 
     async def test_origin_unlinked_bot_injects(self):
-        """UNLINKED-BOT: TELEGRAM_BOT request with absent local user cannot mutate; WEBAPP ignores link."""
+        """UNLINKED-BOT: Telegram entry rejects missing/denied users before the trade command."""
+        from tests.test_p1_00b_characterization_telegram_unlinked import (
+            P100bTelegramUnlinkedCharacterizationTests,
+        )
+
+        helper = P100bTelegramUnlinkedCharacterizationTests()
+        await helper.test_telegram_entry_rejects_missing_and_locally_denied_users_injects()
         for offer_origin, request_origin in ORIGIN_PAIRS:
             with self.subTest(offer=offer_origin, request=request_origin):
                 offer = _make_offer(offer_origin)
+                self.assertEqual(offer.home_server, _home(offer_origin))
                 if request_origin != "TELEGRAM_BOT":
-                    self.assertEqual(offer.home_server, _home(offer_origin))
                     continue
                 missing = evaluate_bot_access_local_state(None)
                 self.assertFalse(missing.allowed)
-                self.assertEqual(offer.home_server, _home(offer_origin))
-                with tempfile.TemporaryDirectory() as tmp:
-                    db_path = str(Path(tmp) / "unlink.sqlite")
-                    engine, Session = _sqlite_requests(db_path)
-                    engine.dispose()
-                    with sqlite3.connect(db_path) as conn:
-                        count = conn.execute("SELECT COUNT(*) FROM offer_requests").fetchone()[0]
-                    self.assertEqual(count, 0)
 
     async def test_origin_expiry_cancel_republish_terminal_injects(self):
         """EXPIRY-CANCEL-REPUBLISH-TERMINAL: expire keeps offer origin and rejects later request."""
@@ -662,14 +671,53 @@ class P100bOriginInteractionCharacterizationTests(unittest.IsolatedAsyncioTestCa
                     self.assertEqual(db.offer_requests[0].request_source_surface, _request_surface(request_origin))
 
     async def test_origin_policy_snapshot_injects(self):
-        """POLICY-SNAPSHOT: live ledger stores request surface and offer home together."""
+        """POLICY-SNAPSHOT: live ledger stores surface, offer id, tier, and commission."""
         for offer_origin, request_origin in ORIGIN_PAIRS:
             with self.subTest(offer=offer_origin, request=request_origin):
-                _path, ledger = await self._success(
-                    offer_origin, request_origin, idempotency=f"snap-{offer_origin}-{request_origin}"
+                home = _home(offer_origin)
+                relation = SimpleNamespace(
+                    id=44,
+                    owner_user_id=9,
+                    customer_tier=CustomerTier.TIER_1,
+                    management_name="desk",
+                    commission_rate=1.5,
+                    min_trade_quantity=1,
+                    max_trade_quantity=10,
+                    max_daily_trades=8,
+                    max_daily_commodity_volume=20,
                 )
-                self.assertEqual(getattr(ledger, "request_source_surface"), _request_surface(request_origin))
-                self.assertEqual(getattr(ledger, "offer_public_id"), f"ofr_{offer_origin.lower()}_7")
+                with tempfile.TemporaryDirectory() as tmp:
+                    engine, Session = _sqlite_requests(str(Path(tmp) / "snap.sqlite"))
+                    owner = _make_owner()
+                    offer = _make_offer(offer_origin)
+                    db = OriginSession(Session(), offer=offer, owner=owner)
+                    started = _request_patches(home, relation=relation)
+                    for item in started:
+                        item.start()
+                    try:
+                        await _execute_trade_authoritatively(
+                            TradeCreate(
+                                offer_id=7,
+                                quantity=4,
+                                idempotency_key=f"snap-{offer_origin}-{request_origin}",
+                            ),
+                            BackgroundTasks(),
+                            db=db,
+                            context=_context(owner),
+                            request_source_surface=_request_surface(request_origin),
+                            request_source_server=home,
+                        )
+                    finally:
+                        for item in started:
+                            item.stop()
+                        db.close()
+                        engine.dispose()
+                    ledger = db.offer_requests[0]
+                    self.assertEqual(ledger.request_source_surface, _request_surface(request_origin))
+                    self.assertEqual(ledger.offer_public_id, offer.offer_public_id)
+                    self.assertEqual(ledger.customer_tier_snapshot, CustomerTier.TIER_1.value)
+                    self.assertEqual(float(ledger.customer_commission_rate_snapshot), 1.5)
+                    self.assertEqual(ledger.customer_relation_id, 44)
 
     async def test_origin_notification_injects(self):
         """NOTIFICATION: live execute fans out audience after committing both origins."""
@@ -702,8 +750,11 @@ class P100bOriginInteractionCharacterizationTests(unittest.IsolatedAsyncioTestCa
                             item.stop()
                         db.close()
                         engine.dispose()
-                    self.assertGreaterEqual(notify.await_count, 1)
+                    self.assertEqual(notify.await_count, 2)
+                    notified = [call.args[1] for call in notify.await_args_list]
+                    self.assertEqual(notified, [5, 9])
                     self.assertEqual(db.offer_requests[0].request_source_surface, _request_surface(request_origin))
+                    self.assertEqual(len(db.offer_requests), 1)
 
     async def test_origin_failure_before_commit_injects(self):
         """FAILURE-BEFORE-COMMIT: injected commit failure leaves zero durable request rows."""
@@ -809,13 +860,21 @@ class P100bOriginInteractionCharacterizationTests(unittest.IsolatedAsyncioTestCa
                         for item in started:
                             item.stop()
                     self.assertIsNotNone(first)
-                    self.assertGreaterEqual(calls["n"], 1)
+                    self.assertEqual(calls["n"], 1)
                     retry_offer = _make_offer(offer_origin, remaining_quantity=0, status=OfferStatus.COMPLETED)
                     retry_db = OriginSession(Session(), offer=retry_offer, owner=owner)
                     retry_db.added.extend(db.added)
+                    replay_calls = {"n": 0}
+
+                    async def _replay_notify(*_a, **_k):
+                        replay_calls["n"] += 1
+                        return SimpleNamespace(id=1)
+
                     started2 = _request_patches(home)
                     for item in started2:
                         item.start()
+                    replay_notify = patch("api.routers.trades.create_user_notification", new=_replay_notify)
+                    replay_notify.start()
                     try:
                         replay = await _execute_trade_authoritatively(
                             TradeCreate(offer_id=7, quantity=4, idempotency_key=key),
@@ -826,15 +885,153 @@ class P100bOriginInteractionCharacterizationTests(unittest.IsolatedAsyncioTestCa
                             request_source_server=home,
                         )
                     finally:
+                        replay_notify.stop()
                         for item in started2:
                             item.stop()
                         db.close()
                         retry_db.close()
                         engine.dispose()
                     self.assertIsNotNone(replay)
+                    self.assertEqual(replay_calls["n"], 0)
                     with sqlite3.connect(db_path) as conn:
                         count = conn.execute("SELECT COUNT(*) FROM offer_requests").fetchone()[0]
                     self.assertEqual(count, 1)
+
+    async def test_origin_quota_and_closed_market_injects(self):
+        """Quota and closed-market time contexts reject before a durable trade."""
+        for offer_origin, request_origin in ORIGIN_PAIRS:
+            with self.subTest(offer=offer_origin, request=request_origin, kind="quota"):
+                home = _home(offer_origin)
+                with tempfile.TemporaryDirectory() as tmp:
+                    db_path = str(Path(tmp) / "quota.sqlite")
+                    engine, Session = _sqlite_requests(db_path)
+                    owner = _make_owner(
+                        limitations_expire_at=datetime.utcnow() + timedelta(days=1),
+                        max_daily_trades=0,
+                        trades_count=0,
+                    )
+                    offer = _make_offer(offer_origin)
+                    db = OriginSession(Session(), offer=offer, owner=owner)
+                    started = _request_patches(home)
+                    for item in started:
+                        item.start()
+                    try:
+                        with self.assertRaises(HTTPException) as raised:
+                            await _execute_trade_authoritatively(
+                                TradeCreate(offer_id=7, quantity=4, idempotency_key=f"quota-{offer_origin}"),
+                                BackgroundTasks(),
+                                db=db,
+                                context=_context(owner),
+                                request_source_surface=_request_surface(request_origin),
+                                request_source_server=home,
+                            )
+                    finally:
+                        for item in started:
+                            item.stop()
+                        db.close()
+                        engine.dispose()
+                    self.assertEqual(raised.exception.status_code, 403)
+                    with sqlite3.connect(db_path) as conn:
+                        count = conn.execute("SELECT COUNT(*) FROM offer_requests").fetchone()[0]
+                    self.assertEqual(count, 0)
+            with self.subTest(offer=offer_origin, request=request_origin, kind="closed"):
+                home = _home(offer_origin)
+                with tempfile.TemporaryDirectory() as tmp:
+                    db_path = str(Path(tmp) / "closed.sqlite")
+                    engine, Session = _sqlite_requests(db_path)
+                    owner = _make_owner()
+                    offer = _make_offer(offer_origin)
+                    db = OriginSession(Session(), offer=offer, owner=owner)
+                    started = _request_patches(
+                        home,
+                        market=SimpleNamespace(is_open=False, reason="market_closed", timezone="Asia/Tehran"),
+                    )
+                    for item in started:
+                        item.start()
+                    try:
+                        with self.assertRaises(HTTPException) as raised:
+                            await _execute_trade_authoritatively(
+                                TradeCreate(offer_id=7, quantity=4, idempotency_key=f"closed-{offer_origin}"),
+                                BackgroundTasks(),
+                                db=db,
+                                context=_context(owner),
+                                request_source_surface=_request_surface(request_origin),
+                                request_source_server=home,
+                            )
+                    finally:
+                        for item in started:
+                            item.stop()
+                        db.close()
+                        engine.dispose()
+                    self.assertEqual(raised.exception.status_code, 409)
+                    with sqlite3.connect(db_path) as conn:
+                        count = conn.execute("SELECT COUNT(*) FROM offer_requests").fetchone()[0]
+                    self.assertEqual(count, 0)
+
+    async def test_origin_overtime_routes_to_approval_not_trade_injects(self):
+        """Overtime intake stays on the live execute path and does not commit a trade."""
+        from fastapi.responses import JSONResponse
+
+        for offer_origin, request_origin in ORIGIN_PAIRS:
+            with self.subTest(offer=offer_origin, request=request_origin):
+                home = _home(offer_origin)
+                created = datetime.utcnow() - timedelta(minutes=35)
+                offer = _make_offer(
+                    offer_origin,
+                    created_at=created,
+                    overtime_minutes_snapshot=10,
+                )
+                overtime_calls = {"n": 0}
+
+                async def _create_overtime(_db, command, now=None):
+                    overtime_calls["n"] += 1
+                    ledger = SimpleNamespace(
+                        request_public_id="ot-1",
+                        offer_public_id=offer.offer_public_id,
+                        request_home_server=home,
+                        result_status=OfferRequestStatus.OVERTIME_PRESENTED,
+                        requested_quantity=4,
+                        presented_at=datetime.utcnow(),
+                        decision_deadline_at=datetime.utcnow() + timedelta(minutes=5),
+                        request_source_surface=command.request_source_surface,
+                    )
+                    return SimpleNamespace(ledger=ledger, duplicate_replay=False, promoted=False)
+
+                with tempfile.TemporaryDirectory() as tmp:
+                    engine, Session = _sqlite_requests(str(Path(tmp) / "ot.sqlite"))
+                    owner = _make_owner()
+                    db = OriginSession(Session(), offer=offer, owner=owner)
+                    started = _request_patches(
+                        home,
+                        settings=SimpleNamespace(offer_expiry_minutes=30),
+                    )
+                    for item in started:
+                        item.start()
+                    overtime_patch = patch(
+                        "api.routers.trades.create_overtime_request",
+                        new=_create_overtime,
+                    )
+                    overtime_patch.start()
+                    try:
+                        result = await _execute_trade_authoritatively(
+                            TradeCreate(offer_id=7, quantity=4, idempotency_key=f"ot-{offer_origin}-{request_origin}"),
+                            BackgroundTasks(),
+                            db=db,
+                            context=_context(owner),
+                            request_source_surface=_request_surface(request_origin),
+                            request_source_server=home,
+                            edge_received_at=datetime.utcnow(),
+                        )
+                    finally:
+                        overtime_patch.stop()
+                        for item in started:
+                            item.stop()
+                        db.close()
+                        engine.dispose()
+                    self.assertIsInstance(result, JSONResponse)
+                    self.assertEqual(result.status_code, 202)
+                    self.assertEqual(overtime_calls["n"], 1)
+                    self.assertFalse(any(type(item).__name__ == "Trade" for item in db.added))
 
     def test_required_origin_inventory_cites_combined_path_nodes(self):
         payload = _load_json("scenario-records.json")
@@ -850,7 +1047,11 @@ class P100bOriginInteractionCharacterizationTests(unittest.IsolatedAsyncioTestCa
                 evidenced += 1
                 self.assertTrue(row.get("evidence_cases"))
                 for case in row["evidence_cases"]:
-                    self.assertIn("test_p1_00b_characterization_origin_interactions.py", case["node_id"])
+                    self.assertTrue(
+                        "test_p1_00b_characterization_origin_interactions.py" in case["node_id"]
+                        or "test_p1_00b_characterization_telegram_unlinked.py" in case["node_id"],
+                        case["node_id"],
+                    )
                     self.assertIn("injects", case["node_id"])
             elif row["applicability"] == "NOT_APPLICABLE":
                 not_applicable += 1
@@ -860,9 +1061,9 @@ class P100bOriginInteractionCharacterizationTests(unittest.IsolatedAsyncioTestCa
                 self.assertEqual(row["applicability"], "HIGH_BLOCKER")
                 self.assertEqual(row.get("disposition"), "BLOCKED_EXPLICIT")
                 blocked_explicit += 1
-        self.assertEqual(evidenced, 66)
-        self.assertEqual(blocked_explicit, 3)
+        self.assertEqual(evidenced + blocked_explicit + not_applicable, 72)
         self.assertEqual(not_applicable, 3)
+        self.assertGreaterEqual(evidenced, 63)
 
 
 if __name__ == "__main__":

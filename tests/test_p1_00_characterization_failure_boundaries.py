@@ -1504,14 +1504,15 @@ class P100FailureBoundaryCharacterizationTests(unittest.IsolatedAsyncioTestCase)
         """MSG commit_before_event_side_effect: injects persist_sent_direct_message then threading."""
         await _inject_msg_commit_before()
 
-    def test_msg_two_concurrent_and_restart_are_not_evidenced(self):
-        """MSG persist has no command identity; collision cells stay NOT_APPLICABLE."""
+    def test_msg_two_concurrent_and_restart_are_evidenced_on_live_persist(self):
+        """MSG persist has no command identity; overlap still creates two rows."""
         payload = _load_json("scenario-records.json")
         for variant_id in ("MSG__TWO-CONCURRENT-COMMANDS", "MSG__PROCESS-RESTART"):
             cell = next(item for item in payload["family_boundary_variants"] if item["variant_id"] == variant_id)
-            self.assertEqual(cell["applicability"], "NOT_APPLICABLE")
-            self.assertEqual(cell["eligibility"]["decision"], "NOT_APPLICABLE")
-            self.assertIn("no command identity", cell["eligibility"]["reason"])
+            self.assertEqual(cell["applicability"], "ELIGIBLE")
+            self.assertEqual(cell["eligibility"]["decision"], "ELIGIBLE")
+            self.assertTrue(cell.get("evidence_cases"))
+            self.assertIn("test_p1_00b_characterization_family_overlap.py", cell["evidence_refs"][0])
         self.assertNotIn(("MSG", "two_concurrent_commands"), INJECTORS)
         self.assertNotIn(("MSG", "process_restart"), INJECTORS)
 

@@ -234,7 +234,7 @@ At minimum the target must preserve:
 | manual resolution of 6 evidence-review items | `COMPLETE — characterization linked` |
 | current runtime child/poller/timer owner seed manifest | `COMPLETE` |
 | exact target compose/credential/readiness binding | future `P1-03` |
-| persona/tier/time/failure scenario records | `IN_PROGRESS` under `WA-P1-00B-FREEZE-20260904-001` — family overlap/reload evidenced except MSG `NOT_APPLICABLE`; 465 seed handlers asserted; 66 origin cells evidenced; 3 Web unlinked-Bot `NOT_APPLICABLE`; 3 Telegram unlinked-Bot `BLOCKED_EXPLICIT`; `target_result NOT_RUN`; `P1-00b` not `COMPLETE` |
+| persona/tier/time/failure scenario records | `IN_PROGRESS` under `WA-P1-00B-FREEZE-20260904-001` — family overlap/reload including MSG two-row overlap and child replay; seed High remains for unsupported seeds; origin combined-path plus Telegram unlinked entry evidenced; 3 Web unlinked-Bot `NOT_APPLICABLE`; `target_result NOT_RUN`; `P1-00b` not `COMPLETE` |
 | owner approval of human-readable scenario contract | `COMPLETE — 2026-09-02` |
 | deploy/restart/backup/restore duration (`DR-015`) | `DEFERRED_BLOCKER` / `DPL-1` / `NOT_OBSERVED` |
 | current-vs-target differential execution | future `P1-06` |

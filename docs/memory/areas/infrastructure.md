@@ -1,5 +1,9 @@
 # Infrastructure
 
+- 2026-09-04 | Codex `CHANGES_REQUIRED` on integration `3a7344b3`. The P1-00b
+  correction did not re-observe live hosts and did not read live Redis.
+  `DR-018` stays `NOT_REINSPECTED`. Host facts stay `NOT_REOBSERVED`.
+
 - 2026-09-04 | `P1-00b` freeze `WA-P1-00B-FREEZE-20260904-001` did not re-observe
   live hosts. Previous 2026-09-01 Bot-Finland / Web-Finland / target facts stay
   `NOT_REOBSERVED`. `DR-018` stays `NOT_REINSPECTED`. `DR-015` still blocks

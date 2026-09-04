@@ -63,12 +63,15 @@ P1-00b materializes those interactions in `inventory/scenario-records.json`
 `origin_required_interactions`. Combined-path cells that ran
 `_execute_trade_authoritatively` on isolated sqlite are `ELIGIBLE` /
 `EVIDENCED`. Web-request `UNLINKED-BOT` is `NOT_APPLICABLE` because Web does
-not consult Telegram link state. Telegram-request `UNLINKED-BOT` stays
-`BLOCKED_EXPLICIT`: `evaluate_bot_access_local_state` is not on that live
-path, and joining it would be a product change. No cell is
-`EQUIVALENT_TO_REPRESENTATIVE`. Isolated ledger persist and origin-free
-invitation checks are not combined-path evidence. `CONCURRENT` overlaps after
-lookup and before commit.
+not consult Telegram link state. Telegram-request `UNLINKED-BOT` is
+`EVIDENCED` on `_handle_channel_trade` / `handle_channel_trade_public`: a
+missing or locally denied user is rejected before session creation, the
+authoritative trade command, durable mutation, or provider send. Quota,
+closed-market, overtime routing, commission snapshots, exact notification
+audience, and retry cardinality are asserted on that same live execute path.
+No cell is `EQUIVALENT_TO_REPRESENTATIVE`. Isolated ledger persist and
+origin-free invitation checks are not combined-path evidence. `CONCURRENT`
+overlaps after lookup and before commit.
 
 ## Approved semantic contract for the next ADR
 

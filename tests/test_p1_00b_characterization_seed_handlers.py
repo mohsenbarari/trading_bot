@@ -256,18 +256,21 @@ class P100bSeedHandlerCharacterizationTests(unittest.TestCase):
                 self.assertEqual(kind, "SCHEDULED_JOB", behavior_id)
                 self.assertEqual(contract["operation_kind"], "SCHEDULED_JOB", behavior_id)
                 if seed["required_registry_member"]:
-                    self.assertIn(job_name, REQUIRED_BACKGROUND_JOBS | {job_name}, behavior_id)
+                    self.assertIn(job_name, REQUIRED_BACKGROUND_JOBS, behavior_id)
 
         self.assertEqual(mismatches, [])
         self.assertEqual(len(job_names), 15)
         self.assertEqual(len(set(job_names)), 15)
 
-    def test_seed_handler_blocker_is_closed_after_one_by_one_assertions(self):
+    def test_seed_handler_blocker_stays_open_without_executed_partitions(self):
         payload = _load_json("scenario-records.json")
-        registry_ids = {item["blocker_id"] for item in payload["blocker_registry"]["items"]}
-        self.assertNotIn("P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE", registry_ids)
-        deferred_ids = {item["blocker_id"] for item in payload["deferred_blockers"]}
-        self.assertNotIn("P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE", deferred_ids)
+        registry = {item["blocker_id"]: item for item in payload["blocker_registry"]["items"]}
+        self.assertIn("P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE", registry)
+        item = registry["P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE"]
+        self.assertEqual(item["severity"], "HIGH")
+        self.assertEqual(item["disposition"], "BLOCKED_EXPLICIT")
+        self.assertEqual(item["resolution_stage"], "P1-00b")
+        self.assertEqual(item.get("evidence_cases") or [], [])
 
 
 if __name__ == "__main__":

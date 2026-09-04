@@ -277,6 +277,7 @@ class P100RequestConcurrentRestartTests(unittest.IsolatedAsyncioTestCase):
             "TRADE",
             "MARKET",
             "NOTIFY",
+            "MSG",
             "TG",
             "ADMIN",
             "SYNC",
@@ -292,16 +293,6 @@ class P100RequestConcurrentRestartTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(cell["eligibility"]["decision"], "ELIGIBLE")
                 self.assertTrue(cell.get("evidence_cases"))
                 self.assertIn("test_p1_00b_characterization_family_overlap.py", cell["evidence_refs"][0])
-        for boundary in ("two_concurrent_commands", "process_restart"):
-            cell = next(
-                item
-                for item in payload["family_boundary_variants"]
-                if item["family"] == "MSG" and item["failure_boundary"] == boundary
-            )
-            self.assertEqual(cell["applicability"], "NOT_APPLICABLE", cell["variant_id"])
-            self.assertEqual(cell["eligibility"]["decision"], "NOT_APPLICABLE")
-            self.assertIn("no command identity", cell["eligibility"]["reason"])
-            self.assertEqual(cell.get("evidence_cases") or [], [])
 
     def test_request_cells_cite_durable_overlap_nodes(self):
         payload = _load_json("scenario-records.json")

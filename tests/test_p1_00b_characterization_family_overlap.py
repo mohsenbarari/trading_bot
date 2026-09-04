@@ -238,6 +238,38 @@ def _run_overlap(worker_coro):
     return results["a"], results["b"], events
 
 
+def _run_overlap_at_commit(worker_coro):
+    """Overlap after add and before commit when the command has no lookup."""
+    commit_barrier = threading.Barrier(2, timeout=45)
+    events: list = []
+    events_lock = threading.Lock()
+    results: dict = {}
+    errors: dict = {}
+
+    def _record(item):
+        with events_lock:
+            events.append(item)
+
+    def thread_main(wid: str):
+        async def before_commit():
+            commit_barrier.wait()
+
+        try:
+            results[wid] = asyncio.run(worker_coro(wid, before_commit, _record))
+        except Exception as exc:
+            errors[wid] = exc
+
+    first = threading.Thread(target=thread_main, args=("a",))
+    second = threading.Thread(target=thread_main, args=("b",))
+    first.start()
+    second.start()
+    first.join(60)
+    second.join(60)
+    if errors:
+        raise next(iter(errors.values()))
+    return results["a"], results["b"], events
+
+
 def _exec_sql(engine, sql: str) -> None:
     with engine.begin() as conn:
         for statement in sql.strip().split(";"):
@@ -256,6 +288,19 @@ def _assert_overlap(events, workers=("a", "b")) -> None:
     assert set(first_lookup) == set(workers)
     assert first_commit_index is not None
     assert max(first_lookup.values()) < first_commit_index
+
+
+def _assert_commit_overlap(events, workers=("a", "b")) -> None:
+    first_pre = {}
+    first_commit_index = None
+    for index, (wid, kind, _count) in enumerate(events):
+        if kind == "pre_commit" and wid not in first_pre:
+            first_pre[wid] = index
+        if kind == "commit" and first_commit_index is None:
+            first_commit_index = index
+    assert set(first_pre) == set(workers)
+    assert first_commit_index is not None
+    assert max(first_pre.values()) < first_commit_index
 
 
 def _child(family: str, db_path: str) -> dict:
@@ -519,22 +564,6 @@ CREATE TABLE change_log (
 MSG_SQL = """
 CREATE TABLE users (id INTEGER PRIMARY KEY);
 CREATE TABLE chats (id INTEGER PRIMARY KEY);
-CREATE TABLE messages (
-    id INTEGER PRIMARY KEY,
-    chat_id INTEGER,
-    sender_id INTEGER NOT NULL,
-    receiver_id INTEGER NOT NULL,
-    actor_user_id INTEGER,
-    reply_to_message_id INTEGER,
-    forwarded_from_id INTEGER,
-    forwarded_from_name_override VARCHAR(255),
-    content TEXT NOT NULL,
-    message_type VARCHAR(32) NOT NULL,
-    is_read BOOLEAN NOT NULL DEFAULT 0,
-    is_deleted BOOLEAN NOT NULL DEFAULT 0,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME
-);
 """
 
 
@@ -1346,60 +1375,109 @@ class P100bFamilyOverlapCharacterizationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(payload["rowcount"], 0)
             self.assertEqual(payload["row_count"], 1)
 
-    def test_msg_two_concurrent_and_restart_are_not_applicable(self):
-        """MSG persist_sent_direct_message has no command identity; cells stay NOT_APPLICABLE."""
-        source = persist_sent_direct_message
-        text = source.__doc__ or ""
-        self.assertIn("Persist one new direct message", text)
-        blob = Path(REPO_ROOT / "core/services/chat_service.py").read_text(encoding="utf-8")
-        start = blob.find("async def persist_sent_direct_message")
-        fragment = blob[start : start + 1200]
-        self.assertNotIn("idempotency_key", fragment)
-        payload = _load_json("scenario-records.json")
-        for variant_id in ("MSG__TWO-CONCURRENT-COMMANDS", "MSG__PROCESS-RESTART"):
-            cell = next(item for item in payload["family_boundary_variants"] if item["variant_id"] == variant_id)
-            self.assertEqual(cell["applicability"], "NOT_APPLICABLE")
-            self.assertEqual(cell["eligibility"]["decision"], "NOT_APPLICABLE")
-            self.assertIn("no command identity", cell["eligibility"]["reason"])
-
-    async def test_msg_overlapping_persists_create_independent_rows(self):
-        """MSG has no same-key collision: overlapping persist_sent_direct_message inserts two rows."""
+    async def test_msg_two_concurrent_commands_injects(self):
+        """MSG two_concurrent_commands: persist_sent_direct_message overlaps before commit."""
         with tempfile.TemporaryDirectory() as tmp:
             db_path = str(Path(tmp) / "msg.sqlite")
             engine = _engine(db_path)
-            with engine.begin() as conn:
-                conn.execute(text("CREATE TABLE users (id INTEGER PRIMARY KEY)"))
-                conn.execute(text("CREATE TABLE chats (id INTEGER PRIMARY KEY)"))
+            _exec_sql(engine, MSG_SQL)
             Message.__table__.create(engine, checkfirst=True)
             Session = sessionmaker(bind=engine, future=True, expire_on_commit=False)
             sender = SimpleNamespace(id=1)
             receiver = SimpleNamespace(id=2)
+            threading_calls = {"n": 0}
+            threading_lock = threading.Lock()
 
-            async def worker():
-                db = YieldingSession(Session())
+            async def _thread(*_a, **_k):
+                with threading_lock:
+                    threading_calls["n"] += 1
+
+            async def worker(wid, before_commit, record):
+                db = YieldingSession(Session(), before_commit=before_commit, event_log=_EventLog(record), worker_id=wid)
                 try:
-                    with patch(
-                        "core.services.chat_service.sync_direct_message_threading",
-                        new=AsyncMock(),
-                    ), patch(
-                        "core.services.chat_service.reload_direct_message",
-                        new=AsyncMock(side_effect=lambda _db, message_id, **_k: SimpleNamespace(id=message_id)),
-                    ):
-                        return await persist_sent_direct_message(
-                            db,
-                            sender=sender,
-                            receiver=receiver,
-                            content="same-text",
-                            message_type=MessageType.TEXT,
-                        )
+                    return await persist_sent_direct_message(
+                        db,
+                        sender=sender,
+                        receiver=receiver,
+                        content="same-text",
+                        message_type=MessageType.TEXT,
+                    )
                 finally:
                     db.close()
 
-            await asyncio.gather(worker(), worker())
+            thread_patch = patch("core.services.chat_service.sync_direct_message_threading", new=_thread)
+            reload_patch = patch(
+                "core.services.chat_service.reload_direct_message",
+                new=AsyncMock(side_effect=lambda _db, message_id, **_k: SimpleNamespace(id=message_id)),
+            )
+            thread_patch.start()
+            reload_patch.start()
+            try:
+                first, second, events = _run_overlap_at_commit(worker)
+            finally:
+                reload_patch.stop()
+                thread_patch.stop()
             engine.dispose()
+            _assert_commit_overlap(events)
+            self.assertIsNotNone(first)
+            self.assertIsNotNone(second)
+            self.assertEqual(threading_calls["n"], 2)
             with sqlite3.connect(db_path) as conn:
                 count = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
             self.assertEqual(count, 2)
+            payload = _load_json("scenario-records.json")
+            cell = next(item for item in payload["family_boundary_variants"] if item["variant_id"] == "MSG__TWO-CONCURRENT-COMMANDS")
+            self.assertEqual(cell["applicability"], "ELIGIBLE")
+            self.assertEqual(cell["eligibility"]["decision"], "ELIGIBLE")
+
+    async def test_msg_process_restart_injects(self):
+        """MSG process_restart: a fresh child persist creates another message and side effect."""
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "msg-restart.sqlite")
+            engine = _engine(db_path)
+            _exec_sql(engine, MSG_SQL)
+            Message.__table__.create(engine, checkfirst=True)
+            Session = sessionmaker(bind=engine, future=True, expire_on_commit=False)
+            db = YieldingSession(Session())
+            threading_calls = {"n": 0}
+
+            async def _thread(*_a, **_k):
+                threading_calls["n"] += 1
+
+            try:
+                with patch(
+                    "core.services.chat_service.sync_direct_message_threading",
+                    new=_thread,
+                ), patch(
+                    "core.services.chat_service.reload_direct_message",
+                    new=AsyncMock(side_effect=lambda _db, message_id, **_k: SimpleNamespace(id=message_id)),
+                ):
+                    first = await persist_sent_direct_message(
+                        db,
+                        sender=SimpleNamespace(id=1),
+                        receiver=SimpleNamespace(id=2),
+                        content="same-text",
+                        message_type=MessageType.TEXT,
+                    )
+            finally:
+                db.close()
+            self.assertIsNotNone(first)
+            self.assertEqual(threading_calls["n"], 1)
+            with sqlite3.connect(db_path) as conn:
+                before = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            self.assertEqual(before, 1)
+            engine.dispose()
+            payload = _child("MSG", db_path)
+            self.assertEqual(payload["row_count"], 2)
+            self.assertTrue(payload["duplicate_replay"])
+            self.assertEqual(payload["threading_calls"], 1)
+            cell = next(
+                item
+                for item in _load_json("scenario-records.json")["family_boundary_variants"]
+                if item["variant_id"] == "MSG__PROCESS-RESTART"
+            )
+            self.assertEqual(cell["applicability"], "ELIGIBLE")
+            self.assertEqual(cell["eligibility"]["decision"], "ELIGIBLE")
 
 
 def _child_main() -> None:
@@ -1564,6 +1642,33 @@ async def _child_replay(family: str, db_path: str) -> dict:
             with sqlite3.connect(db_path) as conn:
                 row_count = conn.execute("SELECT COUNT(*) FROM change_log").fetchone()[0]
             return {"rowcount": rowcount, "row_count": row_count}
+        if family == "MSG":
+            threading_calls = {"n": 0}
+
+            async def _thread(*_a, **_k):
+                threading_calls["n"] += 1
+
+            with patch(
+                "core.services.chat_service.sync_direct_message_threading",
+                new=_thread,
+            ), patch(
+                "core.services.chat_service.reload_direct_message",
+                new=AsyncMock(side_effect=lambda _db, message_id, **_k: SimpleNamespace(id=message_id)),
+            ):
+                await persist_sent_direct_message(
+                    db,
+                    sender=SimpleNamespace(id=1),
+                    receiver=SimpleNamespace(id=2),
+                    content="same-text",
+                    message_type=MessageType.TEXT,
+                )
+            with sqlite3.connect(db_path) as conn:
+                row_count = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            return {
+                "duplicate_replay": row_count > 1,
+                "row_count": row_count,
+                "threading_calls": threading_calls["n"],
+            }
         raise AssertionError(family)
     finally:
         db.close()
