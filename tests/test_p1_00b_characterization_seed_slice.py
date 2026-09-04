@@ -33,32 +33,69 @@ from api.routers.admin_messages import (
     get_market_message_history,
 )
 from api.routers.chat import (
+    bulk_invite_channel_members,
+    cancel_upload_batch_endpoint,
+    cancel_upload_session_endpoint,
+    create_channel,
     create_group,
     delete_direct_conversation,
     delete_group_member,
     delete_message,
     demote_group_admin,
+    get_channel_invite_candidates,
+    get_channel_members,
+    get_channels,
     get_group_detail,
+    get_group_member_candidates,
     get_groups,
+    get_upload_session_state,
+    mark_direct_conversation_unread,
+    mark_messages_read,
+    mark_room_conversation_unread,
+    mark_room_messages_read,
     mute_direct_conversation,
     mute_room_conversation,
+    patch_channel_member,
     patch_group,
     pin_direct_conversation,
     pin_room_conversation,
     post_group_leave,
     post_group_member,
+    post_upload_batch,
+    post_upload_session,
     promote_group_admin,
+    reorder_direct_conversation_pin,
+    reorder_room_conversation_pin,
     send_message,
+    send_room_message,
+    toggle_message_pin,
+    toggle_message_reaction,
+    unfollow_channel,
+    update_channel,
     update_message,
 )
 from api.routers.chat_schemas import (
+    ChannelBulkMemberAddRequest,
+    ChannelCreateRequest,
+    ChannelMemberUpdateRequest,
+    ChannelUpdateRequest,
     ConversationMuteUpdateRequest,
+    ConversationPinReorderUpdateRequest,
     ConversationPinUpdateRequest,
+    ConversationUnreadUpdateRequest,
     GroupCreateRequest,
     GroupMemberAddRequest,
     GroupUpdateRequest,
+    MessagePinUpdateRequest,
+    MessageReactionToggle,
     MessageSend,
     MessageUpdate,
+    RoomMessageSend,
+    UploadBatchCreateRequest,
+    UploadBatchMessageKind,
+    UploadMediaType,
+    UploadRoomKind,
+    UploadSessionCreateRequest,
 )
 from api.routers.commodities import (
     add_alias_to_commodity,
@@ -171,8 +208,11 @@ from models.chat_member import ChatMember
 from models.commodity import Commodity, CommodityAlias
 from models.market_runtime_state import MarketRuntimeState
 from models.market_schedule_override import MarketScheduleOverride, MarketScheduleOverrideType
+from models.conversation import Conversation
 from models.message import Message
 from models.notification import Notification
+from models.session import SingleSessionRecoveryAdminTarget, SingleSessionRecoveryRequest
+from models.upload_session import UploadBatch, UploadSession
 from models.offer import OfferStatus
 from models.telegram_admin_broadcast import TelegramAdminBroadcastAudienceType
 from models.user import User, UserRole as ModelUserRole
@@ -295,6 +335,29 @@ MSG_GET_GROUP_DETAIL_SEED = "API-MSG-GET-CHAT-GET-GROUP-DETAIL-L1278"
 MSG_PIN_DIRECT_SEED = "API-MSG-POST-CHAT-PIN-DIRECT-CONVERSATION-L643"
 MSG_MUTE_DIRECT_SEED = "API-MSG-POST-CHAT-MUTE-DIRECT-CONVERSATION-L727"
 MSG_HIDE_DIRECT_SEED = "API-MSG-DELETE-CHAT-DELETE-DIRECT-CONVERSATION-L777"
+MSG_REORDER_ROOM_SEED = "API-MSG-POST-CHAT-REORDER-ROOM-CONVERSATION-PIN-L1496"
+MSG_UNREAD_ROOM_SEED = "API-MSG-POST-CHAT-MARK-ROOM-CONVERSATION-UNREAD-L1568"
+MSG_UNFOLLOW_CHANNEL_SEED = "API-MSG-POST-CHAT-UNFOLLOW-CHANNEL-L1592"
+MSG_CREATE_CHANNEL_SEED = "API-MSG-POST-CHAT-CREATE-CHANNEL-L1636"
+MSG_UPDATE_CHANNEL_SEED = "API-MSG-PATCH-CHAT-UPDATE-CHANNEL-L1673"
+MSG_PATCH_CHANNEL_MEMBER_SEED = "API-MSG-PATCH-CHAT-PATCH-CHANNEL-MEMBER-L1741"
+MSG_BULK_INVITE_CHANNEL_SEED = "API-MSG-POST-CHAT-BULK-INVITE-CHANNEL-MEMBERS-L1811"
+MSG_SEND_ROOM_SEED = "API-MSG-POST-CHAT-SEND-ROOM-MESSAGE-L1893"
+MSG_MARK_ROOM_READ_SEED = "API-MSG-POST-CHAT-MARK-ROOM-MESSAGES-READ-L1993"
+MSG_TOGGLE_REACTION_SEED = "API-MSG-POST-CHAT-TOGGLE-MESSAGE-REACTION-L2100"
+MSG_TOGGLE_PIN_SEED = "API-MSG-POST-CHAT-TOGGLE-MESSAGE-PIN-L2162"
+MSG_MARK_DIRECT_READ_SEED = "API-MSG-POST-CHAT-MARK-MESSAGES-READ-L2197"
+MSG_REORDER_DIRECT_SEED = "API-MSG-POST-CHAT-REORDER-DIRECT-CONVERSATION-PIN-L670"
+MSG_UNREAD_DIRECT_SEED = "API-MSG-POST-CHAT-MARK-DIRECT-CONVERSATION-UNREAD-L752"
+MSG_UPLOAD_BATCH_SEED = "API-MSG-POST-CHAT-POST-UPLOAD-BATCH-L2517"
+MSG_UPLOAD_SESSION_SEED = "API-MSG-POST-CHAT-POST-UPLOAD-SESSION-L2540"
+MSG_CANCEL_UPLOAD_SESSION_SEED = "API-MSG-POST-CHAT-CANCEL-UPLOAD-SESSION-ENDPOINT-L2726"
+MSG_CANCEL_UPLOAD_BATCH_SEED = "API-MSG-POST-CHAT-CANCEL-UPLOAD-BATCH-ENDPOINT-L2751"
+MSG_GET_MEMBER_CANDIDATES_SEED = "API-MSG-GET-CHAT-GET-GROUP-MEMBER-CANDIDATES-L1182"
+MSG_GET_CHANNELS_SEED = "API-MSG-GET-CHAT-GET-CHANNELS-L1611"
+MSG_GET_CHANNEL_MEMBERS_SEED = "API-MSG-GET-CHAT-GET-CHANNEL-MEMBERS-L1710"
+MSG_GET_CHANNEL_CANDIDATES_SEED = "API-MSG-GET-CHAT-GET-CHANNEL-INVITE-CANDIDATES-L1771"
+MSG_GET_UPLOAD_STATE_SEED = "API-MSG-GET-CHAT-GET-UPLOAD-SESSION-STATE-L2614"
 TRADE_CHANNEL_SEED = "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-L810"
 TRADE_PUBLIC_SEED = "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-PUBLIC-L829"
 UNEVIDENCED_TRADE_GATEWAY_SEEDS = {TRADE_CHANNEL_SEED, TRADE_PUBLIC_SEED}
@@ -404,6 +467,29 @@ SLICE_EXECUTED_SEED_IDS = {
     MSG_PIN_DIRECT_SEED,
     MSG_MUTE_DIRECT_SEED,
     MSG_HIDE_DIRECT_SEED,
+    MSG_REORDER_ROOM_SEED,
+    MSG_UNREAD_ROOM_SEED,
+    MSG_UNFOLLOW_CHANNEL_SEED,
+    MSG_CREATE_CHANNEL_SEED,
+    MSG_UPDATE_CHANNEL_SEED,
+    MSG_PATCH_CHANNEL_MEMBER_SEED,
+    MSG_BULK_INVITE_CHANNEL_SEED,
+    MSG_SEND_ROOM_SEED,
+    MSG_MARK_ROOM_READ_SEED,
+    MSG_TOGGLE_REACTION_SEED,
+    MSG_TOGGLE_PIN_SEED,
+    MSG_MARK_DIRECT_READ_SEED,
+    MSG_REORDER_DIRECT_SEED,
+    MSG_UNREAD_DIRECT_SEED,
+    MSG_UPLOAD_BATCH_SEED,
+    MSG_UPLOAD_SESSION_SEED,
+    MSG_CANCEL_UPLOAD_SESSION_SEED,
+    MSG_CANCEL_UPLOAD_BATCH_SEED,
+    MSG_GET_MEMBER_CANDIDATES_SEED,
+    MSG_GET_CHANNELS_SEED,
+    MSG_GET_CHANNEL_MEMBERS_SEED,
+    MSG_GET_CHANNEL_CANDIDATES_SEED,
+    MSG_GET_UPLOAD_STATE_SEED,
 }
 
 SEED_EVIDENCE_NODES = {
@@ -823,6 +909,98 @@ SEED_EVIDENCE_NODES = {
     MSG_HIDE_DIRECT_SEED: (
         "tests/test_p1_00b_characterization_seed_slice.py"
         "::P100bSeedSliceExecutionTests.test_delete_direct_conversation_hides_then_404s"
+    ),
+    MSG_REORDER_ROOM_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_reorder_room_pin_moves_then_404s"
+    ),
+    MSG_UNREAD_ROOM_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_mark_room_unread_sets_flag_then_404s"
+    ),
+    MSG_UNFOLLOW_CHANNEL_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_unfollow_channel_leaves_then_404s"
+    ),
+    MSG_CREATE_CHANNEL_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_create_channel_persists_then_404s_update_target"
+    ),
+    MSG_UPDATE_CHANNEL_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_update_channel_renames_then_404s"
+    ),
+    MSG_PATCH_CHANNEL_MEMBER_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_patch_channel_member_promotes_then_404s"
+    ),
+    MSG_BULK_INVITE_CHANNEL_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_bulk_invite_channel_members_adds_then_404s"
+    ),
+    MSG_SEND_ROOM_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_send_room_message_persists_then_404s"
+    ),
+    MSG_MARK_ROOM_READ_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_mark_room_messages_read_clears_then_404s"
+    ),
+    MSG_TOGGLE_REACTION_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_toggle_message_reaction_adds_then_404s"
+    ),
+    MSG_TOGGLE_PIN_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_toggle_message_pin_pins_then_404s"
+    ),
+    MSG_MARK_DIRECT_READ_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_mark_messages_read_commits_then_404s"
+    ),
+    MSG_REORDER_DIRECT_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_reorder_direct_pin_moves_then_404s"
+    ),
+    MSG_UNREAD_DIRECT_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_mark_direct_unread_sets_flag_then_404s"
+    ),
+    MSG_UPLOAD_BATCH_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_post_upload_batch_persists_then_rejects_unknown_target"
+    ),
+    MSG_UPLOAD_SESSION_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_post_upload_session_persists_then_404s"
+    ),
+    MSG_CANCEL_UPLOAD_SESSION_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_cancel_upload_session_cancels_then_404s"
+    ),
+    MSG_CANCEL_UPLOAD_BATCH_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_cancel_upload_batch_cancels_then_404s"
+    ),
+    MSG_GET_MEMBER_CANDIDATES_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_get_group_member_candidates_lists_users"
+    ),
+    MSG_GET_CHANNELS_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_get_channels_lists_created_then_empty"
+    ),
+    MSG_GET_CHANNEL_MEMBERS_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_get_channel_members_reads_then_404s"
+    ),
+    MSG_GET_CHANNEL_CANDIDATES_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_get_channel_invite_candidates_lists_users"
+    ),
+    MSG_GET_UPLOAD_STATE_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_get_upload_session_state_reads_then_404s"
     ),
 }
 
@@ -1360,6 +1538,42 @@ def _load_store_user(Session, user_id=1):
         return sess.get(User, user_id)
     finally:
         sess.close()
+
+
+_ACCOUNTANT_RELATIONS_SQL = (
+    "CREATE TABLE accountant_relations ("
+    "id INTEGER PRIMARY KEY, owner_user_id INTEGER NOT NULL, accountant_user_id INTEGER, "
+    "created_by_user_id INTEGER, invitation_token VARCHAR NOT NULL DEFAULT 'tok', "
+    "global_account_name VARCHAR NOT NULL DEFAULT 'g', relation_display_name VARCHAR NOT NULL DEFAULT 'd', "
+    "duty_description VARCHAR, mobile_number VARCHAR NOT NULL DEFAULT '0912', "
+    "status VARCHAR NOT NULL DEFAULT 'active', expires_at DATETIME, activated_at DATETIME, "
+    "deleted_at DATETIME, created_at DATETIME, updated_at DATETIME, sync_version INTEGER NOT NULL DEFAULT 1)"
+)
+
+
+def _extended_chat_store(path: str):
+    engine, Session = _group_chat_store(path)
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS accountant_relations"))
+        conn.execute(text(_ACCOUNTANT_RELATIONS_SQL))
+        conn.execute(
+            text(
+                "INSERT INTO users (id, account_name, mobile_number, normalized_account_name, "
+                "normalized_mobile_number, full_name, address, role, account_status, is_deleted) VALUES "
+                "(3, 'other', '09120000003', 'other', '09120000003', 'Other', 'c', 'STANDARD', 'active', 0)"
+            )
+        )
+    Message.__table__.create(engine, checkfirst=True)
+    Conversation.__table__.create(engine, checkfirst=True)
+    UploadBatch.__table__.create(engine, checkfirst=True)
+    UploadSession.__table__.create(engine, checkfirst=True)
+    SingleSessionRecoveryRequest.__table__.create(engine, checkfirst=True)
+    SingleSessionRecoveryAdminTarget.__table__.create(engine, checkfirst=True)
+    return engine, Session
+
+
+async def _isolated_publish(*_a, **_k):
+    return None
 
 
 def _management_broadcast_store(path: str):
@@ -4925,6 +5139,606 @@ class P100bSeedSliceExecutionTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as raised:
                 await delete_direct_conversation(99, current_user=actor, db=CrudSession(Session()))
             self.assertIn(raised.exception.status_code, (404, 400))
+            engine.dispose()
+
+    async def test_reorder_room_pin_moves_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine, Session = _extended_chat_store(str(Path(tmp) / "reorder-room.sqlite"))
+            actor = SimpleNamespace(id=1)
+            first = await create_group(GroupCreateRequest(title="گروه یک"), current_user=actor, db=CrudSession(Session()))
+            second = await create_group(GroupCreateRequest(title="گروه دو"), current_user=actor, db=CrudSession(Session()))
+            await pin_room_conversation(first.group.id, ConversationPinUpdateRequest(pinned=True), current_user=actor, db=CrudSession(Session()))
+            await pin_room_conversation(second.group.id, ConversationPinUpdateRequest(pinned=True), current_user=actor, db=CrudSession(Session()))
+            moved = await reorder_room_conversation_pin(
+                first.group.id,
+                ConversationPinReorderUpdateRequest(direction="up"),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(moved.chat_id, first.group.id)
+            self.assertEqual(moved.pin_order, 2)
+            with sqlite3.connect(str(Path(tmp) / "reorder-room.sqlite")) as conn:
+                self.assertEqual(
+                    conn.execute("SELECT pin_order FROM chat_members WHERE chat_id=1 AND user_id=1").fetchone()[0],
+                    2,
+                )
+            with self.assertRaises(HTTPException) as raised:
+                await reorder_room_conversation_pin(
+                    99,
+                    ConversationPinReorderUpdateRequest(direction="up"),
+                    current_user=actor,
+                    db=CrudSession(Session()),
+                )
+            self.assertEqual(raised.exception.status_code, 404)
+            engine.dispose()
+
+    async def test_mark_room_unread_sets_flag_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "unread-room.sqlite")
+            engine, Session = _extended_chat_store(db_path)
+            actor = SimpleNamespace(id=1)
+            created = await create_group(GroupCreateRequest(title="گروه"), current_user=actor, db=CrudSession(Session()))
+            with patch("api.routers.chat.publish_user_event", new=_isolated_publish):
+                await send_room_message(
+                    created.group.id,
+                    RoomMessageSend(content="سلام"),
+                    current_user=actor,
+                    db=CrudSession(Session()),
+                )
+            marked = await mark_room_conversation_unread(
+                created.group.id,
+                ConversationUnreadUpdateRequest(unread=True),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(marked.unread_count, 1)
+            again = await mark_room_conversation_unread(
+                created.group.id,
+                ConversationUnreadUpdateRequest(unread=True),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(again.unread_count, 1)
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(
+                    conn.execute("SELECT is_marked_unread FROM chat_members WHERE chat_id=1 AND user_id=1").fetchone()[0],
+                    1,
+                )
+            with self.assertRaises(HTTPException) as raised:
+                await mark_room_conversation_unread(
+                    99,
+                    ConversationUnreadUpdateRequest(unread=True),
+                    current_user=actor,
+                    db=CrudSession(Session()),
+                )
+            self.assertEqual(raised.exception.status_code, 404)
+            engine.dispose()
+
+    async def test_create_channel_persists_then_404s_update_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "channel-create.sqlite")
+            engine, Session = _extended_chat_store(db_path)
+            admin = _load_store_user(Session, 1)
+            created = await create_channel(ChannelCreateRequest(title="کانال تست"), current_user=admin, db=CrudSession(Session()))
+            self.assertEqual(created.channel.title, "کانال تست")
+            self.assertEqual(created.channel.member_count, 1)
+            again = await create_channel(ChannelCreateRequest(title="کانال دوم"), current_user=admin, db=CrudSession(Session()))
+            self.assertEqual(again.channel.id, 2)
+            with sqlite3.connect(db_path) as conn:
+                titles = [row[0] for row in conn.execute("SELECT title FROM chats ORDER BY id")]
+                self.assertEqual(titles, ["کانال تست", "کانال دوم"])
+            engine.dispose()
+
+    async def test_update_channel_renames_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "channel-update.sqlite")
+            engine, Session = _extended_chat_store(db_path)
+            admin = _load_store_user(Session, 1)
+            created = await create_channel(ChannelCreateRequest(title="کانال یک"), current_user=admin, db=CrudSession(Session()))
+            updated = await update_channel(
+                created.channel.id,
+                ChannelUpdateRequest(title="کانال دو"),
+                current_user=admin,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(updated.title, "کانال دو")
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT title FROM chats WHERE id=1").fetchone()[0], "کانال دو")
+            with self.assertRaises(HTTPException) as raised:
+                await update_channel(99, ChannelUpdateRequest(title="غایب"), current_user=admin, db=CrudSession(Session()))
+            self.assertEqual(raised.exception.status_code, 404)
+            engine.dispose()
+
+    async def test_bulk_invite_channel_members_adds_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "channel-bulk.sqlite")
+            engine, Session = _extended_chat_store(db_path)
+            admin = _load_store_user(Session, 1)
+            created = await create_channel(ChannelCreateRequest(title="کانال"), current_user=admin, db=CrudSession(Session()))
+            added = await bulk_invite_channel_members(
+                created.channel.id,
+                ChannelBulkMemberAddRequest(user_ids=[2]),
+                current_user=admin,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(added.added_count, 1)
+            self.assertEqual(added.member_count, 2)
+            replay = await bulk_invite_channel_members(
+                created.channel.id,
+                ChannelBulkMemberAddRequest(user_ids=[2]),
+                current_user=admin,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(replay.already_member_count, 1)
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM chat_members WHERE chat_id=1").fetchone()[0], 2)
+            with self.assertRaises(HTTPException) as raised:
+                await bulk_invite_channel_members(99, ChannelBulkMemberAddRequest(user_ids=[2]), current_user=admin, db=CrudSession(Session()))
+            self.assertEqual(raised.exception.status_code, 404)
+            engine.dispose()
+
+    async def test_patch_channel_member_promotes_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "channel-patch.sqlite")
+            engine, Session = _extended_chat_store(db_path)
+            admin = _load_store_user(Session, 1)
+            created = await create_channel(ChannelCreateRequest(title="کانال"), current_user=admin, db=CrudSession(Session()))
+            await bulk_invite_channel_members(
+                created.channel.id,
+                ChannelBulkMemberAddRequest(user_ids=[2]),
+                current_user=admin,
+                db=CrudSession(Session()),
+            )
+            patched = await patch_channel_member(
+                created.channel.id,
+                2,
+                ChannelMemberUpdateRequest(role="admin"),
+                current_user=admin,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(patched.role, "admin")
+            with sqlite3.connect(db_path) as conn:
+                role = conn.execute("SELECT role FROM chat_members WHERE chat_id=1 AND user_id=2").fetchone()[0]
+                self.assertIn(str(role).lower(), ("admin", "chatmemberrole.admin"))
+            with self.assertRaises(HTTPException) as raised:
+                await patch_channel_member(99, 2, ChannelMemberUpdateRequest(role="admin"), current_user=admin, db=CrudSession(Session()))
+            self.assertEqual(raised.exception.status_code, 404)
+            engine.dispose()
+
+    async def test_unfollow_channel_leaves_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "channel-leave.sqlite")
+            engine, Session = _extended_chat_store(db_path)
+            admin = _load_store_user(Session, 1)
+            member = SimpleNamespace(id=2)
+            created = await create_channel(ChannelCreateRequest(title="کانال"), current_user=admin, db=CrudSession(Session()))
+            await bulk_invite_channel_members(
+                created.channel.id,
+                ChannelBulkMemberAddRequest(user_ids=[2]),
+                current_user=admin,
+                db=CrudSession(Session()),
+            )
+            left = await unfollow_channel(created.channel.id, current_user=member, db=CrudSession(Session()))
+            self.assertTrue(left.left)
+            self.assertEqual(left.member_count, 1)
+            with sqlite3.connect(db_path) as conn:
+                active = conn.execute(
+                    "SELECT COUNT(*) FROM chat_members WHERE chat_id=1 AND membership_status='ACTIVE'"
+                ).fetchone()[0]
+                self.assertEqual(active, 1)
+            with self.assertRaises(HTTPException) as raised:
+                await unfollow_channel(99, current_user=member, db=CrudSession(Session()))
+            self.assertEqual(raised.exception.status_code, 404)
+            engine.dispose()
+
+    async def test_send_room_message_persists_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "send-room.sqlite")
+            engine, Session = _extended_chat_store(db_path)
+            actor = SimpleNamespace(id=1)
+            created = await create_group(GroupCreateRequest(title="گروه"), current_user=actor, db=CrudSession(Session()))
+            with patch("api.routers.chat.publish_user_event", new=_isolated_publish):
+                first = await send_room_message(
+                    created.group.id,
+                    RoomMessageSend(content="سلام اتاق"),
+                    current_user=actor,
+                    db=CrudSession(Session()),
+                )
+                self.assertEqual(first.content, "سلام اتاق")
+                again = await send_room_message(
+                    created.group.id,
+                    RoomMessageSend(content="پیام دوم"),
+                    current_user=actor,
+                    db=CrudSession(Session()),
+                )
+                self.assertEqual(again.id, 2)
+                with self.assertRaises(HTTPException) as raised:
+                    await send_room_message(99, RoomMessageSend(content="غایب"), current_user=actor, db=CrudSession(Session()))
+            self.assertEqual(raised.exception.status_code, 404)
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0], 2)
+            engine.dispose()
+
+    async def test_mark_room_messages_read_clears_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "room-read.sqlite")
+            engine, Session = _extended_chat_store(db_path)
+            actor = SimpleNamespace(id=1)
+            created = await create_group(GroupCreateRequest(title="گروه"), current_user=actor, db=CrudSession(Session()))
+            with patch("api.routers.chat.publish_user_event", new=_isolated_publish):
+                await send_room_message(created.group.id, RoomMessageSend(content="سلام"), current_user=actor, db=CrudSession(Session()))
+                await mark_room_conversation_unread(
+                    created.group.id,
+                    ConversationUnreadUpdateRequest(unread=True),
+                    current_user=actor,
+                    db=CrudSession(Session()),
+                )
+                result = await mark_room_messages_read(created.group.id, current_user=actor, db=CrudSession(Session()))
+                self.assertIsNone(result)
+                await mark_room_messages_read(created.group.id, current_user=actor, db=CrudSession(Session()))
+                with self.assertRaises(HTTPException) as raised:
+                    await mark_room_messages_read(99, current_user=actor, db=CrudSession(Session()))
+            self.assertEqual(raised.exception.status_code, 404)
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(
+                    conn.execute("SELECT is_marked_unread FROM chat_members WHERE chat_id=1 AND user_id=1").fetchone()[0],
+                    0,
+                )
+            engine.dispose()
+
+    async def test_toggle_message_reaction_adds_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "react.sqlite")
+            engine, Session = _extended_chat_store(db_path)
+            actor = SimpleNamespace(id=1)
+            created = await create_group(GroupCreateRequest(title="گروه"), current_user=actor, db=CrudSession(Session()))
+            with patch("api.routers.chat.publish_user_event", new=_isolated_publish):
+                msg = await send_room_message(created.group.id, RoomMessageSend(content="سلام"), current_user=actor, db=CrudSession(Session()))
+                reacted = await toggle_message_reaction(msg.id, MessageReactionToggle(emoji="👍"), current_user=actor, db=CrudSession(Session()))
+                self.assertEqual(reacted.reactions[0].emoji, "👍")
+                again = await toggle_message_reaction(msg.id, MessageReactionToggle(emoji="👍"), current_user=actor, db=CrudSession(Session()))
+                self.assertEqual(again.reactions, [])
+                with self.assertRaises(HTTPException) as raised:
+                    await toggle_message_reaction(99, MessageReactionToggle(emoji="👍"), current_user=actor, db=CrudSession(Session()))
+            self.assertEqual(raised.exception.status_code, 404)
+            engine.dispose()
+
+    async def test_toggle_message_pin_pins_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "pin-msg.sqlite")
+            engine, Session = _extended_chat_store(db_path)
+            actor = SimpleNamespace(id=1)
+            created = await create_group(GroupCreateRequest(title="گروه"), current_user=actor, db=CrudSession(Session()))
+            with patch("api.routers.chat.publish_user_event", new=_isolated_publish):
+                msg = await send_room_message(created.group.id, RoomMessageSend(content="سلام"), current_user=actor, db=CrudSession(Session()))
+                pinned = await toggle_message_pin(msg.id, MessagePinUpdateRequest(pinned=True), current_user=actor, db=CrudSession(Session()))
+                self.assertEqual(pinned.pinned_by_user_id, 1)
+                self.assertEqual(pinned.message.id, msg.id)
+                again = await toggle_message_pin(msg.id, MessagePinUpdateRequest(pinned=True), current_user=actor, db=CrudSession(Session()))
+                self.assertEqual(again.message.id, msg.id)
+                with self.assertRaises(HTTPException) as raised:
+                    await toggle_message_pin(99, MessagePinUpdateRequest(pinned=True), current_user=actor, db=CrudSession(Session()))
+            self.assertEqual(raised.exception.status_code, 404)
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT pinned_message_id FROM chats WHERE id=1").fetchone()[0], 1)
+            engine.dispose()
+
+    async def test_reorder_direct_pin_moves_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "reorder-direct.sqlite")
+            engine, Session = _extended_chat_store(db_path)
+            admin = _load_store_user(Session, 1)
+            await pin_direct_conversation(2, ConversationPinUpdateRequest(pinned=True), current_user=admin, db=CrudSession(Session()))
+            await pin_direct_conversation(3, ConversationPinUpdateRequest(pinned=True), current_user=admin, db=CrudSession(Session()))
+            moved = await reorder_direct_conversation_pin(
+                2,
+                ConversationPinReorderUpdateRequest(direction="up"),
+                current_user=admin,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(moved.target_id, 2)
+            self.assertEqual(moved.pin_order, 2)
+            with self.assertRaises(HTTPException) as raised:
+                await reorder_direct_conversation_pin(
+                    99,
+                    ConversationPinReorderUpdateRequest(direction="up"),
+                    current_user=admin,
+                    db=CrudSession(Session()),
+                )
+            self.assertIn(raised.exception.status_code, (404, 400))
+            engine.dispose()
+
+    async def test_mark_direct_unread_sets_flag_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "unread-direct.sqlite")
+            engine, Session = _extended_chat_store(db_path)
+            admin = _load_store_user(Session, 1)
+            pinned = await pin_direct_conversation(2, ConversationPinUpdateRequest(pinned=True), current_user=admin, db=CrudSession(Session()))
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO messages (chat_id, sender_id, receiver_id, content, message_type, "
+                        "is_read, is_deleted, edit_history, reactions, mentions, mention_all, created_at) "
+                        "VALUES (:c, 2, 1, 'hi', 'TEXT', 0, 0, '[]', '[]', '[]', 0, :ts)"
+                    ),
+                    {"c": pinned.chat_id, "ts": datetime.now(timezone.utc)},
+                )
+            marked = await mark_direct_conversation_unread(
+                2,
+                ConversationUnreadUpdateRequest(unread=True),
+                current_user=admin,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(marked.unread_count, 1)
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(
+                    conn.execute("SELECT is_marked_unread FROM chat_members WHERE user_id=1").fetchone()[0],
+                    1,
+                )
+            with self.assertRaises(HTTPException) as raised:
+                await mark_direct_conversation_unread(
+                    99,
+                    ConversationUnreadUpdateRequest(unread=True),
+                    current_user=admin,
+                    db=CrudSession(Session()),
+                )
+            self.assertIn(raised.exception.status_code, (404, 400))
+            engine.dispose()
+
+    async def test_mark_messages_read_commits_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "direct-read.sqlite")
+            engine, Session = _extended_chat_store(db_path)
+            admin = _load_store_user(Session, 1)
+            pinned = await pin_direct_conversation(2, ConversationPinUpdateRequest(pinned=True), current_user=admin, db=CrudSession(Session()))
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO messages (chat_id, sender_id, receiver_id, content, message_type, "
+                        "is_read, is_deleted, edit_history, reactions, mentions, mention_all, created_at) "
+                        "VALUES (:c, 2, 1, 'hi', 'TEXT', 0, 0, '[]', '[]', '[]', 0, :ts)"
+                    ),
+                    {"c": pinned.chat_id, "ts": datetime.now(timezone.utc)},
+                )
+            result = await mark_messages_read(2, current_user=admin, db=CrudSession(Session()))
+            self.assertIsNone(result)
+            await mark_messages_read(2, current_user=admin, db=CrudSession(Session()))
+            with sqlite3.connect(db_path) as conn:
+                last_read = conn.execute(
+                    "SELECT last_read_message_id FROM chat_members WHERE user_id=1"
+                ).fetchone()[0]
+                self.assertIsNotNone(last_read)
+            engine.dispose()
+
+    async def test_post_upload_batch_persists_then_rejects_unknown_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "upload-batch.sqlite")
+            engine, Session = _extended_chat_store(db_path)
+            admin = _load_store_user(Session, 1)
+            created = await post_upload_batch(
+                UploadBatchCreateRequest(
+                    room_kind=UploadRoomKind.DIRECT,
+                    target_id=2,
+                    message_kind=UploadBatchMessageKind.SINGLE,
+                    expected_items=1,
+                    idempotency_key="idemkey-12345678",
+                ),
+                current_user=admin,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(created.status.value, "collecting")
+            replay = await post_upload_batch(
+                UploadBatchCreateRequest(
+                    room_kind=UploadRoomKind.DIRECT,
+                    target_id=2,
+                    message_kind=UploadBatchMessageKind.SINGLE,
+                    expected_items=1,
+                    idempotency_key="idemkey-12345678",
+                ),
+                current_user=admin,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(replay.batch_id, created.batch_id)
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM upload_batches").fetchone()[0], 1)
+            engine.dispose()
+
+    async def test_post_upload_session_persists_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "upload-session.sqlite")
+            engine, Session = _extended_chat_store(db_path)
+            admin = _load_store_user(Session, 1)
+            batch = await post_upload_batch(
+                UploadBatchCreateRequest(
+                    room_kind=UploadRoomKind.DIRECT,
+                    target_id=2,
+                    message_kind=UploadBatchMessageKind.SINGLE,
+                    expected_items=1,
+                    idempotency_key="idemkey-session-1",
+                ),
+                current_user=admin,
+                db=CrudSession(Session()),
+            )
+            session = await post_upload_session(
+                UploadSessionCreateRequest(
+                    batch_id=batch.batch_id,
+                    room_kind=UploadRoomKind.DIRECT,
+                    target_id=2,
+                    media_type=UploadMediaType.IMAGE,
+                    file_name="a.jpg",
+                    mime_type="image/jpeg",
+                    total_bytes=12,
+                    chunk_size=12,
+                ),
+                current_user=admin,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(session.status.value, "created")
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM upload_sessions").fetchone()[0], 1)
+            engine.dispose()
+
+    async def test_cancel_upload_session_cancels_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "cancel-session.sqlite")
+            engine, Session = _extended_chat_store(db_path)
+            admin = _load_store_user(Session, 1)
+            batch = await post_upload_batch(
+                UploadBatchCreateRequest(
+                    room_kind=UploadRoomKind.DIRECT,
+                    target_id=2,
+                    message_kind=UploadBatchMessageKind.SINGLE,
+                    expected_items=1,
+                    idempotency_key="idemkey-cancel-s",
+                ),
+                current_user=admin,
+                db=CrudSession(Session()),
+            )
+            session = await post_upload_session(
+                UploadSessionCreateRequest(
+                    batch_id=batch.batch_id,
+                    room_kind=UploadRoomKind.DIRECT,
+                    target_id=2,
+                    media_type=UploadMediaType.IMAGE,
+                    file_name="a.jpg",
+                    mime_type="image/jpeg",
+                    total_bytes=12,
+                    chunk_size=12,
+                ),
+                current_user=admin,
+                db=CrudSession(Session()),
+            )
+            cancelled = await cancel_upload_session_endpoint(session.session_id, current_user=admin, db=CrudSession(Session()))
+            self.assertEqual(cancelled.status.value, "cancelled")
+            again = await cancel_upload_session_endpoint(session.session_id, current_user=admin, db=CrudSession(Session()))
+            self.assertEqual(again.status.value, "cancelled")
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT status FROM upload_sessions").fetchone()[0], "cancelled")
+            with self.assertRaises(HTTPException) as raised:
+                await cancel_upload_session_endpoint("missing-session", current_user=admin, db=CrudSession(Session()))
+            self.assertEqual(raised.exception.status_code, 404)
+            engine.dispose()
+
+    async def test_cancel_upload_batch_cancels_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "cancel-batch.sqlite")
+            engine, Session = _extended_chat_store(db_path)
+            admin = _load_store_user(Session, 1)
+            batch = await post_upload_batch(
+                UploadBatchCreateRequest(
+                    room_kind=UploadRoomKind.DIRECT,
+                    target_id=2,
+                    message_kind=UploadBatchMessageKind.SINGLE,
+                    expected_items=1,
+                    idempotency_key="idemkey-cancel-b",
+                ),
+                current_user=admin,
+                db=CrudSession(Session()),
+            )
+            cancelled = await cancel_upload_batch_endpoint(batch.batch_id, current_user=admin, db=CrudSession(Session()))
+            self.assertEqual(cancelled.status.value, "cancelled")
+            again = await cancel_upload_batch_endpoint(batch.batch_id, current_user=admin, db=CrudSession(Session()))
+            self.assertEqual(again.status.value, "cancelled")
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT status FROM upload_batches").fetchone()[0], "cancelled")
+            with self.assertRaises(HTTPException) as raised:
+                await cancel_upload_batch_endpoint("missing-batch", current_user=admin, db=CrudSession(Session()))
+            self.assertEqual(raised.exception.status_code, 404)
+            engine.dispose()
+
+    async def test_get_group_member_candidates_lists_users(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine, Session = _extended_chat_store(str(Path(tmp) / "cands.sqlite"))
+            admin = _load_store_user(Session, 1)
+            empty_query = await get_group_member_candidates(
+                query_text=None,
+                limit=50,
+                offset=0,
+                exclude_chat_id=None,
+                selected_user_ids=[],
+                current_user=admin,
+                db=CrudSession(Session()),
+            )
+            self.assertGreaterEqual(empty_query.total, 2)
+            self.assertTrue(any(item.user_id == 2 for item in empty_query.items))
+            engine.dispose()
+
+    async def test_get_channels_lists_created_then_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine, Session = _extended_chat_store(str(Path(tmp) / "channels.sqlite"))
+            admin = _load_store_user(Session, 1)
+            empty = await get_channels(current_user=admin, db=CrudSession(Session()))
+            self.assertEqual(list(empty), [])
+            await create_channel(ChannelCreateRequest(title="کانال فهرست"), current_user=admin, db=CrudSession(Session()))
+            listed = await get_channels(current_user=admin, db=CrudSession(Session()))
+            self.assertEqual(len(listed), 1)
+            self.assertEqual(listed[0].title, "کانال فهرست")
+            engine.dispose()
+
+    async def test_get_channel_members_reads_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine, Session = _extended_chat_store(str(Path(tmp) / "ch-members.sqlite"))
+            admin = _load_store_user(Session, 1)
+            created = await create_channel(ChannelCreateRequest(title="کانال"), current_user=admin, db=CrudSession(Session()))
+            members = await get_channel_members(created.channel.id, current_user=admin, db=CrudSession(Session()))
+            self.assertEqual(len(members), 1)
+            self.assertEqual(members[0].user_id, 1)
+            with self.assertRaises(HTTPException) as raised:
+                await get_channel_members(99, current_user=admin, db=CrudSession(Session()))
+            self.assertEqual(raised.exception.status_code, 404)
+            engine.dispose()
+
+    async def test_get_channel_invite_candidates_lists_users(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine, Session = _extended_chat_store(str(Path(tmp) / "ch-cands.sqlite"))
+            admin = _load_store_user(Session, 1)
+            page = await get_channel_invite_candidates(
+                q=None,
+                limit=50,
+                offset=0,
+                exclude_chat_id=None,
+                current_user=admin,
+                db=CrudSession(Session()),
+            )
+            self.assertGreaterEqual(page.total, 3)
+            self.assertTrue(any(item.user_id == 2 for item in page.items))
+            engine.dispose()
+
+    async def test_get_upload_session_state_reads_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine, Session = _extended_chat_store(str(Path(tmp) / "upload-state.sqlite"))
+            admin = _load_store_user(Session, 1)
+            batch = await post_upload_batch(
+                UploadBatchCreateRequest(
+                    room_kind=UploadRoomKind.DIRECT,
+                    target_id=2,
+                    message_kind=UploadBatchMessageKind.SINGLE,
+                    expected_items=1,
+                    idempotency_key="idemkey-state-1",
+                ),
+                current_user=admin,
+                db=CrudSession(Session()),
+            )
+            session = await post_upload_session(
+                UploadSessionCreateRequest(
+                    batch_id=batch.batch_id,
+                    room_kind=UploadRoomKind.DIRECT,
+                    target_id=2,
+                    media_type=UploadMediaType.IMAGE,
+                    file_name="a.jpg",
+                    mime_type="image/jpeg",
+                    total_bytes=12,
+                    chunk_size=12,
+                ),
+                current_user=admin,
+                db=CrudSession(Session()),
+            )
+            state = await get_upload_session_state(session.session_id, current_user=admin, db=CrudSession(Session()))
+            self.assertEqual(state.session_id, session.session_id)
+            self.assertEqual(state.total_bytes, 12)
+            with self.assertRaises(HTTPException) as raised:
+                await get_upload_session_state("missing-session", current_user=admin, db=CrudSession(Session()))
+            self.assertEqual(raised.exception.status_code, 404)
             engine.dispose()
 
     async def test_channel_trade_handlers_gateway_confirm_is_not_crud_evidence(self):
