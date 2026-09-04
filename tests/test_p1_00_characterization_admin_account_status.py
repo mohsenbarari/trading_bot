@@ -1,18 +1,19 @@
-"""HIGH-B: account-status uses the live service against an isolated durable store."""
+"""HIGH-B: account-status uses the live service against a mapped session-bound User."""
 
 from __future__ import annotations
 
 import inspect
 import json
-import sqlite3
+import socket
 import unittest
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import Boolean, Column, DateTime, Enum, Integer, String, create_engine, text
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from bot.handlers.admin_users import handle_user_toggle_account_status
 from core.enums import NotificationCategory, NotificationLevel, UserAccountStatus, UserRole
@@ -25,11 +26,73 @@ from models.offer_request import (
     OfferRequestWorkflow,
 )
 from models.telegram_notification_outbox import TelegramNotificationOutbox
+from models.user import UserRole as ModelUserRole
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INV_DIR = REPO_ROOT / "docs/refactor/two-server/section-1/inventory"
 ACCOUNT_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-TOGGLE-ACCOUNT-STATUS-L1134"
 BLOCK_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-TOGGLE-BLOCK-L1649"
+LOCAL_REDIS_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+class IsolatedBase(DeclarativeBase):
+    pass
+
+
+class MappedAccountUser(IsolatedBase):
+    """Equivalent ORM mapping of durable User status fields on isolated sqlite."""
+
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    account_name = Column(String, nullable=False, default="ali")
+    role = Column(
+        Enum(ModelUserRole, values_callable=lambda obj: [e.value for e in obj]),
+        nullable=False,
+        default=ModelUserRole.STANDARD,
+    )
+    account_status = Column(
+        Enum(UserAccountStatus, values_callable=lambda obj: [e.value for e in obj]),
+        nullable=False,
+        default=UserAccountStatus.ACTIVE,
+    )
+    deactivated_at = Column(DateTime, nullable=True)
+    messenger_grace_expires_at = Column(DateTime, nullable=True)
+    messenger_blocked_at = Column(DateTime, nullable=True)
+    telegram_id = Column(Integer, nullable=True)
+    sync_version = Column(Integer, nullable=False, default=1)
+    trading_restricted_until = Column(DateTime, nullable=True)
+    max_daily_trades = Column(Integer, nullable=True)
+    max_active_commodities = Column(Integer, nullable=True)
+    max_daily_requests = Column(Integer, nullable=True)
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    can_block_users = Column(Boolean, default=True)
+    max_blocked_users = Column(Integer, default=5)
+
+
+class IsolatedRedis:
+    constructed: list[dict] = []
+
+    def __init__(self, *args, **kwargs):
+        IsolatedRedis.constructed.append({"args": args, "kwargs": kwargs, "connected": False})
+
+    async def incr(self, *args, **kwargs):
+        raise RuntimeError("isolated-redis")
+
+    async def publish(self, *args, **kwargs):
+        raise RuntimeError("isolated-redis")
+
+    async def get(self, *args, **kwargs):
+        raise RuntimeError("isolated-redis")
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    def close(self):
+        return None
 
 
 def _load_json(name: str) -> dict:
@@ -49,22 +112,22 @@ class _Nested:
 
 
 class DurableSession:
-    """Async adapter over an isolated sqlite session. Does not mock product services."""
+    """Async adapter over an isolated sqlite session. Does not mock product SQL commits."""
 
     def __init__(self, sync_session, *, fail_outbox=False):
         self._session = sync_session
         self.fail_outbox = fail_outbox
         self.commit_count = 0
         self.wakeup_attempts = 0
-        self.loaded_user = None
 
     async def execute(self, statement, params=None):
         blob = f"{statement} {getattr(statement, 'text', '')}"
         if "pg_notify" in blob.lower():
             self.wakeup_attempts += 1
             return SimpleNamespace()
-        if self.loaded_user is not None and "FROM users" in blob and "notifications" not in blob.lower():
-            return SimpleNamespace(scalar_one_or_none=lambda: self.loaded_user)
+        if "FROM users" in blob and "notifications" not in blob.lower():
+            loaded = self._session.get(MappedAccountUser, 9)
+            return SimpleNamespace(scalar_one_or_none=lambda: loaded)
         return self._session.execute(statement)
 
     def add(self, obj):
@@ -102,36 +165,50 @@ class _SessionBox:
 
 def _make_store():
     engine = create_engine("sqlite:///:memory:", future=True)
+    IsolatedBase.metadata.create_all(engine)
     with engine.begin() as conn:
-        for name in ("users", "telegram_delivery_jobs", "offers", "trades", "customer_relations"):
+        for name in ("telegram_delivery_jobs", "offers", "trades", "customer_relations"):
             conn.execute(text(f"CREATE TABLE {name} (id INTEGER PRIMARY KEY)"))
     Notification.__table__.create(engine)
     TelegramNotificationOutbox.__table__.create(engine)
     OfferRequest.__table__.create(engine)
     Session = sessionmaker(bind=engine, future=True, expire_on_commit=False)
     sync = Session()
-    return engine, sync
+    return engine, Session, sync
 
 
-def _user(*, status=UserAccountStatus.ACTIVE, role=UserRole.STANDARD, telegram_id=91):
-    return SimpleNamespace(
+def _persist_user(
+    sync,
+    *,
+    status=UserAccountStatus.ACTIVE,
+    role=ModelUserRole.STANDARD,
+    telegram_id=91,
+    deactivated_at=None,
+):
+    if status == UserAccountStatus.INACTIVE and deactivated_at is None:
+        deactivated_at = datetime(2026, 5, 16, 12, 0, 0)
+    row = MappedAccountUser(
         id=9,
-        role=role,
         account_name="ali",
+        role=role,
         account_status=status,
         telegram_id=telegram_id,
-        deactivated_at=None if status == UserAccountStatus.ACTIVE else datetime(2026, 5, 16, 12, 0, 0),
+        deactivated_at=deactivated_at,
         messenger_grace_expires_at=None,
         messenger_blocked_at=None,
         sync_version=3,
-        trading_restricted_until=None,
-        max_daily_trades=None,
-        max_active_commodities=None,
-        max_daily_requests=None,
         is_deleted=False,
         can_block_users=True,
         max_blocked_users=5,
     )
+    sync.add(row)
+    sync.commit()
+    return row
+
+
+def _reload_user(Session, user_id=9):
+    fresh = Session()
+    return fresh.get(MappedAccountUser, user_id), fresh
 
 
 def _seed_overtime(sync, *, user_id=9):
@@ -152,13 +229,17 @@ def _seed_overtime(sync, *, user_id=9):
     return row
 
 
-def _patches():
+def _service_patches():
     return [
         patch("core.services.user_account_status_service.current_server", return_value="iran"),
         patch("core.services.offer_overtime_request_service.current_server", return_value="iran"),
         patch(
             "core.trading_settings.get_trading_settings_async",
             new=AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=30)),
+        ),
+        patch(
+            "core.services.user_account_status_service._build_activation_join_line",
+            new=AsyncMock(return_value=None),
         ),
     ]
 
@@ -171,22 +252,72 @@ def _callback():
     )
 
 
+@contextmanager
+def _hermetic_network():
+    IsolatedRedis.constructed.clear()
+    blocked: list[tuple[str, int]] = []
+    real_connect = socket.socket.connect
+
+    def guarded_connect(self, address):
+        if isinstance(address, tuple) and len(address) >= 2:
+            host = str(address[0])
+            port = int(address[1])
+            if port == 6379 and host in LOCAL_REDIS_HOSTS:
+                blocked.append((host, port))
+                raise OSError("hermetic: localhost redis blocked")
+        return real_connect(self, address)
+
+    started = [
+        patch("redis.asyncio.Redis", IsolatedRedis),
+        patch("redis.Redis", IsolatedRedis),
+        patch("core.utils.redis.Redis", IsolatedRedis),
+        patch("core.utils.publish_user_event", new=AsyncMock()),
+        patch("core.web_push.schedule_notification_web_push", return_value=None),
+        patch.object(socket.socket, "connect", guarded_connect),
+    ]
+    for item in started:
+        item.start()
+    try:
+        yield {"blocked": blocked, "redis_constructed": IsolatedRedis.constructed}
+    finally:
+        for item in reversed(started):
+            item.stop()
+
+
+def _assert_no_localhost_redis(test, probe):
+    test.assertEqual(probe["blocked"], [])
+    for item in probe["redis_constructed"]:
+        test.assertFalse(item.get("connected"))
+        kwargs = item.get("kwargs") or {}
+        host = kwargs.get("host")
+        port = kwargs.get("port")
+        if host in LOCAL_REDIS_HOSTS and port in {6379, None}:
+            test.fail(f"live Redis constructor reached localhost: {item}")
+
+
 class P100AdminAccountStatusCharacterizationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_live_transition_commits_notification_before_outbox(self):
-        engine, sync = _make_store()
+    async def test_deactivation_persists_mapped_user_after_inner_commit(self):
+        engine, Session, sync = _make_store()
         _seed_overtime(sync)
+        user = _persist_user(sync)
         db = DurableSession(sync)
-        user = _user()
-        started = _patches()
+        started = _service_patches()
         for item in started:
             item.start()
         try:
-            result = await status_service.transition_user_account_status(db, user, UserAccountStatus.INACTIVE)
+            with _hermetic_network() as probe:
+                before_blocked = list(probe["blocked"])
+                result = await status_service.transition_user_account_status(
+                    db, user, UserAccountStatus.INACTIVE
+                )
+                after_blocked = list(probe["blocked"])
+                _assert_no_localhost_redis(self, probe)
         finally:
             for item in started:
                 item.stop()
+        self.assertEqual(before_blocked, [])
+        self.assertEqual(after_blocked, [])
         self.assertTrue(result.changed)
-        self.assertEqual(user.account_status, UserAccountStatus.INACTIVE)
         self.assertEqual(db.commit_count, 1)
         self.assertEqual(sync.query(Notification).count(), 1)
         notice = sync.query(Notification).one()
@@ -199,98 +330,159 @@ class P100AdminAccountStatusCharacterizationTests(unittest.IsolatedAsyncioTestCa
         self.assertEqual(outbox.telegram_id_at_enqueue, 91)
         self.assertEqual(sync.query(OfferRequest).one().result_status, OfferRequestStatus.OVERTIME_INVALIDATED)
         self.assertGreaterEqual(db.wakeup_attempts, 1)
-        self.assertEqual(db.commit_count, 1)
 
-        replay = await status_service.transition_user_account_status(db, user, UserAccountStatus.INACTIVE)
-        self.assertFalse(replay.changed)
-        self.assertEqual(sync.query(Notification).count(), 1)
-        self.assertEqual(sync.query(TelegramNotificationOutbox).count(), 1)
-        self.assertEqual(db.commit_count, 1)
+        reloaded, fresh = _reload_user(Session)
+        self.assertIsInstance(reloaded, MappedAccountUser)
+        self.assertEqual(reloaded.account_status, UserAccountStatus.INACTIVE)
+        self.assertIsNotNone(reloaded.deactivated_at)
+        self.assertIsNotNone(reloaded.messenger_grace_expires_at)
+        self.assertIsNone(reloaded.messenger_blocked_at)
+
+        retry_db = DurableSession(fresh)
+        retry = await status_service.transition_user_account_status(
+            retry_db, reloaded, UserAccountStatus.INACTIVE
+        )
+        self.assertFalse(retry.changed)
+        self.assertEqual(fresh.query(Notification).count(), 1)
+        self.assertEqual(fresh.query(TelegramNotificationOutbox).count(), 1)
+        self.assertEqual(retry_db.commit_count, 0)
+        again, later = _reload_user(Session)
+        self.assertEqual(again.account_status, UserAccountStatus.INACTIVE)
+        self.assertEqual(later.query(Notification).count(), 1)
+        fresh.close()
+        later.close()
         engine.dispose()
 
-    async def test_redis_realtime_absence_when_broker_is_down(self):
-        engine, sync = _make_store()
-        _seed_overtime(sync)
+    async def test_activation_persists_mapped_user_after_inner_commit(self):
+        engine, Session, sync = _make_store()
+        user = _persist_user(sync, status=UserAccountStatus.INACTIVE)
         db = DurableSession(sync)
-        user = _user()
-        started = _patches()
+        started = _service_patches()
         for item in started:
             item.start()
         try:
-            await status_service.transition_user_account_status(db, user, UserAccountStatus.INACTIVE)
+            with _hermetic_network() as probe:
+                result = await status_service.transition_user_account_status(
+                    db, user, UserAccountStatus.ACTIVE
+                )
+                _assert_no_localhost_redis(self, probe)
         finally:
             for item in started:
                 item.stop()
+        self.assertTrue(result.changed)
+        self.assertEqual(db.commit_count, 1)
         self.assertEqual(sync.query(Notification).count(), 1)
-        try:
-            conn = sqlite3.connect(":memory:")
-            conn.close()
-        finally:
-            pass
-        import redis
+        self.assertEqual(sync.query(Notification).one().level, NotificationLevel.SUCCESS)
+        self.assertEqual(sync.query(TelegramNotificationOutbox).count(), 1)
+        reloaded, fresh = _reload_user(Session)
+        self.assertEqual(reloaded.account_status, UserAccountStatus.ACTIVE)
+        self.assertIsNone(reloaded.deactivated_at)
+        self.assertIsNone(reloaded.messenger_grace_expires_at)
+        self.assertIsNone(reloaded.messenger_blocked_at)
 
-        try:
-            client = redis.Redis(host="127.0.0.1", port=6379, socket_connect_timeout=0.2)
-            self.assertIsNone(client.get("user:9:unread_count"))
-        except Exception:
-            # Live create_user_notification swallows Redis errors; no durable Redis effect exists here.
-            self.assertEqual(sync.query(Notification).count(), 1)
+        retry_db = DurableSession(fresh)
+        retry = await status_service.transition_user_account_status(
+            retry_db, reloaded, UserAccountStatus.ACTIVE
+        )
+        self.assertFalse(retry.changed)
+        self.assertEqual(fresh.query(Notification).count(), 1)
+        self.assertEqual(fresh.query(TelegramNotificationOutbox).count(), 1)
+        self.assertEqual(retry_db.commit_count, 0)
+        fresh.close()
         engine.dispose()
 
-    async def test_outbox_failure_after_inner_commit_keeps_notification(self):
-        engine, sync = _make_store()
+    async def test_redis_and_localhost_are_isolated_before_and_after_transition(self):
+        engine, Session, sync = _make_store()
         _seed_overtime(sync)
-        db = DurableSession(sync, fail_outbox=True)
-        user = _user()
-        started = _patches()
+        user = _persist_user(sync)
+        db = DurableSession(sync)
+        started = _service_patches()
         for item in started:
             item.start()
         try:
-            with self.assertRaisesRegex(RuntimeError, "outbox enqueue failed"):
-                await status_service.transition_user_account_status(db, user, UserAccountStatus.INACTIVE)
+            with _hermetic_network() as probe:
+                self.assertEqual(probe["blocked"], [])
+                await status_service.transition_user_account_status(
+                    db, user, UserAccountStatus.INACTIVE
+                )
+                self.assertEqual(probe["blocked"], [])
+                _assert_no_localhost_redis(self, probe)
         finally:
             for item in started:
                 item.stop()
-        self.assertEqual(user.account_status, UserAccountStatus.INACTIVE)
+        reloaded, fresh = _reload_user(Session)
+        self.assertEqual(reloaded.account_status, UserAccountStatus.INACTIVE)
+        self.assertEqual(fresh.query(Notification).count(), 1)
+        fresh.close()
+        engine.dispose()
+
+    async def test_outbox_failure_after_inner_commit_keeps_status_and_notification(self):
+        engine, Session, sync = _make_store()
+        _seed_overtime(sync)
+        user = _persist_user(sync)
+        db = DurableSession(sync, fail_outbox=True)
+        started = _service_patches()
+        for item in started:
+            item.start()
+        try:
+            with _hermetic_network() as probe:
+                with self.assertRaisesRegex(RuntimeError, "outbox enqueue failed"):
+                    await status_service.transition_user_account_status(
+                        db, user, UserAccountStatus.INACTIVE
+                    )
+                _assert_no_localhost_redis(self, probe)
+        finally:
+            for item in started:
+                item.stop()
         self.assertEqual(db.commit_count, 1)
         self.assertEqual(sync.query(Notification).count(), 1)
         self.assertEqual(sync.query(TelegramNotificationOutbox).count(), 0)
         self.assertEqual(sync.query(OfferRequest).one().result_status, OfferRequestStatus.OVERTIME_INVALIDATED)
+        reloaded, fresh = _reload_user(Session)
+        self.assertEqual(reloaded.account_status, UserAccountStatus.INACTIVE)
+        self.assertIsNotNone(reloaded.deactivated_at)
+        self.assertEqual(fresh.query(Notification).count(), 1)
+        self.assertEqual(fresh.query(TelegramNotificationOutbox).count(), 0)
+        fresh.close()
         engine.dispose()
 
     async def test_handler_denied_paths_do_not_write(self):
-        engine, sync = _make_store()
+        engine, Session, sync = _make_store()
         _seed_overtime(sync)
-        protected = _user(role=UserRole.SUPER_ADMIN)
+        _persist_user(sync, role=ModelUserRole.SUPER_ADMIN)
         db = DurableSession(sync)
-        db.loaded_user = protected
-        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=_SessionBox(db)):
-            await handle_user_toggle_account_status(_callback(), user=None)
-            await handle_user_toggle_account_status(
-                _callback(),
-                user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER),
-            )
+        with _hermetic_network() as probe:
+            with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=_SessionBox(db)):
+                await handle_user_toggle_account_status(_callback(), user=None)
+                await handle_user_toggle_account_status(
+                    _callback(),
+                    user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER),
+                )
+            _assert_no_localhost_redis(self, probe)
         self.assertEqual(sync.query(Notification).count(), 0)
         self.assertEqual(sync.query(TelegramNotificationOutbox).count(), 0)
         self.assertEqual(sync.query(OfferRequest).one().result_status, OfferRequestStatus.OVERTIME_QUEUED)
         self.assertEqual(db.commit_count, 0)
-        self.assertEqual(protected.account_status, UserAccountStatus.ACTIVE)
+        reloaded, fresh = _reload_user(Session)
+        self.assertEqual(reloaded.account_status, UserAccountStatus.ACTIVE)
+        fresh.close()
         engine.dispose()
 
     async def test_handler_uses_live_transition_then_may_commit_again(self):
-        engine, sync = _make_store()
+        engine, Session, sync = _make_store()
         _seed_overtime(sync)
-        target = _user()
+        _persist_user(sync)
         db = DurableSession(sync)
-        db.loaded_user = target
         source = inspect.getsource(handle_user_toggle_account_status)
         self.assertIn("transition_user_account_status", source)
         self.assertIn("session.commit", source)
-        started = _patches()
+        started = _service_patches()
         for item in started:
             item.start()
         try:
-            with patch("core.admin_authority.current_server", return_value="iran"), patch(
+            with _hermetic_network() as probe, patch(
+                "core.admin_authority.current_server", return_value="iran"
+            ), patch(
                 "bot.handlers.admin_users.AsyncSessionLocal", return_value=_SessionBox(db)
             ), patch(
                 "bot.handlers.admin_users.get_user_profile_text",
@@ -302,14 +494,19 @@ class P100AdminAccountStatusCharacterizationTests(unittest.IsolatedAsyncioTestCa
                 "bot.handlers.admin_users.edit_callback_message_via_runtime",
                 new=AsyncMock(),
             ):
-                await handle_user_toggle_account_status(_callback(), user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
+                await handle_user_toggle_account_status(
+                    _callback(), user=SimpleNamespace(role=UserRole.SUPER_ADMIN)
+                )
+                _assert_no_localhost_redis(self, probe)
         finally:
             for item in started:
                 item.stop()
-        self.assertEqual(target.account_status, UserAccountStatus.INACTIVE)
         self.assertEqual(sync.query(Notification).count(), 1)
         self.assertEqual(sync.query(TelegramNotificationOutbox).count(), 1)
         self.assertGreaterEqual(db.commit_count, 1)
+        reloaded, fresh = _reload_user(Session)
+        self.assertEqual(reloaded.account_status, UserAccountStatus.INACTIVE)
+        fresh.close()
         engine.dispose()
 
     def test_account_status_contract_records_inner_commit_order(self):
@@ -329,7 +526,9 @@ class P100AdminAccountStatusCharacterizationTests(unittest.IsolatedAsyncioTestCa
         self.assertIn("internal commit", talk)
         self.assertIn("outbox", talk)
         self.assertIn("overtime", talk)
+        self.assertIn("session-bound", talk)
         self.assertNotIn("service writes then handler commits", talk)
+        self.assertNotIn("remain in memory", talk)
         self.assertEqual(contract["events_outbox"]["status"], "APPLICABLE")
         self.assertEqual(contract["ordering"]["status"], "APPLICABLE")
         self.assertIn("tests/test_p1_00_characterization_admin_account_status.py", account["test_refs"])

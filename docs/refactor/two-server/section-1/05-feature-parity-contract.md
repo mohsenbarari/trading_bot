@@ -243,8 +243,9 @@ At minimum the target must preserve:
 amended exit gate has no unresolved High. Leftover current-behavior freeze is
 the new non-implementation Stage `P1-00b`, a prerequisite of `P1-01`, `P1-04`
 and `P1-06`. `P1-06` later proves the target against this frozen contract; it
-does not invent the contract after implementation. Coordinator updates
-`execution-order.yaml` only after Codex `APPROVE` of this `P1-00` candidate.
+does not invent the contract after implementation. Assignment
+`WA-P1-00-SCOPE-20260903-002` authorizes adding `P1-00b` to
+`execution-order.yaml` in this Worker commit.
 
 ## Owner review gate
 

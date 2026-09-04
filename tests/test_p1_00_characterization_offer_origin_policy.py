@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
+import sqlite3
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import sessionmaker
 
 from core.enums import UserRole
 from core.offer_source import OfferSourceSurface, offer_home_server_for_source
@@ -17,10 +23,18 @@ from core.services.offer_publication_state_service import (
     publication_dedupe_key,
     publication_owner_server_for_surface,
 )
-from core.services.offer_request_ledger_service import OfferRequestLedgerCommand
+from core.services.offer_request_ledger_service import (
+    OfferRequestLedgerCommand,
+    create_offer_request_ledger_entry,
+    load_offer_request_by_idempotency,
+)
 from models.offer_publication_state import OfferPublicationSurface
 from models.customer_relation import CustomerTier
 from models.invitation import InvitationKind
+from tests.test_p1_00_characterization_concurrent_restart import (
+    _AsyncSessionAdapter,
+    _make_engine,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INV_DIR = REPO_ROOT / "docs/refactor/two-server/section-1/inventory"
@@ -66,7 +80,7 @@ def _home(origin: str) -> str:
     return offer_home_server_for_source(_surface(origin))
 
 
-class P100OfferOriginPolicyCharacterizationTests(unittest.TestCase):
+class P100OfferOriginPolicyCharacterizationTests(unittest.IsolatedAsyncioTestCase):
     def test_composed_origin_matrix_has_single_origin_keys(self):
         payload = _load_json("scenario-records.json")
         records = payload["composed_origin_matrix"]
@@ -214,18 +228,11 @@ class P100OfferOriginPolicyCharacterizationTests(unittest.TestCase):
         self.assertTrue(any(row["interaction"] == "OUTCOME-SUCCESS" and row["disposition"] == "EQUIVALENT_TO_REPRESENTATIVE" for row in rows))
         self.assertTrue(any(row["interaction"] == "POLICY-SNAPSHOT" and row["disposition"] == "TRANSFERRED_TO_P1_00B" for row in rows))
 
-    def test_combined_live_policy_effects_for_each_origin_pair(self):
-        import asyncio
-        import tempfile
-
-        from sqlalchemy.orm import sessionmaker
-
-        from tests.test_p1_00_characterization_concurrent_restart import (
-            OfferRequestLedgerCommand,
-            _AsyncSessionAdapter,
-            _make_engine,
-            create_offer_request_ledger_entry,
-        )
+    async def test_combined_live_policy_effects_for_each_origin_pair(self):
+        source = Path(__file__).read_text(encoding="utf-8")
+        self.assertIn("asyncio.gather", source)
+        self.assertIn("asyncio.Barrier", source)
+        self.assertIn("request_home_server=offer_home", source)
 
         for offer_origin, request_origin in ORIGIN_PAIRS:
             offer_home = _home(offer_origin)
@@ -236,58 +243,99 @@ class P100OfferOriginPolicyCharacterizationTests(unittest.TestCase):
                 invitation_kind=InvitationKind.ACCOUNTANT,
                 customer_tier=None,
             )
+            tier2 = evaluate_invitation_bot_access(
+                role=UserRole.STANDARD,
+                invitation_kind=InvitationKind.CUSTOMER,
+                customer_tier=CustomerTier.TIER_2,
+            )
             tier1 = evaluate_invitation_bot_access(
                 role=UserRole.STANDARD,
                 invitation_kind=InvitationKind.CUSTOMER,
                 customer_tier=CustomerTier.TIER_1,
             )
             self.assertFalse(accountant.allowed, (offer_origin, request_origin))
+            self.assertFalse(tier2.allowed, (offer_origin, request_origin))
             self.assertTrue(tier1.allowed, (offer_origin, request_origin))
+
+            command = OfferRequestLedgerCommand(
+                local_offer_id=None,
+                offer_public_id=f"ofr_{offer_origin}",
+                requested_quantity=1,
+                request_home_server=offer_home,
+                requester_user_id=None,
+                actor_user_id=None,
+                request_source_surface=request_surface,
+                request_source_server=request_home,
+                idempotency_key=f"origin-{offer_origin}-{request_origin}",
+            )
             with tempfile.TemporaryDirectory() as tmp:
-                db_path = str(Path(tmp) / f"{offer_origin}-{request_origin}.sqlite")
-                engine = _make_engine(db_path)
+                success_path = str(Path(tmp) / f"{offer_origin}-{request_origin}-success.sqlite")
+                engine = _make_engine(success_path)
                 Session = sessionmaker(bind=engine, future=True, expire_on_commit=False)
                 db = _AsyncSessionAdapter(Session())
-                command = OfferRequestLedgerCommand(
-                    local_offer_id=None,
-                    offer_public_id=f"ofr_{offer_origin}_{request_origin}",
-                    requested_quantity=1,
-                    request_home_server=request_home,
-                    requester_user_id=None,
-                    actor_user_id=None,
-                    request_source_surface=request_surface,
-                    request_source_server=request_home,
-                    idempotency_key=f"origin-{offer_origin}-{request_origin}",
-                )
-
-                async def _run():
-                    created = await create_offer_request_ledger_entry(db, command)
-                    await db.commit()
-                    replay = await create_offer_request_ledger_entry(db, command)
-                    other = OfferRequestLedgerCommand(
-                        local_offer_id=None,
-                        offer_public_id=command.offer_public_id,
-                        requested_quantity=1,
-                        request_home_server=request_home,
-                        requester_user_id=None,
-                        actor_user_id=None,
-                        request_source_surface="telegram_bot" if request_surface == "webapp" else "webapp",
-                        request_source_server="foreign" if request_home == "iran" else "iran",
-                        idempotency_key=f"origin-other-{offer_origin}-{request_origin}",
-                    )
-                    second = await create_offer_request_ledger_entry(db, other)
-                    await db.commit()
-                    return created, replay, second
-
-                created, replay, second = asyncio.run(_run())
-                self.assertFalse(created.duplicate_replay)
-                self.assertTrue(replay.duplicate_replay)
-                self.assertFalse(second.duplicate_replay)
+                created = await create_offer_request_ledger_entry(db, command)
+                await db.commit()
+                replay = await create_offer_request_ledger_entry(db, command)
                 surface = created.ledger.request_source_surface
+                self.assertFalse(created.duplicate_replay, (offer_origin, request_origin))
+                self.assertTrue(replay.duplicate_replay, (offer_origin, request_origin))
+                self.assertEqual(created.ledger.request_home_server, offer_home)
                 self.assertEqual(getattr(surface, "value", surface), request_surface)
-                self.assertIn(offer_home, {"iran", "foreign"})
+                self.assertEqual(created.ledger.request_source_server, request_home)
+                self.assertEqual(created.ledger.offer_public_id, f"ofr_{offer_origin}")
+                with sqlite3.connect(success_path) as conn:
+                    rows = conn.execute(
+                        "SELECT request_home_server, request_source_surface, request_source_server FROM offer_requests"
+                    ).fetchall()
+                self.assertEqual(len(rows), 1, (offer_origin, request_origin))
+                self.assertEqual(rows[0][0], offer_home)
+                self.assertEqual(rows[0][1], request_surface)
+                self.assertEqual(rows[0][2], request_home)
                 db.close()
                 engine.dispose()
+
+                concurrent_path = str(Path(tmp) / f"{offer_origin}-{request_origin}-concurrent.sqlite")
+                concurrent_engine = _make_engine(concurrent_path)
+                ConcurrentSession = sessionmaker(
+                    bind=concurrent_engine, future=True, expire_on_commit=False
+                )
+                barrier = asyncio.Barrier(2)
+
+                async def worker():
+                    worker_db = _AsyncSessionAdapter(ConcurrentSession())
+                    await barrier.wait()
+                    try:
+                        result = await create_offer_request_ledger_entry(worker_db, command)
+                        await worker_db.commit()
+                        return "winner" if not result.duplicate_replay else "replay", result
+                    except IntegrityError:
+                        await worker_db.rollback()
+                        existing = await load_offer_request_by_idempotency(
+                            worker_db,
+                            request_home_server=offer_home,
+                            idempotency_key=command.idempotency_key,
+                        )
+                        return "loser", existing
+                    finally:
+                        worker_db.close()
+
+                first, second = await asyncio.gather(worker(), worker())
+                outcomes = {first[0], second[0]}
+                with sqlite3.connect(concurrent_path) as conn:
+                    concurrent_rows = conn.execute(
+                        "SELECT request_home_server, request_source_surface, request_source_server, idempotency_key FROM offer_requests"
+                    ).fetchall()
+                self.assertEqual(len(concurrent_rows), 1, (offer_origin, request_origin, outcomes))
+                self.assertTrue(outcomes & {"winner"}, (offer_origin, request_origin, outcomes))
+                self.assertTrue(outcomes <= {"winner", "loser", "replay"}, outcomes)
+                self.assertTrue({"loser", "replay"} & outcomes or outcomes == {"winner", "replay"} or outcomes == {"winner", "loser"}, outcomes)
+                if outcomes == {"winner"}:
+                    self.fail(f"CONCURRENT produced two winners without a loser/replay: {(offer_origin, request_origin)}")
+                self.assertEqual(concurrent_rows[0][0], offer_home)
+                self.assertEqual(concurrent_rows[0][1], request_surface)
+                self.assertEqual(concurrent_rows[0][2], request_home)
+                self.assertEqual(concurrent_rows[0][3], command.idempotency_key)
+                concurrent_engine.dispose()
 
     def test_admission_cells_do_not_use_a_three_value_origin_array(self):
         payload = _load_json("scenario-records.json")

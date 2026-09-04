@@ -2,7 +2,7 @@
   "schema_version": "two-server-refactor.scenario-records.v2",
   "generated_from_commit": "aa2c06a573dfd60051e142146f55d7965f2242a7",
   "generated_date": "2026-09-03 UTC",
-  "assignment_id": "WA-P1-00-REFRESH-20260903-001",
+  "assignment_id": "WA-P1-00-SCOPE-20260903-002",
   "scope": "Normalized contracts, 465-seed mapping, origin interactions with executed policy effects or P1-00b transfer, REQUEST durable collision evidence, and a canonical-plan amendment adding P1-00b.",
   "provenance": {
     "contract_source": "Repository code and behavioral tests at the Assignment base SHA.",
@@ -318,7 +318,7 @@
       "db_mutations": {
         "status": "APPLICABLE",
         "rules": [
-          "transition_user_account_status mutates in-memory account_status fields, invalidates overtime, then create_user_notification performs an internal commit of the notification row (and any flushed overtime on the same session)."
+          "transition_user_account_status mutates session-bound User account_status fields, invalidates overtime, then create_user_notification performs an internal commit of the same session so the mapped User status fields, notification row, and any flushed overtime persist."
         ]
       },
       "events_outbox": {
@@ -330,19 +330,19 @@
       "side_effects": {
         "status": "APPLICABLE",
         "rules": [
-          "Successful inactive transition invalidates nonterminal overtime rows, creates a user notification, then enqueues Telegram outbox. Redis unread increment and realtime publish are attempted after the inner commit and are swallowed when Redis is down."
+          "Successful inactive or active transition creates a user notification then enqueues Telegram outbox. Inactive also invalidates nonterminal overtime. Redis unread increment and realtime publish are attempted after the inner commit; characterization isolates Redis so localhost is never contacted."
         ]
       },
       "ordering": {
         "status": "APPLICABLE",
         "rules": [
-          "Authorize actor, reject unauthorized target, mutate in-memory status, invalidate overtime, create_user_notification internal commit, outbox enqueue, then handler session.commit if the service returned. The contract is not service-writes-then-handler-commits."
+          "Authorize actor, reject unauthorized target, mutate session-bound User status, invalidate overtime, create_user_notification internal commit (User status fields persist on that commit), outbox enqueue, then handler session.commit if the service returned. The contract is not service-writes-then-handler-commits."
         ]
       },
       "timeouts_retries": {
         "status": "APPLICABLE",
         "rules": [
-          "inactive to inactive returns changed=False with no extra notification, outbox, or overtime write. active to inactive flips and emits the side effects above."
+          "Fresh-session same-status retry returns changed=False with no extra notification, outbox, or overtime write. Both activation and deactivation persist status fields after the inner commit."
         ]
       },
       "idempotency_key": {
@@ -352,7 +352,7 @@
       "failure_cases": {
         "status": "APPLICABLE",
         "rules": [
-          "Missing actor, non-admin actor, or unauthorized target is denied with no transition, no notify, no outbox, and no commit. If outbox enqueue raises after the inner notification commit, the notification and overtime invalidation stay committed and the outbox row is not persisted."
+          "Missing actor, non-admin actor, or unauthorized target is denied with no transition, no notify, no outbox, and no commit. If outbox enqueue raises after the inner notification commit, the notification, overtime invalidation, and mapped User status fields stay committed and the outbox row is not persisted."
         ]
       },
       "reference_evidence": {
@@ -5699,7 +5699,7 @@
         "P1-06"
       ],
       "evidence_status": "OBSERVED_LOCALLY",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change.",
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change.",
       "required_evidence": [
         "P1-00b must execute or leave unresolved the leftover origin policy effects before implementation."
       ],
@@ -6143,7 +6143,7 @@
     "cross_family_failure_evidence": 0,
     "scenario_work_item": "READY_FOR_CODEX_FINAL_REVIEW",
     "target_result": "NOT_RUN",
-    "complete_forbidden_until": "Stage remains IN_PROGRESS. P1-00 amended exit gate has no unresolved High. Leftover current-behavior freeze is owned by new Stage P1-00b before any implementation. Coordinator updates execution-order.yaml only after Codex APPROVE of this candidate.",
+    "complete_forbidden_until": "Stage remains IN_PROGRESS. P1-00 amended exit gate has no unresolved High. Leftover current-behavior freeze is owned by new Stage P1-00b before any implementation. Assignment WA-P1-00-SCOPE-20260903-002 authorizes P1-00b machine-graph edges in this Worker commit. Do not mark any Stage COMPLETE.",
     "family_boundary_evidenced_cells": 35,
     "family_boundary_named_blockers": 20,
     "filename_only_failure_evidence": 0,
@@ -15083,7 +15083,7 @@
         "disposition": "TRANSFERRED_TO_P1_00B",
         "status": "TRANSFERRED_TO_P1_00B",
         "reason": "Unlinked-Bot, expiry/terminal, policy snapshot, notification audience, and the three failure-phase origin cells have no executed combined policy path in P1-00.",
-        "observed_fact": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change.",
+        "observed_fact": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change.",
         "unauthorized_reason": "Assignment external_access is NONE and product mutation is forbidden. P1-00 exit gate is amended so this leftover freeze is a new non-implementation Stage P1-00b before any consolidation implementation."
       },
       {
@@ -24733,7 +24733,7 @@
       "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
       "representative_id": "create_offer_request_ledger_entry",
       "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: each origin pair persists a request ledger row whose request surface and home match the Request origin, against the Offer home from offer_home_server_for_source.",
+      "equivalence_reason": "Policy effect executed: each origin pair persists a request ledger row whose request_home_server is the Offer home from offer_home_server_for_source and whose request surface and server match the Request origin.",
       "applicability": "APPLICABLE"
     },
     {
@@ -24775,9 +24775,9 @@
       "request_origin": "WEBAPP",
       "interaction": "CONCURRENT",
       "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry.distinct_request_origin",
+      "representative_id": "create_offer_request_ledger_entry.overlapping_same_identity",
       "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: a second request origin against the same offer public id uses a distinct identity and persists a second row; origins do not share one lock.",
+      "equivalence_reason": "Policy effect executed: two overlapping asyncio tasks with the same Offer-home plus Request-origin identity produce one committed row and a replay or loser; cardinality stays one.",
       "applicability": "APPLICABLE"
     },
     {
@@ -24791,7 +24791,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__EXPIRY-CANCEL-REPUBLISH-TERMINAL",
@@ -24804,7 +24804,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__POLICY-SNAPSHOT",
@@ -24817,7 +24817,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__NOTIFICATION",
@@ -24830,7 +24830,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__FAILURE-BEFORE-COMMIT",
@@ -24843,7 +24843,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
@@ -24856,7 +24856,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__SIDE-EFFECT-RETRY",
@@ -24869,7 +24869,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__OUTCOME-SUCCESS",
@@ -24879,7 +24879,7 @@
       "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
       "representative_id": "create_offer_request_ledger_entry",
       "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: each origin pair persists a request ledger row whose request surface and home match the Request origin, against the Offer home from offer_home_server_for_source.",
+      "equivalence_reason": "Policy effect executed: each origin pair persists a request ledger row whose request_home_server is the Offer home from offer_home_server_for_source and whose request surface and server match the Request origin.",
       "applicability": "APPLICABLE"
     },
     {
@@ -24921,9 +24921,9 @@
       "request_origin": "TELEGRAM_BOT",
       "interaction": "CONCURRENT",
       "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry.distinct_request_origin",
+      "representative_id": "create_offer_request_ledger_entry.overlapping_same_identity",
       "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: a second request origin against the same offer public id uses a distinct identity and persists a second row; origins do not share one lock.",
+      "equivalence_reason": "Policy effect executed: two overlapping asyncio tasks with the same Offer-home plus Request-origin identity produce one committed row and a replay or loser; cardinality stays one.",
       "applicability": "APPLICABLE"
     },
     {
@@ -24937,7 +24937,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__EXPIRY-CANCEL-REPUBLISH-TERMINAL",
@@ -24950,7 +24950,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__POLICY-SNAPSHOT",
@@ -24963,7 +24963,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__NOTIFICATION",
@@ -24976,7 +24976,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__FAILURE-BEFORE-COMMIT",
@@ -24989,7 +24989,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
@@ -25002,7 +25002,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__SIDE-EFFECT-RETRY",
@@ -25015,7 +25015,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__OUTCOME-SUCCESS",
@@ -25025,7 +25025,7 @@
       "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
       "representative_id": "create_offer_request_ledger_entry",
       "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: each origin pair persists a request ledger row whose request surface and home match the Request origin, against the Offer home from offer_home_server_for_source.",
+      "equivalence_reason": "Policy effect executed: each origin pair persists a request ledger row whose request_home_server is the Offer home from offer_home_server_for_source and whose request surface and server match the Request origin.",
       "applicability": "APPLICABLE"
     },
     {
@@ -25067,9 +25067,9 @@
       "request_origin": "WEBAPP",
       "interaction": "CONCURRENT",
       "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry.distinct_request_origin",
+      "representative_id": "create_offer_request_ledger_entry.overlapping_same_identity",
       "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: a second request origin against the same offer public id uses a distinct identity and persists a second row; origins do not share one lock.",
+      "equivalence_reason": "Policy effect executed: two overlapping asyncio tasks with the same Offer-home plus Request-origin identity produce one committed row and a replay or loser; cardinality stays one.",
       "applicability": "APPLICABLE"
     },
     {
@@ -25083,7 +25083,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__EXPIRY-CANCEL-REPUBLISH-TERMINAL",
@@ -25096,7 +25096,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__POLICY-SNAPSHOT",
@@ -25109,7 +25109,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__NOTIFICATION",
@@ -25122,7 +25122,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__FAILURE-BEFORE-COMMIT",
@@ -25135,7 +25135,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
@@ -25148,7 +25148,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__SIDE-EFFECT-RETRY",
@@ -25161,7 +25161,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__OUTCOME-SUCCESS",
@@ -25171,7 +25171,7 @@
       "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
       "representative_id": "create_offer_request_ledger_entry",
       "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: each origin pair persists a request ledger row whose request surface and home match the Request origin, against the Offer home from offer_home_server_for_source.",
+      "equivalence_reason": "Policy effect executed: each origin pair persists a request ledger row whose request_home_server is the Offer home from offer_home_server_for_source and whose request surface and server match the Request origin.",
       "applicability": "APPLICABLE"
     },
     {
@@ -25213,9 +25213,9 @@
       "request_origin": "TELEGRAM_BOT",
       "interaction": "CONCURRENT",
       "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry.distinct_request_origin",
+      "representative_id": "create_offer_request_ledger_entry.overlapping_same_identity",
       "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: a second request origin against the same offer public id uses a distinct identity and persists a second row; origins do not share one lock.",
+      "equivalence_reason": "Policy effect executed: two overlapping asyncio tasks with the same Offer-home plus Request-origin identity produce one committed row and a replay or loser; cardinality stays one.",
       "applicability": "APPLICABLE"
     },
     {
@@ -25229,7 +25229,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__EXPIRY-CANCEL-REPUBLISH-TERMINAL",
@@ -25242,7 +25242,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__POLICY-SNAPSHOT",
@@ -25255,7 +25255,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__NOTIFICATION",
@@ -25268,7 +25268,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__FAILURE-BEFORE-COMMIT",
@@ -25281,7 +25281,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
@@ -25294,7 +25294,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__SIDE-EFFECT-RETRY",
@@ -25307,7 +25307,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__OUTCOME-SUCCESS",
@@ -25317,7 +25317,7 @@
       "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
       "representative_id": "create_offer_request_ledger_entry",
       "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: each origin pair persists a request ledger row whose request surface and home match the Request origin, against the Offer home from offer_home_server_for_source.",
+      "equivalence_reason": "Policy effect executed: each origin pair persists a request ledger row whose request_home_server is the Offer home from offer_home_server_for_source and whose request surface and server match the Request origin.",
       "applicability": "APPLICABLE"
     },
     {
@@ -25359,9 +25359,9 @@
       "request_origin": "WEBAPP",
       "interaction": "CONCURRENT",
       "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry.distinct_request_origin",
+      "representative_id": "create_offer_request_ledger_entry.overlapping_same_identity",
       "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: a second request origin against the same offer public id uses a distinct identity and persists a second row; origins do not share one lock.",
+      "equivalence_reason": "Policy effect executed: two overlapping asyncio tasks with the same Offer-home plus Request-origin identity produce one committed row and a replay or loser; cardinality stays one.",
       "applicability": "APPLICABLE"
     },
     {
@@ -25375,7 +25375,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__EXPIRY-CANCEL-REPUBLISH-TERMINAL",
@@ -25388,7 +25388,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__POLICY-SNAPSHOT",
@@ -25401,7 +25401,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__NOTIFICATION",
@@ -25414,7 +25414,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__FAILURE-BEFORE-COMMIT",
@@ -25427,7 +25427,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
@@ -25440,7 +25440,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__SIDE-EFFECT-RETRY",
@@ -25453,7 +25453,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__OUTCOME-SUCCESS",
@@ -25463,7 +25463,7 @@
       "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
       "representative_id": "create_offer_request_ledger_entry",
       "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: each origin pair persists a request ledger row whose request surface and home match the Request origin, against the Offer home from offer_home_server_for_source.",
+      "equivalence_reason": "Policy effect executed: each origin pair persists a request ledger row whose request_home_server is the Offer home from offer_home_server_for_source and whose request surface and server match the Request origin.",
       "applicability": "APPLICABLE"
     },
     {
@@ -25505,9 +25505,9 @@
       "request_origin": "TELEGRAM_BOT",
       "interaction": "CONCURRENT",
       "disposition": "EQUIVALENT_TO_REPRESENTATIVE",
-      "representative_id": "create_offer_request_ledger_entry.distinct_request_origin",
+      "representative_id": "create_offer_request_ledger_entry.overlapping_same_identity",
       "live_function": "core.services.offer_request_ledger_service.create_offer_request_ledger_entry",
-      "equivalence_reason": "Policy effect executed: a second request origin against the same offer public id uses a distinct identity and persists a second row; origins do not share one lock.",
+      "equivalence_reason": "Policy effect executed: two overlapping asyncio tasks with the same Offer-home plus Request-origin identity produce one committed row and a replay or loser; cardinality stays one.",
       "applicability": "APPLICABLE"
     },
     {
@@ -25521,7 +25521,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__EXPIRY-CANCEL-REPUBLISH-TERMINAL",
@@ -25534,7 +25534,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__POLICY-SNAPSHOT",
@@ -25547,7 +25547,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__NOTIFICATION",
@@ -25560,7 +25560,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__FAILURE-BEFORE-COMMIT",
@@ -25573,7 +25573,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__FAILURE-AFTER-COMMIT-BEFORE-SIDE-EFFECT",
@@ -25586,7 +25586,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__SIDE-EFFECT-RETRY",
@@ -25599,7 +25599,7 @@
         "severity": "HIGH"
       },
       "applicability": "HIGH_BLOCKER",
-      "reason": "Admission reject/allow, request ledger persist, same-key retry, and distinct-origin second row were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
+      "reason": "Admission reject/allow, request ledger persist with Offer home bound to request_home_server, same-key retry, and overlapping same-identity CONCURRENT were executed for every origin pair. Remaining required matrix rows have no live combined path without a product change."
     }
   ],
   "scenario_work_item": "READY_FOR_CODEX_FINAL_REVIEW"

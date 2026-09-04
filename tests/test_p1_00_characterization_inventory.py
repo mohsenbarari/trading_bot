@@ -1171,6 +1171,28 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
             self.assertNotEqual(item["resolution_stage"], "CODEX_FINAL_REVIEW")
             self.assertNotIn(item["resolution_stage"], {"P1-04", "P1-06"})
 
+    def test_execution_order_contains_authorized_p1_00b_edges(self):
+        yaml_text = (REPO_ROOT / "docs/refactor/two-server/execution-order.yaml").read_text(encoding="utf-8")
+        self.assertIn("stages: [P1-00, P1-00b, P2-00, MKT-0, DPL-1, DOC-1, DOC-2, DOC-3, DOC-5]", yaml_text)
+        self.assertIn("P1-00: {state: IN_PROGRESS, section: 1, depends_on: [], production: false}", yaml_text)
+        self.assertIn("P1-00b: {state: PROPOSED, section: 1, depends_on: [P1-00], production: false}", yaml_text)
+        for needle in (
+            "P1-01: {state: PROPOSED, section: 1, depends_on: [P1-00, P1-00b], production: false}",
+            "P1-02: {state: PROPOSED, section: 1, depends_on: [P1-00, P1-00b, DPL-1, DOC-3], production: false}",
+            "P1-04: {state: PROPOSED, section: 1, depends_on: [P1-00b, P1-03, P2-00, MKT-1], production: false}",
+            "P1-06: {state: PROPOSED, section: 1, depends_on: [P1-00b, P1-05, P2-10, MKT-13, DPL-9], production: false}",
+            "P2-00: {state: PROPOSED, section: 2, depends_on: [P1-00, P1-00b, DOC-3], production: false}",
+            "MKT-0: {state: PROPOSED, section: 3, depends_on: [P1-00, P1-00b, DOC-3, DOC-5], production: false}",
+            "DPL-1: {state: PROPOSED, section: 4, depends_on: [P1-00, P1-00b, DOC-5], production: false}",
+            "DOC-2: {state: PROPOSED, section: 5, depends_on: [DOC-1, P1-00, P1-00b], production: false}",
+            "DOC-5: {state: PROPOSED, section: 5, depends_on: [DOC-1, P1-00, P1-00b], production: false}",
+        ):
+            self.assertIn(needle, yaml_text)
+        card = (REPO_ROOT / "docs/refactor/two-server/section-1/stages/P1-00.md").read_text(encoding="utf-8")
+        self.assertIn("assignment_id: WA-P1-00-SCOPE-20260903-002", card)
+        scenarios = _load_json("scenario-records.json")
+        self.assertEqual(scenarios["assignment_id"], "WA-P1-00-SCOPE-20260903-002")
+
     def test_runtime_facts_are_marked_not_reobserved(self):
         runtime = _load_json("current-finland-runtime.json")
         self.assertEqual(runtime["refresh"]["assignment_id"], "WA-P1-00-REFRESH-20260903-001")

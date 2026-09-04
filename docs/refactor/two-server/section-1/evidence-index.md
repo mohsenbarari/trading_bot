@@ -1,7 +1,7 @@
 # Evidence Index
 
 Status: sanitised tracked index; raw runtime output is intentionally untracked
-Refresh: `WA-P1-00-REFRESH-20260903-001` against `aa2c06a573dfd60051e142146f55d7965f2242a7`
+Refresh: `WA-P1-00-SCOPE-20260903-002` against `aa2c06a573dfd60051e142146f55d7965f2242a7`
 
 | Evidence | Path | Integrity/status |
 | --- | --- | --- |
@@ -20,7 +20,7 @@ Refresh: `WA-P1-00-REFRESH-20260903-001` against `aa2c06a573dfd60051e142146f55d7
 | Web route inventory | `inventory/surface-web.json` | SHA-256 `92a6fbafbfc9bac42bf169261bd447f50676005d0326cf9c497120829a3c754e` |
 | Job authority inventory | `inventory/surface-jobs.json` | SHA-256 `7be5d42699e89df1b9398caaf0d8853c4d797863f6050d0b46e3d9beb95d9327` |
 | Runtime task ownership | `inventory/runtime-task-ownership.json` | SHA-256 `071e273e5168db736bf9330aab93233adcd32cd03a7033b89e5e17d84f47ef14` |
-| Scenario records | `inventory/scenario-records.json` | SHA-256 `93bebe5574cca0aacffa6dabc018553aa73cd17279f00ca83e514c22a3f2189b` |
+| Scenario records | `inventory/scenario-records.json` | SHA-256 `151cae42c132cb444cffa901d05219f000170703d22987b4ae4e4d648e1c3dbc` |
 | Task Card | `stages/P1-00.md` | correction candidate after `CHANGES_REQUIRED`; Codex Final Review pending |
 
 ## Evidence handling
