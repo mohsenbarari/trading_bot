@@ -21,7 +21,7 @@
     "schema_version": {"type": "string", "const": "1.0"},
     "reviewer_authority": {"type": "string", "const": "CODEX_FINAL_REVIEWER"},
     "receipt_type": {"type": "string", "const": "STAGE_FINAL"},
-    "stage_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$"},
+    "stage_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*-[0-9]+[a-z]?$"},
     "assignment_id": {"type": "string", "minLength": 1},
     "integration_base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "reviewed_head_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},

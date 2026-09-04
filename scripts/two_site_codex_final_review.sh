@@ -86,7 +86,7 @@ fi
 
 validate_source_authorization || die "explicit source-review authorization is missing: $source_authorization"
 
-[[ "$stage_id" =~ ^[A-Z][A-Z0-9]*-[0-9]+$ ]] || die "invalid Stage ID"
+[[ "$stage_id" =~ ^[A-Z][A-Z0-9]*-[0-9]+[a-z]?$ ]] || die "invalid Stage ID"
 [[ "$assignment_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "invalid Assignment ID"
 [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]] || die "base must be a full lowercase SHA"
 [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]] || die "head must be a full lowercase SHA"
