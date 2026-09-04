@@ -12,7 +12,7 @@ Object Storage action without its exact scoped Codex pre-action receipt.
 ```
 
 The Coordinator must run `python3 scripts/validate_antigravity_two_site_adapter.py`
-and the `--runtime` discovery plus exact custom-Coordinator read-only smoke before
+and the `--runtime` exact persisted-role binding plus all-three-role read-only smoke before
 takeover. It requires clean integration/Stage worktrees, an unexpired Assignment and
 an immutable-contract digest, then performs the governance
 `RECONCILING → ACTIVE` orchestrator-fence sequence, supersedes the prior Cursor
@@ -104,12 +104,17 @@ creates a new candidate commit, integration head, and review.
 
 ## Optional CLI entry
 
-When the official `agy` CLI is installed and authenticated, first confirm discovery
-with `agy agents`, then use:
+With tested CLI 1.1.26, select the custom Coordinator in `/agents` only after login.
+Fresh `agy agents`/`--agent` can resolve before auth and silently fall back. Use an
+observed, independently bound conversation ID; do not infer it from an agent claim.
+Keep dedicated smoke sessions separate from the execution Coordinator. The runtime
+validator checks the actual persisted config/model and resumes all three smoke roles;
+see `ANTIGRAVITY_EXECUTION.md` for registration and version-pin recovery. Then use:
 
 ```bash
 agy -p "Resume the approved two-site refactor autonomously from canonical state; run no external or production mutation." \
-  --agent two-site-coordinator \
+  --conversation <VERIFIED_EXECUTION_COORDINATOR_ID> \
+  --model gemini-3.8-flash-high --effort high \
   --sandbox \
   --output-format stream-json \
   --print-timeout 60m

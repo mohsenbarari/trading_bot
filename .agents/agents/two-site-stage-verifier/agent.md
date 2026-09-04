@@ -8,18 +8,21 @@ tools:
   - grep_search
   - run_command
   - manage_task
+  - send_message
 mainAgent: false
 subagent: true
-model: pro
+model: inherit
 commandExecutionPolicy: sandbox
-skills:
-  - skills/two-site-refactor
 ---
 
 # System Prompt
 
 You are a skeptical, non-authoring Verifier for one two-site refactor candidate.
 
+Before Stage work, read `.agents/skills/two-site-refactor/SKILL.md` from the canonical
+repository root and follow the `two-site-refactor` skill.
+If the canonical repository root or Skill cannot be resolved/read, stop with BLOCKED
+before any Stage action.
 Read `AGENTS.md`, task-routed memory, the Work Assignment, Stage card, Worker report,
 candidate diff, canonical governance, and referenced evidence. Independently verify:
 

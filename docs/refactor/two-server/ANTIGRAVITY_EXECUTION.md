@@ -1,6 +1,6 @@
 # اجرای خودکار ریفکتور دوسایته با Google Antigravity
 
-وضعیت: `STATIC_VALIDATED / RUNTIME_DISCOVERY_BLOCKED / NO_STAGE_OR_PRODUCTION_ACTION`
+وضعیت بررسی راه‌اندازی در ۲۰۲۶-۰۹-۰۴: `STATIC_AND_RUNTIME_SMOKE_VALIDATED / STAGE_TAKEOVER_NOT_STARTED / NO_PRODUCTION_ACTION`
 
 این سند آداپتر اجرایی Antigravity برای همان پلن، Stage graph و حاکمیت موجود است؛
 پلن تازه یا منبع حقیقت موازی نیست. منابع مرجع همچنان
@@ -36,13 +36,13 @@ pre-review دقیق closeout، closeout commit و verify پس از commit بدو
 ```
 
 تعریف‌ها داخل ریپازیتوری هستند؛ تنظیمات سراسری `~/.gemini`، credential و permission
-عمومی را تغییر نمی‌دهند. هر سه Agent با مدل `pro` و سیاست اجرای command برابر
+عمومی را تغییر نمی‌دهند. هر سه Agent مدل pin‌شدهٔ parent را با `inherit` می‌گیرند و با سیاست اجرای command برابر
 `sandbox` تعریف شده‌اند. Verifier ابزار ویرایش فایل ندارد.
 
 ## شروع در IDE
 
 1. همین Git root را در Antigravity باز کنید و در Agent Manager فرمان `/agents` را
-   اجرا کنید.
+   پس از کامل‌شدن login اجرا کنید. مدل اصلی را `Gemini 3.8 Flash (High)` انتخاب کنید.
 2. Agent اصلی `two-site-coordinator` را انتخاب کنید.
 3. فقط این پیام را بفرستید:
 
@@ -78,12 +78,17 @@ Assignment دارای external access از این مسیر رد می‌شود.
 
 ## شروع اختیاری در CLI
 
-این مسیر فقط وقتی فعال است که CLI رسمی `agy` نصب و authenticate شده باشد:
+این مسیر فقط وقتی فعال است که CLI رسمی `agy` نصب و authenticate شده باشد.
+در نسخهٔ آزموده‌شدهٔ `1.1.26`، فراخوانی تازهٔ `agy agents` ممکن است قبل از تکمیل
+authentication فهرست خالی بدهد و `--agent` به default برگردد. بنابراین bootstrap
+توسط Codex/controller، ابتدا در نشست تعاملیِ plan انجام می‌شود: بعد از login، `/agents`
+باز و Coordinator واقعی انتخاب می‌شود. شناسهٔ مشاهده‌شدهٔ نشست، ورودی resume است؛
+نام مدل یا پاسخ متنیِ خود Agent به‌تنهایی اثبات انتخاب درست نیست.
 
 ```bash
-agy agents
 agy -p "Resume the approved two-site refactor autonomously from canonical state; run no external or production mutation." \
-  --agent two-site-coordinator \
+  --conversation <VERIFIED_EXECUTION_COORDINATOR_ID> \
+  --model gemini-3.8-flash-high --effort high \
   --sandbox \
   --output-format stream-json \
   --print-timeout 60m
@@ -168,23 +173,49 @@ HEAD تجمیع‌شده اجرا می‌شوند. `/teamwork-preview` برای 
 ```bash
 python3 scripts/validate_antigravity_two_site_adapter.py
 python3 -m unittest tests.test_antigravity_two_site_adapter
+python3 -m unittest tests.test_antigravity_session_binding
 ```
 
-گزینهٔ `--runtime` علاوه بر ساختار فایل، discovery توسط `agy agents` را بررسی می‌کند
-و سپس خود `two-site-coordinator` را در `plan` و sandbox با یک prompt بدون tool/mutation
-اجرا می‌کند؛ HEAD، full status و digest وضعیت orchestration محلی قبل/بعد باید
-byte-identical و پاسخ JSON دقیق باشد.
-این smoke یک نشست headless واقعی است و تعریف Coordinator و prompt ثابت smoke را برای
-runtime Google Antigravity ارسال می‌کند؛ بنابراین فقط بعد از رضایت صریح مالک برای این
-ارسال اجرا می‌شود. هیچ secret، فایل محصول یا محتوای آزاد دیگری در prompt smoke قرار
-نمی‌گیرد.
-نبود CLI، discovery،
-authentication یا smoke واقعی به‌طور fail-closed گزارش می‌شود. validator هیچ Stage
-را اجرا نمی‌کند. تغییرات خود adapter نیز با
+گزینهٔ `--runtime` سه نشست اختصاصی smoke را از فایل ignored
+`.local/two-site-refactor/antigravity-runtime-sessions.json` می‌گیرد. این فایل فقط
+`schema_version: 1.0`، `cli_sha256` و شناسه‌های مشاهده‌شدهٔ `coordinator`، `worker` و
+`verifier` دارد؛ مجوز، receipt یا جایگزین بررسی زنده نیست. شناسه‌ها از اجرای واقعی
+Coordinator و `invoke_subagent` گرفته می‌شوند، نه از متن ساختگی. نشست اجرای Stage
+باید از نشست smoke جدا باشد تا validator همان Agent فعال را دوباره اجرا نکند.
+
+`scripts/two_site_antigravity_session.py` پایگاه همان نشست‌های smoke را با SQLite
+`mode=ro` و `query_only` می‌خواند؛ از `immutable=1` که WAL را نادیده می‌گیرد استفاده
+نمی‌کند. نام/نقش، parent، مسیر فایل، prompt دقیق، ابزارهای مجاز، sandbox و مدل واقعی
+هر اجرا باید با تعریف بررسی‌شده مطابق باشند. hash باینری آزموده‌شده در کد pin شده
+و schema ناشناخته یا تغییر باینری باعث توقف می‌شود. به `init.tools` اعتماد نمی‌شود،
+چون CLI در آن فهرست عمومی ابزارها را می‌دهد، نه ابزارهای واقعی نقش انتخاب‌شده.
+
+سپس هر سه نشست با `--conversation`، مدل صریح `gemini-3.8-flash-high`، `plan` و sandbox
+یک prompt ثابت بدون tool/read/write دریافت می‌کنند. پاسخ موفق، شناسهٔ دقیق و نبود
+tool step الزامی است. HEAD، full status، digest وضعیت محلی و اتصال نشست به تعریف
+Agent قبل/بعد کنترل می‌شوند. Agent قدیمی، config/model drift، خطای قبلی نشست، auth
+نامعتبر یا smoke ناموفق، مسیر را مسدود می‌کند. validator هیچ Stage را اجرا نمی‌کند.
+
+تعریف‌ها از `model: inherit` استفاده می‌کنند؛ مدل parent در CLI صریح pin می‌شود و
+مدل واقعی child از executor metadata کنترل می‌شود. `model: pro` در آزمون قبلی برای
+childها به `gemini-3.1-pro-low` تبدیل شد؛ بنابراین برچسب tier کافی نیست. انتخاب 3.8
+Flash High با توجه به [معرفی رسمی Google در ۲ سپتامبر ۲۰۲۶](https://blog.google/innovation-and-ai/models-and-research/gemini-models/3-8-flash-and-3-8-flash-cyber/)
+و بررسی واقعی تنظیمات انجام شد؛ smoke صرفاً سلامت اتصال است، نه benchmark کیفیت کد.
+
+در CLI 1.1.26، `list_permissions` registry معتبر ندارد و `multi_replace_file_content`
+بی‌اثر است؛ در allowlist نقش‌ها نیستند. همچنین `skills:` نسبی به‌علت نبود
+`AgentBasePath` بارگذاری نمی‌شود. هر نقش موظف است قبل از کار Stage، Skill canonical
+را صریح بخواند و در صورت شکست متوقف شود. roleها فقط ابزارهای allowlist دقیق دارند.
+
+مالک ارسال تعریف‌ها، metadata و سورس/تست/مستندات مرتبط این ریفکتور به Google را
+صریحاً تأیید کرده است؛ credentialها، secrets و دادهٔ عملیاتی خارج از این مجوزند.
+آزمون‌ها فقط context اختصاصی smoke و promptهای ثابت را می‌فرستند. نشست‌های شکست‌خورده
+یا superseded شواهد موقت‌اند؛ حداکثر پس از هفت روز و رفع نیاز بررسی حذف شوند. سه
+نشست smoke فعال تا پایان نیاز validator حفظ و پس از پایان ریفکتور پاکسازی می‌شوند.
+
+تغییرات خود adapter نیز با
 `scripts/two_site_codex_governance_review.sh` در commit و bundle مستقل exact-SHA
 پذیرفته می‌شوند و داخل scope Stage جاری قرار نمی‌گیرند.
 
-در آزمون جاری CLI رسمی اجرا شد، `agy agents` خروجی discovery نداد و اجرای مستقیم
-Coordinator نیز نیاز به authentication تعاملی را گزارش کرد. تا احراز هویت، discovery
-هر سه Agent و smoke بدون write موفق نشود، هیچ takeover یا اجرای Stage به Antigravity
-واگذار نمی‌شود.
+عبور از تست محلی یا smoke، به‌تنهایی پذیرش amendment، انتقال fence، تکمیل Stage یا
+مجوز عملیات تولیدی نیست؛ receipt مستقل و سپس takeover همچنان الزامی‌اند.

@@ -26,6 +26,17 @@ def load_validator():
     return module
 
 
+def smoke_stream(response="ANTIGRAVITY_RUNTIME_SMOKE_OK"):
+    return "\n".join(json.dumps(event) for event in [
+        {"event": "init", "conversation_id": "runtime-test", "init": {
+            "cwd": str(ROOT), "model": "gemini-3.8-flash-high", "permission_mode": "request-review"}},
+        {"event": "step_update", "step_update": {
+            "conversation_id": "runtime-test", "step_type": "agent_response", "state": "DONE"}},
+        {"event": "result", "result": {"conversation_id": "runtime-test", "status": "SUCCESS",
+            "response": response, "num_turns": 1}},
+    ])
+
+
 def load_fence_module():
     path = ROOT / "scripts" / "two_site_orchestrator_fence.py"
     spec = importlib.util.spec_from_file_location("two_site_orchestrator_fence", path)
@@ -379,14 +390,7 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
                 },
             }
         )
-        invalid_smoke = json.dumps(
-            {
-                "conversation_id": "runtime-test",
-                "status": "SUCCESS",
-                "response": "almost correct",
-                "num_turns": 1,
-            }
-        )
+        invalid_smoke = smoke_stream("almost correct")
         def runner(command, **_kwargs):
             if command[0] == "git":
                 output = "a" * 40 + "\n" if "rev-parse" in command else ""
@@ -396,10 +400,10 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
 
         with mock.patch.dict(os.environ, {"ANTIGRAVITY_CLI": "/fake/agy"}), mock.patch.object(
             validator.subprocess, "run", side_effect=runner
-        ) as runner:
+        ) as runner, mock.patch.object(validator, "runtime_sessions", return_value={"coordinator": "runtime-test"}), mock.patch.object(validator, "runtime_bindings", return_value=[]):
             errors = validator.validate_runtime()
         self.assertEqual(
-            ["agy read-only coordinator smoke did not return the exact success contract"],
+            ["agy read-only smoke failed: exact response/session/mode contract failed"],
             errors,
         )
         smoke_command = [
@@ -407,12 +411,13 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
             for call in runner.call_args_list
             if call.args[0][0] == "/fake/agy" and "agents" not in call.args[0]
         ][0]
-        self.assertIn("--agent", smoke_command)
-        self.assertIn("two-site-coordinator", smoke_command)
+        self.assertIn("--conversation", smoke_command)
+        self.assertIn("runtime-test", smoke_command)
+        self.assertNotIn("--agent", smoke_command)
         self.assertIn("--mode", smoke_command)
         self.assertIn("plan", smoke_command)
 
-    def test_runtime_validation_reports_auth_before_empty_discovery(self):
+    def test_runtime_validation_reports_auth_after_binding(self):
         validator = load_validator()
         agents_envelope = json.dumps(
             {"status": "SUCCESS", "command": {"data": {"agents": []}}}
@@ -435,7 +440,7 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
 
         with mock.patch.dict(os.environ, {"ANTIGRAVITY_CLI": "/fake/agy"}), mock.patch.object(
             validator.subprocess, "run", side_effect=runner
-        ):
+        ), mock.patch.object(validator, "runtime_sessions", return_value={"coordinator": "runtime-test"}), mock.patch.object(validator, "runtime_bindings", return_value=[]):
             errors = validator.validate_runtime()
         self.assertEqual(
             [
@@ -459,14 +464,7 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
                 },
             }
         )
-        smoke = json.dumps(
-            {
-                "conversation_id": "runtime-test",
-                "status": "SUCCESS",
-                "response": "ANTIGRAVITY_RUNTIME_SMOKE_OK",
-                "num_turns": 1,
-            }
-        )
+        smoke = smoke_stream()
         status_reads = 0
 
         def runner(command, **_kwargs):
@@ -482,12 +480,74 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
 
         with mock.patch.dict(os.environ, {"ANTIGRAVITY_CLI": "/fake/agy"}), mock.patch.object(
             validator.subprocess, "run", side_effect=runner
-        ):
+        ), mock.patch.object(validator, "runtime_sessions", return_value={"coordinator": "runtime-test"}), mock.patch.object(validator, "runtime_bindings", return_value=[]):
             errors = validator.validate_runtime()
         self.assertIn(
             "Antigravity runtime validation changed repository HEAD, full status, or local orchestration state",
             errors,
         )
+
+    def test_runtime_stream_rejects_tools_foreign_session_and_failed_history(self):
+        validator = load_validator()
+        good = [json.loads(line) for line in smoke_stream().splitlines()]
+        self.assertEqual([], validator.check_smoke_stream(smoke_stream(), "runtime-test"))
+        changes = [
+            (0, "conversation_id", "different"),
+            (0, "init", {"cwd": str(ROOT), "permission_mode": "always-proceed"}),
+            (1, "step_update", {"conversation_id": "runtime-test", "step_type": "tool", "tool_name": "run_command"}),
+            (1, "step_update", {"conversation_id": "other", "step_type": "agent_response", "state": "DONE"}),
+            (2, "result", {**good[2]["result"], "status": "ERROR"}),
+            (2, "result", {**good[2]["result"], "num_turns": True}),
+        ]
+        for index, key, value in changes:
+            with self.subTest(index=index, key=key, value=value):
+                candidate = json.loads(json.dumps(good))
+                candidate[index][key] = value
+                self.assertTrue(validator.check_smoke_stream("\n".join(map(json.dumps, candidate)), "runtime-test"))
+        for output in ("{}", "[]", "not json", smoke_stream()+"\n"+json.dumps(good[-1])):
+            self.assertTrue(validator.check_smoke_stream(output, "runtime-test"))
+
+    def test_runtime_missing_binding_never_starts_cli(self):
+        validator = load_validator()
+        with mock.patch.dict(os.environ, {"ANTIGRAVITY_CLI": "/fake/agy"}), mock.patch.object(
+            validator, "runtime_sessions", side_effect=ValueError("missing observed sessions")
+        ), mock.patch.object(validator.subprocess, "run") as runner:
+            self.assertTrue(validator.validate_runtime())
+            runner.assert_not_called()
+
+    def test_runtime_resumes_all_three_exact_roles_without_discovery_fallback(self):
+        validator = load_validator()
+        calls = []
+        def run(command, **_kwargs):
+            if command[0] == "git":
+                output = "a" * 40 + "\n" if "rev-parse" in command else ""
+            else:
+                calls.append(command)
+                session = command[command.index("--conversation") + 1]
+                token = command[-1].split()[-1]
+                output = smoke_stream(token).replace("runtime-test", session)
+            return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+        sessions = {role: f"session-{role}" for role in ("coordinator", "worker", "verifier")}
+        with mock.patch.dict(os.environ, {"ANTIGRAVITY_CLI": "/fake/agy"}), mock.patch.object(
+            validator, "runtime_sessions", return_value=sessions
+        ), mock.patch.object(validator, "runtime_bindings", return_value=[]), mock.patch.object(
+            validator.subprocess, "run", side_effect=run
+        ):
+            self.assertEqual([], validator.validate_runtime())
+        self.assertEqual(3, len(calls))
+        self.assertEqual(list(sessions.values()), [call[call.index("--conversation") + 1] for call in calls])
+        self.assertTrue(all("--agent" not in call and "agents" not in call for call in calls))
+
+    def test_official_but_unapproved_tool_is_rejected(self):
+        validator = load_validator()
+        original = validator.parse_frontmatter
+        def read(path):
+            data = original(path)
+            if path.name == "agent.md":
+                data["tools"].append("search_web")
+            return data
+        with mock.patch.object(validator, "parse_frontmatter", side_effect=read):
+            self.assertTrue(any("exact reviewed role allowlist" in error for error in validator.validate()))
 
     def test_orchestrator_fence_recovers_each_reconciliation_write_boundary(self):
         for failed_write in range(2, 6):

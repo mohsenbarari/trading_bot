@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +16,9 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from two_site_antigravity_session import binding, UUID, MODEL
+VALIDATED_CLI_SHA256 = "a0a6a8044d01accd39e6f5926d29648d212a2e519ff14102f09e1c061e6171dd"
 AGENT_DIR = ROOT / ".agents" / "agents"
 SKILL = ROOT / ".agents" / "skills" / "two-site-refactor" / "SKILL.md"
 RESOURCE = SKILL.parent / "resources" / "AUTONOMOUS_ORCHESTRATION.md"
@@ -33,14 +37,12 @@ OFFICIAL_TOOLS = {
     "view_file",
     "write_to_file",
     "replace_file_content",
-    "multi_replace_file_content",
     "list_dir",
     "find_by_name",
     "grep_search",
     "run_command",
     "manage_task",
     "schedule",
-    "list_permissions",
     "ask_permission",
     "invoke_subagent",
     "define_subagent",
@@ -71,6 +73,13 @@ AGENTS: dict[str, dict[str, Any]] = {
         "subagent": True,
         "required_tools": {"view_file", "grep_search", "run_command"},
     },
+}
+
+READ_TOOLS = {"view_file", "list_dir", "find_by_name", "grep_search", "run_command", "manage_task", "send_message"}
+ALLOWED_ROLE_TOOLS = {
+    "two-site-stage-verifier": READ_TOOLS,
+    "two-site-stage-worker": READ_TOOLS | {"write_to_file", "replace_file_content"},
+    "two-site-coordinator": READ_TOOLS | {"write_to_file", "replace_file_content", "invoke_subagent", "manage_subagents"},
 }
 
 WRITE_TOOLS = {"write_to_file", "replace_file_content", "multi_replace_file_content"}
@@ -161,20 +170,27 @@ def validate(root: Path = ROOT) -> list[str]:
             errors.append(f"{path.relative_to(root)}: {exc}")
             continue
 
-        for key in ("name", "description", "tools", "mainAgent", "subagent", "model", "commandExecutionPolicy", "skills"):
+        for key in ("name", "description", "tools", "mainAgent", "subagent", "model", "commandExecutionPolicy"):
             if key not in meta:
                 errors.append(f"{path.relative_to(root)}: missing frontmatter key {key}")
         for key in ("name", "mainAgent", "subagent"):
             if meta.get(key) != expected[key]:
                 errors.append(f"{path.relative_to(root)}: {key} must be {expected[key]!r}")
-        if meta.get("model") != "pro":
-            errors.append(f"{path.relative_to(root)}: model must be pro")
+        if meta.get("model") != "inherit":
+            errors.append(f"{path.relative_to(root)}: model must inherit the explicitly pinned parent model")
         if meta.get("commandExecutionPolicy") != "sandbox":
             errors.append(f"{path.relative_to(root)}: commandExecutionPolicy must be sandbox")
-        if meta.get("skills") != ["skills/two-site-refactor"]:
-            errors.append(f"{path.relative_to(root)}: must load skills/two-site-refactor")
+        # CLI 1.1.26 lacks AgentBasePath for custom primary-agent skill references.
+        # Load the canonical skill explicitly instead of declaring broken metadata.
+        if "skills" in meta:
+            errors.append(f"{path.relative_to(root)}: use explicit Skill reading, not skills metadata")
+        body = path.read_text(encoding="utf-8")
+        if ".agents/skills/two-site-refactor/SKILL.md" not in body or "stop with BLOCKED" not in body:
+            errors.append(f"{path.relative_to(root)}: must explicitly read the canonical Skill and fail closed")
 
         tools = set(meta.get("tools", []))
+        if tools != ALLOWED_ROLE_TOOLS[expected["name"]] or len(meta.get("tools", [])) != len(tools):
+            errors.append(f"{path.relative_to(root)}: tools must match the exact reviewed role allowlist")
         unknown = tools - OFFICIAL_TOOLS
         if unknown:
             errors.append(f"{path.relative_to(root)}: unknown Antigravity tools {sorted(unknown)}")
@@ -230,12 +246,90 @@ def validate(root: Path = ROOT) -> list[str]:
     return errors
 
 
+def runtime_sessions(agy: str) -> dict[str, str]:
+    """Read observed smoke IDs, not an approval or substitute for live validation."""
+    path = ROOT / ".local" / "two-site-refactor" / "antigravity-runtime-sessions.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or set(data) != {
+        "schema_version", "cli_sha256", "coordinator", "worker", "verifier"
+    } or data["schema_version"] != "1.0":
+        raise ValueError("invalid runtime session registry")
+    digest = hashlib.sha256()
+    with Path(agy).open("rb") as binary:
+        for chunk in iter(lambda: binary.read(1_048_576), b""):
+            digest.update(chunk)
+    if data["cli_sha256"] != VALIDATED_CLI_SHA256 or digest.hexdigest() != VALIDATED_CLI_SHA256:
+        raise ValueError("CLI binary changed; repeat version-specific runtime binding validation")
+    ids = [data[key] for key in ("coordinator", "worker", "verifier")]
+    if any(not isinstance(value, str) or not UUID.fullmatch(value) for value in ids) or len(set(ids)) != 3:
+        raise ValueError("runtime requires three distinct observed conversation IDs")
+    return data
+
+
+def runtime_bindings(sessions: dict[str, str]) -> list[dict[str, Any]]:
+    result = []
+    for filename, metadata in AGENTS.items():
+        role = "coordinator" if metadata["mainAgent"] else (
+            "worker" if metadata["name"].endswith("worker") else "verifier"
+        )
+        result.append(binding(
+            sessions[role], metadata["name"], ROOT,
+            set(parse_frontmatter(AGENT_DIR / filename)["tools"]),
+            parent_id=None if role == "coordinator" else sessions["coordinator"],
+        ))
+    return result
+
+
+def check_smoke_stream(output: str, conversation_id: str, token: str = "ANTIGRAVITY_RUNTIME_SMOKE_OK") -> list[str]:
+    try:
+        events = [json.loads(line) for line in output.splitlines() if line.strip()]
+        if any(not isinstance(item, dict) for item in events):
+            raise ValueError("event must be an object")
+        initial = [item for item in events if item.get("event") == "init"]
+        results = [item for item in events if item.get("event") == "result"]
+        if len(initial) != 1 or len(results) != 1 or events[0] != initial[0] or events[-1] != results[0]:
+            raise ValueError("expected one ordered init/result pair")
+        init = initial[0]
+        result = results[0]["result"]
+        if (init["conversation_id"] != conversation_id
+                or init["init"]["cwd"] != str(ROOT)
+                or init["init"]["permission_mode"] != "request-review"
+                or init["init"].get("model") != MODEL
+                or result["conversation_id"] != conversation_id
+                or result["status"] != "SUCCESS"
+                or result.get("error")
+                or result["response"].strip() != token
+                or type(result["num_turns"]) is not int or result["num_turns"] < 1):
+            raise ValueError("exact response/session/mode contract failed")
+        responses = []
+        for event in events[1:-1]:
+            step = event.get("step_update", {})
+            if (event.get("event") != "step_update"
+                    or step.get("conversation_id") != conversation_id
+                    or step.get("step_type") not in {"user_input", "system_message", "agent_response"}
+                    or any(step.get(key) for key in ("tool_name", "tool_info", "subagent_info"))):
+                raise ValueError("unexpected tool, subagent, or foreign-session step")
+            if step.get("step_type") == "agent_response":
+                responses.append(step)
+        if not responses or not any(item.get("state") == "DONE" for item in responses):
+            raise ValueError("missing completed response in current turn")
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+        return [f"agy read-only smoke failed: {exc}"]
+    return []
+
+
 def validate_runtime() -> list[str]:
     configured = os.environ.get("ANTIGRAVITY_CLI")
     local = ROOT / ".local" / "tools" / "agy"
     agy = configured or shutil.which("agy") or (str(local) if local.is_file() else None)
     if not agy:
         return ["agy CLI is not installed; set ANTIGRAVITY_CLI or install .local/tools/agy"]
+
+    try:
+        sessions = runtime_sessions(agy)
+        bindings_before = runtime_bindings(sessions)
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        return [f"Antigravity runtime binding is not ready: {exc}"]
 
     def repository_snapshot() -> tuple[str, str]:
         head = subprocess.run(
@@ -274,115 +368,51 @@ def validate_runtime() -> list[str]:
     def finish(errors: list[str]) -> list[str]:
         try:
             after = repository_snapshot(), control_state_snapshot()
-        except (OSError, subprocess.CalledProcessError) as exc:
+            bindings_after = runtime_bindings(sessions)
+        except (OSError, ValueError, sqlite3.Error, subprocess.CalledProcessError) as exc:
             return [*errors, f"could not capture post-smoke repository identity: {exc}"]
-        if after != before:
+        if after != before or bindings_after != bindings_before:
             return [
                 *errors,
                 "Antigravity runtime validation changed repository HEAD, full status, or local orchestration state",
             ]
         return errors
 
-    try:
-        result = subprocess.run(
-            [agy, "--output-format", "json", "agents"],
-            cwd=ROOT,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return finish([f"agy agents could not complete: {exc}"])
-    if result.returncode != 0:
-        return finish([f"agy agents failed with exit {result.returncode}: {result.stderr.strip()}"])
-    try:
-        agents_result = json.loads(result.stdout)
-        discovered = agents_result["command"]["data"]["agents"]
-    except (json.JSONDecodeError, KeyError, TypeError) as exc:
-        return finish([f"agy agents returned an invalid JSON envelope: {exc}"])
-    names: set[str] = set()
-    if isinstance(discovered, list):
-        for item in discovered:
-            if isinstance(item, str):
-                names.add(item)
-            elif isinstance(item, dict) and isinstance(item.get("name"), str):
-                names.add(item["name"])
-    missing = [
-        expected["name"]
-        for expected in AGENTS.values()
-        if expected["name"] not in names
-    ]
-    smoke_token = "ANTIGRAVITY_RUNTIME_SMOKE_OK"
-    try:
-        smoke = subprocess.run(
-            [
-                agy,
-                "--agent",
-                "two-site-coordinator",
-                "--sandbox",
-                "--mode",
-                "plan",
-                "--output-format",
-                "json",
-                "--print-timeout",
-                "2m",
-                "-p",
-                f"Runtime validation only. Do not invoke tools or modify anything. Reply exactly {smoke_token}",
-            ],
-            cwd=ROOT,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=150,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return finish([f"agy read-only runtime smoke could not complete: {exc}"])
-    if smoke.returncode != 0:
-        combined = f"{smoke.stderr}\n{smoke.stdout}"
-        normalized = combined.lower()
-        if any(
-            marker in normalized
-            for marker in (
-                "authentication required",
-                "authentication failed",
-                "not logged into antigravity",
-                "you are not logged in",
-                "sign in",
+    tokens = {"coordinator": "ANTIGRAVITY_RUNTIME_SMOKE_OK",
+              "worker": "WORKER_SMOKE_OK", "verifier": "VERIFIER_SMOKE_OK"}
+    for role, token in tokens.items():
+        try:
+            smoke = subprocess.run(
+                [agy, "--conversation", sessions[role], "--model", MODEL,
+                 "--effort", "high", "--sandbox", "--mode", "plan",
+                 "--output-format", "stream-json", "--print-timeout", "2m", "-p",
+                 "Non-Stage runtime validation only. Do not invoke tools or read/write files. "
+                 f"Reply exactly {token}"],
+                cwd=ROOT, check=False, capture_output=True, text=True, timeout=150,
             )
-        ):
-            return finish(
-                [
-                    "agy read-only coordinator smoke failed: authentication required; "
-                    "complete one interactive agy login"
-                ]
-            )
-        if missing:
-            return finish([f"agy did not discover custom agent: {name}" for name in missing])
-        return finish(["agy read-only coordinator smoke failed: runtime command exited unsuccessfully"])
-    try:
-        smoke_result = json.loads(smoke.stdout)
-    except json.JSONDecodeError as exc:
-        return finish([f"agy read-only coordinator smoke returned invalid JSON: {exc}"])
-    if (
-        smoke_result.get("status") != "SUCCESS"
-        or str(smoke_result.get("response", "")).strip() != smoke_token
-        or not smoke_result.get("conversation_id")
-        or int(smoke_result.get("num_turns", 0)) < 1
-    ):
-        return finish(["agy read-only coordinator smoke did not return the exact success contract"])
-    if missing:
-        return finish([f"agy did not discover custom agent: {name}" for name in missing])
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return finish([f"agy read-only runtime smoke could not complete: {exc}"])
+        if smoke.returncode != 0:
+            normalized = f"{smoke.stderr}\n{smoke.stdout}".lower()
+            if any(marker in normalized for marker in (
+                "authentication required", "authentication failed", "not logged into antigravity",
+                "you are not logged in", "sign in",
+            )):
+                return finish([f"agy read-only {role} smoke failed: authentication required; complete one interactive agy login"])
+            return finish([f"agy read-only {role} smoke failed: runtime command exited unsuccessfully"])
+        errors = finish(check_smoke_stream(smoke.stdout, sessions[role], token))
+        if errors:
+            return errors
     return finish([])
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--runtime", action="store_true", help="also require agy CLI discovery")
+    parser.add_argument("--runtime", action="store_true", help="also verify exact bound sessions and live no-tool smoke for all three roles")
     args = parser.parse_args()
 
     errors = validate()
-    if args.runtime:
+    if args.runtime and not errors:
         errors.extend(validate_runtime())
     if errors:
         for error in errors:
