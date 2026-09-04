@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, patch
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 
@@ -64,11 +64,14 @@ from api.routers.chat import (
     patch_channel_member,
     patch_group,
     pin_direct_conversation,
+    patch_upload_session_chunk,
     pin_room_conversation,
     post_group_leave,
     post_group_member,
     post_upload_batch,
     post_upload_session,
+    commit_upload_batch_endpoint,
+    finalize_upload_session_endpoint,
     promote_group_admin,
     reorder_direct_conversation_pin,
     reorder_room_conversation_pin,
@@ -79,6 +82,7 @@ from api.routers.chat import (
     unfollow_channel,
     update_channel,
     update_message,
+    upload_chat_media,
 )
 from api.routers.chat_schemas import (
     ChannelBulkMemberAddRequest,
@@ -369,6 +373,10 @@ MSG_GET_STICKERS_SEED = "API-MSG-GET-CHAT-GET-STICKERS-L2305"
 MSG_GET_ROOM_PINNED_SEED = "API-MSG-GET-CHAT-GET-ROOM-PINNED-MESSAGE-L1526"
 MSG_GET_DIRECT_PINNED_SEED = "API-MSG-GET-CHAT-GET-DIRECT-PINNED-MESSAGE-L701"
 MSG_GET_ROOM_MESSAGES_SEED = "API-MSG-GET-CHAT-GET-ROOM-MESSAGES-L1838"
+MSG_UPLOAD_MEDIA_SEED = "API-MSG-POST-CHAT-UPLOAD-CHAT-MEDIA-L2338"
+MSG_UPLOAD_CHUNK_SEED = "API-MSG-PATCH-CHAT-PATCH-UPLOAD-SESSION-CHUNK-L2576"
+MSG_FINALIZE_UPLOAD_SEED = "API-MSG-POST-CHAT-FINALIZE-UPLOAD-SESSION-ENDPOINT-L2636"
+MSG_COMMIT_UPLOAD_SEED = "API-MSG-POST-CHAT-COMMIT-UPLOAD-BATCH-ENDPOINT-L2675"
 TRADE_CHANNEL_SEED = "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-L810"
 TRADE_PUBLIC_SEED = "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-PUBLIC-L829"
 UNEVIDENCED_TRADE_GATEWAY_SEEDS = {TRADE_CHANNEL_SEED, TRADE_PUBLIC_SEED}
@@ -505,6 +513,10 @@ SLICE_EXECUTED_SEED_IDS = {
     MSG_GET_ROOM_PINNED_SEED,
     MSG_GET_DIRECT_PINNED_SEED,
     MSG_GET_ROOM_MESSAGES_SEED,
+    MSG_UPLOAD_MEDIA_SEED,
+    MSG_UPLOAD_CHUNK_SEED,
+    MSG_FINALIZE_UPLOAD_SEED,
+    MSG_COMMIT_UPLOAD_SEED,
 }
 
 SEED_EVIDENCE_NODES = {
@@ -1033,6 +1045,22 @@ SEED_EVIDENCE_NODES = {
         "tests/test_p1_00b_characterization_seed_slice.py"
         "::P100bSeedSliceExecutionTests.test_get_room_messages_reads_then_404s"
     ),
+    MSG_UPLOAD_MEDIA_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_upload_chat_media_persists_then_rejects_type"
+    ),
+    MSG_UPLOAD_CHUNK_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_patch_upload_session_chunk_writes_then_404s"
+    ),
+    MSG_FINALIZE_UPLOAD_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_finalize_upload_session_readies_then_404s"
+    ),
+    MSG_COMMIT_UPLOAD_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_commit_upload_batch_commits_then_409s"
+    ),
 }
 
 
@@ -1194,7 +1222,23 @@ class CrudSession:
         return self._session.execute(statement)
 
     async def get(self, model, ident, **kwargs):
-        return self._session.get(model, ident)
+        from sqlalchemy.orm.attributes import set_committed_value
+
+        loaded = self._session.get(model, ident)
+        if loaded is None:
+            return None
+        for name in (
+            "created_at",
+            "updated_at",
+            "expires_at",
+            "last_activity_at",
+            "pinned_at",
+            "last_read_at",
+        ):
+            value = getattr(loaded, name, None)
+            if isinstance(value, datetime) and value.tzinfo is None:
+                set_committed_value(loaded, name, value.replace(tzinfo=timezone.utc))
+        return loaded
 
     async def delete(self, obj):
         self._session.delete(obj)
@@ -1643,9 +1687,19 @@ def _isolated_upload_root():
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp).resolve()
         patched_root = root / "chat_sessions"
+        real_join = os.path.join
+
+        def _join(*parts):
+            if len(parts) >= 2 and parts[0] == "uploads" and parts[1] == "chat_files":
+                return real_join(str(root), *parts)
+            return real_join(*parts)
+
         with patch(
             "core.services.chat_upload_session_service.UPLOAD_SESSION_ROOT",
             str(patched_root),
+        ), patch(
+            "core.services.chat_upload_session_service.os.path.join",
+            _join,
         ):
             fence = _UploadIsolation(root, cwd_uploads, before, existed)
             yield fence
@@ -1675,11 +1729,83 @@ def _assert_session_paths_inside(db_path: str, fence: _UploadIsolation) -> None:
                 "SELECT temp_storage_path FROM upload_sessions WHERE temp_storage_path IS NOT NULL"
             )
         ]
+        try:
+            stored_paths.extend(
+                row[0]
+                for row in conn.execute("SELECT s3_key FROM chat_files WHERE s3_key IS NOT NULL")
+            )
+        except sqlite3.OperationalError:
+            pass
     for stored in stored_paths:
         stored_path = Path(stored).resolve()
         if not stored_path.is_relative_to(resolved_root):
             raise AssertionError(f"upload path escaped temp root: {stored_path}")
     fence.assert_no_cwd_leak()
+
+
+def _tiny_png_bytes() -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+
+    buf = BytesIO()
+    Image.new("RGB", (1, 1), (255, 0, 0)).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+class _MemoryUpload:
+    def __init__(self, data: bytes, filename="a.png", content_type="image/png"):
+        self.filename = filename
+        self.content_type = content_type
+        self._data = data
+
+    async def read(self, *_a, **_k):
+        return self._data
+
+    def close(self):
+        return None
+
+
+def _upload_media_store(path: str):
+    engine, Session = _extended_chat_store(path)
+    ChatFile.__table__.create(engine, checkfirst=True)
+    return engine, Session
+
+
+def _isolated_upload_publish():
+    return [
+        patch("api.routers.chat.publish_user_event", new=_isolated_publish),
+        patch("api.routers.chat.get_redis_client", side_effect=RuntimeError("isolated-redis")),
+    ]
+
+
+async def _open_direct_upload(Session, admin, *, key: str, payload: bytes):
+    batch = await post_upload_batch(
+        UploadBatchCreateRequest(
+            room_kind=UploadRoomKind.DIRECT,
+            target_id=2,
+            message_kind=UploadBatchMessageKind.SINGLE,
+            expected_items=1,
+            idempotency_key=key,
+        ),
+        current_user=admin,
+        db=CrudSession(Session()),
+    )
+    session = await post_upload_session(
+        UploadSessionCreateRequest(
+            batch_id=batch.batch_id,
+            room_kind=UploadRoomKind.DIRECT,
+            target_id=2,
+            media_type=UploadMediaType.IMAGE,
+            file_name="a.png",
+            mime_type="image/png",
+            total_bytes=len(payload),
+            chunk_size=len(payload),
+        ),
+        current_user=admin,
+        db=CrudSession(Session()),
+    )
+    return batch, session
 
 
 def _management_broadcast_store(path: str):
@@ -6046,6 +6172,195 @@ class P100bSeedSliceExecutionTests(unittest.IsolatedAsyncioTestCase):
                     db=CrudSession(Session()),
                 )
             self.assertEqual(raised.exception.status_code, 404)
+            engine.dispose()
+
+    async def test_upload_chat_media_persists_then_rejects_type(self):
+        payload = _tiny_png_bytes()
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "upload-media.sqlite")
+            engine, Session = _upload_media_store(db_path)
+            admin = _load_store_user(Session, 1)
+            with _isolated_upload_root() as fence:
+                stored = await upload_chat_media(
+                    file=_MemoryUpload(payload),
+                    thumbnail=None,
+                    current_user=admin,
+                    db=CrudSession(Session()),
+                )
+                self.assertEqual(stored["file_name"], "a.png")
+                self.assertEqual(stored["mime_type"], "image/png")
+                with sqlite3.connect(db_path) as conn:
+                    row = conn.execute("SELECT id, s3_key, mime_type FROM chat_files").fetchone()
+                    self.assertEqual(row[0], stored["file_id"])
+                    self.assertEqual(row[2], "image/png")
+                    self.assertTrue(Path(row[1]).is_file())
+                _assert_session_paths_inside(db_path, fence)
+                with self.assertRaises(HTTPException) as raised:
+                    await upload_chat_media(
+                        file=_MemoryUpload(b"not-a-file", filename="x.bin", content_type="application/x-unknown"),
+                        thumbnail=None,
+                        current_user=admin,
+                        db=CrudSession(Session()),
+                    )
+                self.assertEqual(raised.exception.status_code, 400)
+                with sqlite3.connect(db_path) as conn:
+                    self.assertEqual(conn.execute("SELECT COUNT(*) FROM chat_files").fetchone()[0], 1)
+            engine.dispose()
+
+    async def test_patch_upload_session_chunk_writes_then_404s(self):
+        payload = _tiny_png_bytes()
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "upload-chunk.sqlite")
+            engine, Session = _upload_media_store(db_path)
+            admin = _load_store_user(Session, 1)
+            with _isolated_upload_root() as fence:
+                with patch("api.routers.chat.publish_user_event", new=_isolated_publish), patch(
+                    "api.routers.chat.get_redis_client",
+                    side_effect=RuntimeError("isolated-redis"),
+                ):
+                    _batch, session = await _open_direct_upload(Session, admin, key="idemkey-chunk-1", payload=payload)
+                    written = await patch_upload_session_chunk(
+                        session.session_id,
+                        resume_token=session.resume_token,
+                        offset=0,
+                        is_last_chunk=True,
+                        chunk=_MemoryUpload(payload),
+                        current_user=admin,
+                        db=CrudSession(Session()),
+                    )
+                    self.assertEqual(written.received_bytes, len(payload))
+                    self.assertEqual(written.status.value, "uploaded")
+                    with sqlite3.connect(db_path) as conn:
+                        received, temp_path = conn.execute(
+                            "SELECT received_bytes, temp_storage_path FROM upload_sessions"
+                        ).fetchone()
+                        self.assertEqual(received, len(payload))
+                        self.assertTrue(Path(temp_path).is_file())
+                        self.assertEqual(Path(temp_path).read_bytes(), payload)
+                    with self.assertRaises(HTTPException) as raised:
+                        await patch_upload_session_chunk(
+                            "missing-session",
+                            resume_token=session.resume_token,
+                            offset=0,
+                            is_last_chunk=True,
+                            chunk=_MemoryUpload(payload),
+                            current_user=admin,
+                            db=CrudSession(Session()),
+                        )
+                    self.assertEqual(raised.exception.status_code, 404)
+                _assert_session_paths_inside(db_path, fence)
+            engine.dispose()
+
+    async def test_finalize_upload_session_readies_then_404s(self):
+        payload = _tiny_png_bytes()
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "upload-finalize.sqlite")
+            engine, Session = _upload_media_store(db_path)
+            admin = _load_store_user(Session, 1)
+            with _isolated_upload_root() as fence:
+                with patch("api.routers.chat.publish_user_event", new=_isolated_publish), patch(
+                    "api.routers.chat.get_redis_client",
+                    side_effect=RuntimeError("isolated-redis"),
+                ):
+                    _batch, session = await _open_direct_upload(Session, admin, key="idemkey-final-1", payload=payload)
+                    await patch_upload_session_chunk(
+                        session.session_id,
+                        resume_token=session.resume_token,
+                        offset=0,
+                        is_last_chunk=True,
+                        chunk=_MemoryUpload(payload),
+                        current_user=admin,
+                        db=CrudSession(Session()),
+                    )
+                    ready = await finalize_upload_session_endpoint(
+                        session.session_id,
+                        current_user=admin,
+                        db=CrudSession(Session()),
+                    )
+                    self.assertEqual(ready.status.value, "ready")
+                    self.assertIsNotNone(ready.final_chat_file_id)
+                    with sqlite3.connect(db_path) as conn:
+                        status, file_id = conn.execute(
+                            "SELECT status, final_chat_file_id FROM upload_sessions"
+                        ).fetchone()
+                        self.assertEqual(status, "ready")
+                        self.assertEqual(file_id, ready.final_chat_file_id)
+                        self.assertEqual(conn.execute("SELECT COUNT(*) FROM chat_files").fetchone()[0], 1)
+                    with self.assertRaises(HTTPException) as raised:
+                        await finalize_upload_session_endpoint(
+                            "missing-session",
+                            current_user=admin,
+                            db=CrudSession(Session()),
+                        )
+                    self.assertEqual(raised.exception.status_code, 404)
+                _assert_session_paths_inside(db_path, fence)
+            engine.dispose()
+
+    async def test_commit_upload_batch_commits_then_409s(self):
+        payload = _tiny_png_bytes()
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "upload-commit.sqlite")
+            engine, Session = _upload_media_store(db_path)
+            admin = _load_store_user(Session, 1)
+            with _isolated_upload_root() as fence:
+                with patch("api.routers.chat.publish_user_event", new=_isolated_publish), patch(
+                    "api.routers.chat.get_redis_client",
+                    side_effect=RuntimeError("isolated-redis"),
+                ):
+                    early = await post_upload_batch(
+                        UploadBatchCreateRequest(
+                            room_kind=UploadRoomKind.DIRECT,
+                            target_id=2,
+                            message_kind=UploadBatchMessageKind.SINGLE,
+                            expected_items=1,
+                            idempotency_key="idemkey-commit-early",
+                        ),
+                        current_user=admin,
+                        db=CrudSession(Session()),
+                    )
+                    early_db = CrudSession(Session())
+                    try:
+                        with self.assertRaises(HTTPException) as raised:
+                            await commit_upload_batch_endpoint(
+                                early.batch_id,
+                                BackgroundTasks(),
+                                current_user=admin,
+                                db=early_db,
+                            )
+                        self.assertEqual(raised.exception.status_code, 409)
+                    finally:
+                        await early_db.rollback()
+                        early_db._session.close()
+                    batch, session = await _open_direct_upload(Session, admin, key="idemkey-commit-1", payload=payload)
+                    await patch_upload_session_chunk(
+                        session.session_id,
+                        resume_token=session.resume_token,
+                        offset=0,
+                        is_last_chunk=True,
+                        chunk=_MemoryUpload(payload),
+                        current_user=admin,
+                        db=CrudSession(Session()),
+                    )
+                    await finalize_upload_session_endpoint(
+                        session.session_id,
+                        current_user=admin,
+                        db=CrudSession(Session()),
+                    )
+                    committed = await commit_upload_batch_endpoint(
+                        batch.batch_id,
+                        BackgroundTasks(),
+                        current_user=admin,
+                        db=CrudSession(Session()),
+                    )
+                    self.assertEqual(committed.status.value, "committed")
+                    self.assertEqual(len(committed.messages), 1)
+                    with sqlite3.connect(db_path) as conn:
+                        self.assertEqual(
+                            conn.execute("SELECT status FROM upload_batches WHERE id=?", (batch.batch_id,)).fetchone()[0],
+                            "committed",
+                        )
+                        self.assertEqual(conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0], 1)
+                _assert_session_paths_inside(db_path, fence)
             engine.dispose()
 
     async def test_channel_trade_handlers_gateway_confirm_is_not_crud_evidence(self):

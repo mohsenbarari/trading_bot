@@ -1188,7 +1188,8 @@
       "test_refs": [
         "tests/test_chat_router_remaining_paths.py",
         "tests/test_chat_router_media.py",
-        "frontend/src/utils/chatFiles.test.ts"
+        "frontend/src/utils/chatFiles.test.ts",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_upload_chat_media_persists_then_rejects_type"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -1233,7 +1234,8 @@
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
         "tests/test_chat_router_upload_sessions.py",
-        "tests/test_request_logging.py"
+        "tests/test_request_logging.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_patch_upload_session_chunk_writes_then_404s"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -1261,7 +1263,8 @@
       "source": "api/routers/chat.py:2636",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_chat_router_upload_sessions.py"
+        "tests/test_chat_router_upload_sessions.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_finalize_upload_session_readies_then_404s"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -1275,7 +1278,8 @@
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
         "tests/test_chat_router_upload_sessions.py",
-        "tests/test_chat_router_remaining_paths.py"
+        "tests/test_chat_router_remaining_paths.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_commit_upload_batch_commits_then_409s"
       ],
       "operation_kind": "CRUD_MUTATION"
     },

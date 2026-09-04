@@ -192,6 +192,10 @@ class P100bSeedPartitionExecutionTests(unittest.IsolatedAsyncioTestCase):
         await helper.test_get_room_pinned_message_reads_then_404s()
         await helper.test_get_direct_pinned_message_reads_then_404s()
         await helper.test_get_room_messages_reads_then_404s()
+        await helper.test_upload_chat_media_persists_then_rejects_type()
+        await helper.test_patch_upload_session_chunk_writes_then_404s()
+        await helper.test_finalize_upload_session_readies_then_404s()
+        await helper.test_commit_upload_batch_commits_then_409s()
         await helper.test_channel_trade_handlers_gateway_confirm_is_not_crud_evidence()
 
     def test_sibling_family_membership_does_not_clear_unexecuted_seeds(self):
@@ -199,9 +203,9 @@ class P100bSeedPartitionExecutionTests(unittest.IsolatedAsyncioTestCase):
         seeds = _all_seeds()
         self.assertEqual(len(seeds), 465)
         unsupported = [seed["behavior_id"] for seed in seeds if seed["behavior_id"] not in EXECUTED_SEED_IDS]
-        self.assertEqual(len(EXECUTED_SEED_IDS), 131)
+        self.assertEqual(len(EXECUTED_SEED_IDS), 135)
         self.assertEqual(len(unsupported), REMAINING_HIGH_SEEDS)
-        self.assertEqual(REMAINING_HIGH_SEEDS, 334)
+        self.assertEqual(REMAINING_HIGH_SEEDS, 330)
         msg_crud = [
             seed["behavior_id"]
             for seed in seeds
@@ -216,7 +220,7 @@ class P100bSeedPartitionExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(trade_crud), 26)
         self.assertTrue((set(msg_crud) - EXECUTED_SEED_IDS).issubset(set(unsupported)))
         self.assertTrue((set(trade_crud) - EXECUTED_SEED_IDS).issubset(set(unsupported)))
-        self.assertEqual(len(set(msg_crud) & EXECUTED_SEED_IDS), 33)
+        self.assertEqual(len(set(msg_crud) & EXECUTED_SEED_IDS), 37)
         self.assertEqual(len(set(trade_crud) & EXECUTED_SEED_IDS), 0)
         self.assertIn(
             "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-L810",
@@ -229,7 +233,7 @@ class P100bSeedPartitionExecutionTests(unittest.IsolatedAsyncioTestCase):
         registry = {item["blocker_id"]: item for item in payload["blocker_registry"]["items"]}
         item = registry["P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE"]
         self.assertEqual(item["disposition"], "BLOCKED_EXPLICIT")
-        self.assertIn("334", item["reason"])
+        self.assertIn("330", item["reason"])
         self.assertIn("sibling", item["reason"].lower())
         for seed_id in sorted(EXECUTED_SEED_IDS):
             self.assertIn(seed_id, item["reason"])

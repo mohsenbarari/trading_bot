@@ -1,5 +1,12 @@
 # Infrastructure
 
+- 2026-09-04 | P1-00b evidenced the last four MSG CRUD upload handlers
+  (media persist, chunk append, finalize, batch commit) through live
+  endpoints inside the portable temp fence. Origin SUCCESS/policy/
+  notification/side-effect-retry stay High. One hundred thirty-five exact
+  handlers are evidenced; 330 seeds stay High. Invitation-role and
+  channel-trade stay High. `DR-018` stays `NOT_REINSPECTED`.
+
 - 2026-09-04 | P1-00b upload fence must detect test-created writes, not the
   mere existence of a pre-existing gitignored `uploads/` directory. Existence
   checks on cwd runtime state are not portable across worktree, temp cwd, and
