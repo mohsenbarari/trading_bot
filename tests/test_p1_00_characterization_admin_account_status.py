@@ -69,6 +69,7 @@ class MappedAccountUser(IsolatedBase):
     max_daily_trades = Column(Integer, nullable=True)
     max_active_commodities = Column(Integer, nullable=True)
     max_daily_requests = Column(Integer, nullable=True)
+    limitations_expire_at = Column(DateTime, nullable=True)
     is_deleted = Column(Boolean, default=False, nullable=False)
     can_block_users = Column(Boolean, default=True)
     max_blocked_users = Column(Integer, default=5)

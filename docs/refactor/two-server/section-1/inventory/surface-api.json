@@ -1038,7 +1038,8 @@
       "test_refs": [
         "tests/test_core_notifications_runtime.py",
         "tests/test_notification_and_sync_helpers.py",
-        "tests/test_bot_admin_users_interaction_queue.py"
+        "tests/test_bot_admin_users_interaction_queue.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_send_message_persists_publishes_retries_and_fails_before_commit_injects"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -1051,7 +1052,8 @@
       "source": "api/routers/chat.py:2079",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_chat_router_direct_mutations.py"
+        "tests/test_chat_router_direct_mutations.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_update_message_edits_then_denies_and_fails_injects"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -1092,7 +1094,8 @@
       "test_refs": [
         "tests/test_bot_admin_users_helpers.py",
         "tests/test_bot_message_manager.py",
-        "tests/test_telegram_delivery_queue_production_cutover.py"
+        "tests/test_telegram_delivery_queue_production_cutover.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_delete_message_soft_deletes_then_denies_injects"
       ],
       "operation_kind": "CRUD_MUTATION"
     },

@@ -95,6 +95,10 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _inventory_ref_path(ref: str) -> Path:
+    return REPO_ROOT / ref.split("::", 1)[0]
+
+
 def classify_failure_test_family(path: str) -> str | None:
     name = Path(path).name
     hits: list[tuple[int, str, str]] = []
@@ -621,7 +625,7 @@ def _assert_definite_variant(test, variant: dict, *, require_rule_sources: bool 
         sources = variant.get("rule_sources") or variant.get("evidence_refs") or []
         test.assertTrue(sources, variant.get("variant_id") or variant)
         for ref in sources:
-            test.assertTrue((REPO_ROOT / ref).exists(), ref)
+            test.assertTrue(_inventory_ref_path(ref).exists(), ref)
     for node in _iter_eligibility_nodes(variant.get("eligibility")):
         decision = node["decision"]
         test.assertNotIn(decision, FORBIDDEN_ELIGIBILITY_DECISIONS, variant)
@@ -766,7 +770,7 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
                     _nonempty_contract_value(contract[field]),
                     f"{contract['contract_id']}:{field}",
                 )
-            self.assertTrue(all((REPO_ROOT / ref).exists() for ref in contract["regression_tests"]))
+            self.assertTrue(all(_inventory_ref_path(ref).exists() for ref in contract["regression_tests"]))
             self.assertTrue(set(contract["regression_tests"]) - GENERIC_META_TESTS, contract["contract_id"])
             for source in contract["reference_evidence"]["sources"]:
                 self.assertTrue((REPO_ROOT / source).exists(), f"{contract['contract_id']} -> {source}")
@@ -832,7 +836,10 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
                 f"generic-only evidence: {seed['behavior_id']}",
             )
             for ref in seed["test_refs"]:
-                self.assertTrue((REPO_ROOT / ref).exists(), f"{seed['behavior_id']} -> {ref}")
+                self.assertTrue(
+                    _inventory_ref_path(ref).exists(),
+                    f"{seed['behavior_id']} -> {ref}",
+                )
             mapped_lines.append(f"{seed['behavior_id']}={contract_id}")
 
         resolved = ("\n".join(sorted(mapped_lines)) + "\n").encode()
@@ -843,6 +850,18 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
         for behavior_id in FALSE_CRUD_EXAMPLES:
             seed = next(item for item in seeds if item["behavior_id"] == behavior_id)
             self.assertNotEqual(seed["operation_kind"], "CRUD_MUTATION", behavior_id)
+
+    def test_executed_seed_inventory_nodes_are_linked(self):
+        from tests.test_p1_00b_characterization_seed_slice import SEED_EVIDENCE_NODES
+
+        seeds = {}
+        for name in ("surface-api.json", "surface-bot.json", "surface-web.json", "surface-jobs.json"):
+            for entry in _load_json(name)["entries"]:
+                seeds[entry["behavior_id"]] = entry
+        for seed_id, node in SEED_EVIDENCE_NODES.items():
+            self.assertIn(node, seeds[seed_id]["test_refs"], seed_id)
+            self.assertTrue(_inventory_ref_path(node).exists(), node)
+            self.assertIn("::", node)
 
     def test_bot_menu_and_api_broadcast_do_not_share_a_mutation_contract(self):
         payload = _load_json("scenario-records.json")
@@ -1049,7 +1068,7 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
             self.assertTrue(boundary["evidence_refs"])
             _assert_no_deferred_or_ambiguous_text(self, json.dumps(boundary, ensure_ascii=False), boundary["variant_id"])
             for ref in boundary["evidence_refs"]:
-                self.assertTrue((REPO_ROOT / ref).exists(), ref)
+                self.assertTrue(_inventory_ref_path(ref).exists(), ref)
 
         cells = payload["family_boundary_variants"]
         self.assertEqual(len(cells), 72)

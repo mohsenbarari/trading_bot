@@ -190,7 +190,8 @@
       "handler": "admin_broadcast.toggle_group_recipient",
       "source": "bot/handlers/admin_broadcast.py:240",
       "test_refs": [
-        "tests/test_p1_00_characterization_six_gaps.py"
+        "tests/test_p1_00_characterization_six_gaps.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_broadcast_toggle_group_recipient_flips_fsm_and_denies_injects"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -242,7 +243,8 @@
       "handler": "admin_broadcast.toggle_selected_user",
       "source": "bot/handlers/admin_broadcast.py:334",
       "test_refs": [
-        "tests/test_bot_admin_broadcast_interaction_queue.py"
+        "tests/test_bot_admin_broadcast_interaction_queue.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_broadcast_toggle_selected_user_flips_fsm_and_denies_injects"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -297,7 +299,8 @@
       "test_refs": [
         "tests/test_telegram_admin_broadcast_confirm_idempotency.py",
         "tests/test_telegram_admin_broadcast_video.py",
-        "tests/test_bot_admin_broadcast_interaction_queue.py"
+        "tests/test_bot_admin_broadcast_interaction_queue.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_confirm_telegram_admin_broadcast_persists_then_replays_key_injects"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "BROADCAST"
@@ -585,7 +588,8 @@
       "source": "bot/handlers/admin_users.py:1090",
       "test_refs": [
         "tests/test_bot_admin_users_role_actions.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_set_user_role_persists_then_denies_and_fails_before_commit_injects"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -603,7 +607,8 @@
         "tests/test_p1_00_characterization_admin_seed_semantics.py",
         "tests/test_p1_00_characterization_admin_toggle_behavior.py",
         "tests/test_p1_00_characterization_admin_account_status.py",
-        "tests/test_user_account_status_service.py"
+        "tests/test_user_account_status_service.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_account_status_seed_commits_then_denies_without_write"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "ACCOUNT_STATUS_TRANSITION"
@@ -718,7 +723,8 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_limit_flow.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_limit_confirm_persists_caps_then_denies_injects"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -764,7 +770,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_block_settings.py",
         "tests/test_p1_00_characterization_admin_seed_semantics.py",
-        "tests/test_p1_00_characterization_admin_toggle_behavior.py"
+        "tests/test_p1_00_characterization_admin_toggle_behavior.py",
+        "tests/test_p1_00_characterization_admin_toggle_behavior.py::P100AdminToggleBehaviorTests.test_toggle_block_second_invoke_flips_again_and_has_no_command_identity"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "TOGGLE_MUTATION"
@@ -792,7 +799,8 @@
       "source": "bot/handlers/admin_users.py:1723",
       "test_refs": [
         "tests/test_bot_admin_users_block_settings.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_admin_max_block_set_persists_then_denies_injects"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -975,7 +983,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_core_events.py",
         "tests/test_sync_router_apply_item_success.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_user_block_actions_persists_restriction_then_denies_injects"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -990,7 +999,8 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_unblock_unlimit.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_user_unblock_clears_restriction_then_denies_without_write_injects"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -1005,7 +1015,8 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_unblock_unlimit.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_user_unlimit_clears_caps_then_denies_without_write_injects"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"

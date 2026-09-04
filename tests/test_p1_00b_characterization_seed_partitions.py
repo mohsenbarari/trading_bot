@@ -17,7 +17,10 @@ from tests.test_p1_00_characterization_admin_toggle_behavior import (
     _callback,
     _target,
 )
-from tests.test_p1_00b_characterization_seed_slice import SLICE_EXECUTED_SEED_IDS
+from tests.test_p1_00b_characterization_seed_slice import (
+    SEED_EVIDENCE_NODES,
+    SLICE_EXECUTED_SEED_IDS,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INV_DIR = REPO_ROOT / "docs/refactor/two-server/section-1/inventory"
@@ -66,6 +69,12 @@ class P100bSeedPartitionExecutionTests(unittest.IsolatedAsyncioTestCase):
         await helper.test_set_user_role_persists_then_denies_and_fails_before_commit_injects()
         await helper.test_user_unblock_clears_restriction_then_denies_without_write_injects()
         await helper.test_confirm_telegram_admin_broadcast_persists_then_replays_key_injects()
+        await helper.test_user_unlimit_clears_caps_then_denies_without_write_injects()
+        await helper.test_admin_max_block_set_persists_then_denies_injects()
+        await helper.test_user_block_actions_persists_restriction_then_denies_injects()
+        await helper.test_limit_confirm_persists_caps_then_denies_injects()
+        await helper.test_update_message_edits_then_denies_and_fails_injects()
+        await helper.test_delete_message_soft_deletes_then_denies_injects()
         await helper.test_channel_trade_handlers_gateway_confirm_is_not_crud_evidence()
 
     def test_sibling_family_membership_does_not_clear_unexecuted_seeds(self):
@@ -73,9 +82,9 @@ class P100bSeedPartitionExecutionTests(unittest.IsolatedAsyncioTestCase):
         seeds = _all_seeds()
         self.assertEqual(len(seeds), 465)
         unsupported = [seed["behavior_id"] for seed in seeds if seed["behavior_id"] not in EXECUTED_SEED_IDS]
-        self.assertEqual(len(EXECUTED_SEED_IDS), 8)
+        self.assertEqual(len(EXECUTED_SEED_IDS), 14)
         self.assertEqual(len(unsupported), REMAINING_HIGH_SEEDS)
-        self.assertEqual(REMAINING_HIGH_SEEDS, 457)
+        self.assertEqual(REMAINING_HIGH_SEEDS, 451)
         msg_crud = [
             seed["behavior_id"]
             for seed in seeds
@@ -90,7 +99,7 @@ class P100bSeedPartitionExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(trade_crud), 26)
         self.assertTrue((set(msg_crud) - EXECUTED_SEED_IDS).issubset(set(unsupported)))
         self.assertTrue((set(trade_crud) - EXECUTED_SEED_IDS).issubset(set(unsupported)))
-        self.assertEqual(len(set(msg_crud) & EXECUTED_SEED_IDS), 1)
+        self.assertEqual(len(set(msg_crud) & EXECUTED_SEED_IDS), 3)
         self.assertEqual(len(set(trade_crud) & EXECUTED_SEED_IDS), 0)
         self.assertIn(
             "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-L810",
@@ -103,10 +112,19 @@ class P100bSeedPartitionExecutionTests(unittest.IsolatedAsyncioTestCase):
         registry = {item["blocker_id"]: item for item in payload["blocker_registry"]["items"]}
         item = registry["P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE"]
         self.assertEqual(item["disposition"], "BLOCKED_EXPLICIT")
-        self.assertIn("457", item["reason"])
+        self.assertIn("451", item["reason"])
         self.assertIn("sibling", item["reason"].lower())
         for seed_id in sorted(EXECUTED_SEED_IDS):
             self.assertIn(seed_id, item["reason"])
+
+    def test_executed_seeds_have_exact_inventory_test_nodes(self):
+        seeds = {seed["behavior_id"]: seed for seed in _all_seeds()}
+        self.assertEqual(set(EXECUTED_SEED_IDS), set(SEED_EVIDENCE_NODES))
+        for seed_id, node in SEED_EVIDENCE_NODES.items():
+            refs = seeds[seed_id]["test_refs"]
+            self.assertIn(node, refs, seed_id)
+            path = node.split("::", 1)[0]
+            self.assertTrue((REPO_ROOT / path).exists(), node)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ install_p1_00_network_fence()
 import sqlite3
 import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -17,19 +17,27 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
-from api.routers.chat import send_message
-from api.routers.chat_schemas import MessageSend
+from api.routers.chat import delete_message, send_message, update_message
+from api.routers.chat_schemas import MessageSend, MessageUpdate
 from bot.handlers.admin_broadcast import (
     confirm_telegram_admin_broadcast,
     toggle_group_recipient,
     toggle_selected_user,
 )
-from bot.handlers.admin_users import handle_set_user_role, handle_user_unblock
+from bot.handlers.admin_users import (
+    handle_admin_max_block_set,
+    handle_limit_confirm,
+    handle_set_user_role,
+    handle_user_block_actions,
+    handle_user_unblock,
+    handle_user_unlimit,
+)
 from bot.handlers.trade_execute import handle_channel_trade, handle_channel_trade_public
 from bot.utils import redis_helpers
 from core.enums import MessageType, UserAccountStatus, UserRole
 from core.services.telegram_admin_broadcast_service import TELEGRAM_ADMIN_BROADCAST_GROUP_ORDINARY
 from models.message import Message
+from models.notification import Notification
 from models.offer import OfferStatus
 from models.telegram_admin_broadcast import TelegramAdminBroadcastAudienceType
 from models.user import UserRole as ModelUserRole
@@ -56,9 +64,16 @@ MSG_SEND_SEED = "API-MSG-POST-CHAT-SEND-MESSAGE-L2028"
 SET_ROLE_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-SET-USER-ROLE-L1090"
 UNBLOCK_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-UNBLOCK-L925"
 BROADCAST_CONFIRM_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CONFIRM-TELEGRAM-ADMIN-BROADCAST-L593"
+UNLIMIT_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-UNLIMIT-L998"
+MAX_BLOCK_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-MAX-BLOCK-SET-L1723"
+BLOCK_ACTIONS_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-BLOCK-ACTIONS-L798"
+LIMIT_CONFIRM_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-LIMIT-CONFIRM-L1438"
+MSG_UPDATE_SEED = "API-MSG-PUT-CHAT-UPDATE-MESSAGE-L2079"
+MSG_DELETE_SEED = "API-MSG-DELETE-CHAT-DELETE-MESSAGE-L2183"
 TRADE_CHANNEL_SEED = "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-L810"
 TRADE_PUBLIC_SEED = "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-PUBLIC-L829"
 UNEVIDENCED_TRADE_GATEWAY_SEEDS = {TRADE_CHANNEL_SEED, TRADE_PUBLIC_SEED}
+TOGGLE_BLOCK_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-TOGGLE-BLOCK-L1649"
 
 SLICE_EXECUTED_SEED_IDS = {
     ACCOUNT_SEED,
@@ -68,6 +83,72 @@ SLICE_EXECUTED_SEED_IDS = {
     SET_ROLE_SEED,
     UNBLOCK_SEED,
     BROADCAST_CONFIRM_SEED,
+    UNLIMIT_SEED,
+    MAX_BLOCK_SEED,
+    BLOCK_ACTIONS_SEED,
+    LIMIT_CONFIRM_SEED,
+    MSG_UPDATE_SEED,
+    MSG_DELETE_SEED,
+}
+
+SEED_EVIDENCE_NODES = {
+    TOGGLE_BLOCK_SEED: (
+        "tests/test_p1_00_characterization_admin_toggle_behavior.py"
+        "::P100AdminToggleBehaviorTests"
+        ".test_toggle_block_second_invoke_flips_again_and_has_no_command_identity"
+    ),
+    ACCOUNT_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_account_status_seed_commits_then_denies_without_write"
+    ),
+    BROADCAST_GROUP_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_broadcast_toggle_group_recipient_flips_fsm_and_denies_injects"
+    ),
+    BROADCAST_USER_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_broadcast_toggle_selected_user_flips_fsm_and_denies_injects"
+    ),
+    MSG_SEND_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_send_message_persists_publishes_retries_and_fails_before_commit_injects"
+    ),
+    SET_ROLE_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_set_user_role_persists_then_denies_and_fails_before_commit_injects"
+    ),
+    UNBLOCK_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_user_unblock_clears_restriction_then_denies_without_write_injects"
+    ),
+    BROADCAST_CONFIRM_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_confirm_telegram_admin_broadcast_persists_then_replays_key_injects"
+    ),
+    UNLIMIT_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_user_unlimit_clears_caps_then_denies_without_write_injects"
+    ),
+    MAX_BLOCK_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_admin_max_block_set_persists_then_denies_injects"
+    ),
+    BLOCK_ACTIONS_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_user_block_actions_persists_restriction_then_denies_injects"
+    ),
+    LIMIT_CONFIRM_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_limit_confirm_persists_caps_then_denies_injects"
+    ),
+    MSG_UPDATE_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_update_message_edits_then_denies_and_fails_injects"
+    ),
+    MSG_DELETE_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_delete_message_soft_deletes_then_denies_injects"
+    ),
 }
 
 
@@ -98,7 +179,7 @@ class FakeState:
 
 
 class RoleSession:
-    """Async adapter over mapped sqlite users. Does not mock the role write."""
+    """Async adapter over mapped sqlite users. Does not mock the durable write."""
 
     def __init__(self, sync_session, *, user_id=9, fail_commit=False):
         self._session = sync_session
@@ -107,8 +188,20 @@ class RoleSession:
         self.commit_count = 0
 
     async def execute(self, statement, params=None):
-        loaded = self._session.get(MappedAccountUser, self.user_id)
-        return SimpleNamespace(scalar_one_or_none=lambda: loaded)
+        blob = f"{statement} {getattr(statement, 'text', '')}"
+        if "FROM users" in blob and "notifications" not in blob.lower():
+            loaded = self._session.get(MappedAccountUser, self.user_id)
+            return SimpleNamespace(scalar_one_or_none=lambda: loaded)
+        return self._session.execute(statement)
+
+    def add(self, obj):
+        self._session.add(obj)
+
+    async def flush(self):
+        self._session.flush()
+
+    async def refresh(self, obj, attribute_names=None):
+        self._session.refresh(obj)
 
     async def commit(self):
         if self.fail_commit and self.commit_count == 0:
@@ -139,7 +232,11 @@ class MsgSession:
         self._session.refresh(obj)
 
     async def get(self, model, ident, **kwargs):
-        return self._session.get(model, ident)
+        loaded = self._session.get(model, ident)
+        created = getattr(loaded, "created_at", None)
+        if loaded is not None and created is not None and created.tzinfo is None:
+            loaded.created_at = created.replace(tzinfo=timezone.utc)
+        return loaded
 
     async def rollback(self):
         self._session.rollback()
@@ -621,6 +718,312 @@ class P100bSeedSliceExecutionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(key, creation_key)
             self.assertEqual(published["n"], 1)
             fail_db.commit = original_commit
+            engine.dispose()
+
+    async def test_user_unlimit_clears_caps_then_denies_without_write_injects(self):
+        engine, Session, sync = _make_store()
+        _persist_user(sync)
+        row = sync.get(MappedAccountUser, 9)
+        row.max_daily_trades = 2
+        row.max_active_commodities = 3
+        row.max_daily_requests = 4
+        row.limitations_expire_at = datetime.utcnow() + timedelta(days=1)
+        sync.commit()
+        answers = []
+
+        async def _answer(callback, text=None, show_alert=False):
+            answers.append(text or "")
+
+        callback = SimpleNamespace(data="user_unlimit_9", answer=AsyncMock(), message=SimpleNamespace())
+        db = RoleSession(sync)
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=_SessionBox(db)), patch(
+            "bot.handlers.admin_users.answer_callback_query_via_runtime",
+            new=_answer,
+        ), patch(
+            "bot.handlers.admin_users.get_user_profile_text",
+            new=AsyncMock(return_value="profile"),
+        ), patch(
+            "bot.handlers.admin_users.get_user_settings_keyboard",
+            return_value="KB",
+        ), patch(
+            "bot.handlers.admin_users.edit_callback_message_via_runtime",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.admin_users.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode="isolated"),
+        ), patch(
+            "bot.handlers.admin_users.send_delayed_removal_notification",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.admin_users.asyncio.create_task",
+            side_effect=lambda coro: coro.close() or SimpleNamespace(),
+        ):
+            await handle_user_unlimit(callback, user=SimpleNamespace(role=UserRole.STANDARD))
+            still, peek = _reload_user(Session)
+            self.assertEqual(still.max_daily_trades, 2)
+            peek.close()
+            with patch("core.admin_authority.current_server", return_value="iran"):
+                await handle_user_unlimit(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
+            cleared, later = _reload_user(Session)
+            self.assertIsNone(cleared.max_daily_trades)
+            self.assertIsNone(cleared.max_active_commodities)
+            self.assertIsNone(cleared.max_daily_requests)
+            self.assertIsNone(cleared.limitations_expire_at)
+            self.assertTrue(any("محدودیت‌ها برداشته شد" in text for text in answers))
+            later.close()
+        sync.close()
+        engine.dispose()
+
+    async def test_admin_max_block_set_persists_then_denies_injects(self):
+        engine, Session, sync = _make_store()
+        _persist_user(sync)
+        answers = []
+
+        async def _answer(callback, text=None, show_alert=False):
+            answers.append(text or "")
+
+        callback = SimpleNamespace(data="admin_max_block_set_9_10", answer=AsyncMock(), message=SimpleNamespace())
+        db = RoleSession(sync)
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=_SessionBox(db)), patch(
+            "bot.handlers.admin_users.answer_callback_query_via_runtime",
+            new=_answer,
+        ), patch(
+            "bot.handlers.admin_users.attach_customer_management_names",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.admin_users.get_block_settings_keyboard",
+            return_value="KB",
+        ), patch(
+            "bot.handlers.admin_users.edit_callback_message_via_runtime",
+            new=AsyncMock(),
+        ), patch(
+            "core.admin_authority.current_server",
+            return_value="iran",
+        ):
+            await handle_admin_max_block_set(callback, user=SimpleNamespace(role=UserRole.STANDARD))
+            still, peek = _reload_user(Session)
+            self.assertEqual(still.max_blocked_users, 5)
+            peek.close()
+            await handle_admin_max_block_set(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
+            changed, later = _reload_user(Session)
+            self.assertEqual(changed.max_blocked_users, 10)
+            self.assertTrue(any("سقف بلاک به 10" in text for text in answers))
+            later.close()
+        sync.close()
+        engine.dispose()
+
+    async def test_user_block_actions_persists_restriction_then_denies_injects(self):
+        engine, Session, sync = _make_store()
+        _persist_user(sync)
+        answers = []
+
+        async def _answer(callback, text=None, show_alert=False):
+            answers.append(text or "")
+
+        callback = SimpleNamespace(data="user_block_apply_9_30", answer=AsyncMock(), message=SimpleNamespace())
+        db = RoleSession(sync)
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=_SessionBox(db)), patch(
+            "bot.handlers.admin_users.answer_callback_query_via_runtime",
+            new=_answer,
+        ), patch(
+            "bot.handlers.admin_users.get_user_profile_text",
+            new=AsyncMock(return_value="profile"),
+        ), patch(
+            "bot.handlers.admin_users.get_user_settings_keyboard",
+            return_value="KB",
+        ), patch(
+            "bot.handlers.admin_users.edit_callback_message_via_runtime",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.admin_users.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode="isolated"),
+        ), patch(
+            "bot.handlers.admin_users.send_telegram_notification",
+            new=AsyncMock(),
+        ):
+            await handle_user_block_actions(callback, user=SimpleNamespace(role=UserRole.STANDARD))
+            still, peek = _reload_user(Session)
+            self.assertIsNone(still.trading_restricted_until)
+            peek.close()
+            with patch("core.admin_authority.current_server", return_value="iran"):
+                await handle_user_block_actions(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
+            blocked, later = _reload_user(Session)
+            self.assertIsNotNone(blocked.trading_restricted_until)
+            self.assertGreaterEqual(later.query(Notification).count(), 1)
+            later.close()
+        sync.close()
+        engine.dispose()
+
+    async def test_limit_confirm_persists_caps_then_denies_injects(self):
+        engine, Session, sync = _make_store()
+        _persist_user(sync)
+        expire_at = datetime.utcnow() + timedelta(days=3)
+        state = FakeState(
+            limit_target_user_id=9,
+            limit_expire_at=expire_at,
+            limit_max_trades=4,
+            limit_max_commodities=2,
+            limit_max_requests=1,
+        )
+        answers = []
+
+        async def _answer(callback, text=None, show_alert=False):
+            answers.append(text or "")
+
+        callback = SimpleNamespace(data="limit_confirm_9", answer=AsyncMock(), message=SimpleNamespace())
+        db = RoleSession(sync)
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=_SessionBox(db)), patch(
+            "bot.handlers.admin_users.answer_callback_query_via_runtime",
+            new=_answer,
+        ), patch(
+            "bot.handlers.admin_users.get_user_profile_text",
+            new=AsyncMock(return_value="profile"),
+        ), patch(
+            "bot.handlers.admin_users.get_user_settings_keyboard",
+            return_value="KB",
+        ), patch(
+            "bot.handlers.admin_users.edit_callback_message_via_runtime",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.admin_users.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode="isolated"),
+        ), patch(
+            "bot.handlers.admin_users.send_telegram_notification",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.admin_users.clear_state_retain_anchors",
+            new=AsyncMock(),
+        ):
+            await handle_limit_confirm(
+                callback,
+                user=SimpleNamespace(role=UserRole.STANDARD),
+                state=FakeState(**state.data),
+            )
+            still, peek = _reload_user(Session)
+            self.assertIsNone(still.max_daily_trades)
+            peek.close()
+            with patch("core.admin_authority.current_server", return_value="iran"):
+                await handle_limit_confirm(
+                    callback,
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    state=state,
+                )
+            limited, later = _reload_user(Session)
+            self.assertEqual(limited.max_daily_trades, 4)
+            self.assertEqual(limited.max_active_commodities, 2)
+            self.assertEqual(limited.max_daily_requests, 1)
+            self.assertGreaterEqual(later.query(Notification).count(), 1)
+            later.close()
+        sync.close()
+        engine.dispose()
+
+    async def test_update_message_edits_then_denies_and_fails_injects(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "msg-update.sqlite")
+            engine = _engine(db_path)
+            Message.__table__.create(engine, checkfirst=True)
+            Session = sessionmaker(bind=engine, future=True, expire_on_commit=False)
+            sync = Session()
+            now = datetime.now(timezone.utc)
+            sync.add(
+                Message(
+                    sender_id=1,
+                    receiver_id=9,
+                    content="old-text",
+                    message_type=MessageType.TEXT,
+                    is_read=False,
+                    created_at=now,
+                )
+            )
+            sync.commit()
+            sender = SimpleNamespace(id=1)
+
+            async def _reload(_db, message_id, **_k):
+                return _db._session.get(Message, message_id)
+
+            async def _serialize(_db, message, viewer_user_id=None):
+                return SimpleNamespace(id=message.id, content=message.content)
+
+            fail_db = MsgSession(Session(), fail_commit=True)
+            with patch(
+                "core.services.chat_service.ensure_direct_message_chat_link",
+                new=AsyncMock(),
+            ), patch(
+                "core.services.chat_service.reload_direct_message",
+                new=_reload,
+            ), patch(
+                "api.routers.chat._serialize_direct_message_with_accountant_contract",
+                new=_serialize,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "injected send_message_commit_failure"):
+                    await update_message(1, MessageUpdate(content="new-text"), current_user=sender, db=fail_db)
+                with sqlite3.connect(db_path) as conn:
+                    self.assertEqual(conn.execute("SELECT content FROM messages WHERE id=1").fetchone()[0], "old-text")
+                from fastapi import HTTPException
+
+                ok_db = MsgSession(Session())
+                with self.assertRaises(HTTPException) as denied:
+                    await update_message(
+                        1,
+                        MessageUpdate(content="new-text"),
+                        current_user=SimpleNamespace(id=9),
+                        db=ok_db,
+                    )
+                self.assertEqual(denied.exception.status_code, 403)
+                updated = await update_message(
+                    1,
+                    MessageUpdate(content="new-text"),
+                    current_user=sender,
+                    db=ok_db,
+                )
+                self.assertEqual(updated.content, "new-text")
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT content FROM messages WHERE id=1").fetchone()[0], "new-text")
+            sync.close()
+            engine.dispose()
+
+    async def test_delete_message_soft_deletes_then_denies_injects(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "msg-delete.sqlite")
+            engine = _engine(db_path)
+            Message.__table__.create(engine, checkfirst=True)
+            Session = sessionmaker(bind=engine, future=True, expire_on_commit=False)
+            sync = Session()
+            now = datetime.now(timezone.utc)
+            sync.add(
+                Message(
+                    sender_id=1,
+                    receiver_id=9,
+                    content="to-delete",
+                    message_type=MessageType.TEXT,
+                    is_read=False,
+                    created_at=now,
+                    is_deleted=False,
+                )
+            )
+            sync.commit()
+            sender = SimpleNamespace(id=1)
+
+            async def _reload(_db, message_id, **_k):
+                return _db._session.get(Message, message_id)
+
+            ok_db = MsgSession(Session())
+            with patch(
+                "core.services.chat_service.ensure_direct_message_chat_link",
+                new=AsyncMock(),
+            ), patch(
+                "core.services.chat_service.reload_direct_message",
+                new=_reload,
+            ):
+                from fastapi import HTTPException
+
+                with self.assertRaises(HTTPException) as denied:
+                    await delete_message(1, current_user=SimpleNamespace(id=9), db=ok_db)
+                self.assertEqual(denied.exception.status_code, 403)
+                await delete_message(1, current_user=sender, db=ok_db)
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT is_deleted FROM messages WHERE id=1").fetchone()[0], 1)
+            sync.close()
             engine.dispose()
 
     async def test_channel_trade_handlers_gateway_confirm_is_not_crud_evidence(self):

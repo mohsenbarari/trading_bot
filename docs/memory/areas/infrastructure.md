@@ -1,5 +1,11 @@
 # Infrastructure
 
+- 2026-09-04 | P1-00b executed six more exact handlers (unlimit, max-block,
+  block-actions, limit-confirm, message update, message delete) and attached
+  per-seed test nodes. Origin SUCCESS/policy/notification/side-effect-retry
+  stay High. Fourteen exact handlers are evidenced; 451 seeds stay High.
+  Live hosts were not re-observed. `DR-018` stays `NOT_REINSPECTED`.
+
 - 2026-09-04 | P1-00b demoted channel-trade seeds that only mocked execute.
   Origin SUCCESS/policy/notification/side-effect-retry stay High. Eight exact
   handlers are evidenced; 457 seeds stay High. Live hosts were not
