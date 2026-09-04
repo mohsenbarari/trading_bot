@@ -1,14 +1,5 @@
 # Infrastructure
 
-- 2026-09-04 | P1-00b executed twenty-three more exact handlers (channel
-  create/update/invite/unfollow, room send/read/unread/pin-order, direct
-  unread/read/pin-order, message reaction/pin, upload batch/session cancel,
-  and channel/candidate/upload reads) and attached per-seed test nodes.
-  Origin SUCCESS/policy/notification/side-effect-retry stay High. One hundred
-  twenty-seven exact handlers are evidenced; 338 seeds stay High.
-  Invitation-role and channel-trade stay High. Live hosts were not
-  re-observed. `DR-018` stays `NOT_REINSPECTED`.
-
 - 2026-09-04 | P1-00b executed fourteen more exact handlers (group create/patch/
   member/admin/leave, room pin/mute, group reads, and direct pin/mute/hide)
   and attached per-seed test nodes. Origin SUCCESS/policy/notification/

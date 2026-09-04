@@ -692,8 +692,7 @@
       "mutation_class": "READ_OR_STREAM",
       "test_refs": [
         "tests/test_chat_router_groups.py",
-        "frontend/src/components/chat/ChatGroupManagerModal.test.ts",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_get_group_member_candidates_lists_users"
+        "frontend/src/components/chat/ChatGroupManagerModal.test.ts"
       ],
       "operation_kind": "READ_QUERY"
     },
@@ -836,8 +835,7 @@
       "source": "api/routers/chat.py:1496",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_chat_router_remaining_paths.py",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_reorder_room_pin_moves_then_404s"
+        "tests/test_chat_router_remaining_paths.py"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -879,8 +877,7 @@
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
         "tests/test_chat_router_remaining_paths.py",
-        "tests/test_chat_router_channels.py",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_mark_room_unread_sets_flag_then_404s"
+        "tests/test_chat_router_channels.py"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -893,8 +890,7 @@
       "source": "api/routers/chat.py:1592",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_chat_router_channels.py",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_unfollow_channel_leaves_then_404s"
+        "tests/test_chat_router_channels.py"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -909,8 +905,7 @@
       "test_refs": [
         "tests/test_chat_router_channels.py",
         "frontend/src/App.test.ts",
-        "frontend/src/router/uiRouteContract.test.ts",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_get_channels_lists_created_then_empty"
+        "frontend/src/router/uiRouteContract.test.ts"
       ],
       "operation_kind": "READ_QUERY"
     },
@@ -925,8 +920,7 @@
       "test_refs": [
         "tests/test_bot_channel_invites.py",
         "tests/test_chat_router_remaining_paths.py",
-        "tests/test_chat_router_channels.py",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_create_channel_persists_then_404s_update_target"
+        "tests/test_chat_router_channels.py"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -941,8 +935,7 @@
       "test_refs": [
         "tests/test_trades_router_authoritative_success.py",
         "tests/test_chat_router_remaining_paths.py",
-        "tests/test_chat_router_channels.py",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_update_channel_renames_then_404s"
+        "tests/test_chat_router_channels.py"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -955,8 +948,7 @@
       "source": "api/routers/chat.py:1710",
       "mutation_class": "READ_OR_STREAM",
       "test_refs": [
-        "tests/test_chat_router_channels.py",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_get_channel_members_reads_then_404s"
+        "tests/test_chat_router_channels.py"
       ],
       "operation_kind": "READ_QUERY"
     },
@@ -969,8 +961,7 @@
       "source": "api/routers/chat.py:1741",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_chat_router_channels.py",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_patch_channel_member_promotes_then_404s"
+        "tests/test_chat_router_channels.py"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -984,8 +975,7 @@
       "mutation_class": "READ_OR_STREAM",
       "test_refs": [
         "tests/test_chat_router_channels.py",
-        "frontend/src/components/CreateChannelView.test.ts",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_get_channel_invite_candidates_lists_users"
+        "frontend/src/components/CreateChannelView.test.ts"
       ],
       "operation_kind": "READ_QUERY"
     },
@@ -998,8 +988,7 @@
       "source": "api/routers/chat.py:1811",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_chat_router_channels.py",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_bulk_invite_channel_members_adds_then_404s"
+        "tests/test_chat_router_channels.py"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -1038,8 +1027,7 @@
       "source": "api/routers/chat.py:1893",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_chat_router_rooms.py",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_send_room_message_persists_then_404s"
+        "tests/test_chat_router_rooms.py"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -1052,8 +1040,7 @@
       "source": "api/routers/chat.py:1993",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_chat_router_rooms.py",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_mark_room_messages_read_clears_then_404s"
+        "tests/test_chat_router_rooms.py"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -1096,8 +1083,7 @@
       "source": "api/routers/chat.py:2100",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_chat_router_direct_mutations.py",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_toggle_message_reaction_adds_then_404s"
+        "tests/test_chat_router_direct_mutations.py"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -1110,8 +1096,7 @@
       "source": "api/routers/chat.py:2162",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_chat_router_remaining_paths.py",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_toggle_message_pin_pins_then_404s"
+        "tests/test_chat_router_remaining_paths.py"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -1140,8 +1125,7 @@
       "source": "api/routers/chat.py:2197",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_chat_router_direct_reads.py",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_mark_messages_read_commits_then_404s"
+        "tests/test_chat_router_direct_reads.py"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -1199,8 +1183,7 @@
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
         "tests/test_chat_router_upload_sessions.py",
-        "frontend/src/services/chatUploadBackground.test.ts",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_post_upload_batch_persists_then_rejects_unknown_target"
+        "frontend/src/services/chatUploadBackground.test.ts"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -1215,8 +1198,7 @@
       "test_refs": [
         "tests/test_chat_router_upload_sessions.py",
         "tests/test_request_logging.py",
-        "frontend/src/services/chatUploadBackground.test.ts",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_post_upload_session_persists_then_404s"
+        "frontend/src/services/chatUploadBackground.test.ts"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -1244,8 +1226,7 @@
       "mutation_class": "READ_OR_STREAM",
       "test_refs": [
         "tests/test_chat_router_upload_sessions.py",
-        "tests/test_request_logging.py",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_get_upload_session_state_reads_then_404s"
+        "tests/test_request_logging.py"
       ],
       "operation_kind": "READ_QUERY"
     },
@@ -1285,8 +1266,7 @@
       "source": "api/routers/chat.py:2726",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_chat_router_upload_sessions.py",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_cancel_upload_session_cancels_then_404s"
+        "tests/test_chat_router_upload_sessions.py"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -1299,8 +1279,7 @@
       "source": "api/routers/chat.py:2751",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_chat_router_upload_sessions.py",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_cancel_upload_batch_cancels_then_404s"
+        "tests/test_chat_router_upload_sessions.py"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -1356,8 +1335,7 @@
       "source": "api/routers/chat.py:670",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_chat_router_remaining_paths.py",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_reorder_direct_pin_moves_then_404s"
+        "tests/test_chat_router_remaining_paths.py"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -1397,8 +1375,7 @@
       "source": "api/routers/chat.py:752",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_chat_router_direct_reads.py",
-        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_mark_direct_unread_sets_flag_then_404s"
+        "tests/test_chat_router_direct_reads.py"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
