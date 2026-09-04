@@ -187,27 +187,43 @@ class P100OfferOriginPolicyCharacterizationTests(unittest.IsolatedAsyncioTestCas
         self.assertEqual(len(rows), len(ORIGIN_PAIRS) * len(REQUIRED_INTERACTIONS))
         seen = set()
         registry = {item["blocker_id"]: item for item in payload["blocker_registry"]["items"]}
+        evidenced = 0
+        not_applicable = 0
+        blocked = 0
         for row in rows:
             key = (row["offer_origin"], row["request_origin"], row["interaction"])
             self.assertNotIn(key, seen, key)
             seen.add(key)
             self.assertIn(row["interaction"], REQUIRED_INTERACTIONS)
-            self.assertEqual(row["disposition"], "TRANSFERRED_TO_P1_00B")
-            self.assertNotEqual(row.get("applicability"), "ELIGIBLE")
-            self.assertEqual(row["applicability"], "HIGH_BLOCKER")
             self.assertNotIn("equivalence_reason", row)
-            blocker_id = row["named_blocker"]["blocker_id"]
-            self.assertEqual(blocker_id, "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED")
-            self.assertIn(blocker_id, registry)
-            self.assertEqual(registry[blocker_id]["severity"], "HIGH")
-            self.assertEqual(registry[blocker_id]["disposition"], "TRANSFERRED_TO_P1_00B")
-            self.assertEqual(registry[blocker_id]["resolution_stage"], "P1-00b")
-            self.assertTrue(registry[blocker_id]["observed_fact"])
+            self.assertNotEqual(row.get("disposition"), "EQUIVALENT_TO_REPRESENTATIVE")
             talk = json.dumps(row, ensure_ascii=False).lower()
             self.assertNotIn("policy effect executed", talk)
-            self.assertIn("not overlapping", talk)
-        dispositions = {row["disposition"] for row in rows}
-        self.assertEqual(dispositions, {"TRANSFERRED_TO_P1_00B"})
+            if row["interaction"] == "UNLINKED-BOT" and row["request_origin"] == "WEBAPP":
+                self.assertEqual(row["applicability"], "NOT_APPLICABLE")
+                self.assertEqual(row["disposition"], "NOT_APPLICABLE")
+                not_applicable += 1
+                continue
+            if row["interaction"] == "UNLINKED-BOT" and row["request_origin"] == "TELEGRAM_BOT":
+                self.assertEqual(row["applicability"], "HIGH_BLOCKER")
+                self.assertEqual(row["disposition"], "BLOCKED_EXPLICIT")
+                blocker_id = row["named_blocker"]["blocker_id"]
+                self.assertEqual(blocker_id, "P1-00-HIGH-ORIGIN-INTERACTION-UNMATERIALIZED")
+                self.assertIn(blocker_id, registry)
+                self.assertEqual(registry[blocker_id]["severity"], "HIGH")
+                self.assertEqual(registry[blocker_id]["disposition"], "BLOCKED_EXPLICIT")
+                self.assertEqual(registry[blocker_id]["resolution_stage"], "P1-00b")
+                self.assertEqual(row.get("evidence_cases") or [], [])
+                blocked += 1
+                continue
+            self.assertEqual(row["applicability"], "ELIGIBLE")
+            self.assertEqual(row["disposition"], "EVIDENCED")
+            self.assertTrue(row.get("evidence_cases"))
+            self.assertIn("test_p1_00b_characterization_origin_interactions.py", row["evidence_refs"][0])
+            evidenced += 1
+        self.assertEqual(evidenced, 66)
+        self.assertEqual(not_applicable, 3)
+        self.assertEqual(blocked, 3)
         self.assertIn("OUTCOME-SUCCESS", {row["interaction"] for row in rows})
         self.assertIn("CONCURRENT", {row["interaction"] for row in rows})
 
@@ -215,7 +231,15 @@ class P100OfferOriginPolicyCharacterizationTests(unittest.IsolatedAsyncioTestCas
         payload = _load_json("scenario-records.json")
         talk = json.dumps(payload["origin_required_interactions"], ensure_ascii=False)
         self.assertNotIn("Policy effect executed", talk)
-        self.assertTrue(all(row["disposition"] == "TRANSFERRED_TO_P1_00B" for row in payload["origin_required_interactions"]))
+        self.assertNotIn("EQUIVALENT_TO_REPRESENTATIVE", talk)
+        leftover = [
+            row
+            for row in payload["origin_required_interactions"]
+            if row["applicability"] == "HIGH_BLOCKER"
+        ]
+        self.assertEqual(len(leftover), 3)
+        self.assertTrue(all(row["interaction"] == "UNLINKED-BOT" for row in leftover))
+        self.assertTrue(all(row["request_origin"] == "TELEGRAM_BOT" for row in leftover))
 
     def test_admission_cells_do_not_use_a_three_value_origin_array(self):
         payload = _load_json("scenario-records.json")

@@ -234,7 +234,7 @@ At minimum the target must preserve:
 | manual resolution of 6 evidence-review items | `COMPLETE — characterization linked` |
 | current runtime child/poller/timer owner seed manifest | `COMPLETE` |
 | exact target compose/credential/readiness binding | future `P1-03` |
-| persona/tier/time/failure scenario records | `IN_PROGRESS` — account-status inner-commit contract evidenced; REQUEST sqlite overlap evidenced; every origin interaction transferred to `P1-00b`; leftover freeze transferred to `P1-00b`; `target_result NOT_RUN`; not `COMPLETE` |
+| persona/tier/time/failure scenario records | `IN_PROGRESS` under `WA-P1-00B-FREEZE-20260904-001` — family overlap/reload evidenced except MSG `NOT_APPLICABLE`; 465 seed handlers asserted; 66 origin cells evidenced; 3 Web unlinked-Bot `NOT_APPLICABLE`; 3 Telegram unlinked-Bot `BLOCKED_EXPLICIT`; `target_result NOT_RUN`; `P1-00b` not `COMPLETE` |
 | owner approval of human-readable scenario contract | `COMPLETE — 2026-09-02` |
 | deploy/restart/backup/restore duration (`DR-015`) | `DEFERRED_BLOCKER` / `DPL-1` / `NOT_OBSERVED` |
 | current-vs-target differential execution | future `P1-06` |
@@ -244,8 +244,10 @@ amended exit gate has no unresolved High. Leftover current-behavior freeze is
 the new non-implementation Stage `P1-00b`, a prerequisite of `P1-01`, `P1-04`
 and `P1-06`. `P1-06` later proves the target against this frozen contract; it
 does not invent the contract after implementation. Assignment
-`WA-P1-00-SCOPE-20260903-002` authorizes adding `P1-00b` to
-`execution-order.yaml` in this Worker commit.
+`WA-P1-00-SCOPE-20260903-002` authorized adding `P1-00b` to
+`execution-order.yaml`. Leftover freeze executes under
+`WA-P1-00B-FREEZE-20260904-001`. Do not mark `P1-00b` `COMPLETE` in a Worker
+commit.
 
 ## Owner review gate
 

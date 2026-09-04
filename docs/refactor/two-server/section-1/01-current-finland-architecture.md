@@ -2,7 +2,7 @@
 
 Status: historical baseline accepted; static refresh 2026-09-03; `P1-00` `COMPLETE` on `a0f22b7d`
 Observed: 2026-09-01 UTC
-Live re-observation this Assignment: `NOT_REOBSERVED` (`WA-P1-00-SCOPE-20260903-002` superseding `WA-P1-00-REFRESH-20260903-001`, `external_access: NONE`)
+Live re-observation this Assignment: `NOT_REOBSERVED` (`WA-P1-00-SCOPE-20260903-002` superseding `WA-P1-00-REFRESH-20260903-001`, `external_access: NONE`). Executing leftover freeze: `WA-P1-00B-FREEZE-20260904-001` also has `external_access: NONE` and did not re-observe hosts.
 
 ## Human scenario
 

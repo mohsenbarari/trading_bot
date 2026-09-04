@@ -2,7 +2,7 @@
 
 Status: sanitised read-only snapshot
 Observed: 2026-09-01 UTC
-Live re-observation this Assignment: `NOT_REOBSERVED` (`WA-P1-00-SCOPE-20260903-002` superseding `WA-P1-00-REFRESH-20260903-001`, `external_access: NONE`)
+Live re-observation this Assignment: `NOT_REOBSERVED` (`WA-P1-00-SCOPE-20260903-002` superseding `WA-P1-00-REFRESH-20260903-001`, `external_access: NONE`). Executing leftover freeze: `WA-P1-00B-FREEZE-20260904-001` also has `external_access: NONE` and did not re-observe hosts.
 
 No full environment dump, credential, token, cookie or private key is included.
 Counts and sizes are operational observations, not a backup receipt.

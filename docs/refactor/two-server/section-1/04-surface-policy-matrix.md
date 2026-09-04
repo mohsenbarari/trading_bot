@@ -59,12 +59,16 @@ For each row, tests must cover at least:
 - notification audience, Web realtime/Web Push and Telegram publication/delivery;
 - failure before commit, after commit/before side effect and side-effect retry.
 
-P1-00 materializes those interactions in `inventory/scenario-records.json`
-`origin_required_interactions`. No required origin interaction is EVIDENCED or
-`EQUIVALENT_TO_REPRESENTATIVE` here: isolated ledger persist and origin-free
-invitation checks are not a combined admission-plus-provenance path, and
-origin-pair CONCURRENT was not overlapping. Every required row is
-`TRANSFERRED_TO_P1_00B`.
+P1-00b materializes those interactions in `inventory/scenario-records.json`
+`origin_required_interactions`. Combined-path cells that ran
+`_execute_trade_authoritatively` on isolated sqlite are `ELIGIBLE` /
+`EVIDENCED`. Web-request `UNLINKED-BOT` is `NOT_APPLICABLE` because Web does
+not consult Telegram link state. Telegram-request `UNLINKED-BOT` stays
+`BLOCKED_EXPLICIT`: `evaluate_bot_access_local_state` is not on that live
+path, and joining it would be a product change. No cell is
+`EQUIVALENT_TO_REPRESENTATIVE`. Isolated ledger persist and origin-free
+invitation checks are not combined-path evidence. `CONCURRENT` overlaps after
+lookup and before commit.
 
 ## Approved semantic contract for the next ADR
 

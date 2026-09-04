@@ -164,5 +164,6 @@
     "jobs": "surface-jobs.json",
     "scenarios": "scenario-records.json"
   },
-  "refresh_assignment_id": "WA-P1-00-REFRESH-20260903-001"
+  "refresh_assignment_id": "WA-P1-00-REFRESH-20260903-001",
+  "executing_assignment_id": "WA-P1-00B-FREEZE-20260904-001"
 }

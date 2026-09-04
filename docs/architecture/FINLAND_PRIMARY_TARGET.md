@@ -3,6 +3,7 @@
 Status: accessible, inventoried read-only, unprovisioned, not production-authoritative
 Last verified: 2026-09-01 UTC
 Refresh 2026-09-03: `NOT_REOBSERVED` — Assignment `WA-P1-00-REFRESH-20260903-001` has `external_access: NONE` and did not repeat SSH or host inventory.
+Executing leftover freeze 2026-09-04: `NOT_REOBSERVED` — Assignment `WA-P1-00B-FREEZE-20260904-001` also has `external_access: NONE`. Host facts below remain the 2026-09-01 snapshot.
 
 ## Approved target
 

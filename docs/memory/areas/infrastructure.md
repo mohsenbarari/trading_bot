@@ -1,5 +1,10 @@
 # Infrastructure
 
+- 2026-09-04 | `P1-00b` freeze `WA-P1-00B-FREEZE-20260904-001` did not re-observe
+  live hosts. Previous 2026-09-01 Bot-Finland / Web-Finland / target facts stay
+  `NOT_REOBSERVED`. `DR-018` stays `NOT_REINSPECTED`. `DR-015` still blocks
+  `P1-02` until `DPL-1`; do not estimate or rehearse.
+
 - 2026-09-03 | After Codex `CHANGES_REQUIRED` on `5ec75ec5`, leftover current-behavior
   freeze is a new non-implementation Stage `P1-00b`, not `P1-04`/`P1-06` and not
   live-host work. Host facts stay `NOT_REOBSERVED`. `DR-015` still blocks `P1-02`

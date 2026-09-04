@@ -117,5 +117,6 @@
     "live_host_reobservation": "NOT_REOBSERVED",
     "external_access": "NONE",
     "note": "Host capacity, release SHA, schema and runtime process facts remain the 2026-09-01 read-only snapshot."
-  }
+  },
+  "executing_assignment_id": "WA-P1-00B-FREEZE-20260904-001"
 }

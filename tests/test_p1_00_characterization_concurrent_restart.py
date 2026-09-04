@@ -270,24 +270,38 @@ class P100RequestConcurrentRestartTests(unittest.IsolatedAsyncioTestCase):
 
     def test_non_request_collision_cells_are_unresolved_and_owned_by_p1_00b(self):
         payload = _load_json("scenario-records.json")
-        registry = {item["blocker_id"]: item for item in payload["blocker_registry"]["items"]}
-        for family in ("AUTH", "IDENTITY", "OFFER", "TRADE", "MARKET", "NOTIFY", "MSG", "TG", "ADMIN", "SYNC"):
+        evidenced = {
+            "AUTH",
+            "IDENTITY",
+            "OFFER",
+            "TRADE",
+            "MARKET",
+            "NOTIFY",
+            "TG",
+            "ADMIN",
+            "SYNC",
+        }
+        for family in evidenced:
             for boundary in ("two_concurrent_commands", "process_restart"):
                 cell = next(
                     item
                     for item in payload["family_boundary_variants"]
                     if item["family"] == family and item["failure_boundary"] == boundary
                 )
-                self.assertEqual(cell["applicability"], "HIGH_BLOCKER", cell["variant_id"])
-                self.assertEqual(cell["eligibility"]["decision"], "UNRESOLVED")
-                self.assertNotEqual(cell["applicability"], "ELIGIBLE")
-                blocker = registry[cell["named_blocker"]["blocker_id"]]
-                self.assertEqual(blocker["disposition"], "TRANSFERRED_TO_P1_00B")
-                self.assertEqual(blocker["resolution_stage"], "P1-00b")
-                self.assertTrue(blocker["observed_fact"])
-                self.assertEqual(cell.get("evidence_cases") or [], [])
-                self.assertNotEqual(cell["applicability"], "ELIGIBLE")
-                self.assertNotIn("EVIDENCED", cell["eligibility"].get("decision", ""))
+                self.assertEqual(cell["applicability"], "ELIGIBLE", cell["variant_id"])
+                self.assertEqual(cell["eligibility"]["decision"], "ELIGIBLE")
+                self.assertTrue(cell.get("evidence_cases"))
+                self.assertIn("test_p1_00b_characterization_family_overlap.py", cell["evidence_refs"][0])
+        for boundary in ("two_concurrent_commands", "process_restart"):
+            cell = next(
+                item
+                for item in payload["family_boundary_variants"]
+                if item["family"] == "MSG" and item["failure_boundary"] == boundary
+            )
+            self.assertEqual(cell["applicability"], "NOT_APPLICABLE", cell["variant_id"])
+            self.assertEqual(cell["eligibility"]["decision"], "NOT_APPLICABLE")
+            self.assertIn("no command identity", cell["eligibility"]["reason"])
+            self.assertEqual(cell.get("evidence_cases") or [], [])
 
     def test_request_cells_cite_durable_overlap_nodes(self):
         payload = _load_json("scenario-records.json")

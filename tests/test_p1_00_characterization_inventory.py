@@ -1096,7 +1096,9 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
         self.assertNotEqual(registry["disposition_request"], "OPEN_HIGH_BLOCKERS_FOR_CODEX")
         self.assertFalse(any(item["resolution_stage"] == "CODEX_FINAL_REVIEW" for item in registry["items"]))
         self.assertFalse(any(item["resolution_stage"] in {"P1-04", "P1-06"} for item in registry["items"]))
-        self.assertTrue(all(item["disposition"] == "TRANSFERRED_TO_P1_00B" for item in registry["items"]))
+        self.assertTrue(
+            all(item["disposition"] in {"TRANSFERRED_TO_P1_00B", "BLOCKED_EXPLICIT"} for item in registry["items"])
+        )
         self.assertTrue(all(item["resolution_stage"] == "P1-00b" for item in registry["items"]))
         self.assertEqual(payload["closure"]["unresolved_high_in_p1_00_exit_gate"], 0)
         self.assertGreaterEqual(len(registry["items"]), 1)
@@ -1171,15 +1173,15 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
         self.assertEqual(timing["evidence_status"], "NOT_OBSERVED")
         self.assertIn("P1-02", timing["blocks_before_resolution"])
         for item in payload["deferred_blockers"]:
-            self.assertIn(item["status"], {"DEFERRED_BLOCKER", "TRANSFERRED_TO_P1_00B"})
+            self.assertIn(item["status"], {"DEFERRED_BLOCKER", "TRANSFERRED_TO_P1_00B", "BLOCKED_EXPLICIT"})
             self.assertNotEqual(item["resolution_stage"], "CODEX_FINAL_REVIEW")
             self.assertNotIn(item["resolution_stage"], {"P1-04", "P1-06"})
 
     def test_execution_order_contains_authorized_p1_00b_edges(self):
         yaml_text = (REPO_ROOT / "docs/refactor/two-server/execution-order.yaml").read_text(encoding="utf-8")
         self.assertIn("stages: [P1-00, P1-00b, P2-00, MKT-0, DPL-1, DOC-1, DOC-2, DOC-3, DOC-5]", yaml_text)
-        self.assertIn("P1-00: {state: IN_PROGRESS, section: 1, depends_on: [], production: false}", yaml_text)
-        self.assertIn("P1-00b: {state: PROPOSED, section: 1, depends_on: [P1-00], production: false}", yaml_text)
+        self.assertIn("P1-00: {state: COMPLETE, section: 1, depends_on: [], production: false}", yaml_text)
+        self.assertIn("P1-00b: {state: IN_PROGRESS, section: 1, depends_on: [P1-00], production: false}", yaml_text)
         for needle in (
             "P1-01: {state: PROPOSED, section: 1, depends_on: [P1-00, P1-00b], production: false}",
             "P1-02: {state: PROPOSED, section: 1, depends_on: [P1-00, P1-00b, DPL-1, DOC-3], production: false}",
@@ -1196,10 +1198,12 @@ class P100InventoryRefreshCharacterizationTests(unittest.TestCase):
         self.assertIn("assignment_id: WA-P1-00-SCOPE-20260903-002", card)
         scenarios = _load_json("scenario-records.json")
         self.assertEqual(scenarios["assignment_id"], "WA-P1-00-SCOPE-20260903-002")
+        self.assertEqual(scenarios["executing_assignment_id"], "WA-P1-00B-FREEZE-20260904-001")
 
     def test_runtime_facts_are_marked_not_reobserved(self):
         runtime = _load_json("current-finland-runtime.json")
         self.assertEqual(runtime["refresh"]["assignment_id"], "WA-P1-00-REFRESH-20260903-001")
+        self.assertEqual(runtime["executing_assignment_id"], "WA-P1-00B-FREEZE-20260904-001")
         self.assertEqual(runtime["refresh"]["live_host_reobservation"], "NOT_REOBSERVED")
         self.assertEqual(runtime["refresh"]["base_sha"], EXPECTED_COMMIT)
         self.assertEqual(runtime["static_surfaces"]["live_fastapi_decorators"], 217)
