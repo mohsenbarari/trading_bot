@@ -7,6 +7,7 @@ from tests.test_p1_00_characterization_network_isolation import install_p1_00_ne
 install_p1_00_network_fence()
 
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -1606,19 +1607,67 @@ async def _isolated_publish(*_a, **_k):
     return None
 
 
+def _tree_entries(base: Path) -> frozenset[str]:
+    if not base.exists():
+        return frozenset()
+    return frozenset(str(path.relative_to(base)) for path in base.rglob("*"))
+
+
+class _UploadIsolation:
+    def __init__(self, root: Path, cwd_uploads: Path, before: frozenset[str], existed: bool):
+        self.root = root
+        self.cwd_uploads = cwd_uploads
+        self.before = before
+        self.existed = existed
+
+    def assert_no_cwd_leak(self) -> None:
+        if not self.existed:
+            if self.cwd_uploads.exists():
+                raise AssertionError(
+                    f"characterization created cwd uploads: {self.cwd_uploads.resolve()}"
+                )
+            return
+        created = _tree_entries(self.cwd_uploads) - self.before
+        if created:
+            raise AssertionError(
+                "characterization added under pre-existing uploads: "
+                + ", ".join(sorted(created))
+            )
+
+
 @contextmanager
 def _isolated_upload_root():
+    cwd_uploads = Path.cwd() / "uploads"
+    before = _tree_entries(cwd_uploads)
+    existed = cwd_uploads.exists()
     with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
+        root = Path(tmp).resolve()
+        patched_root = root / "chat_sessions"
         with patch(
             "core.services.chat_upload_session_service.UPLOAD_SESSION_ROOT",
-            str(root / "chat_sessions"),
+            str(patched_root),
         ):
-            yield root
+            fence = _UploadIsolation(root, cwd_uploads, before, existed)
+            yield fence
+            from core.services.chat_upload_session_service import UPLOAD_SESSION_ROOT
+
+            resolved_session_root = Path(UPLOAD_SESSION_ROOT).resolve()
+            if not resolved_session_root.is_relative_to(root):
+                raise AssertionError(
+                    f"UPLOAD_SESSION_ROOT escaped temp dir: {resolved_session_root}"
+                )
+            fence.assert_no_cwd_leak()
 
 
-def _assert_session_paths_inside(db_path: str, root: Path) -> None:
-    resolved_root = root.resolve()
+def _assert_session_paths_inside(db_path: str, fence: _UploadIsolation) -> None:
+    resolved_root = fence.root.resolve()
+    from core.services.chat_upload_session_service import UPLOAD_SESSION_ROOT
+
+    resolved_session_root = Path(UPLOAD_SESSION_ROOT).resolve()
+    if not resolved_session_root.is_relative_to(resolved_root):
+        raise AssertionError(
+            f"UPLOAD_SESSION_ROOT escaped temp dir: {resolved_session_root}"
+        )
     with sqlite3.connect(db_path) as conn:
         stored_paths = [
             row[0]
@@ -1630,9 +1679,7 @@ def _assert_session_paths_inside(db_path: str, root: Path) -> None:
         stored_path = Path(stored).resolve()
         if not stored_path.is_relative_to(resolved_root):
             raise AssertionError(f"upload path escaped temp root: {stored_path}")
-    leftover = Path.cwd() / "uploads"
-    if leftover.exists():
-        raise AssertionError(f"characterization wrote outside temp dir: {leftover}")
+    fence.assert_no_cwd_leak()
 
 
 def _management_broadcast_store(path: str):
@@ -5876,6 +5923,39 @@ class P100bSeedSliceExecutionTests(unittest.IsolatedAsyncioTestCase):
                     await get_upload_session_state("missing-session", current_user=admin, db=CrudSession(Session()))
                 self.assertEqual(raised.exception.status_code, 404)
             engine.dispose()
+
+    def test_upload_isolation_fence_ignores_preexisting_cwd_uploads(self):
+        with tempfile.TemporaryDirectory() as host:
+            preexisting = Path(host) / "uploads"
+            preexisting.mkdir()
+            marker = preexisting / "runtime.txt"
+            marker.write_text("keep")
+            previous = os.getcwd()
+            os.chdir(host)
+            try:
+                with _isolated_upload_root() as fence:
+                    (fence.root / "chat_sessions" / "1").mkdir(parents=True)
+                    (fence.root / "chat_sessions" / "1" / "x.part").write_text("tmp")
+                    fence.assert_no_cwd_leak()
+                self.assertEqual(marker.read_text(), "keep")
+                self.assertFalse((preexisting / "chat_sessions").exists())
+            finally:
+                os.chdir(previous)
+
+    def test_upload_isolation_fence_detects_new_write_under_preexisting_uploads(self):
+        with tempfile.TemporaryDirectory() as host:
+            preexisting = Path(host) / "uploads"
+            preexisting.mkdir()
+            previous = os.getcwd()
+            os.chdir(host)
+            try:
+                with self.assertRaises(AssertionError) as raised:
+                    with _isolated_upload_root() as fence:
+                        (Path.cwd() / "uploads" / "chat_sessions").mkdir()
+                        fence.assert_no_cwd_leak()
+                self.assertIn("pre-existing uploads", str(raised.exception))
+            finally:
+                os.chdir(previous)
 
     async def test_get_stickers_lists_builtin_packs(self):
         packs = await get_stickers()

@@ -1,5 +1,10 @@
 # Infrastructure
 
+- 2026-09-04 | P1-00b upload fence must detect test-created writes, not the
+  mere existence of a pre-existing gitignored `uploads/` directory. Existence
+  checks on cwd runtime state are not portable across worktree, temp cwd, and
+  the integration tree. `DR-018` stays `NOT_REINSPECTED`.
+
 - 2026-09-04 | P1-00b corrected four mutation-seed failure paths and bound
   upload-session writes to a TemporaryDirectory, then evidenced four more
   exact read handlers (stickers, room/direct pinned message, room messages).
