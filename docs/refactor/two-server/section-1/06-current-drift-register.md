@@ -33,11 +33,10 @@ and child-process replay create two independent rows and duplicate threading
 side effects because persist has no command identity. Seed handler assertions
 remain a High blocker for 464 seeds; only the live admin-toggle seed is
 evidenced. Sibling family membership does not clear MSG/TRADE CRUD seeds.
-Origin reject/permission/retry/concurrent/expiry/commit-failure and Telegram
-`UNLINKED-BOT` are evidenced. Origin SUCCESS/policy/notification/side-effect-retry
-stay `BLOCKED_EXPLICIT`. They are not owned by `P1-04` or `P1-06`. The
-amended `P1-00` exit gate has zero unresolved High. `P1-00b` stays
-`IN_PROGRESS`.
+Origin reject/permission/retry/concurrent/expiry/commit-failure, SUCCESS,
+policy-snapshot, notification, side-effect-retry, and Telegram `UNLINKED-BOT`
+are evidenced. They are not owned by `P1-04` or `P1-06`. The amended `P1-00`
+exit gate has zero unresolved High. `P1-00b` stays `IN_PROGRESS`.
 
 | ID | Family / boundary | Disposition |
 | --- | --- | --- |
@@ -46,7 +45,7 @@ amended `P1-00` exit gate has zero unresolved High. `P1-00b` stays
 | MSG concurrent / restart | no command identity; two independent rows and duplicated threading | evidenced in P1-00b |
 | cells without a mutating path | `NOT_APPLICABLE` with a behavior-specific reason | closed on P1-00 |
 | `P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE` | every seed except the live admin-toggle handler | `BLOCKED_EXPLICIT`; 464 seeds remain |
-| `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN` | SUCCESS, policy-snapshot, notification, side-effect-retry | `BLOCKED_EXPLICIT`; 24 cells |
+| `P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN` | SUCCESS, policy-snapshot, notification, side-effect-retry | closed in P1-00b; durable Trade and OfferRequest on isolated sqlite |
 | Telegram-request `UNLINKED-BOT` | `_handle_channel_trade` rejects missing or locally denied users before execute | evidenced in P1-00b |
 | `DR-018` | possible prior localhost Redis contact | `NOT_REINSPECTED`; do not read live Redis |
 | `DR-015` | deploy/restart/backup/restore duration | already `DEFERRED_BLOCKER` / `DPL-1` |

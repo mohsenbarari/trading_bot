@@ -223,13 +223,13 @@ class P100OfferOriginPolicyCharacterizationTests(unittest.IsolatedAsyncioTestCas
             evidenced += 1
         self.assertEqual(evidenced + not_applicable + blocked, 72)
         self.assertEqual(not_applicable, 3)
-        self.assertEqual(evidenced, 45)
-        self.assertEqual(blocked, 24)
+        self.assertEqual(evidenced, 69)
+        self.assertEqual(blocked, 0)
         self.assertIn("OUTCOME-SUCCESS", {row["interaction"] for row in rows})
         self.assertIn("CONCURRENT", {row["interaction"] for row in rows})
         self.assertTrue(
             all(
-                row["applicability"] == "HIGH_BLOCKER"
+                row["applicability"] == "ELIGIBLE"
                 for row in rows
                 if row["interaction"] in {
                     "OUTCOME-SUCCESS",

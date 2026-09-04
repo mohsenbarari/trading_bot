@@ -1,5 +1,10 @@
 # Infrastructure
 
+- 2026-09-04 | P1-00b origin SUCCESS/policy/notification/side-effect-retry now
+  have durable Trade and OfferRequest proof on isolated sqlite. Seed handler
+  assertions stay High for 464 unexecuted seeds. Live hosts were not
+  re-observed. `DR-018` stays `NOT_REINSPECTED`.
+
 - 2026-09-04 | Verifier `CORRECTIONS_REQUIRED` on `18926961`. Origin SUCCESS
   and sibling family-seed shortcuts were demoted. Live hosts were not
   re-observed. `DR-018` stays `NOT_REINSPECTED`.
