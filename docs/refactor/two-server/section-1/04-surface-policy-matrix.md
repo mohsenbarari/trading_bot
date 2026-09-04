@@ -60,12 +60,16 @@ For each row, tests must cover at least:
 - failure before commit, after commit/before side effect and side-effect retry.
 
 P1-00b materializes those interactions in `inventory/scenario-records.json`
-`origin_required_interactions`. Cells with durable Trade and OfferRequest proof
-or the live Telegram entry reject are `ELIGIBLE` / `EVIDENCED`: success,
-reject, permission-denied, retry, concurrent, expiry, both commit-failure
-phases, policy-snapshot, notification, side-effect-retry, and Telegram-request
-`UNLINKED-BOT`. Web-request `UNLINKED-BOT` is `NOT_APPLICABLE` because Web does
-not consult Telegram link state. No cell is `EQUIVALENT_TO_REPRESENTATIVE`.
+`origin_required_interactions`. Only cells with durable OfferRequest proof or
+the live Telegram entry reject are `ELIGIBLE` / `EVIDENCED`: reject,
+permission-denied, retry, concurrent, expiry, both commit-failure phases, and
+Telegram-request `UNLINKED-BOT`. Web-request `UNLINKED-BOT` is
+`NOT_APPLICABLE` because Web does not consult Telegram link state.
+`OUTCOME-SUCCESS`, `POLICY-SNAPSHOT`, `NOTIFICATION`, and `SIDE-EFFECT-RETRY`
+stay `BLOCKED_EXPLICIT`. Durable sqlite Trade and OfferRequest rows, live
+overtime persist, a mocked TIER_1 snapshot, a substitute notification audience,
+and a direct `create_user_notification` retry do not close those cells. No cell
+is `EQUIVALENT_TO_REPRESENTATIVE`.
 
 ## Approved semantic contract for the next ADR
 

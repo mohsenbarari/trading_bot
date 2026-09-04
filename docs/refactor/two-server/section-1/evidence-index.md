@@ -20,7 +20,7 @@ Refresh: executing Assignment `WA-P1-00B-FREEZE-20260904-001` (`base_sha` `40228
 | Web route inventory | `inventory/surface-web.json` | SHA-256 `37b965a4b29050acab829a1018da5889bfd4c2eb8168ea4da1b4963d764f15d8` |
 | Job authority inventory | `inventory/surface-jobs.json` | SHA-256 `479a9c13cb265e187394ac345fe2c6e3fbfc02a203f77d883314a2ca43c12b27` |
 | Runtime task ownership | `inventory/runtime-task-ownership.json` | SHA-256 `ee6f5fe3e2151e7a8f353b25118637f487553cb40727f0b122acbcb57fdc7bee` |
-| Scenario records | `inventory/scenario-records.json` | SHA-256 `e83868c68ada4c8700f0e0340dd78eff88a2fb6a73ab045336e0279464c9a68f` |
+| Scenario records | `inventory/scenario-records.json` | SHA-256 `508f588386a23be4f47e3dcb837eed3e4a0748b87beab44aaa8958fc806bd784` |
 | Task Card | `stages/P1-00.md` | `COMPLETE` on `a0f22b7d476429974b9d4c8a7ae3d0d5e4a99be9` |
 | Task Card | `stages/P1-00b.md` | `IN_PROGRESS` under `WA-P1-00B-FREEZE-20260904-001`; not `COMPLETE` |
 

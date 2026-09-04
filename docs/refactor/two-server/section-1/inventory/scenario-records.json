@@ -3,7 +3,7 @@
   "generated_from_commit": "aa2c06a573dfd60051e142146f55d7965f2242a7",
   "generated_date": "2026-09-03 UTC",
   "assignment_id": "WA-P1-00-SCOPE-20260903-002",
-  "scope": "Normalized contracts, one executed admin-toggle seed, REQUEST durable collision evidence, family overlap and reload including MSG two-row overlap, Telegram unlinked-Bot entry rejection, and durable origin SUCCESS/policy/notification/side-effect-retry cells on isolated sqlite.",
+  "scope": "Normalized contracts, executed seed handler partitions that remain High until that exact handler ran, REQUEST durable collision evidence, family overlap and reload including MSG two-row overlap, Telegram unlinked-Bot entry rejection, durable sqlite Trade/OfferRequest rows, and honest High leftover for origin SUCCESS/policy/notification/side-effect-retry cells.",
   "provenance": {
     "contract_source": "Repository code and behavioral tests at the Assignment base SHA.",
     "live_host_reobservation": "NOT_REOBSERVED",
@@ -33,7 +33,7 @@
     "offer_origin_interaction": 180,
     "composed_origin_matrix": 180,
     "origin_required_interactions": 72,
-    "named_high_blockers": 1
+    "named_high_blockers": 2
   },
   "contract_field_policy": {
     "required_fields": [
@@ -5682,12 +5682,12 @@
     "cross_family_failure_evidence": 0,
     "scenario_work_item": "READY_FOR_CODEX_FINAL_REVIEW",
     "target_result": "NOT_RUN",
-    "complete_forbidden_until": "Stage remains IN_PROGRESS. Seed handler assertions remain High for 464 seeds. Origin SUCCESS/policy/notification/side-effect-retry cells are evidenced on isolated sqlite. Possible prior localhost Redis contact is NOT_REINSPECTED. Assignment WA-P1-00B-FREEZE-20260904-001 executes P1-00b. Do not mark any Stage COMPLETE.",
+    "complete_forbidden_until": "Stage remains IN_PROGRESS. Seed handler assertions remain High for 458 unexecuted seeds. 24 origin SUCCESS/policy/notification/side-effect-retry cells remain High. Possible prior localhost Redis contact is NOT_REINSPECTED. Assignment WA-P1-00B-FREEZE-20260904-001 executes P1-00b. Do not mark any Stage COMPLETE.",
     "family_boundary_evidenced_cells": 55,
     "family_boundary_named_blockers": 0,
     "filename_only_failure_evidence": 0,
     "unrouted_named_blockers": 0,
-    "named_high_blockers": 1,
+    "named_high_blockers": 2,
     "unresolved_high_in_p1_00_exit_gate": 0,
     "prior_localhost_redis_contact": "NOT_REINSPECTED",
     "origin_equivalent_cells": 0
@@ -14269,7 +14269,7 @@
   "blocker_registry": {
     "disposition_request": "CANONICAL_PLAN_AMENDMENT",
     "owner": "CODEX_FINAL_REVIEWER",
-    "note": "One High leftover remains: unfinished seed handler executions except the one admin toggle. Origin SUCCESS/policy/notification/side-effect-retry cells are evidenced. Telegram unlinked-Bot and MSG two-row overlap stay evidenced. P1-00b stays IN_PROGRESS.",
+    "note": "Two High leftovers remain: unfinished seed handler executions except handlers whose exact callable ran, and unproven origin SUCCESS/policy/notification/side-effect-retry dimensions. Durable sqlite Trade/OfferRequest rows and live overtime persist do not close those origin cells. Telegram unlinked-Bot and MSG two-row overlap stay evidenced. P1-00b stays IN_PROGRESS.",
     "required_fields": [
       "blocker_id",
       "severity",
@@ -14304,9 +14304,36 @@
         ],
         "disposition": "BLOCKED_EXPLICIT",
         "status": "BLOCKED_EXPLICIT",
-        "reason": "464 of 465 seeds lack a live handler execution. The one evidenced seed is BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-TOGGLE-BLOCK-L1649. Sibling membership in MSG/CRUD_MUTATION or TRADE/CRUD_MUTATION does not evidence the other 63 handlers.",
-        "observed_fact": "P1-00b executed only handle_admin_toggle_block. persist_sent_direct_message and the Telegram absent-user reject do not close sibling seeds.",
+        "reason": "458 of 465 seeds lack a live handler execution. Evidenced seeds are BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-TOGGLE-BLOCK-L1649, BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-TOGGLE-ACCOUNT-STATUS-L1134, BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-TOGGLE-GROUP-RECIPIENT-L240, BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-TOGGLE-SELECTED-USER-L334, API-MSG-POST-CHAT-SEND-MESSAGE-L2028, BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-L810, and BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-PUBLIC-L829. Sibling membership in MSG/CRUD_MUTATION or TRADE/CRUD_MUTATION does not evidence the other unexecuted handlers.",
+        "observed_fact": "P1-00b executed handle_admin_toggle_block, handle_user_toggle_account_status, toggle_group_recipient, toggle_selected_user, chat.send_message, handle_channel_trade, and handle_channel_trade_public. persist_sent_direct_message overlap and the Telegram absent-user reject do not close sibling seeds.",
         "unauthorized_reason": "Assignment forbids product mutation. Remaining seeds need handler execution or a later authorized change."
+      },
+      {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH",
+        "owner": "CODEX_FINAL_REVIEWER",
+        "resolution_stage": "P1-00b",
+        "blocked_dependents": [
+          "P1-01",
+          "P1-04",
+          "P1-06"
+        ],
+        "required_evidence": "Durable Trade and OfferRequest rows on isolated sqlite, unmocked side-effect cardinality, real overtime persist, a successful retried side effect on the live combined path, and persona/tier/confirmation on the live path.",
+        "forbidden_shortcuts": [
+          "Mark SUCCESS EVIDENCED from a mock trade_number or in-memory Trade",
+          "Cite overtime HTTP 202 as OUTCOME-SUCCESS",
+          "Treat CONCURRENT overlap as proof of the rest of the matrix",
+          "Mark SIDE-EFFECT-RETRY EVIDENCED by calling create_user_notification outside the live trade path",
+          "Mark NOTIFICATION EVIDENCED from a substitute audience or doubled publish/send helpers",
+          "EQUIVALENT_TO_REPRESENTATIVE",
+          "Assign ownership to P1-04 or P1-06",
+          "resolution_stage CODEX_FINAL_REVIEW"
+        ],
+        "disposition": "BLOCKED_EXPLICIT",
+        "status": "BLOCKED_EXPLICIT",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
+        "observed_fact": "Sqlite Trade and OfferRequest rows and live overtime persist exist. SIDE-EFFECT-RETRY still calls create_user_notification directly. SUCCESS/POLICY omit TIER_2, admin guard, and Telegram double-click confirmation. NOTIFICATION still substitutes the audience constructor and publish/send helpers.",
+        "unauthorized_reason": "Assignment forbids a product patch that would join those dimensions on one unmocked path."
       }
     ]
   },
@@ -14318,7 +14345,7 @@
         "TELEGRAM_BOT",
         "INTERNAL"
       ],
-      "reason": "offer_home_server_for_source takes source_surface and returns home. evaluate_invitation_bot_access has no origin parameter. Retry, concurrent, expiry, permission, reject, commit-failure, SUCCESS, policy-snapshot, notification, and side-effect-retry cells have durable Trade and OfferRequest proof.",
+      "reason": "offer_home_server_for_source takes source_surface and returns home. evaluate_invitation_bot_access has no origin parameter. Retry, concurrent, expiry, permission, reject, and commit-failure cells have durable OfferRequest proof. SUCCESS, policy-snapshot, notification, and side-effect-retry stay High blockers; durable sqlite Trade rows are not green copies of those cells.",
       "evidence": [
         "tests/test_offer_source_surface.py",
         "tests/test_p1_00_characterization_matrix_independence.py",
@@ -23492,24 +23519,19 @@
       "offer_origin": "WEBAPP",
       "request_origin": "WEBAPP",
       "interaction": "OUTCOME-SUCCESS",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Live _execute_trade_authoritatively commits durable Trade and OfferRequest on isolated sqlite, stores resulting_trade_id, and writes two delivery receipts.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
-          "boundary_talk": "OUTCOME-SUCCESS",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__OUTCOME-REJECT",
@@ -23665,48 +23687,38 @@
       "offer_origin": "WEBAPP",
       "request_origin": "WEBAPP",
       "interaction": "POLICY-SNAPSHOT",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Live execute stores request surface, offer public id, TIER_1 commission snapshot, and durable Trade plus OfferRequest on isolated sqlite.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects",
-          "boundary_talk": "POLICY-SNAPSHOT",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__NOTIFICATION",
       "offer_origin": "WEBAPP",
       "request_origin": "WEBAPP",
       "interaction": "NOTIFICATION",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Live execute writes two trade_delivery_receipts. Iran home creates two notification rows; foreign home queues the same two receipts with zero local notification rows.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects",
-          "boundary_talk": "NOTIFICATION",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-WEBAPP__WEBAPP__FAILURE-BEFORE-COMMIT",
@@ -23761,48 +23773,38 @@
       "offer_origin": "WEBAPP",
       "request_origin": "WEBAPP",
       "interaction": "SIDE-EFFECT-RETRY",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Post-commit notify failure leaves one Trade, one OfferRequest, and two receipts. A later live create_user_notification delivers without a second ledger row.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects",
-          "boundary_talk": "SIDE-EFFECT-RETRY",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__OUTCOME-SUCCESS",
       "offer_origin": "WEBAPP",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "OUTCOME-SUCCESS",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Live _execute_trade_authoritatively commits durable Trade and OfferRequest on isolated sqlite, stores resulting_trade_id, and writes two delivery receipts.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
-          "boundary_talk": "OUTCOME-SUCCESS",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__OUTCOME-REJECT",
@@ -23967,48 +23969,38 @@
       "offer_origin": "WEBAPP",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "POLICY-SNAPSHOT",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Live execute stores request surface, offer public id, TIER_1 commission snapshot, and durable Trade plus OfferRequest on isolated sqlite.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects",
-          "boundary_talk": "POLICY-SNAPSHOT",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__NOTIFICATION",
       "offer_origin": "WEBAPP",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "NOTIFICATION",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Live execute writes two trade_delivery_receipts. Iran home creates two notification rows; foreign home queues the same two receipts with zero local notification rows.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects",
-          "boundary_talk": "NOTIFICATION",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-WEBAPP__TELEGRAM_BOT__FAILURE-BEFORE-COMMIT",
@@ -24063,48 +24055,38 @@
       "offer_origin": "WEBAPP",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "SIDE-EFFECT-RETRY",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Post-commit notify failure leaves one Trade, one OfferRequest, and two receipts. A later live create_user_notification delivers without a second ledger row.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects",
-          "boundary_talk": "SIDE-EFFECT-RETRY",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__OUTCOME-SUCCESS",
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "WEBAPP",
       "interaction": "OUTCOME-SUCCESS",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Live _execute_trade_authoritatively commits durable Trade and OfferRequest on isolated sqlite, stores resulting_trade_id, and writes two delivery receipts.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
-          "boundary_talk": "OUTCOME-SUCCESS",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__OUTCOME-REJECT",
@@ -24260,48 +24242,38 @@
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "WEBAPP",
       "interaction": "POLICY-SNAPSHOT",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Live execute stores request surface, offer public id, TIER_1 commission snapshot, and durable Trade plus OfferRequest on isolated sqlite.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects",
-          "boundary_talk": "POLICY-SNAPSHOT",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__NOTIFICATION",
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "WEBAPP",
       "interaction": "NOTIFICATION",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Live execute writes two trade_delivery_receipts. Iran home creates two notification rows; foreign home queues the same two receipts with zero local notification rows.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects",
-          "boundary_talk": "NOTIFICATION",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__WEBAPP__FAILURE-BEFORE-COMMIT",
@@ -24356,48 +24328,38 @@
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "WEBAPP",
       "interaction": "SIDE-EFFECT-RETRY",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Post-commit notify failure leaves one Trade, one OfferRequest, and two receipts. A later live create_user_notification delivers without a second ledger row.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects",
-          "boundary_talk": "SIDE-EFFECT-RETRY",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__OUTCOME-SUCCESS",
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "OUTCOME-SUCCESS",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Live _execute_trade_authoritatively commits durable Trade and OfferRequest on isolated sqlite, stores resulting_trade_id, and writes two delivery receipts.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
-          "boundary_talk": "OUTCOME-SUCCESS",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__OUTCOME-REJECT",
@@ -24562,48 +24524,38 @@
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "POLICY-SNAPSHOT",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Live execute stores request surface, offer public id, TIER_1 commission snapshot, and durable Trade plus OfferRequest on isolated sqlite.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects",
-          "boundary_talk": "POLICY-SNAPSHOT",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__NOTIFICATION",
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "NOTIFICATION",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Live execute writes two trade_delivery_receipts. Iran home creates two notification rows; foreign home queues the same two receipts with zero local notification rows.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects",
-          "boundary_talk": "NOTIFICATION",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-TELEGRAM_BOT__TELEGRAM_BOT__FAILURE-BEFORE-COMMIT",
@@ -24658,48 +24610,38 @@
       "offer_origin": "TELEGRAM_BOT",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "SIDE-EFFECT-RETRY",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Post-commit notify failure leaves one Trade, one OfferRequest, and two receipts. A later live create_user_notification delivers without a second ledger row.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects",
-          "boundary_talk": "SIDE-EFFECT-RETRY",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__OUTCOME-SUCCESS",
       "offer_origin": "INTERNAL",
       "request_origin": "WEBAPP",
       "interaction": "OUTCOME-SUCCESS",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Live _execute_trade_authoritatively commits durable Trade and OfferRequest on isolated sqlite, stores resulting_trade_id, and writes two delivery receipts.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
-          "boundary_talk": "OUTCOME-SUCCESS",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__OUTCOME-REJECT",
@@ -24855,48 +24797,38 @@
       "offer_origin": "INTERNAL",
       "request_origin": "WEBAPP",
       "interaction": "POLICY-SNAPSHOT",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Live execute stores request surface, offer public id, TIER_1 commission snapshot, and durable Trade plus OfferRequest on isolated sqlite.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects",
-          "boundary_talk": "POLICY-SNAPSHOT",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__NOTIFICATION",
       "offer_origin": "INTERNAL",
       "request_origin": "WEBAPP",
       "interaction": "NOTIFICATION",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Live execute writes two trade_delivery_receipts. Iran home creates two notification rows; foreign home queues the same two receipts with zero local notification rows.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects",
-          "boundary_talk": "NOTIFICATION",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-INTERNAL__WEBAPP__FAILURE-BEFORE-COMMIT",
@@ -24951,48 +24883,38 @@
       "offer_origin": "INTERNAL",
       "request_origin": "WEBAPP",
       "interaction": "SIDE-EFFECT-RETRY",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Post-commit notify failure leaves one Trade, one OfferRequest, and two receipts. A later live create_user_notification delivers without a second ledger row.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects",
-          "boundary_talk": "SIDE-EFFECT-RETRY",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__OUTCOME-SUCCESS",
       "offer_origin": "INTERNAL",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "OUTCOME-SUCCESS",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Live _execute_trade_authoritatively commits durable Trade and OfferRequest on isolated sqlite, stores resulting_trade_id, and writes two delivery receipts.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_outcome_success_injects",
-          "boundary_talk": "OUTCOME-SUCCESS",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__OUTCOME-REJECT",
@@ -25157,48 +25079,38 @@
       "offer_origin": "INTERNAL",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "POLICY-SNAPSHOT",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Live execute stores request surface, offer public id, TIER_1 commission snapshot, and durable Trade plus OfferRequest on isolated sqlite.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_policy_snapshot_injects",
-          "boundary_talk": "POLICY-SNAPSHOT",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__NOTIFICATION",
       "offer_origin": "INTERNAL",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "NOTIFICATION",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Live execute writes two trade_delivery_receipts. Iran home creates two notification rows; foreign home queues the same two receipts with zero local notification rows.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_notification_injects",
-          "boundary_talk": "NOTIFICATION",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     },
     {
       "variant_id": "ORIGIN-INTERNAL__TELEGRAM_BOT__FAILURE-BEFORE-COMMIT",
@@ -25253,24 +25165,19 @@
       "offer_origin": "INTERNAL",
       "request_origin": "TELEGRAM_BOT",
       "interaction": "SIDE-EFFECT-RETRY",
-      "disposition": "EVIDENCED",
-      "applicability": "ELIGIBLE",
-      "reason": "Post-commit notify failure leaves one Trade, one OfferRequest, and two receipts. A later live create_user_notification delivers without a second ledger row.",
+      "disposition": "BLOCKED_EXPLICIT",
+      "applicability": "HIGH_BLOCKER",
+      "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells.",
       "eligibility": {
-        "decision": "ELIGIBLE",
-        "predicate": "Live _execute_trade_authoritatively joins Offer origin, Request origin, admission, and isolated sqlite Trade plus OfferRequest mutation."
+        "decision": "UNRESOLVED",
+        "reason": "Combined-path proof is incomplete: SIDE-EFFECT-RETRY does not re-enter the live trade path; SUCCESS and POLICY-SNAPSHOT cover only STANDARD owner plus a mocked TIER_1 relation and omit TIER_2, admin command guard, and Telegram double-click confirmation; NOTIFICATION uses a substitute audience and doubled publish/send helpers. Durable sqlite Trade and OfferRequest rows do not close these cells."
       },
-      "evidence_refs": [
-        "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects"
-      ],
-      "evidence_cases": [
-        {
-          "node_id": "tests/test_p1_00b_characterization_origin_interactions.py::P100bOriginInteractionCharacterizationTests.test_origin_side_effect_retry_injects",
-          "boundary_talk": "SIDE-EFFECT-RETRY",
-          "talk_source": "test_function_name_or_doc_or_assert",
-          "injects_named_boundary": true
-        }
-      ]
+      "evidence_refs": [],
+      "evidence_cases": [],
+      "named_blocker": {
+        "blocker_id": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+        "severity": "HIGH"
+      }
     }
   ],
   "scenario_work_item": "READY_FOR_CODEX_FINAL_REVIEW",
