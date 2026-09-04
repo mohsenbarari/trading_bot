@@ -17,7 +17,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from two_site_antigravity_session import binding, UUID, MODEL
+from two_site_antigravity_session import binding, load_profile, UUID, MODEL
 VALIDATED_CLI_SHA256 = "a0a6a8044d01accd39e6f5926d29648d212a2e519ff14102f09e1c061e6171dd"
 AGENT_DIR = ROOT / ".agents" / "agents"
 SKILL = ROOT / ".agents" / "skills" / "two-site-refactor" / "SKILL.md"
@@ -83,6 +83,7 @@ ALLOWED_ROLE_TOOLS = {
 }
 
 WRITE_TOOLS = {"write_to_file", "replace_file_content", "multi_replace_file_content"}
+SMOKE_ROLES = ("coordinator", "worker", "verifier")
 
 
 def _scalar(value: str) -> Any:
@@ -139,6 +140,7 @@ def validate(root: Path = ROOT) -> list[str]:
     governance_schema = root / "docs" / "refactor" / "two-server" / "templates" / "governance-review.schema.json"
     governance_bridge = root / "scripts" / "two_site_codex_governance_review.sh"
     fence_bridge = root / "scripts" / "two_site_orchestrator_fence.py"
+    runtime_profile = root / "scripts" / "antigravity_cli_1_1_26_profile.json"
     errors: list[str] = []
     required = [
         skill,
@@ -153,6 +155,7 @@ def validate(root: Path = ROOT) -> list[str]:
         governance_schema,
         governance_bridge,
         fence_bridge,
+        runtime_profile,
     ]
     required.extend(agent_dir / name for name in AGENTS)
     for path in required:
@@ -161,6 +164,11 @@ def validate(root: Path = ROOT) -> list[str]:
 
     if errors:
         return errors
+
+    try:
+        load_profile(runtime_profile)
+    except (OSError, ValueError) as exc:
+        errors.append(f"{runtime_profile.relative_to(root)}: {exc}")
 
     for filename, expected in AGENTS.items():
         path = agent_dir / filename
@@ -251,7 +259,8 @@ def runtime_sessions(agy: str) -> dict[str, str]:
     path = ROOT / ".local" / "two-site-refactor" / "antigravity-runtime-sessions.json"
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict) or set(data) != {
-        "schema_version", "cli_sha256", "coordinator", "worker", "verifier"
+        "schema_version", "cli_sha256", "coordinator", "worker", "verifier",
+        "execution_coordinator",
     } or data["schema_version"] != "1.0":
         raise ValueError("invalid runtime session registry")
     digest = hashlib.sha256()
@@ -260,13 +269,33 @@ def runtime_sessions(agy: str) -> dict[str, str]:
             digest.update(chunk)
     if data["cli_sha256"] != VALIDATED_CLI_SHA256 or digest.hexdigest() != VALIDATED_CLI_SHA256:
         raise ValueError("CLI binary changed; repeat version-specific runtime binding validation")
-    ids = [data[key] for key in ("coordinator", "worker", "verifier")]
-    if any(not isinstance(value, str) or not UUID.fullmatch(value) for value in ids) or len(set(ids)) != 3:
-        raise ValueError("runtime requires three distinct observed conversation IDs")
+    ids = [data[key] for key in (*SMOKE_ROLES, "execution_coordinator")]
+    if any(not isinstance(value, str) or not UUID.fullmatch(value) for value in ids) or len(set(ids)) != 4:
+        raise ValueError("runtime requires four distinct smoke/execution conversation IDs")
     return data
 
 
-def runtime_bindings(sessions: dict[str, str]) -> list[dict[str, Any]]:
+def execution_binding(sessions: dict[str, str], conversation_id: str) -> dict[str, Any]:
+    if not isinstance(conversation_id, str) or not UUID.fullmatch(conversation_id):
+        raise ValueError("invalid execution Coordinator conversation ID")
+    if sessions.get("execution_coordinator") != conversation_id:
+        raise ValueError("execution Coordinator is not the registered conversation")
+    if conversation_id in {sessions.get(role) for role in SMOKE_ROLES}:
+        raise ValueError("execution Coordinator must be distinct from dedicated smoke sessions")
+    metadata = AGENTS["two-site-coordinator/agent.md"]
+    return binding(
+        conversation_id,
+        metadata["name"],
+        ROOT,
+        set(parse_frontmatter(AGENT_DIR / "two-site-coordinator" / "agent.md")["tools"]),
+        history_policy="ACTIVE_EXECUTION",
+    )
+
+
+def runtime_bindings(
+    sessions: dict[str, str],
+    execution_conversation: str | None = None,
+) -> list[dict[str, Any]]:
     result = []
     for filename, metadata in AGENTS.items():
         role = "coordinator" if metadata["mainAgent"] else (
@@ -277,7 +306,28 @@ def runtime_bindings(sessions: dict[str, str]) -> list[dict[str, Any]]:
             set(parse_frontmatter(AGENT_DIR / filename)["tools"]),
             parent_id=None if role == "coordinator" else sessions["coordinator"],
         ))
+    if execution_conversation is not None:
+        result.append(execution_binding(sessions, execution_conversation))
     return result
+
+
+def antigravity_cli() -> str | None:
+    configured = os.environ.get("ANTIGRAVITY_CLI")
+    local = ROOT / ".local" / "tools" / "agy"
+    return configured or shutil.which("agy") or (str(local) if local.is_file() else None)
+
+
+def validate_execution_conversation(conversation_id: str) -> list[str]:
+    """Bind the actual Coordinator without resuming it or making a provider call."""
+    agy = antigravity_cli()
+    if not agy:
+        return ["agy CLI is not installed; set ANTIGRAVITY_CLI or install .local/tools/agy"]
+    try:
+        sessions = runtime_sessions(agy)
+        execution_binding(sessions, conversation_id)
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        return [f"Antigravity execution Coordinator binding is not ready: {exc}"]
+    return []
 
 
 def check_smoke_stream(output: str, conversation_id: str, token: str = "ANTIGRAVITY_RUNTIME_SMOKE_OK") -> list[str]:
@@ -318,16 +368,17 @@ def check_smoke_stream(output: str, conversation_id: str, token: str = "ANTIGRAV
     return []
 
 
-def validate_runtime() -> list[str]:
-    configured = os.environ.get("ANTIGRAVITY_CLI")
-    local = ROOT / ".local" / "tools" / "agy"
-    agy = configured or shutil.which("agy") or (str(local) if local.is_file() else None)
+def validate_runtime(execution_conversation: str | None = None) -> list[str]:
+    agy = antigravity_cli()
     if not agy:
         return ["agy CLI is not installed; set ANTIGRAVITY_CLI or install .local/tools/agy"]
 
     try:
         sessions = runtime_sessions(agy)
-        bindings_before = runtime_bindings(sessions)
+        execution_conversation = execution_conversation or sessions.get("execution_coordinator")
+        if not isinstance(execution_conversation, str):
+            raise ValueError("runtime registry has no execution Coordinator")
+        bindings_before = runtime_bindings(sessions, execution_conversation)
     except (OSError, ValueError, sqlite3.Error) as exc:
         return [f"Antigravity runtime binding is not ready: {exc}"]
 
@@ -368,7 +419,7 @@ def validate_runtime() -> list[str]:
     def finish(errors: list[str]) -> list[str]:
         try:
             after = repository_snapshot(), control_state_snapshot()
-            bindings_after = runtime_bindings(sessions)
+            bindings_after = runtime_bindings(sessions, execution_conversation)
         except (OSError, ValueError, sqlite3.Error, subprocess.CalledProcessError) as exc:
             return [*errors, f"could not capture post-smoke repository identity: {exc}"]
         if after != before or bindings_after != bindings_before:
@@ -409,11 +460,18 @@ def validate_runtime() -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--runtime", action="store_true", help="also verify exact bound sessions and live no-tool smoke for all three roles")
+    parser.add_argument(
+        "--execution-conversation",
+        metavar="UUID",
+        help="bind the registered actual Antigravity Coordinator without resuming it",
+    )
     args = parser.parse_args()
 
     errors = validate()
     if args.runtime and not errors:
-        errors.extend(validate_runtime())
+        errors.extend(validate_runtime(args.execution_conversation))
+    elif args.execution_conversation and not errors:
+        errors.extend(validate_execution_conversation(args.execution_conversation))
     if errors:
         for error in errors:
             print(f"FAIL: {error}", file=sys.stderr)

@@ -31,6 +31,9 @@ PLATFORMS = {"CURSOR", "ANTIGRAVITY"}
 NON_RUNNING = {"IDLE", "IDLE_INTEGRATED", "BLOCKED", "READY", "COMPLETE_CANDIDATE"}
 ACTIVE_STAGE_STATES = {"READY", "RUNNING", "IDLE_INTEGRATED", "COMPLETE_CANDIDATE", "BLOCKED"}
 ASSIGNMENT_ID_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+ANTIGRAVITY_INSTANCE_PATTERN = (
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+)
 IMMUTABLE_ASSIGNMENT_FIELDS = (
     "stage_id",
     "branch",
@@ -104,6 +107,15 @@ ASSIGNMENT_LIST_FIELDS = (
 
 class FenceError(RuntimeError):
     pass
+
+
+def validate_coordinator_instance(platform: str, instance: Any) -> None:
+    if platform not in PLATFORMS:
+        raise FenceError("orchestrator platform is invalid")
+    if not isinstance(instance, str) or not instance:
+        raise FenceError("orchestrator instance ID is invalid")
+    if platform == "ANTIGRAVITY" and not re.fullmatch(ANTIGRAVITY_INSTANCE_PATTERN, instance):
+        raise FenceError("Antigravity instance must be the execution Coordinator conversation UUID")
 
 
 def run_git(*args: str, cwd: Path | None = None) -> str:
@@ -184,8 +196,7 @@ def validate_fence(payload: Any) -> None:
         raise FenceError("orchestrator fence binding kind is invalid")
     if not isinstance(payload["epoch"], int) or payload["epoch"] < 1:
         raise FenceError("orchestrator fence epoch is invalid")
-    if not isinstance(payload["coordinator_instance_id"], str) or not payload["coordinator_instance_id"]:
-        raise FenceError("orchestrator fence instance ID is invalid")
+    validate_coordinator_instance(payload["platform"], payload["coordinator_instance_id"])
     if payload["integration_branch"] != INTEGRATION_BRANCH:
         raise FenceError("orchestrator fence integration branch is invalid")
     if not re.fullmatch(r"[0-9a-f]{40}", str(payload["integration_head_sha"])):
@@ -220,6 +231,9 @@ def validate_fence(payload: Any) -> None:
             raise FenceError("orchestrator fence supersedes value is invalid")
         if supersedes["platform"] not in PLATFORMS or not isinstance(supersedes["epoch"], int):
             raise FenceError("orchestrator fence superseded owner is invalid")
+        validate_coordinator_instance(
+            supersedes["platform"], supersedes["coordinator_instance_id"]
+        )
 
 
 @contextmanager
@@ -709,9 +723,16 @@ def reconcile_takeover(fence: dict[str, Any], replacement_assignment: str) -> No
     atomic_write_fence(candidate_fence)
 
 
-def validate_antigravity_runtime() -> None:
+def run_antigravity_validator(instance: str, *, runtime: bool) -> None:
+    command = [
+        sys.executable,
+        str(ROOT / "scripts" / "validate_antigravity_two_site_adapter.py"),
+    ]
+    if runtime:
+        command.append("--runtime")
+    command.extend(["--execution-conversation", instance])
     runtime = subprocess.run(
-        [sys.executable, str(ROOT / "scripts" / "validate_antigravity_two_site_adapter.py"), "--runtime"],
+        command,
         cwd=ROOT,
         check=False,
         capture_output=True,
@@ -719,11 +740,21 @@ def validate_antigravity_runtime() -> None:
     )
     if runtime.returncode:
         detail = (runtime.stderr or runtime.stdout).strip()
-        raise FenceError(f"Antigravity runtime discovery is not ready: {detail}")
+        kind = "runtime discovery" if "--runtime" in command else "execution Coordinator binding"
+        raise FenceError(f"Antigravity {kind} is not ready: {detail}")
+
+
+def validate_antigravity_runtime(instance: str) -> None:
+    run_antigravity_validator(instance, runtime=True)
+
+
+def validate_antigravity_execution(instance: str) -> None:
+    run_antigravity_validator(instance, runtime=False)
 
 
 def claim(args: argparse.Namespace) -> None:
     with locked():
+        validate_coordinator_instance(args.platform, args.instance)
         for label, value in (
             ("previous", args.previous_assignment),
             ("replacement", args.replacement_assignment),
@@ -748,7 +779,7 @@ def claim(args: argparse.Namespace) -> None:
         if previous is not None and previous["status"] in {"ACTIVE", "RECONCILING"}:
             raise FenceError("an ACTIVE/RECONCILING orchestrator must be released or recovered before takeover")
         if args.platform == "ANTIGRAVITY":
-            validate_antigravity_runtime()
+            validate_antigravity_runtime(args.instance)
         supersedes = None
         if previous is not None:
             supersedes = {
@@ -792,6 +823,8 @@ def activate(args: argparse.Namespace) -> None:
         ):
             if fence[key] != expected:
                 raise FenceError(f"fence {key} mismatch")
+        if args.platform == "ANTIGRAVITY":
+            validate_antigravity_execution(args.instance)
         verify_git(args.integration_head)
         if fence.get("active_assignment_id") not in (None, args.assignment):
             raise FenceError("RECONCILING fence replacement Assignment mismatch")
@@ -817,6 +850,8 @@ def active_records(
     for key, value in expected.items():
         if fence.get(key) != value:
             raise FenceError(f"ACTIVE fence {key} mismatch")
+    if args.platform == "ANTIGRAVITY":
+        validate_antigravity_execution(args.instance)
     registry = load_yaml(REGISTRY)
     integration = registry.get("integration") or {}
     if integration.get("head_sha") != args.integration_head:
@@ -920,6 +955,8 @@ def stage_bind(args: argparse.Namespace) -> None:
             raise FenceError("Stage bind owner mismatch")
         if fence.get("epoch") != args.epoch or fence.get("integration_head_sha") != args.integration_head:
             raise FenceError("Stage bind epoch/integration mismatch")
+        if args.platform == "ANTIGRAVITY":
+            validate_antigravity_execution(args.instance)
         verify_git(args.integration_head)
         if run_git("status", "--porcelain=v1", "--untracked-files=all"):
             raise FenceError("integration worktree must be clean before Stage bind")
@@ -1046,6 +1083,8 @@ def advance(args: argparse.Namespace) -> None:
         ):
             if fence.get(key) != expected:
                 raise FenceError(f"cannot advance fence: {key} mismatch")
+        if args.platform == "ANTIGRAVITY":
+            validate_antigravity_execution(args.instance)
         verify_git(args.integration_head)
         parent = run_git("rev-parse", f"{args.integration_head}^")
         if fence["integration_head_sha"] not in {parent, args.integration_head}:

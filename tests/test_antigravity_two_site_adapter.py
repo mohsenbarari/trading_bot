@@ -37,6 +37,14 @@ def smoke_stream(response="ANTIGRAVITY_RUNTIME_SMOKE_OK"):
     ])
 
 
+def file_snapshot(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
 def load_fence_module():
     path = ROOT / "scripts" / "two_site_orchestrator_fence.py"
     spec = importlib.util.spec_from_file_location("two_site_orchestrator_fence", path)
@@ -154,7 +162,9 @@ issued_by: CURSOR_COORDINATOR
     fence.LOCK = local / "orchestrator-fence.lock"
     fence.REGISTRY = local / "worktrees.yaml"
     fence.EXECUTION_ORDER = order
-    fence.validate_antigravity_runtime = lambda: None
+    fence.validate_antigravity_runtime = lambda _instance: None
+    fence.validate_antigravity_execution = lambda _instance: None
+    execution_id = "10000000-0000-4000-8000-000000000001"
     return SimpleNamespace(
         git=git,
         root=root,
@@ -165,6 +175,7 @@ issued_by: CURSOR_COORDINATOR
         new_id=new_id,
         integration_head=integration_head,
         stage_head=stage_head,
+        execution_id=execution_id,
         fence=fence,
     )
 
@@ -400,7 +411,7 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
 
         with mock.patch.dict(os.environ, {"ANTIGRAVITY_CLI": "/fake/agy"}), mock.patch.object(
             validator.subprocess, "run", side_effect=runner
-        ) as runner, mock.patch.object(validator, "runtime_sessions", return_value={"coordinator": "runtime-test"}), mock.patch.object(validator, "runtime_bindings", return_value=[]):
+        ) as runner, mock.patch.object(validator, "runtime_sessions", return_value={"coordinator": "runtime-test", "execution_coordinator": "execution-test"}), mock.patch.object(validator, "runtime_bindings", return_value=[]):
             errors = validator.validate_runtime()
         self.assertEqual(
             ["agy read-only smoke failed: exact response/session/mode contract failed"],
@@ -440,7 +451,7 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
 
         with mock.patch.dict(os.environ, {"ANTIGRAVITY_CLI": "/fake/agy"}), mock.patch.object(
             validator.subprocess, "run", side_effect=runner
-        ), mock.patch.object(validator, "runtime_sessions", return_value={"coordinator": "runtime-test"}), mock.patch.object(validator, "runtime_bindings", return_value=[]):
+        ), mock.patch.object(validator, "runtime_sessions", return_value={"coordinator": "runtime-test", "execution_coordinator": "execution-test"}), mock.patch.object(validator, "runtime_bindings", return_value=[]):
             errors = validator.validate_runtime()
         self.assertEqual(
             [
@@ -480,7 +491,7 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
 
         with mock.patch.dict(os.environ, {"ANTIGRAVITY_CLI": "/fake/agy"}), mock.patch.object(
             validator.subprocess, "run", side_effect=runner
-        ), mock.patch.object(validator, "runtime_sessions", return_value={"coordinator": "runtime-test"}), mock.patch.object(validator, "runtime_bindings", return_value=[]):
+        ), mock.patch.object(validator, "runtime_sessions", return_value={"coordinator": "runtime-test", "execution_coordinator": "execution-test"}), mock.patch.object(validator, "runtime_bindings", return_value=[]):
             errors = validator.validate_runtime()
         self.assertIn(
             "Antigravity runtime validation changed repository HEAD, full status, or local orchestration state",
@@ -528,6 +539,7 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
                 output = smoke_stream(token).replace("runtime-test", session)
             return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
         sessions = {role: f"session-{role}" for role in ("coordinator", "worker", "verifier")}
+        sessions["execution_coordinator"] = "session-execution"
         with mock.patch.dict(os.environ, {"ANTIGRAVITY_CLI": "/fake/agy"}), mock.patch.object(
             validator, "runtime_sessions", return_value=sessions
         ), mock.patch.object(validator, "runtime_bindings", return_value=[]), mock.patch.object(
@@ -535,8 +547,108 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
         ):
             self.assertEqual([], validator.validate_runtime())
         self.assertEqual(3, len(calls))
-        self.assertEqual(list(sessions.values()), [call[call.index("--conversation") + 1] for call in calls])
+        self.assertEqual(
+            [sessions[role] for role in validator.SMOKE_ROLES],
+            [call[call.index("--conversation") + 1] for call in calls],
+        )
         self.assertTrue(all("--agent" not in call and "agents" not in call for call in calls))
+
+    def test_execution_coordinator_binding_is_registered_distinct_and_active(self):
+        validator = load_validator()
+        sessions = {
+            "coordinator": "10000000-0000-4000-8000-000000000001",
+            "worker": "10000000-0000-4000-8000-000000000002",
+            "verifier": "10000000-0000-4000-8000-000000000003",
+            "execution_coordinator": "10000000-0000-4000-8000-000000000004",
+        }
+        expected = {"envelope_sha256": "a" * 64}
+        with mock.patch.object(validator, "binding", return_value=expected) as bound:
+            self.assertEqual(
+                expected,
+                validator.execution_binding(sessions, sessions["execution_coordinator"]),
+            )
+        self.assertEqual("ACTIVE_EXECUTION", bound.call_args.kwargs["history_policy"])
+        with self.assertRaisesRegex(ValueError, "not the registered"):
+            validator.execution_binding(
+                sessions, "10000000-0000-4000-8000-000000000005"
+            )
+        duplicate = {**sessions, "execution_coordinator": sessions["coordinator"]}
+        with self.assertRaisesRegex(ValueError, "distinct"):
+            validator.execution_binding(duplicate, duplicate["execution_coordinator"])
+
+    def test_binding_only_validation_never_resumes_execution_conversation(self):
+        validator = load_validator()
+        execution_id = "10000000-0000-4000-8000-000000000004"
+        sessions = {"execution_coordinator": execution_id}
+        with mock.patch.object(
+            validator, "antigravity_cli", return_value="/fake/agy"
+        ), mock.patch.object(
+            validator, "runtime_sessions", return_value=sessions
+        ), mock.patch.object(
+            validator, "execution_binding", return_value={}
+        ) as bound, mock.patch.object(validator.subprocess, "run") as runner:
+            self.assertEqual([], validator.validate_execution_conversation(execution_id))
+        bound.assert_called_once_with(sessions, execution_id)
+        runner.assert_not_called()
+
+    def test_fence_uses_live_smoke_only_for_claim_and_binding_only_afterward(self):
+        fence = load_fence_module()
+        execution_id = "10000000-0000-4000-8000-000000000004"
+        completed = subprocess.CompletedProcess([], 0, stdout="PASS\n", stderr="")
+        with mock.patch.object(fence.subprocess, "run", return_value=completed) as runner:
+            fence.validate_antigravity_runtime(execution_id)
+            fence.validate_antigravity_execution(execution_id)
+        live, offline = [call.args[0] for call in runner.call_args_list]
+        self.assertIn("--runtime", live)
+        self.assertNotIn("--runtime", offline)
+        for command in (live, offline):
+            self.assertEqual(
+                execution_id,
+                command[command.index("--execution-conversation") + 1],
+            )
+            self.assertNotIn("--conversation", command)
+
+    def test_binding_only_cli_fails_closed_with_clear_error(self):
+        validator = load_validator()
+        execution_id = "10000000-0000-4000-8000-000000000004"
+        failure = "Antigravity execution Coordinator binding is not ready: wrong model"
+        with mock.patch.object(validator, "validate", return_value=[]), mock.patch.object(
+            validator, "validate_execution_conversation", return_value=[failure]
+        ), mock.patch.object(
+            validator.sys,
+            "argv",
+            [str(SCRIPT), "--execution-conversation", execution_id],
+        ), mock.patch("builtins.print") as output:
+            self.assertEqual(1, validator.main())
+        self.assertTrue(any(f"FAIL: {failure}" in str(call) for call in output.call_args_list))
+
+    def test_runtime_registry_requires_distinct_execution_coordinator(self):
+        validator = load_validator()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "agy"
+            binary.write_bytes(b"reviewed CLI")
+            digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+            local = root / ".local" / "two-site-refactor"
+            local.mkdir(parents=True)
+            sessions = {
+                "schema_version": "1.0",
+                "cli_sha256": digest,
+                "coordinator": "10000000-0000-4000-8000-000000000001",
+                "worker": "10000000-0000-4000-8000-000000000002",
+                "verifier": "10000000-0000-4000-8000-000000000003",
+                "execution_coordinator": "10000000-0000-4000-8000-000000000004",
+            }
+            registry = local / "antigravity-runtime-sessions.json"
+            registry.write_text(json.dumps(sessions), encoding="utf-8")
+            with mock.patch.object(validator, "ROOT", root), mock.patch.object(
+                validator, "VALIDATED_CLI_SHA256", digest
+            ):
+                self.assertEqual(sessions, validator.runtime_sessions(str(binary)))
+                sessions["execution_coordinator"] = sessions["coordinator"]
+                registry.write_text(json.dumps(sessions), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "four distinct"):
+                    validator.runtime_sessions(str(binary))
 
     def test_official_but_unapproved_tool_is_rejected(self):
         validator = load_validator()
@@ -549,6 +661,123 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
         with mock.patch.object(validator, "parse_frontmatter", side_effect=read):
             self.assertTrue(any("exact reviewed role allowlist" in error for error in validator.validate()))
 
+    def test_antigravity_claim_binding_failure_is_prewrite_and_uuid_is_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = make_fence_fixture(directory)
+            fence = fixture.fence
+            fence.LOCK.touch()
+            baseline = file_snapshot(fixture.local)
+            rejection = mock.Mock(
+                side_effect=fence.FenceError("execution Coordinator binding rejected")
+            )
+            fence.validate_antigravity_runtime = rejection
+            claim = SimpleNamespace(
+                platform="ANTIGRAVITY",
+                instance=fixture.execution_id,
+                integration_head=fixture.integration_head,
+                previous_assignment=fixture.old_id,
+                replacement_assignment=fixture.new_id,
+                expected_epoch=0,
+            )
+            with self.assertRaisesRegex(fence.FenceError, "binding rejected"):
+                fence.claim(claim)
+            rejection.assert_called_once_with(fixture.execution_id)
+            self.assertEqual(baseline, file_snapshot(fixture.local))
+
+            claim.instance = "not-a-conversation-uuid"
+            rejection.reset_mock()
+            with self.assertRaisesRegex(fence.FenceError, "conversation UUID"):
+                fence.claim(claim)
+            rejection.assert_not_called()
+            self.assertEqual(baseline, file_snapshot(fixture.local))
+
+    def test_antigravity_binding_is_rechecked_before_activate_and_active_access(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = make_fence_fixture(directory)
+            fence = fixture.fence
+            claim = SimpleNamespace(
+                platform="ANTIGRAVITY",
+                instance=fixture.execution_id,
+                integration_head=fixture.integration_head,
+                previous_assignment=fixture.old_id,
+                replacement_assignment=fixture.new_id,
+                expected_epoch=0,
+            )
+            original_reconcile = fence.reconcile_takeover
+            fence.reconcile_takeover = mock.Mock(
+                side_effect=fence.FenceError("injected reconciliation interruption")
+            )
+            with self.assertRaisesRegex(fence.FenceError, "interruption"):
+                fence.claim(claim)
+            fence.reconcile_takeover = original_reconcile
+            activate = SimpleNamespace(
+                platform="ANTIGRAVITY",
+                instance=fixture.execution_id,
+                epoch=1,
+                integration_head=fixture.integration_head,
+                assignment=fixture.new_id,
+            )
+            reject = mock.Mock(side_effect=fence.FenceError("binding drift"))
+            fence.validate_antigravity_execution = reject
+            before_activate = file_snapshot(fixture.local)
+            with self.assertRaisesRegex(fence.FenceError, "binding drift"):
+                fence.activate(activate)
+            reject.assert_called_once_with(fixture.execution_id)
+            self.assertEqual(before_activate, file_snapshot(fixture.local))
+
+            fence.validate_antigravity_execution = lambda _instance: None
+            fence.activate(activate)
+            reject = mock.Mock(side_effect=fence.FenceError("binding drift"))
+            fence.validate_antigravity_execution = reject
+            before_check = file_snapshot(fixture.local)
+            with self.assertRaisesRegex(fence.FenceError, "binding drift"):
+                fence.check(activate)
+            reject.assert_called_once_with(fixture.execution_id)
+            self.assertEqual(before_check, file_snapshot(fixture.local))
+
+            reject.reset_mock()
+            with self.assertRaisesRegex(fence.FenceError, "binding drift"):
+                fence.advance(activate)
+            reject.assert_called_once_with(fixture.execution_id)
+            self.assertEqual(before_check, file_snapshot(fixture.local))
+
+            reject.reset_mock()
+            stage_bind = SimpleNamespace(
+                **vars(activate), next_assignment="WA-P1-01-ANTIGRAVITY"
+            )
+            with self.assertRaisesRegex(fence.FenceError, "binding drift"):
+                fence.stage_bind(stage_bind)
+            reject.assert_called_once_with(fixture.execution_id)
+            self.assertEqual(before_check, file_snapshot(fixture.local))
+
+    def test_cursor_instance_remains_opaque_and_skips_antigravity_binding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = make_fence_fixture(directory)
+            fence = fixture.fence
+            runtime = mock.Mock(side_effect=AssertionError("unexpected runtime validation"))
+            execution = mock.Mock(side_effect=AssertionError("unexpected execution binding"))
+            fence.validate_antigravity_runtime = runtime
+            fence.validate_antigravity_execution = execution
+            claim = SimpleNamespace(
+                platform="CURSOR",
+                instance="opaque-cursor-instance",
+                integration_head=fixture.integration_head,
+                previous_assignment=fixture.old_id,
+                replacement_assignment=fixture.new_id,
+                expected_epoch=0,
+            )
+            fence.claim(claim)
+            check = SimpleNamespace(
+                platform="CURSOR",
+                instance="opaque-cursor-instance",
+                epoch=1,
+                integration_head=fixture.integration_head,
+                assignment=fixture.new_id,
+            )
+            fence.check(check)
+            runtime.assert_not_called()
+            execution.assert_not_called()
+
     def test_orchestrator_fence_recovers_each_reconciliation_write_boundary(self):
         for failed_write in range(2, 6):
             with self.subTest(failed_write=failed_write), tempfile.TemporaryDirectory() as directory:
@@ -556,7 +785,7 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
                 fence = fixture.fence
                 claim = SimpleNamespace(
                     platform="ANTIGRAVITY",
-                    instance="crash-recovery-test",
+                    instance=fixture.execution_id,
                     integration_head=fixture.integration_head,
                     previous_assignment=fixture.old_id,
                     replacement_assignment=fixture.new_id,
@@ -580,7 +809,7 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
                 self.assertEqual("RECONCILING", interrupted["status"])
                 activate = SimpleNamespace(
                     platform="ANTIGRAVITY",
-                    instance="crash-recovery-test",
+                    instance=fixture.execution_id,
                     epoch=1,
                     integration_head=fixture.integration_head,
                     assignment=fixture.new_id,
@@ -601,7 +830,7 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
             )
             claim = SimpleNamespace(
                 platform="ANTIGRAVITY",
-                instance="prior-mismatch",
+                instance=fixture.execution_id,
                 integration_head=fixture.integration_head,
                 previous_assignment=fixture.old_id,
                 replacement_assignment=fixture.new_id,
@@ -642,7 +871,7 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
                     )
                 claim = SimpleNamespace(
                     platform="ANTIGRAVITY",
-                    instance=f"fresh-{drift}",
+                    instance=fixture.execution_id,
                     integration_head=fixture.integration_head,
                     previous_assignment=fixture.old_id,
                     replacement_assignment=fixture.new_id,
@@ -659,7 +888,7 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
             fence = fixture.fence
             claim = SimpleNamespace(
                 platform="ANTIGRAVITY",
-                instance="generated-mismatch",
+                instance=fixture.execution_id,
                 integration_head=fixture.integration_head,
                 previous_assignment=fixture.old_id,
                 replacement_assignment=fixture.new_id,
@@ -685,7 +914,7 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
             fence.assignment_document = original_document
             activate = SimpleNamespace(
                 platform="ANTIGRAVITY",
-                instance="generated-mismatch",
+                instance=fixture.execution_id,
                 epoch=1,
                 integration_head=fixture.integration_head,
                 assignment=fixture.new_id,
@@ -718,7 +947,7 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
             )
             claim = SimpleNamespace(
                 platform="ANTIGRAVITY",
-                instance="unrelated-repository",
+                instance=fixture.execution_id,
                 integration_head=fixture.integration_head,
                 previous_assignment=fixture.old_id,
                 replacement_assignment=fixture.new_id,
@@ -837,10 +1066,12 @@ issued_by: CURSOR_COORDINATOR
             fence.LOCK = local / "orchestrator-fence.lock"
             fence.REGISTRY = local / "worktrees.yaml"
             fence.EXECUTION_ORDER = order
-            fence.validate_antigravity_runtime = lambda: None
+            fence.validate_antigravity_runtime = lambda _instance: None
+            fence.validate_antigravity_execution = lambda _instance: None
+            execution_id = "10000000-0000-4000-8000-000000000001"
             claim = SimpleNamespace(
                 platform="ANTIGRAVITY",
-                instance="cursor-test-1",
+                instance=execution_id,
                 integration_head=integration_head,
                 previous_assignment=old_id,
                 replacement_assignment=new_id,
@@ -873,14 +1104,14 @@ issued_by: CURSOR_COORDINATOR
 
             runtime_called = False
 
-            def unexpected_runtime():
+            def unexpected_runtime(_instance):
                 nonlocal runtime_called
                 runtime_called = True
 
             fence.validate_antigravity_runtime = unexpected_runtime
             competing_claim = SimpleNamespace(
                 platform="ANTIGRAVITY",
-                instance="competing-instance",
+                instance="10000000-0000-4000-8000-000000000002",
                 integration_head=integration_head,
                 previous_assignment=new_id,
                 replacement_assignment="WA-P1-00B-COMPETING",
@@ -892,7 +1123,7 @@ issued_by: CURSOR_COORDINATOR
 
             check = SimpleNamespace(
                 platform="ANTIGRAVITY",
-                instance="cursor-test-1",
+                instance=execution_id,
                 epoch=1,
                 integration_head=integration_head,
                 assignment=new_id,

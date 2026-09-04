@@ -84,6 +84,15 @@ authentication فهرست خالی بدهد و `--agent` به default برگرد
 توسط Codex/controller، ابتدا در نشست تعاملیِ plan انجام می‌شود: بعد از login، `/agents`
 باز و Coordinator واقعی انتخاب می‌شود. شناسهٔ مشاهده‌شدهٔ نشست، ورودی resume است؛
 نام مدل یا پاسخ متنیِ خود Agent به‌تنهایی اثبات انتخاب درست نیست.
+شناسهٔ این نشست مستقل در `execution_coordinator` رجیستری محلی ثبت می‌شود و همان UUID
+باید مقدار `--instance` قفل باشد. پیش از claim، فرمان زیر هم smoke سه نقش و هم اتصال
+نشست واقعی را کنترل می‌کند؛ در ادامهٔ کار، fence فقط بررسی read-only نشست واقعی را
+تکرار می‌کند و هرگز نشست فعال خودش را دوباره اجرا نمی‌کند.
+
+```bash
+python3 scripts/validate_antigravity_two_site_adapter.py --runtime \
+  --execution-conversation <VERIFIED_EXECUTION_COORDINATOR_ID>
+```
 
 ```bash
 agy -p "Resume the approved two-site refactor autonomously from canonical state; run no external or production mutation." \
@@ -178,8 +187,9 @@ python3 -m unittest tests.test_antigravity_session_binding
 
 گزینهٔ `--runtime` سه نشست اختصاصی smoke را از فایل ignored
 `.local/two-site-refactor/antigravity-runtime-sessions.json` می‌گیرد. این فایل فقط
-`schema_version: 1.0`، `cli_sha256` و شناسه‌های مشاهده‌شدهٔ `coordinator`، `worker` و
-`verifier` دارد؛ مجوز، receipt یا جایگزین بررسی زنده نیست. شناسه‌ها از اجرای واقعی
+`schema_version: 1.0`، `cli_sha256` و چهار شناسهٔ متمایز `coordinator`، `worker`،
+`verifier` و `execution_coordinator` دارد؛ مجوز، receipt یا جایگزین بررسی زنده نیست.
+سه شناسهٔ اول اختصاصی smoke و چهارمی نشست واقعی Coordinator است. شناسه‌ها از اجرای واقعی
 Coordinator و `invoke_subagent` گرفته می‌شوند، نه از متن ساختگی. نشست اجرای Stage
 باید از نشست smoke جدا باشد تا validator همان Agent فعال را دوباره اجرا نکند.
 
@@ -195,6 +205,19 @@ Coordinator و `invoke_subagent` گرفته می‌شوند، نه از متن �
 tool step الزامی است. HEAD، full status، digest وضعیت محلی و اتصال نشست به تعریف
 Agent قبل/بعد کنترل می‌شوند. Agent قدیمی، config/model drift، خطای قبلی نشست، auth
 نامعتبر یا smoke ناموفق، مسیر را مسدود می‌کند. validator هیچ Stage را اجرا نمی‌کند.
+
+بررسی تنظیمات به prompt اول محدود نیست: همهٔ promptهای literal و symbolic، کنترل‌های
+ادامهٔ اجرا، ابزارها، تنظیمات کمکی و permission/model/effort واقعی با envelope نسخهٔ
+`1.1.26` تطبیق داده می‌شوند. fixture خوانای بدون credential در
+`scripts/antigravity_cli_1_1_26_profile.json` نسخه‌های مشاهده‌شدهٔ همان CLI را ثبت می‌کند؛
+فقط ترتیب map پرچم‌های CLI و مسیر دقیق repository/Gemini نرمال می‌شوند. فیلد، مقدار،
+دستور یا شکل ناشناخته رد می‌شود؛ ارتقای CLI نیازمند ممیزی و receipt تازه است.
+
+سناریوی کنترل: اگر هر سه smoke سالم باشند ولی نشست اجرای Stage با Agent پیش‌فرض یا
+مدل دیگری ساخته شده باشد، `claim` پیش از تغییر fence/Assignment رد می‌شود. اگر اتصال
+نشست بعداً عوض شود، `activate` و `check/worker-check` و مسیرهای mutation متوقف می‌شوند.
+بررسی نشست فعال به تماس Google وابسته نیست: تاریخچهٔ موفق و فقط انتهای درحال‌اجرای
+بدون خطا پذیرفته می‌شود؛ تست smoke همچنان هیچ step ناقص یا ناموفق را نمی‌پذیرد.
 
 تعریف‌ها از `model: inherit` استفاده می‌کنند؛ مدل parent در CLI صریح pin می‌شود و
 مدل واقعی child از executor metadata کنترل می‌شود. `model: pro` در آزمون قبلی برای

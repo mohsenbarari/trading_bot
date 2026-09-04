@@ -47,7 +47,31 @@
         "epoch": {"type": "integer", "minimum": 1},
         "platform": {"enum": ["CURSOR", "ANTIGRAVITY"]},
         "coordinator_instance_id": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"platform": {"const": "ANTIGRAVITY"}}, "required": ["platform"]},
+          "then": {
+            "properties": {
+              "coordinator_instance_id": {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"platform": {"const": "ANTIGRAVITY"}}, "required": ["platform"]},
+      "then": {
+        "properties": {
+          "coordinator_instance_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        }
       }
     }
-  }
+  ]
 }
