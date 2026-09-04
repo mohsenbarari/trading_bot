@@ -34,8 +34,10 @@ command proves ancestry and atomically updates the registered Stage HEAD before 
 
 After exact-SHA approval, patch-bound closeout verification, and integration-fence
 `advance`, the Coordinator deterministically selects a dependency-ready non-external
-Stage, commits only its canonical `IN_PROGRESS` opening under standing authorization,
-and advances the fence again. It then prepares the matching Assignment/worktree and runs
+Stage and first runs fenced `stage-open-check` against canonical `PROPOSED` metadata.
+Unknown metadata or any production/destructive/DNS/Writer/secret flag blocks. Only then
+does it commit the canonical `IN_PROGRESS` opening and advance the fence again. It prepares
+the matching Assignment/worktree at that exact integration HEAD and runs
 `stage-bind --next-assignment <id>`. This closes the prior local Stage record and
 atomically rebinds registry/fence. It rejects external-access Assignments, which remain
 behind their separate pre-action gate.

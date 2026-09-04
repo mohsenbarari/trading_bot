@@ -77,9 +77,11 @@ recovery metadata under ignored `.local/two-site-refactor/`; it is a cache, neve
 source of truth.
 
 After a verified closeout and fence `advance`, deterministically select a dependency-ready
-non-external Stage, commit its canonical transition to `IN_PROGRESS` under standing start
-authorization, and `advance` the fence again. Then prepare its Assignment/worktree and
-run the fenced `stage-bind` transaction. It closes
+candidate and run fenced `stage-open-check` before changing canonical state. Only a
+known-metadata Stage with no production/destructive/DNS/Writer/secret/external flag may
+transition to `IN_PROGRESS` under standing start authorization. `advance` the fence again,
+prepare its Assignment/worktree at that exact integration HEAD, and run fenced `stage-bind`.
+It closes
 the prior local Stage record and binds the new Assignment without changing epoch or
 requiring an owner-relayed handoff.
 

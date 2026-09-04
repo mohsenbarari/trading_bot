@@ -65,14 +65,15 @@ Cursor و Antigravity هرگز هم‌زمان Writer ندارند.
 
 Coordinator برای ساخت و کنترل اتمیک fence فقط از
 `scripts/two_site_orchestrator_fence.py` (`claim`، `activate`، `check`، `worker-check`،
-`stage-advance`، `stage-bind`، `advance` و `release`) استفاده می‌کند؛ ویرایش دستی JSON fence مجاز
+`stage-advance`، `stage-open-check`، `stage-bind`، `advance` و `release`) استفاده می‌کند؛ ویرایش دستی JSON fence مجاز
 نیست. Worker هنگام تغییرات مشروع فقط `worker-check` فقط‌خواندنی را اجرا می‌کند؛ پس از
 commit تمیز، Coordinator با `stage-advance` و اثبات ancestry، HEAD رجیستری Stage را
 اتمیک به candidate متصل می‌کند و سپس Verifier آغاز می‌شود.
-پس از closeout تأییدشده و `advance` شدن integration fence، Coordinator با `stage-bind`
-ابتدا Stage بعدی dependency-ready و non-external را قطعی انتخاب، transition آن به
-`IN_PROGRESS` را تحت standing authorization کامیت و fence را دوباره `advance` می‌کند؛
-سپس رکورد قبلی را محلی می‌بندد و Assignment/Worktree همان Stage را اتمیک فعال می‌کند.
+پس از closeout تأییدشده و `advance` شدن integration fence، Coordinator ابتدا با
+`stage-open-check` نبود پرچم خارجی و metadata ناشناخته را ثابت می‌کند؛ سپس transition
+Stage پذیرفته‌شده به `IN_PROGRESS` را کامیت و fence را دوباره `advance` می‌کند. worktree
+بعدی باید روی همان integration HEAD ساخته شود و `stage-bind` رکورد قبلی را محلی می‌بندد
+و Assignment/Worktree همان Stage را اتمیک فعال می‌کند.
 Assignment دارای external access از این مسیر رد می‌شود.
 
 ## شروع اختیاری در CLI

@@ -17,6 +17,8 @@ alwaysApply: false
   requires clean registered worktrees and supersedes the old Assignment.
 - Worker boundaries use read-only `worker-check`; only Coordinator runs `stage-advance`
   after the clean descendant commit and before verification.
+- Require fenced `stage-open-check` before opening a Stage; unknown metadata and any
+  production/destructive/DNS/Writer/secret flag block automatic continuation.
 - Require success, failure, rollback and post-integration evidence.
 - Deploy never changes DNS or Web Writer; only an explicit human dashboard action may do so.
 - Finland is the sole Telegram Executor; SMS executes only on the current Web Writer/generation.

@@ -24,6 +24,8 @@ Hard invariants:
   and supersedes the old Assignment.
 - Workers use read-only `worker-check` while a candidate may be dirty. Only the
   Coordinator may run `stage-advance` after a clean descendant commit and before review.
+- Before opening the next Stage, require `stage-open-check`; unknown metadata and every
+  production/destructive/DNS/Writer/secret classification fail closed.
 - Success, failure, rollback/recovery, and post-integration evidence are mandatory.
 - No Coordinator, Worker, Cursor model, or Antigravity model may self-approve. Stage
   implementation needs an exact-SHA `CODEX_FINAL_REVIEWER` receipt; dependencies are

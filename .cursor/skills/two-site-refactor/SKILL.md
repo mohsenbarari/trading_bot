@@ -106,8 +106,10 @@ Market data, checkpoint reset, evidence deletion or fixture-only High/Critical p
    `scripts/two_site_codex_closeout_review.sh` to obtain a Codex pre-action receipt bound
    to the exact staged-patch SHA-256. Commit that unchanged index, run the script's
    `--verify-commit` gate, then remove the closed Stage worktree and recompute the ready
-   set. Commit and fence-advance the deterministic `IN_PROGRESS` opening of the selected
-   ready non-external Stage, then use `stage-bind` to atomically move fence/registry to
+   set. Run fenced `stage-open-check` before the deterministic `IN_PROGRESS` opening;
+   unknown metadata and production/destructive/DNS/Writer/secret flags block automatic
+   continuation. Commit and fence-advance only an accepted opening, prepare its worktree at
+   the exact integration HEAD, then use `stage-bind` to atomically move fence/registry to
    its prepared Assignment. Dependents remain blocked until post-commit verification passes.
 8. Continue automatically only through authorized non-external Stages. Promote integration
    to `main` only at an approved branch barrier with a separate exact head/base Codex receipt.

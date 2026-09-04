@@ -26,9 +26,10 @@ project owner must relay between.
    a patch-bound `STAGE_CLOSEOUT_PREACTION` receipt through
    `scripts/two_site_codex_closeout_review.sh`, commit the unchanged index, and run its
    `--verify-commit` gate. Only then close the worktree, release dependencies, recompute
-   the ready set, commit the selected dependency-ready non-external Stage's deterministic
-   `IN_PROGRESS` opening under standing authorization, advance the fence, prepare its
-   Assignment/worktree, bind it atomically with `stage-bind`, and continue. `REJECT` or
+   the ready set, run fenced `stage-open-check`, and only then commit the selected Stage's
+   deterministic `IN_PROGRESS` opening under standing authorization. Advance the fence,
+   prepare its Assignment/worktree at the exact integration HEAD, bind it atomically with
+   `stage-bind`, and continue. `REJECT` or
    `BLOCKED` stops the affected path.
 
 The parent keeps returned subagent IDs so it can resume context rather than asking the

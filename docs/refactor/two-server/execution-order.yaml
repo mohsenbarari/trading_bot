@@ -18,7 +18,10 @@ authorization:
   user_stage_approval_required: false
   user_stage_acceptance_required: false
   standard_non_external_stage_start: STANDING_AUTHORIZATION
-  stage_completion_requires: CODEX_FINAL_REVIEW_RECEIPT
+  stage_completion_requires:
+    - CODEX_FINAL_REVIEW_RECEIPT
+    - CODEX_CLOSEOUT_PREACTION_RECEIPT
+    - CLOSEOUT_POST_COMMIT_VERIFIED
   external_action_requires: CODEX_SCOPED_PRE_ACTION_RECEIPT
   human_writer_dashboard_action_required: true
 
@@ -45,7 +48,10 @@ parallel_execution:
   read_only_second_worker_without_pairing: true
   integrate_serially: true
   candidate_integration_requires: COORDINATOR_ASSIGNMENT_AND_CLEAN_HEAD
-  stage_completion_requires: CODEX_REVIEW_OF_EXACT_INTEGRATION_COMMIT
+  stage_completion_requires:
+    - CODEX_REVIEW_OF_EXACT_INTEGRATION_COMMIT
+    - CODEX_REVIEW_OF_EXACT_CLOSEOUT_PATCH
+    - CLOSEOUT_POST_COMMIT_VERIFIED
   main_promotion_requires: CODEX_BRANCH_BARRIER_RECEIPT
   full_matrix_serial_on_integrated_head: true
   worker_branch_pattern: refactor/stage/<STAGE_ID>-<slug>

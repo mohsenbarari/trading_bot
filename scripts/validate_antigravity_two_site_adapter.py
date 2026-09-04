@@ -218,6 +218,7 @@ def validate(root: Path = ROOT) -> list[str]:
         "orchestrator-fence.json",
         "worker-check",
         "stage-advance",
+        "stage-open-check",
         "stage-bind",
     ):
         if required_text not in combined:

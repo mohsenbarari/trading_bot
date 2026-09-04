@@ -178,8 +178,8 @@ expires_at: <utc>
 نیست، expiry یا auto-failover محصول ندارد و هیچ نقش سروری را عوض نمی‌کند؛ فقط مانع
 نوشتن هم‌زمان دو ابزار توسعه روی Git/worktree می‌شود.
 
-عملیات `claim`، `activate`، `check`، `worker-check`، `stage-advance`، `stage-bind`،
-`advance` و `release` با
+عملیات `claim`، `activate`، `check`، `worker-check`، `stage-advance`،
+`stage-open-check`، `stage-bind`، `advance` و `release` با
 `scripts/two_site_orchestrator_fence.py` انجام می‌شود؛ Agent حق ندارد JSON fence را
 با ویرایش آزاد یا بدون file lock بسازد.
 
@@ -202,14 +202,19 @@ Coordinator باید `stage-advance` را اجرا کند؛ این فرمان de
 فقط بعد از این reconciliation شروع می‌شود.
 
 پس از closeout commit تأییدشده و `advance` integration، Coordinator Assignment و
-Stage بعدی dependency-ready/non-external را به‌صورت قطعی انتخاب می‌کند، فقط transition
-آن به `IN_PROGRESS` را تحت standing start authorization کامیت و fence را `advance`
+Stage بعدی dependency-ready/non-external را به‌صورت قطعی انتخاب می‌کند. پیش از هر
+تغییر، `stage-open-check` باید روی state برابر `PROPOSED`، تمام dependencyها و مجموعهٔ
+بستهٔ metadata موفق شود؛ هر metadata ناشناخته یا هر پرچم `production`، `destructive`،
+`dns_change`، `writer_change` یا `secret_change` ادامهٔ خودکار را مسدود می‌کند. سپس فقط
+transition آن به `IN_PROGRESS` تحت standing start authorization کامیت و fence `advance`
 می‌کند. سپس Assignment و worktree ثبت‌شده را آماده و `stage-bind` را اجرا می‌کند. این
 transaction با همان epoch، fence را موقتاً `RECONCILING`، Stage قبلی را محلی `CLOSED`
 و registry/fence را به Assignment جدید bind می‌کند. فرمان خود نیز COMPLETE بودن Stage
 قبلی، IN_PROGRESS بودن Stage جدید، کامل بودن dependencies و غیرproduction/
-غیرdestructive بودن آن را می‌سنجد. recovery فقط با همان instance و پارامترها مجاز
-است و automatic bind فقط `external_access: NONE` را می‌پذیرد.
+غیرخارجی بودن آن را دوباره می‌سنجد. Assignment، base و HEAD worktree بعدی باید دقیقاً
+برابر integration HEAD باشند و worktree باید Git common directory یکسان داشته باشد.
+recovery فقط با همان instance و پارامترها مجاز است و automatic bind فقط
+`external_access: NONE` را می‌پذیرد.
 
 takeover کاملاً خودکار ولی fail-closed است و فقط با این ترتیب انجام می‌شود:
 

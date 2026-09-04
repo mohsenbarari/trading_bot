@@ -10,6 +10,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "validate_antigravity_two_site_adapter.py"
@@ -43,11 +45,9 @@ def make_fence_fixture(directory: str):
     root = Path(directory) / "integration"
     stage_root = Path(directory) / "stage"
     root.mkdir()
-    stage_root.mkdir()
-    for repo in (root, stage_root):
-        git(repo, "init", "-q")
-        git(repo, "config", "user.name", "Fence Test")
-        git(repo, "config", "user.email", "fence@example.invalid")
+    git(root, "init", "-q")
+    git(root, "config", "user.name", "Fence Test")
+    git(root, "config", "user.email", "fence@example.invalid")
     git(root, "switch", "-qc", "refactor/two-site-architecture")
     (root / ".gitignore").write_text("/.local/\n", encoding="utf-8")
     (root / "tracked.txt").write_text("one\n", encoding="utf-8")
@@ -63,7 +63,16 @@ def make_fence_fixture(directory: str):
     git(root, "commit", "-qm", "integration base")
     integration_head = git(root, "rev-parse", "HEAD")
 
-    git(stage_root, "switch", "-qc", "refactor/stage/P1-00b-freeze")
+    git(
+        root,
+        "worktree",
+        "add",
+        "-q",
+        "-b",
+        "refactor/stage/P1-00b-freeze",
+        str(stage_root),
+        integration_head,
+    )
     (stage_root / "stage.txt").write_text("candidate\n", encoding="utf-8")
     git(stage_root, "add", ".")
     git(stage_root, "commit", "-qm", "stage candidate")
@@ -82,7 +91,7 @@ stage_id: P1-00b
 role: WORKER
 status: READY
 supersedes: null
-base_sha: {stage_head}
+base_sha: {integration_head}
 branch: refactor/stage/P1-00b-freeze
 worktree_path: {stage_root}
 worktree_registry_id: stage-P1-00b
@@ -124,8 +133,6 @@ issued_by: CURSOR_COORDINATOR
             }
         ],
     }
-    import yaml
-
     (local / "worktrees.yaml").write_text(
         yaml.safe_dump(registry, sort_keys=False), encoding="utf-8"
     )
@@ -155,6 +162,28 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
     def test_static_contract(self):
         validator = load_validator()
         self.assertEqual([], validator.validate())
+
+    def test_work_assignment_template_matches_executable_contract(self):
+        fence = load_fence_module()
+        template = (
+            ROOT / "docs" / "refactor" / "two-server" / "templates" / "WORK_ASSIGNMENT.md"
+        ).read_text(encoding="utf-8")
+        contract = template.split("```yaml\n", 1)[1].split("\n```", 1)[0]
+        for field in fence.CANONICAL_ASSIGNMENT_FIELDS:
+            self.assertRegex(contract, rf"(?m)^{field}:")
+        order = yaml.safe_load(
+            (ROOT / "docs" / "refactor" / "two-server" / "execution-order.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            [
+                "CODEX_FINAL_REVIEW_RECEIPT",
+                "CODEX_CLOSEOUT_PREACTION_RECEIPT",
+                "CLOSEOUT_POST_COMMIT_VERIFIED",
+            ],
+            order["authorization"]["stage_completion_requires"],
+        )
 
     def test_verifier_has_no_file_write_tool(self):
         validator = load_validator()
@@ -460,6 +489,146 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
                 fence.activate(activate)
                 fence.check(activate)
 
+    def test_takeover_rejects_prior_mismatch_before_superseding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = make_fence_fixture(directory)
+            fence = fixture.fence
+            old_path = fixture.assignments / f"{fixture.old_id}.md"
+            old_path.write_text(
+                old_path.read_text(encoding="utf-8").replace(
+                    str(fixture.stage_root), f"{fixture.stage_root}-wrong"
+                ),
+                encoding="utf-8",
+            )
+            claim = SimpleNamespace(
+                platform="ANTIGRAVITY",
+                instance="prior-mismatch",
+                integration_head=fixture.integration_head,
+                previous_assignment=fixture.old_id,
+                replacement_assignment=fixture.new_id,
+                expected_epoch=0,
+            )
+            with self.assertRaises(fence.FenceError):
+                fence.claim(claim)
+            self.assertFalse(fence.FENCE.exists())
+            self.assertEqual("READY", fence.load_assignment(fixture.old_id)["status"])
+            self.assertFalse((fixture.assignments / f"{fixture.new_id}.md").exists())
+
+    def test_fresh_takeover_rejects_superseded_assignment_and_registry_base_drift(self):
+        for drift in ("superseded", "registry-base", "malformed-scope"):
+            with self.subTest(drift=drift), tempfile.TemporaryDirectory() as directory:
+                fixture = make_fence_fixture(directory)
+                fence = fixture.fence
+                if drift == "superseded":
+                    old_path = fixture.assignments / f"{fixture.old_id}.md"
+                    old_path.write_text(
+                        old_path.read_text(encoding="utf-8").replace(
+                            "status: READY", "status: SUPERSEDED"
+                        ),
+                        encoding="utf-8",
+                    )
+                elif drift == "registry-base":
+                    registry = yaml.safe_load(fence.REGISTRY.read_text(encoding="utf-8"))
+                    registry["stage_worktrees"][0]["base_sha"] = "0" * 40
+                    fence.REGISTRY.write_text(
+                        yaml.safe_dump(registry, sort_keys=False), encoding="utf-8"
+                    )
+                else:
+                    old_path = fixture.assignments / f"{fixture.old_id}.md"
+                    old_path.write_text(
+                        old_path.read_text(encoding="utf-8").replace(
+                            "allowed_paths: [tests/**]", "allowed_paths: tests/**"
+                        ),
+                        encoding="utf-8",
+                    )
+                claim = SimpleNamespace(
+                    platform="ANTIGRAVITY",
+                    instance=f"fresh-{drift}",
+                    integration_head=fixture.integration_head,
+                    previous_assignment=fixture.old_id,
+                    replacement_assignment=fixture.new_id,
+                    expected_epoch=0,
+                )
+                with self.assertRaises(fence.FenceError):
+                    fence.claim(claim)
+                self.assertFalse(fence.FENCE.exists())
+                self.assertFalse((fixture.assignments / f"{fixture.new_id}.md").exists())
+
+    def test_takeover_generated_mismatch_stays_reconciling_and_recovers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = make_fence_fixture(directory)
+            fence = fixture.fence
+            claim = SimpleNamespace(
+                platform="ANTIGRAVITY",
+                instance="generated-mismatch",
+                integration_head=fixture.integration_head,
+                previous_assignment=fixture.old_id,
+                replacement_assignment=fixture.new_id,
+                expected_epoch=0,
+            )
+            original_document = fence.assignment_document
+
+            def mismatched_document(source, assignment_id, changes, note):
+                document = original_document(source, assignment_id, changes, note)
+                if assignment_id == fixture.new_id:
+                    return document.replace(
+                        str(fixture.stage_root), f"{fixture.stage_root}-wrong", 1
+                    )
+                return document
+
+            fence.assignment_document = mismatched_document
+            with self.assertRaises(fence.FenceError):
+                fence.claim(claim)
+            self.assertEqual("RECONCILING", fence.load_fence()["status"])
+            self.assertEqual("READY", fence.load_assignment(fixture.old_id)["status"])
+            self.assertFalse((fixture.assignments / f"{fixture.new_id}.md").exists())
+
+            fence.assignment_document = original_document
+            activate = SimpleNamespace(
+                platform="ANTIGRAVITY",
+                instance="generated-mismatch",
+                epoch=1,
+                integration_head=fixture.integration_head,
+                assignment=fixture.new_id,
+            )
+            fence.activate(activate)
+            fence.check(activate)
+
+    def test_takeover_rejects_worktree_from_unrelated_repository(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = make_fence_fixture(directory)
+            fence = fixture.fence
+            unrelated = Path(directory) / "unrelated"
+            subprocess.run(
+                ["git", "clone", "-q", str(fixture.stage_root), str(unrelated)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            old_path = fixture.assignments / f"{fixture.old_id}.md"
+            old_path.write_text(
+                old_path.read_text(encoding="utf-8").replace(
+                    str(fixture.stage_root), str(unrelated)
+                ),
+                encoding="utf-8",
+            )
+            registry = yaml.safe_load(fence.REGISTRY.read_text(encoding="utf-8"))
+            registry["stage_worktrees"][0]["path"] = str(unrelated)
+            fence.REGISTRY.write_text(
+                yaml.safe_dump(registry, sort_keys=False), encoding="utf-8"
+            )
+            claim = SimpleNamespace(
+                platform="ANTIGRAVITY",
+                instance="unrelated-repository",
+                integration_head=fixture.integration_head,
+                previous_assignment=fixture.old_id,
+                replacement_assignment=fixture.new_id,
+                expected_epoch=0,
+            )
+            with self.assertRaises(fence.FenceError):
+                fence.claim(claim)
+            self.assertFalse(fence.FENCE.exists())
+
     def test_orchestrator_fence_transaction_and_drift_guards(self):
         def git(repo: Path, *args: str) -> str:
             return subprocess.run(
@@ -470,11 +639,9 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
             root = Path(directory) / "integration"
             stage_root = Path(directory) / "stage"
             root.mkdir()
-            stage_root.mkdir()
-            for repo in (root, stage_root):
-                git(repo, "init", "-q")
-                git(repo, "config", "user.name", "Fence Test")
-                git(repo, "config", "user.email", "fence@example.invalid")
+            git(root, "init", "-q")
+            git(root, "config", "user.name", "Fence Test")
+            git(root, "config", "user.email", "fence@example.invalid")
             git(root, "switch", "-qc", "refactor/two-site-architecture")
             (root / ".gitignore").write_text("/.local/\n", encoding="utf-8")
             (root / "tracked.txt").write_text("one\n", encoding="utf-8")
@@ -490,7 +657,16 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
             git(root, "commit", "-qm", "integration base")
             integration_head = git(root, "rev-parse", "HEAD")
 
-            git(stage_root, "switch", "-qc", "refactor/stage/P1-00b-freeze")
+            git(
+                root,
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "refactor/stage/P1-00b-freeze",
+                str(stage_root),
+                integration_head,
+            )
             (stage_root / "stage.txt").write_text("candidate\n", encoding="utf-8")
             git(stage_root, "add", ".")
             git(stage_root, "commit", "-qm", "stage candidate")
@@ -509,7 +685,7 @@ stage_id: P1-00b
 role: WORKER
 status: READY
 supersedes: null
-base_sha: {stage_head}
+base_sha: {integration_head}
 branch: refactor/stage/P1-00b-freeze
 worktree_path: {stage_root}
 worktree_registry_id: stage-P1-00b
@@ -551,8 +727,6 @@ issued_by: CURSOR_COORDINATOR
                     }
                 ],
             }
-            import yaml
-
             (local / "worktrees.yaml").write_text(
                 yaml.safe_dump(registry, sort_keys=False), encoding="utf-8"
             )
@@ -715,14 +889,16 @@ issued_by: CURSOR_COORDINATOR
             fence.check(check)
 
             next_stage_root = Path(directory) / "stage-next"
-            next_stage_root.mkdir()
-            git(next_stage_root, "init", "-q")
-            git(next_stage_root, "config", "user.name", "Fence Test")
-            git(next_stage_root, "config", "user.email", "fence@example.invalid")
-            git(next_stage_root, "switch", "-qc", "refactor/stage/P1-01")
-            (next_stage_root / "next.txt").write_text("next\n", encoding="utf-8")
-            git(next_stage_root, "add", ".")
-            git(next_stage_root, "commit", "-qm", "next stage base")
+            git(
+                root,
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "refactor/stage/P1-01",
+                str(next_stage_root),
+                next_head,
+            )
             next_stage_head = git(next_stage_root, "rev-parse", "HEAD")
             next_assignment_id = "WA-P1-01-ANTIGRAVITY"
             (assignments / f"{next_assignment_id}.md").write_text(
@@ -749,6 +925,7 @@ rollback_test: revert
 external_access: NONE
 expires_at: '2099-01-01T00:00:00Z'
 issued_by: EXECUTION_COORDINATOR
+issued_at: '2099-01-01T00:00:00Z'
 orchestrator: ANTIGRAVITY
 orchestration_epoch: 1
 integration_branch: refactor/two-site-architecture
@@ -783,6 +960,77 @@ integration_head_at_issue: {next_head}
             )
             next_assignment_path = assignments / f"{next_assignment_id}.md"
             valid_next_assignment = next_assignment_path.read_text(encoding="utf-8")
+            canonical_next = fence.load_assignment(next_assignment_id)
+            unknown = dict(canonical_next)
+            unknown["future_contract_field"] = True
+            with self.assertRaises(fence.FenceError):
+                fence.validate_canonical_assignment(unknown)
+            for field in (
+                "allowed_paths",
+                "forbidden_paths",
+                "locks",
+                "deliverables",
+                "tests",
+                "failure_tests",
+            ):
+                malformed = dict(canonical_next)
+                malformed[field] = "not-an-array"
+                with self.assertRaises(fence.FenceError):
+                    fence.validate_canonical_assignment(malformed)
+            for field, value in (
+                ("status", "COMPLETE"),
+                ("supersedes", 7),
+                ("parallel_peer", []),
+                ("worktree_registry_id", []),
+                ("rollback_test", []),
+                ("external_access", True),
+            ):
+                malformed = dict(canonical_next)
+                malformed[field] = value
+                with self.assertRaises(fence.FenceError):
+                    fence.validate_canonical_assignment(malformed)
+
+            original_load_yaml = fence.load_yaml
+            stage_open = SimpleNamespace(**vars(check), next_stage="P1-01")
+            for flag in (
+                "production",
+                "destructive",
+                "dns_change",
+                "writer_change",
+                "secret_change",
+                "future_external_risk",
+            ):
+                guarded_order = yaml.safe_load(order.read_text(encoding="utf-8"))
+                guarded_order["stages"]["P1-01"][flag] = True
+
+                def guarded_load(path, payload=guarded_order):
+                    return payload if path == order else original_load_yaml(path)
+
+                with mock.patch.object(fence, "load_yaml", side_effect=guarded_load):
+                    with self.assertRaises(fence.FenceError):
+                        fence.stage_bind(stage_bind)
+                self.assertEqual(new_id, fence.load_fence()["active_assignment_id"])
+
+                open_order = yaml.safe_load(order.read_text(encoding="utf-8"))
+                open_order["stages"]["P1-01"]["state"] = "PROPOSED"
+                open_order["stages"]["P1-01"][flag] = True
+
+                def guarded_open_load(path, payload=open_order):
+                    return payload if path == order else original_load_yaml(path)
+
+                with mock.patch.object(fence, "load_yaml", side_effect=guarded_open_load):
+                    with self.assertRaises(fence.FenceError):
+                        fence.stage_open_check(stage_open)
+
+            proposed_order = yaml.safe_load(order.read_text(encoding="utf-8"))
+            proposed_order["stages"]["P1-01"]["state"] = "PROPOSED"
+
+            def proposed_load(path):
+                return proposed_order if path == order else original_load_yaml(path)
+
+            with mock.patch.object(fence, "load_yaml", side_effect=proposed_load):
+                fence.stage_open_check(stage_open)
+
             next_assignment_path.write_text(
                 valid_next_assignment.replace("external_access: NONE", "external_access: LIVE"),
                 encoding="utf-8",
@@ -791,6 +1039,77 @@ integration_head_at_issue: {next_head}
                 fence.stage_bind(stage_bind)
             self.assertEqual(new_id, fence.load_fence()["active_assignment_id"])
             next_assignment_path.write_text(valid_next_assignment, encoding="utf-8")
+
+            stale_base_assignment = valid_next_assignment.replace(
+                f"base_sha: {next_stage_head}", f"base_sha: {stage_head}"
+            )
+            next_assignment_path.write_text(stale_base_assignment, encoding="utf-8")
+            with self.assertRaises(fence.FenceError):
+                fence.stage_bind(stage_bind)
+            next_assignment_path.write_text(valid_next_assignment, encoding="utf-8")
+
+            valid_registry = fence.REGISTRY.read_text(encoding="utf-8")
+            mismatched_registry = yaml.safe_load(valid_registry)
+            next_record = [
+                item
+                for item in mismatched_registry["stage_worktrees"]
+                if item["assignment_id"] == next_assignment_id
+            ][0]
+            next_record["base_sha"] = stage_head
+            fence.REGISTRY.write_text(
+                yaml.safe_dump(mismatched_registry, sort_keys=False), encoding="utf-8"
+            )
+            with self.assertRaises(fence.FenceError):
+                fence.stage_bind(stage_bind)
+            fence.REGISTRY.write_text(valid_registry, encoding="utf-8")
+
+            mismatched_head_registry = yaml.safe_load(valid_registry)
+            next_head_record = [
+                item
+                for item in mismatched_head_registry["stage_worktrees"]
+                if item["assignment_id"] == next_assignment_id
+            ][0]
+            next_head_record["head_sha"] = stage_head
+            fence.REGISTRY.write_text(
+                yaml.safe_dump(mismatched_head_registry, sort_keys=False), encoding="utf-8"
+            )
+            with self.assertRaises(fence.FenceError):
+                fence.stage_bind(stage_bind)
+            fence.REGISTRY.write_text(valid_registry, encoding="utf-8")
+
+            unrelated_next = Path(directory) / "unrelated-next"
+            subprocess.run(
+                ["git", "clone", "-q", str(root), str(unrelated_next)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            git(
+                unrelated_next,
+                "switch",
+                "-qc",
+                "refactor/stage/P1-01",
+                next_head,
+            )
+            next_assignment_path.write_text(
+                valid_next_assignment.replace(str(next_stage_root), str(unrelated_next)),
+                encoding="utf-8",
+            )
+            unrelated_registry = yaml.safe_load(valid_registry)
+            unrelated_record = [
+                item
+                for item in unrelated_registry["stage_worktrees"]
+                if item["assignment_id"] == next_assignment_id
+            ][0]
+            unrelated_record["path"] = str(unrelated_next)
+            fence.REGISTRY.write_text(
+                yaml.safe_dump(unrelated_registry, sort_keys=False), encoding="utf-8"
+            )
+            with self.assertRaises(fence.FenceError):
+                fence.stage_bind(stage_bind)
+            next_assignment_path.write_text(valid_next_assignment, encoding="utf-8")
+            fence.REGISTRY.write_text(valid_registry, encoding="utf-8")
+
             fence.stage_bind(stage_bind)
             next_check = SimpleNamespace(
                 **{**vars(check), "assignment": next_assignment_id}
