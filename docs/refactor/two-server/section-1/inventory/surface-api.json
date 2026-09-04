@@ -167,7 +167,8 @@
       "test_refs": [
         "tests/test_web_push.py",
         "tests/test_admin_messages_router.py",
-        "tests/test_offers_router_create_success.py"
+        "tests/test_offers_router_create_success.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_create_market_message_persists_notifies_then_rejects_empty"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -182,7 +183,8 @@
       "test_refs": [
         "tests/test_admin_messages_router.py",
         "frontend/src/views/MarketView.test.ts",
-        "frontend/src/components/AdminMessagesView.test.ts"
+        "frontend/src/components/AdminMessagesView.test.ts",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_clear_current_market_message_deactivates_then_noop_when_empty"
       ],
       "operation_kind": "CRUD_MUTATION"
     },

@@ -45,7 +45,8 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_start_creation.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_start_invitation_creation_sets_fsm_then_denies_without_user"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -61,7 +62,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_start_creation.py",
         "tests/test_p1_00_characterization_operation_exceptions.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_start_invitation_inline_sets_fsm_then_denies_without_user"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -75,7 +77,8 @@
       "source": "bot/handlers/admin.py:183",
       "test_refs": [
         "tests/test_bot_admin_account_name.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_process_invitation_account_name_advances_then_rejects_invalid"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -89,7 +92,8 @@
       "source": "bot/handlers/admin.py:230",
       "test_refs": [
         "tests/test_bot_admin_mobile.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_process_invitation_mobile_advances_then_rejects_invalid"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -119,7 +123,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_cancel.py",
         "tests/test_p1_00_characterization_operation_exceptions.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_cancel_invitation_creation_clears_then_denies_without_user"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -360,7 +365,8 @@
       "test_refs": [
         "tests/test_bot_admin_commodities_alias_add.py",
         "tests/test_p1_00_characterization_operation_exceptions.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_bot_alias_add_start_sets_fsm_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -392,7 +398,8 @@
         "tests/test_bot_admin_commodities_alias_delete.py",
         "tests/test_bot_admin_commodities_alias_edit.py",
         "tests/test_p1_00_characterization_operation_exceptions.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_bot_alias_edit_start_sets_fsm_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -424,7 +431,8 @@
         "tests/test_bot_admin_commodities_alias_delete.py",
         "tests/test_bot_admin_commodities_alias_edit.py",
         "tests/test_p1_00_characterization_operation_exceptions.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_bot_alias_delete_start_sets_fsm_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -455,7 +463,8 @@
       "test_refs": [
         "tests/test_bot_admin_commodities_commodity_edit.py",
         "tests/test_p1_00_characterization_operation_exceptions.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_bot_commodity_edit_start_sets_fsm_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -487,7 +496,8 @@
         "tests/test_bot_admin_commodities_show_list.py",
         "tests/test_bot_admin_commodities_add_create.py",
         "tests/test_p1_00_characterization_operation_exceptions.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_bot_add_start_sets_fsm_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -502,7 +512,8 @@
       "test_refs": [
         "tests/test_bot_admin_commodities_add_flow.py",
         "tests/test_bot_admin_commodities_add_create.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_bot_add_name_advances_fsm_then_denies_without_user"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -534,7 +545,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_commodities_delete_cancel.py",
         "tests/test_p1_00_characterization_operation_exceptions.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_bot_delete_confirm_sets_fsm_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -566,7 +578,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_commodities_delete_cancel.py",
         "tests/test_p1_00_characterization_operation_exceptions.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_bot_cancel_fsm_clears_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -580,7 +593,8 @@
       "source": "bot/handlers/admin_users.py:1078",
       "test_refs": [
         "tests/test_bot_admin_users_role_actions.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_user_edit_role_prompts_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -628,7 +642,8 @@
       "source": "bot/handlers/admin_users.py:1186",
       "test_refs": [
         "tests/test_bot_admin_users_delete_flow.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_user_delete_request_redirects_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -642,7 +657,8 @@
       "source": "bot/handlers/admin_users.py:1203",
       "test_refs": [
         "tests/test_bot_admin_users_delete_flow.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_user_delete_confirm_redirects_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -745,7 +761,8 @@
       "test_refs": [
         "tests/test_bot_admin_users_limit_flow.py",
         "tests/test_p1_00_characterization_operation_exceptions.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_limit_cancel_clears_fsm_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -760,7 +777,8 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_block_settings.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_user_block_settings_shows_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -791,7 +809,8 @@
       "source": "bot/handlers/admin_users.py:1698",
       "test_refs": [
         "tests/test_bot_admin_users_block_settings.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_admin_set_max_block_prompts_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"
@@ -821,7 +840,8 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_block_custom.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_admin_max_block_custom_sets_fsm_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "FSM_PROMPT"

@@ -1,5 +1,12 @@
 # Infrastructure
 
+- 2026-09-04 | P1-00b executed twenty-two more exact handlers (commodity FSM
+  starts, invitation FSM, remaining user-admin prompts, and market-message
+  create/clear) and attached per-seed test nodes. Origin SUCCESS/policy/
+  notification/side-effect-retry stay High. Fifty-four exact handlers are
+  evidenced; 411 seeds stay High. Live hosts were not re-observed.
+  `DR-018` stays `NOT_REINSPECTED`.
+
 - 2026-09-04 | P1-00b executed eight more exact handlers (six bot commodity
   mutations plus trading-settings update/reset) and attached per-seed test
   nodes. Origin SUCCESS/policy/notification/side-effect-retry stay High.

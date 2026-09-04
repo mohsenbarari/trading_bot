@@ -22,6 +22,11 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 
 import schemas
+from api.routers.admin_messages import (
+    AdminMarketMessageCreate,
+    clear_current_market_message,
+    create_market_message,
+)
 from api.routers.chat import delete_message, send_message, update_message
 from api.routers.chat_schemas import MessageSend, MessageUpdate
 from api.routers.commodities import (
@@ -41,6 +46,13 @@ from api.routers.trading_settings import (
     update_market_override,
     update_settings,
 )
+from bot.handlers.admin import (
+    cancel_invitation_creation,
+    process_invitation_account_name,
+    process_invitation_mobile,
+    start_invitation_creation,
+    start_invitation_creation_inline,
+)
 from bot.handlers.admin_broadcast import (
     confirm_telegram_admin_broadcast,
     toggle_group_recipient,
@@ -48,21 +60,37 @@ from bot.handlers.admin_broadcast import (
 )
 from bot.handlers.admin_commodities import (
     handle_add_aliases_and_create,
+    handle_add_name,
+    handle_add_start,
     handle_alias_add_name,
+    handle_alias_add_start,
+    handle_alias_delete_start,
     handle_alias_delete_yes,
     handle_alias_edit_name,
+    handle_alias_edit_start,
+    handle_cancel_fsm,
     handle_commodity_edit_name,
+    handle_commodity_edit_start,
+    handle_delete_confirm,
     handle_delete_yes,
 )
 from bot.handlers.admin_users import (
+    handle_admin_max_block_custom,
     handle_admin_max_block_set,
+    handle_admin_set_max_block,
+    handle_limit_cancel,
     handle_limit_confirm,
     handle_set_user_role,
     handle_user_block_actions,
+    handle_user_block_settings,
+    handle_user_delete_confirm,
+    handle_user_delete_request,
+    handle_user_edit_role,
     handle_user_unblock,
     handle_user_unlimit,
     process_custom_max_block,
 )
+from bot.states import CommodityManagement, InvitationCreation, UserManagement
 from bot.handlers.trade_execute import handle_channel_trade, handle_channel_trade_public
 from bot.utils import redis_helpers
 from core.commodity_defaults import IMAM_COMMODITY_NAME
@@ -122,6 +150,28 @@ BOT_COMMODITY_CREATE_SEED = "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-ADD-ALIA
 BOT_COMMODITY_DELETE_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-DELETE-YES-L685"
 UPDATE_SETTINGS_SEED = "API-ADMIN-PUT-TRADING-SETTINGS-UPDATE-SETTINGS-L306"
 RESET_SETTINGS_SEED = "API-ADMIN-POST-TRADING-SETTINGS-RESET-SETTINGS-L353"
+BOT_ALIAS_ADD_START_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ALIAS-ADD-START-L350"
+BOT_ALIAS_EDIT_START_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ALIAS-EDIT-START-L408"
+BOT_ALIAS_DELETE_START_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ALIAS-DELETE-START-L466"
+BOT_COMMODITY_EDIT_START_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-COMMODITY-EDIT-START-L523"
+BOT_COMMODITY_ADD_START_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ADD-START-L572"
+BOT_COMMODITY_ADD_NAME_SEED = "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-ADD-NAME-L583"
+BOT_COMMODITY_DELETE_CONFIRM_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-DELETE-CONFIRM-L671"
+BOT_COMMODITY_CANCEL_FSM_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-CANCEL-FSM-L719"
+INVITE_START_SEED = "BOT-ADMIN-MESSAGE-ADMIN-START-INVITATION-CREATION-L140"
+INVITE_START_INLINE_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-START-INVITATION-CREATION-INLINE-L160"
+INVITE_ACCOUNT_SEED = "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-ACCOUNT-NAME-L183"
+INVITE_MOBILE_SEED = "BOT-ADMIN-MESSAGE-ADMIN-PROCESS-INVITATION-MOBILE-L230"
+INVITE_CANCEL_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-CANCEL-INVITATION-CREATION-L402"
+USER_EDIT_ROLE_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-EDIT-ROLE-L1078"
+USER_DELETE_REQUEST_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-DELETE-REQUEST-L1186"
+USER_DELETE_CONFIRM_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-DELETE-CONFIRM-L1203"
+LIMIT_CANCEL_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-LIMIT-CANCEL-L1563"
+BLOCK_SETTINGS_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-BLOCK-SETTINGS-L1607"
+SET_MAX_BLOCK_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-SET-MAX-BLOCK-L1698"
+MAX_BLOCK_CUSTOM_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-MAX-BLOCK-CUSTOM-L1772"
+CREATE_MARKET_MESSAGE_SEED = "API-ADMIN-POST-ADMIN-MESSAGES-CREATE-MARKET-MESSAGE-L204"
+CLEAR_MARKET_MESSAGE_SEED = "API-ADMIN-DELETE-ADMIN-MESSAGES-CLEAR-CURRENT-MARKET-MESSAGE-L235"
 TRADE_CHANNEL_SEED = "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-L810"
 TRADE_PUBLIC_SEED = "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-PUBLIC-L829"
 UNEVIDENCED_TRADE_GATEWAY_SEEDS = {TRADE_CHANNEL_SEED, TRADE_PUBLIC_SEED}
@@ -159,6 +209,28 @@ SLICE_EXECUTED_SEED_IDS = {
     BOT_COMMODITY_DELETE_SEED,
     UPDATE_SETTINGS_SEED,
     RESET_SETTINGS_SEED,
+    BOT_ALIAS_ADD_START_SEED,
+    BOT_ALIAS_EDIT_START_SEED,
+    BOT_ALIAS_DELETE_START_SEED,
+    BOT_COMMODITY_EDIT_START_SEED,
+    BOT_COMMODITY_ADD_START_SEED,
+    BOT_COMMODITY_ADD_NAME_SEED,
+    BOT_COMMODITY_DELETE_CONFIRM_SEED,
+    BOT_COMMODITY_CANCEL_FSM_SEED,
+    INVITE_START_SEED,
+    INVITE_START_INLINE_SEED,
+    INVITE_ACCOUNT_SEED,
+    INVITE_MOBILE_SEED,
+    INVITE_CANCEL_SEED,
+    USER_EDIT_ROLE_SEED,
+    USER_DELETE_REQUEST_SEED,
+    USER_DELETE_CONFIRM_SEED,
+    LIMIT_CANCEL_SEED,
+    BLOCK_SETTINGS_SEED,
+    SET_MAX_BLOCK_SEED,
+    MAX_BLOCK_CUSTOM_SEED,
+    CREATE_MARKET_MESSAGE_SEED,
+    CLEAR_MARKET_MESSAGE_SEED,
 }
 
 SEED_EVIDENCE_NODES = {
@@ -291,6 +363,94 @@ SEED_EVIDENCE_NODES = {
         "tests/test_p1_00b_characterization_seed_slice.py"
         "::P100bSeedSliceExecutionTests.test_reset_settings_restores_defaults_after_update"
     ),
+    BOT_ALIAS_ADD_START_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_bot_alias_add_start_sets_fsm_then_denies_non_admin"
+    ),
+    BOT_ALIAS_EDIT_START_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_bot_alias_edit_start_sets_fsm_then_denies_non_admin"
+    ),
+    BOT_ALIAS_DELETE_START_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_bot_alias_delete_start_sets_fsm_then_denies_non_admin"
+    ),
+    BOT_COMMODITY_EDIT_START_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_bot_commodity_edit_start_sets_fsm_then_denies_non_admin"
+    ),
+    BOT_COMMODITY_ADD_START_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_bot_add_start_sets_fsm_then_denies_non_admin"
+    ),
+    BOT_COMMODITY_ADD_NAME_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_bot_add_name_advances_fsm_then_denies_without_user"
+    ),
+    BOT_COMMODITY_DELETE_CONFIRM_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_bot_delete_confirm_sets_fsm_then_denies_non_admin"
+    ),
+    BOT_COMMODITY_CANCEL_FSM_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_bot_cancel_fsm_clears_then_denies_non_admin"
+    ),
+    INVITE_START_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_start_invitation_creation_sets_fsm_then_denies_without_user"
+    ),
+    INVITE_START_INLINE_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_start_invitation_inline_sets_fsm_then_denies_without_user"
+    ),
+    INVITE_ACCOUNT_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_process_invitation_account_name_advances_then_rejects_invalid"
+    ),
+    INVITE_MOBILE_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_process_invitation_mobile_advances_then_rejects_invalid"
+    ),
+    INVITE_CANCEL_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_cancel_invitation_creation_clears_then_denies_without_user"
+    ),
+    USER_EDIT_ROLE_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_user_edit_role_prompts_then_denies_non_admin"
+    ),
+    USER_DELETE_REQUEST_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_user_delete_request_redirects_then_denies_non_admin"
+    ),
+    USER_DELETE_CONFIRM_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_user_delete_confirm_redirects_then_denies_non_admin"
+    ),
+    LIMIT_CANCEL_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_limit_cancel_clears_fsm_then_denies_non_admin"
+    ),
+    BLOCK_SETTINGS_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_user_block_settings_shows_then_denies_non_admin"
+    ),
+    SET_MAX_BLOCK_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_admin_set_max_block_prompts_then_denies_non_admin"
+    ),
+    MAX_BLOCK_CUSTOM_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_admin_max_block_custom_sets_fsm_then_denies_non_admin"
+    ),
+    CREATE_MARKET_MESSAGE_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_create_market_message_persists_notifies_then_rejects_empty"
+    ),
+    CLEAR_MARKET_MESSAGE_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_clear_current_market_message_deactivates_then_noop_when_empty"
+    ),
 }
 
 
@@ -301,6 +461,50 @@ class IsolatedConfirmRedis:
         raise RuntimeError("isolated-redis")
 
     async def aclose(self):
+        return None
+
+
+class IsolatedAsyncRedis:
+    """Client-construction isolate: no socket; cache/notify commands fail closed."""
+
+    def __init__(self, *args, **kwargs):
+        self.connected = False
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def get(self, *args, **kwargs):
+        raise RuntimeError("isolated-redis")
+
+    async def set(self, *args, **kwargs):
+        raise RuntimeError("isolated-redis")
+
+    async def delete(self, *args, **kwargs):
+        raise RuntimeError("isolated-redis")
+
+    async def incr(self, *args, **kwargs):
+        raise RuntimeError("isolated-redis")
+
+    async def publish(self, *args, **kwargs):
+        raise RuntimeError("isolated-redis")
+
+    async def close(self):
+        return None
+
+
+class IsolatedSyncRedis:
+    """Client-construction isolate for sync publish_event_sync."""
+
+    def __init__(self, *args, **kwargs):
+        self.connected = False
+
+    def publish(self, *args, **kwargs):
+        raise RuntimeError("isolated-redis")
+
+    def close(self):
         return None
 
 
@@ -322,6 +526,7 @@ class FakeState:
 
     async def clear(self):
         self.data.clear()
+        self.state = None
 
 
 class RoleSession:
@@ -589,6 +794,95 @@ def _bot_commodity_patches(db):
         patch("bot.handlers.admin_commodities.show_aliases_list", new=AsyncMock()),
         patch("bot.handlers.admin_commodities.show_commodity_list", new=AsyncMock()),
         patch("bot.handlers.admin_commodities.asyncio.sleep", new=AsyncMock()),
+    ]
+
+
+def _market_message_store(path: str):
+    engine, Session = _admin_crud_store(path)
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS users"))
+        conn.execute(
+            text(
+                "CREATE TABLE users ("
+                "id INTEGER PRIMARY KEY, account_name VARCHAR NOT NULL, mobile_number VARCHAR NOT NULL, "
+                "normalized_account_name VARCHAR NOT NULL, normalized_mobile_number VARCHAR NOT NULL, "
+                "telegram_id INTEGER, username VARCHAR, full_name VARCHAR NOT NULL, address TEXT NOT NULL, "
+                "avatar_file_id VARCHAR, role VARCHAR NOT NULL, account_status VARCHAR NOT NULL, "
+                "deactivated_at DATETIME, messenger_grace_expires_at DATETIME, messenger_blocked_at DATETIME, "
+                "has_bot_access BOOLEAN NOT NULL DEFAULT 1, bot_onboarding_required_step INTEGER NOT NULL DEFAULT 0, "
+                "bot_onboarding_completed_step INTEGER NOT NULL DEFAULT 0, bot_onboarding_completed_at DATETIME, "
+                "is_deleted BOOLEAN NOT NULL DEFAULT 0, deleted_at DATETIME, admin_password_hash VARCHAR, "
+                "must_change_password BOOLEAN NOT NULL DEFAULT 0, offer_overtime_minutes INTEGER NOT NULL DEFAULT 0, "
+                "trading_restricted_until DATETIME, max_daily_trades INTEGER, max_active_commodities INTEGER, "
+                "max_daily_requests INTEGER, limitations_expire_at DATETIME, trades_count INTEGER NOT NULL DEFAULT 0, "
+                "commodities_traded_count INTEGER NOT NULL DEFAULT 0, channel_messages_count INTEGER NOT NULL DEFAULT 0, "
+                "counter_epoch INTEGER NOT NULL DEFAULT 1, max_sessions INTEGER NOT NULL DEFAULT 1, "
+                "max_accountants INTEGER NOT NULL DEFAULT 3, max_customers INTEGER NOT NULL DEFAULT 5, "
+                "home_server VARCHAR NOT NULL DEFAULT 'foreign', sync_version INTEGER NOT NULL DEFAULT 1, "
+                "can_block_users BOOLEAN DEFAULT 1, max_blocked_users INTEGER DEFAULT 10, "
+                "last_seen_at DATETIME, created_at DATETIME, updated_at DATETIME)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS accountant_relations ("
+                "id INTEGER PRIMARY KEY, owner_user_id INTEGER, accountant_user_id INTEGER, "
+                "status VARCHAR, deleted_at DATETIME)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO users (id, account_name, mobile_number, normalized_account_name, "
+                "normalized_mobile_number, full_name, address, role, account_status, is_deleted) VALUES "
+                "(1, 'admin', '09120000001', 'admin', '09120000001', 'Admin', 'a', 'SUPER_ADMIN', 'active', 0), "
+                "(2, 'buyer', '09120000002', 'buyer', '09120000002', 'Buyer', 'b', 'STANDARD', 'active', 0)"
+            )
+        )
+    Notification.__table__.create(engine, checkfirst=True)
+    return engine, Session
+
+
+def _isolated_market_patches():
+    return [
+        patch("core.utils.redis.Redis", IsolatedAsyncRedis),
+        patch("core.events._get_sync_redis", return_value=IsolatedSyncRedis()),
+        patch("core.redis.get_redis_client", side_effect=RuntimeError("isolated-redis")),
+    ]
+
+
+def _invitation_patches():
+    return [
+        patch(
+            "bot.handlers.admin.answer_incoming_message_via_runtime",
+            new=AsyncMock(return_value=SimpleNamespace(message_id=80)),
+        ),
+        patch(
+            "bot.handlers.admin.edit_callback_message_via_runtime",
+            new=AsyncMock(return_value=SimpleNamespace(message_id=81)),
+        ),
+        patch("bot.handlers.admin.answer_callback_query_via_runtime", new=AsyncMock()),
+        patch("bot.handlers.admin.answer_callback_message_via_runtime", new=AsyncMock()),
+        patch("bot.handlers.admin._return_to_admin_panel", new=AsyncMock()),
+        patch(
+            "bot.handlers.admin.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode="isolated"),
+        ),
+        patch("bot.handlers.admin.get_commodity_fsm_cancel_keyboard", return_value="KB"),
+        patch("bot.handlers.admin.get_role_selection_keyboard", return_value="ROLE-KB"),
+    ]
+
+
+def _user_admin_display_patches():
+    return [
+        patch("bot.handlers.admin_users.answer_callback_query_via_runtime", new=AsyncMock()),
+        patch("bot.handlers.admin_users.edit_callback_message_via_runtime", new=AsyncMock()),
+        patch("bot.handlers.admin_users.get_user_profile_text", new=AsyncMock(return_value="profile")),
+        patch("bot.handlers.admin_users.get_user_role_edit_keyboard", return_value="ROLE-KB"),
+        patch("bot.handlers.admin_users.get_max_block_options_keyboard", return_value="MAX-KB"),
+        patch("bot.handlers.admin_users.get_block_settings_keyboard", return_value="BLOCK-KB"),
+        patch("bot.handlers.admin_users.get_user_settings_keyboard", return_value="SET-KB"),
+        patch("bot.handlers.admin_users.get_user_delete_webapp_redirect_keyboard", return_value="DEL-KB"),
+        patch("bot.handlers.admin_users.get_user_profile_return_keyboard", return_value="RET-KB"),
     ]
 
 
@@ -1925,6 +2219,632 @@ class P100bSeedSliceExecutionTests(unittest.IsolatedAsyncioTestCase):
             with sqlite3.connect(db_path) as conn:
                 raw = conn.execute("SELECT value FROM trading_settings WHERE key='offer_min_quantity'").fetchone()
             self.assertEqual(json.loads(raw[0]), 5)
+            engine.dispose()
+
+    async def test_bot_alias_add_start_sets_fsm_then_denies_non_admin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "bot-alias-add-start.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            db = CrudSession(Session())
+            patches = _bot_commodity_patches(db)
+            denied = FakeState()
+            ok = FakeState()
+            for item in patches:
+                item.start()
+            try:
+                await handle_alias_add_start(
+                    _commodity_callback("alias_add_1"),
+                    user=SimpleNamespace(role=UserRole.STANDARD),
+                    state=denied,
+                )
+                self.assertIsNone(denied.state)
+                await handle_alias_add_start(
+                    _commodity_callback("alias_add_1"),
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    state=ok,
+                )
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            self.assertEqual(ok.state, CommodityManagement.awaiting_alias_add_name)
+            self.assertEqual(ok.data["commodity_id"], 1)
+            engine.dispose()
+
+    async def test_bot_alias_edit_start_sets_fsm_then_denies_non_admin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "bot-alias-edit-start.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            db = CrudSession(Session())
+            patches = _bot_commodity_patches(db)
+            denied = FakeState()
+            ok = FakeState()
+            for item in patches:
+                item.start()
+            try:
+                await handle_alias_edit_start(
+                    _commodity_callback("alias_edit_1_2"),
+                    user=SimpleNamespace(role=UserRole.STANDARD),
+                    state=denied,
+                )
+                self.assertIsNone(denied.state)
+                await handle_alias_edit_start(
+                    _commodity_callback("alias_edit_1_2"),
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    state=ok,
+                )
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            self.assertEqual(ok.state, CommodityManagement.awaiting_alias_edit_name)
+            self.assertEqual(ok.data["alias_id"], 2)
+            self.assertEqual(ok.data["commodity_id"], 1)
+            engine.dispose()
+
+    async def test_bot_alias_delete_start_sets_fsm_then_denies_non_admin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "bot-alias-delete-start.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            db = CrudSession(Session())
+            patches = _bot_commodity_patches(db)
+            denied = FakeState()
+            ok = FakeState()
+            for item in patches:
+                item.start()
+            try:
+                await handle_alias_delete_start(
+                    _commodity_callback("alias_delete_1_2"),
+                    user=SimpleNamespace(role=UserRole.STANDARD),
+                    state=denied,
+                )
+                self.assertIsNone(denied.state)
+                await handle_alias_delete_start(
+                    _commodity_callback("alias_delete_1_2"),
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    state=ok,
+                )
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            self.assertEqual(ok.state, CommodityManagement.awaiting_alias_delete_confirm)
+            self.assertEqual(ok.data["alias_to_delete_id"], 2)
+            engine.dispose()
+
+    async def test_bot_commodity_edit_start_sets_fsm_then_denies_non_admin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "bot-commodity-edit-start.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            db = CrudSession(Session())
+            patches = _bot_commodity_patches(db)
+            denied = FakeState()
+            ok = FakeState()
+            for item in patches:
+                item.start()
+            try:
+                await handle_commodity_edit_start(
+                    _commodity_callback("comm_edit_name_1"),
+                    user=SimpleNamespace(role=UserRole.STANDARD),
+                    state=denied,
+                )
+                self.assertIsNone(denied.state)
+                await handle_commodity_edit_start(
+                    _commodity_callback("comm_edit_name_1"),
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    state=ok,
+                )
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            self.assertEqual(ok.state, CommodityManagement.awaiting_commodity_edit_name)
+            self.assertEqual(ok.data["commodity_id"], 1)
+            engine.dispose()
+
+    async def test_bot_add_start_sets_fsm_then_denies_non_admin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "bot-add-start.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            db = CrudSession(Session())
+            patches = _bot_commodity_patches(db)
+            denied = FakeState()
+            ok = FakeState()
+            for item in patches:
+                item.start()
+            try:
+                await handle_add_start(
+                    _commodity_callback("comm_add_new"),
+                    user=SimpleNamespace(role=UserRole.STANDARD),
+                    state=denied,
+                )
+                self.assertIsNone(denied.state)
+                await handle_add_start(
+                    _commodity_callback("comm_add_new"),
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    state=ok,
+                )
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            self.assertEqual(ok.state, CommodityManagement.awaiting_add_name)
+            engine.dispose()
+
+    async def test_bot_add_name_advances_fsm_then_denies_without_user(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "bot-add-name.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            db = CrudSession(Session())
+            patches = _bot_commodity_patches(db)
+            denied = FakeState()
+            ok = FakeState()
+            for item in patches:
+                item.start()
+            try:
+                await handle_add_name(_commodity_message("ربع"), denied, user=None)
+                self.assertIsNone(denied.state)
+                await handle_add_name(
+                    _commodity_message("ربع"),
+                    ok,
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                )
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            self.assertEqual(ok.state, CommodityManagement.awaiting_add_aliases)
+            self.assertEqual(ok.data["name"], "ربع")
+            engine.dispose()
+
+    async def test_bot_delete_confirm_sets_fsm_then_denies_non_admin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "bot-delete-confirm.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            db = CrudSession(Session())
+            patches = _bot_commodity_patches(db)
+            denied = FakeState()
+            ok = FakeState()
+            for item in patches:
+                item.start()
+            try:
+                await handle_delete_confirm(
+                    _commodity_callback("comm_delete_1"),
+                    user=SimpleNamespace(role=UserRole.STANDARD),
+                    state=denied,
+                )
+                self.assertIsNone(denied.state)
+                await handle_delete_confirm(
+                    _commodity_callback("comm_delete_1"),
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    state=ok,
+                )
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            self.assertEqual(ok.state, CommodityManagement.awaiting_delete_confirmation)
+            self.assertEqual(ok.data["commodity_to_delete_id"], 1)
+            engine.dispose()
+
+    async def test_bot_cancel_fsm_clears_then_denies_non_admin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "bot-cancel-fsm.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            db = CrudSession(Session())
+            patches = _bot_commodity_patches(db)
+            denied = FakeState(commodity_id=1)
+            await denied.set_state(CommodityManagement.awaiting_alias_add_name)
+            ok = FakeState(commodity_id=1)
+            await ok.set_state(CommodityManagement.awaiting_alias_add_name)
+
+            async def _clear(state):
+                await state.clear()
+
+            for item in patches:
+                item.start()
+            try:
+                with patch("bot.handlers.admin_commodities.clear_state_retain_anchor", new=_clear):
+                    await handle_cancel_fsm(
+                        _commodity_callback("comm_fsm_cancel"),
+                        denied,
+                        user=SimpleNamespace(role=UserRole.STANDARD),
+                    )
+                    self.assertEqual(denied.state, CommodityManagement.awaiting_alias_add_name)
+                    await handle_cancel_fsm(
+                        _commodity_callback("comm_fsm_cancel"),
+                        ok,
+                        user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    )
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            self.assertIsNone(ok.state)
+            self.assertEqual(ok.data, {})
+            engine.dispose()
+
+    async def test_start_invitation_creation_sets_fsm_then_denies_without_user(self):
+        denied = FakeState()
+        ok = FakeState()
+        patches = _invitation_patches()
+        for item in patches:
+            item.start()
+        try:
+            await start_invitation_creation(_commodity_message("➕ ارسال لینک دعوت"), denied, user=None)
+            self.assertIsNone(denied.state)
+            await start_invitation_creation(
+                _commodity_message("➕ ارسال لینک دعوت"),
+                ok,
+                user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+            )
+        finally:
+            for item in reversed(patches):
+                item.stop()
+        self.assertEqual(ok.state, InvitationCreation.awaiting_account_name)
+        self.assertEqual(ok.data["inviter_role"], UserRole.SUPER_ADMIN.value)
+
+    async def test_start_invitation_inline_sets_fsm_then_denies_without_user(self):
+        denied = FakeState()
+        ok = FakeState()
+        patches = _invitation_patches()
+        for item in patches:
+            item.start()
+        try:
+            await start_invitation_creation_inline(
+                _commodity_callback("create_invitation_inline"),
+                denied,
+                user=None,
+            )
+            self.assertIsNone(denied.state)
+            await start_invitation_creation_inline(
+                _commodity_callback("create_invitation_inline"),
+                ok,
+                user=SimpleNamespace(role=UserRole.MIDDLE_MANAGER),
+            )
+        finally:
+            for item in reversed(patches):
+                item.stop()
+        self.assertEqual(ok.state, InvitationCreation.awaiting_account_name)
+        self.assertEqual(ok.data["inviter_role"], UserRole.MIDDLE_MANAGER.value)
+
+    async def test_process_invitation_account_name_advances_then_rejects_invalid(self):
+        invalid = FakeState()
+        await invalid.set_state(InvitationCreation.awaiting_account_name)
+        ok = FakeState()
+        await ok.set_state(InvitationCreation.awaiting_account_name)
+        patches = _invitation_patches()
+        for item in patches:
+            item.start()
+        try:
+            await process_invitation_account_name(
+                _commodity_message("ab"),
+                invalid,
+                user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+            )
+            self.assertEqual(invalid.state, InvitationCreation.awaiting_account_name)
+            self.assertNotIn("account_name", invalid.data)
+            await process_invitation_account_name(
+                _commodity_message("ali_user"),
+                ok,
+                user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+            )
+        finally:
+            for item in reversed(patches):
+                item.stop()
+        self.assertEqual(ok.state, InvitationCreation.awaiting_mobile_number)
+        self.assertEqual(ok.data["account_name"], "ali_user")
+
+    async def test_process_invitation_mobile_advances_then_rejects_invalid(self):
+        invalid = FakeState(inviter_role=UserRole.SUPER_ADMIN.value)
+        await invalid.set_state(InvitationCreation.awaiting_mobile_number)
+        ok = FakeState(inviter_role=UserRole.SUPER_ADMIN.value)
+        await ok.set_state(InvitationCreation.awaiting_mobile_number)
+        patches = _invitation_patches()
+        for item in patches:
+            item.start()
+        try:
+            await process_invitation_mobile(
+                _commodity_message("123"),
+                invalid,
+                user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+            )
+            self.assertEqual(invalid.state, InvitationCreation.awaiting_mobile_number)
+            self.assertNotIn("mobile_number", invalid.data)
+            await process_invitation_mobile(
+                _commodity_message("09123456789"),
+                ok,
+                user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+            )
+        finally:
+            for item in reversed(patches):
+                item.stop()
+        self.assertEqual(ok.state, InvitationCreation.awaiting_role)
+        self.assertEqual(ok.data["mobile_number"], "09123456789")
+
+    async def test_cancel_invitation_creation_clears_then_denies_without_user(self):
+        denied = FakeState(inviter_role=UserRole.SUPER_ADMIN.value)
+        await denied.set_state(InvitationCreation.awaiting_account_name)
+        ok = FakeState(inviter_role=UserRole.SUPER_ADMIN.value, last_prompt_message_id=9)
+        await ok.set_state(InvitationCreation.awaiting_account_name)
+        patches = _invitation_patches()
+        for item in patches:
+            item.start()
+        try:
+            await cancel_invitation_creation(
+                _commodity_callback("comm_fsm_cancel"),
+                denied,
+                bot=SimpleNamespace(),
+                user=None,
+            )
+            self.assertEqual(denied.data, {})
+            await cancel_invitation_creation(
+                _commodity_callback("comm_fsm_cancel"),
+                ok,
+                bot=SimpleNamespace(),
+                user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+            )
+        finally:
+            for item in reversed(patches):
+                item.stop()
+        self.assertEqual(ok.data, {})
+        self.assertIsNone(ok.state)
+
+    async def test_user_edit_role_prompts_then_denies_non_admin(self):
+        edits = []
+
+        async def _edit(*_a, **_k):
+            edits.append(1)
+
+        callback = SimpleNamespace(data="user_edit_role_9", answer=AsyncMock(), message=SimpleNamespace())
+        with patch("bot.handlers.admin_users.answer_callback_query_via_runtime", new=AsyncMock()), patch(
+            "bot.handlers.admin_users.edit_callback_message_via_runtime",
+            new=_edit,
+        ), patch(
+            "bot.handlers.admin_users.get_user_role_edit_keyboard",
+            return_value="ROLE-KB",
+        ):
+            await handle_user_edit_role(callback, user=SimpleNamespace(role=UserRole.STANDARD))
+            self.assertEqual(edits, [])
+            await handle_user_edit_role(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
+        self.assertEqual(edits, [1])
+
+    async def test_user_delete_request_redirects_then_denies_non_admin(self):
+        engine, Session, sync = _make_store()
+        _persist_user(sync)
+        redirects = []
+
+        async def _redirect(*_a, **_k):
+            redirects.append(1)
+
+        callback = SimpleNamespace(data="user_ask_delete_9", answer=AsyncMock(), message=SimpleNamespace())
+        db = RoleSession(sync)
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=_SessionBox(db)), patch(
+            "bot.handlers.admin_users.answer_callback_query_via_runtime",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.admin_users._show_user_delete_webapp_redirect",
+            new=_redirect,
+        ):
+            await handle_user_delete_request(callback, user=SimpleNamespace(role=UserRole.STANDARD))
+            self.assertEqual(redirects, [])
+            await handle_user_delete_request(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
+        self.assertEqual(redirects, [1])
+        reloaded, fresh = _reload_user(Session)
+        self.assertFalse(reloaded.is_deleted)
+        fresh.close()
+        sync.close()
+        engine.dispose()
+
+    async def test_user_delete_confirm_redirects_then_denies_non_admin(self):
+        engine, Session, sync = _make_store()
+        _persist_user(sync)
+        redirects = []
+
+        async def _redirect(*_a, **_k):
+            redirects.append(1)
+
+        callback = SimpleNamespace(data="user_delete_confirm_9", answer=AsyncMock(), message=SimpleNamespace())
+        db = RoleSession(sync)
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=_SessionBox(db)), patch(
+            "bot.handlers.admin_users.answer_callback_query_via_runtime",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.admin_users._show_user_delete_webapp_redirect",
+            new=_redirect,
+        ):
+            await handle_user_delete_confirm(
+                callback,
+                user=SimpleNamespace(role=UserRole.STANDARD),
+                state=FakeState(),
+            )
+            self.assertEqual(redirects, [])
+            await handle_user_delete_confirm(
+                callback,
+                user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                state=FakeState(),
+            )
+        self.assertEqual(redirects, [1])
+        reloaded, fresh = _reload_user(Session)
+        self.assertFalse(reloaded.is_deleted)
+        fresh.close()
+        sync.close()
+        engine.dispose()
+
+    async def test_limit_cancel_clears_fsm_then_denies_non_admin(self):
+        engine, Session, sync = _make_store()
+        _persist_user(sync)
+        denied = FakeState(limit_user_id=9)
+        ok = FakeState(limit_user_id=9)
+
+        async def _clear(state):
+            await state.clear()
+
+        callback = SimpleNamespace(data="limit_cancel_9", answer=AsyncMock(), message=SimpleNamespace())
+        db = RoleSession(sync)
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=_SessionBox(db)), patch(
+            "bot.handlers.admin_users.clear_state_retain_anchors",
+            new=_clear,
+        ):
+            display = _user_admin_display_patches()
+            for item in display:
+                item.start()
+            try:
+                await handle_limit_cancel(callback, user=SimpleNamespace(role=UserRole.STANDARD), state=denied)
+                self.assertEqual(denied.data.get("limit_user_id"), 9)
+                await handle_limit_cancel(
+                    callback,
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    state=ok,
+                )
+            finally:
+                for item in reversed(display):
+                    item.stop()
+        self.assertEqual(ok.data, {})
+        sync.close()
+        engine.dispose()
+
+    async def test_user_block_settings_shows_then_denies_non_admin(self):
+        engine, Session, sync = _make_store()
+        _persist_user(sync)
+        edits = []
+
+        async def _edit(*_a, **_k):
+            edits.append(1)
+
+        callback = SimpleNamespace(data="user_block_settings_9", answer=AsyncMock(), message=SimpleNamespace())
+        db = RoleSession(sync)
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=_SessionBox(db)), patch(
+            "bot.handlers.admin_users.answer_callback_query_via_runtime",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.admin_users.edit_callback_message_via_runtime",
+            new=_edit,
+        ), patch(
+            "bot.handlers.admin_users.get_block_settings_keyboard",
+            return_value="BLOCK-KB",
+        ):
+            await handle_user_block_settings(callback, user=SimpleNamespace(role=UserRole.STANDARD))
+            self.assertEqual(edits, [])
+            await handle_user_block_settings(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
+        self.assertEqual(edits, [1])
+        sync.close()
+        engine.dispose()
+
+    async def test_admin_set_max_block_prompts_then_denies_non_admin(self):
+        engine, Session, sync = _make_store()
+        _persist_user(sync)
+        edits = []
+
+        async def _edit(*_a, **_k):
+            edits.append(1)
+
+        callback = SimpleNamespace(data="admin_set_max_block_9", answer=AsyncMock(), message=SimpleNamespace())
+        db = RoleSession(sync)
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=_SessionBox(db)), patch(
+            "bot.handlers.admin_users.answer_callback_query_via_runtime",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.admin_users.edit_callback_message_via_runtime",
+            new=_edit,
+        ), patch(
+            "bot.handlers.admin_users.get_max_block_options_keyboard",
+            return_value="MAX-KB",
+        ):
+            await handle_admin_set_max_block(callback, user=SimpleNamespace(role=UserRole.STANDARD))
+            self.assertEqual(edits, [])
+            await handle_admin_set_max_block(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
+        self.assertEqual(edits, [1])
+        sync.close()
+        engine.dispose()
+
+    async def test_admin_max_block_custom_sets_fsm_then_denies_non_admin(self):
+        engine, Session, sync = _make_store()
+        _persist_user(sync)
+        denied = FakeState()
+        ok = FakeState()
+        callback = SimpleNamespace(data="admin_max_block_custom_9", answer=AsyncMock(), message=SimpleNamespace())
+        db = RoleSession(sync)
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=_SessionBox(db)):
+            display = _user_admin_display_patches()
+            for item in display:
+                item.start()
+            try:
+                await handle_admin_max_block_custom(
+                    callback,
+                    user=SimpleNamespace(role=UserRole.STANDARD),
+                    state=denied,
+                )
+                self.assertIsNone(denied.state)
+                await handle_admin_max_block_custom(
+                    callback,
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    state=ok,
+                )
+            finally:
+                for item in reversed(display):
+                    item.stop()
+        self.assertEqual(ok.state, UserManagement.awaiting_custom_max_block)
+        self.assertEqual(ok.data["custom_max_block_user_id"], 9)
+        sync.close()
+        engine.dispose()
+
+    async def test_create_market_message_persists_notifies_then_rejects_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "market-create.sqlite")
+            engine, Session = _market_message_store(db_path)
+            actor = SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN, account_name="admin")
+            patches = _isolated_market_patches()
+            for item in patches:
+                item.start()
+            try:
+                with self.assertRaises(HTTPException) as empty:
+                    await create_market_message(
+                        AdminMarketMessageCreate(content="   "),
+                        current_user=actor,
+                        db=CrudSession(Session()),
+                    )
+                self.assertEqual(empty.exception.status_code, 400)
+                created = await create_market_message(
+                    AdminMarketMessageCreate(content="بازار باز است"),
+                    current_user=actor,
+                    db=CrudSession(Session()),
+                )
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            self.assertEqual(created.content, "بازار باز است")
+            self.assertTrue(created.is_active)
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(
+                    conn.execute("SELECT content, is_active FROM admin_market_messages WHERE id=1").fetchone(),
+                    ("بازار باز است", 1),
+                )
+                self.assertGreaterEqual(
+                    conn.execute("SELECT COUNT(*) FROM notifications WHERE user_id=2").fetchone()[0],
+                    1,
+                )
+            engine.dispose()
+
+    async def test_clear_current_market_message_deactivates_then_noop_when_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "market-clear.sqlite")
+            engine, Session = _market_message_store(db_path)
+            actor = SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN, account_name="admin")
+            patches = _isolated_market_patches()
+            for item in patches:
+                item.start()
+            try:
+                empty = await clear_current_market_message(current_user=actor, db=CrudSession(Session()))
+                self.assertIsNone(empty)
+                await create_market_message(
+                    AdminMarketMessageCreate(content="بازار بسته است"),
+                    current_user=actor,
+                    db=CrudSession(Session()),
+                )
+                cleared = await clear_current_market_message(current_user=actor, db=CrudSession(Session()))
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            self.assertFalse(cleared.is_active)
+            self.assertEqual(cleared.content, "بازار بسته است")
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(
+                    conn.execute("SELECT is_active FROM admin_market_messages WHERE id=1").fetchone()[0],
+                    0,
+                )
             engine.dispose()
 
     async def test_channel_trade_handlers_gateway_confirm_is_not_crud_evidence(self):
