@@ -33,6 +33,7 @@ PROFILE_KEYS = {
     "executor_wrapper",
     "outer_metadata_11_hex",
     "executor_variants",
+    "observations",
 }
 PROMPT_REFERENCES = ("user_information", "mcp_servers", "skills", "messaging",
                      "artifacts", "guidelines", "communication_style")
@@ -83,6 +84,25 @@ def load_profile(path: Path | None = None) -> dict[str, Any]:
             raise ValueError("non-canonical hex")
     except ValueError as exc:
         raise ValueError("Antigravity profile outer metadata hex is invalid") from exc
+    observations = profile["observations"]
+    roles = {"two-site-coordinator", "two-site-stage-worker", "two-site-stage-verifier"}
+    indexes = {"executor_variant": "executor_variants", "source_variant": "source_config_variants",
+               "wrapper_variant": "executor_wrapper", "opaque_variant": "outer_metadata_11_hex"}
+    if not isinstance(observations, dict) or set(observations) != roles:
+        raise ValueError("Antigravity observation roles are invalid")
+    for role, rows in observations.items():
+        if not isinstance(rows, list) or not rows:
+            raise ValueError("Antigravity role observations are missing")
+        for row in rows:
+            if not isinstance(row, dict) or set(row) != {*indexes, "wrapper_workspace", "source_workspace"}:
+                raise ValueError("Antigravity observation tuple shape is invalid")
+            if any(type(row[key]) is not int or not 0 <= row[key] < len(profile[table])
+                   for key, table in indexes.items()):
+                raise ValueError("Antigravity observation tuple index is invalid")
+            if any(type(row[key]) is not bool for key in ("wrapper_workspace", "source_workspace")):
+                raise ValueError("Antigravity observation workspace class is invalid")
+        if len({json.dumps(row, sort_keys=True) for row in rows}) != len(rows):
+            raise ValueError("Antigravity duplicate observation tuple")
     return profile
 
 
@@ -211,7 +231,7 @@ def singleton_shape(data: bytes, required: dict[int, int], optional: dict[int, i
 
 
 def executor_envelope(data: bytes, root: Path, tool_container: bytes, profile: dict,
-                      resolved_container: bytes) -> dict:
+                      resolved_container: bytes, role: str) -> dict:
     singleton_shape(data, {1: 0, 2: 0, 3: 0, 9: 2, 10: 2, 11: 2, 17: 2})
     if one(data, 1) != 4 or any(not 0 <= one(data, k) < 1_000_000_000 for k in (2, 3)):
         raise ValueError("unexpected executor type/step boundaries")
@@ -264,6 +284,16 @@ def executor_envelope(data: bytes, root: Path, tool_container: bytes, profile: d
                 for delta in profile["executor_variants"]]
     if actual not in variants:
         raise ValueError("unreviewed actual executor model/effort/permission/configuration envelope")
+    observation = {
+        "executor_variant": variants.index(actual),
+        "source_variant": profile["source_config_variants"].index(source_config),
+        "wrapper_variant": profile["executor_wrapper"].index(siblings),
+        "opaque_variant": profile["outer_metadata_11_hex"].index(one(data, 11).hex()),
+        "wrapper_workspace": one(wrapper, 12) is not None,
+        "source_workspace": one(source, 12) is not None,
+    }
+    if observation not in profile["observations"].get(role, []):
+        raise ValueError("unreviewed cross-role or spliced executor observation tuple")
     return actual
 
 
@@ -391,7 +421,7 @@ def binding(
         executor_container += message((2, message((2, "subagent_reminder"))),
                                       (8, message((1, "idle_subagent_guard"), (2, 1))))
     for row in executors:
-        executor_envelope(row[0], root, executor_container, profile, expected_container)
+        executor_envelope(row[0], root, executor_container, profile, expected_container, name)
     if parent_id is not None:
         checks["parent"] = one(data, 5) == parent_id.encode()
         checks["root"] = one(data, 6) == parent_id.encode()

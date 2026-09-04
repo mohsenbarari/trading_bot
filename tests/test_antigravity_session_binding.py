@@ -2,6 +2,7 @@
 
 import sqlite3
 import json
+import itertools
 import tempfile
 import unittest
 from pathlib import Path
@@ -81,7 +82,7 @@ def change(data, path, transform):
 
 
 def fixture(directory, role="two-site-coordinator", *, omit_zero=False,
-            wrong_prompt=False, extra_tool=False, split_config=False):
+            wrong_prompt=False, extra_tool=False, split_config=False, observation=None):
     root = Path(directory) / "repo"
     home = Path(directory) / "cli"
     agent = root / ".agents" / "agents" / role / "agent.md"
@@ -131,13 +132,21 @@ def fixture(directory, role="two-site-coordinator", *, omit_zero=False,
         if not main:
             executor_container += message((2, message((2, "subagent_reminder"))),
                                           (8, message((1, "idle_subagent_guard"), (2, 1))))
-        executor_config = render_tree(profile["executor_base"], root) + message((46, executor_container))
-        executor_wrapper = render_tree(profile["executor_wrapper"][0], root)
-        source_config = render_tree(profile["source_config_variants"][0], root) + message((46, container))
+        observation = observation or profile["observations"][role][0]
+        executor_profile = profile_patch(profile["executor_base"],
+                                         profile["executor_variants"][observation["executor_variant"]])
+        executor_config = render_tree(executor_profile, root) + message((46, executor_container))
+        executor_wrapper = render_tree(profile["executor_wrapper"][observation["wrapper_variant"]], root)
+        source_config = render_tree(profile["source_config_variants"][observation["source_variant"]], root) + message((46, container))
+        if observation["wrapper_workspace"]:
+            executor_wrapper += message((12, root.as_uri()))
+        source_wrapper = message((1, source_config), (3, bytes.fromhex("880101")))
+        if observation["source_workspace"]:
+            source_wrapper += message((12, root.as_uri()))
         executor = message((1, 4), (2, 0), (3, 1), (9, CHILD),
                            (10, message((1, executor_config)) + executor_wrapper),
-                           (11, bytes.fromhex(profile["outer_metadata_11_hex"][0])),
-                           (17, message((1, source_config), (3, bytes.fromhex("880101")))))
+                           (11, bytes.fromhex(profile["outer_metadata_11_hex"][observation["opaque_variant"]])),
+                           (17, source_wrapper))
         db.execute("INSERT INTO executor_metadata VALUES(?)", (
             executor,))
     return root, home, database, session, set(tools), None if main else PARENT
@@ -244,17 +253,28 @@ class BindingTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.check_fixture(item)
 
-    def test_every_sanitized_observed_executor_variant(self):
+    def test_every_sanitized_role_specific_observation_tuple(self):
         profile = json.loads(PROFILE.read_text())
-        for delta in profile["executor_variants"]:
-            with tempfile.TemporaryDirectory() as directory:
-                item = fixture(directory)
-                with sqlite3.connect(item[2]) as db:
-                    original = db.execute("SELECT data FROM executor_metadata").fetchone()[0]
-                    config = render_tree(profile_patch(profile["executor_base"], delta), item[0])
-                    config += message((46, one(original, 10, 1, 46)))
-                    db.execute("UPDATE executor_metadata SET data=?", (change(original, (10, 1), lambda _: config),))
-                self.check_fixture(item)
+        for role, observations in profile["observations"].items():
+            for observation in observations:
+                with self.subTest(role=role, observation=observation), tempfile.TemporaryDirectory() as directory:
+                    self.check_fixture(fixture(directory, role, observation=observation), role)
+
+    def test_all_cross_role_and_cross_observation_combinations_are_rejected(self):
+        profile = json.loads(PROFILE.read_text())
+        dimensions = [range(len(profile[key])) for key in (
+            "executor_variants", "source_config_variants", "executor_wrapper", "outer_metadata_11_hex")]
+        keys = ("executor_variant", "source_variant", "wrapper_variant", "opaque_variant",
+                "wrapper_workspace", "source_workspace")
+        for role, known in profile["observations"].items():
+            for values in itertools.product(*dimensions, (False, True), (False, True)):
+                observation = dict(zip(keys, values))
+                if observation in known:
+                    continue
+                with self.subTest(role=role, observation=observation), tempfile.TemporaryDirectory() as directory:
+                    item = fixture(directory, role, observation=observation)
+                    with self.assertRaisesRegex(ValueError, "cross-role or spliced"):
+                        self.check_fixture(item, role)
 
     def test_outer_executor_and_source_configuration_cannot_bypass_full_envelope(self):
         transforms = {

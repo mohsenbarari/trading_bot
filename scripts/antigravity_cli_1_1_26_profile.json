@@ -39,6 +39,78 @@
     "889cb630a5c5c930f0b18f31f6b18f31fbcff23182d0f23193e3f431c1c8fd31bab28332bfb28332e2f78332edf78332acc4ae32b3c4ae32d4edb032d7edb032f090b332f290b332b4dbb432b9dbb432829eb632849eb632d3d2b832e8edba32eaedba32a1f5ba32a6f5ba3283ffbc32cdd1bd32cfd1bd328fb0be32c3ecbe32cfecbe32d1ecbe32bf82c0328ea5c23296a5c232fdbcc4328abdc4328bbdc432a0bdc432a1bdc432b6bdc432e0d4c632e5d4c632f7d4c632b886c732add9c732afd9c7329487c83293bcc8329cd1c9329ed1c93291efcb32aeefcb32889fcc32d5d6cc32ecd6cc32cda2cd32cfa2cd32f2a5ce32d4c1ce32e4d5d332d4efd532cfddd632dff7d632de84d732e284d732fefcdc32aad4dd32acd4dd32b1d4dd32b3d4dd3290f5dd3296f5dd32e9fade32ebfade32d2efdf32d7dee132d9dee13281d9e23283d9e232b5f6e432d2fde432d4cfe632f69de7328dade83291ade832c6b5e832c4b8e8329f82ea32a682ea32b787ea32bf87ea32fce5ec32fee5ec3287fced3289fced3290fced3292fced32",
     "889cb630a5c5c930f0b18f31f6b18f31fbcff23182d0f23193e3f431c1c8fd31bab28332bfb28332e2f78332edf78332acc4ae32b3c4ae32d4edb032d7edb032f090b332f290b332b4dbb432b9dbb432d3d2b832e8edba32eaedba32a1f5ba32a6f5ba3283ffbc32cdd1bd32cfd1bd328fb0be32c3ecbe32cfecbe32d1ecbe32bf82c0328ea5c23296a5c232fdbcc4328abdc4328bbdc432a0bdc432a1bdc432b6bdc432e0d4c632e5d4c632f7d4c632b886c732add9c732afd9c7329487c83293bcc8329cd1c9329ed1c93291efcb32aeefcb32889fcc32d5d6cc32ecd6cc32cda2cd32cfa2cd32f2a5ce32d4c1ce32e4d5d332d4efd532cfddd632dff7d632de84d732e284d732fefcdc32aad4dd32acd4dd32b1d4dd32b3d4dd3290f5dd3296f5dd32e9fade32ebfade32d2efdf32d7dee132d9dee13281d9e23283d9e232b5f6e432d2fde432d4cfe632f69de7328dade83291ade832c6b5e832c4b8e8329f82ea32a682ea32b787ea32bf87ea32fce5ec32fee5ec3287fced3289fced3290fced3292fced32"
   ],
+  "observations": {
+    "two-site-coordinator": [
+      {
+        "executor_variant": 0,
+        "source_variant": 0,
+        "wrapper_variant": 0,
+        "opaque_variant": 1,
+        "wrapper_workspace": true,
+        "source_workspace": true
+      },
+      {
+        "executor_variant": 1,
+        "source_variant": 1,
+        "wrapper_variant": 0,
+        "opaque_variant": 1,
+        "wrapper_workspace": false,
+        "source_workspace": false
+      }
+    ],
+    "two-site-stage-worker": [
+      {
+        "executor_variant": 2,
+        "source_variant": 2,
+        "wrapper_variant": 0,
+        "opaque_variant": 1,
+        "wrapper_workspace": false,
+        "source_workspace": false
+      },
+      {
+        "executor_variant": 3,
+        "source_variant": 3,
+        "wrapper_variant": 0,
+        "opaque_variant": 1,
+        "wrapper_workspace": false,
+        "source_workspace": false
+      },
+      {
+        "executor_variant": 3,
+        "source_variant": 3,
+        "wrapper_variant": 0,
+        "opaque_variant": 0,
+        "wrapper_workspace": false,
+        "source_workspace": false
+      }
+    ],
+    "two-site-stage-verifier": [
+      {
+        "executor_variant": 2,
+        "source_variant": 2,
+        "wrapper_variant": 0,
+        "opaque_variant": 1,
+        "wrapper_workspace": false,
+        "source_workspace": false
+      },
+      {
+        "executor_variant": 3,
+        "source_variant": 3,
+        "wrapper_variant": 0,
+        "opaque_variant": 0,
+        "wrapper_workspace": false,
+        "source_workspace": false
+      },
+      {
+        "executor_variant": 3,
+        "source_variant": 3,
+        "wrapper_variant": 0,
+        "opaque_variant": 1,
+        "wrapper_workspace": false,
+        "source_workspace": false
+      }
+    ]
+  },
   "executor_variants": [
     {},
     {"13":{"$single":{"value":{"message":{"42":{"$single":{"value":{"message":{"2":{"$single":{"value":{"message":{"1":null}}}}}}}}}}}},"42":{"$single":{"value":{"message":{"11":{"$single":{"value":{"message":{"1":null}}}}}}}}},
