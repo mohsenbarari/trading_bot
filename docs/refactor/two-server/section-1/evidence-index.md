@@ -15,12 +15,12 @@ Refresh: executing Assignment `WA-P1-00B-FREEZE-20260904-001` (`base_sha` `40228
 | Cleanup manifest | `07-repository-cleanup-manifest.md` | tracked Markdown |
 | Runtime inventory | `inventory/current-finland-runtime.json` | SHA-256 `2bd751622099d43f9cba02e423a972e5b198fa9930314cac65524afeebbb31e1` |
 | Surface inventory index | `inventory/surface-behavior-inventory.json` | SHA-256 `e4cefff4063f7c4b200a5ae1462e3855d56a8560f9340b613f03ac0dd5d0c002` |
-| API surface inventory | `inventory/surface-api.json` | SHA-256 `c4262fa7399bd8ae649fec8c6f9ecd6b6a478818fedcc9d96e14d7c3b064dcf0` |
+| API surface inventory | `inventory/surface-api.json` | SHA-256 `88e7071122284f878a202852306887fea9abd0c9bdbd8d52f0e7870f1831ccf7` |
 | Bot surface inventory | `inventory/surface-bot.json` | SHA-256 `bcd7299368f93b3e1abbc14c960d32adae591acf2a9f095279d7e77815474af7` |
 | Web route inventory | `inventory/surface-web.json` | SHA-256 `37b965a4b29050acab829a1018da5889bfd4c2eb8168ea4da1b4963d764f15d8` |
 | Job authority inventory | `inventory/surface-jobs.json` | SHA-256 `479a9c13cb265e187394ac345fe2c6e3fbfc02a203f77d883314a2ca43c12b27` |
 | Runtime task ownership | `inventory/runtime-task-ownership.json` | SHA-256 `ee6f5fe3e2151e7a8f353b25118637f487553cb40727f0b122acbcb57fdc7bee` |
-| Scenario records | `inventory/scenario-records.json` | SHA-256 `64e3ee79e40923c6696cc9548a430ccc044e9f4e066f170bd3569a98da74920d` |
+| Scenario records | `inventory/scenario-records.json` | SHA-256 `212dbb75a739a87f38d4bb2ee3c70f246332d2d449379dbd3f1f7a44d04873b2` |
 | Task Card | `stages/P1-00.md` | `COMPLETE` on `a0f22b7d476429974b9d4c8a7ae3d0d5e4a99be9` |
 | Task Card | `stages/P1-00b.md` | `IN_PROGRESS` under `WA-P1-00B-FREEZE-20260904-001`; not `COMPLETE` |
 

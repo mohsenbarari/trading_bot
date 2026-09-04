@@ -32,8 +32,34 @@ from api.routers.admin_messages import (
     get_current_market_message,
     get_market_message_history,
 )
-from api.routers.chat import delete_message, send_message, update_message
-from api.routers.chat_schemas import MessageSend, MessageUpdate
+from api.routers.chat import (
+    create_group,
+    delete_direct_conversation,
+    delete_group_member,
+    delete_message,
+    demote_group_admin,
+    get_group_detail,
+    get_groups,
+    mute_direct_conversation,
+    mute_room_conversation,
+    patch_group,
+    pin_direct_conversation,
+    pin_room_conversation,
+    post_group_leave,
+    post_group_member,
+    promote_group_admin,
+    send_message,
+    update_message,
+)
+from api.routers.chat_schemas import (
+    ConversationMuteUpdateRequest,
+    ConversationPinUpdateRequest,
+    GroupCreateRequest,
+    GroupMemberAddRequest,
+    GroupUpdateRequest,
+    MessageSend,
+    MessageUpdate,
+)
 from api.routers.commodities import (
     add_alias_to_commodity,
     create_commodity,
@@ -149,7 +175,7 @@ from models.message import Message
 from models.notification import Notification
 from models.offer import OfferStatus
 from models.telegram_admin_broadcast import TelegramAdminBroadcastAudienceType
-from models.user import UserRole as ModelUserRole
+from models.user import User, UserRole as ModelUserRole
 from tests.test_p1_00_characterization_admin_account_status import (
     ACCOUNT_SEED,
     MappedAccountUser,
@@ -255,6 +281,20 @@ READ_ALL_COMMODITIES_SEED = "API-ADMIN-GET-COMMODITIES-READ-ALL-COMMODITIES-L99"
 GET_SETTINGS_SEED = "API-ADMIN-GET-TRADING-SETTINGS-GET-SETTINGS-L195"
 GET_MARKET_STATE_SEED = "API-ADMIN-GET-TRADING-SETTINGS-GET-MARKET-STATE-L202"
 LIST_OVERRIDES_SEED = "API-ADMIN-GET-TRADING-SETTINGS-LIST-MARKET-OVERRIDES-L214"
+MSG_CREATE_GROUP_SEED = "API-MSG-POST-CHAT-CREATE-GROUP-L1234"
+MSG_PATCH_GROUP_SEED = "API-MSG-PATCH-CHAT-PATCH-GROUP-L1324"
+MSG_POST_GROUP_MEMBER_SEED = "API-MSG-POST-CHAT-POST-GROUP-MEMBER-L1362"
+MSG_DELETE_GROUP_MEMBER_SEED = "API-MSG-DELETE-CHAT-DELETE-GROUP-MEMBER-L1384"
+MSG_PROMOTE_GROUP_ADMIN_SEED = "API-MSG-POST-CHAT-PROMOTE-GROUP-ADMIN-L1406"
+MSG_DEMOTE_GROUP_ADMIN_SEED = "API-MSG-DELETE-CHAT-DEMOTE-GROUP-ADMIN-L1428"
+MSG_GROUP_LEAVE_SEED = "API-MSG-POST-CHAT-POST-GROUP-LEAVE-L1450"
+MSG_PIN_ROOM_SEED = "API-MSG-POST-CHAT-PIN-ROOM-CONVERSATION-L1470"
+MSG_MUTE_ROOM_SEED = "API-MSG-POST-CHAT-MUTE-ROOM-CONVERSATION-L1544"
+MSG_GET_GROUPS_SEED = "API-MSG-GET-CHAT-GET-GROUPS-L1158"
+MSG_GET_GROUP_DETAIL_SEED = "API-MSG-GET-CHAT-GET-GROUP-DETAIL-L1278"
+MSG_PIN_DIRECT_SEED = "API-MSG-POST-CHAT-PIN-DIRECT-CONVERSATION-L643"
+MSG_MUTE_DIRECT_SEED = "API-MSG-POST-CHAT-MUTE-DIRECT-CONVERSATION-L727"
+MSG_HIDE_DIRECT_SEED = "API-MSG-DELETE-CHAT-DELETE-DIRECT-CONVERSATION-L777"
 TRADE_CHANNEL_SEED = "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-L810"
 TRADE_PUBLIC_SEED = "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-PUBLIC-L829"
 UNEVIDENCED_TRADE_GATEWAY_SEEDS = {TRADE_CHANNEL_SEED, TRADE_PUBLIC_SEED}
@@ -350,6 +390,20 @@ SLICE_EXECUTED_SEED_IDS = {
     GET_SETTINGS_SEED,
     GET_MARKET_STATE_SEED,
     LIST_OVERRIDES_SEED,
+    MSG_CREATE_GROUP_SEED,
+    MSG_PATCH_GROUP_SEED,
+    MSG_POST_GROUP_MEMBER_SEED,
+    MSG_DELETE_GROUP_MEMBER_SEED,
+    MSG_PROMOTE_GROUP_ADMIN_SEED,
+    MSG_DEMOTE_GROUP_ADMIN_SEED,
+    MSG_GROUP_LEAVE_SEED,
+    MSG_PIN_ROOM_SEED,
+    MSG_MUTE_ROOM_SEED,
+    MSG_GET_GROUPS_SEED,
+    MSG_GET_GROUP_DETAIL_SEED,
+    MSG_PIN_DIRECT_SEED,
+    MSG_MUTE_DIRECT_SEED,
+    MSG_HIDE_DIRECT_SEED,
 }
 
 SEED_EVIDENCE_NODES = {
@@ -713,6 +767,62 @@ SEED_EVIDENCE_NODES = {
     LIST_OVERRIDES_SEED: (
         "tests/test_p1_00b_characterization_seed_slice.py"
         "::P100bSeedSliceExecutionTests.test_list_market_overrides_lists_then_empty"
+    ),
+    MSG_CREATE_GROUP_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_create_group_persists_then_fails_before_commit"
+    ),
+    MSG_PATCH_GROUP_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_patch_group_renames_then_404s"
+    ),
+    MSG_POST_GROUP_MEMBER_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_post_group_member_adds_then_404s"
+    ),
+    MSG_DELETE_GROUP_MEMBER_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_delete_group_member_removes_then_404s"
+    ),
+    MSG_PROMOTE_GROUP_ADMIN_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_promote_group_admin_promotes_then_404s"
+    ),
+    MSG_DEMOTE_GROUP_ADMIN_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_demote_group_admin_demotes_then_rejects_last_admin"
+    ),
+    MSG_GROUP_LEAVE_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_post_group_leave_leaves_then_rejects_last_admin"
+    ),
+    MSG_PIN_ROOM_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_pin_room_conversation_pins_then_404s"
+    ),
+    MSG_MUTE_ROOM_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_mute_room_conversation_mutes_then_404s"
+    ),
+    MSG_GET_GROUPS_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_get_groups_lists_created_then_empty"
+    ),
+    MSG_GET_GROUP_DETAIL_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_get_group_detail_reads_then_404s"
+    ),
+    MSG_PIN_DIRECT_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_pin_direct_conversation_pins_then_404s"
+    ),
+    MSG_MUTE_DIRECT_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_mute_direct_conversation_mutes_then_404s"
+    ),
+    MSG_HIDE_DIRECT_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_delete_direct_conversation_hides_then_404s"
     ),
 }
 
@@ -1220,6 +1330,36 @@ def _broadcast_flow_patches():
         patch("bot.handlers.admin_broadcast.answer_callback_query_via_runtime", new=AsyncMock()),
         patch("bot.handlers.admin_broadcast.AsyncSessionLocal", return_value=_SessionBox(EmptyQuerySession())),
     ]
+
+
+_CUSTOMER_RELATIONS_SQL = (
+    "CREATE TABLE customer_relations ("
+    "id INTEGER PRIMARY KEY, owner_user_id INTEGER NOT NULL, customer_user_id INTEGER, "
+    "created_by_user_id INTEGER, invitation_token VARCHAR NOT NULL DEFAULT 'tok', "
+    "management_name VARCHAR(120) NOT NULL DEFAULT 'n', customer_tier VARCHAR NOT NULL DEFAULT 'tier1', "
+    "commission_rate NUMERIC(5,2), min_trade_quantity INTEGER, max_trade_quantity INTEGER, "
+    "max_daily_trades INTEGER, max_daily_commodity_volume INTEGER, trading_restricted_until DATETIME, "
+    "status VARCHAR NOT NULL DEFAULT 'active', expires_at DATETIME, activated_at DATETIME, "
+    "deleted_at DATETIME, created_at DATETIME, updated_at DATETIME, sync_version INTEGER NOT NULL DEFAULT 1)"
+)
+
+
+def _group_chat_store(path: str):
+    engine, Session = _market_message_store(path)
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS customer_relations"))
+        conn.execute(text(_CUSTOMER_RELATIONS_SQL))
+    Chat.__table__.create(engine, checkfirst=True)
+    ChatMember.__table__.create(engine, checkfirst=True)
+    return engine, Session
+
+
+def _load_store_user(Session, user_id=1):
+    sess = Session()
+    try:
+        return sess.get(User, user_id)
+    finally:
+        sess.close()
 
 
 def _management_broadcast_store(path: str):
@@ -4287,6 +4427,504 @@ class P100bSeedSliceExecutionTests(unittest.IsolatedAsyncioTestCase):
             listed = await list_market_overrides(db=CrudSession(Session()))
             self.assertEqual(listed[0].date, created.date)
             self.assertEqual(listed[0].override_type, MarketScheduleOverrideType.CLOSED_ALL_DAY)
+            engine.dispose()
+
+    async def test_create_group_persists_then_fails_before_commit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "group-create.sqlite")
+            engine, Session = _group_chat_store(db_path)
+            actor = SimpleNamespace(id=1)
+            fail_db = CrudSession(Session(), fail_commit=True, fail_label="injected_group_create_commit_failure")
+            with self.assertRaisesRegex(RuntimeError, "injected_group_create_commit_failure"):
+                await create_group(GroupCreateRequest(title="گروه تست"), current_user=actor, db=fail_db)
+            await fail_db.rollback()
+            fail_db._session.close()
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM chats").fetchone()[0], 0)
+            created = await create_group(
+                GroupCreateRequest(title="گروه تست"),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(created.group.title, "گروه تست")
+            self.assertEqual(created.group.member_count, 1)
+            self.assertEqual(created.group.current_user_role, "admin")
+            again = await create_group(
+                GroupCreateRequest(title="گروه دوم"),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(again.group.id, 2)
+            with sqlite3.connect(db_path) as conn:
+                titles = [row[0] for row in conn.execute("SELECT title FROM chats ORDER BY id")]
+                self.assertEqual(titles, ["گروه تست", "گروه دوم"])
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM chat_members").fetchone()[0], 2)
+            engine.dispose()
+
+    async def test_patch_group_renames_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "group-patch.sqlite")
+            engine, Session = _group_chat_store(db_path)
+            actor = SimpleNamespace(id=1)
+            created = await create_group(
+                GroupCreateRequest(title="گروه یک"),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            patched = await patch_group(
+                created.group.id,
+                GroupUpdateRequest(title="گروه دو"),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(patched.title, "گروه دو")
+            again = await patch_group(
+                created.group.id,
+                GroupUpdateRequest(title="گروه دو"),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(again.title, "گروه دو")
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT title FROM chats WHERE id=1").fetchone()[0], "گروه دو")
+            with self.assertRaises(HTTPException) as raised:
+                await patch_group(
+                    99,
+                    GroupUpdateRequest(title="غایب"),
+                    current_user=actor,
+                    db=CrudSession(Session()),
+                )
+            self.assertEqual(raised.exception.status_code, 404)
+            engine.dispose()
+
+    async def test_post_group_member_adds_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "group-add.sqlite")
+            engine, Session = _group_chat_store(db_path)
+            actor = SimpleNamespace(id=1)
+            created = await create_group(
+                GroupCreateRequest(title="گروه اعضا"),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            added = await post_group_member(
+                created.group.id,
+                GroupMemberAddRequest(user_id=2),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(added.user_id, 2)
+            self.assertEqual(added.member_count, 2)
+            self.assertFalse(added.removed)
+            replay = await post_group_member(
+                created.group.id,
+                GroupMemberAddRequest(user_id=2),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(replay.member_count, 2)
+            with sqlite3.connect(db_path) as conn:
+                rows = conn.execute(
+                    "SELECT user_id FROM chat_members WHERE chat_id=1 ORDER BY user_id"
+                ).fetchall()
+                self.assertEqual([row[0] for row in rows], [1, 2])
+            with self.assertRaises(HTTPException) as raised:
+                await post_group_member(
+                    99,
+                    GroupMemberAddRequest(user_id=2),
+                    current_user=actor,
+                    db=CrudSession(Session()),
+                )
+            self.assertEqual(raised.exception.status_code, 404)
+            engine.dispose()
+
+    async def test_delete_group_member_removes_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "group-remove.sqlite")
+            engine, Session = _group_chat_store(db_path)
+            actor = SimpleNamespace(id=1)
+            created = await create_group(
+                GroupCreateRequest(title="گروه حذف"),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            await post_group_member(
+                created.group.id,
+                GroupMemberAddRequest(user_id=2),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            removed = await delete_group_member(
+                created.group.id,
+                2,
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertTrue(removed.removed)
+            self.assertEqual(removed.member_count, 1)
+            with sqlite3.connect(db_path) as conn:
+                active = conn.execute(
+                    "SELECT COUNT(*) FROM chat_members WHERE chat_id=1 AND membership_status='ACTIVE'"
+                ).fetchone()[0]
+                self.assertEqual(active, 1)
+            with self.assertRaises(HTTPException) as raised:
+                await delete_group_member(99, 2, current_user=actor, db=CrudSession(Session()))
+            self.assertEqual(raised.exception.status_code, 404)
+            engine.dispose()
+
+    async def test_promote_group_admin_promotes_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "group-promote.sqlite")
+            engine, Session = _group_chat_store(db_path)
+            actor = SimpleNamespace(id=1)
+            created = await create_group(
+                GroupCreateRequest(title="گروه ارتقا"),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            await post_group_member(
+                created.group.id,
+                GroupMemberAddRequest(user_id=2),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            promoted = await promote_group_admin(
+                created.group.id,
+                2,
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(promoted.role, "admin")
+            again = await promote_group_admin(
+                created.group.id,
+                2,
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(again.role, "admin")
+            with sqlite3.connect(db_path) as conn:
+                role = conn.execute(
+                    "SELECT role FROM chat_members WHERE chat_id=1 AND user_id=2"
+                ).fetchone()[0]
+                self.assertIn(str(role).lower(), ("admin", "chatmemberrole.admin"))
+            with self.assertRaises(HTTPException) as raised:
+                await promote_group_admin(99, 2, current_user=actor, db=CrudSession(Session()))
+            self.assertEqual(raised.exception.status_code, 404)
+            engine.dispose()
+
+    async def test_demote_group_admin_demotes_then_rejects_last_admin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "group-demote.sqlite")
+            engine, Session = _group_chat_store(db_path)
+            actor = SimpleNamespace(id=1)
+            created = await create_group(
+                GroupCreateRequest(title="گروه تنزل"),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            await post_group_member(
+                created.group.id,
+                GroupMemberAddRequest(user_id=2),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            await promote_group_admin(
+                created.group.id,
+                2,
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            demoted = await demote_group_admin(
+                created.group.id,
+                2,
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(demoted.role, "member")
+            with sqlite3.connect(db_path) as conn:
+                role = conn.execute(
+                    "SELECT role FROM chat_members WHERE chat_id=1 AND user_id=2"
+                ).fetchone()[0]
+                self.assertIn(str(role).lower(), ("member", "chatmemberrole.member"))
+            with self.assertRaises(HTTPException) as raised:
+                await demote_group_admin(
+                    created.group.id,
+                    1,
+                    current_user=actor,
+                    db=CrudSession(Session()),
+                )
+            self.assertEqual(raised.exception.status_code, 400)
+            engine.dispose()
+
+    async def test_post_group_leave_leaves_then_rejects_last_admin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "group-leave.sqlite")
+            engine, Session = _group_chat_store(db_path)
+            admin = SimpleNamespace(id=1)
+            member = SimpleNamespace(id=2)
+            created = await create_group(
+                GroupCreateRequest(title="گروه خروج"),
+                current_user=admin,
+                db=CrudSession(Session()),
+            )
+            await post_group_member(
+                created.group.id,
+                GroupMemberAddRequest(user_id=2),
+                current_user=admin,
+                db=CrudSession(Session()),
+            )
+            left = await post_group_leave(
+                created.group.id,
+                current_user=member,
+                db=CrudSession(Session()),
+            )
+            self.assertTrue(left.left)
+            self.assertEqual(left.member_count, 1)
+            with sqlite3.connect(db_path) as conn:
+                active = conn.execute(
+                    "SELECT COUNT(*) FROM chat_members WHERE chat_id=1 AND membership_status='ACTIVE'"
+                ).fetchone()[0]
+                self.assertEqual(active, 1)
+            with self.assertRaises(HTTPException) as raised:
+                await post_group_leave(
+                    created.group.id,
+                    current_user=admin,
+                    db=CrudSession(Session()),
+                )
+            self.assertEqual(raised.exception.status_code, 400)
+            engine.dispose()
+
+    async def test_pin_room_conversation_pins_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "group-pin.sqlite")
+            engine, Session = _group_chat_store(db_path)
+            actor = SimpleNamespace(id=1)
+            created = await create_group(
+                GroupCreateRequest(title="گروه پین"),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            pinned = await pin_room_conversation(
+                created.group.id,
+                ConversationPinUpdateRequest(pinned=True),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertTrue(pinned.is_pinned)
+            self.assertEqual(pinned.chat_id, created.group.id)
+            again = await pin_room_conversation(
+                created.group.id,
+                ConversationPinUpdateRequest(pinned=True),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertTrue(again.is_pinned)
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT is_pinned FROM chat_members WHERE chat_id=1 AND user_id=1"
+                    ).fetchone()[0],
+                    1,
+                )
+            with self.assertRaises(HTTPException) as raised:
+                await pin_room_conversation(
+                    99,
+                    ConversationPinUpdateRequest(pinned=True),
+                    current_user=actor,
+                    db=CrudSession(Session()),
+                )
+            self.assertEqual(raised.exception.status_code, 404)
+            engine.dispose()
+
+    async def test_mute_room_conversation_mutes_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "group-mute.sqlite")
+            engine, Session = _group_chat_store(db_path)
+            actor = SimpleNamespace(id=1)
+            created = await create_group(
+                GroupCreateRequest(title="گروه میوت"),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            muted = await mute_room_conversation(
+                created.group.id,
+                ConversationMuteUpdateRequest(muted=True),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertTrue(muted.is_muted)
+            again = await mute_room_conversation(
+                created.group.id,
+                ConversationMuteUpdateRequest(muted=True),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertTrue(again.is_muted)
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT is_muted FROM chat_members WHERE chat_id=1 AND user_id=1"
+                    ).fetchone()[0],
+                    1,
+                )
+            with self.assertRaises(HTTPException) as raised:
+                await mute_room_conversation(
+                    99,
+                    ConversationMuteUpdateRequest(muted=True),
+                    current_user=actor,
+                    db=CrudSession(Session()),
+                )
+            self.assertEqual(raised.exception.status_code, 404)
+            engine.dispose()
+
+    async def test_get_groups_lists_created_then_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "group-list.sqlite")
+            engine, Session = _group_chat_store(db_path)
+            actor = SimpleNamespace(id=1)
+            empty = await get_groups(current_user=actor, db=CrudSession(Session()))
+            self.assertEqual(list(empty), [])
+            await create_group(
+                GroupCreateRequest(title="گروه فهرست"),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            listed = await get_groups(current_user=actor, db=CrudSession(Session()))
+            self.assertEqual(len(listed), 1)
+            self.assertEqual(listed[0].title, "گروه فهرست")
+            self.assertEqual(listed[0].current_user_role, "admin")
+            engine.dispose()
+
+    async def test_get_group_detail_reads_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "group-detail.sqlite")
+            engine, Session = _group_chat_store(db_path)
+            actor = SimpleNamespace(id=1)
+            created = await create_group(
+                GroupCreateRequest(title="گروه جزئیات"),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            detail = await get_group_detail(
+                created.group.id,
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertEqual(detail.group.title, "گروه جزئیات")
+            self.assertEqual(len(detail.members), 1)
+            self.assertEqual(detail.members[0].user_id, 1)
+            with self.assertRaises(HTTPException) as raised:
+                await get_group_detail(99, current_user=actor, db=CrudSession(Session()))
+            self.assertEqual(raised.exception.status_code, 404)
+            engine.dispose()
+
+    async def test_pin_direct_conversation_pins_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "direct-pin.sqlite")
+            engine, Session = _group_chat_store(db_path)
+            actor = _load_store_user(Session, 1)
+            pinned = await pin_direct_conversation(
+                2,
+                ConversationPinUpdateRequest(pinned=True),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertTrue(pinned.is_pinned)
+            self.assertEqual(pinned.chat_id, 1)
+            again = await pin_direct_conversation(
+                2,
+                ConversationPinUpdateRequest(pinned=True),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertTrue(again.is_pinned)
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT is_pinned FROM chat_members WHERE user_id=1"
+                    ).fetchone()[0],
+                    1,
+                )
+            with self.assertRaises(HTTPException) as raised:
+                await pin_direct_conversation(
+                    99,
+                    ConversationPinUpdateRequest(pinned=True),
+                    current_user=actor,
+                    db=CrudSession(Session()),
+                )
+            self.assertIn(raised.exception.status_code, (404, 400))
+            engine.dispose()
+
+    async def test_mute_direct_conversation_mutes_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "direct-mute.sqlite")
+            engine, Session = _group_chat_store(db_path)
+            actor = _load_store_user(Session, 1)
+            muted = await mute_direct_conversation(
+                2,
+                ConversationMuteUpdateRequest(muted=True),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertTrue(muted.is_muted)
+            again = await mute_direct_conversation(
+                2,
+                ConversationMuteUpdateRequest(muted=True),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertTrue(again.is_muted)
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT is_muted FROM chat_members WHERE user_id=1"
+                    ).fetchone()[0],
+                    1,
+                )
+            with self.assertRaises(HTTPException) as raised:
+                await mute_direct_conversation(
+                    99,
+                    ConversationMuteUpdateRequest(muted=True),
+                    current_user=actor,
+                    db=CrudSession(Session()),
+                )
+            self.assertIn(raised.exception.status_code, (404, 400))
+            engine.dispose()
+
+    async def test_delete_direct_conversation_hides_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "direct-hide.sqlite")
+            engine, Session = _group_chat_store(db_path)
+            actor = _load_store_user(Session, 1)
+            await pin_direct_conversation(
+                2,
+                ConversationPinUpdateRequest(pinned=True),
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            hidden = await delete_direct_conversation(
+                2,
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertTrue(hidden.hidden)
+            self.assertEqual(hidden.target_id, 2)
+            again = await delete_direct_conversation(
+                2,
+                current_user=actor,
+                db=CrudSession(Session()),
+            )
+            self.assertTrue(again.hidden)
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT is_hidden FROM chat_members WHERE user_id=1"
+                    ).fetchone()[0],
+                    1,
+                )
+            with self.assertRaises(HTTPException) as raised:
+                await delete_direct_conversation(99, current_user=actor, db=CrudSession(Session()))
+            self.assertIn(raised.exception.status_code, (404, 400))
             engine.dispose()
 
     async def test_channel_trade_handlers_gateway_confirm_is_not_crud_evidence(self):

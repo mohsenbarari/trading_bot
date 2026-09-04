@@ -1,5 +1,12 @@
 # Infrastructure
 
+- 2026-09-04 | P1-00b executed fourteen more exact handlers (group create/patch/
+  member/admin/leave, room pin/mute, group reads, and direct pin/mute/hide)
+  and attached per-seed test nodes. Origin SUCCESS/policy/notification/
+  side-effect-retry stay High. One hundred four exact handlers are evidenced;
+  361 seeds stay High. Invitation-role and channel-trade stay High. Live
+  hosts were not re-observed. `DR-018` stays `NOT_REINSPECTED`.
+
 - 2026-09-04 | P1-00b executed sixteen more exact handlers (commodity and user
   admin navigation, market/broadcast/commodity/settings reads, and market-state
   view) and attached per-seed test nodes. Origin SUCCESS/policy/notification/
