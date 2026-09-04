@@ -139,7 +139,8 @@
       "test_refs": [
         "tests/test_admin_messages_router.py",
         "frontend/src/views/MarketView.test.ts",
-        "frontend/src/components/AdminMessagesView.test.ts"
+        "frontend/src/components/AdminMessagesView.test.ts",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_get_current_market_message_reads_row_then_none_when_empty"
       ],
       "operation_kind": "READ_QUERY"
     },
@@ -152,7 +153,8 @@
       "source": "api/routers/admin_messages.py:194",
       "mutation_class": "READ_OR_STREAM",
       "test_refs": [
-        "frontend/src/components/AdminMessagesView.test.ts"
+        "frontend/src/components/AdminMessagesView.test.ts",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_get_market_message_history_lists_then_empty"
       ],
       "operation_kind": "READ_QUERY"
     },
@@ -197,7 +199,8 @@
       "source": "api/routers/admin_messages.py:251",
       "mutation_class": "READ_OR_STREAM",
       "test_refs": [
-        "frontend/src/components/AdminMessagesView.test.ts"
+        "frontend/src/components/AdminMessagesView.test.ts",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_get_broadcast_history_lists_then_empty"
       ],
       "operation_kind": "READ_QUERY"
     },
@@ -1458,7 +1461,8 @@
       "source": "api/routers/commodities.py:131",
       "mutation_class": "READ_OR_STREAM",
       "test_refs": [
-        "tests/test_commodities_router_read_one.py"
+        "tests/test_commodities_router_read_one.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_read_commodity_returns_row_then_404s"
       ],
       "operation_kind": "READ_QUERY"
     },
@@ -1559,7 +1563,8 @@
       "test_refs": [
         "tests/test_main_foreign_surface_guard.py",
         "tests/test_bot_admin_commodities_helpers.py",
-        "tests/api_load_test.py"
+        "tests/api_load_test.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_read_all_commodities_lists_then_empty"
       ],
       "operation_kind": "READ_QUERY"
     },
@@ -2843,7 +2848,8 @@
       "test_refs": [
         "tests/test_bot_panel_settings_new_value.py",
         "tests/test_bot_panel_settings_helpers.py",
-        "tests/test_bot_panel_settings_reset.py"
+        "tests/test_bot_panel_settings_reset.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_get_settings_reads_persisted_quantity"
       ],
       "operation_kind": "READ_QUERY"
     },
@@ -2858,7 +2864,8 @@
       "test_refs": [
         "tests/test_trading_settings_router_read.py",
         "frontend/src/views/MarketView.test.ts",
-        "frontend/src/components/BottomNav.test.ts"
+        "frontend/src/components/BottomNav.test.ts",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_get_market_state_returns_schedule_view"
       ],
       "operation_kind": "READ_QUERY"
     },
@@ -2872,7 +2879,8 @@
       "mutation_class": "READ_OR_STREAM",
       "test_refs": [
         "tests/test_trading_settings_router_overrides.py",
-        "frontend/src/components/TradingSettings.test.ts"
+        "frontend/src/components/TradingSettings.test.ts",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_list_market_overrides_lists_then_empty"
       ],
       "operation_kind": "READ_QUERY"
     },

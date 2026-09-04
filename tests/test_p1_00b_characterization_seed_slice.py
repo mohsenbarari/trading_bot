@@ -28,6 +28,9 @@ from api.routers.admin_messages import (
     clear_current_market_message,
     create_broadcast,
     create_market_message,
+    get_broadcast_history,
+    get_current_market_message,
+    get_market_message_history,
 )
 from api.routers.chat import delete_message, send_message, update_message
 from api.routers.chat_schemas import MessageSend, MessageUpdate
@@ -36,6 +39,8 @@ from api.routers.commodities import (
     create_commodity,
     delete_alias,
     delete_commodity,
+    read_all_commodities,
+    read_commodity,
     update_alias,
     update_commodity_name,
 )
@@ -44,6 +49,9 @@ from api.routers.trading_settings import (
     TradingSettingsUpdate,
     create_market_override,
     delete_market_override,
+    get_market_state,
+    get_settings,
+    list_market_overrides,
     reset_settings,
     update_market_override,
     update_settings,
@@ -80,16 +88,20 @@ from bot.handlers.admin_commodities import (
     handle_alias_delete_yes,
     handle_alias_edit_name,
     handle_alias_edit_start,
+    handle_back_to_list,
     handle_cancel_fsm,
     handle_commodity_edit_name,
     handle_commodity_edit_start,
     handle_delete_confirm,
     handle_delete_yes,
+    handle_manage_aliases,
+    handle_manage_commodities,
 )
 from bot.handlers.admin_users import (
     handle_admin_max_block_custom,
     handle_admin_max_block_set,
     handle_admin_set_max_block,
+    handle_back_to_admin,
     handle_limit_cancel,
     handle_limit_confirm,
     handle_set_commodities,
@@ -106,6 +118,10 @@ from bot.handlers.admin_users import (
     handle_user_settings,
     handle_user_unblock,
     handle_user_unlimit,
+    handle_users_list_command,
+    handle_users_menu,
+    handle_users_pagination,
+    handle_view_user_profile,
     process_custom_max_block,
     process_limit_value,
     process_search_query,
@@ -127,6 +143,7 @@ from models.admin_message import AdminBroadcastMessage
 from models.chat import Chat
 from models.chat_member import ChatMember
 from models.commodity import Commodity, CommodityAlias
+from models.market_runtime_state import MarketRuntimeState
 from models.market_schedule_override import MarketScheduleOverride, MarketScheduleOverrideType
 from models.message import Message
 from models.notification import Notification
@@ -222,6 +239,22 @@ SEARCH_CANCEL_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-SEARCH-CA
 SEARCH_QUERY_SEED = "BOT-ADMIN-MESSAGE-ADMIN-USERS-PROCESS-SEARCH-QUERY-L678"
 USER_SETTINGS_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-SETTINGS-L742"
 CREATE_BROADCAST_SEED = "API-ADMIN-POST-ADMIN-MESSAGES-CREATE-BROADCAST-L261"
+MANAGE_COMMODITIES_SEED = "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-MANAGE-COMMODITIES-L305"
+BACK_TO_LIST_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-BACK-TO-LIST-L318"
+MANAGE_ALIASES_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-MANAGE-ALIASES-L333"
+USERS_MENU_SEED = "BOT-ADMIN-MESSAGE-ADMIN-USERS-HANDLE-USERS-MENU-L489"
+USERS_LIST_SEED = "BOT-ADMIN-MESSAGE-ADMIN-USERS-HANDLE-USERS-LIST-COMMAND-L512"
+USERS_PAGE_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USERS-PAGINATION-L527"
+VIEW_PROFILE_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-VIEW-USER-PROFILE-L548"
+BACK_TO_ADMIN_SEED = "BOT-ADMIN-MESSAGE-ADMIN-USERS-HANDLE-BACK-TO-ADMIN-L602"
+GET_MARKET_CURRENT_SEED = "API-ADMIN-GET-ADMIN-MESSAGES-GET-CURRENT-MARKET-MESSAGE-L180"
+GET_MARKET_HISTORY_SEED = "API-ADMIN-GET-ADMIN-MESSAGES-GET-MARKET-MESSAGE-HISTORY-L194"
+GET_BROADCAST_HISTORY_SEED = "API-ADMIN-GET-ADMIN-MESSAGES-GET-BROADCAST-HISTORY-L251"
+READ_COMMODITY_SEED = "API-ADMIN-GET-COMMODITIES-READ-COMMODITY-L131"
+READ_ALL_COMMODITIES_SEED = "API-ADMIN-GET-COMMODITIES-READ-ALL-COMMODITIES-L99"
+GET_SETTINGS_SEED = "API-ADMIN-GET-TRADING-SETTINGS-GET-SETTINGS-L195"
+GET_MARKET_STATE_SEED = "API-ADMIN-GET-TRADING-SETTINGS-GET-MARKET-STATE-L202"
+LIST_OVERRIDES_SEED = "API-ADMIN-GET-TRADING-SETTINGS-LIST-MARKET-OVERRIDES-L214"
 TRADE_CHANNEL_SEED = "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-L810"
 TRADE_PUBLIC_SEED = "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-PUBLIC-L829"
 UNEVIDENCED_TRADE_GATEWAY_SEEDS = {TRADE_CHANNEL_SEED, TRADE_PUBLIC_SEED}
@@ -301,6 +334,22 @@ SLICE_EXECUTED_SEED_IDS = {
     SEARCH_QUERY_SEED,
     USER_SETTINGS_SEED,
     CREATE_BROADCAST_SEED,
+    MANAGE_COMMODITIES_SEED,
+    BACK_TO_LIST_SEED,
+    MANAGE_ALIASES_SEED,
+    USERS_MENU_SEED,
+    USERS_LIST_SEED,
+    USERS_PAGE_SEED,
+    VIEW_PROFILE_SEED,
+    BACK_TO_ADMIN_SEED,
+    GET_MARKET_CURRENT_SEED,
+    GET_MARKET_HISTORY_SEED,
+    GET_BROADCAST_HISTORY_SEED,
+    READ_COMMODITY_SEED,
+    READ_ALL_COMMODITIES_SEED,
+    GET_SETTINGS_SEED,
+    GET_MARKET_STATE_SEED,
+    LIST_OVERRIDES_SEED,
 }
 
 SEED_EVIDENCE_NODES = {
@@ -601,6 +650,70 @@ SEED_EVIDENCE_NODES = {
         "tests/test_p1_00b_characterization_seed_slice.py"
         "::P100bSeedSliceExecutionTests.test_create_broadcast_persists_messages_then_rejects_empty"
     ),
+    MANAGE_COMMODITIES_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_manage_commodities_lists_then_denies_without_user"
+    ),
+    BACK_TO_LIST_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_back_to_list_clears_then_denies_non_admin"
+    ),
+    MANAGE_ALIASES_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_manage_aliases_lists_then_denies_non_admin"
+    ),
+    USERS_MENU_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_users_menu_stores_anchor_then_denies_non_admin"
+    ),
+    USERS_LIST_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_users_list_command_renders_then_denies_non_admin"
+    ),
+    USERS_PAGE_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_users_pagination_renders_page_then_denies_non_admin"
+    ),
+    VIEW_PROFILE_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_view_user_profile_edits_then_denies_non_admin"
+    ),
+    BACK_TO_ADMIN_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_back_to_admin_clears_then_denies_non_admin"
+    ),
+    GET_MARKET_CURRENT_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_get_current_market_message_reads_row_then_none_when_empty"
+    ),
+    GET_MARKET_HISTORY_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_get_market_message_history_lists_then_empty"
+    ),
+    GET_BROADCAST_HISTORY_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_get_broadcast_history_lists_then_empty"
+    ),
+    READ_COMMODITY_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_read_commodity_returns_row_then_404s"
+    ),
+    READ_ALL_COMMODITIES_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_read_all_commodities_lists_then_empty"
+    ),
+    GET_SETTINGS_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_get_settings_reads_persisted_quantity"
+    ),
+    GET_MARKET_STATE_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_get_market_state_returns_schedule_view"
+    ),
+    LIST_OVERRIDES_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_list_market_overrides_lists_then_empty"
+    ),
 }
 
 
@@ -811,8 +924,43 @@ def _isolated_commodity_client(db):
             parts = [item for item in urlparse(url).path.rstrip("/").split("/") if item]
             payload = payload or {}
             try:
-                if method == "GET":
-                    return _HttpResp(200, [])
+                if method == "GET" and parts[-1] == "commodities":
+                    items = await read_all_commodities(db=self.db)
+                    return _HttpResp(
+                        200,
+                        [
+                            {
+                                "id": item.id,
+                                "name": item.name,
+                                "aliases": [
+                                    {
+                                        "id": alias.id,
+                                        "alias": alias.alias,
+                                        "commodity_id": alias.commodity_id,
+                                    }
+                                    for alias in (item.aliases or [])
+                                ],
+                            }
+                            for item in items
+                        ],
+                    )
+                if method == "GET" and parts[-2] == "commodities":
+                    item = await read_commodity(int(parts[-1]), db=self.db)
+                    return _HttpResp(
+                        200,
+                        {
+                            "id": item.id,
+                            "name": item.name,
+                            "aliases": [
+                                {
+                                    "id": alias.id,
+                                    "alias": alias.alias,
+                                    "commodity_id": alias.commodity_id,
+                                }
+                                for alias in (item.aliases or [])
+                            ],
+                        },
+                    )
                 if method == "POST" and parts[-1] == "aliases":
                     created = await add_alias_to_commodity(
                         int(parts[-2]),
@@ -855,16 +1003,16 @@ def _isolated_commodity_client(db):
                 return _HttpResp(exc.status_code, {"detail": exc.detail})
             return _HttpResp(404, {"detail": url})
 
-        async def get(self, url, headers=None):
+        async def get(self, url, headers=None, timeout=None, **_kwargs):
             return await self._call("GET", url)
 
-        async def post(self, url, json=None, headers=None):
+        async def post(self, url, json=None, headers=None, timeout=None, **_kwargs):
             return await self._call("POST", url, json)
 
-        async def put(self, url, json=None, headers=None):
+        async def put(self, url, json=None, headers=None, timeout=None, **_kwargs):
             return await self._call("PUT", url, json)
 
-        async def delete(self, url, headers=None):
+        async def delete(self, url, headers=None, timeout=None, **_kwargs):
             return await self._call("DELETE", url)
 
     return IsolatedCommodityClient
@@ -948,6 +1096,55 @@ def _bot_commodity_patches(db):
         patch("bot.handlers.admin_commodities.show_commodity_list", new=AsyncMock()),
         patch("bot.handlers.admin_commodities.asyncio.sleep", new=AsyncMock()),
     ]
+
+
+class UsersListSession:
+    """Session-construction isolate: live list SQL shape with in-memory rows."""
+
+    def __init__(self, users):
+        self.users = list(users)
+
+    async def execute(self, *_a, **_k):
+        visible = [item for item in self.users if not getattr(item, "is_deleted", False)]
+        return SimpleNamespace(
+            scalar=lambda: len(visible),
+            scalars=lambda: SimpleNamespace(all=lambda: list(visible)),
+        )
+
+
+def _bot_commodity_nav_patches(db, sent):
+    async def _send(*_a, **kwargs):
+        sent.append(kwargs.get("text") or (_a[1] if len(_a) > 1 else ""))
+        return SimpleNamespace(message_id=70 + len(sent))
+
+    return [
+        patch("bot.handlers.admin_commodities.httpx.AsyncClient", _isolated_commodity_client(db)),
+        patch("bot.handlers.admin_commodities.delete_user_message", new=AsyncMock()),
+        patch("bot.handlers.admin_commodities.update_anchor", new=AsyncMock()),
+        patch("bot.handlers.admin_commodities.clear_state_retain_anchor", new=AsyncMock()),
+        patch("bot.handlers.admin_commodities.answer_callback_query_via_runtime", new=AsyncMock()),
+        patch("bot.handlers.admin_commodities.asyncio.sleep", new=AsyncMock()),
+        patch("core.utils.redis.Redis", IsolatedAsyncRedis),
+        patch("core.redis.get_redis_client", side_effect=RuntimeError("isolated-redis")),
+        *_isolated_market_patches()[1:],
+    ] + [
+        patch(
+            "bot.handlers.admin_commodities.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode="isolated"),
+        ),
+    ]
+
+
+def _capture_bot(sent):
+    async def _send(*_a, **kwargs):
+        sent.append(kwargs.get("text") or (_a[1] if len(_a) > 1 else ""))
+        return SimpleNamespace(message_id=80 + len(sent))
+
+    async def _edit(*_a, **kwargs):
+        sent.append(kwargs.get("text") or (_a[2] if len(_a) > 2 else ""))
+        return SimpleNamespace(message_id=90 + len(sent))
+
+    return SimpleNamespace(send_message=_send, edit_message_text=_edit)
 
 
 def _market_message_store(path: str):
@@ -1091,6 +1288,23 @@ def _user_admin_display_patches():
         ),
         patch("bot.handlers.admin_users.attach_customer_management_names", new=AsyncMock()),
         patch("bot.handlers.admin_users.schedule_temporary_message_cleanup", new=AsyncMock()),
+    ]
+
+
+def _user_admin_nav_patches():
+    return _user_admin_display_patches() + [
+        patch("bot.handlers.admin_users.attach_user_management_relation_context", new=AsyncMock()),
+        patch("bot.handlers.admin_users.clear_state_retain_anchors", new=AsyncMock()),
+        patch("bot.handlers.admin_users.safe_delete_message", new=AsyncMock()),
+        patch(
+            "bot.handlers.admin_users.build_admin_panel_navigation_keyboard",
+            new=AsyncMock(return_value="ADMIN-KB"),
+        ),
+        patch("bot.handlers.admin_users.get_users_list_inline_keyboard", return_value="LIST-KB"),
+        patch(
+            "bot.handlers.admin_users.configured_telegram_delivery_runtime",
+            return_value=SimpleNamespace(mode="isolated"),
+        ),
     ]
 
 
@@ -3621,6 +3835,458 @@ class P100bSeedSliceExecutionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(conn.execute("SELECT COUNT(*) FROM admin_broadcast_messages").fetchone()[0], 1)
                 self.assertGreaterEqual(conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0], 1)
                 self.assertGreaterEqual(conn.execute("SELECT COUNT(*) FROM chats").fetchone()[0], 1)
+            engine.dispose()
+
+    async def test_manage_commodities_lists_then_denies_without_user(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "bot-manage-commodities.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            sync = Session()
+            sync.add(Commodity(name="ربع"))
+            sync.commit()
+            sent = []
+            db = CrudSession(Session())
+            patches = _bot_commodity_nav_patches(db, sent)
+            for item in patches:
+                item.start()
+            try:
+                await handle_manage_commodities(_commodity_message("📦 مدیریت کالاها"), user=None, state=FakeState())
+                self.assertEqual(sent, [])
+                message = _commodity_message("📦 مدیریت کالاها")
+                message.bot = _capture_bot(sent)
+                await handle_manage_commodities(
+                    message,
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    state=FakeState(),
+                )
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            self.assertTrue(any("ربع" in text or "مدیریت کالاها" in text for text in sent))
+            sync.close()
+            engine.dispose()
+
+    async def test_back_to_list_clears_then_denies_non_admin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "bot-back-to-list.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            sync = Session()
+            sync.add(Commodity(name="ربع"))
+            sync.commit()
+            sent = []
+            db = CrudSession(Session())
+            patches = _bot_commodity_nav_patches(db, sent)
+            denied = FakeState(anchor_id=3)
+            ok = FakeState(anchor_id=3)
+            for item in patches:
+                item.start()
+            try:
+                await handle_back_to_list(
+                    _commodity_callback("comm_back_to_list"),
+                    user=SimpleNamespace(role=UserRole.STANDARD),
+                    state=denied,
+                )
+                self.assertEqual(sent, [])
+                callback = _commodity_callback("comm_back_to_list")
+                callback.bot = _capture_bot(sent)
+                await handle_back_to_list(
+                    callback,
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    state=ok,
+                )
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            self.assertTrue(any("ربع" in text or "مدیریت کالاها" in text for text in sent))
+            sync.close()
+            engine.dispose()
+
+    async def test_manage_aliases_lists_then_denies_non_admin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "bot-manage-aliases.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            sync = Session()
+            commodity = Commodity(name="ربع")
+            sync.add(commodity)
+            sync.flush()
+            sync.add(CommodityAlias(commodity_id=commodity.id, alias="ربع طلا"))
+            sync.commit()
+            sent = []
+            db = CrudSession(Session())
+            patches = _bot_commodity_nav_patches(db, sent)
+            for item in patches:
+                item.start()
+            try:
+                await handle_manage_aliases(
+                    _commodity_callback("comm_manage_aliases_1"),
+                    user=SimpleNamespace(role=UserRole.STANDARD),
+                    state=FakeState(),
+                )
+                self.assertEqual(sent, [])
+                callback = _commodity_callback("comm_manage_aliases_1")
+                callback.bot = _capture_bot(sent)
+                await handle_manage_aliases(
+                    callback,
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    state=FakeState(),
+                )
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            self.assertTrue(any("ربع" in text for text in sent))
+            sync.close()
+            engine.dispose()
+
+    async def test_users_menu_stores_anchor_then_denies_non_admin(self):
+        answers = []
+
+        async def _answer(*_a, **_k):
+            answers.append(_k.get("source_key") or "")
+            return SimpleNamespace(message_id=92)
+
+        denied = FakeState()
+        ok = FakeState()
+        patches = _user_admin_nav_patches()
+        for item in patches:
+            item.start()
+        try:
+            with patch("bot.handlers.admin_users.answer_incoming_message_via_runtime", new=_answer):
+                await handle_users_menu(
+                    _commodity_message("👥 مدیریت کاربران"),
+                    user=SimpleNamespace(role=UserRole.STANDARD),
+                    state=denied,
+                )
+                self.assertEqual(denied.data, {})
+                self.assertIn("admin-users-menu-denied", answers)
+                await handle_users_menu(
+                    _commodity_message("👥 مدیریت کاربران"),
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    state=ok,
+                )
+        finally:
+            for item in reversed(patches):
+                item.stop()
+        self.assertEqual(ok.data["users_menu_id"], 92)
+        self.assertIn("admin-users-menu", answers)
+
+    async def test_users_list_command_renders_then_denies_non_admin(self):
+        sent = []
+        engine, Session, sync = _make_store()
+        _persist_user(sync)
+        target = sync.get(MappedAccountUser, 9)
+        denied = FakeState()
+        ok = FakeState()
+        message = _commodity_message("📋 لیست کاربران")
+        message.bot = _capture_bot(sent)
+        patches = _user_admin_nav_patches()
+        for item in patches:
+            item.start()
+        try:
+            with patch(
+                "bot.handlers.admin_users.AsyncSessionLocal",
+                return_value=_SessionBox(UsersListSession([target])),
+            ):
+                await handle_users_list_command(
+                    message,
+                    user=SimpleNamespace(role=UserRole.STANDARD),
+                    state=denied,
+                )
+                self.assertEqual(sent, [])
+                await handle_users_list_command(
+                    message,
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    state=ok,
+                )
+        finally:
+            for item in reversed(patches):
+                item.stop()
+        self.assertTrue(any("لیست کاربران" in text for text in sent))
+        sync.close()
+        engine.dispose()
+
+    async def test_users_pagination_renders_page_then_denies_non_admin(self):
+        sent = []
+        engine, Session, sync = _make_store()
+        _persist_user(sync)
+        target = sync.get(MappedAccountUser, 9)
+        callback = SimpleNamespace(
+            data="users_page_1",
+            answer=AsyncMock(),
+            bot=_capture_bot(sent),
+            message=SimpleNamespace(chat=SimpleNamespace(id=1), message_id=10),
+        )
+        patches = _user_admin_nav_patches()
+        for item in patches:
+            item.start()
+        try:
+            with patch(
+                "bot.handlers.admin_users.AsyncSessionLocal",
+                return_value=_SessionBox(UsersListSession([target])),
+            ):
+                await handle_users_pagination(
+                    callback,
+                    user=SimpleNamespace(role=UserRole.STANDARD),
+                    state=FakeState(),
+                )
+                self.assertEqual(sent, [])
+                await handle_users_pagination(
+                    callback,
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    state=FakeState(),
+                )
+        finally:
+            for item in reversed(patches):
+                item.stop()
+        self.assertTrue(any("لیست کاربران" in text for text in sent))
+        sync.close()
+        engine.dispose()
+
+    async def test_view_user_profile_edits_then_denies_non_admin(self):
+        engine, Session, sync = _make_store()
+        _persist_user(sync)
+        edits = []
+
+        async def _edit(*_a, **_k):
+            edits.append(1)
+
+        callback = SimpleNamespace(
+            data="user_profile_9",
+            answer=AsyncMock(),
+            message=SimpleNamespace(reply_markup=None),
+        )
+        db = RoleSession(sync)
+        patches = _user_admin_nav_patches()
+        for item in patches:
+            item.start()
+        try:
+            with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=_SessionBox(db)), patch(
+                "bot.handlers.admin_users.edit_callback_message_via_runtime",
+                new=_edit,
+            ):
+                await handle_view_user_profile(
+                    callback,
+                    user=SimpleNamespace(role=UserRole.STANDARD),
+                    state=FakeState(),
+                )
+                self.assertEqual(edits, [])
+                await handle_view_user_profile(
+                    callback,
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    state=FakeState(),
+                )
+        finally:
+            for item in reversed(patches):
+                item.stop()
+        self.assertEqual(edits, [1])
+        sync.close()
+        engine.dispose()
+
+    async def test_back_to_admin_clears_then_denies_non_admin(self):
+        answers = []
+
+        async def _answer(*_a, **_k):
+            answers.append(_k.get("source_key") or "")
+            return SimpleNamespace(message_id=94)
+
+        denied = FakeState(users_menu_id=3, leftover=1)
+        ok = FakeState(users_menu_id=3, leftover=1)
+        patches = _user_admin_nav_patches()
+        for item in patches:
+            item.start()
+        try:
+            with patch("bot.handlers.admin_users.answer_incoming_message_via_runtime", new=_answer):
+                await handle_back_to_admin(
+                    _commodity_message("🔙 بازگشت به پنل مدیریت"),
+                    user=SimpleNamespace(role=UserRole.STANDARD),
+                    state=denied,
+                )
+                self.assertEqual(denied.data["users_menu_id"], 3)
+                await handle_back_to_admin(
+                    _commodity_message("🔙 بازگشت به پنل مدیریت"),
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    state=ok,
+                )
+        finally:
+            for item in reversed(patches):
+                item.stop()
+        self.assertEqual(ok.data, {})
+        self.assertIn("admin-users-back-to-panel", answers)
+
+    async def test_get_current_market_message_reads_row_then_none_when_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "get-market-current.sqlite")
+            engine, Session = _market_message_store(db_path)
+            actor = SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN, account_name="admin")
+            patches = _isolated_market_patches()
+            for item in patches:
+                item.start()
+            try:
+                empty = await get_current_market_message(current_user=actor, db=CrudSession(Session()))
+                self.assertIsNone(empty)
+                await create_market_message(
+                    AdminMarketMessageCreate(content="بازار باز است"),
+                    current_user=actor,
+                    db=CrudSession(Session()),
+                )
+                current = await get_current_market_message(current_user=actor, db=CrudSession(Session()))
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            self.assertEqual(current.content, "بازار باز است")
+            self.assertTrue(current.is_active)
+            engine.dispose()
+
+    async def test_get_market_message_history_lists_then_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "get-market-history.sqlite")
+            engine, Session = _market_message_store(db_path)
+            actor = SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN, account_name="admin")
+            patches = _isolated_market_patches()
+            for item in patches:
+                item.start()
+            try:
+                empty = await get_market_message_history(current_user=actor, db=CrudSession(Session()))
+                self.assertEqual(empty, [])
+                await create_market_message(
+                    AdminMarketMessageCreate(content="تاریخچه بازار"),
+                    current_user=actor,
+                    db=CrudSession(Session()),
+                )
+                history = await get_market_message_history(current_user=actor, db=CrudSession(Session()))
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            self.assertEqual(history[0].content, "تاریخچه بازار")
+            engine.dispose()
+
+    async def test_get_broadcast_history_lists_then_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "get-broadcast-history.sqlite")
+            engine, Session = _management_broadcast_store(db_path)
+            actor = SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN, account_name="admin")
+            patches = _isolated_market_patches()
+            for item in patches:
+                item.start()
+            try:
+                empty = await get_broadcast_history(current_user=actor, db=CrudSession(Session()))
+                self.assertEqual(empty, [])
+                await create_broadcast(
+                    AdminBroadcastCreate(content="پخش تاریخچه", target_groups=["users"]),
+                    current_user=actor,
+                    db=CrudSession(Session()),
+                )
+                history = await get_broadcast_history(current_user=actor, db=CrudSession(Session()))
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            self.assertEqual(history[0].content, "پخش تاریخچه")
+            engine.dispose()
+
+    async def test_read_commodity_returns_row_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "read-commodity.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            sync = Session()
+            sync.add(Commodity(name="ربع"))
+            sync.commit()
+            patches = _isolated_market_patches()
+            for item in patches:
+                item.start()
+            try:
+                with self.assertRaises(HTTPException) as missing:
+                    await read_commodity(99, db=CrudSession(Session()))
+                self.assertEqual(missing.exception.status_code, 404)
+                loaded = await read_commodity(1, db=CrudSession(Session()))
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            self.assertEqual(loaded.name, "ربع")
+            sync.close()
+            engine.dispose()
+
+    async def test_read_all_commodities_lists_then_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "read-all-commodities.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            patches = _isolated_market_patches()
+            for item in patches:
+                item.start()
+            try:
+                empty = await read_all_commodities(db=CrudSession(Session()))
+                self.assertEqual(empty, [])
+                sync = Session()
+                sync.add(Commodity(name="ربع"))
+                sync.commit()
+                sync.close()
+                items = await read_all_commodities(db=CrudSession(Session()))
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            self.assertEqual(items[0].name, "ربع")
+            engine.dispose()
+
+    async def test_get_settings_reads_persisted_quantity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "get-settings.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+
+            def _box():
+                return _SessionBox(CrudSession(Session()))
+
+            patches = _isolated_market_patches()
+            for item in patches:
+                item.start()
+            try:
+                with patch("core.db.AsyncSessionLocal", side_effect=_box):
+                    updated = await update_settings(TradingSettingsUpdate(offer_min_quantity=7))
+                    loaded = await get_settings()
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            self.assertEqual(updated.offer_min_quantity, 7)
+            self.assertEqual(loaded.offer_min_quantity, 7)
+            engine.dispose()
+
+    async def test_get_market_state_returns_schedule_view(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "get-market-state.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            MarketRuntimeState.__table__.create(engine, checkfirst=True)
+
+            def _box():
+                return _SessionBox(CrudSession(Session()))
+
+            patches = _isolated_market_patches()
+            for item in patches:
+                item.start()
+            try:
+                with patch("core.db.AsyncSessionLocal", side_effect=_box):
+                    await update_settings(TradingSettingsUpdate(offer_min_quantity=3))
+                    state = await get_market_state(db=CrudSession(Session()))
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            self.assertIn(state.is_open, (True, False))
+            self.assertIsInstance(state.offers_since_last_open, int)
+            engine.dispose()
+
+    async def test_list_market_overrides_lists_then_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "list-overrides.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            empty = await list_market_overrides(db=CrudSession(Session()))
+            self.assertEqual(empty, [])
+            created = await create_market_override(
+                MarketScheduleOverrideUpsert(
+                    date="2026-09-10",
+                    override_type=MarketScheduleOverrideType.CLOSED_ALL_DAY,
+                ),
+                db=CrudSession(Session()),
+                current_user=SimpleNamespace(id=1),
+            )
+            listed = await list_market_overrides(db=CrudSession(Session()))
+            self.assertEqual(listed[0].date, created.date)
+            self.assertEqual(listed[0].override_type, MarketScheduleOverrideType.CLOSED_ALL_DAY)
             engine.dispose()
 
     async def test_channel_trade_handlers_gateway_confirm_is_not_crud_evidence(self):

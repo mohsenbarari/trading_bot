@@ -135,6 +135,22 @@ class P100bSeedPartitionExecutionTests(unittest.IsolatedAsyncioTestCase):
         await helper.test_process_search_query_finds_user_then_rejects_unknown()
         await helper.test_user_settings_shows_then_denies_non_admin()
         await helper.test_create_broadcast_persists_messages_then_rejects_empty()
+        await helper.test_manage_commodities_lists_then_denies_without_user()
+        await helper.test_back_to_list_clears_then_denies_non_admin()
+        await helper.test_manage_aliases_lists_then_denies_non_admin()
+        await helper.test_users_menu_stores_anchor_then_denies_non_admin()
+        await helper.test_users_list_command_renders_then_denies_non_admin()
+        await helper.test_users_pagination_renders_page_then_denies_non_admin()
+        await helper.test_view_user_profile_edits_then_denies_non_admin()
+        await helper.test_back_to_admin_clears_then_denies_non_admin()
+        await helper.test_get_current_market_message_reads_row_then_none_when_empty()
+        await helper.test_get_market_message_history_lists_then_empty()
+        await helper.test_get_broadcast_history_lists_then_empty()
+        await helper.test_read_commodity_returns_row_then_404s()
+        await helper.test_read_all_commodities_lists_then_empty()
+        await helper.test_get_settings_reads_persisted_quantity()
+        await helper.test_get_market_state_returns_schedule_view()
+        await helper.test_list_market_overrides_lists_then_empty()
         await helper.test_channel_trade_handlers_gateway_confirm_is_not_crud_evidence()
 
     def test_sibling_family_membership_does_not_clear_unexecuted_seeds(self):
@@ -142,9 +158,9 @@ class P100bSeedPartitionExecutionTests(unittest.IsolatedAsyncioTestCase):
         seeds = _all_seeds()
         self.assertEqual(len(seeds), 465)
         unsupported = [seed["behavior_id"] for seed in seeds if seed["behavior_id"] not in EXECUTED_SEED_IDS]
-        self.assertEqual(len(EXECUTED_SEED_IDS), 74)
+        self.assertEqual(len(EXECUTED_SEED_IDS), 90)
         self.assertEqual(len(unsupported), REMAINING_HIGH_SEEDS)
-        self.assertEqual(REMAINING_HIGH_SEEDS, 391)
+        self.assertEqual(REMAINING_HIGH_SEEDS, 375)
         msg_crud = [
             seed["behavior_id"]
             for seed in seeds
@@ -172,7 +188,7 @@ class P100bSeedPartitionExecutionTests(unittest.IsolatedAsyncioTestCase):
         registry = {item["blocker_id"]: item for item in payload["blocker_registry"]["items"]}
         item = registry["P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE"]
         self.assertEqual(item["disposition"], "BLOCKED_EXPLICIT")
-        self.assertIn("391", item["reason"])
+        self.assertIn("375", item["reason"])
         self.assertIn("sibling", item["reason"].lower())
         for seed_id in sorted(EXECUTED_SEED_IDS):
             self.assertIn(seed_id, item["reason"])

@@ -331,7 +331,8 @@
         "tests/test_bot_admin_commodities_entry_points.py",
         "tests/test_bot_commodity_catalog.py",
         "tests/test_bot_panel_navigation_handoff.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_manage_commodities_lists_then_denies_without_user"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "MENU_NAV"
@@ -346,7 +347,8 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_commodities_entry_points.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_back_to_list_clears_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "MENU_NAV"
@@ -360,7 +362,8 @@
       "source": "bot/handlers/admin_commodities.py:333",
       "test_refs": [
         "tests/test_bot_admin_commodities_entry_points.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_manage_aliases_lists_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "MENU_NAV"
@@ -887,7 +890,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_entry_navigation.py",
         "tests/test_bot_panel_navigation_handoff.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_users_menu_stores_anchor_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "MENU_NAV"
@@ -902,7 +906,8 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_entry_navigation.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_users_list_command_renders_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "MENU_NAV"
@@ -917,7 +922,8 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_entry_navigation.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_users_pagination_renders_page_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "MENU_NAV"
@@ -933,7 +939,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_profile_text.py",
         "tests/test_bot_admin_users_bot_access.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_view_user_profile_edits_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "MENU_NAV"
@@ -949,7 +956,8 @@
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_users_interaction_queue.py",
         "tests/test_bot_admin_users_entry_navigation.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_back_to_admin_clears_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "MENU_NAV"

@@ -1,5 +1,12 @@
 # Infrastructure
 
+- 2026-09-04 | P1-00b executed sixteen more exact handlers (commodity and user
+  admin navigation, market/broadcast/commodity/settings reads, and market-state
+  view) and attached per-seed test nodes. Origin SUCCESS/policy/notification/
+  side-effect-retry stay High. Ninety exact handlers are evidenced; 375 seeds
+  stay High. Invitation-role and group MSG mutations were not evidenced. Live
+  hosts were not re-observed. `DR-018` stays `NOT_REINSPECTED`.
+
 - 2026-09-04 | P1-00b executed twenty more exact handlers (telegram broadcast
   FSM, user-limit and search FSM, user settings, and admin broadcast create)
   and attached per-seed test nodes. Origin SUCCESS/policy/notification/
