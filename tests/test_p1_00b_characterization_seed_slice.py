@@ -6,6 +6,7 @@ from tests.test_p1_00_characterization_network_isolation import install_p1_00_ne
 
 install_p1_00_network_fence()
 
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -13,7 +14,9 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from urllib.parse import urlparse
 
+import httpx
 from fastapi import HTTPException
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
@@ -31,14 +34,25 @@ from api.routers.commodities import (
 )
 from api.routers.trading_settings import (
     MarketScheduleOverrideUpsert,
+    TradingSettingsUpdate,
     create_market_override,
     delete_market_override,
+    reset_settings,
     update_market_override,
+    update_settings,
 )
 from bot.handlers.admin_broadcast import (
     confirm_telegram_admin_broadcast,
     toggle_group_recipient,
     toggle_selected_user,
+)
+from bot.handlers.admin_commodities import (
+    handle_add_aliases_and_create,
+    handle_alias_add_name,
+    handle_alias_delete_yes,
+    handle_alias_edit_name,
+    handle_commodity_edit_name,
+    handle_delete_yes,
 )
 from bot.handlers.admin_users import (
     handle_admin_max_block_set,
@@ -100,6 +114,14 @@ DELETE_ALIAS_SEED = "API-ADMIN-DELETE-COMMODITIES-DELETE-ALIAS-L437"
 CREATE_OVERRIDE_SEED = "API-ADMIN-POST-TRADING-SETTINGS-CREATE-MARKET-OVERRIDE-L222"
 UPDATE_OVERRIDE_SEED = "API-ADMIN-PUT-TRADING-SETTINGS-UPDATE-MARKET-OVERRIDE-L253"
 DELETE_OVERRIDE_SEED = "API-ADMIN-DELETE-TRADING-SETTINGS-DELETE-MARKET-OVERRIDE-L288"
+BOT_ALIAS_ADD_SEED = "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-ALIAS-ADD-NAME-L365"
+BOT_ALIAS_EDIT_SEED = "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-ALIAS-EDIT-NAME-L429"
+BOT_ALIAS_DELETE_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-ALIAS-DELETE-YES-L487"
+BOT_COMMODITY_EDIT_SEED = "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-COMMODITY-EDIT-NAME-L537"
+BOT_COMMODITY_CREATE_SEED = "BOT-ADMIN-MESSAGE-ADMIN-COMMODITIES-HANDLE-ADD-ALIASES-AND-CREATE-L622"
+BOT_COMMODITY_DELETE_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-COMMODITIES-HANDLE-DELETE-YES-L685"
+UPDATE_SETTINGS_SEED = "API-ADMIN-PUT-TRADING-SETTINGS-UPDATE-SETTINGS-L306"
+RESET_SETTINGS_SEED = "API-ADMIN-POST-TRADING-SETTINGS-RESET-SETTINGS-L353"
 TRADE_CHANNEL_SEED = "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-L810"
 TRADE_PUBLIC_SEED = "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-PUBLIC-L829"
 UNEVIDENCED_TRADE_GATEWAY_SEEDS = {TRADE_CHANNEL_SEED, TRADE_PUBLIC_SEED}
@@ -129,6 +151,14 @@ SLICE_EXECUTED_SEED_IDS = {
     CREATE_OVERRIDE_SEED,
     UPDATE_OVERRIDE_SEED,
     DELETE_OVERRIDE_SEED,
+    BOT_ALIAS_ADD_SEED,
+    BOT_ALIAS_EDIT_SEED,
+    BOT_ALIAS_DELETE_SEED,
+    BOT_COMMODITY_EDIT_SEED,
+    BOT_COMMODITY_CREATE_SEED,
+    BOT_COMMODITY_DELETE_SEED,
+    UPDATE_SETTINGS_SEED,
+    RESET_SETTINGS_SEED,
 }
 
 SEED_EVIDENCE_NODES = {
@@ -229,6 +259,38 @@ SEED_EVIDENCE_NODES = {
         "tests/test_p1_00b_characterization_seed_slice.py"
         "::P100bSeedSliceExecutionTests.test_delete_market_override_removes_then_404s"
     ),
+    BOT_ALIAS_ADD_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_bot_alias_add_name_persists_then_denies_without_user"
+    ),
+    BOT_ALIAS_EDIT_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_bot_alias_edit_name_persists_then_denies_without_user"
+    ),
+    BOT_ALIAS_DELETE_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_bot_alias_delete_yes_persists_then_denies_non_admin"
+    ),
+    BOT_COMMODITY_EDIT_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_bot_commodity_edit_name_persists_then_denies_without_user"
+    ),
+    BOT_COMMODITY_CREATE_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_bot_add_aliases_and_create_persists_then_denies_without_user"
+    ),
+    BOT_COMMODITY_DELETE_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_bot_delete_yes_removes_then_denies_non_admin"
+    ),
+    UPDATE_SETTINGS_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_update_settings_persists_then_rejects_invalid_hours"
+    ),
+    RESET_SETTINGS_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_reset_settings_restores_defaults_after_update"
+    ),
 }
 
 
@@ -246,6 +308,7 @@ class FakeState:
     def __init__(self, **data):
         self.data = dict(data)
         self.updates = 0
+        self.state = None
 
     async def get_data(self):
         return dict(self.data)
@@ -253,6 +316,9 @@ class FakeState:
     async def update_data(self, **kwargs):
         self.data.update(kwargs)
         self.updates += 1
+
+    async def set_state(self, state):
+        self.state = state
 
     async def clear(self):
         self.data.clear()
@@ -356,6 +422,96 @@ class CrudSession:
         self._session.rollback()
 
 
+class _HttpResp:
+    def __init__(self, status_code=200, payload=None):
+        self.status_code = status_code
+        self._payload = payload if payload is not None else {}
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            request = httpx.Request("GET", "http://isolated-commodities.local")
+            raise httpx.HTTPStatusError("isolated-http-status", request=request, response=self)
+
+    def json(self):
+        return self._payload
+
+
+def _isolated_commodity_client(db):
+    class IsolatedCommodityClient:
+        """Client-construction isolate: no socket; routes to live commodity callables."""
+
+        def __init__(self, *args, **kwargs):
+            self.db = db
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def _call(self, method, url, payload=None):
+            parts = [item for item in urlparse(url).path.rstrip("/").split("/") if item]
+            payload = payload or {}
+            try:
+                if method == "GET":
+                    return _HttpResp(200, [])
+                if method == "POST" and parts[-1] == "aliases":
+                    created = await add_alias_to_commodity(
+                        int(parts[-2]),
+                        alias=schemas.CommodityAliasCreate(alias=payload["alias"]),
+                        db=self.db,
+                        source="bot",
+                    )
+                    return _HttpResp(201, {"id": created.id, "alias": created.alias})
+                if method == "POST" and parts[-1] == "commodities":
+                    created = await create_commodity(
+                        commodity_data=schemas.CommodityCreate(name=payload["commodity_data"]["name"]),
+                        aliases=payload.get("aliases") or [],
+                        db=self.db,
+                        source="bot",
+                    )
+                    return _HttpResp(201, {"id": created.id, "name": created.name})
+                if method == "PUT" and parts[-2] == "aliases":
+                    updated = await update_alias(
+                        int(parts[-1]),
+                        schemas.CommodityAliasCreate(alias=payload["alias"]),
+                        db=self.db,
+                        source="bot",
+                    )
+                    return _HttpResp(200, {"id": updated.id, "alias": updated.alias})
+                if method == "PUT" and parts[-2] == "commodities":
+                    updated = await update_commodity_name(
+                        int(parts[-1]),
+                        schemas.CommodityCreate(name=payload["name"]),
+                        db=self.db,
+                        source="bot",
+                    )
+                    return _HttpResp(200, {"id": updated.id, "name": updated.name})
+                if method == "DELETE" and parts[-2] == "aliases":
+                    await delete_alias(int(parts[-1]), db=self.db, source="bot")
+                    return _HttpResp(204, {})
+                if method == "DELETE" and parts[-2] == "commodities":
+                    await delete_commodity(int(parts[-1]), db=self.db, source="bot")
+                    return _HttpResp(204, {})
+            except HTTPException as exc:
+                return _HttpResp(exc.status_code, {"detail": exc.detail})
+            return _HttpResp(404, {"detail": url})
+
+        async def get(self, url, headers=None):
+            return await self._call("GET", url)
+
+        async def post(self, url, json=None, headers=None):
+            return await self._call("POST", url, json)
+
+        async def put(self, url, json=None, headers=None):
+            return await self._call("PUT", url, json)
+
+        async def delete(self, url, headers=None):
+            return await self._call("DELETE", url)
+
+    return IsolatedCommodityClient
+
+
 class _SessionBox:
     def __init__(self, session):
         self.session = session
@@ -394,8 +550,59 @@ def _admin_crud_store(path: str):
                 "updated_at DATETIME)"
             )
         )
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS trading_settings ("
+                "key VARCHAR(100) PRIMARY KEY, value TEXT NOT NULL, updated_at DATETIME)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS admin_market_messages ("
+                "id INTEGER PRIMARY KEY, content TEXT NOT NULL, created_by_id INTEGER NOT NULL, "
+                "reused_from_id INTEGER, is_active BOOLEAN NOT NULL DEFAULT 1, "
+                "notified_recipients_count INTEGER NOT NULL DEFAULT 0, "
+                "published_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME)"
+            )
+        )
     Session = sessionmaker(bind=engine, future=True, expire_on_commit=False)
     return engine, Session
+
+
+def _bot_commodity_patches(db):
+    return [
+        patch("bot.handlers.admin_commodities.httpx.AsyncClient", _isolated_commodity_client(db)),
+        patch("bot.handlers.admin_commodities.delete_user_message", new=AsyncMock()),
+        patch(
+            "bot.handlers.admin_commodities.answer_incoming_message_via_runtime",
+            new=AsyncMock(return_value=SimpleNamespace(message_id=70)),
+        ),
+        patch(
+            "bot.handlers.admin_commodities.edit_callback_message_via_runtime",
+            new=AsyncMock(return_value=SimpleNamespace(message_id=71)),
+        ),
+        patch("bot.handlers.admin_commodities.edit_interaction_result_via_runtime", new=AsyncMock()),
+        patch("bot.handlers.admin_commodities.update_anchor", new=AsyncMock()),
+        patch("bot.handlers.admin_commodities.clear_state_retain_anchor", new=AsyncMock()),
+        patch("bot.handlers.admin_commodities.answer_callback_query_via_runtime", new=AsyncMock()),
+        patch("bot.handlers.admin_commodities.show_aliases_list", new=AsyncMock()),
+        patch("bot.handlers.admin_commodities.show_commodity_list", new=AsyncMock()),
+        patch("bot.handlers.admin_commodities.asyncio.sleep", new=AsyncMock()),
+    ]
+
+
+def _commodity_message(text: str):
+    return SimpleNamespace(text=text, bot=SimpleNamespace(), chat=SimpleNamespace(id=1))
+
+
+def _commodity_callback(data: str):
+    return SimpleNamespace(
+        data=data,
+        answer=AsyncMock(),
+        bot=SimpleNamespace(),
+        message=SimpleNamespace(chat=SimpleNamespace(id=1), message_id=10),
+    )
 
 
 def _broadcast_callback(data: str):
@@ -1492,6 +1699,232 @@ class P100bSeedSliceExecutionTests(unittest.IsolatedAsyncioTestCase):
             with sqlite3.connect(db_path) as conn:
                 self.assertEqual(conn.execute("SELECT COUNT(*) FROM market_schedule_overrides").fetchone()[0], 0)
             sync.close()
+            engine.dispose()
+
+    async def test_bot_alias_add_name_persists_then_denies_without_user(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "bot-alias-add.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            sync = Session()
+            sync.add(Commodity(name="ربع"))
+            sync.commit()
+            db = CrudSession(Session())
+            patches = _bot_commodity_patches(db)
+            for item in patches:
+                item.start()
+            try:
+                await handle_alias_add_name(_commodity_message("ربع طلا"), FakeState(commodity_id=1), user=None)
+                with sqlite3.connect(db_path) as conn:
+                    self.assertEqual(conn.execute("SELECT COUNT(*) FROM commodity_aliases").fetchone()[0], 0)
+                await handle_alias_add_name(
+                    _commodity_message("ربع طلا"),
+                    FakeState(commodity_id=1),
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                )
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT alias FROM commodity_aliases").fetchone()[0], "ربع طلا")
+            sync.close()
+            engine.dispose()
+
+    async def test_bot_alias_edit_name_persists_then_denies_without_user(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "bot-alias-edit.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            sync = Session()
+            commodity = Commodity(name="ربع")
+            sync.add(commodity)
+            sync.flush()
+            sync.add(CommodityAlias(commodity_id=commodity.id, alias="ربع طلا"))
+            sync.commit()
+            db = CrudSession(Session())
+            patches = _bot_commodity_patches(db)
+            for item in patches:
+                item.start()
+            try:
+                await handle_alias_edit_name(
+                    _commodity_message("نیم طلا"),
+                    FakeState(alias_id=1, commodity_id=1),
+                    user=None,
+                )
+                with sqlite3.connect(db_path) as conn:
+                    self.assertEqual(conn.execute("SELECT alias FROM commodity_aliases").fetchone()[0], "ربع طلا")
+                await handle_alias_edit_name(
+                    _commodity_message("نیم طلا"),
+                    FakeState(alias_id=1, commodity_id=1),
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                )
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT alias FROM commodity_aliases").fetchone()[0], "نیم طلا")
+            sync.close()
+            engine.dispose()
+
+    async def test_bot_alias_delete_yes_persists_then_denies_non_admin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "bot-alias-delete.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            sync = Session()
+            commodity = Commodity(name="ربع")
+            sync.add(commodity)
+            sync.flush()
+            sync.add(CommodityAlias(commodity_id=commodity.id, alias="ربع طلا"))
+            sync.commit()
+            db = CrudSession(Session())
+            patches = _bot_commodity_patches(db)
+            for item in patches:
+                item.start()
+            try:
+                await handle_alias_delete_yes(
+                    _commodity_callback("alias_delete_confirm_yes_1_1"),
+                    user=SimpleNamespace(role=UserRole.STANDARD),
+                    state=FakeState(alias_to_delete_id=1, commodity_id=1),
+                )
+                with sqlite3.connect(db_path) as conn:
+                    self.assertEqual(conn.execute("SELECT COUNT(*) FROM commodity_aliases").fetchone()[0], 1)
+                await handle_alias_delete_yes(
+                    _commodity_callback("alias_delete_confirm_yes_1_1"),
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    state=FakeState(alias_to_delete_id=1, commodity_id=1),
+                )
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM commodity_aliases").fetchone()[0], 0)
+            sync.close()
+            engine.dispose()
+
+    async def test_bot_commodity_edit_name_persists_then_denies_without_user(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "bot-commodity-edit.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            sync = Session()
+            sync.add(Commodity(name="ربع"))
+            sync.commit()
+            db = CrudSession(Session())
+            patches = _bot_commodity_patches(db)
+            for item in patches:
+                item.start()
+            try:
+                await handle_commodity_edit_name(_commodity_message("نیم"), FakeState(commodity_id=1), user=None)
+                with sqlite3.connect(db_path) as conn:
+                    self.assertEqual(conn.execute("SELECT name FROM commodities").fetchone()[0], "ربع")
+                await handle_commodity_edit_name(
+                    _commodity_message("نیم"),
+                    FakeState(commodity_id=1),
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                )
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT name FROM commodities").fetchone()[0], "نیم")
+            sync.close()
+            engine.dispose()
+
+    async def test_bot_add_aliases_and_create_persists_then_denies_without_user(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "bot-commodity-create.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            db = CrudSession(Session())
+            patches = _bot_commodity_patches(db)
+            for item in patches:
+                item.start()
+            try:
+                await handle_add_aliases_and_create(
+                    _commodity_message("ربع طلا"),
+                    FakeState(name="ربع"),
+                    user=None,
+                )
+                with sqlite3.connect(db_path) as conn:
+                    self.assertEqual(conn.execute("SELECT COUNT(*) FROM commodities").fetchone()[0], 0)
+                await handle_add_aliases_and_create(
+                    _commodity_message("ربع طلا"),
+                    FakeState(name="ربع"),
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                )
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT name FROM commodities").fetchone()[0], "ربع")
+                self.assertIn("ربع طلا", [row[0] for row in conn.execute("SELECT alias FROM commodity_aliases")])
+            engine.dispose()
+
+    async def test_bot_delete_yes_removes_then_denies_non_admin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "bot-commodity-delete.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            sync = Session()
+            sync.add(Commodity(name="ربع"))
+            sync.commit()
+            db = CrudSession(Session())
+            patches = _bot_commodity_patches(db)
+            for item in patches:
+                item.start()
+            try:
+                await handle_delete_yes(
+                    _commodity_callback("comm_delete_confirm_yes_1"),
+                    user=SimpleNamespace(role=UserRole.STANDARD),
+                    state=FakeState(commodity_to_delete_id=1),
+                )
+                with sqlite3.connect(db_path) as conn:
+                    self.assertEqual(conn.execute("SELECT COUNT(*) FROM commodities").fetchone()[0], 1)
+                await handle_delete_yes(
+                    _commodity_callback("comm_delete_confirm_yes_1"),
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    state=FakeState(commodity_to_delete_id=1),
+                )
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM commodities").fetchone()[0], 0)
+            sync.close()
+            engine.dispose()
+
+    async def test_update_settings_persists_then_rejects_invalid_hours(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "settings-update.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+
+            def _box():
+                return _SessionBox(CrudSession(Session()))
+
+            with patch("core.db.AsyncSessionLocal", side_effect=_box):
+                with self.assertRaises(HTTPException) as invalid:
+                    await update_settings(
+                        TradingSettingsUpdate(market_open_time_local="18:00", market_close_time_local="09:00")
+                    )
+                self.assertEqual(invalid.exception.status_code, 400)
+                updated = await update_settings(TradingSettingsUpdate(offer_min_quantity=7))
+                self.assertEqual(updated.offer_min_quantity, 7)
+            with sqlite3.connect(db_path) as conn:
+                raw = conn.execute("SELECT value FROM trading_settings WHERE key='offer_min_quantity'").fetchone()
+            self.assertIsNotNone(raw)
+            self.assertEqual(json.loads(raw[0]), 7)
+            engine.dispose()
+
+    async def test_reset_settings_restores_defaults_after_update(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "settings-reset.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+
+            def _box():
+                return _SessionBox(CrudSession(Session()))
+
+            with patch("core.db.AsyncSessionLocal", side_effect=_box):
+                await update_settings(TradingSettingsUpdate(offer_min_quantity=9))
+                reset = await reset_settings()
+                self.assertEqual(reset.offer_min_quantity, 5)
+            with sqlite3.connect(db_path) as conn:
+                raw = conn.execute("SELECT value FROM trading_settings WHERE key='offer_min_quantity'").fetchone()
+            self.assertEqual(json.loads(raw[0]), 5)
             engine.dispose()
 
     async def test_channel_trade_handlers_gateway_confirm_is_not_crud_evidence(self):

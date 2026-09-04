@@ -374,7 +374,8 @@
       "source": "bot/handlers/admin_commodities.py:365",
       "test_refs": [
         "tests/test_bot_admin_commodities_alias_add.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_bot_alias_add_name_persists_then_denies_without_user"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -405,7 +406,8 @@
       "source": "bot/handlers/admin_commodities.py:429",
       "test_refs": [
         "tests/test_bot_admin_commodities_alias_edit.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_bot_alias_edit_name_persists_then_denies_without_user"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -437,7 +439,8 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_commodities_alias_delete.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_bot_alias_delete_yes_persists_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -466,7 +469,8 @@
       "source": "bot/handlers/admin_commodities.py:537",
       "test_refs": [
         "tests/test_bot_admin_commodities_commodity_edit.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_bot_commodity_edit_name_persists_then_denies_without_user"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -513,7 +517,8 @@
       "test_refs": [
         "tests/test_bot_admin_commodities_add_create.py",
         "tests/test_bot_admin_commodities_add_aliases_create.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_bot_add_aliases_and_create_persists_then_denies_without_user"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
@@ -544,7 +549,8 @@
       "test_refs": [
         "tests/test_bot_keyboards.py",
         "tests/test_bot_admin_commodities_delete_cancel.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_bot_delete_yes_removes_then_denies_non_admin"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"

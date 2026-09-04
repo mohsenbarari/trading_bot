@@ -2927,7 +2927,8 @@
       "test_refs": [
         "tests/test_trading_settings_router_update.py",
         "frontend/src/views/MarketView.test.ts",
-        "frontend/src/components/BottomNav.test.ts"
+        "frontend/src/components/BottomNav.test.ts",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_update_settings_persists_then_rejects_invalid_hours"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -2942,7 +2943,8 @@
       "test_refs": [
         "tests/test_scripts_surface_smoke.py",
         "tests/test_main_foreign_surface_guard.py",
-        "tests/test_trading_settings_router_reset.py"
+        "tests/test_trading_settings_router_reset.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_reset_settings_restores_defaults_after_update"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
