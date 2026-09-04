@@ -9,16 +9,32 @@ install_p1_00_network_fence()
 import sqlite3
 import tempfile
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from sqlalchemy import create_engine, event
+from fastapi import HTTPException
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 
+import schemas
 from api.routers.chat import delete_message, send_message, update_message
 from api.routers.chat_schemas import MessageSend, MessageUpdate
+from api.routers.commodities import (
+    add_alias_to_commodity,
+    create_commodity,
+    delete_alias,
+    delete_commodity,
+    update_alias,
+    update_commodity_name,
+)
+from api.routers.trading_settings import (
+    MarketScheduleOverrideUpsert,
+    create_market_override,
+    delete_market_override,
+    update_market_override,
+)
 from bot.handlers.admin_broadcast import (
     confirm_telegram_admin_broadcast,
     toggle_group_recipient,
@@ -31,11 +47,15 @@ from bot.handlers.admin_users import (
     handle_user_block_actions,
     handle_user_unblock,
     handle_user_unlimit,
+    process_custom_max_block,
 )
 from bot.handlers.trade_execute import handle_channel_trade, handle_channel_trade_public
 from bot.utils import redis_helpers
+from core.commodity_defaults import IMAM_COMMODITY_NAME
 from core.enums import MessageType, UserAccountStatus, UserRole
 from core.services.telegram_admin_broadcast_service import TELEGRAM_ADMIN_BROADCAST_GROUP_ORDINARY
+from models.commodity import Commodity, CommodityAlias
+from models.market_schedule_override import MarketScheduleOverride, MarketScheduleOverrideType
 from models.message import Message
 from models.notification import Notification
 from models.offer import OfferStatus
@@ -70,6 +90,16 @@ BLOCK_ACTIONS_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-BLOCK-ACT
 LIMIT_CONFIRM_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-LIMIT-CONFIRM-L1438"
 MSG_UPDATE_SEED = "API-MSG-PUT-CHAT-UPDATE-MESSAGE-L2079"
 MSG_DELETE_SEED = "API-MSG-DELETE-CHAT-DELETE-MESSAGE-L2183"
+CUSTOM_MAX_BLOCK_SEED = "BOT-ADMIN-MESSAGE-ADMIN-USERS-PROCESS-CUSTOM-MAX-BLOCK-L1799"
+CREATE_COMMODITY_SEED = "API-ADMIN-POST-COMMODITIES-CREATE-COMMODITY-L143"
+UPDATE_COMMODITY_SEED = "API-ADMIN-PUT-COMMODITIES-UPDATE-COMMODITY-NAME-L189"
+DELETE_COMMODITY_SEED = "API-ADMIN-DELETE-COMMODITIES-DELETE-COMMODITY-L243"
+ADD_ALIAS_SEED = "API-ADMIN-POST-COMMODITIES-ADD-ALIAS-TO-COMMODITY-L340"
+UPDATE_ALIAS_SEED = "API-ADMIN-PUT-COMMODITIES-UPDATE-ALIAS-L388"
+DELETE_ALIAS_SEED = "API-ADMIN-DELETE-COMMODITIES-DELETE-ALIAS-L437"
+CREATE_OVERRIDE_SEED = "API-ADMIN-POST-TRADING-SETTINGS-CREATE-MARKET-OVERRIDE-L222"
+UPDATE_OVERRIDE_SEED = "API-ADMIN-PUT-TRADING-SETTINGS-UPDATE-MARKET-OVERRIDE-L253"
+DELETE_OVERRIDE_SEED = "API-ADMIN-DELETE-TRADING-SETTINGS-DELETE-MARKET-OVERRIDE-L288"
 TRADE_CHANNEL_SEED = "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-L810"
 TRADE_PUBLIC_SEED = "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-PUBLIC-L829"
 UNEVIDENCED_TRADE_GATEWAY_SEEDS = {TRADE_CHANNEL_SEED, TRADE_PUBLIC_SEED}
@@ -89,6 +119,16 @@ SLICE_EXECUTED_SEED_IDS = {
     LIMIT_CONFIRM_SEED,
     MSG_UPDATE_SEED,
     MSG_DELETE_SEED,
+    CUSTOM_MAX_BLOCK_SEED,
+    CREATE_COMMODITY_SEED,
+    UPDATE_COMMODITY_SEED,
+    DELETE_COMMODITY_SEED,
+    ADD_ALIAS_SEED,
+    UPDATE_ALIAS_SEED,
+    DELETE_ALIAS_SEED,
+    CREATE_OVERRIDE_SEED,
+    UPDATE_OVERRIDE_SEED,
+    DELETE_OVERRIDE_SEED,
 }
 
 SEED_EVIDENCE_NODES = {
@@ -148,6 +188,46 @@ SEED_EVIDENCE_NODES = {
     MSG_DELETE_SEED: (
         "tests/test_p1_00b_characterization_seed_slice.py"
         "::P100bSeedSliceExecutionTests.test_delete_message_soft_deletes_then_denies_injects"
+    ),
+    CUSTOM_MAX_BLOCK_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_process_custom_max_block_persists_then_denies_injects"
+    ),
+    CREATE_COMMODITY_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_create_commodity_persists_then_rejects_digits_and_conflict"
+    ),
+    UPDATE_COMMODITY_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_update_commodity_name_persists_then_404s"
+    ),
+    DELETE_COMMODITY_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_delete_commodity_removes_then_404s_and_locks_imam"
+    ),
+    ADD_ALIAS_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_add_alias_to_commodity_persists_then_conflicts"
+    ),
+    UPDATE_ALIAS_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_update_alias_persists_then_404s"
+    ),
+    DELETE_ALIAS_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_delete_alias_removes_then_404s"
+    ),
+    CREATE_OVERRIDE_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_create_market_override_persists_then_rejects_duplicate"
+    ),
+    UPDATE_OVERRIDE_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_update_market_override_persists_then_404s"
+    ),
+    DELETE_OVERRIDE_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_delete_market_override_removes_then_404s"
     ),
 }
 
@@ -242,6 +322,40 @@ class MsgSession:
         self._session.rollback()
 
 
+class CrudSession:
+    """Async adapter over isolated sqlite. Does not mock the durable write."""
+
+    def __init__(self, sync_session, *, fail_commit=False, fail_label="injected_crud_commit_failure"):
+        self._session = sync_session
+        self.fail_commit = fail_commit
+        self.fail_label = fail_label
+        self.commit_count = 0
+
+    def add(self, obj):
+        self._session.add(obj)
+
+    async def execute(self, statement, params=None):
+        return self._session.execute(statement)
+
+    async def get(self, model, ident, **kwargs):
+        return self._session.get(model, ident)
+
+    async def delete(self, obj):
+        self._session.delete(obj)
+
+    async def commit(self):
+        if self.fail_commit and self.commit_count == 0:
+            raise RuntimeError(self.fail_label)
+        self._session.commit()
+        self.commit_count += 1
+
+    async def refresh(self, obj, attribute_names=None):
+        self._session.refresh(obj, attribute_names=attribute_names)
+
+    async def rollback(self):
+        self._session.rollback()
+
+
 class _SessionBox:
     def __init__(self, session):
         self.session = session
@@ -261,6 +375,27 @@ def _engine(path: str):
 
     event.listen(engine, "connect", _on_connect)
     return engine
+
+
+def _admin_crud_store(path: str):
+    engine = _engine(path)
+    Commodity.__table__.create(engine, checkfirst=True)
+    CommodityAlias.__table__.create(engine, checkfirst=True)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE IF NOT EXISTS offers (id INTEGER PRIMARY KEY, commodity_id INTEGER, status VARCHAR)"))
+        conn.execute(text("CREATE TABLE IF NOT EXISTS trades (id INTEGER PRIMARY KEY, commodity_id INTEGER)"))
+        conn.execute(text("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY)"))
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS market_schedule_overrides ("
+                "id INTEGER PRIMARY KEY, date DATE NOT NULL, override_type VARCHAR NOT NULL, "
+                "open_time_local TIME, close_time_local TIME, note VARCHAR(255), "
+                "created_by_user_id INTEGER, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at DATETIME)"
+            )
+        )
+    Session = sessionmaker(bind=engine, future=True, expire_on_commit=False)
+    return engine, Session
 
 
 def _broadcast_callback(data: str):
@@ -1023,6 +1158,339 @@ class P100bSeedSliceExecutionTests(unittest.IsolatedAsyncioTestCase):
                 await delete_message(1, current_user=sender, db=ok_db)
             with sqlite3.connect(db_path) as conn:
                 self.assertEqual(conn.execute("SELECT is_deleted FROM messages WHERE id=1").fetchone()[0], 1)
+            sync.close()
+            engine.dispose()
+
+    async def test_process_custom_max_block_persists_then_denies_injects(self):
+        engine, Session, sync = _make_store()
+        _persist_user(sync)
+        answers = []
+
+        async def _answer(message, user, text=None, **_k):
+            answers.append(text or "")
+            return SimpleNamespace(message_id=70)
+
+        message = SimpleNamespace(
+            text="18",
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=1),
+        )
+        state = FakeState(custom_max_block_user_id=9, anchor_id=1)
+        db = RoleSession(sync)
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=_SessionBox(db)), patch(
+            "bot.handlers.admin_users.delete_user_message",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.admin_users.answer_incoming_message_via_runtime",
+            new=_answer,
+        ), patch(
+            "bot.handlers.admin_users.attach_customer_management_names",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.admin_users.get_block_settings_keyboard",
+            return_value="KB",
+        ), patch(
+            "bot.handlers.admin_users.update_anchor",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.admin_users.clear_state_retain_anchors",
+            new=AsyncMock(),
+        ), patch(
+            "core.admin_authority.current_server",
+            return_value="iran",
+        ):
+            await process_custom_max_block(
+                message,
+                user=SimpleNamespace(role=UserRole.STANDARD),
+                state=FakeState(custom_max_block_user_id=9, anchor_id=1),
+            )
+            still, peek = _reload_user(Session)
+            self.assertEqual(still.max_blocked_users, 5)
+            peek.close()
+            await process_custom_max_block(
+                SimpleNamespace(text="not-a-number", bot=SimpleNamespace(), chat=SimpleNamespace(id=1)),
+                user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                state=FakeState(custom_max_block_user_id=9, anchor_id=1),
+            )
+            invalid, peek2 = _reload_user(Session)
+            self.assertEqual(invalid.max_blocked_users, 5)
+            peek2.close()
+            await process_custom_max_block(
+                message,
+                user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                state=state,
+            )
+            changed, later = _reload_user(Session)
+            self.assertEqual(changed.max_blocked_users, 18)
+            self.assertTrue(any("سقف بلاک: 18" in text for text in answers))
+            later.close()
+        sync.close()
+        engine.dispose()
+
+    async def test_create_commodity_persists_then_rejects_digits_and_conflict(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "commodity-create.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            db = CrudSession(Session())
+            with self.assertRaises(HTTPException) as digits:
+                await create_commodity(
+                    commodity_data=schemas.CommodityCreate(name="ربع403"),
+                    aliases=[],
+                    db=db,
+                    source="bot",
+                )
+            self.assertEqual(digits.exception.status_code, 400)
+            created = await create_commodity(
+                commodity_data=schemas.CommodityCreate(name="ربع"),
+                aliases=["ربع طلا"],
+                db=db,
+                source="bot",
+            )
+            self.assertEqual(created.name, "ربع")
+            with self.assertRaises(HTTPException) as conflict:
+                await create_commodity(
+                    commodity_data=schemas.CommodityCreate(name="ربع"),
+                    aliases=[],
+                    db=db,
+                    source="bot",
+                )
+            self.assertEqual(conflict.exception.status_code, 409)
+            with sqlite3.connect(db_path) as conn:
+                names = [row[0] for row in conn.execute("SELECT name FROM commodities").fetchall()]
+                aliases = [row[0] for row in conn.execute("SELECT alias FROM commodity_aliases").fetchall()]
+            self.assertEqual(names, ["ربع"])
+            self.assertEqual(aliases, ["ربع طلا"])
+            engine.dispose()
+
+    async def test_update_commodity_name_persists_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "commodity-update.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            sync = Session()
+            sync.add(Commodity(name="ربع"))
+            sync.commit()
+            db = CrudSession(Session())
+            with self.assertRaises(HTTPException) as missing:
+                await update_commodity_name(
+                    99,
+                    schemas.CommodityCreate(name="نیم"),
+                    db=db,
+                    source="bot",
+                )
+            self.assertEqual(missing.exception.status_code, 404)
+            updated = await update_commodity_name(
+                1,
+                schemas.CommodityCreate(name="نیم"),
+                db=db,
+                source="bot",
+            )
+            self.assertEqual(updated.name, "نیم")
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT name FROM commodities WHERE id=1").fetchone()[0], "نیم")
+            sync.close()
+            engine.dispose()
+
+    async def test_delete_commodity_removes_then_404s_and_locks_imam(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "commodity-delete.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            sync = Session()
+            sync.add(Commodity(name="ربع"))
+            sync.add(Commodity(name=IMAM_COMMODITY_NAME))
+            sync.commit()
+            db = CrudSession(Session())
+            with self.assertRaises(HTTPException) as missing:
+                await delete_commodity(99, db=db, source="bot")
+            self.assertEqual(missing.exception.status_code, 404)
+            with self.assertRaises(HTTPException) as locked:
+                await delete_commodity(2, db=db, source="bot")
+            self.assertEqual(locked.exception.status_code, 409)
+            await delete_commodity(1, db=db, source="bot")
+            with sqlite3.connect(db_path) as conn:
+                names = [row[0] for row in conn.execute("SELECT name FROM commodities").fetchall()]
+            self.assertEqual(names, [IMAM_COMMODITY_NAME])
+            sync.close()
+            engine.dispose()
+
+    async def test_add_alias_to_commodity_persists_then_conflicts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "alias-add.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            sync = Session()
+            sync.add(Commodity(name="ربع"))
+            sync.add(Commodity(name="نیم"))
+            sync.commit()
+            db = CrudSession(Session())
+            added = await add_alias_to_commodity(
+                1,
+                alias=schemas.CommodityAliasCreate(alias="ربع طلا"),
+                db=db,
+                source="bot",
+            )
+            self.assertEqual(added.alias, "ربع طلا")
+            with self.assertRaises(HTTPException) as conflict:
+                await add_alias_to_commodity(
+                    1,
+                    alias=schemas.CommodityAliasCreate(alias="نیم"),
+                    db=db,
+                    source="bot",
+                )
+            self.assertEqual(conflict.exception.status_code, 409)
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(
+                    conn.execute("SELECT alias FROM commodity_aliases WHERE commodity_id=1").fetchone()[0],
+                    "ربع طلا",
+                )
+            sync.close()
+            engine.dispose()
+
+    async def test_update_alias_persists_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "alias-update.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            sync = Session()
+            commodity = Commodity(name="ربع")
+            sync.add(commodity)
+            sync.flush()
+            sync.add(CommodityAlias(commodity_id=commodity.id, alias="ربع طلا"))
+            sync.commit()
+            db = CrudSession(Session())
+            with self.assertRaises(HTTPException) as missing:
+                await update_alias(
+                    99,
+                    schemas.CommodityAliasCreate(alias="نیم طلا"),
+                    db=db,
+                    source="bot",
+                )
+            self.assertEqual(missing.exception.status_code, 404)
+            updated = await update_alias(
+                1,
+                schemas.CommodityAliasCreate(alias="نیم طلا"),
+                db=db,
+                source="bot",
+            )
+            self.assertEqual(updated.alias, "نیم طلا")
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT alias FROM commodity_aliases WHERE id=1").fetchone()[0], "نیم طلا")
+            sync.close()
+            engine.dispose()
+
+    async def test_delete_alias_removes_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "alias-delete.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            sync = Session()
+            commodity = Commodity(name="ربع")
+            sync.add(commodity)
+            sync.flush()
+            sync.add(CommodityAlias(commodity_id=commodity.id, alias="ربع طلا"))
+            sync.commit()
+            db = CrudSession(Session())
+            with self.assertRaises(HTTPException) as missing:
+                await delete_alias(99, db=db, source="bot")
+            self.assertEqual(missing.exception.status_code, 404)
+            await delete_alias(1, db=db, source="bot")
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM commodity_aliases").fetchone()[0], 0)
+            sync.close()
+            engine.dispose()
+
+    async def test_create_market_override_persists_then_rejects_duplicate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "override-create.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            db = CrudSession(Session())
+            actor = SimpleNamespace(id=1)
+            payload = MarketScheduleOverrideUpsert(
+                date="2026-09-10",
+                override_type=MarketScheduleOverrideType.CLOSED_ALL_DAY,
+                note="تعطیل",
+            )
+            with self.assertRaises(HTTPException) as bad_date:
+                await create_market_override(
+                    MarketScheduleOverrideUpsert(
+                        date="not-a-date",
+                        override_type=MarketScheduleOverrideType.CLOSED_ALL_DAY,
+                    ),
+                    db=db,
+                    current_user=actor,
+                )
+            self.assertEqual(bad_date.exception.status_code, 400)
+            created = await create_market_override(payload, db=db, current_user=actor)
+            self.assertEqual(created.date, "2026-09-10")
+            with self.assertRaises(HTTPException) as duplicate:
+                await create_market_override(payload, db=db, current_user=actor)
+            self.assertEqual(duplicate.exception.status_code, 400)
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM market_schedule_overrides").fetchone()[0], 1)
+            engine.dispose()
+
+    async def test_update_market_override_persists_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "override-update.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            sync = Session()
+            sync.add(
+                MarketScheduleOverride(
+                    date=date(2026, 9, 10),
+                    override_type=MarketScheduleOverrideType.CLOSED_ALL_DAY,
+                    created_by_user_id=1,
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
+            sync.commit()
+            db = CrudSession(Session())
+            with self.assertRaises(HTTPException) as missing:
+                await update_market_override(
+                    99,
+                    MarketScheduleOverrideUpsert(
+                        date="2026-09-11",
+                        override_type=MarketScheduleOverrideType.OPEN_ALL_DAY,
+                    ),
+                    db=db,
+                )
+            self.assertEqual(missing.exception.status_code, 404)
+            updated = await update_market_override(
+                1,
+                MarketScheduleOverrideUpsert(
+                    date="2026-09-11",
+                    override_type=MarketScheduleOverrideType.OPEN_ALL_DAY,
+                    note="باز",
+                ),
+                db=db,
+            )
+            self.assertEqual(updated.date, "2026-09-11")
+            self.assertEqual(updated.override_type, MarketScheduleOverrideType.OPEN_ALL_DAY)
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(
+                    conn.execute("SELECT note FROM market_schedule_overrides WHERE id=1").fetchone()[0],
+                    "باز",
+                )
+            sync.close()
+            engine.dispose()
+
+    async def test_delete_market_override_removes_then_404s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "override-delete.sqlite")
+            engine, Session = _admin_crud_store(db_path)
+            sync = Session()
+            sync.add(
+                MarketScheduleOverride(
+                    date=date(2026, 9, 10),
+                    override_type=MarketScheduleOverrideType.CLOSED_ALL_DAY,
+                    created_by_user_id=1,
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
+            sync.commit()
+            db = CrudSession(Session())
+            with self.assertRaises(HTTPException) as missing:
+                await delete_market_override(99, db=db)
+            self.assertEqual(missing.exception.status_code, 404)
+            result = await delete_market_override(1, db=db)
+            self.assertEqual(result, {"success": True})
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM market_schedule_overrides").fetchone()[0], 0)
             sync.close()
             engine.dispose()
 

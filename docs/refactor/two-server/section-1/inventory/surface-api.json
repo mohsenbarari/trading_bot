@@ -1470,7 +1470,8 @@
       "test_refs": [
         "tests/test_main_foreign_surface_guard.py",
         "tests/test_bot_admin_commodities_helpers.py",
-        "tests/test_commodities_router_create.py"
+        "tests/test_commodities_router_create.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_create_commodity_persists_then_rejects_digits_and_conflict"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -1483,7 +1484,8 @@
       "source": "api/routers/commodities.py:189",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_commodities_router_update_name.py"
+        "tests/test_commodities_router_update_name.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_update_commodity_name_persists_then_404s"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -1496,7 +1498,8 @@
       "source": "api/routers/commodities.py:243",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_commodities_router_delete.py"
+        "tests/test_commodities_router_delete.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_delete_commodity_removes_then_404s_and_locks_imam"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -1509,7 +1512,8 @@
       "source": "api/routers/commodities.py:340",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_commodities_router_alias_add.py"
+        "tests/test_commodities_router_alias_add.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_add_alias_to_commodity_persists_then_conflicts"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -1522,7 +1526,8 @@
       "source": "api/routers/commodities.py:388",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_commodities_router_alias_mutations.py"
+        "tests/test_commodities_router_alias_mutations.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_update_alias_persists_then_404s"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -1535,7 +1540,8 @@
       "source": "api/routers/commodities.py:437",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_commodities_router_alias_mutations.py"
+        "tests/test_commodities_router_alias_mutations.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_delete_alias_removes_then_404s"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -2877,7 +2883,8 @@
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
         "tests/test_trading_settings_router_overrides.py",
-        "frontend/src/components/TradingSettings.test.ts"
+        "frontend/src/components/TradingSettings.test.ts",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_create_market_override_persists_then_rejects_duplicate"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -2890,7 +2897,8 @@
       "source": "api/routers/trading_settings.py:253",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_trading_settings_router_overrides.py"
+        "tests/test_trading_settings_router_overrides.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_update_market_override_persists_then_404s"
       ],
       "operation_kind": "CRUD_MUTATION"
     },
@@ -2903,7 +2911,8 @@
       "source": "api/routers/trading_settings.py:288",
       "mutation_class": "MUTATION_OR_COMMAND",
       "test_refs": [
-        "tests/test_trading_settings_router_overrides.py"
+        "tests/test_trading_settings_router_overrides.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_delete_market_override_removes_then_404s"
       ],
       "operation_kind": "CRUD_MUTATION"
     },

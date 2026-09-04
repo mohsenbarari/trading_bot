@@ -829,7 +829,8 @@
       "source": "bot/handlers/admin_users.py:1799",
       "test_refs": [
         "tests/test_bot_admin_users_block_custom.py",
-        "tests/test_p1_00_characterization_admin_seed_semantics.py"
+        "tests/test_p1_00_characterization_admin_seed_semantics.py",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_process_custom_max_block_persists_then_denies_injects"
       ],
       "mutation_class": "MUTATION_OR_COMMAND",
       "operation_kind": "CRUD_MUTATION"
