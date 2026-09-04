@@ -115,6 +115,26 @@ class P100bSeedPartitionExecutionTests(unittest.IsolatedAsyncioTestCase):
         await helper.test_admin_max_block_custom_sets_fsm_then_denies_non_admin()
         await helper.test_create_market_message_persists_notifies_then_rejects_empty()
         await helper.test_clear_current_market_message_deactivates_then_noop_when_empty()
+        await helper.test_start_telegram_admin_broadcast_opens_menu_then_denies_non_admin()
+        await helper.test_cancel_telegram_admin_broadcast_clears_then_denies_non_admin()
+        await helper.test_choose_all_recipients_asks_text_then_denies_non_admin()
+        await helper.test_choose_group_recipients_opens_picker_then_denies_non_admin()
+        await helper.test_finish_group_selection_asks_text_then_rejects_empty()
+        await helper.test_choose_selected_recipients_asks_search_then_denies_non_admin()
+        await helper.test_process_selected_recipient_search_stores_query_then_denies_non_admin()
+        await helper.test_search_again_resets_query_state_then_denies_non_admin()
+        await helper.test_finish_selected_recipients_asks_text_then_rejects_empty()
+        await helper.test_process_broadcast_message_text_drafts_then_rejects_empty()
+        await helper.test_user_limit_start_prompts_duration_then_stores_expiry()
+        await helper.test_set_trades_sets_fsm_then_denies_non_admin()
+        await helper.test_set_commodities_sets_fsm_then_denies_non_admin()
+        await helper.test_set_requests_sets_fsm_then_denies_non_admin()
+        await helper.test_process_limit_value_stores_then_rejects_invalid()
+        await helper.test_start_search_user_sets_fsm_then_denies_non_admin()
+        await helper.test_user_search_cancel_clears_then_denies_non_admin()
+        await helper.test_process_search_query_finds_user_then_rejects_unknown()
+        await helper.test_user_settings_shows_then_denies_non_admin()
+        await helper.test_create_broadcast_persists_messages_then_rejects_empty()
         await helper.test_channel_trade_handlers_gateway_confirm_is_not_crud_evidence()
 
     def test_sibling_family_membership_does_not_clear_unexecuted_seeds(self):
@@ -122,9 +142,9 @@ class P100bSeedPartitionExecutionTests(unittest.IsolatedAsyncioTestCase):
         seeds = _all_seeds()
         self.assertEqual(len(seeds), 465)
         unsupported = [seed["behavior_id"] for seed in seeds if seed["behavior_id"] not in EXECUTED_SEED_IDS]
-        self.assertEqual(len(EXECUTED_SEED_IDS), 54)
+        self.assertEqual(len(EXECUTED_SEED_IDS), 74)
         self.assertEqual(len(unsupported), REMAINING_HIGH_SEEDS)
-        self.assertEqual(REMAINING_HIGH_SEEDS, 411)
+        self.assertEqual(REMAINING_HIGH_SEEDS, 391)
         msg_crud = [
             seed["behavior_id"]
             for seed in seeds
@@ -152,7 +172,7 @@ class P100bSeedPartitionExecutionTests(unittest.IsolatedAsyncioTestCase):
         registry = {item["blocker_id"]: item for item in payload["blocker_registry"]["items"]}
         item = registry["P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE"]
         self.assertEqual(item["disposition"], "BLOCKED_EXPLICIT")
-        self.assertIn("411", item["reason"])
+        self.assertIn("391", item["reason"])
         self.assertIn("sibling", item["reason"].lower())
         for seed_id in sorted(EXECUTED_SEED_IDS):
             self.assertIn(seed_id, item["reason"])

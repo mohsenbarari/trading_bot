@@ -23,8 +23,10 @@ from sqlalchemy.orm import sessionmaker
 
 import schemas
 from api.routers.admin_messages import (
+    AdminBroadcastCreate,
     AdminMarketMessageCreate,
     clear_current_market_message,
+    create_broadcast,
     create_market_message,
 )
 from api.routers.chat import delete_message, send_message, update_message
@@ -54,7 +56,17 @@ from bot.handlers.admin import (
     start_invitation_creation_inline,
 )
 from bot.handlers.admin_broadcast import (
+    cancel_telegram_admin_broadcast,
+    choose_all_recipients,
+    choose_group_recipients,
+    choose_selected_recipients,
     confirm_telegram_admin_broadcast,
+    finish_group_selection,
+    finish_selected_recipients,
+    process_broadcast_message_text,
+    process_selected_recipient_search,
+    search_again,
+    start_telegram_admin_broadcast,
     toggle_group_recipient,
     toggle_selected_user,
 )
@@ -80,22 +92,40 @@ from bot.handlers.admin_users import (
     handle_admin_set_max_block,
     handle_limit_cancel,
     handle_limit_confirm,
+    handle_set_commodities,
+    handle_set_requests,
+    handle_set_trades,
     handle_set_user_role,
     handle_user_block_actions,
     handle_user_block_settings,
     handle_user_delete_confirm,
     handle_user_delete_request,
     handle_user_edit_role,
+    handle_user_limit_start,
+    handle_user_search_cancel,
+    handle_user_settings,
     handle_user_unblock,
     handle_user_unlimit,
     process_custom_max_block,
+    process_limit_value,
+    process_search_query,
+    start_search_user,
 )
-from bot.states import CommodityManagement, InvitationCreation, UserManagement
+from bot.states import (
+    AdminBroadcast,
+    CommodityManagement,
+    InvitationCreation,
+    UserLimitations,
+    UserManagement,
+)
 from bot.handlers.trade_execute import handle_channel_trade, handle_channel_trade_public
 from bot.utils import redis_helpers
 from core.commodity_defaults import IMAM_COMMODITY_NAME
 from core.enums import MessageType, UserAccountStatus, UserRole
 from core.services.telegram_admin_broadcast_service import TELEGRAM_ADMIN_BROADCAST_GROUP_ORDINARY
+from models.admin_message import AdminBroadcastMessage
+from models.chat import Chat
+from models.chat_member import ChatMember
 from models.commodity import Commodity, CommodityAlias
 from models.market_schedule_override import MarketScheduleOverride, MarketScheduleOverrideType
 from models.message import Message
@@ -172,6 +202,26 @@ SET_MAX_BLOCK_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-SET-MAX-
 MAX_BLOCK_CUSTOM_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-ADMIN-MAX-BLOCK-CUSTOM-L1772"
 CREATE_MARKET_MESSAGE_SEED = "API-ADMIN-POST-ADMIN-MESSAGES-CREATE-MARKET-MESSAGE-L204"
 CLEAR_MARKET_MESSAGE_SEED = "API-ADMIN-DELETE-ADMIN-MESSAGES-CLEAR-CURRENT-MARKET-MESSAGE-L235"
+BROADCAST_START_SEED = "BOT-ADMIN-MESSAGE-ADMIN-BROADCAST-START-TELEGRAM-ADMIN-BROADCAST-L179"
+BROADCAST_CANCEL_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CANCEL-TELEGRAM-ADMIN-BROADCAST-L194"
+BROADCAST_ALL_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CHOOSE-ALL-RECIPIENTS-L208"
+BROADCAST_CHOOSE_GROUPS_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CHOOSE-GROUP-RECIPIENTS-L221"
+BROADCAST_FINISH_GROUPS_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-FINISH-GROUP-SELECTION-L270"
+BROADCAST_CHOOSE_SELECTED_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CHOOSE-SELECTED-RECIPIENTS-L286"
+BROADCAST_SEARCH_SEED = "BOT-ADMIN-MESSAGE-ADMIN-BROADCAST-PROCESS-SELECTED-RECIPIENT-SEARCH-L308"
+BROADCAST_SEARCH_AGAIN_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-SEARCH-AGAIN-L377"
+BROADCAST_FINISH_SELECTED_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-FINISH-SELECTED-RECIPIENTS-L395"
+BROADCAST_TEXT_SEED = "BOT-ADMIN-MESSAGE-ADMIN-BROADCAST-PROCESS-BROADCAST-MESSAGE-TEXT-L411"
+LIMIT_START_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-LIMIT-START-L1252"
+SET_TRADES_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-SET-TRADES-L1312"
+SET_COMMODITIES_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-SET-COMMODITIES-L1336"
+SET_REQUESTS_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-SET-REQUESTS-L1360"
+PROCESS_LIMIT_SEED = "BOT-ADMIN-MESSAGE-ADMIN-USERS-PROCESS-LIMIT-VALUE-L1384"
+SEARCH_START_SEED = "BOT-ADMIN-MESSAGE-ADMIN-USERS-START-SEARCH-USER-L635"
+SEARCH_CANCEL_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-SEARCH-CANCEL-L657"
+SEARCH_QUERY_SEED = "BOT-ADMIN-MESSAGE-ADMIN-USERS-PROCESS-SEARCH-QUERY-L678"
+USER_SETTINGS_SEED = "BOT-ADMIN-CALLBACK-QUERY-ADMIN-USERS-HANDLE-USER-SETTINGS-L742"
+CREATE_BROADCAST_SEED = "API-ADMIN-POST-ADMIN-MESSAGES-CREATE-BROADCAST-L261"
 TRADE_CHANNEL_SEED = "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-L810"
 TRADE_PUBLIC_SEED = "BOT-TRADE-CALLBACK-QUERY-TRADE-EXECUTE-HANDLE-CHANNEL-TRADE-PUBLIC-L829"
 UNEVIDENCED_TRADE_GATEWAY_SEEDS = {TRADE_CHANNEL_SEED, TRADE_PUBLIC_SEED}
@@ -231,6 +281,26 @@ SLICE_EXECUTED_SEED_IDS = {
     MAX_BLOCK_CUSTOM_SEED,
     CREATE_MARKET_MESSAGE_SEED,
     CLEAR_MARKET_MESSAGE_SEED,
+    BROADCAST_START_SEED,
+    BROADCAST_CANCEL_SEED,
+    BROADCAST_ALL_SEED,
+    BROADCAST_CHOOSE_GROUPS_SEED,
+    BROADCAST_FINISH_GROUPS_SEED,
+    BROADCAST_CHOOSE_SELECTED_SEED,
+    BROADCAST_SEARCH_SEED,
+    BROADCAST_SEARCH_AGAIN_SEED,
+    BROADCAST_FINISH_SELECTED_SEED,
+    BROADCAST_TEXT_SEED,
+    LIMIT_START_SEED,
+    SET_TRADES_SEED,
+    SET_COMMODITIES_SEED,
+    SET_REQUESTS_SEED,
+    PROCESS_LIMIT_SEED,
+    SEARCH_START_SEED,
+    SEARCH_CANCEL_SEED,
+    SEARCH_QUERY_SEED,
+    USER_SETTINGS_SEED,
+    CREATE_BROADCAST_SEED,
 }
 
 SEED_EVIDENCE_NODES = {
@@ -451,6 +521,86 @@ SEED_EVIDENCE_NODES = {
         "tests/test_p1_00b_characterization_seed_slice.py"
         "::P100bSeedSliceExecutionTests.test_clear_current_market_message_deactivates_then_noop_when_empty"
     ),
+    BROADCAST_START_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_start_telegram_admin_broadcast_opens_menu_then_denies_non_admin"
+    ),
+    BROADCAST_CANCEL_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_cancel_telegram_admin_broadcast_clears_then_denies_non_admin"
+    ),
+    BROADCAST_ALL_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_choose_all_recipients_asks_text_then_denies_non_admin"
+    ),
+    BROADCAST_CHOOSE_GROUPS_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_choose_group_recipients_opens_picker_then_denies_non_admin"
+    ),
+    BROADCAST_FINISH_GROUPS_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_finish_group_selection_asks_text_then_rejects_empty"
+    ),
+    BROADCAST_CHOOSE_SELECTED_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_choose_selected_recipients_asks_search_then_denies_non_admin"
+    ),
+    BROADCAST_SEARCH_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_process_selected_recipient_search_stores_query_then_denies_non_admin"
+    ),
+    BROADCAST_SEARCH_AGAIN_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_search_again_resets_query_state_then_denies_non_admin"
+    ),
+    BROADCAST_FINISH_SELECTED_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_finish_selected_recipients_asks_text_then_rejects_empty"
+    ),
+    BROADCAST_TEXT_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_process_broadcast_message_text_drafts_then_rejects_empty"
+    ),
+    LIMIT_START_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_user_limit_start_prompts_duration_then_stores_expiry"
+    ),
+    SET_TRADES_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_set_trades_sets_fsm_then_denies_non_admin"
+    ),
+    SET_COMMODITIES_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_set_commodities_sets_fsm_then_denies_non_admin"
+    ),
+    SET_REQUESTS_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_set_requests_sets_fsm_then_denies_non_admin"
+    ),
+    PROCESS_LIMIT_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_process_limit_value_stores_then_rejects_invalid"
+    ),
+    SEARCH_START_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_start_search_user_sets_fsm_then_denies_non_admin"
+    ),
+    SEARCH_CANCEL_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_user_search_cancel_clears_then_denies_non_admin"
+    ),
+    SEARCH_QUERY_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_process_search_query_finds_user_then_rejects_unknown"
+    ),
+    USER_SETTINGS_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_user_settings_shows_then_denies_non_admin"
+    ),
+    CREATE_BROADCAST_SEED: (
+        "tests/test_p1_00b_characterization_seed_slice.py"
+        "::P100bSeedSliceExecutionTests.test_create_broadcast_persists_messages_then_rejects_empty"
+    ),
 }
 
 
@@ -604,6 +754,9 @@ class CrudSession:
 
     def add(self, obj):
         self._session.add(obj)
+
+    async def flush(self):
+        self._session.flush()
 
     async def execute(self, statement, params=None):
         return self._session.execute(statement)
@@ -850,6 +1003,44 @@ def _isolated_market_patches():
     ]
 
 
+class EmptyQuerySession:
+    """Session-construction isolate: live SQL runs against an empty result set."""
+
+    async def execute(self, *args, **kwargs):
+        return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: []))
+
+
+def _broadcast_flow_patches():
+    return [
+        patch(
+            "bot.handlers.admin_broadcast.answer_incoming_message_via_runtime",
+            new=AsyncMock(return_value=SimpleNamespace(message_id=90)),
+        ),
+        patch(
+            "bot.handlers.admin_broadcast.edit_callback_message_via_runtime",
+            new=AsyncMock(return_value=SimpleNamespace(message_id=91)),
+        ),
+        patch("bot.handlers.admin_broadcast.answer_callback_query_via_runtime", new=AsyncMock()),
+        patch("bot.handlers.admin_broadcast.AsyncSessionLocal", return_value=_SessionBox(EmptyQuerySession())),
+    ]
+
+
+def _management_broadcast_store(path: str):
+    engine, Session = _market_message_store(path)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS customer_relations ("
+                "id INTEGER PRIMARY KEY, customer_user_id INTEGER, status VARCHAR, deleted_at DATETIME)"
+            )
+        )
+    Chat.__table__.create(engine, checkfirst=True)
+    ChatMember.__table__.create(engine, checkfirst=True)
+    Message.__table__.create(engine, checkfirst=True)
+    AdminBroadcastMessage.__table__.create(engine, checkfirst=True)
+    return engine, Session
+
+
 def _invitation_patches():
     return [
         patch(
@@ -883,6 +1074,23 @@ def _user_admin_display_patches():
         patch("bot.handlers.admin_users.get_user_settings_keyboard", return_value="SET-KB"),
         patch("bot.handlers.admin_users.get_user_delete_webapp_redirect_keyboard", return_value="DEL-KB"),
         patch("bot.handlers.admin_users.get_user_profile_return_keyboard", return_value="RET-KB"),
+        patch("bot.handlers.admin_users.get_limit_duration_keyboard", return_value="DUR-KB"),
+        patch("bot.handlers.admin_users.delete_user_message", new=AsyncMock()),
+        patch("bot.handlers.admin_users.update_anchor", new=AsyncMock()),
+        patch(
+            "bot.handlers.admin_users.answer_incoming_message_via_runtime",
+            new=AsyncMock(return_value=SimpleNamespace(message_id=92)),
+        ),
+        patch(
+            "bot.handlers.admin_users.answer_callback_message_via_runtime",
+            new=AsyncMock(return_value=SimpleNamespace(message_id=93)),
+        ),
+        patch(
+            "bot.handlers.admin_users.build_users_management_navigation_keyboard",
+            new=AsyncMock(return_value="USERS-KB"),
+        ),
+        patch("bot.handlers.admin_users.attach_customer_management_names", new=AsyncMock()),
+        patch("bot.handlers.admin_users.schedule_temporary_message_cleanup", new=AsyncMock()),
     ]
 
 
@@ -2845,6 +3053,574 @@ class P100bSeedSliceExecutionTests(unittest.IsolatedAsyncioTestCase):
                     conn.execute("SELECT is_active FROM admin_market_messages WHERE id=1").fetchone()[0],
                     0,
                 )
+            engine.dispose()
+
+    async def test_start_telegram_admin_broadcast_opens_menu_then_denies_non_admin(self):
+        denied = FakeState(leftover=1)
+        ok = FakeState(leftover=1)
+        answers = []
+
+        async def _answer(*_a, **_k):
+            answers.append(1)
+            return SimpleNamespace(message_id=90)
+
+        patches = _broadcast_flow_patches()
+        for item in patches:
+            item.start()
+        try:
+            with patch("bot.handlers.admin_broadcast.answer_incoming_message_via_runtime", new=_answer):
+                await start_telegram_admin_broadcast(
+                    _commodity_message("📣 ارسال پیام همگانی بات"),
+                    denied,
+                    user=SimpleNamespace(role=UserRole.STANDARD),
+                )
+                self.assertEqual(denied.data.get("leftover"), 1)
+                self.assertEqual(answers, [])
+                await start_telegram_admin_broadcast(
+                    _commodity_message("📣 ارسال پیام همگانی بات"),
+                    ok,
+                    user=SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN),
+                )
+        finally:
+            for item in reversed(patches):
+                item.stop()
+        self.assertEqual(ok.data, {})
+        self.assertEqual(answers, [1])
+
+    async def test_cancel_telegram_admin_broadcast_clears_then_denies_non_admin(self):
+        denied = FakeState(audience_type="all")
+        ok = FakeState(audience_type="all")
+        patches = _broadcast_flow_patches()
+        for item in patches:
+            item.start()
+        try:
+            await cancel_telegram_admin_broadcast(
+                _broadcast_callback("tgb:cancel"),
+                denied,
+                user=SimpleNamespace(role=UserRole.STANDARD),
+            )
+            self.assertEqual(denied.data.get("audience_type"), "all")
+            await cancel_telegram_admin_broadcast(
+                _broadcast_callback("tgb:cancel"),
+                ok,
+                user=SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN),
+            )
+        finally:
+            for item in reversed(patches):
+                item.stop()
+        self.assertEqual(ok.data, {})
+        self.assertIsNone(ok.state)
+
+    async def test_choose_all_recipients_asks_text_then_denies_non_admin(self):
+        denied = FakeState()
+        ok = FakeState()
+        patches = _broadcast_flow_patches()
+        for item in patches:
+            item.start()
+        try:
+            await choose_all_recipients(
+                _broadcast_callback("tgb:all"),
+                denied,
+                user=SimpleNamespace(role=UserRole.STANDARD),
+            )
+            self.assertIsNone(denied.state)
+            await choose_all_recipients(
+                _broadcast_callback("tgb:all"),
+                ok,
+                user=SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN),
+            )
+        finally:
+            for item in reversed(patches):
+                item.stop()
+        self.assertEqual(ok.state, AdminBroadcast.awaiting_message_text)
+        self.assertEqual(ok.data["audience_type"], TelegramAdminBroadcastAudienceType.ALL.value)
+
+    async def test_choose_group_recipients_opens_picker_then_denies_non_admin(self):
+        denied = FakeState()
+        ok = FakeState()
+        patches = _broadcast_flow_patches()
+        for item in patches:
+            item.start()
+        try:
+            await choose_group_recipients(
+                _broadcast_callback("tgb:groups"),
+                denied,
+                user=SimpleNamespace(role=UserRole.STANDARD),
+            )
+            self.assertNotIn("audience_type", denied.data)
+            await choose_group_recipients(
+                _broadcast_callback("tgb:groups"),
+                ok,
+                user=SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN),
+            )
+        finally:
+            for item in reversed(patches):
+                item.stop()
+        self.assertEqual(ok.data["audience_type"], TelegramAdminBroadcastAudienceType.GROUP.value)
+        self.assertEqual(ok.data["target_groups"], [])
+
+    async def test_finish_group_selection_asks_text_then_rejects_empty(self):
+        empty = FakeState(target_groups=[])
+        ok = FakeState(target_groups=[TELEGRAM_ADMIN_BROADCAST_GROUP_ORDINARY])
+        answers = []
+
+        async def _answer(callback, text=None, show_alert=False):
+            answers.append(text or "")
+
+        patches = _broadcast_flow_patches()
+        for item in patches:
+            item.start()
+        try:
+            with patch("bot.handlers.admin_broadcast.answer_callback_query_via_runtime", new=_answer):
+                await finish_group_selection(
+                    _broadcast_callback("tgb:groups_done"),
+                    empty,
+                    user=SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN),
+                )
+                self.assertIsNone(empty.state)
+                self.assertIn("حداقل یک گروه انتخاب کنید.", answers)
+                await finish_group_selection(
+                    _broadcast_callback("tgb:groups_done"),
+                    ok,
+                    user=SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN),
+                )
+        finally:
+            for item in reversed(patches):
+                item.stop()
+        self.assertEqual(ok.state, AdminBroadcast.awaiting_message_text)
+
+    async def test_choose_selected_recipients_asks_search_then_denies_non_admin(self):
+        denied = FakeState()
+        ok = FakeState()
+        patches = _broadcast_flow_patches()
+        for item in patches:
+            item.start()
+        try:
+            await choose_selected_recipients(
+                _broadcast_callback("tgb:selected"),
+                denied,
+                user=SimpleNamespace(role=UserRole.STANDARD),
+            )
+            self.assertIsNone(denied.state)
+            await choose_selected_recipients(
+                _broadcast_callback("tgb:selected"),
+                ok,
+                user=SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN),
+            )
+        finally:
+            for item in reversed(patches):
+                item.stop()
+        self.assertEqual(ok.state, AdminBroadcast.awaiting_search_query)
+        self.assertEqual(ok.data["audience_type"], TelegramAdminBroadcastAudienceType.SELECTED.value)
+
+    async def test_process_selected_recipient_search_stores_query_then_denies_non_admin(self):
+        denied = FakeState(selected_user_ids=[])
+        ok = FakeState(selected_user_ids=[])
+        patches = _broadcast_flow_patches()
+        for item in patches:
+            item.start()
+        try:
+            await process_selected_recipient_search(
+                _commodity_message("ali"),
+                denied,
+                user=SimpleNamespace(role=UserRole.STANDARD),
+            )
+            self.assertNotIn("last_search_query", denied.data)
+            await process_selected_recipient_search(
+                _commodity_message("ali"),
+                ok,
+                user=SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN),
+            )
+        finally:
+            for item in reversed(patches):
+                item.stop()
+        self.assertEqual(ok.data["last_search_query"], "ali")
+
+    async def test_search_again_resets_query_state_then_denies_non_admin(self):
+        denied = FakeState(selected_user_ids=[9])
+        ok = FakeState(selected_user_ids=[9])
+        patches = _broadcast_flow_patches()
+        for item in patches:
+            item.start()
+        try:
+            await search_again(
+                _broadcast_callback("tgb:search_again"),
+                denied,
+                user=SimpleNamespace(role=UserRole.STANDARD),
+            )
+            self.assertIsNone(denied.state)
+            await search_again(
+                _broadcast_callback("tgb:search_again"),
+                ok,
+                user=SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN),
+            )
+        finally:
+            for item in reversed(patches):
+                item.stop()
+        self.assertEqual(ok.state, AdminBroadcast.awaiting_search_query)
+        self.assertEqual(ok.data["selected_user_ids"], [9])
+
+    async def test_finish_selected_recipients_asks_text_then_rejects_empty(self):
+        empty = FakeState(selected_user_ids=[])
+        ok = FakeState(selected_user_ids=[9])
+        answers = []
+
+        async def _answer(callback, text=None, show_alert=False):
+            answers.append(text or "")
+
+        patches = _broadcast_flow_patches()
+        for item in patches:
+            item.start()
+        try:
+            with patch("bot.handlers.admin_broadcast.answer_callback_query_via_runtime", new=_answer):
+                await finish_selected_recipients(
+                    _broadcast_callback("tgb:selected_done"),
+                    empty,
+                    user=SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN),
+                )
+                self.assertIsNone(empty.state)
+                self.assertIn("حداقل یک کاربر انتخاب کنید.", answers)
+                await finish_selected_recipients(
+                    _broadcast_callback("tgb:selected_done"),
+                    ok,
+                    user=SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN),
+                )
+        finally:
+            for item in reversed(patches):
+                item.stop()
+        self.assertEqual(ok.state, AdminBroadcast.awaiting_message_text)
+
+    async def test_process_broadcast_message_text_drafts_then_rejects_empty(self):
+        empty = FakeState(audience_type=TelegramAdminBroadcastAudienceType.ALL.value)
+        ok = FakeState(audience_type=TelegramAdminBroadcastAudienceType.ALL.value)
+        answers = []
+
+        async def _answer(*_a, **kwargs):
+            answers.append(kwargs.get("source_key") or "")
+            return SimpleNamespace(message_id=90)
+
+        patches = _broadcast_flow_patches()
+        for item in patches:
+            item.start()
+        try:
+            with patch("bot.handlers.admin_broadcast.answer_incoming_message_via_runtime", new=_answer):
+                await process_broadcast_message_text(
+                    _commodity_message("   "),
+                    empty,
+                    user=SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN),
+                )
+                self.assertIsNone(empty.state)
+                self.assertIn("admin-broadcast-content-empty", answers)
+                await process_broadcast_message_text(
+                    _commodity_message("پیام همگانی تست"),
+                    ok,
+                    user=SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN),
+                )
+        finally:
+            for item in reversed(patches):
+                item.stop()
+        self.assertEqual(ok.state, AdminBroadcast.awaiting_confirmation)
+        self.assertEqual(ok.data["content"], "پیام همگانی تست")
+        self.assertTrue(ok.data.get("creation_key"))
+
+    async def test_user_limit_start_prompts_duration_then_stores_expiry(self):
+        engine, Session, sync = _make_store()
+        _persist_user(sync)
+        denied = FakeState()
+        first = FakeState()
+        dur = FakeState()
+        callback_start = SimpleNamespace(data="user_limit_9", answer=AsyncMock(), message=SimpleNamespace())
+        callback_dur = SimpleNamespace(data="user_limit_dur_9_60", answer=AsyncMock(), message=SimpleNamespace())
+        db = RoleSession(sync)
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=_SessionBox(db)):
+            display = _user_admin_display_patches()
+            for item in display:
+                item.start()
+            try:
+                await handle_user_limit_start(
+                    callback_start,
+                    user=SimpleNamespace(role=UserRole.STANDARD),
+                    state=denied,
+                )
+                self.assertEqual(denied.data, {})
+                await handle_user_limit_start(
+                    callback_start,
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    state=first,
+                )
+                self.assertNotIn("limit_expire_at", first.data)
+                await handle_user_limit_start(
+                    callback_dur,
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    state=dur,
+                )
+            finally:
+                for item in reversed(display):
+                    item.stop()
+        self.assertEqual(dur.data["limit_target_user_id"], 9)
+        self.assertIsNotNone(dur.data.get("limit_expire_at"))
+        sync.close()
+        engine.dispose()
+
+    async def test_set_trades_sets_fsm_then_denies_non_admin(self):
+        engine, Session, sync = _make_store()
+        _persist_user(sync)
+        denied = FakeState()
+        ok = FakeState()
+        callback = SimpleNamespace(data="limit_set_trades_9", answer=AsyncMock(), message=SimpleNamespace())
+        db = RoleSession(sync)
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=_SessionBox(db)):
+            display = _user_admin_display_patches()
+            for item in display:
+                item.start()
+            try:
+                await handle_set_trades(callback, user=SimpleNamespace(role=UserRole.STANDARD), state=denied)
+                self.assertIsNone(denied.state)
+                await handle_set_trades(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), state=ok)
+            finally:
+                for item in reversed(display):
+                    item.stop()
+        self.assertEqual(ok.state, UserLimitations.awaiting_limit_value)
+        self.assertEqual(ok.data["limit_editing"], "trades")
+        sync.close()
+        engine.dispose()
+
+    async def test_set_commodities_sets_fsm_then_denies_non_admin(self):
+        engine, Session, sync = _make_store()
+        _persist_user(sync)
+        denied = FakeState()
+        ok = FakeState()
+        callback = SimpleNamespace(data="limit_set_commodities_9", answer=AsyncMock(), message=SimpleNamespace())
+        db = RoleSession(sync)
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=_SessionBox(db)):
+            display = _user_admin_display_patches()
+            for item in display:
+                item.start()
+            try:
+                await handle_set_commodities(callback, user=SimpleNamespace(role=UserRole.STANDARD), state=denied)
+                self.assertIsNone(denied.state)
+                await handle_set_commodities(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), state=ok)
+            finally:
+                for item in reversed(display):
+                    item.stop()
+        self.assertEqual(ok.state, UserLimitations.awaiting_limit_value)
+        self.assertEqual(ok.data["limit_editing"], "commodities")
+        sync.close()
+        engine.dispose()
+
+    async def test_set_requests_sets_fsm_then_denies_non_admin(self):
+        engine, Session, sync = _make_store()
+        _persist_user(sync)
+        denied = FakeState()
+        ok = FakeState()
+        callback = SimpleNamespace(data="limit_set_requests_9", answer=AsyncMock(), message=SimpleNamespace())
+        db = RoleSession(sync)
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=_SessionBox(db)):
+            display = _user_admin_display_patches()
+            for item in display:
+                item.start()
+            try:
+                await handle_set_requests(callback, user=SimpleNamespace(role=UserRole.STANDARD), state=denied)
+                self.assertIsNone(denied.state)
+                await handle_set_requests(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN), state=ok)
+            finally:
+                for item in reversed(display):
+                    item.stop()
+        self.assertEqual(ok.state, UserLimitations.awaiting_limit_value)
+        self.assertEqual(ok.data["limit_editing"], "requests")
+        sync.close()
+        engine.dispose()
+
+    async def test_process_limit_value_stores_then_rejects_invalid(self):
+        invalid = FakeState(limit_editing="trades", limit_target_user_id=9)
+        await invalid.set_state(UserLimitations.awaiting_limit_value)
+        ok = FakeState(limit_editing="trades", limit_target_user_id=9)
+        await ok.set_state(UserLimitations.awaiting_limit_value)
+        display = _user_admin_display_patches()
+        for item in display:
+            item.start()
+        try:
+            with patch("bot.keyboards.get_limit_settings_keyboard", return_value="LIM-KB"):
+                await process_limit_value(
+                    _commodity_message("abc"),
+                    invalid,
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                )
+                self.assertEqual(invalid.state, UserLimitations.awaiting_limit_value)
+                self.assertNotIn("limit_max_trades", invalid.data)
+                await process_limit_value(
+                    _commodity_message("4"),
+                    ok,
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                )
+        finally:
+            for item in reversed(display):
+                item.stop()
+        self.assertIsNone(ok.state)
+        self.assertEqual(ok.data["limit_max_trades"], 4)
+
+    async def test_start_search_user_sets_fsm_then_denies_non_admin(self):
+        denied = FakeState()
+        ok = FakeState()
+        display = _user_admin_display_patches()
+        for item in display:
+            item.start()
+        try:
+            await start_search_user(_commodity_message("🔍 جستجوی کاربر"), denied, user=SimpleNamespace(role=UserRole.STANDARD))
+            self.assertIsNone(denied.state)
+            await start_search_user(
+                _commodity_message("🔍 جستجوی کاربر"),
+                ok,
+                user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+            )
+        finally:
+            for item in reversed(display):
+                item.stop()
+        self.assertEqual(ok.state, UserManagement.awaiting_search_query)
+
+    async def test_user_search_cancel_clears_then_denies_non_admin(self):
+        denied = FakeState()
+        await denied.set_state(UserManagement.awaiting_search_query)
+        ok = FakeState()
+        await ok.set_state(UserManagement.awaiting_search_query)
+
+        async def _clear(state):
+            await state.clear()
+
+        display = _user_admin_display_patches()
+        for item in display:
+            item.start()
+        try:
+            with patch("bot.handlers.admin_users.clear_state_retain_anchors", new=_clear):
+                await handle_user_search_cancel(
+                    _commodity_callback("user_search_cancel"),
+                    denied,
+                    user=SimpleNamespace(role=UserRole.STANDARD),
+                )
+                self.assertEqual(denied.state, UserManagement.awaiting_search_query)
+                await handle_user_search_cancel(
+                    _commodity_callback("user_search_cancel"),
+                    ok,
+                    user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                )
+        finally:
+            for item in reversed(display):
+                item.stop()
+        self.assertIsNone(ok.state)
+
+    async def test_process_search_query_finds_user_then_rejects_unknown(self):
+        engine, Session, sync = _make_store()
+        _persist_user(sync)
+        missing = FakeState()
+        await missing.set_state(UserManagement.awaiting_search_query)
+        ok = FakeState()
+        await ok.set_state(UserManagement.awaiting_search_query)
+        class SearchSession(RoleSession):
+            def __init__(self, sync_session, *, found):
+                super().__init__(sync_session)
+                self.found = found
+
+            async def execute(self, statement, params=None):
+                blob = f"{statement} {getattr(statement, 'text', '')}"
+                if "FROM users" in blob and "notifications" not in blob.lower():
+                    loaded = self._session.get(MappedAccountUser, 9) if self.found else None
+                    return SimpleNamespace(scalar_one_or_none=lambda: loaded)
+                return self._session.execute(statement)
+
+        async def _clear(state):
+            await state.clear()
+
+        display = _user_admin_display_patches()
+        for item in display:
+            item.start()
+        try:
+            with patch("bot.handlers.admin_users.clear_state_retain_anchors", new=_clear):
+                with patch(
+                    "bot.handlers.admin_users.AsyncSessionLocal",
+                    return_value=_SessionBox(SearchSession(sync, found=False)),
+                ):
+                    await process_search_query(
+                        _commodity_message("missing"),
+                        missing,
+                        user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    )
+                self.assertIsNone(missing.state)
+                with patch(
+                    "bot.handlers.admin_users.AsyncSessionLocal",
+                    return_value=_SessionBox(SearchSession(sync, found=True)),
+                ):
+                    await process_search_query(
+                        _commodity_message("ali"),
+                        ok,
+                        user=SimpleNamespace(role=UserRole.SUPER_ADMIN),
+                    )
+        finally:
+            for item in reversed(display):
+                item.stop()
+        self.assertIsNone(ok.state)
+        sync.close()
+        engine.dispose()
+
+    async def test_user_settings_shows_then_denies_non_admin(self):
+        engine, Session, sync = _make_store()
+        _persist_user(sync)
+        edits = []
+
+        async def _edit(*_a, **_k):
+            edits.append(1)
+
+        callback = SimpleNamespace(data="user_settings_9", answer=AsyncMock(), message=SimpleNamespace())
+        db = RoleSession(sync)
+        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=_SessionBox(db)), patch(
+            "bot.handlers.admin_users.answer_callback_query_via_runtime",
+            new=AsyncMock(),
+        ), patch(
+            "bot.handlers.admin_users.edit_callback_message_via_runtime",
+            new=_edit,
+        ), patch(
+            "bot.handlers.admin_users.get_user_profile_text",
+            new=AsyncMock(return_value="profile"),
+        ), patch(
+            "bot.handlers.admin_users.get_user_settings_keyboard",
+            return_value="SET-KB",
+        ):
+            await handle_user_settings(callback, user=SimpleNamespace(role=UserRole.STANDARD))
+            self.assertEqual(edits, [])
+            await handle_user_settings(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
+        self.assertEqual(edits, [1])
+        sync.close()
+        engine.dispose()
+
+    async def test_create_broadcast_persists_messages_then_rejects_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "admin-broadcast.sqlite")
+            engine, Session = _management_broadcast_store(db_path)
+            actor = SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN, account_name="admin")
+            patches = _isolated_market_patches()
+            for item in patches:
+                item.start()
+            try:
+                with self.assertRaises(HTTPException) as empty:
+                    await create_broadcast(
+                        AdminBroadcastCreate(content="   ", target_groups=["users"]),
+                        current_user=actor,
+                        db=CrudSession(Session()),
+                    )
+                self.assertEqual(empty.exception.status_code, 400)
+                created = await create_broadcast(
+                    AdminBroadcastCreate(content="پیام مدیریت تست", target_groups=["users"]),
+                    current_user=actor,
+                    db=CrudSession(Session()),
+                )
+            finally:
+                for item in reversed(patches):
+                    item.stop()
+            self.assertEqual(created.content, "پیام مدیریت تست")
+            self.assertIn("users", created.target_groups)
+            with sqlite3.connect(db_path) as conn:
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM admin_broadcast_messages").fetchone()[0], 1)
+                self.assertGreaterEqual(conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0], 1)
+                self.assertGreaterEqual(conn.execute("SELECT COUNT(*) FROM chats").fetchone()[0], 1)
             engine.dispose()
 
     async def test_channel_trade_handlers_gateway_confirm_is_not_crud_evidence(self):

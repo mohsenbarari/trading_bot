@@ -212,7 +212,8 @@
       "test_refs": [
         "tests/test_admin_messages_router.py",
         "tests/test_telegram_admin_broadcast_service.py",
-        "frontend/src/components/AdminMessagesView.test.ts"
+        "frontend/src/components/AdminMessagesView.test.ts",
+        "tests/test_p1_00b_characterization_seed_slice.py::P100bSeedSliceExecutionTests.test_create_broadcast_persists_messages_then_rejects_empty"
       ],
       "operation_kind": "BROADCAST"
     },
