@@ -1,0 +1,46 @@
+# شاهد چرخهٔ محدود اتوماسیون — ۲۰۲۶-۰۹-۰۵
+
+وضعیت: `BOUNDED_CYCLE_VALIDATED`؛ این سند receipt پذیرش Stage یا مجوز عملیاتی نیست.
+
+## baseline و حفظ main
+
+`main` و `origin/main` پس از fetch روی `4b6754959f024f430b396f5073aadb1220fda0c5`
+بودند و تغییر نکردند. merge یک‌طرفهٔ `a9a345b74784324ebdb88c69761fabbc31e3987e`
+در `refactor/two-site-architecture` تمام ۱۳ کامیت جدید را بدون تعارض وارد کرد.
+۹۴ تست مرتبط merge پاس شدند؛ deploy/build تولید و push اجرا نشد.
+
+## کار واقعی
+
+- Assignment: `AUTOMATION-PROPOSAL-REGRESSIONS-002`؛ فقط تکمیل تست‌های runner.
+- مدل واقعی: `gemini-3.8-flash-high`؛ نشست `384c0b81-098c-4d81-8006-fa0f87d7e748`.
+- run: `automation-regressions-worker-004`؛ مدت runner برابر ۱۶۰٫۲۲۱ ثانیه.
+- hash فایل result: `bd1d5c50415a51e4408927d9821339ffb3942566132c23c540f5a98131433dde`.
+- Gemini پنج تست source drift، تغییر HEAD، تغییر status، NDJSON خراب و پاسخ معتبر
+  `BLOCKED` افزود؛ ۲۱ تست قبلی و assertionهایشان حفظ شدند. هیچ فایل محصولی تغییر نکرد.
+- Codex Verifier مستقل، شش الزام، snapshot، hash و diff را پیش از اعمال بررسی و
+  `VERIFIED` اعلام کرد. این review ایستا بود؛ Gemini Verifier اجرا نشد.
+- Codex همان پیشنهاد را با کنترل hash اعمال کرد؛ هر ۲۶ تست runner واقعاً اجرا و پاس شد.
+  تغییرات با کامیت همین بسته ثبت می‌شوند؛ SHA پذیرش دقیق در رسید محلی پس از commit است.
+- از شروع Worker تا اعمال و تست، کاربر هیچ گزارش یا پرامپتی بین نقش‌ها جابه‌جا نکرد.
+
+## ایراد کشف‌شده و حد شواهد
+
+اجرای قبلی `automation-regressions-worker-002` پس از ۱۳۵٫۲۱۱ ثانیه توسط parser رد شد:
+CLI متن پاسخ را با JSON ارسال نهایی الحاق کرده بود، ولی `structured_output` معتبر
+داشت. مطابق [قرارداد رسمی CLI](https://antigravity.google/docs/cli/headless/)، فیلد
+ساختاریافته مرجع خواندن payload شد؛ schema محلی، مدل، نشست و رد ابزارها باقی ماندند.
+دو تست مخصوص این ناسازگاری افزوده و اصلاح مستقل review شد؛ malformed canonical
+هرگز با fallback به متن پذیرفته نمی‌شود. اجرای قبلی بازنویسی یا موفق اعلام نشد.
+
+محیط ارسال draft و feedback اضافی به Google را نپذیرفت؛ آن فراخوانی شروع نشد.
+اجرای بعد فقط source تأییدشده و task اصلی را دریافت کرد. بازبینی مستقل در Codex
+انجام شد؛ این تغییر روش، مجوز ارسال بیشتر به Google ایجاد نمی‌کند.
+
+مدت‌های بالا زمان دو Worker هستند، نه زمان کل merge، تشخیص ایراد و review.
+تست timeout/kill و مسیرهای خطا محلی و mock بودند؛ crash کامل میزبان یا اتصال زندهٔ
+Gemini Verifier در این چرخه آزمایش نشد. نبود تلاش ابزار در اجرای موفق، به‌تنهایی
+اثبات همهٔ حالت‌های sandbox نیست. سرویس دائمی پس از بسته‌شدن گفت‌وگو ایجاد نشده است.
+
+شواهد خام در `.local/two-site-refactor/proposals/` و رسید Codex در review bundle
+محلی نگهداری می‌شوند؛ موعد بازبینی/پاکسازی ۲۰۲۶-۰۹-۱۲ است. این خلاصهٔ کوچک همراه
+کد و تست باقی می‌ماند؛ متن کامل source/prompt دوباره وارد Git نمی‌شود.

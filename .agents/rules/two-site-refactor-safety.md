@@ -15,7 +15,8 @@ Hard invariants:
 
 - The current proposal-only simplification is governed by
   `docs/refactor/two-server/PROPOSAL_AUTOMATION.md`: Codex applies changes; Gemini has
-  no source/Git/state authority. Its live-cycle validation is pending. The native
+  no source/Git/state authority. One bounded cycle with an independent Codex verifier
+  is validated; this is not Stage/production acceptance or a permanent daemon. The native
   Worker/fence/gateway mechanics below apply only to the paused legacy profile;
   do not activate that profile while completing proposal-runner work. Scope,
   independent acceptance, evidence and external/human Writer gates still apply.

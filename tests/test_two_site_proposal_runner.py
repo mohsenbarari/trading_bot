@@ -138,6 +138,20 @@ class ProposalContracts(unittest.TestCase):
         self.assertEqual(result, self.result())
         self.assertEqual(envelope["conversation_id"], "session-one")
 
+    def test_structured_output_is_the_canonical_schema_payload(self):
+        events = self.events()
+        events[1]["result"]["structured_output"] = self.result()
+        events[1]["result"]["response"] += '\n{"toolAction":"Submitting proposal"}'
+        result, _ = self.parse(events)
+        self.assertEqual(result, self.result())
+
+    def test_invalid_structured_output_never_falls_back_to_valid_text(self):
+        for invalid in [None, [], "text", {}, dict(self.result(), changes=[])]:
+            events = self.events()
+            events[1]["result"]["structured_output"] = invalid
+            with self.subTest(invalid=invalid), self.assertRaises(runner.ProposalError):
+                self.parse(events)
+
     def test_bad_stream_envelopes(self):
         variants = [[], [None], [{"event": "init", "init": []}],
                     [{"event": "result", "result": None}]]
@@ -175,7 +189,9 @@ class ProposalContracts(unittest.TestCase):
         self.sources["test_new.py"]["content"] = None
         self.assertIn("--- /dev/null\n", runner.proposal_diff(changes, self.sources))
 
-    def invoke_fake_cli(self, *, drift=None, timeout=False, denied=False):
+    def invoke_fake_cli(self, *, drift=None, timeout=False, denied=False,
+                        result=None, events=None, raw_output=None,
+                        git_side_effect=None, run_id="run-001"):
         process = MagicMock()
         process.__enter__.return_value = process
         process.returncode = 0
@@ -185,16 +201,21 @@ class ProposalContracts(unittest.TestCase):
                 raise subprocess.TimeoutExpired("fake-cli", 30)
             if drift:
                 drift()
-            events = self.events()
+            if raw_output is not None:
+                if isinstance(raw_output, str):
+                    return raw_output.encode(), b""
+                return raw_output, b""
+            evs = self.events(result=result) if events is None else events
             if denied:
-                events[1]["result"]["denied_actions"] = ["read_file"]
-            return "\n".join(json.dumps(e) for e in events).encode(), b""
+                evs[1]["result"]["denied_actions"] = ["read_file"]
+            return "\n".join(json.dumps(e) for e in evs).encode(), b""
         process.communicate.side_effect = communicate
-        with patch.object(runner, "git", side_effect=["head", "", "head", ""]), \
+        git_effects = git_side_effect if git_side_effect is not None else ["head", "", "head", ""]
+        with patch.object(runner, "git", side_effect=git_effects), \
                 patch.object(runner.subprocess, "Popen", return_value=process) as popen, \
                 patch.object(runner.os, "killpg") as kill:
             try:
-                out = runner.run(self.root, self.task_path, "worker", "run-001", 30,
+                out = runner.run(self.root, self.task_path, "worker", run_id, 30,
                                  cli=Path(__file__).resolve())
                 self.assertNotIn("--dangerously-skip-permissions", popen.call_args.args[0])
                 self.assertIn("--sandbox", popen.call_args.args[0])
@@ -225,6 +246,74 @@ class ProposalContracts(unittest.TestCase):
         out = self.root / ".local/two-site-refactor/proposals/run-001"
         self.assertEqual(json.loads((out / "status.json").read_text())["state"], "BLOCKED")
         self.assertFalse((out / "result.json").exists())
+
+    def test_source_drift_without_git_status_change_records_blocked(self):
+        def drift():
+            (self.root / "source.py").write_text("VALUE = 2\n")
+        with self.assertRaisesRegex(runner.ProposalError, "task or source bytes changed during generation"):
+            self.invoke_fake_cli(drift=drift)
+        out = self.root / ".local/two-site-refactor/proposals/run-001"
+        status = json.loads((out / "status.json").read_text())
+        self.assertEqual(status["state"], "BLOCKED")
+        self.assertIn("ProposalError: task or source bytes changed during generation", status["error"])
+        self.assertFalse((out / "result.json").exists())
+        self.assertFalse((self.root / "test_new.py").exists())
+
+    def test_git_head_change_during_generation_records_blocked(self):
+        with self.assertRaisesRegex(runner.ProposalError, "Git state changed during generation"):
+            self.invoke_fake_cli(git_side_effect=["head-start", "", "head-finish", ""])
+        out = self.root / ".local/two-site-refactor/proposals/run-001"
+        status = json.loads((out / "status.json").read_text())
+        self.assertEqual(status["state"], "BLOCKED")
+        self.assertIn("ProposalError: Git state changed during generation", status["error"])
+        self.assertFalse((out / "result.json").exists())
+        self.assertFalse((self.root / "test_new.py").exists())
+
+    def test_git_status_change_during_generation_records_blocked(self):
+        with self.assertRaisesRegex(runner.ProposalError, "Git state changed during generation"):
+            self.invoke_fake_cli(git_side_effect=["head", "", "head", " M source.py\n"])
+        out = self.root / ".local/two-site-refactor/proposals/run-001"
+        status = json.loads((out / "status.json").read_text())
+        self.assertEqual(status["state"], "BLOCKED")
+        self.assertIn("ProposalError: Git state changed during generation", status["error"])
+        self.assertFalse((out / "result.json").exists())
+        self.assertFalse((self.root / "test_new.py").exists())
+
+    def test_malformed_ndjson_cli_output_records_blocked(self):
+        malformed = (
+            json.dumps({"event": "init", "conversation_id": "session-one",
+                        "init": {"model": runner.MODEL}}).encode() + b"\n"
+            b'{"event": "result", "result": {malformed ndjson\n'
+        )
+        with self.assertRaises(json.JSONDecodeError):
+            self.invoke_fake_cli(raw_output=malformed)
+        out = self.root / ".local/two-site-refactor/proposals/run-001"
+        status = json.loads((out / "status.json").read_text())
+        self.assertEqual(status["state"], "BLOCKED")
+        self.assertIn("JSONDecodeError", status["error"])
+        self.assertFalse((out / "result.json").exists())
+        self.assertFalse((self.root / "test_new.py").exists())
+
+    def test_genuine_blocked_model_response_is_valid_output_never_acceptance(self):
+        blocked_result = {
+            "status": "BLOCKED",
+            "summary": "Task blocked due to missing dependency.",
+            "covered_requirements": [],
+            "findings": ["Required module is missing from the environment."],
+            "changes": [],
+        }
+        out = self.invoke_fake_cli(result=blocked_result)
+        status = json.loads((out / "status.json").read_text())
+        self.assertEqual(status["state"], "BLOCKED")
+        self.assertNotEqual(status["state"], "PROPOSAL_READY")
+        self.assertNotIn("error", status)
+        self.assertEqual(status["authority"], "PROPOSAL_ONLY_NOT_ACCEPTANCE")
+        self.assertTrue((out / "result.json").exists())
+        saved_result = json.loads((out / "result.json").read_text())
+        self.assertEqual(saved_result["status"], "BLOCKED")
+        self.assertEqual(saved_result["findings"], ["Required module is missing from the environment."])
+        self.assertEqual(saved_result["changes"], [])
+        self.assertFalse((self.root / "test_new.py").exists())
 
     def test_timeout_and_denial_never_publish_success(self):
         with self.assertRaises(subprocess.TimeoutExpired):

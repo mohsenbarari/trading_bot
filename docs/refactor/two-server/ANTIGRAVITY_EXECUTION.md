@@ -1,11 +1,12 @@
 # اجرای خودکار ریفکتور دوسایته با Google Antigravity
 
-وضعیت در ۲۰۲۶-۰۹-۰۵: `PROPOSAL_LOCAL_TESTED / LIVE_CYCLE_PENDING / GATEWAY_NOT_ACCEPTED / NOT_INSTALLED`
+وضعیت در ۲۰۲۶-۰۹-۰۵: `BOUNDED_CYCLE_VALIDATED / GATEWAY_NOT_ACCEPTED / NOT_INSTALLED`
 
 برای ادامهٔ فعلی فقط [`PROPOSAL_AUTOMATION.md`](PROPOSAL_AUTOMATION.md) را دنبال کنید:
 Codex هماهنگ‌کننده است و Gemini تغییرات کامل را پیشنهاد می‌دهد. مطالب پایین شرح
 مسیر قدیمیِ متوقف‌شده‌اند؛ انتخاب Agent Manager، takeover یا نصب gateway دستور
-شروع کار امروز نیست. آزمون واقعی مسیر ساده هنوز به مجوز محیط برای ارسال کد نیاز دارد.
+شروع کار امروز نیست. مسیر واقعیِ آزموده‌شده از Gemini Worker و Codex Verifier مستقل
+استفاده می‌کند؛ جزئیات شواهد و مجوزهای محدود در راهنمای بالا ثبت شده‌اند.
 
 gateway در commit `1290009dd51e80b776357c3668564796e3fc1f1f` نتیجهٔ
 `CHANGES_REQUIRED` با یک finding سطح High و دو Medium گرفته است. smoke تاریخی،

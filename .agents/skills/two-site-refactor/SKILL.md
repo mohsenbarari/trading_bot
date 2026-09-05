@@ -8,7 +8,7 @@ description: Coordinate the Finland-primary/Iran-standby refactor with bounded G
 ## Current entrypoint — read first
 
 For the current simplification/automation task, use Codex as coordinator and sole
-source writer, and Gemini as proposal-only Worker/Verifier through
+source writer, and Gemini as proposal-only Worker through
 `scripts/two_site_proposal_runner.py`. Load `AGENTS.md`, routed MemoryCustodian files,
 and `docs/refactor/two-server/PROPOSAL_AUTOMATION.md` completely. The latter is the
 small executable contract and states the current readiness limitations.
@@ -18,12 +18,18 @@ relevant governance clauses and exact receipts; load MASTER_PLAN sections releva
 to that task, not all sections for every small correction. Give Gemini complete
 bounded sources, requirements, allowed paths, tests and findings via the documented
 task and prompt template. Independently inspect proposals, apply with apply_patch,
-run tests, route findings directly, and obtain independent review before acceptance.
+run tests and obtain independent review before acceptance. The validated route uses
+a separate read-only Codex verifier before applying a proposal. Optional Gemini
+verification or resending proposal/feedback requires permission for that payload;
+source-only permission does not imply it. Do not repackage denied input under another
+argument. Keep the owner out of routine handoffs within the approved scope.
 No owner-relayed handoff, no fake test claim, no infinite retry. Do not bypass an
 environment authorization refusal. Stage state and external-action gates stay intact.
 
-The live-cycle proof is still pending. No production, Stage completion, legacy
-gateway activation or all-refactor-readiness claim follows from local unit tests.
+One bounded live Worker → independent Codex verification → tests → commit cycle is
+documented in reviews/AUTOMATION_PROPOSAL_LIVE_20260905.md under the two-server docs.
+This is not a daemon, production/Stage acceptance, legacy gateway activation or
+proof that every future Stage is ready. Recheck affected evidence after main merges.
 
 The remainder describes the PAUSED legacy custom-agent profile, not startup for the
 proposal path. Load its resources only for an explicitly scoped legacy diagnosis or

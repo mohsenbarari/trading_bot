@@ -196,9 +196,15 @@ def parse_stream(raw: str, task: dict, sources: dict, role: str) -> tuple[dict, 
             or envelope.get("status") != "SUCCESS" or envelope.get("denied_actions")
             or envelope.get("conversation_id") != init[0].get("conversation_id")):
         raise ProposalError("CLI did not complete one successful tool-free session")
-    if not isinstance(envelope.get("response"), str):
-        raise ProposalError("CLI result has no response text")
-    result = unique_json(envelope["response"])
+    # With --json-schema the documented machine payload is structured_output.
+    # CLI 1.1.26 may also append its submission object to free-text response.
+    # Never scrape that text or fall back when a supplied structured value is bad.
+    if "structured_output" in envelope:
+        result = envelope["structured_output"]
+    else:
+        if not isinstance(envelope.get("response"), str):
+            raise ProposalError("CLI result has no response text")
+        result = unique_json(envelope["response"])
     return validate_result(result, task, sources, role), envelope
 
 
