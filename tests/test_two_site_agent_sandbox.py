@@ -7,10 +7,13 @@ import unittest
 from pathlib import Path
 
 from scripts.two_site_agent_sandbox import (
+    DEADLINE_CLEANUP_RESERVE,
+    EndToEndDeadlineExceeded,
     GitAncestryEvidence,
     SandboxError,
     _run_bounded_process,
     materialize_git_ancestry,
+    operation_deadline,
     run_tests,
     sandbox_argv,
     safe_relative,
@@ -126,6 +129,25 @@ class SandboxTests(unittest.TestCase):
                 process_limit=1,
                 env={"PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8"},
             )
+
+    def test_shared_deadline_caps_child_and_reserves_descendant_cleanup(self):
+        started = time.monotonic()
+        with self.assertRaisesRegex(SandboxError, "timeout"):
+            with operation_deadline(DEADLINE_CLEANUP_RESERVE + 0.25):
+                _run_bounded_process(
+                    [sys.executable, "-c", "import time; time.sleep(30)"],
+                    timeout=120,
+                    output_limit=1024,
+                    env={"PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8"},
+                )
+        self.assertLess(time.monotonic() - started, 3.0)
+
+    def test_shared_deadline_interrupts_non_child_preparation(self):
+        started = time.monotonic()
+        with self.assertRaises(EndToEndDeadlineExceeded):
+            with operation_deadline(0.05):
+                time.sleep(30)
+        self.assertLess(time.monotonic() - started, 1.0)
 
     def test_genuine_commit_only_ancestry_and_awk_work_inside_bwrap(self):
         with tempfile.TemporaryDirectory(prefix="sandbox-ancestry-test-") as temporary:

@@ -20,6 +20,7 @@ import yaml
 
 from scripts.two_site_agent_executor import observe_git
 from scripts.two_site_agent_host import MANIFEST_PATH, load_manifest
+from scripts.two_site_agent_sandbox import RECOVERY_DEADLINE_SECONDS, operation_deadline
 from scripts.two_site_agent_transport import (
     MAX_REQUEST, MAX_RESULT, UUID, TransportError, digest, read_bounded, safe_path,
     unique_json, write_new,
@@ -125,8 +126,9 @@ def parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = parser().parse_args()
     try:
-        result = reconcile(args.request_id, apply=args.mode == 'resolve-safe',
-                           manifest_path=args.manifest)
+        with operation_deadline(RECOVERY_DEADLINE_SECONDS):
+            result = reconcile(args.request_id, apply=args.mode == 'resolve-safe',
+                               manifest_path=args.manifest)
     except Exception as error:
         result = {'status': 'BLOCKED', 'error_class': type(error).__name__}
     print(json.dumps(result, sort_keys=True, separators=(',', ':')))

@@ -7,10 +7,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from scripts.two_site_agent_controller import NativeController, hook_response, source_path
-from scripts.two_site_agent_gateway import ActorBinding, ActorRole
-from scripts.two_site_agent_transport import MODEL, NativeTransport, TransportError
+from scripts.two_site_agent_gateway import ActorBinding, ActorRole, GitSnapshot
+from scripts.two_site_agent_host import ProtectedGatewayHost
+from scripts.two_site_agent_transport import MODEL, NativeTransport, TransportError, digest
 from tests.test_two_site_agent_gateway import (
-    ASSIGNMENT, COORDINATOR, INTEGRATION_HEAD, VERIFIER, WORKER, GatewayFixture,
+    ASSIGNMENT, CANDIDATE, COORDINATOR, INTEGRATION_HEAD, VERIFIER, WORKER, GatewayFixture,
 )
 
 
@@ -157,6 +158,77 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(1, len(self.calls))
         with self.assertRaises(TransportError):
             self.controller.pre(event)
+
+    def test_verifier_native_request_delivery_works_but_source_write_is_denied(self):
+        self.role = ActorRole.VERIFIER
+        self.fixture.set_stage_registry(
+            head_sha=CANDIDATE, dirty_uncommitted_candidate=False,
+            status='COMPLETE_CANDIDATE',
+        )
+        clean = GitSnapshot(
+            self.fixture.stage, 'refactor/stage/P1-00b-gateway', CANDIDATE,
+            parent_sha=self.fixture.assignment['base_sha'],
+        )
+        self.context = self.fixture.context(caller=VERIFIER, stage_snapshot=clean)
+        selectors = ['tests/test_p1_00b_characterization_gateway.py::test_gateway']
+        request = self.fixture.request('test', actor=VERIFIER, selectors=selectors)
+
+        authority_host = ProtectedGatewayHost.__new__(ProtectedGatewayHost)
+
+        def execute_with_authority(plan, supplied_request):
+            self.calls.append(plan)
+            outcome = {
+                'status': 'SUCCESS',
+                'pre_git': [{}, {
+                    'head_sha': CANDIDATE,
+                    'worktree_patch_sha256': None,
+                }],
+            }
+            record = authority_host._authority_record(
+                plan, supplied_request, outcome, self.fixture.assignment, self.fence,
+            )
+            return {
+                **outcome,
+                'authority_record': record,
+                'authority_sha256': digest(record),
+            }
+
+        self.transport.execute = execute_with_authority
+        event = copy.deepcopy(self.event)
+        event['conversationId'] = VERIFIER
+        event['toolCall']['args'] = {
+            'TargetFile': str(self.transport.requests / (request['id'] + '.json')),
+            'CodeContent': json.dumps(request), 'Overwrite': False,
+        }
+        self.assertEqual('allow', self.controller.pre(event)['decision'])
+        Path(event['toolCall']['args']['TargetFile']).write_text(json.dumps(request))
+        self.controller.post(event)
+        self.assertEqual(1, len(self.calls))
+        protected = json.loads(
+            (self.builder.state / (request['id'] + '.receipt.json')).read_text()
+        )
+        record = protected['outcome']['authority_record']
+        self.assertEqual('SUCCESS', protected['outcome']['status'])
+        self.assertEqual('TEST', record['record_type'])
+        self.assertEqual('VERIFIER', record['role'])
+        self.assertEqual('PASS', record['decision'])
+        self.assertEqual(selectors, record['selectors'])
+        self.assertEqual(digest(record), protected['outcome']['authority_sha256'])
+        self.assertEqual(
+            protected,
+            json.loads((self.transport.results / (request['id'] + '.json')).read_text()),
+        )
+
+        source_event = copy.deepcopy(event)
+        source_event['stepIdx'] += 1
+        source_event['toolCall']['args'] = {
+            'TargetFile': str(self.fixture.test_path),
+            'CodeContent': 'def verifier_edit():\n    pass\n',
+            'Overwrite': True,
+        }
+        with self.assertRaisesRegex(TransportError, 'only the assigned Worker'):
+            self.controller.pre(source_event)
+        self.assertFalse(self.controller.reservation.exists())
 
     def test_replacement_expansion_is_rejected_before_reservation(self):
         self.fixture.test_path.write_text('a' * 100_000)

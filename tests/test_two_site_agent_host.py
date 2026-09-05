@@ -1,9 +1,11 @@
 """Protected host preparation and authority tests; no real installation or review."""
+import io
 import hashlib
 import json
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,15 +14,24 @@ from unittest.mock import Mock, patch
 import yaml
 
 from scripts.install_two_site_agent_gateway import expected_hooks
-from scripts.two_site_agent_executor import (
-    FENCE_TIMEOUT, MUTATION_TIMEOUT, READ_TIMEOUT, TEST_TIMEOUT, execute_plan,
-)
+from scripts.two_site_agent_executor import execute_plan
 from scripts.two_site_agent_gateway import (
-    ActorRole, CommandPlan, EnvClass, FollowupCommandPlan, GitCheckpoint,
-    RESULTING_HEAD,
+    ActorRole, CommandPlan, EnvClass, FollowupCommandPlan, GitCheckpoint, GitSnapshot,
+    RESULTING_HEAD, plan_operation,
 )
-from scripts.two_site_agent_host import ProtectedGatewayHost
+from scripts.two_site_agent_host import ProtectedGatewayHost, main as host_main
+from scripts.two_site_agent_sandbox import (
+    HOOK_TIMEOUT_MARGIN_SECONDS, hook_deadline_seconds, hook_timeout_seconds,
+)
 from scripts.two_site_agent_transport import MODEL, NativeTransport, TransportError, digest
+from tests.test_two_site_agent_gateway import (
+    ASSIGNMENT as GATEWAY_ASSIGNMENT,
+    CLOSEOUT_PATCH as GATEWAY_CLOSEOUT_PATCH,
+    COORDINATOR as GATEWAY_COORDINATOR,
+    GatewayFixture,
+    INTEGRATION_HEAD as GATEWAY_INTEGRATION_HEAD,
+    STAGE as GATEWAY_STAGE,
+)
 from tests.test_two_site_agent_executor import (
     ASSIGNMENT, COORDINATOR, EPOCH, STAGE, GitFixture, RecordingRunner,
 )
@@ -218,21 +229,85 @@ class HostTests(unittest.TestCase):
         self.assertIsNone(self.host._authority_record(
             plan, request, {'status': 'FAILED'}, self.assignment, {'epoch': EPOCH}))
 
+    def test_verifier_authority_requires_exact_passing_test_receipt_and_selectors(self):
+        selectors = ['tests/test_sample.py']
+        plan = SimpleNamespace(
+            operation='verifier-submit',
+            request_id='44444444-4444-4444-8444-444444444444',
+            actor_id='22222222-2222-4222-8222-222222222222',
+            role=ActorRole.VERIFIER,
+        )
+        request = {
+            'integration_head': self.fx.integration_head,
+            'candidate_sha': self.fx.base,
+            'test_receipt_sha256': 'a' * 64,
+            'test_selectors': selectors,
+            'decision': 'VERIFIED',
+            'findings': [],
+        }
+        self.host._worker_for_candidate = Mock(return_value={'authority_sha256': 'b' * 64})
+        self.host._selectors_for_authority = Mock(return_value=selectors)
+        record = self.host._authority_record(
+            plan, request, {'status': 'SUCCESS'}, self.assignment, {'epoch': EPOCH},
+        )
+        self.assertEqual('VERIFIER', record['record_type'])
+        self.assertEqual(selectors, record['test_selectors'])
+        self.host._selectors_for_authority.assert_called_once_with('a' * 64, 'VERIFIER')
+
+        self.host._selectors_for_authority = Mock(return_value=['tests/test_other.py'])
+        with self.assertRaisesRegex(TransportError, 'selectors differ'):
+            self.host._authority_record(
+                plan, request, {'status': 'SUCCESS'}, self.assignment, {'epoch': EPOCH},
+            )
+
+    def test_complete_hook_entrypoints_enforce_deadline_and_fail_closed(self):
+        outputs = {
+            'pre': {'decision': 'deny'},
+            'post': {},
+            'stop': {'continue': False},
+        }
+
+        def slow_host(_manifest):
+            time.sleep(0.25)
+            raise AssertionError('deadline did not interrupt host preparation')
+
+        for phase, expected in outputs.items():
+            stdin = SimpleNamespace(buffer=io.BytesIO(b'{}'))
+            stdout = io.StringIO()
+            started = time.monotonic()
+            with patch('scripts.two_site_agent_host.sys.stdin', stdin), patch(
+                'scripts.two_site_agent_host.sys.stdout', stdout
+            ), patch(
+                'scripts.two_site_agent_host.load_manifest', return_value={}
+            ), patch(
+                'scripts.two_site_agent_host.ProtectedGatewayHost', side_effect=slow_host
+            ), patch(
+                'scripts.two_site_agent_host.hook_deadline_seconds', return_value=0.05
+            ):
+                self.assertEqual(0, host_main([phase]))
+            response = json.loads(stdout.getvalue())
+            for key, value in expected.items():
+                self.assertEqual(value, response[key])
+            self.assertNotIn('authority', response)
+            self.assertLess(time.monotonic() - started, 0.2)
+
     def test_installer_hook_contract_matches_repository_shape(self):
         actual = json.loads((Path(__file__).resolve().parents[1] / '.agents/hooks.json').read_text())
         self.assertEqual(actual, expected_hooks())
 
-    def test_post_hook_timeout_exceeds_fixed_long_operation_budgets(self):
+    def test_hook_timeouts_are_derived_from_enforced_end_to_end_deadlines(self):
         hooks = expected_hooks()['two-site-typed-operation-gate']
-        post_timeout = hooks['PostToolUse'][0]['hooks'][0]['timeout']
-        integrate_budget = 2 * FENCE_TIMEOUT + 2 * MUTATION_TIMEOUT + 2 * READ_TIMEOUT + TEST_TIMEOUT
-        self.assertGreaterEqual(post_timeout, integrate_budget + 120)
-        self.assertGreaterEqual(post_timeout, 1300 + 120)
-        # Interrupted Stage-bind recovery may reconcile (120s), prove two
-        # worktrees twice (4x60s), retire (120s), and still needs margin.
-        recovery_budget = 120 + 4 * READ_TIMEOUT + 120
-        self.assertGreaterEqual(hooks['PreToolUse'][0]['hooks'][0]['timeout'], recovery_budget + 120)
-        self.assertGreaterEqual(hooks['Stop'][0]['timeout'], recovery_budget + 120)
+        values = {
+            'pre': hooks['PreToolUse'][0]['hooks'][0]['timeout'],
+            'post': hooks['PostToolUse'][0]['hooks'][0]['timeout'],
+            'stop': hooks['Stop'][0]['timeout'],
+        }
+        for phase, outer_timeout in values.items():
+            self.assertEqual(hook_timeout_seconds(phase), outer_timeout)
+            self.assertEqual(
+                hook_deadline_seconds(phase) + HOOK_TIMEOUT_MARGIN_SECONDS,
+                outer_timeout,
+            )
 
     def test_all_codex_review_bridges_pin_model_and_reasoning(self):
         root = Path(__file__).resolve().parents[1]
@@ -246,6 +321,68 @@ class HostTests(unittest.TestCase):
             self.assertIn('codex_reasoning_effort="high"', source)
             self.assertIn('--model "$codex_model"', source)
             self.assertIn('model_reasoning_effort=', source)
+
+    def closeout_review_composition(self):
+        fixture = GatewayFixture()
+        self.addCleanup(fixture.cleanup)
+        fixture.set_stage_flag('state', 'COMPLETE')
+        prefix = f'docs/refactor/two-server/reviews/{GATEWAY_STAGE}-{GATEWAY_ASSIGNMENT}'
+        snapshot = GitSnapshot(
+            fixture.root,
+            'refactor/two-site-architecture',
+            GATEWAY_INTEGRATION_HEAD,
+            staged_paths=tuple(sorted((
+                'docs/refactor/two-server/CHANGE_LEDGER.md',
+                'docs/refactor/two-server/execution-order.yaml',
+                prefix + '.json',
+                prefix + '.md',
+            ))),
+            staged_patch_sha256=GATEWAY_CLOSEOUT_PATCH,
+        )
+        request = fixture.request(
+            'closeout-review', actor=GATEWAY_COORDINATOR,
+            accepted_head=GATEWAY_INTEGRATION_HEAD,
+            final_receipt_sha256=fixture.digest(fixture.final_path),
+        )
+        plan = plan_operation(request, fixture.context(
+            caller=GATEWAY_COORDINATOR, root_snapshot=snapshot,
+        ))
+        host = ProtectedGatewayHost.__new__(ProtectedGatewayHost)
+        host.root = fixture.root
+        host._binary = Mock(return_value=Path('/usr/bin/true'))
+        return fixture, snapshot, request, plan, host
+
+    def test_closeout_planner_and_supervisor_compose_successfully(self):
+        _, snapshot, request, plan, host = self.closeout_review_composition()
+        with patch('scripts.two_site_agent_host.observe_git', return_value=snapshot), patch(
+            'scripts.two_site_agent_host._run_bounded_process',
+            return_value=subprocess.CompletedProcess(plan.commands[0].argv, 0, b'ok', b''),
+        ) as runner:
+            result = host._review_supervisor(plan.commands[0], request, dict(plan.bindings))
+        self.assertEqual('SUCCESS', result['status'])
+        self.assertRegex(result['receipt_file_sha256'], r'^[0-9a-f]{64}$')
+        runner.assert_called_once()
+
+    def test_closeout_composition_rejects_missing_binding_and_input_tampering(self):
+        fixture, snapshot, request, plan, host = self.closeout_review_composition()
+        missing = dict(plan.bindings)
+        del missing['bundle']
+        with patch('scripts.two_site_agent_host.observe_git', return_value=snapshot), patch(
+            'scripts.two_site_agent_host._run_bounded_process'
+        ) as runner:
+            with self.assertRaisesRegex(TransportError, 'canonical bundle binding'):
+                host._review_supervisor(plan.commands[0], request, missing)
+        runner.assert_not_called()
+
+        def mutate(*_args, **_kwargs):
+            (fixture.final_path.parent / 'HANDOFF.md').write_text('tampered during review\n')
+            return subprocess.CompletedProcess(plan.commands[0].argv, 0, b'ok', b'')
+
+        with patch('scripts.two_site_agent_host.observe_git', return_value=snapshot), patch(
+            'scripts.two_site_agent_host._run_bounded_process', side_effect=mutate,
+        ):
+            with self.assertRaisesRegex(TransportError, 'changed after protected planning'):
+                host._review_supervisor(plan.commands[0], request, dict(plan.bindings))
 
     def test_host_and_executor_integrate_commit_then_advance_composition(self):
         self.bind_mutation_host()

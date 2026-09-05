@@ -207,15 +207,18 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
             order["authorization"]["stage_completion_requires"],
         )
 
-    def test_verifier_has_no_file_write_tool(self):
+    def test_verifier_has_only_protected_request_file_transport(self):
         validator = load_validator()
         metadata = validator.parse_frontmatter(
             ROOT / ".agents" / "agents" / "two-site-stage-verifier" / "agent.md"
         )
-        self.assertTrue(set(metadata["tools"]).isdisjoint(validator.WRITE_TOOLS))
+        tools = set(metadata["tools"])
+        self.assertIn("write_to_file", tools)
+        self.assertTrue(tools.isdisjoint(validator.WRITE_TOOLS - {"write_to_file"}))
         verifier = (
             ROOT / ".agents" / "agents" / "two-site-stage-verifier" / "agent.md"
         ).read_text(encoding="utf-8")
+        self.assertIn("gateway request directory", verifier)
         coordinator = (
             ROOT / ".agents" / "agents" / "two-site-coordinator" / "agent.md"
         ).read_text(encoding="utf-8")

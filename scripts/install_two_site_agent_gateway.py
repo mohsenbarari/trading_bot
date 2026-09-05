@@ -24,6 +24,7 @@ if __package__ in {None, ''}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.two_site_agent_context import PROTECTED_SOURCE
+from scripts.two_site_agent_sandbox import hook_timeout_seconds
 
 INSTALL_ROOT = Path('/usr/local/libexec/two-site-agent-gateway.d')
 LAUNCHER = Path('/usr/local/libexec/two-site-agent-gateway')
@@ -150,10 +151,10 @@ def expected_hooks() -> dict:
     command = '/usr/local/libexec/two-site-agent-gateway'
     return {'two-site-typed-operation-gate': {
         'PreToolUse': [{'matcher': '*', 'hooks': [
-            {'type': 'command', 'command': command + ' pre', 'timeout': 720}]}],
+            {'type': 'command', 'command': command + ' pre', 'timeout': hook_timeout_seconds('pre')}]}],
         'PostToolUse': [{'matcher': '*', 'hooks': [
-            {'type': 'command', 'command': command + ' post', 'timeout': 2400}]}],
-        'Stop': [{'type': 'command', 'command': command + ' stop', 'timeout': 720}],
+            {'type': 'command', 'command': command + ' post', 'timeout': hook_timeout_seconds('post')}]}],
+        'Stop': [{'type': 'command', 'command': command + ' stop', 'timeout': hook_timeout_seconds('stop')}],
     }}
 
 

@@ -1338,7 +1338,8 @@ def _plan_closeout_review(request: Mapping[str, Any], state: _CanonicalState, co
     return OperationPlan(
         **_base_plan(request, state, accepted_head=accepted, final_receipt=receipt.path,
                      final_receipt_file_sha256=str(receipt.file_sha256 or receipt.receipt_sha256),
-                     closeout_patch=patch, **_review_input_bindings(bundle_path)),
+                     closeout_patch=patch, bundle=bundle,
+                     **_review_input_bindings(bundle_path)),
         commands=(CommandPlan(argv, str(state.root), EnvClass.EXTERNAL_CODEX_REVIEW,
                               "request canonical exact-patch closeout pre-action review"),),
         followups=(), checkpoints=(),

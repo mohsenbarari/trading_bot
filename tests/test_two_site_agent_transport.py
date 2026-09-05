@@ -3,10 +3,12 @@ import copy
 import hashlib
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from scripts.two_site_agent_sandbox import operation_deadline
 from scripts.two_site_agent_transport import NativeTransport, TransportError, MODEL, unique_json
 
 ACTOR = '11111111-1111-4111-8111-111111111111'
@@ -151,6 +153,27 @@ class TransportTests(unittest.TestCase):
         with self.assertRaisesRegex(TransportError, 'indeterminate'):
             self.transport.pre(fresh)
         self.assertEqual(1, len(self.calls))
+
+    def test_end_to_end_deadline_records_indeterminate_without_authority(self):
+        def slow(_plan, _request):
+            time.sleep(0.25)
+            return {'status': 'SUCCESS', 'authority_sha256': 'a' * 64}
+
+        self.transport.execute = slow
+        self.transport.pre(self.event)
+        Path(self.event['toolCall']['args']['TargetFile']).write_text(
+            self.event['toolCall']['args']['CodeContent']
+        )
+        with operation_deadline(0.05):
+            self.transport.post(self.event)
+        receipt = json.loads((self.state / (REQUEST + '.receipt.json')).read_text())
+        self.assertEqual('INDETERMINATE', receipt['outcome']['status'])
+        self.assertEqual('EndToEndDeadlineExceeded', receipt['outcome']['error_class'])
+        self.assertNotIn('authority_sha256', receipt['outcome'])
+        self.assertEqual(
+            receipt,
+            json.loads((self.transport.results / (REQUEST + '.json')).read_text()),
+        )
 
     def test_running_without_receipt_freezes_other_operations(self):
         previous = '55555555-5555-4555-8555-555555555555'

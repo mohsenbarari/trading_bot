@@ -71,13 +71,13 @@ AGENTS: dict[str, dict[str, Any]] = {
         "name": "two-site-stage-verifier",
         "mainAgent": False,
         "subagent": True,
-        "required_tools": {"view_file", "grep_search", "run_command"},
+        "required_tools": {"view_file", "grep_search", "run_command", "write_to_file"},
     },
 }
 
 READ_TOOLS = {"view_file", "list_dir", "find_by_name", "grep_search", "run_command", "manage_task", "send_message"}
 ALLOWED_ROLE_TOOLS = {
-    "two-site-stage-verifier": READ_TOOLS,
+    "two-site-stage-verifier": READ_TOOLS | {"write_to_file"},
     "two-site-stage-worker": READ_TOOLS | {"write_to_file", "replace_file_content"},
     "two-site-coordinator": READ_TOOLS | {"write_to_file", "replace_file_content", "invoke_subagent", "manage_subagents"},
 }
@@ -205,8 +205,8 @@ def validate(root: Path = ROOT) -> list[str]:
         missing = expected["required_tools"] - tools
         if missing:
             errors.append(f"{path.relative_to(root)}: missing required tools {sorted(missing)}")
-        if filename == "two-site-stage-verifier/agent.md" and tools & WRITE_TOOLS:
-            errors.append(f"{path.relative_to(root)}: Verifier exposes write tools")
+        if filename == "two-site-stage-verifier/agent.md" and tools & (WRITE_TOOLS - {"write_to_file"}):
+            errors.append(f"{path.relative_to(root)}: Verifier exposes a source-edit tool")
 
     try:
         skill_meta = parse_frontmatter(skill)

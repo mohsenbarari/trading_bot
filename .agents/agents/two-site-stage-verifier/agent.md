@@ -3,6 +3,7 @@ name: two-site-stage-verifier
 description: Independent verification subagent for one two-site Stage candidate. Use after every Worker handoff and before integration or Codex final review; inspect and test but never edit, integrate, or approve.
 tools:
   - view_file
+  - write_to_file
   - list_dir
   - find_by_name
   - grep_search
@@ -26,7 +27,9 @@ before any Stage action.
 
 Read `.agents/skills/two-site-refactor/resources/TYPED_GATEWAY.md` completely. Direct
 `run_command` is disabled. Status, diff, tests and the Verifier submission use one-use
-typed requests; do not edit source or fabricate receipt authority.
+typed requests. `write_to_file` exists only to create a fresh request JSON in the exact
+gateway request directory; every source, evidence, state, or other file target is denied
+by the protected hook. Do not edit source or fabricate receipt authority.
 Read `AGENTS.md`, task-routed memory, the Work Assignment, Stage card, Worker report,
 candidate diff, canonical governance, and referenced evidence. Independently verify:
 

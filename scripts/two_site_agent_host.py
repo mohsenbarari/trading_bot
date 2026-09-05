@@ -30,7 +30,12 @@ from scripts.two_site_agent_executor import (
 from scripts.two_site_agent_gateway import (
     ActorRole, EnvClass, OperationPlan, RESULTING_HEAD, REVIEW_BUNDLE_FILES,
 )
-from scripts.two_site_agent_sandbox import GitAncestryEvidence, _run_bounded_process
+from scripts.two_site_agent_sandbox import (
+    GitAncestryEvidence,
+    _run_bounded_process,
+    hook_deadline_seconds,
+    operation_deadline,
+)
 from scripts.two_site_agent_transport import (
     MAX_EVENT, MAX_REQUEST, MAX_RESULT, NativeTransport, TransportError, digest, read_bounded,
     safe_path, unique_json, write_new,
@@ -193,7 +198,14 @@ class ProtectedGatewayHost:
             self.root / 'scripts/two_site_codex_closeout_review.sh',
         }:
             return {'status': 'BLOCKED', 'reason': 'review bridge is outside the fixed catalog'}
-        bundle = safe_path(self.root / str(bindings.get('bundle', '')))
+        bundle_relative = bindings.get('bundle')
+        expected_bundle = (
+            f".local/two-site-refactor/review-bundles/"
+            f"{bindings.get('stage')}-{request.get('assignment')}"
+        )
+        if not isinstance(bundle_relative, str) or bundle_relative != expected_bundle:
+            raise TransportError('review plan lacks its canonical bundle binding')
+        bundle = safe_path(self.root / bundle_relative)
         def validate_inputs() -> None:
             for name in REVIEW_BUNDLE_FILES:
                 key = 'review_input_' + name.replace('.', '_').lower() + '_sha256'
@@ -963,9 +975,13 @@ class ProtectedGatewayHost:
                     'test_authority_sha256': request['test_receipt_sha256']}
         if plan.operation == 'verifier-submit':
             worker = self._worker_for_candidate(request['candidate_sha'])
+            selectors = self._selectors_for_authority(
+                request['test_receipt_sha256'], 'VERIFIER')
+            if selectors != list(request['test_selectors']):
+                raise TransportError('Verifier submission selectors differ from its passing test authority')
             return {**common, 'record_type': 'VERIFIER', 'decision': request['decision'],
                     'candidate_sha': request['candidate_sha'],
-                    'test_selectors': list(request['test_selectors']),
+                    'test_selectors': selectors,
                     'test_authority_sha256': request['test_receipt_sha256'],
                     'worker_authority_sha256': worker['authority_sha256'],
                     'findings': list(request['findings'])}
@@ -1172,23 +1188,25 @@ def main(argv: list[str] | None = None) -> int:
     values = sys.argv[1:] if argv is None else argv
     if len(values) != 1 or values[0] not in {'pre', 'post', 'stop'}:
         return 64
+    phase = values[0]
     try:
-        raw = sys.stdin.buffer.read(MAX_EVENT + 1)
-        if len(raw) > MAX_EVENT:
-            raise TransportError('native hook event exceeds its budget')
-        event = unique_json(raw)
-        if not isinstance(event, dict):
-            raise TransportError('native hook event must be an object')
-        host = ProtectedGatewayHost(load_manifest())
-        if values[0] == 'stop':
-            response = host.stop(event)
-        else:
-            response = hook_response(host.controller, values[0], event)
+        with operation_deadline(hook_deadline_seconds(phase)):
+            raw = sys.stdin.buffer.read(MAX_EVENT + 1)
+            if len(raw) > MAX_EVENT:
+                raise TransportError('native hook event exceeds its budget')
+            event = unique_json(raw)
+            if not isinstance(event, dict):
+                raise TransportError('native hook event must be an object')
+            host = ProtectedGatewayHost(load_manifest())
+            if phase == 'stop':
+                response = host.stop(event)
+            else:
+                response = hook_response(host.controller, phase, event)
     except Exception as error:
         response = ({'decision': 'deny', 'reason': 'typed gateway unavailable: ' + type(error).__name__}
-                    if values[0] == 'pre' else
+                    if phase == 'pre' else
                     ({'continue': False, 'stopReason': 'typed gateway cannot prove a safe stop'}
-                     if values[0] == 'stop' else {}))
+                     if phase == 'stop' else {}))
     sys.stdout.write(json.dumps(response, sort_keys=True, separators=(',', ':')) + '\n')
     return 0
 

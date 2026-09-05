@@ -13,8 +13,11 @@ import shutil
 import signal
 import subprocess
 import tempfile
+import threading
 import time
 import zlib
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Mapping, Sequence
@@ -36,6 +39,11 @@ MAX_ANCESTRY_COMMITS = 4096
 MAX_ANCESTRY_BYTES = 8_000_000
 READ_CHUNK = 64 * 1024
 PROCESS_CLEANUP_GRACE = 2.0
+DEADLINE_CLEANUP_RESERVE = 2 * PROCESS_CLEANUP_GRACE + 1.0
+PRE_STOP_DEADLINE_SECONDS = 600
+POST_DEADLINE_SECONDS = 2280
+HOOK_TIMEOUT_MARGIN_SECONDS = 120
+RECOVERY_DEADLINE_SECONDS = 600
 MAX_TEST_MEMORY_BYTES = 4 * 1024 * 1024 * 1024
 MAX_TEST_PROCESSES = 128
 MAX_TEST_TMP_BYTES = 512 * 1024 * 1024
@@ -52,6 +60,78 @@ class GitAncestryEvidence:
     head_sha: str
 
 
+_ACTIVE_DEADLINE: ContextVar[float | None] = ContextVar(
+    "two_site_agent_end_to_end_deadline", default=None
+)
+
+
+class EndToEndDeadlineExceeded(SandboxError):
+    """The protected hook exhausted its shared wall-clock budget."""
+
+
+def hook_deadline_seconds(phase: str) -> int:
+    if phase in {"pre", "stop"}:
+        return PRE_STOP_DEADLINE_SECONDS
+    if phase == "post":
+        return POST_DEADLINE_SECONDS
+    raise SandboxError("unknown protected hook phase")
+
+
+def hook_timeout_seconds(phase: str) -> int:
+    """Return the outer Antigravity timeout derived from the enforced deadline."""
+
+    return hook_deadline_seconds(phase) + HOOK_TIMEOUT_MARGIN_SECONDS
+
+
+def _deadline_timeout(requested: float) -> float:
+    """Cap one child process while preserving time to kill all descendants."""
+
+    deadline = _ACTIVE_DEADLINE.get()
+    if deadline is None:
+        return requested
+    remaining = deadline - time.monotonic() - DEADLINE_CLEANUP_RESERVE
+    if remaining <= 0:
+        raise EndToEndDeadlineExceeded("protected operation exhausted its end-to-end deadline")
+    return min(requested, remaining)
+
+
+@contextmanager
+def operation_deadline(seconds: float):
+    """Enforce one shared deadline across preparation, children, and cleanup.
+
+    The protected hook is a dedicated main-thread process. Refusing a pre-existing
+    interval timer keeps ownership unambiguous and fail-closed. Every bounded child
+    also receives the remaining budget minus a cleanup reserve, while SIGALRM covers
+    pure-Python preparation, recovery, observations, and filesystem cleanup.
+    """
+
+    if not isinstance(seconds, (int, float)) or isinstance(seconds, bool) or seconds <= 0:
+        raise SandboxError("end-to-end deadline must be positive")
+    if threading.current_thread() is not threading.main_thread():
+        raise SandboxError("end-to-end deadline requires the protected main thread")
+    previous_deadline = _ACTIVE_DEADLINE.get()
+    if previous_deadline is not None:
+        raise SandboxError("nested end-to-end deadlines are unsupported")
+    previous_timer = signal.getitimer(signal.ITIMER_REAL)
+    if previous_timer != (0.0, 0.0):
+        raise SandboxError("pre-existing interval timer prevents deadline ownership")
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    deadline = time.monotonic() + float(seconds)
+    token = _ACTIVE_DEADLINE.set(deadline)
+
+    def expired(_signum, _frame):
+        raise EndToEndDeadlineExceeded("protected operation exhausted its end-to-end deadline")
+
+    signal.signal(signal.SIGALRM, expired)
+    signal.setitimer(signal.ITIMER_REAL, float(seconds))
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0.0)
+        signal.signal(signal.SIGALRM, previous_handler)
+        _ACTIVE_DEADLINE.reset(token)
+
+
 def _stop_process_group(process: subprocess.Popen[bytes]) -> None:
     """Terminate the isolated command and all descendants in its host process group."""
 
@@ -60,6 +140,14 @@ def _stop_process_group(process: subprocess.Popen[bytes]) -> None:
     try:
         os.killpg(process.pid, signal.SIGTERM)
     except ProcessLookupError:
+        pass
+    # Reap a cooperative leader promptly. Without this, a zombie leader can keep
+    # killpg(..., 0) positive for the whole grace period even when no descendants
+    # survived. If descendants still exist, the group probe below continues to
+    # enforce their bounded cleanup.
+    try:
+        process.wait(timeout=min(0.1, PROCESS_CLEANUP_GRACE))
+    except subprocess.TimeoutExpired:
         pass
     deadline = time.monotonic() + PROCESS_CLEANUP_GRACE
     while time.monotonic() < deadline:
@@ -96,6 +184,7 @@ def _run_bounded_process(
             or memory_limit is not None and memory_limit <= 0
             or process_limit is not None and process_limit <= 0):
         raise SandboxError("bounded process budgets must be positive")
+    timeout = _deadline_timeout(timeout)
     process = subprocess.Popen(
         list(argv),
         cwd=str(cwd) if cwd is not None else None,

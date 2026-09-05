@@ -693,6 +693,10 @@ class GatewayPlanningTests(unittest.TestCase):
         plan = plan_operation(request, self.fx.context(caller=COORDINATOR,
                                                        root_snapshot=snapshot))
         self.assertEqual(EnvClass.EXTERNAL_CODEX_REVIEW, plan.commands[0].env_class)
+        self.assertEqual(
+            f".local/two-site-refactor/review-bundles/{STAGE}-{ASSIGNMENT}",
+            dict(plan.bindings)["bundle"],
+        )
 
     def test_review_rejects_missing_authorization_wrong_bundle_and_stale_head(self) -> None:
         base = self.fx.request(

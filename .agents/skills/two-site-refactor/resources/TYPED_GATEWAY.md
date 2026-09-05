@@ -35,6 +35,10 @@ cache at:
 <integration-root>/.local/two-site-refactor/gateway/results/<UUID>.json
 ```
 
+The Verifier receives native `write_to_file` only for this exact one-use request lane.
+The protected hook rejects every Verifier attempt to write source, evidence, state, or
+any other path. It never receives `replace_file_content` or arbitrary command authority.
+
 `actor_id` must be the actual native conversation UUID. The Coordinator reads its own
 registered execution UUID and sends each child UUID returned by native delegation
 directly to that child; the project owner is never involved in this identity handoff.
@@ -104,6 +108,13 @@ request and plan. Recovery may only roll back while the old fence is still ACTIV
 roll forward an exact `RECONCILING/STAGE` or already-bound new fence. After a successful
 bind, the prior COMPLETE Stage worktree is removed immediately only after its Assignment,
 registry path, branch, HEAD, Git common directory and clean state all match.
+
+Every hook invocation has one enforced wall-clock deadline covering host preparation,
+Git observations, test snapshot creation, command/review execution, recovery and
+descendant cleanup. Pre/Stop use 600 seconds and Post uses 2280 seconds; the generated
+Antigravity hook timeouts add a fixed 120-second cleanup/output margin. Individual child
+timeouts are capped by the remaining shared budget and reserve time to terminate their
+complete process group. Deadline exhaustion never becomes success or approval.
 
 ## Causal sequence
 
