@@ -23,7 +23,7 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-MODEL = "gemini-3.8-flash-high"
+MODEL = "gemini-3.8-flash-medium"
 EFFORT = "medium"
 MAX_CONTEXT = 160_000
 MAX_OUTPUT = 2_000_000

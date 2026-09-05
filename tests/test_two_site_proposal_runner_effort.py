@@ -23,7 +23,8 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
     def test_effort_constant_value(self) -> None:
         """Prove that EFFORT is configured to 'medium' and MODEL is preserved."""
         self.assertEqual(runner.EFFORT, "medium")
-        self.assertEqual(runner.MODEL, "gemini-3.8-flash-high")
+        self.assertEqual(runner.MODEL, "gemini-3.8-flash-medium")
+        self.assertNotEqual(runner.MODEL, "gemini-3.8-flash-high")
         self.assertIsInstance(runner.EFFORT, str)
 
     def test_runner_source_does_not_contain_hardcoded_high_effort(self) -> None:
