@@ -549,6 +549,62 @@ class TelegramDeliveryCutoverContractTests(unittest.TestCase):
                 include_iran=True,
             )
 
+    def test_prebuilt_redeploy_binds_complete_split_runtime_contract(self):
+        release_sha = "a" * 40
+        env = staging_cutover._prebuilt_deploy_environment(release_sha)
+
+        self.assertEqual(env["STAGING_TELEGRAM_BOT_SPLIT_ENABLED"], "1")
+        self.assertEqual(env["STAGING_TELEGRAM_BOT_RUNTIME_ROLE"], "primary")
+        self.assertEqual(
+            env["STAGING_TELEGRAM_SPLIT_CONFIRM"],
+            "start-telegram-split-runtime",
+        )
+
+    def test_runtime_release_parity_counts_split_executor_surface(self):
+        head = "a" * 40
+        tree = "b" * 40
+        source = "c" * 64
+        frontend = "d" * 64
+        dependency = "e" * 64
+        image = "f" * 64
+
+        def evidence(role: str, surface_count: int) -> dict[str, object]:
+            content_binding = hashlib.sha256(
+                "\0".join(
+                    (head, tree, source, frontend, dependency, f"sha256:{image}")
+                ).encode("utf-8")
+            ).hexdigest()
+            return {
+                "role": role,
+                "git_head": head,
+                "git_tree": tree,
+                "runtime_source_sha256": source,
+                "runtime_source_file_count": 10,
+                "frontend_sha256": frontend,
+                "frontend_file_count": 10,
+                "dependency_sha256": dependency,
+                "image_id_sha256": image,
+                "surface_count": surface_count,
+                "content_binding_sha256": content_binding,
+                "release_sha_env_only": False,
+                "secret_values_disclosed": False,
+            }
+
+        report = staging_cutover._assert_release_parity(
+            evidence(
+                "foreign",
+                len(staging_cutover.FOREIGN_REDEPLOY_RUNTIME_CONTAINERS),
+            ),
+            evidence(
+                "iran",
+                len(staging_cutover.IRAN_REDEPLOY_RUNTIME_CONTAINERS),
+            ),
+            expected_head=head,
+            expected_tree=tree,
+            expected_source_digest=source,
+        )
+        self.assertEqual(report["status"], "verified")
+
     def test_publisher_runtime_evidence_binds_five_real_distinct_lanes(self):
         source = self._publisher_values()
         evidence = publisher_runtime_evidence_from_observation(
@@ -1211,12 +1267,13 @@ class TelegramDeliveryCutoverContractTests(unittest.TestCase):
                         "environment": "staging",
                         "command": "redeploy",
                         "status": "failed_forward_reconcile_required",
-                        "error_code": "iran_prebuilt_producer_start_failed",
+                        "error_code": "runtime_release_parity_invalid",
                         "git": {"head": prior_head},
                         "mutation_started": True,
                         "runtime_mutation_started": True,
                         "recovery": recovery_contract,
                         "steps": [
+                            {"name": "start_foreign_prebuilt_bot"},
                             {
                                 "name": "failure_containment",
                                 "events": [

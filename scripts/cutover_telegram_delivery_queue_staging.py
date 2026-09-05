@@ -140,19 +140,23 @@ REDEPLOY_LOCK_NAME = "cutover-redeploy.lock"
 REDEPLOY_STATE_DIR = Path("/var/lib/trading-bot/staging-queue-cutover")
 STAGING_IMAGE_REPOSITORY = "trading_bot_staging_app"
 IRAN_IMAGE_TRANSFER_ROOT = "/root/.trading-bot-staging-image-transfer"
-REDEPLOY_RUNTIME_CONTAINERS = (
+FOREIGN_REDEPLOY_RUNTIME_CONTAINERS = (
     FOREIGN_BOT_CONTAINER,
     FOREIGN_BOT_EXECUTOR_CONTAINER,
     FOREIGN_APP_CONTAINER,
-    IRAN_APP_CONTAINER,
     FOREIGN_SYNC_CONTAINER,
+)
+IRAN_REDEPLOY_RUNTIME_CONTAINERS = (
+    IRAN_APP_CONTAINER,
     IRAN_SYNC_CONTAINER,
+)
+REDEPLOY_RUNTIME_CONTAINERS = (
+    *FOREIGN_REDEPLOY_RUNTIME_CONTAINERS,
+    *IRAN_REDEPLOY_RUNTIME_CONTAINERS,
 )
 SAFE_REDEPLOY_ORCHESTRATION_SUCCESSOR_PATHS = frozenset(
     {
         "scripts/cutover_telegram_delivery_queue_staging.py",
-        "scripts/deploy_staging.sh",
-        "tests/test_deploy_surface_smoke.py",
         "tests/test_telegram_delivery_cutover_contract.py",
     }
 )
@@ -2378,7 +2382,10 @@ def _assert_release_parity(
             character in "0123456789abcdef" for character in rendered
         )
 
-    for evidence, role, surface_count in ((foreign, "foreign", 3), (iran, "iran", 2)):
+    for evidence, role, surface_count in (
+        (foreign, "foreign", len(FOREIGN_REDEPLOY_RUNTIME_CONTAINERS)),
+        (iran, "iran", len(IRAN_REDEPLOY_RUNTIME_CONTAINERS)),
+    ):
         expected_content_binding = hashlib.sha256(
             "\0".join(
                 (
@@ -2699,7 +2706,11 @@ def _validated_redeploy_orchestration_successor(
         or failure.get("environment") != "staging"
         or failure.get("command") != "redeploy"
         or failure.get("status") != "failed_forward_reconcile_required"
-        or failure.get("error_code") != "iran_prebuilt_producer_start_failed"
+        or failure.get("error_code")
+        not in {
+            "iran_prebuilt_producer_start_failed",
+            "runtime_release_parity_invalid",
+        }
         or failure.get("mutation_started") is not True
         or failure.get("runtime_mutation_started") is not True
         or not isinstance(failure_git, Mapping)
@@ -2713,6 +2724,12 @@ def _validated_redeploy_orchestration_successor(
         return None
     steps = failure.get("steps")
     if not isinstance(steps, list):
+        return None
+    if failure.get("error_code") == "runtime_release_parity_invalid" and not any(
+        isinstance(step, Mapping)
+        and step.get("name") == "start_foreign_prebuilt_bot"
+        for step in steps
+    ):
         return None
     containment = next(
         (
@@ -3137,6 +3154,13 @@ def _prebuilt_deploy_environment(release_sha: str) -> dict[str, str]:
                 _staging_frontend_artifact_dir(release_sha).relative_to(REPO_ROOT)
             ),
             "STAGING_SKIP_FRONTEND_BUILD": "1",
+            # Queue-v1 staging runs split: primary owns central polling and
+            # bot_executor is the sole queue owner. deploy_staging.sh does not
+            # source control-plane shell state from .env.staging, so bind the
+            # complete split-cutover contract for every prebuilt start.
+            "STAGING_TELEGRAM_BOT_SPLIT_ENABLED": "1",
+            "STAGING_TELEGRAM_BOT_RUNTIME_ROLE": "primary",
+            "STAGING_TELEGRAM_SPLIT_CONFIRM": "start-telegram-split-runtime",
         }
     )
     return env
@@ -4113,12 +4137,7 @@ def _redeploy_queue_v1_locked(
 
         foreign_release = _runtime_release_evidence(
             "foreign",
-            (
-                FOREIGN_BOT_CONTAINER,
-                FOREIGN_BOT_EXECUTOR_CONTAINER,
-                FOREIGN_APP_CONTAINER,
-                FOREIGN_SYNC_CONTAINER,
-            ),
+            FOREIGN_REDEPLOY_RUNTIME_CONTAINERS,
             expected_head=release_sha,
             expected_tree=release_tree,
             expected_source_digest=source_digest,
@@ -4126,7 +4145,7 @@ def _redeploy_queue_v1_locked(
         )
         iran_release = _runtime_release_evidence(
             "iran",
-            (IRAN_APP_CONTAINER, IRAN_SYNC_CONTAINER),
+            IRAN_REDEPLOY_RUNTIME_CONTAINERS,
             expected_head=release_sha,
             expected_tree=release_tree,
             expected_source_digest=source_digest,
