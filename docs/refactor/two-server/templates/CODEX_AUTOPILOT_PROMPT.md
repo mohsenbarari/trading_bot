@@ -33,14 +33,24 @@ Mandatory workflow:
 3. After one compact Git, MemoryCustodian and active-stage orientation, select one
    smallest dependency-ready internal unit and create one bounded ignored task JSON
    containing only relevant sources, numbered requirements, allowed files and exact test
-   selectors. During orientation and unit selection, never search or enumerate
-   .local/two-site-refactor/proposals, .local/two-site-refactor/autopilot/runs, or
-   .local/two-site-refactor/pipeline. Read only exact handoff, worktree registry,
-   active assignment/stage and routed tracked files. Keep Gemini Worker as sole
-   source/test/project-document author.
+   selectors. After Coordinator creates or resizes the ignored Task JSON, require the
+   exact local command `python3 scripts/two_site_proposal_runner.py check --task <path>`
+   and require an actual TASK_READY result before any proposal pipeline invocation.
+   If local check fails, Coordinator must revise/narrow the ignored Task and rerun only
+   this no-provider check until ready; it must not estimate readiness from sums of
+   source file sizes. These preflight revisions are not provider retries and do not
+   consume the one allowed pipeline invocation. During orientation and unit selection,
+   never search or enumerate .local/two-site-refactor/proposals,
+   .local/two-site-refactor/autopilot/runs, or .local/two-site-refactor/pipeline. Read
+   only exact handoff, worktree registry, active assignment/stage and routed tracked
+   files. Keep Gemini Worker as sole source/test/project-document author.
    Gemini Worker is the sole author of implementation, tests and
-   project-documentation changes. It must return complete final file contents, not a
-   plan; it has no shell, Git or direct source-write authority.
+   project-documentation changes. Gemini Worker authors complete resulting
+   source/test/project-document bytes and may use compact exact-replacement raw
+   transport; the controller materializes complete bytes before Reviewer/Codex.
+   Task requirements must not ask Reviewer to judge hidden raw transport shape.
+   It must return complete final file contents, not a plan; it has no shell, Git or
+   direct source-write authority.
 4. For the normal Worker/Reviewer path require exactly one invocation of:
    python3 scripts/two_site_proposal_pipeline.py --task <path> --run-prefix <unique> --timeout 900.
    The first and only normal invocation of python3 scripts/two_site_proposal_pipeline.py --task <path> --run-prefix <unique> --timeout 900
