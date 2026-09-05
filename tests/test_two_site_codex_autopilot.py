@@ -274,6 +274,20 @@ class AutopilotContracts(unittest.TestCase):
         self.assertTrue((runs / "cycle-0000-20260905T120000Z-10").exists())
         self.assertEqual(len(list(runs.iterdir())), 21)
 
+    def test_run_loop_publishes_running_before_cycle_execution(self):
+        state_root = self.root / ".local/two-site-refactor/autopilot"
+        with patch.object(autopilot, "git", side_effect=["a" * 40]), \
+                patch.object(autopilot, "ref_snapshot", return_value={}), \
+                patch.object(autopilot, "run_cycle", side_effect=KeyboardInterrupt), \
+                patch.object(autopilot, "write_supervisor_state") as publish:
+            with self.assertRaises(KeyboardInterrupt):
+                autopilot.run_loop(self.root, self.root / "codex", 1, 300, True)
+        publish.assert_called_once_with(
+            state_root, "RUNNING", cycle=1, head="a" * 40,
+            summary="Executing Gemini Worker -> Gemini Reviewer -> Codex final gate.",
+            blockers=[],
+        )
+
     def test_repository_gate_requires_tracked_controls_clean_and_correct_branch(self):
         for relative in autopilot.CONTROL_PATHS:
             path = self.root / relative

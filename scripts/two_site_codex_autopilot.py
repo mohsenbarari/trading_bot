@@ -584,6 +584,11 @@ def run_loop(root: Path, codex: Path, max_cycles: int, timeout: int, once: bool)
                 return 0
             cycle_start_head = git(root, "rev-parse", "HEAD")
             cycle_start_refs = ref_snapshot(root)
+            write_supervisor_state(
+                state_root, "RUNNING", cycle=cycle, head=cycle_start_head,
+                summary="Executing Gemini Worker -> Gemini Reviewer -> Codex final gate.",
+                blockers=[],
+            )
             try:
                 run_dir, result = run_cycle(root, codex, state_root, cycle, timeout)
                 retryable_failures = 0

@@ -216,7 +216,7 @@ APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
   python3 -m unittest tests.test_two_site_codex_autopilot -v
 ```
 
-مجموعهٔ Runner، Supervisor، adapter قدیمی و session-binding پس از این تغییر ۹۳ تست
+مجموعهٔ Runner، Supervisor، adapter قدیمی و session-binding پس از این تغییر ۹۴ تست
 آفلاین سبز دارد؛ این عدد شاهد قرارداد کد است، نه smoke واقعی Gemini Reviewer.
 
 شاهد جداگانهٔ زنده، Worker واقعی، Gemini Reviewer تازه، Codex final gate، تغییر
