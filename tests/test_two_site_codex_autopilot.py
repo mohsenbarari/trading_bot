@@ -112,6 +112,22 @@ class AutopilotContracts(unittest.TestCase):
         self.assertEqual(identity["model"], "gpt-6-astra")
         self.assertEqual(identity["reasoning"], "high")
 
+    def test_supervisor_lock_is_exclusive_and_rejects_hardlinks(self):
+        lock_path = self.root / "autopilot.lock"
+        with autopilot.exclusive_supervisor_lock(lock_path):
+            with self.assertRaisesRegex(autopilot.AutopilotError, "already owns"):
+                with autopilot.exclusive_supervisor_lock(lock_path):
+                    self.fail("a second supervisor must never acquire the same lock")
+
+        hardlinked_lock = self.root / "hardlinked.lock"
+        with tempfile.TemporaryDirectory() as outside_directory:
+            outside = Path(outside_directory) / "outside.lock"
+            outside.write_text("")
+            os.link(outside, hardlinked_lock)
+            with self.assertRaisesRegex(autopilot.AutopilotError, "trusted regular"):
+                with autopilot.exclusive_supervisor_lock(hardlinked_lock):
+                    self.fail("a hardlinked lock must never be trusted")
+
     def test_retention_removes_only_old_successes_and_preserves_blockers(self):
         state_root = self.root / "autopilot"
         runs = state_root / "runs"
@@ -173,6 +189,29 @@ class AutopilotContracts(unittest.TestCase):
         subprocess.check_call(["git", "commit", "-qm", "bad schema"], cwd=self.root)
         with self.assertRaisesRegex(autopilot.AutopilotError, "schema"):
             autopilot.validate_repository(self.root)
+
+    def test_repository_gate_rejects_hardlinked_control_input(self):
+        with tempfile.TemporaryDirectory() as outside_directory:
+            outside = Path(outside_directory) / "external-control"
+            outside.write_text("control\n")
+            for relative in autopilot.CONTROL_PATHS:
+                path = self.root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if relative == autopilot.PROMPT_REL:
+                    os.link(outside, path)
+                else:
+                    path.write_text(
+                        (autopilot.ROOT / autopilot.SCHEMA_REL).read_text()
+                        if relative == autopilot.SCHEMA_REL else "control\n"
+                    )
+            subprocess.check_call(["git", "init", "-q"], cwd=self.root)
+            subprocess.check_call(["git", "config", "user.email", "test@example.invalid"], cwd=self.root)
+            subprocess.check_call(["git", "config", "user.name", "Test"], cwd=self.root)
+            subprocess.check_call(["git", "add", "."], cwd=self.root)
+            subprocess.check_call(["git", "commit", "-qm", "hardlinked control"], cwd=self.root)
+            subprocess.check_call(["git", "branch", "-M", autopilot.BRANCH], cwd=self.root)
+            with self.assertRaisesRegex(autopilot.AutopilotError, "unsafe"):
+                autopilot.validate_repository(self.root)
 
 
 if __name__ == "__main__":

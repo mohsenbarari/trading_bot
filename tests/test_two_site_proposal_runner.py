@@ -2,6 +2,7 @@
 from copy import deepcopy
 import inspect
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -136,6 +137,38 @@ class ProposalContracts(unittest.TestCase):
         with self.assertRaises(runner.ProposalError):
             runner.load_task(self.root, self.task_path)
 
+    def test_all_model_inputs_are_bounded_and_project_local(self):
+        self.task_path.write_bytes(b"x" * (runner.MAX_CONTEXT + 1))
+        with self.assertRaisesRegex(runner.ProposalError, "safe context budget"):
+            runner.load_task(self.root, self.task_path)
+        self.save_task()
+
+        with tempfile.TemporaryDirectory() as outside_directory:
+            outside = Path(outside_directory) / "task.json"
+            outside.write_text(json.dumps(self.task))
+            with self.assertRaisesRegex(runner.ProposalError, "outside the project"):
+                runner.load_task(self.root, outside)
+
+        feedback = self.root / "feedback.json"
+        feedback.write_bytes(b"x" * (runner.MAX_CONTEXT + 1))
+        with patch.object(runner, "git", return_value="head"), \
+                patch.object(runner.subprocess, "Popen") as popen:
+            with self.assertRaisesRegex(runner.ProposalError, "safe context budget"):
+                runner.run(self.root, self.task_path, "worker", "bounded-input", 30,
+                           feedback=feedback, cli=Path(__file__).resolve())
+            popen.assert_not_called()
+        self.assertFalse((self.root / ".local").exists())
+        self.assertNotIn("read_bytes", inspect.getsource(runner.load_task))
+
+    def test_hardlink_to_file_outside_project_is_rejected(self):
+        with tempfile.TemporaryDirectory() as outside_directory:
+            outside = Path(outside_directory) / "outside.py"
+            outside.write_text("EXTERNAL = True\n")
+            (self.root / "source.py").unlink()
+            os.link(outside, self.root / "source.py")
+            with self.assertRaisesRegex(runner.ProposalError, "hardlinked"):
+                runner.load_task(self.root, self.task_path)
+
     def test_stream_success(self):
         result, envelope = self.parse(self.events())
         self.assertEqual(result, self.result())
@@ -194,7 +227,8 @@ class ProposalContracts(unittest.TestCase):
 
     def invoke_fake_cli(self, *, drift=None, timeout=False, denied=False,
                         result=None, events=None, raw_output=None,
-                        git_side_effect=None, run_id="run-001"):
+                        git_side_effect=None, run_id="run-001",
+                        cli_identities=None):
         process = MagicMock()
         process.__enter__.return_value = process
         process.returncode = 0
@@ -223,8 +257,11 @@ class ProposalContracts(unittest.TestCase):
         identity = {"path": str(Path(__file__).resolve()), "version": runner.EXPECTED_CLI_VERSION,
                     "sha256": runner.EXPECTED_CLI_SHA256}
         git_effects = git_side_effect if git_side_effect is not None else ["head", "", "head", ""]
+        identity_patch = (patch.object(runner, "cli_identity", return_value=identity)
+                          if cli_identities is None else
+                          patch.object(runner, "cli_identity", side_effect=cli_identities))
         with patch.object(runner, "git", side_effect=git_effects), \
-                patch.object(runner, "cli_identity", return_value=identity), \
+                identity_patch, \
                 patch.object(runner, "capture_bounded_process", side_effect=capture), \
                 patch.object(runner.subprocess, "Popen", return_value=process) as popen, \
                 patch.object(runner.os, "killpg") as kill:
@@ -293,6 +330,17 @@ class ProposalContracts(unittest.TestCase):
         self.assertIn("ProposalError: Git state changed during generation", status["error"])
         self.assertFalse((out / "result.json").exists())
         self.assertFalse((self.root / "test_new.py").exists())
+
+    def test_cli_identity_change_during_generation_is_blocked(self):
+        initial = {"path": "/reviewed/agy", "version": runner.EXPECTED_CLI_VERSION,
+                   "sha256": runner.EXPECTED_CLI_SHA256}
+        changed = dict(initial, version="unexpected-version")
+        with self.assertRaisesRegex(runner.ProposalError, "identity changed"):
+            self.invoke_fake_cli(cli_identities=[initial, changed])
+        out = self.root / ".local/two-site-refactor/proposals/run-001"
+        status = json.loads((out / "status.json").read_text())
+        self.assertEqual(status["state"], "BLOCKED")
+        self.assertIn("identity changed", status["error"])
 
     def test_malformed_ndjson_cli_output_records_blocked(self):
         malformed = (
@@ -430,6 +478,20 @@ class ProposalContracts(unittest.TestCase):
                 patch.object(runner, "EXPECTED_CLI_VERSION", "1.1.26"):
             with self.assertRaisesRegex(runner.ProposalError, "version"):
                 runner.cli_identity(cli)
+
+    def test_concurrent_runner_is_rejected_before_provider_start(self):
+        identity = {"path": str(Path(__file__).resolve()),
+                    "version": runner.EXPECTED_CLI_VERSION,
+                    "sha256": runner.EXPECTED_CLI_SHA256}
+        descriptor, _local = runner.acquire_proposal_lock(self.root)
+        self.addCleanup(runner.release_proposal_lock, descriptor)
+        with patch.object(runner, "git", side_effect=["head", ""]), \
+                patch.object(runner, "cli_identity", return_value=identity), \
+                patch.object(runner.subprocess, "Popen") as popen:
+            with self.assertRaisesRegex(runner.ProposalError, "already active"):
+                runner.run(self.root, self.task_path, "worker", "parallel-run", 30,
+                           cli=Path(__file__).resolve())
+            popen.assert_not_called()
 
     def test_bounded_capture_streams_without_communicate(self):
         stdout_path = self.root / "bounded.stdout"

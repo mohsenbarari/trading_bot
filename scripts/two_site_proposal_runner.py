@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import fcntl
 import hashlib
 import json
 import os
@@ -16,6 +17,7 @@ from pathlib import Path, PurePosixPath
 import re
 import selectors
 import signal
+import stat
 import subprocess
 import tempfile
 import time
@@ -54,6 +56,105 @@ def file_sha256(path: Path) -> str:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def file_fingerprint(value: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns,
+        value.st_ctime_ns, value.st_nlink,
+    )
+
+
+def bounded_file_bytes(root: Path, path: Path, limit: int, label: str) -> bytes:
+    """Read one project file without following links or allocating past limit + 1."""
+    if limit < 0:
+        raise ProposalError("file byte limit cannot be negative")
+    root = root.resolve(strict=True)
+    candidate = path if path.is_absolute() else root / path
+    candidate = Path(os.path.abspath(candidate))
+    if not candidate.is_relative_to(root):
+        raise ProposalError(f"{label} is outside the project root")
+    try:
+        resolved = candidate.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise ProposalError(f"cannot safely resolve {label}") from exc
+    if resolved != candidate:
+        raise ProposalError(f"{label} is a symlink or path escape")
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(candidate, flags)
+    except OSError as exc:
+        raise ProposalError(f"cannot safely open {label}") from exc
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise ProposalError(f"{label} is not a regular file")
+        # A hardlink can make bytes outside the project reachable through an
+        # apparently safe in-project pathname. Proposal inputs must be unique.
+        if before.st_nlink != 1:
+            raise ProposalError(f"{label} is hardlinked and cannot be trusted")
+        if before.st_size > limit:
+            raise ProposalError(f"{label} exceeds the safe context budget")
+        with os.fdopen(descriptor, "rb", closefd=False) as source:
+            data = source.read(limit + 1)
+        if len(data) > limit:
+            raise ProposalError(f"{label} exceeds the safe context budget")
+        after = os.fstat(descriptor)
+        try:
+            named = os.stat(candidate, follow_symlinks=False)
+            final_resolved = candidate.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise ProposalError(f"{label} changed while it was being read") from exc
+        if (file_fingerprint(before) != file_fingerprint(after)
+                or file_fingerprint(after) != file_fingerprint(named)
+                or final_resolved != candidate):
+            raise ProposalError(f"{label} changed while it was being read")
+        return data
+    finally:
+        os.close(descriptor)
+
+
+def bounded_file_text(root: Path, path: Path, limit: int, label: str) -> str:
+    return bounded_file_bytes(root, path, limit, label).decode("utf-8")
+
+
+def acquire_proposal_lock(root: Path) -> tuple[int, Path]:
+    """Acquire the one nonblocking proposal-generation lock for this worktree."""
+    local = root / ".local/two-site-refactor/proposals"
+    if local.resolve() != local:
+        raise ProposalError("run storage cannot be a symlink")
+    local.mkdir(parents=True, exist_ok=True)
+    if local.resolve(strict=True) != local:
+        raise ProposalError("run storage cannot be a symlink")
+    lock_path = local / ".runner.lock"
+    flags = (os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0)
+             | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        descriptor = os.open(lock_path, flags, 0o600)
+    except OSError as exc:
+        raise ProposalError("cannot safely open proposal runner lock") from exc
+    try:
+        lock_stat = os.fstat(descriptor)
+        if (not stat.S_ISREG(lock_stat.st_mode) or lock_stat.st_nlink != 1
+                or lock_stat.st_uid != os.geteuid()):
+            raise ProposalError("proposal runner lock is not a trusted regular file")
+        os.fchmod(descriptor, 0o600)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ProposalError("another proposal runner is already active") from exc
+        return descriptor, local
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def release_proposal_lock(descriptor: int) -> None:
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+    finally:
+        os.close(descriptor)
 
 
 def terminate_process(process: subprocess.Popen) -> None:
@@ -184,8 +285,12 @@ def cli_identity(cli: Path) -> dict[str, str]:
                 10,
                 max_output=4096,
             )
-        version_text = (temporary_path / "stdout").read_text().strip()
-        stderr_text = (temporary_path / "stderr").read_text().strip()
+        version_text = bounded_file_text(
+            temporary_path, temporary_path / "stdout", 4096, "CLI version output"
+        ).strip()
+        stderr_text = bounded_file_text(
+            temporary_path, temporary_path / "stderr", 4096, "CLI version error output"
+        ).strip()
         if process.returncode or stderr_text or version_text != EXPECTED_CLI_VERSION:
             raise ProposalError("CLI version is not the reviewed pin")
     if file_sha256(cli) != digest:
@@ -227,9 +332,7 @@ def git(root: Path, *args: str) -> str:
 
 
 def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
-    raw = task_path.read_bytes()
-    if len(raw) > MAX_CONTEXT:
-        raise ProposalError("task exceeds context budget")
+    raw = bounded_file_bytes(root, task_path, MAX_CONTEXT, "task")
     task = unique_json(raw.decode())
     required = {"task_id", "goal", "context_files", "allowed_files", "requirements", "test_selectors"}
     if not isinstance(task, dict) or set(task) != required:
@@ -253,9 +356,7 @@ def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
                 raise ProposalError("required context file is missing: " + name)
             sources[name] = {"sha256": None, "content": None}
             continue
-        if not target.is_file() or target.stat().st_size > MAX_CONTEXT:
-            raise ProposalError("context file is not a bounded regular file")
-        content = target.read_bytes()
+        content = bounded_file_bytes(root, target, MAX_CONTEXT, "context file " + name)
         if SECRET.search(content.decode()):
             raise ProposalError("credential-like content excluded from model input")
         sources[name] = {"sha256": sha(content), "content": content.decode()}
@@ -389,24 +490,27 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
     material = {"task": task, "source_head": head, "sources": sources}
     for key, path in (("feedback", feedback), ("proposal", proposal)):
         if path is not None:
-            content = path.read_bytes()
-            if len(content) > MAX_CONTEXT or SECRET.search(content.decode()):
-                raise ProposalError("feedback/proposal exceeds the safe context budget")
-            material[key] = content.decode()
+            content = bounded_file_text(root, path, MAX_CONTEXT, key)
+            if SECRET.search(content):
+                raise ProposalError("credential-like content excluded from model input")
+            material[key] = content
     if role == "verifier" and proposal is None:
         raise ProposalError("verifier needs the exact proposal")
     if role == "verifier":
         baseline_path = proposal.with_name("task.json")
-        if baseline_path.stat().st_size > 2 * MAX_CONTEXT:
-            raise ProposalError("worker snapshot exceeds budget")
-        baseline = unique_json(baseline_path.read_text())
+        baseline = unique_json(bounded_file_text(
+            root, baseline_path, 2 * MAX_CONTEXT, "worker snapshot"
+        ))
         if (not isinstance(baseline, dict) or baseline.get("task") != task
                 or baseline.get("source_head") != head or baseline.get("sources") != sources):
             raise ProposalError("verify before applying: worker baseline differs from current source/task")
         candidate = validate_result(unique_json(material["proposal"]), task, sources, "worker")
         if candidate["status"] != "PROPOSAL_READY":
             raise ProposalError("verifier requires a complete worker proposal")
-    prompt = (ROOT / "docs/refactor/two-server/templates/GEMINI_TASK_PROMPT.md").read_text()
+    prompt = bounded_file_text(
+        ROOT, ROOT / "docs/refactor/two-server/templates/GEMINI_TASK_PROMPT.md",
+        MAX_CONTEXT, "prompt template",
+    )
     prompt += "\nROLE: " + role + "\nCONTEXT_JSON:\n" + json.dumps(material, ensure_ascii=False)
     if len(prompt.encode()) > 2 * MAX_CONTEXT:
         raise ProposalError("split task or feedback into a smaller coherent unit")
@@ -420,67 +524,69 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             common_dir = Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"))
             cli = common_dir.parent / ".local/tools/agy"
     cli = cli.resolve(strict=True)
-    initial_cli_identity = cli_identity(cli)
-    local = root / ".local/two-site-refactor/proposals"
-    if local.resolve() != local:
-        raise ProposalError("run storage cannot be a symlink")
-    local.mkdir(parents=True, exist_ok=True)
-    out = local / run_id
-    out.mkdir(mode=0o700)  # Evidence is never overwritten by a retry.
-    workspace = out / "workspace"
-    (workspace / ".agents").mkdir(parents=True)
-    write_json(workspace / ".agents/hooks.json", DENY_HOOK)
-    write_json(out / "task.json", material)
-    (out / "prompt.txt").write_text(prompt)
-    meta = {"run_id": run_id, "task_id": task["task_id"], "role": role,
-            "head": head, "model": MODEL, "state": "RUNNING", "started_at": time.time(),
-            "retain_until": time.time() + 7 * 86400,
-            "authority": "PROPOSAL_ONLY_NOT_ACCEPTANCE",
-            "cli": initial_cli_identity}
-    write_json(out / "status.json", meta)
-    command = [str(cli), "--mode", "plan", "--sandbox", "--model", MODEL,
-               "--effort", "high", "--input-format", "stream-json",
-               "--output-format", "stream-json", "--print-timeout", f"{timeout}s",
-               "--json-schema", json.dumps(schema(role))]
+    lock_descriptor, local = acquire_proposal_lock(root)
     try:
-        # Auth belongs to the CLI. No credential files are read or copied here.
-        with subprocess.Popen(command, cwd=workspace, stdin=subprocess.PIPE,
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              start_new_session=True) as process:
-            meta["cli_pid"] = process.pid
-            write_json(out / "status.json", meta)
-            capture_bounded_process(
-                process,
-                (json.dumps({"event": "user", "message": {"content": prompt}}) + "\n").encode(),
-                out / "stream.jsonl",
-                out / "stderr.txt",
-                timeout + 15,
-            )
-        if process.returncode:
-            raise ProposalError(f"CLI failed with exit {process.returncode}; inspect run evidence")
-        final_cli_identity = cli_identity(cli)
-        if final_cli_identity != initial_cli_identity:
-            raise ProposalError("CLI identity changed during generation")
-        raw = (out / "stream.jsonl").read_bytes()
-        result, envelope = parse_stream(raw.decode(), task, sources, role)
-        # A late parent/source change invalidates the entire candidate.
-        if head != git(root, "rev-parse", "HEAD") or initial_status != git(root, "status", "--porcelain=v1", "--untracked-files=all"):
-            raise ProposalError("Git state changed during generation")
-        current_task, current_sources = load_task(root, task_path)
-        if current_task != task or current_sources != sources:
-            raise ProposalError("task or source bytes changed during generation")
-        write_json(out / "result.json", result)
-        (out / "proposal.patch").write_text(proposal_diff(result["changes"], sources))
-        meta.update(state=result["status"], conversation_id=envelope["conversation_id"],
-                    duration_seconds=round(time.time() - meta["started_at"], 3),
-                    usage=envelope.get("usage", {}), result_sha256=sha((out / "result.json").read_bytes()))
-    except BaseException as exc:
-        meta.update(state="BLOCKED", error=type(exc).__name__ + ": " + str(exc),
-                    duration_seconds=round(time.time() - meta["started_at"], 3))
+        # The lock covers every CLI invocation, including identity probes.
+        initial_cli_identity = cli_identity(cli)
+        out = local / run_id
+        out.mkdir(mode=0o700)  # Evidence is never overwritten by a retry.
+        workspace = out / "workspace"
+        (workspace / ".agents").mkdir(parents=True)
+        write_json(workspace / ".agents/hooks.json", DENY_HOOK)
+        write_json(out / "task.json", material)
+        (out / "prompt.txt").write_text(prompt)
+        meta = {"run_id": run_id, "task_id": task["task_id"], "role": role,
+                "head": head, "model": MODEL, "state": "RUNNING", "started_at": time.time(),
+                "retain_until": time.time() + 7 * 86400,
+                "authority": "PROPOSAL_ONLY_NOT_ACCEPTANCE",
+                "cli": initial_cli_identity}
         write_json(out / "status.json", meta)
-        raise
-    write_json(out / "status.json", meta)
-    return out
+        command = [str(cli), "--mode", "plan", "--sandbox", "--model", MODEL,
+                   "--effort", "high", "--input-format", "stream-json",
+                   "--output-format", "stream-json", "--print-timeout", f"{timeout}s",
+                   "--json-schema", json.dumps(schema(role))]
+        try:
+            # Auth belongs to the CLI. No credential files are read or copied here.
+            with subprocess.Popen(command, cwd=workspace, stdin=subprocess.PIPE,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  start_new_session=True) as process:
+                meta["cli_pid"] = process.pid
+                write_json(out / "status.json", meta)
+                capture_bounded_process(
+                    process,
+                    (json.dumps({"event": "user", "message": {"content": prompt}}) + "\n").encode(),
+                    out / "stream.jsonl",
+                    out / "stderr.txt",
+                    timeout + 15,
+                )
+            if process.returncode:
+                raise ProposalError(f"CLI failed with exit {process.returncode}; inspect run evidence")
+            final_cli_identity = cli_identity(cli)
+            if final_cli_identity != initial_cli_identity:
+                raise ProposalError("CLI identity changed during generation")
+            raw = bounded_file_text(root, out / "stream.jsonl", MAX_OUTPUT, "CLI event stream")
+            result, envelope = parse_stream(raw, task, sources, role)
+            # A late parent/source change invalidates the entire candidate.
+            if head != git(root, "rev-parse", "HEAD") or initial_status != git(root, "status", "--porcelain=v1", "--untracked-files=all"):
+                raise ProposalError("Git state changed during generation")
+            current_task, current_sources = load_task(root, task_path)
+            if current_task != task or current_sources != sources:
+                raise ProposalError("task or source bytes changed during generation")
+            write_json(out / "result.json", result)
+            (out / "proposal.patch").write_text(proposal_diff(result["changes"], sources))
+            meta.update(state=result["status"], conversation_id=envelope["conversation_id"],
+                        duration_seconds=round(time.time() - meta["started_at"], 3),
+                        usage=envelope.get("usage", {}),
+                        result_sha256=file_sha256(out / "result.json"))
+        except BaseException as exc:
+            meta.update(state="BLOCKED", error=type(exc).__name__ + ": " + str(exc),
+                        duration_seconds=round(time.time() - meta["started_at"], 3))
+            write_json(out / "status.json", meta)
+            raise
+        write_json(out / "status.json", meta)
+        return out
+    finally:
+        release_proposal_lock(lock_descriptor)
 
 
 def main() -> int:
@@ -496,7 +602,9 @@ def main() -> int:
     args = parser.parse_args()
     try:
         out = run(args.root, args.task, args.role, args.run_id, args.timeout, args.feedback, args.proposal, args.cli)
-        meta = unique_json((out / "status.json").read_text())
+        meta = unique_json(bounded_file_text(
+            args.root.resolve(strict=True), out / "status.json", MAX_CONTEXT, "run status"
+        ))
         print(json.dumps({"state": meta["state"], "evidence": str(out),
                           "seconds": meta["duration_seconds"]}))
         return 0 if meta["state"] in {"PROPOSAL_READY", "VERIFIED"} else 1

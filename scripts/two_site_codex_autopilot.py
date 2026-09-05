@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import fcntl
 import json
 import os
@@ -10,6 +11,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import tempfile
 import time
@@ -17,6 +19,7 @@ import time
 try:
     from scripts.two_site_proposal_runner import (
         ProposalError,
+        bounded_file_text,
         capture_bounded_process,
         file_sha256,
         git,
@@ -27,6 +30,7 @@ try:
 except ModuleNotFoundError:  # Direct `python scripts/...` execution.
     from two_site_proposal_runner import (  # type: ignore[no-redef]
         ProposalError,
+        bounded_file_text,
         capture_bounded_process,
         file_sha256,
         git,
@@ -44,6 +48,7 @@ EXPECTED_CODEX_CLI_VERSION = "codex-cli 0.153.0"
 EXPECTED_CODEX_CLI_SHA256 = "fce635028842bfe9257140e8b7d53162732945e2f356fc35225be0702b4974be"
 MAX_CODEX_OUTPUT = 16_000_000
 MAX_RESULT_BYTES = 64_000
+MAX_PROMPT_BYTES = 160_000
 DEFAULT_MAX_CYCLES = 200
 DEFAULT_TIMEOUT_SECONDS = 10_800
 MAX_RETRYABLE_FAILURES = 2
@@ -71,6 +76,34 @@ _ACTIVE_PROCESS: subprocess.Popen | None = None
 
 class AutopilotError(ProposalError):
     pass
+
+
+@contextmanager
+def exclusive_supervisor_lock(lock_path: Path):
+    """Own one symlink/hardlink-safe nonblocking supervisor lock."""
+    flags = (os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0)
+             | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        descriptor = os.open(lock_path, flags, 0o600)
+    except OSError as exc:
+        raise AutopilotError("cannot safely open autopilot lock") from exc
+    owned = False
+    try:
+        lock_stat = os.fstat(descriptor)
+        if (not stat.S_ISREG(lock_stat.st_mode) or lock_stat.st_nlink != 1
+                or lock_stat.st_uid != os.geteuid()):
+            raise AutopilotError("autopilot lock is not a trusted regular file")
+        os.fchmod(descriptor, 0o600)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise AutopilotError("another autopilot supervisor already owns the lock") from exc
+        owned = True
+        yield
+    finally:
+        if owned:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
 
 
 def contains_schema_keyword(value: object, forbidden: set[str]) -> bool:
@@ -106,11 +139,14 @@ def validate_repository(root: Path, require_clean: bool = True) -> dict[str, obj
     controls = {}
     for relative in CONTROL_PATHS:
         path = root / relative
-        if not path.is_file() or path.resolve() != path:
+        if (not path.is_file() or path.resolve() != path
+                or path.stat(follow_symlinks=False).st_nlink != 1):
             raise AutopilotError(f"required tracked input is missing or unsafe: {relative}")
         git(root, "cat-file", "-e", f"HEAD:{relative.as_posix()}")
         controls[relative.as_posix()] = git(root, "rev-parse", f"HEAD:{relative.as_posix()}")
-    schema = unique_json((root / SCHEMA_REL).read_text())
+    schema = unique_json(bounded_file_text(
+        root, root / SCHEMA_REL, MAX_RESULT_BYTES, "autopilot schema"
+    ))
     properties = schema.get("properties") if isinstance(schema, dict) else None
     if (
         not isinstance(schema, dict)
@@ -149,7 +185,9 @@ def codex_identity(codex: Path, temporary: Path) -> dict[str, str]:
             process, b"", temporary / "codex-version.stdout",
             temporary / "codex-version.stderr", 15, max_output=4096,
         )
-    version = (temporary / "codex-version.stdout").read_text().strip()
+    version = bounded_file_text(
+        temporary, temporary / "codex-version.stdout", 4096, "Codex version output"
+    ).strip()
     if process.returncode or version != EXPECTED_CODEX_CLI_VERSION:
         raise AutopilotError("Codex CLI version probe failed")
     with subprocess.Popen(
@@ -239,7 +277,9 @@ def validate_transition(
 
 
 def prompt_for_cycle(root: Path, cycle: int, before: dict[str, object]) -> str:
-    base = (root / PROMPT_REL).read_text()
+    base = bounded_file_text(
+        root, root / PROMPT_REL, MAX_PROMPT_BYTES, "autopilot prompt template"
+    )
     context = {
         "cycle": cycle,
         "starting_head": before["head"],
@@ -316,9 +356,9 @@ def run_cycle(
         if file_sha256(codex) != identity["sha256"]:
             raise AutopilotError("Codex CLI identity changed during the cycle")
         result_path = run_dir / "result.json"
-        if not result_path.is_file() or result_path.stat().st_size > MAX_RESULT_BYTES:
-            raise AutopilotError("Codex did not write one bounded result")
-        result = validate_transition(root, before, validate_result(unique_json(result_path.read_text())))
+        result = validate_transition(root, before, validate_result(unique_json(
+            bounded_file_text(root, result_path, MAX_RESULT_BYTES, "Codex cycle result")
+        )))
         meta.update(
             state=result["state"],
             finished_at=time.time(),
@@ -358,7 +398,9 @@ def prune_runs(state_root: Path, keep: int = KEEP_RUNS) -> list[str]:
             raise AutopilotError("run retention path is unsafe")
         status_path = path / "status.json"
         try:
-            status = unique_json(status_path.read_text())
+            status = unique_json(bounded_file_text(
+                state_root.resolve(), status_path, MAX_RESULT_BYTES, "retention status"
+            ))
         except (OSError, ValueError, json.JSONDecodeError):
             continue
         if not isinstance(status, dict) or status.get("state") not in PRUNABLE_RUN_STATES:
@@ -387,11 +429,7 @@ def run_loop(root: Path, codex: Path, max_cycles: int, timeout: int, once: bool)
         raise AutopilotError("autopilot state directory cannot be a symlink")
     (state_root / "runs").mkdir(parents=True, exist_ok=True, mode=0o700)
     lock_path = state_root / "autopilot.lock"
-    with lock_path.open("a+") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise AutopilotError("another autopilot supervisor already owns the lock") from exc
+    with exclusive_supervisor_lock(lock_path):
         retryable_failures = 0
         for cycle in range(1, max_cycles + 1):
             if (state_root / "STOP").exists():

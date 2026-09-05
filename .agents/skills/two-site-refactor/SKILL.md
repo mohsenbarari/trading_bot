@@ -14,7 +14,9 @@ and `docs/refactor/two-server/PROPOSAL_AUTOMATION.md` completely. The latter is 
 small executable contract and states the current readiness limitations. The runner
 must enforce its combined output cap while draining the CLI and must verify the pinned
 CLI version and SHA before and after every provider call; a directory name is never
-version evidence.
+version evidence. Every file sent to a model must be root-confined, read with a hard
+byte limit, and rejected if it is a symlink or has more than one hardlink. One
+nonblocking process lock must cover identity probes and the complete provider run.
 
 For unattended execution, `scripts/two_site_codex_autopilot.py` is the only current
 Supervisor and `scripts/two_site_autopilot_tmux.sh` is its launcher. Each fresh Codex

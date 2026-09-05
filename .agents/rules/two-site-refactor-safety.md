@@ -22,6 +22,8 @@ Hard invariants:
   independent acceptance, evidence and external/human Writer gates still apply.
   Enforce stdout+stderr limits during streaming, and fail closed if the pinned CLI
   version/SHA changes before, during or after a run; path names are not version proof.
+  Read every model input through a root-confined byte cap; reject symlinks and any
+  `st_nlink != 1`. Hold one nonblocking runner lock across all CLI probes/calls.
   Unattended cycles use only the bounded Codex Supervisor/tmux launcher. Continue only
   after a clean descendant commit with unchanged protected refs and control blobs;
   no-progress, ambiguous mutation or an external gate stops the loop.
