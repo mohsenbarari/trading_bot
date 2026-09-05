@@ -357,6 +357,13 @@ def build_and_publish_fact(
                 payload_hash=str(existing[2]),
                 payload=existing_payload,
             )
+            # A fact and its materialized projection normally commit in the
+            # same PostgreSQL transaction.  If an operator restore or an old
+            # partial import retained the fact but lost its projection,
+            # idempotent replay must repair that dependency before a child
+            # trade can be written.  The UPSERT is projection-only: it emits
+            # no revision and no duplicate outbox delivery.
+            _write_projection(cursor, fact)
             return PublishedFact(fact=fact, delivery_sequence=None, changed=False)
         if existing is None:
             source_sequence = _next_source_sequence(cursor, source.fact_stream_id)

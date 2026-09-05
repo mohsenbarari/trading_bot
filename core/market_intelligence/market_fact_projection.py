@@ -32,6 +32,15 @@ from .xau_model_input import (
 PROJECTION_VERSION = "market-fact-projection-v2-xau-model-input"
 MAX_EXPORT_PER_CYCLE = 5_000
 XAU_MODEL_INPUT_REFRESH_PER_CYCLE = 50_000
+RESEARCH_CONTEXT_SOURCES = frozenset(
+    {
+        "GROUP_1",
+        "GROUP_2",
+        "PRIVATE_GOLD_CHANNEL",
+        "MELTED_AGGREGATE",
+        "MELTED_FLOW",
+    }
+)
 _REASON_TOKEN = re.compile(r"[^A-Z0-9_]+")
 _FACT_PAYLOAD_ADAPTER = TypeAdapter(FactPayload)
 
@@ -635,6 +644,115 @@ def observation_payload(
     }
 
 
+def _ensure_offer_dependency_archived(
+    market: sqlite3.Connection,
+    archive_connection,
+    row: sqlite3.Row,
+    payload: Mapping[str, Any],
+    *,
+    capture_staging: sqlite3.Connection | None = None,
+    research_key: ResearchArchiveKey | None = None,
+) -> tuple[int, int]:
+    """Materialize a real offer parent before its dependent trade/outcome.
+
+    The SQLite export ledger is not proof that a PostgreSQL projection still
+    exists after a restore.  Check the authoritative projection and replay the
+    existing canonical parent when it is absent.  No synthetic parent is ever
+    created and no missing local dependency is waived.
+    """
+
+    kind = str(payload.get("kind") or "")
+    table = {
+        "COIN_TRADE": "market_data.coin_offers",
+        "PRIVATE_GOLD_OUTCOME": "market_data.private_gold_offers",
+    }.get(kind)
+    if table is None:
+        return 0, 0
+    offer_fact_id = str(payload.get("offer_fact_id") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", offer_fact_id):
+        raise MarketFactProjectionError(
+            "market_fact_projection_offer_reference_missing"
+        )
+    with archive_connection.cursor() as cursor:
+        cursor.execute(
+            f"SELECT 1 FROM {table} WHERE fact_id=decode(%s,'hex')",
+            (offer_fact_id,),
+        )
+        if cursor.fetchone() is not None:
+            return 0, 0
+
+    attributes = _attributes(row)
+    parent_event_key = str(attributes.get("root_offer_event_key") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", parent_event_key):
+        raise MarketFactProjectionError(
+            "market_fact_projection_offer_reference_missing"
+        )
+    parent = market.execute(
+        "SELECT * FROM market_observations WHERE event_key=?",
+        (bytes.fromhex(parent_event_key),),
+    ).fetchone()
+    if (
+        parent is None
+        or str(parent["source_code"]) != str(row["source_code"])
+        or str(parent["event_type"]) != "OFFER"
+    ):
+        raise MarketFactProjectionError(
+            "market_fact_projection_offer_dependency_missing"
+        )
+    parent_payload = observation_payload(market, parent)
+    expected_fact_id = stable_fact_id(
+        source_code=str(parent["source_code"]),
+        event_key=parent_event_key,
+        fact_kind=str(parent_payload["kind"]),
+    )
+    if expected_fact_id != offer_fact_id:
+        raise MarketFactProjectionError(
+            "market_fact_projection_offer_dependency_identity_mismatch"
+        )
+    result = build_and_publish_fact(
+        archive_connection,
+        event_key=parent_event_key,
+        origin_event_key=parent_event_key,
+        source_code=str(parent["source_code"]),
+        occurred_at_utc=str(parent["event_time_utc"]),
+        available_at_utc=str(parent["available_at_utc"]),
+        parser_version=str(parent["parser_version"]),
+        quality_state=_quality(str(parent["quality_state"])),
+        quality_reason_codes=_reason_codes(parent, _attributes(parent)),
+        payload=parent_payload,
+    )
+    if result.fact.fact_id != offer_fact_id:
+        raise MarketFactProjectionError(
+            "market_fact_projection_offer_dependency_identity_mismatch"
+        )
+    research_required = int(str(parent["source_code"]) in RESEARCH_CONTEXT_SOURCES)
+    research_archived = 0
+    if capture_staging is not None and research_key is not None:
+        context = research_contexts_for_rows(capture_staging, [parent]).get(
+            bytes(parent["event_key"])
+        )
+        if context is not None:
+            with archive_connection.cursor() as cursor:
+                archive_fact_research_context(
+                    cursor,
+                    fact_id=result.fact.fact_id,
+                    fact_revision=result.fact.fact_revision,
+                    context=context,
+                    key=research_key,
+                )
+            research_archived = 1
+    with archive_connection.cursor() as cursor:
+        cursor.execute(
+            f"SELECT 1 FROM {table} WHERE fact_id=decode(%s,'hex')",
+            (offer_fact_id,),
+        )
+        if cursor.fetchone() is None:
+            raise MarketFactProjectionError(
+                "market_fact_projection_offer_dependency_not_materialized"
+            )
+    return research_required, research_archived
+
+
 def export_market_store_facts(
     market: sqlite3.Connection,
     archive_connection,
@@ -651,15 +769,8 @@ def export_market_store_facts(
         max_rows=max_rows,
         force_event_keys=force_event_keys,
     )
-    research_sources = {
-        "GROUP_1",
-        "GROUP_2",
-        "PRIVATE_GOLD_CHANNEL",
-        "MELTED_AGGREGATE",
-        "MELTED_FLOW",
-    }
     research_required = sum(
-        str(row["source_code"]) in research_sources for row in rows
+        str(row["source_code"]) in RESEARCH_CONTEXT_SOURCES for row in rows
     )
     contexts = (
         research_contexts_for_rows(capture_staging, rows)
@@ -676,6 +787,7 @@ def export_market_store_facts(
         revision: int | None = None
         delivery_sequence: int | None = None
         envelope_hash: str | None = None
+        dependency_required = dependency_archived = 0
         try:
             source = allowed.get(source_code)
             if source is None or not source.transfer_to_bot:
@@ -685,6 +797,16 @@ def export_market_store_facts(
                 savepoint = f"market_fact_projection_{index}"
                 cursor.execute(f"SAVEPOINT {savepoint}")
                 try:
+                    dependency_required, dependency_archived = (
+                        _ensure_offer_dependency_archived(
+                            market,
+                            archive_connection,
+                            row,
+                            payload,
+                            capture_staging=capture_staging,
+                            research_key=research_key,
+                        )
+                    )
                     result = build_and_publish_fact(
                         archive_connection,
                         event_key=event_key,
@@ -729,6 +851,8 @@ def export_market_store_facts(
                     raise
                 finally:
                     cursor.execute(f"RELEASE SAVEPOINT {savepoint}")
+            research_required += dependency_required
+            research_archived += dependency_archived
             fact_id = result.fact.fact_id
             revision = result.fact.fact_revision
             published += int(result.changed)

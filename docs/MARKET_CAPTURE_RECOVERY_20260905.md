@@ -111,9 +111,14 @@ ONE_GRAM/CASH remained NO_SAFE_SAME_COMMODITY_ANCHOR, without a fabricated value
 Historical probe prices subsequently ranked differently against refreshed rates;
 the old IMAM outcome is a time-bound probe, not a fixed acceptance expectation.
 
-This repair resolves the observed dependency, not the underlying general
-parent-first export-order bug. A bounded dependency-order regression/fix remains
-a separate follow-up; do not claim all processor failure modes are prevented.
+The underlying parent-first exporter fix is implemented after the live repair.
+Before every coin/private-gold outcome, PostgreSQL's parent projection is checked;
+an absent parent is replayed only from its canonical SQLite observation under the
+same savepoint. Identity/source/type must match. Identical fact replay repairs a
+missing projection without emitting a revision or duplicate outbox delivery.
+Research context remains in the same transaction. Four new dependency tests and
+the wider Market suite passed: 375 passed, 6 environment-skipped. Deployment of
+this processor code is tracked separately from the already-live Account1 fix.
 
 No Product deployment, Queue-v1 change, authority switch to PRIVATE_PRIMARY,
 Git push, database migration, or staging runtime change was performed.
