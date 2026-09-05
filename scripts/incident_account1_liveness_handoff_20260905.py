@@ -136,6 +136,7 @@ def compose(
     release_root: Path,
     source_root: Path,
     prior_override: Path,
+    live_recovery_override: Path,
     target_override: Path | None = None,
 ) -> list[str]:
     arguments = [
@@ -152,8 +153,8 @@ def compose(
         release_root / "deploy/market-data/compose.yml",
         release_root / "deploy/market-data/compose.web.yml",
         source_root / "account1-replay-recovery.override.yml",
-        source_root / "account1-live-recovery-20260905.yml",
         prior_override,
+        live_recovery_override,
     ):
         arguments.extend(("-f", str(path)))
     if target_override is not None:
@@ -317,7 +318,6 @@ def main() -> int:
     target_root = secure_release_root(RELEASE_BASE / args.target_release, args.target_release)
     secure_file(source_root / "web.release.env", uid=0)
     secure_file(source_root / "account1-replay-recovery.override.yml", uid=0)
-    secure_file(source_root / "account1-live-recovery-20260905.yml", uid=0)
     secure_file(args.prior_override, uid=0)
     parent_info = secure_file(args.parent_lock, uid=0)
     parent_bytes = args.parent_lock.read_bytes()
@@ -335,8 +335,12 @@ def main() -> int:
     directory_info = args.operations_dir.lstat()
     require(stat.S_ISDIR(directory_info.st_mode) and directory_info.st_uid == 0 and stat.S_IMODE(directory_info.st_mode) == 0o700, "operations_path_invalid")
     journal = args.operations_dir / "handoff.json"
+    live_recovery_override = args.operations_dir / "account1-live-recovery.runtime.json"
     override = args.operations_dir / "account1-liveness.override.json"
-    require(not journal.exists() and not override.exists(), "handoff_already_exists")
+    require(
+        not journal.exists() and not override.exists() and not live_recovery_override.exists(),
+        "handoff_already_exists",
+    )
     with held(args.parent_lock, 0):
         old = inspect(CONTAINER)
         labels = old.get("Config", {}).get("Labels", {})
@@ -346,7 +350,23 @@ def main() -> int:
         prior_health = health_document(state_lock)
         sequence = prior_health.get("capture_sequence")
         require(type(sequence) is int, "prior_capture_sequence_invalid")
-        prior_compose = compose(release_root=source_root, source_root=source_root, prior_override=args.prior_override)
+        # The historical live-recovery YAML is intentionally not trusted as a
+        # runtime input because it is world-readable. These two documented,
+        # non-secret empty recovery controls are recreated in an operations
+        # file owned by root before either current or target Compose is read.
+        atomic_json(
+            live_recovery_override,
+            {"services": {ROLE: {"environment": {
+                "MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC": "",
+                "MARKET_CAPTURE_BACKFILL_SOURCE_CODES": "",
+            }}}},
+        )
+        prior_compose = compose(
+            release_root=source_root,
+            source_root=source_root,
+            prior_override=args.prior_override,
+            live_recovery_override=live_recovery_override,
+        )
         old_config = compose_config(prior_compose)
         expected_current = old_config["services"][ROLE]
         require(old["Image"] == expected_current.get("image"), "prior_runtime_image_drift")
@@ -356,7 +376,13 @@ def main() -> int:
             "prior_runtime_healthcheck_drift",
         )
         atomic_json(override, {"services": {ROLE: {"image": args.target_image, "environment": {"MARKET_PIPELINE_RELEASE_SHA": args.target_release}, "labels": {"org.opencontainers.image.revision": args.target_release}}}})
-        target_compose = compose(release_root=target_root, source_root=source_root, prior_override=args.prior_override, target_override=override)
+        target_compose = compose(
+            release_root=target_root,
+            source_root=source_root,
+            prior_override=args.prior_override,
+            live_recovery_override=live_recovery_override,
+            target_override=override,
+        )
         try:
             new_config = compose_config(target_compose)
             validate_config(old_config, new_config, target_release=args.target_release, target_image=args.target_image)
@@ -418,6 +444,7 @@ def main() -> int:
         finally:
             if not journal.exists():
                 override.unlink(missing_ok=True)
+                live_recovery_override.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
