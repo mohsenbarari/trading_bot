@@ -1,6 +1,6 @@
 # Coin Market Intelligence
 
-- Sep05: live recovered; code fix awaits authority handoff. `docs/MARKET_CAPTURE_RECOVERY_20260905.md`. Keep quarantine; verify Product snapshot, not heartbeat.
+- Sep05: Account1 hotfix `1f972a48` live; parent lock unchanged. `docs/MARKET_CAPTURE_RECOVERY_20260905.md`. Historical quarantine keeps health degraded; verify Product snapshot, not heartbeat.
 
 - Settlement: future=`خ ن ف/ف ن ف`,`خ ف/ف ف` or absent; cash=`خ ن/ف ن/نق`; future wins.
 - Units: project-thousands; accept full-Toman/separators/zeros. Resolve tails by family. `رب`=quarter; `پ/ت پ/پایین`=low-date; duplicated-zero needs family.
