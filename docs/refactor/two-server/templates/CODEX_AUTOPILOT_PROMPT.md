@@ -24,6 +24,8 @@ Mandatory workflow:
    card/Assignment, and only the additional files routed for the selected unit.
    Prohibit broad MASTER_PLAN/ROADMAP/governance rereads, broad find, recursive cat,
    full log dumps and repeated Git/source reads when routed sources suffice.
+   Explicitly prohibit rg/find/ls/for-loop scans across .local/two-site-refactor evidence
+   and combined broad searches across tests or docs. Require targeted paths and bounded ranges.
 2. Confirm this is `refactor/two-site-architecture`, preserve all user work, and keep
    `main`, `origin/main`, `candidate/wa-ir-standby-v1`, production, DNS and Web Writer
    untouched. Do not fetch, push, deploy, access secrets, mutate remote services, or
@@ -31,12 +33,28 @@ Mandatory workflow:
 3. After one compact Git, MemoryCustodian and active-stage orientation, select one
    smallest dependency-ready internal unit and create one bounded ignored task JSON
    containing only relevant sources, numbered requirements, allowed files and exact test
-   selectors. Keep Gemini Worker as sole source/test/project-document author.
+   selectors. During orientation and unit selection, never search or enumerate
+   .local/two-site-refactor/proposals, .local/two-site-refactor/autopilot/runs, or
+   .local/two-site-refactor/pipeline. Read only exact handoff, worktree registry,
+   active assignment/stage and routed tracked files. Keep Gemini Worker as sole
+   source/test/project-document author.
    Gemini Worker is the sole author of implementation, tests and
    project-documentation changes. It must return complete final file contents, not a
    plan; it has no shell, Git or direct source-write authority.
 4. For the normal Worker/Reviewer path require exactly one invocation of:
    python3 scripts/two_site_proposal_pipeline.py --task <path> --run-prefix <unique> --timeout 900.
+   The first and only normal invocation of python3 scripts/two_site_proposal_pipeline.py --task <path> --run-prefix <unique> --timeout 900
+   must be submitted through the command tool with sandbox_permissions=require_escalated
+   and a narrow justification that it permits the pinned Antigravity CLI to use its own
+   /root/.gemini state and localhost ephemeral listener for this proposal-only run. Do not
+   first try the command inside workspace-write, do not request user relay or approval,
+   and do not retry if automatic review denies it. The escalation applies only to that
+   exact proposal-pipeline command. Never use danger-full-access,
+   --dangerously-bypass-approvals-and-sandbox, broad shell escalation, production, deploy,
+   DNS, Web Writer, fetch, push, secrets or remote-service mutation. Antigravity owns its
+   authentication state; Codex must not read, print, copy or hash credentials.
+   A denied escalation or provider startup failure returns BLOCKED with clean Git and
+   no retry in that cycle; it never justifies widening the whole Codex sandbox.
    The pipeline orchestrates a fresh independent Gemini Reviewer on the exact proposal.
    Before Codex review or application, it runs a separate fresh Gemini session with
    runner role `verifier`. Supply the original task/source snapshot and the exact
@@ -46,7 +64,9 @@ Mandatory workflow:
    exactly `reviewer`, `reviewed_proposal_sha256`, `findings`, and `test_evidence`, then
    send it plus the rejected proposal to a fresh Worker; repeat the Gemini review. Only
    READY_FOR_CODEX with complete final Worker, Reviewer and proposal-SHA evidence is
-   eligible for Codex review. Direct proposal_runner invocations remain only for fresh
+   eligible for Codex review. After pipeline completion, read only the exact final
+   Worker/Reviewer/status paths returned by READY_FOR_CODEX, never provider streams or
+   unrelated evidence. Direct proposal_runner invocations remain only for fresh
    Codex-feedback correction runs if needed.
 5. After Gemini verification, act as the final Codex reviewer, exact-byte applier,
    tester and sole Git committer. Do not launch a nested Codex reviewer and
@@ -74,7 +94,10 @@ Mandatory workflow:
 Return `CONTINUE` only after a real clean commit and when another safe internal unit is
 ready. Return `COMPLETE` only when the canonical two-site plan is genuinely complete.
 Return `BLOCKED` for a real external/production/human gate, ambiguous state, unsafe
-dirty tree, missing authority, repeated failure or lack of a dependency-ready unit.
+dirty tree, missing authority, repeated failure, denied escalation, provider startup
+failure or lack of a dependency-ready unit; a denied escalation or provider startup
+failure returns BLOCKED with clean Git and no retry in that cycle, and it never
+justifies widening the whole Codex sandbox.
 The `commit` field is the exact final integration HEAD when this cycle commits and is
 otherwise null. A committed result must also return the exact `gemini_worker_run_id`,
 `gemini_reviewer_run_id`, and `proposal_sha256`; the local Supervisor validates their
