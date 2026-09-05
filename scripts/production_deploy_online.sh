@@ -175,6 +175,7 @@ PRODUCTION_FOREIGN_TARGET_BINDING_SHA256=""
 PRODUCTION_IRAN_TARGET_BINDING_SHA256=""
 PRODUCTION_COIN_INFERENCE_REQUESTED=0
 PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED=0
+PRODUCTION_LEGACY_COIN_COLLECTORS_REQUIRED=0
 PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED=0
 PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE="LEGACY"
 PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=0
@@ -1558,6 +1559,101 @@ PY
     PRODUCTION_MARKET_MAINTENANCE_LOCK_ADOPTED=1
 }
 
+resolve_production_legacy_coin_collector_authority() {
+    [[ "$PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED" == "1" ]] || return 0
+    local authority
+    authority="$(PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 - \
+        "$PRODUCTION_RELEASE_LOCK_PATH" "$PRODUCTION_MARKET_HANDOFF_DIR" <<'PY'
+from hashlib import sha256
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+
+from scripts import quiesce_production_legacy_market_collectors as handoff
+
+lock_path = Path(sys.argv[1])
+handoff_dir = Path(sys.argv[2])
+flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+try:
+    descriptor = os.open(lock_path, flags)
+except OSError:
+    raise SystemExit("production_operation_lock_unavailable")
+try:
+    before = os.fstat(descriptor)
+    raw = b""
+    while len(raw) < before.st_size:
+        chunk = os.read(descriptor, before.st_size - len(raw))
+        if not chunk:
+            break
+        raw += chunk
+    after = os.fstat(descriptor)
+finally:
+    os.close(descriptor)
+path_info = lock_path.lstat()
+if (
+    lock_path.is_symlink()
+    or not stat.S_ISREG(before.st_mode)
+    or before.st_uid != os.geteuid()
+    or stat.S_IMODE(before.st_mode) != 0o600
+    or before.st_nlink != 1
+    or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+    != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+    or (path_info.st_dev, path_info.st_ino) != (before.st_dev, before.st_ino)
+):
+    raise SystemExit("production_operation_lock_invalid")
+try:
+    lock = json.loads(raw.decode("utf-8"))
+except (UnicodeDecodeError, json.JSONDecodeError):
+    raise SystemExit("production_operation_lock_invalid")
+if lock.get("schema") != "market_pipeline_maintenance_lock/1.0":
+    print("direct-legacy")
+    raise SystemExit(0)
+release = str(lock.get("release_sha") or "")
+journal = handoff_dir / f"bot-legacy-handoff-{release[:8]}.json"
+if (
+    lock.get("environment") != "production"
+    or lock.get("host_role") != "bot"
+    or not re.fullmatch(r"[0-9a-f]{40}", release)
+    or lock.get("device") != before.st_dev
+    or lock.get("inode") != before.st_ino
+    or lock.get("journal_path_sha256")
+    != sha256(str(journal).encode("utf-8")).hexdigest()
+):
+    raise SystemExit("market_maintenance_lock_invalid")
+journal_digest = handoff._digest(journal)
+handoff.validate_transferred_handoff(
+    journal=journal,
+    expected_journal_sha256=journal_digest,
+    release_sha=release,
+    host_role="bot",
+    expected_maintenance_lock=lock,
+)
+print("transferred-private-capture")
+PY
+)" || die "Transferred Market capture authority could not be verified."
+    case "$authority" in
+        direct-legacy)
+            PRODUCTION_LEGACY_COIN_COLLECTORS_REQUIRED=1
+            ;;
+        transferred-private-capture)
+            PRODUCTION_LEGACY_COIN_COLLECTORS_REQUIRED=0
+            log "Transferred private Market capture is authoritative; legacy Product relay remains enabled but direct Telegram collectors remain quiesced."
+            ;;
+        *) die "Production Market capture authority classification is invalid." ;;
+    esac
+}
+
+verify_production_legacy_coin_collector_authority() {
+    [[ "$PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED" == "1" \
+        && "$PRODUCTION_LEGACY_COIN_COLLECTORS_REQUIRED" == "0" ]] || return 0
+    resolve_production_legacy_coin_collector_authority
+    [[ "$PRODUCTION_LEGACY_COIN_COLLECTORS_REQUIRED" == "0" ]] \
+        || die "Transferred Market capture authority changed during release."
+}
+
 prepare_production_source_lock() {
     validate_secure_runtime_env_source_file \
         || die "Immutable production runtime env source is not secure enough to lock."
@@ -2329,6 +2425,7 @@ validate_production_coin_inference_activation_contract() {
     PRODUCTION_PRODUCT_ESTIMATOR_SNAPSHOT_MODE="$mode"
     PRODUCTION_COIN_INFERENCE_REQUESTED=0
     PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED=0
+    PRODUCTION_LEGACY_COIN_COLLECTORS_REQUIRED=0
     PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED=0
     if [[ "$preview" == "true" || "$selection" == "true" || "$guard" == "true" ]]; then
         PRODUCTION_COIN_INFERENCE_REQUESTED=1
@@ -2366,6 +2463,7 @@ validate_production_coin_inference_activation_contract() {
                 || die "Production PRIVATE_PRIMARY requires an explicit relay-disabled release manifest and exact rollback-only disable confirmation."
         else
             PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED=1
+            PRODUCTION_LEGACY_COIN_COLLECTORS_REQUIRED=1
             [[ "$PRODUCTION_COIN_INFERENCE_RELAY_ENABLED" == "1" \
                 && "$PRODUCTION_COIN_INFERENCE_RELAY_CONFIRM" == "$PRODUCTION_COIN_SNAPSHOT_RELAY_CONFIRM_TEXT" ]] \
                 || die "Legacy production coin inference requires the confirmed production Snapshot relay."
@@ -3560,7 +3658,7 @@ run_production_coin_input_timer_installer() {
 }
 
 install_and_verify_production_coin_inputs() {
-    [[ "$PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED" == "1" ]] || return 0
+    [[ "$PRODUCTION_LEGACY_COIN_COLLECTORS_REQUIRED" == "1" ]] || return 0
     run_production_coin_input_timer_installer 0
     local attempt
     for attempt in $(seq 1 30); do
@@ -8998,6 +9096,7 @@ run_release() {
     install_sync_sampler_local
     sync_hosts_mappings
     verify_prepared_release_artifacts
+    resolve_production_legacy_coin_collector_authority
     bootstrap_iran
     configure_nginx
     issue_cert
@@ -9041,6 +9140,7 @@ run_release() {
     fi
     start_two_host_writers_after_schema_convergence
     verify_running_production_coin_consumers
+    verify_production_legacy_coin_collector_authority
     if [[ "$PRODUCTION_PRIVATE_PRIMARY_PRODUCT_REQUIRED" == "1" ]]; then
         retire_production_legacy_coin_inputs
         retire_production_coin_snapshot_relay

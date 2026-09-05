@@ -474,6 +474,66 @@ class LegacyMarketCollectorHandoffTests(unittest.TestCase):
             self.assertTrue(self.operation_lock.exists())
             self.assertFalse(any(self.active.values()))
 
+    def test_transferred_handoff_repairs_only_runtime_state_drift(self) -> None:
+        context = self.context()
+        with context[0], context[1], context[2], context[3]:
+            handoff.quiesce(**self.common())
+            self.record_transferred_authority()
+            before = self.journal.read_bytes()
+            for timer in handoff.ROLE_TIMERS[self.host_role]:
+                self.active[timer] = True
+                self.enabled[timer] = True
+            service = handoff.ROLE_SERVICES[self.host_role][0]
+            self.active[service] = True
+            self.enabled[service] = True
+
+            repaired = handoff.repair_transferred_drift(**self.common())
+
+            self.assertEqual(repaired["status"], "AUTHORITY_TRANSFERRED")
+            self.assertEqual(self.journal.read_bytes(), before)
+            self.assertTrue(self.operation_lock.exists())
+            self.assertFalse(any(self.active.values()))
+            self.assertTrue(
+                all(
+                    not self.enabled[timer]
+                    for timer in handoff.ROLE_TIMERS[self.host_role]
+                )
+            )
+            self.assertTrue(
+                all(
+                    not self.enabled[service]
+                    for service in handoff.ROLE_SERVICES[self.host_role]
+                )
+            )
+            handoff.validate_transferred_handoff(
+                journal=self.journal,
+                expected_journal_sha256=sha256(before).hexdigest(),
+                release_sha=RELEASE,
+                host_role=self.host_role,
+                expected_maintenance_lock=repaired["maintenance_lock"],
+            )
+
+    def test_transferred_handoff_repair_refuses_unit_content_drift(self) -> None:
+        context = self.context()
+        with context[0], context[1], context[2], context[3]:
+            handoff.quiesce(**self.common())
+            self.record_transferred_authority()
+            timer = handoff.ROLE_TIMERS[self.host_role][0]
+            self.active[timer] = True
+            self.enabled[timer] = True
+            (self.systemd / timer).write_text(
+                "[Unit]\nDescription=unexpected replacement\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                handoff.CollectorHandoffError, "collector_handoff_unit_drift"
+            ):
+                handoff.repair_transferred_drift(**self.common())
+
+            self.assertTrue(self.active[timer])
+            self.assertTrue(self.enabled[timer])
+
     def test_transferred_handoff_validator_rejects_incomplete_authority_binding(self) -> None:
         context = self.context()
         with context[0], context[1], context[2], context[3]:
