@@ -1104,11 +1104,12 @@ class BridgeInstallerTests(unittest.TestCase):
             "PrivateNetwork=true",
             "ReadOnlyPaths=@RELEASE_ROOT@ @SHADOW_STORE_DIR@",
             "UMask=0077",
-            "RuntimeMaxSec=300",
             "PRODUCT_ESTIMATOR_SNAPSHOT_MODE=LEGACY",
             "flock --exclusive --timeout 300",
+            "--skip-quick-check",
         ):
             self.assertIn(token, template)
+        self.assertNotIn("RuntimeMaxSec=", template)
         self.assertIn("OnUnitInactiveSec=15s", timer)
         self.assertNotIn("EnvironmentFile", template)
 

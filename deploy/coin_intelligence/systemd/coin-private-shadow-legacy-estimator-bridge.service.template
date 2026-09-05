@@ -11,7 +11,6 @@ Environment=PYTHONPATH=@RELEASE_ROOT@
 Environment=PRODUCT_ESTIMATOR_SNAPSHOT_MODE=LEGACY
 Environment=APP_ENV_FILE=/dev/null
 UMask=0077
-RuntimeMaxSec=300
 TimeoutStartSec=360
 TimeoutStopSec=20
 NoNewPrivileges=true
@@ -23,4 +22,4 @@ ReadOnlyPaths=@RELEASE_ROOT@ @SHADOW_STORE_DIR@
 ReadWritePaths=@MARKET_RUNTIME_ROOT@/market @MARKET_RUNTIME_ROOT@/staging @ESTIMATOR_RUNTIME_ROOT@ @BRIDGE_STATE_ROOT@
 RestrictAddressFamilies=AF_UNIX
 IPAddressDeny=any
-ExecStart=/usr/bin/flock --exclusive --timeout 300 @BRIDGE_STATE_ROOT@/.bridge.lock /usr/bin/python3 @RELEASE_ROOT@/scripts/run_private_shadow_legacy_estimator_bridge.py --shadow-market-store @SHADOW_MARKET_STORE@ --legacy-market-store @LEGACY_MARKET_STORE@ --conversation-db @CONVERSATION_DB@ --ledger @LEDGER@ --heartbeat @HEARTBEAT@ --group-projection-health @GROUP_PROJECTION_HEALTH@ --release-sha @RELEASE_SHA@ --cutoff-utc @CUTOFF_UTC@ --market-lock @MARKET_LOCK@ --conversation-lock @CONVERSATION_LOCK@
+ExecStart=/usr/bin/flock --exclusive --timeout 300 @BRIDGE_STATE_ROOT@/.bridge.lock /usr/bin/python3 @RELEASE_ROOT@/scripts/run_private_shadow_legacy_estimator_bridge.py --shadow-market-store @SHADOW_MARKET_STORE@ --legacy-market-store @LEGACY_MARKET_STORE@ --conversation-db @CONVERSATION_DB@ --ledger @LEDGER@ --heartbeat @HEARTBEAT@ --group-projection-health @GROUP_PROJECTION_HEALTH@ --release-sha @RELEASE_SHA@ --cutoff-utc @CUTOFF_UTC@ --market-lock @MARKET_LOCK@ --conversation-lock @CONVERSATION_LOCK@ --skip-quick-check
