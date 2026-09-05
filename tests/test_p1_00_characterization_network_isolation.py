@@ -84,11 +84,13 @@ install_p1_00_network_fence()
 
 class P100NetworkIsolationCharacterizationTests(unittest.TestCase):
     def test_fence_denies_localhost_6379_tcp(self):
+        self.assertIs(socket.socket.connect, _guarded_connect)
         before = len(_FENCE["denied_connects"])
         with self.assertRaises(OSError):
             socket.create_connection(("127.0.0.1", 6379), timeout=0.2)
+        fake_socket = object()
         with self.assertRaises(OSError):
-            socket.socket().connect(("localhost", 6379))
+            socket.socket.connect(fake_socket, ("localhost", 6379))
         self.assertGreaterEqual(len(_FENCE["denied_connects"]), before + 2)
 
     def test_live_redis_constructor_is_denied(self):
