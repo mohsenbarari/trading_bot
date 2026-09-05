@@ -6656,6 +6656,11 @@ build_release() {
         --exclude 'audit_trail' \
         --exclude 'pip_packages' \
         "$LOCAL_PROJECT_DIR/" "$iran_context_dir/"
+    # Dockerfile.iran serves the already verified production frontend bundle.
+    # Keep frontend sources out of the runtime context, but copy that exact
+    # generated bundle explicitly so the immutable image is self-contained.
+    mkdir -p "$iran_context_dir/mini_app_dist"
+    rsync -a --delete "$LOCAL_DIST_DIR/" "$iran_context_dir/mini_app_dist/"
     rsync -a --delete "$iran_pip_dir/" "$iran_context_dir/pip_packages/"
 
     local image_signature

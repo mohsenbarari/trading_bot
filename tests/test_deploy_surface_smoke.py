@@ -920,6 +920,16 @@ hash_file_or_dir inputs
         self.assertIn('chown root:root \\"\\$hosts_file\\"', release_script)
         self.assertIn('chmod 0644 \\"\\$hosts_file\\"', release_script)
 
+    def test_production_iran_image_context_includes_verified_frontend_dist(self):
+        release_script = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text(encoding='utf-8')
+
+        copy_command = 'rsync -a --delete "$LOCAL_DIST_DIR/" "$iran_context_dir/mini_app_dist/"'
+        self.assertIn(copy_command, release_script)
+        self.assertLess(
+            release_script.index('verify_frontend_release_contracts "$LOCAL_DIST_DIR"'),
+            release_script.index(copy_command),
+        )
+
     def test_dockerfiles_pass_docker_build_check(self):
         if shutil.which('docker') is None:
             self.skipTest('docker is not installed')
