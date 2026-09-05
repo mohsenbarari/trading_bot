@@ -1,6 +1,6 @@
 # Coin Market Intelligence
 
-- Replay certification failure preserves evidence and live capture; storage/integrity faults stop. Quarantine degrades readiness. Verify recovery using Product's actual snapshot and rejected prices.
+- Sep05: live recovered; code fix awaits authority handoff. `docs/MARKET_CAPTURE_RECOVERY_20260905.md`. Keep quarantine; verify Product snapshot, not heartbeat.
 
 - Settlement: future=`خ ن ف/ف ن ف`,`خ ف/ف ف` or absent; cash=`خ ن/ف ن/نق`; future wins.
 - Units: project-thousands; accept full-Toman/separators/zeros. Resolve tails by family. `رب`=quarter; `پ/ت پ/پایین`=low-date; duplicated-zero needs family.
