@@ -56,6 +56,7 @@ REDEPLOY_SUCCESSOR_CONFIRMATION = (
 ROLLBACK_CONFIRMATION = "ROLLBACK STAGING TELEGRAM DELIVERY TO LEGACY"
 REHEARSE_CONFIRMATION = "REHEARSE STAGING TELEGRAM DELIVERY FORWARD ROLLBACK"
 FOREIGN_BOT_CONTAINER = "trading_bot_staging-bot-1"
+FOREIGN_BOT_EXECUTOR_CONTAINER = "trading_bot_staging-bot_executor-1"
 FOREIGN_APP_CONTAINER = "trading_bot_staging-foreign_app-1"
 FOREIGN_SYNC_CONTAINER = "trading_bot_staging-foreign_sync_worker-1"
 FOREIGN_DB_CONTAINER = "trading_bot_staging-db-1"
@@ -141,6 +142,7 @@ STAGING_IMAGE_REPOSITORY = "trading_bot_staging_app"
 IRAN_IMAGE_TRANSFER_ROOT = "/root/.trading-bot-staging-image-transfer"
 REDEPLOY_RUNTIME_CONTAINERS = (
     FOREIGN_BOT_CONTAINER,
+    FOREIGN_BOT_EXECUTOR_CONTAINER,
     FOREIGN_APP_CONTAINER,
     IRAN_APP_CONTAINER,
     FOREIGN_SYNC_CONTAINER,
@@ -588,6 +590,8 @@ def _enumerate_bot_containers(role: str) -> list[dict[str, Any]]:
                 for key in (
                     "TRADING_BOT_SERVICE",
                     "SERVER_MODE",
+                    "TELEGRAM_BOT_RUNTIME_ROLE",
+                    "TELEGRAM_BOT_SPLIT_ENABLED",
                     "TELEGRAM_DELIVERY_EXECUTION_OWNER",
                     "TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED",
                 )
@@ -651,42 +655,107 @@ def executor_inventory_from_observation(
     staging = [
         record for record in foreign_records if record.get("scope") == "staging"
     ]
-    if len(staging) > 1:
+    if len(staging) > 2:
         raise StagingCutoverError("duplicate_staging_executor_container")
 
     owner: str | None = None
     legacy_enabled = False
     queue_enabled = False
+    topology = "stopped"
+    queue_owner_records: list[dict[str, Any]] = []
     if staging:
-        record = staging[0]
-        env = dict(record.get("runtime_env") or {})
-        decision = dict(record.get("runtime_decision") or {})
-        if (
-            record.get("name") != FOREIGN_BOT_CONTAINER
-            or record.get("project") != FOREIGN_STAGING_PROJECT
-            or record.get("service") != "bot"
-            or record.get("environment") != "staging"
-            or int(record.get("bot_process_count") or 0) != 1
-            or str(env.get("TRADING_BOT_SERVICE") or "") != "bot"
-            or str(env.get("SERVER_MODE") or "") != "foreign"
-        ):
-            raise StagingCutoverError("executor_container_identity_mismatch")
-        owner = str(env.get("TELEGRAM_DELIVERY_EXECUTION_OWNER") or "").lower()
-        queue_flag = (
-            str(env.get("TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED") or "").lower()
-            == "true"
-        )
-        legacy_enabled = decision.get("legacy_workers_enabled") is True
-        queue_enabled = decision.get("queue_worker_enabled") is True
-        mode = str(decision.get("mode") or "").lower()
-        if (
-            owner not in {"legacy", "queue-v1"}
-            or mode != owner
-            or queue_flag != queue_enabled
-            or (owner == "legacy" and (not legacy_enabled or queue_enabled))
-            or (owner == "queue-v1" and (legacy_enabled or not queue_enabled))
-        ):
-            raise StagingCutoverError("executor_runtime_ownership_mismatch")
+        normalized: list[tuple[dict[str, Any], dict[str, Any], str, bool]] = []
+        for record in staging:
+            env = dict(record.get("runtime_env") or {})
+            decision = dict(record.get("runtime_decision") or {})
+            runtime_role = str(
+                env.get("TELEGRAM_BOT_RUNTIME_ROLE") or "all"
+            ).strip().lower()
+            split_enabled = str(
+                env.get("TELEGRAM_BOT_SPLIT_ENABLED") or "false"
+            ).strip().lower() == "true"
+            record_owner = str(
+                env.get("TELEGRAM_DELIVERY_EXECUTION_OWNER") or ""
+            ).lower()
+            queue_flag = str(
+                env.get("TELEGRAM_DELIVERY_QUEUE_WORKER_ENABLED") or ""
+            ).lower() == "true"
+            record_legacy = decision.get("legacy_workers_enabled") is True
+            record_queue = decision.get("queue_worker_enabled") is True
+            mode = str(decision.get("mode") or "").lower()
+            if (
+                record.get("project") != FOREIGN_STAGING_PROJECT
+                or record.get("environment") != "staging"
+                or int(record.get("bot_process_count") or 0) != 1
+                or str(env.get("TRADING_BOT_SERVICE") or "") != "bot"
+                or str(env.get("SERVER_MODE") or "") != "foreign"
+            ):
+                raise StagingCutoverError(
+                    "executor_container_identity_mismatch"
+                )
+            if (
+                record_owner not in {"legacy", "queue-v1"}
+                or mode != record_owner
+                or queue_flag != record_queue
+                or (
+                    record_owner == "legacy"
+                    and (not record_legacy or record_queue)
+                )
+                or (
+                    record_owner == "queue-v1"
+                    and (record_legacy or not record_queue)
+                )
+            ):
+                raise StagingCutoverError(
+                    "executor_runtime_ownership_mismatch"
+                )
+            normalized.append((record, env, runtime_role, split_enabled))
+
+        if len(normalized) == 1:
+            record, env, runtime_role, split_enabled = normalized[0]
+            if (
+                record.get("name") != FOREIGN_BOT_CONTAINER
+                or record.get("service") != "bot"
+                or runtime_role != "all"
+                or split_enabled
+            ):
+                raise StagingCutoverError(
+                    "executor_container_identity_mismatch"
+                )
+            owner = str(env["TELEGRAM_DELIVERY_EXECUTION_OWNER"]).lower()
+            topology = "combined"
+            queue_owner_records = [record]
+        else:
+            by_role = {
+                runtime_role: (record, env, split_enabled)
+                for record, env, runtime_role, split_enabled in normalized
+            }
+            if len(by_role) != 2 or set(by_role) != {"primary", "executor"}:
+                raise StagingCutoverError(
+                    "executor_split_role_set_invalid"
+                )
+            primary, primary_env, primary_split = by_role["primary"]
+            executor, executor_env, executor_split = by_role["executor"]
+            if (
+                primary.get("name") != FOREIGN_BOT_CONTAINER
+                or primary.get("service") != "bot"
+                or executor.get("name") != FOREIGN_BOT_EXECUTOR_CONTAINER
+                or executor.get("service") != "bot_executor"
+                or not primary_split
+                or not executor_split
+                or primary_env.get("TELEGRAM_DELIVERY_EXECUTION_OWNER")
+                != "queue-v1"
+                or executor_env.get("TELEGRAM_DELIVERY_EXECUTION_OWNER")
+                != "queue-v1"
+            ):
+                raise StagingCutoverError(
+                    "executor_split_topology_invalid"
+                )
+            owner = "queue-v1"
+            topology = "split"
+            queue_owner_records = [executor]
+        legacy_enabled = owner == "legacy"
+        queue_enabled = owner == "queue-v1"
     if expected_owner is None and staging:
         raise StagingCutoverError("executor_expected_zero")
     if expected_owner in {"legacy", "queue-v1"} and owner != expected_owner:
@@ -706,9 +775,10 @@ def executor_inventory_from_observation(
         "observed_at": _utc_now(),
         "environment": "staging",
         "inventory_scope": "all-running-containers-and-host-processes-on-both-hosts",
-        "executor_count": 1 if staging else 0,
+        "executor_count": len(queue_owner_records),
         "execution_owner": owner,
         "bot_running": bool(staging),
+        "runtime_topology": topology,
         "legacy_workers_enabled": legacy_enabled,
         "queue_worker_enabled": queue_enabled,
         "executor_overlap": False,
@@ -725,16 +795,24 @@ def executor_inventory_from_observation(
             },
         },
         "containers": {
-            "foreign_staging_executor_count": len(staging),
+            "foreign_staging_executor_count": len(queue_owner_records),
+            "foreign_staging_bot_process_count": len(staging),
             "iran_executor_count": 0,
             "ambiguous_executor_count": 0,
             "other_known_environment_process_count": other_environment_count,
         },
         "expected_container": {
-            "name": FOREIGN_BOT_CONTAINER if staging else None,
+            "name": (
+                queue_owner_records[0].get("name")
+                if queue_owner_records
+                else None
+            ),
             "project": FOREIGN_STAGING_PROJECT if staging else None,
             "process_count": 1 if staging else 0,
         },
+        "expected_containers": [
+            record.get("name") for record in staging
+        ],
         "process_identifiers_disclosed": False,
         "secret_values_disclosed": False,
     }
@@ -1477,6 +1555,9 @@ def build_status() -> dict[str, Any]:
     binding = _git_binding()
     inventory = collect_executor_inventory(expected_owner="queue-v1")
     foreign_bot = _redacted_runtime(FOREIGN_BOT_CONTAINER, "bot")
+    foreign_executor = _redacted_runtime(
+        FOREIGN_BOT_EXECUTOR_CONTAINER, "bot"
+    )
     if (
         foreign_bot.get("service") != "bot"
         or foreign_bot.get("server_mode") != "foreign"
@@ -1485,6 +1566,14 @@ def build_status() -> dict[str, Any]:
         or foreign_bot.get("missing_required")
     ):
         raise StagingCutoverError("bot_runtime_contract_not_ready")
+    if (
+        foreign_executor.get("service") != "bot"
+        or foreign_executor.get("server_mode") != "foreign"
+        or foreign_executor.get("environment") != "staging"
+        or foreign_executor.get("release_sha") != binding.get("head")
+        or foreign_executor.get("missing_required")
+    ):
+        raise StagingCutoverError("bot_executor_runtime_contract_not_ready")
     api_runtime = collect_api_runtime_evidence(
         expected_release_sha=binding["head"],
         include_iran=True,
@@ -1495,6 +1584,7 @@ def build_status() -> dict[str, Any]:
         "git": binding,
         "executor_inventory": inventory,
         "foreign_bot": foreign_bot,
+        "foreign_bot_executor": foreign_executor,
         "api_runtime": api_runtime,
         "publisher_runtime": publisher_runtime,
         "executor_overlap": False,
@@ -2760,6 +2850,7 @@ def _resume_redeploy_runtime(containers: Sequence[str]) -> list[dict[str, Any]]:
         IRAN_APP_CONTAINER,
         FOREIGN_SYNC_CONTAINER,
         IRAN_SYNC_CONTAINER,
+        FOREIGN_BOT_EXECUTOR_CONTAINER,
         FOREIGN_BOT_CONTAINER,
     ):
         if container not in requested:
@@ -4022,7 +4113,12 @@ def _redeploy_queue_v1_locked(
 
         foreign_release = _runtime_release_evidence(
             "foreign",
-            (FOREIGN_BOT_CONTAINER, FOREIGN_APP_CONTAINER, FOREIGN_SYNC_CONTAINER),
+            (
+                FOREIGN_BOT_CONTAINER,
+                FOREIGN_BOT_EXECUTOR_CONTAINER,
+                FOREIGN_APP_CONTAINER,
+                FOREIGN_SYNC_CONTAINER,
+            ),
             expected_head=release_sha,
             expected_tree=release_tree,
             expected_source_digest=source_digest,

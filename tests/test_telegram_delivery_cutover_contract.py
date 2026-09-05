@@ -35,6 +35,7 @@ from scripts.cutover_telegram_delivery_queue_staging import (
     API_SURFACES,
     EXPECTED_QUEUE_IDENTITIES,
     FOREIGN_BOT_CONTAINER,
+    FOREIGN_BOT_EXECUTOR_CONTAINER,
     FOREIGN_STAGING_PROJECT,
     StagingCutoverError,
     _assert_quiesced_snapshot,
@@ -103,6 +104,30 @@ class TelegramDeliveryCutoverContractTests(unittest.TestCase):
                 "queue_worker_enabled": queue_enabled,
             },
         }
+
+    @classmethod
+    def _split_executor_records(cls):
+        primary = cls._executor_record(process_ids=(101,))
+        primary["runtime_env"].update(
+            {
+                "TELEGRAM_BOT_RUNTIME_ROLE": "primary",
+                "TELEGRAM_BOT_SPLIT_ENABLED": "true",
+            }
+        )
+        executor = cls._executor_record(process_ids=(102,))
+        executor.update(
+            {
+                "name": FOREIGN_BOT_EXECUTOR_CONTAINER,
+                "service": "bot_executor",
+            }
+        )
+        executor["runtime_env"].update(
+            {
+                "TELEGRAM_BOT_RUNTIME_ROLE": "executor",
+                "TELEGRAM_BOT_SPLIT_ENABLED": "true",
+            }
+        )
+        return primary, executor
 
     @staticmethod
     def _publisher_values():
@@ -348,6 +373,62 @@ class TelegramDeliveryCutoverContractTests(unittest.TestCase):
             evidence["containers"]["other_known_environment_process_count"], 1
         )
         self.assertFalse(evidence["process_identifiers_disclosed"])
+
+    def test_staging_executor_inventory_accepts_split_primary_and_executor(self):
+        primary, executor = self._split_executor_records()
+        evidence = executor_inventory_from_observation(
+            foreign_containers=[primary, executor],
+            iran_containers=[],
+            foreign_host_process_ids=[101, 102],
+            iran_host_process_ids=[],
+            expected_owner="queue-v1",
+        )
+        self.assertEqual(evidence["executor_count"], 1)
+        self.assertEqual(evidence["execution_owner"], "queue-v1")
+        self.assertEqual(evidence["runtime_topology"], "split")
+        self.assertEqual(
+            evidence["expected_container"]["name"],
+            FOREIGN_BOT_EXECUTOR_CONTAINER,
+        )
+        self.assertEqual(
+            evidence["containers"]["foreign_staging_bot_process_count"],
+            2,
+        )
+
+    def test_staging_executor_inventory_rejects_incomplete_split_roles(self):
+        primary, executor = self._split_executor_records()
+        executor["runtime_env"]["TELEGRAM_BOT_RUNTIME_ROLE"] = "primary"
+        with self.assertRaisesRegex(
+            StagingCutoverError, "executor_split_role_set_invalid"
+        ):
+            executor_inventory_from_observation(
+                foreign_containers=[primary, executor],
+                iran_containers=[],
+                foreign_host_process_ids=[101, 102],
+                iran_host_process_ids=[],
+                expected_owner="queue-v1",
+            )
+
+    def test_redeploy_runtime_contract_and_recovery_cover_split_executor(self):
+        self.assertIn(
+            FOREIGN_BOT_EXECUTOR_CONTAINER,
+            staging_cutover.REDEPLOY_RUNTIME_CONTAINERS,
+        )
+        requested = staging_cutover.REDEPLOY_RUNTIME_CONTAINERS
+        with patch.object(
+            staging_cutover, "_container_running", return_value=False
+        ), patch.object(
+            staging_cutover,
+            "_start_container",
+            side_effect=lambda container: {"container": container},
+        ):
+            events = staging_cutover._resume_redeploy_runtime(requested)
+        started = [event["container"] for event in events]
+        self.assertIn(FOREIGN_BOT_EXECUTOR_CONTAINER, started)
+        self.assertLess(
+            started.index(FOREIGN_BOT_EXECUTOR_CONTAINER),
+            started.index(FOREIGN_BOT_CONTAINER),
+        )
 
     def test_staging_executor_inventory_rejects_duplicate_process(self):
         with self.assertRaisesRegex(
@@ -699,7 +780,7 @@ class TelegramDeliveryCutoverContractTests(unittest.TestCase):
             return_value=inventory,
         ) as executor, patch.object(
             staging_cutover, "_redacted_runtime", return_value=bot
-        ), patch.object(
+        ) as runtime_probe, patch.object(
             staging_cutover,
             "collect_api_runtime_evidence",
             return_value=api,
@@ -710,6 +791,13 @@ class TelegramDeliveryCutoverContractTests(unittest.TestCase):
         ) as publisher_probe:
             status = staging_cutover.build_status()
         executor.assert_called_once_with(expected_owner="queue-v1")
+        self.assertEqual(
+            runtime_probe.call_args_list,
+            [
+                unittest.mock.call(FOREIGN_BOT_CONTAINER, "bot"),
+                unittest.mock.call(FOREIGN_BOT_EXECUTOR_CONTAINER, "bot"),
+            ],
+        )
         api_probe.assert_called_once_with(
             expected_release_sha="a" * 40,
             include_iran=True,
@@ -971,7 +1059,7 @@ class TelegramDeliveryCutoverContractTests(unittest.TestCase):
             legacy_foreign = mocked("_deploy_foreign")
             legacy_iran = mocked("_deploy_iran")
             mocked("build_status", return_value=status)
-            mocked(
+            runtime_release = mocked(
                 "_runtime_release_evidence",
                 side_effect=({"role": "foreign"}, {"role": "iran"}),
             )
@@ -995,6 +1083,10 @@ class TelegramDeliveryCutoverContractTests(unittest.TestCase):
         )
         legacy_foreign.assert_not_called()
         legacy_iran.assert_not_called()
+        self.assertIn(
+            FOREIGN_BOT_EXECUTOR_CONTAINER,
+            runtime_release.call_args_list[0].args[1],
+        )
         rsync_iran.assert_called_once_with(
             expected_head="a" * 40,
             expected_tree="b" * 40,
