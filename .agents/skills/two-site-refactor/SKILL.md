@@ -16,6 +16,12 @@ must enforce its combined output cap while draining the CLI and must verify the 
 CLI version and SHA before and after every provider call; a directory name is never
 version evidence.
 
+For unattended execution, `scripts/two_site_codex_autopilot.py` is the only current
+Supervisor and `scripts/two_site_autopilot_tmux.sh` is its launcher. Each fresh Codex
+cycle must finish one bounded unit in a clean commit before continuation. The local
+Supervisor, not model text, verifies ancestry, clean state, protected refs and control
+files. A no-progress `CONTINUE`, ambiguous mutation or external gate stops the loop.
+
 For Stage work also read execution-order.yaml, the matching card/Assignment,
 relevant governance clauses and exact receipts; load MASTER_PLAN sections relevant
 to that task, not all sections for every small correction. Give Gemini complete
@@ -31,8 +37,10 @@ environment authorization refusal. Stage state and external-action gates stay in
 
 One bounded live Worker → independent Codex verification → tests → commit cycle is
 documented in reviews/AUTOMATION_PROPOSAL_LIVE_20260905.md under the two-server docs.
-This is not a daemon, production/Stage acceptance, legacy gateway activation or
-proof that every future Stage is ready. Recheck affected evidence after main merges.
+This is not a reboot-persistent daemon, production/Stage acceptance, legacy gateway
+activation or proof that every future Stage is ready. The approved tmux Supervisor can
+continue after the interactive chat closes, while the host/session remains alive.
+Recheck affected evidence after main merges.
 
 The remainder describes the PAUSED legacy custom-agent profile, not startup for the
 proposal path. Load its resources only for an explicitly scoped legacy diagnosis or

@@ -123,8 +123,36 @@ prompt، stream، status، نتیجه و diff است. hash فایل و شناس�
 بدون تعیین تکلیف حذف نمی‌شود. تمدید نیازمند علت و موعد جدید است. این runner سرویس
 پاکسازی زمان‌بندی‌شده نصب نمی‌کند؛ deadline به‌تنهایی ادعای انجام حذف نیست.
 
-این نسخه در زمان فعال‌بودن Codex handoffها را مدیریت می‌کند. daemon دائمی یا تضمین
-ادامهٔ پردازش پس از بسته‌شدن گفت‌وگو ایجاد نشده است؛ بازیابی از شواهد محلی انجام می‌شود.
+## اجرا بدون گفتگوی باز
+
+`scripts/two_site_codex_autopilot.py` یک Supervisor محدود برای اجرای پشت‌سرهم
+`codex exec` است. مدل Coordinator روی `gpt-6-astra` با reasoning=`high` و CLI روی
+نسخه/SHA بازبینی‌شده pin شده است؛ authentication پیش از هر چرخه بررسی می‌شود و هر
+invocation نشست تازه و ephemeral دارد. هر چرخه فقط پس از یک commit واقعی، ancestry
+صحیح، worktree تمیز، ثبات refهای `main`/`origin/main`/candidate و ثبات فایل‌های کنترلی
+به چرخهٔ بعد می‌رود. نبود پیشرفت، dirty tree، بازنویسی history، تغییر ref محافظت‌شده،
+خروجی نامعتبر یا gate بیرونی چرخه را متوقف می‌کند؛ مدل نمی‌تواند با نوشتن `CONTINUE`
+این کنترل‌های محلی را دور بزند.
+
+راه‌انداز محلی:
+
+```bash
+scripts/two_site_autopilot_tmux.sh start
+scripts/two_site_autopilot_tmux.sh status
+scripts/two_site_autopilot_tmux.sh logs
+```
+
+پس از `start`، بازبودن صفحه یا گفتگوی Codex لازم نیست؛ session با نام
+`two-site-autopilot` تا وقتی میزبان و `tmux` زنده‌اند ادامه می‌یابد. این سرویس دائمی
+پس از reboot نیست؛ وضعیت canonical در Git و شواهد محدود زیر
+`.local/two-site-refactor/autopilot/` بازیابی می‌شود. `stop` پس از چرخهٔ جاری و
+`stop-now` با signal و توقف process group خاتمه می‌دهد.
+
+خروجی هر Codex حین stream به ۱۶ مگابایت محدود، timeout هر چرخه سه ساعت و تعداد کل
+چرخه‌ها ۲۰۰ است. فقط ۲۰ run عادی آخر حفظ می‌شود؛ شاهد `BLOCKED` برای بررسی باقی
+می‌ماند. Supervisor هیچ gate تولید/DNS/Writer/secret را مجاز نمی‌کند و gateway قدیمی
+را فعال نمی‌کند. مسیر مستقلِ Codex، proposal Gemini را review، تغییر پذیرفته‌شده را
+اعمال، تست و commit می‌کند؛ شکست معمولی حداکثر دو retry دارد و تغییر مبهم retry نمی‌شود.
 
 ## مرز پذیرش
 
@@ -135,7 +163,15 @@ APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
   python3 -m unittest tests.test_two_site_proposal_runner -v
 ```
 
-این تست‌ها CLI را mock می‌کنند و به Google وصل نمی‌شوند. شاهد جداگانهٔ زنده، Worker
+این تست‌ها CLI را mock می‌کنند و به Google وصل نمی‌شوند. تست Supervisor نیز آفلاین
+است و قرارداد state، ثبات ref/control، no-progress، retention و command امن را می‌سنجد:
+
+```bash
+APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
+  python3 -m unittest tests.test_two_site_codex_autopilot -v
+```
+
+شاهد جداگانهٔ زنده، Worker
 واقعی، تغییرِ اعمال‌شده، تست، review مستقل و commit را ثبت می‌کند. نه این شاهد و نه
 تست‌ها به معنی پذیرش Stage یا آمادگی تولید نیستند. Web/Bot، deploy، DNS و انتقال
 انسانی Web Writer با این تغییر دست‌نخورده می‌مانند.

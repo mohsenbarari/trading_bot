@@ -1,6 +1,6 @@
 # Documentation Execution
 
-- 2026-09-05 | The active proposal runner enforces one streaming stdout+stderr cap and kills on excess. It pins Antigravity by reported `1.1.27` plus reviewed SHA before/after calls and uses a version-neutral local directory. The paused `1.1.26` adapter stays legacy.
+- 2026-09-05 | The proposal runner enforces one streaming stdout+stderr cap and pins Antigravity `1.1.27` plus SHA before/after calls; its directory is version-neutral. Unattended work uses the bounded Codex/tmux Supervisor: only clean descendant commits continue; ref/control drift, no progress or external gates stop. The `1.1.26` adapter stays legacy.
 - 2026-09-05 | A bounded Gemini proposal → independent Codex verification → controller apply/test/commit cycle is validated; 26 runner tests passed. See `PROPOSAL_AUTOMATION.md`. No Stage/production acceptance; legacy gateway stays paused.
 - Gateway candidate `1290009d` remains unaccepted/uninstalled after `CHANGES_REQUIRED`: effects preceded ownership proof and recovery state was unsafe. Evidence: `.local/two-site-refactor/governance-bundles/ANTIGRAVITY-GATEWAY-20260905-001/`.
 - Gateway safety requires locked request/schema/owner validation before effects, complete rollback prevalidation, exact baseline for removal, and final-state proof before receipts/journal deletion. Canonical detail: `EXECUTION_GOVERNANCE.md` and `TYPED_GATEWAY.md`.

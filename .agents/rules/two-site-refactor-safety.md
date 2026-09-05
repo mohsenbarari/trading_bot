@@ -22,6 +22,9 @@ Hard invariants:
   independent acceptance, evidence and external/human Writer gates still apply.
   Enforce stdout+stderr limits during streaming, and fail closed if the pinned CLI
   version/SHA changes before, during or after a run; path names are not version proof.
+  Unattended cycles use only the bounded Codex Supervisor/tmux launcher. Continue only
+  after a clean descendant commit with unchanged protected refs and control blobs;
+  no-progress, ambiguous mutation or an external gate stops the loop.
 
 - One Execution Coordinator owns the integration branch and ledger. One writing Worker
   is the default; a second requires the exact Codex pairing receipt and disjoint paths,
