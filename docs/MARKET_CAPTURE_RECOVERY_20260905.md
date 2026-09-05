@@ -81,5 +81,39 @@ Operational receipt: `incident-recovery/20260905-account1/handoff.json` on wa-fi
 Future broader upgrades must account for this scoped Account1 marker/image and
 must not blindly replace it with the parent pipeline's older release.
 
+## Separate processor failure found during end-to-end verification
+
+The final Product probe at 07:31:41 UTC returned NO_FRESH_MELTED again. This was
+not treated as success despite Account1's healthy live sequence. Read-only
+diagnostics found the unchanged f3be9ae2 processor had exhausted its restart
+budget and exited at 07:15:59 UTC, BEFORE Account1 activation at 07:27:53 UTC.
+The specific error was ForeignKeyViolation on
+`private_gold_outcomes_offer_fact_id_fkey`: an outcome's real offer parent existed
+in the canonical SQLite observations but had not been projected to PostgreSQL.
+
+A bounded, indexed inspection found two candidate roots and exactly one missing
+parent. The allowlisted missing-root scope digest was
+`7fefe6fc0affe0379c98ce0180d3a5ad402d0dd2c2ef2ba52e37c4c33e0d6529`.
+The source script is `scripts/incident_private_gold_parent_repair_20260905.py`.
+It uses the existing runtime's canonical exporter and research-context archive,
+requires the processor owner lock, refuses scope drift, commits PostgreSQL
+before the SQLite export ledger, and never synthesizes or deletes observations.
+The initial read-only query was too expensive; its isolated inspection container
+was stopped and the query replaced with indexed event-key lookup and a 25-second
+execution bound. No production service was stopped for that diagnostic change.
+
+The exact one parent was published successfully; no constraint was disabled.
+The same processor container/image/config was restarted at 07:43:39 UTC.
+At 07:44:51 its counters showed 100 archived facts, zero archive rejection, and
+no unavailable research contexts. Fact transport showed zero rejection/dead
+letters and a short queue. At 07:47:35 UTC Product again had 13 estimated rates;
+ONE_GRAM/CASH remained NO_SAFE_SAME_COMMODITY_ANCHOR, without a fabricated value.
+Historical probe prices subsequently ranked differently against refreshed rates;
+the old IMAM outcome is a time-bound probe, not a fixed acceptance expectation.
+
+This repair resolves the observed dependency, not the underlying general
+parent-first export-order bug. A bounded dependency-order regression/fix remains
+a separate follow-up; do not claim all processor failure modes are prevented.
+
 No Product deployment, Queue-v1 change, authority switch to PRIVATE_PRIMARY,
 Git push, database migration, or staging runtime change was performed.
