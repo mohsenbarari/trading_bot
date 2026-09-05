@@ -124,9 +124,9 @@ missing/malformed receipt, changed SHA, inaccessible registered
 worktree, killed Worker without a complete handoff, or CLI/auth failure is never
 implicit approval.
 
-Codex Stage, closeout, and governance review bridges are pinned to `gpt-6-astra` with
-`high` reasoning and a read-only sandbox. Do not rely on a caller's default model or
-reasoning configuration for final acceptance.
+Codex Stage, closeout, governance, and autonomous final-review paths are pinned to
+`gpt-5.6-sol` with `xhigh` reasoning and a read-only sandbox. Do not rely on a
+caller's default model or reasoning configuration for final acceptance.
 
 After verified closeout and fence `advance`, select the next dependency-ready candidate and
 run fenced `stage-open-check`. Unknown metadata and production/destructive/DNS/Writer/secret

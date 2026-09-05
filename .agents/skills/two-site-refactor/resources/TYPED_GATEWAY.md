@@ -178,7 +178,7 @@ After exact-SHA `APPROVE`: `closeout-prepare` → `closeout-review` →
 `closeout-commit` → `closeout-advance` → `next-stage-prepare` →
 `next-stage-commit` → `next-stage-bind` → delegate the new Worker.
 
-All three Codex review bridges pin `gpt-6-astra` with `high` reasoning in a read-only
+All three Codex review bridges pin `gpt-5.6-sol` with `xhigh` reasoning in a read-only
 sandbox. Antigravity execution remains pinned separately to `gemini-3.8-flash-high`.
 
 Never skip a receipt edge, manufacture an approval, use an arbitrary command, change
