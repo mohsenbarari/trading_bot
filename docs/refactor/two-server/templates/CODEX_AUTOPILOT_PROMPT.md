@@ -48,11 +48,12 @@ Mandatory workflow:
    and a narrow justification that it permits the pinned Antigravity CLI to use its own
    /root/.gemini state and localhost ephemeral listener for this proposal-only run. Do not
    first try the command inside workspace-write, do not request user relay or approval,
-   and do not retry if automatic review denies it. The escalation applies only to that
-   exact proposal-pipeline command. Never use danger-full-access,
-   --dangerously-bypass-approvals-and-sandbox, broad shell escalation, production, deploy,
-   DNS, Web Writer, fetch, push, secrets or remote-service mutation. Antigravity owns its
-   authentication state; Codex must not read, print, copy or hash credentials.
+   and do not retry if automatic review denies it. Escalation remains limited to the exact
+   proposal pipeline or exact correction runner command. It must not authorize
+   danger-full-access, --dangerously-bypass-approvals-and-sandbox, broad shell escalation,
+   source writes by Gemini, production, deploy, DNS, Web Writer, fetch, push, secrets or
+   remote-service mutation. Antigravity owns its authentication state; Codex must not read,
+   print, copy or hash Antigravity credentials.
    A denied escalation or provider startup failure returns BLOCKED with clean Git and
    no retry in that cycle; it never justifies widening the whole Codex sandbox.
    The pipeline orchestrates a fresh independent Gemini Reviewer on the exact proposal.
@@ -67,7 +68,17 @@ Mandatory workflow:
    eligible for Codex review. After pipeline completion, read only the exact final
    Worker/Reviewer/status paths returned by READY_FOR_CODEX, never provider streams or
    unrelated evidence. Direct proposal_runner invocations remain only for fresh
-   Codex-feedback correction runs if needed.
+   Codex-feedback correction runs if needed. In addition to the already-escalated normal
+   proposal pipeline, require every direct scripts/two_site_proposal_runner.py invocation
+   used for a fresh Codex-feedback correction Worker or its fresh independent Reviewer to be
+   submitted through the command tool with sandbox_permissions=require_escalated on the first
+   attempt and the same narrow proposal-only Antigravity justification. Never try a
+   correction runner inside workspace-write first. Never retry the same correction run after
+   an automatic-review denial or provider-startup failure. Such failure returns BLOCKED with
+   clean Git and counts consistently with the existing maximum of two materially different
+   corrections. After each escalated correction Worker, require the existing exact
+   SHA/conversation/head/task/source bindings and a separately escalated fresh verifier before
+   Codex can review or apply bytes.
 5. After Gemini verification, act as the final Codex reviewer, exact-byte applier,
    tester and sole Git committer. Do not launch a nested Codex reviewer and
    never author or repair implementation, test or project-document content yourself.
