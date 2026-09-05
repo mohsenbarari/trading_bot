@@ -606,7 +606,22 @@ def run_service(role: str) -> int:
     return 0
 
 
-def run_healthcheck(role: str, max_age_seconds: float) -> int:
+def _run_healthcheck(
+    role: str,
+    max_age_seconds: float,
+    *,
+    require_capture_replay_complete: bool,
+) -> int:
+    """Validate a durable role heartbeat.
+
+    ``healthcheck`` is deliberately a promotion/readiness gate: a capture
+    replay with an unresolved quarantine is not eligible for promotion even
+    when its live subscription is receiving and durably writing updates.
+    Docker also needs a narrower liveness signal so an auditable, historical
+    replay quarantine cannot label that otherwise healthy live owner as dead.
+    Both paths keep every operational invariant below; only the promotion-only
+    quarantine requirement is optional for capture liveness.
+    """
     validate_role(role)
     path = role_state(role) / "health.json"
     try:
@@ -634,7 +649,7 @@ def run_healthcheck(role: str, max_age_seconds: float) -> int:
                 quarantined = backfill.get("quarantined", 0)
                 if type(quarantined) is not int or quarantined < 0:
                     raise FoundationError("capture_heartbeat_schema_invalid")
-                if quarantined:
+                if quarantined and require_capture_replay_complete:
                     raise FoundationError("capture_replay_requires_review")
             mode = document.get("mode")
             allowed_statuses = {f"{mode}-ready"}
@@ -791,6 +806,35 @@ def run_healthcheck(role: str, max_age_seconds: float) -> int:
     return 0
 
 
+def run_healthcheck(role: str, max_age_seconds: float) -> int:
+    """Run the strict readiness/promotion probe for any Market role."""
+    return _run_healthcheck(
+        role,
+        max_age_seconds,
+        require_capture_replay_complete=True,
+    )
+
+
+def run_capture_liveness_check(role: str, max_age_seconds: float) -> int:
+    """Run the Docker liveness probe for a live Telegram capture owner.
+
+    This is intentionally restricted to capture roles. It still validates the
+    role, schema, source inventory, live status, heartbeat age and PID, and it
+    still rejects a current replay-blocked/degraded owner. A retained
+    point-in-time historical quarantine remains visible to the strict
+    ``healthcheck`` promotion gate, but does not make an actively capturing
+    container unhealthy.
+    """
+    validate_role(role)
+    if role not in CAPTURE_ROLES:
+        raise FoundationError("capture_liveness_role_invalid")
+    return _run_healthcheck(
+        role,
+        max_age_seconds,
+        require_capture_replay_complete=False,
+    )
+
+
 def _read_secret(path: str, *, label: str) -> str:
     value = Path(path).read_text(encoding="utf-8").strip()
     if not value:
@@ -895,6 +939,12 @@ def build_parser() -> argparse.ArgumentParser:
     health = commands.add_parser("healthcheck", help="validate durable role health")
     health.add_argument("--role", choices=sorted(ROLES), required=True)
     health.add_argument("--max-age-seconds", type=float, default=30.0)
+    liveness = commands.add_parser(
+        "capture-liveness",
+        help="validate live capture liveness without waiving replay promotion",
+    )
+    liveness.add_argument("--role", choices=sorted(CAPTURE_ROLES), required=True)
+    liveness.add_argument("--max-age-seconds", type=float, default=30.0)
     migrate = commands.add_parser("migrate", help="apply the isolated archive migration")
     migrate.add_argument("--migration", type=Path, default=DEFAULT_MIGRATION)
     return parser
@@ -910,6 +960,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not 1 <= args.max_age_seconds <= 300:
                 parser.error("--max-age-seconds must be between 1 and 300")
             return run_healthcheck(args.role, args.max_age_seconds)
+        if args.command == "capture-liveness":
+            if not 1 <= args.max_age_seconds <= 300:
+                parser.error("--max-age-seconds must be between 1 and 300")
+            return run_capture_liveness_check(args.role, args.max_age_seconds)
         if args.command == "migrate":
             return run_migration(args.migration)
     except FoundationError as exc:

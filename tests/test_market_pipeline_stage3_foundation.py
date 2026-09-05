@@ -238,6 +238,8 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
         )[0]
         self.assertIn('restart: "on-failure"', capture_account1)
         self.assertIn('restart: "on-failure"', capture_account2)
+        self.assertIn("capture-liveness", capture_account1)
+        self.assertIn("capture-liveness", capture_account2)
         self.assertEqual(web.count("ports:"), 1)
         self.assertEqual(bot.count("ports:"), 1)
         receiver_mount = bot.split(
