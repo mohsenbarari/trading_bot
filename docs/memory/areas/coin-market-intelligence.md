@@ -1,6 +1,6 @@
 # Coin Market Intelligence
 
-- Sep05: `1f972a48` live; quarantine retained. Processor FK repaired; exporter enforces canonical parent-first projection. `docs/MARKET_CAPTURE_RECOVERY_20260905.md`. Check Product rates.
+- Sep05: `1f972a48` Capture and `9c613d39` parent-first processor are live; quarantine retained. `docs/MARKET_CAPTURE_RECOVERY_20260905.md`. Check Product rates.
 
 - Settlement: future=`خ ن ف/ف ن ف`,`خ ف/ف ف` or absent; cash=`خ ن/ف ن/نق`; future wins.
 - Units: project-thousands; accept full-Toman/separators/zeros. Resolve tails by family. `رب`=quarter; `پ/ت پ/پایین`=low-date; duplicated-zero needs family.

@@ -118,7 +118,43 @@ same savepoint. Identity/source/type must match. Identical fact replay repairs a
 missing projection without emitting a revision or duplicate outbox delivery.
 Research context remains in the same transaction. Four new dependency tests and
 the wider Market suite passed: 375 passed, 6 environment-skipped. Deployment of
-this processor code is tracked separately from the already-live Account1 fix.
+this processor code was tracked separately from the already-live Account1 fix.
+
+## Scoped processor deployment
+
+The parent-first implementation is commit
+`9c613d39a14f7e42782fc40a50db87e709d735d7`, tree
+`d5258a836ab7762b95e015c6c715de73c7cb1964`. Its exact production image has
+portable content digest
+`ae3ec92e4e5f50ce00bf671a7a94e5c51a8568c41c342d2a26458c4596177b3e` and
+wa-fi image ID
+`sha256:b873801dca5983c1ac97068b14baa755c2031d438cf447d393cbdb4c749faa0a`.
+
+At 08:04:25 UTC a digest-pinned, processor-only handoff completed with status
+`APPLIED_LIVE`. The pre-existing production-maintenance record remained bound to
+4ef8e6dc and byte-for-byte unchanged. Only `market-processor` was recreated; all
+bystander containers retained their identity, image, and start time. The new
+processor was healthy with restart count zero, a release-bound fresh heartbeat,
+100 archived facts, zero archive rejection, and zero unavailable research
+contexts. Automatic rollback to the prior exact image/config was armed but not
+needed.
+
+The scoped handoff tool is
+`scripts/incident_processor_parent_handoff_20260905.py`; its four fail-closed
+guard tests passed. Its journal is
+`incident-recovery/20260905-processor/handoff.json` on wa-fi and refuses blind
+repeat execution. The tool validates the full rendered Compose delta, immutable
+image digest, single state owner, unchanged mounts/bystanders/parent lock, and
+fresh release-bound health before declaring success.
+
+Post-handoff observations confirmed that Account1 itself was not recreated:
+the same container/image/start time remained, restart count stayed zero, and its
+live capture sequence advanced from 2551670 to 2551690 in eight seconds with an
+empty outbox. Its Docker status remains deliberately degraded solely for the
+retained historical replay quarantine. Product's 08:08:06 UTC snapshot contained
+13 estimated rates out of 14; only ONE_GRAM/CASH remained
+`NO_SAFE_SAME_COMMODITY_ANCHOR`.
 
 No Product deployment, Queue-v1 change, authority switch to PRIVATE_PRIMARY,
-Git push, database migration, or staging runtime change was performed.
+Git push, database migration, data deletion, or staging runtime change was
+performed.
