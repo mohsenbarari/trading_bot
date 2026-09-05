@@ -347,6 +347,16 @@ def main() -> int:
         require(old["State"].get("Running") and labels.get("org.opencontainers.image.revision") == args.source_runtime_release, "prior_runtime_drift")
         old_mounts = mounts(old)
         state_lock, session_lock = owner_paths(old)
+        authority_marker = session_lock.parent / "authority-container.json"
+        secure_file(authority_marker, uid=10001)
+        prior_marker_bytes = authority_marker.read_bytes()
+        prior_marker = json.loads(prior_marker_bytes)
+        require(
+            prior_marker.get("contract") == "market_capture_authority/1.0"
+            and prior_marker.get("role") == ROLE
+            and prior_marker.get("release_sha") == args.source_runtime_release,
+            "prior_authority_marker_drift",
+        )
         prior_health = health_document(state_lock)
         sequence = prior_health.get("capture_sequence")
         require(type(sequence) is int, "prior_capture_sequence_invalid")
@@ -399,6 +409,7 @@ def main() -> int:
                 "parent_lock_sha256": digest(parent_bytes),
                 "prior_container_id": old["Id"],
                 "sequence_before": sequence,
+                "prior_marker_sha256": digest(prior_marker_bytes),
                 "data_deleted": False,
                 "product_changed": False,
                 "queue_changed": False,
@@ -410,13 +421,27 @@ def main() -> int:
             atomic_json(journal, record)
             untouched = bystanders()
             stopped = False
+            target_marker: dict[str, Any] | None = None
             try:
+                record["status"] = "APPLYING"
+                atomic_json(journal, record)
                 run(["docker", "stop", "--time", "30", CONTAINER], timeout=50)
                 stopped = True
                 with ExitStack() as stack:
                     stack.enter_context(held(state_lock, 10001))
                     stack.enter_context(held(session_lock, 10001))
                     require(not [row for row in json.loads(run(["docker", "inspect", *run(["docker", "ps", "-q"]).split()])) if any(str(item.get("Source")) == str(session_lock.parent) for item in row.get("Mounts", []))], "old_owner_not_quiesced")
+                    require(authority_marker.read_bytes() == prior_marker_bytes, "authority_marker_race")
+                    target_marker = {
+                        **prior_marker,
+                        "release_sha": args.target_release,
+                        "authorized_at_utc": utc_now(),
+                    }
+                    atomic_json(authority_marker, target_marker, uid=10001, gid=10001)
+                    secure_file(authority_marker, uid=10001)
+                    record["target_marker_sha256"] = digest(authority_marker.read_bytes())
+                    record["status"] = "AUTHORITY_TRANSFERRED"
+                    atomic_json(journal, record)
                 started = time.time()
                 run([*target_compose, "up", "-d", "--no-deps", "--no-build", "--pull", "never", ROLE])
                 record["live_probe"] = wait_for_proof(release=args.target_release, image=args.target_image, old_mounts=old_mounts, state_lock=state_lock, session_lock=session_lock, minimum_sequence=sequence, since=started, require_docker_healthy=True)
@@ -435,6 +460,18 @@ def main() -> int:
                     with ExitStack() as stack:
                         stack.enter_context(held(state_lock, 10001))
                         stack.enter_context(held(session_lock, 10001))
+                        current_marker = authority_marker.read_bytes()
+                        target_bytes = (
+                            json.dumps(target_marker, sort_keys=True, separators=(",", ":")).encode()
+                            + b"\n"
+                            if target_marker is not None
+                            else prior_marker_bytes
+                        )
+                        require(
+                            current_marker in {prior_marker_bytes, target_bytes},
+                            "rollback_authority_marker_drift",
+                        )
+                        atomic_json(authority_marker, prior_marker, uid=10001, gid=10001)
                     started = time.time()
                     run([*prior_compose, "up", "-d", "--no-deps", "--no-build", "--pull", "never", ROLE])
                     record["rollback_probe"] = wait_for_proof(release=args.source_runtime_release, image=str(old["Image"]), old_mounts=old_mounts, state_lock=state_lock, session_lock=session_lock, minimum_sequence=sequence, since=started, require_docker_healthy=False)
