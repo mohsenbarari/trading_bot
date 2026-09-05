@@ -11,6 +11,13 @@ spec = importlib.util.spec_from_file_location('handoff',Path(__file__).resolve()
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 
+spec_liveness = importlib.util.spec_from_file_location(
+    'liveness_handoff',
+    Path(__file__).resolve().parents[1] / 'scripts/incident_account1_liveness_handoff_20260905.py',
+)
+l = importlib.util.module_from_spec(spec_liveness)
+spec_liveness.loader.exec_module(l)
+
 class Guards(unittest.TestCase):
     def configs(self):
         old = {'services':{m.ROLE:{'image':m.OLD_IMAGE,'environment':{
@@ -66,6 +73,33 @@ class Guards(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'symlink_path'):
                 with m.held(s,os.getuid()):
                     self.fail('symlink accepted')
+
+    def test_liveness_handoff_allows_only_the_account1_probe_and_identity_delta(self):
+        old = {
+            'services': {
+                l.ROLE: {
+                    'image': 'sha256:' + 'a' * 64,
+                    'environment': {'MARKET_PIPELINE_RELEASE_SHA': 'b' * 40},
+                    'labels': {'org.opencontainers.image.revision': 'b' * 40},
+                    'healthcheck': {'test': ['CMD', 'strict']},
+                },
+                'market-capture-account2': {'image': 'unchanged'},
+            },
+            'networks': {'market': {}},
+            'volumes': {},
+            'secrets': {},
+            'configs': {},
+        }
+        new = copy.deepcopy(old)
+        new['services'][l.ROLE]['image'] = 'sha256:' + 'c' * 64
+        new['services'][l.ROLE]['environment']['MARKET_PIPELINE_RELEASE_SHA'] = 'd' * 40
+        new['services'][l.ROLE]['labels']['org.opencontainers.image.revision'] = 'd' * 40
+        new['services'][l.ROLE]['healthcheck']['test'] = l.liveness_test()
+        l.validate_config(old, new, target_release='d' * 40, target_image='sha256:' + 'c' * 64)
+
+        new['services']['market-capture-account2']['image'] = 'mutated'
+        with self.assertRaisesRegex(l.HandoffError, 'unrelated_service_drift'):
+            l.validate_config(old, new, target_release='d' * 40, target_image='sha256:' + 'c' * 64)
 
 if __name__ == '__main__':
     unittest.main()

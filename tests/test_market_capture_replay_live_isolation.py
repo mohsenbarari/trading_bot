@@ -66,34 +66,69 @@ class ReplayLiveIsolationTests(unittest.TestCase):
         provider.reconciliation_truncated = True
         self.assertEqual(provider.live_status, "live-degraded")
 
-    def test_health_rejects_quarantined_replay_even_with_fresh_starting_heartbeat(self):
-        for extra in (
-            {"replay_blocked_reason": "capture_replay_source_incomplete"},
-            {"sources": {"MELTED_FLOW": {"explicit_backfill": {"quarantined": 1}}}},
-        ):
-            with self.subTest(extra=extra), tempfile.TemporaryDirectory() as directory:
-                state = Path(directory) / "market-capture-account1"
-                state.mkdir()
-                document = {
-                    "schema": "market_capture_engine/1.0",
-                    "role": "market-capture-account1",
-                    "mode": "live",
-                    "status": "live-starting",
-                    "updated_at_utc": foundation.utc_now().isoformat(),
-                    "pid": os.getpid(),
-                    "sources": {key: {} for key in (
-                        "MELTED_PRIMARY_FLOW", "MELTED_AGGREGATE", "MELTED_FLOW", "USD_HERAT", "XAUUSD"
-                    )},
+    def test_liveness_keeps_historical_quarantine_visible_to_strict_readiness(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "market-capture-account1"
+            state.mkdir()
+            document = {
+                "schema": "market_capture_engine/1.0",
+                "role": "market-capture-account1",
+                "mode": "live",
+                "status": "live-ready",
+                "updated_at_utc": foundation.utc_now().isoformat(),
+                "pid": os.getpid(),
+                "sources": {key: {} for key in (
+                    "MELTED_PRIMARY_FLOW", "MELTED_AGGREGATE", "MELTED_FLOW", "USD_HERAT", "XAUUSD"
+                )},
+            }
+            with patch.dict(os.environ, {"MARKET_PIPELINE_STATE_ROOT": directory}), patch("os.kill"):
+                (state / "health.json").write_text(json.dumps(document))
+                self.assertEqual(foundation.run_healthcheck("market-capture-account1", 60), 0)
+                self.assertEqual(foundation.run_capture_liveness_check("market-capture-account1", 60), 0)
+
+                document["sources"]["MELTED_FLOW"] = {
+                    "explicit_backfill": {"quarantined": 1}
                 }
-                with patch.dict(os.environ, {"MARKET_PIPELINE_STATE_ROOT": directory}), patch("os.kill"):
-                    (state / "health.json").write_text(json.dumps(document))
-                    self.assertEqual(foundation.run_healthcheck("market-capture-account1", 60), 0)
-                    if "sources" in extra:
-                        document["sources"].update(extra["sources"])
-                    else:
-                        document.update(extra)
-                    (state / "health.json").write_text(json.dumps(document))
-                    self.assertEqual(foundation.run_healthcheck("market-capture-account1", 60), 1)
+                (state / "health.json").write_text(json.dumps(document))
+                self.assertEqual(foundation.run_healthcheck("market-capture-account1", 60), 1)
+                self.assertEqual(foundation.run_capture_liveness_check("market-capture-account1", 60), 0)
+
+                document["replay_blocked_reason"] = "capture_replay_source_incomplete"
+                (state / "health.json").write_text(json.dumps(document))
+                self.assertEqual(foundation.run_healthcheck("market-capture-account1", 60), 1)
+                self.assertEqual(foundation.run_capture_liveness_check("market-capture-account1", 60), 1)
+
+    def test_liveness_keeps_operational_capture_guards(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "market-capture-account1"
+            state.mkdir()
+            document = {
+                "schema": "market_capture_engine/1.0",
+                "role": "market-capture-account1",
+                "mode": "live",
+                "status": "live-ready",
+                "updated_at_utc": foundation.utc_now().isoformat(),
+                "pid": os.getpid(),
+                "sources": {key: {} for key in (
+                    "MELTED_PRIMARY_FLOW", "MELTED_AGGREGATE", "MELTED_FLOW", "USD_HERAT", "XAUUSD"
+                )},
+            }
+            with patch.dict(os.environ, {"MARKET_PIPELINE_STATE_ROOT": directory}), patch("os.kill"):
+                for field, value in (
+                    ("schema", "wrong"),
+                    ("status", "live-degraded"),
+                    ("updated_at_utc", "2000-01-01T00:00:00+00:00"),
+                ):
+                    with self.subTest(field=field):
+                        invalid = dict(document)
+                        invalid[field] = value
+                        (state / "health.json").write_text(json.dumps(invalid))
+                        self.assertEqual(
+                            foundation.run_capture_liveness_check(
+                                "market-capture-account1", 60
+                            ),
+                            1,
+                        )
 
     def test_live_run_reconciles_all_sources_after_historical_failure(self):
         provider = self.provider(CaptureRuntimeError("capture_replay_source_incomplete"))
