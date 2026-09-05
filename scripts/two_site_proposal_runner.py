@@ -24,6 +24,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL = "gemini-3.8-flash-high"
+EFFORT = "medium"
 MAX_CONTEXT = 160_000
 MAX_OUTPUT = 2_000_000
 STREAM_CHUNK_SIZE = 64 * 1024
@@ -774,7 +775,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         write_json(out / "task.json", material)
         (out / "prompt.txt").write_text(prompt)
         meta = {"run_id": run_id, "task_id": task["task_id"], "role": role,
-                "head": head, "model": MODEL, "state": "RUNNING", "started_at": time.time(),
+                "head": head, "model": MODEL, "effort": EFFORT, "state": "RUNNING", "started_at": time.time(),
                 "retain_until": time.time() + 7 * 86400,
                 "authority": "PROPOSAL_ONLY_NOT_ACCEPTANCE",
                 "cli": initial_cli_identity}
@@ -788,7 +789,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             meta["input_feedback_sha256"] = input_hashes["feedback"]
         write_json(out / "status.json", meta)
         command = [str(cli), "--mode", "plan", "--sandbox", "--model", MODEL,
-                   "--effort", "high", "--input-format", "stream-json",
+                   "--effort", EFFORT, "--input-format", "stream-json",
                    "--output-format", "stream-json", "--print-timeout", f"{timeout}s",
                    "--json-schema", json.dumps(schema(role))]
         try:
