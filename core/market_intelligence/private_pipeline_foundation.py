@@ -618,6 +618,24 @@ def run_healthcheck(role: str, max_age_seconds: float) -> int:
         if role in CAPTURE_ROLES:
             if document.get("schema") != "market_capture_engine/1.0":
                 raise FoundationError("capture_heartbeat_schema_invalid")
+            if document.get("replay_blocked_reason"):
+                raise FoundationError("capture_replay_requires_review")
+            sources = document.get("sources")
+            if not isinstance(sources, dict):
+                raise FoundationError("capture_heartbeat_source_inventory_invalid")
+            for source in sources.values():
+                if not isinstance(source, dict):
+                    raise FoundationError("capture_heartbeat_schema_invalid")
+                backfill = source.get("explicit_backfill")
+                if backfill is None:
+                    continue
+                if not isinstance(backfill, dict):
+                    raise FoundationError("capture_heartbeat_schema_invalid")
+                quarantined = backfill.get("quarantined", 0)
+                if type(quarantined) is not int or quarantined < 0:
+                    raise FoundationError("capture_heartbeat_schema_invalid")
+                if quarantined:
+                    raise FoundationError("capture_replay_requires_review")
             mode = document.get("mode")
             allowed_statuses = {f"{mode}-ready"}
             # A live capture process deliberately starts its subscriptions

@@ -773,6 +773,7 @@ class TelegramCaptureProvider:
         self._live_seen_order: deque[tuple[str, int]] = deque()
         self.reconciliation_truncated = False
         self.backfill_in_progress = False
+        self.replay_blocked_reason: str | None = None
         self._fatal: BaseException | None = None
         self._ready_for_live_updates = False
 
@@ -1244,6 +1245,40 @@ class TelegramCaptureProvider:
             exhaustion=exhaustion,
         )
 
+    @property
+    def live_status(self) -> str:
+        if self.backfill_in_progress:
+            return "live-starting"
+        if self.replay_blocked_reason or self.reconciliation_truncated:
+            return "live-degraded"
+        return "live-ready"
+
+    async def _run_initial_replay(self, client: object) -> None:
+        """Keep historical certification failures separate from live capture.
+
+        An unavailable historical revision remains quarantined and the replay
+        run stays open. It must not disconnect every live subscription on the
+        account. Durable write, manifest-integrity and configuration failures
+        still propagate and stop the owner.
+        """
+        self.backfill_in_progress = self.backfill_not_before is not None
+        self.replay_blocked_reason = None
+        try:
+            replay_run_id = self._ensure_replay_run()
+            for binding in self.config.sources:
+                await self._backfill_source_to_cutoff(
+                    client, SOURCE_POLICIES[binding.source_code]
+                )
+            if replay_run_id is not None:
+                try:
+                    self.engine.state.complete_replay_run(replay_run_id)
+                except CaptureRuntimeError as exc:
+                    if str(exc) != "capture_replay_source_incomplete":
+                        raise
+                    self.replay_blocked_reason = str(exc)
+        finally:
+            self.backfill_in_progress = False
+
     async def run(self) -> None:
         try:
             from telethon import TelegramClient, events, utils
@@ -1351,23 +1386,7 @@ class TelegramCaptureProvider:
                 ]
             self._ready_for_live_updates = True
             heartbeat_task = asyncio.create_task(heartbeat_loop())
-            self.backfill_in_progress = self.backfill_not_before is not None
-            try:
-                replay_run_id = self._ensure_replay_run()
-                for binding in self.config.sources:
-                    await self._backfill_source_to_cutoff(
-                        client, SOURCE_POLICIES[binding.source_code]
-                    )
-                if replay_run_id is not None:
-                    self.engine.state.complete_replay_run(replay_run_id)
-                    # Quarantine is not evidence that replay failed, but a
-                    # completed local manifest is also not proof that the
-                    # processor, archive, ACK and bot-side Store received the
-                    # same data.  Resolution therefore remains fail-closed
-                    # until the independent catch-up audit emits and applies a
-                    # digest-bound evidence bundle.
-            finally:
-                self.backfill_in_progress = False
+            await self._run_initial_replay(client)
             for binding in self.config.sources:
                 await self._reconcile_source(
                     client, SOURCE_POLICIES[binding.source_code]

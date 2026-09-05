@@ -1,5 +1,7 @@
 # Coin Market Intelligence
 
+- Sep05: `1f972a48` Capture and `9c613d39` parent-first processor are live; quarantine retained. `docs/MARKET_CAPTURE_RECOVERY_20260905.md`. Check Product rates.
+
 - Settlement: future=`خ ن ف/ف ن ف`,`خ ف/ف ف` or absent; cash=`خ ن/ف ن/نق`; future wins.
 - Units: project-thousands; accept full-Toman/separators/zeros. Resolve tails by family. `رب`=quarter; `پ/ت پ/پایین`=low-date; duplicated-zero needs family.
 - Named anchors set scale only. Unnamed uses prior `MAIN_ONLINE` ≤5m then 2h; contradiction fails; bootstrap=3 messages/2 senders/30m/1.5%.
@@ -14,5 +16,5 @@
 - Cutover needs real 7d coin/gold/Herat; predated coins abstain; no synthesis.
 - 2026-08-29/30: Shadow fed G1/G2/private-gold; causal review; syntax needs raw; `human-feedback-r*`.
 - 2026-08-31: 22–23 Tehran uses melted/Herat fresh at 22:00 (`AFTER_CLOSE_HOLD`, +0.4%). Never revive older data; guard stays fail-open.
-- 2026-09-02: Account2 alone captures G1/G2. Atomically derive projection health from results, never heartbeat/wall-clock freshness.
-- 2026-09-03: ~489k replay rows overflowed 16MiB `/tmp`; stream digest via `(run_id,account)`. Empty retry counters may use a prior immutable nonempty manifest only after attempt>1/no quarantine. Never delete state/clear backfill.
+- Account2 captures G1/G2. Projection health derives from results, never heartbeats.
+- Replay digests stream via `(run_id,account)` to avoid `/tmp` overflow. Empty retries require prior nonempty immutable manifest, attempt>1, zero quarantine. Never clear state/backfill.
