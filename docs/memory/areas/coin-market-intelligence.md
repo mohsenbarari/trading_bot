@@ -1,5 +1,7 @@
 # Coin Market Intelligence
 
+- 2026-09-05: Historical replay certification failure must keep its manifest/quarantine open without disconnecting live capture or recent reconciliation. Only `capture_replay_source_incomplete` at completion is isolated; storage/integrity failures still stop. Report `live-degraded` with the reason; a fresh `live-starting` heartbeat cannot hide nonzero replay quarantine. Product inference recovery must be checked with its actual configured snapshot and rejected prices.
+
 - Settlement: future=`خ ن ف/ف ن ف`,`خ ف/ف ف` or absent; cash=`خ ن/ف ن/نق`; future wins.
 - Units: project-thousands; accept full-Toman/separators/zeros. Resolve tails by family. `رب`=quarter; `پ/ت پ/پایین`=low-date; duplicated-zero needs family.
 - Named anchors set scale only. Unnamed uses prior `MAIN_ONLINE` ≤5m then 2h; contradiction fails; bootstrap=3 messages/2 senders/30m/1.5%.

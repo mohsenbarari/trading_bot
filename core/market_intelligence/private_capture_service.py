@@ -130,7 +130,9 @@ def run_capture_service(
     health_path = state_directory / "health.json"
     last_retention = time.monotonic()
 
-    def write_health(*, status: str | None = None) -> None:
+    def write_health(
+        *, status: str | None = None, replay_blocked_reason: str | None = None
+    ) -> None:
         nonlocal last_retention
         now = utc_now()
         if time.monotonic() - last_retention >= 3600:
@@ -145,6 +147,7 @@ def run_capture_service(
             now=now,
             status=status,
         )
+        document["replay_blocked_reason"] = replay_blocked_reason
         atomic_json(health_path, document)
 
     try:
@@ -208,15 +211,8 @@ def run_capture_service(
             backfill_source_codes=backfill_source_codes,
             release_sha=release_sha,
             heartbeat=lambda: write_health(
-                status=(
-                    "live-starting"
-                    if provider.backfill_in_progress
-                    else (
-                        "live-degraded"
-                        if provider.reconciliation_truncated
-                        else "live-ready"
-                    )
-                )
+                status=provider.live_status,
+                replay_blocked_reason=provider.replay_blocked_reason,
             ),
         )
         write_health(status="live-starting")
