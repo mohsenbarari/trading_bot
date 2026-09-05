@@ -2,6 +2,14 @@
 .git
 .gitignore
 .github
+.agents/
+.claude/
+.codex/
+.cursor/
+.githooks/
+.lego/
+.local/
+.pytest_cache/
 
 # Docker
 Dockerfile
@@ -39,6 +47,7 @@ env/
 **/online.env
 !**/online.env.example
 /mutants/
+mini_app_dist_staging/
 audit_trail/
 app_logs/
 uploads/

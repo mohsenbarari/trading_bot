@@ -931,6 +931,24 @@ hash_file_or_dir inputs
             release_script.index(copy_command),
         )
 
+    def test_production_image_context_excludes_local_tooling_and_staging_artifacts(self):
+        release_script = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text(encoding='utf-8')
+        dockerignore = (REPO_ROOT / '.dockerignore').read_text(encoding='utf-8').splitlines()
+
+        for path in (
+            '.agents', '.claude', '.codex', '.cursor', '.githooks', '.lego',
+            '.local', '.pytest_cache', 'mini_app_dist_staging', 'mutants',
+        ):
+            with self.subTest(path=path):
+                self.assertIn(f"--exclude '{path}'", release_script)
+        for pattern in (
+            '.agents/', '.claude/', '.codex/', '.cursor/', '.githooks/',
+            '.lego/', '.local/', '.pytest_cache/', 'mini_app_dist_staging/',
+            '/mutants/',
+        ):
+            with self.subTest(pattern=pattern):
+                self.assertIn(pattern, dockerignore)
+
     def test_dockerfiles_pass_docker_build_check(self):
         if shutil.which('docker') is None:
             self.skipTest('docker is not installed')

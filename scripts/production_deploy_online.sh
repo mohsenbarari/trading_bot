@@ -6636,6 +6636,14 @@ build_release() {
     rsync -a --delete \
         --exclude '.git' \
         --exclude '.github' \
+        --exclude '.agents' \
+        --exclude '.claude' \
+        --exclude '.codex' \
+        --exclude '.cursor' \
+        --exclude '.githooks' \
+        --exclude '.lego' \
+        --exclude '.local' \
+        --exclude '.pytest_cache' \
         --exclude '.env' \
         --exclude '.env.*' \
         --exclude '.deploy_count' \
@@ -6654,6 +6662,8 @@ build_release() {
         --exclude 'uploads' \
         --exclude 'map_data' \
         --exclude 'audit_trail' \
+        --exclude 'mini_app_dist_staging' \
+        --exclude 'mutants' \
         --exclude 'pip_packages' \
         "$LOCAL_PROJECT_DIR/" "$iran_context_dir/"
     # Dockerfile.iran serves the already verified production frontend bundle.
