@@ -1,6 +1,13 @@
 # اجرای خودکار ریفکتور دوسایته با Google Antigravity
 
-وضعیت بررسی راه‌اندازی در ۲۰۲۶-۰۹-۰۴: `STATIC_AND_RUNTIME_SMOKE_VALIDATED / STAGE_TAKEOVER_NOT_STARTED / NO_PRODUCTION_ACTION`
+وضعیت در ۲۰۲۶-۰۹-۰۵: `SIMPLIFICATION_REQUIRED / GATEWAY_NOT_ACCEPTED / NOT_INSTALLED / STAGE_TAKEOVER_NOT_STARTED`
+
+gateway در commit `1290009dd51e80b776357c3668564796e3fc1f1f` نتیجهٔ
+`CHANGES_REQUIRED` با یک finding سطح High و دو Medium گرفته است. smoke تاریخی،
+آمادگی اجرای امروز را ثابت نمی‌کند. طبق اصل «امن، آسان و دقیق» در
+[`EXECUTION_GOVERNANCE.md`](EXECUTION_GOVERNANCE.md)، گسترش gateway برای بازنگری و
+ساده‌سازی متوقف است. شرح و فرمان‌های زیر قرارداد طراحی موجودند و تا پذیرش و نصب
+مسیر اجرایی، دستور شروع عملیات محسوب نمی‌شوند.
 
 این سند آداپتر اجرایی Antigravity برای همان پلن، Stage graph و حاکمیت موجود است؛
 پلن تازه یا منبع حقیقت موازی نیست. منابع مرجع همچنان
@@ -37,7 +44,8 @@ pre-review دقیق closeout، closeout commit و verify پس از commit بدو
 
 تعریف‌ها داخل ریپازیتوری هستند؛ تنظیمات سراسری `~/.gemini`، credential و permission
 عمومی را تغییر نمی‌دهند. هر سه Agent مدل pin‌شدهٔ parent را با `inherit` می‌گیرند و با سیاست اجرای command برابر
-`sandbox` تعریف شده‌اند. Verifier ابزار ویرایش فایل ندارد.
+`sandbox` تعریف شده‌اند. Verifier فقط برای ساخت درخواست یک‌بارمصرف gateway ابزار
+`write_to_file` دارد؛ نوشتن source یا state جزو اختیار آن نیست.
 
 ## شروع در IDE
 

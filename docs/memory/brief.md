@@ -5,6 +5,7 @@ Purpose:
 - It provides trading offers and execution, OTP-first authentication, sessions, notifications, chat/media, and operational controls through API, Telegram, and web surfaces.
 
 Current direction:
+- Project-wide engineering rule (owner, 2026-09-05): deliver safely, simply and accurately. Use the smallest sufficient design; justify added controls with concrete failure scenarios and their maintenance cost. Automation must reduce development time and manual work. Repeated failure requires reassessing the approach, not indefinite retries or approval requests.
 - Preserve production safety while evolving the Telegram bot, FastAPI backend, Vue PWA, and cross-server sync/observability workflows.
 - Evolve the Vue PWA toward a native iOS/Android feel; keep Market protected. Messenger frontend restyle is fully free on the native-standardization track; behavior, album rules, and legacy-default rollout stay frozen and reversible.
 - Treat the repository's current code and approved roadmaps/runbooks as authoritative; verify behavior with focused tests and diffs before release work.

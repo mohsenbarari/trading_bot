@@ -2,9 +2,7 @@
 
 Entries are newest first.
 
-- 2026-09-05 | Automatic Stage-bind is fail-closed and request-bound: the exact typed-request schema/digest plus integration/prior-Stage ownership must pass under the fence lock before writes. Rollback prevalidates every target; persisted REMOVED must match its immutable baseline and absence/unregistration, and a terminal receipt cannot publish or clear its journal until that final state is re-proven.
-
-- 2026-09-04 | Cursor and Antigravity use one platform-neutral two-site workflow: parent Coordinator, one Writer by default (second needs Codex pairing), independent Verifier, serial integration, exact-SHA Stage receipt, and pre-reviewed patch-bound closeout. No owner relay/Stage approval or parallel state source; scoped external gates and human Web Writer transfer remain.
+- 2026-09-05 | Owner requires safe, simple and accurate implementation project-wide. Choose the smallest sufficient design and reassess recurring failure before adding controls. Automation must reduce development time and manual work; complexity needs a concrete benefit. Execution-specific contracts and gateway review status live in `areas/documentation-execution.md`.
 
 - 2026-09-03 | Section 3 is approved: `MKT-0..MKT-13` execute in dependency order and activate only with Section 4. Completion requires no High/Critical gaps or behavior drift plus restore/rebuild/parity proof; thresholds stay evidence-derived.
 
