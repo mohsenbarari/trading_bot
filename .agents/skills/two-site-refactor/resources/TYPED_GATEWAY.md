@@ -104,7 +104,13 @@ The protected host derives branch, worktree path, registry ID, seven-day expiry,
 timestamps, orchestrator, epoch, base and integration head. The contract cannot grant
 external access or remove the mandatory protected paths. Before its first side effect,
 `next-stage-bind` creates a root-owned transaction journal bound to the exact protected
-request and plan. Recovery may only roll back while the old fence is still ACTIVE, or
+request and plan. The planned `stage-bind` argv also carries the canonical SHA-256 of
+that typed request; the fence rereads the bounded, duplicate-key-free request under its
+canonical lock, rejects unknown/missing request keys or malformed receipt digests, and
+independently enforces the nested contract's types, bounds, unique lists, safe paths and
+mandatory protected patterns. It then proves the request, Assignment scope, derived branch/worktree/registry
+identity, integration path/branch/owner, and prior Stage owner before its first write.
+Recovery may only roll back while the old fence is still ACTIVE, or
 roll forward an exact `RECONCILING/STAGE` or already-bound new fence. After a successful
 bind, the prior COMPLETE Stage worktree is removed immediately only after its Assignment,
 registry path, branch, HEAD, Git common directory and clean state all match.
@@ -118,9 +124,17 @@ path/branch/registry identifier from the protected request, validates the journa
 before/after registry hashes and exact one-record semantic delta, and checks both the
 integration owner and old Stage owner in the current byte-identical registry. Missing,
 foreign, dirty, substituted, ambiguous or concurrently changed state is terminally
-rejected without rollback effects. A `RECONCILING` retry releases the outer lock only so
+rejected without rollback effects. The next Assignment bytes and next branch ref are
+validated before the first rollback removal. A `RECONCILING` retry releases the outer lock only so
 the canonical fence process can acquire that same lock; recovery reacquires it and proves
-the exact new ACTIVE owner before retirement.
+the exact new ACTIVE owner before retirement. Recovery treats a precisely owned
+`REMOVED` prior record as an idempotent post-retirement state only when its worktree is
+both absent and no longer Git-registered, including interruptions after the COMPLETE
+journal write but before the terminal receipt. A protected terminal receipt is never
+mirrored or allowed to clear that journal until its complete identity and the exact
+ACTIVE-new/REMOVED transition are revalidated under the lock. The prior registry record
+must equal its journaled COMPLETE_CANDIDATE baseline except for the exact CLOSED/REMOVED
+timestamps and states.
 
 Privileged Python entrypoints never resolve imports through a candidate repository.
 Fence and validator subprocesses run with the exact pinned Python binary in isolated

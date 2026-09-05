@@ -878,8 +878,19 @@ class GatewayPlanningTests(unittest.TestCase):
             caller=COORDINATOR, receipts=(committed,),
             root_snapshot=GitSnapshot(self.fx.root, "refactor/two-site-architecture", INTEGRATION_HEAD),
         ))
-        self.assertEqual(bind_plan.commands[0].argv[-2:],
-                         ("--next-assignment", "WA-P1-01-REPO-CLEANUP-20260905-001"))
+        bind_argv = bind_plan.commands[0].argv
+        self.assertEqual(
+            bind_argv[bind_argv.index("--next-assignment") + 1],
+            "WA-P1-01-REPO-CLEANUP-20260905-001",
+        )
+        self.assertEqual(bind_argv[bind_argv.index("--request-id") + 1], bind_request["id"])
+        self.assertEqual(
+            bind_argv[bind_argv.index("--request-sha256") + 1],
+            hashlib.sha256(json.dumps(
+                bind_request, sort_keys=True, separators=(",", ":"),
+                ensure_ascii=False, allow_nan=False,
+            ).encode()).hexdigest(),
+        )
         bind_request["contract"] = {**contract, "forbidden_paths": ["scripts/**"]}
         self.assertBlocked(GatewayErrorCode.PATH_REJECTED, bind_request, self.fx.context(
             caller=COORDINATOR, receipts=(committed,),

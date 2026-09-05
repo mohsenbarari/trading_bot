@@ -507,6 +507,45 @@ class ProtectedGatewayHost:
             rf'^  {re.escape(stage_id)}: \{{state: COMPLETE,', order, re.M,
         ))
 
+    def _prior_stage_registry_snapshot(self, record: Mapping[str, Any]) -> dict:
+        """Return the journal-bound prior Stage record before its only legal transition."""
+        raw = str(record.get('registry_before', '')).encode()
+        if hashlib.sha256(raw).hexdigest() != record.get('registry_before_sha256'):
+            raise TransportError('retirement registry baseline digest is invalid')
+        try:
+            registry = yaml.safe_load(raw)
+        except yaml.YAMLError as error:
+            raise TransportError('retirement registry baseline is malformed') from error
+        matches = [item for item in registry.get('stage_worktrees', [])
+                   if isinstance(item, dict)
+                   and item.get('assignment_id') == record.get('old_assignment')] \
+            if isinstance(registry, dict) else []
+        if (len(matches) != 1
+                or matches[0].get('status') != 'COMPLETE_CANDIDATE'
+                or 'closed_at' in matches[0]
+                or 'removed_at' in matches[0]):
+            raise TransportError('retirement registry baseline is not one COMPLETE_CANDIDATE')
+        return matches[0]
+
+    @staticmethod
+    def _validate_retirement_transition(baseline: Mapping[str, Any], current: Mapping[str, Any]) -> None:
+        """Permit only COMPLETE_CANDIDATE -> CLOSED -> REMOVED metadata deltas."""
+        status = current.get('status')
+        expected = dict(baseline)
+        expected['status'] = status
+        if status in {'CLOSED', 'REMOVED'}:
+            closed_at = current.get('closed_at')
+            if not isinstance(closed_at, str) or not closed_at:
+                raise TransportError('retirement CLOSED transition timestamp is invalid')
+            expected['closed_at'] = closed_at
+        if status == 'REMOVED':
+            removed_at = current.get('removed_at')
+            if not isinstance(removed_at, str) or not removed_at:
+                raise TransportError('retirement REMOVED transition timestamp is invalid')
+            expected['removed_at'] = removed_at
+        if status not in {'COMPLETE_CANDIDATE', 'CLOSED', 'REMOVED'} or current != expected:
+            raise TransportError('retirement registry record drifted outside its legal transition')
+
     def _validate_retirement_candidate(self, record: Mapping[str, Any], pins: PinnedPaths,
                                        registry: Mapping[str, Any]) -> dict:
         matches = [item for item in registry.get('stage_worktrees', [])
@@ -536,7 +575,25 @@ class ProtectedGatewayHost:
                 or payload.get('branch') != record['old_branch']
                 or payload.get('worktree_path') != record['old_worktree']):
             raise TransportError('retirement Assignment document differs from registry identity')
-        if path.exists():
+        baseline = self._prior_stage_registry_snapshot(record)
+        if (baseline.get('registry_id') != payload.get('worktree_registry_id')
+                or baseline.get('stage_id') != record['old_stage']
+                or baseline.get('assignment_id') != record['old_assignment']
+                or baseline.get('owner_role') != 'EXECUTION_WORKER'
+                or baseline.get('path') != record['old_worktree']
+                or baseline.get('branch') != record['old_branch']
+                or baseline.get('base_sha') != payload.get('base_sha')
+                or baseline.get('head_sha') != record['old_head']
+                or baseline.get('locks') != payload.get('locks')
+                or baseline.get('orchestrator') != 'ANTIGRAVITY'
+                or baseline.get('orchestration_epoch') != record['epoch']
+                or baseline.get('dirty_uncommitted_candidate') not in {None, False}):
+            raise TransportError('retirement registry baseline differs from prior Assignment')
+        self._validate_retirement_transition(baseline, item)
+        if item.get('status') == 'REMOVED':
+            if path.exists() or self._worktree_registered(pins, path):
+                raise TransportError('REMOVED retirement worktree still exists or is registered')
+        elif path.exists():
             snapshot = observe_git(path)
             if (not snapshot.clean or snapshot.branch != record['old_branch']
                     or snapshot.head_sha != record['old_head']
@@ -662,11 +719,62 @@ class ProtectedGatewayHost:
         else:
             write_new(public, result, MAX_RESULT)
 
-    def _validate_bound_stage(self, record: Mapping[str, Any], pins: PinnedPaths) -> None:
-        fence = unique_json(read_bounded(
-            self.root / '.local/two-site-refactor/orchestrator-fence.json', 65536))
+    def _validate_stage_bind_terminal_receipt(
+            self, record: Mapping[str, Any], running: Mapping[str, Any],
+            request: Mapping[str, Any], receipt: Mapping[str, Any]) -> str:
+        """Bind a crash-window receipt to this journal before it can become public."""
+        expected_outer = {
+            'actor', 'step', 'request_id', 'request_sha256', 'request',
+            'plan_sha256', 'completed_at', 'outcome', 'authority',
+        }
+        completed_at = receipt.get('completed_at')
+        outcome = receipt.get('outcome')
+        if (not isinstance(receipt, dict) or set(receipt) != expected_outer
+                or receipt.get('actor') != running.get('actor')
+                or receipt.get('step') != running.get('step')
+                or receipt.get('request_id') != record['request_id']
+                or receipt.get('request_sha256') != record['request_sha256']
+                or receipt.get('request') != request
+                or receipt.get('plan_sha256') != record['plan_sha256']
+                or type(completed_at) not in {int, float}
+                or receipt.get('authority') != 'PROTECTED_CONTROLLER_RECEIPT'
+                or not isinstance(outcome, dict)
+                or outcome.get('status') not in {'SUCCESS', 'FAILED'}
+                or outcome.get('request_id') != record['request_id']
+                or outcome.get('operation') != 'next-stage-bind'
+                or outcome.get('authority') != 'EXECUTOR_VERIFIED_NO_APPROVAL'):
+            raise TransportError('Stage-bind journal has an unrelated terminal receipt')
+        status = str(outcome['status'])
+        if status == 'SUCCESS':
+            prepared = outcome.get('prepared')
+            allowed_prepared = {
+                'next_assignment', 'next_stage', 'worktree_path', 'branch',
+                'assignment_contract_sha256',
+            }
+            if (not isinstance(prepared, dict)
+                    or not {'next_assignment', 'next_stage', 'worktree_path', 'branch'}
+                    <= set(prepared)
+                    or not set(prepared) <= allowed_prepared
+                    or ('assignment_contract_sha256' in prepared
+                        and (not isinstance(prepared['assignment_contract_sha256'], str)
+                             or not re.fullmatch(
+                                 r'[0-9a-f]{64}', prepared['assignment_contract_sha256'])))
+                    or any(prepared.get(key) != value for key, value in {
+                        'next_assignment': record['next_assignment'],
+                        'next_stage': record['next_stage'],
+                        'worktree_path': record['next_worktree'],
+                        'branch': record['next_branch'],
+                    }.items())):
+                raise TransportError('successful Stage-bind receipt targets differ from journal')
+        return status
+
+    def _validate_stage_bind_state(
+            self, record: Mapping[str, Any], pins: PinnedPaths,
+            fence: Mapping[str, Any], *, expected_status: str) -> None:
         self._validate_stage_bind_fence_identity(record, pins, fence)
-        if (fence.get('status') != 'ACTIVE' or fence.get('binding_kind') != 'STAGE'
+        if (expected_status not in {'ACTIVE', 'RECONCILING'}
+                or fence.get('status') != expected_status
+                or fence.get('binding_kind') != 'STAGE'
                 or fence.get('platform') != 'ANTIGRAVITY'
                 or fence.get('integration_branch') != pins.integration_branch
                 or fence.get('active_assignment_id') != record['next_assignment']
@@ -674,7 +782,8 @@ class ProtectedGatewayHost:
                 or fence.get('integration_head_sha') != record['integration_head']
                 or fence.get('epoch') != record['epoch']
                 or fence.get('coordinator_instance_id') != self.manifest['coordinator_id']):
-            raise TransportError('recovered Stage-bind fence is not exact and ACTIVE')
+            raise TransportError(
+                'recovered Stage-bind fence is not exact and ' + expected_status)
 
         _, request, _ = self._stage_bind_inputs(record)
         contract = request.get('contract')
@@ -728,12 +837,18 @@ class ProtectedGatewayHost:
                    if isinstance(item, dict)
                    and item.get('assignment_id') == record['next_assignment']]
         integration = registry.get('integration') if isinstance(registry, dict) else None
+        if (expected_status == 'ACTIVE'):
+            allowed_integration_assignments = {record['next_assignment']}
+        else:
+            allowed_integration_assignments = {
+                record['old_assignment'], record['next_assignment'],
+            }
         if (not isinstance(integration, dict)
                 or integration.get('path') != str(self.root)
                 or integration.get('branch') != pins.integration_branch
                 or integration.get('head_sha') != record['integration_head']
                 or integration.get('owner_role') != 'EXECUTION_COORDINATOR'
-                or integration.get('active_assignment_id') != record['next_assignment']
+                or integration.get('active_assignment_id') not in allowed_integration_assignments
                 or integration.get('orchestrator') != 'ANTIGRAVITY'
                 or integration.get('orchestration_epoch') != record['epoch']):
             raise TransportError('recovered next Stage integration owner differs')
@@ -752,7 +867,13 @@ class ProtectedGatewayHost:
         if len(matches) != 1 or matches[0] != expected_stage:
             raise TransportError('recovered next Stage registry identity differs')
         old = self._validate_retirement_candidate(record, pins, registry)
-        if (old.get('status') != 'CLOSED'
+        if expected_status == 'ACTIVE':
+            allowed_old_statuses = {'CLOSED', 'REMOVED'}
+        elif integration.get('active_assignment_id') == record['old_assignment']:
+            allowed_old_statuses = {'COMPLETE_CANDIDATE'}
+        else:
+            allowed_old_statuses = {'CLOSED'}
+        if (old.get('status') not in allowed_old_statuses
                 or old.get('owner_role') != 'EXECUTION_WORKER'
                 or old.get('orchestrator') != 'ANTIGRAVITY'
                 or old.get('orchestration_epoch') != record['epoch']):
@@ -763,6 +884,19 @@ class ProtectedGatewayHost:
                 or snapshot.head_sha != record['integration_head']
                 or self._git_common_dir(pins, worktree) != self._git_common_dir(pins, self.root)):
             raise TransportError('recovered next Stage worktree is not exact')
+
+    def _validate_bound_stage(self, record: Mapping[str, Any], pins: PinnedPaths) -> None:
+        fence = unique_json(read_bounded(
+            self.root / '.local/two-site-refactor/orchestrator-fence.json', 65536))
+        self._validate_stage_bind_state(
+            record, pins, fence, expected_status='ACTIVE')
+
+    def _validate_reconciling_stage_bind(
+            self, record: Mapping[str, Any], pins: PinnedPaths,
+            fence: Mapping[str, Any]) -> None:
+        """Prove the complete roll-forward owner/state before invoking the fence process."""
+        self._validate_stage_bind_state(
+            record, pins, fence, expected_status='RECONCILING')
 
     def _validate_stage_bind_fence_identity(
             self, record: Mapping[str, Any], pins: PinnedPaths,
@@ -905,13 +1039,36 @@ class ProtectedGatewayHost:
         registry_sha = hashlib.sha256(registry_bytes).hexdigest()
         if registry_sha not in {record['registry_before_sha256'], record['registry_after_sha256']}:
             raise TransportError('cannot rollback a Stage-bind registry with unknown drift')
-        worktree = Path(str(record['next_worktree']))
-        if worktree.exists():
-            snapshot = observe_git(safe_path(worktree))
+        worktree = safe_path(Path(str(record['next_worktree'])), exists=False)
+        worktree_exists = worktree.exists()
+        if worktree_exists:
+            snapshot = observe_git(worktree)
             if (not snapshot.clean or snapshot.branch != record['next_branch']
                     or snapshot.head_sha != record['integration_head']
                     or self._git_common_dir(pins, worktree) != self._git_common_dir(pins, self.root)):
                 raise TransportError('cannot rollback a changed next Stage worktree')
+        elif self._worktree_registered(pins, worktree):
+            raise TransportError('missing next Stage path remains Git-registered')
+
+        assignment_path = safe_path(Path(str(record['assignment_path'])), exists=False)
+        assignment_exists = assignment_path.exists()
+        if assignment_exists:
+            if file_sha256(assignment_path) != record['assignment_sha256']:
+                raise TransportError('cannot rollback a changed next Assignment document')
+
+        branch_check = _run_bounded_process(
+            [str(pins.git_binary), '-C', str(self.root), 'rev-parse', '--verify',
+             'refs/heads/' + str(record['next_branch'])],
+            cwd=self.root, env={'PATH': '/usr/local/bin:/usr/bin:/bin', 'LANG': 'C.UTF-8',
+                                'GIT_TERMINAL_PROMPT': '0'}, timeout=60, output_limit=64_000,
+        )
+        branch_exists = branch_check.returncode == 0
+        if branch_exists and branch_check.stdout.decode().strip() != record['integration_head']:
+            raise TransportError('cannot rollback a changed next Stage branch')
+
+        # All target and authority checks above are read-only.  Effects begin only
+        # after the worktree, Assignment, branch and registry have all been proven.
+        if worktree_exists:
             result = _run_bounded_process(
                 [str(pins.git_binary), '-C', str(self.root), 'worktree', 'remove', str(worktree)],
                 cwd=self.root, env={'PATH': '/usr/local/bin:/usr/bin:/bin', 'LANG': 'C.UTF-8',
@@ -920,22 +1077,9 @@ class ProtectedGatewayHost:
             )
             if result.returncode != 0 or worktree.exists():
                 raise TransportError('cannot rollback derived next Stage worktree')
-        elif self._worktree_registered(pins, worktree):
-            raise TransportError('missing next Stage path remains Git-registered')
-        assignment_path = Path(str(record['assignment_path']))
-        if assignment_path.exists():
-            if file_sha256(safe_path(assignment_path)) != record['assignment_sha256']:
-                raise TransportError('cannot rollback a changed next Assignment document')
+        if assignment_exists:
             assignment_path.unlink()
-        branch_check = _run_bounded_process(
-            [str(pins.git_binary), '-C', str(self.root), 'rev-parse', '--verify',
-             'refs/heads/' + str(record['next_branch'])],
-            cwd=self.root, env={'PATH': '/usr/local/bin:/usr/bin:/bin', 'LANG': 'C.UTF-8',
-                                'GIT_TERMINAL_PROMPT': '0'}, timeout=60, output_limit=64_000,
-        )
-        if branch_check.returncode == 0:
-            if branch_check.stdout.decode().strip() != record['integration_head']:
-                raise TransportError('cannot rollback a changed next Stage branch')
+        if branch_exists:
             deleted = _run_bounded_process(
                 [str(pins.git_binary), '-C', str(self.root), 'branch', '-D',
                  str(record['next_branch'])], cwd=self.root,
@@ -963,23 +1107,37 @@ class ProtectedGatewayHost:
             return
         record = unique_json(read_bounded(journal_path, 4_000_000))
         running, request, _ = self._stage_bind_inputs(record)
+        pins = self._journal_pins(record)
         receipt_path = self.state / (str(record['request_id']) + '.receipt.json')
         if receipt_path.exists():
             receipt = unique_json(read_bounded(receipt_path, MAX_RESULT))
-            if (receipt.get('request_id') != record['request_id']
-                    or receipt.get('authority') != 'PROTECTED_CONTROLLER_RECEIPT'
-                    or receipt.get('outcome', {}).get('status') not in {'SUCCESS', 'FAILED', 'BLOCKED'}):
-                raise TransportError('Stage-bind journal has a nonterminal protected receipt')
-            public = self.root / '.local/two-site-refactor/gateway/results' / (
-                str(record['request_id']) + '.json')
-            if public.exists():
-                if unique_json(read_bounded(public, MAX_RESULT)) != receipt:
-                    raise TransportError('terminal Stage-bind public/protected receipts differ')
-            else:
-                write_new(public, receipt, MAX_RESULT)
-            journal_path.unlink()
+            status = self._validate_stage_bind_terminal_receipt(
+                record, running, request, receipt)
+            with self._fence_locked():
+                if status == 'SUCCESS':
+                    if record.get('phase') != 'COMPLETE':
+                        raise TransportError('successful Stage-bind receipt precedes COMPLETE journal')
+                    self._validate_bound_stage(record, pins)
+                    registry = yaml.safe_load(read_bounded(
+                        self.root / '.local/two-site-refactor/worktrees.yaml', 1_000_000))
+                    old = self._validate_retirement_candidate(record, pins, registry)
+                    if old.get('status') != 'REMOVED':
+                        raise TransportError('successful Stage-bind receipt precedes exact retirement')
+                else:
+                    if record.get('phase') in {'FENCE_BOUND', 'COMPLETE'}:
+                        raise TransportError('failed Stage-bind receipt conflicts with bound journal')
+                    fence = unique_json(read_bounded(
+                        self.root / '.local/two-site-refactor/orchestrator-fence.json', 65536))
+                    self._rollback_stage_bind_effects(record, pins, fence)
+                public = self.root / '.local/two-site-refactor/gateway/results' / (
+                    str(record['request_id']) + '.json')
+                if public.exists():
+                    if unique_json(read_bounded(public, MAX_RESULT)) != receipt:
+                        raise TransportError('terminal Stage-bind public/protected receipts differ')
+                else:
+                    write_new(public, receipt, MAX_RESULT)
+                journal_path.unlink()
             return
-        pins = self._journal_pins(record)
         with self._fence_locked():
             fence = unique_json(read_bounded(
                 self.root / '.local/two-site-refactor/orchestrator-fence.json', 65536))
@@ -1011,6 +1169,7 @@ class ProtectedGatewayHost:
                 return
             if not reconciling:
                 raise TransportError('Stage-bind recovery fence is outside rollback/roll-forward states')
+            self._validate_reconciling_stage_bind(record, pins, fence)
 
         # The canonical fence program acquires the same lock and independently
         # revalidates the complete RECONCILING state before any roll-forward write.
@@ -1018,7 +1177,9 @@ class ProtectedGatewayHost:
             [str(pins.python_binary), '-I', str(pins.fence_script), 'stage-bind',
              '--platform', 'ANTIGRAVITY', '--instance', self.manifest['coordinator_id'],
              '--epoch', str(record['epoch']), '--integration-head', record['integration_head'],
-             '--assignment', record['old_assignment'], '--next-assignment', record['next_assignment']],
+             '--assignment', record['old_assignment'], '--next-assignment', record['next_assignment'],
+             '--request-id', record['request_id'],
+             '--request-sha256', record['request_sha256']],
             cwd=self.root, env={'PATH': '/usr/local/bin:/usr/bin:/bin', 'LANG': 'C.UTF-8',
                                 'GIT_TERMINAL_PROMPT': '0'}, timeout=120,
             output_limit=256_000,
@@ -1360,8 +1521,12 @@ class ProtectedGatewayHost:
         if plan.operation == 'next-stage-bind':
             journal = unique_json(read_bounded(self._stage_bind_journal_path, 4_000_000))
             self._stage_bind_inputs(journal)
-            current_fence = unique_json(read_bounded(
-                self.root / '.local/two-site-refactor/orchestrator-fence.json', 65536))
+            with self._fence_locked():
+                current_fence = unique_json(read_bounded(
+                    self.root / '.local/two-site-refactor/orchestrator-fence.json', 65536))
+                if (current_fence.get('status') == 'RECONCILING'
+                        and current_fence.get('binding_kind') == 'STAGE'):
+                    self._validate_reconciling_stage_bind(journal, pins, current_fence)
             if outcome.get('status') != 'SUCCESS':
                 if (current_fence.get('status') == 'ACTIVE'
                         and current_fence.get('active_assignment_id') == journal['old_assignment']):
@@ -1378,7 +1543,9 @@ class ProtectedGatewayHost:
                          '--platform', 'ANTIGRAVITY', '--instance', self.manifest['coordinator_id'],
                          '--epoch', str(journal['epoch']), '--integration-head', journal['integration_head'],
                          '--assignment', journal['old_assignment'],
-                         '--next-assignment', journal['next_assignment']],
+                         '--next-assignment', journal['next_assignment'],
+                         '--request-id', journal['request_id'],
+                         '--request-sha256', journal['request_sha256']],
                         cwd=self.root,
                         env={'PATH': '/usr/local/bin:/usr/bin:/bin', 'LANG': 'C.UTF-8',
                              'GIT_TERMINAL_PROMPT': '0'}, timeout=120, output_limit=256_000,

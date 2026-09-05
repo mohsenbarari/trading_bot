@@ -9,12 +9,13 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
 from contextlib import contextmanager
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import datetime, timedelta, timezone
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterator
 
 import yaml
@@ -32,6 +33,13 @@ PLATFORMS = {"CURSOR", "ANTIGRAVITY"}
 NON_RUNNING = {"IDLE", "IDLE_INTEGRATED", "BLOCKED", "READY", "COMPLETE_CANDIDATE"}
 ACTIVE_STAGE_STATES = {"READY", "RUNNING", "IDLE_INTEGRATED", "COMPLETE_CANDIDATE", "BLOCKED"}
 ASSIGNMENT_ID_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+PROTECTED_ASSIGNMENT_PATTERNS = {
+    ".agents/**",
+    "docs/refactor/two-server/CHANGE_LEDGER.md",
+    "docs/refactor/two-server/execution-order.yaml",
+    "docs/refactor/two-server/reviews/**",
+    "scripts/two_site_agent_*.py",
+}
 ANTIGRAVITY_INSTANCE_PATTERN = (
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 )
@@ -165,6 +173,60 @@ def load_fence(required: bool = True) -> dict[str, Any] | None:
         raise FenceError(f"orchestrator fence is invalid JSON: {exc}") from exc
     validate_fence(payload)
     return payload
+
+
+def load_bounded_unique_json(path: Path, limit: int) -> dict[str, Any]:
+    """Read one regular JSON file without following a final symlink or duplicate keys."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as exc:
+        raise FenceError(f"cannot open bounded JSON input: {path}") from exc
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise FenceError("bounded JSON input is not a regular file")
+        with os.fdopen(descriptor, "rb", closefd=False) as source:
+            value = source.read(limit + 1)
+        if len(value) > limit:
+            raise FenceError("bounded JSON input exceeds its size limit")
+    finally:
+        os.close(descriptor)
+
+    def unique_pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, item in items:
+            if key in result:
+                raise FenceError("bounded JSON input has duplicate keys")
+            result[key] = item
+        return result
+
+    def reject_constant(_value: str) -> None:
+        raise FenceError("bounded JSON input contains a non-finite number")
+
+    try:
+        payload = json.loads(
+            value,
+            object_pairs_hook=unique_pairs,
+            parse_constant=reject_constant,
+        )
+    except (ValueError, UnicodeError, RecursionError) as exc:
+        raise FenceError("bounded JSON input is invalid") from exc
+    if not isinstance(payload, dict):
+        raise FenceError("bounded JSON input root must be an object")
+    return payload
+
+
+def canonical_json_sha256(payload: Any) -> str:
+    try:
+        canonical = json.dumps(
+            payload,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    except (ValueError, TypeError, RecursionError) as exc:
+        raise FenceError("JSON value cannot be canonically hashed") from exc
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def validate_fence(payload: Any) -> None:
@@ -522,6 +584,273 @@ def validate_prior_takeover_contract(
     immutable_contract_sha256(assignment)
 
 
+def validate_stage_bind_integration(
+    integration: dict[str, Any],
+    args: argparse.Namespace,
+    allowed_assignments: set[str],
+) -> str:
+    """Validate the complete integration owner while the canonical lock is held."""
+    active_assignment = integration.get("active_assignment_id")
+    if (
+        integration.get("path") != str(ROOT)
+        or integration.get("branch") != INTEGRATION_BRANCH
+        or integration.get("head_sha") != args.integration_head
+        or integration.get("owner_role") != "EXECUTION_COORDINATOR"
+        or integration.get("orchestrator") != args.platform
+        or integration.get("orchestration_epoch") != args.epoch
+        or active_assignment not in allowed_assignments
+    ):
+        raise FenceError("registry integration ownership is not exact for Stage bind")
+    return str(active_assignment)
+
+
+def validate_stage_bind_prior_contract(
+    assignment: dict[str, Any],
+    assignment_id: str,
+    stage: dict[str, Any],
+    args: argparse.Namespace,
+    *,
+    expected_status: str,
+) -> None:
+    """Validate the exact prior Stage owner before any Stage-bind write."""
+    validate_canonical_assignment(assignment)
+    if (
+        assignment.get("assignment_id") != assignment_id
+        or assignment.get("role") != "WORKER"
+        or assignment.get("status") not in {"READY", "IN_PROGRESS"}
+        or assignment.get("issued_by") != "EXECUTION_COORDINATOR"
+        or assignment.get("orchestrator") != args.platform
+        or assignment.get("orchestration_epoch") != args.epoch
+        or assignment.get("integration_branch") != INTEGRATION_BRANCH
+        or assignment.get("stage_id") != stage.get("stage_id")
+        or assignment.get("worktree_registry_id") != stage.get("registry_id")
+        or assignment.get("branch") != stage.get("branch")
+        or assignment.get("worktree_path") != stage.get("path")
+        or assignment.get("base_sha") != stage.get("base_sha")
+        or assignment.get("locks") != stage.get("locks")
+        or stage.get("assignment_id") != assignment_id
+        or stage.get("owner_role") != "EXECUTION_WORKER"
+        or stage.get("orchestrator") != args.platform
+        or stage.get("orchestration_epoch") != args.epoch
+        or stage.get("status") != expected_status
+        or stage.get("dirty_uncommitted_candidate") is not False
+    ):
+        raise FenceError("prior Stage ownership is not exact for Stage bind")
+    worktree = Path(str(stage.get("path", "")))
+    if not worktree.is_dir():
+        raise FenceError("prior Stage worktree is inaccessible during Stage bind")
+    require_integration_repository(worktree)
+    if run_git("branch", "--show-current", cwd=worktree) != stage.get("branch"):
+        raise FenceError("prior Stage worktree branch differs during Stage bind")
+    actual_head = run_git("rev-parse", "HEAD", cwd=worktree)
+    if actual_head != stage.get("head_sha"):
+        raise FenceError("prior Stage worktree HEAD differs during Stage bind")
+    if run_git("status", "--porcelain=v1", "--untracked-files=all", cwd=worktree):
+        raise FenceError("prior Stage worktree is dirty during Stage bind")
+    if subprocess.run(
+        [
+            GIT_BINARY,
+            "-C",
+            str(worktree),
+            "merge-base",
+            "--is-ancestor",
+            str(assignment["base_sha"]),
+            actual_head,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    ).returncode:
+        raise FenceError("prior Stage worktree does not descend from its Assignment base")
+
+
+def validate_stage_bind_request(
+    args: argparse.Namespace,
+    next_assignment: dict[str, Any],
+) -> None:
+    """Bind the canonical transition to the exact typed gateway request."""
+    if not re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+        str(args.request_id),
+    ):
+        raise FenceError("Stage-bind request ID is invalid")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(args.request_sha256)):
+        raise FenceError("Stage-bind request digest is invalid")
+    request_path = LOCAL / "gateway" / "requests" / f"{args.request_id}.json"
+    request = load_bounded_unique_json(request_path, 1_000_000)
+    if canonical_json_sha256(request) != args.request_sha256:
+        raise FenceError("Stage-bind typed request digest differs")
+    expected_request_keys = {
+        "id",
+        "operation",
+        "actor_id",
+        "assignment",
+        "epoch",
+        "integration_head",
+        "next_stage",
+        "next_assignment",
+        "next_stage_commit_receipt_sha256",
+        "contract",
+    }
+    if (
+        not isinstance(request, dict)
+        or set(request) != expected_request_keys
+        or request.get("id") != args.request_id
+        or request.get("operation") != "next-stage-bind"
+        or not re.fullmatch(ANTIGRAVITY_INSTANCE_PATTERN, str(request.get("actor_id", "")))
+        or request.get("actor_id") != args.instance
+        or not re.fullmatch(ASSIGNMENT_ID_PATTERN, str(request.get("assignment", "")))
+        or request.get("assignment") != args.assignment
+        or not re.fullmatch(
+            ASSIGNMENT_ID_PATTERN, str(request.get("next_assignment", ""))
+        )
+        or request.get("next_assignment") != args.next_assignment
+        or isinstance(request.get("epoch"), bool)
+        or not isinstance(request.get("epoch"), int)
+        or request.get("epoch") != args.epoch
+        or not re.fullmatch(r"[0-9a-f]{40}", str(request.get("integration_head", "")))
+        or request.get("integration_head") != args.integration_head
+        or request.get("next_stage") != next_assignment.get("stage_id")
+        or not re.fullmatch(
+            r"[0-9a-f]{64}", str(request.get("next_stage_commit_receipt_sha256", ""))
+        )
+    ):
+        raise FenceError("Stage-bind typed request identity differs")
+    contract = request.get("contract")
+    expected_contract_keys = {
+        "slug",
+        "allowed_paths",
+        "forbidden_paths",
+        "locks",
+        "deliverables",
+        "tests",
+        "failure_tests",
+        "rollback_test",
+        "scope_notes",
+    }
+    if not isinstance(contract, dict) or set(contract) != expected_contract_keys:
+        raise FenceError("Stage-bind typed request contract is malformed")
+    slug = contract.get("slug")
+    stage_id = next_assignment.get("stage_id")
+    if (
+        not isinstance(slug, str)
+        or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", slug)
+        or next_assignment.get("branch") != f"refactor/stage/{stage_id}-{slug}"
+        or Path(str(next_assignment.get("worktree_path", ""))).name
+        != f"{stage_id}-{slug}"
+        or next_assignment.get("worktree_registry_id") != f"stage-{stage_id}-{slug}"
+    ):
+        raise FenceError("Stage-bind Assignment targets differ from typed request")
+    rollback = contract.get("rollback_test")
+    if rollback is not None and (
+        not isinstance(rollback, str) or not 1 <= len(rollback.encode()) <= 4096
+    ):
+        raise FenceError("Stage-bind typed request rollback test is malformed")
+    for key in (
+        "allowed_paths",
+        "forbidden_paths",
+        "locks",
+        "deliverables",
+        "tests",
+        "failure_tests",
+    ):
+        values = contract.get(key)
+        if (
+            not isinstance(values, list)
+            or (key == "allowed_paths" and not values)
+            or len(values) > 256
+            or any(
+                not isinstance(value, str)
+                or not 1 <= len(value.encode()) <= 4096
+                or "\0" in value
+                for value in values
+            )
+            or len(values) != len(set(values))
+        ):
+            raise FenceError(f"Stage-bind typed request {key} is malformed")
+    scope_notes = contract.get("scope_notes")
+    if (
+        not isinstance(scope_notes, str)
+        or not 1 <= len(scope_notes.encode()) <= 20_000
+    ):
+        raise FenceError("Stage-bind typed request scope notes are malformed")
+    for key in ("allowed_paths", "forbidden_paths"):
+        for value in contract[key]:
+            path = PurePosixPath(value)
+            if (
+                value != value.strip()
+                or "\\" in value
+                or any(ord(character) < 32 for character in value)
+                or path.is_absolute()
+                or str(path) != value
+                or value.startswith("-")
+                or value.startswith("**")
+                or value == "*"
+                or any(part in {"", ".", "..", ".git"} for part in path.parts)
+            ):
+                raise FenceError(f"Stage-bind typed request {key} path is unsafe")
+    if not PROTECTED_ASSIGNMENT_PATTERNS.issubset(set(contract["forbidden_paths"])):
+        raise FenceError("Stage-bind typed request omits protected forbidden paths")
+    assignment_contract = {
+        "allowed_paths": next_assignment.get("allowed_paths"),
+        "forbidden_paths": next_assignment.get("forbidden_paths"),
+        "locks": next_assignment.get("locks"),
+        "deliverables": next_assignment.get("deliverables"),
+        "tests": next_assignment.get("tests"),
+        "failure_tests": next_assignment.get("failure_tests"),
+        "rollback_test": next_assignment.get("rollback_test"),
+    }
+    request_contract = {key: contract.get(key) for key in assignment_contract}
+    if assignment_contract != request_contract:
+        raise FenceError("Stage-bind Assignment scope differs from typed request")
+
+
+def validate_stage_bind_next_record(
+    assignment: dict[str, Any],
+    stage: dict[str, Any],
+    args: argparse.Namespace,
+) -> None:
+    """Validate every host-derived next Assignment/registry field before writes."""
+    issued_at = assignment.get("issued_at")
+    expires_at = assignment.get("expires_at")
+    if not isinstance(issued_at, str) or not isinstance(expires_at, str):
+        raise FenceError("next Stage timestamps are missing")
+    try:
+        issued = datetime.fromisoformat(issued_at.replace("Z", "+00:00"))
+        expires = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise FenceError("next Stage timestamps are invalid") from exc
+    if (
+        issued.tzinfo is None
+        or expires.tzinfo is None
+        or expires - issued != timedelta(days=7)
+        or assignment.get("issued_from_worktree") != str(ROOT)
+        or assignment.get("supersedes") is not None
+        or assignment.get("parallel_peer") is not None
+    ):
+        raise FenceError("next Assignment host-derived fields are invalid")
+    expected = {
+        "registry_id": assignment["worktree_registry_id"],
+        "stage_id": assignment["stage_id"],
+        "assignment_id": assignment["assignment_id"],
+        "owner_role": "EXECUTION_WORKER",
+        "path": assignment["worktree_path"],
+        "branch": assignment["branch"],
+        "base_sha": args.integration_head,
+        "head_sha": args.integration_head,
+        "dirty_uncommitted_candidate": False,
+        "locks": assignment["locks"],
+        "status": "READY",
+        "orchestrator": args.platform,
+        "orchestration_epoch": args.epoch,
+        "created_at": issued_at,
+        "expires_at": expires_at,
+        "remove_within_hours_after_close": 24,
+    }
+    if stage != expected:
+        raise FenceError("next Stage registry record is not exact")
+
+
 def validate_replacement_contract(
     assignment: dict[str, Any],
     fence: dict[str, Any],
@@ -677,6 +1006,8 @@ def reconcile_takeover(fence: dict[str, Any], replacement_assignment: str) -> No
     integration = registry.get("integration") or {}
     integration.update(
         {
+            "path": str(ROOT),
+            "branch": INTEGRATION_BRANCH,
             "owner_role": "EXECUTION_COORDINATOR",
             "orchestrator": fence["platform"],
             "orchestration_epoch": fence["epoch"],
@@ -965,25 +1296,14 @@ def stage_bind(args: argparse.Namespace) -> None:
 
         registry = load_yaml(REGISTRY)
         integration = registry.get("integration") or {}
-        if integration.get("head_sha") != args.integration_head:
-            raise FenceError("registry integration head does not match Stage bind")
-        if integration.get("orchestrator") != args.platform or integration.get("orchestration_epoch") != args.epoch:
-            raise FenceError("registry owner does not match Stage bind")
-
         if fence["status"] == "ACTIVE":
             if fence.get("active_assignment_id") != args.assignment:
                 raise FenceError("ACTIVE fence current Assignment does not match Stage bind")
-            if integration.get("active_assignment_id") != args.assignment:
-                raise FenceError("registry current Assignment does not match Stage bind")
-            current_stages = [
-                item
-                for item in registry.get("stage_worktrees", [])
-                if item.get("assignment_id") == args.assignment
-            ]
-            if len(current_stages) != 1:
-                raise FenceError("current Stage is not uniquely registered")
-            current_assignment = load_assignment(args.assignment)
-            validate_replacement_contract(current_assignment, fence, current_stages[0])
+            active_assignment = validate_stage_bind_integration(
+                integration, args, {args.assignment}
+            )
+            expected_prior_status = "COMPLETE_CANDIDATE"
+            registry_transition_required = True
             candidate_fence = dict(fence)
             candidate_fence.update(
                 {
@@ -999,14 +1319,38 @@ def stage_bind(args: argparse.Namespace) -> None:
                 raise FenceError("recovering Stage bind previous Assignment mismatch")
             if fence.get("active_assignment_id") != args.next_assignment:
                 raise FenceError("recovering Stage bind next Assignment mismatch")
-            if integration.get("active_assignment_id") not in {args.assignment, args.next_assignment}:
-                raise FenceError("registry is outside the recovering Stage bind")
+            active_assignment = validate_stage_bind_integration(
+                integration, args, {args.assignment, args.next_assignment}
+            )
+            expected_prior_status = (
+                "COMPLETE_CANDIDATE"
+                if active_assignment == args.assignment
+                else "CLOSED"
+            )
+            registry_transition_required = active_assignment == args.assignment
             candidate_fence = dict(fence)
         else:
             raise FenceError("Stage bind requires ACTIVE or matching RECONCILING/STAGE fence")
 
+        current_stages = [
+            item
+            for item in registry.get("stage_worktrees", [])
+            if item.get("assignment_id") == args.assignment
+        ]
+        if len(current_stages) != 1:
+            raise FenceError("current Stage is not uniquely registered")
+        current_assignment = load_assignment(args.assignment)
+        validate_stage_bind_prior_contract(
+            current_assignment,
+            args.assignment,
+            current_stages[0],
+            args,
+            expected_status=expected_prior_status,
+        )
+
         next_assignment = load_assignment(args.next_assignment)
         validate_canonical_assignment(next_assignment)
+        validate_stage_bind_request(args, next_assignment)
         if next_assignment.get("external_access") != "NONE":
             raise FenceError("automatic Stage bind permits only external_access NONE")
         if next_assignment.get("integration_head_at_issue") != args.integration_head:
@@ -1025,9 +1369,10 @@ def stage_bind(args: argparse.Namespace) -> None:
             raise FenceError("next Stage registry base is not the current integration HEAD")
         if next_stage.get("head_sha") != args.integration_head:
             raise FenceError("next Stage worktree is not at the current integration HEAD")
+        validate_stage_bind_next_record(next_assignment, next_stage, args)
         order = load_yaml(EXECUTION_ORDER)
         stages = order.get("stages") or {}
-        current_stage_id = load_assignment(args.assignment).get("stage_id")
+        current_stage_id = current_assignment.get("stage_id")
         next_stage_id = next_assignment.get("stage_id")
         validate_automatic_stage(
             stages,
@@ -1046,13 +1391,14 @@ def stage_bind(args: argparse.Namespace) -> None:
             raise FenceError("next Stage worktree must be clean")
 
         atomic_write_fence(candidate_fence)
-        for item in registry.get("stage_worktrees", []):
-            if item.get("assignment_id") == args.assignment:
-                item["status"] = "CLOSED"
-                item["closed_at"] = datetime.now(timezone.utc).isoformat()
-        integration["active_assignment_id"] = args.next_assignment
-        registry["updated_at"] = datetime.now(timezone.utc).isoformat()
-        atomic_write_yaml(REGISTRY, registry)
+        if registry_transition_required:
+            for item in registry.get("stage_worktrees", []):
+                if item.get("assignment_id") == args.assignment:
+                    item["status"] = "CLOSED"
+                    item["closed_at"] = datetime.now(timezone.utc).isoformat()
+            integration["active_assignment_id"] = args.next_assignment
+            registry["updated_at"] = datetime.now(timezone.utc).isoformat()
+            atomic_write_yaml(REGISTRY, registry)
         candidate_fence["status"] = "ACTIVE"
         atomic_write_fence(candidate_fence)
         print(f"ORCHESTRATOR_STAGE=BOUND epoch={args.epoch} assignment={args.next_assignment}")
@@ -1157,6 +1503,8 @@ def parser() -> argparse.ArgumentParser:
     stage_advance_parser.add_argument("--stage-head", required=True)
     stage_open_check_parser.add_argument("--next-stage", required=True)
     stage_bind_parser.add_argument("--next-assignment", required=True)
+    stage_bind_parser.add_argument("--request-id", required=True)
+    stage_bind_parser.add_argument("--request-sha256", required=True)
     return result
 
 

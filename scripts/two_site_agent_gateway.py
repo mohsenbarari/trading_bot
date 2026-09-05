@@ -1622,7 +1622,17 @@ def _plan_next_stage_bind(request: Mapping[str, Any], state: _CanonicalState,
                        digest=authority, head_sha=request["integration_head"])
     if not state.integration_snapshot.clean:
         _fail(GatewayErrorCode.STATE_MISMATCH, "Stage bind requires a clean integration worktree")
-    command = _fence_command(state, "stage-bind", next_assignment=next_assignment)
+    request_sha256 = hashlib.sha256(json.dumps(
+        request, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        allow_nan=False,
+    ).encode()).hexdigest()
+    command = _fence_command(
+        state,
+        "stage-bind",
+        next_assignment=next_assignment,
+        request_id=str(request["id"]),
+        request_sha256=request_sha256,
+    )
     return OperationPlan(
         **_base_plan(request, state, next_stage=next_stage, next_assignment=next_assignment,
                      slug=contract["slug"], contract_sha256=hashlib.sha256(

@@ -213,6 +213,18 @@ transaction با همان epoch، fence را موقتاً `RECONCILING`، Stage 
 قبلی، IN_PROGRESS بودن Stage جدید، کامل بودن dependencies و غیرproduction/
 غیرخارجی بودن آن را دوباره می‌سنجد. Assignment، base و HEAD worktree بعدی باید دقیقاً
 برابر integration HEAD باشند و worktree باید Git common directory یکسان داشته باشد.
+علاوه بر پارامترها، argv به ID و digest دقیق درخواست typed متصل است و fence زیر lock
+مالکیت کامل integration (path/branch/role/platform/epoch)، مالک Stage قبلی، scope
+Assignment و targetهای مشتق از درخواست را پیش از هر write کنترل می‌کند. Host نیز همین
+زنجیره را پیش از retry در `RECONCILING` بررسی می‌کند. rollback تا پیش از اعتبارسنجی
+Assignment، worktree، branch و registry هیچ targetی را حذف نمی‌کند؛ حالت persisted
+`REMOVED` فقط وقتی idempotent است که worktree قبلی وجود نداشته و Git-registered نباشد.
+schema داخلی contract نیز مستقل از planner از نظر type/size، یکتایی listها، path امن و
+الگوهای اجباری protected در fence کنترل می‌شود.
+هویت immutable رکورد قدیمی باید با snapshot داخل journal برابر بماند و فقط delta دقیق
+`COMPLETE_CANDIDATE -> CLOSED -> REMOVED` مجاز است. وجود receipt محافظت‌شده نیز به‌تنهایی
+authority پایان recovery نیست: receipt، journal و ACTIVE-new/REMOVED زیر همان lock
+دوباره اثبات می‌شوند و فقط سپس cache عمومی نوشته و journal حذف می‌شود.
 recovery فقط با همان instance و پارامترها مجاز است و automatic bind فقط
 `external_access: NONE` را می‌پذیرد.
 

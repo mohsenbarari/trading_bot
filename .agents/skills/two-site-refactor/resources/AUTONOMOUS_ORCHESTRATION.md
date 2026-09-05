@@ -43,9 +43,12 @@ Stage and first runs fenced `stage-open-check` against canonical `PROPOSED` meta
 Unknown metadata or any production/destructive/DNS/Writer/secret flag blocks. Only then
 does it commit the canonical `IN_PROGRESS` opening and advance the fence again. It prepares
 the matching Assignment/worktree at that exact integration HEAD and runs
-`stage-bind --next-assignment <id>`. This closes the prior local Stage record and
-atomically rebinds registry/fence. It rejects external-access Assignments, which remain
-behind their separate pre-action gate.
+`stage-bind --next-assignment <id>` through the typed gateway. The fixed argv binds the
+canonical request ID and digest; under the fence lock, the command proves the complete
+integration owner, prior Stage owner, next Assignment and request-derived targets before
+any write. It then closes the prior local Stage record and atomically rebinds
+registry/fence. It rejects external-access Assignments, which remain behind their
+separate pre-action gate.
 
 The Worker must commit the complete candidate on its assigned branch after tests pass,
 return the exact commit SHA, and leave its worktree clean. It never pushes or integrates.

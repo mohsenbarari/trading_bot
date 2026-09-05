@@ -795,6 +795,15 @@ class HostTests(unittest.TestCase):
         request, _, _, registry_path = self.prepare_stage_bind_fixture()
         journal = self.write_stage_bind_transport_state(request)
 
+        next_assignment = Path(journal['assignment_path'])
+        next_assignment_original = next_assignment.read_text()
+        next_assignment.write_text(next_assignment_original + '\nunreviewed drift\n')
+        before = self.stage_bind_effect_snapshot(journal, registry_path)
+        with self.assertRaisesRegex(TransportError, 'changed next Assignment'):
+            self.host._rollback_stage_bind(journal, self.fx.pins)
+        self.assertEqual(before, self.stage_bind_effect_snapshot(journal, registry_path))
+        next_assignment.write_text(next_assignment_original)
+
         original_assignment = self.assignment_path.read_text()
         self.assignment['orchestration_epoch'] = EPOCH + 1
         self.write_assignment()
@@ -838,6 +847,20 @@ class HostTests(unittest.TestCase):
         before = self.stage_bind_effect_snapshot(journal, registry_path)
         with self.assertRaises(TransportError):
             self.host._rollback_stage_bind(invalid_delta, self.fx.pins)
+        self.assertEqual(before, self.stage_bind_effect_snapshot(journal, registry_path))
+
+    def test_rollback_prevalidates_branch_before_removing_other_targets(self):
+        request, _, _, registry_path = self.prepare_stage_bind_fixture()
+        journal = self.write_stage_bind_transport_state(request)
+        removed = self.fx.git(
+            self.fx.root, 'worktree', 'remove', str(journal['next_worktree']))
+        self.assertEqual(0, removed.returncode)
+        moved = self.fx.git(
+            self.fx.root, 'branch', '-f', journal['next_branch'], journal['old_head'])
+        self.assertEqual(0, moved.returncode)
+        before = self.stage_bind_effect_snapshot(journal, registry_path)
+        with self.assertRaisesRegex(TransportError, 'changed next Stage branch'):
+            self.host._rollback_stage_bind(journal, self.fx.pins)
         self.assertEqual(before, self.stage_bind_effect_snapshot(journal, registry_path))
 
     def test_rollback_waits_for_canonical_fence_lock_before_any_effect(self):
@@ -903,6 +926,42 @@ class HostTests(unittest.TestCase):
         receipt = json.loads((self.host.state / (request['id'] + '.receipt.json')).read_text())
         self.assertEqual('SUCCESS', receipt['outcome']['status'])
 
+    def test_reconciling_recovery_rejects_foreign_owners_before_fence_effect(self):
+        from scripts import two_site_agent_host as host_module
+
+        request, _, _, registry_path = self.prepare_stage_bind_fixture()
+        journal = self.write_stage_bind_transport_state(request)
+        self.next_stage_fence(request, status='RECONCILING')
+        canonical = yaml.safe_load(registry_path.read_text())
+        cases = {
+            'integration-owner': lambda value: value['integration'].__setitem__(
+                'owner_role', 'EXECUTION_WORKER'),
+            'prior-stage-owner': lambda value: value['stage_worktrees'][0].__setitem__(
+                'owner_role', 'EXECUTION_COORDINATOR'),
+        }
+        original = host_module._run_bounded_process
+        invoked_stage_bind = []
+
+        def reject_stage_bind(argv, **kwargs):
+            if 'stage-bind' in argv:
+                invoked_stage_bind.append(tuple(argv))
+                raise AssertionError('canonical fence must not run after owner drift')
+            return original(argv, **kwargs)
+
+        for name, mutate in cases.items():
+            with self.subTest(name=name):
+                candidate = json.loads(json.dumps(canonical))
+                mutate(candidate)
+                registry_path.write_text(yaml.safe_dump(candidate, sort_keys=False))
+                before = self.stage_bind_effect_snapshot(journal, registry_path)
+                with patch.object(
+                        host_module, '_run_bounded_process', side_effect=reject_stage_bind):
+                    with self.assertRaises(TransportError):
+                        self.host._recover_stage_bind_transaction()
+                self.assertEqual([], invoked_stage_bind)
+                self.assertEqual(before, self.stage_bind_effect_snapshot(journal, registry_path))
+        registry_path.write_text(yaml.safe_dump(canonical, sort_keys=False))
+
     def test_recovery_finishes_registry_after_worktree_removal_crash(self):
         request, _, result, registry_path = self.prepare_stage_bind_fixture()
         self.write_stage_bind_transport_state(request)
@@ -917,6 +976,112 @@ class HostTests(unittest.TestCase):
         old_after = next(item for item in yaml.safe_load(registry_path.read_text())['stage_worktrees']
                          if item['assignment_id'] == ASSIGNMENT)
         self.assertEqual('REMOVED', old_after['status'])
+
+    def test_recovery_finishes_after_removed_registry_was_persisted(self):
+        request, _, result, registry_path = self.prepare_stage_bind_fixture()
+        journal = self.write_stage_bind_transport_state(request)
+        self.mark_stage_bind_state(request, registry_path)
+        self.host._retire_bound_worktree(journal, self.fx.pins)
+        old = next(item for item in yaml.safe_load(registry_path.read_text())['stage_worktrees']
+                   if item['assignment_id'] == ASSIGNMENT)
+        self.assertEqual('REMOVED', old['status'])
+        self.host._recover_stage_bind_transaction()
+        self.assertTrue(Path(result['worktree_path']).is_dir())
+        self.assertFalse(self.host._stage_bind_journal_path.exists())
+        receipt = json.loads((self.host.state / (request['id'] + '.receipt.json')).read_text())
+        self.assertEqual('SUCCESS', receipt['outcome']['status'])
+
+    def test_recovery_finishes_after_complete_journal_was_persisted(self):
+        request, _, result, registry_path = self.prepare_stage_bind_fixture()
+        journal = self.write_stage_bind_transport_state(request)
+        self.mark_stage_bind_state(request, registry_path)
+        self.host._retire_bound_worktree(journal, self.fx.pins)
+        self.host._write_stage_bind_journal(journal, 'COMPLETE')
+        self.host._recover_stage_bind_transaction()
+        self.assertTrue(Path(result['worktree_path']).is_dir())
+        self.assertFalse(self.host._stage_bind_journal_path.exists())
+        old = next(item for item in yaml.safe_load(registry_path.read_text())['stage_worktrees']
+                   if item['assignment_id'] == ASSIGNMENT)
+        self.assertEqual('REMOVED', old['status'])
+        receipt = json.loads((self.host.state / (request['id'] + '.receipt.json')).read_text())
+        self.assertEqual('SUCCESS', receipt['outcome']['status'])
+
+    def test_recovery_republishes_receipt_only_after_revalidating_complete_state(self):
+        request, _, _, registry_path = self.prepare_stage_bind_fixture()
+        journal = self.write_stage_bind_transport_state(request)
+        self.mark_stage_bind_state(request, registry_path)
+        self.host._retire_bound_worktree(journal, self.fx.pins)
+        journal = self.host._write_stage_bind_journal(journal, 'COMPLETE')
+        running, protected_request, _ = self.host._stage_bind_inputs(journal)
+        self.host._finish_recovered_stage_bind(
+            journal, running, protected_request, 'SUCCESS', 'crash-window fixture')
+        protected = self.host.state / (request['id'] + '.receipt.json')
+        public = self.fx.root / '.local/two-site-refactor/gateway/results' / (
+            request['id'] + '.json')
+        expected = protected.read_bytes()
+        public.unlink()
+
+        self.host._recover_stage_bind_transaction()
+
+        self.assertEqual(expected, public.read_bytes())
+        self.assertFalse(self.host._stage_bind_journal_path.exists())
+
+    def test_recovery_does_not_publish_receipt_if_removed_worktree_reappears(self):
+        request, _, _, registry_path = self.prepare_stage_bind_fixture()
+        journal = self.write_stage_bind_transport_state(request)
+        self.mark_stage_bind_state(request, registry_path)
+        self.host._retire_bound_worktree(journal, self.fx.pins)
+        journal = self.host._write_stage_bind_journal(journal, 'COMPLETE')
+        running, protected_request, _ = self.host._stage_bind_inputs(journal)
+        self.host._finish_recovered_stage_bind(
+            journal, running, protected_request, 'SUCCESS', 'crash-window fixture')
+        public = self.fx.root / '.local/two-site-refactor/gateway/results' / (
+            request['id'] + '.json')
+        public.unlink()
+        restored = self.fx.git(
+            self.fx.root, 'worktree', 'add', str(self.fx.stage), journal['old_branch'])
+        self.assertEqual(0, restored.returncode)
+
+        with self.assertRaisesRegex(TransportError, 'still exists or is registered'):
+            self.host._recover_stage_bind_transaction()
+
+        self.assertFalse(public.exists())
+        self.assertTrue(self.host._stage_bind_journal_path.exists())
+        self.assertTrue((self.host.state / (request['id'] + '.receipt.json')).exists())
+
+    def test_recovery_rejects_removed_registry_immutable_identity_drift(self):
+        request, _, _, registry_path = self.prepare_stage_bind_fixture()
+        journal = self.write_stage_bind_transport_state(request)
+        self.mark_stage_bind_state(request, registry_path)
+        self.host._retire_bound_worktree(journal, self.fx.pins)
+        registry = yaml.safe_load(registry_path.read_text())
+        old = next(item for item in registry['stage_worktrees']
+                   if item['assignment_id'] == ASSIGNMENT)
+        old['registry_id'] = 'foreign'
+        old['base_sha'] = 'f' * 40
+        old['locks'] = ['foreign-lock']
+        registry_path.write_text(yaml.safe_dump(registry, sort_keys=False))
+        before = self.stage_bind_effect_snapshot(journal, registry_path)
+
+        with self.assertRaisesRegex(TransportError, 'legal transition'):
+            self.host._recover_stage_bind_transaction()
+
+        self.assertEqual(before, self.stage_bind_effect_snapshot(journal, registry_path))
+
+    def test_recovery_rejects_removed_registry_while_prior_worktree_still_exists(self):
+        request, _, _, registry_path = self.prepare_stage_bind_fixture()
+        journal = self.write_stage_bind_transport_state(request)
+        self.mark_stage_bind_state(request, registry_path)
+        registry = yaml.safe_load(registry_path.read_text())
+        old = next(item for item in registry['stage_worktrees']
+                   if item['assignment_id'] == ASSIGNMENT)
+        old['status'] = 'REMOVED'
+        old['removed_at'] = '2026-09-05T00:00:00Z'
+        registry_path.write_text(yaml.safe_dump(registry, sort_keys=False))
+        before = self.stage_bind_effect_snapshot(journal, registry_path)
+        with self.assertRaisesRegex(TransportError, 'still exists or is registered'):
+            self.host._recover_stage_bind_transaction()
+        self.assertEqual(before, self.stage_bind_effect_snapshot(journal, registry_path))
 
     def test_retirement_rejects_workspace_root_branch_drift_and_incomplete_stage(self):
         _, _, _, registry_path = self.prepare_stage_bind_fixture()
@@ -955,6 +1120,14 @@ class HostTests(unittest.TestCase):
         self.fx.git(imposter, 'checkout', '-q', '-b', journal['old_branch'], journal['old_head'])
         unsafe = {**journal, 'old_worktree': str(imposter)}
         old['path'] = str(imposter)
+        baseline_registry = yaml.safe_load(unsafe['registry_before'])
+        baseline_old = next(
+            item for item in baseline_registry['stage_worktrees']
+            if item['assignment_id'] == ASSIGNMENT)
+        baseline_old['path'] = str(imposter)
+        unsafe['registry_before'] = yaml.safe_dump(baseline_registry, sort_keys=False)
+        unsafe['registry_before_sha256'] = hashlib.sha256(
+            unsafe['registry_before'].encode()).hexdigest()
         assignment = yaml.safe_load(re.findall(
             r'```yaml\n(.*?)\n```', self.assignment_path.read_text(), re.S)[0])
         assignment['worktree_path'] = str(imposter)

@@ -1305,14 +1305,14 @@ issued_by: CURSOR_COORDINATOR
             check.integration_head = next_head
             fence.check(check)
 
-            next_stage_root = Path(directory) / "stage-next"
+            next_stage_root = Path(directory) / "P1-01-next"
             git(
                 root,
                 "worktree",
                 "add",
                 "-q",
                 "-b",
-                "refactor/stage/P1-01",
+                "refactor/stage/P1-01-next",
                 str(next_stage_root),
                 next_head,
             )
@@ -1328,11 +1328,17 @@ role: WORKER
 status: READY
 supersedes: null
 base_sha: {next_stage_head}
-branch: refactor/stage/P1-01
+branch: refactor/stage/P1-01-next
 worktree_path: {next_stage_root}
-worktree_registry_id: stage-P1-01
+worktree_registry_id: stage-P1-01-next
 allowed_paths: [src/**]
-forbidden_paths: [deploy/**]
+forbidden_paths:
+  - deploy/**
+  - .agents/**
+  - docs/refactor/two-server/CHANGE_LEDGER.md
+  - docs/refactor/two-server/execution-order.yaml
+  - docs/refactor/two-server/reviews/**
+  - scripts/two_site_agent_*.py
 locks: []
 parallel_peer: null
 deliverables: [implementation]
@@ -1340,9 +1346,10 @@ tests: [focused]
 failure_tests: [negative]
 rollback_test: revert
 external_access: NONE
-expires_at: '2099-01-01T00:00:00Z'
+expires_at: '2099-01-08T00:00:00Z'
 issued_by: EXECUTION_COORDINATOR
 issued_at: '2099-01-01T00:00:00Z'
+issued_from_worktree: {root}
 orchestrator: ANTIGRAVITY
 orchestration_epoch: 1
 integration_branch: refactor/two-site-architecture
@@ -1354,26 +1361,66 @@ integration_head_at_issue: {next_head}
             registry = yaml.safe_load(fence.REGISTRY.read_text(encoding="utf-8"))
             registry["stage_worktrees"].append(
                 {
-                    "registry_id": "stage-P1-01",
+                    "registry_id": "stage-P1-01-next",
                     "stage_id": "P1-01",
                     "assignment_id": next_assignment_id,
                     "owner_role": "EXECUTION_WORKER",
                     "orchestrator": "ANTIGRAVITY",
                     "orchestration_epoch": 1,
                     "path": str(next_stage_root),
-                    "branch": "refactor/stage/P1-01",
+                    "branch": "refactor/stage/P1-01-next",
                     "base_sha": next_stage_head,
                     "head_sha": next_stage_head,
                     "dirty_uncommitted_candidate": False,
                     "locks": [],
                     "status": "READY",
+                    "created_at": "2099-01-01T00:00:00Z",
+                    "expires_at": "2099-01-08T00:00:00Z",
+                    "remove_within_hours_after_close": 24,
                 }
             )
             fence.REGISTRY.write_text(
                 yaml.safe_dump(registry, sort_keys=False), encoding="utf-8"
             )
+            bind_request = {
+                "id": "44444444-4444-4444-8444-444444444444",
+                "operation": "next-stage-bind",
+                "actor_id": execution_id,
+                "assignment": new_id,
+                "epoch": 1,
+                "integration_head": next_head,
+                "next_stage": "P1-01",
+                "next_assignment": next_assignment_id,
+                "next_stage_commit_receipt_sha256": "a" * 64,
+                "contract": {
+                    "slug": "next",
+                    "allowed_paths": ["src/**"],
+                    "forbidden_paths": [
+                        "deploy/**",
+                        ".agents/**",
+                        "docs/refactor/two-server/CHANGE_LEDGER.md",
+                        "docs/refactor/two-server/execution-order.yaml",
+                        "docs/refactor/two-server/reviews/**",
+                        "scripts/two_site_agent_*.py",
+                    ],
+                    "locks": [],
+                    "deliverables": ["implementation"],
+                    "tests": ["focused"],
+                    "failure_tests": ["negative"],
+                    "rollback_test": "revert",
+                    "scope_notes": "direct canonical fence transaction fixture",
+                },
+            }
+            request_path = local / "gateway" / "requests" / (
+                bind_request["id"] + ".json"
+            )
+            request_path.parent.mkdir(parents=True)
+            request_path.write_text(json.dumps(bind_request), encoding="utf-8")
             stage_bind = SimpleNamespace(
-                **vars(check), next_assignment=next_assignment_id
+                **vars(check),
+                next_assignment=next_assignment_id,
+                request_id=bind_request["id"],
+                request_sha256=fence.canonical_json_sha256(bind_request),
             )
             next_assignment_path = assignments / f"{next_assignment_id}.md"
             valid_next_assignment = next_assignment_path.read_text(encoding="utf-8")
@@ -1466,6 +1513,163 @@ integration_head_at_issue: {next_head}
             next_assignment_path.write_text(valid_next_assignment, encoding="utf-8")
 
             valid_registry = fence.REGISTRY.read_text(encoding="utf-8")
+            active_fence_for_bind = fence.FENCE.read_text(encoding="utf-8")
+            valid_bind_request = request_path.read_text(encoding="utf-8")
+            request_path.write_text(
+                json.dumps({**bind_request, "next_stage": "P1-99"}),
+                encoding="utf-8",
+            )
+            before_request_rejection = file_snapshot(local)
+            with self.assertRaisesRegex(fence.FenceError, "request digest differs"):
+                fence.stage_bind(stage_bind)
+            self.assertEqual(before_request_rejection, file_snapshot(local))
+            request_path.write_text(valid_bind_request, encoding="utf-8")
+
+            malformed_requests = {
+                "unknown-key": {**bind_request, "unreviewed_extension": True},
+                "invalid-commit-receipt": {
+                    **bind_request,
+                    "next_stage_commit_receipt_sha256": "not-a-sha",
+                },
+                "invalid-scope-notes": {
+                    **bind_request,
+                    "contract": {**bind_request["contract"], "scope_notes": {}},
+                },
+                "empty-allowed-paths": {
+                    **bind_request,
+                    "contract": {**bind_request["contract"], "allowed_paths": []},
+                },
+                "duplicate-allowed-paths": {
+                    **bind_request,
+                    "contract": {
+                        **bind_request["contract"],
+                        "allowed_paths": ["src/**", "src/**"],
+                    },
+                },
+                "unsafe-allowed-path": {
+                    **bind_request,
+                    "contract": {
+                        **bind_request["contract"],
+                        "allowed_paths": ["../escape/**"],
+                    },
+                },
+                "missing-protected-forbidden-paths": {
+                    **bind_request,
+                    "contract": {
+                        **bind_request["contract"],
+                        "forbidden_paths": ["deploy/**"],
+                    },
+                },
+            }
+            for name, malformed_request in malformed_requests.items():
+                with self.subTest(typed_request_schema=name):
+                    request_path.write_text(
+                        json.dumps(malformed_request), encoding="utf-8"
+                    )
+                    malformed_bind = SimpleNamespace(
+                        **{
+                            **vars(stage_bind),
+                            "request_sha256": fence.canonical_json_sha256(
+                                malformed_request
+                            ),
+                        }
+                    )
+                    before_schema_rejection = file_snapshot(local)
+                    with self.assertRaises(fence.FenceError):
+                        fence.stage_bind(malformed_bind)
+                    self.assertEqual(
+                        before_schema_rejection, file_snapshot(local)
+                    )
+            request_path.write_text(valid_bind_request, encoding="utf-8")
+
+            incomplete_next_registry = yaml.safe_load(valid_registry)
+            incomplete_next_record = next(
+                item
+                for item in incomplete_next_registry["stage_worktrees"]
+                if item["assignment_id"] == next_assignment_id
+            )
+            del incomplete_next_record["remove_within_hours_after_close"]
+            fence.REGISTRY.write_text(
+                yaml.safe_dump(incomplete_next_registry, sort_keys=False),
+                encoding="utf-8",
+            )
+            before_registry_rejection = file_snapshot(local)
+            with self.assertRaisesRegex(fence.FenceError, "registry record is not exact"):
+                fence.stage_bind(stage_bind)
+            self.assertEqual(before_registry_rejection, file_snapshot(local))
+            fence.REGISTRY.write_text(valid_registry, encoding="utf-8")
+
+            next_payload = fence.load_assignment(next_assignment_id)
+            reconciling_fence = json.loads(active_fence_for_bind)
+            reconciling_fence.update(
+                {
+                    "status": "RECONCILING",
+                    "binding_kind": "STAGE",
+                    "previous_assignment_id": new_id,
+                    "active_assignment_id": next_assignment_id,
+                    "assignment_base_sha": next_payload["base_sha"],
+                    "assignment_integration_head_at_issue": next_payload[
+                        "integration_head_at_issue"
+                    ],
+                    "immutable_contract_sha256": fence.immutable_contract_sha256(
+                        next_payload
+                    ),
+                }
+            )
+            ownership_cases = {
+                "integration-owner": lambda value: value["integration"].__setitem__(
+                    "owner_role", "EXECUTION_WORKER"
+                ),
+                "integration-path": lambda value: value["integration"].__setitem__(
+                    "path", str(Path(directory) / "foreign-integration")
+                ),
+                "integration-branch": lambda value: value["integration"].__setitem__(
+                    "branch", "refactor/foreign"
+                ),
+                "prior-stage-owner": lambda value: next(
+                    item
+                    for item in value["stage_worktrees"]
+                    if item["assignment_id"] == new_id
+                ).__setitem__("owner_role", "EXECUTION_COORDINATOR"),
+            }
+            for name, mutate in ownership_cases.items():
+                with self.subTest(reconciling_owner_drift=name):
+                    candidate = yaml.safe_load(valid_registry)
+                    mutate(candidate)
+                    fence.REGISTRY.write_text(
+                        yaml.safe_dump(candidate, sort_keys=False), encoding="utf-8"
+                    )
+                    fence.FENCE.write_text(
+                        json.dumps(reconciling_fence), encoding="utf-8"
+                    )
+                    before = file_snapshot(local)
+                    with self.assertRaises(fence.FenceError):
+                        fence.stage_bind(stage_bind)
+                    self.assertEqual(before, file_snapshot(local))
+
+            already_transitioned = yaml.safe_load(valid_registry)
+            already_transitioned["integration"]["active_assignment_id"] = (
+                next_assignment_id
+            )
+            prior_record = next(
+                item
+                for item in already_transitioned["stage_worktrees"]
+                if item["assignment_id"] == new_id
+            )
+            prior_record["status"] = "CLOSED"
+            prior_record["closed_at"] = "2099-01-01T00:00:01Z"
+            fence.REGISTRY.write_text(
+                yaml.safe_dump(already_transitioned, sort_keys=False),
+                encoding="utf-8",
+            )
+            fence.FENCE.write_text(json.dumps(reconciling_fence), encoding="utf-8")
+            transitioned_registry_bytes = fence.REGISTRY.read_bytes()
+            fence.stage_bind(stage_bind)
+            self.assertEqual(transitioned_registry_bytes, fence.REGISTRY.read_bytes())
+            self.assertEqual("ACTIVE", fence.load_fence()["status"])
+            fence.REGISTRY.write_text(valid_registry, encoding="utf-8")
+            fence.FENCE.write_text(active_fence_for_bind, encoding="utf-8")
+
             mismatched_registry = yaml.safe_load(valid_registry)
             next_record = [
                 item
@@ -1505,7 +1709,7 @@ integration_head_at_issue: {next_head}
                 unrelated_next,
                 "switch",
                 "-qc",
-                "refactor/stage/P1-01",
+                "refactor/stage/P1-01-next",
                 next_head,
             )
             next_assignment_path.write_text(

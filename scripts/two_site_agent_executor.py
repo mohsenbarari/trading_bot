@@ -804,9 +804,17 @@ def _validate_plan(plan: OperationPlan, request: Mapping[str, Any], pins: Pinned
     elif operation == "next-stage-bind":
         valid = len(commands) == 1
         if valid:
+            request_sha256 = hashlib.sha256(json.dumps(
+                request, sort_keys=True, separators=(",", ":"),
+                ensure_ascii=False, allow_nan=False,
+            ).encode()).hexdigest()
             _parse_fence(commands[0], pins, request, expected_subcommand="stage-bind",
                          expected_head=str(request["integration_head"]),
-                         expected_extra=("--next-assignment", str(request.get("next_assignment"))))
+                         expected_extra=(
+                             "--next-assignment", str(request.get("next_assignment")),
+                             "--request-id", str(request.get("id")),
+                             "--request-sha256", request_sha256,
+                         ))
     elif operation == "receipt-check":
         valid = not commands and not plan.followups and not plan.checkpoints
     else:

@@ -73,7 +73,13 @@ commit تمیز، Coordinator با `stage-advance` و اثبات ancestry، HEAD
 `stage-open-check` نبود پرچم خارجی و metadata ناشناخته را ثابت می‌کند؛ سپس transition
 Stage پذیرفته‌شده به `IN_PROGRESS` را کامیت و fence را دوباره `advance` می‌کند. worktree
 بعدی باید روی همان integration HEAD ساخته شود و `stage-bind` رکورد قبلی را محلی می‌بندد
-و Assignment/Worktree همان Stage را اتمیک فعال می‌کند.
+و Assignment/Worktree همان Stage را اتمیک فعال می‌کند. argv این فرمان به ID و SHA-256
+دقیق درخواست typed متصل است؛ خود fence زیر lock، درخواست، مالک path/branch مربوط به
+integration، مالک Stage قبلی و تمام هویت Assignment/registry جدید را پیش از اولین write
+دوباره اثبات و کلید اضافه/ناقص یا digest نامعتبر رسید را رد می‌کند. rollback نیز Assignment
+و branch بعدی را پیش از هر حذف می‌سنجد و بازیابی رکورد `REMOVED` تنها با برابری کامل
+رکورد پایه، delta مجاز و اثبات نبودن و ثبت‌نبودن worktree قبلی مجاز است. رسید terminal
+نیز پیش از انتشار و پاک‌کردن journal همین state نهایی را زیر lock دوباره کنترل می‌کند.
 Assignment دارای external access از این مسیر رد می‌شود.
 
 ## شروع اختیاری در CLI
