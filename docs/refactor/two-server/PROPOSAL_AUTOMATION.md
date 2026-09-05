@@ -1,10 +1,11 @@
 # اتوماسیون سادهٔ Codex و Antigravity
 
-وضعیت: `BOUNDED_CYCLE_HARDENED` — ۲۰۲۶-۰۹-۰۵
+وضعیت: `GEMINI_FIRST_REVIEW_REQUIRED` — ۲۰۲۶-۰۹-۰۵
 
-مسیر محدودِ Gemini Worker → Codex Verifier مستقل → اعمال و تست → commit آزمایش شد.
-این اثباتِ یک چرخهٔ توسعه است، نه تکمیل همهٔ Stageها یا daemon دائمی.
-شرح دقیق و حدود شاهد در [گزارش چرخه](reviews/AUTOMATION_PROPOSAL_LIVE_20260905.md) است.
+مسیر جاری Gemini Worker → Gemini Reviewer مستقل → Codex final gate → اعمال/تست/commit
+است. چرخهٔ زندهٔ قبلی Worker → Codex را اثبات کرد؛ الزام review اول توسط Gemini تصمیم
+جدید مالک و جایگزین مسیر قبلی است و تا اجرای smoke زندهٔ خودش ادعای runtime acceptance
+ندارد. شرح شاهد تاریخی در [گزارش چرخه](reviews/AUTOMATION_PROPOSAL_LIVE_20260905.md) است.
 gateway پیچیدهٔ قبلی همچنان غیرفعال و نصب‌نشده باقی می‌ماند.
 
 ## سناریوی عادی
@@ -14,27 +15,32 @@ gateway پیچیدهٔ قبلی همچنان غیرفعال و نصب‌نشده
 1. Codex وابستگی Stage و وضعیت واقعی Git را بررسی و یک زیرکار محدود تعیین می‌کند.
    فایل‌های مرتبط، رفتار غیرقابل‌تغییر، خروجی لازم و معیارهای پذیرش داخل Assignment
    می‌آیند؛ لازم نیست Gemini کل ROADMAP یا تمام پروژه را بخواند.
-2. Codex با runner یک نشست تازهٔ Gemini می‌سازد. مدل فقط متن همان فایل‌ها را می‌گیرد
-   و متن کامل فایل‌های پیشنهادی را برمی‌گرداند؛ shell، Git و فایل‌نویسی به مدل واگذار نمی‌شوند.
+2. Codex با runner یک نشست تازهٔ Gemini Worker می‌سازد. تمام کدنویسی، تست و تغییر
+   مستندات پروژه در خروجی کامل همین Worker انجام می‌شود؛ مدل متن نهایی فایل‌ها را
+   برمی‌گرداند، اما shell، Git و نوشتن مستقیم روی worktree ندارد.
 3. runner شکل پاسخ، پوشش اعلام‌شدهٔ نیازمندی‌ها، مسیرها، hash نسخهٔ اولیه، شناسهٔ نشست،
    مدل و نبود تلاش برای ابزار را می‌سنجد. `PROPOSAL_READY` به معنی «پیشنهاد قابل بررسی»
    است، نه «تست‌شده»، «درست» یا «پذیرفته‌شده».
-4. پیش از اعمال تغییر، یک Codex Verifier مستقل، پیشنهاد دقیق و فایل‌های اصلی را
-   بررسی می‌کند؛ snapshot و hash نتیجه باید با `task.json` و source/HEAD فعلی منطبق
-   باشند. این review ایستا است، نه اجرای تست. این همان مسیر آزموده‌شده است و ارسال
-   دوبارهٔ draft یا feedback به Google را لازم ندارد. اگر ارسال چنین بسته‌ای صریحاً
-   مجاز باشد، نقش اختیاری `verifier` در runner نشست تازهٔ Gemini می‌سازد و تطبیق را
-   خودکار انجام می‌دهد؛ این گزینه هنوز آزمایش زنده نشده است.
-5. Codex diff را می‌خواند، با `apply_patch` اعمال و تست‌های مشخص را در محیط غیرعملیاتی
-   اجرا می‌کند. فرمان تست از Assignment معتبر می‌آید، نه فرمان دلخواه داخل پاسخ مدل.
-   شکست واقعی به اجرای اصلاحی تازه با source و hash تازه برمی‌گردد؛ پذیرش به تست سبز
-   و review نهایی Codex روی کل تغییر وابسته است، نه صرفاً نظر Gemini.
-6. Codex تغییر نهایی را review و فقط فایل‌های همان کار را commit می‌کند. برای پذیرش
+4. پیش از Codex، runner یک نشست تازه و مستقل Gemini Reviewer می‌سازد. Reviewer همان
+   task/snapshot و proposal دقیق را می‌گیرد، حق تولید تغییر ندارد و فقط `VERIFIED`،
+   `CHANGES_REQUIRED` یا `BLOCKED` می‌دهد. Runner تفاوت conversation ID، وضعیت Worker
+   و SHA دقیق proposal را کنترل می‌کند. ارتباط مستقیمی میان دو Gemini وجود ندارد.
+5. اگر Gemini رد کند، Codex یافته‌ها را در feedback چهارفیلدیِ متصل به proposal SHA
+   قرار می‌دهد و آن را همراه proposal ردشده به Worker تازه می‌فرستد؛ سپس Reviewer
+   تازه از ابتدا review می‌کند. هیچ گزارش دستی توسط مالک جابه‌جا نمی‌شود.
+6. پس از `VERIFIED`، Codex بازبین نهایی است: بستهٔ task/source/proposal/review/hash را
+   بررسی می‌کند و خودش کد، تست یا مستندات پروژه را نمی‌نویسد. رد Codex نیز با همان
+   قرارداد feedback به Worker و سپس Gemini Reviewer تازه بازمی‌گردد.
+7. فقط پس از عبور review ایستا، Codex bytes دقیق proposal را اعمال، hash نهایی را
+   کنترل و تست‌های Assignment را اجرا می‌کند. شکست تست با evidence واقعی و پس از
+   بازگرداندن baseline تمیز وارد چرخهٔ اصلاح می‌شود؛ Codex failure را شخصاً fix نمی‌کند.
+8. پس از سبزشدن تست و review کامل diff، Codex فقط فایل‌های همان کار را commit می‌کند. برای پذیرش
    Stage، review مستقل Codex روی SHA دقیق و closeout مصوب همچنان لازم است؛ این runner
    اجازهٔ تغییر `COMPLETE`، ارتقای `main` یا آزادکردن dependency را صادر نمی‌کند.
 
-Codex تنها اعمال‌کنندهٔ تغییرات در این حالت است. Gemini فقط پیشنهاد می‌دهد و
-Verifier مستقل حق اعمال یا پذیرش کار خودش را ندارد؛ لایهٔ privileged gateway،
+Gemini Worker نویسندهٔ کامل کد است؛ «proposal» فقط به این معناست که تا عبور از دو
+review اجازهٔ نوشتن مستقیم ندارد، نه اینکه صرفاً ایده یا plan بدهد. Codex تنها
+اعمال‌کننده و مالک Git است. Gemini Reviewer حق تغییر یا پذیرش نهایی ندارد؛ لایهٔ privileged gateway،
 installer و session-binding خصوصی لازم نیست.
 این تغییرِ نقش مجوزی برای اجرای مسیر قدیمی، حذف داده یا تغییر عملیات محصول نیست.
 
@@ -64,8 +70,7 @@ python3 scripts/two_site_proposal_runner.py worker \
   --task .local/two-site-refactor/task.json --run-id unique-worker-001
 ```
 
-در مسیر آزموده‌شده، Codex پیشنهاد را مستقیم به Verifier مستقلِ فقط‌خواندنی می‌دهد.
-فرمان زیر اختیاری است و فقط با مجوز ارسال proposal به Google اجرا می‌شود:
+review اول زیر اجباری است و در نشست تازهٔ Gemini اجرا می‌شود:
 
 ```bash
 python3 scripts/two_site_proposal_runner.py verifier \
@@ -93,18 +98,29 @@ template ــ با خواندن حداکثر `limit+1` بایت از file descri
 مدل در کد pin شده: `gemini-3.8-flash-high` با `high`.
 timeout پیش‌فرض ۳۰۰ ثانیه است؛ context هر زیرکار حداکثر ۱۶۰ کیلوبایت.
 کد، task و feedback باید فاقد کلید و دادهٔ عملیاتی باشند. فیلتر token، جایگزین
-بررسی محتوا توسط Codex نیست. ارسال به سرویس فقط در scope مجاز و با مجوز ابزار محیط است.
-در اصلاح، فقط در scope مجازِ ارسال، `--feedback` شاهد خطا و `--proposal` پیشنهاد قبلی
-را به Worker می‌دهند. مجوز source-only به‌طور خودکار مجوز این دو ورودی نیست؛ اگر
-محیط ارسالشان را رد کرد، آن محتوا را زیر نام ورودی دیگری ارسال نکنید. بازبینی محلی
-Codex مجاز می‌تواند ادامه یابد؛ مسیر مسدود گزارش می‌شود. نتیجهٔ تستِ نسخهٔ قبلی
-نباید به‌عنوان تستِ تغییر تازه معرفی شود.
+بررسی محتوا توسط Codex نیست. مالک ارسال bounded source/proposal/review/finding لازم
+برای ریفکتور دوسایته به Gemini و Codex را تأیید کرده است؛ secret، دادهٔ کاربر و دادهٔ
+عملیاتی همچنان خارج scope هستند. feedback اصلاحی دقیقاً این قرارداد را دارد و hash
+باید proposal ردشده باشد؛ کلید اضافه یا گزارش آزاد رد می‌شود:
+
+```json
+{
+  "reviewer": "gemini",
+  "reviewed_proposal_sha256": "<64-hex>",
+  "findings": ["path/function: triggering case and expected behavior"],
+  "test_evidence": []
+}
+```
+
+برای رد نهایی مقدار `reviewer` برابر `codex` است. نتیجهٔ تست نسخهٔ قبلی به‌عنوان
+شاهد تغییر تازه استفاده نمی‌شود.
 
 ## خروجی ناقص یا قطع Worker
 
 - اگر مدل فقط توضیح یا برنامه بدهد، خروجی به‌عنوان پیاده‌سازی رد می‌شود.
-- اگر تست شکست بخورد، Codex شاهد شکست و الزام نقض‌شده را خودکار به Gemini می‌دهد.
-  اجرای اصلاحی باید شناسهٔ تازه داشته باشد و پیشنهاد قبلی را نیز دریافت کند.
+- اگر Gemini Reviewer یا Codex رد کند یا تست شکست بخورد، Codex یافته‌ها و شاهد واقعی
+  را خودکار به Worker تازه می‌دهد. اجرای اصلاحی شناسهٔ تازه و proposal قبلی را دارد
+  و پس از آن همیشه یک Gemini Reviewer تازه اجرا می‌شود.
 - حداکثر دو اصلاح خودکار برای همان زیرکار انجام می‌شود. تکرار finding یکسان بدون
   تغییر مؤثر یا نبود پیشرفت یعنی بازنگری اندازهٔ کار/زمینه/روش، نه retry بی‌پایان.
   این حد به معنی تأیید خروجی ناقص یا الزام درخواست تأیید معمول از مالک نیست.
@@ -146,6 +162,17 @@ invocation نشست تازه و ephemeral دارد. هر چرخه فقط پس ا
 خروجی نامعتبر یا gate بیرونی چرخه را متوقف می‌کند؛ مدل نمی‌تواند با نوشتن `CONTINUE`
 این کنترل‌های محلی را دور بزند.
 
+همین نشست Codex Supervisor بازبین نهایی و مالک apply/test/Git است؛ nested Codex
+اجرا نمی‌شود. Supervisor نمی‌تواند implementation/test/project-doc را بنویسد یا
+failure را شخصاً fix کند: قبل از هر اعمال، Worker و Reviewer مستقل Gemini لازم‌اند
+و هر finding به چرخهٔ اصلاحی Gemini بازمی‌گردد.
+
+خروجی commitدار Codex باید `gemini_worker_run_id`، `gemini_reviewer_run_id` و
+`proposal_sha256` دقیق را برگرداند. Supervisor پیش از قبول چرخه، status/snapshot/result
+هر دو نشست، تفاوت conversation ID، SHAها، تک‌commit‌بودن history و برابری کامل
+path/mode/bytes commit با proposal را محلی کنترل می‌کند. نتیجهٔ بدون commit هر سه
+فیلد را `null` می‌دهد؛ متن مدل به‌تنهایی نمی‌تواند این gate را پاس کند.
+
 گزینهٔ `--approve-for-me` خود Codex درخواست‌ها را با sandbox نوع workspace-write
 بازبینی می‌کند؛ CLI اجازهٔ ترکیب هم‌زمان آن با `--sandbox` را نمی‌دهد. Supervisor
 عمداً فقط اولی را می‌فرستد و هیچ bypass سراسری approvals/sandbox به کار نمی‌برد.
@@ -167,8 +194,8 @@ scripts/two_site_autopilot_tmux.sh logs
 خروجی هر Codex حین stream به ۱۶ مگابایت محدود، timeout هر چرخه سه ساعت و تعداد کل
 چرخه‌ها ۲۰۰ است. فقط ۲۰ run عادی آخر حفظ می‌شود؛ شاهد `BLOCKED` برای بررسی باقی
 می‌ماند. Supervisor هیچ gate تولید/DNS/Writer/secret را مجاز نمی‌کند و gateway قدیمی
-را فعال نمی‌کند. مسیر مستقلِ Codex، proposal Gemini را review، تغییر پذیرفته‌شده را
-اعمال، تست و commit می‌کند؛ شکست معمولی حداکثر دو retry دارد و تغییر مبهم retry نمی‌شود.
+را فعال نمی‌کند. Supervisor مسیر Worker → Gemini Reviewer → Codex final gate را
+اجرا می‌کند؛ شکست معمولی حداکثر دو اصلاح دارد و تغییر مبهم retry نمی‌شود.
 Supervisor نیز ورودی‌های schema/prompt/result/status را محدود می‌خواند، hardlinkهای
 فایل‌های کنترلی را رد می‌کند و lock انحصاری خود را بدون دنبال‌کردن symlink نگه می‌دارد.
 
@@ -189,7 +216,10 @@ APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
   python3 -m unittest tests.test_two_site_codex_autopilot -v
 ```
 
-شاهد جداگانهٔ زنده، Worker
-واقعی، تغییرِ اعمال‌شده، تست، review مستقل و commit را ثبت می‌کند. نه این شاهد و نه
-تست‌ها به معنی پذیرش Stage یا آمادگی تولید نیستند. Web/Bot، deploy، DNS و انتقال
+مجموعهٔ Runner، Supervisor، adapter قدیمی و session-binding پس از این تغییر ۹۳ تست
+آفلاین سبز دارد؛ این عدد شاهد قرارداد کد است، نه smoke واقعی Gemini Reviewer.
+
+شاهد جداگانهٔ زنده، Worker واقعی، Gemini Reviewer تازه، Codex final gate، تغییر
+اعمال‌شده، تست و commit را ثبت خواهد کرد. نه شاهد تاریخی و نه تست‌ها به معنی پذیرش
+Stage یا آمادگی تولید نیستند. Web/Bot، deploy، DNS و انتقال
 انسانی Web Writer با این تغییر دست‌نخورده می‌مانند.

@@ -15,8 +15,9 @@ Hard invariants:
 
 - The current proposal-only simplification is governed by
   `docs/refactor/two-server/PROPOSAL_AUTOMATION.md`: Codex applies changes; Gemini has
-  no source/Git/state authority. One bounded cycle with an independent Codex verifier
-  is validated; this is not Stage/production acceptance or a permanent daemon. The native
+  no direct source/Git/state authority. The prior bounded Worker→Codex cycle is only
+  historical evidence; current work additionally requires fresh Gemini first review.
+  This is not Stage/production acceptance or a permanent daemon. The native
   Worker/fence/gateway mechanics below apply only to the paused legacy profile;
   do not activate that profile while completing proposal-runner work. Scope,
   independent acceptance, evidence and external/human Writer gates still apply.
@@ -24,6 +25,9 @@ Hard invariants:
   version/SHA changes before, during or after a run; path names are not version proof.
   Read every model input through a root-confined byte cap; reject symlinks and any
   `st_nlink != 1`. Hold one nonblocking runner lock across all CLI probes/calls.
+  Gemini Worker is the sole implementation/test/project-doc author; require a fresh
+  Gemini Reviewer on the exact proposal before the final Codex gate. Codex may apply,
+  test and commit accepted bytes but must return findings instead of authoring a fix.
   Unattended cycles use only the bounded Codex Supervisor/tmux launcher. Continue only
   after a clean descendant commit with unchanged protected refs and control blobs;
   no-progress, ambiguous mutation or an external gate stops the loop.

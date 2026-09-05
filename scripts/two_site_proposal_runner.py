@@ -424,6 +424,57 @@ def validate_result(result: dict, task: dict, sources: dict, role: str) -> dict:
     return result
 
 
+def load_prior_worker(
+    root: Path,
+    proposal_path: Path,
+    proposal_text: str,
+    task: dict,
+    sources: dict,
+    head: str,
+) -> tuple[dict, dict, str]:
+    """Bind a review/correction to one complete worker run and exact proposal bytes."""
+    baseline = unique_json(bounded_file_text(
+        root, proposal_path.with_name("task.json"), 2 * MAX_CONTEXT, "worker snapshot"
+    ))
+    worker_status = unique_json(bounded_file_text(
+        root, proposal_path.with_name("status.json"), MAX_CONTEXT, "worker status"
+    ))
+    proposal_sha256 = sha(proposal_text.encode("utf-8"))
+    if (not isinstance(baseline, dict) or baseline.get("task") != task
+            or baseline.get("source_head") != head or baseline.get("sources") != sources):
+        raise ProposalError("verify before applying: worker baseline differs from current source/task")
+    if (not isinstance(worker_status, dict)
+            or worker_status.get("role") != "worker"
+            or worker_status.get("state") != "PROPOSAL_READY"
+            or worker_status.get("result_sha256") != proposal_sha256
+            or not isinstance(worker_status.get("run_id"), str)
+            or not isinstance(worker_status.get("conversation_id"), str)
+            or not worker_status["conversation_id"].strip()):
+        raise ProposalError("proposal is not bound to one completed worker run")
+    candidate = validate_result(unique_json(proposal_text), task, sources, "worker")
+    if candidate["status"] != "PROPOSAL_READY":
+        raise ProposalError("review/correction requires a complete worker proposal")
+    return candidate, worker_status, proposal_sha256
+
+
+def validate_correction_feedback(text: str, proposal_sha256: str) -> dict:
+    feedback = unique_json(text)
+    required = {"reviewer", "reviewed_proposal_sha256", "findings", "test_evidence"}
+    if not isinstance(feedback, dict) or set(feedback) != required:
+        raise ProposalError("correction feedback does not match the exact contract")
+    if feedback["reviewer"] not in {"gemini", "codex"}:
+        raise ProposalError("correction feedback reviewer is invalid")
+    if feedback["reviewed_proposal_sha256"] != proposal_sha256:
+        raise ProposalError("correction feedback targets a different proposal")
+    for field, allow_empty in (("findings", False), ("test_evidence", True)):
+        values = feedback[field]
+        if (not isinstance(values, list) or len(values) > 32
+                or (not allow_empty and not values)
+                or any(not isinstance(value, str) or not value.strip() for value in values)):
+            raise ProposalError(f"correction feedback {field} is invalid")
+    return feedback
+
+
 def parse_stream(raw: str, task: dict, sources: dict, role: str) -> tuple[dict, dict]:
     events = [unique_json(line) for line in raw.splitlines() if line.strip()]
     if any(not isinstance(e, dict) for e in events):
@@ -484,29 +535,37 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
     root = root.resolve(strict=True)
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", run_id) or not 10 <= timeout <= 900:
         raise ProposalError("invalid run ID or timeout")
+    if role not in {"worker", "verifier"}:
+        raise ProposalError("invalid proposal role")
     task, sources = load_task(root, task_path)
     head = git(root, "rev-parse", "HEAD")
     initial_status = git(root, "status", "--porcelain=v1", "--untracked-files=all")
     material = {"task": task, "source_head": head, "sources": sources}
+    input_hashes = {}
     for key, path in (("feedback", feedback), ("proposal", proposal)):
         if path is not None:
             content = bounded_file_text(root, path, MAX_CONTEXT, key)
             if SECRET.search(content):
                 raise ProposalError("credential-like content excluded from model input")
             material[key] = content
+            input_hashes[key] = sha(content.encode("utf-8"))
     if role == "verifier" and proposal is None:
         raise ProposalError("verifier needs the exact proposal")
-    if role == "verifier":
-        baseline_path = proposal.with_name("task.json")
-        baseline = unique_json(bounded_file_text(
-            root, baseline_path, 2 * MAX_CONTEXT, "worker snapshot"
-        ))
-        if (not isinstance(baseline, dict) or baseline.get("task") != task
-                or baseline.get("source_head") != head or baseline.get("sources") != sources):
-            raise ProposalError("verify before applying: worker baseline differs from current source/task")
-        candidate = validate_result(unique_json(material["proposal"]), task, sources, "worker")
-        if candidate["status"] != "PROPOSAL_READY":
-            raise ProposalError("verifier requires a complete worker proposal")
+    if role == "verifier" and feedback is not None:
+        raise ProposalError("first-pass Gemini verifier does not accept feedback")
+    if role == "worker" and ((feedback is None) != (proposal is None)):
+        raise ProposalError("correction worker requires both proposal and feedback")
+    prior_status = None
+    if proposal is not None:
+        _candidate, prior_status, proposal_sha256 = load_prior_worker(
+            root, proposal, material["proposal"], task, sources, head
+        )
+        if input_hashes["proposal"] != proposal_sha256:
+            raise ProposalError("proposal hash changed during validation")
+        if role == "worker":
+            material["feedback"] = validate_correction_feedback(
+                material["feedback"], proposal_sha256
+            )
     prompt = bounded_file_text(
         ROOT, ROOT / "docs/refactor/two-server/templates/GEMINI_TASK_PROMPT.md",
         MAX_CONTEXT, "prompt template",
@@ -540,6 +599,14 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 "retain_until": time.time() + 7 * 86400,
                 "authority": "PROPOSAL_ONLY_NOT_ACCEPTANCE",
                 "cli": initial_cli_identity}
+        if prior_status is not None:
+            meta.update(
+                input_worker_run_id=prior_status["run_id"],
+                input_worker_conversation_id=prior_status["conversation_id"],
+                input_proposal_sha256=input_hashes["proposal"],
+            )
+        if feedback is not None:
+            meta["input_feedback_sha256"] = input_hashes["feedback"]
         write_json(out / "status.json", meta)
         command = [str(cli), "--mode", "plan", "--sandbox", "--model", MODEL,
                    "--effort", "high", "--input-format", "stream-json",
@@ -566,6 +633,9 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 raise ProposalError("CLI identity changed during generation")
             raw = bounded_file_text(root, out / "stream.jsonl", MAX_OUTPUT, "CLI event stream")
             result, envelope = parse_stream(raw, task, sources, role)
+            if (prior_status is not None
+                    and envelope["conversation_id"] == prior_status["conversation_id"]):
+                raise ProposalError("review/correction reused the worker session")
             # A late parent/source change invalidates the entire candidate.
             if head != git(root, "rev-parse", "HEAD") or initial_status != git(root, "status", "--porcelain=v1", "--untracked-files=all"):
                 raise ProposalError("Git state changed during generation")

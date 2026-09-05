@@ -51,6 +51,23 @@ class ProposalContracts(unittest.TestCase):
             }},
         ]
 
+    def worker_evidence(self, directory, *, result=None, head="head",
+                        conversation_id="worker-session"):
+        directory.mkdir()
+        proposal = directory / "result.json"
+        runner.write_json(proposal, result or self.result())
+        runner.write_json(directory / "task.json", {
+            "task": self.task, "source_head": head, "sources": self.sources,
+        })
+        runner.write_json(directory / "status.json", {
+            "run_id": directory.name,
+            "role": "worker",
+            "state": "PROPOSAL_READY",
+            "conversation_id": conversation_id,
+            "result_sha256": runner.file_sha256(proposal),
+        })
+        return proposal
+
     def parse(self, events):
         return runner.parse_stream("\n".join(json.dumps(e) for e in events),
                                    self.task, self.sources, "worker")
@@ -228,7 +245,7 @@ class ProposalContracts(unittest.TestCase):
     def invoke_fake_cli(self, *, drift=None, timeout=False, denied=False,
                         result=None, events=None, raw_output=None,
                         git_side_effect=None, run_id="run-001",
-                        cli_identities=None):
+                        cli_identities=None, feedback=None, proposal=None):
         process = MagicMock()
         process.__enter__.return_value = process
         process.returncode = 0
@@ -267,6 +284,7 @@ class ProposalContracts(unittest.TestCase):
                 patch.object(runner.os, "killpg") as kill:
             try:
                 out = runner.run(self.root, self.task_path, "worker", run_id, 30,
+                                 feedback=feedback, proposal=proposal,
                                  cli=Path(__file__).resolve())
                 self.assertNotIn("--dangerously-skip-permissions", popen.call_args.args[0])
                 self.assertIn("--sandbox", popen.call_args.args[0])
@@ -412,11 +430,7 @@ class ProposalContracts(unittest.TestCase):
 
     def test_verifier_rejects_changed_original_before_provider_call(self):
         previous = self.root / "worker"
-        previous.mkdir()
-        proposal = previous / "result.json"
-        proposal.write_text(json.dumps(self.result()))
-        baseline = {"task": self.task, "source_head": "head", "sources": self.sources}
-        (previous / "task.json").write_text(json.dumps(baseline))
+        proposal = self.worker_evidence(previous)
         (self.root / "test_new.py").write_text(self.result()["changes"][0]["content"])
         with patch.object(runner, "git", return_value="head"), \
                 patch.object(runner.subprocess, "Popen") as popen:
@@ -428,12 +442,7 @@ class ProposalContracts(unittest.TestCase):
 
     def test_verifier_receives_matching_original_and_cannot_apply(self):
         previous = self.root / "worker"
-        previous.mkdir()
-        proposal = previous / "result.json"
-        proposal.write_text(json.dumps(self.result()))
-        (previous / "task.json").write_text(json.dumps({
-            "task": self.task, "source_head": "head", "sources": self.sources,
-        }))
+        proposal = self.worker_evidence(previous)
         verified = dict(self.result(), status="VERIFIED", changes=[])
         process = MagicMock()
         process.__enter__.return_value = process
@@ -454,8 +463,55 @@ class ProposalContracts(unittest.TestCase):
             out = runner.run(self.root, self.task_path, "verifier", "verify-001", 30,
                              proposal=proposal, cli=Path(__file__).resolve())
         self.assertEqual(json.loads((out / "status.json").read_text())["state"], "VERIFIED")
+        status = json.loads((out / "status.json").read_text())
+        self.assertEqual(status["input_worker_run_id"], "worker")
+        self.assertEqual(status["input_worker_conversation_id"], "worker-session")
+        self.assertEqual(status["input_proposal_sha256"], runner.file_sha256(proposal))
         self.assertEqual(json.loads((out / "task.json").read_text())["sources"], self.sources)
         self.assertFalse((self.root / "test_new.py").exists())
+
+    def test_correction_feedback_is_exactly_bound_to_prior_proposal(self):
+        proposal = self.worker_evidence(self.root / "prior-worker")
+        proposal_sha = runner.file_sha256(proposal)
+        feedback = self.root / "feedback.json"
+        runner.write_json(feedback, {
+            "reviewer": "gemini",
+            "reviewed_proposal_sha256": proposal_sha,
+            "findings": ["test_new.py lacks the required failure assertion"],
+            "test_evidence": [],
+        })
+        out = self.invoke_fake_cli(
+            feedback=feedback, proposal=proposal, run_id="correction-001",
+        )
+        status = json.loads((out / "status.json").read_text())
+        self.assertEqual(status["input_proposal_sha256"], proposal_sha)
+        self.assertEqual(status["input_feedback_sha256"], runner.file_sha256(feedback))
+        supplied = json.loads((out / "task.json").read_text())
+        self.assertEqual(supplied["feedback"]["reviewer"], "gemini")
+
+        invalid = json.loads(feedback.read_text())
+        invalid["reviewed_proposal_sha256"] = "0" * 64
+        runner.write_json(feedback, invalid)
+        with self.assertRaisesRegex(runner.ProposalError, "different proposal"):
+            self.invoke_fake_cli(
+                feedback=feedback, proposal=proposal, run_id="correction-002",
+            )
+
+    def test_reviewer_or_correction_must_use_fresh_gemini_session(self):
+        proposal = self.worker_evidence(
+            self.root / "same-session-worker", conversation_id="session-one"
+        )
+        feedback = self.root / "same-session-feedback.json"
+        runner.write_json(feedback, {
+            "reviewer": "codex",
+            "reviewed_proposal_sha256": runner.file_sha256(proposal),
+            "findings": ["Add the missing regression assertion"],
+            "test_evidence": ["focused selector failed before commit"],
+        })
+        with self.assertRaisesRegex(runner.ProposalError, "reused the worker session"):
+            self.invoke_fake_cli(
+                feedback=feedback, proposal=proposal, run_id="same-session-correction",
+            )
 
     def test_cli_identity_requires_exact_reviewed_binary_and_version(self):
         cli = self.root / "agy"

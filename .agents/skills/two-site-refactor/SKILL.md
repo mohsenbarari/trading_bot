@@ -1,14 +1,14 @@
 ---
 name: two-site-refactor
-description: Coordinate the Finland-primary/Iran-standby refactor with bounded Gemini proposals, Codex-controlled application and tests, independent verification and exact-SHA acceptance. Also covers recovery of its paused legacy Antigravity adapter.
+description: Coordinate the Finland-primary/Iran-standby refactor with complete Gemini-authored proposals, independent Gemini first review, Codex final review/application/tests/Git and exact-SHA acceptance. Also covers recovery of its paused legacy Antigravity adapter.
 ---
 
 # Two-Site Refactor for Antigravity
 
 ## Current entrypoint — read first
 
-For the current simplification/automation task, use Codex as coordinator and sole
-source writer, and Gemini as proposal-only Worker through
+For the current simplification/automation task, use Codex as coordinator/final gate
+and Gemini Worker as the sole implementation/test/project-document author through
 `scripts/two_site_proposal_runner.py`. Load `AGENTS.md`, routed MemoryCustodian files,
 and `docs/refactor/two-server/PROPOSAL_AUTOMATION.md` completely. The latter is the
 small executable contract and states the current readiness limitations. The runner
@@ -17,6 +17,11 @@ CLI version and SHA before and after every provider call; a directory name is ne
 version evidence. Every file sent to a model must be root-confined, read with a hard
 byte limit, and rejected if it is a symlink or has more than one hardlink. One
 nonblocking process lock must cover identity probes and the complete provider run.
+Every Worker result must receive first review from a separate fresh Gemini session
+on the exact proposal SHA. Codex never repairs source itself: Gemini/Codex findings
+and test evidence return through SHA-bound correction feedback to a fresh Worker,
+followed by another fresh Gemini review. Codex alone applies accepted bytes, tests
+and operates Git.
 
 For unattended execution, `scripts/two_site_codex_autopilot.py` is the only current
 Supervisor and `scripts/two_site_autopilot_tmux.sh` is its launcher. Each fresh Codex
@@ -29,18 +34,17 @@ relevant governance clauses and exact receipts; load MASTER_PLAN sections releva
 to that task, not all sections for every small correction. Give Gemini complete
 bounded sources, requirements, allowed paths, tests and findings via the documented
 task and prompt template. Independently inspect proposals, apply with apply_patch,
-run tests and obtain independent review before acceptance. The validated route uses
-a separate read-only Codex verifier before applying a proposal. Optional Gemini
-verification or resending proposal/feedback requires permission for that payload;
-source-only permission does not imply it. Do not repackage denied input under another
-argument. Keep the owner out of routine handoffs within the approved scope.
+run tests and obtain exact-SHA acceptance. The current required route uses a separate
+Gemini verifier before the final Codex gate; do not launch nested Codex review. Bounded
+two-site source/proposal/finding transfer needed by this route is owner-approved, while
+secrets/user/operational data remain excluded. Keep the owner out of routine handoffs.
 No owner-relayed handoff, no fake test claim, no infinite retry. Do not bypass an
 environment authorization refusal. Stage state and external-action gates stay intact.
 
-One bounded live Worker → independent Codex verification → tests → commit cycle is
-documented in reviews/AUTOMATION_PROPOSAL_LIVE_20260905.md under the two-server docs.
-This is not a reboot-persistent daemon, production/Stage acceptance, legacy gateway
-activation or proof that every future Stage is ready. The approved tmux Supervisor can
+The historical bounded Worker → independent Codex cycle is documented in
+reviews/AUTOMATION_PROPOSAL_LIVE_20260905.md. It does not prove the newly required
+Gemini first-review step, a reboot-persistent daemon, production/Stage acceptance,
+legacy gateway activation or future Stage readiness. The approved tmux Supervisor can
 continue after the interactive chat closes, while the host/session remains alive.
 Recheck affected evidence after main merges.
 

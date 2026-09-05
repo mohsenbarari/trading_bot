@@ -18,6 +18,8 @@ import time
 
 try:
     from scripts.two_site_proposal_runner import (
+        MAX_CONTEXT,
+        MODEL as GEMINI_MODEL,
         ProposalError,
         bounded_file_text,
         capture_bounded_process,
@@ -25,10 +27,13 @@ try:
         git,
         terminate_process,
         unique_json,
+        validate_result as validate_proposal_result,
         write_json,
     )
 except ModuleNotFoundError:  # Direct `python scripts/...` execution.
     from two_site_proposal_runner import (  # type: ignore[no-redef]
+        MAX_CONTEXT,
+        MODEL as GEMINI_MODEL,
         ProposalError,
         bounded_file_text,
         capture_bounded_process,
@@ -36,6 +41,7 @@ except ModuleNotFoundError:  # Direct `python scripts/...` execution.
         git,
         terminate_process,
         unique_json,
+        validate_result as validate_proposal_result,
         write_json,
     )
 
@@ -61,7 +67,11 @@ PROTECTED_REFS = (
     "refs/heads/candidate/wa-ir-standby-v1",
 )
 RUN_ID = re.compile(r"cycle-[0-9]{4}-[0-9]{8}T[0-9]{6}Z-[0-9]+")
-RESULT_KEYS = {"schema_version", "state", "summary", "commit", "next_action", "blockers"}
+RESULT_KEYS = {
+    "schema_version", "state", "summary", "commit", "next_action", "blockers",
+    "gemini_worker_run_id", "gemini_reviewer_run_id", "proposal_sha256",
+}
+PROPOSAL_RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
 PRUNABLE_RUN_STATES = {"CONTINUE", "COMPLETE", "FAILED", "RETRYABLE_FAILURE", "STOPPED"}
 CONTROL_PATHS = (
     Path("scripts/two_site_codex_autopilot.py"),
@@ -242,7 +252,139 @@ def validate_result(result: object) -> dict:
         raise AutopilotError("non-blocked state cannot report blockers")
     if result["state"] == "CONTINUE" and result["next_action"] is None:
         raise AutopilotError("CONTINUE requires a concrete next action")
+    evidence = (
+        result["gemini_worker_run_id"], result["gemini_reviewer_run_id"],
+        result["proposal_sha256"],
+    )
+    if any(value is None for value in evidence) != all(value is None for value in evidence):
+        raise AutopilotError("Gemini evidence fields must be all present or all null")
+    if result["commit"] is not None:
+        if (any(value is None for value in evidence)
+                or any(not isinstance(value, str) for value in evidence)
+                or not PROPOSAL_RUN_ID.fullmatch(result["gemini_worker_run_id"])
+                or not PROPOSAL_RUN_ID.fullmatch(result["gemini_reviewer_run_id"])
+                or not re.fullmatch(r"[0-9a-f]{64}", result["proposal_sha256"])):
+            raise AutopilotError("commit requires exact Gemini Worker/Reviewer evidence")
+    elif any(value is not None for value in evidence):
+        raise AutopilotError("Gemini acceptance evidence cannot accompany a null commit")
     return result
+
+
+def proposal_run_dir(root: Path, run_id: str) -> Path:
+    if not PROPOSAL_RUN_ID.fullmatch(run_id):
+        raise AutopilotError("proposal evidence run ID is invalid")
+    proposals = root / ".local/two-site-refactor/proposals"
+    run_dir = proposals / run_id
+    if (not run_dir.is_dir() or run_dir.resolve() != run_dir
+            or run_dir.parent.resolve() != proposals.resolve()):
+        raise AutopilotError("proposal evidence directory is missing or unsafe")
+    return run_dir
+
+
+def validate_gemini_chain(root: Path, source_head: str, result: dict) -> dict:
+    """Validate one exact Worker -> independent Gemini Reviewer evidence chain."""
+    worker_dir = proposal_run_dir(root, result["gemini_worker_run_id"])
+    reviewer_dir = proposal_run_dir(root, result["gemini_reviewer_run_id"])
+    worker_result_path = worker_dir / "result.json"
+    reviewer_result_path = reviewer_dir / "result.json"
+    worker_result_text = bounded_file_text(
+        root, worker_result_path, MAX_CONTEXT, "Gemini Worker result"
+    )
+    worker_snapshot = unique_json(bounded_file_text(
+        root, worker_dir / "task.json", 2 * MAX_CONTEXT, "Gemini Worker snapshot"
+    ))
+    worker_status = unique_json(bounded_file_text(
+        root, worker_dir / "status.json", MAX_CONTEXT, "Gemini Worker status"
+    ))
+    reviewer_snapshot = unique_json(bounded_file_text(
+        root, reviewer_dir / "task.json", 2 * MAX_CONTEXT, "Gemini Reviewer snapshot"
+    ))
+    reviewer_result = unique_json(bounded_file_text(
+        root, reviewer_result_path, MAX_CONTEXT, "Gemini Reviewer result"
+    ))
+    reviewer_status = unique_json(bounded_file_text(
+        root, reviewer_dir / "status.json", MAX_CONTEXT, "Gemini Reviewer status"
+    ))
+    if (not isinstance(worker_snapshot, dict) or not isinstance(reviewer_snapshot, dict)
+            or not isinstance(worker_status, dict) or not isinstance(reviewer_status, dict)):
+        raise AutopilotError("Gemini evidence has an invalid shape")
+    task = worker_snapshot.get("task")
+    sources = worker_snapshot.get("sources")
+    if not isinstance(task, dict) or not isinstance(sources, dict):
+        raise AutopilotError("Gemini Worker snapshot is incomplete")
+    worker_result = validate_proposal_result(
+        unique_json(worker_result_text), task, sources, "worker"
+    )
+    validate_proposal_result(reviewer_result, task, sources, "verifier")
+    proposal_sha256 = file_sha256(worker_result_path)
+    if (worker_snapshot.get("source_head") != source_head
+            or reviewer_snapshot.get("source_head") != source_head
+            or reviewer_snapshot.get("task") != task
+            or reviewer_snapshot.get("sources") != sources
+            or reviewer_snapshot.get("proposal") != worker_result_text
+            or worker_status.get("run_id") != result["gemini_worker_run_id"]
+            or worker_status.get("role") != "worker"
+            or worker_status.get("state") != "PROPOSAL_READY"
+            or worker_status.get("model") != GEMINI_MODEL
+            or worker_status.get("head") != source_head
+            or worker_status.get("result_sha256") != proposal_sha256
+            or reviewer_status.get("run_id") != result["gemini_reviewer_run_id"]
+            or reviewer_status.get("role") != "verifier"
+            or reviewer_status.get("state") != "VERIFIED"
+            or reviewer_status.get("model") != GEMINI_MODEL
+            or reviewer_status.get("head") != source_head
+            or reviewer_status.get("input_worker_run_id") != result["gemini_worker_run_id"]
+            or reviewer_status.get("input_proposal_sha256") != proposal_sha256
+            or reviewer_status.get("result_sha256") != file_sha256(reviewer_result_path)
+            or reviewer_result.get("status") != "VERIFIED"
+            or result["proposal_sha256"] != proposal_sha256):
+        raise AutopilotError("Gemini Worker/Reviewer evidence is not exactly bound")
+    worker_conversation = worker_status.get("conversation_id")
+    reviewer_conversation = reviewer_status.get("conversation_id")
+    if (not isinstance(worker_conversation, str) or not worker_conversation.strip()
+            or not isinstance(reviewer_conversation, str) or not reviewer_conversation.strip()
+            or worker_conversation == reviewer_conversation):
+        raise AutopilotError("Gemini review did not use an independent fresh session")
+    return worker_result
+
+
+def git_blob(root: Path, commit: str, path: str) -> bytes:
+    try:
+        return subprocess.check_output(
+            ["/usr/bin/git", "--no-replace-objects", "-C", str(root),
+             "show", f"{commit}:{path}"],
+            timeout=20, stderr=subprocess.DEVNULL,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise AutopilotError("committed proposal blob is missing") from exc
+
+
+def tree_mode(root: Path, commit: str, path: str) -> str | None:
+    record = git(root, "ls-tree", commit, "--", path)
+    return record.split(maxsplit=1)[0] if record else None
+
+
+def validate_committed_proposal(
+    root: Path, before_head: str, after_head: str, proposal: dict,
+) -> None:
+    history = git(root, "rev-list", "--parents", "-n", "1", after_head).split()
+    if len(history) != 2 or history[0] != after_head or history[1] != before_head:
+        raise AutopilotError("cycle must create exactly one non-merge commit")
+    changed_paths = set(git(
+        root, "diff", "--name-only", "--no-renames", before_head, after_head,
+    ).splitlines())
+    proposal_paths = {change["path"] for change in proposal["changes"]}
+    if changed_paths != proposal_paths:
+        raise AutopilotError("commit paths differ from the Gemini proposal")
+    for change in proposal["changes"]:
+        path = change["path"]
+        if git_blob(root, after_head, path) != change["content"].encode("utf-8"):
+            raise AutopilotError("committed bytes differ from the Gemini proposal")
+        before_mode = tree_mode(root, before_head, path)
+        after_mode = tree_mode(root, after_head, path)
+        if ((before_mode is None and after_mode != "100644")
+                or (before_mode is not None and after_mode != before_mode)):
+            raise AutopilotError("proposal commit contains an unreviewed mode change")
 
 
 def validate_transition(
@@ -265,6 +407,8 @@ def validate_transition(
             raise AutopilotError("cycle rewrote or diverged integration history") from exc
         if result["commit"] != after_head:
             raise AutopilotError("reported commit does not equal the final integration HEAD")
+        proposal = validate_gemini_chain(root, before_head, result)
+        validate_committed_proposal(root, before_head, after_head, proposal)
     elif result["commit"] is not None:
         raise AutopilotError("cycle reported a commit without changing integration HEAD")
     if result["state"] == "CONTINUE" and not changed:
@@ -367,6 +511,9 @@ def run_cycle(
             summary=result["summary"],
             next_action=result["next_action"],
             blockers=result["blockers"],
+            gemini_worker_run_id=result["gemini_worker_run_id"],
+            gemini_reviewer_run_id=result["gemini_reviewer_run_id"],
+            proposal_sha256=result["proposal_sha256"],
         )
         write_json(run_dir / "status.json", meta)
         return run_dir, result
@@ -446,6 +593,9 @@ def run_loop(root: Path, codex: Path, max_cycles: int, timeout: int, once: bool)
                     evidence=str(run_dir), head=result["head_after"],
                     summary=result["summary"], next_action=result["next_action"],
                     blockers=result["blockers"],
+                    gemini_worker_run_id=result["gemini_worker_run_id"],
+                    gemini_reviewer_run_id=result["gemini_reviewer_run_id"],
+                    proposal_sha256=result["proposal_sha256"],
                 )
                 if result["state"] != "CONTINUE" or once:
                     return 0 if result["state"] == "COMPLETE" else 2

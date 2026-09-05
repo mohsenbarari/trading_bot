@@ -8,7 +8,10 @@
     "summary",
     "commit",
     "next_action",
-    "blockers"
+    "blockers",
+    "gemini_worker_run_id",
+    "gemini_reviewer_run_id",
+    "proposal_sha256"
   ],
   "properties": {
     "schema_version": {
@@ -41,6 +44,18 @@
         "minLength": 1,
         "maxLength": 2000
       }
+    },
+    "gemini_worker_run_id": {
+      "type": ["string", "null"],
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+    },
+    "gemini_reviewer_run_id": {
+      "type": ["string", "null"],
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+    },
+    "proposal_sha256": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{64}$"
     }
   }
 }
