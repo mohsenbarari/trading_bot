@@ -591,6 +591,598 @@ class ProposalContracts(unittest.TestCase):
         self.assertFalse(marker.exists())
         self.assertIsNotNone(process.returncode)
 
+    def test_worker_and_verifier_schema_contracts(self):
+        worker_schema = runner.schema("worker")
+        self.assertEqual(worker_schema["type"], "object")
+        self.assertFalse(worker_schema["additionalProperties"])
+        self.assertEqual(
+            set(worker_schema["required"]),
+            {"status", "summary", "covered_requirements", "findings", "changes"},
+        )
+        self.assertEqual(worker_schema["properties"]["status"]["enum"], ["PROPOSAL_READY", "BLOCKED"])
+
+        changes_schema = worker_schema["properties"]["changes"]
+        self.assertEqual(changes_schema["type"], "array")
+        change_item = changes_schema["items"]
+        self.assertEqual(change_item["type"], "object")
+        self.assertFalse(change_item["additionalProperties"])
+        self.assertEqual(
+            set(change_item["required"]),
+            {"path", "original_sha256", "content", "replacements"},
+        )
+        self.assertEqual(change_item["properties"]["path"]["type"], "string")
+        self.assertEqual(change_item["properties"]["original_sha256"]["type"], ["string", "null"])
+        self.assertEqual(change_item["properties"]["content"]["type"], ["string", "null"])
+
+        rep_schema = change_item["properties"]["replacements"]
+        self.assertEqual(rep_schema["type"], "array")
+        rep_item = rep_schema["items"]
+        self.assertEqual(rep_item["type"], "object")
+        self.assertFalse(rep_item["additionalProperties"])
+        self.assertEqual(set(rep_item["required"]), {"old", "new"})
+        self.assertEqual(rep_item["properties"]["old"]["type"], "string")
+        self.assertEqual(rep_item["properties"]["new"]["type"], "string")
+
+        verifier_schema = runner.schema("verifier")
+        self.assertEqual(
+            verifier_schema["properties"]["status"]["enum"],
+            ["VERIFIED", "CHANGES_REQUIRED", "BLOCKED"],
+        )
+        self.assertEqual(verifier_schema["properties"]["changes"]["type"], "array")
+        self.assertNotIn("minItems", verifier_schema["properties"]["changes"])
+
+        verified = {
+            "status": "VERIFIED",
+            "summary": "Verified proposal without authoring changes.",
+            "covered_requirements": [1, 2],
+            "findings": [],
+            "changes": [],
+        }
+        self.assertEqual(
+            runner.validate_result(verified, self.task, self.sources, "verifier"),
+            verified,
+        )
+        with self.assertRaisesRegex(runner.ProposalError, "verifier cannot author changes"):
+            runner.validate_result(
+                dict(verified, changes=[{"path": "test_new.py", "original_sha256": None, "content": "x"}]),
+                self.task,
+                self.sources,
+                "verifier",
+            )
+
+    def test_normalize_result_modes_and_immutability(self):
+        task = dict(self.task, allowed_files=["source.py", "test_new.py"])
+        source_text = "FIRST = 1\nSECOND = 2\nTHIRD = 3\n"
+        source_sha = runner.sha(source_text.encode("utf-8"))
+        sources = {
+            "source.py": {"sha256": source_sha, "content": source_text},
+            "test_new.py": {"sha256": None, "content": None},
+        }
+
+        # 1. Legacy three-key full content
+        legacy_change = {
+            "path": "test_new.py",
+            "original_sha256": None,
+            "content": "assert legacy == True\n",
+        }
+        legacy_result = dict(self.result(), changes=[legacy_change])
+        legacy_copy = deepcopy(legacy_result)
+        norm_legacy = runner.normalize_result(legacy_result, task, sources, "worker")
+        self.assertEqual(legacy_result, legacy_copy)
+        self.assertEqual(norm_legacy["changes"], [{
+            "path": "test_new.py",
+            "original_sha256": None,
+            "content": "assert legacy == True\n",
+        }])
+        self.assertEqual(set(norm_legacy["changes"][0].keys()), {"path", "original_sha256", "content"})
+
+        # 2. Explicit four-key full content
+        four_key_change = {
+            "path": "test_new.py",
+            "original_sha256": None,
+            "content": "assert four_key == True\n",
+            "replacements": [],
+        }
+        four_key_result = dict(self.result(), changes=[four_key_change])
+        four_key_copy = deepcopy(four_key_result)
+        norm_four_key = runner.normalize_result(four_key_result, task, sources, "worker")
+        self.assertEqual(four_key_result, four_key_copy)
+        self.assertEqual(norm_four_key["changes"], [{
+            "path": "test_new.py",
+            "original_sha256": None,
+            "content": "assert four_key == True\n",
+        }])
+        self.assertEqual(set(norm_four_key["changes"][0].keys()), {"path", "original_sha256", "content"})
+
+        # 3. One existing-file exact replacement
+        one_rep_change = {
+            "path": "source.py",
+            "original_sha256": source_sha,
+            "content": None,
+            "replacements": [{"old": "SECOND = 2", "new": "SECOND = 20"}],
+        }
+        one_rep_result = dict(self.result(), changes=[one_rep_change])
+        one_rep_copy = deepcopy(one_rep_result)
+        norm_one_rep = runner.normalize_result(one_rep_result, task, sources, "worker")
+        self.assertEqual(one_rep_result, one_rep_copy)
+        self.assertEqual(norm_one_rep["changes"], [{
+            "path": "source.py",
+            "original_sha256": source_sha,
+            "content": "FIRST = 1\nSECOND = 20\nTHIRD = 3\n",
+        }])
+        self.assertEqual(set(norm_one_rep["changes"][0].keys()), {"path", "original_sha256", "content"})
+
+        # 4. Multiple disjoint replacements in reverse order
+        multi_rev_change = {
+            "path": "source.py",
+            "original_sha256": source_sha,
+            "content": None,
+            "replacements": [
+                {"old": "THIRD = 3", "new": "THIRD = 300"},
+                {"old": "FIRST = 1", "new": "FIRST = 100"},
+            ],
+        }
+        multi_rev_result = dict(self.result(), changes=[multi_rev_change])
+        multi_rev_copy = deepcopy(multi_rev_result)
+        norm_multi_rev = runner.normalize_result(multi_rev_result, task, sources, "worker")
+        self.assertEqual(multi_rev_result, multi_rev_copy)
+        self.assertEqual(norm_multi_rev["changes"], [{
+            "path": "source.py",
+            "original_sha256": source_sha,
+            "content": "FIRST = 100\nSECOND = 2\nTHIRD = 300\n",
+        }])
+        self.assertEqual(set(norm_multi_rev["changes"][0].keys()), {"path", "original_sha256", "content"})
+
+        # 5. One proposal mixing replacement mode for an existing file with full mode for a new file
+        mixed_changes = [
+            {
+                "path": "source.py",
+                "original_sha256": source_sha,
+                "content": None,
+                "replacements": [{"old": "FIRST = 1", "new": "FIRST = 999"}],
+            },
+            {
+                "path": "test_new.py",
+                "original_sha256": None,
+                "content": "assert FIRST == 999\n",
+                "replacements": [],
+            },
+        ]
+        mixed_result = dict(self.result(), changes=mixed_changes)
+        mixed_copy = deepcopy(mixed_result)
+        norm_mixed = runner.normalize_result(mixed_result, task, sources, "worker")
+        self.assertEqual(mixed_result, mixed_copy)
+        self.assertEqual(norm_mixed["changes"], [
+            {
+                "path": "source.py",
+                "original_sha256": source_sha,
+                "content": "FIRST = 999\nSECOND = 2\nTHIRD = 3\n",
+            },
+            {
+                "path": "test_new.py",
+                "original_sha256": None,
+                "content": "assert FIRST == 999\n",
+            },
+        ])
+        for ch in norm_mixed["changes"]:
+            self.assertEqual(set(ch.keys()), {"path", "original_sha256", "content"})
+
+    def test_rejection_table_for_normalization_and_validation(self):
+        task = dict(self.task, allowed_files=["source.py", "test_new.py", "not_in_sources.py"])
+        source_text = "VALUE = 1\n"
+        source_sha = runner.sha(source_text.encode("utf-8"))
+        sources = {
+            "source.py": {"sha256": source_sha, "content": source_text},
+            "test_new.py": {"sha256": None, "content": None},
+        }
+
+        table = [
+            (
+                "mixed_content_and_replacements",
+                [{"path": "source.py", "original_sha256": source_sha,
+                  "content": "VALUE = 2\n", "replacements": [{"old": "1", "new": "2"}]}],
+                "mixed change content and replacements",
+            ),
+            (
+                "empty_content_and_replacements",
+                [{"path": "source.py", "original_sha256": source_sha,
+                  "content": None, "replacements": []}],
+                "empty change content and replacements",
+            ),
+            (
+                "extra_key_in_change",
+                [{"path": "source.py", "original_sha256": source_sha,
+                  "content": "VALUE = 2\n", "replacements": [], "extra": "forbidden"}],
+                "invalid change shape",
+            ),
+            (
+                "missing_content_key",
+                [{"path": "source.py", "original_sha256": source_sha, "replacements": []}],
+                "invalid change shape",
+            ),
+            (
+                "wrong_keys",
+                [{"file": "source.py", "diff": "---"}],
+                "invalid change shape",
+            ),
+            (
+                "change_not_a_dict",
+                ["not_a_dict"],
+                "invalid change shape",
+            ),
+            (
+                "content_is_int",
+                [{"path": "source.py", "original_sha256": source_sha,
+                  "content": 12345, "replacements": []}],
+                "invalid change shape",
+            ),
+            (
+                "replacements_is_none",
+                [{"path": "source.py", "original_sha256": source_sha,
+                  "content": "VALUE = 2\n", "replacements": None}],
+                "invalid change shape",
+            ),
+            (
+                "legacy_with_null_content",
+                [{"path": "source.py", "original_sha256": source_sha, "content": None}],
+                "invalid change shape",
+            ),
+            (
+                "replacement_item_not_dict",
+                [{"path": "source.py", "original_sha256": source_sha,
+                  "content": None, "replacements": ["invalid"]}],
+                "replacement item must be a dict with exactly 'old' and 'new'",
+            ),
+            (
+                "replacement_item_empty_old",
+                [{"path": "source.py", "original_sha256": source_sha,
+                  "content": None, "replacements": [{"old": "", "new": "x"}]}],
+                "replacement old must be a nonempty string",
+            ),
+            (
+                "path_not_string",
+                [{"path": 123, "original_sha256": None, "content": "assert True\n", "replacements": []}],
+                "changed path is duplicated or outside assignment",
+            ),
+            (
+                "path_not_in_allowed_files",
+                [{"path": "other.py", "original_sha256": None, "content": "assert True\n", "replacements": []}],
+                "changed path is duplicated or outside assignment",
+            ),
+            (
+                "path_in_allowed_files_but_not_in_sources",
+                [{"path": "not_in_sources.py", "original_sha256": None,
+                  "content": "assert True\n", "replacements": []}],
+                "changed path is duplicated or outside assignment",
+            ),
+            (
+                "duplicate_path",
+                [
+                    {"path": "test_new.py", "original_sha256": None, "content": "assert True\n", "replacements": []},
+                    {"path": "test_new.py", "original_sha256": None, "content": "assert False\n", "replacements": []},
+                ],
+                "changed path is duplicated or outside assignment",
+            ),
+            (
+                "new_file_replacement_mode",
+                [{"path": "test_new.py", "original_sha256": None,
+                  "content": None, "replacements": [{"old": "foo", "new": "bar"}]}],
+                "new-file replacement is not supported",
+            ),
+            (
+                "existing_file_hash_mismatch",
+                [{"path": "source.py", "original_sha256": "0" * 64,
+                  "content": "VALUE = 2\n", "replacements": []}],
+                "proposal is based on different source bytes",
+            ),
+            (
+                "new_file_hash_mismatch",
+                [{"path": "test_new.py", "original_sha256": "0" * 64,
+                  "content": "assert True\n", "replacements": []}],
+                "proposal is based on different source bytes",
+            ),
+            (
+                "noop_unchanged_existing_file_full_mode",
+                [{"path": "source.py", "original_sha256": source_sha,
+                  "content": source_text, "replacements": []}],
+                "empty or unchanged file",
+            ),
+            (
+                "noop_empty_file_full_mode",
+                [{"path": "test_new.py", "original_sha256": None,
+                  "content": "   \n", "replacements": []}],
+                "empty or unchanged file",
+            ),
+            (
+                "unsafe_null_byte_in_replacement",
+                [{"path": "source.py", "original_sha256": source_sha,
+                  "content": None, "replacements": [{"old": "1", "new": "1\0"}]}],
+                "unsafe generated content",
+            ),
+            (
+                "unsafe_secret_in_replacement",
+                [{"path": "source.py", "original_sha256": source_sha,
+                  "content": None, "replacements": [{"old": "1", "new": "sk-" + "k" * 30}]}],
+                "unsafe generated content",
+            ),
+            (
+                "unsafe_null_byte_in_full_mode",
+                [{"path": "test_new.py", "original_sha256": None,
+                  "content": "assert True\0\n", "replacements": []}],
+                "unsafe generated content",
+            ),
+            (
+                "unsafe_secret_in_full_mode",
+                [{"path": "test_new.py", "original_sha256": None,
+                  "content": "KEY = 'sk-" + "s" * 30 + "'\n", "replacements": []}],
+                "unsafe generated content",
+            ),
+        ]
+
+        for case_name, changes_payload, expected_err in table:
+            with self.subTest(case=case_name):
+                candidate = dict(self.result(), changes=changes_payload)
+                with self.assertRaisesRegex(runner.ProposalError, expected_err):
+                    norm = runner.normalize_result(candidate, task, sources, "worker")
+                    runner.validate_result(norm, task, sources, "worker")
+
+    def test_out_of_assignment_path_rejected_before_source_lookup(self):
+        mock_sources = MagicMock()
+        task = {
+            "task_id": "TEST-001",
+            "goal": "Test out of assignment path rejection",
+            "context_files": [],
+            "allowed_files": ["allowed.py"],
+            "requirements": ["req1"],
+            "test_selectors": ["test.py"],
+        }
+        proposal = {
+            "status": "PROPOSAL_READY",
+            "summary": "Out of assignment path",
+            "covered_requirements": [1],
+            "findings": [],
+            "changes": [{
+                "path": "outside_assignment.py",
+                "original_sha256": None,
+                "content": "value = 1\n",
+                "replacements": [],
+            }],
+        }
+        with self.assertRaisesRegex(runner.ProposalError, "changed path is duplicated or outside assignment"):
+            runner.normalize_result(proposal, task, mock_sources, "worker")
+        mock_sources.__contains__.assert_not_called()
+        mock_sources.__getitem__.assert_not_called()
+
+    def test_parse_stream_converts_replacements_and_ignores_tool_parameters(self):
+        task = dict(self.task, allowed_files=["source.py", "test_new.py"])
+        source_sha = self.sources["source.py"]["sha256"]
+
+        tool_parameters = {
+            "status": "PROPOSAL_READY",
+            "summary": "Noncanonical tool call parameters",
+            "covered_requirements": [1, 2],
+            "findings": [],
+            "changes": [{
+                "path": "source.py",
+                "original_sha256": source_sha,
+                "content": "VALUE = 99999\n",
+                "replacements": [],
+            }],
+        }
+        structured_output = {
+            "status": "PROPOSAL_READY",
+            "summary": "Canonical structured output with replacement",
+            "covered_requirements": [1, 2],
+            "findings": [],
+            "changes": [{
+                "path": "source.py",
+                "original_sha256": source_sha,
+                "content": None,
+                "replacements": [{"old": "VALUE = 1", "new": "VALUE = 42"}],
+            }],
+        }
+
+        stream_lines = [
+            json.dumps({"event": "init", "conversation_id": "session-test", "init": {"model": runner.MODEL}}),
+            json.dumps({
+                "event": "step_update",
+                "conversation_id": "session-test",
+                "step_update": {
+                    "step_type": "tool",
+                    "tool_name": "finish",
+                    "tool_info": {
+                        "name": "finish",
+                        "parameters": tool_parameters,
+                    },
+                },
+            }),
+            json.dumps({
+                "event": "result",
+                "result": {
+                    "status": "SUCCESS",
+                    "conversation_id": "session-test",
+                    "structured_output": structured_output,
+                    "response": json.dumps(tool_parameters),
+                },
+            }),
+        ]
+        raw_stream = "\n".join(stream_lines)
+
+        result, envelope = runner.parse_stream(raw_stream, task, self.sources, "worker")
+
+        self.assertEqual(result["status"], "PROPOSAL_READY")
+        self.assertEqual(result["summary"], "Canonical structured output with replacement")
+        self.assertEqual(len(result["changes"]), 1)
+        canonical_change = result["changes"][0]
+        self.assertEqual(canonical_change["path"], "source.py")
+        self.assertEqual(canonical_change["original_sha256"], source_sha)
+        self.assertEqual(canonical_change["content"], "VALUE = 42\n")
+        self.assertEqual(set(canonical_change.keys()), {"path", "original_sha256", "content"})
+        self.assertNotIn("replacements", canonical_change)
+
+        self.assertNotEqual(canonical_change["content"], tool_parameters["changes"][0]["content"])
+        self.assertEqual(envelope["conversation_id"], "session-test")
+        self.assertEqual(
+            envelope["structured_output"]["changes"][0]["replacements"],
+            [{"old": "VALUE = 1", "new": "VALUE = 42"}],
+        )
+
+    def test_fake_cli_persists_materialized_bytes_and_preserves_worktree(self):
+        self.task["allowed_files"] = ["source.py", "test_new.py"]
+        self.save_task()
+        _, self.sources = runner.load_task(self.root, self.task_path)
+
+        source_path = self.root / "source.py"
+        source_bytes_before = source_path.read_bytes()
+        source_stat_before = runner.file_fingerprint(source_path.stat())
+
+        source_sha = self.sources["source.py"]["sha256"]
+        structured_proposal = {
+            "status": "PROPOSAL_READY",
+            "summary": "Exact replacement applied offline via CLI",
+            "covered_requirements": [1, 2],
+            "findings": [],
+            "changes": [
+                {
+                    "path": "source.py",
+                    "original_sha256": source_sha,
+                    "content": None,
+                    "replacements": [{"old": "VALUE = 1\n", "new": "VALUE = 999\n"}],
+                },
+                {
+                    "path": "test_new.py",
+                    "original_sha256": None,
+                    "content": "assert VALUE == 999\n",
+                    "replacements": [],
+                },
+            ],
+        }
+
+        events = [
+            {"event": "init", "conversation_id": "session-one", "init": {"model": runner.MODEL}},
+            {
+                "event": "step_update",
+                "conversation_id": "session-one",
+                "step_update": {
+                    "step_type": "tool",
+                    "tool_name": "finish",
+                    "tool_info": {
+                        "name": "finish",
+                        "parameters": {
+                            "status": "PROPOSAL_READY",
+                            "summary": "Noncanonical parameter summary",
+                            "covered_requirements": [1, 2],
+                            "findings": [],
+                            "changes": [
+                                {
+                                    "path": "source.py",
+                                    "original_sha256": source_sha,
+                                    "content": "NONCANONICAL\n",
+                                    "replacements": [],
+                                },
+                            ],
+                        },
+                    },
+                },
+            },
+            {"event": "result", "result": {
+                "status": "SUCCESS",
+                "conversation_id": "session-one",
+                "structured_output": structured_proposal,
+                "response": "Response text",
+            }},
+        ]
+
+        out = self.invoke_fake_cli(events=events, run_id="cli-persist-001")
+
+        result_file = out / "result.json"
+        self.assertTrue(result_file.exists())
+        saved_result = json.loads(result_file.read_text())
+        self.assertEqual(saved_result["status"], "PROPOSAL_READY")
+        self.assertEqual(saved_result["changes"], [
+            {
+                "path": "source.py",
+                "original_sha256": source_sha,
+                "content": "VALUE = 999\n",
+            },
+            {
+                "path": "test_new.py",
+                "original_sha256": None,
+                "content": "assert VALUE == 999\n",
+            },
+        ])
+        for ch in saved_result["changes"]:
+            self.assertEqual(set(ch.keys()), {"path", "original_sha256", "content"})
+
+        patch_file = out / "proposal.patch"
+        self.assertTrue(patch_file.exists())
+        patch_text = patch_file.read_text()
+        self.assertIn("--- a/source.py", patch_text)
+        self.assertIn("+++ b/source.py", patch_text)
+        self.assertIn("-VALUE = 1\n", patch_text)
+        self.assertIn("+VALUE = 999\n", patch_text)
+        self.assertIn("--- /dev/null", patch_text)
+        self.assertIn("+++ b/test_new.py", patch_text)
+        self.assertIn("+assert VALUE == 999\n", patch_text)
+
+        self.assertEqual(source_path.read_bytes(), source_bytes_before)
+        self.assertEqual(source_path.read_text(), "VALUE = 1\n")
+        self.assertEqual(runner.file_fingerprint(source_path.stat()), source_stat_before)
+        self.assertFalse((self.root / "test_new.py").exists())
+
+        status = json.loads((out / "status.json").read_text())
+        self.assertEqual(status["state"], "PROPOSAL_READY")
+        self.assertEqual(status["result_sha256"], runner.file_sha256(result_file))
+
+    def test_parse_stream_canonical_result_budget_boundary(self):
+        events = self.events()
+        events[1]["result"]["structured_output"] = self.result()
+        stream = "\n".join(json.dumps(e) for e in events)
+        result = runner.validate_result(
+            runner.normalize_result(events[1]["result"]["structured_output"], self.task, self.sources, "worker"),
+            self.task,
+            self.sources,
+            "worker",
+        )
+        exact_length = len(runner.serialize_json(result))
+        with patch.object(runner, "MAX_CONTEXT", exact_length):
+            accepted, envelope = runner.parse_stream(stream, self.task, self.sources, "worker")
+            self.assertEqual(accepted, result)
+            self.assertEqual(envelope["conversation_id"], "session-one")
+        with patch.object(runner, "MAX_CONTEXT", exact_length - 1):
+            with self.assertRaisesRegex(runner.ProposalError, "canonical proposal exceeds the safe context budget"):
+                runner.parse_stream(stream, self.task, self.sources, "worker")
+
+    def test_write_json_unicode_formatting_and_cleanup(self):
+        target = self.root / "payload.json"
+        tmp_target = target.with_suffix(target.suffix + ".tmp")
+        value = {"greeting": "こんにちは", "summary": "Café ☕"}
+        runner.write_json(target, value)
+
+        file_bytes = target.read_bytes()
+        self.assertEqual(file_bytes, runner.serialize_json(value))
+
+        # ensure_ascii false preserves raw UTF-8 characters rather than \\u escapes
+        self.assertIn("こんにちは".encode("utf-8"), file_bytes)
+        self.assertIn("Café ☕".encode("utf-8"), file_bytes)
+        self.assertNotIn(b"\\u", file_bytes)
+        text = file_bytes.decode("utf-8")
+        self.assertIn("こんにちは", text)
+        self.assertIn("Café ☕", text)
+
+        # Indentation is present
+        self.assertIn("\n  \"greeting\":", text)
+        self.assertTrue(any(line.startswith("  ") for line in text.splitlines()))
+
+        # Exactly one terminal newline exists
+        self.assertTrue(file_bytes.endswith(b"\n"))
+        self.assertFalse(file_bytes.endswith(b"\n\n"))
+        self.assertEqual(len(file_bytes) - len(file_bytes.rstrip(b"\n")), 1)
+
+        # No .tmp file remains after atomic replacement
+        self.assertFalse(tmp_target.exists())
+        self.assertEqual(list(self.root.glob("*.tmp")), [])
+
 
 if __name__ == "__main__":
     unittest.main()

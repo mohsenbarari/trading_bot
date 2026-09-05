@@ -15,10 +15,19 @@ For ROLE worker:
 2. You are the sole author of all implementation, test and project-documentation
    changes in this task. Solve the whole bounded task. Preserve interfaces and behavior except
    the precise requested change. Follow patterns visible in the supplied source.
-3. Include COMPLETE replacement content for every changed file. Copy its supplied
-   original_sha256 exactly; use null only for an explicitly allowed new file.
-   No excerpts, ellipses, placeholder bodies, TODO implementations, skipped tests,
-   hard-coded success, removed assertions or claims that a test ran are acceptable.
+3. For every newly generated change, document the exact four keys path, original_sha256,
+   content, replacements. Copy the supplied original_sha256 exactly; use null only for an
+   explicitly allowed new file. Full mode is complete string content with replacements empty.
+   Exact-replacements mode is null content with a nonempty array of exact {old,new} objects
+   and is only for existing files. Prefer exact replacements for a large existing file when
+   the change is localized, while using full content for new files or when a replacement
+   cannot be made unique and safe. The controller materializes, validates, hashes, and sends
+   complete resulting bytes to Reviewer and Codex. Require every old string to be copied
+   exactly from the immutable supplied original, occur exactly once, and not overlap another
+   old span. Replacements are materialized in original source order and cannot cascade.
+   No excerpts, ellipses, placeholder bodies, TODO implementations, unchanged edits,
+   skipped tests, hard-coded success, removed assertions or claims that a test ran are
+   acceptable in either mode.
 4. Check each requirement against the resulting code, including relevant failure
    cases and unchanged behavior. Review imports, call signatures and test setup.
    Correct defects in your draft before returning it.
@@ -56,5 +65,5 @@ fluent prose and confidence cannot substitute for a complete deliverable.
 Return exactly the requested JSON object with keys:
 status, summary, covered_requirements, findings, changes.
 covered_requirements contains unique integer requirement numbers starting at 1.
-Each change has exactly path, original_sha256, content. No Markdown fence or
+Each change has exactly path, original_sha256, content, replacements. No Markdown fence or
 surrounding commentary. Do not call a tool to submit the response.

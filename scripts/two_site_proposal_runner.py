@@ -43,10 +43,58 @@ PROTECTED = {".git", ".local", ".agents", ".codex", ".cursor", "data", "logs",
 CANONICAL_RESPONSE_KEYS = frozenset({
     "status", "summary", "covered_requirements", "findings", "changes",
 })
+MAX_REPLACEMENTS = 32
+MAX_REPLACEMENT_BYTES = 65536
 
 
 class ProposalError(ValueError):
     pass
+
+
+def materialize_replacements(original: str, replacements: object) -> str:
+    if not isinstance(original, str):
+        raise ProposalError("original text must be a string")
+    if not isinstance(replacements, list):
+        raise ProposalError("replacements must be a list")
+    if not (1 <= len(replacements) <= MAX_REPLACEMENTS):
+        raise ProposalError(f"replacements count must be between 1 and {MAX_REPLACEMENTS}")
+
+    total_bytes = 0
+    spans = []
+    for item in replacements:
+        if not isinstance(item, dict) or set(item.keys()) != {"old", "new"}:
+            raise ProposalError("replacement item must be a dict with exactly 'old' and 'new'")
+        old = item["old"]
+        new = item["new"]
+        if not isinstance(old, str) or not old:
+            raise ProposalError("replacement old must be a nonempty string")
+        if not isinstance(new, str):
+            raise ProposalError("replacement new must be a string")
+        if old == new:
+            raise ProposalError("replacement old and new must differ")
+
+        total_bytes += len(old.encode("utf-8")) + len(new.encode("utf-8"))
+        if total_bytes > MAX_REPLACEMENT_BYTES:
+            raise ProposalError("aggregate replacement UTF-8 bytes exceed limit")
+
+        start = original.find(old)
+        if start == -1:
+            raise ProposalError(f"replacement target not found in original: {old!r}")
+        if original.find(old, start + 1) != -1:
+            raise ProposalError(f"replacement target occurs more than once in original: {old!r}")
+        spans.append((start, start + len(old), new))
+
+    spans.sort(key=lambda s: (s[0], s[1]))
+    pieces = []
+    last_end = 0
+    for start, end, new in spans:
+        if start < last_end:
+            raise ProposalError("replacement spans overlap")
+        pieces.append(original[last_end:start])
+        pieces.append(new)
+        last_end = end
+    pieces.append(original[last_end:])
+    return "".join(pieces)
 
 
 def sha(data: bytes) -> str:
@@ -376,14 +424,95 @@ def schema(role: str) -> dict:
         "findings": {"type": "array", "items": {"type": "string"}},
         "changes": {"type": "array", "items": {
             "type": "object", "additionalProperties": False,
-            "required": ["path", "original_sha256", "content"],
+            "required": ["path", "original_sha256", "content", "replacements"],
             "properties": {"path": {"type": "string"},
                            "original_sha256": {"type": ["string", "null"]},
-                           "content": {"type": "string"}},
+                           "content": {"type": ["string", "null"]},
+                           "replacements": {
+                               "type": "array",
+                               "items": {
+                                   "type": "object",
+                                   "additionalProperties": False,
+                                   "required": ["old", "new"],
+                                   "properties": {
+                                       "old": {"type": "string"},
+                                       "new": {"type": "string"},
+                                   },
+                               },
+                           }},
         }},
     }
     return {"type": "object", "additionalProperties": False,
             "required": list(fields), "properties": fields}
+
+
+def normalize_result(result: dict, task: dict, sources: dict, role: str) -> dict:
+    if not isinstance(result, dict):
+        raise ProposalError("incomplete response contract")
+    if role == "verifier" or result.get("status") != "PROPOSAL_READY":
+        return dict(result)
+
+    changes = result.get("changes")
+    if not isinstance(changes, list):
+        raise ProposalError("malformed response list")
+    if not changes:
+        raise ProposalError("plan-only or no-op response is not implementation")
+
+    seen = set()
+    normalized_changes = []
+
+    for change in changes:
+        if not isinstance(change, dict):
+            raise ProposalError("invalid change shape")
+        keys = set(change.keys())
+        if keys == {"path", "original_sha256", "content"}:
+            change_mode = "legacy"
+            if not isinstance(change["content"], str):
+                raise ProposalError("invalid change shape")
+        elif keys == {"path", "original_sha256", "content", "replacements"}:
+            content = change["content"]
+            replacements = change["replacements"]
+            if not (isinstance(content, str) or content is None) or not isinstance(replacements, list):
+                raise ProposalError("invalid change shape")
+            if isinstance(content, str) and len(replacements) == 0:
+                change_mode = "full"
+            elif content is None and len(replacements) > 0:
+                change_mode = "replacement"
+            elif isinstance(content, str) and len(replacements) > 0:
+                raise ProposalError("mixed change content and replacements")
+            else:
+                raise ProposalError("empty change content and replacements")
+        else:
+            raise ProposalError("invalid change shape")
+
+        name = change["path"]
+        if (not isinstance(name, str) or name not in task["allowed_files"]
+                or name not in sources or name in seen):
+            raise ProposalError("changed path is duplicated or outside assignment")
+        seen.add(name)
+
+        if change["original_sha256"] != sources[name]["sha256"]:
+            raise ProposalError("proposal is based on different source bytes")
+
+        if change_mode == "replacement":
+            if sources[name]["content"] is None:
+                raise ProposalError("new-file replacement is not supported")
+            materialized = materialize_replacements(sources[name]["content"], change["replacements"])
+            normalized_changes.append({
+                "path": name,
+                "original_sha256": change["original_sha256"],
+                "content": materialized,
+            })
+        else:
+            normalized_changes.append({
+                "path": name,
+                "original_sha256": change["original_sha256"],
+                "content": change["content"],
+            })
+
+    normalized_result = dict(result)
+    normalized_result["changes"] = normalized_changes
+    return normalized_result
 
 
 def validate_result(result: dict, task: dict, sources: dict, role: str) -> dict:
@@ -549,7 +678,11 @@ def parse_stream(raw: str, task: dict, sources: dict, role: str) -> tuple[dict, 
         if not isinstance(envelope.get("response"), str):
             raise ProposalError("CLI result has no response text")
         result = unique_json(envelope["response"])
-    return validate_result(result, task, sources, role), envelope
+    result = normalize_result(result, task, sources, role)
+    result = validate_result(result, task, sources, role)
+    if len(serialize_json(result)) > MAX_CONTEXT:
+        raise ProposalError("canonical proposal exceeds the safe context budget")
+    return result, envelope
 
 
 def proposal_diff(changes: list, sources: dict) -> str:
@@ -565,9 +698,13 @@ def proposal_diff(changes: list, sources: dict) -> str:
     return patch
 
 
+def serialize_json(value: dict) -> bytes:
+    return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+
+
 def write_json(path: Path, value: dict) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+    temporary.write_bytes(serialize_json(value))
     temporary.replace(path)
 
 
