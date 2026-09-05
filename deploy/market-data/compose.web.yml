@@ -135,7 +135,7 @@ services:
       market-migration:
         condition: service_completed_successfully
     healthcheck:
-      test: [CMD, python, -m, core.market_intelligence.private_pipeline_foundation, capture-liveness, --role, market-capture-account2]
+      test: [CMD, python, -m, core.market_intelligence.private_pipeline_foundation, healthcheck, --role, market-capture-account2]
       interval: 10s
       timeout: 3s
       retries: 3
