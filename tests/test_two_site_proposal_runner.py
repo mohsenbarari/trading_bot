@@ -1,9 +1,12 @@
 """Offline contracts; fake CLI output is not evidence of a real Gemini run."""
 from copy import deepcopy
+import inspect
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -196,22 +199,33 @@ class ProposalContracts(unittest.TestCase):
         process.__enter__.return_value = process
         process.returncode = 0
         process.pid = 987654
-        def communicate(*args, **kwargs):
+        process.poll.return_value = None
+
+        def capture(fake_process, _input, stdout_path, stderr_path, _timeout, **_kwargs):
             if timeout:
+                runner.terminate_process(fake_process)
                 raise subprocess.TimeoutExpired("fake-cli", 30)
             if drift:
                 drift()
             if raw_output is not None:
                 if isinstance(raw_output, str):
-                    return raw_output.encode(), b""
-                return raw_output, b""
-            evs = self.events(result=result) if events is None else events
-            if denied:
-                evs[1]["result"]["denied_actions"] = ["read_file"]
-            return "\n".join(json.dumps(e) for e in evs).encode(), b""
-        process.communicate.side_effect = communicate
+                    output = raw_output.encode()
+                else:
+                    output = raw_output
+            else:
+                evs = self.events(result=result) if events is None else events
+                if denied:
+                    evs[1]["result"]["denied_actions"] = ["read_file"]
+                output = "\n".join(json.dumps(e) for e in evs).encode()
+            stdout_path.write_bytes(output)
+            stderr_path.write_bytes(b"")
+
+        identity = {"path": str(Path(__file__).resolve()), "version": runner.EXPECTED_CLI_VERSION,
+                    "sha256": runner.EXPECTED_CLI_SHA256}
         git_effects = git_side_effect if git_side_effect is not None else ["head", "", "head", ""]
         with patch.object(runner, "git", side_effect=git_effects), \
+                patch.object(runner, "cli_identity", return_value=identity), \
+                patch.object(runner, "capture_bounded_process", side_effect=capture), \
                 patch.object(runner.subprocess, "Popen", return_value=process) as popen, \
                 patch.object(runner.os, "killpg") as kill:
             try:
@@ -231,6 +245,7 @@ class ProposalContracts(unittest.TestCase):
         self.assertEqual(status["state"], "PROPOSAL_READY")
         self.assertEqual(status["authority"], "PROPOSAL_ONLY_NOT_ACCEPTANCE")
         self.assertEqual(status["cli_pid"], 987654)
+        self.assertEqual(status["cli"]["version"], runner.EXPECTED_CLI_VERSION)
         self.assertGreater(status["retain_until"], status["started_at"])
         self.assertEqual(status["result_sha256"], runner.sha((out / "result.json").read_bytes()))
         self.assertEqual(json.loads((out / "workspace/.agents/hooks.json").read_text()), runner.DENY_HOOK)
@@ -375,16 +390,88 @@ class ProposalContracts(unittest.TestCase):
         process = MagicMock()
         process.__enter__.return_value = process
         process.pid, process.returncode = 987654, 0
-        process.communicate.return_value = (
-            "\n".join(json.dumps(e) for e in self.events(verified)).encode(), b"",
-        )
+        identity = {"path": str(Path(__file__).resolve()), "version": runner.EXPECTED_CLI_VERSION,
+                    "sha256": runner.EXPECTED_CLI_SHA256}
+
+        def capture(_process, _input, stdout_path, stderr_path, _timeout, **_kwargs):
+            stdout_path.write_bytes(
+                "\n".join(json.dumps(e) for e in self.events(verified)).encode()
+            )
+            stderr_path.write_bytes(b"")
+
         with patch.object(runner, "git", side_effect=["head", "", "head", ""]), \
+                patch.object(runner, "cli_identity", return_value=identity), \
+                patch.object(runner, "capture_bounded_process", side_effect=capture), \
                 patch.object(runner.subprocess, "Popen", return_value=process):
             out = runner.run(self.root, self.task_path, "verifier", "verify-001", 30,
                              proposal=proposal, cli=Path(__file__).resolve())
         self.assertEqual(json.loads((out / "status.json").read_text())["state"], "VERIFIED")
         self.assertEqual(json.loads((out / "task.json").read_text())["sources"], self.sources)
         self.assertFalse((self.root / "test_new.py").exists())
+
+    def test_cli_identity_requires_exact_reviewed_binary_and_version(self):
+        cli = self.root / "agy"
+        cli.write_text("#!/usr/bin/env python3\nprint('1.1.27')\n")
+        cli.chmod(0o755)
+        digest = runner.file_sha256(cli)
+        with patch.object(runner, "EXPECTED_CLI_SHA256", digest):
+            identity = runner.cli_identity(cli)
+        self.assertEqual(identity, {
+            "path": str(cli), "version": "1.1.27", "sha256": digest,
+        })
+
+        with patch.object(runner, "EXPECTED_CLI_SHA256", "0" * 64), \
+                patch.object(runner.subprocess, "Popen") as popen:
+            with self.assertRaisesRegex(runner.ProposalError, "hash"):
+                runner.cli_identity(cli)
+            popen.assert_not_called()
+
+        with patch.object(runner, "EXPECTED_CLI_SHA256", digest), \
+                patch.object(runner, "EXPECTED_CLI_VERSION", "1.1.26"):
+            with self.assertRaisesRegex(runner.ProposalError, "version"):
+                runner.cli_identity(cli)
+
+    def test_bounded_capture_streams_without_communicate(self):
+        stdout_path = self.root / "bounded.stdout"
+        stderr_path = self.root / "bounded.stderr"
+        payload = b"x" * 200_000
+        with subprocess.Popen(
+            [sys.executable, "-c",
+             "import sys; data=sys.stdin.buffer.read(); print(len(data)); print('ok', file=sys.stderr)"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            start_new_session=True,
+        ) as process:
+            runner.capture_bounded_process(
+                process, payload, stdout_path, stderr_path, 10, max_output=1024,
+            )
+        self.assertEqual(stdout_path.read_text().strip(), str(len(payload)))
+        self.assertEqual(stderr_path.read_text().strip(), "ok")
+        self.assertNotIn("communicate", inspect.getsource(runner.capture_bounded_process))
+
+    def test_bounded_capture_kills_at_combined_limit_before_full_collection(self):
+        marker = self.root / "child-finished"
+        stdout_path = self.root / "limited.stdout"
+        stderr_path = self.root / "limited.stderr"
+        child = (
+            "import os,pathlib,time; "
+            "os.write(1,b'x'*65536); os.write(2,b'y'*65536); "
+            "time.sleep(5); "
+            f"pathlib.Path({str(marker)!r}).write_text('done')"
+        )
+        started_at = time.monotonic()
+        with subprocess.Popen(
+            [sys.executable, "-c", child],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            start_new_session=True,
+        ) as process:
+            with self.assertRaisesRegex(runner.ProposalError, "output exceeds"):
+                runner.capture_bounded_process(
+                    process, b"", stdout_path, stderr_path, 10, max_output=4096,
+                )
+        self.assertEqual(stdout_path.stat().st_size + stderr_path.stat().st_size, 4096)
+        self.assertLess(time.monotonic() - started_at, 2)
+        self.assertFalse(marker.exists())
+        self.assertIsNotNone(process.returncode)
 
 
 if __name__ == "__main__":

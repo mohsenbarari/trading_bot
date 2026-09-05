@@ -11,7 +11,10 @@ For the current simplification/automation task, use Codex as coordinator and sol
 source writer, and Gemini as proposal-only Worker through
 `scripts/two_site_proposal_runner.py`. Load `AGENTS.md`, routed MemoryCustodian files,
 and `docs/refactor/two-server/PROPOSAL_AUTOMATION.md` completely. The latter is the
-small executable contract and states the current readiness limitations.
+small executable contract and states the current readiness limitations. The runner
+must enforce its combined output cap while draining the CLI and must verify the pinned
+CLI version and SHA before and after every provider call; a directory name is never
+version evidence.
 
 For Stage work also read execution-order.yaml, the matching card/Assignment,
 relevant governance clauses and exact receipts; load MASTER_PLAN sections relevant

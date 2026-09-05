@@ -20,6 +20,8 @@ Hard invariants:
   Worker/fence/gateway mechanics below apply only to the paused legacy profile;
   do not activate that profile while completing proposal-runner work. Scope,
   independent acceptance, evidence and external/human Writer gates still apply.
+  Enforce stdout+stderr limits during streaming, and fail closed if the pinned CLI
+  version/SHA changes before, during or after a run; path names are not version proof.
 
 - One Execution Coordinator owns the integration branch and ledger. One writing Worker
   is the default; a second requires the exact Codex pairing receipt and disjoint paths,

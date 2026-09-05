@@ -14,14 +14,19 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import selectors
 import signal
 import subprocess
+import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL = "gemini-3.8-flash-high"
 MAX_CONTEXT = 160_000
 MAX_OUTPUT = 2_000_000
+STREAM_CHUNK_SIZE = 64 * 1024
+EXPECTED_CLI_VERSION = "1.1.27"
+EXPECTED_CLI_SHA256 = "93eb2118b778a4005700b54cdd7e08b896fbe665d5ff338e38e9e53da9a091ea"
 DENY_HOOK = {"proposal-only": {"PreToolUse": [{"matcher": "*", "hooks": [{
     "type": "command", "timeout": 5,
     "command": "/usr/bin/printf '%s\\n' '{\"decision\":\"deny\",\"reason\":\"Proposal-only session: tools are disabled. Return JSON directly from supplied context.\"}'",
@@ -41,6 +46,151 @@ class ProposalError(ValueError):
 
 def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def terminate_process(process: subprocess.Popen) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    process.wait(timeout=10)
+
+
+def capture_bounded_process(
+    process: subprocess.Popen,
+    input_bytes: bytes,
+    stdout_path: Path,
+    stderr_path: Path,
+    timeout: float,
+    max_output: int = MAX_OUTPUT,
+) -> None:
+    """Drain all pipes concurrently while enforcing one hard stdout+stderr cap."""
+    if max_output < 1 or process.stdin is None or process.stdout is None or process.stderr is None:
+        raise ProposalError("invalid bounded process configuration")
+    selector = selectors.DefaultSelector()
+    deadline = time.monotonic() + timeout
+    input_offset = 0
+    total_output = 0
+    streams = {}
+
+    try:
+        with stdout_path.open("xb") as stdout_file, stderr_path.open("xb") as stderr_file:
+            streams = {process.stdout: stdout_file, process.stderr: stderr_file}
+            for stream in streams:
+                os.set_blocking(stream.fileno(), False)
+                selector.register(stream, selectors.EVENT_READ, "output")
+            os.set_blocking(process.stdin.fileno(), False)
+            if input_bytes:
+                selector.register(process.stdin, selectors.EVENT_WRITE, "input")
+            else:
+                process.stdin.close()
+
+            while selector.get_map():
+                remaining_time = deadline - time.monotonic()
+                if remaining_time <= 0:
+                    raise subprocess.TimeoutExpired(getattr(process, "args", "CLI"), timeout)
+                events = selector.select(min(remaining_time, 0.25))
+                if not events and process.poll() is not None:
+                    try:
+                        selector.get_key(process.stdin)
+                    except KeyError:
+                        pass
+                    else:
+                        selector.unregister(process.stdin)
+                        process.stdin.close()
+                        continue
+                for key, _mask in events:
+                    stream = key.fileobj
+                    if key.data == "input":
+                        try:
+                            written = os.write(stream.fileno(), input_bytes[input_offset:])
+                        except BlockingIOError:
+                            continue
+                        except BrokenPipeError:
+                            selector.unregister(stream)
+                            stream.close()
+                            continue
+                        input_offset += written
+                        if input_offset == len(input_bytes):
+                            selector.unregister(stream)
+                            stream.close()
+                        continue
+
+                    remaining_output = max_output - total_output
+                    try:
+                        chunk = os.read(
+                            stream.fileno(),
+                            min(STREAM_CHUNK_SIZE, remaining_output + 1),
+                        )
+                    except BlockingIOError:
+                        continue
+                    if not chunk:
+                        selector.unregister(stream)
+                        stream.close()
+                        continue
+                    if len(chunk) > remaining_output:
+                        if remaining_output:
+                            streams[stream].write(chunk[:remaining_output])
+                            total_output += remaining_output
+                        raise ProposalError("CLI output exceeds budget")
+                    streams[stream].write(chunk)
+                    total_output += len(chunk)
+
+            remaining_time = deadline - time.monotonic()
+            if remaining_time <= 0:
+                raise subprocess.TimeoutExpired(getattr(process, "args", "CLI"), timeout)
+            process.wait(timeout=remaining_time)
+    except BaseException:
+        terminate_process(process)
+        raise
+    finally:
+        selector.close()
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None and not stream.closed:
+                stream.close()
+
+
+def cli_identity(cli: Path) -> dict[str, str]:
+    cli = cli.resolve(strict=True)
+    if not cli.is_file() or not os.access(cli, os.X_OK):
+        raise ProposalError("CLI must be an executable regular file")
+    digest = file_sha256(cli)
+    if digest != EXPECTED_CLI_SHA256:
+        raise ProposalError("CLI binary hash is not the reviewed pin")
+    with tempfile.TemporaryDirectory(prefix="two-site-cli-version-") as temporary:
+        temporary_path = Path(temporary)
+        with subprocess.Popen(
+            [str(cli), "--version"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        ) as process:
+            capture_bounded_process(
+                process,
+                b"",
+                temporary_path / "stdout",
+                temporary_path / "stderr",
+                10,
+                max_output=4096,
+            )
+        version_text = (temporary_path / "stdout").read_text().strip()
+        stderr_text = (temporary_path / "stderr").read_text().strip()
+        if process.returncode or stderr_text or version_text != EXPECTED_CLI_VERSION:
+            raise ProposalError("CLI version is not the reviewed pin")
+    if file_sha256(cli) != digest:
+        raise ProposalError("CLI identity changed during version inspection")
+    return {"path": str(cli), "version": version_text, "sha256": digest}
 
 
 def unique_json(text: str):
@@ -197,7 +347,7 @@ def parse_stream(raw: str, task: dict, sources: dict, role: str) -> tuple[dict, 
             or envelope.get("conversation_id") != init[0].get("conversation_id")):
         raise ProposalError("CLI did not complete one successful tool-free session")
     # With --json-schema the documented machine payload is structured_output.
-    # CLI 1.1.26 may also append its submission object to free-text response.
+    # CLI 1.1.27 may also append its submission object to free-text response.
     # Never scrape that text or fall back when a supplied structured value is bad.
     if "structured_output" in envelope:
         result = envelope["structured_output"]
@@ -262,7 +412,15 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         raise ProposalError("split task or feedback into a smaller coherent unit")
     if SECRET.search(prompt):
         raise ProposalError("credential-like content excluded from model input")
-    cli = (cli or ROOT / ".local/tools/agy").resolve(strict=True)
+    if cli is None:
+        local_cli = root / ".local/tools/agy"
+        if local_cli.is_file():
+            cli = local_cli
+        else:
+            common_dir = Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+            cli = common_dir.parent / ".local/tools/agy"
+    cli = cli.resolve(strict=True)
+    initial_cli_identity = cli_identity(cli)
     local = root / ".local/two-site-refactor/proposals"
     if local.resolve() != local:
         raise ProposalError("run storage cannot be a symlink")
@@ -277,7 +435,8 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
     meta = {"run_id": run_id, "task_id": task["task_id"], "role": role,
             "head": head, "model": MODEL, "state": "RUNNING", "started_at": time.time(),
             "retain_until": time.time() + 7 * 86400,
-            "authority": "PROPOSAL_ONLY_NOT_ACCEPTANCE"}
+            "authority": "PROPOSAL_ONLY_NOT_ACCEPTANCE",
+            "cli": initial_cli_identity}
     write_json(out / "status.json", meta)
     command = [str(cli), "--mode", "plan", "--sandbox", "--model", MODEL,
                "--effort", "high", "--input-format", "stream-json",
@@ -288,26 +447,21 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         with subprocess.Popen(command, cwd=workspace, stdin=subprocess.PIPE,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                               start_new_session=True) as process:
-            try:
-                meta["cli_pid"] = process.pid
-                write_json(out / "status.json", meta)
-                raw, error = process.communicate(
-                    (json.dumps({"event": "user", "message": {"content": prompt}}) + "\n").encode(),
-                    timeout=timeout + 15,
-                )
-            except BaseException:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                process.wait(timeout=10)
-                raise
-        if len(raw) + len(error) > MAX_OUTPUT:
-            raise ProposalError("CLI output exceeds budget")
-        (out / "stream.jsonl").write_bytes(raw)
-        (out / "stderr.txt").write_bytes(error)
+            meta["cli_pid"] = process.pid
+            write_json(out / "status.json", meta)
+            capture_bounded_process(
+                process,
+                (json.dumps({"event": "user", "message": {"content": prompt}}) + "\n").encode(),
+                out / "stream.jsonl",
+                out / "stderr.txt",
+                timeout + 15,
+            )
         if process.returncode:
             raise ProposalError(f"CLI failed with exit {process.returncode}; inspect run evidence")
+        final_cli_identity = cli_identity(cli)
+        if final_cli_identity != initial_cli_identity:
+            raise ProposalError("CLI identity changed during generation")
+        raw = (out / "stream.jsonl").read_bytes()
         result, envelope = parse_stream(raw.decode(), task, sources, role)
         # A late parent/source change invalidates the entire candidate.
         if head != git(root, "rev-parse", "HEAD") or initial_status != git(root, "status", "--porcelain=v1", "--untracked-files=all"):
