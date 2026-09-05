@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded, tool-free Antigravity proposals. Only Codex applies/reviews/commits them.
+"""Bounded Antigravity proposals. Only Codex applies/reviews/commits them.
 
 The controller writes ignored run artifacts only; it does not apply generated code,
 change Git refs/Stage state or deploy. The CLI uses plan/sandbox mode and a deny hook;
@@ -40,6 +40,9 @@ SECRET = re.compile(
 )
 PROTECTED = {".git", ".local", ".agents", ".codex", ".cursor", "data", "logs",
              "uploads", "secrets", "credentials", "backups"}
+CANONICAL_RESPONSE_KEYS = frozenset({
+    "status", "summary", "covered_requirements", "findings", "changes",
+})
 
 
 class ProposalError(ValueError):
@@ -487,17 +490,56 @@ def parse_stream(raw: str, task: dict, sources: dict, role: str) -> tuple[dict, 
     terminal = [e["result"] for e in events if e.get("event") == "result"]
     if len(init) != 1 or init[0]["init"].get("model") != MODEL or len(terminal) != 1:
         raise ProposalError("missing unique model/session/result evidence")
-    if any(e.get("event") == "step_update" and (
-            e["step_update"].get("tool_name") or e["step_update"].get("tool_info")
-            or e["step_update"].get("subagent_info")
-            or e["step_update"].get("step_type") in {"tool", "subagent"}) for e in events):
-        raise ProposalError("tool attempt invalidates a proposal-only run")
     envelope = terminal[0]
     session = init[0].get("conversation_id")
     if (not isinstance(session, str) or not session.strip()
             or envelope.get("status") != "SUCCESS" or envelope.get("denied_actions")
-            or envelope.get("conversation_id") != init[0].get("conversation_id")):
-        raise ProposalError("CLI did not complete one successful tool-free session")
+            or envelope.get("conversation_id") != session):
+        raise ProposalError("CLI did not complete one successful session")
+
+    finish_submissions = 0
+    for event in events:
+        if "conversation_id" in event and event.get("conversation_id") != session:
+            raise ProposalError("CLI did not complete one successful session")
+        if (
+            "tool_name" in event
+            or "tool_info" in event
+            or "subagent_info" in event
+            or event.get("step_type") in {"tool", "subagent"}
+        ):
+            raise ProposalError("tool attempt invalidates a proposal-only run")
+        if event.get("event") != "step_update":
+            continue
+        step = event["step_update"]
+        step_cid = step.get("conversation_id")
+        if "conversation_id" in step and step_cid != session:
+            raise ProposalError("CLI did not complete one successful session")
+        is_tool_or_subagent = (
+            "tool_name" in step
+            or "tool_info" in step
+            or "subagent_info" in step
+            or step.get("step_type") in {"tool", "subagent"}
+        )
+        if not is_tool_or_subagent:
+            continue
+        tool_info = step.get("tool_info")
+        params = tool_info.get("parameters") if isinstance(tool_info, dict) else None
+        is_finish_submission = (
+            step.get("step_type") == "tool"
+            and step.get("tool_name") == "finish"
+            and "subagent_info" not in step
+            and isinstance(tool_info, dict)
+            and set(tool_info.keys()) == {"name", "parameters"}
+            and tool_info.get("name") == "finish"
+            and isinstance(params, dict)
+            and set(params.keys()) == CANONICAL_RESPONSE_KEYS
+            and (step_cid is None or step_cid == session)
+            and (event.get("conversation_id") is None or event.get("conversation_id") == session)
+        )
+        if not is_finish_submission or finish_submissions >= 1:
+            raise ProposalError("tool attempt invalidates a proposal-only run")
+        finish_submissions += 1
+
     # With --json-schema the documented machine payload is structured_output.
     # CLI 1.1.27 may also append its submission object to free-text response.
     # Never scrape that text or fall back when a supplied structured value is bad.
