@@ -12,9 +12,11 @@
   ],
   "properties": {
     "schema_version": {
+      "type": "string",
       "const": "1.0"
     },
     "state": {
+      "type": "string",
       "enum": ["CONTINUE", "COMPLETE", "BLOCKED"]
     },
     "summary": {
@@ -23,27 +25,13 @@
       "maxLength": 4000
     },
     "commit": {
-      "oneOf": [
-        {
-          "type": "string",
-          "pattern": "^[0-9a-f]{40}$"
-        },
-        {
-          "type": "null"
-        }
-      ]
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{40}$"
     },
     "next_action": {
-      "oneOf": [
-        {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 2000
-        },
-        {
-          "type": "null"
-        }
-      ]
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 2000
     },
     "blockers": {
       "type": "array",

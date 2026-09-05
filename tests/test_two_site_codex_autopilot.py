@@ -133,7 +133,7 @@ class AutopilotContracts(unittest.TestCase):
             path = self.root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(
-                '{"additionalProperties": false}\n'
+                (autopilot.ROOT / autopilot.SCHEMA_REL).read_text()
                 if relative == autopilot.SCHEMA_REL else "control\n"
             )
         subprocess.check_call(["git", "init", "-q"], cwd=self.root)
@@ -149,6 +149,29 @@ class AutopilotContracts(unittest.TestCase):
         })
         (self.root / "untracked.txt").write_text("dirty\n")
         with self.assertRaisesRegex(autopilot.AutopilotError, "not clean"):
+            autopilot.validate_repository(self.root)
+
+    def test_repository_gate_rejects_provider_incompatible_schema_before_launch(self):
+        for relative in autopilot.CONTROL_PATHS:
+            path = self.root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                (autopilot.ROOT / autopilot.SCHEMA_REL).read_text()
+                if relative == autopilot.SCHEMA_REL else "control\n"
+            )
+        subprocess.check_call(["git", "init", "-q"], cwd=self.root)
+        subprocess.check_call(["git", "config", "user.email", "test@example.invalid"], cwd=self.root)
+        subprocess.check_call(["git", "config", "user.name", "Test"], cwd=self.root)
+        subprocess.check_call(["git", "add", "."], cwd=self.root)
+        subprocess.check_call(["git", "commit", "-qm", "baseline"], cwd=self.root)
+        subprocess.check_call(["git", "branch", "-M", autopilot.BRANCH], cwd=self.root)
+        schema_path = self.root / autopilot.SCHEMA_REL
+        schema = json.loads(schema_path.read_text())
+        del schema["properties"]["schema_version"]["type"]
+        schema_path.write_text(json.dumps(schema))
+        subprocess.check_call(["git", "add", "."], cwd=self.root)
+        subprocess.check_call(["git", "commit", "-qm", "bad schema"], cwd=self.root)
+        with self.assertRaisesRegex(autopilot.AutopilotError, "schema"):
             autopilot.validate_repository(self.root)
 
 

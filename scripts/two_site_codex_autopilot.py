@@ -73,6 +73,16 @@ class AutopilotError(ProposalError):
     pass
 
 
+def contains_schema_keyword(value: object, forbidden: set[str]) -> bool:
+    if isinstance(value, dict):
+        return bool(set(value) & forbidden) or any(
+            contains_schema_keyword(child, forbidden) for child in value.values()
+        )
+    if isinstance(value, list):
+        return any(contains_schema_keyword(child, forbidden) for child in value)
+    return False
+
+
 def ref_snapshot(root: Path) -> dict[str, str | None]:
     result = {}
     for ref in PROTECTED_REFS:
@@ -101,7 +111,17 @@ def validate_repository(root: Path, require_clean: bool = True) -> dict[str, obj
         git(root, "cat-file", "-e", f"HEAD:{relative.as_posix()}")
         controls[relative.as_posix()] = git(root, "rev-parse", f"HEAD:{relative.as_posix()}")
     schema = unique_json((root / SCHEMA_REL).read_text())
-    if not isinstance(schema, dict) or schema.get("additionalProperties") is not False:
+    properties = schema.get("properties") if isinstance(schema, dict) else None
+    if (
+        not isinstance(schema, dict)
+        or schema.get("type") != "object"
+        or schema.get("additionalProperties") is not False
+        or set(schema.get("required", [])) != RESULT_KEYS
+        or not isinstance(properties, dict)
+        or set(properties) != RESULT_KEYS
+        or any(not isinstance(value, dict) or "type" not in value for value in properties.values())
+        or contains_schema_keyword(schema, {"oneOf", "anyOf", "allOf"})
+    ):
         raise AutopilotError("autopilot result schema is invalid")
     return {
         "head": head,
