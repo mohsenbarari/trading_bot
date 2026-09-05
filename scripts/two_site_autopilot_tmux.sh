@@ -54,7 +54,7 @@ case "${1:-}" in
     printf 'AUTOPILOT=STOPPED session=%s\n' "$session"
     ;;
   logs)
-    tmux capture-pane -p -t "=$session" -S -200
+    tmux capture-pane -p -t "$session:0.0" -S -200
     ;;
   *)
     usage >&2

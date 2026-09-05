@@ -234,7 +234,6 @@ def codex_command(codex: Path, root: Path, run_dir: Path, prompt: str) -> list[s
         "--model", MODEL,
         "--config", f'model_reasoning_effort="{REASONING}"',
         "--cd", str(root),
-        "--sandbox", "workspace-write",
         "--approve-for-me",
         "--ephemeral",
         "--output-schema", str(root / SCHEMA_REL),
