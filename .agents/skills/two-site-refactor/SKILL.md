@@ -1,9 +1,33 @@
 ---
 name: two-site-refactor
-description: Coordinates and executes the Finland-primary/Iran-standby refactor through Antigravity custom subagents, registered worktrees, serial integration, independent verification, exact-SHA Codex acceptance, and fail-closed external-action gates.
+description: Coordinate the Finland-primary/Iran-standby refactor with bounded Gemini proposals, Codex-controlled application and tests, independent verification and exact-SHA acceptance. Also covers recovery of its paused legacy Antigravity adapter.
 ---
 
 # Two-Site Refactor for Antigravity
+
+## Current entrypoint — read first
+
+For the current simplification/automation task, use Codex as coordinator and sole
+source writer, and Gemini as proposal-only Worker/Verifier through
+`scripts/two_site_proposal_runner.py`. Load `AGENTS.md`, routed MemoryCustodian files,
+and `docs/refactor/two-server/PROPOSAL_AUTOMATION.md` completely. The latter is the
+small executable contract and states the current readiness limitations.
+
+For Stage work also read execution-order.yaml, the matching card/Assignment,
+relevant governance clauses and exact receipts; load MASTER_PLAN sections relevant
+to that task, not all sections for every small correction. Give Gemini complete
+bounded sources, requirements, allowed paths, tests and findings via the documented
+task and prompt template. Independently inspect proposals, apply with apply_patch,
+run tests, route findings directly, and obtain independent review before acceptance.
+No owner-relayed handoff, no fake test claim, no infinite retry. Do not bypass an
+environment authorization refusal. Stage state and external-action gates stay intact.
+
+The live-cycle proof is still pending. No production, Stage completion, legacy
+gateway activation or all-refactor-readiness claim follows from local unit tests.
+
+The remainder describes the PAUSED legacy custom-agent profile, not startup for the
+proposal path. Load its resources only for an explicitly scoped legacy diagnosis or
+reactivation review; do not install or retry its rejected gateway automatically.
 
 Use this skill for any Antigravity execution or recovery of the approved two-site
 refactor. The normal entrypoint is the `two-site-coordinator` primary custom agent.

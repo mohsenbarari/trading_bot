@@ -13,6 +13,13 @@ Canonical sources:
 
 Hard invariants:
 
+- The current proposal-only simplification is governed by
+  `docs/refactor/two-server/PROPOSAL_AUTOMATION.md`: Codex applies changes; Gemini has
+  no source/Git/state authority. Its live-cycle validation is pending. The native
+  Worker/fence/gateway mechanics below apply only to the paused legacy profile;
+  do not activate that profile while completing proposal-runner work. Scope,
+  independent acceptance, evidence and external/human Writer gates still apply.
+
 - One Execution Coordinator owns the integration branch and ledger. One writing Worker
   is the default; a second requires the exact Codex pairing receipt and disjoint paths,
   locks, and rollback.
