@@ -1,6 +1,6 @@
 # Coin Market Intelligence
 
-- Sep05: `1f972a48` Capture and `9c613d39` parent-first processor are live; quarantine retained. `docs/MARKET_CAPTURE_RECOVERY_20260905.md`. Check Product rates.
+- Sep05: Account1 capture `a6dcd636` and parent-first processor `9c613d39` are live; replay quarantine retained. `docs/MARKET_CAPTURE_RECOVERY_20260905.md`. Check Product rates.
 - Sep05: Docker capture liveness validates live role/schema/source/status/freshness/PID, while strict `healthcheck` remains the replay/promotion gate. A retained point-in-time replay quarantine must stay visible to strict readiness and must never be deleted or synthesized merely to make Docker green.
 
 - Settlement: future=`خ ن ف/ف ن ف`,`خ ف/ف ف` or absent; cash=`خ ن/ف ن/نق`; future wins.

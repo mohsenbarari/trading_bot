@@ -70,6 +70,29 @@ record remains quarantined, even though live capture is ready and advancing.
 This historical readiness failure is NOT a full acceptance PASS and was not
 cleared to produce green health. Missing upstream XAU events were not synthesized.
 
+## Docker liveness / replay-readiness split
+
+The historical point-in-time quarantine remains an unresolved replay-readiness
+finding, but it is not a live-capture outage.  The Account1-only handoff on
+2026-09-05 introduced a separate `capture-liveness` Docker probe. It retains
+all live guards (role, schema, source inventory, `live-ready` status, fresh
+heartbeat and PID) while the existing strict `healthcheck` remains the only
+replay/promotion gate and continues to fail for the retained quarantine.
+
+The first handoff attempt was interrupted after the target image started with
+the prior authority marker; it failed closed with
+`capture_authority_marker_mismatch`. The prior image and marker were restored
+before the retry. The corrected handoff moves the marker while both owner locks
+are held, verifies the target's capture sequence advances, and rolls it back
+with the prior marker on failure.
+
+Final scoped runtime: release `a6dcd636a1525a3a3d47e2a6083ca887b16080db`,
+Docker health `healthy`, restart count zero, and capture status `live-ready`.
+The strict probe still exits nonzero and the liveness probe exits zero with the
+same single historical quarantine. Product authority remains `LEGACY`; Queue,
+Market data, sessions, replay evidence and unrelated containers were not
+changed.
+
 The scoped tool is `scripts/incident_account1_handoff_20260905.py`; it refuses
 blind re-execution if its journal exists. Its six guard tests plus the existing
 18 capture/foundation tests passed (24 total). The first read-only Compose
