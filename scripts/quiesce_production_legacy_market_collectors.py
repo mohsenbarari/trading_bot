@@ -29,6 +29,9 @@ from scripts import verify_production_private_primary_promotion as primary_verif
 CONFIRMATION = "quiesce-production-legacy-market-collectors"
 RESTORE_CONFIRMATION = "restore-production-legacy-market-collectors"
 RECOVER_CONFIRMATION = "recover-production-legacy-market-collector-handoff"
+REPAIR_TRANSFERRED_CONFIRMATION = (
+    "repair-transferred-production-legacy-market-collector-drift"
+)
 COMMIT_CONFIRMATION = "commit-production-private-primary-capture-owner"
 PREPARE_AUTHORITY_CONFIRMATION = (
     "prepare-production-private-primary-capture-authority"
@@ -1126,29 +1129,11 @@ def validate_committed_handoff(
     return payload
 
 
-def validate_transferred_handoff(
+def _validate_transferred_payload(
+    payload: Mapping[str, Any],
     *,
-    journal: Path,
-    expected_journal_sha256: str,
-    release_sha: str,
-    host_role: str,
     expected_maintenance_lock: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Validate a durable capture-authority transfer without mutating it.
-
-    Queue-v1 code releases may run while the Market pipeline deliberately
-    keeps the production operation-lock inode.  This validator proves that
-    the lock belongs to a completed capture-authority transfer and that every
-    legacy collector is still quiesced.  It intentionally does not promote
-    Product authority or relax the later ``PRIMARY_COMMITTED`` contract.
-    """
-
-    if not HEX64.fullmatch(expected_journal_sha256):
-        raise CollectorHandoffError("collector_handoff_transferred_binding_invalid")
-    _secure_file(journal)
-    if _digest(journal) != expected_journal_sha256:
-        raise CollectorHandoffError("collector_handoff_transferred_binding_invalid")
-    payload = _read(journal, release_sha=release_sha, host_role=host_role)
+) -> None:
     expected_keys = {
         "schema",
         "status",
@@ -1193,10 +1178,91 @@ def validate_transferred_handoff(
         )
     ):
         raise CollectorHandoffError("collector_handoff_transferred_binding_invalid")
+
+
+def validate_transferred_handoff(
+    *,
+    journal: Path,
+    expected_journal_sha256: str,
+    release_sha: str,
+    host_role: str,
+    expected_maintenance_lock: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate a durable capture-authority transfer without mutating it.
+
+    Queue-v1 code releases may run while the Market pipeline deliberately
+    keeps the production operation-lock inode.  This validator proves that
+    the lock belongs to a completed capture-authority transfer and that every
+    legacy collector is still quiesced.  It intentionally does not promote
+    Product authority or relax the later ``PRIMARY_COMMITTED`` contract.
+    """
+
+    if not HEX64.fullmatch(expected_journal_sha256):
+        raise CollectorHandoffError("collector_handoff_transferred_binding_invalid")
+    _secure_file(journal)
+    if _digest(journal) != expected_journal_sha256:
+        raise CollectorHandoffError("collector_handoff_transferred_binding_invalid")
+    payload = _read(journal, release_sha=release_sha, host_role=host_role)
+    _validate_transferred_payload(
+        payload,
+        expected_maintenance_lock=expected_maintenance_lock,
+    )
     live = _assert_quiesced(host_role)
     if live != payload.get("current_units"):
         raise CollectorHandoffError("collector_handoff_live_state_drift")
     return payload
+
+
+def repair_transferred_drift(
+    *, journal: Path, release_sha: str, host_role: str
+) -> dict[str, Any]:
+    """Restore the no-overlap state already recorded by a transfer journal.
+
+    The repair is intentionally narrow: it accepts only the existing
+    ``AUTHORITY_TRANSFERRED`` journal and maintenance-lock inode, refuses any
+    unit-content or source-ownership drift, and only restores the inactive
+    unit states already committed in that journal.  It does not change
+    capture authority, Product authority, Queue ownership, or Market data.
+    """
+
+    units = _role_units(host_role)
+    timers = _role_timers(host_role)
+    services = _role_services(host_role)
+    with _held_maintenance_guard(
+        journal, release_sha, host_role
+    ) as (_descriptor, lock_binding):
+        payload = _read(journal, release_sha=release_sha, host_role=host_role)
+        _validate_transferred_payload(
+            payload,
+            expected_maintenance_lock=lock_binding,
+        )
+        recorded = payload.get("current_units")
+        if not isinstance(recorded, dict) or set(recorded) != set(units):
+            raise CollectorHandoffError(
+                "collector_handoff_transferred_binding_invalid"
+            )
+        live = _inventory(host_role)
+        for unit in units:
+            expected = recorded.get(unit)
+            observed = live.get(unit)
+            if (
+                not isinstance(expected, dict)
+                or not isinstance(observed, dict)
+                or observed.get("unit_sha256") != expected.get("unit_sha256")
+                or observed.get("source_codes") != expected.get("source_codes")
+            ):
+                raise CollectorHandoffError("collector_handoff_unit_drift")
+        for timer in timers:
+            _run(["systemctl", "stop", timer])
+            _run(["systemctl", "disable", timer])
+        for service in services:
+            _run(["systemctl", "disable", service])
+        for service in services:
+            _run(["systemctl", "stop", service])
+        current = _assert_quiesced(host_role)
+        if current != recorded:
+            raise CollectorHandoffError("collector_handoff_live_state_drift")
+        return payload
 
 
 def _complete_quiesce_from_prepared(
@@ -1644,6 +1710,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         choices=(
             "quiesce",
             "verify",
+            "repair-transferred-drift",
             "prepare-authority",
             "refresh-authority-transfer",
             "mark-authority-transferred",
@@ -1682,6 +1749,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.confirm != CONFIRMATION:
                 raise CollectorHandoffError("collector_handoff_confirmation_invalid")
             payload = verify(**common)
+        elif args.command == "repair-transferred-drift":
+            if args.confirm != REPAIR_TRANSFERRED_CONFIRMATION:
+                raise CollectorHandoffError(
+                    "collector_handoff_repair_confirmation_invalid"
+                )
+            payload = repair_transferred_drift(**common)
         elif args.command == "prepare-authority":
             if (
                 args.confirm != PREPARE_AUTHORITY_CONFIRMATION

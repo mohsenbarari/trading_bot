@@ -2168,12 +2168,12 @@ COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_OFFER_CHANNEL_ID=-1002222222222
 COIN_INTELLIGENCE_EXPECTED_PRIVATE_GOLD_TRADE_CHANNEL_ID=-1003333333333
 COIN_INTELLIGENCE_EXPECTED_TELEGRAM_API_ID=12345
 validate_production_coin_inference_activation_contract
-printf '%s\n' "$PRODUCTION_COIN_INFERENCE_REQUESTED"
+printf '%s %s %s\n' "$PRODUCTION_COIN_INFERENCE_REQUESTED" "$PRODUCTION_LEGACY_COIN_PIPELINE_REQUIRED" "$PRODUCTION_LEGACY_COIN_COLLECTORS_REQUIRED"
 """,
                 str(source),
             )
             self.assertEqual(ready.returncode, 0, ready.stderr + ready.stdout)
-            self.assertEqual(ready.stdout.strip(), "1")
+            self.assertEqual(ready.stdout.strip(), "1 1 1")
 
     def test_private_primary_inference_requires_exact_product_contract_not_legacy_relay(self) -> None:
         with tempfile.TemporaryDirectory(prefix="production-private-primary-contract-") as temporary:
@@ -2268,6 +2268,16 @@ printf '%s %s %s\n' "$PRODUCTION_COIN_INFERENCE_REQUESTED" "$PRODUCTION_LEGACY_C
     def test_release_gates_inputs_snapshot_and_consumers_before_final_health(self) -> None:
         source = RELEASE_SCRIPT.read_text(encoding="utf-8")
         release = source.split("run_release() {", 1)[1].split("\n}", 1)[0]
+        installer = source.split(
+            "install_and_verify_production_coin_inputs() {", 1
+        )[1].split("\n}", 1)[0]
+        authority = source.split(
+            "resolve_production_legacy_coin_collector_authority() {", 1
+        )[1].split("\n}", 1)[0]
+        self.assertLess(
+            release.index("resolve_production_legacy_coin_collector_authority"),
+            release.index("bootstrap_iran"),
+        )
         self.assertLess(
             release.index("begin_two_host_release_transaction"),
             release.index("capture_production_coin_input_timer_recovery_state"),
@@ -2284,6 +2294,14 @@ printf '%s %s %s\n' "$PRODUCTION_COIN_INFERENCE_REQUESTED" "$PRODUCTION_LEGACY_C
             release.index("verify_running_production_coin_consumers"),
             release.index("healthcheck"),
         )
+        self.assertLess(
+            release.index("verify_running_production_coin_consumers"),
+            release.index("verify_production_legacy_coin_collector_authority"),
+        )
+        self.assertIn("PRODUCTION_LEGACY_COIN_COLLECTORS_REQUIRED", installer)
+        self.assertIn("validate_transferred_handoff", authority)
+        self.assertIn("transferred-private-capture", authority)
+        self.assertIn("direct-legacy", authority)
         dispatcher = source.split("verify_running_production_coin_consumers() {", 1)[1].split("\n}", 1)[0]
         legacy = source.split("verify_running_legacy_production_coin_consumers() {", 1)[1].split("\n}", 1)[0]
         private = source.split("verify_running_private_primary_consumers() {", 1)[1].split("\n}", 1)[0]
