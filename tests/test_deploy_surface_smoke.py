@@ -548,6 +548,16 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertNotIn('conflicting_services=(db', cleanup_body)
         self.assertNotIn('conflicting_services=(redis', cleanup_body)
 
+    def test_runtime_image_uses_uncached_official_debian_security_mirror(self):
+        dockerfile = (REPO_ROOT / 'Dockerfile').read_text(encoding='utf-8')
+
+        self.assertIn(
+            'https://security.debian.org/debian-security',
+            dockerfile,
+        )
+        self.assertIn('Acquire::https::No-Cache=true update', dockerfile)
+        self.assertIn('Acquire::https::No-Cache=true install', dockerfile)
+
     def test_staging_frontend_dist_isolated_from_production_artifact(self):
         staging_script = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(encoding='utf-8')
         vite_config = (REPO_ROOT / 'frontend/vite.config.ts').read_text(encoding='utf-8')
