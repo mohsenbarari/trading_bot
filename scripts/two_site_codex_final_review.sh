@@ -30,6 +30,8 @@ schema_rel="docs/refactor/two-server/templates/final-review.schema.json"
 schema_path="$repo_root/$schema_rel"
 source_authorization="$repo_root/.local/two-site-refactor/authorizations/CODEX_SOURCE_REVIEW.md"
 codex_bin="$(command -v codex 2>/dev/null || true)"
+codex_model="gpt-6-astra"
+codex_reasoning_effort="high"
 check_only=false
 stage_id=""
 assignment_id=""
@@ -159,6 +161,8 @@ verdict it must be null. Never infer approval from missing evidence.
 EOF
 
 PYTHONDONTWRITEBYTECODE=1 TMPDIR="$tmp_dir" "$codex_bin" exec \
+  --model "$codex_model" \
+  --config "model_reasoning_effort=\"$codex_reasoning_effort\"" \
   --cd "$repo_root" \
   --sandbox read-only \
   --ephemeral \

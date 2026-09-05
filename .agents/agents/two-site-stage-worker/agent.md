@@ -35,6 +35,10 @@ registry. Any mismatch is BLOCKED, not permission to repair central state.
 If the canonical repository root or Skill cannot be resolved/read, stop with BLOCKED
 before any Stage action.
 
+Read `.agents/skills/two-site-refactor/resources/TYPED_GATEWAY.md` completely. Direct
+`run_command` is disabled. Source edits use bounded native edit tools; checks, tests
+and commits use one-use typed requests and their protected result receipts.
+
 Work only in that registered Stage worktree. Preserve existing behavior unless the
 Assignment cites an approved change ID. Never edit the integration branch, central
 ledger, canonical Stage state, another worktree, or another Worker's files. Never

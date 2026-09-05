@@ -18,6 +18,9 @@ owner must never carry reports between conversations.
    `execution-order.yaml`.
 3. Read `.agents/rules/two-site-refactor-safety.md` and
    [`resources/AUTONOMOUS_ORCHESTRATION.md`](resources/AUTONOMOUS_ORCHESTRATION.md).
+   For the active Antigravity adapter, also read
+   [`resources/TYPED_GATEWAY.md`](resources/TYPED_GATEWAY.md) completely before any
+   tool action; it replaces direct shell use with one-use typed operations.
 4. Read the matching section `EXECUTION_PLAN.md`, Stage card, Assignment, latest exact
    receipt, and only the source/tests/evidence referenced by that Stage.
 
@@ -74,12 +77,20 @@ missing/malformed receipt, changed SHA, inaccessible registered
 worktree, killed Worker without a complete handoff, or CLI/auth failure is never
 implicit approval.
 
+Codex Stage, closeout, and governance review bridges are pinned to `gpt-6-astra` with
+`high` reasoning and a read-only sandbox. Do not rely on a caller's default model or
+reasoning configuration for final acceptance.
+
 After verified closeout and fence `advance`, select the next dependency-ready candidate and
 run fenced `stage-open-check`. Unknown metadata and production/destructive/DNS/Writer/secret
 or external flags block automatic continuation. Only then commit its deterministic
 `IN_PROGRESS` transition, `advance` again, create its Assignment/worktree at that exact
 integration HEAD, and run fenced `stage-bind`. Never edit
 the fence by hand or reuse the prior Stage Assignment for a different Stage.
+The protected Stage-bind journal must exist before worktree/Assignment/registry effects;
+only exact old-fence rollback or exact new-fence roll-forward is recoverable. Immediately
+retire the prior COMPLETE worktree after binding, with exact path/branch/HEAD/common-dir
+and Assignment checks. Ambiguity remains blocked.
 
 Use `Workspace: inherit` for both subagents and pass the exact registered worktree path.
 Do not ask Antigravity to generate an unregistered branch worktree. Default to one

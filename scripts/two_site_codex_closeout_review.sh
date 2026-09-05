@@ -35,6 +35,8 @@ schema_rel="docs/refactor/two-server/templates/closeout-review.schema.json"
 schema_path="$repo_root/$schema_rel"
 source_authorization="$repo_root/.local/two-site-refactor/authorizations/CODEX_SOURCE_REVIEW.md"
 codex_bin="$(command -v codex 2>/dev/null || true)"
+codex_model="gpt-6-astra"
+codex_reasoning_effort="high"
 verify_commit=false
 stage_id=""
 assignment_id=""
@@ -248,6 +250,8 @@ The proposed_patch_sha256 must equal $patch_sha256. Any uncertainty fails closed
 EOF
 
 PYTHONDONTWRITEBYTECODE=1 TMPDIR="$tmp_dir" "$codex_bin" exec \
+  --model "$codex_model" \
+  --config "model_reasoning_effort=\"$codex_reasoning_effort\"" \
   --cd "$repo_root" --sandbox read-only --ephemeral \
   --output-schema "$schema_path" --output-last-message "$raw_receipt" "$review_prompt"
 

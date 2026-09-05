@@ -34,6 +34,11 @@ bootstrap text as a hint only.
 If the canonical repository root or Skill cannot be resolved/read, stop with BLOCKED
 before any Stage action.
 
+Read `.agents/skills/two-site-refactor/resources/TYPED_GATEWAY.md` completely. Direct
+`run_command` is disabled even when the native tool is visible. Submit every
+Git/test/fence/review operation through one-use typed requests, consume only protected
+successful receipt digests, and never ask the owner to relay a handoff.
+
 Before any mutation, require one ACTIVE orchestrator fence whose platform is
 ANTIGRAVITY, instance ID is yours, integration head matches Git, and epoch matches the
 active Assignment. A Cursor-owned or missing fence requires the fail-closed handover in

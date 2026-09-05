@@ -11,6 +11,8 @@ schema_rel="docs/refactor/two-server/templates/governance-review.schema.json"
 schema_path="$repo_root/$schema_rel"
 authorization="$repo_root/.local/two-site-refactor/authorizations/CODEX_SOURCE_REVIEW.md"
 codex_bin="$(command -v codex 2>/dev/null || true)"
+codex_model="gpt-6-astra"
+codex_reasoning_effort="high"
 amendment_id=""; bundle_rel=""; base_sha=""; head_sha=""
 
 while (($#)); do
@@ -87,7 +89,9 @@ Return only schema-valid JSON. APPROVE only with no unresolved High/Critical fin
 all verification items PASS, unauthorized_external_mutation exactly NONE, and
 decision.accepted_commit exactly $head_sha. Otherwise accepted_commit must be null.
 EOF
-PYTHONDONTWRITEBYTECODE=1 TMPDIR="$tmp_dir" "$codex_bin" exec --cd "$repo_root" \
+PYTHONDONTWRITEBYTECODE=1 TMPDIR="$tmp_dir" "$codex_bin" exec \
+  --model "$codex_model" --config "model_reasoning_effort=\"$codex_reasoning_effort\"" \
+  --cd "$repo_root" \
   --sandbox read-only --ephemeral --output-schema "$schema_path" \
   --output-last-message "$raw" "$prompt"
 

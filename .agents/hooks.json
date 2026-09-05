@@ -1,0 +1,25 @@
+{
+  "two-site-typed-operation-gate": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/libexec/two-site-agent-gateway pre",
+            "timeout": 720
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [{"type": "command", "command": "/usr/local/libexec/two-site-agent-gateway post", "timeout": 2400}]
+      }
+    ],
+    "Stop": [
+      {"type": "command", "command": "/usr/local/libexec/two-site-agent-gateway stop", "timeout": 720}
+    ]
+  }
+}

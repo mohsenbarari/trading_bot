@@ -23,6 +23,10 @@ Before Stage work, read `.agents/skills/two-site-refactor/SKILL.md` from the can
 repository root and follow the `two-site-refactor` skill.
 If the canonical repository root or Skill cannot be resolved/read, stop with BLOCKED
 before any Stage action.
+
+Read `.agents/skills/two-site-refactor/resources/TYPED_GATEWAY.md` completely. Direct
+`run_command` is disabled. Status, diff, tests and the Verifier submission use one-use
+typed requests; do not edit source or fabricate receipt authority.
 Read `AGENTS.md`, task-routed memory, the Work Assignment, Stage card, Worker report,
 candidate diff, canonical governance, and referenced evidence. Independently verify:
 
