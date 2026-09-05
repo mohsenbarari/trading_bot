@@ -417,6 +417,18 @@ def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
     return task, sources
 
 
+def check(root: Path, task_path: Path) -> dict:
+    root = root.resolve(strict=True)
+    task, sources = load_task(root, task_path)
+    snapshot = json.dumps({"task": task, "sources": sources}).encode("utf-8")
+    return {
+        "state": "TASK_READY",
+        "task_id": task["task_id"],
+        "source_file_count": len(sources),
+        "byte_count": len(snapshot),
+    }
+
+
 def schema(role: str) -> dict:
     fields = {
         "status": {"type": "string", "enum": ["PROPOSAL_READY", "BLOCKED"] if role == "worker" else ["VERIFIED", "CHANGES_REQUIRED", "BLOCKED"]},
@@ -841,16 +853,25 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("role", choices=("worker", "verifier"))
+    parser.add_argument("role", choices=("worker", "verifier", "check"))
     parser.add_argument("--task", type=Path, required=True)
-    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--run-id")
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--feedback", type=Path)
     parser.add_argument("--proposal", type=Path)
     parser.add_argument("--cli", type=Path, help="existing Antigravity executable (controller-owned)")
     args = parser.parse_args()
+    if args.role in ("worker", "verifier") and args.run_id is None:
+        parser.error("the following arguments are required: --run-id")
     try:
+        if args.role == "check":
+            if (args.run_id is not None or args.feedback is not None
+                    or args.proposal is not None or args.cli is not None):
+                raise ProposalError("check mode does not accept run-id, feedback, proposal, or cli arguments")
+            payload = check(args.root, args.task)
+            print(json.dumps(payload))
+            return 0
         out = run(args.root, args.task, args.role, args.run_id, args.timeout, args.feedback, args.proposal, args.cli)
         meta = unique_json(bounded_file_text(
             args.root.resolve(strict=True), out / "status.json", MAX_CONTEXT, "run status"
