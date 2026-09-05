@@ -468,13 +468,18 @@ class ExecutorTests(unittest.TestCase):
             next_stage="P1-01", patch=patch_sha, prepare_receipt="receipt.json",
             **self.fx.commit_bindings(),
         )
+        runner = RecordingRunner()
         outcome = execute_plan(
-            plan, request, runner=RecordingRunner(), pinned_paths=self.fx.pins,
+            plan, request, runner=runner, pinned_paths=self.fx.pins,
             before_mutation=self.before,
         )
         self.assertEqual("SUCCESS", outcome["status"], outcome)
         self.assertRegex(outcome["resulting_head"], r"^[0-9a-f]{40}$")
         self.assertEqual(outcome["resulting_head"], self.fx.head(self.fx.root))
+        self.assertEqual(
+            (str(self.fx.pins.python_binary), '-I', str(self.fx.pins.fence_script)),
+            runner.commands[-1][0][:3],
+        )
 
     def test_receipt_check_empty_plan_executes_no_runner_or_git_observation(self):
         request = self.fx.request(

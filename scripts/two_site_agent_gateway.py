@@ -1189,16 +1189,21 @@ def _plan_integrate(request: Mapping[str, Any], state: _CanonicalState, context:
     )
 
 
-def _review_bundle(request: Mapping[str, Any], state: _CanonicalState) -> Path:
+def _canonical_review_bundle(state: _CanonicalState) -> tuple[str, Path]:
     stage_id = str(state.assignment["stage_id"])
     assignment_id = str(state.assignment["assignment_id"])
-    expected = f".local/two-site-refactor/review-bundles/{stage_id}-{assignment_id}"
+    relative = f".local/two-site-refactor/review-bundles/{stage_id}-{assignment_id}"
+    path = _safe_existing_relative(state.root, relative, "review bundle", directory=True)
+    return relative, path
+
+
+def _review_bundle(request: Mapping[str, Any], state: _CanonicalState) -> tuple[str, Path]:
+    expected, bundle = _canonical_review_bundle(state)
     if request["bundle"] != expected:
         _fail(GatewayErrorCode.PATH_REJECTED, f"review bundle must be exactly {expected}")
-    bundle = _safe_existing_relative(state.root, expected, "review bundle", directory=True)
     for name in REVIEW_BUNDLE_FILES:
         _safe_existing_relative(bundle, name, f"review bundle {name}")
-    return bundle
+    return expected, bundle
 
 
 def _review_input_bindings(bundle: Path) -> dict[str, str]:
@@ -1253,8 +1258,7 @@ def _plan_review(request: Mapping[str, Any], state: _CanonicalState, context: Ga
     if (base_sha != state.assignment["integration_head_at_issue"]
             or head_sha != request["integration_head"] or state.integration_snapshot.head_sha != head_sha):
         _fail(GatewayErrorCode.STATE_MISMATCH, "review head differs from exact integration HEAD")
-    bundle = _review_bundle(request, state)
-    expected_bundle = f".local/two-site-refactor/review-bundles/{state.assignment['stage_id']}-{state.assignment['assignment_id']}"
+    expected_bundle, bundle = _review_bundle(request, state)
     matches = [
         item
         for item in context.reviews
@@ -1282,7 +1286,7 @@ def _plan_review(request: Mapping[str, Any], state: _CanonicalState, context: Ga
         head_sha,
     )
     return OperationPlan(
-        **_base_plan(request, state, base=base_sha, head=head_sha, bundle=bundle,
+        **_base_plan(request, state, base=base_sha, head=head_sha, bundle=expected_bundle,
                      **_review_input_bindings(bundle)),
         commands=(CommandPlan(argv, str(state.root), EnvClass.EXTERNAL_CODEX_REVIEW, "request canonical exact-SHA Codex final review"),),
         followups=(),
@@ -1331,8 +1335,7 @@ def _plan_closeout_review(request: Mapping[str, Any], state: _CanonicalState, co
     receipt = _receipt(context, state, kind=ReceiptKind.CODEX_FINAL,
                        digest=final_digest, head_sha=accepted)
     bridge = _safe_existing_relative(state.root, "scripts/two_site_codex_closeout_review.sh", "Codex closeout bridge")
-    bundle = f".local/two-site-refactor/review-bundles/{state.assignment['stage_id']}-{state.assignment['assignment_id']}"
-    bundle_path = _safe_existing_relative(state.root, bundle, "closeout review bundle", directory=True)
+    bundle, bundle_path = _canonical_review_bundle(state)
     argv = (str(bridge), "--stage", str(state.assignment["stage_id"]), "--assignment",
             str(state.assignment["assignment_id"]), "--bundle", bundle, "--accepted-head", accepted)
     return OperationPlan(

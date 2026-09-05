@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3 -I
 """Atomically fence Cursor/Antigravity ownership of two-site repository writes."""
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ LOCK = LOCAL / "orchestrator-fence.lock"
 REGISTRY = LOCAL / "worktrees.yaml"
 EXECUTION_ORDER = ROOT / "docs" / "refactor" / "two-server" / "execution-order.yaml"
 INTEGRATION_BRANCH = "refactor/two-site-architecture"
+GIT_BINARY = "/usr/bin/git"
 PLATFORMS = {"CURSOR", "ANTIGRAVITY"}
 NON_RUNNING = {"IDLE", "IDLE_INTEGRATED", "BLOCKED", "READY", "COMPLETE_CANDIDATE"}
 ACTIVE_STAGE_STATES = {"READY", "RUNNING", "IDLE_INTEGRATED", "COMPLETE_CANDIDATE", "BLOCKED"}
@@ -121,7 +122,7 @@ def validate_coordinator_instance(platform: str, instance: Any) -> None:
 def run_git(*args: str, cwd: Path | None = None) -> str:
     cwd = ROOT if cwd is None else cwd
     result = subprocess.run(
-        ["git", "-C", str(cwd), *args],
+        [GIT_BINARY, "-C", str(cwd), *args],
         check=False,
         capture_output=True,
         text=True,
@@ -512,7 +513,7 @@ def validate_prior_takeover_contract(
     if actual_head != stage.get("head_sha"):
         raise FenceError("prior Assignment worktree HEAD does not match registry")
     if subprocess.run(
-        ["git", "-C", str(worktree), "merge-base", "--is-ancestor", str(assignment["base_sha"]), actual_head],
+        [GIT_BINARY, "-C", str(worktree), "merge-base", "--is-ancestor", str(assignment["base_sha"]), actual_head],
         check=False,
         capture_output=True,
         text=True,
@@ -588,7 +589,7 @@ def validate_replacement_contract(
         raise FenceError("replacement Worktree path/HEAD is invalid")
     if actual_head != expected_head:
         descendant = subprocess.run(
-            ["git", "-C", str(worktree), "merge-base", "--is-ancestor", str(expected_head), actual_head],
+            [GIT_BINARY, "-C", str(worktree), "merge-base", "--is-ancestor", str(expected_head), actual_head],
             check=False,
             capture_output=True,
             text=True,
@@ -596,7 +597,7 @@ def validate_replacement_contract(
         if not allow_unregistered_descendant or descendant.returncode:
             raise FenceError("replacement Worktree path/HEAD is invalid")
     ancestry = subprocess.run(
-        ["git", "-C", str(worktree), "merge-base", "--is-ancestor", fence["assignment_base_sha"], actual_head],
+        [GIT_BINARY, "-C", str(worktree), "merge-base", "--is-ancestor", fence["assignment_base_sha"], actual_head],
         check=False,
         capture_output=True,
         text=True,
@@ -726,6 +727,7 @@ def reconcile_takeover(fence: dict[str, Any], replacement_assignment: str) -> No
 def run_antigravity_validator(instance: str, *, runtime: bool) -> None:
     command = [
         sys.executable,
+        "-I",
         str(ROOT / "scripts" / "validate_antigravity_two_site_adapter.py"),
     ]
     if runtime:
@@ -909,7 +911,7 @@ def stage_advance(args: argparse.Namespace) -> None:
             raise FenceError("cannot advance a dirty Stage worktree")
         worktree = Path(str(stage["path"]))
         ancestry = subprocess.run(
-            ["git", "-C", str(worktree), "merge-base", "--is-ancestor", str(stage["head_sha"]), args.stage_head],
+            [GIT_BINARY, "-C", str(worktree), "merge-base", "--is-ancestor", str(stage["head_sha"]), args.stage_head],
             check=False,
             capture_output=True,
             text=True,
@@ -1159,6 +1161,9 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    if not sys.flags.isolated:
+        print("BLOCKED: fence CLI requires /usr/bin/python3 -I")
+        return 1
     args = parser().parse_args()
     try:
         {

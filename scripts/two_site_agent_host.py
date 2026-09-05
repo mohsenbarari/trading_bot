@@ -22,6 +22,7 @@ from typing import Any, Mapping
 import jsonschema
 import yaml
 
+from scripts import two_site_orchestrator_fence as fence_api
 from scripts.two_site_agent_context import ContextBuilder
 from scripts.two_site_agent_controller import NativeController, hook_response
 from scripts.two_site_agent_executor import (
@@ -664,27 +665,98 @@ class ProtectedGatewayHost:
     def _validate_bound_stage(self, record: Mapping[str, Any], pins: PinnedPaths) -> None:
         fence = unique_json(read_bounded(
             self.root / '.local/two-site-refactor/orchestrator-fence.json', 65536))
+        self._validate_stage_bind_fence_identity(record, pins, fence)
         if (fence.get('status') != 'ACTIVE' or fence.get('binding_kind') != 'STAGE'
+                or fence.get('platform') != 'ANTIGRAVITY'
+                or fence.get('integration_branch') != pins.integration_branch
                 or fence.get('active_assignment_id') != record['next_assignment']
                 or fence.get('previous_assignment_id') != record['old_assignment']
                 or fence.get('integration_head_sha') != record['integration_head']
                 or fence.get('epoch') != record['epoch']
                 or fence.get('coordinator_instance_id') != self.manifest['coordinator_id']):
             raise TransportError('recovered Stage-bind fence is not exact and ACTIVE')
+
+        _, request, _ = self._stage_bind_inputs(record)
+        contract = request.get('contract')
+        slug = contract.get('slug') if isinstance(contract, dict) else None
+        if not isinstance(slug, str):
+            raise TransportError('recovered Stage-bind request contract is malformed')
+        workspace_root = safe_path(Path(self.manifest['stage_workspace_root']))
+        expected_worktree = safe_path(
+            workspace_root / f"{record['next_stage']}-{slug}", exists=False)
+        expected_branch = f"refactor/stage/{record['next_stage']}-{slug}"
+        expected_assignment_path = self.root / '.local/two-site-refactor/assignments' / (
+            str(record['next_assignment']) + '.md')
+        if (record.get('next_worktree') != str(expected_worktree)
+                or record.get('next_branch') != expected_branch
+                or record.get('assignment_path') != str(expected_assignment_path)):
+            raise TransportError('recovered Stage-bind targets are not request-derived')
+
         assignment_path = safe_path(Path(str(record['assignment_path'])))
         if file_sha256(assignment_path) != record['assignment_sha256']:
             raise TransportError('recovered next Assignment content differs from journal')
+        blocks = re.findall(r'```yaml\n(.*?)\n```', read_bounded(
+            assignment_path, 1_000_000).decode(), re.S)
+        assignment = yaml.safe_load(blocks[0]) if len(blocks) == 1 else None
+        try:
+            fence_api.validate_canonical_assignment(assignment)
+            assignment_contract_sha = fence_api.immutable_contract_sha256(assignment)
+        except Exception as error:
+            raise TransportError('recovered next Assignment contract is invalid') from error
+        if (assignment.get('assignment_id') != record['next_assignment']
+                or assignment.get('stage_id') != record['next_stage']
+                or assignment.get('role') != 'WORKER'
+                or assignment.get('status') != 'READY'
+                or assignment.get('orchestrator') != 'ANTIGRAVITY'
+                or assignment.get('orchestration_epoch') != record['epoch']
+                or assignment.get('worktree_path') != record['next_worktree']
+                or assignment.get('branch') != record['next_branch']
+                or assignment.get('base_sha') != record['integration_head']
+                or assignment.get('integration_branch') != pins.integration_branch
+                or assignment.get('integration_head_at_issue') != record['integration_head']
+                or assignment.get('external_access') != 'NONE'
+                or assignment.get('issued_by') != 'EXECUTION_COORDINATOR'
+                or fence.get('assignment_base_sha') != assignment.get('base_sha')
+                or fence.get('assignment_integration_head_at_issue')
+                != assignment.get('integration_head_at_issue')
+                or fence.get('immutable_contract_sha256') != assignment_contract_sha):
+            raise TransportError('recovered next Assignment/fence owner contract differs')
+
         registry = yaml.safe_load(read_bounded(
             self.root / '.local/two-site-refactor/worktrees.yaml', 1_000_000))
         matches = [item for item in registry.get('stage_worktrees', [])
                    if isinstance(item, dict)
                    and item.get('assignment_id') == record['next_assignment']]
-        if (len(matches) != 1 or matches[0].get('path') != record['next_worktree']
-                or matches[0].get('branch') != record['next_branch']
-                or matches[0].get('head_sha') != record['integration_head']
-                or (registry.get('integration') or {}).get('active_assignment_id')
-                != record['next_assignment']):
+        integration = registry.get('integration') if isinstance(registry, dict) else None
+        if (not isinstance(integration, dict)
+                or integration.get('path') != str(self.root)
+                or integration.get('branch') != pins.integration_branch
+                or integration.get('head_sha') != record['integration_head']
+                or integration.get('owner_role') != 'EXECUTION_COORDINATOR'
+                or integration.get('active_assignment_id') != record['next_assignment']
+                or integration.get('orchestrator') != 'ANTIGRAVITY'
+                or integration.get('orchestration_epoch') != record['epoch']):
+            raise TransportError('recovered next Stage integration owner differs')
+        expected_stage = {
+            'registry_id': assignment['worktree_registry_id'],
+            'stage_id': record['next_stage'], 'assignment_id': record['next_assignment'],
+            'owner_role': 'EXECUTION_WORKER', 'path': record['next_worktree'],
+            'branch': record['next_branch'], 'base_sha': record['integration_head'],
+            'head_sha': record['integration_head'],
+            'dirty_uncommitted_candidate': False, 'locks': assignment['locks'],
+            'status': 'READY', 'orchestrator': 'ANTIGRAVITY',
+            'orchestration_epoch': record['epoch'],
+            'created_at': record['created_at'], 'expires_at': assignment['expires_at'],
+            'remove_within_hours_after_close': 24,
+        }
+        if len(matches) != 1 or matches[0] != expected_stage:
             raise TransportError('recovered next Stage registry identity differs')
+        old = self._validate_retirement_candidate(record, pins, registry)
+        if (old.get('status') != 'CLOSED'
+                or old.get('owner_role') != 'EXECUTION_WORKER'
+                or old.get('orchestrator') != 'ANTIGRAVITY'
+                or old.get('orchestration_epoch') != record['epoch']):
+            raise TransportError('recovered prior Stage retirement owner differs')
         worktree = safe_path(Path(str(record['next_worktree'])))
         snapshot = observe_git(worktree)
         if (not snapshot.clean or snapshot.branch != record['next_branch']
@@ -692,7 +764,142 @@ class ProtectedGatewayHost:
                 or self._git_common_dir(pins, worktree) != self._git_common_dir(pins, self.root)):
             raise TransportError('recovered next Stage worktree is not exact')
 
-    def _rollback_stage_bind(self, record: Mapping[str, Any], pins: PinnedPaths) -> None:
+    def _validate_stage_bind_fence_identity(
+            self, record: Mapping[str, Any], pins: PinnedPaths,
+            fence: Mapping[str, Any]) -> None:
+        try:
+            fence_api.validate_fence(fence)
+        except Exception as error:
+            raise TransportError('Stage-bind fence schema is invalid') from error
+        if (fence.get('platform') != 'ANTIGRAVITY'
+                or fence.get('coordinator_instance_id') != self.manifest['coordinator_id']
+                or fence.get('epoch') != record['epoch']
+                or fence.get('integration_branch') != pins.integration_branch
+                or fence.get('integration_head_sha') != record['integration_head']):
+            raise TransportError('Stage-bind fence ownership/integration identity drifted')
+        snapshot = observe_git(self.root)
+        if (not snapshot.clean or snapshot.branch != pins.integration_branch
+                or snapshot.head_sha != record['integration_head']):
+            raise TransportError('Stage-bind actual integration Git identity drifted')
+
+    def _validate_stage_bind_rollback_authority(
+            self, record: Mapping[str, Any], pins: PinnedPaths,
+            fence: Mapping[str, Any]) -> None:
+        """Prove the complete old owner/state before any rollback side effect.
+
+        The caller holds the canonical fence lock.  Journal hashes alone are not
+        authority: the current fence, Assignment, registry and actual Git state
+        must all still describe the exact old Antigravity Stage.
+        """
+        self._validate_stage_bind_fence_identity(record, pins, fence)
+        if (fence.get('status') != 'ACTIVE'
+                or fence.get('active_assignment_id') != record['old_assignment']):
+            raise TransportError('Stage-bind rollback is not owned by the exact old ACTIVE fence')
+
+        _, request, _ = self._stage_bind_inputs(record)
+        contract = request.get('contract')
+        slug = contract.get('slug') if isinstance(contract, dict) else None
+        if not isinstance(slug, str):
+            raise TransportError('Stage-bind rollback request contract is malformed')
+        workspace_root = safe_path(Path(self.manifest['stage_workspace_root']))
+        derived_worktree = safe_path(
+            workspace_root / f"{record['next_stage']}-{slug}", exists=False)
+        derived_branch = f"refactor/stage/{record['next_stage']}-{slug}"
+        derived_assignment = self.root / '.local/two-site-refactor/assignments' / (
+            str(record['next_assignment']) + '.md')
+        if (record.get('next_worktree') != str(derived_worktree)
+                or record.get('next_branch') != derived_branch
+                or record.get('assignment_path') != str(derived_assignment)):
+            raise TransportError('Stage-bind rollback journal targets are not request-derived')
+
+        assignment_path = self.root / '.local/two-site-refactor/assignments' / (
+            str(record['old_assignment']) + '.md')
+        raw = read_bounded(assignment_path, 1_000_000).decode()
+        blocks = re.findall(r'```yaml\n(.*?)\n```', raw, re.S)
+        assignment = yaml.safe_load(blocks[0]) if len(blocks) == 1 else None
+        try:
+            fence_api.validate_canonical_assignment(assignment)
+            contract_digest = fence_api.immutable_contract_sha256(assignment)
+        except Exception as error:
+            raise TransportError('Stage-bind old Assignment contract is invalid') from error
+        if (assignment.get('assignment_id') != record['old_assignment']
+                or assignment.get('stage_id') != record['old_stage']
+                or assignment.get('worktree_path') != record['old_worktree']
+                or assignment.get('branch') != record['old_branch']
+                or assignment.get('orchestrator') != 'ANTIGRAVITY'
+                or assignment.get('orchestration_epoch') != record['epoch']
+                or assignment.get('integration_branch') != pins.integration_branch
+                or assignment.get('base_sha') != fence.get('assignment_base_sha')
+                or assignment.get('integration_head_at_issue')
+                != fence.get('assignment_integration_head_at_issue')
+                or contract_digest != fence.get('immutable_contract_sha256')):
+            raise TransportError('Stage-bind old Assignment/fence contract drifted')
+
+        registry_path = self.root / '.local/two-site-refactor/worktrees.yaml'
+        before_bytes = str(record['registry_before']).encode()
+        after_bytes = str(record['registry_after']).encode()
+        if (hashlib.sha256(before_bytes).hexdigest() != record['registry_before_sha256']
+                or hashlib.sha256(after_bytes).hexdigest() != record['registry_after_sha256']):
+            raise TransportError('Stage-bind rollback journal registry digests are invalid')
+        before_registry = yaml.safe_load(before_bytes)
+        after_registry = yaml.safe_load(after_bytes)
+        if not isinstance(before_registry, dict) or not isinstance(after_registry, dict):
+            raise TransportError('Stage-bind rollback journal registry snapshots are malformed')
+        before_copy = json.loads(json.dumps(before_registry))
+        after_copy = json.loads(json.dumps(after_registry))
+        before_stages = before_copy.pop('stage_worktrees', None)
+        after_stages = after_copy.pop('stage_worktrees', None)
+        before_copy.pop('updated_at', None)
+        after_updated = after_copy.pop('updated_at', None)
+        if (before_copy != after_copy or not isinstance(before_stages, list)
+                or not isinstance(after_stages, list)
+                or after_stages[:-1] != before_stages
+                or len(after_stages) != len(before_stages) + 1
+                or after_updated != record['created_at']):
+            raise TransportError('Stage-bind rollback registry snapshots have an invalid semantic delta')
+        derived_record = after_stages[-1]
+        expected_derived = {
+            'registry_id': f"stage-{record['next_stage']}-{slug}",
+            'stage_id': record['next_stage'], 'assignment_id': record['next_assignment'],
+            'owner_role': 'EXECUTION_WORKER', 'path': str(derived_worktree),
+            'branch': derived_branch, 'base_sha': record['integration_head'],
+            'head_sha': record['integration_head'], 'locks': list(contract.get('locks', [])),
+            'status': 'READY', 'orchestrator': 'ANTIGRAVITY',
+            'orchestration_epoch': record['epoch'], 'created_at': record['created_at'],
+        }
+        if (not isinstance(derived_record, dict)
+                or any(derived_record.get(key) != value
+                       for key, value in expected_derived.items())):
+            raise TransportError('Stage-bind rollback derived registry record is invalid')
+
+        registry_bytes = read_bounded(registry_path, 1_000_000)
+        if registry_bytes not in {before_bytes, after_bytes}:
+            raise TransportError('Stage-bind rollback registry bytes differ from its journal')
+        registry = yaml.safe_load(registry_bytes)
+        integration = registry.get('integration') if isinstance(registry, dict) else None
+        if (not isinstance(integration, dict)
+                or integration.get('path') != str(self.root)
+                or integration.get('branch') != pins.integration_branch
+                or integration.get('head_sha') != record['integration_head']
+                or integration.get('active_assignment_id') != record['old_assignment']
+                or integration.get('owner_role') != 'EXECUTION_COORDINATOR'
+                or integration.get('orchestrator') != 'ANTIGRAVITY'
+                or integration.get('orchestration_epoch') != record['epoch']):
+            raise TransportError('Stage-bind rollback registry integration identity drifted')
+        old = self._validate_retirement_candidate(record, pins, registry)
+        if (old.get('status') != 'COMPLETE_CANDIDATE'
+                or old.get('owner_role') != 'EXECUTION_WORKER'
+                or old.get('orchestrator') != 'ANTIGRAVITY'
+                or old.get('orchestration_epoch') != record['epoch']
+                or old.get('registry_id') != assignment.get('worktree_registry_id')
+                or old.get('base_sha') != assignment.get('base_sha')
+                or old.get('locks') != assignment.get('locks')):
+            raise TransportError('Stage-bind rollback registry Stage ownership drifted')
+
+    def _rollback_stage_bind_effects(
+            self, record: Mapping[str, Any], pins: PinnedPaths,
+            fence: Mapping[str, Any]) -> None:
+        self._validate_stage_bind_rollback_authority(record, pins, fence)
         registry_path = self.root / '.local/two-site-refactor/worktrees.yaml'
         registry_bytes = read_bounded(registry_path, 1_000_000)
         registry_sha = hashlib.sha256(registry_bytes).hexdigest()
@@ -743,6 +950,13 @@ class ProtectedGatewayHost:
                 raise TransportError('Stage-bind journal registry backup is invalid')
             self._atomic_project_write(registry_path, before)
 
+    def _rollback_stage_bind(self, record: Mapping[str, Any], pins: PinnedPaths) -> None:
+        """Rollback only while holding and revalidating the canonical fence lock."""
+        with self._fence_locked():
+            fence = unique_json(read_bounded(
+                self.root / '.local/two-site-refactor/orchestrator-fence.json', 65536))
+            self._rollback_stage_bind_effects(record, pins, fence)
+
     def _recover_stage_bind_transaction(self) -> None:
         journal_path = self._stage_bind_journal_path
         if not journal_path.exists():
@@ -766,49 +980,65 @@ class ProtectedGatewayHost:
             journal_path.unlink()
             return
         pins = self._journal_pins(record)
-        fence = unique_json(read_bounded(
-            self.root / '.local/two-site-refactor/orchestrator-fence.json', 65536))
-        old_active = (fence.get('status') == 'ACTIVE'
-                      and fence.get('active_assignment_id') == record['old_assignment']
-                      and fence.get('epoch') == record['epoch']
-                      and fence.get('integration_head_sha') == record['integration_head'])
-        new_active = (fence.get('status') == 'ACTIVE'
-                      and fence.get('active_assignment_id') == record['next_assignment'])
-        reconciling = (fence.get('status') == 'RECONCILING'
-                       and fence.get('binding_kind') == 'STAGE'
-                       and fence.get('previous_assignment_id') == record['old_assignment']
-                       and fence.get('active_assignment_id') == record['next_assignment'])
-        if old_active:
-            self._rollback_stage_bind(record, pins)
-            self._finish_recovered_stage_bind(
-                record, running, request, 'FAILED',
-                'protected recovery rolled back an interrupted pre-bind transaction')
-        elif reconciling:
-            result = _run_bounded_process(
-                [str(pins.python_binary), str(pins.fence_script), 'stage-bind',
-                 '--platform', 'ANTIGRAVITY', '--instance', self.manifest['coordinator_id'],
-                 '--epoch', str(record['epoch']), '--integration-head', record['integration_head'],
-                 '--assignment', record['old_assignment'], '--next-assignment', record['next_assignment']],
-                cwd=self.root, env={'PATH': '/usr/local/bin:/usr/bin:/bin', 'LANG': 'C.UTF-8',
-                                    'GIT_TERMINAL_PROMPT': '0'}, timeout=120,
-                output_limit=256_000,
-            )
-            if result.returncode != 0:
-                raise TransportError('protected Stage-bind reconciliation did not complete')
+        with self._fence_locked():
+            fence = unique_json(read_bounded(
+                self.root / '.local/two-site-refactor/orchestrator-fence.json', 65536))
+            self._validate_stage_bind_fence_identity(record, pins, fence)
+            old_active = (fence.get('status') == 'ACTIVE'
+                          and fence.get('active_assignment_id') == record['old_assignment'])
+            new_active = (fence.get('status') == 'ACTIVE'
+                          and fence.get('binding_kind') == 'STAGE'
+                          and fence.get('previous_assignment_id') == record['old_assignment']
+                          and fence.get('active_assignment_id') == record['next_assignment'])
+            reconciling = (fence.get('status') == 'RECONCILING'
+                           and fence.get('binding_kind') == 'STAGE'
+                           and fence.get('previous_assignment_id') == record['old_assignment']
+                           and fence.get('active_assignment_id') == record['next_assignment'])
+            if old_active:
+                self._rollback_stage_bind_effects(record, pins, fence)
+                self._finish_recovered_stage_bind(
+                    record, running, request, 'FAILED',
+                    'protected recovery rolled back an interrupted pre-bind transaction')
+                journal_path.unlink()
+                return
+            if new_active:
+                self._validate_bound_stage(record, pins)
+                self._retire_bound_worktree(record, pins)
+                self._finish_recovered_stage_bind(
+                    record, running, request, 'SUCCESS',
+                    'protected recovery verified an already-completed exact Stage bind')
+                journal_path.unlink()
+                return
+            if not reconciling:
+                raise TransportError('Stage-bind recovery fence is outside rollback/roll-forward states')
+
+        # The canonical fence program acquires the same lock and independently
+        # revalidates the complete RECONCILING state before any roll-forward write.
+        result = _run_bounded_process(
+            [str(pins.python_binary), '-I', str(pins.fence_script), 'stage-bind',
+             '--platform', 'ANTIGRAVITY', '--instance', self.manifest['coordinator_id'],
+             '--epoch', str(record['epoch']), '--integration-head', record['integration_head'],
+             '--assignment', record['old_assignment'], '--next-assignment', record['next_assignment']],
+            cwd=self.root, env={'PATH': '/usr/local/bin:/usr/bin:/bin', 'LANG': 'C.UTF-8',
+                                'GIT_TERMINAL_PROMPT': '0'}, timeout=120,
+            output_limit=256_000,
+        )
+        if result.returncode != 0:
+            raise TransportError('protected Stage-bind reconciliation did not complete')
+        with self._fence_locked():
+            fence = unique_json(read_bounded(
+                self.root / '.local/two-site-refactor/orchestrator-fence.json', 65536))
+            self._validate_stage_bind_fence_identity(record, pins, fence)
+            if (fence.get('status') != 'ACTIVE' or fence.get('binding_kind') != 'STAGE'
+                    or fence.get('previous_assignment_id') != record['old_assignment']
+                    or fence.get('active_assignment_id') != record['next_assignment']):
+                raise TransportError('reconciled Stage-bind fence is not the exact new owner')
             self._validate_bound_stage(record, pins)
             self._retire_bound_worktree(record, pins)
             self._finish_recovered_stage_bind(
                 record, running, request, 'SUCCESS',
                 'protected recovery completed an exact RECONCILING Stage bind')
-        elif new_active:
-            self._validate_bound_stage(record, pins)
-            self._retire_bound_worktree(record, pins)
-            self._finish_recovered_stage_bind(
-                record, running, request, 'SUCCESS',
-                'protected recovery verified an already-completed exact Stage bind')
-        else:
-            raise TransportError('Stage-bind recovery fence is outside rollback/roll-forward states')
-        journal_path.unlink()
+            journal_path.unlink()
 
     def _prepare_stage_bind(self, plan: OperationPlan, request: Mapping[str, Any],
                             assignment: dict, pins: PinnedPaths) -> dict:
@@ -1135,13 +1365,16 @@ class ProtectedGatewayHost:
             if outcome.get('status') != 'SUCCESS':
                 if (current_fence.get('status') == 'ACTIVE'
                         and current_fence.get('active_assignment_id') == journal['old_assignment']):
+                    # The helper reacquires the canonical fence lock and revalidates
+                    # fence, Coordinator, Assignment, registry and actual Git before
+                    # performing any removal or restoration.
                     self._rollback_stage_bind(journal, pins)
                     self._stage_bind_journal_path.unlink()
                     return outcome
                 if (current_fence.get('status') == 'RECONCILING'
                         and current_fence.get('binding_kind') == 'STAGE'):
                     retry = _run_bounded_process(
-                        [str(pins.python_binary), str(pins.fence_script), 'stage-bind',
+                        [str(pins.python_binary), '-I', str(pins.fence_script), 'stage-bind',
                          '--platform', 'ANTIGRAVITY', '--instance', self.manifest['coordinator_id'],
                          '--epoch', str(journal['epoch']), '--integration-head', journal['integration_head'],
                          '--assignment', journal['old_assignment'],
@@ -1152,17 +1385,17 @@ class ProtectedGatewayHost:
                     )
                     if retry.returncode != 0:
                         raise TransportError('journaled Stage-bind retry did not reconcile')
-                self._validate_bound_stage(journal, pins)
                 outcome = {
                     'status': 'SUCCESS', 'request_id': plan.request_id,
                     'operation': plan.operation,
                     'reason': 'journaled Stage bind completed by exact recovery',
                     'authority': 'EXECUTOR_VERIFIED_NO_APPROVAL',
                 }
-            self._validate_bound_stage(journal, pins)
-            journal = self._write_stage_bind_journal(journal, 'FENCE_BOUND')
-            self._retire_bound_worktree(journal, pins)
-            self._write_stage_bind_journal(journal, 'COMPLETE')
+            with self._fence_locked():
+                self._validate_bound_stage(journal, pins)
+                journal = self._write_stage_bind_journal(journal, 'FENCE_BOUND')
+                self._retire_bound_worktree(journal, pins)
+                self._write_stage_bind_journal(journal, 'COMPLETE')
             outcome = {**outcome, 'prepared': prepared_bind}
         record = self._authority_record(plan, request, outcome, assignment, fence)
         if record is not None:

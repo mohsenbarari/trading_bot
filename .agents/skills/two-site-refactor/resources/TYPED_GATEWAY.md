@@ -109,6 +109,41 @@ roll forward an exact `RECONCILING/STAGE` or already-bound new fence. After a su
 bind, the prior COMPLETE Stage worktree is removed immediately only after its Assignment,
 registry path, branch, HEAD, Git common directory and clean state all match.
 
+Every rollback decision and side effect occurs while holding the same canonical fence
+lock used by the fence program. Before removing or restoring anything, the host
+revalidates the complete fence schema and exact Antigravity platform, Coordinator UUID,
+epoch, active Assignment, integration branch/HEAD and actual clean integration Git state.
+It reparses the old canonical Assignment and immutable-contract digest, derives every new
+path/branch/registry identifier from the protected request, validates the journal's
+before/after registry hashes and exact one-record semantic delta, and checks both the
+integration owner and old Stage owner in the current byte-identical registry. Missing,
+foreign, dirty, substituted, ambiguous or concurrently changed state is terminally
+rejected without rollback effects. A `RECONCILING` retry releases the outer lock only so
+the canonical fence process can acquire that same lock; recovery reacquires it and proves
+the exact new ACTIVE owner before retirement.
+
+Privileged Python entrypoints never resolve imports through a candidate repository.
+Fence and validator subprocesses run with the exact pinned Python binary in isolated
+mode (`-I`); Git inside the fence is `/usr/bin/git`. The adapter validator loads its
+reviewed session sibling by exact file path while excluding repository paths and rejects
+a `yaml` module originating inside the project. The root installer is a standalone exact
+reviewed Git blob, must itself run with `-I`, imports no repository package during
+bootstrap, and re-reads its own bytes to prove equality with
+`<accepted-sha>:scripts/install_two_site_agent_gateway.py` before installation. The
+isolation and provenance checks are inside `install()` as well as its CLI, so importing
+the module cannot bypass them. After an exact-SHA `APPROVE`, Codex—not the project owner
+or Antigravity—must use `/usr/bin/git --no-replace-objects show` to materialize that exact
+blob into a new root-owned mode-`0400` temporary file, invoke it with `/usr/bin/python3
+-I`, and remove the temporary directory. It then compares the protected-source catalog
+with the installed runtime manifest before activation. Running the installer from the
+candidate working-tree path is forbidden even when that tree currently appears clean.
+
+Review-bundle identities are canonical repository-relative POSIX paths in requests,
+plans and receipts. Resolved absolute paths are used only inside the protected host for
+bounded reads and hashes. Both final and closeout review supervisors revalidate the
+relative identity and every bound digest immediately before and after the reviewer runs;
+pre-run or in-review replacement fails closed and cannot produce authority.
+
 Every hook invocation has one enforced wall-clock deadline covering host preparation,
 Git observations, test snapshot creation, command/review execution, recovery and
 descendant cleanup. Pre/Stop use 600 seconds and Post uses 2280 seconds; the generated

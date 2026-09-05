@@ -2,7 +2,9 @@ import importlib.util
 import hashlib
 import json
 import os
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -373,7 +375,8 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
 
     def test_orchestrator_fence_cli_is_available(self):
         result = subprocess.run(
-            ["python3", str(ROOT / "scripts" / "two_site_orchestrator_fence.py"), "--help"],
+            ["/usr/bin/python3", "-I",
+             str(ROOT / "scripts" / "two_site_orchestrator_fence.py"), "--help"],
             cwd=ROOT,
             check=True,
             capture_output=True,
@@ -387,6 +390,19 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
         self.assertIn("stage-bind", result.stdout)
         self.assertIn("advance", result.stdout)
         self.assertIn("release", result.stdout)
+
+    def test_direct_nonisolated_fence_and_validator_cli_fail_closed(self):
+        for relative in (
+            "scripts/two_site_orchestrator_fence.py",
+            "scripts/validate_antigravity_two_site_adapter.py",
+        ):
+            with self.subTest(relative=relative):
+                result = subprocess.run(
+                    ["/usr/bin/python3", str(ROOT / relative), "--help"],
+                    cwd=ROOT, check=False, capture_output=True, text=True,
+                )
+                self.assertEqual(1, result.returncode)
+                self.assertRegex(result.stdout + result.stderr, r"requires /usr/bin/python3 -I")
 
     def test_runtime_validation_requires_exact_custom_coordinator_smoke(self):
         validator = load_validator()
@@ -605,11 +621,77 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
         self.assertIn("--runtime", live)
         self.assertNotIn("--runtime", offline)
         for command in (live, offline):
+            self.assertEqual([sys.executable, "-I"], command[:2])
             self.assertEqual(
                 execution_id,
                 command[command.index("--execution-conversation") + 1],
             )
             self.assertNotIn("--conversation", command)
+
+    def test_isolated_validator_ignores_hostile_candidate_import_modules(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'candidate'
+            scripts = root / 'scripts'
+            scripts.mkdir(parents=True)
+            for name in (
+                'validate_antigravity_two_site_adapter.py',
+                'two_site_antigravity_session.py',
+                'antigravity_cli_1_1_26_profile.json',
+            ):
+                shutil.copyfile(ROOT / 'scripts' / name, scripts / name)
+            marker = Path(directory) / 'poison-executed'
+            poison = (
+                "from pathlib import Path\n"
+                f"Path({str(marker)!r}).write_text('executed')\n"
+                "raise RuntimeError('candidate import poison')\n"
+            )
+            for relative in ('yaml.py', 'sitecustomize.py', 'scripts/yaml.py',
+                             'scripts/sitecustomize.py'):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(poison)
+            (scripts / SCRIPT.name).chmod(0o755)
+            result = subprocess.run(
+                [str(scripts / SCRIPT.name), '--help'],
+                cwd=root, capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertIn('--execution-conversation', result.stdout)
+            self.assertFalse(marker.exists())
+
+        validator = load_validator()
+        self.assertEqual(
+            (ROOT / 'scripts/two_site_antigravity_session.py').resolve(),
+            Path(validator._SESSION_ADAPTER.__file__).resolve(),
+        )
+        self.assertFalse(Path(sys.modules['yaml'].__file__).resolve().is_relative_to(ROOT))
+
+    def test_direct_fence_shebang_ignores_hostile_candidate_import_modules(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'candidate'
+            scripts = root / 'scripts'
+            scripts.mkdir(parents=True)
+            fence = scripts / 'two_site_orchestrator_fence.py'
+            shutil.copyfile(ROOT / 'scripts' / fence.name, fence)
+            fence.chmod(0o755)
+            marker = Path(directory) / 'poison-executed'
+            poison = (
+                "from pathlib import Path\n"
+                f"Path({str(marker)!r}).write_text('executed')\n"
+                "raise RuntimeError('candidate import poison')\n"
+            )
+            for relative in ('yaml.py', 'sitecustomize.py', 'scripts/yaml.py',
+                             'scripts/sitecustomize.py'):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(poison)
+            result = subprocess.run(
+                [str(fence), '--help'], cwd=root,
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertIn('stage-bind', result.stdout)
+            self.assertFalse(marker.exists())
 
     def test_binding_only_cli_fails_closed_with_clear_error(self):
         validator = load_validator()
@@ -617,6 +699,8 @@ class AntigravityTwoSiteAdapterTests(unittest.TestCase):
         failure = "Antigravity execution Coordinator binding is not ready: wrong model"
         with mock.patch.object(validator, "validate", return_value=[]), mock.patch.object(
             validator, "validate_execution_conversation", return_value=[failure]
+        ), mock.patch.object(
+            validator, "isolated_runtime", return_value=True
         ), mock.patch.object(
             validator.sys,
             "argv",

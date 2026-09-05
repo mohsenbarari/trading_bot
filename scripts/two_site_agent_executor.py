@@ -915,6 +915,12 @@ def _actual_argv(command: CommandPlan | FollowupCommandPlan, pins: PinnedPaths, 
     if template[0] == "git":
         return (str(pins.git_binary), *template[1:])
     if template[0] == sys.executable:
+        if len(template) > 1 and template[1] == str(pins.fence_script):
+            # The fence source is exact-digest pinned, but its repository directory
+            # is candidate-controlled.  Isolated mode prevents sibling modules such
+            # as scripts/yaml.py (and site/PYTHONPATH hooks) from entering this
+            # privileged process before final review.
+            return (str(pins.python_binary), "-I", *template[1:])
         return (str(pins.python_binary), *template[1:])
     if template[0] in {str(pins.final_review_bridge), str(pins.closeout_review_bridge)}:
         return template

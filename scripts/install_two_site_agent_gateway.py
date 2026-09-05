@@ -20,11 +20,38 @@ from pathlib import Path
 
 import jsonschema
 
-if __package__ in {None, ''}:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# Keep the root installer bootstrap standalone: importing candidate repository code
+# before exact-Git verification would execute it with root authority.  Runtime checks
+# independently require this same complete set in the protected manifest.
+PROTECTED_SOURCE = (
+    '.agents/hooks.json',
+    '.agents/agents/two-site-coordinator/agent.md',
+    '.agents/agents/two-site-stage-worker/agent.md',
+    '.agents/agents/two-site-stage-verifier/agent.md',
+    '.agents/skills/two-site-refactor/SKILL.md',
+    '.agents/skills/two-site-refactor/resources/TYPED_GATEWAY.md',
+    'scripts/two_site_agent_transport.py', 'scripts/two_site_agent_gateway.py',
+    'scripts/two_site_agent_context.py', 'scripts/two_site_agent_executor.py',
+    'scripts/two_site_agent_controller.py', 'scripts/two_site_agent_host.py',
+    'scripts/two_site_agent_recovery.py',
+    'scripts/install_two_site_agent_gateway.py', 'scripts/two_site_agent_sandbox.py',
+    'scripts/two_site_antigravity_session.py', 'scripts/antigravity_cli_1_1_26_profile.json',
+    'scripts/two_site_orchestrator_fence.py', 'scripts/validate_antigravity_two_site_adapter.py',
+    'scripts/two_site_codex_final_review.sh', 'scripts/two_site_codex_closeout_review.sh',
+    'scripts/two_site_codex_governance_review.sh',
+    'docs/refactor/two-server/templates/final-review.schema.json',
+    'docs/refactor/two-server/templates/closeout-review.schema.json',
+    'docs/refactor/two-server/templates/governance-review.schema.json',
+)
+HOOK_DEADLINES = {'pre': 600, 'post': 2280, 'stop': 600}
+HOOK_TIMEOUT_MARGIN_SECONDS = 120
 
-from scripts.two_site_agent_context import PROTECTED_SOURCE
-from scripts.two_site_agent_sandbox import hook_timeout_seconds
+
+def hook_timeout_seconds(phase: str) -> int:
+    try:
+        return HOOK_DEADLINES[phase] + HOOK_TIMEOUT_MARGIN_SECONDS
+    except KeyError as error:
+        raise InstallError('unknown gateway hook phase') from error
 
 INSTALL_ROOT = Path('/usr/local/libexec/two-site-agent-gateway.d')
 LAUNCHER = Path('/usr/local/libexec/two-site-agent-gateway')
@@ -40,6 +67,10 @@ SHA40 = re.compile(r'[0-9a-f]{40}\Z')
 
 class InstallError(RuntimeError):
     pass
+
+
+def isolated_runtime() -> bool:
+    return bool(sys.flags.isolated)
 
 
 def run(root: Path, *arguments: str, output_limit: int = 4_000_000) -> bytes:
@@ -158,13 +189,27 @@ def expected_hooks() -> dict:
     }}
 
 
+def validate_installer_provenance(root: Path, accepted: str) -> None:
+    """Require this executing file to be the exact installer blob under review."""
+    source = canonical(Path(__file__).resolve(strict=True))
+    committed = run(
+        root, 'show', accepted + ':scripts/install_two_site_agent_gateway.py',
+        output_limit=1_000_000,
+    )
+    if source.read_bytes() != committed:
+        raise InstallError('executing installer is not the exact accepted Git blob')
+
+
 def install(root: Path, accepted: str, coordinator: str, receipt_path: Path,
             stage_workspace_root: Path, codex_binary: Path, agy_binary: Path) -> dict:
+    if not isolated_runtime():
+        raise InstallError('installer requires isolated Python mode')
     if os.geteuid() != 0:
         raise InstallError('root ownership is required for protected installation')
     root = canonical(root, directory=True)
     if not SHA40.fullmatch(accepted) or not UUID.fullmatch(coordinator):
         raise InstallError('accepted SHA or Coordinator UUID is malformed')
+    validate_installer_provenance(root, accepted)
     if run(root, 'branch', '--show-current').decode().strip() != BRANCH:
         raise InstallError('installer must run from the integration branch')
     if run(root, 'rev-parse', 'HEAD').decode().strip() != accepted:
@@ -351,6 +396,9 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    if not isolated_runtime():
+        print('BLOCKED: installer must run from an exact reviewed blob with Python -I')
+        return 1
     args = parser().parse_args()
     try:
         manifest = install(args.root, args.accepted_sha, args.coordinator_id,

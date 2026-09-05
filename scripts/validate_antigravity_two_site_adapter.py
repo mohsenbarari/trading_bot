@@ -1,10 +1,11 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3 -I
 """Statically validate the repository-local Antigravity two-site adapter."""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import shutil
@@ -16,8 +17,50 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
-from two_site_antigravity_session import binding, load_profile, UUID, MODEL
+
+
+def _load_trusted_session_adapter() -> Any:
+    """Load the reviewed sibling without exposing repository import precedence.
+
+    Privileged callers use Python isolated mode as the outer boundary.  Removing
+    the repository and scripts directory during the explicit file load also keeps
+    ordinary validation invocations from resolving a candidate ``scripts/yaml.py``
+    as the session adapter's third-party ``yaml`` dependency.
+    """
+    source = (ROOT / "scripts" / "two_site_antigravity_session.py").resolve(strict=True)
+    blocked = {ROOT.resolve(), source.parent}
+    original = list(sys.path)
+    try:
+        sys.path[:] = [
+            item for item in original
+            if item and Path(item).resolve() not in blocked
+        ]
+        loaded_yaml = sys.modules.get("yaml")
+        yaml_source = getattr(loaded_yaml, "__file__", None)
+        if yaml_source and Path(yaml_source).resolve().is_relative_to(ROOT.resolve()):
+            raise RuntimeError("repository yaml module is not a trusted dependency")
+        spec = importlib.util.spec_from_file_location(
+            "_two_site_antigravity_session_protected", source,
+        )
+        if spec is None or spec.loader is None:
+            raise RuntimeError("could not create the protected session adapter loader")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        loaded_yaml = sys.modules.get("yaml")
+        yaml_source = getattr(loaded_yaml, "__file__", None)
+        if (not yaml_source
+                or Path(yaml_source).resolve().is_relative_to(ROOT.resolve())):
+            raise RuntimeError("session adapter yaml dependency is not system-owned")
+        return module
+    finally:
+        sys.path[:] = original
+
+
+_SESSION_ADAPTER = _load_trusted_session_adapter()
+binding = _SESSION_ADAPTER.binding
+load_profile = _SESSION_ADAPTER.load_profile
+UUID = _SESSION_ADAPTER.UUID
+MODEL = _SESSION_ADAPTER.MODEL
 VALIDATED_CLI_SHA256 = "a0a6a8044d01accd39e6f5926d29648d212a2e519ff14102f09e1c061e6171dd"
 AGENT_DIR = ROOT / ".agents" / "agents"
 SKILL = ROOT / ".agents" / "skills" / "two-site-refactor" / "SKILL.md"
@@ -84,6 +127,10 @@ ALLOWED_ROLE_TOOLS = {
 
 WRITE_TOOLS = {"write_to_file", "replace_file_content", "multi_replace_file_content"}
 SMOKE_ROLES = ("coordinator", "worker", "verifier")
+
+
+def isolated_runtime() -> bool:
+    return bool(sys.flags.isolated)
 
 
 def _scalar(value: str) -> Any:
@@ -458,6 +505,12 @@ def validate_runtime(execution_conversation: str | None = None) -> list[str]:
 
 
 def main() -> int:
+    if not isolated_runtime():
+        print(
+            "FAIL: adapter validator requires /usr/bin/python3 -I",
+            file=sys.stderr,
+        )
+        return 1
     parser = argparse.ArgumentParser()
     parser.add_argument("--runtime", action="store_true", help="also verify exact bound sessions and live no-tool smoke for all three roles")
     parser.add_argument(

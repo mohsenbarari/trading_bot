@@ -11,7 +11,7 @@ production, external, destructive, DNS, Writer, secret, deploy, migration, or re
 Object Storage action without its exact scoped Codex pre-action receipt.
 ```
 
-The Coordinator must run `python3 scripts/validate_antigravity_two_site_adapter.py`
+The Coordinator must run `/usr/bin/python3 -I scripts/validate_antigravity_two_site_adapter.py`
 and the `--runtime --execution-conversation <actual-execution-UUID>` exact persisted-role
 binding plus all-three-role read-only smoke before
 takeover. It requires clean integration/Stage worktrees, an unexpired Assignment and

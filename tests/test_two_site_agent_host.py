@@ -1,10 +1,13 @@
 """Protected host preparation and authority tests; no real installation or review."""
+import fcntl
 import io
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -13,6 +16,7 @@ from unittest.mock import Mock, patch
 
 import yaml
 
+from scripts import two_site_orchestrator_fence as fence_api
 from scripts.install_two_site_agent_gateway import expected_hooks
 from scripts.two_site_agent_executor import execute_plan
 from scripts.two_site_agent_gateway import (
@@ -48,14 +52,51 @@ class HostTests(unittest.TestCase):
         local = self.fx.root / '.local/two-site-refactor'
         assignment = local / 'assignments' / (ASSIGNMENT + '.md')
         assignment.parent.mkdir(parents=True)
-        self.assignment = {'assignment_id': ASSIGNMENT, 'stage_id': STAGE,
-                           'worktree_path': str(self.fx.stage),
-                           'branch': 'refactor/stage/P1-00b-gateway',
-                           'base_sha': self.fx.base,
-                           'integration_head_at_issue': self.fx.base}
-        assignment.write_text(
-            '# Assignment\n\n```yaml\n' + yaml.safe_dump(self.assignment, sort_keys=False).rstrip()
-            + '\n```\n')
+        self.assignment = {
+            'assignment_id': ASSIGNMENT, 'stage_id': STAGE, 'role': 'WORKER',
+            'status': 'IN_PROGRESS', 'orchestrator': 'ANTIGRAVITY',
+            'orchestration_epoch': EPOCH, 'supersedes': None,
+            'worktree_path': str(self.fx.stage),
+            'branch': 'refactor/stage/P1-00b-gateway',
+            'worktree_registry_id': 'old', 'base_sha': self.fx.base,
+            'allowed_paths': ['app.txt'], 'forbidden_paths': ['.agents/**'],
+            'locks': [], 'parallel_peer': None, 'deliverables': ['candidate'],
+            'tests': ['tests/test_sample.py'], 'failure_tests': ['reject drift'],
+            'rollback_test': 'remove derived Stage', 'external_access': 'NONE',
+            'expires_at': '2099-01-01T00:00:00Z',
+            'issued_by': 'EXECUTION_COORDINATOR',
+            'issued_at': '2026-09-05T00:00:00Z',
+            'integration_branch': 'refactor/two-site-architecture',
+            'integration_head_at_issue': self.fx.base,
+        }
+        self.assignment_path = assignment
+        self.write_assignment()
+        exclude = self.fx.root / '.git/info/exclude'
+        exclude.write_text(exclude.read_text() + '\n.local/\n')
+
+    def write_assignment(self):
+        self.assignment_path.write_text(
+            '# Assignment\n\n```yaml\n'
+            + yaml.safe_dump(self.assignment, sort_keys=False).rstrip() + '\n```\n')
+
+    def old_active_fence(self, **changes):
+        fence = {
+            'schema_version': '1.0', 'epoch': EPOCH, 'status': 'ACTIVE',
+            'binding_kind': 'STAGE', 'platform': 'ANTIGRAVITY',
+            'coordinator_instance_id': COORDINATOR,
+            'integration_branch': 'refactor/two-site-architecture',
+            'integration_head_sha': self.fx.integration_head,
+            'previous_assignment_id': 'WA-P1-00-PREVIOUS',
+            'active_assignment_id': ASSIGNMENT,
+            'assignment_base_sha': self.assignment['base_sha'],
+            'assignment_integration_head_at_issue': self.assignment['integration_head_at_issue'],
+            'immutable_contract_sha256': fence_api.immutable_contract_sha256(self.assignment),
+            'claimed_at_utc': '2026-09-05T00:00:00Z', 'supersedes': None,
+        }
+        fence.update(changes)
+        path = self.fx.root / '.local/two-site-refactor/orchestrator-fence.json'
+        path.write_text(json.dumps(fence))
+        return path
 
     def bind_mutation_host(self):
         (self.fx.root / '.gitignore').write_text('.local/\n')
@@ -64,6 +105,7 @@ class HostTests(unittest.TestCase):
         self.fx.integration_head = self.fx.head(self.fx.root)
         self.fx.pins = self.fx.make_pins()
         self.assignment['integration_head_at_issue'] = self.fx.integration_head
+        self.write_assignment()
         fence = {
             'active_assignment_id': ASSIGNMENT, 'epoch': EPOCH,
             'coordinator_instance_id': COORDINATOR,
@@ -93,11 +135,21 @@ class HostTests(unittest.TestCase):
         registry.write_text(yaml.safe_dump({
             'schema_version': '1.0',
             'limits': {'max_ephemeral_stage_worktrees': 2},
-            'integration': {'active_assignment_id': ASSIGNMENT},
+            'integration': {
+                'path': str(self.fx.root), 'branch': 'refactor/two-site-architecture',
+                'head_sha': self.fx.integration_head,
+                'owner_role': 'EXECUTION_COORDINATOR', 'status': 'IN_PROGRESS',
+                'active_assignment_id': ASSIGNMENT, 'orchestrator': 'ANTIGRAVITY',
+                'orchestration_epoch': EPOCH,
+            },
             'stage_worktrees': [{
                 'registry_id': 'old', 'stage_id': STAGE, 'assignment_id': ASSIGNMENT,
+                'owner_role': 'EXECUTION_WORKER',
                 'path': str(self.fx.stage), 'branch': self.assignment['branch'],
-                'head_sha': self.fx.head(self.fx.stage), 'status': 'COMPLETE_CANDIDATE',
+                'base_sha': self.assignment['base_sha'],
+                'head_sha': self.fx.head(self.fx.stage), 'locks': [],
+                'status': 'COMPLETE_CANDIDATE', 'orchestrator': 'ANTIGRAVITY',
+                'orchestration_epoch': EPOCH,
             }],
         }, sort_keys=False))
         order = self.fx.root / 'docs/refactor/two-server/execution-order.yaml'
@@ -105,6 +157,15 @@ class HostTests(unittest.TestCase):
         order.write_text(
             f'stages:\n  {STAGE}: {{state: COMPLETE, section: 1}}\n'
             '  P1-01: {state: IN_PROGRESS, section: 1}\n')
+        self.fx.git(self.fx.root, 'add', str(order.relative_to(self.fx.root)))
+        self.fx.git(self.fx.root, 'commit', '-qm', 'stage bind execution order')
+        self.fx.integration_head = self.fx.head(self.fx.root)
+        self.fx.pins = self.fx.make_pins()
+        self.assignment['integration_head_at_issue'] = self.fx.integration_head
+        self.write_assignment()
+        current_registry = yaml.safe_load(registry.read_text())
+        current_registry['integration']['head_sha'] = self.fx.integration_head
+        registry.write_text(yaml.safe_dump(current_registry, sort_keys=False))
         contract = {
             'slug': 'repo-cleanup',
             'allowed_paths': ['docs/refactor/two-server/section-1/**'],
@@ -127,6 +188,7 @@ class HostTests(unittest.TestCase):
             contract_sha256=self.host._contract_digest(contract),
         )
         result = self.host._prepare_stage_bind(plan, request, self.assignment, self.fx.pins)
+        self.old_active_fence()
         return request, plan, result, registry
 
     def write_stage_bind_transport_state(self, request):
@@ -143,6 +205,43 @@ class HostTests(unittest.TestCase):
         (self.host.state / (request['id'] + '.running.json')).write_text(json.dumps(running))
         return journal
 
+    def stage_bind_effect_snapshot(self, journal, registry_path):
+        branch = self.fx.git(
+            self.fx.root, 'rev-parse', '--verify',
+            'refs/heads/' + journal['next_branch'], check=False,
+        )
+        assignment_path = Path(journal['assignment_path'])
+        return {
+            'registry': registry_path.read_bytes(),
+            'journal': self.host._stage_bind_journal_path.read_bytes(),
+            'fence': (self.fx.root / '.local/two-site-refactor/orchestrator-fence.json').read_bytes(),
+            'assignment': assignment_path.read_bytes() if assignment_path.exists() else None,
+            'next_worktree': Path(journal['next_worktree']).exists(),
+            'old_worktree': Path(journal['old_worktree']).exists(),
+            'branch': (branch.returncode, branch.stdout, branch.stderr),
+        }
+
+    def next_stage_fence(self, request, *, status='ACTIVE'):
+        assignment_path = self.fx.root / '.local/two-site-refactor/assignments' / (
+            request['next_assignment'] + '.md')
+        block = re.findall(r'```yaml\n(.*?)\n```', assignment_path.read_text(), re.S)
+        next_assignment = yaml.safe_load(block[0])
+        fence = {
+            'schema_version': '1.0', 'status': status, 'binding_kind': 'STAGE',
+            'platform': 'ANTIGRAVITY',
+            'previous_assignment_id': ASSIGNMENT,
+            'active_assignment_id': request['next_assignment'], 'epoch': EPOCH,
+            'integration_head_sha': self.fx.integration_head,
+            'coordinator_instance_id': COORDINATOR,
+            'integration_branch': 'refactor/two-site-architecture',
+            'assignment_base_sha': next_assignment['base_sha'],
+            'assignment_integration_head_at_issue': next_assignment['integration_head_at_issue'],
+            'immutable_contract_sha256': fence_api.immutable_contract_sha256(next_assignment),
+            'claimed_at_utc': '2026-09-05T00:00:00Z', 'supersedes': None,
+        }
+        (self.fx.root / '.local/two-site-refactor/orchestrator-fence.json').write_text(
+            json.dumps(fence))
+
     def mark_stage_bind_state(self, request, registry_path, *, status='ACTIVE'):
         registry = yaml.safe_load(registry_path.read_text())
         registry['integration']['active_assignment_id'] = request['next_assignment']
@@ -151,15 +250,7 @@ class HostTests(unittest.TestCase):
                 item['status'] = 'CLOSED'
                 item['closed_at'] = '2026-09-05T00:00:00Z'
         registry_path.write_text(yaml.safe_dump(registry, sort_keys=False))
-        fence = {
-            'status': status, 'binding_kind': 'STAGE',
-            'previous_assignment_id': ASSIGNMENT,
-            'active_assignment_id': request['next_assignment'], 'epoch': EPOCH,
-            'integration_head_sha': self.fx.integration_head,
-            'coordinator_instance_id': COORDINATOR,
-        }
-        (self.fx.root / '.local/two-site-refactor/orchestrator-fence.json').write_text(
-            json.dumps(fence))
+        self.next_stage_fence(request, status=status)
 
     def test_review_bundle_is_exact_and_hash_verified(self):
         request = {
@@ -322,6 +413,56 @@ class HostTests(unittest.TestCase):
             self.assertIn('--model "$codex_model"', source)
             self.assertIn('model_reasoning_effort=', source)
 
+    def final_review_composition(self):
+        fixture = GatewayFixture()
+        self.addCleanup(fixture.cleanup)
+        bundle = f'.local/two-site-refactor/review-bundles/{GATEWAY_STAGE}-{GATEWAY_ASSIGNMENT}'
+        request = fixture.request(
+            'review-request', actor=GATEWAY_COORDINATOR, bundle=bundle,
+            base_sha=fixture.assignment['integration_head_at_issue'],
+            head_sha=GATEWAY_INTEGRATION_HEAD,
+        )
+        plan = plan_operation(request, fixture.context(caller=GATEWAY_COORDINATOR))
+        host = ProtectedGatewayHost.__new__(ProtectedGatewayHost)
+        host.root = fixture.root
+        host._binary = Mock(return_value=Path('/usr/bin/true'))
+        fixture.final_path.with_suffix('.md').write_text('review markdown\n')
+        return fixture, request, plan, host
+
+    def test_final_review_planner_and_supervisor_compose_successfully(self):
+        fixture, request, plan, host = self.final_review_composition()
+        bindings = dict(plan.bindings)
+        expected = request['bundle']
+        self.assertEqual(expected, bindings['bundle'])
+        self.assertEqual(expected, plan.commands[0].argv[6])
+        with patch(
+            'scripts.two_site_agent_host._run_bounded_process',
+            return_value=subprocess.CompletedProcess(plan.commands[0].argv, 0, b'ok', b''),
+        ) as runner:
+            result = host._review_supervisor(plan.commands[0], request, bindings)
+        self.assertEqual('SUCCESS', result['status'])
+        self.assertEqual(fixture.digest(fixture.final_path), result['receipt_file_sha256'])
+        runner.assert_called_once()
+
+    def test_final_review_composition_rejects_pre_and_during_tampering(self):
+        fixture, request, plan, host = self.final_review_composition()
+        handoff = fixture.final_path.parent / 'HANDOFF.md'
+        handoff.write_text('tampered before review\n')
+        with patch('scripts.two_site_agent_host._run_bounded_process') as runner:
+            with self.assertRaisesRegex(TransportError, 'changed after protected planning'):
+                host._review_supervisor(plan.commands[0], request, dict(plan.bindings))
+        runner.assert_not_called()
+
+        fixture, request, plan, host = self.final_review_composition()
+        handoff = fixture.final_path.parent / 'HANDOFF.md'
+        def mutate(*_args, **_kwargs):
+            handoff.write_text('tampered during review\n')
+            return subprocess.CompletedProcess(plan.commands[0].argv, 0, b'ok', b'')
+        with patch('scripts.two_site_agent_host._run_bounded_process', side_effect=mutate) as runner:
+            with self.assertRaisesRegex(TransportError, 'changed after protected planning'):
+                host._review_supervisor(plan.commands[0], request, dict(plan.bindings))
+        runner.assert_called_once()
+
     def closeout_review_composition(self):
         fixture = GatewayFixture()
         self.addCleanup(fixture.cleanup)
@@ -374,15 +515,25 @@ class HostTests(unittest.TestCase):
                 host._review_supervisor(plan.commands[0], request, missing)
         runner.assert_not_called()
 
+        (fixture.final_path.parent / 'HANDOFF.md').write_text('tampered before review\n')
+        with patch('scripts.two_site_agent_host.observe_git', return_value=snapshot), patch(
+            'scripts.two_site_agent_host._run_bounded_process'
+        ) as runner:
+            with self.assertRaisesRegex(TransportError, 'changed after protected planning'):
+                host._review_supervisor(plan.commands[0], request, dict(plan.bindings))
+        runner.assert_not_called()
+
+        fixture, snapshot, request, plan, host = self.closeout_review_composition()
         def mutate(*_args, **_kwargs):
             (fixture.final_path.parent / 'HANDOFF.md').write_text('tampered during review\n')
             return subprocess.CompletedProcess(plan.commands[0].argv, 0, b'ok', b'')
 
         with patch('scripts.two_site_agent_host.observe_git', return_value=snapshot), patch(
             'scripts.two_site_agent_host._run_bounded_process', side_effect=mutate,
-        ):
+        ) as runner:
             with self.assertRaisesRegex(TransportError, 'changed after protected planning'):
                 host._review_supervisor(plan.commands[0], request, dict(plan.bindings))
+        runner.assert_called_once()
 
     def test_host_and_executor_integrate_commit_then_advance_composition(self):
         self.bind_mutation_host()
@@ -471,49 +622,6 @@ class HostTests(unittest.TestCase):
         self.assertEqual(request['integration_head'],
                          self.fx.git(self.fx.root, 'rev-parse', 'HEAD^').stdout.strip())
 
-    def test_review_supervisor_rejects_bundle_swap_before_codex(self):
-        bundle = self.fx.root / f'.local/two-site-refactor/review-bundles/{STAGE}-{ASSIGNMENT}'
-        bundle.mkdir(parents=True, exist_ok=True)
-        names = ('assignment.md', 'STAGE_REPORT.md', 'FINAL_REVIEW_REQUEST.md', 'HANDOFF.md', 'commit.txt')
-        bindings = {'bundle': bundle.relative_to(self.fx.root).as_posix()}
-        for name in names:
-            (bundle / name).write_text(name + '\n')
-            key = 'review_input_' + name.replace('.', '_').lower() + '_sha256'
-            bindings[key] = hashlib.sha256((bundle / name).read_bytes()).hexdigest()
-        (bundle / 'HANDOFF.md').write_text('swapped\n')
-        self.host._binary = Mock(return_value=Path('/bin/true'))
-        command = CommandPlan(
-            (str(self.fx.pins.final_review_bridge),), str(self.fx.root),
-            EnvClass.EXTERNAL_CODEX_REVIEW, 'review',
-        )
-        with patch('scripts.two_site_agent_host._run_bounded_process') as runner:
-            with self.assertRaises(TransportError):
-                self.host._review_supervisor(command, {}, bindings)
-        runner.assert_not_called()
-
-    def test_review_supervisor_rejects_bundle_swap_during_codex(self):
-        bundle = self.fx.root / f'.local/two-site-refactor/review-bundles/{STAGE}-{ASSIGNMENT}'
-        bundle.mkdir(parents=True, exist_ok=True)
-        names = ('assignment.md', 'STAGE_REPORT.md', 'FINAL_REVIEW_REQUEST.md', 'HANDOFF.md', 'commit.txt')
-        bindings = {'bundle': bundle.relative_to(self.fx.root).as_posix()}
-        for name in names:
-            (bundle / name).write_text(name + '\n')
-            bindings['review_input_' + name.replace('.', '_').lower() + '_sha256'] = hashlib.sha256(
-                (bundle / name).read_bytes()).hexdigest()
-        self.host._binary = Mock(return_value=Path('/bin/true'))
-        command = CommandPlan(
-            (str(self.fx.pins.final_review_bridge),), str(self.fx.root),
-            EnvClass.EXTERNAL_CODEX_REVIEW, 'review',
-        )
-
-        def mutate(*args, **kwargs):
-            (bundle / 'HANDOFF.md').write_text('changed during review\n')
-            return subprocess.CompletedProcess(command.argv, 0, b'ok', b'')
-
-        with patch('scripts.two_site_agent_host._run_bounded_process', side_effect=mutate):
-            with self.assertRaises(TransportError):
-                self.host._review_supervisor(command, {}, bindings)
-
     def test_closeout_prepare_rejects_final_receipt_swap(self):
         self.host._validated_review_receipt = Mock(return_value=(
             {'reviewed_at_utc': '2026-09-05T00:00:00Z', 'verdict': 'APPROVE',
@@ -555,12 +663,6 @@ class HostTests(unittest.TestCase):
     def test_interrupted_pre_bind_transaction_rolls_back_with_terminal_failure(self):
         request, _, result, registry = self.prepare_stage_bind_fixture()
         journal = self.write_stage_bind_transport_state(request)
-        fence_path = self.fx.root / '.local/two-site-refactor/orchestrator-fence.json'
-        fence_path.write_text(json.dumps({
-            'status': 'ACTIVE', 'active_assignment_id': ASSIGNMENT, 'epoch': EPOCH,
-            'integration_head_sha': self.fx.integration_head,
-            'coordinator_instance_id': COORDINATOR,
-        }))
         self.host._recover_stage_bind_transaction()
         self.assertFalse(Path(result['worktree_path']).exists())
         self.assertFalse(Path(journal['assignment_path']).exists())
@@ -585,40 +687,211 @@ class HostTests(unittest.TestCase):
         receipt = json.loads((self.host.state / (request['id'] + '.receipt.json')).read_text())
         self.assertEqual('SUCCESS', receipt['outcome']['status'])
 
+    def test_completed_bind_recovery_rejects_new_registry_owner_before_retirement(self):
+        request, _, _, registry_path = self.prepare_stage_bind_fixture()
+        journal = self.write_stage_bind_transport_state(request)
+        self.mark_stage_bind_state(request, registry_path)
+        registry = yaml.safe_load(registry_path.read_text())
+        new = next(item for item in registry['stage_worktrees']
+                   if item['assignment_id'] == request['next_assignment'])
+        new['owner_role'] = 'EXECUTION_COORDINATOR'
+        registry_path.write_text(yaml.safe_dump(registry, sort_keys=False))
+        before = self.stage_bind_effect_snapshot(journal, registry_path)
+        with self.assertRaisesRegex(TransportError, 'next Stage registry identity'):
+            self.host._recover_stage_bind_transaction()
+        self.assertEqual(before, self.stage_bind_effect_snapshot(journal, registry_path))
+
+    def test_completed_bind_recovery_rejects_unknown_new_registry_field_before_retirement(self):
+        request, _, _, registry_path = self.prepare_stage_bind_fixture()
+        journal = self.write_stage_bind_transport_state(request)
+        self.mark_stage_bind_state(request, registry_path)
+        registry = yaml.safe_load(registry_path.read_text())
+        new = next(item for item in registry['stage_worktrees']
+                   if item['assignment_id'] == request['next_assignment'])
+        new['unreviewed_extension'] = True
+        registry_path.write_text(yaml.safe_dump(registry, sort_keys=False))
+        before = self.stage_bind_effect_snapshot(journal, registry_path)
+        with self.assertRaisesRegex(TransportError, 'next Stage registry identity'):
+            self.host._recover_stage_bind_transaction()
+        self.assertEqual(before, self.stage_bind_effect_snapshot(journal, registry_path))
+
+    def test_completed_bind_recovery_rejects_next_assignment_drift_before_retirement(self):
+        request, _, _, registry_path = self.prepare_stage_bind_fixture()
+        journal = self.write_stage_bind_transport_state(request)
+        self.mark_stage_bind_state(request, registry_path)
+        assignment_path = Path(journal['assignment_path'])
+        assignment_path.write_text(assignment_path.read_text() + '\nchanged\n')
+        before = self.stage_bind_effect_snapshot(journal, registry_path)
+        with self.assertRaisesRegex(TransportError, 'content differs'):
+            self.host._recover_stage_bind_transaction()
+        self.assertEqual(before, self.stage_bind_effect_snapshot(journal, registry_path))
+
     def test_started_journal_with_no_effects_is_idempotently_rolled_back(self):
         request, _, result, registry_path = self.prepare_stage_bind_fixture()
-        journal = json.loads(self.host._stage_bind_journal_path.read_text())
+        journal = self.write_stage_bind_transport_state(request)
         self.host._rollback_stage_bind(journal, self.fx.pins)
         self.host._write_stage_bind_journal(journal, 'STARTED')
-        self.write_stage_bind_transport_state(request)
-        (self.fx.root / '.local/two-site-refactor/orchestrator-fence.json').write_text(json.dumps({
-            'status': 'ACTIVE', 'active_assignment_id': ASSIGNMENT, 'epoch': EPOCH,
-            'integration_head_sha': self.fx.integration_head,
-            'coordinator_instance_id': COORDINATOR,
-        }))
         self.host._recover_stage_bind_transaction()
         self.assertFalse(Path(result['worktree_path']).exists())
         self.assertEqual(1, len(yaml.safe_load(registry_path.read_text())['stage_worktrees']))
         receipt = json.loads((self.host.state / (request['id'] + '.receipt.json')).read_text())
         self.assertEqual('FAILED', receipt['outcome']['status'])
 
+    def test_rollback_rejects_every_fence_owner_identity_drift_without_effects(self):
+        request, _, _, registry_path = self.prepare_stage_bind_fixture()
+        journal = self.write_stage_bind_transport_state(request)
+        fence_path = self.fx.root / '.local/two-site-refactor/orchestrator-fence.json'
+        canonical = json.loads(fence_path.read_text())
+        cases = {
+            'platform': {'platform': 'CURSOR', 'coordinator_instance_id': 'cursor-session'},
+            'coordinator': {
+                'coordinator_instance_id': '99999999-9999-4999-8999-999999999999'},
+            'epoch': {'epoch': EPOCH + 1},
+            'assignment': {'active_assignment_id': 'WA-P1-00-FOREIGN-20260905-001'},
+            'integration_head': {'integration_head_sha': self.fx.base},
+            'contract_digest': {'immutable_contract_sha256': 'f' * 64},
+        }
+        for name, changes in cases.items():
+            with self.subTest(name=name):
+                fence_path.write_text(json.dumps({**canonical, **changes}))
+                before = self.stage_bind_effect_snapshot(journal, registry_path)
+                with self.assertRaises(TransportError):
+                    self.host._rollback_stage_bind(journal, self.fx.pins)
+                self.assertEqual(before, self.stage_bind_effect_snapshot(journal, registry_path))
+        fence_path.write_text(json.dumps(canonical))
+
+    def test_rollback_rejects_registry_owner_identity_drift_without_effects(self):
+        request, _, _, registry_path = self.prepare_stage_bind_fixture()
+        journal = self.write_stage_bind_transport_state(request)
+        canonical = yaml.safe_load(registry_path.read_text())
+        cases = {
+            'integration-owner': lambda value: value['integration'].__setitem__(
+                'owner_role', 'EXECUTION_WORKER'),
+            'integration-platform': lambda value: value['integration'].__setitem__(
+                'orchestrator', 'CURSOR'),
+            'integration-epoch': lambda value: value['integration'].__setitem__(
+                'orchestration_epoch', EPOCH + 1),
+            'integration-assignment': lambda value: value['integration'].__setitem__(
+                'active_assignment_id', 'WA-P1-00-FOREIGN-20260905-001'),
+            'stage-owner': lambda value: value['stage_worktrees'][0].__setitem__(
+                'owner_role', 'EXECUTION_COORDINATOR'),
+            'stage-platform': lambda value: value['stage_worktrees'][0].__setitem__(
+                'orchestrator', 'CURSOR'),
+            'stage-epoch': lambda value: value['stage_worktrees'][0].__setitem__(
+                'orchestration_epoch', EPOCH + 1),
+        }
+        for name, mutate in cases.items():
+            with self.subTest(name=name):
+                candidate = json.loads(json.dumps(canonical))
+                mutate(candidate)
+                registry_path.write_text(yaml.safe_dump(candidate, sort_keys=False))
+                before = self.stage_bind_effect_snapshot(journal, registry_path)
+                with self.assertRaises(TransportError):
+                    self.host._rollback_stage_bind(journal, self.fx.pins)
+                self.assertEqual(before, self.stage_bind_effect_snapshot(journal, registry_path))
+        registry_path.write_text(yaml.safe_dump(canonical, sort_keys=False))
+
+    def test_rollback_rejects_assignment_git_and_journal_drift_without_effects(self):
+        request, _, _, registry_path = self.prepare_stage_bind_fixture()
+        journal = self.write_stage_bind_transport_state(request)
+
+        original_assignment = self.assignment_path.read_text()
+        self.assignment['orchestration_epoch'] = EPOCH + 1
+        self.write_assignment()
+        before = self.stage_bind_effect_snapshot(journal, registry_path)
+        with self.assertRaises(TransportError):
+            self.host._rollback_stage_bind(journal, self.fx.pins)
+        self.assertEqual(before, self.stage_bind_effect_snapshot(journal, registry_path))
+        self.assignment_path.write_text(original_assignment)
+        self.assignment['orchestration_epoch'] = EPOCH
+
+        integration_file = self.fx.root / 'integration.txt'
+        integration_original = integration_file.read_text()
+        integration_file.write_text('dirty integration\n')
+        before = self.stage_bind_effect_snapshot(journal, registry_path)
+        with self.assertRaises(TransportError):
+            self.host._rollback_stage_bind(journal, self.fx.pins)
+        self.assertEqual(before, self.stage_bind_effect_snapshot(journal, registry_path))
+        integration_file.write_text(integration_original)
+
+        stage_file = self.fx.stage / 'app.txt'
+        stage_original = stage_file.read_text()
+        stage_file.write_text('dirty Stage\n')
+        before = self.stage_bind_effect_snapshot(journal, registry_path)
+        with self.assertRaises(TransportError):
+            self.host._rollback_stage_bind(journal, self.fx.pins)
+        self.assertEqual(before, self.stage_bind_effect_snapshot(journal, registry_path))
+        stage_file.write_text(stage_original)
+
+        substituted = {**journal, 'next_worktree': str(self.fx.container / 'foreign-target')}
+        before = self.stage_bind_effect_snapshot(journal, registry_path)
+        with self.assertRaises(TransportError):
+            self.host._rollback_stage_bind(substituted, self.fx.pins)
+        self.assertEqual(before, self.stage_bind_effect_snapshot(journal, registry_path))
+
+        invalid_delta = {**journal}
+        after = yaml.safe_load(invalid_delta['registry_after'])
+        after['stage_worktrees'][-1]['owner_role'] = 'EXECUTION_COORDINATOR'
+        invalid_delta['registry_after'] = yaml.safe_dump(after, sort_keys=False)
+        invalid_delta['registry_after_sha256'] = hashlib.sha256(
+            invalid_delta['registry_after'].encode()).hexdigest()
+        before = self.stage_bind_effect_snapshot(journal, registry_path)
+        with self.assertRaises(TransportError):
+            self.host._rollback_stage_bind(invalid_delta, self.fx.pins)
+        self.assertEqual(before, self.stage_bind_effect_snapshot(journal, registry_path))
+
+    def test_rollback_waits_for_canonical_fence_lock_before_any_effect(self):
+        request, _, _, registry_path = self.prepare_stage_bind_fixture()
+        journal = self.write_stage_bind_transport_state(request)
+        before = self.stage_bind_effect_snapshot(journal, registry_path)
+        lock_path = self.fx.root / '.local/two-site-refactor/orchestrator-fence.lock'
+        descriptor = open(lock_path, 'a+b')
+        fcntl.flock(descriptor.fileno(), fcntl.LOCK_EX)
+        started = threading.Event()
+        finished = threading.Event()
+        errors = []
+
+        def rollback():
+            started.set()
+            try:
+                self.host._rollback_stage_bind(journal, self.fx.pins)
+            except Exception as error:  # pragma: no cover - assertion reports the concrete error
+                errors.append(error)
+            finally:
+                finished.set()
+
+        worker = threading.Thread(target=rollback, daemon=True)
+        worker.start()
+        try:
+            self.assertTrue(started.wait(1))
+            self.assertFalse(finished.wait(0.2))
+            self.assertEqual(before, self.stage_bind_effect_snapshot(journal, registry_path))
+        finally:
+            fcntl.flock(descriptor.fileno(), fcntl.LOCK_UN)
+            descriptor.close()
+        worker.join(5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual([], errors)
+        self.assertFalse(Path(journal['next_worktree']).exists())
+        self.assertFalse(Path(journal['assignment_path']).exists())
+        self.assertEqual(
+            journal['registry_before'].encode(), registry_path.read_bytes(),
+        )
+
     def test_reconciling_stage_bind_is_rolled_forward_then_retired(self):
         from scripts import two_site_agent_host as host_module
 
         request, _, result, registry_path = self.prepare_stage_bind_fixture()
         self.write_stage_bind_transport_state(request)
-        fence_path = self.fx.root / '.local/two-site-refactor/orchestrator-fence.json'
-        fence_path.write_text(json.dumps({
-            'status': 'RECONCILING', 'binding_kind': 'STAGE',
-            'previous_assignment_id': ASSIGNMENT,
-            'active_assignment_id': request['next_assignment'], 'epoch': EPOCH,
-            'integration_head_sha': self.fx.integration_head,
-            'coordinator_instance_id': COORDINATOR,
-        }))
+        self.next_stage_fence(request, status='RECONCILING')
         original = host_module._run_bounded_process
 
         def finish_fence(argv, **kwargs):
             if 'stage-bind' in argv:
+                self.assertEqual(
+                    [str(self.fx.pins.python_binary), '-I', str(self.fx.pins.fence_script)],
+                    argv[:3],
+                )
                 self.mark_stage_bind_state(request, registry_path)
                 return subprocess.CompletedProcess(argv, 0, b'BOUND\n', b'')
             return original(argv, **kwargs)
@@ -667,6 +940,29 @@ class HostTests(unittest.TestCase):
         order.write_text(order.read_text().replace('state: COMPLETE', 'state: IN_PROGRESS'))
         with self.assertRaisesRegex(TransportError, 'registry/Stage identity'):
             self.host._validate_retirement_candidate(journal, self.fx.pins, registry)
+
+    def test_retirement_rejects_lookalike_worktree_from_a_different_git_repository(self):
+        _, _, _, registry_path = self.prepare_stage_bind_fixture()
+        journal = json.loads(self.host._stage_bind_journal_path.read_text())
+        registry = yaml.safe_load(registry_path.read_text())
+        old = next(item for item in registry['stage_worktrees']
+                   if item['assignment_id'] == ASSIGNMENT)
+        imposter = self.fx.container / 'imposter-repository'
+        subprocess.run(
+            ['/usr/bin/git', 'clone', '--no-hardlinks', '-q', str(self.fx.root), str(imposter)],
+            check=True, capture_output=True,
+        )
+        self.fx.git(imposter, 'checkout', '-q', '-b', journal['old_branch'], journal['old_head'])
+        unsafe = {**journal, 'old_worktree': str(imposter)}
+        old['path'] = str(imposter)
+        assignment = yaml.safe_load(re.findall(
+            r'```yaml\n(.*?)\n```', self.assignment_path.read_text(), re.S)[0])
+        assignment['worktree_path'] = str(imposter)
+        self.assignment_path.write_text(
+            '# Assignment\n\n```yaml\n'
+            + yaml.safe_dump(assignment, sort_keys=False).rstrip() + '\n```\n')
+        with self.assertRaisesRegex(TransportError, 'repository is not exact'):
+            self.host._validate_retirement_candidate(unsafe, self.fx.pins, registry)
 
     def test_prejournal_stage_bind_collision_returns_terminal_blocked(self):
         self.bind_mutation_host()

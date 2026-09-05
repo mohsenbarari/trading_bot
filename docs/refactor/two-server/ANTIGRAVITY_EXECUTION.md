@@ -90,7 +90,7 @@ authentication فهرست خالی بدهد و `--agent` به default برگرد
 تکرار می‌کند و هرگز نشست فعال خودش را دوباره اجرا نمی‌کند.
 
 ```bash
-python3 scripts/validate_antigravity_two_site_adapter.py --runtime \
+/usr/bin/python3 -I scripts/validate_antigravity_two_site_adapter.py --runtime \
   --execution-conversation <VERIFIED_EXECUTION_COORDINATOR_ID>
 ```
 
@@ -180,7 +180,7 @@ HEAD تجمیع‌شده اجرا می‌شوند. `/teamwork-preview` برای 
 ## کنترل صحت آداپتر
 
 ```bash
-python3 scripts/validate_antigravity_two_site_adapter.py
+/usr/bin/python3 -I scripts/validate_antigravity_two_site_adapter.py
 python3 -m unittest tests.test_antigravity_two_site_adapter
 python3 -m unittest tests.test_antigravity_session_binding
 ```

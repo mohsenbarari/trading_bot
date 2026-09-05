@@ -1,6 +1,7 @@
 """Transactional installer tests using only disposable roots."""
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
@@ -87,11 +88,12 @@ class InstallerTests(unittest.TestCase):
 
     def install(self):
         true = Path('/usr/bin/true').resolve()
-        return installer.install(
-            self.root.resolve(), self.accepted,
-            '11111111-1111-4111-8111-111111111111', self.receipt.resolve(),
-            self.stage_root.resolve(), true, true,
-        )
+        with patch.object(installer, 'isolated_runtime', return_value=True):
+            return installer.install(
+                self.root.resolve(), self.accepted,
+                '11111111-1111-4111-8111-111111111111', self.receipt.resolve(),
+                self.stage_root.resolve(), true, true,
+            )
 
     def test_install_is_complete_and_recovery_launcher_is_present(self):
         with patch.multiple(installer, **self.paths):
@@ -103,13 +105,74 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse(self.paths['JOURNAL'].exists())
 
     def test_installer_direct_cli_help_loads_from_outside_repository(self):
-        script = Path(__file__).resolve().parents[1] / 'scripts/install_two_site_agent_gateway.py'
+        poison = self.base / 'poison'
+        scripts = poison / 'scripts'
+        scripts.mkdir(parents=True)
+        marker = self.base / 'poison-executed'
+        source = Path(__file__).resolve().parents[1] / 'scripts/install_two_site_agent_gateway.py'
+        script = scripts / source.name
+        shutil.copyfile(source, script)
+        payload = f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\nraise RuntimeError('poison')\n"
+        for relative in (
+            'yaml.py', 'sitecustomize.py', 'scripts/yaml.py', 'scripts/sitecustomize.py',
+            'scripts/two_site_agent_context.py', 'scripts/two_site_agent_sandbox.py',
+        ):
+            target = poison / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(payload)
         result = subprocess.run(
-            [sys.executable, str(script), '--help'], cwd=self.base,
+            [sys.executable, '-I', str(script), '--help'], cwd=poison,
             capture_output=True, text=True, check=False,
         )
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn('--accepted-sha', result.stdout)
+        self.assertFalse(marker.exists())
+
+    def test_installer_catalog_matches_runtime_without_importing_it_at_bootstrap(self):
+        self.assertEqual(tuple(PROTECTED_SOURCE), tuple(installer.PROTECTED_SOURCE))
+        source = (Path(__file__).resolve().parents[1]
+                  / 'scripts/install_two_site_agent_gateway.py').read_text()
+        tree = ast.parse(source)
+        repository_imports = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            and isinstance(node.module, str) and node.module.startswith('scripts')
+        ]
+        bootstrap_path_mutations = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute) and node.func.attr == 'insert'
+            and isinstance(node.func.value, ast.Attribute)
+            and isinstance(node.func.value.value, ast.Name)
+            and node.func.value.value.id == 'sys' and node.func.value.attr == 'path'
+        ]
+        self.assertEqual([], repository_imports)
+        self.assertEqual([], bootstrap_path_mutations)
+
+    def test_library_entry_and_nonaccepted_installer_bytes_fail_closed(self):
+        true = Path('/usr/bin/true').resolve()
+        arguments = (
+            self.root.resolve(), self.accepted,
+            '11111111-1111-4111-8111-111111111111', self.receipt.resolve(),
+            self.stage_root.resolve(), true, true,
+        )
+        with self.assertRaisesRegex(installer.InstallError, 'isolated Python'):
+            installer.install(*arguments)
+
+        tampered = self.base / 'tampered-installer.py'
+        tampered.write_bytes(Path(installer.__file__).read_bytes() + b'\n# tampered\n')
+        with patch.object(installer, 'isolated_runtime', return_value=True), patch.object(
+            installer, '__file__', str(tampered),
+        ):
+            with self.assertRaisesRegex(installer.InstallError, 'exact accepted Git blob'):
+                installer.install(*arguments)
+
+    def test_git_materialized_exact_installer_blob_passes_provenance(self):
+        materialized = self.base / 'reviewed-installer.py'
+        materialized.write_text(self.git(
+            'show', self.accepted + ':scripts/install_two_site_agent_gateway.py').stdout)
+        with patch.object(installer, '__file__', str(materialized)):
+            installer.validate_installer_provenance(self.root.resolve(), self.accepted)
 
     def test_late_failure_rolls_back_and_journal_allows_exact_retry(self):
         original = installer.atomic_bytes
