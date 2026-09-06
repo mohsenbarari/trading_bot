@@ -376,6 +376,34 @@ class AutopilotContracts(unittest.TestCase):
         self.assertIn("do not infer members such as", gemini_prompt)
         self.assertIn("transport representation is not a semantic review", gemini_prompt)
 
+        # Gemini Reviewer sealed-context rule and prohibited native tool actions
+        self.assertIn("CONTEXT_JSON is the complete and only review evidence", gemini_prompt)
+        self.assertIn("supplied paths are labels, not readable workspace paths", gemini_prompt)
+        self.assertIn(
+            "the verifier must use internal reasoning only and return the requested JSON directly",
+            gemini_prompt,
+        )
+        self.assertIn("attempted native tool or tool-like action", gemini_prompt)
+        self.assertIn(
+            "irreversibly invalidates the proposal-only session and cannot obtain human approval",
+            gemini_prompt,
+        )
+        self.assertIn(
+            "The rule must apply even if the model believes more context is desirable",
+            gemini_prompt,
+        )
+        for action in (
+            "view_file",
+            "run_command",
+            "pwd",
+            "ls",
+            "browser",
+            "network",
+            "delegation",
+            "file access",
+        ):
+            self.assertIn(action, gemini_prompt)
+
     def test_codex_version_probe_uses_bounded_streaming(self):
         cli = self.root / "codex"
         cli.write_text("#!/usr/bin/env python3\nprint('codex-cli 0.153.0')\n")
