@@ -478,6 +478,176 @@ class AutopilotContracts(unittest.TestCase):
             with self.assertRaisesRegex(autopilot.AutopilotError, "unsafe"):
                 autopilot.validate_repository(self.root)
 
+    def test_prompt_for_cycle_carries_recovery_context(self):
+        before = {"head": "a" * 40, "protected_refs": {}}
+        recovery = {
+            "attempt": 1,
+            "prior_unit_rejected": True,
+            "next_action": "Rescope bounded files.",
+            "blockers": ["Scope was too broad."],
+        }
+        with patch.object(autopilot, "bounded_file_text", return_value="PROMPT_TEMPLATE"):
+            prompt = autopilot.prompt_for_cycle(self.root, 2, before, recovery=recovery)
+        self.assertIn("SUPERVISOR_CONTEXT_JSON:\n", prompt)
+        context_json = prompt.split("SUPERVISOR_CONTEXT_JSON:\n", 1)[1]
+        context = json.loads(context_json)
+        self.assertEqual(context["cycle"], 2)
+        self.assertEqual(context["recovery"], recovery)
+
+    def test_rescope_recovery_handoff_into_next_cycle(self):
+        rescope_result = self.result(
+            state="BLOCKED", disposition="RESCOPE", commit=None,
+            next_action="Narrow to single module.", blockers=["Boundary exceeded."],
+        )
+        rescope_result.update({"head_before": "a" * 40, "head_after": "a" * 40, "head_changed": False})
+        commit_result = self.result(
+            state="CONTINUE", disposition="NONE", commit="b" * 40,
+            next_action="Continue next step.", blockers=[],
+        )
+        commit_result.update({"head_before": "a" * 40, "head_after": "b" * 40, "head_changed": True})
+
+        calls = []
+        def fake_run_cycle(root, codex, s_root, cycle, timeout, recovery=None):
+            calls.append((cycle, recovery))
+            if cycle == 1:
+                return self.root / "run_001", rescope_result
+            return self.root / "run_002", commit_result
+
+        with patch.object(autopilot, "git", side_effect=["a" * 40, "a" * 40, "b" * 40]), \
+                patch.object(autopilot, "ref_snapshot", return_value={}), \
+                patch.object(autopilot, "run_cycle", side_effect=fake_run_cycle), \
+                patch.object(autopilot, "write_supervisor_state") as publish, \
+                patch.object(autopilot, "prune_runs"):
+            status = autopilot.run_loop(self.root, self.root / "codex", max_cycles=2, timeout=300, once=False)
+
+        self.assertEqual(status, 2)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0], (1, None))
+        self.assertEqual(calls[1][0], 2)
+        self.assertTrue(calls[1][1]["rejected"])
+        self.assertEqual(calls[1][1]["attempt"], 1)
+        self.assertEqual(calls[1][1]["next_action"], "Narrow to single module.")
+        self.assertEqual(calls[1][1]["blockers"], ["Boundary exceeded."])
+
+        published_states = [call.args[1] for call in publish.call_args_list]
+        self.assertIn("RESCOPE", published_states)
+        self.assertIn("CONTINUE", published_states)
+
+    def test_bounded_exhaustion_with_no_fourth_run(self):
+        rescope_result = self.result(
+            state="BLOCKED", disposition="RESCOPE", commit=None,
+            next_action="Keep narrowing.", blockers=["Still blocked."],
+        )
+        rescope_result.update({"head_before": "a" * 40, "head_after": "a" * 40, "head_changed": False})
+
+        cycle_runs = []
+        def fake_run_cycle(root, codex, s_root, cycle, timeout, recovery=None):
+            cycle_runs.append((cycle, recovery))
+            return self.root / f"run_{cycle:03d}", rescope_result
+
+        with patch.object(autopilot, "git", return_value="a" * 40), \
+                patch.object(autopilot, "ref_snapshot", return_value={}), \
+                patch.object(autopilot, "run_cycle", side_effect=fake_run_cycle), \
+                patch.object(autopilot, "write_supervisor_state") as publish, \
+                patch.object(autopilot, "prune_runs"):
+            status = autopilot.run_loop(self.root, self.root / "codex", max_cycles=10, timeout=300, once=False)
+
+        self.assertEqual(status, 2)
+        self.assertEqual(len(cycle_runs), 3, "must execute exactly 3 runs with no fourth run")
+        self.assertEqual(cycle_runs[0][0], 1)
+        self.assertIsNone(cycle_runs[0][1])
+        self.assertEqual(cycle_runs[1][0], 2)
+        self.assertEqual(cycle_runs[1][1]["attempt"], 1)
+        self.assertEqual(cycle_runs[2][0], 3)
+        self.assertEqual(cycle_runs[2][1]["attempt"], 2)
+
+        last_publish = publish.call_args_list[-1]
+        self.assertEqual(last_publish.args[1], "BLOCKED")
+        self.assertEqual(last_publish.kwargs["cycle"], 3)
+
+    def test_rescope_counter_resets_after_real_commit(self):
+        rescope_result = self.result(
+            state="BLOCKED", disposition="RESCOPE", commit=None,
+            next_action="Rescope.", blockers=["Need rescope."],
+        )
+        rescope_result.update({"head_before": "a" * 40, "head_after": "a" * 40, "head_changed": False})
+        commit_result = self.result(
+            state="CONTINUE", disposition="NONE", commit="b" * 40,
+            next_action="Continue.", blockers=[],
+        )
+        commit_result.update({"head_before": "a" * 40, "head_after": "b" * 40, "head_changed": True})
+
+        cycle_runs = []
+        def fake_run_cycle(root, codex, s_root, cycle, timeout, recovery=None):
+            cycle_runs.append((cycle, recovery))
+            if cycle == 1:
+                return self.root / "run_1", rescope_result
+            if cycle == 2:
+                return self.root / "run_2", commit_result
+            return self.root / f"run_{cycle}", rescope_result
+
+        with patch.object(autopilot, "git", return_value="a" * 40), \
+                patch.object(autopilot, "ref_snapshot", return_value={}), \
+                patch.object(autopilot, "run_cycle", side_effect=fake_run_cycle), \
+                patch.object(autopilot, "write_supervisor_state"), \
+                patch.object(autopilot, "prune_runs"):
+            status = autopilot.run_loop(self.root, self.root / "codex", max_cycles=10, timeout=300, once=False)
+
+        self.assertEqual(status, 2)
+        self.assertEqual(len(cycle_runs), 5)
+        self.assertIsNotNone(cycle_runs[1][1], "Cycle 2 had recovery context from cycle 1")
+        self.assertIsNone(cycle_runs[2][1], "Cycle 3 had recovery context cleared after cycle 2 commit")
+        self.assertEqual(cycle_runs[3][1]["attempt"], 1)
+        self.assertEqual(cycle_runs[4][1]["attempt"], 2)
+
+    def test_immediate_halt_for_halt_and_generic_blocked(self):
+        halt_result = self.result(
+            state="BLOCKED", disposition="HALT", commit=None,
+            next_action="Inspect failure.", blockers=["Definitive roadblock."],
+        )
+        halt_result.update({"head_before": "a" * 40, "head_after": "a" * 40, "head_changed": False})
+
+        run_calls = []
+        def fake_run_cycle(root, codex, s_root, cycle, timeout, recovery=None):
+            run_calls.append(cycle)
+            return self.root / "run_001", halt_result
+
+        with patch.object(autopilot, "git", return_value="a" * 40), \
+                patch.object(autopilot, "ref_snapshot", return_value={}), \
+                patch.object(autopilot, "run_cycle", side_effect=fake_run_cycle), \
+                patch.object(autopilot, "write_supervisor_state") as publish, \
+                patch.object(autopilot, "prune_runs"):
+            status = autopilot.run_loop(self.root, self.root / "codex", max_cycles=5, timeout=300, once=False)
+
+        self.assertEqual(status, 2)
+        self.assertEqual(len(run_calls), 1, "HALT must stop immediately with no further cycles")
+        published_states = [call.args[1] for call in publish.call_args_list]
+        self.assertEqual(published_states, ["RUNNING", "BLOCKED"])
+
+    def test_once_flag_exits_immediately_on_rescope(self):
+        rescope_result = self.result(
+            state="BLOCKED", disposition="RESCOPE", commit=None,
+            next_action="Rescope next.", blockers=["Gate."],
+        )
+        rescope_result.update({"head_before": "a" * 40, "head_after": "a" * 40, "head_changed": False})
+
+        run_calls = []
+        def fake_run_cycle(root, codex, s_root, cycle, timeout, recovery=None):
+            run_calls.append(cycle)
+            return self.root / "run_001", rescope_result
+
+        with patch.object(autopilot, "git", return_value="a" * 40), \
+                patch.object(autopilot, "ref_snapshot", return_value={}), \
+                patch.object(autopilot, "run_cycle", side_effect=fake_run_cycle), \
+                patch.object(autopilot, "write_supervisor_state") as publish, \
+                patch.object(autopilot, "prune_runs"):
+            status = autopilot.run_loop(self.root, self.root / "codex", max_cycles=5, timeout=300, once=True)
+
+        self.assertEqual(status, 2)
+        self.assertEqual(len(run_calls), 1, "--once must execute only one cycle")
+        published_states = [call.args[1] for call in publish.call_args_list]
+        self.assertEqual(published_states, ["RUNNING", "RESCOPE"])
+
 
 if __name__ == "__main__":
     unittest.main()

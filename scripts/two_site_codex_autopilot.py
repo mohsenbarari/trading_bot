@@ -58,6 +58,7 @@ MAX_PROMPT_BYTES = 160_000
 DEFAULT_MAX_CYCLES = 200
 DEFAULT_TIMEOUT_SECONDS = 10_800
 MAX_RETRYABLE_FAILURES = 2
+MAX_CONSECUTIVE_RESCOPES = 3
 KEEP_RUNS = 20
 PROMPT_REL = Path("docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT.md")
 SCHEMA_REL = Path("docs/refactor/two-server/templates/codex-autopilot-cycle.schema.json")
@@ -431,15 +432,22 @@ def validate_transition(
     return result
 
 
-def prompt_for_cycle(root: Path, cycle: int, before: dict[str, object]) -> str:
+def prompt_for_cycle(
+    root: Path,
+    cycle: int,
+    before: dict[str, object],
+    recovery: dict[str, object] | None = None,
+) -> str:
     base = bounded_file_text(
         root, root / PROMPT_REL, MAX_PROMPT_BYTES, "autopilot prompt template"
     )
-    context = {
+    context: dict[str, object] = {
         "cycle": cycle,
         "starting_head": before["head"],
         "protected_refs": before["protected_refs"],
     }
+    if recovery is not None:
+        context["recovery"] = recovery
     return base + "\n\nSUPERVISOR_CONTEXT_JSON:\n" + json.dumps(context, sort_keys=True)
 
 
@@ -464,13 +472,14 @@ def run_cycle(
     state_root: Path,
     cycle: int,
     timeout: int,
+    recovery: dict[str, object] | None = None,
 ) -> tuple[Path, dict]:
     global _ACTIVE_PROCESS
     before = validate_repository(root, require_clean=True)
     timestamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     run_dir = state_root / "runs" / f"cycle-{cycle:04d}-{timestamp}-{os.getpid()}"
     run_dir.mkdir(mode=0o700)
-    prompt = prompt_for_cycle(root, cycle, before)
+    prompt = prompt_for_cycle(root, cycle, before, recovery=recovery)
     (run_dir / "prompt.txt").write_text(prompt)
     codex = codex.resolve(strict=True)
     identity = codex_identity(codex, run_dir)
@@ -484,6 +493,8 @@ def run_cycle(
         "output_limit_bytes": MAX_CODEX_OUTPUT,
         "timeout_seconds": timeout,
     }
+    if recovery is not None:
+        meta["recovery"] = recovery
     write_json(run_dir / "status.json", meta)
     command = codex_command(codex, root, run_dir, prompt)
     environment = os.environ.copy()
@@ -589,6 +600,8 @@ def run_loop(root: Path, codex: Path, max_cycles: int, timeout: int, once: bool)
     lock_path = state_root / "autopilot.lock"
     with exclusive_supervisor_lock(lock_path):
         retryable_failures = 0
+        consecutive_rescopes = 0
+        recovery_context: dict[str, object] | None = None
         for cycle in range(1, max_cycles + 1):
             if (state_root / "STOP").exists():
                 write_supervisor_state(state_root, "STOPPED", cycle=cycle)
@@ -601,11 +614,92 @@ def run_loop(root: Path, codex: Path, max_cycles: int, timeout: int, once: bool)
                 blockers=[],
             )
             try:
-                run_dir, result = run_cycle(root, codex, state_root, cycle, timeout)
+                run_dir, result = run_cycle(
+                    root, codex, state_root, cycle, timeout, recovery=recovery_context,
+                )
                 retryable_failures = 0
+                if result.get("head_changed") and result.get("commit") is not None:
+                    consecutive_rescopes = 0
+                    recovery_context = None
+                if result["state"] == "COMPLETE":
+                    consecutive_rescopes = 0
+                    recovery_context = None
+                    prune_runs(state_root)
+                    write_supervisor_state(
+                        state_root, "COMPLETE", cycle=cycle,
+                        evidence=str(run_dir), head=result["head_after"],
+                        summary=result["summary"], next_action=result["next_action"],
+                        blockers=result["blockers"],
+                        gemini_worker_run_id=result["gemini_worker_run_id"],
+                        gemini_reviewer_run_id=result["gemini_reviewer_run_id"],
+                        proposal_sha256=result["proposal_sha256"],
+                    )
+                    return 0
+                if result["state"] == "CONTINUE":
+                    consecutive_rescopes = 0
+                    recovery_context = None
+                    prune_runs(state_root)
+                    write_supervisor_state(
+                        state_root, "CONTINUE", cycle=cycle,
+                        evidence=str(run_dir), head=result["head_after"],
+                        summary=result["summary"], next_action=result["next_action"],
+                        blockers=result["blockers"],
+                        gemini_worker_run_id=result["gemini_worker_run_id"],
+                        gemini_reviewer_run_id=result["gemini_reviewer_run_id"],
+                        proposal_sha256=result["proposal_sha256"],
+                    )
+                    if once:
+                        return 2
+                    continue
+
+                is_rescope = (
+                    result.get("disposition") == "RESCOPE"
+                    and not result.get("head_changed")
+                    and result.get("commit") is None
+                    and result.get("gemini_worker_run_id") is None
+                    and result.get("gemini_reviewer_run_id") is None
+                    and result.get("proposal_sha256") is None
+                )
+                if is_rescope:
+                    consecutive_rescopes += 1
+                    if consecutive_rescopes >= MAX_CONSECUTIVE_RESCOPES:
+                        prune_runs(state_root)
+                        write_supervisor_state(
+                            state_root, "BLOCKED", cycle=cycle,
+                            evidence=str(run_dir), head=result["head_after"],
+                            summary=result["summary"], next_action=result["next_action"],
+                            blockers=result["blockers"],
+                            gemini_worker_run_id=None,
+                            gemini_reviewer_run_id=None,
+                            proposal_sha256=None,
+                        )
+                        return 2
+                    prune_runs(state_root)
+                    write_supervisor_state(
+                        state_root, "RESCOPE", cycle=cycle,
+                        evidence=str(run_dir), head=result["head_after"],
+                        summary=result["summary"], next_action=result["next_action"],
+                        blockers=result["blockers"],
+                        gemini_worker_run_id=None,
+                        gemini_reviewer_run_id=None,
+                        proposal_sha256=None,
+                    )
+                    if once:
+                        return 2
+                    recovery_context = {
+                        "attempt": consecutive_rescopes,
+                        "attempt_count": consecutive_rescopes,
+                        "consecutive_rescopes": consecutive_rescopes,
+                        "prior_unit_rejected": True,
+                        "rejected": True,
+                        "next_action": result["next_action"],
+                        "blockers": list(result["blockers"]),
+                    }
+                    continue
+
                 prune_runs(state_root)
                 write_supervisor_state(
-                    state_root, str(result["state"]), cycle=cycle,
+                    state_root, "BLOCKED", cycle=cycle,
                     evidence=str(run_dir), head=result["head_after"],
                     summary=result["summary"], next_action=result["next_action"],
                     blockers=result["blockers"],
@@ -613,8 +707,7 @@ def run_loop(root: Path, codex: Path, max_cycles: int, timeout: int, once: bool)
                     gemini_reviewer_run_id=result["gemini_reviewer_run_id"],
                     proposal_sha256=result["proposal_sha256"],
                 )
-                if result["state"] != "CONTINUE" or once:
-                    return 0 if result["state"] == "COMPLETE" else 2
+                return 2
             except (OSError, ValueError, subprocess.SubprocessError) as exc:
                 current_head = git(root, "rev-parse", "HEAD")
                 dirty = bool(git(root, "status", "--porcelain=v1", "--untracked-files=all"))
