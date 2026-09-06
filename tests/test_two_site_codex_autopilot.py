@@ -351,6 +351,31 @@ class AutopilotContracts(unittest.TestCase):
         self.assertIn("never author or repair implementation", prompt)
         self.assertIn("At most two materially different correction attempts", prompt)
 
+    def test_prompt_templates_enforce_recovery_disposition_and_symbol_guards(self):
+        codex_prompt = (autopilot.ROOT / autopilot.PROMPT_REL).read_text()
+        gemini_prompt = (autopilot.ROOT / "docs/refactor/two-server/templates/GEMINI_TASK_PROMPT.md").read_text()
+
+        # Coordinator recovery context and recovery disposition policy
+        self.assertIn("Supervisor recovery context", codex_prompt)
+        self.assertIn("CONTINUE and COMPLETE use disposition NONE", codex_prompt)
+        self.assertIn("BLOCKED/RESCOPE", codex_prompt)
+        self.assertIn("BLOCKED/HALT", codex_prompt)
+        self.assertIn("RESCOPE must not reuse artifacts, bypass tests or", codex_prompt)
+
+        # Coordinator authoritative-symbol gate and UserRole.BUYER prevention
+        self.assertIn("distinct smaller or context-complete internal unit", codex_prompt)
+        self.assertIn("authoritative current definitions", codex_prompt)
+        self.assertIn("UserRole.BUYER", codex_prompt)
+        self.assertIn("forbidden unless its authoritative definition proves it exists", codex_prompt)
+
+        # Gemini Reviewer authoritative-symbol gate and UserRole.BUYER prevention
+        self.assertIn("validate each referenced enum member", gemini_prompt)
+        self.assertIn("authoritative supplied source", gemini_prompt)
+        self.assertIn("CHANGES_REQUIRED", gemini_prompt)
+        self.assertIn("UserRole.BUYER", gemini_prompt)
+        self.assertIn("do not infer members such as", gemini_prompt)
+        self.assertIn("transport representation is not a semantic review", gemini_prompt)
+
     def test_codex_version_probe_uses_bounded_streaming(self):
         cli = self.root / "codex"
         cli.write_text("#!/usr/bin/env python3\nprint('codex-cli 0.153.0')\n")

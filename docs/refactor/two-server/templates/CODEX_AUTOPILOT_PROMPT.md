@@ -30,20 +30,26 @@ Mandatory workflow:
    `main`, `origin/main`, `candidate/wa-ir-standby-v1`, production, DNS and Web Writer
    untouched. Do not fetch, push, deploy, access secrets, mutate remote services, or
    activate the paused native Antigravity gateway.
-3. After one compact Git, MemoryCustodian and active-stage orientation, select one
-   smallest dependency-ready internal unit and create one bounded ignored task JSON
-   containing only relevant sources, numbered requirements, allowed files and exact test
-   selectors. After Coordinator creates or resizes the ignored Task JSON, require the
-   exact local command `python3 scripts/two_site_proposal_runner.py check --task <path>`
-   and require an actual TASK_READY result before any proposal pipeline invocation.
-   If local check fails, Coordinator must revise/narrow the ignored Task and rerun only
-   this no-provider check until ready; it must not estimate readiness from sums of
-   source file sizes. These preflight revisions are not provider retries and do not
-   consume the one allowed pipeline invocation. During orientation and unit selection,
-   never search or enumerate .local/two-site-refactor/proposals,
-   .local/two-site-refactor/autopilot/runs, or .local/two-site-refactor/pipeline. Read
-   only exact handoff, worktree registry, active assignment/stage and routed tracked
-   files. Keep Gemini Worker as sole source/test/project-document author.
+3. After one compact Git, MemoryCustodian and active-stage orientation, consume any
+   Supervisor recovery context provided in `SUPERVISOR_CONTEXT_JSON`. After RESCOPE,
+   choose a distinct smaller or context-complete internal unit rather than repeat the
+   rejected one. Select one smallest dependency-ready internal unit and create a fresh
+   bounded ignored task JSON containing only relevant sources, numbered requirements,
+   allowed files and exact test selectors, providing authoritative current definitions
+   for every enum member, public constant, import target, API shape, model field and
+   call signature its implementation or tests will use. Explicitly name UserRole.BUYER
+   as forbidden unless its authoritative definition proves it exists. After Coordinator
+   creates or resizes the ignored Task JSON, require the exact local command
+   `python3 scripts/two_site_proposal_runner.py check --task <path>` and require an
+   actual TASK_READY result before any proposal pipeline invocation. If local check
+   fails, Coordinator must revise/narrow the ignored Task and rerun only this no-provider
+   check until ready; it must not estimate readiness from sums of source file sizes.
+   These preflight revisions are not provider retries and do not consume the one allowed
+   pipeline invocation. During orientation and unit selection, never search or
+   enumerate .local/two-site-refactor/proposals, .local/two-site-refactor/autopilot/runs,
+   or .local/two-site-refactor/pipeline. Read only exact handoff, worktree registry,
+   active assignment/stage and routed tracked files. Keep Gemini Worker as sole
+   source/test/project-document author.
    Gemini Worker is the sole author of implementation, tests and
    project-documentation changes. Gemini Worker authors complete resulting
    source/test/project-document bytes and may use compact exact-replacement raw
@@ -112,13 +118,18 @@ Mandatory workflow:
 7. Before returning, require a clean integration worktree, verify that the starting
    HEAD is an ancestor of the final HEAD, and confirm protected refs did not change.
 
-Return `CONTINUE` only after a real clean commit and when another safe internal unit is
-ready. Return `COMPLETE` only when the canonical two-site plan is genuinely complete.
-Return `BLOCKED` for a real external/production/human gate, ambiguous state, unsafe
-dirty tree, missing authority, repeated failure, denied escalation, provider startup
-failure or lack of a dependency-ready unit; a denied escalation or provider startup
-failure returns BLOCKED with clean Git and no retry in that cycle, and it never
-justifies widening the whole Codex sandbox.
+Exact final result policy:
+CONTINUE and COMPLETE use disposition NONE. Return `CONTINUE` only after a real clean
+commit and when another safe internal unit is ready. Return `COMPLETE` only when the
+canonical two-site plan is genuinely complete.
+A clean no-commit internal proposal/review/test rejection may use BLOCKED/RESCOPE with
+concrete next_action and blockers. RESCOPE must not reuse artifacts, bypass tests or
+turn into CONTINUE.
+Provider, authentication, authority, production, secret, deploy, DNS, Web-Writer, dirty
+tree, ref-control drift, ambiguous state and repeated recovery exhaustion require
+BLOCKED/HALT. A denied escalation or provider startup failure returns BLOCKED/HALT with
+clean Git and no retry in that cycle, and it never justifies widening the whole Codex
+sandbox.
 The `commit` field is the exact final integration HEAD when this cycle commits and is
 otherwise null. A committed result must also return the exact `gemini_worker_run_id`,
 `gemini_reviewer_run_id`, and `proposal_sha256`; the local Supervisor validates their
