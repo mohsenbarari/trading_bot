@@ -69,7 +69,7 @@ PROTECTED_REFS = (
 )
 RUN_ID = re.compile(r"cycle-[0-9]{4}-[0-9]{8}T[0-9]{6}Z-[0-9]+")
 RESULT_KEYS = {
-    "schema_version", "state", "disposition", "summary", "commit", "next_action",
+    "schema_version", "state", "disposition", "category", "summary", "commit", "next_action",
     "blockers", "gemini_worker_run_id", "gemini_reviewer_run_id", "proposal_sha256",
 }
 PROPOSAL_RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
@@ -231,10 +231,20 @@ def validate_result(result: object) -> dict:
         raise AutopilotError("Codex result has an invalid schema version or state")
     if result["disposition"] not in {"NONE", "HALT", "RESCOPE"}:
         raise AutopilotError("Codex result has an invalid disposition")
-    if result["state"] in {"CONTINUE", "COMPLETE"} and result["disposition"] != "NONE":
-        raise AutopilotError("CONTINUE and COMPLETE require disposition NONE")
-    if result["state"] == "BLOCKED" and result["disposition"] not in {"HALT", "RESCOPE"}:
-        raise AutopilotError("BLOCKED requires disposition HALT or RESCOPE")
+    if result["category"] not in {"NONE", "INTERNAL_REJECTION", "EXTERNAL_GATE"}:
+        raise AutopilotError("Codex result has an invalid category")
+    if result["state"] in {"CONTINUE", "COMPLETE"}:
+        if result["disposition"] != "NONE":
+            raise AutopilotError("CONTINUE and COMPLETE require disposition NONE")
+        if result["category"] != "NONE":
+            raise AutopilotError("CONTINUE and COMPLETE require category NONE")
+    if result["state"] == "BLOCKED":
+        if result["disposition"] not in {"HALT", "RESCOPE"}:
+            raise AutopilotError("BLOCKED requires disposition HALT or RESCOPE")
+        if result["disposition"] == "RESCOPE" and result["category"] != "INTERNAL_REJECTION":
+            raise AutopilotError("BLOCKED/RESCOPE requires category INTERNAL_REJECTION")
+        if result["disposition"] == "HALT" and result["category"] != "EXTERNAL_GATE":
+            raise AutopilotError("BLOCKED/HALT requires category EXTERNAL_GATE")
     if not isinstance(result["summary"], str) or not result["summary"].strip():
         raise AutopilotError("Codex result summary is missing")
     if result["commit"] is not None and not (
@@ -654,6 +664,7 @@ def run_loop(root: Path, codex: Path, max_cycles: int, timeout: int, once: bool)
 
                 is_rescope = (
                     result.get("disposition") == "RESCOPE"
+                    and result.get("category") == "INTERNAL_REJECTION"
                     and not result.get("head_changed")
                     and result.get("commit") is None
                     and result.get("gemini_worker_run_id") is None

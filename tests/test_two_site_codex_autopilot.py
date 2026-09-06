@@ -24,6 +24,7 @@ class AutopilotContracts(unittest.TestCase):
             "schema_version": "1.0",
             "state": "CONTINUE",
             "disposition": "NONE",
+            "category": "NONE",
             "summary": "Committed one bounded unit.",
             "commit": "b" * 40,
             "next_action": "Open the next safe internal unit.",
@@ -35,6 +36,10 @@ class AutopilotContracts(unittest.TestCase):
         result.update(changes)
         if result["state"] == "BLOCKED" and "disposition" not in changes:
             result["disposition"] = "HALT"
+        if result["state"] == "BLOCKED" and "category" not in changes:
+            result["category"] = (
+                "INTERNAL_REJECTION" if result["disposition"] == "RESCOPE" else "EXTERNAL_GATE"
+            )
         if result["commit"] is None:
             for field in ("gemini_worker_run_id", "gemini_reviewer_run_id", "proposal_sha256"):
                 if field not in changes:
@@ -136,6 +141,9 @@ class AutopilotContracts(unittest.TestCase):
             self.result(disposition="UNKNOWN"),
             self.result(disposition="HALT"),
             self.result(disposition="RESCOPE"),
+            self.result(category="UNKNOWN"),
+            self.result(category="INTERNAL_REJECTION"),
+            self.result(category="EXTERNAL_GATE"),
             self.result(state="COMPLETE", commit=None, next_action=None, disposition="HALT"),
             self.result(state="COMPLETE", commit=None, next_action=None, disposition="RESCOPE"),
             self.result(state="BLOCKED", commit=None, next_action=None, blockers=["Gate."], disposition="NONE"),
@@ -251,6 +259,49 @@ class AutopilotContracts(unittest.TestCase):
                 gemini_reviewer_run_id="reviewer-001", proposal_sha256="c" * 64,
             ))
 
+        with self.assertRaisesRegex(autopilot.AutopilotError, "category"):
+            autopilot.validate_result(self.result(category="INVALID"))
+
+        with self.assertRaisesRegex(autopilot.AutopilotError, "category"):
+            autopilot.validate_result(self.result(state="CONTINUE", category="INTERNAL_REJECTION"))
+
+        with self.assertRaisesRegex(autopilot.AutopilotError, "category"):
+            autopilot.validate_result(self.result(state="CONTINUE", category="EXTERNAL_GATE"))
+
+        with self.assertRaisesRegex(autopilot.AutopilotError, "category"):
+            autopilot.validate_result(self.result(
+                state="COMPLETE", commit=None, next_action=None, category="INTERNAL_REJECTION",
+            ))
+
+        with self.assertRaisesRegex(autopilot.AutopilotError, "category"):
+            autopilot.validate_result(self.result(
+                state="COMPLETE", commit=None, next_action=None, category="EXTERNAL_GATE",
+            ))
+
+        with self.assertRaisesRegex(autopilot.AutopilotError, "category"):
+            autopilot.validate_result(self.result(
+                state="BLOCKED", disposition="RESCOPE", commit=None,
+                next_action="Next.", blockers=["Gate."], category="EXTERNAL_GATE",
+            ))
+
+        with self.assertRaisesRegex(autopilot.AutopilotError, "category"):
+            autopilot.validate_result(self.result(
+                state="BLOCKED", disposition="RESCOPE", commit=None,
+                next_action="Next.", blockers=["Gate."], category="NONE",
+            ))
+
+        with self.assertRaisesRegex(autopilot.AutopilotError, "category"):
+            autopilot.validate_result(self.result(
+                state="BLOCKED", disposition="HALT", commit=None,
+                next_action=None, blockers=["Gate."], category="INTERNAL_REJECTION",
+            ))
+
+        with self.assertRaisesRegex(autopilot.AutopilotError, "category"):
+            autopilot.validate_result(self.result(
+                state="BLOCKED", disposition="HALT", commit=None,
+                next_action=None, blockers=["Gate."], category="NONE",
+            ))
+
     def test_transition_requires_clean_descendant_progress_and_protected_refs(self):
         before = {
             "head": "a" * 40,
@@ -362,6 +413,11 @@ class AutopilotContracts(unittest.TestCase):
         self.assertIn("BLOCKED/HALT", codex_prompt)
         self.assertIn("RESCOPE must not reuse artifacts, bypass tests or", codex_prompt)
 
+        # Known clean exhausted-correction test case is RESCOPE and external gates remain HALT
+        self.assertIn("including two exhausted correction attempts—must return BLOCKED/RESCOPE with category INTERNAL_REJECTION", codex_prompt)
+        self.assertIn("It must never use HALT solely because the per-unit correction budget is exhausted", codex_prompt)
+        self.assertIn("require BLOCKED/HALT with category EXTERNAL_GATE", codex_prompt)
+
         # Coordinator authoritative-symbol gate and UserRole.BUYER prevention
         self.assertIn("distinct smaller or context-complete internal unit", codex_prompt)
         self.assertIn("authoritative current definitions", codex_prompt)
@@ -403,6 +459,57 @@ class AutopilotContracts(unittest.TestCase):
             "file access",
         ):
             self.assertIn(action, gemini_prompt)
+
+    def test_category_disposition_state_mappings(self):
+        valid_triples = {
+            ("CONTINUE", "NONE", "NONE"),
+            ("COMPLETE", "NONE", "NONE"),
+            ("BLOCKED", "RESCOPE", "INTERNAL_REJECTION"),
+            ("BLOCKED", "HALT", "EXTERNAL_GATE"),
+        }
+        all_states = ("CONTINUE", "COMPLETE", "BLOCKED")
+        all_dispositions = ("NONE", "HALT", "RESCOPE")
+        all_categories = ("NONE", "INTERNAL_REJECTION", "EXTERNAL_GATE")
+
+        for state in all_states:
+            for disposition in all_dispositions:
+                for category in all_categories:
+                    triple = (state, disposition, category)
+                    with self.subTest(triple=triple):
+                        if triple in valid_triples:
+                            if state == "CONTINUE":
+                                res = self.result(
+                                    state=state, disposition=disposition, category=category,
+                                    commit="b" * 40, next_action="Next step.", blockers=[],
+                                )
+                            elif state == "COMPLETE":
+                                res = self.result(
+                                    state=state, disposition=disposition, category=category,
+                                    commit=None, next_action=None, blockers=[],
+                                )
+                            elif disposition == "RESCOPE":
+                                res = self.result(
+                                    state=state, disposition=disposition, category=category,
+                                    commit=None, next_action="Next step.", blockers=["Internal failure."],
+                                )
+                            else:
+                                res = self.result(
+                                    state=state, disposition=disposition, category=category,
+                                    commit=None, next_action=None, blockers=["External gate."],
+                                )
+                            validated = autopilot.validate_result(res)
+                            self.assertEqual(validated["state"], state)
+                            self.assertEqual(validated["disposition"], disposition)
+                            self.assertEqual(validated["category"], category)
+                        else:
+                            res = self.result(
+                                state=state, disposition=disposition, category=category,
+                                commit="b" * 40 if state == "CONTINUE" else None,
+                                next_action="Next step." if (state == "CONTINUE" or disposition == "RESCOPE") else None,
+                                blockers=[] if state != "BLOCKED" else ["Blocker."],
+                            )
+                            with self.assertRaises(autopilot.AutopilotError):
+                                autopilot.validate_result(res)
 
     def test_codex_version_probe_uses_bounded_streaming(self):
         cli = self.root / "codex"

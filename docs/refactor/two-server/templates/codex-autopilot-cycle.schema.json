@@ -6,6 +6,7 @@
     "schema_version",
     "state",
     "disposition",
+    "category",
     "summary",
     "commit",
     "next_action",
@@ -26,6 +27,10 @@
     "disposition": {
       "type": "string",
       "enum": ["NONE", "HALT", "RESCOPE"]
+    },
+    "category": {
+      "type": "string",
+      "enum": ["NONE", "INTERNAL_REJECTION", "EXTERNAL_GATE"]
     },
     "summary": {
       "type": "string",

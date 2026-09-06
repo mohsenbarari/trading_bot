@@ -109,9 +109,12 @@ Mandatory workflow:
    exact clean baseline, attach factual test evidence to Codex feedback and repeat
    Worker → Gemini Reviewer → Codex. Never claim a test not run.
 6. At most two materially different correction attempts are allowed across Gemini or
-   Codex findings; repeated failure is a real blocker, not an infinite retry. Commit
-   only after both reviews, exact-byte application and all required tests pass. Do not
-   change a Stage to `COMPLETE` without every
+   Codex findings; repeated failure is a real blocker, not an infinite retry. Clean
+   exhaustion of the two correction attempts on an internal rejection must return
+   BLOCKED/RESCOPE with category INTERNAL_REJECTION and a fresh distinct smaller or
+   context-complete next unit, never HALT solely because the per-unit correction budget
+   is exhausted. Commit only after both reviews, exact-byte application and all required
+   tests pass. Do not change a Stage to `COMPLETE` without every
    canonical exact-SHA acceptance and closeout gate. Do not self-approve missing
    evidence. Codex may write mechanical status/review receipts, but source changes must
    remain byte-identical to Gemini's accepted proposal.
@@ -119,17 +122,15 @@ Mandatory workflow:
    HEAD is an ancestor of the final HEAD, and confirm protected refs did not change.
 
 Exact final result policy:
-CONTINUE and COMPLETE use disposition NONE. Return `CONTINUE` only after a real clean
+CONTINUE and COMPLETE use disposition NONE and category NONE. Return `CONTINUE` only after a real clean
 commit and when another safe internal unit is ready. Return `COMPLETE` only when the
 canonical two-site plan is genuinely complete.
-A clean no-commit internal proposal/review/test rejection may use BLOCKED/RESCOPE with
-concrete next_action and blockers. RESCOPE must not reuse artifacts, bypass tests or
-turn into CONTINUE.
-Provider, authentication, authority, production, secret, deploy, DNS, Web-Writer, dirty
-tree, ref-control drift, ambiguous state and repeated recovery exhaustion require
-BLOCKED/HALT. A denied escalation or provider startup failure returns BLOCKED/HALT with
-clean Git and no retry in that cycle, and it never justifies widening the whole Codex
-sandbox.
+A clean no-commit internal proposal/review/test rejection—including two exhausted correction attempts—must return BLOCKED/RESCOPE with category INTERNAL_REJECTION, a concrete next_action specifying a fresh distinct smaller or context-complete next unit, and blockers. It must never use HALT solely because the per-unit correction budget is exhausted. RESCOPE must not reuse artifacts, bypass tests or turn into CONTINUE.
+Provider, authentication, authority, secret, production, deploy, DNS, Web-Writer, dirty
+tree, protected-ref or control drift, ambiguous state, and exhausted cross-unit recovery
+require BLOCKED/HALT with category EXTERNAL_GATE. A denied escalation or provider startup
+failure returns BLOCKED/HALT with category EXTERNAL_GATE, clean Git and no retry in that
+cycle, and it never justifies widening the whole Codex sandbox.
 The `commit` field is the exact final integration HEAD when this cycle commits and is
 otherwise null. A committed result must also return the exact `gemini_worker_run_id`,
 `gemini_reviewer_run_id`, and `proposal_sha256`; the local Supervisor validates their
