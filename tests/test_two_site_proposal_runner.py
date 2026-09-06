@@ -4,6 +4,7 @@ import inspect
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,13 @@ class ProposalContracts(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
+        for relative in (
+            runner.GEMINI_RUNTIME_CONTRACT_REL,
+            *runner.GEMINI_RUNTIME_REFERENCE_PATHS,
+        ):
+            target = self.root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(runner.ROOT / relative, target)
         (self.root / "source.py").write_text("VALUE = 1\n")
         self.task = {
             "task_id": "TEST-001", "goal": "Add one focused test.",
@@ -169,6 +177,7 @@ class ProposalContracts(unittest.TestCase):
         feedback = self.root / "feedback.json"
         feedback.write_bytes(b"x" * (runner.MAX_CONTEXT + 1))
         with patch.object(runner, "git", return_value="head"), \
+                patch.object(runner, "validate_runtime_contract", return_value=runner.RUNTIME_CONTRACT), \
                 patch.object(runner.subprocess, "Popen") as popen:
             with self.assertRaisesRegex(runner.ProposalError, "safe context budget"):
                 runner.run(self.root, self.task_path, "worker", "bounded-input", 30,
@@ -279,6 +288,7 @@ class ProposalContracts(unittest.TestCase):
                           patch.object(runner, "cli_identity", side_effect=cli_identities))
         with patch.object(runner, "git", side_effect=git_effects), \
                 identity_patch, \
+                patch.object(runner, "validate_runtime_contract", return_value=runner.RUNTIME_CONTRACT), \
                 patch.object(runner, "capture_bounded_process", side_effect=capture), \
                 patch.object(runner.subprocess, "Popen", return_value=process) as popen, \
                 patch.object(runner.os, "killpg") as kill:

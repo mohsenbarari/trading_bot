@@ -23,13 +23,22 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-MODEL = "gemini-3.8-flash-medium"
-EFFORT = "medium"
 MAX_CONTEXT = 160_000
 MAX_OUTPUT = 2_000_000
 STREAM_CHUNK_SIZE = 64 * 1024
-EXPECTED_CLI_VERSION = "1.1.27"
-EXPECTED_CLI_SHA256 = "93eb2118b778a4005700b54cdd7e08b896fbe665d5ff338e38e9e53da9a091ea"
+GEMINI_RUNTIME_CONTRACT_REL = Path(
+    "docs/refactor/two-server/templates/gemini-runtime-contract.json"
+)
+GEMINI_RUNTIME_REFERENCE_PATHS = (
+    Path("docs/refactor/two-server/PROPOSAL_AUTOMATION.md"),
+    Path("docs/refactor/two-server/ANTIGRAVITY_EXECUTION.md"),
+    Path(".agents/skills/two-site-refactor/resources/AUTONOMOUS_ORCHESTRATION.md"),
+    Path(".agents/skills/two-site-refactor/resources/TYPED_GATEWAY.md"),
+)
+RUNTIME_CONTRACT_KEYS = frozenset({
+    "schema_version", "provider", "model", "effort", "cli_version", "cli_sha256",
+})
+VALID_EFFORTS = frozenset({"low", "medium", "high"})
 DENY_HOOK = {"proposal-only": {"PreToolUse": [{"matcher": "*", "hooks": [{
     "type": "command", "timeout": 5,
     "command": "/usr/bin/printf '%s\\n' '{\"decision\":\"deny\",\"reason\":\"Proposal-only session: tools are disabled. Return JSON directly from supplied context.\"}'",
@@ -359,6 +368,70 @@ def unique_json(text: str):
             result[key] = value
         return result
     return json.loads(text, object_pairs_hook=pairs)
+
+
+def load_runtime_contract(root: Path) -> dict[str, str]:
+    """Load and validate the one machine-readable Gemini execution contract."""
+    root = root.resolve(strict=True)
+    path = root / GEMINI_RUNTIME_CONTRACT_REL
+    contract = unique_json(bounded_file_text(
+        root, path, 16 * 1024, "Gemini runtime contract"
+    ))
+    if not isinstance(contract, dict) or set(contract) != RUNTIME_CONTRACT_KEYS:
+        raise ProposalError("Gemini runtime contract has unexpected keys")
+    if contract.get("schema_version") != "1.0" or contract.get("provider") != "antigravity":
+        raise ProposalError("Gemini runtime contract has an unsupported schema or provider")
+    model = contract.get("model")
+    effort = contract.get("effort")
+    cli_version = contract.get("cli_version")
+    cli_sha256 = contract.get("cli_sha256")
+    if (not isinstance(model, str) or not re.fullmatch(r"gemini-[A-Za-z0-9][A-Za-z0-9._-]{1,79}", model)
+            or not isinstance(effort, str) or effort not in VALID_EFFORTS
+            or not isinstance(cli_version, str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", cli_version)
+            or not isinstance(cli_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", cli_sha256)):
+        raise ProposalError("Gemini runtime contract contains an invalid pin")
+    return contract
+
+
+def validate_runtime_contract(root: Path) -> dict[str, str]:
+    """Fail before provider invocation when code, docs, or contract drift apart."""
+    contract = load_runtime_contract(root)
+    loaded_at_startup = globals().get("RUNTIME_CONTRACT")
+    if loaded_at_startup is not None and contract != loaded_at_startup:
+        raise ProposalError("Gemini runtime contract changed after runner startup; restart is required")
+    references = tuple((path, "pair" if path.name == "PROPOSAL_AUTOMATION.md" else
+                        "model" if path.name == "TYPED_GATEWAY.md" else "cli")
+                       for path in GEMINI_RUNTIME_REFERENCE_PATHS)
+    model = contract["model"]
+    effort = contract["effort"]
+    for relative, reference_kind in references:
+        text = bounded_file_text(root, root / relative, MAX_CONTEXT, f"Gemini runtime reference {relative}")
+        if reference_kind == "pair":
+            if f"`{model}`" not in text or f"با `{effort}`" not in text:
+                raise ProposalError(f"Gemini runtime reference drift: {relative}")
+        else:
+            marker = model
+            if marker not in text:
+                raise ProposalError(f"Gemini runtime reference drift: {relative}")
+            if reference_kind == "cli" and f"--model {model} --effort {effort}" not in text:
+                raise ProposalError(f"Gemini model/effort reference drift: {relative}")
+        for alternate_model in {"gemini-3.8-flash-high", "gemini-3.8-flash-medium"} - {model}:
+            if alternate_model in text:
+                raise ProposalError(f"stale Gemini model reference: {relative}")
+        for alternate_effort in VALID_EFFORTS - {effort}:
+            if f"--model {model} --effort {alternate_effort}" in text:
+                raise ProposalError(f"stale Gemini effort reference: {relative}")
+    return contract
+
+
+# These values are derived from the tracked contract; no executable file may pin
+# a second model/effort pair. validate_runtime_contract() is repeated per run so
+# an in-process process cannot continue after the contract changes on disk.
+RUNTIME_CONTRACT = load_runtime_contract(ROOT)
+MODEL = RUNTIME_CONTRACT["model"]
+EFFORT = RUNTIME_CONTRACT["effort"]
+EXPECTED_CLI_VERSION = RUNTIME_CONTRACT["cli_version"]
+EXPECTED_CLI_SHA256 = RUNTIME_CONTRACT["cli_sha256"]
 
 
 def relative_file(root: Path, name: str) -> Path:
@@ -729,6 +802,9 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         raise ProposalError("invalid run ID or timeout")
     if role not in {"worker", "verifier"}:
         raise ProposalError("invalid proposal role")
+    # Contract/document drift must be rejected before task materialization and
+    # before the Gemini CLI can consume a token or create a run artifact.
+    validate_runtime_contract(root)
     task, sources = load_task(root, task_path)
     head = git(root, "rev-parse", "HEAD")
     initial_status = git(root, "status", "--porcelain=v1", "--untracked-files=all")

@@ -18,21 +18,28 @@ from scripts import two_site_proposal_runner as runner
 
 
 class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
-    """Hermetic unit tests for reasoning effort constant, invocation, and audit metadata."""
+    """Hermetic tests for the canonical runtime contract and audit metadata."""
 
     def test_effort_constant_value(self) -> None:
-        """Prove that EFFORT is configured to 'medium' and MODEL is preserved."""
-        self.assertEqual(runner.EFFORT, "medium")
-        self.assertEqual(runner.MODEL, "gemini-3.8-flash-medium")
-        self.assertNotEqual(runner.MODEL, "gemini-3.8-flash-high")
+        """Prove that executable constants are derived from the tracked contract."""
+        contract = runner.load_runtime_contract(runner.ROOT)
+        self.assertEqual(runner.EFFORT, contract["effort"])
+        self.assertEqual(runner.MODEL, contract["model"])
+        self.assertEqual(runner.EXPECTED_CLI_VERSION, contract["cli_version"])
+        self.assertEqual(runner.EXPECTED_CLI_SHA256, contract["cli_sha256"])
         self.assertIsInstance(runner.EFFORT, str)
 
-    def test_runner_source_does_not_contain_hardcoded_high_effort(self) -> None:
-        """Verify that scripts/two_site_proposal_runner.py does not contain hard-coded high effort."""
+    def test_runner_source_does_not_duplicate_runtime_pins(self) -> None:
+        """Verify that model/effort are not re-pinned outside the contract."""
         source = Path(runner.__file__).read_text(encoding="utf-8")
-        self.assertNotIn('--effort", "high"', source)
-        self.assertNotIn("--effort', 'high'", source)
+        self.assertNotIn('MODEL = "gemini-', source)
+        self.assertNotIn('EFFORT = "', source)
         self.assertIn('--effort", EFFORT', source)
+
+    def test_runtime_contract_references_are_consistent(self) -> None:
+        contract = runner.validate_runtime_contract(runner.ROOT)
+        self.assertEqual(contract["model"], "gemini-3.8-flash-high")
+        self.assertEqual(contract["effort"], "high")
 
     def _execute_mock_run(
         self,
@@ -118,6 +125,7 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
                 mock.patch.object(runner, "capture_bounded_process", side_effect=mock_capture),
                 mock.patch.object(runner, "parse_stream", return_value=(mock_result, mock_envelope)),
                 mock.patch.object(runner, "load_prior_worker", return_value=(mock_result, {"run_id": "prior-worker", "conversation_id": "prior-conv"}, runner.sha(b"{}"))),
+                mock.patch.object(runner, "validate_runtime_contract", return_value=runner.RUNTIME_CONTRACT),
                 mock.patch("subprocess.Popen", side_effect=mock_popen),
             ]
             if effort_override is not None:
@@ -156,32 +164,30 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
             status_data = json.loads(status_path.read_text(encoding="utf-8"))
             return captured_commands, status_data
 
-    def test_worker_command_and_metadata_uses_medium_effort(self) -> None:
-        """Prove that worker invocation uses --effort medium and records effort in status.json."""
+    def test_worker_command_and_metadata_uses_contract_effort(self) -> None:
+        """Prove that worker invocation uses the contract effort and records it."""
         commands, status_data = self._execute_mock_run(role="worker")
         self.assertEqual(len(commands), 1)
         command = commands[0]
         self.assertIn("--effort", command)
         idx = command.index("--effort")
-        self.assertEqual(command[idx + 1], "medium")
+        self.assertEqual(command[idx + 1], runner.RUNTIME_CONTRACT["effort"])
         self.assertEqual(command[idx + 1], runner.EFFORT)
-        self.assertNotIn("high", command)
         self.assertIn("effort", status_data)
-        self.assertEqual(status_data["effort"], "medium")
+        self.assertEqual(status_data["effort"], runner.RUNTIME_CONTRACT["effort"])
         self.assertEqual(status_data["effort"], runner.EFFORT)
 
-    def test_verifier_command_and_metadata_uses_medium_effort(self) -> None:
-        """Prove that verifier invocation uses --effort medium and records effort in status.json."""
+    def test_verifier_command_and_metadata_uses_contract_effort(self) -> None:
+        """Prove that verifier invocation uses the contract effort and records it."""
         commands, status_data = self._execute_mock_run(role="verifier")
         self.assertEqual(len(commands), 1)
         command = commands[0]
         self.assertIn("--effort", command)
         idx = command.index("--effort")
-        self.assertEqual(command[idx + 1], "medium")
+        self.assertEqual(command[idx + 1], runner.RUNTIME_CONTRACT["effort"])
         self.assertEqual(command[idx + 1], runner.EFFORT)
-        self.assertNotIn("high", command)
         self.assertIn("effort", status_data)
-        self.assertEqual(status_data["effort"], "medium")
+        self.assertEqual(status_data["effort"], runner.RUNTIME_CONTRACT["effort"])
         self.assertEqual(status_data["effort"], runner.EFFORT)
 
     def test_dynamic_effort_constant_propagation(self) -> None:
@@ -199,7 +205,7 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
         """Prove that status metadata records effort even when CLI execution fails (BLOCKED state)."""
         _commands, status_data = self._execute_mock_run(role="worker", simulate_error=True)
         self.assertEqual(status_data.get("state"), "BLOCKED")
-        self.assertEqual(status_data.get("effort"), "medium")
+        self.assertEqual(status_data.get("effort"), runner.RUNTIME_CONTRACT["effort"])
         self.assertEqual(status_data.get("effort"), runner.EFFORT)
 
 

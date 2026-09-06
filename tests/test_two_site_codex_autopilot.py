@@ -569,14 +569,31 @@ class AutopilotContracts(unittest.TestCase):
             blockers=[],
         )
 
+    def test_run_loop_contains_unexpected_cycle_errors(self):
+        state_root = self.root / ".local/two-site-refactor/autopilot"
+        with patch.object(autopilot, "git", side_effect=["a" * 40, "a" * 40, ""]), \
+                patch.object(autopilot, "ref_snapshot", return_value={}), \
+                patch.object(autopilot, "run_cycle", side_effect=RuntimeError("unexpected cycle error")), \
+                patch.object(autopilot, "write_supervisor_state") as publish:
+            status = autopilot.run_loop(self.root, self.root / "codex", 1, 300, True)
+        self.assertEqual(status, 2)
+        self.assertEqual(publish.call_args_list[-1].args[1], "RETRYABLE_FAILURE")
+        self.assertIn("unexpected cycle error", publish.call_args_list[-1].kwargs["error"])
+
     def test_repository_gate_requires_tracked_controls_clean_and_correct_branch(self):
         for relative in autopilot.CONTROL_PATHS:
             path = self.root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(
                 (autopilot.ROOT / autopilot.SCHEMA_REL).read_text()
-                if relative == autopilot.SCHEMA_REL else "control\n"
+                if relative == autopilot.SCHEMA_REL
+                else (autopilot.ROOT / autopilot.GEMINI_RUNTIME_CONTRACT_REL).read_text()
+                if relative == autopilot.GEMINI_RUNTIME_CONTRACT_REL else "control\n"
             )
+        for relative in proposal_runner.GEMINI_RUNTIME_REFERENCE_PATHS:
+            path = self.root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text((proposal_runner.ROOT / relative).read_text())
         subprocess.check_call(["git", "init", "-q"], cwd=self.root)
         subprocess.check_call(["git", "config", "user.email", "test@example.invalid"], cwd=self.root)
         subprocess.check_call(["git", "config", "user.name", "Test"], cwd=self.root)
@@ -592,14 +609,38 @@ class AutopilotContracts(unittest.TestCase):
         with self.assertRaisesRegex(autopilot.AutopilotError, "not clean"):
             autopilot.validate_repository(self.root)
 
+    def test_repository_gate_rejects_gemini_runtime_document_drift(self):
+        contract = self.root / autopilot.GEMINI_RUNTIME_CONTRACT_REL
+        contract.parent.mkdir(parents=True, exist_ok=True)
+        contract.write_text((proposal_runner.ROOT / proposal_runner.GEMINI_RUNTIME_CONTRACT_REL).read_text())
+        reference = self.root / proposal_runner.GEMINI_RUNTIME_REFERENCE_PATHS[0]
+        reference.parent.mkdir(parents=True, exist_ok=True)
+        reference.write_text(
+            (proposal_runner.ROOT / proposal_runner.GEMINI_RUNTIME_REFERENCE_PATHS[0])
+            .read_text()
+            .replace("gemini-3.8-flash-high", "gemini-3.8-flash-medium")
+        )
+        for relative in proposal_runner.GEMINI_RUNTIME_REFERENCE_PATHS[1:]:
+            path = self.root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text((proposal_runner.ROOT / relative).read_text())
+        with self.assertRaisesRegex(proposal_runner.ProposalError, "drift"):
+            autopilot.validate_runtime_contract(self.root)
+
     def test_repository_gate_rejects_provider_incompatible_schema_before_launch(self):
         for relative in autopilot.CONTROL_PATHS:
             path = self.root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(
                 (autopilot.ROOT / autopilot.SCHEMA_REL).read_text()
-                if relative == autopilot.SCHEMA_REL else "control\n"
+                if relative == autopilot.SCHEMA_REL
+                else (autopilot.ROOT / autopilot.GEMINI_RUNTIME_CONTRACT_REL).read_text()
+                if relative == autopilot.GEMINI_RUNTIME_CONTRACT_REL else "control\n"
             )
+        for relative in proposal_runner.GEMINI_RUNTIME_REFERENCE_PATHS:
+            path = self.root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text((proposal_runner.ROOT / relative).read_text())
         subprocess.check_call(["git", "init", "-q"], cwd=self.root)
         subprocess.check_call(["git", "config", "user.email", "test@example.invalid"], cwd=self.root)
         subprocess.check_call(["git", "config", "user.name", "Test"], cwd=self.root)
@@ -627,8 +668,14 @@ class AutopilotContracts(unittest.TestCase):
                 else:
                     path.write_text(
                         (autopilot.ROOT / autopilot.SCHEMA_REL).read_text()
-                        if relative == autopilot.SCHEMA_REL else "control\n"
+                        if relative == autopilot.SCHEMA_REL
+                        else (autopilot.ROOT / autopilot.GEMINI_RUNTIME_CONTRACT_REL).read_text()
+                        if relative == autopilot.GEMINI_RUNTIME_CONTRACT_REL else "control\n"
                     )
+            for relative in proposal_runner.GEMINI_RUNTIME_REFERENCE_PATHS:
+                path = self.root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text((proposal_runner.ROOT / relative).read_text())
             subprocess.check_call(["git", "init", "-q"], cwd=self.root)
             subprocess.check_call(["git", "config", "user.email", "test@example.invalid"], cwd=self.root)
             subprocess.check_call(["git", "config", "user.name", "Test"], cwd=self.root)

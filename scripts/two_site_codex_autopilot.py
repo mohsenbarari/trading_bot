@@ -19,6 +19,7 @@ import time
 try:
     from scripts.two_site_proposal_runner import (
         MAX_CONTEXT,
+        GEMINI_RUNTIME_CONTRACT_REL,
         MODEL as GEMINI_MODEL,
         ProposalError,
         bounded_file_text,
@@ -27,12 +28,14 @@ try:
         git,
         terminate_process,
         unique_json,
+        validate_runtime_contract,
         validate_result as validate_proposal_result,
         write_json,
     )
 except ModuleNotFoundError:  # Direct `python scripts/...` execution.
     from two_site_proposal_runner import (  # type: ignore[no-redef]
         MAX_CONTEXT,
+        GEMINI_RUNTIME_CONTRACT_REL,
         MODEL as GEMINI_MODEL,
         ProposalError,
         bounded_file_text,
@@ -41,6 +44,7 @@ except ModuleNotFoundError:  # Direct `python scripts/...` execution.
         git,
         terminate_process,
         unique_json,
+        validate_runtime_contract,
         validate_result as validate_proposal_result,
         write_json,
     )
@@ -77,6 +81,7 @@ PRUNABLE_RUN_STATES = {"CONTINUE", "COMPLETE", "FAILED", "RETRYABLE_FAILURE", "S
 CONTROL_PATHS = (
     Path("scripts/two_site_codex_autopilot.py"),
     Path("scripts/two_site_proposal_runner.py"),
+    GEMINI_RUNTIME_CONTRACT_REL,
     PROMPT_REL,
     SCHEMA_REL,
     Path(".agents/skills/two-site-refactor/SKILL.md"),
@@ -139,6 +144,10 @@ def ref_snapshot(root: Path) -> dict[str, str | None]:
 
 def validate_repository(root: Path, require_clean: bool = True) -> dict[str, object]:
     root = root.resolve(strict=True)
+    # This is deliberately the first control gate: no Codex cycle or Gemini
+    # Worker/Reviewer invocation is allowed while the runtime contract and its
+    # human-readable references disagree.
+    validate_runtime_contract(root)
     if git(root, "branch", "--show-current") != BRANCH:
         raise AutopilotError(f"autopilot requires branch {BRANCH}")
     head = git(root, "rev-parse", "HEAD")
@@ -719,7 +728,10 @@ def run_loop(root: Path, codex: Path, max_cycles: int, timeout: int, once: bool)
                     proposal_sha256=result["proposal_sha256"],
                 )
                 return 2
-            except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            except Exception as exc:
+                # Never leave the supervisor appearing RUNNING after an
+                # unexpected application error. KeyboardInterrupt/SystemExit
+                # remain outside Exception and still stop immediately.
                 current_head = git(root, "rev-parse", "HEAD")
                 dirty = bool(git(root, "status", "--porcelain=v1", "--untracked-files=all"))
                 ambiguous_change = current_head != cycle_start_head or ref_snapshot(root) != cycle_start_refs
@@ -772,7 +784,7 @@ def main() -> int:
         return run_loop(args.root, args.codex, args.max_cycles, args.timeout, args.once)
     except KeyboardInterrupt:
         return 130
-    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+    except Exception as exc:
         print(json.dumps({"state": "BLOCKED", "reason": str(exc)}), flush=True)
         return 2
 

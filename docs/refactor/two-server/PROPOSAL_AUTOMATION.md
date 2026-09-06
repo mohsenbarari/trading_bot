@@ -95,7 +95,11 @@ template ــ با خواندن حداکثر `limit+1` بایت از file descri
 این قاعده عمداً hardlink حتی میان دو مسیر داخل پروژه را نیز رد می‌کند تا هیچ alias
 خارج پروژه قابل تشخیص‌نبودن نباشد.
 
-مدل در کد pin شده: `gemini-3.8-flash-high` با `high`.
+مدل و effort از فایل canonical
+`templates/gemini-runtime-contract.json` خوانده می‌شوند: `gemini-3.8-flash-high`
+با `high`. Runner و Supervisor پیش از هر نشست این فایل و همین ارجاع‌های مستنداتی
+را بررسی می‌کنند؛ هر اختلافی پیش از مصرف Gemini fail-closed می‌شود. این فایل کنترل
+شده است و تغییر آن باید مانند تغییر قرارداد اجرایی، مستقل و با review کامل انجام شود.
 timeout پیش‌فرض ۳۰۰ ثانیه است؛ context هر زیرکار حداکثر ۱۶۰ کیلوبایت.
 کد، task و feedback باید فاقد کلید و دادهٔ عملیاتی باشند. فیلتر token، جایگزین
 بررسی محتوا توسط Codex نیست. مالک ارسال bounded source/proposal/review/finding لازم
