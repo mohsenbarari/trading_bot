@@ -68,8 +68,8 @@ PROTECTED_REFS = (
 )
 RUN_ID = re.compile(r"cycle-[0-9]{4}-[0-9]{8}T[0-9]{6}Z-[0-9]+")
 RESULT_KEYS = {
-    "schema_version", "state", "summary", "commit", "next_action", "blockers",
-    "gemini_worker_run_id", "gemini_reviewer_run_id", "proposal_sha256",
+    "schema_version", "state", "disposition", "summary", "commit", "next_action",
+    "blockers", "gemini_worker_run_id", "gemini_reviewer_run_id", "proposal_sha256",
 }
 PROPOSAL_RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
 PRUNABLE_RUN_STATES = {"CONTINUE", "COMPLETE", "FAILED", "RETRYABLE_FAILURE", "STOPPED"}
@@ -228,6 +228,12 @@ def validate_result(result: object) -> dict:
         "CONTINUE", "COMPLETE", "BLOCKED",
     }:
         raise AutopilotError("Codex result has an invalid schema version or state")
+    if result["disposition"] not in {"NONE", "HALT", "RESCOPE"}:
+        raise AutopilotError("Codex result has an invalid disposition")
+    if result["state"] in {"CONTINUE", "COMPLETE"} and result["disposition"] != "NONE":
+        raise AutopilotError("CONTINUE and COMPLETE require disposition NONE")
+    if result["state"] == "BLOCKED" and result["disposition"] not in {"HALT", "RESCOPE"}:
+        raise AutopilotError("BLOCKED requires disposition HALT or RESCOPE")
     if not isinstance(result["summary"], str) or not result["summary"].strip():
         raise AutopilotError("Codex result summary is missing")
     if result["commit"] is not None and not (
@@ -267,6 +273,11 @@ def validate_result(result: object) -> dict:
             raise AutopilotError("commit requires exact Gemini Worker/Reviewer evidence")
     elif any(value is not None for value in evidence):
         raise AutopilotError("Gemini acceptance evidence cannot accompany a null commit")
+    if result["disposition"] in {"HALT", "RESCOPE"}:
+        if result["commit"] is not None or any(value is not None for value in evidence):
+            raise AutopilotError(f"{result['disposition']} requires null commit and Gemini acceptance evidence")
+    if result["disposition"] == "RESCOPE" and result["next_action"] is None:
+        raise AutopilotError("RESCOPE requires a concrete next action")
     return result
 
 

@@ -5,6 +5,7 @@
   "required": [
     "schema_version",
     "state",
+    "disposition",
     "summary",
     "commit",
     "next_action",
@@ -21,6 +22,10 @@
     "state": {
       "type": "string",
       "enum": ["CONTINUE", "COMPLETE", "BLOCKED"]
+    },
+    "disposition": {
+      "type": "string",
+      "enum": ["NONE", "HALT", "RESCOPE"]
     },
     "summary": {
       "type": "string",

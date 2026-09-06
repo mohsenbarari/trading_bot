@@ -23,6 +23,7 @@ class AutopilotContracts(unittest.TestCase):
         result = {
             "schema_version": "1.0",
             "state": "CONTINUE",
+            "disposition": "NONE",
             "summary": "Committed one bounded unit.",
             "commit": "b" * 40,
             "next_action": "Open the next safe internal unit.",
@@ -32,6 +33,8 @@ class AutopilotContracts(unittest.TestCase):
             "proposal_sha256": "c" * 64,
         }
         result.update(changes)
+        if result["state"] == "BLOCKED" and "disposition" not in changes:
+            result["disposition"] = "HALT"
         if result["commit"] is None:
             for field in ("gemini_worker_run_id", "gemini_reviewer_run_id", "proposal_sha256"):
                 if field not in changes:
@@ -113,6 +116,11 @@ class AutopilotContracts(unittest.TestCase):
         self.assertEqual(autopilot.validate_result(blocked), blocked)
         complete = self.result(state="COMPLETE", commit=None, next_action=None)
         self.assertEqual(autopilot.validate_result(complete), complete)
+        rescope = self.result(
+            state="BLOCKED", disposition="RESCOPE", commit=None,
+            next_action="Rescope next safe step.", blockers=["Upstream design blocked."],
+        )
+        self.assertEqual(autopilot.validate_result(rescope), rescope)
 
         invalid = [
             dict(self.result(), extra=True),
@@ -125,10 +133,123 @@ class AutopilotContracts(unittest.TestCase):
             self.result(gemini_worker_run_id=7),
             self.result(proposal_sha256="short"),
             self.result(summary=" "),
+            self.result(disposition="UNKNOWN"),
+            self.result(disposition="HALT"),
+            self.result(disposition="RESCOPE"),
+            self.result(state="COMPLETE", commit=None, next_action=None, disposition="HALT"),
+            self.result(state="COMPLETE", commit=None, next_action=None, disposition="RESCOPE"),
+            self.result(state="BLOCKED", commit=None, next_action=None, blockers=["Gate."], disposition="NONE"),
+            self.result(state="BLOCKED", disposition="RESCOPE", commit=None, next_action=None, blockers=["Gate."]),
+            self.result(state="BLOCKED", disposition="RESCOPE", commit="b" * 40, next_action="Next.", blockers=["Gate."]),
+            self.result(
+                state="BLOCKED", disposition="RESCOPE", commit=None, next_action="Next.",
+                blockers=["Gate."], gemini_worker_run_id="worker-001",
+                gemini_reviewer_run_id="reviewer-001", proposal_sha256="c" * 64,
+            ),
+            self.result(state="BLOCKED", disposition="HALT", commit="b" * 40, next_action=None, blockers=["Gate."]),
+            self.result(
+                state="BLOCKED", disposition="HALT", commit=None, next_action=None,
+                blockers=["Gate."], gemini_worker_run_id="worker-001",
+                gemini_reviewer_run_id="reviewer-001", proposal_sha256="c" * 64,
+            ),
         ]
         for result in invalid:
             with self.subTest(result=result), self.assertRaises(autopilot.AutopilotError):
                 autopilot.validate_result(result)
+
+    def test_disposition_contracts_and_rescope_safety(self):
+        self.assertEqual(self.result()["disposition"], "NONE")
+        self.assertEqual(self.result(state="COMPLETE")["disposition"], "NONE")
+        self.assertEqual(self.result(state="BLOCKED")["disposition"], "HALT")
+
+        valid_continue = self.result(state="CONTINUE", disposition="NONE")
+        self.assertEqual(autopilot.validate_result(valid_continue)["disposition"], "NONE")
+
+        valid_complete = self.result(
+            state="COMPLETE", disposition="NONE", commit=None, next_action=None,
+        )
+        self.assertEqual(autopilot.validate_result(valid_complete)["disposition"], "NONE")
+
+        valid_halt_without_next = self.result(
+            state="BLOCKED", disposition="HALT", commit=None, next_action=None, blockers=["Gate."],
+        )
+        self.assertEqual(autopilot.validate_result(valid_halt_without_next)["disposition"], "HALT")
+
+        valid_halt_with_next = self.result(
+            state="BLOCKED", disposition="HALT", commit=None, next_action="Inspect log.", blockers=["Gate."],
+        )
+        self.assertEqual(autopilot.validate_result(valid_halt_with_next)["disposition"], "HALT")
+
+        valid_rescope = self.result(
+            state="BLOCKED", disposition="RESCOPE", commit=None,
+            next_action="Re-anchor bounded proposal.", blockers=["Out of scope."],
+        )
+        self.assertEqual(autopilot.validate_result(valid_rescope)["disposition"], "RESCOPE")
+
+        with self.assertRaisesRegex(autopilot.AutopilotError, "disposition"):
+            autopilot.validate_result(self.result(disposition="INVALID"))
+
+        with self.assertRaisesRegex(autopilot.AutopilotError, "disposition"):
+            autopilot.validate_result(self.result(state="CONTINUE", disposition="HALT"))
+
+        with self.assertRaisesRegex(autopilot.AutopilotError, "disposition"):
+            autopilot.validate_result(self.result(state="CONTINUE", disposition="RESCOPE"))
+
+        with self.assertRaisesRegex(autopilot.AutopilotError, "disposition"):
+            autopilot.validate_result(self.result(
+                state="COMPLETE", disposition="HALT", commit=None, next_action=None,
+            ))
+
+        with self.assertRaisesRegex(autopilot.AutopilotError, "disposition"):
+            autopilot.validate_result(self.result(
+                state="COMPLETE", disposition="RESCOPE", commit=None, next_action=None,
+            ))
+
+        with self.assertRaisesRegex(autopilot.AutopilotError, "disposition"):
+            autopilot.validate_result(self.result(
+                state="BLOCKED", disposition="NONE", commit=None, next_action=None, blockers=["Gate."],
+            ))
+
+        with self.assertRaisesRegex(autopilot.AutopilotError, "next action"):
+            autopilot.validate_result(self.result(
+                state="BLOCKED", disposition="RESCOPE", commit=None, next_action=None, blockers=["Gate."],
+            ))
+
+        with self.assertRaisesRegex(autopilot.AutopilotError, "next_action"):
+            autopilot.validate_result(self.result(
+                state="BLOCKED", disposition="RESCOPE", commit=None, next_action="   ", blockers=["Gate."],
+            ))
+
+        with self.assertRaisesRegex(autopilot.AutopilotError, "blocker"):
+            autopilot.validate_result(self.result(
+                state="BLOCKED", disposition="RESCOPE", commit=None, next_action="Next.", blockers=[],
+            ))
+
+        with self.assertRaisesRegex(autopilot.AutopilotError, "null commit"):
+            autopilot.validate_result(self.result(
+                state="BLOCKED", disposition="RESCOPE", commit="b" * 40,
+                next_action="Next.", blockers=["Gate."],
+            ))
+
+        with self.assertRaisesRegex(autopilot.AutopilotError, "evidence"):
+            autopilot.validate_result(self.result(
+                state="BLOCKED", disposition="RESCOPE", commit=None, next_action="Next.",
+                blockers=["Gate."], gemini_worker_run_id="worker-001",
+                gemini_reviewer_run_id="reviewer-001", proposal_sha256="c" * 64,
+            ))
+
+        with self.assertRaisesRegex(autopilot.AutopilotError, "null commit"):
+            autopilot.validate_result(self.result(
+                state="BLOCKED", disposition="HALT", commit="b" * 40,
+                next_action=None, blockers=["Gate."],
+            ))
+
+        with self.assertRaisesRegex(autopilot.AutopilotError, "evidence"):
+            autopilot.validate_result(self.result(
+                state="BLOCKED", disposition="HALT", commit=None,
+                next_action=None, blockers=["Gate."], gemini_worker_run_id="worker-001",
+                gemini_reviewer_run_id="reviewer-001", proposal_sha256="c" * 64,
+            ))
 
     def test_transition_requires_clean_descendant_progress_and_protected_refs(self):
         before = {
