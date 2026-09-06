@@ -2,6 +2,9 @@
 
 Seed: BOT-TRADE-CALLBACK-QUERY-TRADE-MANAGE-HANDLE-EXPIRE-OFFER-L118
 Bounded characterization suite under Stage P1-00b and Assignment WA-P1-00B-FREEZE-20260904-001.
+
+This directly characterizes only handle_expire_offer, does not complete P1-00b,
+and does not establish Offer/Request origin-interaction evidence.
 """
 
 from __future__ import annotations
@@ -201,6 +204,14 @@ class CharacterizationTradeExpireOfferTests(unittest.IsolatedAsyncioTestCase):
         patcher_channel.start()
         self.addCleanup(patcher_channel.stop)
 
+        self.mock_forward = AsyncMock()
+        patcher_forward = patch(
+            "bot.handlers.trade_manage.forward_offer_expiry_to_home_server",
+            new=self.mock_forward,
+        )
+        patcher_forward.start()
+        self.addCleanup(patcher_forward.stop)
+
         self.mock_build_keyboard = AsyncMock(return_value="NAV_KEYBOARD")
         patcher_nav = patch(
             "bot.handlers.trade_manage.build_persistent_navigation_keyboard",
@@ -246,6 +257,7 @@ class CharacterizationTradeExpireOfferTests(unittest.IsolatedAsyncioTestCase):
 
         self.mock_apply_offer_channel_state.side_effect = _record_channel_apply
         self.mock_apply_offer_channel_state.reset_mock()
+        self.mock_forward.reset_mock()
 
         async def _record_manual_limits(*args, **kwargs):
             events.append("enforce_manual_limits")
@@ -320,12 +332,13 @@ class CharacterizationTradeExpireOfferTests(unittest.IsolatedAsyncioTestCase):
         # 4. Exactly one commit in legacy delivery mode
         self.assertEqual(session.commits, 1)
 
-        # 5. Channel application with exact parameters
+        # 5. Channel application with exact parameters and no forwarding
         self.mock_apply_offer_channel_state.assert_awaited_once_with(
             offer,
             reason="manual_expire",
             timeout=10,
         )
+        self.mock_forward.assert_not_awaited()
 
         # 6. Callback acknowledgement
         callback.answer.assert_awaited_once_with()
@@ -539,6 +552,9 @@ class CharacterizationTradeExpireOfferTests(unittest.IsolatedAsyncioTestCase):
             callback.answer.assert_awaited_once_with()
             self.mock_acquire_gate.assert_not_awaited()
             self.assertEqual(self.session_factory.opened, 0)
+            self.mock_forward.assert_not_awaited()
+            self.assertEqual(len(session.get_calls), 0)
+            self.assertEqual(session.commits, 0)
             self.mock_get_trading_settings.assert_not_called()
             self.assertEqual(lease.release_calls, 0)
 
@@ -558,6 +574,9 @@ class CharacterizationTradeExpireOfferTests(unittest.IsolatedAsyncioTestCase):
             self.mock_acquire_gate.assert_awaited_once_with(offer_id=42)
             callback.answer.assert_awaited_once_with(OFFER_EXPIRY_LOCK_BUSY_TEXT)
             self.assertEqual(self.session_factory.opened, 0)
+            self.mock_forward.assert_not_awaited()
+            self.assertEqual(len(session.get_calls), 0)
+            self.assertEqual(session.commits, 0)
             self.mock_enforce_manual_limits.assert_not_awaited()
             self.mock_apply_offer_channel_state.assert_not_awaited()
             # Characterize current behavior: lease.release() is not invoked because
