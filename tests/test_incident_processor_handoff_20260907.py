@@ -56,9 +56,9 @@ class ProcessorHandoffGuards(unittest.TestCase):
             "services": {
                 handoff.ROLE: {
                     "image": handoff.OLD_IMAGE,
-                    "restart": "on-failure:5",
+                    "restart": "unless-stopped",
                     "environment": {"MARKET_PIPELINE_RELEASE_SHA": handoff.OLD,
-                                    "MARKET_PROCESSOR_MAX_FACT_EXPORTS_PER_CYCLE":"100"},
+                                    "MARKET_PROCESSOR_MAX_FACT_EXPORTS_PER_CYCLE":"500"},
                     "labels": {"org.opencontainers.image.revision": handoff.OLD},
                     "volumes": [{"source": "/retained/state", "target": "/state"}],
                     "mem_limit": "384m",
@@ -80,6 +80,28 @@ class ProcessorHandoffGuards(unittest.TestCase):
 
     def test_only_exact_processor_delta_is_allowed(self):
         handoff.validate_config(*self.configs())
+
+    def test_rollback_preserves_existing_export_capacity_override(self):
+        prior = handoff.compose()
+        candidate = handoff.compose(True)
+        self.assertIn(
+            '/srv/trading-bot/incident-recovery/20260907-processor-export-capacity/processor-export-capacity.override.json',
+            prior,
+        )
+        self.assertEqual(candidate, prior + ['-f', str(handoff.OVERRIDE)])
+        self.assertNotIn(str(handoff.OVERRIDE), prior)
+
+    def test_image_only_followup_preserves_prior_capacity_and_restart_policy(self):
+        old, new = self.configs()
+        prior = old['services'][handoff.ROLE]
+        target = new['services'][handoff.ROLE]
+        self.assertEqual(prior['restart'], target['restart'])
+        self.assertEqual(
+            prior['environment']['MARKET_PROCESSOR_MAX_FACT_EXPORTS_PER_CYCLE'],
+            target['environment']['MARKET_PROCESSOR_MAX_FACT_EXPORTS_PER_CYCLE'],
+        )
+        self.assertNotEqual(handoff.OLD_IMAGE, handoff.NEW_IMAGE)
+        handoff.validate_config(old, new)
 
     def test_export_capacity_cannot_expand_beyond_exact_reviewed_bound(self):
         old,new=self.configs()

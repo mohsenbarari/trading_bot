@@ -1,6 +1,46 @@
 # Market processor replay/backlog recovery — 2026-09-07
 
-## Latest checkpoint — 08:30–08:33 UTC
+## Latest activation — 08:50 UTC; verification through 08:55 UTC
+
+The user explicitly authorized image
+`market_pipeline_release:921b45a045073dab91f14b56f4bb8fc7c9a25344` to
+`65.109.220.59:37067`, replacing **only market-processor**, preserving data and
+rollback. Transfer succeeded over strict-host-checked SSH without a root-disk
+tar. Local/remote portable content digest matched:
+`9791fee4402ef466ba0d33fdaf4163cea7686937a80d121633fb84249b9ab8c3`.
+Remote image ID:
+`sha256:70133301cfdebca98887e651bfba8a87f45da21580fb77df5088562255c47472`.
+
+- The 195 exact-image regression tests remain applicable; runtime content did
+  not change. All 13 updated handoff tests passed, including preserved export
+  capacity/restart policy and the full prior override chain for rollback.
+- Preflight passed. The scoped journal
+  `/srv/trading-bot/incident-recovery/20260907-processor-sparse-minutes/handoff.json`
+  reached `APPLIED_LIVE` at 08:50:27 UTC. Processor container
+  `cb16e49998b76b1cdbf72b3029e6fbadc88fc8a3d54ea0be47575b46f2069e82`
+  is Docker-healthy with zero restarts. Sole owner, mounts, parent lock and all
+  bystander container identities/start times were verified unchanged. No data,
+  checkpoint, capture, sender, Product, Writer or DNS changes were made.
+- Export capacity stays 500. The first complete cycle was 27.011s with backlog
+  27,939; at 08:53:32 backlog was 25,177 and cycle 42.684s (archive 19.244s).
+  Both sampled cycles had zero export rejection/missing research context. This
+  does **not** repair or waive the earlier exact-revision archive-link gap.
+- Actual authenticated dashboard: HTTP 200 and confirmed activity page; 40 rows
+  contained 34 model-input labels, zero review labels and six audit-only labels.
+  Private v8 snapshot is fresh/OK with **13/14** estimated cells. ONE_GRAM/CASH
+  still reports `NO_SAFE_SAME_COMMODITY_ANCHOR`. No synthetic input or authority
+  substitution was used; the separately identified historical replay was not run.
+- Read-only latest-30-created-live-message samples per group showed event-to-
+  availability median 0s/max 1s. Availability-to-parse median 20s, max 51s (G1)
+  and 41s (G2); this sample can straddle activation and is not a full end-to-end
+  post-release SLO. The latest sampled event/parse pairs were G1 08:54:08/08:54:15
+  and G2 08:54:54/08:54:57 UTC.
+- Sampled processor memory 187.6 MiB/384 MiB, CPU 18.26%; local root still about
+  17 GiB free and attached volume about 44 GiB free. Do not treat a short sample
+  as proof of perpetual stability. Backlog, latency, one-gram readiness and the
+  historical exact-revision archive-link audit remain open.
+
+## Earlier checkpoint — 08:30–08:33 UTC
 
 - `cb45aad7` remains active, with zero restarts at the read-only identity check.
   At 08:30:08 its parse backlog was 45,107, cycle 53.908s, archive published 445
