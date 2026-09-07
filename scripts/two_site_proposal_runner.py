@@ -708,8 +708,22 @@ def parse_stream(raw: str, task: dict, sources: dict, role: str) -> tuple[dict, 
     envelope = terminal[0]
     session = init[0].get("conversation_id")
     if (not isinstance(session, str) or not session.strip()
-            or envelope.get("status") != "SUCCESS" or envelope.get("denied_actions")
-            or envelope.get("conversation_id") != session):
+            or envelope.get("conversation_id") != session
+            or envelope.get("denied_actions")):
+        raise ProposalError("CLI did not complete one successful session")
+    if envelope.get("status") != "SUCCESS":
+        error = envelope.get("error")
+        if (isinstance(error, str)
+                and not re.search(
+                    r"auth|quota|rate[\s_-]*limit|time[\s_-]*out|timed[\s_-]*out|deadline|network|connect",
+                    error, re.IGNORECASE,
+                )
+                and re.search(
+                    r"exceed.*output[-\s]+tokens?[-\s]+limit|"
+                    r"output[-\s]+tokens?[-\s]+limit.*exceed",
+                    error, re.IGNORECASE | re.DOTALL,
+                )):
+            raise ProposalError("MODEL_OUTPUT_TRUNCATED: rescope to a smaller task")
         raise ProposalError("CLI did not complete one successful session")
 
     finish_submissions = 0
