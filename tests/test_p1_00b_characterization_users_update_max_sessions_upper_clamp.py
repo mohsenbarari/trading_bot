@@ -67,6 +67,10 @@ class UsersUpdateMaxSessionsUpperClampCharacterizationTests(unittest.IsolatedAsy
         )
         db = MinimalAsyncDB(target)
         user_update = UserUpdate(max_sessions=99)
+        self.assertEqual(
+            user_update.model_dump(exclude_unset=True),
+            {"max_sessions": 99},
+        )
 
         sentinel_result = object()
         queue_sentinel = object()
@@ -126,6 +130,14 @@ class UsersUpdateMaxSessionsUpperClampCharacterizationTests(unittest.IsolatedAsy
         self.assertEqual(
             audit_call_kwargs["actor_role"],
             UserRole.MIDDLE_MANAGER.value,
+        )
+        self.assertEqual(
+            audit_call_kwargs["before_summary"]["max_sessions"],
+            1,
+        )
+        self.assertEqual(
+            audit_call_kwargs["after_summary"]["max_sessions"],
+            3,
         )
         self.assertEqual(
             audit_call_kwargs["after_summary"]["updated_fields"],
