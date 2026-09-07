@@ -969,9 +969,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     except FoundationError as exc:
         print(safe_json({"status": "fail", "reason_code": str(exc)}), file=sys.stderr)
         return LIVE_NOT_IMPLEMENTED_EXIT
-    except (OSError, ValueError, sqlite3.Error):
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        # Keep payloads, credentials and exception messages out of logs, but
+        # retain enough code-only evidence to diagnose a restart loop.
+        evidence = {"status": "fail", "reason_code": "runtime_dependency_failure",
+                    "error_type": type(exc).__name__}
+        trace = exc.__traceback__
+        while trace is not None and trace.tb_next is not None:
+            trace = trace.tb_next
+        if trace is not None:
+            code = trace.tb_frame.f_code
+            evidence["origin"] = {"file": Path(code.co_filename).name,
+                                  "function": code.co_name, "line": trace.tb_lineno}
         print(
-            safe_json({"status": "fail", "reason_code": "runtime_dependency_failure"}),
+            safe_json(evidence),
             file=sys.stderr,
         )
         return 1

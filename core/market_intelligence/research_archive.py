@@ -163,11 +163,19 @@ def _context_rows(
 ) -> dict[bytes, ResearchFactContext]:
     if not event_keys:
         return {}
+    # A three-day horizon can still contain hundreds of thousands of rows.
+    # Scope SQL to this export batch; never load unrelated raw text/identities.
+    if len(event_keys) > 500:
+        result = {}
+        ordered = sorted(event_keys)
+        for offset in range(0, len(ordered), 500):
+            result.update(_context_rows(staging, frozenset(ordered[offset:offset + 500])))
+        return result
+    selected = tuple(sorted(event_keys))
+    placeholders = ",".join("?" for _ in selected)
     result: dict[bytes, ResearchFactContext] = {}
-    # The tables contain at most the bounded three-day staging horizon.  Read
-    # once per export cycle instead of issuing thousands of point queries.
     group_rows = staging.execute(
-        """
+        f"""
         SELECT c.event_key,c.group_number,c.root_message_id,
                root.event_time_utc,root.available_at_utc,root.message_text,
                root.sender_telegram_id AS offerer_id,
@@ -179,9 +187,11 @@ def _context_rows(
           ON root.group_number=c.group_number
          AND root.message_id=c.root_message_id
         LEFT JOIN coin_group_staged_messages AS requester
-          ON requester.group_number=c.group_number
+         ON requester.group_number=c.group_number
          AND requester.message_id=c.requester_message_id
-        """
+        WHERE c.event_key IN ({placeholders})
+        """,
+        selected,
     ).fetchall()
     for row in group_rows:
         event_key = bytes(row["event_key"])
@@ -218,7 +228,7 @@ def _context_rows(
     ).fetchone()
     channel_rows = (
         staging.execute(
-            """
+            f"""
             SELECT p.event_key,p.source_id,p.message_id,current.event_time_utc,
                    current.available_at_utc,current.message_text
             FROM capture_projection_keys AS p
@@ -226,8 +236,9 @@ def _context_rows(
               ON current.source_id=p.source_id
              AND current.message_id=p.message_id
             WHERE p.source_id IN (?,?,?)
+              AND p.event_key IN ({placeholders})
             """,
-            (_PRIMARY_CAPTURE_SOURCE, "MELTED_AGGREGATE", "MELTED_FLOW"),
+            (_PRIMARY_CAPTURE_SOURCE, "MELTED_AGGREGATE", "MELTED_FLOW", *selected),
         ).fetchall()
         if has_channel_projection is not None
         else []
@@ -311,6 +322,23 @@ def archive_fact_research_context(
         actors=context.actors,
         key=key,
     )
+
+
+def has_archived_research_context(cursor, *, fact_id: str, fact_revision: int, source_code: str) -> bool:
+    """Accept only a durable raw link for this exact fact revision and source."""
+    role = "SOURCE_TEXT" if source_code in {"MELTED_AGGREGATE", "MELTED_FLOW"} else "OFFER_TEXT"
+    cursor.execute(
+        """
+        SELECT 1 FROM market_data.research_fact_raw_messages r
+        JOIN market_data.research_raw_messages m
+          ON m.raw_message_key=r.raw_message_key AND m.plaintext_hash=r.plaintext_hash
+        WHERE r.fact_id=decode(%s,'hex') AND r.fact_revision=%s
+          AND m.source_code=%s AND r.raw_role=%s AND m.raw_kind=%s
+        LIMIT 1
+        """,
+        (fact_id, fact_revision, source_code, role, role),
+    )
+    return cursor.fetchone() is not None
 
 
 def archive_research_message(

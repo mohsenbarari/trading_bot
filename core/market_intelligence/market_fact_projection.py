@@ -20,6 +20,7 @@ from .private_pipeline_contracts import FactPayload, content_hash, load_source_r
 from .research_archive import (
     ResearchArchiveKey,
     archive_fact_research_context,
+    has_archived_research_context,
     research_contexts_for_rows,
 )
 from .xau_model_input import (
@@ -110,6 +111,17 @@ def initialize_export_ledger(connection: sqlite3.Connection) -> None:
         ON market_fact_export_history(event_key,fact_revision);
         CREATE INDEX IF NOT EXISTS idx_market_observations_export_event_time
         ON market_observations(event_time_utc DESC,id DESC);
+        CREATE INDEX IF NOT EXISTS idx_market_observations_export_non_xau_id
+        ON market_observations(id) WHERE source_code<>'XAUUSD';
+        CREATE INDEX IF NOT EXISTS idx_market_observations_export_non_xau_state
+        ON market_observations(id,event_key,inserted_at_utc,source_code)
+        WHERE source_code<>'XAUUSD';
+        CREATE INDEX IF NOT EXISTS market_fact_export_ledger_state_idx
+        ON market_fact_export_ledger(
+            event_key,observation_inserted_at_utc,status,reason_code
+        );
+        CREATE INDEX IF NOT EXISTS market_fact_export_semantics_state_idx
+        ON market_fact_export_semantics(event_key,observation_inserted_at_utc);
         CREATE TABLE IF NOT EXISTS market_xau_model_input_buckets (
             bucket_number INTEGER PRIMARY KEY,
             selected_event_key BLOB NOT NULL UNIQUE,
@@ -347,14 +359,20 @@ def _pending_export_rows(
         )
     """
 
-    def select(extra_where: str, parameters: tuple[object, ...], limit: int):
+    def select(
+        extra_where: str, parameters: tuple[object, ...], limit: int,
+        *, from_sql: str = "market_observations o", eligibility: str = eligible,
+        columns: str = "o.*",
+    ):
         return market.execute(
             f"""
-            SELECT o.*
-            FROM market_observations o
-            LEFT JOIN market_fact_export_ledger l ON l.event_key=o.event_key
-            LEFT JOIN market_fact_export_semantics s ON s.event_key=o.event_key
-            WHERE {eligible} AND {pending} {extra_where}
+            SELECT {columns}
+            FROM {from_sql}
+            LEFT JOIN market_fact_export_ledger l
+              INDEXED BY market_fact_export_ledger_state_idx ON l.event_key=o.event_key
+            LEFT JOIN market_fact_export_semantics s
+              INDEXED BY market_fact_export_semantics_state_idx ON s.event_key=o.event_key
+            WHERE {eligibility} AND {pending} {extra_where}
             LIMIT ?
             """,
             (*parameters, limit),
@@ -406,13 +424,40 @@ def _pending_export_rows(
             if selected
             else ""
         )
-        rows.extend(
-            select(
-                exclusion + "ORDER BY o.id",
-                selected,
-                remaining,
-            )
+        # Most stored history consists of raw XAU ticks, while only one real
+        # tick per closed 15-second bucket is eligible for model transport.
+        # Scanning every raw row by ID to find the next pending fact caused
+        # multi-GB reads on every cycle. Scan the non-XAU partial index and
+        # drive XAU from its selected bucket keys instead. The first N rows
+        # of each disjoint partition contain the exact global first N IDs.
+        historical = select(
+            exclusion + "AND o.source_code<>'XAUUSD' ORDER BY o.id",
+            selected, remaining,
+            from_sql=("market_observations o INDEXED BY "
+                      "idx_market_observations_export_non_xau_state"),
+            eligibility="1", columns="o.id",
         )
+        historical.extend(select(
+            exclusion + "ORDER BY o.id", selected, remaining,
+            from_sql=("market_xau_model_input_buckets b "
+                      "CROSS JOIN market_observations o"),
+            columns="o.id", eligibility=(
+                "o.event_key=b.selected_event_key AND o.source_code='XAUUSD' "
+                "AND CAST(strftime('%s','now') AS INTEGER) >= "
+                f"(b.bucket_number + 1) * {XAU_MODEL_INPUT_BUCKET_SECONDS} "
+                f"+ {XAU_MODEL_INPUT_EXPORT_SETTLE_SECONDS}"
+            ),
+        ))
+        # Read wide payload rows only after bounded candidate selection. All
+        # non-XAU readiness checks now use covering indexes, including both
+        # receipts; no per-row random read of the large payload tables.
+        identities = tuple(int(row["id"]) for row in
+                           sorted(historical, key=lambda row: int(row["id"]))[:remaining])
+        if identities:
+            rows.extend(market.execute(
+                "SELECT * FROM market_observations WHERE id IN ("
+                + ",".join("?" for _ in identities) + ") ORDER BY id", identities,
+            ).fetchall())
     return rows
 
 
@@ -750,6 +795,12 @@ def _ensure_offer_dependency_archived(
             raise MarketFactProjectionError(
                 "market_fact_projection_offer_dependency_not_materialized"
             )
+    if research_required and not research_archived:
+        with archive_connection.cursor() as cursor:
+            research_archived = int(has_archived_research_context(
+                cursor, fact_id=result.fact.fact_id,
+                fact_revision=result.fact.fact_revision, source_code=str(parent["source_code"]),
+            ))
     return research_required, research_archived
 
 
@@ -845,6 +896,14 @@ def export_market_store_facts(
                             context=context,
                             key=research_key,
                         )
+                        research_archived += 1
+                    elif source_code in RESEARCH_CONTEXT_SOURCES and has_archived_research_context(
+                        cursor, fact_id=result.fact.fact_id,
+                        fact_revision=result.fact.fact_revision, source_code=source_code,
+                    ):
+                        # An unchanged historical delivery can outlive local
+                        # raw TTL while its exact durable archive is intact.
+                        # Never substitute another revision or synthesize raw.
                         research_archived += 1
                 except BaseException:
                     cursor.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")

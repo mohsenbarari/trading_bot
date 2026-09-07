@@ -16,6 +16,7 @@ from core.market_intelligence.market_fact_archive import (
 from core.market_intelligence.market_fact_projection import (
     MarketFactProjectionError,
     _ensure_offer_dependency_archived,
+    export_market_store_facts,
     observation_payload,
 )
 from core.market_intelligence.market_store import (
@@ -41,14 +42,20 @@ class ProjectionCursor:
 
     def execute(self, query, parameters=()):
         self.archive.queries.append((query, parameters))
+        self.last_query = query
 
     def fetchone(self):
+        if "research_fact_raw_messages" in self.last_query:
+            return (1,) if self.archive.retained_context else None
+        if "market_fact_outbox" in self.last_query:
+            return (1, "b" * 64)
         return (1,) if self.archive.parent_present else None
 
 
 class ProjectionArchive:
-    def __init__(self, *, parent_present=False):
+    def __init__(self, *, parent_present=False, retained_context=False):
         self.parent_present = parent_present
+        self.retained_context = retained_context
         self.queries = []
 
     def cursor(self):
@@ -152,7 +159,7 @@ class ParentDependencyRecoveryTests(unittest.TestCase):
 
         def publish(*_args, **_kwargs):
             archive.parent_present = True
-            return SimpleNamespace(fact=SimpleNamespace(fact_id=expected))
+            return SimpleNamespace(fact=SimpleNamespace(fact_id=expected, fact_revision=1))
 
         with patch(
             "core.market_intelligence.market_fact_projection.build_and_publish_fact",
@@ -167,6 +174,32 @@ class ParentDependencyRecoveryTests(unittest.TestCase):
         )
         self.assertTrue(archive.parent_present)
         self.assertEqual(counts, (1, 0))
+
+    def test_export_counts_only_exact_retained_research_evidence_as_available(self):
+        for retained in (False, True):
+            temporary, market, parent, _child = self.private_gold_rows()
+            self.addCleanup(temporary.cleanup)
+            self.addCleanup(market.close)
+            key = bytes(parent["event_key"])
+            fact = SimpleNamespace(
+                fact_id="a" * 64, fact_revision=1, event_key=key.hex(),
+                origin_event_key=key.hex(), source_code="PRIVATE_GOLD_CHANNEL",
+                stream_id="market.fact.private-gold", source_sequence=1,
+                occurred_at_utc=parent["event_time_utc"], available_at_utc=parent["available_at_utc"],
+                parser_version=parent["parser_version"], quality_state="ELIGIBLE",
+                quality_reason_codes=[], payload={}, payload_hash="c" * 64,
+            )
+            archive = ProjectionArchive(retained_context=retained)
+            with patch("core.market_intelligence.market_fact_projection.build_and_publish_fact",
+                       return_value=SimpleNamespace(fact=fact, changed=False)), patch(
+                       "core.market_intelligence.market_fact_projection._fact_semantic_fingerprint",
+                       return_value="d" * 64):
+                report = export_market_store_facts(market, archive, force_event_keys=(key,))
+            self.assertEqual(report.research_contexts_required, 1)
+            self.assertEqual(report.research_contexts_archived, int(retained))
+            self.assertEqual(report.research_contexts_unavailable, int(not retained))
+            self.assertEqual(report.unchanged, 1)
+            self.assertFalse(any("INSERT INTO market_data.research" in sql for sql, _ in archive.queries))
 
     def test_existing_archive_parent_is_not_republished(self):
         temporary, market, _parent, child = self.private_gold_rows()
