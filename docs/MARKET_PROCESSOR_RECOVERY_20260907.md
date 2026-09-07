@@ -12,8 +12,33 @@ At 07:29 UTC the prior processor had 34 restarts, exit 1, no OOM. Repair accepts
 this explicitly recorded degraded baseline; it does not relax NEW liveness,
 ownership, image, mount, export or bystander checks. A fallback to the known
 broken prior artifact is reported as degraded, never as healthy rollback.
-Activation and end-to-end acceptance remain pending. The user's additional
-report of review labels and delayed data requires separate quality/latency traces.
+Activation passed at 07:34:37 UTC: healthy Docker, zero restarts, unchanged
+bystanders/parent/mounts, no export rejection or missing research context. The
+exact poison message is now FILTERED/PRICE_OUT_OF_CANONICAL_RANGE; original
+lineage is retained. Catch-up and end-to-end acceptance remain open.
+
+### Review-label and live-latency findings
+
+Recent dashboard rows retain upstream `PENDING_REVIEW` with
+`INSUFFICIENT_OR_AMBIGUOUS_STRICTLY_PRIOR_SAME_BOOK_ANCHORS`; explicit named
+offers include ELIGIBLE rows, so this is not a blanket UI-only flag. The parser's
+mounted prediction ledger has zero rows, with an existing PRIVATE_PRIMARY
+authority epoch. Its live PRIVATE_PRIMARY snapshot is SAFE_NO_DATA, all 14 cells
+reporting NO_FRESH_MELTED. Do not switch authority or substitute the separate
+legacy dashboard's estimates to hide the missing input.
+
+The bounded parse queue used global oldest-first ordering, making new independent
+gold/XAU facts wait behind unrelated history. Fair selection now reserves at
+least half of each batch for global oldest history and shares the other half
+across five sources. XAU, aggregate and self-contained private offer revision
+histories can select actual fresh messages. Herat and melted-flow retain their
+within-source oldest-first ordering because they have prior-fact dependencies.
+The final selected batch is ordered causally; event times, economics, checkpoints,
+raw retention, model/quality policies and Product authority are unchanged.
+Small batches (<10) and unlimited/offline callers preserve old selection order.
+Additive indexes bound each source lookup. Tests cover lane fairness, old-history
+progress, future exclusion, exact-once drain, indexes on retained/new schema and
+full private offer/trade parity against FIFO after catch-up. Deployment pending.
 
 ## Cause and scope
 

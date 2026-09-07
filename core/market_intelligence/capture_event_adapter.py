@@ -257,6 +257,10 @@ CREATE TABLE IF NOT EXISTS capture_dirty_market_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_capture_dirty_market_ready
     ON capture_dirty_market_messages(available_at_utc,source_id,message_id);
+CREATE INDEX IF NOT EXISTS idx_capture_dirty_market_source_ready
+    ON capture_dirty_market_messages(source_id,available_at_utc,message_id);
+CREATE INDEX IF NOT EXISTS idx_capture_dirty_market_source_event
+    ON capture_dirty_market_messages(source_id,event_time_utc,available_at_utc,message_id);
 
 CREATE TABLE IF NOT EXISTS capture_dirty_groups (
     group_number INTEGER PRIMARY KEY CHECK(group_number IN (1,2)),
@@ -1027,6 +1031,14 @@ def initialize_capture_adapter(connection: sqlite3.Connection) -> None:
     connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_capture_projection_event_key "
         "ON capture_projection_keys(event_key)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_capture_dirty_market_source_ready "
+        "ON capture_dirty_market_messages(source_id,available_at_utc,message_id)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_capture_dirty_market_source_event "
+        "ON capture_dirty_market_messages(source_id,event_time_utc,available_at_utc,message_id)"
     )
 
 
@@ -2399,6 +2411,63 @@ def _missing_offer_reply_graph(
     return frozenset(included)
 
 
+def _select_dirty_market_messages(
+    staging: sqlite3.Connection, *, as_of_utc: str, max_messages: int | None,
+) -> list[sqlite3.Row]:
+    """Bound live/reference latency without starving retained history.
+
+    Half the bounded budget remains global oldest-first. The other half is
+    shared among the five source lanes. Herat normalization and melted-flow
+    linking need preceding facts, so their lanes remain oldest-first too.
+    Only independent XAU/aggregate messages and self-contained private offer
+    revision histories may take a fresh head. No cursor or timestamp changes.
+    """
+    ordered = (
+        "SELECT * FROM capture_dirty_market_messages WHERE available_at_utc<=? "
+        "ORDER BY available_at_utc,source_id,message_id"
+    )
+    # Small/offline callers preserve the original exact ordering.
+    if max_messages is None or max_messages < 10:
+        return staging.execute(
+            ordered + (" LIMIT ?" if max_messages is not None else ""),
+            (as_of_utc, max_messages) if max_messages is not None else (as_of_utc,),
+        ).fetchall()
+    sources = ("MELTED_PRIMARY_FLOW", "MELTED_AGGREGATE", "XAUUSD",
+               "USD_HERAT", "MELTED_FLOW")
+    independent = frozenset(sources[:3])
+    recent_lower = (
+        datetime.fromisoformat(as_of_utc.replace("Z", "+00:00")) - timedelta(minutes=10)
+    ).isoformat().replace("+00:00", "Z")
+    per_source = (max_messages // 2) // len(sources)
+    selected: dict[tuple[str, int], sqlite3.Row] = {}
+    for source in sources:
+        if source in independent:
+            query = (
+                "SELECT * FROM capture_dirty_market_messages "
+                "WHERE source_id=? AND event_time_utc>=? AND event_time_utc<=? "
+                "AND available_at_utc<=? "
+                "ORDER BY event_time_utc DESC,available_at_utc DESC,message_id DESC LIMIT ?"
+            )
+            parameters = (source, recent_lower, as_of_utc, as_of_utc, per_source)
+        else:
+            query = (
+                "SELECT * FROM capture_dirty_market_messages "
+                "WHERE source_id=? AND available_at_utc<=? "
+                "ORDER BY available_at_utc,message_id LIMIT ?"
+            )
+            parameters = (source, as_of_utc, per_source)
+        for row in staging.execute(query, parameters):
+            selected[(str(row["source_id"]), int(row["message_id"]))] = row
+    # At most N prior rows suffice to fill N slots after deduplication.
+    for row in staging.execute(ordered + " LIMIT ?", (as_of_utc, max_messages)):
+        selected.setdefault((str(row["source_id"]), int(row["message_id"])), row)
+        if len(selected) == max_messages:
+            break
+    return sorted(selected.values(), key=lambda row: (
+        str(row["available_at_utc"]), str(row["source_id"]), int(row["message_id"]),
+    ))
+
+
 def project_capture_changes(
     staging: sqlite3.Connection,
     market: sqlite3.Connection,
@@ -2441,16 +2510,9 @@ def project_capture_changes(
             ),
             available_at_utc=as_of,
         )
-    dirty_query = (
-        "SELECT * FROM capture_dirty_market_messages "
-        "WHERE available_at_utc<=? "
-        "ORDER BY available_at_utc,source_id,message_id"
+    dirty = _select_dirty_market_messages(
+        staging, as_of_utc=as_of, max_messages=max_market_messages,
     )
-    dirty_parameters: tuple[object, ...] = (as_of,)
-    if max_market_messages is not None:
-        dirty_query += " LIMIT ?"
-        dirty_parameters = (as_of, max_market_messages)
-    dirty = staging.execute(dirty_query, dirty_parameters).fetchall()
     projected = upserted = retracted = 0
     public_price_policy_rejections = 0
     private_trades = private_finalized = private_ambiguous = 0
