@@ -232,6 +232,9 @@ services:
       - market-backend
 
   market-fact-sync-worker:
+    # Keep the same durable owner recoverable after transient process/DB faults.
+    # Integrity refusals remain visible in health and are never skipped.
+    restart: unless-stopped
     extends:
       file: compose.yml
       service: market-runtime-base
