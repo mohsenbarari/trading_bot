@@ -57,7 +57,8 @@ class ProcessorHandoffGuards(unittest.TestCase):
                 handoff.ROLE: {
                     "image": handoff.OLD_IMAGE,
                     "restart": "on-failure:5",
-                    "environment": {"MARKET_PIPELINE_RELEASE_SHA": handoff.OLD},
+                    "environment": {"MARKET_PIPELINE_RELEASE_SHA": handoff.OLD,
+                                    "MARKET_PROCESSOR_MAX_FACT_EXPORTS_PER_CYCLE":"100"},
                     "labels": {"org.opencontainers.image.revision": handoff.OLD},
                     "volumes": [{"source": "/retained/state", "target": "/state"}],
                     "mem_limit": "384m",
@@ -73,11 +74,18 @@ class ProcessorHandoffGuards(unittest.TestCase):
         target["image"] = handoff.NEW_IMAGE
         target["restart"] = "unless-stopped"
         target["environment"]["MARKET_PIPELINE_RELEASE_SHA"] = handoff.NEW
+        target["environment"]["MARKET_PROCESSOR_MAX_FACT_EXPORTS_PER_CYCLE"] = handoff.EXPORT_LIMIT
         target["labels"]["org.opencontainers.image.revision"] = handoff.NEW
         return old, new
 
     def test_only_exact_processor_delta_is_allowed(self):
         handoff.validate_config(*self.configs())
+
+    def test_export_capacity_cannot_expand_beyond_exact_reviewed_bound(self):
+        old,new=self.configs()
+        new['services'][handoff.ROLE]['environment']['MARKET_PROCESSOR_MAX_FACT_EXPORTS_PER_CYCLE']='5000'
+        with self.assertRaisesRegex(RuntimeError,'unexpected_target_config_drift'):
+            handoff.validate_config(old,new)
 
     def test_both_capture_and_sender_are_protected(self):
         for role in ("market-fact-sync-worker", "market-capture-account2"):

@@ -11,9 +11,9 @@ import stat
 import subprocess
 import time
 
-OLD = '7c35c5111651ea0d06072a0ad143214eb68c7030'
+OLD = 'cb45aad7e0f17aec4a16c242a234deb71f5585f7'
 NEW = 'cb45aad7e0f17aec4a16c242a234deb71f5585f7'
-OLD_IMAGE = 'sha256:1d35a38721dc6cb5364fb992cbc9d6ef668bba68d405d977d8a9b5b7c34c4f4d'
+OLD_IMAGE = 'sha256:1371fce0a9158a06482d77e211a0265df59aa18f08e4f8639edbad97efe8eaad'
 NEW_IMAGE = 'sha256:1371fce0a9158a06482d77e211a0265df59aa18f08e4f8639edbad97efe8eaad'
 PORTABLE = 'f54768ebbbd5feefa336b931707f81f71fe307a2c5fd4691fd28bb7ee8488cd7'
 KNOWN_DEGRADED_RELEASE = '83a698e0f1818bbc4088614467d76e04e9b9b5da'
@@ -26,8 +26,9 @@ STATE_ROOT = Path('/srv/trading-bot/market-data-staging-shadow/state/market-proc
 STATE = STATE_ROOT / ROLE
 OWNER_LOCK = STATE / 'owner.lock'
 PARENT_LOCK = Path('/root/secure-envs/trading-bot/queue-cutover-artifacts/production-release.lock')
-OPS = Path('/srv/trading-bot/incident-recovery/20260907-processor-live-fairness')
-OVERRIDE = OPS / 'processor-live-fairness-hotfix.override.json'
+OPS = Path('/srv/trading-bot/incident-recovery/20260907-processor-export-capacity')
+OVERRIDE = OPS / 'processor-export-capacity.override.json'
+EXPORT_LIMIT = '500'
 JOURNAL = OPS / 'handoff.json'
 
 def require(condition, reason):
@@ -95,6 +96,7 @@ def compose(new=False):
     args += ['-f','/srv/trading-bot/incident-recovery/20260907-processor/processor-replay-hotfix.override.json']
     args += ['-f','/srv/trading-bot/incident-recovery/20260907-processor-covering/processor-covering-hotfix.override.json']
     args += ['-f','/srv/trading-bot/incident-recovery/20260907-processor-input-isolation/processor-input-isolation-hotfix.override.json']
+    args += ['-f','/srv/trading-bot/incident-recovery/20260907-processor-live-fairness/processor-live-fairness-hotfix.override.json']
     if new:
         args += ['-f',str(OVERRIDE)]
     return args
@@ -109,6 +111,7 @@ def validate_config(old, new):
     expected['image'] = NEW_IMAGE
     expected['restart'] = 'unless-stopped'
     expected['environment']['MARKET_PIPELINE_RELEASE_SHA'] = NEW
+    expected['environment']['MARKET_PROCESSOR_MAX_FACT_EXPORTS_PER_CYCLE'] = EXPORT_LIMIT
     expected.setdefault('labels',{})['org.opencontainers.image.revision'] = NEW
     require(expected == b[ROLE], 'unexpected_target_config_drift')
     for key in ('networks','volumes','secrets','configs'):
@@ -219,7 +222,8 @@ def main():
                 and parent.get('device')==info.st_dev,'parent_binding_drift')
         require(not JOURNAL.exists(),'journal_exists_no_blind_repeat')
         override={'services':{ROLE:{'image':NEW_IMAGE,'restart':'unless-stopped',
-                   'environment':{'MARKET_PIPELINE_RELEASE_SHA':NEW},
+                   'environment':{'MARKET_PIPELINE_RELEASE_SHA':NEW,
+                                  'MARKET_PROCESSOR_MAX_FACT_EXPORTS_PER_CYCLE':EXPORT_LIMIT},
                    'labels':{'org.opencontainers.image.revision':NEW}}}}
         if OVERRIDE.exists():
             file_check(OVERRIDE,0)
@@ -247,6 +251,7 @@ def main():
         record={'schema':'market_processor_scoped_hotfix_handoff/1.0','status':'PREPARED',
                 'created_at_utc':utc(),'old_release':OLD,'new_release':NEW,'old_image':OLD_IMAGE,
                 'new_image':NEW_IMAGE,'portable_image_digest':PORTABLE,
+                'export_limit':int(EXPORT_LIMIT),
                 'parent_lock_sha256':digest(lock_bytes),'old_container_id':old['Id'],
                 'data_deleted':False,'product_changed':False,'product_queue_changed':False,
                 'capture_changed':False,'sender_changed':False,'parent_handoff_changed':False,
