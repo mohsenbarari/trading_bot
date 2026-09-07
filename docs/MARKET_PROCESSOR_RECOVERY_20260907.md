@@ -1,5 +1,36 @@
 # Market processor replay/backlog recovery — 2026-09-07
 
+## Conversation projection optimization prepared — not deployed
+
+- Refactor commit `0625597f27daca7e591e9e277b662bb24db69083` replaces the
+  full historical offer scan for every fact with an in-memory index per exact
+  instrument/trade-form book, sorted once by event time. Two binary searches
+  select only the existing inclusive five-minute window. The original function
+  still enforces self-exclusion, `available_at_utc` causality, settlement-book
+  preference/fallback, minimum evidence, median/MAD and 5% floor. No data is
+  deleted, TTL shortened, persistent cache added or model policy/version changed.
+- A test oracle retains the pre-index algorithm and compares every exclusion
+  reason. Boundary coverage proves exactly 300 seconds is included, 301 seconds
+  excluded, and a reference available in the candidate's future remains unusable.
+  A 2,000-row complexity test bounds reference visits and prevents a return to
+  the historical quadratic scan.
+- Focused projection test: 12 passed initially; final combined group/bridge/
+  dashboard suite: **57 passed in 8.13s**. Adjacent processor/export/transport/
+  parent/handoff suite: **48 passed in 2.268s**. Syntax, lint and diff checks pass.
+- Final production-data comparison was one frozen SQLite `mode=ro`, `query_only`
+  transaction with a 512MiB/55s bound and low CPU priority. For **8,496 real
+  rows**, all old/new decisions and reason codes were byte-for-byte equivalent
+  (canonical digest `3f0d03255bb1a58fd214f05472ace039cec16ad57cd8852d98144f2623a35a8d`).
+  Calculation fell from 8.976s to 0.274s (**32.7x**). An earlier frozen sample
+  of 8,503 rows also matched and measured 44x; the row set naturally changed
+  between read transactions, never within either comparison.
+- This commit affects only the local compatibility bridge path; rebuilding or
+  replacing market-processor is unnecessary. Activation still requires a new
+  immutable bridge release and scoped operational authorization. After rollout,
+  measure complete oneshot duration, exact event-to-conversation commit and
+  authenticated page visibility. Do not infer the final latency from this
+  function-only benchmark. The live bridge remains d08 until that activation.
+
 ## Approved follow-up deployed — 10:27–10:35 UTC
 
 The user explicitly approved both the d08 image for **market-processor only**

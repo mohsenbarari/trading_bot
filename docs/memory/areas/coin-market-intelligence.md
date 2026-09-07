@@ -1,6 +1,6 @@
 # Coin Market Intelligence
 
-- Sep07: approved `d08ec9b2` processor+local bridge live; 236 image tests pass, backlog=0, estimates=14/14. Latency remains: processor~33s, conversation~32s (full-book loop). Store insert≠commit/UI time; lineage terminal≠completion. Main=`32d266bd`. Historical revision/raw links remain open. Evidence: `docs/MARKET_PROCESSOR_RECOVERY_20260907.md`.
+- Sep07: `d08ec9b2` processor+bridge live; backlog=0, estimates=14/14. Prepared bridge perf `0625597f`: 8,496 real decisions exactly equal, 8.976→0.274s; not deployed. Store insert≠commit/UI; lineage terminal≠completion. Main=`32d266bd`. Historical revision/raw links open. Evidence: `docs/MARKET_PROCESSOR_RECOVERY_20260907.md`.
 - Sender `fb95bbde` is live. Replay only retained originals with bound ACKs; never reset checkpoints. Dead letters/backlog degrade health; market silence alone does not. `docs/MARKET_TRANSFER_RECOVERY_20260907.md`.
 - Account1 `a6dcd636` is live; retain replay quarantine. Docker liveness validates role/schema/source/status/freshness/PID; strict replay/promotion readiness still exposes quarantine. Never delete/synthesize evidence to pass. `docs/MARKET_CAPTURE_RECOVERY_20260905.md`.
 
