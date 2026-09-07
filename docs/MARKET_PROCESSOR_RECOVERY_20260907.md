@@ -1,6 +1,6 @@
 # Market processor replay/backlog recovery — 2026-09-07
 
-## Conversation projection optimization prepared — not deployed
+## Conversation projection optimization activated — 11:12 UTC; verified through 11:26 UTC
 
 - Refactor commit `0625597f27daca7e591e9e277b662bb24db69083` replaces the
   full historical offer scan for every fact with an in-memory index per exact
@@ -24,12 +24,43 @@
   Calculation fell from 8.976s to 0.274s (**32.7x**). An earlier frozen sample
   of 8,503 rows also matched and measured 44x; the row set naturally changed
   between read transactions, never within either comparison.
-- This commit affects only the local compatibility bridge path; rebuilding or
-  replacing market-processor is unnecessary. Activation still requires a new
-  immutable bridge release and scoped operational authorization. After rollout,
-  measure complete oneshot duration, exact event-to-conversation commit and
-  authenticated page visibility. Do not infer the final latency from this
-  function-only benchmark. The live bridge remains d08 until that activation.
+- The owner explicitly authorized activation of `0625597f` only for the local
+  `coin-private-shadow-legacy-estimator-bridge`. The immutable release is live;
+  market-processor was not rebuilt or replaced, Product remains `LEGACY`, the
+  existing timer schedule is byte-identical, and all three writer-lock
+  device/inode/link/mode/owner tuples are unchanged. The timer is enabled and
+  active. Prior unit files are retained on the attached volume at
+  `/srv/trading-bot/staging-data/incident-recovery/20260907-bridge-price-window/`.
+  Rollback restores those exact unit files and d08; it must never deactivate
+  projected rows or reset a database.
+- The first production run completed at 11:12:33 with `OK`: Market projection
+  2.701s, conversation projection 4.875s and total 7.588s. Repeated automatic
+  runs remained `OK`, incremental and zero-restart. Their conversation phase
+  measured 4.747–5.211s instead of the observed d08 range of 32.220–34.948s.
+  Total duration varied from 19.757–23.592s when shared Market/conversation
+  locks added 12.683–16.384s; lock contention, not the optimized calculation,
+  is now the dominant local bridge delay.
+- Nine real post-activation G1/G2 facts old enough to precede the sampled bridge
+  cycle were traced without reading payload values: 9/9 existed in Legacy with
+  an `APPLIED` ledger row and 9/9 existed in `canonical_group_projection`.
+  Source-Store insert to conversation projection timestamp was 12.643–43.884s.
+  Projection timestamp precedes transaction commit, so this is not mislabeled
+  as exact browser latency. The authenticated activity endpoint subsequently
+  returned HTTP 200 with 40 current rows (31 model, one review, eight audit) and
+  a post-activation latest display time; the open page refreshes every 15s.
+- The live PRIVATE_PRIMARY estimator snapshot at 11:26:33 was `OK` with 14/14
+  cells `ESTIMATED`. The snapshot sender remained `live-ready`, retained its
+  acknowledged receiver view and recovered transient consecutive failures to
+  zero during observation; brief retry bursts still recur and remain observable.
+  Remote market-processor stayed on d08, Docker healthy with zero restarts/OOM,
+  backlog zero and no archive refusal/unavailable research context. Its sampled
+  projection still cost 22.530s and remains the next measured bottleneck.
+- The immutable release added 91MiB to the root filesystem, which remained 56%
+  used with about 17GiB free. The unit backup uses 12KiB on the attached volume,
+  which remained 55% used with about 44GiB free. No raw/fact/model data, cache,
+  volume or prior release was deleted. The historical revision/raw-link audit
+  remains open, so this activation closes the bridge price-window deployment,
+  not the full Market incident.
 
 ## Approved follow-up deployed — 10:27–10:35 UTC
 
