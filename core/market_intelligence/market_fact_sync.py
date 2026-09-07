@@ -28,7 +28,9 @@ from .private_pipeline_contracts import (
     batch_items_hash,
     content_hash,
 )
-from .market_fact_recovery import FactRecoveryError, replay_acknowledged_prefix
+from .market_fact_recovery import (
+    FactRecoveryError, FactRecoveryRetryableError, replay_acknowledged_prefix,
+)
 
 
 SYNC_SCHEMA = "market_fact_sync/1.0"
@@ -510,6 +512,8 @@ def run_sync_cycle(
             )
         except MarketTransportError:
             reason, permanent = "REPLAY_TRANSPORT_UNAVAILABLE", False
+        except FactRecoveryRetryableError as exc:
+            reason, permanent = str(exc), False
         except (FactRecoveryError, ValidationError) as exc:
             reason = str(exc) if isinstance(exc, FactRecoveryError) else "REPLAY_CONTRACT_INVALID"
             permanent = True

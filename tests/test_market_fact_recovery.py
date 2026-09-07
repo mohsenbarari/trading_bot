@@ -118,6 +118,43 @@ class FactRecoveryTests(unittest.TestCase):
             finally:
                 receiver.close()
 
+    def test_temporary_replay_http_refusal_keeps_original_batch_retryable(self):
+        first = batch_fixture()
+        second = revised_batch(delivery_sequence=2, revision=2, price="187600")
+        third = MarketFactBatchV1.model_validate(revised_batch(delivery_sequence=3, revision=3, price="187700"))
+        for status in (408, 425, 429, 500, 502, 503, 504):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as tmp:
+                receiver = connect_receiver(Path(tmp) / "receiver.sqlite")
+                try:
+                    apply_fact_batch(receiver, first)
+                    def send(doc):
+                        if doc["first_sequence"] == 2:
+                            return status, {"error": "temporarily unavailable"}
+                        return apply_fact_batch(receiver, doc)
+                    with patch("core.market_intelligence.market_fact_sync.load_next_batch", return_value=third), \
+                         patch("core.market_intelligence.market_fact_sync.record_batch_failure", return_value=1) as failure:
+                        result = run_sync_cycle(Outbox([outbox_row(second)]), sender_instance_id="test-recovery", send=send)
+                        self.assertFalse(failure.call_args.kwargs["permanent"])
+                        self.assertEqual(result["rejected"], 0)
+                        self.assertEqual(receiver.execute("SELECT count(*) FROM fact_deliveries").fetchone()[0], 1)
+                finally:
+                    receiver.close()
+
+    def test_large_replay_stops_at_one_hundred_originals_then_continues(self):
+        rows = [outbox_row(revised_batch(delivery_sequence=i, revision=i, price=str(187000 + i)))
+                for i in range(1, 102)]
+        stream_id = rows[0][1]["stream_id"]
+        first = load_acknowledged_replay(
+            Outbox(rows), stream_id=stream_id, receiver_sequence=0,
+            sender_sequence=101, sender_instance_id="test-recovery",
+        )
+        self.assertEqual((first.first_sequence, first.last_sequence, first.item_count), (1, 100, 100))
+        second = load_acknowledged_replay(
+            Outbox(rows), stream_id=stream_id, receiver_sequence=100,
+            sender_sequence=101, sender_instance_id="test-recovery",
+        )
+        self.assertEqual((second.first_sequence, second.last_sequence, second.item_count), (101, 101, 1))
+
     def test_unavailable_compacted_unacked_or_changed_original_is_not_sent(self):
         first = batch_fixture()
         original = outbox_row(first)

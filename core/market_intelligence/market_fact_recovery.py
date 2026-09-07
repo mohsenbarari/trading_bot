@@ -23,6 +23,10 @@ class FactRecoveryError(RuntimeError):
     """Payload-free recovery refusal; never mask an identity/integrity error."""
 
 
+class FactRecoveryRetryableError(FactRecoveryError):
+    """A temporary receiver refusal must not permanently strand the stream."""
+
+
 def load_acknowledged_replay(
     connection, *, stream_id: str, receiver_sequence: int,
     sender_sequence: int, sender_instance_id: str,
@@ -76,6 +80,11 @@ def load_acknowledged_replay(
 
 
 def validate_replay_ack(batch: MarketFactBatchV1, status: int, response: Mapping) -> MarketFactAckV1:
+    # A receiver/proxy may return a small JSON error instead of an ACK while
+    # overloaded or restarting. Classify the HTTP status before validating the
+    # ACK contract, otherwise a temporary outage becomes a permanent failure.
+    if status in {408, 425, 429} or 500 <= status < 600:
+        raise FactRecoveryRetryableError("REPLAY_RECEIVER_TEMPORARILY_UNAVAILABLE")
     ack = MarketFactAckV1.model_validate(response)
     if (status != 200 or ack.status != "ACK" or ack.batch_id != batch.batch_id
             or ack.stream_id != batch.stream_id or ack.rejected_count
