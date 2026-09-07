@@ -1,8 +1,9 @@
 # Coin Market Intelligence
 
-- Sep07: Receiver rollback can strand ACKed prefixes. Replay retained original
-  envelopes with bound ACKs; never reset checkpoints. Dead letters/backlog must
-  degrade transport health; closed-market silence alone is not failure. See
+- Sep07: Sender `fb95bbde` is live. Replay rollback gaps only with retained
+  originals and bound ACKs; never reset checkpoints. Dead letters/backlog degrade
+  health; market silence alone is not failure. Other-source parser backlog remains
+  open. Deployment/verification:
   `docs/MARKET_TRANSFER_RECOVERY_20260907.md`.
 - Sep05: Account1 capture `a6dcd636` and parent-first processor `9c613d39` are live; replay quarantine retained. `docs/MARKET_CAPTURE_RECOVERY_20260905.md`. Check Product rates.
 - Sep05: Docker capture liveness validates live role/schema/source/status/freshness/PID, while strict `healthcheck` remains the replay/promotion gate. A retained point-in-time replay quarantine must stay visible to strict readiness and must never be deleted or synthesized merely to make Docker green.

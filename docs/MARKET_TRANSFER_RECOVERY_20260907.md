@@ -100,17 +100,61 @@ reported separately from transfer backlog and parser dispositions.
   context excludes runtime data and image transport must stream directly;
   do not create a second large image archive on the root disk.
 
-## Deployment gate still open
+## Deployment authorization and completed sender-only handoff
 
-The live repair above used original envelopes and existing sender runtime. It
-does not activate the newly committed sender recovery/health/restart behavior.
-The execution environment's approval reviewer denied transfer of the internal
-runtime image to the inventory-confirmed Web host `65.109.220.59:37067`, asking
-for explicit authorization of that payload and destination. Do not bypass this
-with source copying, a different transport, or another destination. Obtain that
-specific permission and then perform a digest-pinned **sender-only** handoff,
-preserving capture/processor containers, parent authority and state mounts.
+The execution environment initially required explicit image/destination approval.
+The owner supplied it on September 7 for `fb95bbde` to the existing Web host
+`65.109.220.59:37067`, activating only the data-transfer service. This authorization
+was obtained before retrying the transfer; the original denial was not bypassed.
 
-Local recovery + stage-8 transport + stage-3 foundation verification: 38 tests
-passed. Image-contained tests must be rerun on the final image after any later
-code change; a previous image's test result is not a receipt for a new image.
+`scripts/incident_sender_handoff_20260907.py` completed `APPLIED_LIVE` at
+05:37:51 UTC. Its preflight compared the full rendered Compose definitions,
+validated the original parent maintenance lock and required exactly one sender
+owner. Only image/release identity and the sender restart policy changed. Secret
+and state mounts, capture and processor containers, all other running containers,
+Product authority, and parent lock bytes remained unchanged. The prior runtime
+was retained for a scoped rollback; no database, cursor, or historical failure
+evidence was deleted or reset.
+
+Exact deployed source is `fb95bbdece703a09eb6ca3d6b9e2fccf04abbe3b` (tree
+`a6c61011ec069c1c33028e12edf5f75d0783e6eb`). Docker storage engines on the two hosts
+report different local image IDs, so receipt verification also matched the
+configuration, creation metadata, architecture/OS, and every content-layer ID:
+
+- Local image ID: `sha256:186a9f5bf7721d95295bc9402c14538b3e61f00f9801277b0a3264dddcf69406`.
+- Remote pinned image ID: `sha256:f5762ed500ad0c0656394e46fc98e73801d483576fba09eb40251c5f20579b9f`.
+- Matching portable content digest: `251f8451d5ac35a542a464c2beb77d5d118b557b37e957d1f7aef4e540de672d`.
+- Matching image-input signature: `3b4d4a244516949fdc1bcf59a30d428229b24aede66a8a2a240af1fb29e098f7`.
+
+The approximately 153 MB image was streamed directly; no root-disk tar copy was
+created. The root-private remote receipt/override is under
+`/srv/trading-bot/incident-recovery/20260907-transfer/`; retain it while this
+scoped override is active or this incident is open, then retire it through normal
+release retention after an integrated release supersedes the override.
+
+Post-deployment verification:
+
+- At 05:38:36 UTC the new process had acknowledged 20 real deliveries, with
+  zero duplicates, rejections, dead letters, or pending deliveries. Counters in
+  its heartbeat are process-lifetime counters; historical failures remain in
+  the database. No fabricated market events or live fault injection were used.
+- At 05:43:35 UTC both receiver and model adapter covered all ten sender stream
+  checkpoints observed after deployment. This proves delivery-prefix coverage,
+  not the currency of input facts that the parser has not yet produced.
+- An authenticated HTTP check of the actual dashboard again returned 200 and
+  the same correct last GROUP_1/GROUP_2 source event times. Capture silence during
+  market closure was not treated as a fault.
+- Local recovery/transport/foundation and sender-handoff guards: 45 tests passed.
+  The exact runtime image separately passed 26 recovery/transport tests without
+  network access, under read-only and bounded-resource execution.
+
+## Separate parser issue remains open
+
+At 05:38 UTC, approximately 108,000 dirty market messages remained across melted,
+Herat and XAU sources; coin dirty groups were zero. The earlier short-term decline
+did not establish sustained draining. A sample of five old XAU dirty rows was
+processed between checks, but the full backlog did not clear and melted/Herat
+latest facts remain behind capture. Do not silently raise health freshness limits,
+drop historical work, or refresh source timestamps to call this healthy. Parser
+capacity/repeated-work and per-source scheduling need separate diagnosis and
+verification. This sender-only handoff did not alter that processor.
