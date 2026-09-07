@@ -20,8 +20,13 @@
 - A regression fixture retains the valid group calibration while excluding a
   look-alike row from a non-group source. All 64 group parser/linker/feedback
   tests and all 50 processor/adapter/research-context tests pass (114 total).
-  The candidate has not been built, transferred or activated; d08 remains the
-  sole production market-processor version.
+  Immutable local image
+  `market_pipeline_release:9d752171fee23b20afdef4bd6efc8c3962262586`
+  is `sha256:2b77bdd8fd5536c5237609e98fe94e4afc6589e5765ef8bdfc8fd23f1abef9d6`;
+  its linux/amd64, `10001:10001`, release/tree/input-signature labels match the
+  committed source and its offline import/scope smoke test passes. It has not
+  been transferred or activated; d08 remains the sole production processor.
+  The build left the root filesystem at 56% with about 17GiB free.
 
 ## Conversation projection optimization activated — 11:12 UTC; verified through 11:26 UTC
 
