@@ -145,5 +145,8 @@ The `commit` field is the exact final integration HEAD when this cycle commits a
 otherwise null. A committed result must also return the exact `gemini_worker_run_id`,
 `gemini_reviewer_run_id`, and `proposal_sha256`; the local Supervisor validates their
 complete chain and rejects any commit whose paths, modes or bytes differ from proposal.
-All three fields are null when no commit is created. Keep the summary factual and put
-every blocker in `blockers`.
+All three fields are null when no commit is created. Keep the summary factual.
+The `blockers` field contains only conditions that make state BLOCKED; CONTINUE and COMPLETE
+must return `blockers: []`. Pre-existing unrelated failures proven by a clean baseline
+belong in summary and next_action, not blockers. The local recovery path is a narrow
+last-resort for a valid exact commit and does not weaken any transition or external gate.

@@ -301,6 +301,54 @@ def validate_result(result: object) -> dict:
     return result
 
 
+def recover_committed_advisory_result(
+    raw_result: object,
+    validation_error: Exception,
+) -> tuple[dict, list[str]]:
+    """Normalize a committed CONTINUE receipt that erroneously reported non-blocking blockers."""
+    if (
+        not isinstance(validation_error, AutopilotError)
+        or str(validation_error) != "non-blocked state cannot report blockers"
+    ):
+        raise AutopilotError(f"unrecoverable validation error: {validation_error}")
+    if not isinstance(raw_result, dict) or set(raw_result) != RESULT_KEYS:
+        raise AutopilotError("Codex result does not match the exact contract")
+    if raw_result.get("state") != "CONTINUE":
+        raise AutopilotError("recovery only applies to CONTINUE state")
+    if raw_result.get("disposition") != "NONE" or raw_result.get("category") != "NONE":
+        raise AutopilotError("recovery requires disposition NONE and category NONE")
+    commit = raw_result.get("commit")
+    if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise AutopilotError("recovery requires a valid 40-hex commit SHA")
+    next_action = raw_result.get("next_action")
+    if not isinstance(next_action, str) or not next_action.strip():
+        raise AutopilotError("recovery requires a non-empty next_action")
+    worker_run_id = raw_result.get("gemini_worker_run_id")
+    reviewer_run_id = raw_result.get("gemini_reviewer_run_id")
+    proposal_sha256 = raw_result.get("proposal_sha256")
+    if (
+        not isinstance(worker_run_id, str)
+        or not PROPOSAL_RUN_ID.fullmatch(worker_run_id)
+        or not isinstance(reviewer_run_id, str)
+        or not PROPOSAL_RUN_ID.fullmatch(reviewer_run_id)
+        or not isinstance(proposal_sha256, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", proposal_sha256)
+    ):
+        raise AutopilotError("recovery requires exact Gemini Worker/Reviewer evidence")
+    blockers = raw_result.get("blockers")
+    if (
+        not isinstance(blockers, list)
+        or not (1 <= len(blockers) <= 20)
+        or any(not isinstance(item, str) or not item.strip() for item in blockers)
+    ):
+        raise AutopilotError("recovery requires a non-empty bounded list of string blockers")
+    candidate = dict(raw_result)
+    candidate["blockers"] = []
+    advisories = list(blockers)
+    normalized = validate_result(candidate)
+    return normalized, advisories
+
+
 def proposal_run_dir(root: Path, run_id: str) -> Path:
     if not PROPOSAL_RUN_ID.fullmatch(run_id):
         raise AutopilotError("proposal evidence run ID is invalid")
@@ -541,9 +589,18 @@ def run_cycle(
         if file_sha256(codex) != identity["sha256"]:
             raise AutopilotError("Codex CLI identity changed during the cycle")
         result_path = run_dir / "result.json"
-        result = validate_transition(root, before, validate_result(unique_json(
+        raw_result = unique_json(
             bounded_file_text(root, result_path, MAX_RESULT_BYTES, "Codex cycle result")
-        )))
+        )
+        try:
+            validated_receipt = validate_result(raw_result)
+            advisories: list[str] = []
+        except AutopilotError as exc:
+            if str(exc) != "non-blocked state cannot report blockers":
+                raise
+            validated_receipt, advisories = recover_committed_advisory_result(raw_result, exc)
+        result = validate_transition(root, before, validated_receipt)
+        result["advisories"] = advisories
         meta.update(
             state=result["state"],
             finished_at=time.time(),
@@ -552,6 +609,7 @@ def run_cycle(
             summary=result["summary"],
             next_action=result["next_action"],
             blockers=result["blockers"],
+            advisories=result["advisories"],
             gemini_worker_run_id=result["gemini_worker_run_id"],
             gemini_reviewer_run_id=result["gemini_reviewer_run_id"],
             proposal_sha256=result["proposal_sha256"],
@@ -663,6 +721,7 @@ def run_loop(root: Path, codex: Path, max_cycles: int, timeout: int, once: bool)
                         evidence=str(run_dir), head=result["head_after"],
                         summary=result["summary"], next_action=result["next_action"],
                         blockers=result["blockers"],
+                        advisories=result.get("advisories", []),
                         gemini_worker_run_id=result["gemini_worker_run_id"],
                         gemini_reviewer_run_id=result["gemini_reviewer_run_id"],
                         proposal_sha256=result["proposal_sha256"],
