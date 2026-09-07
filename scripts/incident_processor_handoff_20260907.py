@@ -11,11 +11,11 @@ import stat
 import subprocess
 import time
 
-OLD = '9c613d39a14f7e42782fc40a50db87e709d735d7'
-NEW = 'ab205f08a66ae67e6cb9013cabc5bf4b285bf1fd'
-OLD_IMAGE = 'sha256:b873801dca5983c1ac97068b14baa755c2031d438cf447d393cbdb4c749faa0a'
-NEW_IMAGE = 'sha256:0bf49ccd181e26d4bdd7d1418aab3c48186ba30f3c3f960e395aa3a772ed375c'
-PORTABLE = 'ed1d8950c3a0dc4c282ee7b6e880ad0c150dbf57f71618aec4a82e8480a26b1e'
+OLD = 'ab205f08a66ae67e6cb9013cabc5bf4b285bf1fd'
+NEW = '83a698e0f1818bbc4088614467d76e04e9b9b5da'
+OLD_IMAGE = 'sha256:0bf49ccd181e26d4bdd7d1418aab3c48186ba30f3c3f960e395aa3a772ed375c'
+NEW_IMAGE = 'sha256:082255a7452ae5a66f8306b6c7f0c430ddb7482323c2df17027c655965911df3'
+PORTABLE = '77a1f93d881b08cc272f7e8792f6091c4ccf15511e8e05bcbb39aa8fbe76278c'
 PARENT_RELEASE = '4ef8e6dcb2d361b763bd8b72dc730c1f978f564a'
 ROLE = 'market-processor'
 PROJECT = 'market-private-pipeline-primary'
@@ -25,8 +25,8 @@ STATE_ROOT = Path('/srv/trading-bot/market-data-staging-shadow/state/market-proc
 STATE = STATE_ROOT / ROLE
 OWNER_LOCK = STATE / 'owner.lock'
 PARENT_LOCK = Path('/root/secure-envs/trading-bot/queue-cutover-artifacts/production-release.lock')
-OPS = Path('/srv/trading-bot/incident-recovery/20260907-processor')
-OVERRIDE = OPS / 'processor-replay-hotfix.override.json'
+OPS = Path('/srv/trading-bot/incident-recovery/20260907-processor-covering')
+OVERRIDE = OPS / 'processor-covering-hotfix.override.json'
 JOURNAL = OPS / 'handoff.json'
 
 def require(condition, reason):
@@ -91,6 +91,7 @@ def compose(new=False):
                  'processor-backlog-recovery.override.yml'):
         args += ['-f',str(ROOT/name)]
     args += ['-f','/srv/trading-bot/incident-recovery/20260905-processor/processor-parent-hotfix-20260905.override.json']
+    args += ['-f','/srv/trading-bot/incident-recovery/20260907-processor/processor-replay-hotfix.override.json']
     if new:
         args += ['-f',str(OVERRIDE)]
     return args
@@ -137,7 +138,7 @@ def healthy(release,image,old_mounts,since):
     counters=h.get('counters',{})
     require(counters.get('archive_rejected')==0
             and counters.get('research_contexts_unavailable')==0,'processor_export_rejected')
-    expected_policy='unless-stopped' if release==NEW else 'on-failure'
+    expected_policy='unless-stopped'
     require(c['HostConfig']['RestartPolicy']['Name']==expected_policy,'restart_policy_drift')
     if release==NEW:
         require(h.get('adapter_version')=='capture-event-adapter-v11-idempotent-public-replay',
@@ -156,7 +157,9 @@ def healthy(release,image,old_mounts,since):
             'restart_policy':expected_policy}
 
 def wait_healthy(release,image,old_mounts,since):
-    deadline=time.monotonic()+180
+    # Only first activation builds three covering indexes over retained
+    # history. Keep live freshness requirements; allow bounded startup work.
+    deadline=time.monotonic()+600
     last=None
     while time.monotonic()<deadline:
         try:
