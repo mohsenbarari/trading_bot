@@ -438,6 +438,8 @@ def _ensure_ledger_schema(connection: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS bridge.projection_ledger_source_status
             ON projection_ledger(source_code, status);
+        CREATE INDEX IF NOT EXISTS bridge.projection_ledger_source_available
+            ON projection_ledger(source_code, available_at_utc);
         CREATE TABLE IF NOT EXISTS bridge.projection_checkpoint (
             singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
             last_completed_at_utc TEXT NOT NULL,
@@ -549,6 +551,44 @@ def _load_rows_by_keys(
             )
         )
     return rows
+
+
+def _load_prior_projection_rows(
+    connection: sqlite3.Connection,
+    sources: Sequence[str],
+    *,
+    keys: Sequence[bytes],
+    since_utc: str | None,
+) -> dict[bytes, sqlite3.Row]:
+    """Keep all retirement candidates plus exact changed/parent identities.
+
+    Incremental projection needs recent missing rows for retirement and old
+    rows explicitly revisited by a correction or dependency. It does not need
+    every historical receipt. Full reconciliation intentionally still does.
+    """
+    placeholders = ",".join("?" for _ in sources)
+    columns = "event_key,payload_hash,status,projection_revision,source_code,available_at_utc"
+    clause = "" if since_utc is None else " AND available_at_utc >= ?"
+    parameters = tuple(sources) + (() if since_utc is None else (since_utc,))
+    result = {
+        bytes(row["event_key"]): row
+        for row in connection.execute(
+            f"SELECT {columns} FROM bridge.projection_ledger "
+            f"WHERE source_code IN ({placeholders}){clause}", parameters,
+        )
+    }
+    if since_utc is not None:
+        missing = sorted(set(keys) - result.keys())
+        for offset in range(0, len(missing), 400):
+            chunk = missing[offset:offset + 400]
+            key_placeholders = ",".join("?" for _ in chunk)
+            for row in connection.execute(
+                f"SELECT {columns} FROM bridge.projection_ledger "
+                f"WHERE source_code IN ({placeholders}) "
+                f"AND event_key IN ({key_placeholders})", (*sources, *chunk),
+            ):
+                result[bytes(row["event_key"])] = row
+    return result
 
 
 def _root_keys(rows: Sequence[sqlite3.Row]) -> set[bytes]:
@@ -715,23 +755,20 @@ def project_shadow_to_legacy_market(
     try:
         _verify_destination(dest_conn)
         _attach_ledger(dest_conn, ledger)
-        prior_keys = {
-            bytes(row["event_key"])
-            for row in dest_conn.execute(
-                """
-                SELECT event_key
-                FROM bridge.projection_ledger
-                WHERE source_code IN ({})
-                """.format(",".join("?" for _ in selected_sources)),
-                selected_sources,
-            )
-        }
         if force_full_reconcile:
             since_utc, full_reconcile = None, True
         else:
             since_utc, full_reconcile = _checkpoint_since(
                 dest_conn, selected_sources, cutoff_utc
             )
+        prior_keys = {
+            bytes(row["event_key"])
+            for row in dest_conn.execute(
+                "SELECT event_key FROM bridge.projection_ledger "
+                "WHERE source_code IN ({})".format(",".join("?" for _ in selected_sources)),
+                selected_sources,
+            )
+        } if full_reconcile else set()
         hot = _load_rows(
             source_conn,
             selected_sources,
@@ -762,18 +799,11 @@ def project_shadow_to_legacy_market(
             dest_conn.execute("BEGIN")
         else:
             dest_conn.execute("BEGIN IMMEDIATE")
-        prior = {
-            bytes(row["event_key"]): row
-            for row in dest_conn.execute(
-                """
-                SELECT event_key, payload_hash, status, projection_revision,
-                       source_code, available_at_utc
-                FROM bridge.projection_ledger
-                WHERE source_code IN ({})
-                """.format(",".join("?" for _ in selected_sources)),
-                selected_sources,
-            )
-        }
+        prior = _load_prior_projection_rows(
+            dest_conn, selected_sources,
+            keys=[bytes(row["event_key"]) for row in combined],
+            since_utc=None if full_reconcile else since_utc,
+        )
         if full_reconcile:
             needed = _needed_keys(
                 combined, cutoff_utc=cutoff_utc, prior_keys=set(prior)
@@ -947,6 +977,7 @@ def project_shadow_to_legacy_market(
             "sources": list(selected_sources),
             "cutoff_utc": cutoff_utc,
             "mode": "full" if full_reconcile else "incremental",
+            "ledger_rows_loaded": len(prior),
             "since_utc": None if full_reconcile else since_utc,
             "source_latest_available_at_utc": source_latest,
             "destination_latest_available_at_utc": dest_latest,

@@ -1,6 +1,6 @@
 # Coin Market Intelligence
 
-- Sep07: processor `921b45a0`, export=500, activated with explicit image/host approval; 195 image and 13 handoff tests pass, peers/data preserved. Backlog/latency, one-gram and historical exact-revision research links remain open; private estimates=13/14. Never equate liveness with completion. Evidence: `docs/MARKET_PROCESSOR_RECOVERY_20260907.md`.
+- Sep07: processor `921b45a0`, export=500, is live; ingested backlog=0 and estimates=14/14 without forced replay. Product arrival takes 99–134s in samples; lineage terminal time is logical, not completion. XAU/bridge fixes are prepared, not active; historical revision/raw links remain open. Further artifact/bridge activation needs approval. Evidence: `docs/MARKET_PROCESSOR_RECOVERY_20260907.md`.
 - Sender `fb95bbde` is live. Replay only retained originals with bound ACKs; never reset checkpoints. Dead letters/backlog degrade health; market silence alone does not. `docs/MARKET_TRANSFER_RECOVERY_20260907.md`.
 - Account1 `a6dcd636` is live; retain replay quarantine. Docker liveness validates role/schema/source/status/freshness/PID; strict replay/promotion readiness still exposes quarantine. Never delete/synthesize evidence to pass. `docs/MARKET_CAPTURE_RECOVERY_20260905.md`.
 

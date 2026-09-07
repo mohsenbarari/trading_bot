@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import sqlite3
 import sys
+import time
 from typing import Any, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -130,6 +131,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     require_product_mode_legacy()
     release_sha = _read_release_sha(args.release_sha)
     started = utc_now()
+    run_started = time.monotonic()
     source_check = dest_market_check = dest_conversation_check = None
     if not args.skip_quick_check:
         source_check = sqlite_quick_check(args.shadow_market_store)
@@ -139,7 +141,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             raise BridgeError("quick_check_failed")
         if source_check != "OK" or dest_market_check != "OK" or dest_conversation_check != "OK":
             raise BridgeError("quick_check_failed")
+    phase_started = time.monotonic()
     market_lock = _exclusive_lock(args.market_lock, args.lock_timeout_seconds)
+    timings = {"market_lock_wait_seconds": round(time.monotonic() - phase_started, 3)}
+    phase_started = time.monotonic()
     try:
         market = project_shadow_to_legacy_market(
             source=args.shadow_market_store,
@@ -152,13 +157,17 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         )
     finally:
         market_lock.close()
+    timings["market_projection_seconds"] = round(time.monotonic() - phase_started, 3)
     group_projection_health = (
         args.group_projection_health
         or args.conversation_db.parent / "group-event-health.json"
     )
+    phase_started = time.monotonic()
     conversation_lock = _exclusive_lock(
         args.conversation_lock, args.lock_timeout_seconds
     )
+    timings["conversation_lock_wait_seconds"] = round(time.monotonic() - phase_started, 3)
+    phase_started = time.monotonic()
     try:
         groups = (
             {
@@ -173,6 +182,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         )
     finally:
         conversation_lock.close()
+    timings["conversation_projection_seconds"] = round(time.monotonic() - phase_started, 3)
     if not args.dry_run:
         update_probe_state(
             group_projection_health,
@@ -185,8 +195,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 if key != "status"
             },
         )
+    phase_started = time.monotonic()
     source_latest = _watermarks(args.shadow_market_store, sorted(MARKET_BRIDGE_SOURCES))
     dest_latest = _watermarks(args.legacy_market_store, sorted(MARKET_BRIDGE_SOURCES))
+    timings["watermark_seconds"] = round(time.monotonic() - phase_started, 3)
+    timings["run_duration_seconds"] = round(time.monotonic() - run_started, 3)
     completed = utc_now()
     health = {
         "schema": "private-shadow-legacy-bridge-health/1.0",
@@ -198,6 +211,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "source_latest_available_at_utc": source_latest,
         "destination_latest_available_at_utc": dest_latest,
         "projection_mode": market.get("mode"),
+        "ledger_rows_loaded": market.get("ledger_rows_loaded"),
+        "timings": timings,
         "projected": int(market.get("projected") or 0),
         "updated": int(market.get("updated") or 0),
         "unchanged": int(market.get("unchanged") or 0),

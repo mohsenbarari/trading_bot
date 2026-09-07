@@ -26,6 +26,8 @@ from core.market_intelligence.shadow_legacy_bridge import (
     MARKET_BRIDGE_SOURCES,
     PRIVATE_SOURCES,
     BridgeError,
+    _ensure_ledger_schema,
+    _load_prior_projection_rows,
     deactivate_projected_rows,
     parser_version_allowed,
     project_shadow_to_legacy_market,
@@ -191,6 +193,41 @@ def _unrelated(key: bytes, when: datetime) -> MarketObservation:
 
 
 class ShadowLegacyBridgeTests(unittest.TestCase):
+    def test_prior_receipt_lookup_chunks_deduplicates_and_excludes_other_sources(self) -> None:
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        connection.execute("ATTACH DATABASE ':memory:' AS bridge")
+        _ensure_ledger_schema(connection)
+        keys = [derive_event_key("receipt-scope", index) for index in range(903)]
+        for index, key in enumerate(keys):
+            source = "MELTED_FLOW" if index == 902 else "PRIVATE_GOLD_CHANNEL"
+            stamp = "2026-08-29T12:00:00Z" if index == 901 else "2026-08-29T09:00:00Z"
+            connection.execute(
+                "INSERT INTO bridge.projection_ledger VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (key, source, "a" * 64, "ELIGIBLE", "fixture", stamp, stamp,
+                 "APPLIED", 1, stamp, BRIDGE_VERSION),
+            )
+        queries = []
+
+        class Recorded:
+            def execute(self, query, parameters):
+                queries.append((query, parameters))
+                return connection.execute(query, parameters)
+
+        result = _load_prior_projection_rows(
+            Recorded(), ("PRIVATE_GOLD_CHANNEL",),
+            keys=[*keys[:850], keys[0], keys[902]], since_utc="2026-08-29T11:00:00Z",
+        )
+        self.assertEqual(set(result), {*keys[:850], keys[901]})
+        self.assertEqual(len(queries), 4)  # recent scope and three <=400-key chunks
+        self.assertTrue(all(len(parameters) <= 401 for _, parameters in queries))
+        plan = [row[3] for row in connection.execute("EXPLAIN QUERY PLAN " + queries[0][0], queries[0][1])]
+        self.assertTrue(any("projection_ledger_source_available" in step for step in plan))
+        self.assertEqual(connection.execute("SELECT count(*) FROM bridge.projection_ledger").fetchone()[0], 903)
+        full = _load_prior_projection_rows(connection, ("PRIVATE_GOLD_CHANNEL",), keys=(), since_utc=None)
+        self.assertEqual(set(full), set(keys[:902]))
+        connection.close()
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="shadow-legacy-bridge-")
         self.root = Path(self.temporary.name)
@@ -563,6 +600,44 @@ class ShadowLegacyBridgeTests(unittest.TestCase):
         self.assertEqual(third["selected"], 2)
         self.assertEqual(self.dest_count("PRIVATE_GOLD_CHANNEL"), 3)
 
+    def test_incremental_bounds_receipts_but_keeps_old_correction_and_recent_retirement(self) -> None:
+        old = [derive_event_key("bounded-prior", index) for index in range(100)]
+        self.seed_shadow([_private_offer(key=key, when=self.when) for key in old])
+        self.project()
+        source = connect_market_store(self.shadow)
+        source.execute("UPDATE market_observations SET inserted_at_utc=event_time_utc")
+        mid = derive_event_key("bounded-mid", 1)
+        later = self.when + timedelta(hours=3)
+        upsert_observation(source, _private_offer(key=mid, when=later))
+        source.commit()
+        source.close()
+        self.project()
+
+        source = connect_market_store(self.shadow)
+        source.execute("UPDATE market_observations SET inserted_at_utc=event_time_utc")
+        new = derive_event_key("bounded-new", 1)
+        upsert_observation(source, _private_offer(key=new, when=later + timedelta(minutes=5)))
+        upsert_observation(source, _private_offer(key=old[0], when=self.when, price="45100000"))
+        source.execute("DELETE FROM market_observations WHERE event_key=?", (mid,))
+        source.commit()
+        source.close()
+
+        result = self.project()
+        self.assertEqual(result["mode"], "incremental")
+        self.assertEqual(result["ledger_rows_loaded"], 2)
+        self.assertEqual(result["projected"], 1)
+        self.assertEqual(result["updated"], 1)
+        self.assertEqual(result["removed"], 1)
+        self.assertEqual(self.dest_price(old[0]), 45100000.0)
+        self.assertEqual(self.dest_quality(mid), "IGNORED")
+        self.assertEqual(self.dest_price(old[1]), 45000000.0)
+        ledger = sqlite3.connect(self.ledger)
+        self.assertEqual(ledger.execute("SELECT count(*) FROM projection_ledger").fetchone()[0], 102)
+        self.assertIsNotNone(ledger.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='projection_ledger_source_available'"
+        ).fetchone())
+        ledger.close()
+
     def test_incremental_follows_slowest_source_watermark(self) -> None:
         channel = derive_event_key("wm-channel", 1)
         group = derive_event_key("wm-group", 1)
@@ -866,6 +941,12 @@ class ShadowLegacyBridgeTests(unittest.TestCase):
         health = json.loads(self.heartbeat.read_text(encoding="utf-8"))
         self.assertEqual(health["status"], "OK")
         self.assertEqual(health["release_sha"], _SHA)
+        self.assertEqual(health["ledger_rows_loaded"], 0)
+        for phase in ("market_lock_wait_seconds", "market_projection_seconds",
+                      "conversation_lock_wait_seconds", "conversation_projection_seconds",
+                      "watermark_seconds", "run_duration_seconds"):
+            self.assertIsInstance(health["timings"][phase], (int, float))
+            self.assertGreaterEqual(health["timings"][phase], 0)
         self.assertNotIn("alice", health)
         group_health = json.loads(
             self.group_projection_health.read_text(encoding="utf-8")

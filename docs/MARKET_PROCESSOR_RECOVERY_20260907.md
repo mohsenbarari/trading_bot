@@ -1,6 +1,49 @@
 # Market processor replay/backlog recovery — 2026-09-07
 
-## Latest activation — 08:50 UTC; verification through 08:55 UTC
+## Latest recovery checkpoint — 09:35–09:40 UTC
+
+- `921b45a0` remains live. The queue for the ingested parse prefix reached zero
+  for all sources at 09:15:35 and remained zero in subsequent samples; this
+  does not include messages arriving after each cycle's spool read. The last
+  one-gram dependencies advanced naturally through canonical export (119/250
+  unexported in one probe, then 8/250). At 09:24:27 **all 14 private v8 estimates
+  were available**, still 14/14 at 09:35:37. No forced replay, synthetic price,
+  checkpoint reset or authority substitution was needed.
+- **Latency is not resolved.** The 09:35 cycle took 41.933s. `terminal_at_utc`
+  in parse lineage is a logical cycle timestamp, not actual completion time;
+  the earlier available-to-terminal samples must not be used as a latency SLO.
+  Exact-key real offer traces reached the legacy Product Store after about
+  99s and 134s: G1 09:33:33 → 09:35:12.370615, and G1 09:34:48 →
+  09:37:02.420679. Two sampled G2 keys were already in the private store but
+  not yet in that Product store at the check. No missing-data conclusion follows
+  merely from this transient delay.
+- Installed bridge `ba1f7616` took 44s in its 09:36:53–09:37:37 run; its timer
+  waits another 15s after completion. Its incremental path loads the complete
+  receipt ledger twice. The prepared fix loads only recent retirement candidates
+  plus exact changed/parent keys, in <=400-key chunks; full reconciliation keeps
+  the complete ledger. Old corrections, recent missing-row retirement, source
+  separation, both writer locks and Product `LEGACY` authority remain intact.
+  A fixture with 100 old receipts loads only the two required receipts while
+  preserving the old correction and recent retirement. Another fixture covers
+  903 receipts, chunking, duplicates, unrelated sources and full reconciliation.
+- Read-only timing of the installed exporter, with bucket refresh disabled only
+  in the transient diagnostic, took 14.790s: groups 0.237, fresh 0.055,
+  non-XAU history 5.668, XAU history 8.823, payload lookup 0.006. The prepared
+  additive XAU covering index avoids wide-row reads for readiness lookup, keeping
+  the same selected real buckets, IDs, ordering and all raw observations.
+  Separate elapsed-time counters are prepared for processor and bridge phases.
+- Historical archive-link gap remains open: three exact August 31 aggregate
+  facts from the 08:32 export have identical revision-1/2 payloads, hashes,
+  parser and quality, but revision 2 lacks the raw link. Current fact availability
+  is September 3 while retained raw availability is August 31. Raw was not proven
+  lost; no association was copied across revisions and no timestamps were changed.
+- The latest explicit operational authorization names the **921 image and only
+  market-processor**. The new follow-up artifact and the separate local
+  `coin-private-shadow-legacy-estimator-bridge.service` need scoped activation
+  authority before rollout. No bridge service change has been made. The incident
+  must stay open despite 14/14 model coverage and zero parse backlog.
+
+## Activation — 08:50 UTC; verification through 08:55 UTC
 
 The user explicitly authorized image
 `market_pipeline_release:921b45a045073dab91f14b56f4bb8fc7c9a25344` to

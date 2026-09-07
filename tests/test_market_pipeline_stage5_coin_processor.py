@@ -121,6 +121,17 @@ class MarketPipelineStage5CoinProcessorTests(unittest.TestCase):
             self.assertEqual(report["pending_coin_groups"], 0)
             self.assertEqual(report["projection_backlog_by_source"], {})
             self.assertGreaterEqual(report["cycle_duration_seconds"], 0)
+            phases = (
+                "setup_duration_seconds", "spool_duration_seconds",
+                "causal_inputs_duration_seconds", "projection_duration_seconds",
+                "review_snapshot_commit_duration_seconds", "archive_duration_seconds",
+            )
+            for phase in phases:
+                self.assertIsInstance(report[phase], (int, float))
+                self.assertGreaterEqual(report[phase], 0)
+            # Independent rounding can add at most half a millisecond per phase.
+            self.assertLessEqual(sum(report[phase] for phase in phases),
+                                 report["cycle_duration_seconds"] + 0.004)
 
         with tempfile.TemporaryDirectory() as directory:
             paths = self._fixture(Path(directory))

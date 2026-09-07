@@ -106,8 +106,22 @@ class HistoricalExportScanTests(unittest.TestCase):
             for name in ("market_fact_export_ledger_state_idx", "market_fact_export_semantics_state_idx"):
                 self.assertTrue(any("USING COVERING INDEX " + name in item for item in plan))
         self.assertFalse(any(item == "SCAN o" or item.startswith("SCAN o ") for item in plans[1]))
-        self.assertTrue(any("SEARCH o USING INDEX" in item for item in plans[1]))
+        self.assertTrue(any("SEARCH o USING COVERING INDEX idx_market_observations_export_xau_state"
+                            in item for item in plans[1]))
         self.assertEqual(self.market.execute("SELECT count(*) FROM market_observations").fetchone()[0], 300)
+
+    def test_retained_store_adopts_xau_covering_index_without_changing_facts(self):
+        before = [tuple(row) for row in self.market.execute(
+            "SELECT * FROM market_observations ORDER BY id"
+        )]
+        self.market.execute("DROP INDEX idx_market_observations_export_xau_state")
+        initialize_export_ledger(self.market)
+        initialize_export_ledger(self.market)
+        after = [tuple(row) for row in self.market.execute(
+            "SELECT * FROM market_observations ORDER BY id"
+        )]
+        self.assertEqual(before, after)
+        self.test_historical_queries_use_non_xau_index_and_bucket_key_lookup()
 
 
 if __name__ == "__main__":
