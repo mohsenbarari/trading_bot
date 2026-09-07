@@ -28,6 +28,7 @@ from .private_pipeline_contracts import (
     batch_items_hash,
     content_hash,
 )
+from .market_fact_recovery import FactRecoveryError, replay_acknowledged_prefix
 
 
 SYNC_SCHEMA = "market_fact_sync/1.0"
@@ -488,6 +489,42 @@ def run_sync_cycle(
             "rejected": 0,
             "ack_latency_ms": round((time.perf_counter() - started) * 1000, 3),
         }
+    # Restoring an older receiver snapshot can legitimately leave its prefix
+    # behind already ACKed sender rows. Redeliver the original retained rows;
+    # never skip a sequence, reset a checkpoint, or regenerate a fact revision.
+    # Bind the refusal to this exact request before trusting its watermark.
+    if (
+        status == 409 and ack.status == "REJECTED"
+        and ack.batch_id == batch.batch_id and ack.stream_id == batch.stream_id
+        and ack.received_count == batch.item_count
+        and ack.rejected_count == batch.item_count
+        and ack.rejection_reason_codes == ("SEQUENCE_GAP",)
+        and ack.highest_contiguous_sequence < batch.first_sequence - 1
+    ):
+        try:
+            recovery = replay_acknowledged_prefix(
+                connection, stream_id=batch.stream_id,
+                receiver_sequence=ack.highest_contiguous_sequence,
+                sender_sequence=batch.first_sequence - 1,
+                sender_instance_id=sender_instance_id, send=send,
+            )
+        except MarketTransportError:
+            reason, permanent = "REPLAY_TRANSPORT_UNAVAILABLE", False
+        except (FactRecoveryError, ValidationError) as exc:
+            reason = str(exc) if isinstance(exc, FactRecoveryError) else "REPLAY_CONTRACT_INVALID"
+            permanent = True
+        else:
+            return {
+                "sent": batch.item_count + int(recovery["replayed"]),
+                "acknowledged": 0, "duplicates": recovery["duplicates"], "rejected": 0,
+                "replayed": recovery["replayed"],
+                "recovery_receiver_sequence": recovery["receiver_sequence"],
+                "ack_latency_ms": round((time.perf_counter() - started) * 1000, 3),
+            }
+        attempt = record_batch_failure(connection, batch, reason_code=reason, permanent=permanent)
+        return {"sent": batch.item_count, "acknowledged": 0, "duplicates": 0,
+                "rejected": batch.item_count if permanent else 0, "attempt": attempt,
+                "ack_latency_ms": None}
     attempt = record_batch_failure(
         connection,
         batch,
@@ -550,7 +587,7 @@ def run_market_fact_sync_service(
     health_path = state_directory / "health.json"
     started_at = _utc_text()
     connection = _postgres_connection()
-    aggregate = {"sent": 0, "acknowledged": 0, "duplicates": 0, "rejected": 0}
+    aggregate = {"sent": 0, "acknowledged": 0, "duplicates": 0, "rejected": 0, "replayed": 0}
     ack_latencies: deque[float] = deque(maxlen=512)
     last_compaction = 0.0
     compacted_envelopes = 0
@@ -608,7 +645,12 @@ def run_market_fact_sync_service(
                     "pid": os.getpid(),
                     "started_at_utc": started_at,
                     "updated_at_utc": _utc_text(),
-                    "status": f"{mode}-ready",
+                    "status": (
+                        f"{mode}-degraded"
+                        if int(metrics["dead_letter_count"]) > 0
+                        or (int(metrics["queue_depth"]) > 0 and float(metrics["oldest_age_seconds"]) > 120)
+                        else f"{mode}-ready"
+                    ),
                     "durable_write": True,
                     "private_transport_only": True,
                     "last_ack_latency_ms": (
@@ -622,7 +664,9 @@ def run_market_fact_sync_service(
                     **metrics,
                 },
             )
-            if int(metrics["queue_depth"]) == 0:
+            # A blocked/backing-off stream must not spin at 100% CPU merely
+            # because it has pending rows but nothing eligible to send.
+            if int(cycle.get("sent", 0)) == 0:
                 stop.wait(DEFAULT_FLUSH_SECONDS)
     finally:
         connection.close()
