@@ -504,6 +504,15 @@ def refresh_private_gold_paper_minute(
     ).get(key)
 
 
+def ensure_private_minute_index(connection: sqlite3.Connection) -> None:
+    """Add only a private-input lookup index; never commit the caller's work."""
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_market_private_minute_bucket "
+        "ON market_observations(source_code,substr(event_time_utc,1,16),available_at_utc) "
+        "WHERE source_code IN ('PRIVATE_GOLD_CHANNEL','PRIVATE_GOLD_PAPER_MINUTE')"
+    )
+
+
 def refresh_private_gold_paper_minutes(
     connection: sqlite3.Connection,
     *,
@@ -544,11 +553,18 @@ def refresh_private_gold_paper_minutes(
         return {}
     earliest = min(starts)
     latest = _minute_end(max(starts))
-    rows = connection.execute(
-        """
+    ensure_private_minute_index(connection)
+    minute_prefixes = sorted({key[2][:16] for key in requested})
+    rows: list[sqlite3.Row] = []
+    for offset in range(0, len(minute_prefixes), 500):
+        chunk = minute_prefixes[offset:offset + 500]
+        placeholders = ",".join("?" for _ in chunk)
+        rows.extend(connection.execute(
+        f"""
         SELECT price_num,event_type,settlement_term,trade_form,event_time_utc
-        FROM market_observations
+        FROM market_observations INDEXED BY idx_market_private_minute_bucket
         WHERE source_code = ?
+          AND source_code IN ('PRIVATE_GOLD_CHANNEL','PRIVATE_GOLD_PAPER_MINUTE')
           AND instrument = 'MELTED_GOLD_PRIVATE'
           AND trade_form IN ('PAPER_NORMAL','PAPER_REVERSE','PAPER_SWIM')
           AND event_type IN ('OFFER', 'TRADE')
@@ -557,14 +573,16 @@ def refresh_private_gold_paper_minutes(
           AND event_time_utc >= ?
           AND event_time_utc <= ?
           AND available_at_utc <= ?
+          AND substr(event_time_utc,1,16) IN ({placeholders})
         """,
         (
             PRIVATE_GOLD_SOURCE_CODE,
             normalize_utc(earliest, field_name="private_gold_minutes_start"),
             normalize_utc(latest, field_name="private_gold_minutes_end"),
             available_at,
+            *chunk,
         ),
-    ).fetchall()
+        ).fetchall())
     grouped: dict[tuple[str, str, str], list[sqlite3.Row]] = defaultdict(list)
     for row in rows:
         key = (

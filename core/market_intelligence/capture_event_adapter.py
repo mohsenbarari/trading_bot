@@ -40,6 +40,7 @@ from .private_gold import (
     PRIVATE_GOLD_MINUTE_SOURCE_CODE,
     PrivateGoldOfferInput,
     private_gold_observations,
+    ensure_private_minute_index,
     refresh_private_gold_paper_minutes,
 )
 from .private_gold_trade_revisions import (
@@ -50,6 +51,7 @@ from .private_gold_trade_revisions import (
     extract_private_gold_trade,
 )
 from .public_telegram.ingest import (
+    PublicBatchIngestResult,
     PublicTelegramMessage,
     ingest_public_message,
     ingest_xau_messages_batch,
@@ -1920,7 +1922,7 @@ def _project_xau_batch(
     items: list[sqlite3.Row],
     *,
     as_of_utc: str,
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, int]:
     """Project one causal XAU batch without per-message SQLite round trips."""
 
     message_ids = [int(item["message_id"]) for item in items]
@@ -1958,9 +1960,7 @@ def _project_xau_batch(
         for message_id in message_ids
         if message_id in current_by_id
     ]
-    batch = ingest_xau_messages_batch(
-        market,
-        tuple(
+    messages = tuple(
             PublicTelegramMessage(
                 message_id=int(row["message_id"]),
                 published_at_utc=str(row["event_time_utc"]),
@@ -1969,8 +1969,41 @@ def _project_xau_batch(
                 is_forwarded=bool(row["is_forwarded"]),
             )
             for row in current_rows
-        ),
-    )
+        )
+    rejected_ids: set[int] = set()
+    if not market.in_transaction:
+        market.execute("BEGIN")
+    market.execute("SAVEPOINT xau_batch_projection")
+    try:
+        batch = ingest_xau_messages_batch(market, messages)
+    except MarketStoreContractError as exc:
+        market.execute("ROLLBACK TO xau_batch_projection")
+        if not str(exc).startswith("price_out_of_canonical_range:"):
+            raise
+        # Healthy batches keep the bulk fast path. On this narrow input
+        # failure, retry messages atomically to isolate the offending quote.
+        stored = 0
+        keys: dict[int, tuple[bytes, ...]] = {}
+        for row in current_rows:
+            identity = int(row["message_id"])
+            try:
+                count, _flow_keys = _project_public_row(staging, market, row)
+            except MarketStoreContractError as error:
+                if not str(error).startswith("price_out_of_canonical_range:"):
+                    raise
+                rejected_ids.add(identity)
+                keys[identity] = ()
+                _finish_capture_lineage(
+                    staging, stream="market", source_id="XAUUSD", message_id=identity,
+                    status="FILTERED", disposition_code="PRICE_OUT_OF_CANONICAL_RANGE",
+                    completed_at_utc=as_of_utc,
+                )
+            else:
+                stored += count
+                keys[identity] = _public_keys(row)
+        batch = PublicBatchIngestResult(stored, keys)
+    finally:
+        market.execute("RELEASE xau_batch_projection")
     projection_rows = [
         ("XAUUSD", message_id, event_key, str(current_by_id[message_id]["event_time_utc"])[:16])
         for message_id, event_keys in batch.event_keys_by_message.items()
@@ -1997,7 +2030,8 @@ def _project_xau_batch(
             completed_at_utc=as_of_utc,
         )
 
-    current_ids = [int(row["message_id"]) for row in current_rows]
+    current_ids = [int(row["message_id"]) for row in current_rows
+                   if int(row["message_id"]) not in rejected_ids]
     multiple_pending: set[int] = set()
     for chunk in _chunks(current_ids):
         placeholders = ",".join("?" for _ in chunk)
@@ -2017,6 +2051,7 @@ def _project_xau_batch(
             for row in current_rows
             if bool(row["is_forwarded"]) is forwarded
             and int(row["message_id"]) not in multiple_pending
+            and int(row["message_id"]) not in rejected_ids
         ]
         for chunk in _chunks(simple_ids):
             placeholders = ",".join("?" for _ in chunk)
@@ -2048,7 +2083,7 @@ def _project_xau_batch(
             ),
             completed_at_utc=as_of_utc,
         )
-    return len(current_rows), batch.event_count, retracted
+    return len(current_rows), batch.event_count, retracted, len(rejected_ids)
 
 
 def _primary_source_event_id(message_id: int) -> str:
@@ -2239,6 +2274,7 @@ def _refresh_private_minutes(
 ) -> int:
     if not affected_minutes:
         return 0
+    ensure_private_minute_index(market)
     # A source revision can only change its own event-time minute.  Bounding
     # the rebuild this way keeps a live 10-15 second cycle inexpensive even
     # when the three-day raw window contains hundreds of thousands of offers.
@@ -2247,8 +2283,9 @@ def _refresh_private_minutes(
     rows = market.execute(
         f"""
         SELECT DISTINCT settlement_term,trade_form,substr(event_time_utc,1,16)||':00Z' AS minute_utc
-        FROM market_observations
+        FROM market_observations INDEXED BY idx_market_private_minute_bucket
         WHERE source_code='PRIVATE_GOLD_CHANNEL'
+          AND source_code IN ('PRIVATE_GOLD_CHANNEL','PRIVATE_GOLD_PAPER_MINUTE')
           AND instrument='MELTED_GOLD_PRIVATE'
           AND trade_form IN ('PAPER_NORMAL','PAPER_REVERSE','PAPER_SWIM')
           AND event_type IN ('OFFER','TRADE') AND quality_state='ELIGIBLE'
@@ -2262,8 +2299,9 @@ def _refresh_private_minutes(
     # affected minutes before recreating those still supported by active facts.
     for row in market.execute(
         f"""
-        SELECT event_key FROM market_observations
+        SELECT event_key FROM market_observations INDEXED BY idx_market_private_minute_bucket
         WHERE source_code=? AND quality_state='ELIGIBLE'
+          AND source_code IN ('PRIVATE_GOLD_CHANNEL','PRIVATE_GOLD_PAPER_MINUTE')
           AND substr(event_time_utc,1,16) IN ({placeholders})
         """,
         (PRIVATE_GOLD_MINUTE_SOURCE_CODE, *minute_values),
@@ -2521,7 +2559,7 @@ def project_capture_changes(
     changed_melted_flow_keys: list[bytes] = []
     xau_items = [item for item in dirty if str(item["source_id"]) == "XAUUSD"]
     if xau_items:
-        xau_projected, xau_upserted, xau_retracted = _project_xau_batch(
+        xau_projected, xau_upserted, xau_retracted, xau_rejected = _project_xau_batch(
             staging,
             market,
             xau_items,
@@ -2530,6 +2568,7 @@ def project_capture_changes(
         projected += xau_projected
         upserted += xau_upserted
         retracted += xau_retracted
+        public_price_policy_rejections += xau_rejected
     for item in dirty:
         source_id = str(item["source_id"])
         if source_id == "XAUUSD":

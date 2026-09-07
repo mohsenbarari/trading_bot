@@ -40,6 +40,33 @@ Additive indexes bound each source lookup. Tests cover lane fairness, old-histor
 progress, future exclusion, exact-once drain, indexes on retained/new schema and
 full private offer/trade parity against FIFO after catch-up. Deployment pending.
 
+Fairness `cb45aad7` activated at 07:55:40 UTC. At 07:55:54 the actual private
+snapshot changed from SAFE_NO_DATA to OK, with 12/14 estimated cells and 36 real
+prediction-ledger rows; no authority/policy change or synthetic input was needed.
+The missing cells were IMAM/TOMORROW and ONE_GRAM/CASH. Installed estimator code
+showed real coin anchors but no contemporaneous melted points: for example
+ONE_GRAM/CASH at Sep06 08:31:17 and IMAM/TOMORROW at Sep06 18:04:04. Retained
+export backlog included 26,732 private-gold, 10,253 aggregate and 2,569 Herat rows.
+Batch capacity 100→500 on the same image activated at 08:02:45; initially
+169–445 published facts/cycle, zero rejection/context loss, but cycles grew to
+52–61s. This is recovery progress, not an acceptable final real-time latency.
+
+Follow-up: sparse private-minute rebuilds read the entire earliest-to-latest
+span before filtering requested minutes in Python. Mixing fresh and historical
+work makes that span many hours. Select only actual requested minute prefixes
+in <=500-key chunks through an additive private-source-only expression index;
+use the same index for affected-minute discovery/retraction. Preserve exact
+weighted prices, book boundaries, closed-minute and availability limits. A
+test with 100 unrelated intervening rows reads only the three requested input
+rows and proves identical weighted values, unchanged inputs and no implicit
+commit. Existing private/capture/fairness tests pass.
+
+Also reproduced the analogous XAU poison-input failure offline against `cb45`:
+one out-of-range quote aborts the whole bulk batch. The follow-up keeps the bulk
+fast path for healthy batches and, only on canonical-magnitude rejection, retries
+per message with savepoints. Invalid raw remains FILTERED with its reason, valid
+quotes continue, and unrelated store-contract errors remain fail-closed.
+
 ## Cause and scope
 
 After the sender recovery, the processor still had about 156,000 dirty public
