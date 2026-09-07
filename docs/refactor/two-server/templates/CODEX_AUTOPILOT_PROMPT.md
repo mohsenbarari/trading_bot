@@ -38,7 +38,13 @@ Mandatory workflow:
    allowed files and exact test selectors, providing authoritative current definitions
    for every enum member, public constant, import target, API shape, model field and
    call signature its implementation or tests will use. Explicitly name UserRole.BUYER
-   as forbidden unless its authoritative definition proves it exists. After Coordinator
+   as forbidden unless its authoritative definition proves it exists. Add preventive
+   task-sizing instructions: one new test module must normally characterize one success
+   path or one failure boundary per unit, requirements should normally be at most six,
+   context should target no more than 80000 TASK_READY bytes, and an exception requires
+   a concrete reason that the smaller task would be incomplete. Existing files should
+   use compact replacements. If a task approaches output risk, split it before invoking
+   Gemini even if TASK_READY technically passes. After Coordinator
    creates or resizes the ignored Task JSON, require the exact local command
    `python3 scripts/two_site_proposal_runner.py check --task <path>` and require an
    actual TASK_READY result before any proposal pipeline invocation. If local check
@@ -125,12 +131,16 @@ Exact final result policy:
 CONTINUE and COMPLETE use disposition NONE and category NONE. Return `CONTINUE` only after a real clean
 commit and when another safe internal unit is ready. Return `COMPLETE` only when the
 canonical two-site plan is genuinely complete.
-A clean no-commit internal proposal/review/test rejection—including two exhausted correction attempts—must return BLOCKED/RESCOPE with category INTERNAL_REJECTION, a concrete next_action specifying a fresh distinct smaller or context-complete next unit, and blockers. It must never use HALT solely because the per-unit correction budget is exhausted. RESCOPE must not reuse artifacts, bypass tests or turn into CONTINUE.
+A clean no-commit internal proposal/review/test rejection—including two exhausted correction attempts—must return BLOCKED/RESCOPE with category INTERNAL_REJECTION, a concrete next_action specifying a fresh distinct smaller or context-complete next unit, and blockers. State unambiguously that MODEL_OUTPUT_TRUNCATED, invalid or malformed finish submission, oversized/incomplete proposal, and other clean no-commit Gemini response-shape failures are INTERNAL_REJECTION with BLOCKED/RESCOPE, not provider startup failures and not EXTERNAL_GATE. Never accept partial bytes or reuse a failed run; the next cycle must create a fresh smaller task and unique run prefix. It must never use HALT solely because the per-unit correction budget is exhausted. RESCOPE must not reuse artifacts, bypass tests or turn into CONTINUE.
+Keep true authentication failure, missing provider startup/init/session, provider
+unavailability, denied escalation, authority/secret/production/DNS/Writer gates, dirty
+worktree, protected-ref drift, and ambiguous state as fail-closed BLOCKED/HALT EXTERNAL_GATE.
 Provider, authentication, authority, secret, production, deploy, DNS, Web-Writer, dirty
 tree, protected-ref or control drift, ambiguous state, and exhausted cross-unit recovery
 require BLOCKED/HALT with category EXTERNAL_GATE. A denied escalation or provider startup
 failure returns BLOCKED/HALT with category EXTERNAL_GATE, clean Git and no retry in that
-cycle, and it never justifies widening the whole Codex sandbox.
+cycle, and it never justifies widening the whole Codex sandbox. Do not weaken permissions,
+review, tests, binding, exact-byte, or one-pipeline-per-unit controls.
 The `commit` field is the exact final integration HEAD when this cycle commits and is
 otherwise null. A committed result must also return the exact `gemini_worker_run_id`,
 `gemini_reviewer_run_id`, and `proposal_sha256`; the local Supervisor validates their
