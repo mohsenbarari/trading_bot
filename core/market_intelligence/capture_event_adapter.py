@@ -60,7 +60,7 @@ from .public_telegram.sources import source_for_code
 
 
 CAPTURE_ADAPTER_SCHEMA_VERSION = 9
-CAPTURE_ADAPTER_VERSION = "capture-event-adapter-v10-terminal-lineage"
+CAPTURE_ADAPTER_VERSION = "capture-event-adapter-v11-idempotent-public-replay"
 CAPTURE_RAW_RETENTION = timedelta(days=3)
 COIN_GROUP_ACTIVE_REPLAY_WINDOW = timedelta(hours=6)
 MARKET_BACKFILL_REPLAY_WINDOW = timedelta(minutes=30)
@@ -1452,8 +1452,15 @@ def stage_capture_event(connection: sqlite3.Connection, event: CaptureEvent) -> 
         else None
     )
     if seen_event is not None and (
-        not event.is_explicit_backfill or existing_explicit_lineage is not None
+        not event.is_explicit_backfill
+        or event.source_id not in _PROMOTION_BACKFILL_SOURCE_CODES
+        or existing_explicit_lineage is not None
     ):
+        # Only promotion sources have a separate replay-accounting ledger
+        # that may need a one-time upgrade of a previously routine identity.
+        # Public explicit backfills intentionally use the generic lineage.
+        # Requiring their nonexistent promotion row requeues every completed
+        # public message whenever retention replaces a spool file's inode.
         return CaptureStageReport(False, True, False, False)
     non_model = event.content_type in _NON_MODEL_CONTENT_TYPES
     if event.event_type == "message_deleted":

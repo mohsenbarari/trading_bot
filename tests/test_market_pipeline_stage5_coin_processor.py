@@ -70,6 +70,29 @@ def event(
 
 
 class MarketPipelineStage5CoinProcessorTests(unittest.TestCase):
+    def test_processor_reports_pending_work_even_without_new_spool_records(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paths = self._fixture(Path(directory))
+            staging = connect_coin_group_staging(paths.staging_database)
+            initialize_capture_adapter(staging)
+            pending_time = "2026-08-24T10:03:00Z"
+            staging.execute(
+                "INSERT INTO capture_dirty_market_messages VALUES(?,?,?,?)",
+                ("XAUUSD", 1, pending_time, pending_time),
+            )
+            staging.execute("INSERT INTO capture_dirty_groups VALUES(?,?,?)",
+                            (1, pending_time, pending_time))
+            staging.commit()
+            staging.close()
+            report = process_coin_spool_cycle(paths=paths, mode="fixture",
+                now_utc="2026-08-24T10:02:00Z")
+            self.assertEqual(report["records"], 0)
+            self.assertEqual(report["pending_market_messages"], 1)
+            self.assertEqual(report["pending_coin_groups"], 1)
+            self.assertEqual(report["projection_backlog_by_source"], {
+                "XAUUSD": {"messages": 1, "oldest_available_at_utc": pending_time},
+            })
+
     def _fixture(self, root: Path) -> CoinProcessorPaths:
         spool = root / "capture" / "account2"
         spool.mkdir(parents=True)
@@ -94,6 +117,10 @@ class MarketPipelineStage5CoinProcessorTests(unittest.TestCase):
                 sqlite_cache_kib_per_store=64,
             )
             self.assertEqual(report["records"], 0)
+            self.assertEqual(report["pending_market_messages"], 0)
+            self.assertEqual(report["pending_coin_groups"], 0)
+            self.assertEqual(report["projection_backlog_by_source"], {})
+            self.assertGreaterEqual(report["cycle_duration_seconds"], 0)
 
         with tempfile.TemporaryDirectory() as directory:
             paths = self._fixture(Path(directory))

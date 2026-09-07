@@ -174,6 +174,9 @@ services:
       - market-transport
 
   market-processor:
+    # Durable cursors and owner locking make retries safe after transient
+    # faults. A finite five-retry cap must not abandon the market pipeline.
+    restart: unless-stopped
     extends:
       file: compose.yml
       service: market-runtime-base

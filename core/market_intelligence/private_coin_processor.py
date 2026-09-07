@@ -729,6 +729,7 @@ def process_coin_spool_cycle(
 ) -> dict[str, object]:
     """Run one restart-safe shadow cycle and return redacted counters only."""
 
+    cycle_started = time.monotonic()
     now = normalize_utc(
         now_utc or datetime.now(timezone.utc),
         field_name="coin_processor_now_utc",
@@ -873,6 +874,22 @@ def process_coin_spool_cycle(
                 "FROM capture_primary_trade_outcomes GROUP BY status"
             ).fetchall()
         }
+        # A live heartbeat is not evidence that received messages are parsed.
+        # Expose the durable work queue separately, including quiet sources;
+        # do not infer failure merely from the age of the last market offer.
+        projection_backlog = {
+            str(row["source_id"]): {
+                "messages": int(row["total"]),
+                "oldest_available_at_utc": row["oldest"],
+            }
+            for row in staging.execute(
+                "SELECT source_id,COUNT(*) AS total,MIN(available_at_utc) AS oldest "
+                "FROM capture_dirty_market_messages GROUP BY source_id"
+            )
+        }
+        pending_groups = int(staging.execute(
+            "SELECT COUNT(*) FROM capture_dirty_groups"
+        ).fetchone()[0])
         market.commit()
         staging.commit()
         corpus.commit()
@@ -948,6 +965,10 @@ def process_coin_spool_cycle(
             trade_reconciliation.rejected if trade_reconciliation else 0
         ),
         "market_messages_reprojected": projection.market_messages_reprojected,
+        "pending_market_messages": sum(item["messages"] for item in projection_backlog.values()),
+        "pending_coin_groups": pending_groups,
+        "projection_backlog_by_source": projection_backlog,
+        "cycle_duration_seconds": round(time.monotonic() - cycle_started, 3),
         "market_facts_upserted": projection.market_facts_upserted,
         "market_facts_retracted": projection.market_facts_retracted,
         "private_paper_minutes_refreshed": projection.private_paper_minutes_refreshed,
@@ -1131,6 +1152,10 @@ def run_coin_processor_service(
                 "calibration_corpus_version": CALIBRATION_CORPUS_VERSION,
                 "shadow_only": True,
                 "counters": counters,
+                "projection_status": (
+                    "catching-up" if counters["pending_market_messages"]
+                    or counters["pending_coin_groups"] else "caught-up"
+                ),
                 "last_projection_causal_inputs": last_projection_causal_inputs,
             },
         )

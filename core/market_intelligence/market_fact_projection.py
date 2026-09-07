@@ -110,6 +110,8 @@ def initialize_export_ledger(connection: sqlite3.Connection) -> None:
         ON market_fact_export_history(event_key,fact_revision);
         CREATE INDEX IF NOT EXISTS idx_market_observations_export_event_time
         ON market_observations(event_time_utc DESC,id DESC);
+        CREATE INDEX IF NOT EXISTS idx_market_observations_export_non_xau_id
+        ON market_observations(id) WHERE source_code<>'XAUUSD';
         CREATE TABLE IF NOT EXISTS market_xau_model_input_buckets (
             bucket_number INTEGER PRIMARY KEY,
             selected_event_key BLOB NOT NULL UNIQUE,
@@ -347,14 +349,17 @@ def _pending_export_rows(
         )
     """
 
-    def select(extra_where: str, parameters: tuple[object, ...], limit: int):
+    def select(
+        extra_where: str, parameters: tuple[object, ...], limit: int,
+        *, from_sql: str = "market_observations o", eligibility: str = eligible,
+    ):
         return market.execute(
             f"""
             SELECT o.*
-            FROM market_observations o
+            FROM {from_sql}
             LEFT JOIN market_fact_export_ledger l ON l.event_key=o.event_key
             LEFT JOIN market_fact_export_semantics s ON s.event_key=o.event_key
-            WHERE {eligible} AND {pending} {extra_where}
+            WHERE {eligibility} AND {pending} {extra_where}
             LIMIT ?
             """,
             (*parameters, limit),
@@ -406,13 +411,31 @@ def _pending_export_rows(
             if selected
             else ""
         )
-        rows.extend(
-            select(
-                exclusion + "ORDER BY o.id",
-                selected,
-                remaining,
-            )
+        # Most stored history consists of raw XAU ticks, while only one real
+        # tick per closed 15-second bucket is eligible for model transport.
+        # Scanning every raw row by ID to find the next pending fact caused
+        # multi-GB reads on every cycle. Scan the non-XAU partial index and
+        # drive XAU from its selected bucket keys instead. The first N rows
+        # of each disjoint partition contain the exact global first N IDs.
+        historical = select(
+            exclusion + "AND o.source_code<>'XAUUSD' ORDER BY o.id",
+            selected, remaining,
+            from_sql=("market_observations o INDEXED BY "
+                      "idx_market_observations_export_non_xau_id"),
+            eligibility="1",
         )
+        historical.extend(select(
+            exclusion + "ORDER BY o.id", selected, remaining,
+            from_sql=("market_xau_model_input_buckets b "
+                      "CROSS JOIN market_observations o"),
+            eligibility=(
+                "o.event_key=b.selected_event_key AND o.source_code='XAUUSD' "
+                "AND CAST(strftime('%s','now') AS INTEGER) >= "
+                f"(b.bucket_number + 1) * {XAU_MODEL_INPUT_BUCKET_SECONDS} "
+                f"+ {XAU_MODEL_INPUT_EXPORT_SETTLE_SECONDS}"
+            ),
+        ))
+        rows.extend(sorted(historical, key=lambda row: int(row["id"]))[:remaining])
     return rows
 
 
