@@ -1,5 +1,33 @@
 # Market processor replay/backlog recovery — 2026-09-07
 
+## Latest checkpoint — 08:21 UTC
+
+- Active: `cb45aad7` with the separately journaled export batch of 500. Zero
+  processor restarts; sender queue/dead letters/rejections zero. No export
+  rejection or missing research context. Parse backlog 52,236; cycle 57.983s.
+- Actual authenticated dashboard returned HTTP 200. Its 40 compact activity
+  rows contained 30 model-input labels, 8 review labels and 2 audit-only labels.
+  Both group lists show today's events through approximately 11:48 Tehran.
+  This is not proof that every ambiguous offer should become eligible, nor
+  proof of the requested real-time latency.
+- Private reference snapshot: 12/14 estimated cells; IMAM/TOMORROW and
+  ONE_GRAM/CASH still lack their historical melted dependencies downstream.
+  Read-only producer verification found those real inputs already retained.
+  The exact two installed-engine lookup scopes total 500 distinct facts,
+  scope SHA256 `50c1146586b7224da3303ce2066634634463d8076fae85a9279213c2f2615245`.
+  **No manual/forced replay of this scope has been performed.** Normal
+  export is continuing. Any scoped replay must use the canonical exporter,
+  owner locks and exact receipts; never copy fabricated prices into the model.
+- Follow-up source `921b45a045073dab91f14b56f4bb8fc7c9a25344` passed all 195
+  exact-image tests (12.429s). Separate anchor/fairness pytest: 13 passed.
+  Its image is local only: the execution approval layer denied transfer to
+  the current Web host, then denied it again after strict SSH trust verification
+  and payload inspection. Only two runtime source files differ from `cb45`;
+  dependency files are unchanged and the image contains no env/DB/session/key
+  files. No workaround or in-place deployment was attempted. A trusted user
+  approval explicitly naming **this image and destination** is still required
+  by the execution layer. Do not mark this incident resolved.
+
 ## Current follow-up authorization and activation attempt
 
 The user explicitly approved transferring this incident's code/image to the
