@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from core.market_intelligence.market_contracts import MarketObservation, derive_event_key
 from core.market_intelligence.market_store import (
@@ -11,6 +12,7 @@ from core.market_intelligence.market_store import (
     initialize_market_store,
     upsert_observation,
 )
+from scripts import project_group_market_to_estimator as group_projection
 from scripts.project_group_market_to_estimator import main, project
 
 
@@ -719,6 +721,140 @@ def test_projection_uses_other_settlement_when_exact_book_is_thin() -> None:
         ).fetchone()
         connection.close()
         assert quality == (0, 0, "LIVE_BOOK_PRICE_OUTLIER")
+
+
+def _brute_force_exclusion_reasons(rows):
+    """The pre-index algorithm, retained in tests as a behavior oracle."""
+
+    root_event_keys, root_reference_errors = (
+        group_projection._resolved_root_offer_event_keys(rows)
+    )
+    rows_by_key = {bytes(row["event_key"]): row for row in rows}
+    base = {
+        bytes(row["event_key"]): group_projection._model_exclusion_reason(row)
+        for row in rows
+    }
+    eligible_offers = [
+        row
+        for row in rows
+        if str(row["event_type"]).upper() == "OFFER"
+        and base[bytes(row["event_key"])] is None
+    ]
+    by_book = {}
+    for offer in eligible_offers:
+        book = (
+            str(offer["instrument"]).upper(),
+            str(offer["trade_form"]).upper(),
+        )
+        by_book.setdefault(book, []).append(offer)
+    result = {}
+    for row in rows:
+        key = bytes(row["event_key"])
+        reason = base[key]
+        if reason is None:
+            reason = group_projection._causal_trade_exclusion_reason(
+                row,
+                rows_by_key=rows_by_key,
+                exclusions=result,
+                root_event_keys=root_event_keys,
+                root_reference_errors=root_reference_errors,
+            )
+        if reason is None:
+            book = (
+                str(row["instrument"]).upper(),
+                str(row["trade_form"]).upper(),
+            )
+            reason = group_projection._live_book_price_exclusion_reason(
+                row,
+                eligible_offers=by_book.get(book, ()),
+            )
+        result[key] = reason
+    return result
+
+
+def _price_guard_rows(count: int, *, spacing_seconds: int) -> list[dict[str, object]]:
+    base = datetime(2026, 8, 17, 9, tzinfo=timezone.utc).timestamp()
+    rows = []
+    for index in range(count):
+        stamp = datetime.fromtimestamp(base + index * spacing_seconds, timezone.utc)
+        rows.append(
+            {
+                "event_key": derive_event_key("bounded-live-book", index),
+                "source_code": "GROUP_1" if index % 2 else "GROUP_2",
+                "event_time_utc": stamp.isoformat().replace("+00:00", "Z"),
+                "available_at_utc": stamp.isoformat().replace("+00:00", "Z"),
+                "instrument": "COIN_IMAM",
+                "settlement_term": "CASH" if index % 3 else "TOMORROW",
+                "trade_form": "PHYSICAL",
+                "event_type": "OFFER",
+                "side": "SELL",
+                "price_num": 188_000 + (index % 4) * 100,
+                "quantity_num": 5,
+                "parse_confidence": 1.0,
+                "quality_state": "ELIGIBLE",
+                "parser_version": "price-window-index-test",
+                "is_conditional": 0,
+                "attributes_json": "{}",
+            }
+        )
+    return rows
+
+
+def test_live_book_time_index_matches_pre_index_behavior_at_boundaries() -> None:
+    rows = _price_guard_rows(180, spacing_seconds=10)
+    # Preserve the subtle gates: an offer exactly 300 seconds old is eligible,
+    # while a reference known one second in the future is not.
+    candidate = rows[-1]
+    boundary = rows[-31]
+    assert (
+        datetime.fromisoformat(str(candidate["available_at_utc"]).replace("Z", "+00:00"))
+        - datetime.fromisoformat(str(boundary["event_time_utc"]).replace("Z", "+00:00"))
+    ).total_seconds() == 300
+    rows[-2]["available_at_utc"] = (
+        datetime.fromisoformat(str(candidate["available_at_utc"]).replace("Z", "+00:00"))
+        .replace(microsecond=0)
+        .timestamp()
+        + 1
+    )
+    rows[-2]["available_at_utc"] = datetime.fromtimestamp(
+        rows[-2]["available_at_utc"], timezone.utc
+    ).isoformat().replace("+00:00", "Z")
+    roots, errors = group_projection._resolved_root_offer_event_keys(rows)
+    optimized = group_projection._model_exclusion_reasons(
+        rows, root_event_keys=roots, root_reference_errors=errors
+    )
+    assert optimized == _brute_force_exclusion_reasons(rows)
+
+
+def test_live_book_time_index_keeps_both_inclusive_boundaries() -> None:
+    available_at = datetime(2026, 8, 17, 9, 5, tzinfo=timezone.utc)
+    upper = available_at.timestamp()
+    refs = tuple(
+        (derive_event_key("window-boundary", index), stamp, stamp, 188_000.0, "CASH")
+        for index, stamp in enumerate(
+            (upper - 301, upper - 300, upper, upper + 1)
+        )
+    )
+    result = group_projection._live_book_window(
+        (tuple(ref[1] for ref in refs), refs), available_at=available_at
+    )
+    assert result == refs[1:3]
+
+
+def test_live_book_time_index_avoids_historical_quadratic_scan() -> None:
+    rows = _price_guard_rows(2_000, spacing_seconds=301)
+    roots, errors = group_projection._resolved_root_offer_event_keys(rows)
+    original = group_projection._live_book_offer_ref
+    with patch.object(
+        group_projection,
+        "_live_book_offer_ref",
+        wraps=original,
+    ) as measured:
+        result = group_projection._model_exclusion_reasons(
+            rows, root_event_keys=roots, root_reference_errors=errors
+        )
+    assert len(result) == len(rows)
+    assert measured.call_count <= len(rows) * 3
 
 
 def test_projection_command_records_failure_heartbeat() -> None:

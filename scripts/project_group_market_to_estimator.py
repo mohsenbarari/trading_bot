@@ -11,6 +11,7 @@ identifiers never cross this boundary.
 from __future__ import annotations
 
 import argparse
+from bisect import bisect_left, bisect_right
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -35,6 +36,8 @@ MAXIMUM_MODEL_PROJECTION_DELAY_SECONDS = 5 * 60
 LIVE_BOOK_PRICE_WINDOW_SECONDS = 5 * 60
 LIVE_BOOK_PRICE_MINIMUM_OFFERS = 3
 LIVE_BOOK_MAXIMUM_RELATIVE_DEVIATION = 0.05
+_LiveBookRef = tuple[bytes, float, float, float, str]
+_LiveBookIndex = tuple[tuple[float, ...], tuple[_LiveBookRef, ...]]
 _TEHRAN = ZoneInfo("Asia/Tehran")
 _COMMODITY = {
     "IMAM": "امام",
@@ -337,6 +340,24 @@ def _live_book_offer_ref(
     )
 
 
+def _live_book_window(
+    index: _LiveBookIndex,
+    *,
+    available_at: datetime,
+) -> tuple[_LiveBookRef, ...]:
+    """Return only refs which can satisfy the existing inclusive age gate.
+
+    Availability and self-key checks intentionally remain in
+    ``_live_book_price_exclusion_reason``.  This index only removes references
+    whose event time the existing rule would reject unconditionally.
+    """
+
+    event_times, refs = index
+    upper = available_at.timestamp()
+    lower = upper - LIVE_BOOK_PRICE_WINDOW_SECONDS
+    return refs[bisect_left(event_times, lower) : bisect_right(event_times, upper)]
+
+
 def _live_book_price_exclusion_reason(
     row: sqlite3.Row,
     *,
@@ -431,15 +452,19 @@ def _model_exclusion_reasons(
         if str(row["event_type"]).upper() == "OFFER"
         and base_exclusions[bytes(row["event_key"])] is None
     ]
-    offers_by_book: dict[tuple[str, str], list[tuple[bytes, float, float, float, str]]] = {}
+    offer_refs_by_book: dict[tuple[str, str], list[_LiveBookRef]] = {}
     for offer in eligible_offers:
         book = (
             str(offer["instrument"]).upper(),
             str(offer["trade_form"]).upper(),
         )
-        offers_by_book.setdefault(book, []).append(
+        offer_refs_by_book.setdefault(book, []).append(
             _live_book_offer_ref(offer, offer_times=offer_times)
         )
+    offers_by_book: dict[tuple[str, str], _LiveBookIndex] = {}
+    for book, refs in offer_refs_by_book.items():
+        ordered = tuple(sorted(refs, key=lambda ref: ref[1]))
+        offers_by_book[book] = (tuple(ref[1] for ref in ordered), ordered)
     exclusions: dict[bytes, str | None] = {}
     for row in rows:
         event_key = bytes(row["event_key"])
@@ -460,7 +485,11 @@ def _model_exclusion_reasons(
             event_time, available_at = offer_times[event_key]
             reason = _live_book_price_exclusion_reason(
                 row,
-                eligible_offers=offers_by_book.get(book, ()),
+                eligible_offers=(
+                    _live_book_window(offers_by_book[book], available_at=available_at)
+                    if book in offers_by_book
+                    else ()
+                ),
                 event_time=event_time,
                 available_at=available_at,
                 offer_times=offer_times,
