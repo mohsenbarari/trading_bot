@@ -1,6 +1,6 @@
 # Market processor replay/backlog recovery — 2026-09-07
 
-## Coin-group calibration scan candidate — measured at 11:52 UTC; not deployed
+## Coin-group calibration scan activated — 13:22 UTC; verified through 13:36 UTC
 
 - Read-only profiling against the live processor's exact d08 image and current
   SQLite stores isolated 13.718s of an 18.193s coin-group projection in
@@ -13,10 +13,11 @@
   `idx_market_observations_source_available` index and still returns all 1,248
   current calibration rows. The real read-only query measured 0.066s; no index,
   migration, persistent cache, data rewrite or retention change is introduced.
-- The conservative measured estimate for the same group projection is about
-  4.54s (`18.193 - 13.718 + 0.066`), roughly 75% below the profiled run. This is
-  an estimate, not production acceptance, until the exact candidate image is
-  authorized and observed under normal cycles.
+- The pre-deployment estimate for the same group computation was about 4.54s
+  (`18.193 - 13.718 + 0.066`). The first observed production cycle that actually
+  replayed the active group graph processed 1,881 messages in 6.597s versus the
+  prior 23.003s sample, a 71.3% reduction. The larger production number includes
+  retained writes/reconciliation omitted from the read-only profiler.
 - A regression fixture retains the valid group calibration while excluding a
   look-alike row from a non-group source. All 64 group parser/linker/feedback
   tests and all 50 processor/adapter/research-context tests pass (114 total).
@@ -24,9 +25,30 @@
   `market_pipeline_release:9d752171fee23b20afdef4bd6efc8c3962262586`
   is `sha256:2b77bdd8fd5536c5237609e98fe94e4afc6589e5765ef8bdfc8fd23f1abef9d6`;
   its linux/amd64, `10001:10001`, release/tree/input-signature labels match the
-  committed source and its offline import/scope smoke test passes. It has not
-  been transferred or activated; d08 remains the sole production processor.
-  The build left the root filesystem at 56% with about 17GiB free.
+  committed source and its offline import/scope smoke test passes.
+- The explicitly authorized image was streamed without a saved tar to
+  `65.109.220.59:37067`. Destination image
+  `sha256:3c3460be96489e4356b4dbb801545831e32a19b9b74d50e280ac12907346056f`
+  has the same six layers, release/tree/input-signature labels and portable
+  content digest. Guarded handoff journal
+  `/srv/trading-bot/incident-recovery/20260907-processor-calibration-scan/handoff.json`
+  reached `APPLIED_LIVE` at 13:22:48. Container `809bc38507dd...` is the sole
+  processor owner, healthy, `unless-stopped`, restart zero. Bystanders, mounts,
+  resource/environment configuration and parent/owner lock identities remained
+  unchanged. The d08 image and preceding override chain remain available for
+  rollback; no data/checkpoint, capture, sender, Product or authority changed.
+- More than nine automatic cycles remained caught-up with zero market/group
+  backlog, archive rejection and research-context unavailability. Idle/mixed
+  projection samples were 0.261–3.293s. Capture-account2 and sender remained
+  healthy with zero restarts/dead letters/rejections.
+- Nine post-rollout, live-time G1/G2 offer facts were traced by opaque event key:
+  9/9 reached the received Shadow Store, 9/9 Legacy Store, 9/9 `APPLIED` bridge
+  ledger and 9/9 conversation projection. Bridge runs remained `OK`, G1/G2 lag
+  reached zero, and the estimator state at 13:36:09 was `RUNNING`, input health
+  `HEALTHY`, with all 14/14 rates `ESTIMATED`.
+- The destination root remained 49% used with about 74GiB free. The local root
+  remained about 57% used with 17GiB free; attached storage remained 55% used.
+  Old d08 is intentionally retained as the recovery artifact.
 
 ## Conversation projection optimization activated — 11:12 UTC; verified through 11:26 UTC
 

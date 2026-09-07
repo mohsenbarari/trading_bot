@@ -1,6 +1,6 @@
 # Coin Market Intelligence
 
-- Sep07: d08 + `0625597f` bridge live; LEGACY 14/14. Conversation 32–35s→4.75–5.21s; parity 8,496; nine facts in 12.6–43.9s. Undeployed G1/G2 scan: 13.718s→0.066s; 114 tests. Revision/raw gap open. Main=`32d266bd`. Evidence: `docs/MARKET_PROCESSOR_RECOVERY_20260907.md`.
+- Sep07: `9d752171` processor + `0625597f` bridge live; LEGACY 14/14. Dirty G1/G2 projection 23.003s→6.597s; nine new facts reached all four stores/ledgers. Conversation 32–35s→4.75–5.21s. Locks/data/d08 rollback preserved; revision/raw gap open. Main=`32d266bd`. Evidence: `docs/MARKET_PROCESSOR_RECOVERY_20260907.md`.
 - Sender `fb95bbde` is live. Replay only retained originals with bound ACKs; never reset checkpoints. Dead letters/backlog degrade health; market silence alone does not. `docs/MARKET_TRANSFER_RECOVERY_20260907.md`.
 - Account1 `a6dcd636` is live; retain replay quarantine. Docker liveness validates role/schema/source/status/freshness/PID; strict replay/promotion readiness still exposes quarantine. Never delete/synthesize evidence to pass. `docs/MARKET_CAPTURE_RECOVERY_20260905.md`.
 
