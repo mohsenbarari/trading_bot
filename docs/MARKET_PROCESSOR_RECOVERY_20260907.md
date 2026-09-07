@@ -1,5 +1,28 @@
 # Market processor replay/backlog recovery — 2026-09-07
 
+## Coin-group calibration scan candidate — measured at 11:52 UTC; not deployed
+
+- Read-only profiling against the live processor's exact d08 image and current
+  SQLite stores isolated 13.718s of an 18.193s coin-group projection in
+  `_store_parser_calibrations`; parsing 1,703 included messages itself cost
+  0.967s. The reply-graph query cost 0.142s and feedback load 0.024s.
+- The hot observation table held 1,643,712 rows, while only 14,328 belonged to
+  `GROUP_1`/`GROUP_2`. The calibration attributes are a coin-group contract, so
+  the candidate constrains that query to those two sources before evaluating
+  JSON. SQLite then uses the existing
+  `idx_market_observations_source_available` index and still returns all 1,248
+  current calibration rows. The real read-only query measured 0.066s; no index,
+  migration, persistent cache, data rewrite or retention change is introduced.
+- The conservative measured estimate for the same group projection is about
+  4.54s (`18.193 - 13.718 + 0.066`), roughly 75% below the profiled run. This is
+  an estimate, not production acceptance, until the exact candidate image is
+  authorized and observed under normal cycles.
+- A regression fixture retains the valid group calibration while excluding a
+  look-alike row from a non-group source. All 64 group parser/linker/feedback
+  tests and all 50 processor/adapter/research-context tests pass (114 total).
+  The candidate has not been built, transferred or activated; d08 remains the
+  sole production market-processor version.
+
 ## Conversation projection optimization activated — 11:12 UTC; verified through 11:26 UTC
 
 - Refactor commit `0625597f27daca7e591e9e277b662bb24db69083` replaces the

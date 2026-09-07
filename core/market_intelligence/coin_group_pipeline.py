@@ -428,7 +428,8 @@ def _store_parser_calibrations(
         SELECT event_type,source_code,instrument,side,settlement_term,trade_form,
                is_conditional,attributes_json
         FROM market_observations
-        WHERE json_extract(attributes_json,'$.human_feedback_syntax_fingerprint')
+        WHERE source_code IN ('GROUP_1','GROUP_2')
+          AND json_extract(attributes_json,'$.human_feedback_syntax_fingerprint')
               IS NOT NULL
           AND json_extract(attributes_json,'$.human_feedback_reviewed_at_utc')
               IS NOT NULL

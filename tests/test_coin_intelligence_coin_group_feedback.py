@@ -12,7 +12,10 @@ from core.market_intelligence.coin_group_feedback import (
     record_coin_group_parser_feedback,
     record_coin_group_parser_feedback_batch,
 )
-from core.market_intelligence.coin_group_pipeline import process_coin_group_staging
+from core.market_intelligence.coin_group_pipeline import (
+    _store_parser_calibrations,
+    process_coin_group_staging,
+)
 from core.market_intelligence.coin_group_review_projection import (
     CoinGroupReviewProjectionError,
     project_coin_group_reviews,
@@ -186,6 +189,67 @@ def _pending_observation(event_key: bytes) -> MarketObservation:
         is_conditional=False,
         attributes={"resolution_reason": "COMMODITY_AMBIGUOUS"},
     )
+
+
+def _stored_pattern_observation(
+    event_key: bytes,
+    *,
+    source_code: str,
+) -> MarketObservation:
+    return MarketObservation(
+        event_key=event_key,
+        source_code=source_code,
+        source_family="GROUP",
+        event_time_utc="2026-08-15T10:00:00Z",
+        available_at_utc="2026-08-15T10:01:00Z",
+        instrument="COIN_IMAM",
+        market_label="GROUP_COIN_IMAM",
+        settlement_term="TOMORROW",
+        trade_form="PHYSICAL",
+        event_type="OFFER",
+        side="SELL",
+        price=188_600,
+        price_unit="PROJECT_THOUSAND_TOMAN",
+        currency="TOMAN",
+        quantity=5,
+        quantity_unit="COIN",
+        parser_version="coin-parser-test+human-feedback-r1",
+        quality_policy_version="coin-group-human-feedback-v1",
+        attributes={
+            "human_feedback_fields": ["side"],
+            "human_feedback_syntax_fingerprint": "a" * 64,
+            "human_feedback_reviewed_at_utc": "2026-08-15T10:00:30Z",
+            "human_feedback_revision": 1,
+            "human_feedback_event_confirmed": True,
+        },
+    )
+
+
+def test_stored_pattern_calibration_scan_is_scoped_to_coin_groups() -> None:
+    with TemporaryDirectory() as directory:
+        market = connect_market_store(Path(directory) / "market.sqlite3")
+        initialize_market_store(market)
+        upsert_observation(
+            market,
+            _stored_pattern_observation(
+                derive_event_key("stored-pattern", "group"),
+                source_code="GROUP_1",
+            ),
+        )
+        upsert_observation(
+            market,
+            _stored_pattern_observation(
+                derive_event_key("stored-pattern", "unrelated"),
+                source_code="OTHER_1",
+            ),
+        )
+        market.commit()
+
+        calibrations = _store_parser_calibrations(market)
+
+        assert len(calibrations) == 1
+        assert calibrations[0].group_number == 1
+        market.close()
 
 
 def test_exact_event_review_projection_is_causal_idempotent_and_rejectable() -> None:
