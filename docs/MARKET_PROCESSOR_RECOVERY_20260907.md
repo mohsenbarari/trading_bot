@@ -92,8 +92,43 @@ a genuinely absent link remains unavailable. Read-only samples of the latest
 10 facts from each of both groups/private-gold/two melted channels all had their
 durable context links. This sample does not prove coverage of all history.
 
-Pending: deploy the bounded-context follow-up, all-source backlog drain,
-transport checkpoint coverage and final model/dashboard evidence.
+Bounded-context source `36794a31` passed 102 tests inside its exact image in
+9.771s. Its transfer was denied by the execution approval layer because that
+code/image payload and destination were not considered explicitly authorized.
+No alternative transfer or in-place deployment was attempted. That image is
+not the running production version.
+
+### New poison-message failure discovered at 07:04 UTC
+
+The running `83a698e0` process had last completed a cycle at 07:02:47 with
+94,650 pending rows, then restarted 11 times. Capture and sender remained
+healthy with zero sender backlog/dead letters. This is **not a stable processor**.
+OOM was false; the old entrypoint reported only `runtime_dependency_failure`.
+
+Read-only validation of 431 public rows from the next 1,000 queued messages
+reproduced `MarketStoreContractError` for USD_HERAT message 151917, parsed price
+22,400 Toman/USD, outside the existing canonical range. The diagnostic used the
+already-installed image, `mode=ro` plus `query_only`, disabled all fact/checkpoint
+writes and did not publish raw text. SQLite sidecar creation required the normal
+service UID/directory access; an initial read-only-directory probe could not open
+the WAL database and was not treated as a data finding.
+
+Follow-up fix: isolate each public message in savepoints on both stores; preserve
+the caller's outer commit boundary. Filter only the existing canonical-magnitude
+policy exception, retain the input and terminal disposition, and continue with
+healthy messages. Mixed valid/invalid lines cannot leave partial model facts.
+Other contract/storage errors still fail closed. Add a specific rejection counter
+and payload-free exception type/code-location diagnostics for unexpected failures.
+Tests reproduce a 22,400 quote, a partially valid multiline message, successful
+subsequent input, outer rollback, unrelated-error propagation and log redaction.
+Local final regression run: 106 tests in 53.399s, 104 passed and two encryption
+tests skipped because the host lacks pyaes (those tests passed in the preceding
+102-test immutable-image run). Foundation/error-redaction run: 16 passed.
+
+Pending: user authorization accepted by the execution layer for transferring
+the incident-fix images to current Web host `65.109.220.59`, deploying the final
+fix to **market-processor only**, then drain and verify the complete pipeline.
+Do not use the future Finland host `65.109.214.203` for this incident.
 The sender recovery is separately recorded in
 `MARKET_TRANSFER_RECOVERY_20260907.md`.
 

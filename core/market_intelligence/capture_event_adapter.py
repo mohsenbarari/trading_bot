@@ -148,6 +148,7 @@ class CaptureProjectionReport:
     private_trade_messages_ambiguous: int
     group_pipeline: CoinGroupPipelineReport | None
     raw_rows_purged: int
+    public_price_policy_rejections: int = 0
 
 
 _SCHEMA = """
@@ -1846,6 +1847,29 @@ def _project_public_row(
     market: sqlite3.Connection,
     row: sqlite3.Row,
 ) -> tuple[int, tuple[bytes, ...]]:
+    # One malformed public message must not leave partially inserted facts.
+    # Keep an explicit outer transaction so releasing this savepoint cannot
+    # commit work before the processor's normal cross-store commit boundary.
+    for connection in (market, staging):
+        if not connection.in_transaction:
+            connection.execute("BEGIN")
+        connection.execute("SAVEPOINT public_message_projection")
+    try:
+        return _project_public_row_inner(staging, market, row)
+    except BaseException:
+        for connection in (market, staging):
+            connection.execute("ROLLBACK TO public_message_projection")
+        raise
+    finally:
+        for connection in (market, staging):
+            connection.execute("RELEASE public_message_projection")
+
+
+def _project_public_row_inner(
+    staging: sqlite3.Connection,
+    market: sqlite3.Connection,
+    row: sqlite3.Row,
+) -> tuple[int, tuple[bytes, ...]]:
     source_id = str(row["source_id"])
     result = ingest_public_message(
         market,
@@ -2428,6 +2452,7 @@ def project_capture_changes(
         dirty_parameters = (as_of, max_market_messages)
     dirty = staging.execute(dirty_query, dirty_parameters).fetchall()
     projected = upserted = retracted = 0
+    public_price_policy_rejections = 0
     private_trades = private_finalized = private_ambiguous = 0
     primary_changed = False
     primary_minutes: set[str] = set()
@@ -2534,7 +2559,19 @@ def project_capture_changes(
                     (as_of, source_id, int(item["message_id"])),
                 )
         else:
-            public_upserted, flow_keys = _project_public_row(staging, market, row)
+            try:
+                public_upserted, flow_keys = _project_public_row(staging, market, row)
+            except MarketStoreContractError as exc:
+                if not str(exc).startswith("price_out_of_canonical_range:"):
+                    raise
+                public_price_policy_rejections += 1
+                _finish_capture_lineage(
+                    staging, stream="market", source_id=source_id,
+                    message_id=int(item["message_id"]), status="FILTERED",
+                    disposition_code="PRICE_OUT_OF_CANONICAL_RANGE",
+                    completed_at_utc=as_of,
+                )
+                continue
             upserted += public_upserted
             changed_melted_flow_keys.extend(flow_keys)
         _finish_capture_lineage(
@@ -2696,6 +2733,7 @@ def project_capture_changes(
             )
     raw_purged = purge_capture_staging(staging, as_of_utc=as_of)
     return CaptureProjectionReport(
+        public_price_policy_rejections=public_price_policy_rejections,
         market_messages_reprojected=projected,
         market_facts_upserted=upserted,
         market_facts_retracted=retracted + (group_report.retracted_facts if group_report else 0),

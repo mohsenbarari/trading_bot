@@ -1,5 +1,12 @@
 # Coin Market Intelligence
 
+- Sep07 ongoing: processor `83a698e0` fixed repeated public replay and export
+  scan overhead, but restart-looped at 07:02 on an out-of-range Herat message.
+  Local follow-ups isolate invalid messages and bound research lookup; NOT yet
+  deployed. Final image transfer to current Web `65.109.220.59` needs explicit
+  payload/host authorization accepted by the execution layer. Do not bypass it
+  or call Docker liveness end-to-end readiness. See
+  `docs/MARKET_PROCESSOR_RECOVERY_20260907.md` for evidence and remaining gates.
 - Sep07: Sender `fb95bbde` is live. Replay rollback gaps only with retained
   originals and bound ACKs; never reset checkpoints. Dead letters/backlog degrade
   health; market silence alone is not failure. Other-source parser backlog remains
