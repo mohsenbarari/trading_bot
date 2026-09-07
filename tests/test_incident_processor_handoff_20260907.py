@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timezone
 
 spec = importlib.util.spec_from_file_location(
@@ -25,9 +26,19 @@ class ProcessorHandoffGuards(unittest.TestCase):
                  'counters':{'archive_rejected':0}})
 
     def test_known_degraded_prior_can_be_repaired_without_claiming_health(self):
-        result=handoff.validate_prior(*self.prior())
+        with patch.object(handoff,'KNOWN_DEGRADED_RELEASE',handoff.OLD):
+            result=handoff.validate_prior(*self.prior())
         self.assertTrue(result['degraded'])
         self.assertEqual(result['restart_count'],34)
+
+    def test_follow_up_requires_healthy_prior_instead_of_reusing_degraded_waiver(self):
+        old,health=self.prior()
+        with self.assertRaisesRegex(RuntimeError,'prior_failure_not_known_restart_loop'):
+            handoff.validate_prior(old,health)
+        old['RestartCount']=0
+        old['State'].update(Status='running',ExitCode=0)
+        health['updated_at_utc']=datetime.fromtimestamp(time.time()-1,timezone.utc).isoformat()
+        self.assertFalse(handoff.validate_prior(old,health)['degraded'])
 
     def test_unknown_old_image_failure_or_contract_is_refused(self):
         for change in ('image','exit','oom','release','schema'):

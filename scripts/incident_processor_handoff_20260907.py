@@ -11,11 +11,12 @@ import stat
 import subprocess
 import time
 
-OLD = '83a698e0f1818bbc4088614467d76e04e9b9b5da'
-NEW = '7c35c5111651ea0d06072a0ad143214eb68c7030'
-OLD_IMAGE = 'sha256:082255a7452ae5a66f8306b6c7f0c430ddb7482323c2df17027c655965911df3'
-NEW_IMAGE = 'sha256:1d35a38721dc6cb5364fb992cbc9d6ef668bba68d405d977d8a9b5b7c34c4f4d'
-PORTABLE = '8c0b17f3eb65e9b0437ea606bc5cda8fb0ca4051218ec34a2e52d81b6297f859'
+OLD = '7c35c5111651ea0d06072a0ad143214eb68c7030'
+NEW = 'cb45aad7e0f17aec4a16c242a234deb71f5585f7'
+OLD_IMAGE = 'sha256:1d35a38721dc6cb5364fb992cbc9d6ef668bba68d405d977d8a9b5b7c34c4f4d'
+NEW_IMAGE = 'sha256:1371fce0a9158a06482d77e211a0265df59aa18f08e4f8639edbad97efe8eaad'
+PORTABLE = 'f54768ebbbd5feefa336b931707f81f71fe307a2c5fd4691fd28bb7ee8488cd7'
+KNOWN_DEGRADED_RELEASE = '83a698e0f1818bbc4088614467d76e04e9b9b5da'
 PARENT_RELEASE = '4ef8e6dcb2d361b763bd8b72dc730c1f978f564a'
 ROLE = 'market-processor'
 PROJECT = 'market-private-pipeline-primary'
@@ -25,8 +26,8 @@ STATE_ROOT = Path('/srv/trading-bot/market-data-staging-shadow/state/market-proc
 STATE = STATE_ROOT / ROLE
 OWNER_LOCK = STATE / 'owner.lock'
 PARENT_LOCK = Path('/root/secure-envs/trading-bot/queue-cutover-artifacts/production-release.lock')
-OPS = Path('/srv/trading-bot/incident-recovery/20260907-processor-input-isolation')
-OVERRIDE = OPS / 'processor-input-isolation-hotfix.override.json'
+OPS = Path('/srv/trading-bot/incident-recovery/20260907-processor-live-fairness')
+OVERRIDE = OPS / 'processor-live-fairness-hotfix.override.json'
 JOURNAL = OPS / 'handoff.json'
 
 def require(condition, reason):
@@ -93,6 +94,7 @@ def compose(new=False):
     args += ['-f','/srv/trading-bot/incident-recovery/20260905-processor/processor-parent-hotfix-20260905.override.json']
     args += ['-f','/srv/trading-bot/incident-recovery/20260907-processor/processor-replay-hotfix.override.json']
     args += ['-f','/srv/trading-bot/incident-recovery/20260907-processor-covering/processor-covering-hotfix.override.json']
+    args += ['-f','/srv/trading-bot/incident-recovery/20260907-processor-input-isolation/processor-input-isolation-hotfix.override.json']
     if new:
         args += ['-f',str(OVERRIDE)]
     return args
@@ -144,7 +146,8 @@ def validate_prior(old, health):
     require(age >= 0, 'prior_heartbeat_future')
     degraded = old['RestartCount'] > 0 or age >= 60
     if degraded:
-        require(old['RestartCount'] > 0 and state.get('ExitCode') == 1,
+        require(OLD == KNOWN_DEGRADED_RELEASE
+                and old['RestartCount'] > 0 and state.get('ExitCode') == 1,
                 'prior_failure_not_known_restart_loop')
     return {'degraded': degraded, 'restart_count': old['RestartCount'],
             'exit_code': state.get('ExitCode'), 'heartbeat_age_seconds': round(age, 3),
