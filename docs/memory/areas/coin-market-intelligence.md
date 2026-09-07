@@ -1,11 +1,12 @@
 # Coin Market Intelligence
 
-- Sep07 ongoing: processor `83a698e0` fixed repeated public replay and export
-  scan overhead, but restart-looped at 07:02 on an out-of-range Herat message.
-  Local follow-ups isolate invalid messages and bound research lookup; NOT yet
-  deployed. Final image transfer to current Web `65.109.220.59` needs explicit
-  payload/host authorization accepted by the execution layer. Do not bypass it
-  or call Docker liveness end-to-end readiness. See
+- Sep07 ongoing: processor `cb45aad7` is live with poison isolation, bounded
+  research reads and fair fresh/history scheduling; export batch=500. Zero
+  restarts, but historical backlog and latency remain. Actual dashboard labels
+  improved and private estimates recovered to 12/14. Sparse-minute/XAU follow-up
+  `921b45a0` passed 195 exact-image tests but transfer to current Web
+  `65.109.220.59` was denied again even after trust/payload checks. Needs explicit
+  image/destination approval; never bypass or call liveness completion. See
   `docs/MARKET_PROCESSOR_RECOVERY_20260907.md` for evidence and remaining gates.
 - Sep07: Sender `fb95bbde` is live. Replay rollback gaps only with retained
   originals and bound ACKs; never reset checkpoints. Dead letters/backlog degrade

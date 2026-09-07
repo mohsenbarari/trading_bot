@@ -1,5 +1,100 @@
 # Market processor replay/backlog recovery — 2026-09-07
 
+## Latest checkpoint — 08:21 UTC
+
+- Active: `cb45aad7` with the separately journaled export batch of 500. Zero
+  processor restarts; sender queue/dead letters/rejections zero. No export
+  rejection or missing research context. Parse backlog 52,236; cycle 57.983s.
+- Actual authenticated dashboard returned HTTP 200. Its 40 compact activity
+  rows contained 30 model-input labels, 8 review labels and 2 audit-only labels.
+  Both group lists show today's events through approximately 11:48 Tehran.
+  This is not proof that every ambiguous offer should become eligible, nor
+  proof of the requested real-time latency.
+- Private reference snapshot: 12/14 estimated cells; IMAM/TOMORROW and
+  ONE_GRAM/CASH still lack their historical melted dependencies downstream.
+  Read-only producer verification found those real inputs already retained.
+  The exact two installed-engine lookup scopes total 500 distinct facts,
+  scope SHA256 `50c1146586b7224da3303ce2066634634463d8076fae85a9279213c2f2615245`.
+  **No manual/forced replay of this scope has been performed.** Normal
+  export is continuing. Any scoped replay must use the canonical exporter,
+  owner locks and exact receipts; never copy fabricated prices into the model.
+- Follow-up source `921b45a045073dab91f14b56f4bb8fc7c9a25344` passed all 195
+  exact-image tests (12.429s). Separate anchor/fairness pytest: 13 passed.
+  Its image is local only: the execution approval layer denied transfer to
+  the current Web host, then denied it again after strict SSH trust verification
+  and payload inspection. Only two runtime source files differ from `cb45`;
+  dependency files are unchanged and the image contains no env/DB/session/key
+  files. No workaround or in-place deployment was attempted. A trusted user
+  approval explicitly naming **this image and destination** is still required
+  by the execution layer. Do not mark this incident resolved.
+
+## Current follow-up authorization and activation attempt
+
+The user explicitly approved transferring this incident's code/image to the
+current Web host and replacing only `market-processor`, retaining data and
+rollback. Source `7c35c511` passed all 106 exact-image tests (10.144s) and was
+streamed to the host without a tar archive on the root disk. Portable content
+digest: `8c0b17f3eb65e9b0437ea606bc5cda8fb0ca4051218ec34a2e52d81b6297f859`.
+The handoff now pins that artifact against the prior `83a698e0` artifact.
+At 07:29 UTC the prior processor had 34 restarts, exit 1, no OOM. Repair accepts
+this explicitly recorded degraded baseline; it does not relax NEW liveness,
+ownership, image, mount, export or bystander checks. A fallback to the known
+broken prior artifact is reported as degraded, never as healthy rollback.
+Activation passed at 07:34:37 UTC: healthy Docker, zero restarts, unchanged
+bystanders/parent/mounts, no export rejection or missing research context. The
+exact poison message is now FILTERED/PRICE_OUT_OF_CANONICAL_RANGE; original
+lineage is retained. Catch-up and end-to-end acceptance remain open.
+
+### Review-label and live-latency findings
+
+Recent dashboard rows retain upstream `PENDING_REVIEW` with
+`INSUFFICIENT_OR_AMBIGUOUS_STRICTLY_PRIOR_SAME_BOOK_ANCHORS`; explicit named
+offers include ELIGIBLE rows, so this is not a blanket UI-only flag. The parser's
+mounted prediction ledger has zero rows, with an existing PRIVATE_PRIMARY
+authority epoch. Its live PRIVATE_PRIMARY snapshot is SAFE_NO_DATA, all 14 cells
+reporting NO_FRESH_MELTED. Do not switch authority or substitute the separate
+legacy dashboard's estimates to hide the missing input.
+
+The bounded parse queue used global oldest-first ordering, making new independent
+gold/XAU facts wait behind unrelated history. Fair selection now reserves at
+least half of each batch for global oldest history and shares the other half
+across five sources. XAU, aggregate and self-contained private offer revision
+histories can select actual fresh messages. Herat and melted-flow retain their
+within-source oldest-first ordering because they have prior-fact dependencies.
+The final selected batch is ordered causally; event times, economics, checkpoints,
+raw retention, model/quality policies and Product authority are unchanged.
+Small batches (<10) and unlimited/offline callers preserve old selection order.
+Additive indexes bound each source lookup. Tests cover lane fairness, old-history
+progress, future exclusion, exact-once drain, indexes on retained/new schema and
+full private offer/trade parity against FIFO after catch-up. Deployment pending.
+
+Fairness `cb45aad7` activated at 07:55:40 UTC. At 07:55:54 the actual private
+snapshot changed from SAFE_NO_DATA to OK, with 12/14 estimated cells and 36 real
+prediction-ledger rows; no authority/policy change or synthetic input was needed.
+The missing cells were IMAM/TOMORROW and ONE_GRAM/CASH. Installed estimator code
+showed real coin anchors but no contemporaneous melted points: for example
+ONE_GRAM/CASH at Sep06 08:31:17 and IMAM/TOMORROW at Sep06 18:04:04. Retained
+export backlog included 26,732 private-gold, 10,253 aggregate and 2,569 Herat rows.
+Batch capacity 100→500 on the same image activated at 08:02:45; initially
+169–445 published facts/cycle, zero rejection/context loss, but cycles grew to
+52–61s. This is recovery progress, not an acceptable final real-time latency.
+
+Follow-up: sparse private-minute rebuilds read the entire earliest-to-latest
+span before filtering requested minutes in Python. Mixing fresh and historical
+work makes that span many hours. Select only actual requested minute prefixes
+in <=500-key chunks through an additive private-source-only expression index;
+use the same index for affected-minute discovery/retraction. Preserve exact
+weighted prices, book boundaries, closed-minute and availability limits. A
+test with 100 unrelated intervening rows reads only the three requested input
+rows and proves identical weighted values, unchanged inputs and no implicit
+commit. Existing private/capture/fairness tests pass.
+
+Also reproduced the analogous XAU poison-input failure offline against `cb45`:
+one out-of-range quote aborts the whole bulk batch. The follow-up keeps the bulk
+fast path for healthy batches and, only on canonical-magnitude rejection, retries
+per message with savepoints. Invalid raw remains FILTERED with its reason, valid
+quotes continue, and unrelated store-contract errors remain fail-closed.
+
 ## Cause and scope
 
 After the sender recovery, the processor still had about 156,000 dirty public

@@ -11,11 +11,12 @@ import stat
 import subprocess
 import time
 
-OLD = 'ab205f08a66ae67e6cb9013cabc5bf4b285bf1fd'
-NEW = '83a698e0f1818bbc4088614467d76e04e9b9b5da'
-OLD_IMAGE = 'sha256:0bf49ccd181e26d4bdd7d1418aab3c48186ba30f3c3f960e395aa3a772ed375c'
-NEW_IMAGE = 'sha256:082255a7452ae5a66f8306b6c7f0c430ddb7482323c2df17027c655965911df3'
-PORTABLE = '77a1f93d881b08cc272f7e8792f6091c4ccf15511e8e05bcbb39aa8fbe76278c'
+OLD = 'cb45aad7e0f17aec4a16c242a234deb71f5585f7'
+NEW = 'cb45aad7e0f17aec4a16c242a234deb71f5585f7'
+OLD_IMAGE = 'sha256:1371fce0a9158a06482d77e211a0265df59aa18f08e4f8639edbad97efe8eaad'
+NEW_IMAGE = 'sha256:1371fce0a9158a06482d77e211a0265df59aa18f08e4f8639edbad97efe8eaad'
+PORTABLE = 'f54768ebbbd5feefa336b931707f81f71fe307a2c5fd4691fd28bb7ee8488cd7'
+KNOWN_DEGRADED_RELEASE = '83a698e0f1818bbc4088614467d76e04e9b9b5da'
 PARENT_RELEASE = '4ef8e6dcb2d361b763bd8b72dc730c1f978f564a'
 ROLE = 'market-processor'
 PROJECT = 'market-private-pipeline-primary'
@@ -25,8 +26,9 @@ STATE_ROOT = Path('/srv/trading-bot/market-data-staging-shadow/state/market-proc
 STATE = STATE_ROOT / ROLE
 OWNER_LOCK = STATE / 'owner.lock'
 PARENT_LOCK = Path('/root/secure-envs/trading-bot/queue-cutover-artifacts/production-release.lock')
-OPS = Path('/srv/trading-bot/incident-recovery/20260907-processor-covering')
-OVERRIDE = OPS / 'processor-covering-hotfix.override.json'
+OPS = Path('/srv/trading-bot/incident-recovery/20260907-processor-export-capacity')
+OVERRIDE = OPS / 'processor-export-capacity.override.json'
+EXPORT_LIMIT = '500'
 JOURNAL = OPS / 'handoff.json'
 
 def require(condition, reason):
@@ -92,6 +94,9 @@ def compose(new=False):
         args += ['-f',str(ROOT/name)]
     args += ['-f','/srv/trading-bot/incident-recovery/20260905-processor/processor-parent-hotfix-20260905.override.json']
     args += ['-f','/srv/trading-bot/incident-recovery/20260907-processor/processor-replay-hotfix.override.json']
+    args += ['-f','/srv/trading-bot/incident-recovery/20260907-processor-covering/processor-covering-hotfix.override.json']
+    args += ['-f','/srv/trading-bot/incident-recovery/20260907-processor-input-isolation/processor-input-isolation-hotfix.override.json']
+    args += ['-f','/srv/trading-bot/incident-recovery/20260907-processor-live-fairness/processor-live-fairness-hotfix.override.json']
     if new:
         args += ['-f',str(OVERRIDE)]
     return args
@@ -106,6 +111,7 @@ def validate_config(old, new):
     expected['image'] = NEW_IMAGE
     expected['restart'] = 'unless-stopped'
     expected['environment']['MARKET_PIPELINE_RELEASE_SHA'] = NEW
+    expected['environment']['MARKET_PROCESSOR_MAX_FACT_EXPORTS_PER_CYCLE'] = EXPORT_LIMIT
     expected.setdefault('labels',{})['org.opencontainers.image.revision'] = NEW
     require(expected == b[ROLE], 'unexpected_target_config_drift')
     for key in ('networks','volumes','secrets','configs'):
@@ -123,6 +129,33 @@ def owners():
     ids = command(['docker','ps','-q']).split()
     rows = json.loads(command(['docker','inspect']+ids)) if ids else []
     return [r['Id'] for r in rows if any(m.get('Source')==str(STATE_ROOT) for m in r['Mounts'])]
+
+def validate_prior(old, health):
+    """Accept only this incident's known artifact, including its restart loop.
+
+    A stale prior heartbeat is evidence of the incident, not a prerequisite
+    for repairing it. NEW still has every normal live acceptance gate.
+    """
+    state = old['State']
+    require(old['Image'] == OLD_IMAGE and state.get('Status') in ('running', 'restarting')
+            and not state.get('OOMKilled'), 'prior_runtime_drift')
+    require(health.get('release_sha') == OLD
+            and health.get('schema') == 'market_processor/4.0'
+            and health.get('mode') == 'live' and health.get('shadow_only') is True
+            and health.get('status') == 'live-shadow-ready'
+            and health.get('counters', {}).get('archive_rejected') == 0,
+            'prior_processor_contract_drift')
+    age = time.time() - datetime.fromisoformat(health['updated_at_utc'].replace('Z', '+00:00')).timestamp()
+    require(age >= 0, 'prior_heartbeat_future')
+    degraded = old['RestartCount'] > 0 or age >= 60
+    if degraded:
+        require(OLD == KNOWN_DEGRADED_RELEASE
+                and old['RestartCount'] > 0 and state.get('ExitCode') == 1,
+                'prior_failure_not_known_restart_loop')
+    return {'degraded': degraded, 'restart_count': old['RestartCount'],
+            'exit_code': state.get('ExitCode'), 'heartbeat_age_seconds': round(age, 3),
+            'last_completed_cycle': health['updated_at_utc'],
+            'known_failure': 'USD_HERAT:151917:price_out_of_canonical_range' if degraded else None}
 
 def healthy(release,image,old_mounts,since):
     c=inspect(CONTAINER)
@@ -189,7 +222,8 @@ def main():
                 and parent.get('device')==info.st_dev,'parent_binding_drift')
         require(not JOURNAL.exists(),'journal_exists_no_blind_repeat')
         override={'services':{ROLE:{'image':NEW_IMAGE,'restart':'unless-stopped',
-                   'environment':{'MARKET_PIPELINE_RELEASE_SHA':NEW},
+                   'environment':{'MARKET_PIPELINE_RELEASE_SHA':NEW,
+                                  'MARKET_PROCESSOR_MAX_FACT_EXPORTS_PER_CYCLE':EXPORT_LIMIT},
                    'labels':{'org.opencontainers.image.revision':NEW}}}}
         if OVERRIDE.exists():
             file_check(OVERRIDE,0)
@@ -198,7 +232,6 @@ def main():
             atomic(OVERRIDE,override)
         file_check(OVERRIDE,0)
         old=inspect(CONTAINER)
-        require(old['Image']==OLD_IMAGE and old['State']['Running'] and old['RestartCount']==0,'prior_runtime_drift')
         require(owners()==[old['Id']],'prior_owner_overlap')
         target=inspect(NEW_IMAGE,image=True)
         payload={k:target.get(k) for k in ('Architecture','Config','Created','Os','RootFS')}
@@ -212,21 +245,20 @@ def main():
                     for key,value in prior_config['services'][ROLE]['environment'].items()),
                 'prior_runtime_environment_drift')
         old_health=json.loads((STATE/'health.json').read_text())
-        require(old_health.get('release_sha')==OLD and old_health.get('status')=='live-shadow-ready'
-                and old_health.get('counters',{}).get('archive_rejected')==0,'prior_processor_not_ready')
-        require(time.time()-datetime.fromisoformat(old_health['updated_at_utc'].replace('Z','+00:00')).timestamp()<60,
-                'prior_processor_heartbeat_stale')
+        prior_probe=validate_prior(old,old_health)
         old_mounts=mounts(old)
         untouched=bystanders()
         record={'schema':'market_processor_scoped_hotfix_handoff/1.0','status':'PREPARED',
                 'created_at_utc':utc(),'old_release':OLD,'new_release':NEW,'old_image':OLD_IMAGE,
                 'new_image':NEW_IMAGE,'portable_image_digest':PORTABLE,
+                'export_limit':int(EXPORT_LIMIT),
                 'parent_lock_sha256':digest(lock_bytes),'old_container_id':old['Id'],
                 'data_deleted':False,'product_changed':False,'product_queue_changed':False,
                 'capture_changed':False,'sender_changed':False,'parent_handoff_changed':False,
-                'mounts':old_mounts,'bystanders':untouched,'old_restart_policy':old['HostConfig']['RestartPolicy']}
+                'mounts':old_mounts,'bystanders':untouched,'old_restart_policy':old['HostConfig']['RestartPolicy'],
+                'prior_probe':prior_probe}
         if not args.apply:
-            print(json.dumps({'status':'PREFLIGHT_PASS','old_release':OLD,'new_release':NEW}))
+            print(json.dumps({'status':'PREFLIGHT_PASS','old_release':OLD,'new_release':NEW,'prior_probe':prior_probe}))
             return
         atomic(JOURNAL,record)
         stopped=False
@@ -258,8 +290,19 @@ def main():
                     require(owners()==[],'rollback_owner_not_quiesced')
                 started=time.time()
                 command(compose()+['up','-d','--no-deps','--no-build','--pull','never',ROLE],timeout=90)
-                record['rollback_probe']=wait_healthy(OLD,OLD_IMAGE,old_mounts,started)
-                record['status']='ROLLED_BACK_LIVE'
+                if prior_probe['degraded']:
+                    restored=inspect(CONTAINER)
+                    require(restored['Image']==OLD_IMAGE and mounts(restored)==old_mounts
+                            and owners()==[restored['Id']], 'prior_artifact_restore_failed')
+                    require(bystanders()==untouched and PARENT_LOCK.read_bytes()==lock_bytes,
+                            'rollback_peer_or_authority_drift')
+                    # The prior artifact has a known poison input. Restoring it
+                    # cannot honestly be reported as a healthy rollback.
+                    record['status']='PRIOR_ARTIFACT_RESTORED_DEGRADED'
+                    record['rollback_probe']={'container_id':restored['Id'],'healthy':False}
+                else:
+                    record['rollback_probe']=wait_healthy(OLD,OLD_IMAGE,old_mounts,started)
+                    record['status']='ROLLED_BACK_LIVE'
                 atomic(JOURNAL,record)
             raise
 

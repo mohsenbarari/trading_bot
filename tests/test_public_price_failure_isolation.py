@@ -47,14 +47,33 @@ class PublicPriceFailureIsolationTests(unittest.TestCase):
         self.staging.close()
         self.temp.cleanup()
 
-    def stage(self, identity, text):
+    def stage(self, identity, text, source="USD_HERAT"):
         event = decode_market_channel_event(build_market_event(
-            SOURCE_POLICIES["USD_HERAT"], snapshot(identity,
+            SOURCE_POLICIES[source], snapshot(identity,
                 published=self.now - timedelta(minutes=1), text=text),
             event_type="message_created", received_at=self.now, backfill=False,
         ))
         stage_capture_event(self.staging, event)
         return event
+
+    def test_xau_out_of_range_message_cannot_poison_other_quotes(self):
+        bad=self.stage(1,"XAUUSD 9999.50",source="XAUUSD")
+        good=self.stage(2,"XAUUSD 3500.50",source="XAUUSD")
+        report=project_capture_changes(self.staging,self.market,as_of_utc=self.now)
+        self.assertEqual(report.public_price_policy_rejections,1)
+        self.assertEqual(report.market_facts_upserted,1)
+        self.assertEqual(self.market.execute('SELECT price_value FROM market_observations').fetchone()[0],'3500.50')
+        self.assertEqual(tuple(self.staging.execute('SELECT status,disposition_code FROM capture_event_lineage WHERE event_id=?',(bad.event_id,)).fetchone()),('FILTERED','PRICE_OUT_OF_CANONICAL_RANGE'))
+        self.assertEqual(self.staging.execute('SELECT status FROM capture_event_lineage WHERE event_id=?',(good.event_id,)).fetchone()[0],'PARSED')
+        self.assertEqual(self.staging.execute('SELECT count(*) FROM capture_dirty_market_messages').fetchone()[0],0)
+        self.assertEqual(self.staging.execute('SELECT count(*) FROM capture_market_messages').fetchone()[0],2)
+
+    def test_xau_unrelated_contract_failure_remains_visible(self):
+        self.stage(1,"XAUUSD 3500.50",source="XAUUSD")
+        with patch('core.market_intelligence.capture_event_adapter.ingest_xau_messages_batch',
+                   side_effect=MarketStoreContractError('instrument_price_unit_mismatch')):
+            with self.assertRaisesRegex(MarketStoreContractError,'instrument_price_unit_mismatch'):
+                project_capture_changes(self.staging,self.market,as_of_utc=self.now)
 
     def test_invalid_and_partially_valid_messages_do_not_block_next_valid_message(self):
         bad = self.stage(1, "هرات فروش 22400")
