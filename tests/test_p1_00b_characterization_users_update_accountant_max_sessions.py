@@ -1,6 +1,6 @@
 """Direct characterization test for api.routers.users.update_user forcing accountant max_sessions=1.
 
-This file covers only this one accountant max_sessions characterization branch and does not complete
+This file covers only the accountant and non-accountant in-range max_sessions characterization branches and does not complete
 P1-00b, the 465-seed blocker, Offer/Request-origin evidence, or production
 readiness.
 """
@@ -148,6 +148,116 @@ class UsersUpdateAccountantMaxSessionsCharacterizationTests(unittest.IsolatedAsy
         self.assertEqual(
             audit_call_kwargs["after_summary"]["max_sessions"],
             1,
+        )
+        self.assertEqual(
+            audit_call_kwargs["after_summary"]["updated_fields"],
+            ["max_sessions"],
+        )
+
+    async def test_non_accountant_target_preserves_in_range_max_sessions(self):
+        actor_id = 7
+        requested_user_id = 42
+        target = SimpleNamespace(
+            id=requested_user_id,
+            role=UserRole.STANDARD,
+            max_sessions=3,
+            is_deleted=False,
+            deleted_at=None,
+            account_status=UserAccountStatus.ACTIVE,
+            telegram_id=None,
+            trading_restricted_until=None,
+            max_daily_trades=None,
+            max_active_commodities=None,
+            max_daily_requests=None,
+            limitations_expire_at=None,
+            can_block_users=True,
+            max_blocked_users=10,
+            max_accountants=3,
+            max_customers=5,
+        )
+        actor = SimpleNamespace(
+            id=actor_id,
+            role=UserRole.MIDDLE_MANAGER,
+        )
+        db = MinimalAsyncDB(target)
+        user_update = UserUpdate(max_sessions=2)
+        self.assertEqual(
+            user_update.model_dump(exclude_unset=True),
+            {"max_sessions": 2},
+        )
+
+        sentinel_result = object()
+        queue_sentinel = object()
+
+        with patch(
+            "api.routers.users.sync_mandatory_channel_for_user_state_change",
+            new_callable=AsyncMock,
+        ) as mock_sync_channel, patch(
+            "core.cache.invalidate_user_cache",
+            new_callable=AsyncMock,
+        ) as mock_invalidate_cache, patch(
+            "api.routers.users.attach_customer_user_context",
+            new_callable=AsyncMock,
+            return_value=target,
+        ) as mock_attach_context, patch(
+            "api.routers.users.serialize_user_read",
+            return_value=sentinel_result,
+        ) as mock_serialize, patch(
+            "api.routers.users.audit_log",
+        ) as mock_audit_log, patch(
+            "api.routers.users.configured_telegram_delivery_producer_mode",
+            return_value=queue_sentinel,
+        ) as mock_producer_mode, patch(
+            "api.routers.users.is_user_accountant",
+            new_callable=AsyncMock,
+            return_value=False,
+        ) as mock_is_accountant:
+            result = await update_user(
+                requested_user_id,
+                user_update,
+                db=db,
+                actor=actor,
+                _admin_authority=None,
+            )
+
+        self.assertTrue(hasattr(db, "execute"))
+        mock_is_accountant.assert_awaited_once_with(db, requested_user_id)
+        self.assertEqual(db.execute_calls, [])
+        self.assertEqual(db.get_calls, [(models.user.User, requested_user_id)])
+        self.assertEqual(db.commit_calls, 1)
+        self.assertEqual(db.refresh_calls, [target])
+        self.assertEqual(target.max_sessions, 2)
+        self.assertIs(result, sentinel_result)
+
+        mock_attach_context.assert_awaited_once_with(db, target)
+        mock_serialize.assert_called_once_with(target)
+        mock_producer_mode.assert_called_once_with()
+        mock_invalidate_cache.assert_awaited_once_with(None)
+        mock_sync_channel.assert_awaited_once_with(
+            db,
+            user=target,
+            previous_role=UserRole.STANDARD,
+            previous_is_deleted=False,
+            previous_deleted_at=None,
+        )
+
+        mock_audit_log.assert_called_once()
+        audit_call_args, audit_call_kwargs = mock_audit_log.call_args
+        self.assertEqual(audit_call_args, ("user.update",))
+        self.assertEqual(audit_call_kwargs["target_type"], "user")
+        self.assertEqual(audit_call_kwargs["target_id"], requested_user_id)
+        self.assertEqual(audit_call_kwargs["actor_id"], actor_id)
+        self.assertEqual(
+            audit_call_kwargs["actor_role"],
+            UserRole.MIDDLE_MANAGER.value,
+        )
+        self.assertEqual(
+            audit_call_kwargs["before_summary"]["max_sessions"],
+            3,
+        )
+        self.assertEqual(
+            audit_call_kwargs["after_summary"]["max_sessions"],
+            2,
         )
         self.assertEqual(
             audit_call_kwargs["after_summary"]["updated_fields"],
