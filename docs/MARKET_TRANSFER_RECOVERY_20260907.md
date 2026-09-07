@@ -148,6 +148,15 @@ Post-deployment verification:
   The exact runtime image separately passed 26 recovery/transport tests without
   network access, under read-only and bounded-resource execution.
 
+Refactor handoff note: the deployment-evidence commit advanced protected `main`
+while an already-running refactor unit was finishing. That unit preserved its
+clean Gemini-reviewed test commit `25f4d64b`, but the supervisor correctly required
+external-ref reconciliation (its HALT result also retained non-null acceptance
+fields and failed result validation). The known main delta was inspected, merged
+at the stopped boundary, and relevant tests rerun before starting a fresh cycle.
+Keep the original run records. For future incidents, **wait for confirmed runner
+exit**, not merely a stop-request acknowledgement, before committing to `main`.
+
 ## Separate parser issue remains open
 
 At 05:38 UTC, approximately 108,000 dirty market messages remained across melted,
