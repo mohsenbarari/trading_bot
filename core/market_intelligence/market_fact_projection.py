@@ -20,6 +20,7 @@ from .private_pipeline_contracts import FactPayload, content_hash, load_source_r
 from .research_archive import (
     ResearchArchiveKey,
     archive_fact_research_context,
+    has_archived_research_context,
     research_contexts_for_rows,
 )
 from .xau_model_input import (
@@ -794,6 +795,12 @@ def _ensure_offer_dependency_archived(
             raise MarketFactProjectionError(
                 "market_fact_projection_offer_dependency_not_materialized"
             )
+    if research_required and not research_archived:
+        with archive_connection.cursor() as cursor:
+            research_archived = int(has_archived_research_context(
+                cursor, fact_id=result.fact.fact_id,
+                fact_revision=result.fact.fact_revision, source_code=str(parent["source_code"]),
+            ))
     return research_required, research_archived
 
 
@@ -889,6 +896,14 @@ def export_market_store_facts(
                             context=context,
                             key=research_key,
                         )
+                        research_archived += 1
+                    elif source_code in RESEARCH_CONTEXT_SOURCES and has_archived_research_context(
+                        cursor, fact_id=result.fact.fact_id,
+                        fact_revision=result.fact.fact_revision, source_code=source_code,
+                    ):
+                        # An unchanged historical delivery can outlive local
+                        # raw TTL while its exact durable archive is intact.
+                        # Never substitute another revision or synthesize raw.
                         research_archived += 1
                 except BaseException:
                     cursor.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")

@@ -70,8 +70,30 @@ bounded, ID-ordered batch. Parity and covering-query-plan tests protect this.
 No previously created index or fact is removed. Separate archive-phase timing
 exposes whether remaining delays are in parse or delivery preparation.
 
-Pending: second immutable image/handoff, all-source backlog drain, transport
-checkpoint coverage, model/dashboard evidence and observation through rotation.
+Covering-index runtime `83a698e0` passed activation at 06:45:56 UTC. Its exact
+image passed 81 tests in 10.444 seconds. A normal cycle at 06:46:28 was 17.507s
+(archive phase 15.367s), versus earlier 72–76s cycles. Queue: 120,132 at
+activation, 110,683 at 06:50:20 and 101,581 at 06:57:15. Hourly spool rotation
+was observed: a cycle reread 20,000 records, all duplicates, without recreating
+that work. During this replay cycle total duration was 40.565s. Later mixed
+source parsing still took 34.207s, so one fast cycle is not an all-load SLO.
+
+Additional bounded research lookup: the old context loader fetched unrelated
+group/channel text before Python filtered event keys. SQL now selects only the
+export batch's keys, in chunks of at most 500, with an additive projection-key
+index. Tests cover all returned content, missing keys, chunking and old-schema
+index adoption. A real-inode-replacement test also checks three spool rotations.
+
+A local raw TTL expiry is not proof of missing permanent research evidence.
+Availability accounting now checks the existing PostgreSQL link for the exact
+fact ID, revision, source, raw role and plaintext-hash-bound message when local
+context is unavailable. No previous revision is substituted or raw data invented;
+a genuinely absent link remains unavailable. Read-only samples of the latest
+10 facts from each of both groups/private-gold/two melted channels all had their
+durable context links. This sample does not prove coverage of all history.
+
+Pending: deploy the bounded-context follow-up, all-source backlog drain,
+transport checkpoint coverage and final model/dashboard evidence.
 The sender recovery is separately recorded in
 `MARKET_TRANSFER_RECOVERY_20260907.md`.
 

@@ -1,5 +1,7 @@
 """Public history replay must not recreate completed work after spool rotation."""
 from datetime import datetime, timedelta, timezone
+import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -11,6 +13,7 @@ from core.market_intelligence.capture_event_adapter import (
 from core.market_intelligence.coin_group_staging import connect_coin_group_staging
 from core.market_intelligence.market_store import connect_market_store, initialize_market_store
 from core.market_intelligence.private_capture_telegram import SOURCE_POLICIES, build_market_event
+from core.market_intelligence.private_coin_processor import _ingest_file
 from tests.test_market_pipeline_stage4_capture import snapshot
 
 
@@ -78,6 +81,35 @@ class PublicReplayIdempotenceTests(unittest.TestCase):
         project_capture_changes(self.staging, self.market, as_of_utc=self.now)
         self.assertTrue(stage_capture_event(self.staging, second).accepted)
         self.assertEqual(self.staging.execute("SELECT count(*) FROM capture_dirty_market_messages").fetchone()[0], 1)
+
+    def test_retention_inode_replacement_replays_file_without_recreating_work(self):
+        document = build_market_event(SOURCE_POLICIES["XAUUSD"],
+            snapshot(101, published=self.now - timedelta(hours=2), text="XAUUSD 3500.5"),
+            event_type="message_snapshot", received_at=self.now,
+            backfill=True, explicit_backfill=True)
+        content = json.dumps(document) + "\n"
+        path = self.root / "market-events.jsonl"
+        path.write_text(content)
+        now = self.now.isoformat().replace("+00:00", "Z")
+        first = _ingest_file(self.staging, stream="market", path=path,
+                             now_utc=now, remaining_records=10)
+        self.assertEqual(first["changes"], 1)
+        project_capture_changes(self.staging, self.market, as_of_utc=self.now)
+        self.staging.commit()
+        self.market.commit()
+        for _ in range(3):
+            inode = path.stat().st_ino
+            replacement = self.root / "retained.tmp"
+            replacement.write_text(content)
+            os.replace(replacement, path)
+            self.assertNotEqual(path.stat().st_ino, inode)
+            replay = _ingest_file(self.staging, stream="market", path=path,
+                                  now_utc=now, remaining_records=10)
+            self.assertEqual(replay["records"], 1)
+            self.assertEqual(replay["duplicates"], 1)
+            self.assertEqual(replay["changes"], 0)
+            self.assertEqual(self.staging.execute(
+                "SELECT count(*) FROM capture_dirty_market_messages").fetchone()[0], 0)
 
 
 if __name__ == "__main__":

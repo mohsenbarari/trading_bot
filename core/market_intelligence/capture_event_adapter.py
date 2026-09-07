@@ -278,6 +278,8 @@ CREATE TABLE IF NOT EXISTS capture_projection_keys (
 );
 CREATE INDEX IF NOT EXISTS idx_capture_projection_bucket
     ON capture_projection_keys(source_id,bucket_utc);
+CREATE INDEX IF NOT EXISTS idx_capture_projection_event_key
+    ON capture_projection_keys(event_key);
 
 CREATE TABLE IF NOT EXISTS capture_file_cursors (
     stream TEXT NOT NULL,
@@ -1020,6 +1022,11 @@ def initialize_capture_adapter(connection: sqlite3.Connection) -> None:
         ).fetchone()
     if metadata is None or int(metadata[0]) != CAPTURE_ADAPTER_SCHEMA_VERSION:
         raise CaptureEventContractError("capture_adapter_schema_upgrade_required")
+    # Additive lookup acceleration; old runtimes can still read this schema.
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_capture_projection_event_key "
+        "ON capture_projection_keys(event_key)"
+    )
 
 
 def _expiry(value: str) -> str:
