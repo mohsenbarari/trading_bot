@@ -1,6 +1,30 @@
 # Market processor replay/backlog recovery — 2026-09-07
 
-## Latest checkpoint — 08:21 UTC
+## Latest checkpoint — 08:30–08:33 UTC
+
+- `cb45aad7` remains active, with zero restarts at the read-only identity check.
+  At 08:30:08 its parse backlog was 45,107, cycle 53.908s, archive published 445
+  and rejected zero. Root free space: local about 17 GiB; current Web about
+  75 GiB. The attached local volume has about 44 GiB free.
+- **New open archive evidence:** that cycle reported 346 unavailable research
+  contexts. A read-only PostgreSQL transaction sampled the latest 100 deliveries
+  per research source: exact-context links missing for aggregate 100/100, flow
+  1/100, G1 1/100, private-gold 0/100, G2 0/100. Aggregate examples are August 31
+  observations exported as revision 2 on September 7; each sampled missing
+  example still has one link on another revision. This does not prove raw loss,
+  nor authorize attaching another revision's text without exact evidence.
+  Do not claim zero missing context or complete archival readiness from an
+  earlier healthy cycle. No repair/replay/database write was performed by this
+  diagnostic; its PostgreSQL transaction was explicitly read-only and rolled back.
+- After the user's generic confirmation, the same direct `921b45a0` image
+  transfer was refused again because the execution layer requires explicit
+  payload/destination authorization. A strict-host-checking read confirmed the
+  image is absent on Web; `market-processor` remains on `cb45aad7`. No indirect
+  transfer, in-place code replacement, deployment or data reset was attempted.
+  The precise scoped authorization has been requested. The 195-test source
+  checkpoint was already merged into the refactor branch as `aa3d2d24`.
+
+## Earlier checkpoint — 08:21 UTC
 
 - Active: `cb45aad7` with the separately journaled export batch of 500. Zero
   processor restarts; sender queue/dead letters/rejections zero. No export
