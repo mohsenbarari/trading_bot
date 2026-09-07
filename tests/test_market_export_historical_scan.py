@@ -96,11 +96,15 @@ class HistoricalExportScanTests(unittest.TestCase):
         self.market.set_trace_callback(queries.append)
         _pending_export_rows(self.market, max_rows=1000)
         self.market.set_trace_callback(None)
-        historical = [sql for sql in queries if "SELECT o.*" in sql and "ORDER BY o.id" in sql]
+        historical = [sql for sql in queries if "SELECT o.id" in sql and "ORDER BY o.id" in sql]
         self.assertEqual(len(historical), 2)
         plans = [[row[3] for row in self.market.execute("EXPLAIN QUERY PLAN " + sql)]
                  for sql in historical]
-        self.assertTrue(any("idx_market_observations_export_non_xau_id" in item for item in plans[0]))
+        self.assertTrue(any("USING COVERING INDEX idx_market_observations_export_non_xau_state" in item
+                            for item in plans[0]))
+        for plan in plans:
+            for name in ("market_fact_export_ledger_state_idx", "market_fact_export_semantics_state_idx"):
+                self.assertTrue(any("USING COVERING INDEX " + name in item for item in plan))
         self.assertFalse(any(item == "SCAN o" or item.startswith("SCAN o ") for item in plans[1]))
         self.assertTrue(any("SEARCH o USING INDEX" in item for item in plans[1]))
         self.assertEqual(self.market.execute("SELECT count(*) FROM market_observations").fetchone()[0], 300)

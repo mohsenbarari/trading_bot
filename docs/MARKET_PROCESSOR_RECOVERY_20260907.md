@@ -54,9 +54,24 @@ or timestamp is created, and no trading, DNS, writer or capture authority change
 
 ## Activation and acceptance
 
-Pending: immutable image verification, processor-only owner-locked handoff with
-automatic rollback, all-source backlog drain, transport checkpoint coverage,
-actual model/dashboard evidence and observation through spool rotation.
+First processor deployment `ab205f08` passed at 06:33:29 UTC, with unchanged
+bystanders and parent authority, zero restarts/export refusals, and 128,604
+pending messages explicitly reported as catching-up. The exact image passed
+81 tests in 9.940 seconds. Actual authenticated dashboard HTTP 200 showed
+today's group offers, but this did not close the other-source backlog.
+
+Post-deployment measurement found another source of historical scan cost:
+741,314 non-XAU observations and 1,142,304 ledger rows required random reads of
+wide payload/receipt tables. The non-XAU selection alone exceeded a 15-second
+diagnostic deadline. A second scoped optimization adds covering readiness
+indexes for the non-XAU observations and both export receipts. Historical
+candidate queries return IDs only; payloads are fetched only for the final
+bounded, ID-ordered batch. Parity and covering-query-plan tests protect this.
+No previously created index or fact is removed. Separate archive-phase timing
+exposes whether remaining delays are in parse or delivery preparation.
+
+Pending: second immutable image/handoff, all-source backlog drain, transport
+checkpoint coverage, model/dashboard evidence and observation through rotation.
 The sender recovery is separately recorded in
 `MARKET_TRANSFER_RECOVERY_20260907.md`.
 

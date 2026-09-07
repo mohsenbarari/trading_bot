@@ -112,6 +112,15 @@ def initialize_export_ledger(connection: sqlite3.Connection) -> None:
         ON market_observations(event_time_utc DESC,id DESC);
         CREATE INDEX IF NOT EXISTS idx_market_observations_export_non_xau_id
         ON market_observations(id) WHERE source_code<>'XAUUSD';
+        CREATE INDEX IF NOT EXISTS idx_market_observations_export_non_xau_state
+        ON market_observations(id,event_key,inserted_at_utc,source_code)
+        WHERE source_code<>'XAUUSD';
+        CREATE INDEX IF NOT EXISTS market_fact_export_ledger_state_idx
+        ON market_fact_export_ledger(
+            event_key,observation_inserted_at_utc,status,reason_code
+        );
+        CREATE INDEX IF NOT EXISTS market_fact_export_semantics_state_idx
+        ON market_fact_export_semantics(event_key,observation_inserted_at_utc);
         CREATE TABLE IF NOT EXISTS market_xau_model_input_buckets (
             bucket_number INTEGER PRIMARY KEY,
             selected_event_key BLOB NOT NULL UNIQUE,
@@ -352,13 +361,16 @@ def _pending_export_rows(
     def select(
         extra_where: str, parameters: tuple[object, ...], limit: int,
         *, from_sql: str = "market_observations o", eligibility: str = eligible,
+        columns: str = "o.*",
     ):
         return market.execute(
             f"""
-            SELECT o.*
+            SELECT {columns}
             FROM {from_sql}
-            LEFT JOIN market_fact_export_ledger l ON l.event_key=o.event_key
-            LEFT JOIN market_fact_export_semantics s ON s.event_key=o.event_key
+            LEFT JOIN market_fact_export_ledger l
+              INDEXED BY market_fact_export_ledger_state_idx ON l.event_key=o.event_key
+            LEFT JOIN market_fact_export_semantics s
+              INDEXED BY market_fact_export_semantics_state_idx ON s.event_key=o.event_key
             WHERE {eligibility} AND {pending} {extra_where}
             LIMIT ?
             """,
@@ -421,21 +433,30 @@ def _pending_export_rows(
             exclusion + "AND o.source_code<>'XAUUSD' ORDER BY o.id",
             selected, remaining,
             from_sql=("market_observations o INDEXED BY "
-                      "idx_market_observations_export_non_xau_id"),
-            eligibility="1",
+                      "idx_market_observations_export_non_xau_state"),
+            eligibility="1", columns="o.id",
         )
         historical.extend(select(
             exclusion + "ORDER BY o.id", selected, remaining,
             from_sql=("market_xau_model_input_buckets b "
                       "CROSS JOIN market_observations o"),
-            eligibility=(
+            columns="o.id", eligibility=(
                 "o.event_key=b.selected_event_key AND o.source_code='XAUUSD' "
                 "AND CAST(strftime('%s','now') AS INTEGER) >= "
                 f"(b.bucket_number + 1) * {XAU_MODEL_INPUT_BUCKET_SECONDS} "
                 f"+ {XAU_MODEL_INPUT_EXPORT_SETTLE_SECONDS}"
             ),
         ))
-        rows.extend(sorted(historical, key=lambda row: int(row["id"]))[:remaining])
+        # Read wide payload rows only after bounded candidate selection. All
+        # non-XAU readiness checks now use covering indexes, including both
+        # receipts; no per-row random read of the large payload tables.
+        identities = tuple(int(row["id"]) for row in
+                           sorted(historical, key=lambda row: int(row["id"]))[:remaining])
+        if identities:
+            rows.extend(market.execute(
+                "SELECT * FROM market_observations WHERE id IN ("
+                + ",".join("?" for _ in identities) + ") ORDER BY id", identities,
+            ).fetchall())
     return rows
 
 

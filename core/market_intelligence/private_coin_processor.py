@@ -894,6 +894,7 @@ def process_coin_spool_cycle(
         staging.commit()
         corpus.commit()
         archive_report = None
+        archive_started = time.monotonic()
         if os.environ.get("MARKET_PROCESSOR_ARCHIVE_ENABLED", "0").strip() == "1":
             research_key = _research_archive_key()
             archive = _archive_connection()
@@ -914,6 +915,7 @@ def process_coin_spool_cycle(
                 raise
             finally:
                 archive.close()
+        archive_duration = round(time.monotonic() - archive_started, 3)
     except BaseException:
         market.rollback()
         staging.rollback()
@@ -986,6 +988,7 @@ def process_coin_spool_cycle(
         ),
         "raw_rows_purged": projection.raw_rows_purged,
         "archive_selected": archive_report.selected if archive_report else 0,
+        "archive_duration_seconds": archive_duration,
         "archive_published": archive_report.published if archive_report else 0,
         "archive_unchanged": archive_report.unchanged if archive_report else 0,
         "archive_rejected": archive_report.rejected if archive_report else 0,
