@@ -1,5 +1,20 @@
 # Market processor replay/backlog recovery — 2026-09-07
 
+## Current follow-up authorization and activation attempt
+
+The user explicitly approved transferring this incident's code/image to the
+current Web host and replacing only `market-processor`, retaining data and
+rollback. Source `7c35c511` passed all 106 exact-image tests (10.144s) and was
+streamed to the host without a tar archive on the root disk. Portable content
+digest: `8c0b17f3eb65e9b0437ea606bc5cda8fb0ca4051218ec34a2e52d81b6297f859`.
+The handoff now pins that artifact against the prior `83a698e0` artifact.
+At 07:29 UTC the prior processor had 34 restarts, exit 1, no OOM. Repair accepts
+this explicitly recorded degraded baseline; it does not relax NEW liveness,
+ownership, image, mount, export or bystander checks. A fallback to the known
+broken prior artifact is reported as degraded, never as healthy rollback.
+Activation and end-to-end acceptance remain pending. The user's additional
+report of review labels and delayed data requires separate quality/latency traces.
+
 ## Cause and scope
 
 After the sender recovery, the processor still had about 156,000 dirty public

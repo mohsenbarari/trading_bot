@@ -3,7 +3,9 @@ import importlib.util
 import os
 from pathlib import Path
 import tempfile
+import time
 import unittest
+from datetime import datetime, timezone
 
 spec = importlib.util.spec_from_file_location(
     "processor_handoff",
@@ -14,6 +16,30 @@ spec.loader.exec_module(handoff)
 
 
 class ProcessorHandoffGuards(unittest.TestCase):
+    def prior(self):
+        return ({'Image':handoff.OLD_IMAGE,'RestartCount':34,
+                 'State':{'Status':'restarting','ExitCode':1,'OOMKilled':False}},
+                {'release_sha':handoff.OLD,'schema':'market_processor/4.0',
+                 'mode':'live','shadow_only':True,'status':'live-shadow-ready',
+                 'updated_at_utc':datetime.fromtimestamp(time.time()-1800,timezone.utc).isoformat(),
+                 'counters':{'archive_rejected':0}})
+
+    def test_known_degraded_prior_can_be_repaired_without_claiming_health(self):
+        result=handoff.validate_prior(*self.prior())
+        self.assertTrue(result['degraded'])
+        self.assertEqual(result['restart_count'],34)
+
+    def test_unknown_old_image_failure_or_contract_is_refused(self):
+        for change in ('image','exit','oom','release','schema'):
+            old,health=self.prior()
+            if change=='image': old['Image']='unapproved-image'
+            elif change=='exit': old['State']['ExitCode']=137
+            elif change=='oom': old['State']['OOMKilled']=True
+            elif change=='release': health['release_sha']='unapproved-release'
+            else: health['schema']='unknown'
+            with self.subTest(change=change),self.assertRaises(RuntimeError):
+                handoff.validate_prior(old,health)
+
     def configs(self):
         old = {
             "services": {
