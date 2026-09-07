@@ -1,5 +1,42 @@
 # Market processor replay/backlog recovery — 2026-09-07
 
+## Verified follow-up artifact — 10:18–10:21 UTC; not deployed
+
+- Live processor remains `921b45a0`, same container/image, Docker healthy,
+  zero restarts/OOM. Heartbeat 10:17:38: ingested parse backlog=0,
+  cycle=42.650s, archive=19.425s, published=447, rejected=0, unavailable=0.
+  Private snapshot at 10:18:02 is OK with **14/14 ESTIMATED** cells.
+  These are point-in-time checks, not proof of all historical archive coverage.
+- Authenticated activity page at 10:21:31 returned HTTP 200 with 40 labels:
+  36 model, zero review, four audit. Classes were counted with an HTML parser;
+  a first double-quote-only regex returned a false zero count and was discarded.
+  Legitimate ambiguous/conditional/late rows retain their quality guards.
+- Bridge `ba1f7616` remains unchanged. Its 10:18:06–10:18:45 incremental run
+  took 39s; completed source/destination watermark differences were 43s for
+  both groups. This is not event-to-web latency and does not replace the
+  previously measured 99–134s end-to-end samples.
+- Follow-up source is **`d08ec9b2ebf3c14781ea6d60bf7892b2b60386ed`**, committed
+  only on `refactor/two-site-architecture`. Main remains clean at
+  `32d266bd58eeb61f6ebd1e928761a95e5e6c7fd8`. A main-branch commit was rejected
+  by execution review; edits were moved to the refactor worktree and only our
+  uncommitted main edits were reversed. No reverse merge or remote push occurred.
+- Immutable image `market_pipeline_release:d08ec9b2ebf3c14781ea6d60bf7892b2b60386ed`:
+  local ID `sha256:7b9845106a6c8454d50daf5e23a4a5441b3276cf4b255078bbd5ef5355a065ca`,
+  portable content digest `2155da129b2686a283acdcaf69f30c4064b9b1655c0a75d1e110697a11b52240`,
+  input signature `98768423bb0a0901c173a115fff06409f4092d40fd7cf71aff1e79e8074ba761`.
+  Runtime-context comparison to main contains only the three reviewed core
+  changes; dependencies, Dockerfile, config, contracts and migrations are unchanged.
+  Image size is 152,792,301 bytes; payload scan found no env/db/session/key files.
+- 88 focused host tests passed in 6.472s, including bridge installer tests.
+  **236 exact-image tests passed in 13.784s**: 198 pipeline/regression tests plus
+  38 bridge tests. Network was disabled, root filesystem read-only, tmpfs=64MiB,
+  memory=384MiB, CPU=1. Runtime core was imported from `/app`, not the host.
+- No new image transfer, processor replacement or bridge activation has occurred.
+  Scoped approval for this artifact and the separate local bridge was requested;
+  until granted, the prior authorization covers only the already-live 921 image.
+  Preserve data, writer locks, Product LEGACY mode and tested rollback. Keep the
+  incident open for latency and exact-revision historical research-link evidence.
+
 ## Latest recovery checkpoint — 09:35–09:40 UTC
 
 - `921b45a0` remains live. The queue for the ingested parse prefix reached zero
