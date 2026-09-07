@@ -11,11 +11,11 @@ import stat
 import subprocess
 import time
 
-OLD = 'cb45aad7e0f17aec4a16c242a234deb71f5585f7'
-NEW = '921b45a045073dab91f14b56f4bb8fc7c9a25344'
-OLD_IMAGE = 'sha256:1371fce0a9158a06482d77e211a0265df59aa18f08e4f8639edbad97efe8eaad'
-NEW_IMAGE = 'sha256:70133301cfdebca98887e651bfba8a87f45da21580fb77df5088562255c47472'
-PORTABLE = '9791fee4402ef466ba0d33fdaf4163cea7686937a80d121633fb84249b9ab8c3'
+OLD = '921b45a045073dab91f14b56f4bb8fc7c9a25344'
+NEW = 'd08ec9b2ebf3c14781ea6d60bf7892b2b60386ed'
+OLD_IMAGE = 'sha256:70133301cfdebca98887e651bfba8a87f45da21580fb77df5088562255c47472'
+NEW_IMAGE = 'sha256:fb6f4d370f2ee6523cd04609f46ca1a9e6a1fdf91e27c0461ba261101d181a95'
+PORTABLE = '2155da129b2686a283acdcaf69f30c4064b9b1655c0a75d1e110697a11b52240'
 KNOWN_DEGRADED_RELEASE = '83a698e0f1818bbc4088614467d76e04e9b9b5da'
 PARENT_RELEASE = '4ef8e6dcb2d361b763bd8b72dc730c1f978f564a'
 ROLE = 'market-processor'
@@ -26,8 +26,8 @@ STATE_ROOT = Path('/srv/trading-bot/market-data-staging-shadow/state/market-proc
 STATE = STATE_ROOT / ROLE
 OWNER_LOCK = STATE / 'owner.lock'
 PARENT_LOCK = Path('/root/secure-envs/trading-bot/queue-cutover-artifacts/production-release.lock')
-OPS = Path('/srv/trading-bot/incident-recovery/20260907-processor-sparse-minutes')
-OVERRIDE = OPS / 'processor-sparse-minutes.override.json'
+OPS = Path('/srv/trading-bot/incident-recovery/20260907-processor-latency')
+OVERRIDE = OPS / 'processor-latency.override.json'
 EXPORT_LIMIT = '500'
 JOURNAL = OPS / 'handoff.json'
 
@@ -98,6 +98,7 @@ def compose(new=False):
     args += ['-f','/srv/trading-bot/incident-recovery/20260907-processor-input-isolation/processor-input-isolation-hotfix.override.json']
     args += ['-f','/srv/trading-bot/incident-recovery/20260907-processor-live-fairness/processor-live-fairness-hotfix.override.json']
     args += ['-f','/srv/trading-bot/incident-recovery/20260907-processor-export-capacity/processor-export-capacity.override.json']
+    args += ['-f','/srv/trading-bot/incident-recovery/20260907-processor-sparse-minutes/processor-sparse-minutes.override.json']
     if new:
         args += ['-f',str(OVERRIDE)]
     return args

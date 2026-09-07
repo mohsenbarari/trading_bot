@@ -88,6 +88,10 @@ class ProcessorHandoffGuards(unittest.TestCase):
             '/srv/trading-bot/incident-recovery/20260907-processor-export-capacity/processor-export-capacity.override.json',
             prior,
         )
+        self.assertIn(
+            '/srv/trading-bot/incident-recovery/20260907-processor-sparse-minutes/processor-sparse-minutes.override.json',
+            prior,
+        )
         self.assertEqual(candidate, prior + ['-f', str(handoff.OVERRIDE)])
         self.assertNotIn(str(handoff.OVERRIDE), prior)
 

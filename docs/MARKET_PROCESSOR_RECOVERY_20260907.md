@@ -1,5 +1,63 @@
 # Market processor replay/backlog recovery — 2026-09-07
 
+## Approved follow-up deployed — 10:27–10:35 UTC
+
+The user explicitly approved both the d08 image for **market-processor only**
+on `65.109.220.59:37067` and the local estimator compatibility bridge from the
+same commit. This supersedes the earlier pending authorization below.
+
+- Transfer streamed over strict-host-checked SSH without a saved tar. Remote
+  image `sha256:fb6f4d370f2ee6523cd04609f46ca1a9e6a1fdf91e27c0461ba261101d181a95`
+  has the same portable content digest as the tested local image. Engine image
+  IDs/sizes differ; the complete portable content binding, not their equality,
+  was verified. All 13 updated handoff guard tests passed in 0.020s.
+- Processor journal `/srv/trading-bot/incident-recovery/20260907-processor-latency/handoff.json`
+  reached **APPLIED_LIVE at 10:27:38 UTC**. Container
+  `1758e117ca8b8dd2a22579005e4dc6c398b38944c3e505649537b1a2f7701f05`
+  is the sole owner. Bystander containers, mounts, parent lock, data/checkpoints,
+  resource limits, export=500 and restart policy were preserved. Automatic
+  rollback was armed before stopping the prior processor; the 921 image and
+  complete preceding override chain remain available.
+- Local bridge d08 completed its first run at **10:30:35 UTC**. The existing
+  installer pinned its immutable source release; only the timer was paused while
+  the old oneshot finished normally. The rendered service was byte-compared to
+  its predecessor with only the release SHA replaced; the timer bytes/schedule
+  and all three existing lock identities/modes were unchanged. Product remains
+  LEGACY. Subsequent automatic runs succeeded, timer remains enabled/active.
+  Prior service/timer backups are on the attached volume at
+  `/srv/trading-bot/staging-data/incident-recovery/20260907-bridge-latency/`.
+  Rollback restores those two unit files, daemon-reloads and resumes the timer;
+  it must **not** call the row-deactivation rollback tool or reset databases.
+  Keep prior release/units until follow-up acceptance; review backup retention
+  on September 14 instead of retaining them indefinitely. No deletion scheduled.
+- At 10:34:32: processor healthy, zero restarts/OOM, ingested backlog=0;
+  cycle=32.770s, projection=21.814s, archive=9.870s (previously ~19s),
+  archive refusals/unavailable contexts=0. Private snapshot 10:34:02 is OK,
+  **14/14 ESTIMATED**. Bridge 10:34:08: OK, 281 receipts loaded,
+  Market projection=3.743s, conversation projection=32.472s, total=36.235s.
+- Authenticated activity page at 10:34:40 returned HTTP 200: 31 model labels,
+  one review, eight audit; current-day event times are visible. Quality flags
+  were not overridden, so legitimate review/audit rows remain possible.
+- Four exact real offer keys checked at 10:31:31 were missing from Legacy,
+  but all were committed into the conversation/display database by 10:32:58.
+  Event-to-Legacy **insert timestamp** samples were 100.505, 87.311, 66.471 and
+  122.236s. These are not browser visibility measurements: transaction commit,
+  conversation projection and browser refresh occur afterward. Earlier 99–134s
+  samples likewise measure Store insert time, not final screen visibility.
+- **Residual latency is proven, not resolved.** A bounded read-only profile of
+  8,518 actual group rows loaded them in 0.177s; model exclusion calculation
+  took 26.925s under profiling. `_live_book_price_exclusion_reason` accounted
+  for 26.423s and visited `_live_book_offer_ref` 11,791,883 times. The historical
+  full-book loop is the next specific target: restrict candidate references to
+  the same inclusive five-minute causal window while preserving availability,
+  settlement fallback, self-exclusion, median/MAD and every quality decision.
+  This subsequent algorithm change is **not** in d08 and was not implemented
+  or activated in this handoff. Processor projection also still costs ~22s.
+- No permanent raw/fact data were removed, no synthetic input/timestamps created,
+  and no main ref, capture, sender, bot, DNS or writer authority changed.
+  The historical exact-revision research-link gap remains open. Successful
+  deployment and sampled liveness are not a declaration that the incident is fixed.
+
 ## Verified follow-up artifact — 10:18–10:21 UTC; not deployed
 
 - Live processor remains `921b45a0`, same container/image, Docker healthy,
