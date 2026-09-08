@@ -10,10 +10,7 @@ at most 12 Codex command executions and 256000 completed command-output bytes pe
 normal cycle. They are advisory efficiency targets: never skip review, tests or
 required evidence to meet them.
 
-Current executable model truth: Supervisor remains gpt-5.6-sol/xhigh for the first
-measured canary; Astra/high becomes eligible only after the canary preserves all quality
-gates and meets measured efficiency targets. Do not claim internal telemetry or Astra
-switching already exists.
+Current executable model truth: Supervisor gpt-6-astra/xhigh is active for a measured canary comparison against a frozen gpt-5.6-sol/xhigh baseline. Do not claim the Astra measurement has completed.
 
 Mandatory workflow:
 

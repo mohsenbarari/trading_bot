@@ -52,7 +52,7 @@ except ModuleNotFoundError:  # Direct `python scripts/...` execution.
 
 ROOT = Path(__file__).resolve().parents[1]
 BRANCH = "refactor/two-site-architecture"
-MODEL = "gpt-5.6-sol"
+MODEL = "gpt-6-astra"
 REASONING = "xhigh"
 EXPECTED_CODEX_CLI_VERSION = "codex-cli 0.153.0"
 EXPECTED_CODEX_CLI_SHA256 = "fce635028842bfe9257140e8b7d53162732945e2f356fc35225be0702b4974be"
