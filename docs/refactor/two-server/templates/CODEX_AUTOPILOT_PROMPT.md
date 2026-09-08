@@ -68,7 +68,10 @@ Mandatory workflow:
    /root/.gemini state and localhost ephemeral listener for this proposal-only run. Do not
    first try the command inside workspace-write, do not request user relay or approval,
    and do not retry if automatic review denies it. Escalation remains limited to the exact
-   proposal pipeline or exact correction runner command. It must not authorize
+   proposal pipeline, exact correction runner commands, and a
+   final Git metadata escalation only for narrowly scoped git add -- <exact accepted proposal paths>
+   and one non-interactive git commit after fresh Gemini verification, Codex exact-byte review,
+   hash checks, required tests, and complete diff review have all passed. It must not authorize
    danger-full-access, --dangerously-bypass-approvals-and-sandbox, broad shell escalation,
    source writes by Gemini, production, deploy, DNS, Web Writer, fetch, push, secrets or
    remote-service mutation. Antigravity owns its authentication state; Codex must not read,
@@ -111,6 +114,16 @@ Mandatory workflow:
    unit rather than modifying unrelated proposal content. If a test fails, restore the
    exact clean baseline, attach factual test evidence to Codex feedback and repeat
    Worker → Gemini Reviewer → Codex. Never claim a test not run.
+   Require Git staging to name every and only accepted proposal path (git add -- <exact accepted proposal paths>)
+   and commit with one non-interactive git commit; prohibit git add -A, git add .,
+   globs, unrelated paths, amend, reset, checkout, merge, rebase, push, fetch, tag,
+   branch mutation, hooks bypass, signing-policy bypass, and every production/DNS/Web Writer/secret/remote
+   mutation. The commit must be a normal single-parent commit on refactor/two-site-architecture
+   and remain subject to Supervisor exact-proposal validation. A
+   read-only worktree Git metadata failure must be retried once through that narrow command-tool require_escalated path
+   before declaring EXTERNAL_GATE; never widen the whole Codex sandbox. If automatic review denies this
+   exact Git escalation or the retry fails, restore the clean baseline and return
+   BLOCKED/HALT EXTERNAL_GATE.
 6. At most two materially different correction attempts are allowed across Gemini or
    Codex findings; repeated failure is a real blocker, not an infinite retry. Clean
    exhaustion of the two correction attempts on an internal rejection must return

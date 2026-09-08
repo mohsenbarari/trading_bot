@@ -460,6 +460,42 @@ class AutopilotContracts(unittest.TestCase):
         ):
             self.assertIn(action, gemini_prompt)
 
+    def test_coordinator_prompt_enforces_narrow_git_escalation_and_forbidden_operations(self):
+        prompt = (autopilot.ROOT / autopilot.PROMPT_REL).read_text()
+        self.assertIn(
+            "final Git metadata escalation only for narrowly scoped git add -- <exact accepted proposal paths>",
+            prompt,
+        )
+        self.assertIn("one non-interactive git commit", prompt)
+        self.assertIn("Require Git staging to name every and only accepted proposal path", prompt)
+        self.assertIn(
+            "read-only worktree Git metadata failure must be retried once through that narrow command-tool require_escalated path",
+            prompt,
+        )
+        self.assertIn("single-parent commit on refactor/two-site-architecture", prompt)
+        self.assertIn("Supervisor exact-proposal validation", prompt)
+
+        prohibited = [
+            "git add -A",
+            "git add .",
+            "globs",
+            "unrelated paths",
+            "amend",
+            "reset",
+            "checkout",
+            "merge",
+            "rebase",
+            "push",
+            "fetch",
+            "tag",
+            "branch mutation",
+            "hooks bypass",
+            "signing-policy bypass",
+        ]
+        for operation in prohibited:
+            with self.subTest(operation=operation):
+                self.assertIn(operation, prompt)
+
     def test_category_disposition_state_mappings(self):
         valid_triples = {
             ("CONTINUE", "NONE", "NONE"),
