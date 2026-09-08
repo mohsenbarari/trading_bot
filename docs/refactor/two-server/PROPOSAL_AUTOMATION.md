@@ -158,7 +158,7 @@ prompt، stream، status، نتیجه و diff است. hash فایل و شناس�
 ## اجرا بدون گفتگوی باز
 
 `scripts/two_site_codex_autopilot.py` یک Supervisor محدود برای اجرای پشت‌سرهم
-`codex exec` است. مدل Coordinator روی `gpt-6-astra` با reasoning=`high` و CLI روی
+`codex exec` است. مدل Coordinator روی `gpt-6-astra` با reasoning=`xhigh` و CLI روی
 نسخه/SHA بازبینی‌شده pin شده است؛ authentication پیش از هر چرخه بررسی می‌شود و هر
 invocation نشست تازه و ephemeral دارد. هر چرخه فقط پس از یک commit واقعی، ancestry
 صحیح، worktree تمیز، ثبات refهای `main`/`origin/main`/candidate و ثبات فایل‌های کنترلی
@@ -214,6 +214,24 @@ Supervisor نیز ورودی‌های schema/prompt/result/status را محدو�
 شواهد اندازه‌گیری‌شده در ۲۰۲۶-۰۹-۰۵: کاناری خودکار اولیه ابتدا انحراف ناخواستهٔ نیم‌فاصله (ZWNJ drift) را رد کرد و سپس به‌دلیل خطای provider یا سقف خروجی (output-limit failure) در چرخهٔ اصلاح، بدون commit متوقف شد؛ اما حالت فشرده (compact mode) متعاقباً اجرای واقعی و تازهٔ نشست‌های Worker و Reviewer را با موفقیت کامل کرد. با این حال، این شواهد هنوز اثبات‌کنندهٔ یک چرخهٔ کامل و خودکار commit/ادامه توسط autopilot بدون نظارت، پذیرش Stage، استقرار یا آمادگی عملیاتی نیست.
 
 در تست‌های اندازه‌گیری‌شده، ۵۷ تست متمرکز در ۰٫۵۴۴ ثانیه با موفقیت پاس شدند؛ دستور گسترده‌تر اتوماسیون با ۲۶۶ تست، شامل ۲۶۵ تست موفق و یک خطای `NETLINK_ROUTE` در محیط sandbox تو‌در‌تو بود، و همان سلکتور bwrap در اجرای خارج از sandbox تو‌در‌تو در ۰٫۹۰۵ ثانیه پاس شد. جملهٔ بعدی در بخش «مرز پذیرش» مبنی بر ۹۴ تست، تاریخی و منسوخ (superseded) است و نباید به عنوان شمارش جاری خوانده شود.
+
+### مقایسهٔ اندازه‌گیری‌شده
+
+نمونه‌های واجد شرایط (eligible samples) در مقایسهٔ اندازه‌گیری‌شده
+(measured-comparison) صرفاً چرخه‌های تمیز، موفق و commit‌شده هستند.
+معیارهای ورودی (input)، ورودی کش‌شده (cached input)، ورودی بدون کش
+(uncached input)، خروجی (output)، خروجی استدلال (reasoning output)،
+مدت‌زمان (duration)، نسبت کش (cache ratio)، موفقیت review/تست
+(review/test success) و موفقیت commit (commit success) به‌صورت جداگانه
+گزارش می‌شوند. خط‌پایهٔ تثبیت‌شدهٔ Sol/xhigh از ۱۴ چرخهٔ موفق
+(retained Sol/xhigh baseline from 14 successful cycles) فریز و ثبت شده است:
+میانگین‌ها (means) شامل ورودی 1,521,948، ورودی کش‌شده 1,437,477، ورودی بدون کش
+84,471، خروجی 13,384، خروجی استدلال 6,956، مدت‌زمان 652 ثانیه، نسبت کش
+94.45 درصد؛ میانه‌ها (medians) شامل ورودی 1,461,716، ورودی بدون کش 76,513،
+خروجی 13,498، خروجی استدلال 7,104، مدت‌زمان 597 ثانیه است. موفقیت review/تست
+و موفقیت commit برای این نمونه‌ها به‌طور مستقل و ۱۰۰٪ گزارش شده است.
+تنوع تسک‌ها انتساب را محدود می‌کند (task variation limits attribution)
+و هنوز هیچ ادعایی برای نتایج Astra مطرح نشده است (no Astra result is claimed yet).
 
 ## مرز پذیرش
 
