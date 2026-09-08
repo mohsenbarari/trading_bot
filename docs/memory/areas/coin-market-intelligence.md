@@ -1,15 +1,16 @@
 # Coin Market Intelligence
 
-- Sep07: `9d752171` processor + `0625597f` bridge live; LEGACY 14/14. Dirty G1/G2 projection 23.003s→6.597s; nine new facts reached all four stores/ledgers. Conversation 32–35s→4.75–5.21s. Locks/data/d08 rollback preserved; revision/raw gap open. Main=`32d266bd`. Evidence: `docs/MARKET_PROCESSOR_RECOVERY_20260907.md`.
-- Sender `fb95bbde` is live. Replay only retained originals with bound ACKs; never reset checkpoints. Dead letters/backlog degrade health; market silence alone does not. `docs/MARKET_TRANSFER_RECOVERY_20260907.md`.
-- Account1 `a6dcd636` is live; retain replay quarantine. Docker liveness validates role/schema/source/status/freshness/PID; strict replay/promotion readiness still exposes quarantine. Never delete/synthesize evidence to pass. `docs/MARKET_CAPTURE_RECOVERY_20260905.md`.
+- Sep08 Imam CASH: a 68h trade masked today's offer across melted sources. Trade priority≤5m; non-fallback transfer needs same source; retention=7d. `f5b98fee`/`a37ec78e` is live estimator-only; dashboard/Web≈231m; rollback retained. `docs/COIN_IMAM_CASH_ANCHOR_INCIDENT_20260908.md`.
+- Sep07 `9d752171` processor + `0625597f` bridge live; LEGACY 14/14 and projection lag<7s. Locks/data/d08 rollback retained; revision/raw gap open. `docs/MARKET_PROCESSOR_RECOVERY_20260907.md`.
+- Sender `fb95bbde` is live. Replay only retained originals with bound ACKs; never reset checkpoints. Dead letters/backlog degrade health; silence does not. `docs/MARKET_TRANSFER_RECOVERY_20260907.md`.
+- Account1 `a6dcd636` is live; retain replay quarantine. Liveness validates role/schema/source/status/freshness/PID; strict readiness still exposes quarantine. Never delete/synthesize evidence. `docs/MARKET_CAPTURE_RECOVERY_20260905.md`.
 
-- Settlement: future=`خ ن ف/ف ن ف`,`خ ف/ف ف` or absent; cash=`خ ن/ف ن/نق`; future wins.
-- Units are project-thousands; normalize zeros/separators and resolve tails by family (`رب`=quarter, `پ/ت پ/پایین`=low-date).
-- Named anchors set scale only. Unnamed uses consistent `MAIN_ONLINE` anchors; contradiction or weak evidence abstains.
+- Settlement: future=`خ ن ف/ف ن ف`,`خ ف/ف ف` or absent; cash=`خ ن/ف ن/نق`.
+- Units=project-thousands; normalize zeros/separators; `رب`=quarter and `پ/ت پ/پایین`=low-date.
+- Named anchors set scale only. Unnamed uses consistent `MAIN_ONLINE`; contradiction/weak evidence abstains.
 - Trades use oldest exact/root; quantity markers win; reject ambiguity/overfill. `available_at_utc` governs reconciliation; pending/conditional/late are audit-only.
 - Estimator is facts-only `/shadow`; gold/Herat/XAU/G1/G2 feed it, weak evidence abstains. Staging mirrors Iran; snapshots read-only; packs are ×100/`PACK_ONLY`.
-- Capture contracts are `market_channel_event/1.0` and `coin_group_event/2.0`; receipts/revisions/replies/allowlist govern. Raw is 3d; Store opaque.
+- Capture: `market_channel_event/1.0`/`coin_group_event/2.0`; receipts, revisions, replies and allowlist govern. Raw=3d.
 - Parser v10/linker v7; promotion needs version bump+dominance; replay needs raw/Store/`human-feedback-r*`/causal `MAIN_ONLINE`; syntax needs raw, ambiguity=REVIEW.
 - Private melted: immutable price/quantity, lifetime=120s, freshness=900s; lower remaining=fill, zero=full, positive close=no-trade, edit≠trade.
 - Cutover needs real 7d coin/gold/Herat; predated coins abstain; no synthesis.

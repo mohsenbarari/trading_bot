@@ -188,6 +188,44 @@ class CoinRateEngineTests(unittest.TestCase):
         self.assertEqual(imam.anchor_age_seconds, 300.0)
         self.assertEqual(imam.estimated_project_price, 188_500)
 
+    def test_days_old_trade_does_not_mask_new_same_day_offer(self) -> None:
+        self.add("old-gold", instrument="MELTED_GOLD_PRIVATE", price=78_000_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-01T10:00:00Z", settlement="TODAY", form="PHYSICAL")
+        self.add("old-trade", instrument="COIN_IMAM", price=190_000, unit="PROJECT_THOUSAND_TOMAN", at="2026-08-01T10:01:00Z", settlement="CASH", form="PHYSICAL", event_type="TRADE")
+        self.add("fresh-gold", instrument="MELTED_GOLD_PRIVATE", price=80_300_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:00:00Z", settlement="TODAY", form="PHYSICAL")
+        self.add("fresh-offer", instrument="COIN_IMAM", price=186_900, unit="PROJECT_THOUSAND_TOMAN", at="2026-08-04T10:01:00Z", settlement="CASH", form="PHYSICAL", event_type="OFFER")
+        self.add("current-gold", instrument="MELTED_GOLD_PRIVATE", price=81_000_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:09:30Z", settlement="TODAY", form="PHYSICAL")
+        self.connection.commit()
+
+        imam = self.rate("IMAM", "CASH")
+
+        self.assertEqual(imam.anchor_age_seconds, 540.0)
+        self.assertEqual(imam.estimated_project_price, 188_500)
+
+    def test_nearby_confirmed_trade_remains_stronger_than_newer_offer(self) -> None:
+        self.add("anchor-gold", instrument="MELTED_GOLD_PRIVATE", price=80_300_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:00:00Z", settlement="TODAY", form="PHYSICAL")
+        self.add("nearby-trade", instrument="COIN_IMAM", price=186_900, unit="PROJECT_THOUSAND_TOMAN", at="2026-08-04T10:04:00Z", settlement="CASH", form="PHYSICAL", event_type="TRADE")
+        self.add("newer-offer", instrument="COIN_IMAM", price=190_000, unit="PROJECT_THOUSAND_TOMAN", at="2026-08-04T10:08:00Z", settlement="CASH", form="PHYSICAL", event_type="OFFER")
+        self.add("current-gold", instrument="MELTED_GOLD_PRIVATE", price=81_000_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:09:30Z", settlement="TODAY", form="PHYSICAL")
+        self.connection.commit()
+
+        imam = self.rate("IMAM", "CASH")
+
+        self.assertEqual(imam.anchor_age_seconds, 360.0)
+        self.assertEqual(imam.estimated_project_price, 188_500)
+
+    def test_nonfallback_anchor_transfer_does_not_mix_melted_sources(self) -> None:
+        self.add("public-anchor-gold", instrument="MELTED_GOLD_AGGREGATE", price=75_000_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:00:00Z", settlement="UNKNOWN", form="PHYSICAL", source_code="MELTED_AGGREGATE")
+        self.add("newer-incompatible-offer", instrument="COIN_IMAM", price=190_000, unit="PROJECT_THOUSAND_TOMAN", at="2026-08-04T10:01:00Z", settlement="CASH", form="PHYSICAL", event_type="OFFER")
+        self.add("private-anchor-gold", instrument="MELTED_GOLD_PRIVATE", price=80_300_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T09:40:00Z", settlement="TODAY", form="PHYSICAL")
+        self.add("older-compatible-offer", instrument="COIN_IMAM", price=186_900, unit="PROJECT_THOUSAND_TOMAN", at="2026-08-04T09:41:00Z", settlement="CASH", form="PHYSICAL", event_type="OFFER")
+        self.add("current-gold", instrument="MELTED_GOLD_PRIVATE", price=81_000_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:09:30Z", settlement="TODAY", form="PHYSICAL")
+        self.connection.commit()
+
+        imam = self.rate("IMAM", "CASH")
+
+        self.assertEqual(imam.anchor_age_seconds, 1_740.0)
+        self.assertEqual(imam.estimated_project_price, 188_500)
+
     def test_stale_trade_does_not_mask_fresh_offer_anchor(self) -> None:
         self.add(
             "stale-one-gram-trade",

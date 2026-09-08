@@ -9,7 +9,7 @@ no USDT→Herat substitution or hidden Rial/Toman conversion is permitted.
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 import math
 import sqlite3
 from statistics import median
@@ -58,6 +58,11 @@ COIN_SPECS: dict[str, tuple[float, bool]] = {
 _SETTLEMENTS = ("CASH", "TOMORROW")
 _MAX_ANCHOR_AGE_SECONDS = 7 * 86_400
 _MAX_LOW_DATE_ANCHOR_AGE_SECONDS = 2 * 60 * 60
+# A confirmed trade is stronger than an offer only while both describe the
+# same recent market neighbourhood.  Without this bound, any trade in the
+# seven-day retention window masks a much newer offer and transfers an obsolete
+# premium into today's book.
+_TRADE_PREFERENCE_MAX_LAG_SECONDS = 5 * 60
 _HERAT_CORRECTION_WEIGHT = {"CASH": 0.35, "TOMORROW": 0.60}
 
 
@@ -416,15 +421,25 @@ def _coin_anchors(
             continue
         if age_seconds <= _MAX_ANCHOR_AGE_SECONDS:
             fresh_rows.append((item, event_time))
-    # ``_rows`` is already ordered by economic event time, then id.  Prefer
-    # fresh confirmed trades over fresh offers while retaining every candidate
-    # in that order.  The estimator may then skip an otherwise valid anchor
-    # whose point-in-time underlying is unavailable instead of letting that
-    # one row mask later usable evidence.
-    ordered = (
-        [item for item in fresh_rows if str(item[0]["event_type"]) == "TRADE"]
-        + [item for item in fresh_rows if str(item[0]["event_type"]) != "TRADE"]
-    )
+    # ``_rows`` is already ordered by economic event time, then id.  A
+    # confirmed trade wins over an offer only when it is no more than five
+    # minutes behind the newest eligible observation.  Older trades remain
+    # usable as recency-ordered fallbacks, but can never mask a current offer.
+    # This preserves trade authority without reviving a days-old market state.
+    if fresh_rows:
+        newest_event_time = fresh_rows[0][1]
+        trade_preference_floor = newest_event_time - timedelta(
+            seconds=_TRADE_PREFERENCE_MAX_LAG_SECONDS
+        )
+        recent = [item for item in fresh_rows if item[1] >= trade_preference_floor]
+        older = [item for item in fresh_rows if item[1] < trade_preference_floor]
+        ordered = (
+            [item for item in recent if str(item[0]["event_type"]) == "TRADE"]
+            + [item for item in recent if str(item[0]["event_type"]) != "TRADE"]
+            + older
+        )
+    else:
+        ordered = []
     return [
         (price, event_time)
         for row, event_time in ordered
@@ -550,6 +565,18 @@ def build_coin_rate_estimates(connection: sqlite3.Connection, *, as_of_utc: date
                     knowledge_as_of=as_of,
                 )
                 if anchor_melted.value_project is not None:
+                    # A non-fallback physical source cannot establish a stable
+                    # residual for another physical source.  Their local bases
+                    # may differ materially even at the same instant.  Paper
+                    # fallbacks remain explicitly allowed because their method
+                    # and confidence already expose that continuity bridge.
+                    if (
+                        not current.fallback
+                        and not anchor_melted.fallback
+                        and _source_without_after_close_hold(current.source_kind)
+                        != _source_without_after_close_hold(anchor_melted.source_kind)
+                    ):
+                        continue
                     old_intrinsic = anchor_melted.value_project * coefficient
                     residual = anchor_price - old_intrinsic
                     anchor_age = candidate_anchor_age
