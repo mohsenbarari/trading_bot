@@ -549,12 +549,12 @@ class AutopilotContracts(unittest.TestCase):
 
     def test_codex_version_probe_uses_bounded_streaming(self):
         cli = self.root / "codex"
-        cli.write_text("#!/usr/bin/env python3\nprint('codex-cli 0.153.0')\n")
+        cli.write_text(f"#!/usr/bin/env python3\nprint('{autopilot.EXPECTED_CODEX_CLI_VERSION}')\n")
         cli.chmod(0o755)
         digest = autopilot.file_sha256(cli)
         with patch.object(autopilot, "EXPECTED_CODEX_CLI_SHA256", digest):
             identity = autopilot.codex_identity(cli, self.root)
-        self.assertEqual(identity["version"], "codex-cli 0.153.0")
+        self.assertEqual(identity["version"], autopilot.EXPECTED_CODEX_CLI_VERSION)
         self.assertEqual(identity["sha256"], digest)
         self.assertEqual(identity["model"], "gpt-6-astra")
         self.assertEqual(identity["reasoning"], "xhigh")
