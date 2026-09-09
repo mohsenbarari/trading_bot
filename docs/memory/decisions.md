@@ -2,6 +2,8 @@
 
 Entries are newest first.
 
+- 2026-09-09 | CLI runtime execution uses an immutable canonical master (.local/tools/agy-<cli_version>-<first-16-sha>.pin) requiring absolute path, effective-UID ownership, regular file, single hard link, read-only mode, and exact pinned SHA-256, with removal of mutable alias fallback. All identity probes and provider calls execute only via a streamed per-invocation disposable copy in a mode-0700 temporary directory, never the canonical master. Literal AGY_CLI_DISABLE_AUTO_UPDATE=true is strictly required, with pre/post identity verification of version and hash failing closed on any drift. Disposable cleanup strictly precedes exclusive worktree lock release on success, error, and timeout. Explicit --cli inputs are similarly copied to disposable execution and validated against contract identity without requiring canonical read-only source.
+
 - 2026-09-09 | Owner reconfirmed permanent standing authorization, without per-transfer confirmation, to send bounded non-secret source excerpts, tests, documentation, task JSON, proposals, reviews, and test evidence to Google Antigravity/Gemini for proposal-only workflow. Strictly excludes secrets, credentials, identity/auth material, user/personal data, production/operational data, deploy changes, DNS, Web Writer, fetch/push, and unrelated remote mutation. No other gate is widened.
 
 - 2026-09-05 | Owner requires safe, simple and accurate implementation project-wide. Choose the smallest sufficient design and reassess recurring failure before adding controls. Automation must reduce development time and manual work; complexity needs a concrete benefit. Execution-specific contracts and gateway review status live in `areas/documentation-execution.md`.
