@@ -213,6 +213,9 @@ class TestRunCycleCommittedAdvisoryRecovery(unittest.TestCase):
         (self.state_root / "runs").mkdir(parents=True, exist_ok=True)
         self.codex.parent.mkdir(parents=True)
         self.codex.write_text("#!/bin/sh\nexit 0\n")
+        runtime_patch = patch(f"{MODULE}.codex_runtime_identity", return_value={})
+        runtime_patch.start()
+        self.addCleanup(runtime_patch.stop)
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -228,6 +231,7 @@ class TestRunCycleCommittedAdvisoryRecovery(unittest.TestCase):
             "path": str(self.codex),
             "version": "codex-cli 0.153.0",
             "sha256": "fake-codex-sha",
+            "runtime": {},
             "model": "gpt-5.6-sol",
             "reasoning": "xhigh",
         }

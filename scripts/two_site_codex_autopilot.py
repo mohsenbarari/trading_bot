@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -25,6 +26,7 @@ try:
         bounded_file_text,
         capture_bounded_process,
         file_sha256,
+        file_fingerprint,
         git,
         terminate_process,
         unique_json,
@@ -41,6 +43,7 @@ except ModuleNotFoundError:  # Direct `python scripts/...` execution.
         bounded_file_text,
         capture_bounded_process,
         file_sha256,
+        file_fingerprint,
         git,
         terminate_process,
         unique_json,
@@ -56,6 +59,14 @@ MODEL = "gpt-6-astra"
 REASONING = "xhigh"
 EXPECTED_CODEX_CLI_VERSION = "codex-cli 0.153.4"
 EXPECTED_CODEX_CLI_SHA256 = "56ef98ab4032d317ab26e9b5e5a175650717351edb16ed9cde0cb6d1734d62da"
+CODEX_RUNTIME_FILES = {
+    "codex-code-mode-host": "3e85d67471825f73d02ff5f7e047ca1f6ca8caa3f59e4c6e8d9ca6ca7302cb45",
+    "codex-package.json": "43f8735a93a7947c6dc082c550d2ff2d795fccfd1c7eb27c93aa91cbead1e3f4",
+    "codex-path/rg": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+    "codex-resources/bwrap": "77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c",
+    "codex-resources/zsh/bin/zsh": "67faaaa89242c4a332e16e508a1977cffc24bf7fca31d4411cdfd101f3831ef3",
+    "rg": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+}
 MAX_CODEX_OUTPUT = 16_000_000
 MAX_RESULT_BYTES = 64_000
 MAX_PROMPT_BYTES = 160_000
@@ -189,13 +200,48 @@ def validate_repository(root: Path, require_clean: bool = True) -> dict[str, obj
     }
 
 
-def codex_identity(codex: Path, temporary: Path) -> dict[str, str]:
+def codex_runtime_identity(codex: Path) -> dict[str, str]:
+    """Validate the complete matching runtime, not merely the main executable."""
+    identity = {}
+    for name, expected in CODEX_RUNTIME_FILES.items():
+        path = codex.parent / name
+        if path.resolve() != path:
+            raise AutopilotError("Codex runtime path alias: " + name)
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except OSError as exc:
+            raise AutopilotError("cannot open Codex runtime file: " + name) from exc
+        with os.fdopen(fd, "rb") as stream:
+            before = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+                    or before.st_uid != os.geteuid() or before.st_mode & 0o222
+                    or (name != "codex-package.json" and not before.st_mode & 0o111)
+                    or before.st_size > 100_000_000):
+                raise AutopilotError("untrusted Codex runtime file: " + name)
+            digest = hashlib.sha256()
+            count = 0
+            while chunk := stream.read(1024 * 1024):
+                count += len(chunk)
+                if count > 100_000_000:
+                    raise AutopilotError("Codex runtime file grew: " + name)
+                digest.update(chunk)
+            after = os.fstat(stream.fileno())
+            if (file_fingerprint(before) != file_fingerprint(after)
+                    or file_fingerprint(after) != file_fingerprint(path.stat(follow_symlinks=False))
+                    or path.resolve() != path or digest.hexdigest() != expected):
+                raise AutopilotError("Codex runtime identity mismatch: " + name)
+            identity[name] = digest.hexdigest()
+    return identity
+
+
+def codex_identity(codex: Path, temporary: Path) -> dict[str, object]:
     codex = codex.resolve(strict=True)
     if not codex.is_file() or not os.access(codex, os.X_OK):
         raise AutopilotError("Codex CLI must be an executable regular file")
     digest = file_sha256(codex)
     if digest != EXPECTED_CODEX_CLI_SHA256:
         raise AutopilotError("Codex CLI binary hash is not the reviewed pin")
+    runtime = codex_runtime_identity(codex)
     with subprocess.Popen(
         [str(codex), "--version"],
         stdin=subprocess.PIPE,
@@ -227,9 +273,11 @@ def codex_identity(codex: Path, temporary: Path) -> dict[str, str]:
         raise AutopilotError("Codex CLI is not authenticated")
     if file_sha256(codex) != digest:
         raise AutopilotError("Codex CLI identity changed during readiness inspection")
+    if codex_runtime_identity(codex) != runtime:
+        raise AutopilotError("Codex runtime changed during readiness inspection")
     return {
         "path": str(codex), "version": version, "sha256": digest,
-        "model": MODEL, "reasoning": REASONING,
+        "model": MODEL, "reasoning": REASONING, "runtime": runtime,
     }
 
 
@@ -615,6 +663,8 @@ def run_cycle(
             raise AutopilotError(f"Codex CLI exited with status {process.returncode}")
         if file_sha256(codex) != identity["sha256"]:
             raise AutopilotError("Codex CLI identity changed during the cycle")
+        if codex_runtime_identity(codex) != identity["runtime"]:
+            raise AutopilotError("Codex runtime changed during the cycle")
         result_path = run_dir / "result.json"
         raw_result = unique_json(
             bounded_file_text(root, result_path, MAX_RESULT_BYTES, "Codex cycle result")

@@ -167,7 +167,8 @@ def test_metrics_failure_never_changes_cycle_success_or_original_failure(tmp_pat
         (output.parent / "result.json").write_text(json.dumps(success()))
     with patch.object(ap, "validate_repository", return_value={"head": "a" * 40, "protected_refs": {}}), \
          patch.object(ap, "prompt_for_cycle", return_value="bounded prompt"), \
-         patch.object(ap, "codex_identity", return_value={"sha256": "pin"}), \
+         patch.object(ap, "codex_identity", return_value={"sha256": "pin", "runtime": {}}), \
+         patch.object(ap, "codex_runtime_identity", return_value={}), \
          patch.object(ap, "file_sha256", return_value="pin"), \
          patch.object(ap.subprocess, "Popen", return_value=process), \
          patch.object(ap, "capture_bounded_process", side_effect=capture), \

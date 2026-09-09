@@ -151,6 +151,10 @@ Codex CLI نسخهٔ 0.153.4 با SHA ثبت‌شده در Supervisor، از م�
 این مسیر به پوشهٔ نسخه‌دار افزونه وابسته نیست؛ fallback به PATH یا نسخهٔ تأییدنشده ندارد.
 نسخه/SHA/login پیش از اجرا و SHA پس از اجرا کنترل می‌شوند.
 این تغییر خطر حذف مسیر توسط update افزونه را رفع می‌کند، نه همهٔ خطاهای احتمالی میزبان.
+بستهٔ مستقل باید کامل باشد: codex-code-mode-host، codex-package.json، rg و منابع
+codex-path/codex-resources از همان نسخه، با SHAهای CODEX_RUNTIME_FILES در Supervisor.
+این فایل‌ها read-only و single-link هستند؛ پیش و پس از readiness و پس از چرخه بررسی
+می‌شوند. وجود باینری اصلی و موفقیت login به‌تنهایی اثبات قابلیت اجرای ابزار نیست.
 
 ورودی فایل‌محور با descriptor و limit+1 محدود خوانده می‌شود؛ root confinement،
 regular بودن، رد symlink/hardlink و ثبات inode/اندازه/timestamp لازم‌اند.

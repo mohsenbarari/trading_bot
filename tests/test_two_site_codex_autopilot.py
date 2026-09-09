@@ -552,7 +552,8 @@ class AutopilotContracts(unittest.TestCase):
         cli.write_text(f"#!/usr/bin/env python3\nprint('{autopilot.EXPECTED_CODEX_CLI_VERSION}')\n")
         cli.chmod(0o755)
         digest = autopilot.file_sha256(cli)
-        with patch.object(autopilot, "EXPECTED_CODEX_CLI_SHA256", digest):
+        with patch.object(autopilot, "EXPECTED_CODEX_CLI_SHA256", digest), \
+                patch.object(autopilot, "codex_runtime_identity", return_value={}):
             identity = autopilot.codex_identity(cli, self.root)
         self.assertEqual(identity["version"], autopilot.EXPECTED_CODEX_CLI_VERSION)
         self.assertEqual(identity["sha256"], digest)
