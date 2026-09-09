@@ -899,18 +899,9 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         raise ProposalError("split task or feedback into a smaller coherent unit")
     if SECRET.search(prompt):
         raise ProposalError("credential-like content excluded from model input")
-    if cli is None:
-        local_cli = root / ".local/tools/agy"
-        if local_cli.is_file():
-            cli = local_cli
-        else:
-            common_dir = Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"))
-            cli = common_dir.parent / ".local/tools/agy"
-    cli = cli.resolve(strict=True)
-    lock_descriptor, local = acquire_proposal_lock(root)
-    try:
+    with proposal_cli_context(root, cli) as (local, disposable_cli, cli_source):
         # The lock covers every CLI invocation, including identity probes.
-        initial_cli_identity = cli_identity(cli)
+        initial_cli_identity = cli_identity(disposable_cli)
         out = local / run_id
         out.mkdir(mode=0o700)  # Evidence is never overwritten by a retry.
         workspace = out / "workspace"
@@ -922,7 +913,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 "head": head, "model": MODEL, "effort": EFFORT, "state": "RUNNING", "started_at": time.time(),
                 "retain_until": time.time() + 7 * 86400,
                 "authority": "PROPOSAL_ONLY_NOT_ACCEPTANCE",
-                "cli": initial_cli_identity}
+                "cli": initial_cli_identity, "cli_source": cli_source}
         if prior_status is not None:
             meta.update(
                 input_worker_run_id=prior_status["run_id"],
@@ -932,7 +923,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         if feedback is not None:
             meta["input_feedback_sha256"] = input_hashes["feedback"]
         write_json(out / "status.json", meta)
-        command = [str(cli), "--mode", "plan", "--sandbox", "--model", MODEL,
+        command = [str(disposable_cli), "--mode", "plan", "--sandbox", "--model", MODEL,
                    "--effort", EFFORT, "--input-format", "stream-json",
                    "--output-format", "stream-json", "--print-timeout", f"{timeout}s",
                    "--json-schema", json.dumps(schema(role))]
@@ -940,7 +931,8 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             # Auth belongs to the CLI. No credential files are read or copied here.
             with subprocess.Popen(command, cwd=workspace, stdin=subprocess.PIPE,
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                  start_new_session=True) as process:
+                                  start_new_session=True,
+                                  env=dict(os.environ, AGY_CLI_DISABLE_AUTO_UPDATE='true')) as process:
                 meta["cli_pid"] = process.pid
                 write_json(out / "status.json", meta)
                 capture_bounded_process(
@@ -952,7 +944,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 )
             if process.returncode:
                 raise ProposalError(f"CLI failed with exit {process.returncode}; inspect run evidence")
-            final_cli_identity = cli_identity(cli)
+            final_cli_identity = cli_identity(disposable_cli)
             if final_cli_identity != initial_cli_identity:
                 raise ProposalError("CLI identity changed during generation")
             raw = bounded_file_text(root, out / "stream.jsonl", MAX_OUTPUT, "CLI event stream")
@@ -979,8 +971,6 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             raise
         write_json(out / "status.json", meta)
         return out
-    finally:
-        release_proposal_lock(lock_descriptor)
 
 
 def main() -> int:
