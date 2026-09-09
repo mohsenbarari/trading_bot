@@ -204,16 +204,16 @@ def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli
         state["task_id"] = task["task_id"]
         state["source_head"] = initial_head
 
-        proposals_dir = root / ".local/two-site-refactor/proposals"
+        def state_check() -> None:
+            check_state(root, initial_head, initial_refs, task_candidate, task, sources)
+
         seen_convs: set[str] = set()
         seen_norm_findings: set[str] = set()
 
-        worker_run_id = f"{run_prefix}-worker-0"
-        if (proposals_dir / worker_run_id).exists():
-            raise ProposalError(f"worker run ID already exists: {worker_run_id}")
-
-        check_state(root, initial_head, initial_refs, task_candidate, task, sources)
-        worker_dir = runner_run(root, task_candidate, "worker", worker_run_id, timeout, cli=cli)
+        worker_run_id, worker_dir = run_provider_session(
+            root, task_candidate, "worker", f"{run_prefix}-worker-0", timeout,
+            state_check, cli=cli,
+        )
         worker_res, worker_st, worker_sha, worker_txt = validate_run(
             root, worker_dir, "worker", worker_run_id, initial_head, task, sources, seen_convs
         )
@@ -227,15 +227,10 @@ def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli
 
         correction_count = 0
         while True:
-            check_state(root, initial_head, initial_refs, task_candidate, task, sources)
-            reviewer_run_id = f"{run_prefix}-reviewer-{correction_count}"
-            if (proposals_dir / reviewer_run_id).exists():
-                raise ProposalError(f"reviewer run ID already exists: {reviewer_run_id}")
-
             worker_result_path = worker_dir / "result.json"
-            reviewer_dir = runner_run(
-                root, task_candidate, "verifier", reviewer_run_id, timeout,
-                proposal=worker_result_path, cli=cli
+            reviewer_run_id, reviewer_dir = run_provider_session(
+                root, task_candidate, "verifier", f"{run_prefix}-reviewer-{correction_count}", timeout,
+                state_check, proposal=worker_result_path, cli=cli,
             )
             reviewer_res, _st, _sha, _txt = validate_run(
                 root, reviewer_dir, "verifier", reviewer_run_id, initial_head, task, sources,
@@ -277,14 +272,9 @@ def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli
             write_json(feedback_path, feedback_payload)
             feedback_sha = file_sha256(feedback_path)
 
-            worker_run_id = f"{run_prefix}-worker-{correction_count}"
-            if (proposals_dir / worker_run_id).exists():
-                raise ProposalError(f"worker run ID already exists: {worker_run_id}")
-
-            check_state(root, initial_head, initial_refs, task_candidate, task, sources)
-            worker_dir = runner_run(
-                root, task_candidate, "worker", worker_run_id, timeout,
-                feedback=feedback_path, proposal=worker_result_path, cli=cli
+            worker_run_id, worker_dir = run_provider_session(
+                root, task_candidate, "worker", f"{run_prefix}-worker-{correction_count}", timeout,
+                state_check, feedback=feedback_path, proposal=worker_result_path, cli=cli,
             )
             worker_res, worker_st, worker_sha, worker_txt = validate_run(
                 root, worker_dir, "worker", worker_run_id, initial_head, task, sources,
