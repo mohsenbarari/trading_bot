@@ -157,10 +157,11 @@ def run_provider_session(
     proposals_dir = root / ".local/two-site-refactor/proposals"
     attempts = (base_run_id, f'{base_run_id}-retry-1', f'{base_run_id}-retry-2')
     last_error: RetryableProviderSessionError | None = None
+    label = "reviewer" if role == "verifier" else "worker"
     for attempt_id in attempts:
         state_check()
         if (proposals_dir / attempt_id).exists():
-            raise ProposalError(f"run ID already exists: {attempt_id}")
+            raise ProposalError(f"{label} run ID already exists: {attempt_id}")
         try:
             run_dir = runner_run(
                 root, task_path, role, attempt_id, timeout,
