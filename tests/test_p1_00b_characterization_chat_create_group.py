@@ -326,17 +326,51 @@ class CharacterizeChatCreateGroupTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         fake_db = object()
         current_user = SimpleNamespace(id=42)
-        mock_is_user_customer.return_value = False
-        mock_resolve_owned_avatar_file_id.return_value = "resolved-avatar-file-uuid-1"
+        resolved_avatar_id = "resolved-avatar-file-uuid-1"
         sentinel_exc = RuntimeError("create_group_chat internal failure")
-        mock_create_group_chat.side_effect = sentinel_exc
+
+        call_order: list[str] = []
+
+        async def _fake_customer(db: object, user_id: int) -> bool:
+            call_order.append("is_user_customer")
+            return False
+
+        async def _fake_avatar(
+            db: object,
+            *,
+            actor_id: int,
+            avatar_file_id: str | None,
+        ) -> str | None:
+            call_order.append("resolve_owned_avatar_file_id")
+            return resolved_avatar_id
+
+        async def _fake_create_group(
+            db: object,
+            *,
+            creator: object,
+            title: str,
+            member_ids: list[int],
+            description: str | None = None,
+            avatar_file_id: str | None = None,
+        ) -> object:
+            call_order.append("create_group_chat")
+            raise sentinel_exc
+
+        mock_is_user_customer.side_effect = _fake_customer
+        mock_resolve_owned_avatar_file_id.side_effect = _fake_avatar
+        mock_create_group_chat.side_effect = _fake_create_group
 
         request_data = GroupCreateRequest(
-            title="Engineering Group",
-            description="Team discussion",
-            avatar_file_id="avatar-file-uuid-1",
-            member_ids=[10, 20],
+            title="   Engineering Group   ",
+            description="   Team discussion   ",
+            avatar_file_id="   avatar-file-uuid-1   ",
+            member_ids=[10, 0, -5, 20, 10, 30, -1],
         )
+
+        self.assertEqual(request_data.title, "Engineering Group")
+        self.assertEqual(request_data.description, "Team discussion")
+        self.assertEqual(request_data.avatar_file_id, "avatar-file-uuid-1")
+        self.assertEqual(request_data.member_ids, [10, 20, 30])
 
         with self.assertRaises(RuntimeError) as ctx:
             await create_group(
@@ -346,6 +380,14 @@ class CharacterizeChatCreateGroupTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertIs(ctx.exception, sentinel_exc)
+        self.assertEqual(
+            call_order,
+            [
+                "is_user_customer",
+                "resolve_owned_avatar_file_id",
+                "create_group_chat",
+            ],
+        )
         mock_is_user_customer.assert_awaited_once_with(fake_db, current_user.id)
         mock_resolve_owned_avatar_file_id.assert_awaited_once_with(
             fake_db,
@@ -356,10 +398,13 @@ class CharacterizeChatCreateGroupTests(unittest.IsolatedAsyncioTestCase):
             fake_db,
             creator=current_user,
             title="Engineering Group",
-            member_ids=[10, 20],
+            member_ids=[10, 20, 30],
             description="Team discussion",
-            avatar_file_id="resolved-avatar-file-uuid-1",
+            avatar_file_id=resolved_avatar_id,
         )
+        self.assertIs(mock_create_group_chat.call_args.args[0], fake_db)
+        self.assertIs(mock_create_group_chat.call_args.kwargs["creator"], current_user)
+        mock_count_active_chat_members.assert_not_called()
         mock_count_active_chat_members.assert_not_awaited()
 
 
