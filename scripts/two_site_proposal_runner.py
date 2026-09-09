@@ -8,6 +8,7 @@ tool attempts invalidate its result. Each invocation is a fresh session.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import difflib
 import fcntl
 import hashlib
@@ -21,6 +22,12 @@ import stat
 import subprocess
 import tempfile
 import time
+from typing import Iterator
+
+try:
+    from scripts.two_site_cli_artifact import prepare_disposable_cli
+except ImportError:
+    from two_site_cli_artifact import prepare_disposable_cli
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_CONTEXT = 160_000
@@ -337,6 +344,7 @@ def cli_identity(cli: Path) -> dict[str, str]:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
+            env=dict(os.environ, AGY_CLI_DISABLE_AUTO_UPDATE='true'),
         ) as process:
             capture_bounded_process(
                 process,
@@ -454,6 +462,40 @@ def git(root: Path, *args: str) -> str:
         ["/usr/bin/git", "--no-replace-objects", "-C", str(root), *args],
         text=True, timeout=20, stderr=subprocess.DEVNULL,
     ).strip()
+
+
+def canonical_cli_source(root: Path) -> Path:
+    common_dir = Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    return common_dir.parent / ".local/tools" / f"agy-{EXPECTED_CLI_VERSION}-{EXPECTED_CLI_SHA256[:16]}.pin"
+
+
+@contextlib.contextmanager
+def proposal_cli_context(
+    root: Path,
+    cli: Path | None = None,
+) -> Iterator[tuple[Path, Path, dict[str, str]]]:
+    if cli is None:
+        source = canonical_cli_source(root)
+        is_default = True
+    else:
+        source = Path(cli)
+        if not source.is_absolute():
+            source = Path(os.path.abspath(Path(root) / source))
+        is_default = False
+
+    if not os.path.lexists(source):
+        raise FileNotFoundError(f"CLI source not found: {source}")
+
+    lock_descriptor, local = acquire_proposal_lock(root)
+    try:
+        with prepare_disposable_cli(
+            source,
+            expected_sha256=EXPECTED_CLI_SHA256 if is_default else None,
+            require_read_only=is_default,
+        ) as (disposable_path, evidence):
+            yield local, disposable_path, evidence
+    finally:
+        release_proposal_lock(lock_descriptor)
 
 
 def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
