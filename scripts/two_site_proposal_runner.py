@@ -519,6 +519,14 @@ def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
                 or any(not isinstance(x, str) or not x.strip() for x in values)
                 or len(set(values)) != len(values)):
             raise ProposalError("task lists must contain unique bounded nonempty strings")
+    if SECRET.search(json.dumps(task, ensure_ascii=False)):
+        raise ProposalError("credential-like content excluded from model input")
+    if "\nCANONICAL_SOURCE_EXCERPTS_JSON:\n" in task["goal"]:
+        try:
+            from scripts.two_site_cycle_tools import validate_excerpts
+        except ModuleNotFoundError:
+            from two_site_cycle_tools import validate_excerpts
+        validate_excerpts(root, task)
     sources = {}
     for name in dict.fromkeys(task["context_files"] + task["allowed_files"]):
         target = relative_file(root, name)

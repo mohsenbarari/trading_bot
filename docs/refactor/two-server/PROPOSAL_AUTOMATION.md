@@ -1,273 +1,200 @@
-# اتوماسیون سادهٔ Codex و Antigravity
+# اتوماسیون Codex و Antigravity — قرارداد جاری
 
-وضعیت: `GEMINI_FIRST_REVIEW_REQUIRED` — ۲۰۲۶-۰۹-۰۵
+به‌روز: ۲۰۲۶-۰۹-۰۹. مسیر توسعهٔ خودکار:
+Gemini Worker → Gemini Reviewer مستقل → Codex review/apply/test/commit.
+مسیر قدیمی gateway/native همچنان غیرفعال است. وضعیت اجرا را از فرایند زنده،
+Git و شواهد همان چرخه بخوانید؛ عبارت RUNNING یا یک گزارش تاریخی اثبات سلامت نیست.
 
-مسیر جاری Gemini Worker → Gemini Reviewer مستقل → Codex final gate → اعمال/تست/commit
-است. چرخهٔ زندهٔ قبلی Worker → Codex را اثبات کرد؛ الزام review اول توسط Gemini تصمیم
-جدید مالک و جایگزین مسیر قبلی است و تا اجرای smoke زندهٔ خودش ادعای runtime acceptance
-ندارد. شرح شاهد تاریخی در [گزارش چرخه](reviews/AUTOMATION_PROPOSAL_LIVE_20260905.md) است.
-gateway پیچیدهٔ قبلی همچنان غیرفعال و نصب‌نشده باقی می‌ماند.
+مدل جاری Supervisor: `gpt-6-astra` با `xhigh`.
+مدل Gemini از `templates/gemini-runtime-contract.json`: `gemini-3.8-flash-high`
+با `high`. Runner پیش از مصرف provider سازگاری این قرارداد و ارجاع‌هایش را می‌سنجد.
+هیچ کاهش effort، حذف review یا سبک‌کردن تست برای صرفه‌جویی مجاز نیست.
 
-## سناریوی عادی
+## سناریوی یک چرخه، بدون واسطه‌گری مالک
 
-مثلاً باید رفتار خطای یک تابع در `P1-00b` مستند و با تست موجود تطبیق داده شود:
+مثلاً یک رفتار خطای ثبت پیام در Stage فعال هنوز تست مشخص ندارد:
 
-1. Codex وابستگی Stage و وضعیت واقعی Git را بررسی و یک زیرکار محدود تعیین می‌کند.
-   فایل‌های مرتبط، رفتار غیرقابل‌تغییر، خروجی لازم و معیارهای پذیرش داخل Assignment
-   می‌آیند؛ لازم نیست Gemini کل ROADMAP یا تمام پروژه را بخواند.
-2. Codex با runner یک نشست تازهٔ Gemini Worker می‌سازد. تمام کدنویسی، تست و تغییر
-   مستندات پروژه در خروجی کامل همین Worker انجام می‌شود؛ مدل متن نهایی فایل‌ها را
-   برمی‌گرداند، اما shell، Git و نوشتن مستقیم روی worktree ندارد.
-3. runner شکل پاسخ، پوشش اعلام‌شدهٔ نیازمندی‌ها، مسیرها، hash نسخهٔ اولیه، شناسهٔ نشست،
-   مدل و نبود تلاش برای ابزار را می‌سنجد. `PROPOSAL_READY` به معنی «پیشنهاد قابل بررسی»
-   است، نه «تست‌شده»، «درست» یا «پذیرفته‌شده».
-4. پیش از Codex، runner یک نشست تازه و مستقل Gemini Reviewer می‌سازد. Reviewer همان
-   task/snapshot و proposal دقیق را می‌گیرد، حق تولید تغییر ندارد و فقط `VERIFIED`،
-   `CHANGES_REQUIRED` یا `BLOCKED` می‌دهد. Runner تفاوت conversation ID، وضعیت Worker
-   و SHA دقیق proposal را کنترل می‌کند. ارتباط مستقیمی میان دو Gemini وجود ندارد.
-5. اگر Gemini رد کند، Codex یافته‌ها را در feedback چهارفیلدیِ متصل به proposal SHA
-   قرار می‌دهد و آن را همراه proposal ردشده به Worker تازه می‌فرستد؛ سپس Reviewer
-   تازه از ابتدا review می‌کند. هیچ گزارش دستی توسط مالک جابه‌جا نمی‌شود.
-6. پس از `VERIFIED`، Codex بازبین نهایی است: بستهٔ task/source/proposal/review/hash را
-   بررسی می‌کند و خودش کد، تست یا مستندات پروژه را نمی‌نویسد. رد Codex نیز با همان
-   قرارداد feedback به Worker و سپس Gemini Reviewer تازه بازمی‌گردد.
-7. فقط پس از عبور review ایستا، Codex bytes دقیق proposal را اعمال، hash نهایی را
-   کنترل و تست‌های Assignment را اجرا می‌کند. شکست تست با evidence واقعی و پس از
-   بازگرداندن baseline تمیز وارد چرخهٔ اصلاح می‌شود؛ Codex failure را شخصاً fix نمی‌کند.
-8. پس از سبزشدن تست و review کامل diff، Codex فقط فایل‌های همان کار را commit می‌کند. برای پذیرش
-   Stage، review مستقل Codex روی SHA دقیق و closeout مصوب همچنان لازم است؛ این runner
-   اجازهٔ تغییر `COMPLETE`، ارتقای `main` یا آزادکردن dependency را صادر نمی‌کند.
+1. Codex یک بار Git، حافظهٔ مسیریابی‌شده، Stage و Assignment فعال را بررسی می‌کند.
+   next_action چرخهٔ موفق قبلی محل دقیق کار بعدی را نشان می‌دهد؛ این خلاصه فقط وقتی
+   HEAD هنوز همان است منتقل می‌شود و جای مجوز، شواهد پذیرش یا بررسی شکاف واقعی را نمی‌گیرد.
+2. یک زیرکار مرتبط با شکاف مشخص انتخاب می‌شود. دو یا سه سناریوی نزدیک برای همان
+   تابع می‌توانند یک بسته باشند؛ تغییر Stageها یا رفتارهای مستقل یک بسته نیست.
+   هدف تکمیل نیازمندی است، نه زیادکردن تعداد تست و commit.
+3. Gemini Worker تمام کد، تست و مستندات لازم را به شکل bytes نهایی تولید می‌کند؛
+   صرفاً پیشنهاد ایده نمی‌دهد. ابزار، shell، Git و نوشتن مستقیم روی worktree ندارد.
+4. نشست تازهٔ Gemini Reviewer همان task، snapshot و proposal کامل را می‌گیرد.
+   conversation ID باید متفاوت باشد؛ proposal SHA دقیق، VERIFIED و findings خالی لازم‌اند.
+   Reviewer حق تولید تغییر ندارد و مستقیماً با Worker صحبت نمی‌کند.
+5. Codex کد واقعی و رفتار را کامل review می‌کند. اگر پذیرفت، فقط bytes همان proposal
+   را اعمال، تست‌های لازم را اجرا، diff کامل را بررسی و فایل‌های دقیق را commit می‌کند.
+   بررسی مکانیکی شواهد جای بازبینی معنایی یا تست واقعی را نمی‌گیرد.
+6. Supervisor مستقل از متن مدل، زنجیرهٔ Worker/Reviewer، یک commit با یک parent،
+   برابری path/mode/bytes، ancestry، worktree تمیز و ثبات refs/controlها را می‌سنجد.
+   فقط سپس CONTINUE پذیرفته می‌شود. پذیرش واحد به معنی COMPLETE شدن Stage نیست.
 
-Gemini Worker نویسندهٔ کامل کد است؛ «proposal» فقط به این معناست که تا عبور از دو
-review اجازهٔ نوشتن مستقیم ندارد، نه اینکه صرفاً ایده یا plan بدهد. Codex تنها
-اعمال‌کننده و مالک Git است. Gemini Reviewer حق تغییر یا پذیرش نهایی ندارد؛ لایهٔ privileged gateway،
-installer و session-binding خصوصی لازم نیست.
-این تغییرِ نقش مجوزی برای اجرای مسیر قدیمی، حذف داده یا تغییر عملیات محصول نیست.
+در توسعهٔ بدون‌نظارت، Gemini تنها نویسندهٔ source/test/project-doc و Codex بازبین نهایی
+و تنها مالک Git است. استثنای موردی مالک برای نگهداری زیرساخت، مجوز تغییر این نقش‌ها در
+چرخه‌های بعدی نیست. هیچ منطق محصول، deploy، DNS یا Web Writer از این ابزار مجوز نمی‌گیرد.
 
-## قرارداد قابل اجرا
+## آماده‌سازی استاندارد و کم‌هزینهٔ Task
 
-ابزار: `scripts/two_site_proposal_runner.py`؛ قالب مشترک:
-[`templates/GEMINI_TASK_PROMPT.md`](templates/GEMINI_TASK_PROMPT.md).
-همهٔ فهرست‌ها غیرخالی‌اند؛ شمارهٔ نیازمندی‌ها از ۱ و مطابق ترتیب فهرست است.
+قرارداد Runner دقیقاً شش کلید دارد:
+`task_id`, `goal`, `context_files`, `allowed_files`, `requirements`, `test_selectors`.
+فهرست‌ها یکتا، غیرخالی و حداکثر ۳۲ عضو هستند. شمارهٔ نیازمندی از ۱ مطابق ترتیب فهرست.
+فایل‌های مجازِ موجود کامل فرستاده می‌شوند؛ فایل جدید content/hash اولیهٔ null دارد.
 
-```json
-{
-  "task_id": "P1-00B-BOUNDED-001",
-  "goal": "شرح دقیق یک تغییر با حفظ رفتار فعلی",
-  "context_files": ["path/to/existing.py"],
-  "allowed_files": ["tests/test_example.py"],
-  "requirements": ["حالت موفق", "حالت شکست و رفتار ثابت مورد انتظار"],
-  "test_selectors": ["tests/test_example.py"]
-}
-```
-
-این فقط نمونهٔ ساختار است، نه Assignment آمادهٔ اجرا. Codex قبل از هر فراخوانی مسیرهای
-واقعی و معیارهای معنادار را جایگزین می‌کند. Assignment اصلی Stage، scope و مجوزها
-همچنان مرجع‌اند؛ task ورودی runner فقط بستهٔ کاری کوچکِ مشتق‌شده از آن است.
+فرمان آماده‌سازی محلی، بدون تماس با مدل:
 
 ```bash
-python3 scripts/two_site_proposal_runner.py worker \
-  --task .local/two-site-refactor/task.json --run-id unique-worker-001
+python3 scripts/two_site_cycle_tools.py build \
+  --spec .local/two-site-refactor/tasks/<spec>.json \
+  --output .local/two-site-refactor/tasks/<fresh-task>.json
+python3 scripts/two_site_proposal_runner.py check \
+  --task .local/two-site-refactor/tasks/<fresh-task>.json
 ```
 
-review اول زیر اجباری است و در نشست تازهٔ Gemini اجرا می‌شود:
+spec شامل `task` با همان شش کلید، `snippets` و `gap_reference` است.
+نمونهٔ snippets: `[{"path":"مسیر واقعی فایل Python","symbols":["نام تابع","نام ثابت"]}]`.
+برای بستهٔ کامل بدون excerpt مقدار `[]` بدهید.
+gap_reference مسیر مستند tracked و در صورت نیاز #شناسهٔ شکاف است؛ این برچسب به‌تنهایی
+اثبات بازبودن شکاف نیست. Codex باید آن را با Stage و پوشش موجود تطبیق دهد.
+
+excerpt فقط برای وابستگی read-only است، نه فایل قابل تغییر یا context تکراری.
+تعریف کامل سطح‌بالای تابع/کلاس/ثابت، decorator و importها همراه SHA کامل فایل،
+HEAD و بازهٔ خط در goal بسته‌بندی می‌شود. هنگام check، ارسال و بررسی نهایی،
+منشأ و متن دوباره محلی سنجیده می‌شوند؛ snapshot قدیمی یا متن دستکاری‌شده رد می‌شود.
+وابستگی‌های انتقالی و تعریف enum/signature باید کامل باشند؛ ابزار صرفاً منشأ را ثابت
+می‌کند، نه کامل‌بودن زمینه را. اگر انتخاب چند تعریف کافی نیست، فایل کامل ارسال شود.
+
+فایل اصلی باید tracked، داخل root و بدون symlink/hardlink باشد. هرگز فایل ساختگی
+در tmp، .local یا .txt را context_files نگذارید. task خروجی فقط در tasks/ محلی،
+با نام تازه و mode 0600 ساخته می‌شود و فایل موجود بازنویسی نمی‌شود.
+ساخت ناموفق فقط خروجی تازهٔ همان فراخوانی را جمع می‌کند.
+
+TASK_READY واقعی پیش‌شرط تماس با provider است. خطای این مرحله محلی اصلاح می‌شود و
+نباید مصرف Gemini ایجاد کند. سقف سخت بستهٔ task/sources و proposal استاندارد هرکدام
+۱۶۰٬۰۰۰ بایت و سقف prompt کامل ۳۲۰٬۰۰۰ بایت است. اهداف پیشنهادی: task حدود ۸۰٬۰۰۰
+بایت یا کمتر و بستهٔ کامل Reviewer زیر حدود ۱۶۰٬۰۰۰ بایت.
+این اهداف گیت سخت جدید نیستند. Reviewer علاوه بر زمینه، فایل کامل خروجی را دریافت
+می‌کند؛ کم‌بودن Worker input یا استفاده از replacement به‌تنهایی کافی نیست.
+
+برای تغییر کوچک فایل موجود از replacement دقیق استفاده کنید؛ فایل تازه کامل باشد.
+قالب چهارکلیدی raw change: path، original_sha256، content و replacements.
+حالت کامل content کامل + replacements خالی؛ حالت replacement مقدار content=null و
+۱ تا ۳۲ {old,new} یکتا و غیرهم‌پوشان، مجموع حداکثر ۶۵۵۳۶ بایت UTF-8.
+Runner پیش از Reviewer bytes کامل را materialize می‌کند؛ شکل انتقال خام معیار review معنایی نیست.
+مدل باید import/signature/enum، سناریوی منفی و پوشش نیازمندی‌ها را قبل از ارسال بررسی کند.
+نبود تعریف لازم باید با path/symbol دقیق گزارش شود، نه ادعای انجام کار یا خروجی ناقص.
+
+## اجرا، review مکانیکی و اصلاح
+
+مسیر عادی دقیقاً یک pipeline برای هر واحد:
 
 ```bash
-python3 scripts/two_site_proposal_runner.py verifier \
-  --task .local/two-site-refactor/task.json --run-id unique-verifier-001 \
-  --proposal .local/two-site-refactor/proposals/unique-worker-001/result.json
+python3 scripts/two_site_proposal_pipeline.py \
+  --task .local/two-site-refactor/tasks/<fresh-task>.json \
+  --run-prefix <unique> --timeout 900
 ```
 
-`--cli` مسیر executable موجود را در worktree جدا مشخص می‌کند؛ پیش‌فرض
-منبع کانونی پیش‌فرض `.local/tools/agy-<cli_version>-<first-16-sha>.pin`
-مشتق از قرارداد زمان اجرا (`templates/gemini-runtime-contract.json`) است و
-هیچ fallback یا alias مشترکی وجود ندارد. مسیر منبع باید مطلق، متعلق به
-UID جاری فرایند، فایل regular، دارای دقیقاً یک hardlink (`st_nlink == 1`)،
-غیرقابل‌نوشتن (`require_read_only`) و دارای تطابق دقیق SHA-256 با قرارداد
-باشد. بررسی‌های هویت (`cli_identity`) و فراخوانی‌های provider هرگز روی
-منبع کانونی اجرا نمی‌شوند، بلکه فقط یک نسخهٔ کپی یک‌بارمصرف (disposable copy)
-استریم‌شده در یک دایرکتوری موقت با دسترسی `0700` را اجرا می‌کنند؛ هش و اثر انگشت
-فایل منبع پیش، حین و پس از کپی کنترل می‌شوند و پاکسازی کپی و دایرکتوری موقت در تمام
-حالات موفقیت، خطا و timeout پیش از رهاسازی lock انحصاری worktree انجام می‌شود؛
-`status.json` هر دو رکورد `cli_source` و `cli` یک‌بارمصرف را ثبت می‌کند.
-ثابت دقیق `AGY_CLI_DISABLE_AUTO_UPDATE=true` برای بررسی هویت و اجرای provider
-الزامی است و مقدار دقیق رشته‌ای `true` باید ارسال شود؛ نسخه و هش پیش و پس از
-اجرا سنجیده می‌شوند و هرگونه انحراف (drift) به صورت fail-closed متوقف می‌شود.
-مسیر صریح `--cli` نیز به یک کپی یک‌بارمصرف منتقل می‌شود و باید بررسی‌های هویتی
-قرارداد زمان اجرا را پاس کند، اما منبع آن نیازی به کانونی بودن یا read-only بودن
-ندارد؛ Runner تمام این مراحل را منحصراً از طریق همین کپی موقت اجرا می‌کند.
-Runner در هر اجرا نسخهٔ واقعی `1.1.27` و SHA-256 بازبینی‌شدهٔ باینری را پیش و پس
-از فراخوانی کنترل و در `status.json` ثبت می‌کند. هر تغییر نسخه، hash یا هویت حین
-اجرا fail-closed است و تا بازبینی و pin تازه اجازهٔ proposal نمی‌دهد. پروفایل قدیمی
-`1.1.26` متعلق به adapter متوقف‌شده است و مسیر اجرایی فعلی نیست.
+فرمان باید از اولین تلاش با escalation محدود اجرا شود؛ مالک در ۲۰۲۶-۰۹-۰۹
+ارسال source محدود و غیرمحرمانه، tests، docs، task، proposal، review/findings و
+test evidence به Google Antigravity/Gemini را دائماً و بدون تأیید جداگانه مجاز کرده است.
+مجوز شامل دسترسی خود CLI به وضعیت احراز هویت خودش و listener موقت localhost است.
+Codex نباید credential را بخواند، چاپ کند، کپی کند یا hash کند.
+secret، اطلاعات هویتی/اعتباری، دادهٔ کاربر، دادهٔ عملیاتی/تولید، deploy، DNS،
+Writer، fetch/push و تغییر سرویس نامرتبط خارج دامنه‌اند. رد مجوز دور زده نمی‌شود.
 
-تمام ورودی‌های فایل‌محور مدل ــ task، context، feedback، proposal، snapshot و
-template ــ با خواندن حداکثر `limit+1` بایت از file descriptor بازشده با
-`O_NOFOLLOW` دریافت می‌شوند؛ بنابراین سنجش اندازه بعد از `read_bytes()` نامحدود
-وجود ندارد. مسیر باید داخل root باشد، فایل regular و دارای دقیقاً یک hardlink
-(`st_nlink == 1`) باشد و inode/اندازه/timestamp پیش و پس از خواندن ثابت بماند.
-این قاعده عمداً hardlink حتی میان دو مسیر داخل پروژه را نیز رد می‌کند تا هیچ alias
-خارج پروژه قابل تشخیص‌نبودن نباشد.
+خروجی READY_FOR_CODEX مسیر دقیق Worker، Reviewer و proposal SHA را می‌دهد.
+بدون اسکن شواهد قدیمی، قبل از اعمال:
 
-مدل و effort از فایل canonical
-`templates/gemini-runtime-contract.json` خوانده می‌شوند: `gemini-3.8-flash-high`
-با `high`. Runner و Supervisor پیش از هر نشست این فایل و همین ارجاع‌های مستنداتی
-را بررسی می‌کنند؛ هر اختلافی پیش از مصرف Gemini fail-closed می‌شود. این فایل کنترل
-شده است و تغییر آن باید مانند تغییر قرارداد اجرایی، مستقل و با review کامل انجام شود.
-timeout پیش‌فرض ۳۰۰ ثانیه است؛ context هر زیرکار حداکثر ۱۶۰ کیلوبایت.
-کد، task و feedback باید فاقد کلید و دادهٔ عملیاتی باشند. فیلتر token، جایگزین
-بررسی محتوا توسط Codex نیست. مالک ارسال bounded source/proposal/review/finding لازم
-برای ریفکتور دوسایته به Gemini و Codex را تأیید کرده است؛ secret، دادهٔ کاربر و دادهٔ
-عملیاتی همچنان خارج scope هستند. feedback اصلاحی دقیقاً این قرارداد را دارد و hash
-باید proposal ردشده باشد؛ کلید اضافه یا گزارش آزاد رد می‌شود:
-
-```json
-{
-  "reviewer": "gemini",
-  "reviewed_proposal_sha256": "<64-hex>",
-  "findings": ["path/function: triggering case and expected behavior"],
-  "test_evidence": []
-}
+```bash
+python3 scripts/two_site_cycle_tools.py review --task <task> \
+  --worker <worker-id> --reviewer <reviewer-id> --sha <proposal-sha>
 ```
 
-برای رد نهایی مقدار `reviewer` برابر `codex` است. نتیجهٔ تست نسخهٔ قبلی به‌عنوان
-شاهد تغییر تازه استفاده نمی‌شود.
+BINDINGS_VALID یعنی اتصال دقیق task/source/head/hash و دو نشست بررسی شده، نه اینکه
+کد درست است. Codex تمام تغییرات و شواهد را review می‌کند. پس از اعمال bytes دقیق،
+همان فرمان با `--applied` و پیش از staging اجرا می‌شود؛ BYTES_VALID اختلاف مسیر،
+متن، mode یا فایل نامرتبط را رد می‌کند، ولی تستی اجرا نمی‌کند.
+در correction، helper قرارداد parsed feedback و proposal قبلی را می‌سنجد؛ hash متن
+خام feedback را از سریال‌سازی مجدد حدس نمی‌زند. binding خام در Runner/Pipeline حفظ می‌شود.
 
-## خروجی ناقص یا قطع Worker
+رد Reviewer، Codex یا تست با چهار کلید دقیق برمی‌گردد:
+`reviewer` (gemini یا codex)، `reviewed_proposal_sha256`،
+`findings` و `test_evidence`.
+finding باید محل، ورودی محرک، رفتار واقعی/مورد انتظار و اصلاح لازم را روشن کند.
+Worker تازه proposal ردشده و feedback را می‌گیرد؛ سپس Reviewer تازه الزامی است.
+بخش‌های صحیح نباید بی‌دلیل بازنویسی شوند. شکست مشابه را با عبارت جدید دوباره نفرستید.
 
-- اگر مدل فقط توضیح یا برنامه بدهد، خروجی به‌عنوان پیاده‌سازی رد می‌شود.
-- اگر Gemini Reviewer یا Codex رد کند یا تست شکست بخورد، Codex یافته‌ها و شاهد واقعی
-  را خودکار به Worker تازه می‌دهد. اجرای اصلاحی شناسهٔ تازه و proposal قبلی را دارد
-  و پس از آن همیشه یک Gemini Reviewer تازه اجرا می‌شود.
-- حداکثر دو اصلاح خودکار برای همان زیرکار انجام می‌شود. تکرار finding یکسان بدون
-  تغییر مؤثر یا نبود پیشرفت یعنی بازنگری اندازهٔ کار/زمینه/روش، نه retry بی‌پایان.
-  این حد به معنی تأیید خروجی ناقص یا الزام درخواست تأیید معمول از مالک نیست.
-- timeout فرایند فرزند را متوقف و وضعیت را `BLOCKED` می‌کند. اگر خود Codex/میزبان
-  قطع شد، در بازیابی وضعیت `RUNNING` دلیل زنده‌بودن یا موفقیت نیست: ابتدا فرایند و
-  خروجی واقعی بررسی می‌شود؛ همان run-id هرگز بازنویسی یا کورکورانه تکرار نمی‌شود.
-- مجوز ردشده دور زده نمی‌شود. مانع دسترسی، ایراد کد و نقص پاسخ مدل جدا گزارش می‌شوند.
-- سقف مشترک دو مگابایتی `stdout` و `stderr` هنگام خواندن stream اعمال می‌شود؛ Runner
-  خروجی نامحدود را با `communicate()` در حافظه جمع نمی‌کند. با اولین بایتِ بیشتر از
-  سقف، process group متوقف می‌شود و مجموع فایل‌های evidence نیز از سقف عبور نمی‌کند.
-- یک `flock` انحصاری و non-blocking برای هر worktree از پیش از اولین اجرای CLI تا
-  ثبت وضعیت نهایی نگه داشته می‌شود. اجرای دوم بدون انتظار و پیش از شروع provider با
-  `BLOCKED` رد می‌شود. خود فایل lock نیز symlink/hardlink، مالک ناشناخته یا mode
-  ناامن را نمی‌پذیرد و با مرگ process به‌صورت کرنلی آزاد می‌شود.
+حداکثر دو اصلاح متمایز در یک واحد؛ تمام‌شدن بودجه با Git تمیز و بدون commit یعنی
+BLOCKED/RESCOPE INTERNAL_REJECTION و یک واحد کوچک‌تر/کامل‌تر جدید.
+خروجی ناقص، MODEL_OUTPUT_TRUNCATED یا finish نامعتبر مجوز پذیرش bytes ناقص نیست.
+حداکثر سه RESCOPE پیاپی در Supervisor وجود دارد؛ تغییر مبهم یا gate بیرونی retry نمی‌شود.
+خطای provider/auth/مجوز، dirty tree یا drift کنترل‌ها BLOCKED/HALT EXTERNAL_GATE است.
+شکست تست ابتدا یک بار با baseline تمیز مقایسه می‌شود؛ خطای قدیمی نامرتبط جدا می‌ماند.
 
-## محل اجرا و شواهد
+پس از review و تست، staging فقط نام تک‌تک فایل‌های proposal و یک commit غیرتعاملی دارد.
+metadata مشترک Git بیرون writable worktree است؛ اولین add/commit با escalation محدود،
+بدون یک تلاش ناموفق قابل‌پیش‌بینی. add کلی، amend، reset/checkout، merge/rebase،
+تغییر branch/tag، bypass hook/signing، fetch/push و عملیات محصول ممنوع‌اند.
 
-یک integration worktree ثبت‌شده روی `refactor/two-site-architecture` کافی است؛
-برای مدل پیشنهاددهنده worktree جدا ساخته نمی‌شود. اگر `main` مشغول کار دیگری است،
-آن checkout یا تغییراتش جابه‌جا/تمیز نمی‌شوند. Codex پیش از اعمال و commit مالکیت و
-scope را بررسی می‌کند؛ دو Coordinator هم‌زمان حق نوشتن روی integration ندارند.
+## پایداری و کنترل منابع
 
-هر run در `.local/two-site-refactor/proposals/<run-id>/` شامل task/source snapshot،
-prompt، stream، status، نتیجه و diff است. hash فایل و شناسهٔ نشست برای پیگیری‌اند،
-نه امضا یا مجوز پذیرش. نگهداری پیش‌فرض ۷ روز در `retain_until` ثبت می‌شود.
-در آغاز و پایان چرخه، Codex runهای terminal و منقضی را بررسی و پس از حفظ خلاصهٔ لازم
-در review bundle، فقط همان مسیرهای دقیق را حذف می‌کند؛ run فعال یا مدرکِ finding باز
-بدون تعیین تکلیف حذف نمی‌شود. تمدید نیازمند علت و موعد جدید است. این runner سرویس
-پاکسازی زمان‌بندی‌شده نصب نمی‌کند؛ deadline به‌تنهایی ادعای انجام حذف نیست.
+Antigravity CLI نسخهٔ 1.1.27 و SHA از runtime contract می‌آید. منبع کانونی در
+.local/tools/ زیر checkout مشترک، متعلق به UID جاری، single-link، read-only و دقیقاً
+همان SHA است. هر اجرا فقط روی کپی disposable در پوشهٔ موقت 0700 انجام می‌شود.
+AGY_CLI_DISABLE_AUTO_UPDATE=true؛ نسخه و SHA پیش و پس از اجرا بررسی می‌شوند.
+کپی موقت قبل از آزادشدن lock در موفقیت/خطا/timeout جمع می‌شود؛ adapter 1.1.26 قدیمی است.
 
-## اجرا بدون گفتگوی باز
+Codex CLI نسخهٔ 0.153.4 با SHA ثبت‌شده در Supervisor، از مسیر مستقل این integration:
+`.local/tools/codex-0.153.4-56ef98ab4032d317.pin`.
+این مسیر به پوشهٔ نسخه‌دار افزونه وابسته نیست؛ fallback به PATH یا نسخهٔ تأییدنشده ندارد.
+نسخه/SHA/login پیش از اجرا و SHA پس از اجرا کنترل می‌شوند.
+این تغییر خطر حذف مسیر توسط update افزونه را رفع می‌کند، نه همهٔ خطاهای احتمالی میزبان.
 
-`scripts/two_site_codex_autopilot.py` یک Supervisor محدود برای اجرای پشت‌سرهم
-`codex exec` است. مدل Coordinator روی `gpt-6-astra` با reasoning=`xhigh` و CLI روی
-نسخه/SHA بازبینی‌شده pin شده است؛ authentication پیش از هر چرخه بررسی می‌شود و هر
-invocation نشست تازه و ephemeral دارد. هر چرخه فقط پس از یک commit واقعی، ancestry
-صحیح، worktree تمیز، ثبات refهای `main`/`origin/main`/candidate و ثبات فایل‌های کنترلی
-به چرخهٔ بعد می‌رود. نبود پیشرفت، dirty tree، بازنویسی history، تغییر ref محافظت‌شده،
-خروجی نامعتبر یا gate بیرونی چرخه را متوقف می‌کند؛ مدل نمی‌تواند با نوشتن `CONTINUE`
-این کنترل‌های محلی را دور بزند.
-
-همین نشست Codex Supervisor بازبین نهایی و مالک apply/test/Git است؛ nested Codex
-اجرا نمی‌شود. Supervisor نمی‌تواند implementation/test/project-doc را بنویسد یا
-failure را شخصاً fix کند: قبل از هر اعمال، Worker و Reviewer مستقل Gemini لازم‌اند
-و هر finding به چرخهٔ اصلاحی Gemini بازمی‌گردد.
-
-خروجی commitدار Codex باید `gemini_worker_run_id`، `gemini_reviewer_run_id` و
-`proposal_sha256` دقیق را برگرداند. Supervisor پیش از قبول چرخه، status/snapshot/result
-هر دو نشست، تفاوت conversation ID، SHAها، تک‌commit‌بودن history و برابری کامل
-path/mode/bytes commit با proposal را محلی کنترل می‌کند. نتیجهٔ بدون commit هر سه
-فیلد را `null` می‌دهد؛ متن مدل به‌تنهایی نمی‌تواند این gate را پاس کند.
-
-گزینهٔ `--approve-for-me` خود Codex درخواست‌ها را با sandbox نوع workspace-write
-بازبینی می‌کند؛ CLI اجازهٔ ترکیب هم‌زمان آن با `--sandbox` را نمی‌دهد. Supervisor
-عمداً فقط اولی را می‌فرستد و هیچ bypass سراسری approvals/sandbox به کار نمی‌برد.
-
-راه‌انداز محلی:
+ورودی فایل‌محور با descriptor و limit+1 محدود خوانده می‌شود؛ root confinement،
+regular بودن، رد symlink/hardlink و ثبات inode/اندازه/timestamp لازم‌اند.
+stdout+stderr Gemini حین stream سقف مشترک ۲ مگابایت دارند؛ خروجی Codex سقف ۱۶ مگابایت.
+عبور از سقف یا timeout process group همان اجرا را متوقف می‌کند.
+Runner و Supervisor قفل انحصاری nonblocking مستقل دارند؛ اجرای هم‌زمان دوم مجاز نیست.
+نشست Codex ephemeral است؛ nested Codex reviewer اجرا نمی‌شود.
 
 ```bash
 scripts/two_site_autopilot_tmux.sh start
 scripts/two_site_autopilot_tmux.sh status
-scripts/two_site_autopilot_tmux.sh logs
 ```
 
-پس از `start`، بازبودن صفحه یا گفتگوی Codex لازم نیست؛ session با نام
-`two-site-autopilot` تا وقتی میزبان و `tmux` زنده‌اند ادامه می‌یابد. این سرویس دائمی
-پس از reboot نیست؛ وضعیت canonical در Git و شواهد محدود زیر
-`.local/two-site-refactor/autopilot/` بازیابی می‌شود. `stop` پس از چرخهٔ جاری و
-`stop-now` با signal و توقف process group خاتمه می‌دهد.
+tmux گفتگوی باز نمی‌خواهد. STOP در مرز چرخه رعایت می‌شود؛ stop-now برای توقف فوری است.
+راه‌انداز خود تضمین reboot یا دسترسی همیشگی provider نیست. مانیتور نصب‌شدهٔ محلی
+هر ۱۵ دقیقه جدا وضعیت فرایند/شواهد را می‌سنجد و STOP عمدی را نباید دور بزند.
+حد اجرای Supervisor: ۲۰۰ چرخه، timeout هر چرخه سه ساعت، retry خطای گذرای بی‌تغییر حداکثر دو بار.
 
-خروجی هر Codex حین stream به ۱۶ مگابایت محدود، timeout هر چرخه سه ساعت و تعداد کل
-چرخه‌ها ۲۰۰ است. فقط ۲۰ run عادی آخر حفظ می‌شود؛ شاهد `BLOCKED` برای بررسی باقی
-می‌ماند. Supervisor هیچ gate تولید/DNS/Writer/secret را مجاز نمی‌کند و gateway قدیمی
-را فعال نمی‌کند. Supervisor مسیر Worker → Gemini Reviewer → Codex final gate را
-اجرا می‌کند؛ شکست معمولی حداکثر دو اصلاح دارد و تغییر مبهم retry نمی‌شود.
-Supervisor نیز ورودی‌های schema/prompt/result/status را محدود می‌خواند، hardlinkهای
-فایل‌های کنترلی را رد می‌کند و lock انحصاری خود را بدون دنبال‌کردن symlink نگه می‌دارد.
+## مصرف توکن، نگهداری و مرز ادعا
 
-## جایگزینی دقیق، بودجه و شواهد اندازه‌گیری‌شده
+پیش از prune هر run، حتی خطای اجرا، metrics کوچک ذخیره می‌شود:
+مدل/effort، prompt SHA، HEADها، outcome، زمان، شمارش command، ورودی، cached،
+uncached و output. reasoning اگر واقعاً موجود باشد زیرمجموعهٔ output است و دوباره
+جمع نمی‌شود. دادهٔ ناقص/نامعتبر UNKNOWN/null است، نه مصرف صفر.
+شناسه/هش Task و gap_reference فقط وقتی از snapshot همان چرخه در دسترس باشند ثبت می‌شوند.
+هیچ prompt، source، command body یا متن خصوصی در metrics نگهداری نمی‌شود.
 
-تغییرات با دو حالت صریح چهارکلیدی (`path`، `original_sha256`، `content`، `replacements`) پشتیبانی می‌شوند: حالت کامل (`full`) با متن کامل فایل در `content` و `replacements: []`، و حالت جایگزینی دقیق (`exact-replacements`) با مقدار `content: null` و آرایهٔ غیرخالی از اشیای `{old, new}` برای فایل‌های موجود. در جایگزینی دقیق، حداکثر ۳۲ مورد جایگزینی و سقف مجموع ۶۵۵۳۶ بایت UTF-8 اعمال می‌شود؛ هر رشتهٔ `old` باید دقیقاً از متن تغییرناپذیر اولیه کپی شده، یکتا در کل فایل و فاقد هم‌پوشانی با سایر بازه‌ها باشد و محقق‌سازی (materialization) به صورت قطعی، بر اساس ترتیب اولیهٔ منبع و بدون اثر آبشاری (non-cascading) انجام شود. اتصال به `original_sha256` فایل مبدأ الزامی است و runner پس از محقق‌سازی، فایل استاندارد و کامل `result.json` را برای Reviewer و Codex تولید و ثبت می‌کند.
+.local/two-site-refactor/autopilot/metrics.json حداکثر ۲۰۰۰ رکورد و ۲ مگابایت دارد؛
+بعد از prune خروجی‌های خام باقی می‌ماند. پرشدن حلقه قدیمی‌ترین رکورد را کنار می‌گذارد.
+خطای telemetry تشخیص‌پذیر است ولی commit معتبر را متوقف نمی‌کند.
+۲۰ run عادی آخر نگهداری می‌شود؛ BLOCKED برای بررسی باقی می‌ماند.
+proposalها retain_until هفت‌روزه دارند؛ این تاریخ به‌تنهایی ادعای حذف خودکار نیست.
+شواهد فعال/ایراد باز بدون تعیین تکلیف پاک نمی‌شوند؛ backup دائمی نسازید.
 
-نتیجهٔ استاندارد با سریال‌سازی دقیق `ensure_ascii=false`، `indent=2` و خط پایانی (terminal newline) باید حداکثر ۱۶۰٬۰۰۰ بایت (`MAX_CONTEXT`) باشد، وگرنه ثبت و انتشار با شکست مواجه می‌شود. حالت انتقال خام (raw transport) صرفاً یک گیت محلی میان runner و Codex برای بهینه‌سازی تبادل است، نه یک الزام معنایی در تسک برای Reviewer که بایت‌های کامل و محقق‌شدهٔ فایل را دریافت می‌کند.
+مقایسه باید بر پایهٔ نیازمندی واقعاً پذیرفته‌شده و با احتساب تلاش‌های ناموفق باشد،
+نه فقط تعداد commit یا ساعت. ورودی cached و uncached جدا گزارش شوند.
+baseline تاریخی Sol: ۱۴ چرخهٔ موفق؛ میانگین ورودی 1,521,948، uncached برابر84,471،
+output برابر13,384، زمان652ثانیه. ممیزی ۹ سپتامبر پیش از این بهینه‌سازی:
+۱۹ چرخهٔ موفق Astra؛ میانگین ورودی1,882,351، uncached برابر92,911،
+output برابر9,558 و زمان470.4ثانیه. نوع کارها یکسان نیست؛ این اعداد آزمایش کنترل‌شده،
+هزینهٔ قطعی حساب یا درصد صرفه‌جویی تغییرات امروز نیستند. نمونهٔ تازه برای نتیجه‌گیری لازم است.
 
-مجوز دائمی (standing authorization) برای تبادل سورس محدود و غیرمحرمانه، تست‌ها، مستندات پروژه، تسک‌ها، پیشنهادها، بازبینی‌ها، یافته‌ها و شواهد تست با Google Antigravity/Gemini بدون نیاز به تأیید مجزا به ازای هر بارگذاری صادر شده است. کلیدها، اطلاعات هویتی و اعتباری، داده‌های کاربران و داده‌های عملیاتی و محیط تولید اکیداً خارج از دامنه باقی می‌مانند و تمام گیت‌های Stage، استقرار (deploy)، DNS، Web Writer و گیت‌های مدل و CLI حفظ می‌شوند. وجود این مستندات به معنی اثبات رفتار در زمان اجرا (runtime behavior) نیست.
-
-شواهد اندازه‌گیری‌شده در ۲۰۲۶-۰۹-۰۵: کاناری خودکار اولیه ابتدا انحراف ناخواستهٔ نیم‌فاصله (ZWNJ drift) را رد کرد و سپس به‌دلیل خطای provider یا سقف خروجی (output-limit failure) در چرخهٔ اصلاح، بدون commit متوقف شد؛ اما حالت فشرده (compact mode) متعاقباً اجرای واقعی و تازهٔ نشست‌های Worker و Reviewer را با موفقیت کامل کرد. با این حال، این شواهد هنوز اثبات‌کنندهٔ یک چرخهٔ کامل و خودکار commit/ادامه توسط autopilot بدون نظارت، پذیرش Stage، استقرار یا آمادگی عملیاتی نیست.
-
-در تست‌های اندازه‌گیری‌شده، ۵۷ تست متمرکز در ۰٫۵۴۴ ثانیه با موفقیت پاس شدند؛ دستور گسترده‌تر اتوماسیون با ۲۶۶ تست، شامل ۲۶۵ تست موفق و یک خطای `NETLINK_ROUTE` در محیط sandbox تو‌در‌تو بود، و همان سلکتور bwrap در اجرای خارج از sandbox تو‌در‌تو در ۰٫۹۰۵ ثانیه پاس شد. جملهٔ بعدی در بخش «مرز پذیرش» مبنی بر ۹۴ تست، تاریخی و منسوخ (superseded) است و نباید به عنوان شمارش جاری خوانده شود.
-
-### مقایسهٔ اندازه‌گیری‌شده
-
-نمونه‌های واجد شرایط (eligible samples) در مقایسهٔ اندازه‌گیری‌شده
-(measured-comparison) صرفاً چرخه‌های تمیز، موفق و commit‌شده هستند.
-معیارهای ورودی (input)، ورودی کش‌شده (cached input)، ورودی بدون کش
-(uncached input)، خروجی (output)، خروجی استدلال (reasoning output)،
-مدت‌زمان (duration)، نسبت کش (cache ratio)، موفقیت review/تست
-(review/test success) و موفقیت commit (commit success) به‌صورت جداگانه
-گزارش می‌شوند. خط‌پایهٔ تثبیت‌شدهٔ Sol/xhigh از ۱۴ چرخهٔ موفق
-(retained Sol/xhigh baseline from 14 successful cycles) فریز و ثبت شده است:
-میانگین‌ها (means) شامل ورودی 1,521,948، ورودی کش‌شده 1,437,477، ورودی بدون کش
-84,471، خروجی 13,384، خروجی استدلال 6,956، مدت‌زمان 652 ثانیه، نسبت کش
-94.45 درصد؛ میانه‌ها (medians) شامل ورودی 1,461,716، ورودی بدون کش 76,513،
-خروجی 13,498، خروجی استدلال 7,104، مدت‌زمان 597 ثانیه است. موفقیت review/تست
-و موفقیت commit برای این نمونه‌ها به‌طور مستقل و ۱۰۰٪ گزارش شده است.
-تنوع تسک‌ها انتساب را محدود می‌کند (task variation limits attribution)
-و هنوز هیچ ادعایی برای نتایج Astra مطرح نشده است (no Astra result is claimed yet).
-
-## مرز پذیرش
-
-تست محلی ابزار:
-
-```bash
-APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
-  python3 -m unittest tests.test_two_site_proposal_runner -v
-```
-
-این تست‌ها CLI را mock می‌کنند و به Google وصل نمی‌شوند. تست Supervisor نیز آفلاین
-است و قرارداد state، ثبات ref/control، no-progress، retention و command امن را می‌سنجد:
-
-```bash
-APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
-  python3 -m unittest tests.test_two_site_codex_autopilot -v
-```
-
-مجموعهٔ Runner، Supervisor، adapter قدیمی و session-binding پس از این تغییر ۹۴ تست
-آفلاین سبز دارد؛ این عدد شاهد قرارداد کد است، نه smoke واقعی Gemini Reviewer.
-
-شاهد جداگانهٔ زنده، Worker واقعی، Gemini Reviewer تازه، Codex final gate، تغییر
-اعمال‌شده، تست و commit را ثبت خواهد کرد. نه شاهد تاریخی و نه تست‌ها به معنی پذیرش
-Stage یا آمادگی تولید نیستند. Web/Bot، deploy، DNS و انتقال
-انسانی Web Writer با این تغییر دست‌نخورده می‌مانند.
+شاهد ۵ سپتامبر فقط تاریخچهٔ انتقال از Worker→Codex بود:
+[گزارش تاریخی](reviews/AUTOMATION_PROPOSAL_LIVE_20260905.md).
+شاهد جاری هر اجرا همان SHAها، test evidence و transition اعتبارسنجی‌شده است.
+تست آفلاین قرارداد ابزار را می‌سنجد؛ سلامت live، Stage COMPLETE، deploy و آمادگی
+عملیاتی هرکدام شواهد مخصوص خود را می‌خواهند. هیچ‌کدام از متن این سند نتیجه نمی‌شوند.

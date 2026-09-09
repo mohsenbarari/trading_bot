@@ -80,6 +80,8 @@ PROPOSAL_RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
 PRUNABLE_RUN_STATES = {"CONTINUE", "COMPLETE", "FAILED", "RETRYABLE_FAILURE", "STOPPED"}
 CONTROL_PATHS = (
     Path("scripts/two_site_codex_autopilot.py"),
+    Path("scripts/two_site_cycle_tools.py"),
+    Path("scripts/two_site_cycle_metrics.py"),
     Path("scripts/two_site_proposal_runner.py"),
     GEMINI_RUNTIME_CONTRACT_REL,
     PROMPT_REL,
@@ -499,11 +501,32 @@ def validate_transition(
     return result
 
 
+def continuation_hint(result: object, current_head: object) -> dict | None:
+    """Bounded optimization hint, never an acceptance/authority receipt."""
+    if not isinstance(result, dict):
+        return None
+    keys = ("head_after", "commit", "summary", "next_action",
+            "gemini_worker_run_id", "gemini_reviewer_run_id", "proposal_sha256")
+    if (result.get("state") != "CONTINUE" or result.get("head_changed") is not True
+            or result.get("blockers") != [] or result.get("head_after") != current_head
+            or result.get("commit") != current_head
+            or not all(isinstance(result.get(k), str) and result[k].strip() for k in keys)
+            or not re.fullmatch(r"[0-9a-f]{40}", str(current_head))
+            or not re.fullmatch(r"[0-9a-f]{64}", result["proposal_sha256"])
+            or any(not PROPOSAL_RUN_ID.fullmatch(result[k]) for k in keys[4:6])):
+        return None
+    hint = {k: result[k] for k in keys}
+    if len(json.dumps(hint, ensure_ascii=True).encode()) > 8000:
+        return None
+    return hint
+
+
 def prompt_for_cycle(
     root: Path,
     cycle: int,
     before: dict[str, object],
     recovery: dict[str, object] | None = None,
+    continuation: dict | None = None,
 ) -> str:
     base = bounded_file_text(
         root, root / PROMPT_REL, MAX_PROMPT_BYTES, "autopilot prompt template"
@@ -515,6 +538,9 @@ def prompt_for_cycle(
     }
     if recovery is not None:
         context["recovery"] = recovery
+    hint = continuation_hint(continuation, before["head"])
+    if hint is not None:
+        context["validated_previous_cycle_hint"] = hint
     return base + "\n\nSUPERVISOR_CONTEXT_JSON:\n" + json.dumps(context, sort_keys=True)
 
 
@@ -540,13 +566,14 @@ def run_cycle(
     cycle: int,
     timeout: int,
     recovery: dict[str, object] | None = None,
+    continuation: dict | None = None,
 ) -> tuple[Path, dict]:
     global _ACTIVE_PROCESS
     before = validate_repository(root, require_clean=True)
     timestamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     run_dir = state_root / "runs" / f"cycle-{cycle:04d}-{timestamp}-{os.getpid()}"
     run_dir.mkdir(mode=0o700)
-    prompt = prompt_for_cycle(root, cycle, before, recovery=recovery)
+    prompt = prompt_for_cycle(root, cycle, before, recovery=recovery, continuation=continuation)
     (run_dir / "prompt.txt").write_text(prompt)
     codex = codex.resolve(strict=True)
     identity = codex_identity(codex, run_dir)
@@ -627,6 +654,20 @@ def run_cycle(
         raise
     finally:
         _ACTIVE_PROCESS = None
+        # Telemetry must neither authorize nor block a valid transition. Persist
+        # before run pruning, including failed/interrupted attempts.
+        try:
+            try:
+                from scripts.two_site_cycle_metrics import record_cycle
+            except ModuleNotFoundError:
+                from two_site_cycle_metrics import record_cycle
+            record_cycle(root, state_root, run_dir, meta, MODEL, REASONING)
+        except Exception as exc:
+            meta["metrics_error"] = type(exc).__name__
+            try:
+                write_json(run_dir / "status.json", meta)
+            except OSError:
+                pass
 
 
 def prune_runs(state_root: Path, keep: int = KEEP_RUNS) -> list[str]:
@@ -679,6 +720,7 @@ def run_loop(root: Path, codex: Path, max_cycles: int, timeout: int, once: bool)
         retryable_failures = 0
         consecutive_rescopes = 0
         recovery_context: dict[str, object] | None = None
+        previous_success: dict | None = None
         for cycle in range(1, max_cycles + 1):
             if (state_root / "STOP").exists():
                 write_supervisor_state(state_root, "STOPPED", cycle=cycle)
@@ -691,9 +733,13 @@ def run_loop(root: Path, codex: Path, max_cycles: int, timeout: int, once: bool)
                 blockers=[],
             )
             try:
+                continuation_args = ({"continuation": previous_success}
+                                     if continuation_hint(previous_success, cycle_start_head) is not None else {})
                 run_dir, result = run_cycle(
                     root, codex, state_root, cycle, timeout, recovery=recovery_context,
+                    **continuation_args,
                 )
+                previous_success = None
                 retryable_failures = 0
                 if result.get("head_changed") and result.get("commit") is not None:
                     consecutive_rescopes = 0
@@ -713,6 +759,8 @@ def run_loop(root: Path, codex: Path, max_cycles: int, timeout: int, once: bool)
                     )
                     return 0
                 if result["state"] == "CONTINUE":
+                    if continuation_hint(result, result.get("head_after")) is not None:
+                        previous_success = result
                     consecutive_rescopes = 0
                     recovery_context = None
                     prune_runs(state_root)
@@ -788,6 +836,7 @@ def run_loop(root: Path, codex: Path, max_cycles: int, timeout: int, once: bool)
                 )
                 return 2
             except Exception as exc:
+                previous_success = None
                 # Never leave the supervisor appearing RUNNING after an
                 # unexpected application error. KeyboardInterrupt/SystemExit
                 # remain outside Exception and still stop immediately.
