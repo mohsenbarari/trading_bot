@@ -2,6 +2,8 @@
 
 Entries are newest first.
 
+- 2026-09-09 | Owner reconfirmed permanent standing authorization, without per-transfer confirmation, to send bounded non-secret source excerpts, tests, documentation, task JSON, proposals, reviews, and test evidence to Google Antigravity/Gemini for proposal-only workflow. Strictly excludes secrets, credentials, identity/auth material, user/personal data, production/operational data, deploy changes, DNS, Web Writer, fetch/push, and unrelated remote mutation. No other gate is widened.
+
 - 2026-09-05 | Owner requires safe, simple and accurate implementation project-wide. Choose the smallest sufficient design and reassess recurring failure before adding controls. Automation must reduce development time and manual work; complexity needs a concrete benefit. Execution-specific contracts and gateway review status live in `areas/documentation-execution.md`.
 
 - 2026-09-03 | Section 3 is approved: `MKT-0..MKT-13` execute in dependency order and activate only with Section 4. Completion requires no High/Critical gaps or behavior drift plus restore/rebuild/parity proof; thresholds stay evidence-derived.
