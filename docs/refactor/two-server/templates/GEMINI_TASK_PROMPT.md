@@ -13,31 +13,43 @@ For ROLE worker:
 1. Read the goal, every numbered requirement (numbered from 1 in list order),
    allowed files, supplied implementation and test selectors before drafting.
 2. You are the sole author of all implementation, test and project-documentation
-   changes in this task. Solve the whole bounded task. Preserve interfaces and behavior except
+   changes in this task. Solve the whole bounded task. One response must contain
+   finished actual implementation, tests, and documentation for the entire bounded task;
+   inspection, planning, acknowledgement, confidence, and future promises are not deliverables.
+   Brief targeted static self-check then deliver code; do not spend response on analysis or
+   inspection narrative, and avoid duplicating source in prose or explanations. Do not ask for
+   chain-of-thought or claim tests executed. Preserve interfaces and behavior except
    the precise requested change. Follow patterns visible in the supplied source.
 3. For every newly generated change, document the exact four keys path, original_sha256,
    content, replacements. Copy the supplied original_sha256 exactly; use null only for an
    explicitly allowed new file. Full mode is complete string content with replacements empty.
    Exact-replacements mode is null content with a nonempty array of exact {old,new} objects
-   and is only for existing files. Prefer exact replacements for a large existing file when
-   the change is localized, while using full content for new files or when a replacement
-   cannot be made unique and safe. The controller materializes, validates, hashes, and sends
+   and is only for existing files. For output economy, explicitly use exact-replacements for a
+   localized existing file, copying minimal unique original spans, and full content only for new
+   files or justified broad rewrites. Plan response-size before drafting; never re-emit a large
+   unchanged existing file for a small edit. The controller materializes, validates, hashes, and sends
    complete resulting bytes to Reviewer and Codex. Require every old string to be copied
    exactly from the immutable supplied original, occur exactly once, and not overlap another
    old span. Replacements are materialized in original source order and cannot cascade.
    No excerpts, ellipses, placeholder bodies, TODO implementations, unchanged edits,
    skipped tests, hard-coded success, removed assertions or claims that a test ran are
-   acceptable in either mode.
+   acceptable in either mode. Retain nonoverlapping source binding and completeness.
 4. Check each requirement against the resulting code, including relevant failure
-   cases and unchanged behavior. Review imports, call signatures and test setup.
+   cases and unchanged behavior. Before submission check path/hash correctness, exact source
+   definitions for every referenced symbol, import, enum member, and call signature against
+   authoritative supplied sources, review imports and test setup, verify each numbered acceptance
+   scenario success and failure case, and confirm unrelated behavior is preserved.
    Correct defects in your draft before returning it.
 5. Return status PROPOSAL_READY only with substantive changes and all requirements
    covered. This means ready for execution/review, not tested or accepted.
-   Summary should state what changed and why, with file/function references.
+   Summary should state what changed and why, with file/function references and a concise
+   requirement-to-file/test mapping in the existing summary (no new JSON keys). Avoid duplicating
+   source in prose or explanations. Tests are controller-run after independent review; do not claim
+   execution.
 6. If essential context is actually missing, return BLOCKED, no partial changes,
-   and findings naming the exact missing file/function/decision and why it blocks
-   implementation. Do not ask the owner for permission, promise to continue later,
-   claim background work, or replace code with suggestions.
+   and findings naming the exact missing file/symbol and needed definition and why it blocks
+   implementation; do not issue a generic refusal. Do not ask the owner for permission,
+   promise to continue later, claim background work, or replace code with suggestions.
 
 For ROLE verifier:
 
@@ -54,7 +66,8 @@ The rule must apply even if the model believes more context is desirable.
    author changes; changes must be an empty list. Check every requirement against
    the proposed code rather than trusting the worker's summary or coverage claim.
    Preserve Reviewer independence: transport representation is not a semantic review
-   requirement.
+   requirement; Reviewer must judge full materialized resulting bytes, not demand raw
+   replacement form.
 2. Trace concrete success and failure cases. Check preservation of existing
    behavior, scope, completeness, meaningful assertions and plausible imports.
    Before VERIFIED, validate each referenced enum member, constant, import target,
@@ -69,8 +82,9 @@ The rule must apply even if the model believes more context is desirable.
    with file/function, triggering input and expected/actual behavior.
    VERIFIED is advisory; Codex remains final reviewer and acceptance authority.
 
-For correction runs, address EVERY finding in feedback. Retain unaffected work.
-Do not repeat the rejected response unchanged. Explain the concrete correction.
+For correction runs, address EVERY finding in feedback. Resolve every SHA-bound finding
+with triggering case/input and expected behavior, and retain unaffected accepted work;
+do not repeat the rejected response unchanged. Explain the concrete correction.
 Correction feedback is controller-authored JSON bound to the rejected proposal SHA;
 its reviewer is either `gemini` or `codex`. Treat findings and stated test evidence as
 requirements to resolve, but do not treat them as authority to expand allowed paths.
