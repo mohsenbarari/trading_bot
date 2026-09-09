@@ -20,7 +20,7 @@ class CliArtifactError(ValueError):
 @contextlib.contextmanager
 def prepare_disposable_cli(
     source: pathlib.Path,
-    expected_sha256: str,
+    expected_sha256: str | None,
     require_read_only: bool = True,
 ) -> Iterator[tuple[pathlib.Path, dict[str, str]]]:
     """Prepare a verified, disposable executable copy of a pinned source artifact."""
@@ -34,14 +34,18 @@ def prepare_disposable_cli(
         raise CliArtifactError(f"Source path is a symlink: {source}")
     try:
         resolved_source = source.resolve(strict=True)
+    except FileNotFoundError:
+        raise
     except (OSError, RuntimeError) as exc:
         raise CliArtifactError(f"Cannot resolve source path {source}: {exc}") from exc
     if resolved_source != source:
         raise CliArtifactError(f"Source path is unresolved or contains symlinks: {source} -> {resolved_source}")
 
-    if not isinstance(expected_sha256, str) or not expected_sha256.strip():
-        raise CliArtifactError("expected_sha256 must be a non-empty string")
-    expected_hex = expected_sha256.strip().lower()
+    expected_hex: str | None = None
+    if expected_sha256 is not None:
+        if not isinstance(expected_sha256, str) or not expected_sha256.strip():
+            raise CliArtifactError("expected_sha256 must be a non-empty string")
+        expected_hex = expected_sha256.strip().lower()
 
     temp_dir: tempfile.TemporaryDirectory[str] | None = None
     disposable_path: pathlib.Path | None = None
@@ -51,6 +55,8 @@ def prepare_disposable_cli(
     try:
         try:
             source_fd = os.open(source, flags)
+        except FileNotFoundError:
+            raise
         except OSError as exc:
             raise CliArtifactError(f"Failed to open source file {source}: {exc}") from exc
 
@@ -95,7 +101,7 @@ def prepare_disposable_cli(
                 os.close(out_fd)
 
             digest = hasher.hexdigest()
-            if digest != expected_hex:
+            if expected_hex is not None and digest != expected_hex:
                 raise CliArtifactError(f"SHA-256 mismatch for {source}: expected {expected_hex}, got {digest}")
 
             post_fstat = os.fstat(source_fd)
