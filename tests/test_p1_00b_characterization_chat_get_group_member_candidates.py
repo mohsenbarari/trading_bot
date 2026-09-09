@@ -279,6 +279,99 @@ class CharacterizeChatGetGroupMemberCandidatesTests(unittest.IsolatedAsyncioTest
         )
         mock_load_chat_role_badges.assert_not_awaited()
 
+    @patch("api.routers.chat.load_chat_role_badges", new_callable=AsyncMock)
+    @patch("api.routers.chat.list_group_member_candidates", new_callable=AsyncMock)
+    @patch("api.routers.chat.get_active_group_admin_or_403", new_callable=AsyncMock)
+    @patch("api.routers.chat.get_group_or_404", new_callable=AsyncMock)
+    @patch("api.routers.chat.is_user_customer", new_callable=AsyncMock)
+    async def test_get_group_member_candidates_authorized_listing_failure(
+        self,
+        mock_is_user_customer: AsyncMock,
+        mock_get_group_or_404: AsyncMock,
+        mock_get_active_group_admin_or_403: AsyncMock,
+        mock_list_group_member_candidates: AsyncMock,
+        mock_load_chat_role_badges: AsyncMock,
+    ) -> None:
+        fake_db = object()
+        current_user = SimpleNamespace(id=42)
+        fake_group = SimpleNamespace(id=77, title="Sample Group")
+        fake_admin = SimpleNamespace(user_id=42, role="admin")
+        sentinel_error = RuntimeError("candidate listing failed after authorization")
+
+        mock_is_user_customer.return_value = False
+        mock_get_group_or_404.return_value = fake_group
+        mock_get_active_group_admin_or_403.return_value = fake_admin
+
+        execution_order: list[str] = []
+
+        async def _record_is_user_customer(*_args: object, **_kwargs: object) -> bool:
+            execution_order.append("is_user_customer")
+            return False
+
+        async def _record_get_group_or_404(*_args: object, **_kwargs: object) -> object:
+            execution_order.append("get_group_or_404")
+            return fake_group
+
+        async def _record_get_active_group_admin_or_403(
+            *_args: object, **_kwargs: object
+        ) -> object:
+            execution_order.append("get_active_group_admin_or_403")
+            return fake_admin
+
+        async def _record_list_group_member_candidates(
+            *_args: object, **_kwargs: object
+        ) -> object:
+            execution_order.append("list_group_member_candidates")
+            raise sentinel_error
+
+        mock_is_user_customer.side_effect = _record_is_user_customer
+        mock_get_group_or_404.side_effect = _record_get_group_or_404
+        mock_get_active_group_admin_or_403.side_effect = (
+            _record_get_active_group_admin_or_403
+        )
+        mock_list_group_member_candidates.side_effect = (
+            _record_list_group_member_candidates
+        )
+
+        with self.assertRaises(RuntimeError) as ctx:
+            await get_group_member_candidates(
+                query_text="search_term",
+                limit=25,
+                offset=10,
+                exclude_chat_id=77,
+                selected_user_ids=[101, 102],
+                current_user=current_user,
+                db=fake_db,
+            )
+
+        self.assertIs(ctx.exception, sentinel_error)
+        mock_is_user_customer.assert_awaited_once_with(fake_db, current_user.id)
+        mock_get_group_or_404.assert_awaited_once_with(fake_db, 77)
+        mock_get_active_group_admin_or_403.assert_awaited_once_with(
+            fake_db, chat=fake_group, user_id=current_user.id
+        )
+        mock_list_group_member_candidates.assert_awaited_once_with(
+            fake_db,
+            current_user=current_user,
+            query_text="search_term",
+            limit=25,
+            offset=10,
+            exclude_chat_id=77,
+            selected_user_ids=[101, 102],
+        )
+        mock_load_chat_role_badges.assert_not_called()
+        mock_load_chat_role_badges.assert_not_awaited()
+
+        self.assertEqual(
+            execution_order,
+            [
+                "is_user_customer",
+                "get_group_or_404",
+                "get_active_group_admin_or_403",
+                "list_group_member_candidates",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
