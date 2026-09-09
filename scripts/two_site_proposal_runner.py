@@ -68,6 +68,10 @@ class ProposalError(ValueError):
     pass
 
 
+class RetryableProviderSessionError(ProposalError):
+    pass
+
+
 def materialize_replacements(original: str, replacements: object) -> str:
     if not isinstance(original, str):
         raise ProposalError("original text must be a string")
@@ -750,9 +754,10 @@ def parse_stream(raw: str, task: dict, sources: dict, role: str) -> tuple[dict, 
     envelope = terminal[0]
     session = init[0].get("conversation_id")
     if (not isinstance(session, str) or not session.strip()
-            or envelope.get("conversation_id") != session
-            or envelope.get("denied_actions")):
+            or envelope.get("conversation_id") != session):
         raise ProposalError("CLI did not complete one successful session")
+    if envelope.get("denied_actions"):
+        raise RetryableProviderSessionError("CLI did not complete one successful session")
     if envelope.get("status") != "SUCCESS":
         error = envelope.get("error")
         if (isinstance(error, str)
@@ -778,7 +783,7 @@ def parse_stream(raw: str, task: dict, sources: dict, role: str) -> tuple[dict, 
             or "subagent_info" in event
             or event.get("step_type") in {"tool", "subagent"}
         ):
-            raise ProposalError("tool attempt invalidates a proposal-only run")
+            raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
         if event.get("event") != "step_update":
             continue
         step = event["step_update"]
@@ -808,7 +813,7 @@ def parse_stream(raw: str, task: dict, sources: dict, role: str) -> tuple[dict, 
             and (event.get("conversation_id") is None or event.get("conversation_id") == session)
         )
         if not is_finish_submission or finish_submissions >= 1:
-            raise ProposalError("tool attempt invalidates a proposal-only run")
+            raise RetryableProviderSessionError("tool attempt invalidates a proposal-only run")
         finish_submissions += 1
 
     # With --json-schema the documented machine payload is structured_output.
@@ -818,7 +823,7 @@ def parse_stream(raw: str, task: dict, sources: dict, role: str) -> tuple[dict, 
         result = envelope["structured_output"]
     else:
         if not isinstance(envelope.get("response"), str):
-            raise ProposalError("CLI result has no response text")
+            raise RetryableProviderSessionError("CLI result has no response text")
         result = unique_json(envelope["response"])
     result = normalize_result(result, task, sources, role)
     result = validate_result(result, task, sources, role)
