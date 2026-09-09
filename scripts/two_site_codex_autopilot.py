@@ -54,8 +54,8 @@ ROOT = Path(__file__).resolve().parents[1]
 BRANCH = "refactor/two-site-architecture"
 MODEL = "gpt-6-astra"
 REASONING = "xhigh"
-EXPECTED_CODEX_CLI_VERSION = "codex-cli 0.153.0"
-EXPECTED_CODEX_CLI_SHA256 = "fce635028842bfe9257140e8b7d53162732945e2f356fc35225be0702b4974be"
+EXPECTED_CODEX_CLI_VERSION = "codex-cli 0.153.4"
+EXPECTED_CODEX_CLI_SHA256 = "56ef98ab4032d317ab26e9b5e5a175650717351edb16ed9cde0cb6d1734d62da"
 MAX_CODEX_OUTPUT = 16_000_000
 MAX_RESULT_BYTES = 64_000
 MAX_PROMPT_BYTES = 160_000
@@ -820,12 +820,14 @@ def run_loop(root: Path, codex: Path, max_cycles: int, timeout: int, once: bool)
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT)
-    parser.add_argument("--codex", type=Path, default=Path(shutil.which("codex") or "codex"))
+    parser.add_argument("--codex", type=Path, default=None)
     parser.add_argument("--max-cycles", type=int, default=DEFAULT_MAX_CYCLES)
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
+    if args.codex is None:
+        args.codex = args.root.resolve() / ".local/tools/codex-0.153.4-56ef98ab4032d317.pin"
     if not 1 <= args.max_cycles <= DEFAULT_MAX_CYCLES or not 300 <= args.timeout <= 14_400:
         raise SystemExit("invalid max-cycles or timeout")
     for handled in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
