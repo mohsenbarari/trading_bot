@@ -11,18 +11,19 @@ import argparse
 from contextlib import contextmanager
 import fcntl, json, os, re, stat, subprocess
 from pathlib import Path
+from typing import Callable
 
 try:
     from scripts.two_site_proposal_runner import (
-        MAX_CONTEXT, MODEL, ProposalError, bounded_file_text, file_sha256, git,
-        load_task, run as runner_run, unique_json, validate_correction_feedback,
-        validate_result, write_json,
+        MAX_CONTEXT, MODEL, ProposalError, RetryableProviderSessionError,
+        bounded_file_text, file_sha256, git, load_task, run as runner_run,
+        unique_json, validate_correction_feedback, validate_result, write_json,
     )
 except ModuleNotFoundError:
     from two_site_proposal_runner import (  # type: ignore[no-redef]
-        MAX_CONTEXT, MODEL, ProposalError, bounded_file_text, file_sha256, git,
-        load_task, run as runner_run, unique_json, validate_correction_feedback,
-        validate_result, write_json,
+        MAX_CONTEXT, MODEL, ProposalError, RetryableProviderSessionError,
+        bounded_file_text, file_sha256, git, load_task, run as runner_run,
+        unique_json, validate_correction_feedback, validate_result, write_json,
     )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -146,6 +147,31 @@ def validate_run(
         raise ProposalError(f"reused conversation_id in {expected_run_id}")
     seen_convs.add(conv_id)
     return result, status, result_sha, result_text
+
+
+def run_provider_session(
+    root: Path, task_path: Path, role: str, base_run_id: str, timeout: int,
+    state_check: Callable[[], None], feedback: Path | None = None,
+    proposal: Path | None = None, cli: Path | None = None,
+) -> tuple[str, Path]:
+    proposals_dir = root / ".local/two-site-refactor/proposals"
+    attempts = (base_run_id, f'{base_run_id}-retry-1', f'{base_run_id}-retry-2')
+    last_error: RetryableProviderSessionError | None = None
+    for attempt_id in attempts:
+        state_check()
+        if (proposals_dir / attempt_id).exists():
+            raise ProposalError(f"run ID already exists: {attempt_id}")
+        try:
+            run_dir = runner_run(
+                root, task_path, role, attempt_id, timeout,
+                feedback=feedback, proposal=proposal, cli=cli,
+            )
+            return attempt_id, run_dir
+        except RetryableProviderSessionError as exc:
+            last_error = exc
+    raise ProposalError(
+        f"provider session retry exhausted for {base_run_id} after 3 attempts"
+    ) from last_error
 
 
 def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli: Path | None, state: dict) -> dict:
