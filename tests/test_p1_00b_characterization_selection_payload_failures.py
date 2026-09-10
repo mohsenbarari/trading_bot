@@ -1,11 +1,11 @@
-"""Characterization tests for _selection_inference_for_missing_commodity payload format errors.
+"""Characterization tests for _selection_inference_for_missing_commodity payload format and logging errors.
 
 Tracked gap: docs/refactor/two-server/section-1/inventory/scenario-records.json#P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE
 Seed: API-OFFER-POST-OFFERS-PARSE-OFFER-TEXT-L3184
 Stage card: docs/refactor/two-server/section-1/stages/P1-00b.md
 Assignment ID: WA-P1-00B-FREEZE-20260904-001
 
-These tests provide helper-level payload-error and rollback characterization only;
+These tests provide helper-level formatter, rollback, and logging failure characterization only;
 they do not establish handler closure, inference internals, audit durability,
 seed closure, or Stage acceptance.
 """
@@ -22,6 +22,7 @@ from tests.test_p1_00_characterization_network_isolation import (
 
 install_p1_00_network_fence()
 
+import asyncio
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -50,6 +51,10 @@ class SyntheticPayloadFormatError(RuntimeError):
 
 class SyntheticRollbackError(RuntimeError):
     """Distinct synthetic exception raised by DB rollback mock."""
+
+
+class SyntheticLoggingError(RuntimeError):
+    """Distinct synthetic exception raised by logging mock."""
 
 
 class StrictFakeAsyncSession:
@@ -152,6 +157,7 @@ def _selection_test_context(
     observation: CoinInferenceShadowObservation,
     payload_error: BaseException,
     timeline: list[str],
+    logging_error: BaseException | None = None,
     snapshot_path: str = "/synthetic/snapshots/authority.json",
 ) -> Iterator[SimpleNamespace]:
     synthetic_settings = SimpleNamespace(
@@ -176,6 +182,9 @@ def _selection_test_context(
     mock_payload_formatter = mock.Mock(side_effect=_mock_format)
 
     def _mock_log(*args: Any, **kwargs: Any) -> None:
+        if logging_error is not None:
+            timeline.append("log_attempt")
+            raise logging_error
         timeline.append("log_completed")
 
     mock_log_trading_event = mock.Mock(side_effect=_mock_log)
@@ -262,7 +271,7 @@ def _assert_boundary_interactions(
 
 
 class SelectionPayloadFailureCharacterizationTests(unittest.IsolatedAsyncioTestCase):
-    """Characterizes payload formatting failure handling and rollback in the selection helper."""
+    """Characterizes payload formatting, rollback, and logging failure handling in the selection helper."""
 
     async def test_payload_format_failure_rollback_success(self) -> None:
         timeline: list[str] = []
@@ -367,6 +376,136 @@ class SelectionPayloadFailureCharacterizationTests(unittest.IsolatedAsyncioTestC
                     "commit_completed",
                     "formatter_attempt",
                     "rollback_attempt",
+                ],
+            )
+
+            _assert_boundary_interactions(
+                self,
+                ctx,
+                db=db,
+                observation=observation,
+                price=price,
+                settlement_term="TOMORROW",
+                candidate_scope=COIN_INFERENCE_CANDIDATE_SCOPE_PACK_ONLY,
+                force_confirmation=False,
+            )
+
+    async def test_payload_format_failure_logging_failure(self) -> None:
+        timeline: list[str] = []
+        formatter_error = SyntheticPayloadFormatError("simulated payload formatting failure")
+        logging_error = SyntheticLoggingError("simulated logging failure")
+        self.assertIsNot(formatter_error, logging_error)
+
+        db = StrictFakeAsyncSession(timeline=timeline)
+        price = 54_000_000
+        observation = _build_valid_observation(price=price, settlement_term="CASH")
+        _assert_real_formatter_precheck(self, observation)
+
+        with _selection_test_context(
+            auto_selection_enabled=False,
+            observation=observation,
+            payload_error=formatter_error,
+            logging_error=logging_error,
+            timeline=timeline,
+        ) as ctx:
+            with self.assertRaises(SyntheticLoggingError) as cm:
+                await offers._selection_inference_for_missing_commodity(
+                    db,
+                    price=price,
+                    settlement_type="cash",
+                    low_date_hint=True,
+                    pack_hint=False,
+                )
+
+            self.assertIs(cm.exception, logging_error)
+            self.assertIsNot(cm.exception, formatter_error)
+            self.assertIs(cm.exception.__context__, formatter_error)
+            self.assertIsNone(cm.exception.__cause__)
+            self.assertFalse(cm.exception.__suppress_context__)
+
+            ctx.mock_log_trading_event.assert_called_once_with(
+                offers.logger,
+                "coin_inference_parse_selection.unavailable",
+                level="warning",
+                action="coin_inference_parse_selection",
+                result="abstained",
+                error_class="SyntheticPayloadFormatError",
+            )
+            self.assertIs(ctx.mock_log_trading_event.call_args[0][0], offers.logger)
+
+            self.assertEqual(
+                timeline,
+                [
+                    "observation_completed",
+                    "commit_completed",
+                    "formatter_attempt",
+                    "rollback_completed",
+                    "log_attempt",
+                ],
+            )
+
+            _assert_boundary_interactions(
+                self,
+                ctx,
+                db=db,
+                observation=observation,
+                price=price,
+                settlement_term="CASH",
+                candidate_scope=COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY,
+                force_confirmation=True,
+            )
+
+    async def test_payload_format_failure_logging_cancellation(self) -> None:
+        timeline: list[str] = []
+        formatter_error = SyntheticPayloadFormatError("simulated payload formatting failure")
+        logging_error = asyncio.CancelledError()
+        self.assertIsNot(formatter_error, logging_error)
+
+        db = StrictFakeAsyncSession(timeline=timeline)
+        price = 62_500_000
+        observation = _build_valid_observation(price=price, settlement_term="TOMORROW")
+        _assert_real_formatter_precheck(self, observation)
+
+        with _selection_test_context(
+            auto_selection_enabled=True,
+            observation=observation,
+            payload_error=formatter_error,
+            logging_error=logging_error,
+            timeline=timeline,
+        ) as ctx:
+            with self.assertRaises(asyncio.CancelledError) as cm:
+                await offers._selection_inference_for_missing_commodity(
+                    db,
+                    price=price,
+                    settlement_type="tomorrow",
+                    low_date_hint=True,
+                    pack_hint=True,
+                )
+
+            self.assertIs(cm.exception, logging_error)
+            self.assertIsNot(cm.exception, formatter_error)
+            self.assertIs(cm.exception.__context__, formatter_error)
+            self.assertIsNone(cm.exception.__cause__)
+            self.assertFalse(cm.exception.__suppress_context__)
+
+            ctx.mock_log_trading_event.assert_called_once_with(
+                offers.logger,
+                "coin_inference_parse_selection.unavailable",
+                level="warning",
+                action="coin_inference_parse_selection",
+                result="abstained",
+                error_class="SyntheticPayloadFormatError",
+            )
+            self.assertIs(ctx.mock_log_trading_event.call_args[0][0], offers.logger)
+
+            self.assertEqual(
+                timeline,
+                [
+                    "observation_completed",
+                    "commit_completed",
+                    "formatter_attempt",
+                    "rollback_completed",
+                    "log_attempt",
                 ],
             )
 
