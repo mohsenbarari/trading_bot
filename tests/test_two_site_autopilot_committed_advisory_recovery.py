@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 try:
     from scripts.two_site_codex_autopilot import (
+        AssignmentScope,
         AutopilotError,
         RESULT_KEYS,
         recover_committed_advisory_result,
@@ -20,6 +21,7 @@ try:
     )
 except ModuleNotFoundError:
     from two_site_codex_autopilot import (  # type: ignore[no-redef]
+        AssignmentScope,
         AutopilotError,
         RESULT_KEYS,
         recover_committed_advisory_result,
@@ -226,6 +228,14 @@ class TestRunCycleCommittedAdvisoryRecovery(unittest.TestCase):
             "status": "",
             "protected_refs": {},
             "control_blobs": {},
+            "assignment_scope": AssignmentScope(
+                assignment_id="WA-TEST-SCOPE-001",
+                stage_id="P1-TEST",
+                allowed_paths=("tests/**",),
+                forbidden_paths=("blocked/**",),
+                expires_at="2099-01-01T00:00:00Z",
+                sha256="0" * 64,
+            ),
         }
         identity = {
             "path": str(self.codex),

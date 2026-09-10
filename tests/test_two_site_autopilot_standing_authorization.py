@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import unittest
 
-from scripts.two_site_codex_autopilot import ROOT, prompt_for_cycle
+from scripts.two_site_codex_autopilot import AssignmentScope, ROOT, prompt_for_cycle
 
 
 class TestTwoSiteAutopilotStandingAuthorization(unittest.TestCase):
@@ -19,6 +19,14 @@ class TestTwoSiteAutopilotStandingAuthorization(unittest.TestCase):
                 "refs/remotes/origin/main": "2222222222222222222222222222222222222222",
                 "refs/heads/candidate/wa-ir-standby-v1": "3333333333333333333333333333333333333333",
             },
+            "assignment_scope": AssignmentScope(
+                assignment_id="WA-TEST-SCOPE-001",
+                stage_id="P1-TEST",
+                allowed_paths=("tests/**",),
+                forbidden_paths=("blocked/**",),
+                expires_at="2099-01-01T00:00:00Z",
+                sha256="0" * 64,
+            ),
         }
 
     def _assert_standing_authorization_semantics(self, prompt: str) -> None:
