@@ -3,11 +3,41 @@ set -euo pipefail
 umask 077
 
 session="two-site-autopilot"
-root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+script_path="$(realpath -e -- "${BASH_SOURCE[0]:-$0}" 2>/dev/null || true)"
+if [[ -z "$script_path" ]]; then
   printf 'ERROR: not inside the integration repository\n' >&2
   exit 2
-}
-root="$(realpath -e "$root")"
+fi
+script_dir="$(dirname -- "$script_path")"
+root="$(realpath -e -- "$script_dir/.." 2>/dev/null || true)"
+if [[ -z "$root" ]]; then
+  printf 'ERROR: not inside the integration repository\n' >&2
+  exit 2
+fi
+git_top="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null || true)"
+git_top="$(realpath -e -- "$git_top" 2>/dev/null || true)"
+if [[ -z "$git_top" || "$git_top" != "$root" || "$(basename -- "$script_dir")" != "scripts" ]]; then
+  printf 'ERROR: not inside the integration repository\n' >&2
+  exit 2
+fi
+
+apparent_dir="$(dirname -- "$0")"
+apparent_git="$(git -C "$apparent_dir" rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -n "$apparent_git" ]]; then
+  apparent_git="$(realpath -e -- "$apparent_git" 2>/dev/null || true)"
+  if [[ -n "$apparent_git" && "$apparent_git" != "$root" ]]; then
+    printf 'ERROR: symlink alias selects ambiguous repository root\n' >&2
+    exit 2
+  fi
+fi
+
+branch="$(git -C "$root" symbolic-ref --short HEAD 2>/dev/null || git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+if [[ "$branch" != "refactor/two-site-architecture" ]]; then
+  printf 'ERROR: branch must be refactor/two-site-architecture\n' >&2
+  exit 2
+fi
+
+cd "$root"
 state_root="$root/.local/two-site-refactor/autopilot"
 
 usage() {
