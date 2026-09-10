@@ -601,6 +601,7 @@ def codex_command(codex: Path, root: Path, run_dir: Path, prompt: str) -> list[s
         str(codex), "exec",
         "--model", MODEL,
         "--config", f'model_reasoning_effort="{REASONING}"',
+        "--enable", "code_mode",
         "--cd", str(root),
         "--approve-for-me",
         "--ephemeral",

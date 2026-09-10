@@ -103,13 +103,48 @@ and unrelated remote-service mutation. This does not widen any other gate.
    No repeated reads of unchanged full result/task snapshots or per-unit reimplementation of
    existing helper checks. Read every proposed change and relevant original behavior, validate requirement
    coverage and dependency definitions. Send precise failures via the correction contract.
-   For application get python3 scripts/two_site_cycle_packet.py patch --task <path> --worker <id>
-   --reviewer <id> --sha <sha> output and pass directly to apply_patch via tool orchestration
-   without printing all bytes into model context again; helper never applies or approves.
+   Do not repeatedly discover already-documented helper APIs by reading helper source; use
+   documented commands, inspect exact source only for an actual error or missing contract.
+   For coverage discovery, start with exact files from previous next_action and bounded
+   test-definition names, not broad matches of common words that dump many fixture/assertion lines.
+   Preserve all mandatory skill/memory/Stage/Assignment startup and dependency-source reads.
+
+   For zero-echo patch application, execute this functions.exec JavaScript recipe
+   (substitute actual task/worker/reviewer/SHA arguments):
+// BEGIN_ZERO_ECHO_APPLY
+const result = await tools.exec_command({
+  cmd: `python3 scripts/two_site_cycle_packet.py patch --task ${task} --worker ${worker} --reviewer ${reviewer} --sha ${sha}`,
+  max_output_tokens: 200000,
+});
+if (!result || typeof (result.exit_code ?? result.exitCode) !== 'number' || (result.exit_code ?? result.exitCode) !== 0) {
+  throw new Error(`patch helper exited with non-zero or missing code: ${result ? (result.exit_code ?? result.exitCode) : 'missing'}`);
+}
+if (result.session_id || result.sessionId) {
+  throw new Error('patch helper returned active session_id');
+}
+if (typeof result.output !== 'string') {
+  throw new Error('patch helper output must be a string');
+}
+if (!result.output.startsWith('*** Begin Patch\n') || !result.output.endsWith('*** End Patch\n')) {
+  throw new Error('patch helper output missing exact patch framing');
+}
+await tools.apply_patch(result.output);
+// END_ZERO_ECHO_APPLY
+   Never call text(result), text(result.output), console.log, shell cat/tee, or manually
+   rewrite patch bytes. Emit only an application completion/status summary, never the source
+   payload; tool errors must be propagated rather than reported as success. Keep the recipe small,
+   use no process/network/file APIs beyond the two supplied tools; packet/patch helpers never
+   grant semantic acceptance.
+
    Rerun python3 scripts/two_site_cycle_tools.py review --task <path> --worker <id>
    --reviewer <id> --sha <sha> --applied BEFORE staging. BYTES_VALID is not test/semantic approval.
    Run actual focused tests plus proportional regression; use bounded status/wait while
-   tests run rather than broad source rediscovery, then inspect the complete diff.
+   tests run rather than broad source rediscovery.
+   Once applied bytes are proven exact by the existing review --applied guard and required tests pass,
+   inspect git diff --stat / --name-status / --check and exact staged paths/modes, without reprinting
+   the same full source. Full diff rereading remains necessary if source, SHA, paths/modes or task
+   change or semantic questions remain. Do not skip source review, test execution, bindings, scope,
+   staged bytes, independent verifier, full quality gates or corrections.
    Never claim tests not run. On test failure, check the clean baseline once. Restore only
    the exact task bytes before correction. A proven unrelated pre-existing failure becomes
    a separate next unit, not unauthorized repair or a CONTINUE blocker after a valid commit.
