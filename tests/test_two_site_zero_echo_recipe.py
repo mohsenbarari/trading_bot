@@ -232,7 +232,7 @@ def test_prompt_contains_coordinator_guidance_and_preserves_gates():
     assert "inspect git diff --stat / --name-status / --check and exact staged paths/modes, without reprinting" in prompt_text
     assert "Run actual focused tests plus proportional regression" in prompt_text
     assert "Never claim tests not run" in prompt_text
-    assert "Use gpt-6-astra/xhigh" in prompt_text
+    assert "Use gpt-5.6-sol/xhigh" in prompt_text
 
     assert "Use final Git metadata escalation only for narrowly scoped git add -- <exact accepted proposal paths>" in prompt_text
     assert "Prohibit git add -A, git add ., globs, unrelated paths" in prompt_text
@@ -266,7 +266,7 @@ def test_codex_command_enables_code_mode_and_preserves_arguments(tmp_path):
     model_idx = cmd.index("--model")
     assert cmd[model_idx + 1] == ap.MODEL
     assert f'model_reasoning_effort="{ap.REASONING}"' in cmd
-    assert ap.MODEL == "gpt-6-astra"
+    assert ap.MODEL == "gpt-5.6-sol"
     assert ap.REASONING == "xhigh"
 
     assert "--approve-for-me" in cmd
