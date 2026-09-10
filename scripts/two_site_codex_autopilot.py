@@ -51,6 +51,18 @@ except ModuleNotFoundError:  # Direct `python scripts/...` execution.
         validate_result as validate_proposal_result,
         write_json,
     )
+try:
+    from scripts.two_site_assignment_scope import (
+        AssignmentScope,
+        AssignmentScopeError,
+        load_active_assignment_scope,
+    )
+except ModuleNotFoundError:  # Direct `python scripts/...` execution.
+    from two_site_assignment_scope import (  # type: ignore[no-redef]
+        AssignmentScope,
+        AssignmentScopeError,
+        load_active_assignment_scope,
+    )
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,6 +107,7 @@ CONTROL_PATHS = (
     Path("scripts/two_site_cycle_tools.py"),
     Path("scripts/two_site_cycle_metrics.py"),
     Path("scripts/two_site_proposal_runner.py"),
+    Path("scripts/two_site_assignment_scope.py"),
     Path("scripts/two_site_autopilot_tmux.sh"),
     Path("scripts/two_site_autopilot_monitor.sh"),
     GEMINI_RUNTIME_CONTRACT_REL,
@@ -196,11 +209,16 @@ def validate_repository(root: Path, require_clean: bool = True) -> dict[str, obj
         or contains_schema_keyword(schema, {"oneOf", "anyOf", "allOf"})
     ):
         raise AutopilotError("autopilot result schema is invalid")
+    try:
+        assignment_scope = load_active_assignment_scope(root)
+    except AssignmentScopeError as exc:
+        raise AutopilotError("assignment scope validation failed") from exc
     return {
         "head": head,
         "status": status,
         "protected_refs": ref_snapshot(root),
         "control_blobs": controls,
+        "assignment_scope": assignment_scope,
     }
 
 
