@@ -91,10 +91,14 @@ PROPOSAL_RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
 PRUNABLE_RUN_STATES = {"CONTINUE", "COMPLETE", "FAILED", "RETRYABLE_FAILURE", "STOPPED"}
 CONTROL_PATHS = (
     Path("scripts/two_site_codex_autopilot.py"),
+    Path("scripts/two_site_cycle_packet.py"),
     Path("scripts/two_site_cycle_tools.py"),
     Path("scripts/two_site_cycle_metrics.py"),
     Path("scripts/two_site_proposal_runner.py"),
+    Path("scripts/two_site_autopilot_tmux.sh"),
+    Path("scripts/two_site_autopilot_monitor.sh"),
     GEMINI_RUNTIME_CONTRACT_REL,
+    Path("docs/refactor/two-server/templates/GEMINI_TASK_PROMPT.md"),
     PROMPT_REL,
     SCHEMA_REL,
     Path(".agents/skills/two-site-refactor/SKILL.md"),

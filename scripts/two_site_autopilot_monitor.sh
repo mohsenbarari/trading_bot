@@ -14,6 +14,8 @@ recovery_file="$report_root/recovery.json"
 antigravity_cli="/root/trading-bot/trading_bot/.local/tools/agy-1.1.27-93eb2118b778a400.pin"
 expected_antigravity_sha256="93eb2118b778a4005700b54cdd7e08b896fbe665d5ff338e38e9e53da9a091ea"
 
+cd "$integration_root" || exit 1
+
 mkdir -p -- "$report_root"
 exec 9>"$report_root/monitor.lock"
 if ! /usr/bin/flock -n 9; then
@@ -70,7 +72,7 @@ fi
 phase="idle"
 if /usr/bin/pgrep -f "$integration_root/scripts/two_site_proposal_pipeline.py" >/dev/null 2>&1; then
   phase="gemini_pipeline"
-elif /usr/bin/pgrep -f "/codex exec .*--cd $integration_root" >/dev/null 2>&1; then
+elif /usr/bin/pgrep -f "(/codex|/codex-[^/ ]+\.pin) exec .*--cd $integration_root( |$)" >/dev/null 2>&1; then
   phase="codex_coordinator"
 elif [[ "$supervisor_count" -gt 0 ]]; then
   phase="supervisor"
