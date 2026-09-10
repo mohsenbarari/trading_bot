@@ -57,6 +57,41 @@ class SyntheticAuthorityPathPropertyError(RuntimeError):
     """Synthetic ordinary exception sentinel for authority path property failure."""
 
 
+class SyntheticAuthorityPathBoolError(RuntimeError):
+    """Synthetic ordinary exception sentinel for authority path __bool__ failure."""
+
+
+class SyntheticAuthorityPathStrError(RuntimeError):
+    """Synthetic ordinary exception sentinel for authority path __str__ failure."""
+
+
+class InstrumentedAuthorityPath:
+    """Synthetic path object tracking __bool__ and __str__ invocations and raising sentinels."""
+
+    def __init__(
+        self,
+        event_log: list[str],
+        *,
+        bool_exc: Exception | None = None,
+        str_exc: Exception | None = None,
+    ) -> None:
+        self._event_log = event_log
+        self._bool_exc = bool_exc
+        self._str_exc = str_exc
+
+    def __bool__(self) -> bool:
+        self._event_log.append("path_value:bool")
+        if self._bool_exc is not None:
+            raise self._bool_exc
+        return True
+
+    def __str__(self) -> str:
+        self._event_log.append("path_value:str")
+        if self._str_exc is not None:
+            raise self._str_exc
+        return "/synthetic/instrumented_path.json"
+
+
 class FailingStringMode:
     """Synthetic truthy mode value whose __str__ raises an ordinary exception sentinel."""
 
@@ -636,6 +671,184 @@ class SelectionInferenceConfigurationExitsCharacterizationTests(
         self.assertEqual(synthetic_settings.forbidden_accesses, [])
 
         self._assert_suppression(spies, strict_session)
+
+    async def test_real_resolver_failure_selected_authority_path_bool_error(
+        self,
+    ) -> None:
+        """Selected authority path __bool__ failure escapes outside try block for all authority modes."""
+        mode_matrix = [
+            (
+                "LEGACY",
+                "coin_intelligence_inference_snapshot_path",
+                "product_estimator_private_primary_snapshot_path",
+            ),
+            (
+                "PRIVATE_SHADOW",
+                "coin_intelligence_inference_snapshot_path",
+                "product_estimator_private_primary_snapshot_path",
+            ),
+            (
+                "PRIVATE_PRIMARY",
+                "product_estimator_private_primary_snapshot_path",
+                "coin_intelligence_inference_snapshot_path",
+            ),
+        ]
+        for mode, selected_prop, alternate_prop in mode_matrix:
+            with self.subTest(mode=mode):
+                synthetic_exc = SyntheticAuthorityPathBoolError(
+                    f"synthetic-authority-path-bool-sentinel-{mode.lower()}"
+                )
+                events: list[str] = []
+                failing_path = InstrumentedAuthorityPath(
+                    events,
+                    bool_exc=synthetic_exc,
+                )
+                synthetic_settings = InstrumentedSettings(
+                    product_estimator_snapshot_mode=mode,
+                    **{
+                        selected_prop: failing_path,
+                        alternate_prop: f"/synthetic/alternate_{alternate_prop}.json",
+                    },
+                    event_log=events,
+                )
+                resolver_spy = MagicMock(
+                    wraps=configured_product_snapshot_authority_path
+                )
+                strict_session = StrictFakeAsyncSession()
+
+                with _selection_inference_spies(
+                    settings_obj=synthetic_settings,
+                    resolver_spy=resolver_spy,
+                ) as spies:
+                    with self.assertRaises(SyntheticAuthorityPathBoolError) as ctx:
+                        await _selection_inference_for_missing_commodity(
+                            strict_session,
+                            price=50_000_000,
+                            settlement_type="cash",
+                            low_date_hint=False,
+                            pack_hint=False,
+                        )
+
+                self.assertIs(ctx.exception, synthetic_exc)
+
+                expected_events = [
+                    "product_estimator_snapshot_mode",
+                    selected_prop,
+                    "path_value:bool",
+                ]
+                self.assertEqual(events, expected_events)
+                self.assertEqual(
+                    events.count("product_estimator_snapshot_mode"), 1
+                )
+                self.assertEqual(events.count(selected_prop), 1)
+                self.assertEqual(events.count("path_value:bool"), 1)
+                self.assertEqual(events.count("path_value:str"), 0)
+                self.assertNotIn("path_value:str", events)
+
+                resolver_spy.assert_called_once_with(synthetic_settings)
+                self.assertEqual(resolver_spy.call_count, 1)
+                self.assertIs(resolver_spy.call_args[0][0], synthetic_settings)
+
+                self.assertNotIn(
+                    alternate_prop,
+                    synthetic_settings.access_log,
+                )
+                self.assertNotIn(
+                    "coin_intelligence_inference_auto_selection_enabled",
+                    synthetic_settings.access_log,
+                )
+                self.assertEqual(synthetic_settings.forbidden_accesses, [])
+
+                self._assert_suppression(spies, strict_session)
+
+    async def test_real_resolver_failure_selected_authority_path_str_error(
+        self,
+    ) -> None:
+        """Selected authority path __str__ failure escapes outside try block for all authority modes."""
+        mode_matrix = [
+            (
+                "LEGACY",
+                "coin_intelligence_inference_snapshot_path",
+                "product_estimator_private_primary_snapshot_path",
+            ),
+            (
+                "PRIVATE_SHADOW",
+                "coin_intelligence_inference_snapshot_path",
+                "product_estimator_private_primary_snapshot_path",
+            ),
+            (
+                "PRIVATE_PRIMARY",
+                "product_estimator_private_primary_snapshot_path",
+                "coin_intelligence_inference_snapshot_path",
+            ),
+        ]
+        for mode, selected_prop, alternate_prop in mode_matrix:
+            with self.subTest(mode=mode):
+                synthetic_exc = SyntheticAuthorityPathStrError(
+                    f"synthetic-authority-path-str-sentinel-{mode.lower()}"
+                )
+                events: list[str] = []
+                failing_path = InstrumentedAuthorityPath(
+                    events,
+                    str_exc=synthetic_exc,
+                )
+                synthetic_settings = InstrumentedSettings(
+                    product_estimator_snapshot_mode=mode,
+                    **{
+                        selected_prop: failing_path,
+                        alternate_prop: f"/synthetic/alternate_{alternate_prop}.json",
+                    },
+                    event_log=events,
+                )
+                resolver_spy = MagicMock(
+                    wraps=configured_product_snapshot_authority_path
+                )
+                strict_session = StrictFakeAsyncSession()
+
+                with _selection_inference_spies(
+                    settings_obj=synthetic_settings,
+                    resolver_spy=resolver_spy,
+                ) as spies:
+                    with self.assertRaises(SyntheticAuthorityPathStrError) as ctx:
+                        await _selection_inference_for_missing_commodity(
+                            strict_session,
+                            price=50_000_000,
+                            settlement_type="tomorrow",
+                            low_date_hint=True,
+                            pack_hint=False,
+                        )
+
+                self.assertIs(ctx.exception, synthetic_exc)
+
+                expected_events = [
+                    "product_estimator_snapshot_mode",
+                    selected_prop,
+                    "path_value:bool",
+                    "path_value:str",
+                ]
+                self.assertEqual(events, expected_events)
+                self.assertEqual(
+                    events.count("product_estimator_snapshot_mode"), 1
+                )
+                self.assertEqual(events.count(selected_prop), 1)
+                self.assertEqual(events.count("path_value:bool"), 1)
+                self.assertEqual(events.count("path_value:str"), 1)
+
+                resolver_spy.assert_called_once_with(synthetic_settings)
+                self.assertEqual(resolver_spy.call_count, 1)
+                self.assertIs(resolver_spy.call_args[0][0], synthetic_settings)
+
+                self.assertNotIn(
+                    alternate_prop,
+                    synthetic_settings.access_log,
+                )
+                self.assertNotIn(
+                    "coin_intelligence_inference_auto_selection_enabled",
+                    synthetic_settings.access_log,
+                )
+                self.assertEqual(synthetic_settings.forbidden_accesses, [])
+
+                self._assert_suppression(spies, strict_session)
 
 
 if __name__ == "__main__":
