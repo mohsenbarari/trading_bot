@@ -5,7 +5,7 @@ Use gpt-6-astra/xhigh. Optimize redundant context and mechanical work, never qua
 review depth, acceptance gates or model effort. A successful commit is not Stage closure.
 
 Standing authorization (owner, 2026-09-09): permanent authorization, without per-transfer confirmation,
-to send bounded non-secret repository source excerpts,
+to send bounded non-secret repository source excerpts or complete nonsecret source files when needed,
 tests, project documentation, task JSON, proposals, reviews/findings and test evidence
 to Google Antigravity/Gemini for the proposal-only Worker/Reviewer workflow.
 Excluded: secrets and credentials, identity/authentication material, user/personal data,
@@ -13,8 +13,9 @@ production or operational data, deploy/production changes, DNS, Web Writer, fetc
 and unrelated remote-service mutation. This does not widen any other gate.
 
 1. Orient once. Read AGENTS.md, the MemoryCustodian startup files and current entrypoint
-   .agents/skills/two-site-refactor/SKILL.md; follow PROPOSAL_AUTOMATION.md, execution
-   order and the active Stage card/Assignment. Load only routed, task-relevant sources.
+   .agents/skills/two-site-refactor/SKILL.md; follow PROPOSAL_AUTOMATION.md and the active
+   Stage card/Assignment; narrow execution-order and Stage reading to relevant sections once.
+   Load only routed, task-relevant sources.
    Resolve the shared checkout with git rev-parse --path-format=absolute --git-common-dir:
    its parent owns .local/two-site-refactor/worktrees.yaml and assignments/, not this
    integration worktree's private .local. Validate the active entry before using it.
@@ -96,14 +97,19 @@ and unrelated remote-service mutation. This does not widen any other gate.
 5. Act as the final Codex reviewer, exact-byte applier, tester and sole Git committer.
    Do not launch a nested Codex reviewer; never author or repair implementation,
    test or project-document content yourself in this unattended flow.
-   Use python3 scripts/two_site_cycle_tools.py review --task <path> --worker <id>
-   --reviewer <id> --sha <sha> before application; read its exact proposal/review paths.
-   BINDINGS_VALID only replaces repetitive mechanical checking, not your full semantic
-   review. Read every proposed change and relevant original behavior, validate requirement
+   Use python3 scripts/two_site_cycle_packet.py packet --task <path> --worker <id>
+   --reviewer <id> --sha <sha> for binding checks plus complete semantic diff review once
+   (use --full only when full candidate context is needed; all changed code must be reviewed).
+   No repeated reads of unchanged full result/task snapshots or per-unit reimplementation of
+   existing helper checks. Read every proposed change and relevant original behavior, validate requirement
    coverage and dependency definitions. Send precise failures via the correction contract.
-   After static approval mechanically apply only exact accepted proposal bytes; rerun
-   the same helper with --applied BEFORE staging. BYTES_VALID is not test/semantic approval.
-   Run actual focused tests plus proportional regression, then inspect the complete diff.
+   For application get python3 scripts/two_site_cycle_packet.py patch --task <path> --worker <id>
+   --reviewer <id> --sha <sha> output and pass directly to apply_patch via tool orchestration
+   without printing all bytes into model context again; helper never applies or approves.
+   Rerun python3 scripts/two_site_cycle_tools.py review --task <path> --worker <id>
+   --reviewer <id> --sha <sha> --applied BEFORE staging. BYTES_VALID is not test/semantic approval.
+   Run actual focused tests plus proportional regression; use bounded status/wait while
+   tests run rather than broad source rediscovery, then inspect the complete diff.
    Never claim tests not run. On test failure, check the clean baseline once. Restore only
    the exact task bytes before correction. A proven unrelated pre-existing failure becomes
    a separate next unit, not unauthorized repair or a CONTINUE blocker after a valid commit.

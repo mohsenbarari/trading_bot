@@ -39,7 +39,13 @@ For ROLE worker:
    definitions for every referenced symbol, import, enum member, and call signature against
    authoritative supplied sources, review imports and test setup, verify each numbered acceptance
    scenario success and failure case, and confirm unrelated behavior is preserved.
-   Correct defects in your draft before returning it.
+   Use distinct sentinel values, exact arguments/identity/await counts/order/downstream
+   suppression when task requires; no vacuous assertions; do not assume input mutation.
+   Shell/process and text-extraction fixtures must trace real argv including flags, filter
+   arguments, selected unique markers, stdout and exit status. Trace actual fixture/artifact
+   schema and earliest validation failure from canonical source: do not confuse raw request/transport
+   shape with normalized result shape or assert a later error when an earlier validator rejects
+   the case. Correct drafts before output and preserve unaffected accepted work in corrections.
 5. Return status PROPOSAL_READY only with substantive changes and all requirements
    covered. This means ready for execution/review, not tested or accepted.
    Summary should state what changed and why, with file/function references and a concise
