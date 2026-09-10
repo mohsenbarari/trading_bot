@@ -1,6 +1,7 @@
 """Offline safety contracts for the background Codex supervisor."""
 from __future__ import annotations
 
+import inspect
 import json
 import os
 from pathlib import Path
@@ -54,7 +55,7 @@ class AutopilotContracts(unittest.TestCase):
         reviewer_dir.mkdir()
         task = {
             "task_id": "CHAIN-001",
-            "goal": "Change one exact file.",
+            "goal": f"Change one exact file for {self.assignment_scope().assignment_id}.",
             "context_files": ["change.py"],
             "allowed_files": ["change.py"],
             "requirements": ["Preserve the exact replacement"],
@@ -122,6 +123,15 @@ class AutopilotContracts(unittest.TestCase):
             expires_at="2099-01-01T00:00:00Z",
             sha256="a" * 64,
         )
+
+    # Temporary compatibility bridge destined for removal after evidence gate lands.
+    def call_gemini_chain(self, result, scope=None):
+        # Temporary compatibility bridge destined for removal after evidence gate lands.
+        if "assignment_scope" in inspect.signature(autopilot.validate_gemini_chain).parameters:
+            return autopilot.validate_gemini_chain(
+                self.root, "a" * 40, result, scope or self.assignment_scope(),
+            )
+        return autopilot.validate_gemini_chain(self.root, "a" * 40, result)
 
     def test_result_contract_is_exact_and_state_consistent(self):
         self.assertEqual(autopilot.validate_result(self.result()), self.result())
@@ -332,7 +342,12 @@ class AutopilotContracts(unittest.TestCase):
                 patch.object(autopilot, "validate_committed_proposal") as committed:
             checked = autopilot.validate_transition(self.root, before, self.result())
         self.assertTrue(checked["head_changed"])
-        chain.assert_called_once_with(self.root, "a" * 40, self.result())
+        if "assignment_scope" in inspect.signature(autopilot.validate_gemini_chain).parameters:
+            chain.assert_called_once_with(
+                self.root, "a" * 40, self.result(), before["assignment_scope"],
+            )
+        else:
+            chain.assert_called_once_with(self.root, "a" * 40, self.result())
         committed.assert_called_once_with(self.root, "a" * 40, "b" * 40, proposal)
         git.assert_called_once_with(
             self.root, "merge-base", "--is-ancestor", "a" * 40, "b" * 40,
@@ -358,14 +373,14 @@ class AutopilotContracts(unittest.TestCase):
     def test_gemini_chain_requires_exact_proposal_and_fresh_reviewer(self):
         result, worker_result, reviewer_dir = self.gemini_chain()
         self.assertEqual(
-            autopilot.validate_gemini_chain(self.root, "a" * 40, result),
+            self.call_gemini_chain(result),
             worker_result,
         )
         reviewer_status = json.loads((reviewer_dir / "status.json").read_text())
         reviewer_status["conversation_id"] = "worker-conversation"
         proposal_runner.write_json(reviewer_dir / "status.json", reviewer_status)
         with self.assertRaisesRegex(autopilot.AutopilotError, "independent fresh"):
-            autopilot.validate_gemini_chain(self.root, "a" * 40, result)
+            self.call_gemini_chain(result)
 
     def test_committed_files_must_equal_exact_gemini_proposal(self):
         (self.root / "change.py").write_text("OLD = True\n")
