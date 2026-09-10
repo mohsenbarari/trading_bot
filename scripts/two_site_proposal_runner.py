@@ -444,6 +444,11 @@ MODEL = RUNTIME_CONTRACT["model"]
 EFFORT = RUNTIME_CONTRACT["effort"]
 EXPECTED_CLI_VERSION = RUNTIME_CONTRACT["cli_version"]
 EXPECTED_CLI_SHA256 = RUNTIME_CONTRACT["cli_sha256"]
+ALLOWED_SHELL_SCRIPTS = frozenset({
+    "scripts/two_site_autopilot_tmux.sh",
+    "scripts/two_site_autopilot_monitor.sh",
+})
+TRUSTED_SHELL_SCRIPTS = ALLOWED_SHELL_SCRIPTS
 
 
 def relative_file(root: Path, name: str) -> Path:
@@ -453,7 +458,8 @@ def relative_file(root: Path, name: str) -> Path:
     path = PurePosixPath(name)
     if (path.is_absolute() or any(part in PROTECTED for part in path.parts)
             or any(part.startswith(".env") and not part.endswith(".example") for part in path.parts)
-            or path.suffix.lower() not in {".py", ".md", ".json", ".yaml", ".yml", ".ts", ".vue", ".css", ".example"}):
+            or (path.suffix.lower() not in {".py", ".md", ".json", ".yaml", ".yml", ".ts", ".vue", ".css", ".example"}
+                and name not in ALLOWED_SHELL_SCRIPTS)):
         raise ProposalError("file outside source/document scope")
     target = root / name
     if target.resolve() != target or not target.is_relative_to(root):
