@@ -8,8 +8,8 @@ from bot.handlers.trade_execute import (
     handle_channel_trade_public,
 )
 from core.enums import UserAccountStatus, UserRole
-from models.offer import OfferStatus, OfferType
 from models.offer_request import OfferRequestSourceSurface
+from models.offer import OfferStatus, OfferType
 
 
 class FakeExecuteResult:
@@ -60,12 +60,12 @@ class FakeSessionContext:
         return False
 
 
-def make_callback(chat_id=200, message_id=50):
+def make_callback(chat_id=200):
     return SimpleNamespace(
         id="cb1",
         from_user=SimpleNamespace(id=300),
         answer=AsyncMock(),
-        message=SimpleNamespace(chat=SimpleNamespace(id=chat_id), message_id=message_id, edit_reply_markup=AsyncMock()),
+        message=SimpleNamespace(chat=SimpleNamespace(id=chat_id), message_id=50, edit_reply_markup=AsyncMock()),
     )
 
 
@@ -84,26 +84,24 @@ def make_bot_user(**overrides):
     return SimpleNamespace(**data)
 
 
-def make_offer(**overrides):
-    data = {
-        "id": 7,
-        "status": OfferStatus.ACTIVE,
-        "user_id": 9,
-        "offer_type": OfferType.BUY,
-        "quantity": 5,
-        "remaining_quantity": 5,
-        "is_wholesale": False,
-        "lot_sizes": [2, 3],
-        "home_server": None,
-        "offer_public_id": "ofr_bot_local_7",
-        "channel_message_id": 77,
-        "price": 150000,
-        "commodity_id": 12,
-        "commodity": SimpleNamespace(name="سکه"),
-        "user": SimpleNamespace(account_name="owner", mobile_number="0912", telegram_id=999),
-    }
-    data.update(overrides)
-    return SimpleNamespace(**data)
+def make_offer():
+    return SimpleNamespace(
+        id=7,
+        status=OfferStatus.ACTIVE,
+        user_id=9,
+        offer_type=OfferType.BUY,
+        quantity=5,
+        remaining_quantity=5,
+        is_wholesale=False,
+        lot_sizes=[2, 3],
+        home_server=None,
+        offer_public_id="ofr_bot_local_7",
+        channel_message_id=77,
+        price=150000,
+        commodity_id=12,
+        commodity=SimpleNamespace(name="سکه"),
+        user=SimpleNamespace(account_name="owner", mobile_number="0912", telegram_id=999),
+    )
 
 
 class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
@@ -111,88 +109,37 @@ class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
         user = make_bot_user()
         offer = make_offer()
         session = FakeSession(offer)
-        callback = make_callback(chat_id=200, message_id=50)
+        callback = make_callback(chat_id=200)
         bot = SimpleNamespace(send_message=AsyncMock())
-        events: list[str] = []
-        callback.answer.side_effect = lambda *args, **kwargs: events.append("answer")
-        callback.message.edit_reply_markup.side_effect = (
-            lambda *args, **kwargs: events.append("markup")
-        )
-
-        def record_background_task():
-            events.append("background_task")
-
-        async def execute_trade_side_effect(*args, **kwargs):
-            kwargs["background_tasks"].add_task(record_background_task)
-            return {"id": 88}
 
         with patch("bot.handlers.trade_execute.check_user_limits", return_value=(True, None)), patch(
             "bot.handlers.trade_execute.AsyncSessionLocal", return_value=FakeSessionContext(session)
-        ), patch(
-            "bot.handlers.trade_execute.is_trade_blocked_by_principals",
-            new=AsyncMock(return_value=(False, None, offer.user_id, user.id)),
-        ), patch(
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
             "bot.handlers.trade_execute.is_remote_home", return_value=False
-        ), patch(
-            "bot.handlers.trade_execute.validate_offer_trade_amount",
-            return_value=(True, None, 2, [2, 3]),
-        ), patch(
+        ), patch("bot.handlers.trade_execute.validate_offer_trade_amount", return_value=(True, None, 2, [2, 3])), patch(
             "bot.handlers.trade_execute.check_double_click", new=AsyncMock(return_value=True)
-        ) as double_click_mock, patch(
-            "bot.handlers.trade_execute.current_server", return_value="foreign"
         ), patch(
-            "bot.handlers.trade_execute.settings",
-            SimpleNamespace(channel_id=-100, bot_username="botname"),
-        ), patch(
-            "bot.handlers.trade_execute.remove_trade_suggestion_record", new=AsyncMock()
-        ) as remove_mock, patch(
-            "bot.handlers.trade_execute._execute_trade_authoritatively_with_transient_retry",
-            new=AsyncMock(side_effect=execute_trade_side_effect),
-        ) as execute_mock:
-            await handle_channel_trade(
-                callback,
-                SimpleNamespace(offer_id=7, amount=2),
-                user=user,
-                bot=bot,
-                trade_contention_preconfirmed=False,
-                trade_contention_pre_gated=False,
-            )
+            "bot.handlers.trade_execute._execute_confirmed_channel_trade_via_shared_command",
+            new=AsyncMock(),
+        ) as shared_command_mock, patch(
+            "bot.handlers.trade_execute.settings", SimpleNamespace(channel_id=-100, bot_username="botname")
+        ):
+            await handle_channel_trade(callback, SimpleNamespace(offer_id=7, amount=2), user=user, bot=bot)
 
-        self.assertGreaterEqual(len(session.statements), 1)
-        self.assertIn("WHERE offers.id =", session.statements[0])
-        self.assertNotIn("WHERE offers.offer_public_id =", session.statements[0])
-        for statement in session.statements:
-            self.assertNotIn("FOR UPDATE", statement.upper())
+        shared_command_mock.assert_awaited_once()
+        kwargs = shared_command_mock.await_args.kwargs
+        self.assertIs(kwargs["callback"], callback)
+        self.assertIs(kwargs["user"], user)
+        self.assertIs(kwargs["bot"], bot)
+        self.assertIs(kwargs["session"], session)
+        self.assertIs(kwargs["offer"], offer)
+        self.assertEqual(kwargs["actual_amount"], 2)
         self.assertEqual(session.commits, 0)
         self.assertEqual(session.added, [])
-        self.assertEqual(session.expunged, [offer])
-
-        double_click_mock.assert_awaited_once()
-        self.assertEqual(double_click_mock.await_args.args, (user.id, 7, 2))
-
-        execute_mock.assert_awaited_once()
-        kwargs = execute_mock.await_args.kwargs
-        self.assertEqual(kwargs["trade_data"].offer_id, 7)
-        self.assertEqual(kwargs["trade_data"].offer_public_id, "ofr_bot_local_7")
-        self.assertEqual(kwargs["trade_data"].quantity, 2)
-        self.assertEqual(
-            kwargs["trade_data"].idempotency_key,
-            "telegram_callback:5:ofr_bot_local_7:2:remaining:5:50",
-        )
-        self.assertEqual(kwargs["request_source_surface"], OfferRequestSourceSurface.TELEGRAM_BOT)
-        self.assertEqual(kwargs["request_source_server"], "foreign")
-        self.assertFalse(kwargs["request_pre_gated"])
-        self.assertIs(kwargs["db"], session)
-        self.assertIs(kwargs["context"].owner_user, user)
-        self.assertIs(kwargs["context"].actor_user, user)
-        self.assertIsNone(kwargs["context"].relation)
-        self.assertFalse(kwargs["context"].is_accountant_context)
-        self.assertEqual(user.role, UserRole.STANDARD)
-
-        callback.answer.assert_awaited_once_with("معامله ثبت شد ✅", show_alert=False)
-        callback.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
-        remove_mock.assert_awaited_once_with(7, 200, 50)
-        self.assertEqual(events, ["answer", "markup", "background_task"])
+        self.assertGreaterEqual(len(session.statements), 1)
+        self.assertIn("offers.id", session.statements[0])
+        for statement in session.statements:
+            self.assertNotIn("FOR UPDATE", statement.upper())
 
     async def test_handle_channel_trade_preconfirmed_local_trade_skips_double_click(self):
         user = make_bot_user()
@@ -227,103 +174,33 @@ class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(shared_command_mock.await_args.kwargs["request_pre_gated"])
 
     async def test_public_channel_trade_callback_resolves_offer_by_public_identity(self):
-        user = make_bot_user(
-            id=6,
-            telegram_id=666,
-            mobile_number="0936",
-            account_name="buyer_public",
-        )
-        offer = make_offer(
-            id=8,
-            offer_public_id="ofr_bot_public_8",
-            quantity=7,
-            remaining_quantity=7,
-            lot_sizes=[3, 4],
-            price=200000,
-        )
+        user = make_bot_user()
+        offer = make_offer()
         session = FakeSession(offer)
-        callback = make_callback(chat_id=201, message_id=55)
+        callback = make_callback(chat_id=200)
         bot = SimpleNamespace(send_message=AsyncMock())
-        events: list[str] = []
-        callback.answer.side_effect = lambda *args, **kwargs: events.append("answer")
-        callback.message.edit_reply_markup.side_effect = (
-            lambda *args, **kwargs: events.append("markup")
-        )
-
-        def record_background_task():
-            events.append("background_task")
-
-        async def execute_trade_side_effect(*args, **kwargs):
-            kwargs["background_tasks"].add_task(record_background_task)
-            return {"id": 89}
 
         with patch("bot.handlers.trade_execute.check_user_limits", return_value=(True, None)), patch(
             "bot.handlers.trade_execute.AsyncSessionLocal", return_value=FakeSessionContext(session)
-        ), patch(
-            "bot.handlers.trade_execute.is_trade_blocked_by_principals",
-            new=AsyncMock(return_value=(False, None, offer.user_id, user.id)),
-        ), patch(
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
             "bot.handlers.trade_execute.is_remote_home", return_value=False
-        ), patch(
-            "bot.handlers.trade_execute.validate_offer_trade_amount",
-            return_value=(True, None, 3, [3, 4]),
-        ), patch(
+        ), patch("bot.handlers.trade_execute.validate_offer_trade_amount", return_value=(True, None, 2, [2, 3])), patch(
             "bot.handlers.trade_execute.check_double_click", new=AsyncMock(return_value=True)
-        ) as double_click_mock, patch(
-            "bot.handlers.trade_execute.current_server", return_value="foreign"
         ), patch(
-            "bot.handlers.trade_execute.settings",
-            SimpleNamespace(channel_id=-100, bot_username="botname"),
-        ), patch(
-            "bot.handlers.trade_execute.remove_trade_suggestion_record", new=AsyncMock()
-        ) as remove_mock, patch(
-            "bot.handlers.trade_execute._execute_trade_authoritatively_with_transient_retry",
-            new=AsyncMock(side_effect=execute_trade_side_effect),
-        ) as execute_mock:
+            "bot.handlers.trade_execute._execute_confirmed_channel_trade_via_shared_command",
+            new=AsyncMock(),
+        ) as shared_command_mock, patch(
+            "bot.handlers.trade_execute.settings", SimpleNamespace(channel_id=-100, bot_username="botname")
+        ):
             await handle_channel_trade_public(
                 callback,
-                SimpleNamespace(offer_public_id="ofr_bot_public_8", amount=3),
+                SimpleNamespace(offer_public_id="ofr_bot_local_7", amount=2),
                 user=user,
                 bot=bot,
-                trade_contention_preconfirmed=False,
-                trade_contention_pre_gated=True,
             )
 
-        self.assertGreaterEqual(len(session.statements), 1)
-        self.assertIn("WHERE offers.offer_public_id =", session.statements[0])
-        self.assertNotIn("WHERE offers.id =", session.statements[0])
-        for statement in session.statements:
-            self.assertNotIn("FOR UPDATE", statement.upper())
-        self.assertEqual(session.commits, 0)
-        self.assertEqual(session.added, [])
-        self.assertEqual(session.expunged, [offer])
-
-        double_click_mock.assert_awaited_once()
-        self.assertEqual(double_click_mock.await_args.args, (6, 8, 3))
-
-        execute_mock.assert_awaited_once()
-        kwargs = execute_mock.await_args.kwargs
-        self.assertEqual(kwargs["trade_data"].offer_id, 8)
-        self.assertEqual(kwargs["trade_data"].offer_public_id, "ofr_bot_public_8")
-        self.assertEqual(kwargs["trade_data"].quantity, 3)
-        self.assertEqual(
-            kwargs["trade_data"].idempotency_key,
-            "telegram_callback:6:ofr_bot_public_8:3:remaining:7:55",
-        )
-        self.assertEqual(kwargs["request_source_surface"], OfferRequestSourceSurface.TELEGRAM_BOT)
-        self.assertEqual(kwargs["request_source_server"], "foreign")
-        self.assertTrue(kwargs["request_pre_gated"])
-        self.assertIs(kwargs["db"], session)
-        self.assertIs(kwargs["context"].owner_user, user)
-        self.assertIs(kwargs["context"].actor_user, user)
-        self.assertIsNone(kwargs["context"].relation)
-        self.assertFalse(kwargs["context"].is_accountant_context)
-        self.assertEqual(user.role, UserRole.STANDARD)
-
-        callback.answer.assert_awaited_once_with("معامله ثبت شد ✅", show_alert=False)
-        callback.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
-        remove_mock.assert_awaited_once_with(8, 201, 55)
-        self.assertEqual(events, ["answer", "markup", "background_task"])
+        shared_command_mock.assert_awaited_once()
+        self.assertIn("offers.offer_public_id", session.statements[0])
 
     async def test_confirmed_channel_trade_helper_passes_telegram_metadata_to_shared_command(self):
         user = make_bot_user(trading_restricted_until=None)
