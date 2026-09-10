@@ -113,6 +113,16 @@ class AutopilotContracts(unittest.TestCase):
         )
         return result, worker_result, reviewer_dir
 
+    def assignment_scope(self):
+        return autopilot.AssignmentScope(
+            assignment_id="WA-TEST-SCOPE-001",
+            stage_id="P1-TEST",
+            allowed_paths=("change.py",),
+            forbidden_paths=("blocked/**",),
+            expires_at="2099-01-01T00:00:00Z",
+            sha256="a" * 64,
+        )
+
     def test_result_contract_is_exact_and_state_consistent(self):
         self.assertEqual(autopilot.validate_result(self.result()), self.result())
         blocked = self.result(
@@ -307,11 +317,13 @@ class AutopilotContracts(unittest.TestCase):
             "head": "a" * 40,
             "protected_refs": {"main": "1" * 40},
             "control_blobs": {"runner": "2" * 40},
+            "assignment_scope": self.assignment_scope(),
         }
         after = {
             "head": "b" * 40,
             "protected_refs": before["protected_refs"],
             "control_blobs": before["control_blobs"],
+            "assignment_scope": before["assignment_scope"],
         }
         proposal = {"changes": []}
         with patch.object(autopilot, "validate_repository", return_value=after), \
@@ -771,7 +783,11 @@ class AutopilotContracts(unittest.TestCase):
                 autopilot.validate_repository(self.root)
 
     def test_prompt_for_cycle_carries_recovery_context(self):
-        before = {"head": "a" * 40, "protected_refs": {}}
+        before = {
+            "head": "a" * 40,
+            "protected_refs": {},
+            "assignment_scope": self.assignment_scope(),
+        }
         recovery = {
             "attempt": 1,
             "prior_unit_rejected": True,
