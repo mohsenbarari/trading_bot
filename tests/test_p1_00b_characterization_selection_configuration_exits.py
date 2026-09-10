@@ -4,10 +4,10 @@ Seed: API-OFFER-POST-OFFERS-PARSE-OFFER-TEXT-L3184
 Stage card: P1-00b
 Assignment ID: WA-P1-00B-FREEZE-20260904-001
 
-Characterize the two helper-level early configuration exits of the real
-api.routers.offers._selection_inference_for_missing_commodity under P1-00b.
-This evidence is strictly limited to helper-level early exits, not handler/seed
-or Stage closure.
+Characterize helper-level early configuration exits and real authority-resolver
+failure paths of the real api.routers.offers._selection_inference_for_missing_commodity
+under P1-00b. This evidence is strictly limited to helper-level early exits and
+resolver failures, not handler/seed or Stage closure.
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import api.routers.offers as offers_module
 from api.routers.offers import _selection_inference_for_missing_commodity
 from core.market_intelligence.product_snapshot_reader import (
+    ProductSnapshotUnavailable,
     configured_product_snapshot_authority_path,
 )
 
@@ -46,6 +47,83 @@ EXPECTED_UNCONFIGURED_PAYLOAD: dict[str, Any] = {
 
 class SyntheticResolverError(RuntimeError):
     """Synthetic exception representing authority path resolution failure."""
+
+
+class SyntheticModeStringConversionError(RuntimeError):
+    """Synthetic ordinary exception sentinel for mode string conversion failure."""
+
+
+class SyntheticAuthorityPathPropertyError(RuntimeError):
+    """Synthetic ordinary exception sentinel for authority path property failure."""
+
+
+class FailingStringMode:
+    """Synthetic truthy mode value whose __str__ raises an ordinary exception sentinel."""
+
+    def __init__(self, exc: Exception, event_log: list[str]) -> None:
+        self._exc = exc
+        self._event_log = event_log
+
+    def __bool__(self) -> bool:
+        self._event_log.append("mode_value:bool")
+        return True
+
+    def __str__(self) -> str:
+        self._event_log.append("mode_value:str")
+        raise self._exc
+
+
+class InstrumentedSettings:
+    """Instrumented synthetic settings tracking ordered property access and forbidden reads."""
+
+    def __init__(
+        self,
+        *,
+        product_estimator_snapshot_mode: Any = "LEGACY",
+        coin_intelligence_inference_snapshot_path: Any = "",
+        product_estimator_private_primary_snapshot_path: Any = "",
+        coin_intelligence_inference_auto_selection_enabled: Any = False,
+        event_log: list[str] | None = None,
+    ) -> None:
+        self._mode = product_estimator_snapshot_mode
+        self._legacy_path = coin_intelligence_inference_snapshot_path
+        self._private_primary_path = product_estimator_private_primary_snapshot_path
+        self._auto_selection = coin_intelligence_inference_auto_selection_enabled
+        self.access_log: list[str] = event_log if event_log is not None else []
+        self.forbidden_accesses: list[str] = []
+
+    @property
+    def product_estimator_snapshot_mode(self) -> Any:
+        self.access_log.append("product_estimator_snapshot_mode")
+        if isinstance(self._mode, BaseException):
+            raise self._mode
+        return self._mode
+
+    @property
+    def coin_intelligence_inference_snapshot_path(self) -> Any:
+        self.access_log.append("coin_intelligence_inference_snapshot_path")
+        if isinstance(self._legacy_path, BaseException):
+            raise self._legacy_path
+        return self._legacy_path
+
+    @property
+    def product_estimator_private_primary_snapshot_path(self) -> Any:
+        self.access_log.append("product_estimator_private_primary_snapshot_path")
+        if isinstance(self._private_primary_path, BaseException):
+            raise self._private_primary_path
+        return self._private_primary_path
+
+    @property
+    def coin_intelligence_inference_auto_selection_enabled(self) -> Any:
+        self.access_log.append("coin_intelligence_inference_auto_selection_enabled")
+        if isinstance(self._auto_selection, BaseException):
+            raise self._auto_selection
+        return self._auto_selection
+
+    def __getattr__(self, name: str) -> Any:
+        self.forbidden_accesses.append(name)
+        self.access_log.append(f"forbidden:{name}")
+        raise AttributeError(f"Unexpected settings attribute access: {name!r}")
 
 
 class SyntheticSettings:
@@ -364,6 +442,198 @@ class SelectionInferenceConfigurationExitsCharacterizationTests(
         resolver_spy.assert_called_once_with(synthetic_settings)
         self.assertEqual(resolver_spy.call_count, 1)
         self.assertIs(resolver_spy.call_args[0][0], synthetic_settings)
+
+        self._assert_suppression(spies, strict_session)
+
+    async def test_real_resolver_failure_invalid_snapshot_mode(self) -> None:
+        """Invalid nonempty snapshot mode raises ProductSnapshotUnavailable via real normalization."""
+        synthetic_settings = InstrumentedSettings(
+            product_estimator_snapshot_mode="   invalid_mode   ",
+            coin_intelligence_inference_snapshot_path="",
+            product_estimator_private_primary_snapshot_path="",
+        )
+        resolver_spy = MagicMock(
+            wraps=configured_product_snapshot_authority_path
+        )
+        strict_session = StrictFakeAsyncSession()
+
+        with _selection_inference_spies(
+            settings_obj=synthetic_settings,
+            resolver_spy=resolver_spy,
+        ) as spies:
+            with self.assertRaises(ProductSnapshotUnavailable) as ctx:
+                await _selection_inference_for_missing_commodity(
+                    strict_session,
+                    price=50_000_000,
+                    settlement_type="cash",
+                    low_date_hint=False,
+                    pack_hint=False,
+                )
+
+        self.assertIs(type(ctx.exception), ProductSnapshotUnavailable)
+        self.assertIsInstance(ctx.exception, ProductSnapshotUnavailable)
+        self.assertEqual(ctx.exception.reason_code, "PRODUCT_SNAPSHOT_MODE_INVALID")
+        self.assertEqual(str(ctx.exception), "PRODUCT_SNAPSHOT_MODE_INVALID")
+        self.assertEqual(ctx.exception.args, ("PRODUCT_SNAPSHOT_MODE_INVALID",))
+
+        resolver_spy.assert_called_once_with(synthetic_settings)
+        self.assertEqual(resolver_spy.call_count, 1)
+        self.assertIs(resolver_spy.call_args[0][0], synthetic_settings)
+
+        self.assertEqual(
+            synthetic_settings.access_log,
+            ["product_estimator_snapshot_mode"],
+        )
+        self.assertNotIn(
+            "product_estimator_private_primary_snapshot_path",
+            synthetic_settings.access_log,
+        )
+        self.assertNotIn(
+            "coin_intelligence_inference_snapshot_path",
+            synthetic_settings.access_log,
+        )
+        self.assertNotIn(
+            "coin_intelligence_inference_auto_selection_enabled",
+            synthetic_settings.access_log,
+        )
+        self.assertEqual(synthetic_settings.forbidden_accesses, [])
+
+        self._assert_suppression(spies, strict_session)
+
+    async def test_real_resolver_failure_mode_string_conversion_error(self) -> None:
+        """Mode value __str__ failure escapes with exact ordered getter and __bool__/__str__ traces."""
+        synthetic_exc = SyntheticModeStringConversionError(
+            "synthetic-mode-string-conversion-sentinel"
+        )
+        events: list[str] = []
+        failing_mode = FailingStringMode(synthetic_exc, events)
+        synthetic_settings = InstrumentedSettings(
+            product_estimator_snapshot_mode=failing_mode,
+            coin_intelligence_inference_snapshot_path="",
+            product_estimator_private_primary_snapshot_path="",
+            event_log=events,
+        )
+        resolver_spy = MagicMock(
+            wraps=configured_product_snapshot_authority_path
+        )
+        strict_session = StrictFakeAsyncSession()
+
+        with _selection_inference_spies(
+            settings_obj=synthetic_settings,
+            resolver_spy=resolver_spy,
+        ) as spies:
+            with self.assertRaises(SyntheticModeStringConversionError) as ctx:
+                await _selection_inference_for_missing_commodity(
+                    strict_session,
+                    price=50_000_000,
+                    settlement_type="tomorrow",
+                    low_date_hint=True,
+                    pack_hint=False,
+                )
+
+        self.assertIs(ctx.exception, synthetic_exc)
+
+        self.assertEqual(
+            events,
+            [
+                "product_estimator_snapshot_mode",
+                "mode_value:bool",
+                "mode_value:str",
+            ],
+        )
+        self.assertEqual(
+            events.count("product_estimator_snapshot_mode"), 1
+        )
+        self.assertEqual(events.count("mode_value:bool"), 1)
+        self.assertEqual(events.count("mode_value:str"), 1)
+
+        str_idx = events.index("mode_value:str")
+        self.assertEqual(events[str_idx - 1], "mode_value:bool")
+        self.assertEqual(events[str_idx - 2], "product_estimator_snapshot_mode")
+
+        resolver_spy.assert_called_once_with(synthetic_settings)
+        self.assertEqual(resolver_spy.call_count, 1)
+        self.assertIs(resolver_spy.call_args[0][0], synthetic_settings)
+
+        self.assertNotIn(
+            "product_estimator_private_primary_snapshot_path",
+            synthetic_settings.access_log,
+        )
+        self.assertNotIn(
+            "coin_intelligence_inference_snapshot_path",
+            synthetic_settings.access_log,
+        )
+        self.assertNotIn(
+            "coin_intelligence_inference_auto_selection_enabled",
+            synthetic_settings.access_log,
+        )
+        self.assertEqual(synthetic_settings.forbidden_accesses, [])
+
+        self._assert_suppression(spies, strict_session)
+
+    async def test_real_resolver_failure_selected_authority_path_property_error(
+        self,
+    ) -> None:
+        """Selected authority path property error escapes with exact ordered getter trace."""
+        synthetic_exc = SyntheticAuthorityPathPropertyError(
+            "synthetic-authority-path-property-sentinel"
+        )
+        synthetic_settings = InstrumentedSettings(
+            product_estimator_snapshot_mode="   private_primary   ",
+            product_estimator_private_primary_snapshot_path=synthetic_exc,
+            coin_intelligence_inference_snapshot_path="/synthetic/fallback.json",
+        )
+        resolver_spy = MagicMock(
+            wraps=configured_product_snapshot_authority_path
+        )
+        strict_session = StrictFakeAsyncSession()
+
+        with _selection_inference_spies(
+            settings_obj=synthetic_settings,
+            resolver_spy=resolver_spy,
+        ) as spies:
+            with self.assertRaises(SyntheticAuthorityPathPropertyError) as ctx:
+                await _selection_inference_for_missing_commodity(
+                    strict_session,
+                    price=75_000_000,
+                    settlement_type="cash",
+                    low_date_hint=False,
+                    pack_hint=True,
+                )
+
+        self.assertIs(ctx.exception, synthetic_exc)
+
+        self.assertEqual(
+            synthetic_settings.access_log,
+            [
+                "product_estimator_snapshot_mode",
+                "product_estimator_private_primary_snapshot_path",
+            ],
+        )
+        self.assertEqual(
+            synthetic_settings.access_log.count("product_estimator_snapshot_mode"),
+            1,
+        )
+        self.assertEqual(
+            synthetic_settings.access_log.count(
+                "product_estimator_private_primary_snapshot_path"
+            ),
+            1,
+        )
+
+        resolver_spy.assert_called_once_with(synthetic_settings)
+        self.assertEqual(resolver_spy.call_count, 1)
+        self.assertIs(resolver_spy.call_args[0][0], synthetic_settings)
+
+        self.assertNotIn(
+            "coin_intelligence_inference_snapshot_path",
+            synthetic_settings.access_log,
+        )
+        self.assertNotIn(
+            "coin_intelligence_inference_auto_selection_enabled",
+            synthetic_settings.access_log,
+        )
+        self.assertEqual(synthetic_settings.forbidden_accesses, [])
 
         self._assert_suppression(spies, strict_session)
 
