@@ -413,6 +413,27 @@ class AutopilotContracts(unittest.TestCase):
         ).strip()
         proposal = {"changes": [{"path": "change.py", "content": "NEW = True\n"}]}
         autopilot.validate_committed_proposal(self.root, before, after, proposal)
+        autopilot.validate_scoped_committed_proposal(
+            self.root, before, after, proposal, self.assignment_scope(),
+        )
+        scope = self.assignment_scope()
+        path_scope = autopilot.AssignmentScope(
+            assignment_id=scope.assignment_id,
+            stage_id=scope.stage_id,
+            allowed_paths=("other.py",),
+            forbidden_paths=scope.forbidden_paths,
+            expires_at=scope.expires_at,
+            sha256=scope.sha256,
+        )
+        with self.assertRaisesRegex(autopilot.AutopilotError, "assignment scope"):
+            autopilot.validate_scoped_committed_proposal(
+                self.root, before, after, proposal, path_scope,
+            )
+        out_of_scope_proposal = {"changes": [{"path": "blocked/path.py", "content": "arbitrary\n"}]}
+        with self.assertRaisesRegex(autopilot.AutopilotError, "assignment scope"):
+            autopilot.validate_scoped_committed_proposal(
+                self.root, before, after, out_of_scope_proposal, self.assignment_scope(),
+            )
         proposal["changes"][0]["content"] = "CODEX_EDIT = True\n"
         with self.assertRaisesRegex(autopilot.AutopilotError, "bytes differ"):
             autopilot.validate_committed_proposal(self.root, before, after, proposal)
