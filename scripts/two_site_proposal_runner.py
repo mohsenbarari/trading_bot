@@ -29,6 +29,19 @@ try:
 except ImportError:
     from two_site_cli_artifact import prepare_disposable_cli
 
+try:
+    from scripts.two_site_assignment_scope import (
+        AssignmentScopeError,
+        load_expected_assignment_scope,
+        validate_task_scope,
+    )
+except ImportError:
+    from two_site_assignment_scope import (
+        AssignmentScopeError,
+        load_expected_assignment_scope,
+        validate_task_scope,
+    )
+
 ROOT = Path(__file__).resolve().parents[1]
 MAX_CONTEXT = 160_000
 MAX_OUTPUT = 2_000_000
@@ -508,6 +521,31 @@ def proposal_cli_context(
         release_proposal_lock(lock_descriptor)
 
 
+def validate_assignment_scope(root: Path, task: dict) -> None:
+    scope_vars = (
+        "TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED",
+        "TWO_SITE_ASSIGNMENT_ID",
+        "TWO_SITE_ASSIGNMENT_SHA256",
+    )
+    present = [var for var in scope_vars if var in os.environ]
+    if not present:
+        return
+    if len(present) != len(scope_vars):
+        raise ProposalError("assignment scope validation failed")
+    required = os.environ["TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED"]
+    assignment_id = os.environ["TWO_SITE_ASSIGNMENT_ID"]
+    assignment_sha256 = os.environ["TWO_SITE_ASSIGNMENT_SHA256"]
+    if required != "1" or not assignment_id.strip() or not assignment_sha256.strip():
+        raise ProposalError("assignment scope validation failed")
+    try:
+        scope = load_expected_assignment_scope(root, assignment_id, assignment_sha256)
+        validate_task_scope(scope, task)
+    except AssignmentScopeError as exc:
+        raise ProposalError("assignment scope validation failed") from exc
+    except Exception as exc:
+        raise ProposalError("assignment scope validation failed") from exc
+
+
 def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
     raw = bounded_file_bytes(root, task_path, MAX_CONTEXT, "task")
     task = unique_json(raw.decode())
@@ -527,6 +565,7 @@ def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
             raise ProposalError("task lists must contain unique bounded nonempty strings")
     if SECRET.search(json.dumps(task, ensure_ascii=False)):
         raise ProposalError("credential-like content excluded from model input")
+    validate_assignment_scope(root, task)
     if "\nCANONICAL_SOURCE_EXCERPTS_JSON:\n" in task["goal"]:
         try:
             from scripts.two_site_cycle_tools import validate_excerpts
