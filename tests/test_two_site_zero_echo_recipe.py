@@ -266,6 +266,8 @@ def test_codex_command_enables_code_mode_and_preserves_arguments(tmp_path):
     model_idx = cmd.index("--model")
     assert cmd[model_idx + 1] == ap.MODEL
     assert f'model_reasoning_effort="{ap.REASONING}"' in cmd
+    assert ap.MODEL == "gpt-6-astra"
+    assert ap.REASONING == "xhigh"
 
     assert "--approve-for-me" in cmd
     assert "--ephemeral" in cmd

@@ -381,7 +381,7 @@ class AutopilotContracts(unittest.TestCase):
         command = autopilot.codex_command(
             Path("/usr/bin/codex"), self.root, self.root / "run", "prompt",
         )
-        self.assertIn("gpt-6-astra", command)
+        self.assertIn(autopilot.MODEL, command)
         self.assertIn('model_reasoning_effort="xhigh"', command)
         self.assertIn("--approve-for-me", command)
         self.assertNotIn("--sandbox", command)
@@ -557,7 +557,7 @@ class AutopilotContracts(unittest.TestCase):
             identity = autopilot.codex_identity(cli, self.root)
         self.assertEqual(identity["version"], autopilot.EXPECTED_CODEX_CLI_VERSION)
         self.assertEqual(identity["sha256"], digest)
-        self.assertEqual(identity["model"], "gpt-6-astra")
+        self.assertEqual(identity["model"], autopilot.MODEL)
         self.assertEqual(identity["reasoning"], "xhigh")
 
     def test_supervisor_lock_is_exclusive_and_rejects_hardlinks(self):
