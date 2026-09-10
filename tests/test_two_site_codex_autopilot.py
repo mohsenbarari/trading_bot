@@ -631,6 +631,36 @@ class AutopilotContracts(unittest.TestCase):
             path = self.root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text((proposal_runner.ROOT / relative).read_text())
+        (self.root / "docs/refactor/two-server").mkdir(parents=True, exist_ok=True)
+        (self.root / "docs/refactor/two-server/execution-order.yaml").write_text(
+            "stages:\n"
+            "  P1-TEST:\n"
+            "    state: IN_PROGRESS\n"
+        )
+        (self.root / ".local/two-site-refactor/assignments").mkdir(parents=True, exist_ok=True)
+        (self.root / ".local/two-site-refactor/worktrees.yaml").write_text(
+            "integration:\n"
+            f"  path: {self.root}\n"
+            f"  branch: {autopilot.BRANCH}\n"
+            "  active_assignment_id: WA-TEST-SCOPE-001\n"
+        )
+        (self.root / ".local/two-site-refactor/assignments/WA-TEST-SCOPE-001.md").write_text(
+            "# WA-TEST-SCOPE-001\n\n"
+            "```yaml\n"
+            "id: WA-TEST-SCOPE-001\n"
+            "assignment_id: WA-TEST-SCOPE-001\n"
+            "status: READY\n"
+            "role: WORKER\n"
+            "stage_id: P1-TEST\n"
+            f"integration_branch: {autopilot.BRANCH}\n"
+            "external_access: NONE\n"
+            "expires_at: '2099-01-01T00:00:00Z'\n"
+            "allowed_paths:\n"
+            "  - tests/test_two_site_codex_autopilot.py\n"
+            "forbidden_paths:\n"
+            "  - scripts/two_site_assignment_scope.py\n"
+            "```\n"
+        )
         subprocess.check_call(["git", "init", "-q"], cwd=self.root)
         subprocess.check_call(["git", "config", "user.email", "test@example.invalid"], cwd=self.root)
         subprocess.check_call(["git", "config", "user.name", "Test"], cwd=self.root)
@@ -642,6 +672,24 @@ class AutopilotContracts(unittest.TestCase):
         self.assertEqual(set(state["control_blobs"]), {
             path.as_posix() for path in autopilot.CONTROL_PATHS
         })
+        if "assignment_scope" in state:
+            scope = state["assignment_scope"]
+            self.assertEqual(
+                scope.assignment_id if hasattr(scope, "assignment_id") else scope["assignment_id"],
+                "WA-TEST-SCOPE-001",
+            )
+            self.assertEqual(
+                scope.stage_id if hasattr(scope, "stage_id") else scope["stage_id"],
+                "P1-TEST",
+            )
+            self.assertEqual(
+                tuple(scope.allowed_paths if hasattr(scope, "allowed_paths") else scope["allowed_paths"]),
+                ("tests/test_two_site_codex_autopilot.py",),
+            )
+            self.assertEqual(
+                tuple(scope.forbidden_paths if hasattr(scope, "forbidden_paths") else scope["forbidden_paths"]),
+                ("scripts/two_site_assignment_scope.py",),
+            )
         (self.root / "untracked.txt").write_text("dirty\n")
         with self.assertRaisesRegex(autopilot.AutopilotError, "not clean"):
             autopilot.validate_repository(self.root)
