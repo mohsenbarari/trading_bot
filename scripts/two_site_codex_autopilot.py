@@ -222,6 +222,19 @@ def validate_repository(root: Path, require_clean: bool = True) -> dict[str, obj
     }
 
 
+def assignment_scope_context(scope: object) -> dict[str, object]:
+    if not isinstance(scope, AssignmentScope):
+        raise AutopilotError("invalid or missing assignment scope")
+    return {
+        "assignment_id": scope.assignment_id,
+        "stage_id": scope.stage_id,
+        "sha256": scope.sha256,
+        "expires_at": scope.expires_at,
+        "allowed_paths": list(scope.allowed_paths),
+        "forbidden_paths": list(scope.forbidden_paths),
+    }
+
+
 def codex_runtime_identity(codex: Path) -> dict[str, str]:
     """Validate the complete matching runtime, not merely the main executable."""
     identity = {}
@@ -598,6 +611,9 @@ def prompt_for_cycle(
     recovery: dict[str, object] | None = None,
     continuation: dict | None = None,
 ) -> str:
+    if "assignment_scope" not in before:
+        raise AutopilotError("missing assignment scope in repository state")
+    scope_data = assignment_scope_context(before["assignment_scope"])
     base = bounded_file_text(
         root, root / PROMPT_REL, MAX_PROMPT_BYTES, "autopilot prompt template"
     )
@@ -605,6 +621,7 @@ def prompt_for_cycle(
         "cycle": cycle,
         "starting_head": before["head"],
         "protected_refs": before["protected_refs"],
+        "assignment_scope": scope_data,
     }
     if recovery is not None:
         context["recovery"] = recovery
@@ -641,6 +658,9 @@ def run_cycle(
 ) -> tuple[Path, dict]:
     global _ACTIVE_PROCESS
     before = validate_repository(root, require_clean=True)
+    scope = before.get("assignment_scope")
+    if not isinstance(scope, AssignmentScope):
+        raise AutopilotError("invalid or missing startup assignment scope")
     timestamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     run_dir = state_root / "runs" / f"cycle-{cycle:04d}-{timestamp}-{os.getpid()}"
     run_dir.mkdir(mode=0o700)
@@ -655,6 +675,11 @@ def run_cycle(
         "head_before": before["head"],
         "protected_refs": before["protected_refs"],
         "codex": identity,
+        "assignment_scope": {
+            "assignment_id": scope.assignment_id,
+            "stage_id": scope.stage_id,
+            "sha256": scope.sha256,
+        },
         "output_limit_bytes": MAX_CODEX_OUTPUT,
         "timeout_seconds": timeout,
     }
@@ -665,6 +690,9 @@ def run_cycle(
     environment = os.environ.copy()
     environment["APP_ENV_FILE"] = "config/unit-test.env.example"
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    environment["TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED"] = "1"
+    environment["TWO_SITE_ASSIGNMENT_ID"] = scope.assignment_id
+    environment["TWO_SITE_ASSIGNMENT_SHA256"] = scope.sha256
     try:
         with subprocess.Popen(
             command,
@@ -961,6 +989,7 @@ def main() -> int:
         print(json.dumps({
             "state": "READY", "branch": BRANCH, "head": state["head"],
             "codex": identity,
+            "assignment_scope": assignment_scope_context(state.get("assignment_scope")),
         }))
         return 0
     try:
