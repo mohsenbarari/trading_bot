@@ -367,6 +367,34 @@ class AutopilotContracts(unittest.TestCase):
         with self.assertRaisesRegex(autopilot.AutopilotError, "independent fresh"):
             autopilot.validate_gemini_chain(self.root, 'a' * 40, result)
 
+    def test_scoped_gemini_chain_enforces_assignment_scope(self):
+        result, worker_result, _ = self.gemini_chain()
+        self.assertEqual(
+            autopilot.validate_scoped_gemini_chain(self.root, 'a' * 40, result, self.assignment_scope()),
+            worker_result,
+        )
+        scope = self.assignment_scope()
+        other_scope = autopilot.AssignmentScope(
+            assignment_id="WA-OTHER-SCOPE-001",
+            stage_id=scope.stage_id,
+            allowed_paths=scope.allowed_paths,
+            forbidden_paths=scope.forbidden_paths,
+            expires_at=scope.expires_at,
+            sha256=scope.sha256,
+        )
+        with self.assertRaisesRegex(autopilot.AutopilotError, "assignment scope"):
+            autopilot.validate_scoped_gemini_chain(self.root, 'a' * 40, result, other_scope)
+        path_scope = autopilot.AssignmentScope(
+            assignment_id=scope.assignment_id,
+            stage_id=scope.stage_id,
+            allowed_paths=("other.py",),
+            forbidden_paths=scope.forbidden_paths,
+            expires_at=scope.expires_at,
+            sha256=scope.sha256,
+        )
+        with self.assertRaisesRegex(autopilot.AutopilotError, "assignment scope"):
+            autopilot.validate_scoped_gemini_chain(self.root, 'a' * 40, result, path_scope)
+
     def test_committed_files_must_equal_exact_gemini_proposal(self):
         (self.root / "change.py").write_text("OLD = True\n")
         subprocess.check_call(["git", "init", "-q"], cwd=self.root)
