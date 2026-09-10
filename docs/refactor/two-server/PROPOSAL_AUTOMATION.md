@@ -5,7 +5,7 @@ Gemini Worker → Gemini Reviewer مستقل → Codex review/apply/test/commit.
 مسیر قدیمی gateway/native همچنان غیرفعال است. وضعیت اجرا را از فرایند زنده،
 Git و شواهد همان چرخه بخوانید؛ عبارت RUNNING یا یک گزارش تاریخی اثبات سلامت نیست.
 
-مدل جاری Supervisor: `gpt-6-astra` با `xhigh`.
+مدل جاری Supervisor: `gpt-5.6-sol` با `xhigh`.
 مدل Gemini از `templates/gemini-runtime-contract.json`: `gemini-3.8-flash-high`
 با `high`. Runner پیش از مصرف provider سازگاری این قرارداد و ارجاع‌هایش را می‌سنجد.
 هیچ کاهش effort، حذف review یا سبک‌کردن تست برای صرفه‌جویی مجاز نیست.
