@@ -566,8 +566,12 @@ def tree_mode(root: Path, commit: str, path: str) -> str | None:
     return record.split(maxsplit=1)[0] if record else None
 
 
-def validate_committed_proposal(
-    root: Path, before_head: str, after_head: str, proposal: dict,
+def _validate_committed_proposal(
+    root: Path,
+    before_head: str,
+    after_head: str,
+    proposal: dict,
+    assignment_scope: AssignmentScope | None,
 ) -> None:
     history = git(root, "rev-list", "--parents", "-n", "1", after_head).split()
     if len(history) != 2 or history[0] != after_head or history[1] != before_head:
@@ -576,6 +580,12 @@ def validate_committed_proposal(
         root, "diff", "--name-only", "--no-renames", before_head, after_head,
     ).splitlines())
     proposal_paths = {change["path"] for change in proposal["changes"]}
+    if assignment_scope is not None:
+        try:
+            validate_changed_paths(assignment_scope, sorted(changed_paths))
+            validate_changed_paths(assignment_scope, sorted(proposal_paths))
+        except AssignmentScopeError:
+            raise AutopilotError("assignment scope validation failed") from None
     if changed_paths != proposal_paths:
         raise AutopilotError("commit paths differ from the Gemini proposal")
     for change in proposal["changes"]:
@@ -587,6 +597,24 @@ def validate_committed_proposal(
         if ((before_mode is None and after_mode != "100644")
                 or (before_mode is not None and after_mode != before_mode)):
             raise AutopilotError("proposal commit contains an unreviewed mode change")
+
+
+def validate_committed_proposal(
+    root: Path, before_head: str, after_head: str, proposal: dict,
+) -> None:
+    _validate_committed_proposal(root, before_head, after_head, proposal, None)
+
+
+def validate_scoped_committed_proposal(
+    root: Path,
+    before_head: str,
+    after_head: str,
+    proposal: dict,
+    assignment_scope: AssignmentScope,
+) -> None:
+    if not isinstance(assignment_scope, AssignmentScope):
+        raise AutopilotError("invalid or missing assignment scope")
+    _validate_committed_proposal(root, before_head, after_head, proposal, assignment_scope)
 
 
 def validate_transition(
