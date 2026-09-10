@@ -160,7 +160,11 @@ if [[ "$tmux_observation" == "absent" && "$supervisor_count" -eq 0
   elif [[ "$state" == "BLOCKED" && "$status_dirty" == "false"
           && "$status_ambiguous" == "false" ]]; then
     blockers_lower="${blockers_text,,}"
-    if [[ ! "$blockers_lower" =~ dirty|ambiguous|protected.?ref|ref.?drift|production|deploy|dns|web.?writer|secret|credential|authority ]] \
+    if [[ "$blockers_lower" =~ expired|expiry ]]; then
+      action="assignment_expired"
+    elif [[ "$blockers_lower" =~ approval.*denied|denied.*approval|approval.*rejected|rejected.*approval|escalation.*denied|denied.*escalation|escalation.*rejected|rejected.*escalation|halt|external_gate|external.?gate ]]; then
+      action="authority_blocked"
+    elif [[ ! "$blockers_lower" =~ dirty|ambiguous|protected.?ref|ref.?drift|production|deploy|dns|web.?writer|secret|credential|authority ]] \
         && { [[ ! "$blockers_lower" =~ denied.?escalation|approval.?required|explicit.?authorization|insufficient.?egress.?authorization ]] \
           || [[ "$standing_transfer_authorized" == true ]]; }; then
       restart_eligible=true
