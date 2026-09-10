@@ -56,12 +56,16 @@ try:
         AssignmentScope,
         AssignmentScopeError,
         load_active_assignment_scope,
+        validate_changed_paths,
+        validate_task_scope,
     )
 except ModuleNotFoundError:  # Direct `python scripts/...` execution.
     from two_site_assignment_scope import (  # type: ignore[no-redef]
         AssignmentScope,
         AssignmentScopeError,
         load_active_assignment_scope,
+        validate_changed_paths,
+        validate_task_scope,
     )
 
 
@@ -445,7 +449,12 @@ def proposal_run_dir(root: Path, run_id: str) -> Path:
     return run_dir
 
 
-def validate_gemini_chain(root: Path, source_head: str, result: dict) -> dict:
+def _validate_gemini_chain(
+    root: Path,
+    source_head: str,
+    result: dict,
+    assignment_scope: AssignmentScope | None,
+) -> dict:
     """Validate one exact Worker -> independent Gemini Reviewer evidence chain."""
     worker_dir = proposal_run_dir(root, result["gemini_worker_run_id"])
     reviewer_dir = proposal_run_dir(root, result["gemini_reviewer_run_id"])
@@ -476,9 +485,22 @@ def validate_gemini_chain(root: Path, source_head: str, result: dict) -> dict:
     sources = worker_snapshot.get("sources")
     if not isinstance(task, dict) or not isinstance(sources, dict):
         raise AutopilotError("Gemini Worker snapshot is incomplete")
+    if assignment_scope is not None:
+        try:
+            validate_task_scope(assignment_scope, task)
+        except AssignmentScopeError:
+            raise AutopilotError("assignment scope validation failed") from None
     worker_result = validate_proposal_result(
         unique_json(worker_result_text), task, sources, "worker"
     )
+    if assignment_scope is not None:
+        try:
+            validate_changed_paths(
+                assignment_scope,
+                [change["path"] for change in worker_result["changes"]],
+            )
+        except AssignmentScopeError:
+            raise AutopilotError("assignment scope validation failed") from None
     validate_proposal_result(reviewer_result, task, sources, "verifier")
     proposal_sha256 = file_sha256(worker_result_path)
     if (worker_snapshot.get("source_head") != source_head
@@ -510,6 +532,22 @@ def validate_gemini_chain(root: Path, source_head: str, result: dict) -> dict:
             or worker_conversation == reviewer_conversation):
         raise AutopilotError("Gemini review did not use an independent fresh session")
     return worker_result
+
+
+def validate_gemini_chain(root: Path, source_head: str, result: dict) -> dict:
+    """Validate one exact Worker -> independent Gemini Reviewer evidence chain."""
+    return _validate_gemini_chain(root, source_head, result, None)
+
+
+def validate_scoped_gemini_chain(
+    root: Path,
+    source_head: str,
+    result: dict,
+    assignment_scope: AssignmentScope,
+) -> dict:
+    if not isinstance(assignment_scope, AssignmentScope):
+        raise AutopilotError("invalid or missing assignment scope")
+    return _validate_gemini_chain(root, source_head, result, assignment_scope)
 
 
 def git_blob(root: Path, commit: str, path: str) -> bytes:
