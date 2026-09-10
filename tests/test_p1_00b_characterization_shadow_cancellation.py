@@ -12,6 +12,8 @@ for api.routers.offers._shadow_inference_for_implicit_commodity:
 2. Cancellation during the awaited database session commit call.
 3. Cancellation during the awaited database session rollback call after shadow observation failure.
 4. Cancellation during the awaited database session rollback call after database session commit failure.
+5. Cancellation during synchronous payload formatting after successful observation and database session commit.
+6. Cancellation during the awaited database session rollback call after payload formatting failure.
 
 It provides narrow helper-only mocked cancellation evidence with no real
 estimator/audit persistence, no database or Redis access, and no full
@@ -72,6 +74,20 @@ SYNTHETIC_OBSERVATION = SimpleNamespace(
     decision_key="synthetic_decision_key_0123456789abcdef",
     edit_candidates=(),
 )
+SYNTHETIC_POSTCOMMIT_DECISION = object()
+SYNTHETIC_POSTCOMMIT_DECISION_KEY = "synthetic_postcommit_decision_key_fedcba9876543210"
+SYNTHETIC_POSTCOMMIT_EDIT_CANDIDATES = (
+    SimpleNamespace(
+        commodity_id=987,
+        commodity_code="EMAMI_TEST",
+        commodity_name="سکه تمام بهار آزادی طرح جدید",
+    ),
+)
+SYNTHETIC_POSTCOMMIT_OBSERVATION = SimpleNamespace(
+    decision=SYNTHETIC_POSTCOMMIT_DECISION,
+    decision_key=SYNTHETIC_POSTCOMMIT_DECISION_KEY,
+    edit_candidates=SYNTHETIC_POSTCOMMIT_EDIT_CANDIDATES,
+)
 
 
 @contextmanager
@@ -79,6 +95,7 @@ def _shadow_cancellation_spies(
     *,
     call_order: list[str],
     observer_side_effect: Any,
+    formatter_side_effect: Any = None,
 ) -> Iterator[dict[str, Any]]:
     def resolver_side_effect(settings_arg: Any) -> str:
         call_order.append("resolution")
@@ -110,7 +127,10 @@ def _shadow_cancellation_spies(
         name="observe_coin_inference_shadow_spy",
         side_effect=observer_side_effect,
     )
-    payload_formatter_spy = MagicMock(name="_catalog_inference_shadow_payload_spy")
+    payload_formatter_spy = MagicMock(
+        name="_catalog_inference_shadow_payload_spy",
+        side_effect=formatter_side_effect,
+    )
     log_trading_event_spy = MagicMock(
         name="log_trading_event_spy",
         side_effect=log_trading_event_side_effect,
@@ -664,6 +684,277 @@ class ShadowCancellationCharacterizationTests(unittest.IsolatedAsyncioTestCase):
             session=session,
             price=102_500_000,
             settlement_term="TOMORROW",
+        )
+
+    def _assert_formatter_contract(
+        self,
+        *,
+        spies: dict[str, Any],
+        expected_decision: Any,
+        expected_decision_key: str,
+        expected_edit_candidates: tuple[Any, ...],
+    ) -> None:
+        self.assertGreater(len(expected_edit_candidates), 0)
+        spies["payload_formatter_spy"].assert_called_once_with(
+            expected_decision,
+            decision_key=expected_decision_key,
+            edit_candidates=expected_edit_candidates,
+        )
+        self.assertEqual(spies["payload_formatter_spy"].call_count, 1)
+        self.assertEqual(len(spies["payload_formatter_spy"].call_args.args), 1)
+        self.assertIs(spies["payload_formatter_spy"].call_args.args[0], expected_decision)
+        expected_kwargs: dict[str, Any] = {
+            "decision_key": expected_decision_key,
+            "edit_candidates": expected_edit_candidates,
+        }
+        self.assertEqual(spies["payload_formatter_spy"].call_args.kwargs, expected_kwargs)
+        self.assertIs(
+            spies["payload_formatter_spy"].call_args.kwargs["decision_key"],
+            expected_decision_key,
+        )
+        self.assertIs(
+            spies["payload_formatter_spy"].call_args.kwargs["edit_candidates"],
+            expected_edit_candidates,
+        )
+        self.assertEqual(
+            set(spies["payload_formatter_spy"].call_args.kwargs.keys()),
+            {"decision_key", "edit_candidates"},
+        )
+        self.assertNotIn("mode", spies["payload_formatter_spy"].call_args.kwargs)
+
+    async def test_formatter_cancellation_after_commit_propagates_without_rollback_or_logging(
+        self,
+    ) -> None:
+        session = StrictFakeAsyncSession()
+        call_order: list[str] = []
+
+        async def commit_callback(*args: Any, **kwargs: Any) -> None:
+            call_order.append("commit_await")
+            call_order.append("commit_success")
+
+        async def rollback_callback(*args: Any, **kwargs: Any) -> None:
+            call_order.append("rollback_await")
+            call_order.append("rollback_success")
+
+        session.commit.side_effect = commit_callback
+        session.rollback.side_effect = rollback_callback
+
+        formatter_cancelled_error = asyncio.CancelledError(
+            "Synthetic cancellation during synchronous payload formatting"
+        )
+
+        def formatter_side_effect(*args: Any, **kwargs: Any) -> Any:
+            call_order.append("formatter")
+            raise formatter_cancelled_error
+
+        async def observer_side_effect(*args: Any, **kwargs: Any) -> Any:
+            call_order.append("observer_await")
+            call_order.append("observer_success")
+            return SYNTHETIC_POSTCOMMIT_OBSERVATION
+
+        with _shadow_cancellation_spies(
+            call_order=call_order,
+            observer_side_effect=observer_side_effect,
+            formatter_side_effect=formatter_side_effect,
+        ) as spies:
+            with self.assertRaises(asyncio.CancelledError) as exc_context:
+                await _shadow_inference_for_implicit_commodity(
+                    session,
+                    price=76_500_000,
+                    settlement_type="cash",
+                )
+
+        # Assert identical exception object escapes with __context__ is None (no fallback returned)
+        self.assertIs(exc_context.exception, formatter_cancelled_error)
+        self.assertIsNone(exc_context.exception.__context__)
+        self.assertIsInstance(exc_context.exception, asyncio.CancelledError)
+
+        # Assert exact event execution order and independently prove observation before commit before formatter
+        self.assertEqual(
+            call_order,
+            [
+                "resolution",
+                "clock",
+                "reader_construction",
+                "observer_await",
+                "observer_success",
+                "commit_await",
+                "commit_success",
+                "formatter",
+            ],
+        )
+        observer_success_index = call_order.index("observer_success")
+        commit_success_index = call_order.index("commit_success")
+        formatter_index = call_order.index("formatter")
+        self.assertLess(observer_success_index, commit_success_index)
+        self.assertLess(commit_success_index, formatter_index)
+        self.assertLess(observer_success_index, formatter_index)
+
+        # Assert commit called and awaited exactly once with no args
+        session.commit.assert_called_once_with()
+        session.commit.assert_awaited_once_with()
+        self.assertEqual(session.commit.call_count, 1)
+        self.assertEqual(session.commit.await_count, 1)
+        self.assertEqual(session.commit.call_args.args, ())
+        self.assertEqual(session.commit.call_args.kwargs, {})
+        self.assertEqual(session.commit.await_args.args, ())
+        self.assertEqual(session.commit.await_args.kwargs, {})
+
+        # Assert rollback neither called nor awaited
+        session.rollback.assert_not_called()
+        session.rollback.assert_not_awaited()
+        self.assertEqual(session.rollback.call_count, 0)
+        self.assertEqual(session.rollback.await_count, 0)
+
+        # Assert logging uncalled
+        spies["log_trading_event_spy"].assert_not_called()
+        self.assertEqual(spies["log_trading_event_spy"].call_count, 0)
+        spies["logger_mock"].warning.assert_not_called()
+        spies["logger_mock"].error.assert_not_called()
+        spies["logger_mock"].info.assert_not_called()
+        spies["logger_mock"].exception.assert_not_called()
+        self.assertEqual(spies["logger_mock"].warning.call_count, 0)
+        self.assertEqual(spies["logger_mock"].error.call_count, 0)
+        self.assertEqual(spies["logger_mock"].info.call_count, 0)
+        self.assertEqual(spies["logger_mock"].exception.call_count, 0)
+
+        # Assert upstream and observer contract helper
+        self._assert_common_upstream_and_observer_contracts(
+            spies=spies,
+            session=session,
+            price=76_500_000,
+            settlement_term="CASH",
+        )
+
+        # Assert formatter contract helper
+        self._assert_formatter_contract(
+            spies=spies,
+            expected_decision=SYNTHETIC_POSTCOMMIT_DECISION,
+            expected_decision_key=SYNTHETIC_POSTCOMMIT_DECISION_KEY,
+            expected_edit_candidates=SYNTHETIC_POSTCOMMIT_EDIT_CANDIDATES,
+        )
+
+    async def test_rollback_await_cancellation_after_formatter_failure_propagates_with_context(
+        self,
+    ) -> None:
+        session = StrictFakeAsyncSession()
+        call_order: list[str] = []
+
+        async def commit_callback(*args: Any, **kwargs: Any) -> None:
+            call_order.append("commit_await")
+            call_order.append("commit_success")
+
+        rollback_cancelled_error = asyncio.CancelledError(
+            "Synthetic cancellation during database rollback await after formatter failure"
+        )
+
+        async def rollback_callback(*args: Any, **kwargs: Any) -> None:
+            call_order.append("rollback_await")
+            raise rollback_cancelled_error
+
+        session.commit.side_effect = commit_callback
+        session.rollback.side_effect = rollback_callback
+
+        formatter_failure_error = RuntimeError(
+            "Synthetic ordinary failure during synchronous payload formatting"
+        )
+
+        def formatter_side_effect(*args: Any, **kwargs: Any) -> Any:
+            call_order.append("formatter")
+            raise formatter_failure_error
+
+        async def observer_side_effect(*args: Any, **kwargs: Any) -> Any:
+            call_order.append("observer_await")
+            call_order.append("observer_success")
+            return SYNTHETIC_POSTCOMMIT_OBSERVATION
+
+        with _shadow_cancellation_spies(
+            call_order=call_order,
+            observer_side_effect=observer_side_effect,
+            formatter_side_effect=formatter_side_effect,
+        ) as spies:
+            with self.assertRaises(asyncio.CancelledError) as exc_context:
+                await _shadow_inference_for_implicit_commodity(
+                    session,
+                    price=95_000_000,
+                    settlement_type="tomorrow",
+                )
+
+        # Assert identical exception escapes, __context__ is the exact formatter error (no fallback returned)
+        self.assertIs(exc_context.exception, rollback_cancelled_error)
+        self.assertIs(exc_context.exception.__context__, formatter_failure_error)
+        self.assertIsInstance(exc_context.exception, asyncio.CancelledError)
+
+        # Assert exact event execution order and independently prove observation before commit before formatter before rollback
+        self.assertEqual(
+            call_order,
+            [
+                "resolution",
+                "clock",
+                "reader_construction",
+                "observer_await",
+                "observer_success",
+                "commit_await",
+                "commit_success",
+                "formatter",
+                "rollback_await",
+            ],
+        )
+        observer_success_index = call_order.index("observer_success")
+        commit_success_index = call_order.index("commit_success")
+        formatter_index = call_order.index("formatter")
+        rollback_await_index = call_order.index("rollback_await")
+        self.assertLess(observer_success_index, commit_success_index)
+        self.assertLess(commit_success_index, formatter_index)
+        self.assertLess(formatter_index, rollback_await_index)
+        self.assertLess(observer_success_index, rollback_await_index)
+
+        # Assert commit called and awaited exactly once with no args
+        session.commit.assert_called_once_with()
+        session.commit.assert_awaited_once_with()
+        self.assertEqual(session.commit.call_count, 1)
+        self.assertEqual(session.commit.await_count, 1)
+        self.assertEqual(session.commit.call_args.args, ())
+        self.assertEqual(session.commit.call_args.kwargs, {})
+        self.assertEqual(session.commit.await_args.args, ())
+        self.assertEqual(session.commit.await_args.kwargs, {})
+
+        # Assert rollback called and awaited exactly once with no args
+        session.rollback.assert_called_once_with()
+        session.rollback.assert_awaited_once_with()
+        self.assertEqual(session.rollback.call_count, 1)
+        self.assertEqual(session.rollback.await_count, 1)
+        self.assertEqual(session.rollback.call_args.args, ())
+        self.assertEqual(session.rollback.call_args.kwargs, {})
+        self.assertEqual(session.rollback.await_args.args, ())
+        self.assertEqual(session.rollback.await_args.kwargs, {})
+
+        # Assert logging uncalled
+        spies["log_trading_event_spy"].assert_not_called()
+        self.assertEqual(spies["log_trading_event_spy"].call_count, 0)
+        spies["logger_mock"].warning.assert_not_called()
+        spies["logger_mock"].error.assert_not_called()
+        spies["logger_mock"].info.assert_not_called()
+        spies["logger_mock"].exception.assert_not_called()
+        self.assertEqual(spies["logger_mock"].warning.call_count, 0)
+        self.assertEqual(spies["logger_mock"].error.call_count, 0)
+        self.assertEqual(spies["logger_mock"].info.call_count, 0)
+        self.assertEqual(spies["logger_mock"].exception.call_count, 0)
+
+        # Assert upstream and observer contract helper
+        self._assert_common_upstream_and_observer_contracts(
+            spies=spies,
+            session=session,
+            price=95_000_000,
+            settlement_term="TOMORROW",
+        )
+
+        # Assert formatter contract helper
+        self._assert_formatter_contract(
+            spies=spies,
+            expected_decision=SYNTHETIC_POSTCOMMIT_DECISION,
+            expected_decision_key=SYNTHETIC_POSTCOMMIT_DECISION_KEY,
+            expected_edit_candidates=SYNTHETIC_POSTCOMMIT_EDIT_CANDIDATES,
         )
 
 
