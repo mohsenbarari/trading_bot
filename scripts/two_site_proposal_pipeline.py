@@ -9,27 +9,35 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
-import fcntl, json, os, re, stat, subprocess
+import fcntl, hashlib, json, os, re, stat, subprocess
 from pathlib import Path
 from typing import Callable
 
 try:
     from scripts.two_site_proposal_runner import (
         MAX_CONTEXT, MODEL, ProposalError, RetryableProviderSessionError,
-        bounded_file_text, file_sha256, git, load_task, run as runner_run,
-        unique_json, validate_correction_feedback, validate_result, write_json,
+        bounded_file_bytes, bounded_file_text, file_sha256, git, load_task,
+        run as runner_run, serialize_json, unique_json,
+        validate_correction_feedback, validate_result, write_json,
     )
 except ModuleNotFoundError:
     from two_site_proposal_runner import (  # type: ignore[no-redef]
         MAX_CONTEXT, MODEL, ProposalError, RetryableProviderSessionError,
-        bounded_file_text, file_sha256, git, load_task, run as runner_run,
-        unique_json, validate_correction_feedback, validate_result, write_json,
+        bounded_file_bytes, bounded_file_text, file_sha256, git, load_task,
+        run as runner_run, serialize_json, unique_json,
+        validate_correction_feedback, validate_result, write_json,
     )
 
 try:
-    from scripts.two_site_pre_review_receipt import validate_test_receipt
+    from scripts.two_site_pre_review_receipt import (
+        run_candidate_tests,
+        validate_test_receipt,
+    )
 except ImportError:
-    from two_site_pre_review_receipt import validate_test_receipt
+    from two_site_pre_review_receipt import (
+        run_candidate_tests,
+        validate_test_receipt,
+    )
 
 ROOT = Path(__file__).resolve().parents[1]
 BRANCH = "refactor/two-site-architecture"
@@ -39,6 +47,7 @@ PROTECTED_REFS = (
     "refs/heads/candidate/wa-ir-standby-v1",
 )
 RUN_PREFIX_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,60}$")
+SHA_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
 def ref_snapshot(root: Path) -> dict[str, str | None]:
@@ -171,6 +180,87 @@ def validate_run(
         raise ProposalError(f"reused conversation_id in {expected_run_id}")
     seen_convs.add(conv_id)
     return result, status, result_sha, result_text
+
+
+def persist_pre_review_tests(
+    root: Path,
+    evidence_dir: Path,
+    task: dict,
+    worker_result: dict,
+    worker_sha: str,
+    index: int,
+    state_check: Callable[[], None],
+    state: dict,
+) -> tuple[dict, Path, str]:
+    if isinstance(root, str):
+        root = Path(root)
+    elif not isinstance(root, Path):
+        raise ProposalError("root must be a Path or str")
+    try:
+        resolved_root = root.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise ProposalError("root must be an existing directory") from exc
+    if not root.is_dir() or resolved_root != root:
+        raise ProposalError("root must be a resolved canonical directory")
+
+    if isinstance(evidence_dir, str):
+        evidence_dir = Path(evidence_dir)
+    elif not isinstance(evidence_dir, Path):
+        raise ProposalError("evidence_dir must be a Path or str")
+    try:
+        resolved_evidence = evidence_dir.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise ProposalError("evidence_dir must be an existing directory") from exc
+    if not evidence_dir.is_dir() or resolved_evidence != evidence_dir:
+        raise ProposalError("evidence_dir must be an existing resolved canonical directory")
+    if not evidence_dir.is_relative_to(root) or evidence_dir == root:
+        raise ProposalError("evidence_dir must be inside root")
+
+    if not isinstance(index, int) or isinstance(index, bool) or not (0 <= index <= 2):
+        raise ProposalError("index must be an integer between 0 and 2")
+
+    if not isinstance(worker_sha, str) or not SHA_PATTERN.fullmatch(worker_sha):
+        raise ProposalError("worker_sha must be a lowercase 64-hex SHA")
+
+    receipt_path = evidence_dir / f"pre-review-tests-{index}.json"
+    if receipt_path.exists() or receipt_path.is_symlink() or os.path.lexists(receipt_path):
+        raise ProposalError(f"test receipt path already exists or is a symlink: {receipt_path}")
+
+    if not isinstance(state, dict):
+        raise ProposalError("state must be a dict")
+    if not callable(state_check):
+        raise ProposalError("state_check must be callable")
+
+    receipt = run_candidate_tests(
+        root, task, worker_result, worker_sha, timeout=1200
+    )
+    write_json(receipt_path, receipt)
+
+    raw_bytes = bounded_file_bytes(
+        root, receipt_path, MAX_CONTEXT, "pre-review test receipt"
+    )
+    expected_bytes = serialize_json(receipt)
+    if raw_bytes != expected_bytes:
+        raise ProposalError("test receipt byte mismatch with serialized receipt")
+
+    try:
+        text = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ProposalError("test receipt contains invalid UTF-8") from exc
+    parsed = unique_json(text)
+    normalized = validate_test_receipt(parsed, worker_sha)
+    if parsed != receipt or normalized != receipt:
+        raise ProposalError("test receipt semantic mismatch with serialized receipt")
+
+    receipt_sha = hashlib.sha256(raw_bytes).hexdigest()
+
+    state.update(
+        pre_review_test_path=receipt_path.relative_to(root).as_posix(),
+        pre_review_test_sha256=receipt_sha,
+        pre_review_test_state=normalized["state"],
+    )
+    state_check()
+    return normalized, receipt_path, receipt_sha
 
 
 def run_provider_session(
