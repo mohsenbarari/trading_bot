@@ -26,6 +26,11 @@ except ModuleNotFoundError:
         unique_json, validate_correction_feedback, validate_result, write_json,
     )
 
+try:
+    from scripts.two_site_pre_review_receipt import validate_test_receipt
+except ImportError:
+    from two_site_pre_review_receipt import validate_test_receipt
+
 ROOT = Path(__file__).resolve().parents[1]
 BRANCH = "refactor/two-site-architecture"
 PROTECTED_REFS = (
@@ -104,6 +109,7 @@ def validate_run(
     root: Path, run_dir: Path, role: str, expected_run_id: str, expected_head: str,
     expected_task: dict, expected_sources: dict, seen_convs: set[str],
     prior_worker: tuple[str, str, str, str] | None = None, expected_feedback_sha: str | None = None,
+    expected_test_receipt: dict | None = None, expected_test_evidence_sha: str | None = None,
 ) -> tuple[dict, dict, str, str]:
     status = unique_json(bounded_file_text(root, run_dir / "status.json", MAX_CONTEXT, f"{role} status"))
     snapshot = unique_json(bounded_file_text(root, run_dir / "task.json", 2 * MAX_CONTEXT, f"{role} task"))
@@ -140,6 +146,24 @@ def validate_run(
         or status.get("input_proposal_sha256") is not None
     ):
         raise ProposalError(f"initial worker should not have input worker bindings in {expected_run_id}")
+    if (expected_test_receipt is None) != (expected_test_evidence_sha is None):
+        raise ProposalError(f"test evidence receipt and SHA must be provided together in {expected_run_id}")
+    if expected_test_receipt is not None and expected_test_evidence_sha is not None:
+        if role != "verifier":
+            raise ProposalError(f"test evidence requires role verifier in {expected_run_id}")
+        if prior_worker is None:
+            raise ProposalError(f"test evidence requires prior worker in {expected_run_id}")
+        prior_sha = prior_worker[1]
+        validated_receipt = validate_test_receipt(
+            expected_test_receipt, prior_sha, require_passed=True
+        )
+        if snapshot.get("test_evidence") != validated_receipt:
+            raise ProposalError(f"task test_evidence mismatch in {expected_run_id}")
+        if status.get("input_test_evidence_sha256") != expected_test_evidence_sha:
+            raise ProposalError(f"status input_test_evidence_sha256 mismatch in {expected_run_id}")
+    else:
+        if "test_evidence" in snapshot or "input_test_evidence_sha256" in status:
+            raise ProposalError(f"unexpected test evidence in {expected_run_id}")
     conv_id = status.get("conversation_id")
     if not isinstance(conv_id, str) or not conv_id.strip():
         raise ProposalError(f"conversation_id missing or empty in {expected_run_id}")
@@ -153,6 +177,7 @@ def run_provider_session(
     root: Path, task_path: Path, role: str, base_run_id: str, timeout: int,
     state_check: Callable[[], None], feedback: Path | None = None,
     proposal: Path | None = None, cli: Path | None = None,
+    test_evidence: Path | None = None,
 ) -> tuple[str, Path]:
     proposals_dir = root / ".local/two-site-refactor/proposals"
     attempts = (base_run_id, f'{base_run_id}-retry-1', f'{base_run_id}-retry-2')
@@ -163,9 +188,15 @@ def run_provider_session(
         if (proposals_dir / attempt_id).exists():
             raise ProposalError(f"{label} run ID already exists: {attempt_id}")
         try:
+            runner_kwargs = {
+                "feedback": feedback,
+                "proposal": proposal,
+                "cli": cli,
+            }
+            if test_evidence is not None:
+                runner_kwargs["test_evidence"] = test_evidence
             run_dir = runner_run(
-                root, task_path, role, attempt_id, timeout,
-                feedback=feedback, proposal=proposal, cli=cli,
+                root, task_path, role, attempt_id, timeout, **runner_kwargs
             )
             return attempt_id, run_dir
         except RetryableProviderSessionError as exc:
