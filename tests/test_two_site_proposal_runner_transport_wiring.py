@@ -112,7 +112,11 @@ def test_schema_generic_and_aware():
     assert len(branches) == 4
 
     verifier_aware = schema("verifier", task=task, sources=sources)
-    assert verifier_aware["properties"]["changes"] == {"type": "array", "maxItems": 0}
+    assert verifier_aware["properties"]["changes"] == {
+        "type": "array",
+        "maxItems": 0,
+        "items": {"type": "object", "additionalProperties": False},
+    }
 
 
 def test_schema_branches_new_large_small_verifier():

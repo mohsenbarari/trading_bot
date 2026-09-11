@@ -128,7 +128,11 @@ def build_changes_schema(
         _validate_source_record(record)
 
     if role == "verifier":
-        return {"type": "array", "maxItems": 0}
+        return {
+            "type": "array",
+            "maxItems": 0,
+            "items": {"type": "object", "additionalProperties": False},
+        }
 
     branches: list[dict] = []
     for path in allowed_files:

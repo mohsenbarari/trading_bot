@@ -92,7 +92,11 @@ def test_verifier_behavior() -> None:
         "existing.py": {"sha256": SAMPLE_SHA_A, "content": "data"},
     }
     schema = build_changes_schema("verifier", allowed_files, sources)
-    assert schema == {"type": "array", "maxItems": 0}
+    assert schema == {
+        "type": "array",
+        "maxItems": 0,
+        "items": {"type": "object", "additionalProperties": False},
+    }
 
     with pytest.raises(TransportPolicyError):
         build_changes_schema("verifier", [], sources)
