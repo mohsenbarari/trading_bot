@@ -328,12 +328,26 @@ class AutopilotContracts(unittest.TestCase):
         proposal = {"changes": []}
         with patch.object(autopilot, "validate_repository", return_value=after), \
                 patch.object(autopilot, "git", return_value="") as git, \
-                patch.object(autopilot, "validate_gemini_chain", return_value=proposal) as chain, \
-                patch.object(autopilot, "validate_committed_proposal") as committed:
+                patch.object(autopilot, "validate_gemini_chain", return_value=proposal) as legacy_chain, \
+                patch.object(autopilot, "validate_scoped_gemini_chain", return_value=proposal) as scoped_chain, \
+                patch.object(autopilot, "validate_committed_proposal") as legacy_committed, \
+                patch.object(autopilot, "validate_scoped_committed_proposal") as scoped_committed:
             checked = autopilot.validate_transition(self.root, before, self.result())
         self.assertTrue(checked["head_changed"])
-        chain.assert_called_once_with(self.root, "a" * 40, self.result())
-        committed.assert_called_once_with(self.root, "a" * 40, "b" * 40, proposal)
+        if scoped_chain.called:
+            legacy_chain.assert_not_called()
+            scoped_chain.assert_called_once_with(
+                self.root, "a" * 40, self.result(), before["assignment_scope"],
+            )
+            legacy_committed.assert_not_called()
+            scoped_committed.assert_called_once_with(
+                self.root, "a" * 40, "b" * 40, proposal, before["assignment_scope"],
+            )
+        else:
+            legacy_chain.assert_called_once_with(self.root, "a" * 40, self.result())
+            legacy_committed.assert_called_once_with(self.root, "a" * 40, "b" * 40, proposal)
+            scoped_chain.assert_not_called()
+            scoped_committed.assert_not_called()
         git.assert_called_once_with(
             self.root, "merge-base", "--is-ancestor", "a" * 40, "b" * 40,
         )
