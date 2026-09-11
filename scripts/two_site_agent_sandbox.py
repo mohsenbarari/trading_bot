@@ -313,7 +313,7 @@ def source_files(worktree: Path, extra_paths: list[str]) -> list[str]:
             continue
         if any(part.startswith(".env") and not part.endswith(".example") for part in path.parts):
             continue
-        if any(part.lower() in {"credentials", "secrets", "private", "dumps"} for part in path.parts):
+        if any(part.split(".", 1)[0].lower() in {"credentials", "secrets", "private", "dumps"} for part in path.parts):
             continue
         if path.parts[0] == "data" or str(path).startswith("docs/memory/archive/"):
             continue
@@ -497,7 +497,7 @@ def _validate_overlay_path(value: str) -> PurePosixPath:
         raise SandboxError("overlay path in excluded root")
     if any(part.startswith(".env") and not part.endswith(".example") for part in path.parts):
         raise SandboxError("overlay path exposes environment file")
-    if any(part.lower() in {"credentials", "secrets", "private", "dumps"} for part in path.parts):
+    if any(part.split(".", 1)[0].lower() in {"credentials", "secrets", "private", "dumps"} for part in path.parts):
         raise SandboxError("overlay path exposes credential or private location")
     if path.parts[0] == "data" or str(path).startswith("docs/memory/archive/"):
         raise SandboxError("overlay path in restricted data/archive location")
