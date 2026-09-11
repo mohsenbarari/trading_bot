@@ -489,14 +489,57 @@ def sandbox_argv(snapshot: Path, selected_tests: list[str], bwrap: str = "/usr/b
     return args + ["/usr/bin/python3", "-m", "pytest", "-q", "-p", "no:cacheprovider", *tests]
 
 
+def _validate_overlay_path(value: str) -> PurePosixPath:
+    path = safe_relative(value)
+    if str(path) != value:
+        raise SandboxError("overlay path is not canonical")
+    if path.parts[0] in EXCLUDED_ROOTS or "__pycache__" in path.parts:
+        raise SandboxError("overlay path in excluded root")
+    if any(part.startswith(".env") and not part.endswith(".example") for part in path.parts):
+        raise SandboxError("overlay path exposes environment file")
+    if any(part.lower() in {"credentials", "secrets", "private", "dumps"} for part in path.parts):
+        raise SandboxError("overlay path exposes credential or private location")
+    if path.parts[0] == "data" or str(path).startswith("docs/memory/archive/"):
+        raise SandboxError("overlay path in restricted data/archive location")
+    if path.suffix not in SOURCE_SUFFIXES and path.name not in {"Makefile", "Dockerfile"}:
+        raise SandboxError("overlay path has unsupported suffix")
+    return path
+
+
 def run_tests(worktree: Path, selected_tests: list[str], extra_paths: list[str] | None = None,
               *, timeout: int = 1200, snapshot_limit: int = 300_000_000,
-              git_ancestry: GitAncestryEvidence | None = None) -> dict:
+              git_ancestry: GitAncestryEvidence | None = None,
+              overlays: Mapping[str, str] | None = None) -> dict:
     worktree = worktree.resolve(strict=True)
     selectors(selected_tests)
     if not 1 <= timeout <= 3600:
         raise SandboxError("test timeout outside controller budget")
-    files = source_files(worktree, extra_paths or [])
+    validated_overlays: dict[str, bytes] = {}
+    if overlays is not None:
+        if not isinstance(overlays, Mapping) or isinstance(overlays, (str, bytes)):
+            raise SandboxError("overlays must be a mapping")
+        if len(overlays) > 32:
+            raise SandboxError("overlays mapping exceeds 32 entries")
+        extra_set = {str(safe_relative(p)) for p in (extra_paths or [])}
+        for key, content in overlays.items():
+            path = _validate_overlay_path(key)
+            if key in extra_set or str(path) in extra_set or key in (extra_paths or ()):
+                raise SandboxError("overlay path overlaps extra_paths")
+            if not isinstance(content, str):
+                raise SandboxError("overlay content must be a string")
+            if not content:
+                raise SandboxError("overlay content must be non-empty")
+            if "\x00" in content:
+                raise SandboxError("overlay content must not contain NUL")
+            try:
+                encoded = content.encode("utf-8")
+            except UnicodeEncodeError as exc:
+                raise SandboxError("overlay content must be valid UTF-8") from exc
+            validated_overlays[key] = encoded
+    inventory = list(extra_paths or [])
+    if validated_overlays:
+        inventory.extend(validated_overlays.keys())
+    files = source_files(worktree, inventory)
     with tempfile.TemporaryDirectory(prefix="two-site-agent-tests-") as temporary:
         snapshot = Path(temporary) / "source"
         snapshot.mkdir()
@@ -509,6 +552,16 @@ def run_tests(worktree: Path, selected_tests: list[str], extra_paths: list[str] 
             destination = snapshot / value
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(original, destination, follow_symlinks=False)
+        snapshot_files = set(files)
+        for key, encoded in validated_overlays.items():
+            destination = snapshot / key
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            replaced_bytes = destination.stat().st_size if destination.exists() else 0
+            if total - replaced_bytes + len(encoded) > snapshot_limit:
+                raise SandboxError("source snapshot exceeds reviewed capacity")
+            destination.write_bytes(encoded)
+            total = total - replaced_bytes + len(encoded)
+            snapshot_files.add(key)
         for selector in selected_tests:
             if not (snapshot / selector.split("::", 1)[0]).is_file():
                 raise SandboxError("test selector not in authorized source snapshot")
@@ -537,6 +590,6 @@ def run_tests(worktree: Path, selected_tests: list[str], extra_paths: list[str] 
         return {"returncode": result.returncode,
                 "stdout": result.stdout.decode("utf-8", errors="replace"),
                 "stderr": result.stderr.decode("utf-8", errors="replace"),
-                "snapshot_files": len(files), "snapshot_bytes": total,
+                "snapshot_files": len(snapshot_files), "snapshot_bytes": total,
                 "git_ancestry": ancestry,
                 "isolation": "bwrap:ro-source,empty-home,clearenv,unshare-all"}
