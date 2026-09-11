@@ -7,9 +7,25 @@ from unittest.mock import patch
 import pytest
 
 from scripts.two_site_agent_sandbox import SandboxError
-from scripts.two_site_pre_review_receipt import _bound_utf8_tail, run_candidate_tests
+from scripts.two_site_pre_review_receipt import (
+    _bound_utf8_tail,
+    run_candidate_tests,
+    validate_test_receipt,
+)
 
 VALID_SHA = "0" * 64
+VALID_RECEIPT = {
+    "state": "PASSED",
+    "proposal_sha256": VALID_SHA,
+    "selectors": ["tests/test_a.py"],
+    "unsupported_specs": [],
+    "returncode": 0,
+    "stdout_tail": "ok",
+    "stderr_tail": "",
+    "snapshot_files": 1,
+    "snapshot_bytes": 10,
+    "isolation": "bwrap",
+}
 VALID_TASK = {"test_selectors": ["tests/test_a.py"]}
 VALID_WORKER = {"changes": [{"path": "tests/test_a.py", "content": "def test_ok(): pass\n"}]}
 VALID_SANDBOX_RESULT = {
@@ -113,9 +129,9 @@ def test_selection_over_200_whole_spec_retained(tmp_path: Path, mock_deps) -> No
         if s == "spec1":
             return [f"tests/test_{i}.py" for i in range(195)], []
         if s == "spec_over":
-            return [f"tests/extra_{i}.py" for i in range(10)], []
+            return [f"tests/test_extra_{i}.py" for i in range(10)], []
         if s == "spec2":
-            return [f"tests/last_{i}.py" for i in range(5)], []
+            return [f"tests/test_last_{i}.py" for i in range(5)], []
         return [s], []
 
     m_norm.side_effect = _fake_norm
@@ -123,7 +139,7 @@ def test_selection_over_200_whole_spec_retained(tmp_path: Path, mock_deps) -> No
     receipt = run_candidate_tests(tmp_path, task, VALID_WORKER, VALID_SHA)
     assert len(receipt["selectors"]) == 200
     assert receipt["selectors"][:195] == [f"tests/test_{i}.py" for i in range(195)]
-    assert receipt["selectors"][195:] == [f"tests/last_{i}.py" for i in range(5)]
+    assert receipt["selectors"][195:] == [f"tests/test_last_{i}.py" for i in range(5)]
     assert receipt["unsupported_specs"] == ["spec_over"]
     assert not any("extra" in s for s in receipt["selectors"])
 
@@ -226,3 +242,154 @@ def test_malformed_sandbox_result(tmp_path: Path, mock_deps, bad_result: object,
     m_run.return_value = bad_result
     with pytest.raises(SandboxError, match=re.escape(match)):
         run_candidate_tests(tmp_path, VALID_TASK, VALID_WORKER, VALID_SHA)
+
+
+def test_validate_test_receipt_pass_and_fail() -> None:
+    res_pass = validate_test_receipt(VALID_RECEIPT, VALID_SHA)
+    assert res_pass == VALID_RECEIPT
+    assert res_pass["state"] == "PASSED"
+    assert res_pass["returncode"] == 0
+
+    failed_receipt = {
+        **VALID_RECEIPT,
+        "state": "FAILED",
+        "returncode": 1,
+        "unsupported_specs": ["tests/unsupported.py"],
+    }
+    res_fail = validate_test_receipt(failed_receipt, VALID_SHA, require_passed=False)
+    assert res_fail["state"] == "FAILED"
+    assert res_fail["returncode"] == 1
+    assert res_fail["unsupported_specs"] == ["tests/unsupported.py"]
+
+
+def test_validate_test_receipt_no_mutation_and_copy_semantics() -> None:
+    selectors = ["tests/test_a.py"]
+    unsupported = ["tests/test_b.py"]
+    receipt = {
+        **VALID_RECEIPT,
+        "selectors": selectors,
+        "unsupported_specs": unsupported,
+    }
+    res = validate_test_receipt(receipt, VALID_SHA)
+    assert res == receipt
+    assert res is not receipt
+    assert res["selectors"] is not selectors
+    assert res["unsupported_specs"] is not unsupported
+
+    receipt["selectors"].append("tests/test_c.py")
+    receipt["unsupported_specs"].append("tests/test_d.py")
+    assert res["selectors"] == ["tests/test_a.py"]
+    assert res["unsupported_specs"] == ["tests/test_b.py"]
+
+    res["selectors"].append("tests/test_e.py")
+    assert selectors == ["tests/test_a.py", "tests/test_c.py"]
+
+
+def test_validate_test_receipt_require_passed() -> None:
+    res = validate_test_receipt(VALID_RECEIPT, VALID_SHA, require_passed=True)
+    assert res["state"] == "PASSED"
+
+    failed_receipt = {**VALID_RECEIPT, "state": "FAILED", "returncode": 2}
+    with pytest.raises(SandboxError, match="receipt state must be PASSED when require_passed=True"):
+        validate_test_receipt(failed_receipt, VALID_SHA, require_passed=True)
+
+    for bad_rp in ("True", 1, None, [True]):
+        with pytest.raises(SandboxError, match="require_passed must be a bool"):
+            validate_test_receipt(VALID_RECEIPT, VALID_SHA, require_passed=bad_rp)
+
+
+@pytest.mark.parametrize("bad_sha", ["bad", "A" * 64, 123, None, " " * 64])
+def test_validate_test_receipt_bad_arg_sha(bad_sha) -> None:
+    with pytest.raises(SandboxError, match="proposal_sha256 must be a lowercase 64-hex SHA"):
+        validate_test_receipt(VALID_RECEIPT, bad_sha)
+
+
+@pytest.mark.parametrize(
+    ("corrupt_fn", "match"),
+    [
+        (lambda r: "not-a-mapping", "receipt must be a mapping"),
+        (lambda r: 123, "receipt must be a mapping"),
+        (lambda r: None, "receipt must be a mapping"),
+        (lambda r: {k: v for k, v in r.items() if k != "state"}, "receipt keys must match expected schema exactly"),
+        (lambda r: {k: v for k, v in r.items() if k != "proposal_sha256"}, "receipt keys must match expected schema exactly"),
+        (lambda r: {k: v for k, v in r.items() if k != "selectors"}, "receipt keys must match expected schema exactly"),
+        (lambda r: {k: v for k, v in r.items() if k != "unsupported_specs"}, "receipt keys must match expected schema exactly"),
+        (lambda r: {k: v for k, v in r.items() if k != "returncode"}, "receipt keys must match expected schema exactly"),
+        (lambda r: {k: v for k, v in r.items() if k != "stdout_tail"}, "receipt keys must match expected schema exactly"),
+        (lambda r: {k: v for k, v in r.items() if k != "stderr_tail"}, "receipt keys must match expected schema exactly"),
+        (lambda r: {k: v for k, v in r.items() if k != "snapshot_files"}, "receipt keys must match expected schema exactly"),
+        (lambda r: {k: v for k, v in r.items() if k != "snapshot_bytes"}, "receipt keys must match expected schema exactly"),
+        (lambda r: {k: v for k, v in r.items() if k != "isolation"}, "receipt keys must match expected schema exactly"),
+        (lambda r: {**r, "extra": 1}, "receipt keys must match expected schema exactly"),
+        (lambda r: {**r, "proposal_sha256": "badsha"}, "receipt proposal_sha256 must be a lowercase 64-hex SHA"),
+        (lambda r: {**r, "proposal_sha256": "A" * 64}, "receipt proposal_sha256 must be a lowercase 64-hex SHA"),
+        (lambda r: {**r, "proposal_sha256": 123}, "receipt proposal_sha256 must be a lowercase 64-hex SHA"),
+        (lambda r: {**r, "proposal_sha256": "1" * 64}, "receipt proposal_sha256 does not match expected SHA"),
+        (lambda r: {**r, "returncode": True}, "receipt returncode must be a non-bool integer"),
+        (lambda r: {**r, "returncode": False}, "receipt returncode must be a non-bool integer"),
+        (lambda r: {**r, "returncode": "0"}, "receipt returncode must be a non-bool integer"),
+        (lambda r: {**r, "returncode": None}, "receipt returncode must be a non-bool integer"),
+        (lambda r: {**r, "state": 123}, "receipt state must be a string"),
+        (lambda r: {**r, "state": "UNKNOWN"}, "receipt state must be PASSED or FAILED"),
+        (lambda r: {**r, "state": "PASSED", "returncode": 1}, "receipt state PASSED requires returncode 0"),
+        (lambda r: {**r, "state": "FAILED", "returncode": 0}, "receipt state FAILED requires nonzero returncode"),
+        (lambda r: {**r, "selectors": "tests/test_a.py"}, "receipt selectors must be a list"),
+        (lambda r: {**r, "selectors": ("tests/test_a.py",)}, "receipt selectors must be a list"),
+        (lambda r: {**r, "selectors": []}, "explicit bounded pytest selectors required"),
+        (lambda r: {**r, "selectors": [f"tests/test_{i}.py" for i in range(201)]}, "explicit bounded pytest selectors required"),
+        (lambda r: {**r, "selectors": ["tests/test_a.py", "tests/test_a.py"]}, "duplicate pytest selector"),
+        (lambda r: {**r, "selectors": ["invalid_selector"]}, "unsupported pytest selector or option"),
+        (lambda r: {**r, "selectors": ["tests/test_a.py/../test_a.py"]}, "source path escapes the assigned worktree"),
+        (lambda r: {**r, "unsupported_specs": "tests/test_b.py"}, "receipt unsupported_specs must be a list"),
+        (lambda r: {**r, "unsupported_specs": ("tests/test_b.py",)}, "receipt unsupported_specs must be a list"),
+        (lambda r: {**r, "unsupported_specs": [f"spec_{i}" for i in range(33)]}, "receipt unsupported_specs cannot exceed 32 entries"),
+        (lambda r: {**r, "unsupported_specs": ["spec1", "spec1"]}, "receipt unsupported_specs entries must be unique"),
+        (lambda r: {**r, "unsupported_specs": [""]}, "receipt unsupported_specs entries must be nonempty strings"),
+        (lambda r: {**r, "unsupported_specs": [123]}, "receipt unsupported_specs entries must be nonempty strings"),
+        (lambda r: {**r, "unsupported_specs": ["\ud800"]}, "receipt unsupported_specs entries must be valid UTF-8"),
+        (lambda r: {**r, "stdout_tail": 123}, "receipt stdout_tail must be a string"),
+        (lambda r: {**r, "stdout_tail": b"ok"}, "receipt stdout_tail must be a string"),
+        (lambda r: {**r, "stdout_tail": "\ud800"}, "receipt stdout_tail must be valid UTF-8"),
+        (lambda r: {**r, "stdout_tail": "a" * 8193}, "receipt stdout_tail exceeds 8192 bytes"),
+        (lambda r: {**r, "stderr_tail": None}, "receipt stderr_tail must be a string"),
+        (lambda r: {**r, "stderr_tail": "\ud800"}, "receipt stderr_tail must be valid UTF-8"),
+        (lambda r: {**r, "stderr_tail": "a" * 8193}, "receipt stderr_tail exceeds 8192 bytes"),
+        (lambda r: {**r, "snapshot_files": True}, "receipt snapshot_files must be a non-negative integer"),
+        (lambda r: {**r, "snapshot_files": -1}, "receipt snapshot_files must be a non-negative integer"),
+        (lambda r: {**r, "snapshot_files": 1.5}, "receipt snapshot_files must be a non-negative integer"),
+        (lambda r: {**r, "snapshot_files": "1"}, "receipt snapshot_files must be a non-negative integer"),
+        (lambda r: {**r, "snapshot_bytes": False}, "receipt snapshot_bytes must be a non-negative integer"),
+        (lambda r: {**r, "snapshot_bytes": -1}, "receipt snapshot_bytes must be a non-negative integer"),
+        (lambda r: {**r, "snapshot_bytes": None}, "receipt snapshot_bytes must be a non-negative integer"),
+        (lambda r: {**r, "isolation": ""}, "receipt isolation must be a non-empty string"),
+        (lambda r: {**r, "isolation": 123}, "receipt isolation must be a non-empty string"),
+        (lambda r: {**r, "isolation": "\ud800"}, "receipt isolation must be valid UTF-8"),
+    ],
+)
+def test_validate_test_receipt_invariants(corrupt_fn, match: str) -> None:
+    bad_receipt = corrupt_fn(dict(VALID_RECEIPT))
+    with pytest.raises(SandboxError, match=re.escape(match)):
+        validate_test_receipt(bad_receipt, VALID_SHA)
+
+
+def test_run_candidate_tests_self_validation_success_and_spy(tmp_path: Path, mock_deps) -> None:
+    with patch(
+        "scripts.two_site_pre_review_receipt.validate_test_receipt",
+        wraps=validate_test_receipt,
+    ) as m_validate:
+        receipt = run_candidate_tests(tmp_path, VALID_TASK, VALID_WORKER, VALID_SHA)
+        assert receipt["state"] == "PASSED"
+        m_validate.assert_called_once()
+        call_args = m_validate.call_args[0]
+        assert call_args[0]["proposal_sha256"] == VALID_SHA
+        assert call_args[1] == VALID_SHA
+
+
+def test_run_candidate_tests_self_validation_fails_on_corrupt_tail(tmp_path: Path, mock_deps) -> None:
+    _, _, m_run = mock_deps
+    with patch(
+        "scripts.two_site_pre_review_receipt._bound_utf8_tail",
+        return_value="\ud800",
+    ):
+        with pytest.raises(SandboxError, match="receipt stdout_tail must be valid UTF-8"):
+            run_candidate_tests(tmp_path, VALID_TASK, VALID_WORKER, VALID_SHA)

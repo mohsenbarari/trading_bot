@@ -7,10 +7,18 @@ from typing import Any, Mapping
 
 try:
     from scripts import two_site_agent_sandbox
-    from scripts.two_site_agent_sandbox import SandboxError, _validate_overlay_path
+    from scripts.two_site_agent_sandbox import (
+        SandboxError,
+        _validate_overlay_path,
+        selectors as sandbox_selectors,
+    )
 except ImportError:
     import two_site_agent_sandbox
-    from two_site_agent_sandbox import SandboxError, _validate_overlay_path
+    from two_site_agent_sandbox import (
+        SandboxError,
+        _validate_overlay_path,
+        selectors as sandbox_selectors,
+    )
 
 try:
     from scripts.two_site_pre_review_tests import (
@@ -23,10 +31,22 @@ except ImportError:
         tracked_test_inventory,
     )
 
-__all__ = ["run_candidate_tests"]
+__all__ = ["run_candidate_tests", "validate_test_receipt"]
 
 MAX_SPECS, MAX_CHANGES, MAX_SELECTORS, MAX_TAIL_BYTES = 32, 32, 200, 8192
 SHA_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+EXPECTED_RECEIPT_KEYS = frozenset({
+    "state",
+    "proposal_sha256",
+    "selectors",
+    "unsupported_specs",
+    "returncode",
+    "stdout_tail",
+    "stderr_tail",
+    "snapshot_files",
+    "snapshot_bytes",
+    "isolation",
+})
 
 
 def _bound_utf8_tail(text: str, max_bytes: int = MAX_TAIL_BYTES) -> str:
@@ -40,6 +60,105 @@ def _bound_utf8_tail(text: str, max_bytes: int = MAX_TAIL_BYTES) -> str:
         except UnicodeDecodeError:
             continue
     return tail.decode("utf-8", errors="ignore")
+
+
+def validate_test_receipt(
+    receipt: Mapping[str, Any],
+    proposal_sha256: str,
+    require_passed: bool = False,
+) -> dict[str, Any]:
+    """Validate persisted test receipt schema and return normalized copy."""
+    if not isinstance(receipt, Mapping) or isinstance(receipt, (str, bytes)):
+        raise SandboxError("receipt must be a mapping")
+    if not isinstance(require_passed, bool):
+        raise SandboxError("require_passed must be a bool")
+    if set(receipt.keys()) != EXPECTED_RECEIPT_KEYS:
+        raise SandboxError("receipt keys must match expected schema exactly")
+
+    if not isinstance(proposal_sha256, str) or not SHA_PATTERN.fullmatch(proposal_sha256):
+        raise SandboxError("proposal_sha256 must be a lowercase 64-hex SHA")
+    receipt_sha = receipt["proposal_sha256"]
+    if not isinstance(receipt_sha, str) or not SHA_PATTERN.fullmatch(receipt_sha):
+        raise SandboxError("receipt proposal_sha256 must be a lowercase 64-hex SHA")
+    if receipt_sha != proposal_sha256:
+        raise SandboxError("receipt proposal_sha256 does not match expected SHA")
+
+    rc = receipt["returncode"]
+    if not isinstance(rc, int) or isinstance(rc, bool):
+        raise SandboxError("receipt returncode must be a non-bool integer")
+    state = receipt["state"]
+    if not isinstance(state, str):
+        raise SandboxError("receipt state must be a string")
+    if state == "PASSED":
+        if rc != 0:
+            raise SandboxError("receipt state PASSED requires returncode 0")
+    elif state == "FAILED":
+        if rc == 0:
+            raise SandboxError("receipt state FAILED requires nonzero returncode")
+    else:
+        raise SandboxError("receipt state must be PASSED or FAILED")
+
+    if require_passed and state != "PASSED":
+        raise SandboxError("receipt state must be PASSED when require_passed=True")
+
+    raw_selectors = receipt["selectors"]
+    if not isinstance(raw_selectors, list):
+        raise SandboxError("receipt selectors must be a list")
+    sandbox_selectors(raw_selectors)
+
+    raw_unsupported = receipt["unsupported_specs"]
+    if not isinstance(raw_unsupported, list):
+        raise SandboxError("receipt unsupported_specs must be a list")
+    if len(raw_unsupported) > MAX_SPECS:
+        raise SandboxError("receipt unsupported_specs cannot exceed 32 entries")
+    seen_specs: set[str] = set()
+    for spec in raw_unsupported:
+        if not isinstance(spec, str) or not spec:
+            raise SandboxError("receipt unsupported_specs entries must be nonempty strings")
+        try:
+            spec.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise SandboxError("receipt unsupported_specs entries must be valid UTF-8") from exc
+        if spec in seen_specs:
+            raise SandboxError("receipt unsupported_specs entries must be unique")
+        seen_specs.add(spec)
+
+    for key in ("stdout_tail", "stderr_tail"):
+        val = receipt[key]
+        if not isinstance(val, str):
+            raise SandboxError(f"receipt {key} must be a string")
+        try:
+            encoded = val.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise SandboxError(f"receipt {key} must be valid UTF-8") from exc
+        if len(encoded) > MAX_TAIL_BYTES:
+            raise SandboxError(f"receipt {key} exceeds {MAX_TAIL_BYTES} bytes")
+
+    for key in ("snapshot_files", "snapshot_bytes"):
+        val = receipt[key]
+        if not isinstance(val, int) or isinstance(val, bool) or val < 0:
+            raise SandboxError(f"receipt {key} must be a non-negative integer")
+
+    isolation = receipt["isolation"]
+    if not isinstance(isolation, str) or not isolation:
+        raise SandboxError("receipt isolation must be a non-empty string")
+    try:
+        isolation.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise SandboxError("receipt isolation must be valid UTF-8") from exc
+
+    return {
+        "state": state,
+        "proposal_sha256": receipt_sha,
+        "selectors": list(raw_selectors),
+        "unsupported_specs": list(raw_unsupported),
+        "returncode": rc,
+        "stdout_tail": receipt["stdout_tail"],
+        "stderr_tail": receipt["stderr_tail"],
+        "snapshot_files": receipt["snapshot_files"],
+        "snapshot_bytes": receipt["snapshot_bytes"],
+        "isolation": isolation,
+    }
 
 
 def run_candidate_tests(
@@ -162,7 +281,7 @@ def run_candidate_tests(
     if not isinstance(isolation, str) or not isolation:
         raise SandboxError("malformed sandbox result: isolation must be non-empty str")
 
-    return {
+    receipt = {
         "state": "PASSED" if rc == 0 else "FAILED",
         "proposal_sha256": proposal_sha256,
         "selectors": chosen_selectors,
@@ -174,3 +293,4 @@ def run_candidate_tests(
         "snapshot_bytes": snapshot_bytes,
         "isolation": isolation,
     }
+    return validate_test_receipt(receipt, proposal_sha256)
