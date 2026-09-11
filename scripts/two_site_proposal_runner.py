@@ -55,6 +55,17 @@ except ImportError:
         validate_change_mode,
     )
 
+try:
+    from scripts.two_site_correction_delta import (
+        build_candidate_sources,
+        rebase_correction_result,
+    )
+except ImportError:
+    from two_site_correction_delta import (
+        build_candidate_sources,
+        rebase_correction_result,
+    )
+
 ROOT = Path(__file__).resolve().parents[1]
 MAX_CONTEXT = 160_000
 MAX_OUTPUT = 2_000_000
@@ -1001,6 +1012,8 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
     prior_status = None
     prompt_material = material
     review_transport_sha = None
+    candidate_sources = None
+    candidate_sources_sha256 = None
     if proposal is not None:
         candidate, prior_status, proposal_sha256 = load_prior_worker(
             root, proposal, material["proposal"], task, sources, head
@@ -1011,6 +1024,20 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             material["feedback"] = validate_correction_feedback(
                 material["feedback"], proposal_sha256
             )
+            candidate_sources = build_candidate_sources(
+                task["allowed_files"], sources, candidate["changes"]
+            )
+            candidate_sources_sha256 = sha(serialize_json(candidate_sources))
+            prompt_material = {
+                "task": task,
+                "source_head": head,
+                "sources": candidate_sources,
+                "feedback": material["feedback"],
+                "prior_identity": {
+                    "run_id": prior_status["run_id"],
+                    "proposal_sha256": proposal_sha256,
+                },
+            }
         elif role == "verifier":
             review_proposal = build_review_transport(candidate, sources, proposal_sha256)
             review_transport_bytes = serialize_json(review_proposal)
@@ -1057,11 +1084,14 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             meta["input_feedback_sha256"] = input_hashes["feedback"]
         if review_transport_sha is not None:
             meta["review_transport_sha256"] = review_transport_sha
+        if candidate_sources_sha256 is not None:
+            meta["candidate_sources_sha256"] = candidate_sources_sha256
         write_json(out / "status.json", meta)
+        active_sources = candidate_sources if candidate_sources is not None else sources
         command = [str(disposable_cli), "--mode", "plan", "--sandbox", "--model", MODEL,
                    "--effort", EFFORT, "--input-format", "stream-json",
                    "--output-format", "stream-json", "--print-timeout", f"{timeout}s",
-                   "--json-schema", json.dumps(schema(role, task, sources))]
+                   "--json-schema", json.dumps(schema(role, task, active_sources))]
         try:
             # Auth belongs to the CLI. No credential files are read or copied here.
             with subprocess.Popen(command, cwd=workspace, stdin=subprocess.PIPE,
@@ -1083,7 +1113,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             if final_cli_identity != initial_cli_identity:
                 raise ProposalError("CLI identity changed during generation")
             raw = bounded_file_text(root, out / "stream.jsonl", MAX_OUTPUT, "CLI event stream")
-            result, envelope = parse_stream(raw, task, sources, role)
+            result, envelope = parse_stream(raw, task, active_sources, role)
             if (prior_status is not None
                     and envelope["conversation_id"] == prior_status["conversation_id"]):
                 raise ProposalError("review/correction reused the worker session")
@@ -1093,6 +1123,19 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             current_task, current_sources = load_task(root, task_path)
             if current_task != task or current_sources != sources:
                 raise ProposalError("task or source bytes changed during generation")
+            if candidate_sources is not None:
+                if result.get("status") != "PROPOSAL_READY":
+                    raise ProposalError("correction delta proposal is not ready")
+                delta_result = result
+                rebased = rebase_correction_result(
+                    delta_result, task["allowed_files"], sources, candidate_sources
+                )
+                rebased = validate_result(rebased, task, sources, role)
+                if len(serialize_json(rebased)) > MAX_CONTEXT:
+                    raise ProposalError("canonical proposal exceeds the safe context budget")
+                write_json(out / "delta-result.json", delta_result)
+                meta["delta_result_sha256"] = file_sha256(out / "delta-result.json")
+                result = rebased
             write_json(out / "result.json", result)
             (out / "proposal.patch").write_text(proposal_diff(result["changes"], sources))
             meta.update(state=result["status"], conversation_id=envelope["conversation_id"],
