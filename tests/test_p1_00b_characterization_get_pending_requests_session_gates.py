@@ -524,6 +524,195 @@ class CharacterizationGetPendingRequestsSessionGatesTests(unittest.IsolatedAsync
         self.assertEqual(FENCE["denied_connects"], denied_before)
         self.assertEqual(FENCE["live_redis_constructs"], redis_before)
 
+    async def test_get_pending_requests_no_authorization_header_queries_pending(self) -> None:
+        denied_before = copy.copy(FENCE["denied_connects"])
+        redis_before = copy.copy(FENCE["live_redis_constructs"])
+
+        user_id = 99
+        current_user = SimpleNamespace(id=user_id)
+        request = StrictFakeRequest({})
+
+        observed_events: list[str] = []
+
+        async def fake_guard(db_arg: object, user_arg: object) -> None:
+            observed_events.append("ensure_non_accountant_session_management")
+
+        def fake_jwt_decode(*args: object, **kwargs: object) -> dict[str, object]:
+            observed_events.append("jwt_decode")
+            raise AssertionError("jose.jwt.decode must not be called when Authorization header is absent")
+
+        def on_db_execute(stmt: object) -> None:
+            observed_events.append("db_execute")
+
+        execute_result = StrictFakeExecuteResult(items=[])
+        db = StrictFakeAsyncDB([execute_result], on_execute=on_db_execute)
+        guard_mock = AsyncMock(side_effect=fake_guard)
+
+        with (
+            patch("api.routers.sessions.datetime", PinnedDateTime),
+            patch(
+                "api.routers.sessions.ensure_non_accountant_session_management",
+                new=guard_mock,
+            ),
+            patch("jose.jwt.decode", side_effect=fake_jwt_decode) as decode_mock,
+        ):
+            result = await get_pending_requests(
+                request=request,
+                db=db,
+                current_user=current_user,
+            )
+
+        # 1. Result is exactly an empty list
+        self.assertEqual(result, [])
+        self.assertIsInstance(result, list)
+
+        # 2. jose.jwt.decode is never called
+        decode_mock.assert_not_called()
+        self.assertNotIn("jwt_decode", observed_events)
+
+        # 3. Guard assertions
+        guard_mock.assert_awaited_once_with(db, current_user)
+        self.assertIs(guard_mock.await_args[0][0], db)
+        self.assertIs(guard_mock.await_args[0][1], current_user)
+
+        # 4. Strict execution ordering: guard completes first before DB execute
+        self.assertEqual(
+            observed_events,
+            [
+                "ensure_non_accountant_session_management",
+                "db_execute",
+            ],
+        )
+        guard_idx = observed_events.index("ensure_non_accountant_session_management")
+        db_idx = observed_events.index("db_execute")
+        self.assertLess(guard_idx, db_idx)
+
+        # 5. DB statement execution and result consumption:
+        # Exactly one execute call (SessionLoginRequest SELECT), no UserSession SELECT
+        self.assertEqual(len(db.executed_statements), 1)
+        self.assertEqual(len(db.queued_results), 0)
+        self.assertEqual(execute_result.scalars_called, 1)
+        self.assertIsNotNone(execute_result.scalars_instance)
+        self.assertEqual(execute_result.scalars_instance._all_called, 1)
+        self.assertEqual(execute_result.scalar_one_or_none_called, 0)
+
+        # 6. Verify SessionLoginRequest statement with pinned clock
+        self._assert_pending_login_requests_select(
+            db.executed_statements[0], user_id, PINNED_UTC_NOW
+        )
+
+        # 7. Strict header double assertion: exact lookup performed
+        self.assertEqual(
+            request.headers.get_calls,
+            [("authorization", "")],
+        )
+
+        # 8. Zero mutations and network fence unchanged
+        self.assertEqual(db.add_count, 0)
+        self.assertEqual(db.delete_count, 0)
+        self.assertEqual(db.flush_count, 0)
+        self.assertEqual(db.commit_count, 0)
+        self.assertEqual(db.rollback_count, 0)
+        self.assertEqual(db.refresh_count, 0)
+        self.assertEqual(FENCE["denied_connects"], denied_before)
+        self.assertEqual(FENCE["live_redis_constructs"], redis_before)
+
+    async def test_get_pending_requests_malformed_token_sid_raises_value_error_before_db(self) -> None:
+        denied_before = copy.copy(FENCE["denied_connects"])
+        redis_before = copy.copy(FENCE["live_redis_constructs"])
+
+        user_id = 101
+        current_user = SimpleNamespace(id=user_id)
+        raw_token = "synthetic-token-malformed-sid-c17"
+        malformed_sid = "malformed-sid-not-a-valid-uuid"
+        request = StrictFakeRequest({"authorization": f"Bearer {raw_token}"})
+
+        observed_events: list[str] = []
+
+        async def fake_guard(db_arg: object, user_arg: object) -> None:
+            observed_events.append("ensure_non_accountant_session_management")
+
+        def fake_jwt_decode(*args: object, **kwargs: object) -> dict[str, object]:
+            observed_events.append("jwt_decode")
+            return {"sid": malformed_sid}
+
+        def on_db_execute(stmt: object) -> None:
+            observed_events.append("db_execute")
+
+        db = StrictFakeAsyncDB([], on_execute=on_db_execute)
+        guard_mock = AsyncMock(side_effect=fake_guard)
+
+        with (
+            patch(
+                "api.routers.sessions.ensure_non_accountant_session_management",
+                new=guard_mock,
+            ),
+            patch("jose.jwt.decode", side_effect=fake_jwt_decode) as decode_mock,
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                await get_pending_requests(
+                    request=request,
+                    db=db,
+                    current_user=current_user,
+                )
+
+        # 1. ValueError escaped from uuid.UUID
+        self.assertIsInstance(ctx.exception, ValueError)
+        self.assertIn("badly formed", str(ctx.exception).lower())
+
+        # 2. JWT decode signature assertion with authoritative settings
+        decode_mock.assert_called_once_with(
+            raw_token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+        self.assertEqual(
+            decode_mock.call_args[0],
+            (raw_token, settings.jwt_secret_key),
+        )
+        self.assertEqual(
+            decode_mock.call_args[1],
+            {"algorithms": [settings.jwt_algorithm]},
+        )
+
+        # 3. Guard assertions
+        guard_mock.assert_awaited_once_with(db, current_user)
+        self.assertIs(guard_mock.await_args[0][0], db)
+        self.assertIs(guard_mock.await_args[0][1], current_user)
+
+        # 4. Strict execution ordering: guard completes before JWT decode and before any DB execute
+        self.assertEqual(
+            observed_events,
+            [
+                "ensure_non_accountant_session_management",
+                "jwt_decode",
+            ],
+        )
+        guard_idx = observed_events.index("ensure_non_accountant_session_management")
+        jwt_idx = observed_events.index("jwt_decode")
+        self.assertLess(guard_idx, jwt_idx)
+        self.assertNotIn("db_execute", observed_events)
+
+        # 5. DB statement execution: failure occurs before every db.execute, zero statements executed
+        self.assertEqual(len(db.executed_statements), 0)
+        self.assertEqual(db.executed_statements, [])
+
+        # 6. Strict header double assertion
+        self.assertEqual(
+            request.headers.get_calls,
+            [("authorization", "")],
+        )
+
+        # 7. Zero mutations and network fence unchanged
+        self.assertEqual(db.add_count, 0)
+        self.assertEqual(db.delete_count, 0)
+        self.assertEqual(db.flush_count, 0)
+        self.assertEqual(db.commit_count, 0)
+        self.assertEqual(db.rollback_count, 0)
+        self.assertEqual(db.refresh_count, 0)
+        self.assertEqual(FENCE["denied_connects"], denied_before)
+        self.assertEqual(FENCE["live_redis_constructs"], redis_before)
+
 
 if __name__ == "__main__":
     unittest.main()
