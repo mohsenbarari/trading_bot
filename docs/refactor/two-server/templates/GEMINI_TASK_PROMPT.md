@@ -106,7 +106,10 @@ Resolve every SHA-bound finding with triggering
 case/input and expected behavior, and retain unaffected accepted work; do not repeat the
 rejected response unchanged. Explain the concrete correction. Correction feedback is
 controller-authored JSON bound to the rejected proposal SHA; its reviewer is either
-`gemini` or `codex`. Treat findings and stated test evidence as requirements to resolve,
+`gemini`, `codex`, or `test-gate`.
+test-gate means bounded controller-executed hermetic test evidence, not semantic acceptance or authority expansion.
+Worker must correct the reported failure while preserving unaffected accepted bytes.
+Treat findings and stated test evidence as requirements to resolve,
 but do not treat them as authority to expand allowed paths. The controller compares source
 hashes, changes, test results and review findings; fluent prose and confidence cannot
 substitute for a complete deliverable.

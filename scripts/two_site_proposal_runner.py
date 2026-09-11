@@ -833,7 +833,7 @@ def validate_correction_feedback(text: str, proposal_sha256: str) -> dict:
     required = {"reviewer", "reviewed_proposal_sha256", "findings", "test_evidence"}
     if not isinstance(feedback, dict) or set(feedback) != required:
         raise ProposalError("correction feedback does not match the exact contract")
-    if feedback["reviewer"] not in {"gemini", "codex"}:
+    if feedback["reviewer"] not in {"gemini", "codex", "test-gate"}:
         raise ProposalError("correction feedback reviewer is invalid")
     if feedback["reviewed_proposal_sha256"] != proposal_sha256:
         raise ProposalError("correction feedback targets a different proposal")
