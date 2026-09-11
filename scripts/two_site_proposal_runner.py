@@ -66,6 +66,11 @@ except ImportError:
         rebase_correction_result,
     )
 
+try:
+    from scripts.two_site_pre_review_receipt import validate_test_receipt
+except ImportError:
+    from two_site_pre_review_receipt import validate_test_receipt
+
 ROOT = Path(__file__).resolve().parents[1]
 MAX_CONTEXT = 160_000
 MAX_OUTPUT = 2_000_000
@@ -982,7 +987,7 @@ def write_json(path: Path, value: dict) -> None:
 
 def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         feedback: Path | None = None, proposal: Path | None = None,
-        cli: Path | None = None) -> Path:
+        cli: Path | None = None, test_evidence: Path | None = None) -> Path:
     root = root.resolve(strict=True)
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", run_id) or not 10 <= timeout <= 900:
         raise ProposalError("invalid run ID or timeout")
@@ -996,7 +1001,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
     initial_status = git(root, "status", "--porcelain=v1", "--untracked-files=all")
     material = {"task": task, "source_head": head, "sources": sources}
     input_hashes = {}
-    for key, path in (("feedback", feedback), ("proposal", proposal)):
+    for key, path in (("feedback", feedback), ("proposal", proposal), ("test_evidence", test_evidence)):
         if path is not None:
             content = bounded_file_text(root, path, MAX_CONTEXT, key)
             if SECRET.search(content):
@@ -1009,6 +1014,8 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         raise ProposalError("first-pass Gemini verifier does not accept feedback")
     if role == "worker" and ((feedback is None) != (proposal is None)):
         raise ProposalError("correction worker requires both proposal and feedback")
+    if test_evidence is not None and (role != "verifier" or proposal is None):
+        raise ProposalError("test evidence is only allowed for verifier with a proposal")
     prior_status = None
     prompt_material = material
     review_transport_sha = None
@@ -1050,6 +1057,13 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 "sources": sources,
                 "proposal": review_proposal,
             }
+            if test_evidence is not None:
+                receipt = unique_json(material["test_evidence"])
+                normalized_receipt = validate_test_receipt(
+                    receipt, proposal_sha256, require_passed=True
+                )
+                prompt_material["pre_review_test_evidence"] = normalized_receipt
+                material["test_evidence"] = normalized_receipt
     prompt = bounded_file_text(
         ROOT, ROOT / "docs/refactor/two-server/templates/GEMINI_TASK_PROMPT.md",
         MAX_CONTEXT, "prompt template",
@@ -1082,6 +1096,8 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             )
         if feedback is not None:
             meta["input_feedback_sha256"] = input_hashes["feedback"]
+        if test_evidence is not None:
+            meta["input_test_evidence_sha256"] = input_hashes["test_evidence"]
         if review_transport_sha is not None:
             meta["review_transport_sha256"] = review_transport_sha
         if candidate_sources_sha256 is not None:
@@ -1161,18 +1177,20 @@ def main() -> int:
     parser.add_argument("--feedback", type=Path)
     parser.add_argument("--proposal", type=Path)
     parser.add_argument("--cli", type=Path, help="existing Antigravity executable (controller-owned)")
+    parser.add_argument("--test-evidence", type=Path)
     args = parser.parse_args()
     if args.role in ("worker", "verifier") and args.run_id is None:
         parser.error("the following arguments are required: --run-id")
     try:
         if args.role == "check":
             if (args.run_id is not None or args.feedback is not None
-                    or args.proposal is not None or args.cli is not None):
-                raise ProposalError("check mode does not accept run-id, feedback, proposal, or cli arguments")
+                    or args.proposal is not None or args.cli is not None
+                    or args.test_evidence is not None):
+                raise ProposalError("check mode does not accept run-id, feedback, proposal, cli, or test-evidence arguments")
             payload = check(args.root, args.task)
             print(json.dumps(payload))
             return 0
-        out = run(args.root, args.task, args.role, args.run_id, args.timeout, args.feedback, args.proposal, args.cli)
+        out = run(args.root, args.task, args.role, args.run_id, args.timeout, args.feedback, args.proposal, args.cli, test_evidence=args.test_evidence)
         meta = unique_json(bounded_file_text(
             args.root.resolve(strict=True), out / "status.json", MAX_CONTEXT, "run status"
         ))
