@@ -623,6 +623,14 @@ def validate_transition(
     result: dict,
 ) -> dict[str, object]:
     after = validate_repository(root, require_clean=True)
+    before_scope = before.get("assignment_scope")
+    after_scope = after.get("assignment_scope")
+    if (
+        not isinstance(before_scope, AssignmentScope)
+        or not isinstance(after_scope, AssignmentScope)
+        or before_scope != after_scope
+    ):
+        raise AutopilotError("active assignment scope changed during cycle")
     if after["protected_refs"] != before["protected_refs"]:
         raise AutopilotError("a protected main/origin/candidate ref changed during the cycle")
     if after["control_blobs"] != before["control_blobs"]:
@@ -637,8 +645,8 @@ def validate_transition(
             raise AutopilotError("cycle rewrote or diverged integration history") from exc
         if result["commit"] != after_head:
             raise AutopilotError("reported commit does not equal the final integration HEAD")
-        proposal = validate_gemini_chain(root, before_head, result)
-        validate_committed_proposal(root, before_head, after_head, proposal)
+        proposal = validate_scoped_gemini_chain(root, before_head, result, before_scope)
+        validate_scoped_committed_proposal(root, before_head, after_head, proposal, before_scope)
     elif result["commit"] is not None:
         raise AutopilotError("cycle reported a commit without changing integration HEAD")
     if result["state"] == "CONTINUE" and not changed:
