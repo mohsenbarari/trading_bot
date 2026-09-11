@@ -13,6 +13,10 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from scripts import two_site_proposal_runner as runner
+try:
+    from scripts.two_site_correction_delta import CorrectionDeltaError
+except ImportError:
+    from two_site_correction_delta import CorrectionDeltaError
 
 
 class ProposalContracts(unittest.TestCase):
@@ -1252,6 +1256,245 @@ class ProposalContracts(unittest.TestCase):
         # No .tmp file remains after atomic replacement
         self.assertFalse(tmp_target.exists())
         self.assertEqual(list(self.root.glob("*.tmp")), [])
+
+    def test_correction_delta_rebasing_and_persisted_evidence(self):
+        self.task["allowed_files"] = ["source.py", "test_new.py"]
+        self.save_task()
+        _, self.sources = runner.load_task(self.root, self.task_path)
+        source_sha = self.sources["source.py"]["sha256"]
+        self.assertIsNotNone(source_sha)
+        self.assertIsNone(self.sources["test_new.py"]["sha256"])
+
+        prior_changes = [
+            {
+                "path": "test_new.py",
+                "original_sha256": None,
+                "content": "assert 1 == 1\n",
+            },
+            {
+                "path": "source.py",
+                "original_sha256": source_sha,
+                "content": "VALUE = 2\n",
+            },
+        ]
+        prior_result = {
+            "status": "PROPOSAL_READY",
+            "summary": "Prior proposal changing both allowed files.",
+            "covered_requirements": [1, 2],
+            "findings": [],
+            "changes": prior_changes,
+        }
+        prior_proposal = self.worker_evidence(
+            self.root / "prior-worker-delta",
+            result=prior_result,
+            conversation_id="worker-delta-session",
+        )
+        prior_proposal_sha = runner.file_sha256(prior_proposal)
+        prior_proposal_text = prior_proposal.read_text()
+
+        feedback = self.root / "feedback-delta.json"
+        runner.write_json(feedback, {
+            "reviewer": "codex",
+            "reviewed_proposal_sha256": prior_proposal_sha,
+            "findings": ["test_new.py assertion must verify VALUE == 2"],
+            "test_evidence": ["assertion failed on 1 != 2"],
+        })
+
+        expected_candidate_sources = runner.build_candidate_sources(
+            self.task["allowed_files"], self.sources, prior_changes
+        )
+        candidate_new_sha = expected_candidate_sources["test_new.py"]["sha256"]
+        candidate_source_sha = expected_candidate_sources["source.py"]["sha256"]
+        self.assertEqual(candidate_new_sha, runner.sha(b"assert 1 == 1\n"))
+        self.assertEqual(candidate_source_sha, runner.sha(b"VALUE = 2\n"))
+        expected_candidate_sources_sha = runner.sha(runner.serialize_json(expected_candidate_sources))
+
+        delta_payload = {
+            "status": "PROPOSAL_READY",
+            "summary": "Corrected assertion in test_new.py to assert 2 == 2.",
+            "covered_requirements": [1, 2],
+            "findings": [],
+            "changes": [
+                {
+                    "path": "test_new.py",
+                    "original_sha256": candidate_new_sha,
+                    "content": None,
+                    "replacements": [{"old": "assert 1 == 1\n", "new": "assert 2 == 2\n"}],
+                },
+            ],
+        }
+
+        out = self.invoke_fake_cli(
+            feedback=feedback,
+            proposal=prior_proposal,
+            result=delta_payload,
+            run_id="correction-delta-run",
+        )
+
+        status_file = out / "status.json"
+        delta_file = out / "delta-result.json"
+        result_file = out / "result.json"
+        patch_file = out / "proposal.patch"
+        task_file = out / "task.json"
+        prompt_file = out / "prompt.txt"
+
+        self.assertTrue(status_file.exists())
+        self.assertTrue(delta_file.exists())
+        self.assertTrue(result_file.exists())
+        self.assertTrue(patch_file.exists())
+        self.assertTrue(task_file.exists())
+        self.assertTrue(prompt_file.exists())
+
+        status = json.loads(status_file.read_text())
+        self.assertEqual(status["state"], "PROPOSAL_READY")
+        self.assertEqual(status["candidate_sources_sha256"], expected_candidate_sources_sha)
+        self.assertEqual(
+            status["candidate_sources_sha256"],
+            runner.sha(runner.serialize_json(expected_candidate_sources)),
+        )
+        self.assertEqual(status["delta_result_sha256"], runner.file_sha256(delta_file))
+        self.assertEqual(status["delta_result_sha256"], runner.sha(delta_file.read_bytes()))
+        self.assertEqual(status["result_sha256"], runner.file_sha256(result_file))
+        self.assertEqual(status["result_sha256"], runner.sha(result_file.read_bytes()))
+
+        # delta-result.json must contain only the candidate-SHA-bound one-file delta
+        delta_data = json.loads(delta_file.read_text())
+        self.assertEqual(delta_data["status"], "PROPOSAL_READY")
+        self.assertEqual(delta_data["covered_requirements"], [1, 2])
+        self.assertEqual(len(delta_data["changes"]), 1)
+        self.assertEqual(delta_data["changes"][0], {
+            "path": "test_new.py",
+            "original_sha256": candidate_new_sha,
+            "content": "assert 2 == 2\n",
+        })
+
+        # final result.json must retain the untouched prior file, apply the corrected file,
+        # restore original repository SHA/null bindings and allowed-file order
+        result_data = json.loads(result_file.read_text())
+        self.assertEqual(result_data["status"], "PROPOSAL_READY")
+        self.assertEqual(result_data["covered_requirements"], [1, 2])
+        self.assertEqual([c["path"] for c in result_data["changes"]], self.task["allowed_files"])
+        self.assertEqual(result_data["changes"], [
+            {
+                "path": "source.py",
+                "original_sha256": source_sha,
+                "content": "VALUE = 2\n",
+            },
+            {
+                "path": "test_new.py",
+                "original_sha256": None,
+                "content": "assert 2 == 2\n",
+            },
+        ])
+
+        # proposal.patch reflects the final rebased canonical proposal
+        patch_text = patch_file.read_text()
+        self.assertIn("--- a/source.py", patch_text)
+        self.assertIn("+VALUE = 2\n", patch_text)
+        self.assertIn("--- /dev/null", patch_text)
+        self.assertIn("+++ b/test_new.py", patch_text)
+        self.assertIn("+assert 2 == 2\n", patch_text)
+
+        # task.json retains original sources and exact prior proposal
+        task_data = json.loads(task_file.read_text())
+        self.assertEqual(task_data["task"], self.task)
+        self.assertEqual(task_data["sources"], self.sources)
+        self.assertEqual(task_data["sources"]["source.py"]["sha256"], source_sha)
+        self.assertIsNone(task_data["sources"]["test_new.py"]["sha256"])
+        self.assertEqual(task_data["proposal"], prior_proposal_text)
+
+        # prompt.txt contains candidate sources/feedback/prior identity and does not contain duplicate proposal
+        prompt_text = prompt_file.read_text()
+        self.assertIn("\nROLE: worker\nCONTEXT_JSON:\n", prompt_text)
+        prompt_json = json.loads(prompt_text.split("\nCONTEXT_JSON:\n", 1)[1])
+        self.assertEqual(prompt_json["sources"], expected_candidate_sources)
+        self.assertEqual(prompt_json["sources"]["source.py"]["sha256"], candidate_source_sha)
+        self.assertEqual(prompt_json["sources"]["test_new.py"]["sha256"], candidate_new_sha)
+        self.assertEqual(prompt_json["feedback"]["reviewer"], "codex")
+        self.assertEqual(prompt_json["feedback"]["reviewed_proposal_sha256"], prior_proposal_sha)
+        self.assertEqual(
+            prompt_json["feedback"]["findings"],
+            ["test_new.py assertion must verify VALUE == 2"],
+        )
+        self.assertEqual(prompt_json["prior_identity"], {
+            "run_id": "prior-worker-delta",
+            "proposal_sha256": prior_proposal_sha,
+        })
+        self.assertNotIn("proposal", prompt_json)
+        self.assertEqual(
+            set(prompt_json.keys()),
+            {"task", "source_head", "sources", "feedback", "prior_identity"},
+        )
+        self.assertNotIn('"canonical_proposal_sha256"', prompt_text)
+
+    def test_correction_revert_complete_noop_fails_closed(self):
+        self.task["allowed_files"] = ["source.py"]
+        self.save_task()
+        _, self.sources = runner.load_task(self.root, self.task_path)
+        source_sha = self.sources["source.py"]["sha256"]
+
+        prior_result = {
+            "status": "PROPOSAL_READY",
+            "summary": "Prior modification modifying source.py.",
+            "covered_requirements": [1, 2],
+            "findings": [],
+            "changes": [
+                {
+                    "path": "source.py",
+                    "original_sha256": source_sha,
+                    "content": "VALUE = 2\n",
+                },
+            ],
+        }
+        prior_proposal = self.worker_evidence(
+            self.root / "prior-worker-revert",
+            result=prior_result,
+            conversation_id="worker-revert-session",
+        )
+        prior_sha = runner.file_sha256(prior_proposal)
+
+        feedback = self.root / "feedback-revert.json"
+        runner.write_json(feedback, {
+            "reviewer": "gemini",
+            "reviewed_proposal_sha256": prior_sha,
+            "findings": ["Revert changes in source.py"],
+            "test_evidence": [],
+        })
+
+        candidate_sha = runner.sha(b"VALUE = 2\n")
+        revert_delta = {
+            "status": "PROPOSAL_READY",
+            "summary": "Revert source.py back to original VALUE = 1.",
+            "covered_requirements": [1, 2],
+            "findings": [],
+            "changes": [
+                {
+                    "path": "source.py",
+                    "original_sha256": candidate_sha,
+                    "content": None,
+                    "replacements": [{"old": "VALUE = 2\n", "new": "VALUE = 1\n"}],
+                },
+            ],
+        }
+
+        with self.assertRaises(CorrectionDeltaError) as ctx:
+            self.invoke_fake_cli(
+                feedback=feedback,
+                proposal=prior_proposal,
+                result=revert_delta,
+                run_id="revert-noop-run",
+            )
+        self.assertIn("complete no-op rejection", str(ctx.exception))
+
+        out = self.root / ".local/two-site-refactor/proposals/revert-noop-run"
+        self.assertTrue((out / "status.json").exists())
+        status = json.loads((out / "status.json").read_text())
+        self.assertEqual(status["state"], "BLOCKED")
+        self.assertIn("CorrectionDeltaError: complete no-op rejection", status["error"])
+        self.assertFalse((out / "delta-result.json").exists())
+        self.assertFalse((out / "result.json").exists())
+        self.assertFalse((out / "proposal.patch").exists())
+        self.assertEqual((self.root / "source.py").read_text(), "VALUE = 1\n")
 
 
 if __name__ == "__main__":
