@@ -10,6 +10,17 @@ from scripts import two_site_codex_autopilot as ap
 from scripts import two_site_cycle_metrics as metrics
 
 
+def synthetic_scope():
+    return ap.AssignmentScope(
+        assignment_id="WA-P1-00B-FREEZE-20260904-001",
+        stage_id="stage-p1-freeze",
+        allowed_paths=("tests/*",),
+        forbidden_paths=(".git/*",),
+        expires_at="2030-01-01T00:00:00Z",
+        sha256="0" * 64,
+    )
+
+
 def success(head="a" * 40):
     return {"state": "CONTINUE", "head_changed": True, "head_after": head,
             "head_before": "b" * 40, "commit": head, "blockers": [],
@@ -20,7 +31,11 @@ def success(head="a" * 40):
 
 def test_hint_is_small_head_bound_and_separate_from_recovery():
     result = success()
-    before = {"head": result["commit"], "protected_refs": {}}
+    before = {
+        "head": result["commit"],
+        "protected_refs": {},
+        "assignment_scope": synthetic_scope(),
+    }
     prompt = ap.prompt_for_cycle(ap.ROOT, 2, before, recovery={"attempt": 1}, continuation=result)
     context = json.loads(prompt.split("SUPERVISOR_CONTEXT_JSON:\n")[1])
     assert context["validated_previous_cycle_hint"]["next_action"] == result["next_action"]
@@ -165,7 +180,10 @@ def test_metrics_failure_never_changes_cycle_success_or_original_failure(tmp_pat
         if capture_fails:
             raise ap.AutopilotError("original provider failure")
         (output.parent / "result.json").write_text(json.dumps(success()))
-    with patch.object(ap, "validate_repository", return_value={"head": "a" * 40, "protected_refs": {}}), \
+    with patch.object(
+        ap, "validate_repository",
+        return_value={"head": "a" * 40, "protected_refs": {}, "assignment_scope": synthetic_scope()},
+    ), \
          patch.object(ap, "prompt_for_cycle", return_value="bounded prompt"), \
          patch.object(ap, "codex_identity", return_value={"sha256": "pin", "runtime": {}}), \
          patch.object(ap, "codex_runtime_identity", return_value={}), \
