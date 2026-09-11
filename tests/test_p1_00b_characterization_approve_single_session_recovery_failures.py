@@ -252,6 +252,107 @@ class TestP100bCharacterizationApproveSingleSessionRecoveryFailures(unittest.Iso
         fake_db.add.assert_not_called()
         self.assertEqual(len(fake_db.added), 0)
 
+    async def test_approve_single_session_recovery_fails_when_session_login_request_lookup_returns_none(self):
+        from models.session import SessionLoginRequest
+
+        fake_db = FakeDB()
+        mock_execute_result = Mock(name="execute_result")
+        mock_execute_result.scalar_one_or_none.return_value = None
+        fake_db.execute.return_value = mock_execute_result
+
+        fake_request = SimpleNamespace()
+        admin_user = SimpleNamespace(id=35, is_accountant=False, role=UserRole.SUPER_ADMIN)
+        recovery_uuid = uuid.UUID("11111111-1111-4111-8111-111111111111")
+        recovery_id_str = str(recovery_uuid)
+        session_login_request_id = uuid.UUID("22222222-2222-4222-8222-222222222222")
+
+        recovery_request = SimpleNamespace(
+            id=recovery_uuid,
+            user_id=45,
+            status=SingleSessionRecoveryStatus.PENDING_ADMIN_REVIEW,
+            session_login_request=None,
+            session_login_request_id=session_login_request_id,
+        )
+        admin_target = SimpleNamespace(admin_user_id=35, recovery_request=recovery_request)
+        requester_user = SimpleNamespace(id=45, mobile_number="09120000000")
+
+        mock_ensure_admin = AsyncMock(
+            name="_ensure_recovery_admin_access",
+            return_value=(admin_target, recovery_request, requester_user),
+        )
+        mock_is_user_accountant = AsyncMock(name="is_user_accountant")
+        mock_create_refresh_token = Mock(name="create_refresh_token")
+        mock_approve_recovery = Mock(name="approve_recovery_request")
+        mock_clear_action_messages = AsyncMock(name="_clear_recovery_admin_action_messages")
+        mock_provision_session = AsyncMock(name="provision_session_for_login_request")
+        mock_store_token = AsyncMock(name="_store_temporary_refresh_token")
+        mock_send_sms = Mock(name="send_sms")
+        mock_publish_prompt = AsyncMock(name="_publish_recovery_prompt_updates")
+        mock_session_to_dict = Mock(name="session_to_dict")
+        mock_recovery_to_dict = Mock(name="recovery_request_to_dict")
+
+        with patch("api.routers.sessions.ensure_non_accountant_session_management", wraps=ensure_non_accountant_session_management) as guard_spy, \
+             patch("api.routers.sessions._ensure_recovery_admin_access", mock_ensure_admin), \
+             patch("api.routers.sessions.is_user_accountant", mock_is_user_accountant), \
+             patch("api.routers.sessions.create_refresh_token", mock_create_refresh_token), \
+             patch("api.routers.sessions.approve_recovery_request", mock_approve_recovery), \
+             patch("api.routers.sessions._clear_recovery_admin_action_messages", mock_clear_action_messages), \
+             patch("api.routers.sessions.provision_session_for_login_request", mock_provision_session), \
+             patch("api.routers.sessions._store_temporary_refresh_token", mock_store_token), \
+             patch("api.routers.sessions.send_sms", mock_send_sms), \
+             patch("api.routers.sessions._publish_recovery_prompt_updates", mock_publish_prompt), \
+             patch("api.routers.sessions.session_to_dict", mock_session_to_dict), \
+             patch("api.routers.sessions.recovery_request_to_dict", mock_recovery_to_dict):
+
+            with self.assertRaises(HTTPException) as exc_info:
+                await approve_single_session_recovery(
+                    recovery_id_str,
+                    request=fake_request,
+                    db=fake_db,
+                    current_user=admin_user,
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 404)
+        self.assertEqual(exc_info.exception.detail, "درخواست ورود اولیه یافت نشد")
+
+        guard_spy.assert_awaited_once_with(fake_db, admin_user)
+        mock_ensure_admin.assert_awaited_once_with(
+            fake_db,
+            recovery_id=recovery_uuid,
+            current_user=admin_user,
+        )
+
+        fake_db.execute.assert_awaited_once()
+        executed_stmt = fake_db.execute.await_args.args[0]
+        self.assertIs(executed_stmt.column_descriptions[0]["entity"], SessionLoginRequest)
+        self.assertIsNotNone(executed_stmt.whereclause)
+        self.assertEqual(executed_stmt.whereclause.left.table.name, "session_login_requests")
+        self.assertEqual(executed_stmt.whereclause.left.name, "id")
+        self.assertEqual(executed_stmt.whereclause.right.value, session_login_request_id)
+        self.assertEqual(list(executed_stmt.compile().params.values()), [session_login_request_id])
+        mock_execute_result.scalar_one_or_none.assert_called_once_with()
+
+        self.assertIs(recovery_request.status, SingleSessionRecoveryStatus.PENDING_ADMIN_REVIEW)
+        self.assertEqual(recovery_request.status.value, "pending_admin_review")
+        self.assertIsNone(recovery_request.session_login_request)
+        self.assertEqual(recovery_request.session_login_request_id, session_login_request_id)
+        self.assertEqual(recovery_request.id, recovery_uuid)
+
+        mock_is_user_accountant.assert_not_called()
+        mock_create_refresh_token.assert_not_called()
+        mock_approve_recovery.assert_not_called()
+        mock_clear_action_messages.assert_not_called()
+        mock_provision_session.assert_not_called()
+        fake_db.commit.assert_not_called()
+        fake_db.rollback.assert_not_called()
+        mock_store_token.assert_not_called()
+        mock_send_sms.assert_not_called()
+        mock_publish_prompt.assert_not_called()
+        mock_session_to_dict.assert_not_called()
+        mock_recovery_to_dict.assert_not_called()
+        fake_db.add.assert_not_called()
+        self.assertEqual(len(fake_db.added), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
