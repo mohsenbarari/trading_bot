@@ -11,7 +11,7 @@ import argparse
 from contextlib import contextmanager
 import fcntl, hashlib, json, os, re, stat, subprocess
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable, Mapping
 
 try:
     from scripts.two_site_proposal_runner import (
@@ -261,6 +261,119 @@ def persist_pre_review_tests(
     )
     state_check()
     return normalized, receipt_path, receipt_sha
+
+
+def _bound_utf8_tail(text: str, max_bytes: int = 8192) -> str:
+    if max_bytes <= 0:
+        return ""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    tail = encoded[-max_bytes:]
+    for offset in range(min(4, len(tail))):
+        try:
+            return tail[offset:].decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+    return tail.decode("utf-8", errors="ignore")
+
+
+def _bound_utf8(text: str, max_bytes: int = 8192) -> str:
+    if max_bytes <= 0:
+        return ""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    head = encoded[:max_bytes]
+    for offset in range(min(4, len(head))):
+        try:
+            return head[:len(head) - offset].decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+    return head.decode("utf-8", errors="ignore")
+
+
+def test_failure_signature(receipt: Mapping[str, Any]) -> str:
+    proposal_sha = (
+        receipt.get("proposal_sha256")
+        if isinstance(receipt, Mapping) and not isinstance(receipt, (str, bytes))
+        else ""
+    )
+    if not isinstance(proposal_sha, str):
+        proposal_sha = ""
+    validated = validate_test_receipt(receipt, proposal_sha)
+    if validated["state"] != "FAILED":
+        raise ProposalError(f"receipt state must be FAILED, got {validated['state']}")
+    payload = {
+        "returncode": validated["returncode"],
+        "selectors": validated["selectors"],
+        "stderr_tail": validated["stderr_tail"],
+        "stdout_tail": validated["stdout_tail"],
+    }
+    canonical_json = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest().lower()
+
+
+def test_gate_feedback(
+    receipt: Mapping[str, Any],
+    proposal_sha: str,
+) -> dict[str, Any]:
+    validated = validate_test_receipt(receipt, proposal_sha)
+    if validated["state"] != "FAILED":
+        raise ProposalError(f"receipt state must be FAILED, got {validated['state']}")
+
+    rc = validated["returncode"]
+    selectors = validated["selectors"]
+    stdout_tail = validated["stdout_tail"]
+    stderr_tail = validated["stderr_tail"]
+
+    selector_count = len(selectors)
+    sample_limit = 10
+    if selector_count <= sample_limit:
+        selector_sample = ", ".join(selectors)
+    else:
+        selector_sample = ", ".join(selectors[:sample_limit]) + f" ... ({selector_count - sample_limit} more)"
+
+    finding = (
+        f"Pre-review candidate tests failed with exit code {rc}; "
+        f"resolve test failures and ensure all test selectors pass."
+    )
+
+    prefix_out = "stdout_tail:\n"
+    max_out_bytes = max(0, 8192 - len(prefix_out.encode("utf-8")))
+    stdout_str = prefix_out + _bound_utf8_tail(stdout_tail, max_out_bytes)
+
+    prefix_err = "stderr_tail:\n"
+    max_err_bytes = max(0, 8192 - len(prefix_err.encode("utf-8")))
+    stderr_str = prefix_err + _bound_utf8_tail(stderr_tail, max_err_bytes)
+
+    evidence = [
+        _bound_utf8(f"returncode: {rc}", 8192),
+        _bound_utf8(f"selectors (count={selector_count}): {selector_sample}", 8192),
+        _bound_utf8(stdout_str, 8192),
+        _bound_utf8(stderr_str, 8192),
+    ]
+
+    feedback: dict[str, Any] = {
+        "reviewer": "test-gate",
+        "reviewed_proposal_sha256": proposal_sha,
+        "findings": [finding],
+        "test_evidence": evidence,
+    }
+
+    serialized = json.dumps(feedback, ensure_ascii=False)
+    if len(serialized.encode("utf-8")) >= MAX_CONTEXT:
+        budget = (MAX_CONTEXT - 1000) // len(evidence)
+        evidence = [_bound_utf8(item, max(budget, 100)) for item in evidence]
+        feedback["test_evidence"] = evidence
+        serialized = json.dumps(feedback, ensure_ascii=False)
+
+    return validate_correction_feedback(serialized, proposal_sha)
 
 
 def run_provider_session(
