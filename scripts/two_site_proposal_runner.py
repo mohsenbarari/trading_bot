@@ -42,6 +42,19 @@ except ImportError:
         validate_task_scope,
     )
 
+try:
+    from scripts.two_site_proposal_transport import (
+        TransportPolicyError,
+        build_changes_schema,
+        validate_change_mode,
+    )
+except ImportError:
+    from two_site_proposal_transport import (
+        TransportPolicyError,
+        build_changes_schema,
+        validate_change_mode,
+    )
+
 ROOT = Path(__file__).resolve().parents[1]
 MAX_CONTEXT = 160_000
 MAX_OUTPUT = 2_000_000
@@ -601,7 +614,13 @@ def check(root: Path, task_path: Path) -> dict:
     }
 
 
-def schema(role: str) -> dict:
+def schema(
+    role: str,
+    task: dict | None = None,
+    sources: dict | None = None,
+) -> dict:
+    if (task is None) != (sources is None):
+        raise ProposalError("task and sources must both be provided or both omitted")
     fields = {
         "status": {"type": "string", "enum": ["PROPOSAL_READY", "BLOCKED"] if role == "worker" else ["VERIFIED", "CHANGES_REQUIRED", "BLOCKED"]},
         "summary": {"type": "string"},
@@ -627,11 +646,23 @@ def schema(role: str) -> dict:
                            }},
         }},
     }
+    if task is not None and sources is not None:
+        fields["changes"] = build_changes_schema(
+            role, task["allowed_files"], sources, MAX_REPLACEMENTS
+        )
     return {"type": "object", "additionalProperties": False,
             "required": list(fields), "properties": fields}
 
 
-def normalize_result(result: dict, task: dict, sources: dict, role: str) -> dict:
+def normalize_result(
+    result: dict,
+    task: dict,
+    sources: dict,
+    role: str,
+    strict_transport: bool = False,
+) -> dict:
+    if type(strict_transport) is not bool:
+        raise ProposalError("strict_transport must be a boolean")
     if not isinstance(result, dict):
         raise ProposalError("incomplete response contract")
     if role == "verifier" or result.get("status") != "PROPOSAL_READY":
@@ -678,6 +709,12 @@ def normalize_result(result: dict, task: dict, sources: dict, role: str) -> dict
 
         if change["original_sha256"] != sources[name]["sha256"]:
             raise ProposalError("proposal is based on different source bytes")
+
+        if strict_transport and change_mode != "legacy":
+            try:
+                validate_change_mode(change, sources[name], MAX_REPLACEMENTS)
+            except TransportPolicyError as exc:
+                raise ProposalError("proposal transport policy violation") from exc
 
         if change_mode == "replacement":
             if sources[name]["content"] is None:
@@ -878,7 +915,7 @@ def parse_stream(raw: str, task: dict, sources: dict, role: str) -> tuple[dict, 
         if not isinstance(envelope.get("response"), str):
             raise RetryableProviderSessionError("CLI result has no response text")
         result = unique_json(envelope["response"])
-    result = normalize_result(result, task, sources, role)
+    result = normalize_result(result, task, sources, role, strict_transport=True)
     result = validate_result(result, task, sources, role)
     if len(serialize_json(result)) > MAX_CONTEXT:
         raise ProposalError("canonical proposal exceeds the safe context budget")
@@ -984,7 +1021,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         command = [str(disposable_cli), "--mode", "plan", "--sandbox", "--model", MODEL,
                    "--effort", EFFORT, "--input-format", "stream-json",
                    "--output-format", "stream-json", "--print-timeout", f"{timeout}s",
-                   "--json-schema", json.dumps(schema(role))]
+                   "--json-schema", json.dumps(schema(role, task, sources))]
         try:
             # Auth belongs to the CLI. No credential files are read or copied here.
             with subprocess.Popen(command, cwd=workspace, stdin=subprocess.PIPE,
