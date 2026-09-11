@@ -273,7 +273,67 @@ class ProposalContracts(unittest.TestCase):
                 else:
                     output = raw_output
             else:
-                evs = self.events(result=result) if events is None else events
+                if events is not None:
+                    evs = events
+                elif result is not None:
+                    evs = self.events(result=result)
+                else:
+                    cmd = popen.call_args.args[0] if popen.call_args else getattr(fake_process, "args", [])
+                    schema = {}
+                    if "--json-schema" in cmd:
+                        schema = json.loads(cmd[cmd.index("--json-schema") + 1])
+                    changes_schema = schema.get("properties", {}).get("changes", {})
+                    items_schema = changes_schema.get("items", {})
+                    branches = items_schema.get("anyOf") or ([items_schema] if "properties" in items_schema else [])
+                    path_shas = {}
+                    for branch in branches:
+                        props = branch.get("properties", {})
+                        p = props.get("path", {}).get("enum", [None])[0] or props.get("path", {}).get("const")
+                        if p and p not in path_shas:
+                            s_prop = props.get("original_sha256", {})
+                            path_shas[p] = s_prop.get("enum", [None])[0] if "enum" in s_prop else s_prop.get("const")
+                    if not path_shas:
+                        path_shas = {"test_new.py": None}
+
+                    context = {}
+                    if _input:
+                        try:
+                            prompt_text = json.loads(_input).get("message", {}).get("content", "")
+                            if "\nCONTEXT_JSON:\n" in prompt_text:
+                                context = json.loads(prompt_text.split("\nCONTEXT_JSON:\n", 1)[1])
+                        except Exception:
+                            pass
+                    if not context and (stdout_path.parent / "task.json").exists():
+                        try:
+                            context = json.loads((stdout_path.parent / "task.json").read_text())
+                        except Exception:
+                            pass
+
+                    sources_ctx = context.get("sources", {})
+                    changes = []
+                    for p, s in path_shas.items():
+                        baseline = sources_ctx.get(p, {}).get("content")
+                        if baseline is None and hasattr(self, "sources"):
+                            baseline = self.sources.get(p, {}).get("content")
+                        if baseline == "assert 1 == 1\n" or s == runner.sha(b"assert 1 == 1\n"):
+                            content = "assert 2 == 2\n"
+                        else:
+                            content = "assert 1 == 1\n"
+                        changes.append({
+                            "path": p,
+                            "original_sha256": s,
+                            "content": content,
+                            "replacements": [],
+                        })
+                    req_count = len(context.get("task", {}).get("requirements", [None, None]))
+                    derived = {
+                        "status": "PROPOSAL_READY",
+                        "summary": "Added focused regression.",
+                        "covered_requirements": list(range(1, req_count + 1)),
+                        "findings": [],
+                        "changes": changes,
+                    }
+                    evs = self.events(result=derived)
                 if denied:
                     evs[1]["result"]["denied_actions"] = ["read_file"]
                 output = "\n".join(json.dumps(e) for e in evs).encode()
