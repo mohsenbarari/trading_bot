@@ -88,6 +88,7 @@ CANONICAL_RESPONSE_KEYS = frozenset({
 })
 MAX_REPLACEMENTS = 32
 MAX_REPLACEMENT_BYTES = 65536
+MAX_REVIEW_TRANSPORT_BYTES = MAX_CONTEXT
 
 
 class ProposalError(ValueError):
@@ -939,6 +940,29 @@ def serialize_json(value: dict) -> bytes:
     return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
+def build_review_transport(
+    candidate: dict,
+    sources: dict,
+    proposal_sha256: str,
+) -> dict:
+    if not isinstance(candidate, dict) or not isinstance(sources, dict):
+        raise ProposalError("invalid review transport input")
+    if not isinstance(proposal_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", proposal_sha256):
+        raise ProposalError("invalid proposal SHA")
+    changes = candidate.get("changes")
+    if not isinstance(changes, list):
+        raise ProposalError("invalid candidate changes")
+    return {
+        "canonical_proposal_sha256": proposal_sha256,
+        "status": candidate["status"],
+        "summary": candidate["summary"],
+        "covered_requirements": list(candidate["covered_requirements"]),
+        "findings": list(candidate["findings"]),
+        "changed_paths": [change["path"] for change in changes],
+        "unified_diff": proposal_diff(changes, sources),
+    }
+
+
 def write_json(path: Path, value: dict) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_bytes(serialize_json(value))
@@ -975,8 +999,10 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
     if role == "worker" and ((feedback is None) != (proposal is None)):
         raise ProposalError("correction worker requires both proposal and feedback")
     prior_status = None
+    prompt_material = material
+    review_transport_sha = None
     if proposal is not None:
-        _candidate, prior_status, proposal_sha256 = load_prior_worker(
+        candidate, prior_status, proposal_sha256 = load_prior_worker(
             root, proposal, material["proposal"], task, sources, head
         )
         if input_hashes["proposal"] != proposal_sha256:
@@ -985,11 +1011,23 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             material["feedback"] = validate_correction_feedback(
                 material["feedback"], proposal_sha256
             )
+        elif role == "verifier":
+            review_proposal = build_review_transport(candidate, sources, proposal_sha256)
+            review_transport_bytes = serialize_json(review_proposal)
+            if len(review_transport_bytes) > MAX_REVIEW_TRANSPORT_BYTES:
+                raise ProposalError("review transport exceeds context budget")
+            review_transport_sha = sha(review_transport_bytes)
+            prompt_material = {
+                "task": task,
+                "source_head": head,
+                "sources": sources,
+                "proposal": review_proposal,
+            }
     prompt = bounded_file_text(
         ROOT, ROOT / "docs/refactor/two-server/templates/GEMINI_TASK_PROMPT.md",
         MAX_CONTEXT, "prompt template",
     )
-    prompt += "\nROLE: " + role + "\nCONTEXT_JSON:\n" + json.dumps(material, ensure_ascii=False)
+    prompt += "\nROLE: " + role + "\nCONTEXT_JSON:\n" + json.dumps(prompt_material, ensure_ascii=False)
     if len(prompt.encode()) > 2 * MAX_CONTEXT:
         raise ProposalError("split task or feedback into a smaller coherent unit")
     if SECRET.search(prompt):
@@ -1017,6 +1055,8 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             )
         if feedback is not None:
             meta["input_feedback_sha256"] = input_hashes["feedback"]
+        if review_transport_sha is not None:
+            meta["review_transport_sha256"] = review_transport_sha
         write_json(out / "status.json", meta)
         command = [str(disposable_cli), "--mode", "plan", "--sandbox", "--model", MODEL,
                    "--effort", EFFORT, "--input-format", "stream-json",
