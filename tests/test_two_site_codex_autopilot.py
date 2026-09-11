@@ -328,26 +328,16 @@ class AutopilotContracts(unittest.TestCase):
         proposal = {"changes": []}
         with patch.object(autopilot, "validate_repository", return_value=after), \
                 patch.object(autopilot, "git", return_value="") as git, \
-                patch.object(autopilot, "validate_gemini_chain", return_value=proposal) as legacy_chain, \
                 patch.object(autopilot, "validate_scoped_gemini_chain", return_value=proposal) as scoped_chain, \
-                patch.object(autopilot, "validate_committed_proposal") as legacy_committed, \
                 patch.object(autopilot, "validate_scoped_committed_proposal") as scoped_committed:
             checked = autopilot.validate_transition(self.root, before, self.result())
         self.assertTrue(checked["head_changed"])
-        if scoped_chain.called:
-            legacy_chain.assert_not_called()
-            scoped_chain.assert_called_once_with(
-                self.root, "a" * 40, self.result(), before["assignment_scope"],
-            )
-            legacy_committed.assert_not_called()
-            scoped_committed.assert_called_once_with(
-                self.root, "a" * 40, "b" * 40, proposal, before["assignment_scope"],
-            )
-        else:
-            legacy_chain.assert_called_once_with(self.root, "a" * 40, self.result())
-            legacy_committed.assert_called_once_with(self.root, "a" * 40, "b" * 40, proposal)
-            scoped_chain.assert_not_called()
-            scoped_committed.assert_not_called()
+        scoped_chain.assert_called_once_with(
+            self.root, "a" * 40, self.result(), before["assignment_scope"],
+        )
+        scoped_committed.assert_called_once_with(
+            self.root, "a" * 40, "b" * 40, proposal, before["assignment_scope"],
+        )
         git.assert_called_once_with(
             self.root, "merge-base", "--is-ancestor", "a" * 40, "b" * 40,
         )
@@ -368,6 +358,21 @@ class AutopilotContracts(unittest.TestCase):
         with patch.object(autopilot, "validate_repository", return_value=changed_control):
             with self.assertRaisesRegex(autopilot.AutopilotError, "control"):
                 autopilot.validate_transition(self.root, before, self.result())
+
+        mutated_scope = autopilot.AssignmentScope(
+            assignment_id=before["assignment_scope"].assignment_id,
+            stage_id=before["assignment_scope"].stage_id,
+            allowed_paths=before["assignment_scope"].allowed_paths,
+            forbidden_paths=before["assignment_scope"].forbidden_paths,
+            expires_at=before["assignment_scope"].expires_at,
+            sha256="f" * 64,
+        )
+        changed_scope = dict(after, assignment_scope=mutated_scope)
+        with patch.object(autopilot, "validate_repository", return_value=changed_scope), \
+                patch.object(autopilot, "validate_scoped_gemini_chain") as evidence_mock:
+            with self.assertRaisesRegex(autopilot.AutopilotError, "assignment scope changed"):
+                autopilot.validate_transition(self.root, before, self.result())
+            evidence_mock.assert_not_called()
 
     def test_gemini_chain_requires_exact_proposal_and_fresh_reviewer(self):
         result, worker_result, reviewer_dir = self.gemini_chain()
