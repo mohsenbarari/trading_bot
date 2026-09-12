@@ -145,8 +145,35 @@ def review(root: Path, task_path: Path, worker: str, reviewer: str, digest: str,
         root, worker_dir, "worker", worker, head, task, sources, conversations,
         prior_worker=prior,
     )
-    validate_run(root, reviewer_dir, "verifier", reviewer, head, task, sources, conversations,
-                 prior_worker=(worker, result_sha, result_text, status["conversation_id"]))
+    reviewer_snapshot = runner.unique_json(runner.bounded_file_text(
+        root, reviewer_dir / "task.json", 2 * runner.MAX_CONTEXT, "reviewer snapshot"
+    ))
+    reviewer_status = runner.unique_json(runner.bounded_file_text(
+        root, reviewer_dir / "status.json", runner.MAX_CONTEXT, "reviewer status"
+    ))
+    if not isinstance(reviewer_snapshot, dict) or not isinstance(reviewer_status, dict):
+        raise runner.ProposalError("invalid reviewer metadata")
+    has_evidence = "test_evidence" in reviewer_snapshot
+    has_evidence_sha = "input_test_evidence_sha256" in reviewer_status
+    if has_evidence != has_evidence_sha:
+        raise runner.ProposalError("reviewer test evidence and SHA must be provided together")
+    if has_evidence:
+        test_evidence = reviewer_snapshot["test_evidence"]
+        if not isinstance(test_evidence, dict):
+            raise runner.ProposalError("reviewer test evidence must be a dict")
+        expected_test_evidence_sha = runner.sha(runner.serialize_json(test_evidence))
+        if expected_test_evidence_sha != reviewer_status["input_test_evidence_sha256"]:
+            raise runner.ProposalError("reviewer test evidence SHA mismatch")
+        expected_test_receipt = test_evidence
+    else:
+        expected_test_receipt = None
+        expected_test_evidence_sha = None
+    validate_run(
+        root, reviewer_dir, "verifier", reviewer, head, task, sources, conversations,
+        prior_worker=(worker, result_sha, result_text, status["conversation_id"]),
+        expected_test_receipt=expected_test_receipt,
+        expected_test_evidence_sha=expected_test_evidence_sha,
+    )
     if applied:
         changes = {x["path"]: x for x in result["changes"]}
         staged = runner.git(root, "diff", "--cached", "--name-only")

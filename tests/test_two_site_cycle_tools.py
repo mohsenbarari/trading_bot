@@ -237,3 +237,135 @@ def test_build_rejects_escaped_or_aliased_output_parent(repo, aliased_parent):
     with pytest.raises(runner.ProposalError, match="fresh bounded ignored task JSON"):
         ct.build(root, spec, output)
     assert not output.exists()
+
+
+def make_receipt(proposal_sha, state="PASSED", returncode=0):
+    return {
+        "state": state,
+        "proposal_sha256": proposal_sha,
+        "selectors": ["tests/test_two_site_cycle_tools.py"],
+        "unsupported_specs": [],
+        "returncode": returncode,
+        "stdout_tail": "all tests passed\n",
+        "stderr_tail": "",
+        "snapshot_files": 1,
+        "snapshot_bytes": 100,
+        "isolation": "bubblewrap",
+    }
+
+
+def test_review_legacy_chain_without_test_evidence_passes(repo):
+    root, _ = repo
+    output, digest, result, _ = chain(repo)
+    receipt = ct.review(root, output, "w1", "r1", digest)
+    assert receipt["state"] == "BINDINGS_VALID"
+    assert receipt["tests"] == "NOT_RUN"
+    (root / "test_new.py").write_text(result["changes"][0]["content"])
+    applied = ct.review(root, output, "w1", "r1", digest, applied=True)
+    assert applied["state"] == "BYTES_VALID"
+
+
+def test_review_accepts_sha_bound_passed_test_evidence(repo):
+    root, _ = repo
+    output, digest, result, reviewer = chain(repo)
+    evidence = make_receipt(digest, state="PASSED", returncode=0)
+    evidence_sha = runner.sha(runner.serialize_json(evidence))
+
+    task_json = json.loads((reviewer / "task.json").read_text())
+    task_json["test_evidence"] = evidence
+    runner.write_json(reviewer / "task.json", task_json)
+
+    status_json = json.loads((reviewer / "status.json").read_text())
+    status_json["input_test_evidence_sha256"] = evidence_sha
+    runner.write_json(reviewer / "status.json", status_json)
+
+    receipt = ct.review(root, output, "w1", "r1", digest)
+    assert receipt["state"] == "BINDINGS_VALID"
+    assert receipt["tests"] == "NOT_RUN"
+
+    (root / "test_new.py").write_text(result["changes"][0]["content"])
+    applied = ct.review(root, output, "w1", "r1", digest, applied=True)
+    assert applied["state"] == "BYTES_VALID"
+
+
+@pytest.mark.parametrize("asymmetric_mode", ["snapshot_only", "status_only"])
+def test_review_rejects_asymmetric_test_evidence(repo, asymmetric_mode):
+    root, _ = repo
+    output, digest, _, reviewer = chain(repo)
+    evidence = make_receipt(digest, state="PASSED", returncode=0)
+    evidence_sha = runner.sha(runner.serialize_json(evidence))
+
+    if asymmetric_mode == "snapshot_only":
+        task_json = json.loads((reviewer / "task.json").read_text())
+        task_json["test_evidence"] = evidence
+        runner.write_json(reviewer / "task.json", task_json)
+    else:
+        status_json = json.loads((reviewer / "status.json").read_text())
+        status_json["input_test_evidence_sha256"] = evidence_sha
+        runner.write_json(reviewer / "status.json", status_json)
+
+    with pytest.raises(ValueError):
+        ct.review(root, output, "w1", "r1", digest)
+
+
+def test_review_rejects_wrong_evidence_sha(repo):
+    root, _ = repo
+    output, digest, _, reviewer = chain(repo)
+    evidence = make_receipt(digest, state="PASSED", returncode=0)
+
+    task_json = json.loads((reviewer / "task.json").read_text())
+    task_json["test_evidence"] = evidence
+    runner.write_json(reviewer / "task.json", task_json)
+
+    status_json = json.loads((reviewer / "status.json").read_text())
+    status_json["input_test_evidence_sha256"] = "a" * 64
+    runner.write_json(reviewer / "status.json", status_json)
+
+    with pytest.raises(ValueError):
+        ct.review(root, output, "w1", "r1", digest)
+
+
+@pytest.mark.parametrize("invalid_receipt_case", ["failed", "mismatched_proposal_sha"])
+def test_review_rejects_failed_or_mismatched_test_receipt(repo, invalid_receipt_case):
+    root, _ = repo
+    output, digest, _, reviewer = chain(repo)
+    if invalid_receipt_case == "failed":
+        evidence = make_receipt(digest, state="FAILED", returncode=1)
+    else:
+        evidence = make_receipt("b" * 64, state="PASSED", returncode=0)
+    evidence_sha = runner.sha(runner.serialize_json(evidence))
+
+    task_json = json.loads((reviewer / "task.json").read_text())
+    task_json["test_evidence"] = evidence
+    runner.write_json(reviewer / "task.json", task_json)
+
+    status_json = json.loads((reviewer / "status.json").read_text())
+    status_json["input_test_evidence_sha256"] = evidence_sha
+    runner.write_json(reviewer / "status.json", status_json)
+
+    with pytest.raises(ValueError):
+        ct.review(root, output, "w1", "r1", digest)
+
+
+def test_review_rejects_free_form_or_non_dict_test_evidence(repo):
+    root, _ = repo
+    output, digest, _, reviewer = chain(repo)
+
+    task_json = json.loads((reviewer / "task.json").read_text())
+    task_json["test_evidence"] = "free-form string evidence"
+    runner.write_json(reviewer / "task.json", task_json)
+    status_json = json.loads((reviewer / "status.json").read_text())
+    status_json["input_test_evidence_sha256"] = "c" * 64
+    runner.write_json(reviewer / "status.json", status_json)
+
+    with pytest.raises(ValueError):
+        ct.review(root, output, "w1", "r1", digest)
+
+    free_form = {"status": "passed", "selectors": ["test_new.py"]}
+    task_json["test_evidence"] = free_form
+    runner.write_json(reviewer / "task.json", task_json)
+    status_json["input_test_evidence_sha256"] = runner.sha(runner.serialize_json(free_form))
+    runner.write_json(reviewer / "status.json", status_json)
+
+    with pytest.raises(ValueError):
+        ct.review(root, output, "w1", "r1", digest)
