@@ -167,6 +167,21 @@ def test_normalize_result_direct_legacy_compatibility():
     assert norm["changes"][0]["content"] == "legacy direct content without replacements"
 
 
+def test_forced_correction_path_rejects_legacy_three_key_transport():
+    task = make_task()
+    sources = make_sources()
+    legacy_change = {
+        "path": "file_small.py",
+        "original_sha256": sources["file_small.py"]["sha256"],
+        "content": "changed complete content",
+    }
+    with pytest.raises(ProposalError, match="proposal transport policy violation"):
+        normalize_result(
+            make_proposal([legacy_change]), task, sources, "worker",
+            strict_transport=True, force_full_paths=("file_small.py",),
+        )
+
+
 def test_normalize_result_strict_rejection_and_error_translation():
     task = make_task()
     sources = make_sources()

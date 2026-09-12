@@ -31,10 +31,10 @@ and unrelated remote-service mutation. This does not widen any other gate.
    previous work and next gap without searching old runs. It is a bounded in-memory,
    current-HEAD-matched hint, not authority or Stage acceptance. Revalidate the active
    Stage/Assignment and actual missing coverage; do not repeat a completed scenario.
-   Supervisor recovery context remains separate: after RESCOPE choose a
-   distinct smaller or context-complete internal unit. Include the exact tracked inventory gap, Stage
-   card and Assignment reference and next unmet behavior in next_action, not generic
-   "continue characterization". Never claim progress from test/commit count alone.
+   Supervisor recovery context: after RESCOPE choose a distinct smaller or context-complete internal unit; next_action names exact gap,
+   Stage/Assignment and unmet behavior. If recovery.defer_prior_unit is true, choose a
+   dependency-ready gap unlike recovery.deferred_unit; no paraphrase,
+   and no alternative means HALT. Test/commit count alone is not progress.
 
 3. Prepare complete authoritative current definitions for every referenced enum,
    constant, import, signature, model field and dependency. UserRole.BUYER is

@@ -128,7 +128,7 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
                 mock.patch.object(runner, "release_proposal_lock"),
                 mock.patch.object(runner, "cli_identity", return_value={"path": str(cli_file), "version": runner.EXPECTED_CLI_VERSION, "sha256": runner.EXPECTED_CLI_SHA256}),
                 mock.patch.object(runner, "capture_bounded_process", side_effect=mock_capture),
-                mock.patch.object(runner, "parse_stream", return_value=(mock_result, mock_envelope)),
+                mock.patch.object(runner, "_parse_stream", return_value=(mock_result, mock_envelope)),
                 mock.patch.object(runner, "load_prior_worker", return_value=(mock_result, {"run_id": "prior-worker", "conversation_id": "prior-conv"}, runner.sha(b"{}"))),
                 mock.patch.object(runner, "validate_runtime_contract", return_value=runner.RUNTIME_CONTRACT),
                 mock.patch("subprocess.Popen", side_effect=mock_popen),

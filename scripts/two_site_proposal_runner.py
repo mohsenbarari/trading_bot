@@ -57,11 +57,13 @@ except ImportError:
 
 try:
     from scripts.two_site_correction_delta import (
+        CorrectionDeltaError,
         build_candidate_sources,
         rebase_correction_result,
     )
 except ImportError:
     from two_site_correction_delta import (
+        CorrectionDeltaError,
         build_candidate_sources,
         rebase_correction_result,
     )
@@ -113,6 +115,40 @@ class ProposalError(ValueError):
 
 class RetryableProviderSessionError(ProposalError):
     pass
+
+
+class RetryableProviderOutputError(RetryableProviderSessionError):
+    """A bounded-retry failure attributable only to one provider response."""
+
+
+_RETRYABLE_OUTPUT_MESSAGES = frozenset({
+    "incomplete response contract",
+    "malformed response list",
+    "plan-only or no-op response is not implementation",
+    "invalid change shape",
+    "mixed change content and replacements",
+    "empty change content and replacements",
+    "proposal transport policy violation",
+    "new-file replacement is not supported",
+    "replacements must be a list",
+    "replacement item must be a dict with exactly 'old' and 'new'",
+    "replacement old must be a nonempty string",
+    "replacement new must be a string",
+    "replacement old and new must differ",
+    "aggregate replacement UTF-8 bytes exceed limit",
+    "replacement spans overlap",
+    "empty or unchanged file",
+})
+
+
+def _provider_output_is_retryable(exc: ProposalError) -> bool:
+    message = str(exc)
+    return (
+        message in _RETRYABLE_OUTPUT_MESSAGES
+        or message.startswith("replacements count must be between ")
+        or message.startswith("replacement target not found in original:")
+        or message.startswith("replacement target occurs more than once in original:")
+    )
 
 
 def materialize_replacements(original: str, replacements: object) -> str:
@@ -631,10 +667,19 @@ def check(root: Path, task_path: Path) -> dict:
     }
 
 
+def originally_new_paths(task: dict, sources: dict) -> tuple[str, ...]:
+    """Return original absent paths in assignment order, before candidate overlay."""
+    return tuple(
+        path for path in task["allowed_files"]
+        if sources[path]["sha256"] is None and sources[path]["content"] is None
+    )
+
+
 def schema(
     role: str,
     task: dict | None = None,
     sources: dict | None = None,
+    force_full_paths: tuple[str, ...] = (),
 ) -> dict:
     if (task is None) != (sources is None):
         raise ProposalError("task and sources must both be provided or both omitted")
@@ -665,7 +710,8 @@ def schema(
     }
     if task is not None and sources is not None:
         fields["changes"] = build_changes_schema(
-            role, task["allowed_files"], sources, MAX_REPLACEMENTS
+            role, task["allowed_files"], sources, MAX_REPLACEMENTS,
+            force_full_paths=force_full_paths,
         )
     return {"type": "object", "additionalProperties": False,
             "required": list(fields), "properties": fields}
@@ -677,9 +723,16 @@ def normalize_result(
     sources: dict,
     role: str,
     strict_transport: bool = False,
+    force_full_paths: tuple[str, ...] = (),
 ) -> dict:
     if type(strict_transport) is not bool:
         raise ProposalError("strict_transport must be a boolean")
+    if (not isinstance(force_full_paths, tuple)
+            or any(not isinstance(path, str) or not path for path in force_full_paths)
+            or len(set(force_full_paths)) != len(force_full_paths)
+            or not set(force_full_paths).issubset(task["allowed_files"])):
+        raise ProposalError("force_full_paths must be an ordered unique tuple within allowed files")
+    forced = set(force_full_paths)
     if not isinstance(result, dict):
         raise ProposalError("incomplete response contract")
     if role == "verifier" or result.get("status") != "PROPOSAL_READY":
@@ -727,9 +780,12 @@ def normalize_result(
         if change["original_sha256"] != sources[name]["sha256"]:
             raise ProposalError("proposal is based on different source bytes")
 
-        if strict_transport and change_mode != "legacy":
+        if strict_transport and (change_mode != "legacy" or name in forced):
             try:
-                validate_change_mode(change, sources[name], MAX_REPLACEMENTS)
+                validate_change_mode(
+                    change, sources[name], MAX_REPLACEMENTS,
+                    force_full=name in forced,
+                )
             except TransportPolicyError as exc:
                 raise ProposalError("proposal transport policy violation") from exc
 
@@ -847,6 +903,16 @@ def validate_correction_feedback(text: str, proposal_sha256: str) -> dict:
 
 
 def parse_stream(raw: str, task: dict, sources: dict, role: str) -> tuple[dict, dict]:
+    return _parse_stream(raw, task, sources, role)
+
+
+def _parse_stream(
+    raw: str,
+    task: dict,
+    sources: dict,
+    role: str,
+    force_full_paths: tuple[str, ...] = (),
+) -> tuple[dict, dict]:
     events = [unique_json(line) for line in raw.splitlines() if line.strip()]
     if any(not isinstance(e, dict) for e in events):
         raise ProposalError("CLI event must be an object")
@@ -878,6 +944,15 @@ def parse_stream(raw: str, task: dict, sources: dict, role: str) -> tuple[dict, 
                     error, re.IGNORECASE | re.DOTALL,
                 )):
             raise ProposalError("MODEL_OUTPUT_TRUNCATED: rescope to a smaller task")
+        if (isinstance(error, str)
+                and not re.search(
+                    r"auth|quota|rate[\s_-]*limit|time[\s_-]*out|timed[\s_-]*out|deadline|network|connect",
+                    error, re.IGNORECASE,
+                )
+                and re.search(r"improperly formatted function call", error, re.IGNORECASE)):
+            raise RetryableProviderOutputError(
+                "provider returned an invalid response envelope"
+            )
         raise ProposalError("CLI did not complete one successful session")
 
     finish_submissions = 0
@@ -937,8 +1012,18 @@ def parse_stream(raw: str, task: dict, sources: dict, role: str) -> tuple[dict, 
             raise RetryableProviderSessionError(
                 "CLI response is not one valid JSON document"
             ) from exc
-    result = normalize_result(result, task, sources, role, strict_transport=True)
-    result = validate_result(result, task, sources, role)
+    try:
+        result = normalize_result(
+            result, task, sources, role, strict_transport=True,
+            force_full_paths=force_full_paths,
+        )
+        result = validate_result(result, task, sources, role)
+    except ProposalError as exc:
+        if role == "worker" and _provider_output_is_retryable(exc):
+            raise RetryableProviderOutputError(
+                "provider returned unusable proposal transport"
+            ) from exc
+        raise
     if len(serialize_json(result)) > MAX_CONTEXT:
         raise ProposalError("canonical proposal exceeds the safe context budget")
     return result, envelope
@@ -1026,6 +1111,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
     review_transport_sha = None
     candidate_sources = None
     candidate_sources_sha256 = None
+    force_full_paths: tuple[str, ...] = ()
     if proposal is not None:
         candidate, prior_status, proposal_sha256 = load_prior_worker(
             root, proposal, material["proposal"], task, sources, head
@@ -1040,6 +1126,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 task["allowed_files"], sources, candidate["changes"]
             )
             candidate_sources_sha256 = sha(serialize_json(candidate_sources))
+            force_full_paths = originally_new_paths(task, sources)
             prompt_material = {
                 "task": task,
                 "source_head": head,
@@ -1048,6 +1135,9 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 "prior_identity": {
                     "run_id": prior_status["run_id"],
                     "proposal_sha256": proposal_sha256,
+                },
+                "correction_transport": {
+                    "full_content_required_paths": list(force_full_paths),
                 },
             }
         elif role == "verifier":
@@ -1112,7 +1202,9 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         command = [str(disposable_cli), "--mode", "plan", "--sandbox", "--model", MODEL,
                    "--effort", EFFORT, "--input-format", "stream-json",
                    "--output-format", "stream-json", "--print-timeout", f"{timeout}s",
-                   "--json-schema", json.dumps(schema(role, task, active_sources))]
+                   "--json-schema", json.dumps(schema(
+                       role, task, active_sources, force_full_paths
+                   ))]
         try:
             # Auth belongs to the CLI. No credential files are read or copied here.
             with subprocess.Popen(command, cwd=workspace, stdin=subprocess.PIPE,
@@ -1134,7 +1226,9 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             if final_cli_identity != initial_cli_identity:
                 raise ProposalError("CLI identity changed during generation")
             raw = bounded_file_text(root, out / "stream.jsonl", MAX_OUTPUT, "CLI event stream")
-            result, envelope = parse_stream(raw, task, active_sources, role)
+            result, envelope = _parse_stream(
+                raw, task, active_sources, role, force_full_paths
+            )
             if (prior_status is not None
                     and envelope["conversation_id"] == prior_status["conversation_id"]):
                 raise ProposalError("review/correction reused the worker session")
@@ -1148,9 +1242,19 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 if result.get("status") != "PROPOSAL_READY":
                     raise ProposalError("correction delta proposal is not ready")
                 delta_result = result
-                rebased = rebase_correction_result(
-                    delta_result, task["allowed_files"], sources, candidate_sources
-                )
+                try:
+                    rebased = rebase_correction_result(
+                        delta_result, task["allowed_files"], sources, candidate_sources
+                    )
+                except CorrectionDeltaError as exc:
+                    message = str(exc)
+                    if (message.startswith("complete no-op rejection:")
+                            or " in delta result" in message
+                            or message.startswith("delta result ")):
+                        raise RetryableProviderOutputError(
+                            "provider returned unusable correction delta"
+                        ) from exc
+                    raise
                 rebased = validate_result(rebased, task, sources, role)
                 if len(serialize_json(rebased)) > MAX_CONTEXT:
                     raise ProposalError("canonical proposal exceeds the safe context budget")

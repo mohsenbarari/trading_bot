@@ -99,6 +99,10 @@ For correction runs, address EVERY finding in feedback. In correction Worker con
 sources is the complete current candidate state after the rejected proposal, feedback is
 SHA-bound (controller-authored JSON bound to the rejected proposal SHA), and prior_identity
 contains the prior run/SHA (run_id and proposal_sha256).
+correction_transport.full_content_required_paths is mandatory. For every listed path, return
+the complete non-empty final candidate bytes with the candidate original_sha256 and
+replacements=[]. Never use exact replacements for a listed path, and make a real byte change
+from the supplied candidate source.
 Change only paths needed to resolve every finding. Use candidate original_sha256 values.
 Omit unaffected paths because the controller retains/rebases them.
 Never revert accepted bytes unless a finding requires it.

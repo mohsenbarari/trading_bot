@@ -936,6 +936,11 @@ class AutopilotContracts(unittest.TestCase):
         self.assertEqual(cycle_runs[1][1]["attempt"], 1)
         self.assertEqual(cycle_runs[2][0], 3)
         self.assertEqual(cycle_runs[2][1]["attempt"], 2)
+        self.assertTrue(cycle_runs[2][1]["defer_prior_unit"])
+        self.assertEqual(cycle_runs[2][1]["deferred_unit"], {
+            "next_action": "Keep narrowing.",
+            "blockers": ["Still blocked."],
+        })
 
         last_publish = publish.call_args_list[-1]
         self.assertEqual(last_publish.args[1], "BLOCKED")

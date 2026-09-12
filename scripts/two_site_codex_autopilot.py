@@ -996,7 +996,13 @@ def run_loop(root: Path, codex: Path, max_cycles: int, timeout: int, once: bool)
                         "rejected": True,
                         "next_action": result["next_action"],
                         "blockers": list(result["blockers"]),
+                        "defer_prior_unit": consecutive_rescopes >= 2,
                     }
+                    if recovery_context["defer_prior_unit"]:
+                        recovery_context["deferred_unit"] = {
+                            "next_action": result["next_action"],
+                            "blockers": list(result["blockers"]),
+                        }
                     continue
 
                 prune_runs(state_root)

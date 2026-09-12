@@ -8,6 +8,7 @@ try:
     from scripts.two_site_proposal_runner import (
         MODEL,
         ProposalError,
+        RetryableProviderOutputError,
         RetryableProviderSessionError,
         parse_stream,
     )
@@ -15,6 +16,7 @@ except ImportError:
     from two_site_proposal_runner import (
         MODEL,
         ProposalError,
+        RetryableProviderOutputError,
         RetryableProviderSessionError,
         parse_stream,
     )
@@ -74,6 +76,7 @@ class TestRetryableProviderSessionError(unittest.TestCase):
     def test_subtype_hierarchy(self):
         self.assertTrue(issubclass(RetryableProviderSessionError, ProposalError))
         self.assertTrue(issubclass(RetryableProviderSessionError, ValueError))
+        self.assertTrue(issubclass(RetryableProviderOutputError, RetryableProviderSessionError))
 
     def test_denied_actions_raises_retryable(self):
         envelope = {
@@ -132,6 +135,38 @@ class TestRetryableProviderSessionError(unittest.TestCase):
             parse_stream(raw, VALID_TASK, VALID_SOURCES, "worker")
         self.assertNotIsInstance(ctx.exception, RetryableProviderSessionError)
         self.assertIn("CLI did not complete one successful session", str(ctx.exception))
+
+    def test_bad_function_call_error_is_narrowly_retryable(self):
+        envelope = {
+            "conversation_id": "session-test-id",
+            "status": "ERROR",
+            "error": "Your previous response contained an improperly formatted function call.",
+        }
+        with self.assertRaises(RetryableProviderOutputError) as ctx:
+            parse_stream(make_stream(envelope), VALID_TASK, VALID_SOURCES, "worker")
+        self.assertEqual("provider returned an invalid response envelope", str(ctx.exception))
+
+    def test_bad_function_call_with_external_gate_is_not_retryable(self):
+        envelope = {
+            "conversation_id": "session-test-id",
+            "status": "ERROR",
+            "error": "Quota limit; previous response had an improperly formatted function call.",
+        }
+        with self.assertRaises(ProposalError) as ctx:
+            parse_stream(make_stream(envelope), VALID_TASK, VALID_SOURCES, "worker")
+        self.assertNotIsInstance(ctx.exception, RetryableProviderSessionError)
+
+    def test_empty_success_transport_is_narrowly_retryable(self):
+        invalid = dict(VALID_PROPOSAL)
+        invalid["changes"] = []
+        envelope = {
+            "conversation_id": "session-test-id",
+            "status": "SUCCESS",
+            "response": json.dumps(invalid),
+        }
+        with self.assertRaises(RetryableProviderOutputError) as ctx:
+            parse_stream(make_stream(envelope), VALID_TASK, VALID_SOURCES, "worker")
+        self.assertEqual("provider returned unusable proposal transport", str(ctx.exception))
 
     def test_conversation_mismatch_not_retryable(self):
         envelope = {

@@ -13,12 +13,6 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from scripts import two_site_proposal_runner as runner
-try:
-    from scripts.two_site_correction_delta import CorrectionDeltaError
-except ImportError:
-    from two_site_correction_delta import CorrectionDeltaError
-
-
 class ProposalContracts(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -1309,6 +1303,17 @@ class ProposalContracts(unittest.TestCase):
         self.assertEqual(candidate_source_sha, runner.sha(b"VALUE = 2\n"))
         expected_candidate_sources_sha = runner.sha(runner.serialize_json(expected_candidate_sources))
 
+        forced_schema = runner.schema(
+            "worker", self.task, expected_candidate_sources, ("test_new.py",)
+        )["properties"]["changes"]["items"]["anyOf"]
+        new_file_branches = [
+            branch for branch in forced_schema
+            if branch["properties"]["path"]["enum"] == ["test_new.py"]
+        ]
+        self.assertEqual(len(new_file_branches), 1)
+        self.assertEqual(new_file_branches[0]["properties"]["content"]["minLength"], 1)
+        self.assertEqual(new_file_branches[0]["properties"]["replacements"]["maxItems"], 0)
+
         delta_payload = {
             "status": "PROPOSAL_READY",
             "summary": "Corrected assertion in test_new.py to assert 2 == 2.",
@@ -1318,8 +1323,8 @@ class ProposalContracts(unittest.TestCase):
                 {
                     "path": "test_new.py",
                     "original_sha256": candidate_new_sha,
-                    "content": None,
-                    "replacements": [{"old": "assert 1 == 1\n", "new": "assert 2 == 2\n"}],
+                    "content": "assert 2 == 2\n",
+                    "replacements": [],
                 },
             ],
         }
@@ -1420,10 +1425,14 @@ class ProposalContracts(unittest.TestCase):
             "run_id": "prior-worker-delta",
             "proposal_sha256": prior_proposal_sha,
         })
+        self.assertEqual(prompt_json["correction_transport"], {
+            "full_content_required_paths": ["test_new.py"],
+        })
         self.assertNotIn("proposal", prompt_json)
         self.assertEqual(
             set(prompt_json.keys()),
-            {"task", "source_head", "sources", "feedback", "prior_identity"},
+            {"task", "source_head", "sources", "feedback", "prior_identity",
+             "correction_transport"},
         )
         self.assertNotIn('"canonical_proposal_sha256"', prompt_text)
 
@@ -1477,20 +1486,20 @@ class ProposalContracts(unittest.TestCase):
             ],
         }
 
-        with self.assertRaises(CorrectionDeltaError) as ctx:
+        with self.assertRaises(runner.RetryableProviderOutputError) as ctx:
             self.invoke_fake_cli(
                 feedback=feedback,
                 proposal=prior_proposal,
                 result=revert_delta,
                 run_id="revert-noop-run",
             )
-        self.assertIn("complete no-op rejection", str(ctx.exception))
+        self.assertEqual("provider returned unusable correction delta", str(ctx.exception))
 
         out = self.root / ".local/two-site-refactor/proposals/revert-noop-run"
         self.assertTrue((out / "status.json").exists())
         status = json.loads((out / "status.json").read_text())
         self.assertEqual(status["state"], "BLOCKED")
-        self.assertIn("CorrectionDeltaError: complete no-op rejection", status["error"])
+        self.assertIn("RetryableProviderOutputError: provider returned unusable correction delta", status["error"])
         self.assertFalse((out / "delta-result.json").exists())
         self.assertFalse((out / "result.json").exists())
         self.assertFalse((out / "proposal.patch").exists())

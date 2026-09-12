@@ -143,6 +143,11 @@ BINDINGS_VALID یعنی اتصال دقیق task/source/head/hash و دو نشس
 هر round همان proposal ردشده را همراه findings و test evidence فشرده و مقید به SHA
 به Worker تازه می‌دهد و سپس Reviewer تازه لازم است؛ context تکراری مخزن دوباره ارسال
 نمی‌شود و بخش‌های پذیرفته‌شدهٔ نامرتبط باید ثابت بمانند.
+اگر path در snapshot اصلی وجود نداشته باشد، overlay شدن proposal قبلی آن را به فایل موجود
+برای انتخاب transport تبدیل نمی‌کند: Runner فهرست `full_content_required_paths` را از
+snapshot اصلی می‌سازد و correction برای آن path فقط محتوای کامل، غیرخالی و واقعاً متفاوت
+با SHA همان candidate و `replacements=[]` می‌پذیرد. schema، prompt و کنترل پس از پاسخ
+همگی به همان فهرست متصل‌اند.
 
 رد Reviewer، Codex یا تست با چهار کلید دقیق برمی‌گردد:
 `reviewer` (gemini یا codex)، `reviewed_proposal_sha256`،
@@ -150,14 +155,19 @@ BINDINGS_VALID یعنی اتصال دقیق task/source/head/hash و دو نشس
 finding باید محل، ورودی محرک، رفتار واقعی/مورد انتظار و اصلاح لازم را روشن کند.
 Worker تازه proposal ردشده و feedback را می‌گیرد؛ سپس Reviewer تازه الزامی است.
 بخش‌های صحیح نباید بی‌دلیل بازنویسی شوند. شکست مشابه را با عبارت جدید دوباره نفرستید.
-tool-attempt یا پاسخ session بدشکلِ provider فقط از مسیر retry محدود با نشست تازه عبور
-می‌کند؛ این retry جای correction معنایی نیست. correction معنایی همچنان حداکثر دو بار
-است و رد معادل باید به rescope واقعی منجر شود.
+tool-attempt، function-call بدفرمت یا پاسخ `SUCCESS` با transport خالی/نامعتبر/بدون تغییر
+فقط از مسیر retry محدود سه‌نشستی با شناسه و session تازه عبور می‌کند؛ خطای ثبت‌شده کوتاه
+است و source را تکرار نمی‌کند. این retry جای correction معنایی نیست. خطای سهمیه/شبکه/auth،
+truncation، scope/security/Git/runtime و پوشش معنایی requirements وارد این مسیر نمی‌شوند.
+correction معنایی همچنان حداکثر دو بار است و رد معادل باید به rescope واقعی منجر شود.
 
 حداکثر دو اصلاح متمایز در یک واحد؛ تمام‌شدن بودجه با Git تمیز و بدون commit یعنی
 BLOCKED/RESCOPE INTERNAL_REJECTION و یک واحد کوچک‌تر/کامل‌تر جدید.
 خروجی ناقص، MODEL_OUTPUT_TRUNCATED یا finish نامعتبر مجوز پذیرش bytes ناقص نیست.
-حداکثر سه RESCOPE پیاپی در Supervisor وجود دارد؛ تغییر مبهم یا gate بیرونی retry نمی‌شود.
+حداکثر سه RESCOPE پیاپی در Supervisor وجود دارد؛ پس از دومین RESCOPE، واحد قبلی در context
+صریحاً deferred می‌شود و چرخهٔ بعد باید یک رفتار مستقل و dependency-ready را برگزیند.
+اگر چنین واحدی وجود نداشته باشد HALT لازم است و تلاش سومِ ناموفق همچنان BLOCKED می‌شود.
+تغییر مبهم یا gate بیرونی retry نمی‌شود.
 خطای provider/auth/مجوز، dirty tree یا drift کنترل‌ها BLOCKED/HALT EXTERNAL_GATE است.
 شکست تست ابتدا یک بار با baseline تمیز مقایسه می‌شود؛ خطای قدیمی نامرتبط جدا می‌ماند.
 
