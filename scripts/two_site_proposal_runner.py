@@ -931,7 +931,12 @@ def parse_stream(raw: str, task: dict, sources: dict, role: str) -> tuple[dict, 
     else:
         if not isinstance(envelope.get("response"), str):
             raise RetryableProviderSessionError("CLI result has no response text")
-        result = unique_json(envelope["response"])
+        try:
+            result = unique_json(envelope["response"])
+        except json.JSONDecodeError as exc:
+            raise RetryableProviderSessionError(
+                "CLI response is not one valid JSON document"
+            ) from exc
     result = normalize_result(result, task, sources, role, strict_transport=True)
     result = validate_result(result, task, sources, role)
     if len(serialize_json(result)) > MAX_CONTEXT:
