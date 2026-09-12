@@ -205,6 +205,25 @@ class TestPipelinePreReviewGate(unittest.TestCase):
             "test_selectors": [DEFAULT_SELECTOR],
         }
         write_json(self.task_path, self.task)
+        self.reserve_record = {
+            "schema_version": 1,
+            "fingerprint": "0" * 64,
+            "source_sha256": "0" * 64,
+            "stage_id": "P1-00b",
+            "gap_reference": "docs/refactor/two-server/PROPOSAL_AUTOMATION.md#semantic-task-dedup",
+            "scenario_key": "automation_pre_review_gate",
+            "task_id": "T-PRE-REVIEW-GATE",
+            "run_prefix": "run",
+            "state": "RESERVED",
+            "created_at": 1000.0,
+        }
+        self.reserve_semantic_patcher = patch.object(
+            pipeline,
+            "reserve_semantic_attempt",
+            return_value=self.reserve_record,
+            create=True,
+        )
+        self.reserve_semantic_patcher.start()
         self.state = {
             "state": "TASK_BLOCKED",
             "task_id": "",
@@ -220,9 +239,11 @@ class TestPipelinePreReviewGate(unittest.TestCase):
             "pre_review_test_path": None,
             "pre_review_test_sha256": None,
             "pre_review_test_state": None,
+            "semantic_task_fingerprint": None,
         }
 
     def tearDown(self):
+        self.reserve_semantic_patcher.stop()
         self.tmp_dir.cleanup()
 
     def test_fail_then_pass_orchestration(self):

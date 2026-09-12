@@ -15,7 +15,8 @@ except ModuleNotFoundError:
 FORBIDDEN_GIT = {"add", "commit", "reset", "checkout", "switch", "fetch", "push", "merge"}
 EXPECTED_KEYS = {
     "state", "task_id", "source_head", "final_worker_run_id", "final_reviewer_run_id",
-    "proposal_sha256", "changed_paths", "proposal_path", "reviewer_path", "correction_count", "blockers"
+    "proposal_sha256", "changed_paths", "proposal_path", "reviewer_path", "correction_count", "blockers",
+    "pre_review_test_path", "pre_review_test_sha256", "pre_review_test_state", "semantic_task_fingerprint"
 }
 
 def _dummy_task_dict():
@@ -156,7 +157,7 @@ class TestProposalPipelineGuards(unittest.TestCase):
         self.assertEqual(len(lines), 1)
         data = json.loads(lines[0])
         self.assertEqual(set(data.keys()), EXPECTED_KEYS)
-        self.assertEqual(len(data), 11)
+        self.assertEqual(len(data), 15)
         self.assertEqual(data["blockers"], [])
         self.assertNotIn(src_marker, out)
         self.assertNotIn(prop_marker, out)
@@ -166,7 +167,7 @@ class TestProposalPipelineGuards(unittest.TestCase):
         self.assertEqual(code, 1)
         data = json.loads(out.strip())
         self.assertEqual(set(data.keys()), EXPECTED_KEYS)
-        self.assertEqual(len(data), 11)
+        self.assertEqual(len(data), 15)
         self.assertEqual(data["state"], "TASK_BLOCKED")
         self.assertEqual(data["blockers"], [marker])
         self.assertIn(marker, out)
@@ -195,19 +196,23 @@ class TestProposalPipelineGuards(unittest.TestCase):
             ev_dir = pdir / "coll-pfx"
             ev_dir.mkdir(parents=True)
             (ev_dir / "sentinel.txt").write_text("keep_me")
-            with self.assertRaises(pipe.ProposalError) as ctx:
-                pipe.run_pipeline(root, task_file, "coll-pfx", 300, None, {})
-            self.assertIn("already exists", str(ctx.exception))
-            self.assertEqual((ev_dir / "sentinel.txt").read_text(), "keep_me")
             def fake_git(_r, *a):
                 if a[0] == "branch": return pipe.BRANCH
                 if a[0] == "rev-parse": return "a" * 40
                 if a[0] == "status": return ""
                 return "1" * 40
-            with patch.object(pipe, "git", side_effect=fake_git), patch.object(pipe, "runner_run", side_effect=pipe.ProposalError("stop")):
+            with patch.object(pipe, "git", side_effect=fake_git):
+                with self.assertRaises(pipe.ProposalError) as ctx:
+                    pipe.run_pipeline(root, task_file, "coll-pfx", 300, None, {})
+            self.assertIn("already exists", str(ctx.exception))
+            self.assertEqual((ev_dir / "sentinel.txt").read_text(), "keep_me")
+            with patch.object(pipe, "git", side_effect=fake_git), \
+                 patch.object(pipe, "reserve_semantic_attempt", return_value={"fingerprint": "0" * 64}, create=True), \
+                 patch.object(pipe, "runner_run", side_effect=pipe.ProposalError("stop")):
                 try: pipe.run_pipeline(root, task_file, "new-pfx", 300, None, {})
                 except pipe.ProposalError: pass
             self.assertTrue((pdir / "new-pfx").exists())
+            self.assertEqual((ev_dir / "sentinel.txt").read_text(), "keep_me")
             self.assertEqual(src.read_bytes(), src_bytes)
 
 if __name__ == "__main__":
