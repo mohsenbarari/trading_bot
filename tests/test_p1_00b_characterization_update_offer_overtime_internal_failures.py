@@ -549,6 +549,392 @@ class TestP100bUpdateOfferOvertimeInternalFailures(unittest.IsolatedAsyncioTestC
         self.assertNotIn("rollback", order_tracker)
         self.assertNotIn("cache_invalidation", order_tracker)
 
+    async def test_post_commit_refresh_failure_preserves_mutation_and_suppresses_phases(self) -> None:
+        class SentinelRefreshError(Exception):
+            """Unique sentinel exception during database refresh."""
+
+        sentinel_error = SentinelRefreshError("database refresh failed after commit")
+
+        user_id = 18
+        target_minutes = 6
+        telegram_id = 887766
+        body = json.dumps({"user_id": user_id, "offer_overtime_minutes": target_minutes}).encode("utf-8")
+        request = _FakeRequest(body=body)
+        user = _InstrumentedUser(
+            user_id=user_id,
+            telegram_id=telegram_id,
+            offer_overtime_minutes=0,
+            is_deleted=False,
+        )
+
+        order_tracker: list[str] = []
+
+        async def _fake_get(model, pk):
+            order_tracker.append("lookup")
+            if model is User and pk == user_id:
+                return user
+            return None
+
+        async def _fake_commit():
+            order_tracker.append("commit")
+
+        async def _failing_refresh(instance):
+            order_tracker.append("refresh")
+            raise sentinel_error
+
+        async def _fake_rollback():
+            order_tracker.append("rollback")
+
+        db = SimpleNamespace(
+            get=AsyncMock(side_effect=_fake_get),
+            commit=AsyncMock(side_effect=_fake_commit),
+            refresh=AsyncMock(side_effect=_failing_refresh),
+            rollback=AsyncMock(side_effect=_fake_rollback),
+        )
+
+        save_result = OvertimePreferenceSaveResult(
+            offer_overtime_minutes=target_minutes,
+            detail="مهلت پیشنهاد با موفقیت ثبت شد.",
+            warning=None,
+        )
+
+        async def _succeeding_persist(db_arg, user_arg, value_arg):
+            order_tracker.append("persist")
+            user_arg.offer_overtime_minutes = value_arg
+            return save_result
+
+        persist_mock = AsyncMock(side_effect=_succeeding_persist)
+
+        async def _fake_invalidate(tg_id):
+            order_tracker.append("cache_invalidation")
+
+        mock_cache = AsyncMock(side_effect=_fake_invalidate)
+
+        with override_current_server(SERVER_IRAN), \
+             patch("api.routers.auth.verify_internal_signature", return_value=True) as mock_sig, \
+             patch("api.routers.auth._verify_foreign_internal_command", wraps=_verify_foreign_internal_command) as spy_verify, \
+             patch("core.services.offer_overtime_preference_service.persist_overtime_preference", new=persist_mock), \
+             patch("core.cache.invalidate_user_cache", new=mock_cache), \
+             patch("schemas.UserOfferOvertimeUpdateResponse") as mock_response:
+
+            with self.assertRaises(SentinelRefreshError) as caught:
+                await update_offer_overtime_internal(raw_request=request, db=db)
+
+        self.assertIs(caught.exception, sentinel_error)
+
+        spy_verify.assert_called_once_with(request, body)
+        self.assertEqual(spy_verify.call_count, 1)
+        mock_sig.assert_called_once_with(
+            body,
+            request.headers["x-timestamp"],
+            request.headers["x-signature"],
+            request.headers["x-api-key"],
+        )
+        self.assertEqual(mock_sig.call_count, 1)
+
+        db.get.assert_awaited_once_with(User, user_id)
+        self.assertEqual(db.get.await_count, 1)
+        persist_mock.assert_awaited_once_with(db, user, target_minutes)
+        self.assertEqual(persist_mock.await_count, 1)
+        self.assertIs(persist_mock.call_args[0][0], db)
+        self.assertIs(persist_mock.call_args[0][1], user)
+        self.assertEqual(persist_mock.call_args[0][2], target_minutes)
+
+        self.assertEqual(user.offer_overtime_minutes, target_minutes)
+        self.assertEqual(user.mutation_count, 1)
+
+        db.commit.assert_awaited_once_with()
+        self.assertEqual(db.commit.await_count, 1)
+
+        db.refresh.assert_awaited_once_with(user)
+        self.assertEqual(db.refresh.await_count, 1)
+        self.assertIs(db.refresh.call_args[0][0], user)
+
+        self.assertEqual(order_tracker, ["lookup", "persist", "commit", "refresh"])
+        lookup_idx = order_tracker.index("lookup")
+        persist_idx = order_tracker.index("persist")
+        commit_idx = order_tracker.index("commit")
+        refresh_idx = order_tracker.index("refresh")
+        self.assertLess(lookup_idx, persist_idx)
+        self.assertLess(persist_idx, commit_idx)
+        self.assertLess(commit_idx, refresh_idx)
+
+        db.rollback.assert_not_called()
+        self.assertEqual(db.rollback.await_count, 0)
+        mock_cache.assert_not_called()
+        self.assertEqual(mock_cache.await_count, 0)
+        mock_response.assert_not_called()
+        self.assertEqual(mock_response.call_count, 0)
+
+        self.assertNotIn("rollback", order_tracker)
+        self.assertNotIn("cache_invalidation", order_tracker)
+        self.assertNotIn("response_construction", order_tracker)
+
+    async def test_post_refresh_cache_invalidation_failure_preserves_mutation_and_suppresses_response(self) -> None:
+        class SentinelCacheInvalidationError(Exception):
+            """Unique sentinel exception during cache invalidation."""
+
+        sentinel_error = SentinelCacheInvalidationError("redis connection error during user cache invalidation")
+
+        user_id = 23
+        target_minutes = 8
+        telegram_id = 665544
+        body = json.dumps({"user_id": user_id, "offer_overtime_minutes": target_minutes}).encode("utf-8")
+        request = _FakeRequest(body=body)
+        user = _InstrumentedUser(
+            user_id=user_id,
+            telegram_id=telegram_id,
+            offer_overtime_minutes=0,
+            is_deleted=False,
+        )
+
+        order_tracker: list[str] = []
+
+        async def _fake_get(model, pk):
+            order_tracker.append("lookup")
+            if model is User and pk == user_id:
+                return user
+            return None
+
+        async def _fake_commit():
+            order_tracker.append("commit")
+
+        async def _fake_refresh(instance):
+            order_tracker.append("refresh")
+
+        async def _failing_invalidate(tg_id):
+            order_tracker.append("cache_invalidation")
+            raise sentinel_error
+
+        async def _fake_rollback():
+            order_tracker.append("rollback")
+
+        db = SimpleNamespace(
+            get=AsyncMock(side_effect=_fake_get),
+            commit=AsyncMock(side_effect=_fake_commit),
+            refresh=AsyncMock(side_effect=_fake_refresh),
+            rollback=AsyncMock(side_effect=_fake_rollback),
+        )
+
+        save_result = OvertimePreferenceSaveResult(
+            offer_overtime_minutes=target_minutes,
+            detail="مهلت پیشنهاد با موفقیت ثبت شد.",
+            warning=None,
+        )
+
+        async def _succeeding_persist(db_arg, user_arg, value_arg):
+            order_tracker.append("persist")
+            user_arg.offer_overtime_minutes = value_arg
+            return save_result
+
+        persist_mock = AsyncMock(side_effect=_succeeding_persist)
+        mock_cache = AsyncMock(side_effect=_failing_invalidate)
+
+        with override_current_server(SERVER_IRAN), \
+             patch("api.routers.auth.verify_internal_signature", return_value=True) as mock_sig, \
+             patch("api.routers.auth._verify_foreign_internal_command", wraps=_verify_foreign_internal_command) as spy_verify, \
+             patch("core.services.offer_overtime_preference_service.persist_overtime_preference", new=persist_mock), \
+             patch("core.cache.invalidate_user_cache", new=mock_cache), \
+             patch("schemas.UserOfferOvertimeUpdateResponse") as mock_response:
+
+            with self.assertRaises(SentinelCacheInvalidationError) as caught:
+                await update_offer_overtime_internal(raw_request=request, db=db)
+
+        self.assertIs(caught.exception, sentinel_error)
+
+        spy_verify.assert_called_once_with(request, body)
+        self.assertEqual(spy_verify.call_count, 1)
+        mock_sig.assert_called_once_with(
+            body,
+            request.headers["x-timestamp"],
+            request.headers["x-signature"],
+            request.headers["x-api-key"],
+        )
+        self.assertEqual(mock_sig.call_count, 1)
+
+        db.get.assert_awaited_once_with(User, user_id)
+        self.assertEqual(db.get.await_count, 1)
+        persist_mock.assert_awaited_once_with(db, user, target_minutes)
+        self.assertEqual(persist_mock.await_count, 1)
+        self.assertIs(persist_mock.call_args[0][0], db)
+        self.assertIs(persist_mock.call_args[0][1], user)
+        self.assertEqual(persist_mock.call_args[0][2], target_minutes)
+
+        self.assertEqual(user.offer_overtime_minutes, target_minutes)
+        self.assertEqual(user.mutation_count, 1)
+
+        db.commit.assert_awaited_once_with()
+        self.assertEqual(db.commit.await_count, 1)
+
+        db.refresh.assert_awaited_once_with(user)
+        self.assertEqual(db.refresh.await_count, 1)
+        self.assertIs(db.refresh.call_args[0][0], user)
+
+        mock_cache.assert_awaited_once_with(telegram_id)
+        self.assertEqual(mock_cache.await_count, 1)
+        self.assertEqual(mock_cache.call_args[0][0], telegram_id)
+
+        self.assertEqual(order_tracker, ["lookup", "persist", "commit", "refresh", "cache_invalidation"])
+        lookup_idx = order_tracker.index("lookup")
+        persist_idx = order_tracker.index("persist")
+        commit_idx = order_tracker.index("commit")
+        refresh_idx = order_tracker.index("refresh")
+        cache_idx = order_tracker.index("cache_invalidation")
+        self.assertLess(lookup_idx, persist_idx)
+        self.assertLess(persist_idx, commit_idx)
+        self.assertLess(commit_idx, refresh_idx)
+        self.assertLess(refresh_idx, cache_idx)
+
+        db.rollback.assert_not_called()
+        self.assertEqual(db.rollback.await_count, 0)
+        mock_response.assert_not_called()
+        self.assertEqual(mock_response.call_count, 0)
+
+        self.assertNotIn("rollback", order_tracker)
+        self.assertNotIn("response_construction", order_tracker)
+
+    async def test_telegram_id_present_success_executes_complete_order_and_returns_response(self) -> None:
+        user_id = 31
+        target_minutes = 4
+        telegram_id = 443322
+        body = json.dumps({"user_id": user_id, "offer_overtime_minutes": target_minutes}).encode("utf-8")
+        request = _FakeRequest(body=body)
+        user = _InstrumentedUser(
+            user_id=user_id,
+            telegram_id=telegram_id,
+            offer_overtime_minutes=0,
+            is_deleted=False,
+        )
+
+        order_tracker: list[str] = []
+
+        async def _fake_get(model, pk):
+            order_tracker.append("lookup")
+            if model is User and pk == user_id:
+                return user
+            return None
+
+        async def _fake_commit():
+            order_tracker.append("commit")
+
+        async def _fake_refresh(instance):
+            order_tracker.append("refresh")
+
+        async def _fake_invalidate(tg_id):
+            order_tracker.append("cache_invalidation")
+            return True
+
+        async def _fake_rollback():
+            order_tracker.append("rollback")
+
+        db = SimpleNamespace(
+            get=AsyncMock(side_effect=_fake_get),
+            commit=AsyncMock(side_effect=_fake_commit),
+            refresh=AsyncMock(side_effect=_fake_refresh),
+            rollback=AsyncMock(side_effect=_fake_rollback),
+        )
+
+        save_result = OvertimePreferenceSaveResult(
+            offer_overtime_minutes=target_minutes,
+            detail="مهلت پیشنهاد با موفقیت ثبت شد.",
+            warning="توجه: آزمایشی",
+        )
+
+        async def _succeeding_persist(db_arg, user_arg, value_arg):
+            order_tracker.append("persist")
+            user_arg.offer_overtime_minutes = value_arg
+            return save_result
+
+        persist_mock = AsyncMock(side_effect=_succeeding_persist)
+        mock_cache = AsyncMock(side_effect=_fake_invalidate)
+
+        expected_response = schemas.UserOfferOvertimeUpdateResponse(
+            offer_overtime_minutes=save_result.offer_overtime_minutes,
+            detail=save_result.detail,
+            warning=save_result.warning,
+        )
+
+        def _fake_response_constructor(*args, **kwargs):
+            order_tracker.append("response_construction")
+            return expected_response
+
+        with override_current_server(SERVER_IRAN), \
+             patch("api.routers.auth.verify_internal_signature", return_value=True) as mock_sig, \
+             patch("api.routers.auth._verify_foreign_internal_command", wraps=_verify_foreign_internal_command) as spy_verify, \
+             patch("core.services.offer_overtime_preference_service.persist_overtime_preference", new=persist_mock), \
+             patch("core.cache.invalidate_user_cache", new=mock_cache), \
+             patch("schemas.UserOfferOvertimeUpdateResponse", side_effect=_fake_response_constructor) as mock_response:
+
+            response = await update_offer_overtime_internal(raw_request=request, db=db)
+
+        self.assertIs(response, expected_response)
+        self.assertEqual(response.offer_overtime_minutes, target_minutes)
+        self.assertEqual(response.detail, save_result.detail)
+        self.assertEqual(response.warning, save_result.warning)
+
+        spy_verify.assert_called_once_with(request, body)
+        self.assertEqual(spy_verify.call_count, 1)
+        mock_sig.assert_called_once_with(
+            body,
+            request.headers["x-timestamp"],
+            request.headers["x-signature"],
+            request.headers["x-api-key"],
+        )
+        self.assertEqual(mock_sig.call_count, 1)
+
+        db.get.assert_awaited_once_with(User, user_id)
+        self.assertEqual(db.get.await_count, 1)
+        persist_mock.assert_awaited_once_with(db, user, target_minutes)
+        self.assertEqual(persist_mock.await_count, 1)
+        self.assertIs(persist_mock.call_args[0][0], db)
+        self.assertIs(persist_mock.call_args[0][1], user)
+        self.assertEqual(persist_mock.call_args[0][2], target_minutes)
+
+        self.assertEqual(user.offer_overtime_minutes, target_minutes)
+        self.assertEqual(user.mutation_count, 1)
+
+        db.commit.assert_awaited_once_with()
+        self.assertEqual(db.commit.await_count, 1)
+
+        db.refresh.assert_awaited_once_with(user)
+        self.assertEqual(db.refresh.await_count, 1)
+        self.assertIs(db.refresh.call_args[0][0], user)
+
+        mock_cache.assert_awaited_once_with(telegram_id)
+        self.assertEqual(mock_cache.await_count, 1)
+        self.assertEqual(mock_cache.call_args[0][0], telegram_id)
+
+        mock_response.assert_called_once_with(
+            offer_overtime_minutes=save_result.offer_overtime_minutes,
+            detail=save_result.detail,
+            warning=save_result.warning,
+        )
+        self.assertEqual(mock_response.call_count, 1)
+        self.assertEqual(mock_response.call_args.kwargs["offer_overtime_minutes"], save_result.offer_overtime_minutes)
+        self.assertEqual(mock_response.call_args.kwargs["detail"], save_result.detail)
+        self.assertEqual(mock_response.call_args.kwargs["warning"], save_result.warning)
+        self.assertEqual(mock_response.call_args[0], ())
+
+        self.assertEqual(
+            order_tracker,
+            ["lookup", "persist", "commit", "refresh", "cache_invalidation", "response_construction"],
+        )
+        lookup_idx = order_tracker.index("lookup")
+        persist_idx = order_tracker.index("persist")
+        commit_idx = order_tracker.index("commit")
+        refresh_idx = order_tracker.index("refresh")
+        cache_idx = order_tracker.index("cache_invalidation")
+        resp_idx = order_tracker.index("response_construction")
+        self.assertLess(lookup_idx, persist_idx)
+        self.assertLess(persist_idx, commit_idx)
+        self.assertLess(commit_idx, refresh_idx)
+        self.assertLess(refresh_idx, cache_idx)
+        self.assertLess(cache_idx, resp_idx)
+
+        db.rollback.assert_not_called()
+        self.assertEqual(db.rollback.await_count, 0)
+        self.assertNotIn("rollback", order_tracker)
+
 
 if __name__ == "__main__":
     unittest.main()
