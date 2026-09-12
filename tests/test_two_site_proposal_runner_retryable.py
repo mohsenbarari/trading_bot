@@ -30,7 +30,7 @@ VALID_TASK = {
 
 VALID_SOURCES = {
     "file.py": {
-        "sha256": "abc123oldhash",
+        "sha256": "1355e9731dc401dd2f73831607210ce164884eb2bda373d314b40239303ca3f2",
         "content": "old_file_content\n",
     }
 }
@@ -43,7 +43,7 @@ VALID_PROPOSAL = {
     "changes": [
         {
             "path": "file.py",
-            "original_sha256": "abc123oldhash",
+            "original_sha256": "1355e9731dc401dd2f73831607210ce164884eb2bda373d314b40239303ca3f2",
             "content": "new_file_content\n",
             "replacements": [],
         }

@@ -62,11 +62,16 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
                 "task_id": "GEMINI-TEST-EFFORT-001",
                 "goal": "Hermetic test goal",
                 "context_files": [],
-                "allowed_files": [],
+                "allowed_files": ["file.py"],
                 "requirements": ["1. Test requirement."],
                 "test_selectors": ["tests.test_two_site_proposal_runner_effort"],
             }
-            mock_sources: dict = {}
+            mock_sources: dict = {
+                "file.py": {
+                    "sha256": "1355e9731dc401dd2f73831607210ce164884eb2bda373d314b40239303ca3f2",
+                    "content": "old_file_content\n",
+                }
+            }
             captured_commands: list[list[str]] = []
 
             class DummyProcess:
