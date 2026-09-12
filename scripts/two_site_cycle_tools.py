@@ -12,6 +12,16 @@ try:
     from scripts import two_site_proposal_runner as runner
 except ModuleNotFoundError:
     import two_site_proposal_runner as runner
+try:
+    from scripts.two_site_semantic_task_builder import (
+        build_task_identity,
+        validate_task_identity,
+    )
+except ModuleNotFoundError:
+    from two_site_semantic_task_builder import (
+        build_task_identity,
+        validate_task_identity,
+    )
 
 MARKER = "\nCANONICAL_SOURCE_EXCERPTS_JSON:\n"
 
@@ -57,7 +67,7 @@ def validate_excerpts(root: Path, task: dict) -> None:
     if goal.count(MARKER) != 1:
         raise runner.ProposalError("duplicate excerpt marker")
     package = runner.unique_json(goal.split(MARKER, 1)[1])
-    if (not isinstance(package, dict) or set(package) != {"head", "gap_reference", "excerpts"}
+    if (not isinstance(package, dict) or set(package) != {"head", "gap_reference", "excerpts", "semantic_identity"}
             or package["head"] != runner.git(root, "rev-parse", "HEAD")
             or not isinstance(package["excerpts"], list) or len(package["excerpts"]) > 32):
         raise runner.ProposalError("stale or invalid source excerpt package")
@@ -74,12 +84,27 @@ def validate_excerpts(root: Path, task: dict) -> None:
         if item != excerpt(root, item["path"], item.get("symbols")):
             raise runner.ProposalError("excerpt provenance mismatch")
         seen.add(item["path"])
+    identity = package.get("semantic_identity")
+    if not isinstance(identity, dict) or not isinstance(identity.get("scenario_key"), str):
+        raise runner.ProposalError("invalid semantic identity package")
+    try:
+        validate_task_identity(
+            root,
+            gap,
+            identity["scenario_key"],
+            task.get("context_files", []),
+            task.get("allowed_files", []),
+            package["excerpts"],
+            identity,
+        )
+    except Exception as exc:
+        raise runner.ProposalError(f"semantic identity validation failed: {exc}") from exc
 
 
 def build(root: Path, spec_path: Path, output: Path) -> dict:
     spec = runner.unique_json(runner.bounded_file_text(root, spec_path, runner.MAX_CONTEXT, "task spec"))
-    if not isinstance(spec, dict) or set(spec) != {"task", "snippets", "gap_reference"}:
-        raise runner.ProposalError("spec needs task, snippets and gap_reference")
+    if not isinstance(spec, dict) or set(spec) != {"task", "snippets", "gap_reference", "scenario_key"}:
+        raise runner.ProposalError("spec needs task, snippets, gap_reference and scenario_key")
     task = spec["task"]
     if not isinstance(task, dict) or not isinstance(task.get("goal"), str) or MARKER in task["goal"]:
         raise runner.ProposalError("invalid base task")
@@ -90,8 +115,20 @@ def build(root: Path, spec_path: Path, output: Path) -> dict:
         if not isinstance(item, dict) or set(item) != {"path", "symbols"}:
             raise runner.ProposalError("snippet needs path and symbols")
         snippets.append(excerpt(root, item["path"], item["symbols"]))
+    try:
+        identity = build_task_identity(
+            root,
+            spec["gap_reference"],
+            spec["scenario_key"],
+            task.get("context_files", []),
+            task.get("allowed_files", []),
+            snippets,
+        )
+    except Exception as exc:
+        raise runner.ProposalError(f"failed to build semantic identity: {exc}") from exc
     package = {"head": runner.git(root, "rev-parse", "HEAD"),
-               "gap_reference": spec["gap_reference"], "excerpts": snippets}
+               "gap_reference": spec["gap_reference"], "excerpts": snippets,
+               "semantic_identity": identity}
     task = {**task, "goal": task["goal"] + MARKER + json.dumps(package, ensure_ascii=False)}
     payload = (json.dumps(task, ensure_ascii=False, indent=2) + "\n").encode()
     expected_parent = root / ".local/two-site-refactor/tasks"
@@ -109,6 +146,7 @@ def build(root: Path, spec_path: Path, output: Path) -> dict:
         raise
     result.update(task_path=str(output), gap_reference=package["gap_reference"],
                   excerpt_count=len(snippets),
+                  semantic_task_fingerprint=identity["fingerprint"],
                   sizing_note="Budget the reviewer too: template + task/sources + full canonical proposal; target <160000 bytes, not only Worker input.")
     return result
 
@@ -134,7 +172,6 @@ def review(root: Path, task_path: Path, worker: str, reviewer: str, digest: str,
         current_task = runner.unique_json(runner.bounded_file_text(root, task_path, runner.MAX_CONTEXT, "task"))
         if current_task != task:
             raise runner.ProposalError("task changed after review")
-        validate_excerpts(root, task)
     binding = {"gemini_worker_run_id": worker, "gemini_reviewer_run_id": reviewer, "proposal_sha256": digest}
     proposal = autopilot.validate_gemini_chain(root, head, binding)
     conversations: set[str] = set()

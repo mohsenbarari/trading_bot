@@ -10,7 +10,13 @@ from scripts import two_site_proposal_runner as runner
 
 
 @pytest.fixture
-def repo(tmp_path):
+def repo(tmp_path, monkeypatch):
+    monkeypatch.setattr("scripts.two_site_semantic_task_builder.load_active_assignment_scope", lambda *args, **kwargs: "stage_a")
+    try:
+        import two_site_semantic_task_builder
+        monkeypatch.setattr(two_site_semantic_task_builder, "load_active_assignment_scope", lambda *args, **kwargs: "stage_a")
+    except (ImportError, AttributeError):
+        pass
     def git(*args):
         return subprocess.check_output(["git", "-C", str(tmp_path), *args], stderr=subprocess.DEVNULL, text=True).strip()
     git("init")
@@ -30,11 +36,14 @@ def task():
             "test_selectors": ["test_new.py"]}
 
 
-def built(repo, snippets=None):
+def built(repo, snippets=None, scenario_key="scenario_a"):
     root, _ = repo
     spec = root / "spec.json"
-    spec.write_text(json.dumps({"task": task(), "gap_reference": "gap.md#gap-a",
-                                "snippets": snippets if snippets is not None else [{"path": "code.py", "symbols": ["f", "LIMIT"]}]}))
+    spec_data = {"task": task(), "gap_reference": "gap.md#gap-a",
+                 "snippets": snippets if snippets is not None else [{"path": "code.py", "symbols": ["f", "LIMIT"]}]}
+    if scenario_key is not None:
+        spec_data["scenario_key"] = scenario_key
+    spec.write_text(json.dumps(spec_data))
     output = root / ".local/two-site-refactor/tasks/new.json"
     value = ct.build(root, spec, output)
     spec.unlink()
@@ -45,7 +54,12 @@ def test_builder_proves_symbols_and_reduces_full_sources(repo):
     root, _ = repo
     output, result = built(repo)
     assert result["state"] == "TASK_READY"
+    assert "semantic_task_fingerprint" in result
+    assert isinstance(result["semantic_task_fingerprint"], str) and len(result["semantic_task_fingerprint"]) == 64
     loaded, sources = runner.load_task(root, output)
+    package = json.loads(loaded["goal"].split(ct.MARKER, 1)[1])
+    assert "semantic_identity" in package
+    assert package["semantic_identity"]["fingerprint"] == result["semantic_task_fingerprint"]
     assert "code.py" not in sources
     assert "@staticmethod\ndef f" in loaded["goal"].replace("\\n", "\n")
     assert "unrelated" not in loaded["goal"]
@@ -56,12 +70,25 @@ def test_builder_proves_symbols_and_reduces_full_sources(repo):
 
 def _write_spec(root):
     path = root / "spec.json"
-    path.write_text(json.dumps({"task": task(), "snippets": [], "gap_reference": "gap.md"}))
+    path.write_text(json.dumps({"task": task(), "snippets": [], "gap_reference": "gap.md#gap-a", "scenario_key": "scenario_a"}))
     return path
 
 
-@pytest.mark.parametrize("mutation", ["source", "head", "text", "range", "hash", "symbol"])
-def test_excerpt_drift_is_rejected(repo, mutation):
+def test_missing_scenario_is_rejected(repo):
+    root, _ = repo
+    spec = root / "spec.json"
+    spec.write_text(json.dumps({"task": task(), "snippets": [], "gap_reference": "gap.md#gap-a"}))
+    output = root / ".local/two-site-refactor/tasks/missing_scenario.json"
+    with pytest.raises(runner.ProposalError, match="scenario_key"):
+        ct.build(root, spec, output)
+
+
+@pytest.mark.parametrize("mutation", [
+    "source", "head", "text", "range", "hash", "symbol",
+    "identity_removal", "forged_fingerprint", "forged_manifest",
+    "stage_drift", "scenario_drift",
+])
+def test_excerpt_drift_is_rejected(repo, monkeypatch, mutation):
     root, git = repo
     output, _ = built(repo)
     if mutation == "source":
@@ -69,15 +96,31 @@ def test_excerpt_drift_is_rejected(repo, mutation):
             file.write("# drift\n")
     elif mutation == "head":
         git("commit", "--allow-empty", "-m", "new head")
+    elif mutation == "stage_drift":
+        monkeypatch.setattr("scripts.two_site_semantic_task_builder.load_active_assignment_scope", lambda *args, **kwargs: "stage_b")
+        try:
+            import two_site_semantic_task_builder
+            monkeypatch.setattr(two_site_semantic_task_builder, "load_active_assignment_scope", lambda *args, **kwargs: "stage_b")
+        except (ImportError, AttributeError):
+            pass
     else:
         value = json.loads(output.read_text())
         goal, raw = value["goal"].split(ct.MARKER)
         package = json.loads(raw)
-        item = package["excerpts"][0]
-        if mutation == "text": item["ranges"][0]["text"] = "import fake\n"
-        if mutation == "range": item["ranges"][0]["start"] = 7
-        if mutation == "hash": item["sha256"] = "0" * 64
-        if mutation == "symbol": item["symbols"] = ["missing"]
+        if mutation == "identity_removal":
+            package.pop("semantic_identity", None)
+        elif mutation == "forged_fingerprint":
+            package["semantic_identity"]["fingerprint"] = "0" * 64
+        elif mutation == "forged_manifest":
+            package["semantic_identity"]["source_manifest"]["gap.md"] = "0" * 64
+        elif mutation == "scenario_drift":
+            package["semantic_identity"]["scenario_key"] = "scenario_b"
+        else:
+            item = package["excerpts"][0]
+            if mutation == "text": item["ranges"][0]["text"] = "import fake\n"
+            if mutation == "range": item["ranges"][0]["start"] = 7
+            if mutation == "hash": item["sha256"] = "0" * 64
+            if mutation == "symbol": item["symbols"] = ["missing"]
         value["goal"] = goal + ct.MARKER + json.dumps(package)
         output.write_text(json.dumps(value))
     with pytest.raises(ValueError):

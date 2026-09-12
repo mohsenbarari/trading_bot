@@ -61,7 +61,14 @@ UPDATED_CODE = (
 
 
 @pytest.fixture
-def repo(tmp_path):
+def repo(tmp_path, monkeypatch):
+    monkeypatch.setattr("scripts.two_site_semantic_task_builder.load_active_assignment_scope", lambda *args, **kwargs: "stage_a")
+    try:
+        import two_site_semantic_task_builder
+        monkeypatch.setattr(two_site_semantic_task_builder, "load_active_assignment_scope", lambda *args, **kwargs: "stage_a")
+    except (ImportError, AttributeError):
+        pass
+
     def git(*args):
         return subprocess.check_output(
             ["git", "-C", str(tmp_path), *args],
@@ -103,6 +110,7 @@ def make_proposal_chain(
         json.dumps({
             "task": task_def,
             "gap_reference": "gap.md#gap-a",
+            "scenario_key": "scenario_a",
             "snippets": [],
         })
     )
