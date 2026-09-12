@@ -35,11 +35,27 @@ def fake_git(_root: Path, *args: str) -> str:
     return "b" * 40 if "show-ref" in cmd else ""
 
 
+def passed_receipt(worker_sha: str) -> dict:
+    raw = {
+        "state": "PASSED",
+        "proposal_sha256": worker_sha,
+        "selectors": ["tests/test_a.py"],
+        "unsupported_specs": [],
+        "returncode": 0,
+        "stdout_tail": "1 passed",
+        "stderr_tail": "",
+        "snapshot_files": 1,
+        "snapshot_bytes": 1,
+        "isolation": "test-double",
+    }
+    return pipeline.validate_test_receipt(raw, worker_sha, require_passed=True)
+
+
 def make_runner(root: Path, responses: list[dict]):
     calls = []
     src_sha = file_sha256(root / "src.py")
 
-    def mock_run(_r, _t, role, run_id, timeout, feedback=None, proposal=None, cli=None):
+    def mock_run(_r, _t, role, run_id, timeout, feedback=None, proposal=None, cli=None, test_evidence=None):
         calls.append((role, run_id, timeout, feedback, proposal, cli))
         resp = responses[len(calls) - 1]
         out = root / ".local/two-site-refactor/proposals" / run_id
@@ -58,6 +74,8 @@ def make_runner(root: Path, responses: list[dict]):
                     "sources": {"src.py": {"sha256": src_sha, "content": "# orig\n"}}}
         if proposal is not None:
             snapshot["proposal"] = proposal.read_text()
+        if test_evidence is not None:
+            snapshot["test_evidence"] = json.loads(Path(test_evidence).read_text())
         if "task_override" in resp:
             snapshot.update(resp["task_override"])
         write_json(out / "task.json", snapshot)
@@ -71,6 +89,8 @@ def make_runner(root: Path, responses: list[dict]):
                       input_proposal_sha256=pst["result_sha256"])
         if feedback is not None:
             st["input_feedback_sha256"] = file_sha256(feedback)
+        if test_evidence is not None:
+            st["input_test_evidence_sha256"] = file_sha256(test_evidence)
         if "status_override" in resp:
             st.update(resp["status_override"])
         write_json(out / "status.json", st)
@@ -81,6 +101,12 @@ def make_runner(root: Path, responses: list[dict]):
 
 class TestPipeline(unittest.TestCase):
     def setUp(self):
+        self.candidate_tests_patcher = patch.object(
+            pipeline,
+            "run_candidate_tests",
+            side_effect=lambda *args, **_kwargs: passed_receipt(args[3]),
+        )
+        self.candidate_tests_patcher.start()
         self.tmp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp_dir.name).resolve()
         self.task_path = self.root / "task.json"
@@ -92,9 +118,12 @@ class TestPipeline(unittest.TestCase):
         self.state = {"state": "TASK_BLOCKED", "task_id": "", "source_head": "",
                       "final_worker_run_id": None, "final_reviewer_run_id": None,
                       "proposal_sha256": None, "changed_paths": [], "proposal_path": None,
-                      "reviewer_path": None, "correction_count": 0, "blockers": []}
+                      "reviewer_path": None, "correction_count": 0, "blockers": [],
+                      "pre_review_test_path": None, "pre_review_test_sha256": None,
+                      "pre_review_test_state": None}
 
     def tearDown(self):
+        self.candidate_tests_patcher.stop()
         self.tmp_dir.cleanup()
 
     def test_happy_path(self):
@@ -111,6 +140,8 @@ class TestPipeline(unittest.TestCase):
         r_st = json.loads((r_dir / "status.json").read_text())
         self.assertNotEqual(w_st["conversation_id"], r_st["conversation_id"])
         w_sha = file_sha256(w_dir / "result.json")
+        rcpt_path = self.root / ".local/two-site-refactor/pipeline/run-happy/pre-review-tests-0.json"
+        rcpt_sha = file_sha256(rcpt_path)
         expected = {
             "state": "READY_FOR_CODEX", "task_id": "T1", "source_head": HEAD,
             "final_worker_run_id": "run-happy-worker-0", "final_reviewer_run_id": "run-happy-reviewer-0",
@@ -118,8 +149,11 @@ class TestPipeline(unittest.TestCase):
             "proposal_path": ".local/two-site-refactor/proposals/run-happy-worker-0/result.json",
             "reviewer_path": ".local/two-site-refactor/proposals/run-happy-reviewer-0/result.json",
             "correction_count": 0, "blockers": [],
+            "pre_review_test_path": ".local/two-site-refactor/pipeline/run-happy/pre-review-tests-0.json",
+            "pre_review_test_sha256": rcpt_sha,
+            "pre_review_test_state": "PASSED",
         }
-        self.assertEqual(len(res), 11)
+        self.assertEqual(len(res), 14)
         self.assertEqual(res, expected)
         self.assertFalse(Path(res["proposal_path"]).is_absolute() or Path(res["reviewer_path"]).is_absolute())
         self.assertEqual(self.src_file.read_text(), "# orig\n")
@@ -144,9 +178,13 @@ class TestPipeline(unittest.TestCase):
         fb_path = self.root / ".local/two-site-refactor/pipeline/run-corr/feedback-correction-1.json"
         self.assertTrue(fb_path.exists())
         fb_data = json.loads(fb_path.read_bytes().decode("utf-8"))
+        rcpt0_path = self.root / ".local/two-site-refactor/pipeline/run-corr/pre-review-tests-0.json"
+        rcpt0_sha = file_sha256(rcpt0_path)
         self.assertEqual(fb_data, {
             "reviewer": "gemini", "reviewed_proposal_sha256": w0_sha,
-            "findings": ["fix bug"], "test_evidence": [],
+            "findings": ["fix bug"], "test_evidence": [
+                f"receipt_sha256={rcpt0_sha} proposal_sha256={w0_sha} selector_count=1",
+            ],
         })
         self.assertEqual(len(fb_data), 4)
 
