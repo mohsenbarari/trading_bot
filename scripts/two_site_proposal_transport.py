@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-FULL_CONTENT_BYTE_THRESHOLD = 16384
+FULL_CONTENT_BYTE_THRESHOLD = 8192
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
