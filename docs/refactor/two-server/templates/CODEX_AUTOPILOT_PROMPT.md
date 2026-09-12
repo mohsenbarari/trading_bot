@@ -44,20 +44,30 @@ and unrelated remote-service mutation. This does not widen any other gate.
    independent work. Normally <=6 requirements. Do not bundle Stages or skip gates.
    Use scripts/two_site_cycle_tools.py build --spec <ignored-spec.json> --output
    .local/two-site-refactor/tasks/<fresh-id>.json. Spec keys: task (the exact six-key
-   runner contract), snippets ([{path, symbols}] or []), gap_reference (tracked doc#gap).
+   runner contract), snippets ([{path, symbols}] or []), gap_reference (tracked doc#gap),
+   and scenario_key (stable machine-readable behavior/scenario name).
    All context_files/allowed_files are actual canonical source paths, never .local,
    tmp excerpts, .txt, credentials or aliases. Read-only Python dependency snippets
    contain complete selected top-level definitions, decorators and imports; full-file
    SHA, HEAD, line ranges and text are rechecked locally. Include the dependency closure:
    this helper proves provenance, not completeness. Writable files remain full sources.
    Full-context tasks remain supported when excerpts would hide relevant behavior.
+   The builder marker binds HEAD, gap, excerpts and a semantic identity derived from
+   Stage, normalized gap, referenced symbols, scenario key and source SHA manifest.
+   It proves identity/provenance, not that the gap remains open. The pipeline validates
+   it and atomically reserves one immutable local attempt per fingerprint before evidence
+   creation or provider contact. A different task ID or run prefix cannot bypass this.
+   Retry only after a material source-SHA/Stage/gap/symbol/scenario change, or an explicit
+   audited local maintenance decision; never invent TTL, deletion, lease or auto-release.
    After creating/resizing a task require the actual command
    python3 scripts/two_site_proposal_runner.py check --task <path>
    and actual TASK_READY before any provider call. Fix local preflight failures locally;
    do not spend a provider retry on an invalid task. Target <=80000 TASK_READY bytes
    AND a complete Reviewer package (template + task/sources + materialized full proposal)
    below about160000 bytes. These are sizing advisories, not lower hard limits.
-   Compact replacements reduce Worker transport, not the Reviewer full-file payload.
+   Existing files whose final UTF-8 content is >=8192 bytes MUST use exact replacements;
+   smaller existing files MAY use them, while new files use complete content. Compact
+   replacements reduce Worker transport, not Reviewer/Codex full-file materialization.
    Split oversized context/output risk before generation; state any necessary exception.
    Gemini Worker is the sole author of implementation, tests and project documentation
    in this unattended flow. It must return complete final bytes, not inspection or a plan.
@@ -74,14 +84,21 @@ and unrelated remote-service mutation. This does not widen any other gate.
    Never first attempt inside workspace-write, ask owner relay, read/print/copy/hash
    credentials or retry a denied invocation. No danger-full-access,
    --dangerously-bypass-approvals-and-sandbox or broad shell escalation.
-   The pipeline runs a fresh independent Gemini Reviewer using runner role `verifier`,
+   The pipeline first materializes and validates the complete Worker bytes and runs the
+   task's focused selectors in an isolated no-network candidate workspace. Only PASS
+   starts a fresh independent Gemini Reviewer using runner role `verifier`; failure sends
+   bounded exact test evidence to correction without spending Reviewer work. Reviewer uses
    the original task/source snapshot and exact Worker result.json. Require a
    different conversation ID, exact proposal SHA, VERIFIED and no findings. Reviewer cannot author
    changes and never talks directly to Worker. CHANGES_REQUIRED returns to a fresh Worker
    as exactly {reviewer, reviewed_proposal_sha256, findings, test_evidence}, with the
-   rejected proposal, then another fresh Reviewer. Findings must identify path/symbol,
+   rejected proposal, then another fresh Reviewer. Correction transport contains the exact
+   rejected proposal plus compact SHA-bound findings/test evidence; do not resend redundant
+   repository context or rewrite unaffected accepted changes. Findings must identify path/symbol,
    triggering case, expected/actual behavior and concrete correction; preserve unaffected
    accepted work. Repeated equivalent rejection requires rescoping, not paraphrased retry.
+   Provider tool-attempt or malformed-session failures use only the existing bounded
+   fresh-session retry path and do not expand the two substantive correction attempts.
    Only READY_FOR_CODEX with final Worker/Reviewer/SHA is eligible; read only its exact
    task/status/result/review paths, never streams or unrelated runs.
 

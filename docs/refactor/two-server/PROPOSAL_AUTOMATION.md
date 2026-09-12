@@ -1,6 +1,6 @@
 # اتوماسیون Codex و Antigravity — قرارداد جاری
 
-به‌روز: ۲۰۲۶-۰۹-۰۹. مسیر توسعهٔ خودکار:
+به‌روز: ۲۰۲۶-۰۹-۱۲. مسیر توسعهٔ خودکار:
 Gemini Worker → Gemini Reviewer مستقل → Codex review/apply/test/commit.
 مسیر قدیمی gateway/native همچنان غیرفعال است. وضعیت اجرا را از فرایند زنده،
 Git و شواهد همان چرخه بخوانید؛ عبارت RUNNING یا یک گزارش تاریخی اثبات سلامت نیست.
@@ -22,13 +22,17 @@ Git و شواهد همان چرخه بخوانید؛ عبارت RUNNING یا ی�
    هدف تکمیل نیازمندی است، نه زیادکردن تعداد تست و commit.
 3. Gemini Worker تمام کد، تست و مستندات لازم را به شکل bytes نهایی تولید می‌کند؛
    صرفاً پیشنهاد ایده نمی‌دهد. ابزار، shell، Git و نوشتن مستقیم روی worktree ندارد.
-4. نشست تازهٔ Gemini Reviewer همان task، snapshot و proposal کامل را می‌گیرد.
+4. pipeline ابتدا bytes نهایی Worker را محلی materialize و اعتبارسنجی می‌کند و
+   `test_selectors` همان task را در workspace کاندیدای ایزوله و بدون شبکه اجرا می‌کند.
+   فقط PASS شدن این گیت اجازهٔ مصرف Reviewer را می‌دهد؛ شکست، شاهد محدود و دقیق را
+   برای اصلاح برمی‌گرداند.
+5. نشست تازهٔ Gemini Reviewer همان task، snapshot و proposal کامل را می‌گیرد.
    conversation ID باید متفاوت باشد؛ proposal SHA دقیق، VERIFIED و findings خالی لازم‌اند.
    Reviewer حق تولید تغییر ندارد و مستقیماً با Worker صحبت نمی‌کند.
-5. Codex کد واقعی و رفتار را کامل review می‌کند. اگر پذیرفت، فقط bytes همان proposal
+6. Codex کد واقعی و رفتار را کامل review می‌کند. اگر پذیرفت، فقط bytes همان proposal
    را اعمال، تست‌های لازم را اجرا، diff کامل را بررسی و فایل‌های دقیق را commit می‌کند.
    بررسی مکانیکی شواهد جای بازبینی معنایی یا تست واقعی را نمی‌گیرد.
-6. Supervisor مستقل از متن مدل، زنجیرهٔ Worker/Reviewer، یک commit با یک parent،
+7. Supervisor مستقل از متن مدل، زنجیرهٔ Worker/Reviewer، یک commit با یک parent،
    برابری path/mode/bytes، ancestry، worktree تمیز و ثبات refs/controlها را می‌سنجد.
    فقط سپس CONTINUE پذیرفته می‌شود. پذیرش واحد به معنی COMPLETE شدن Stage نیست.
 
@@ -53,11 +57,26 @@ python3 scripts/two_site_proposal_runner.py check \
   --task .local/two-site-refactor/tasks/<fresh-task>.json
 ```
 
-spec شامل `task` با همان شش کلید، `snippets` و `gap_reference` است.
+spec دقیقاً شامل `task` با همان شش کلید، `snippets`، `gap_reference` و
+`scenario_key` است.
 نمونهٔ snippets: `[{"path":"مسیر واقعی فایل Python","symbols":["نام تابع","نام ثابت"]}]`.
 برای بستهٔ کامل بدون excerpt مقدار `[]` بدهید.
 gap_reference مسیر مستند tracked و در صورت نیاز #شناسهٔ شکاف است؛ این برچسب به‌تنهایی
 اثبات بازبودن شکاف نیست. Codex باید آن را با Stage و پوشش موجود تطبیق دهد.
+
+### هویت معنایی و جلوگیری از دوباره‌کاری
+
+builder در goal یک marker می‌گذارد که HEAD، gap_reference، excerptها و هویت معنایی
+را به هم متصل می‌کند. fingerprint هویت از Stage، gap نرمال‌شده، مجموعهٔ symbolهای
+مرجع، scenario_key و manifest مربوط به SHA منابع ساخته می‌شود. این هویت منشأ و موضوع
+تلاش را ثابت می‌کند، اما به‌تنهایی اثبات نمی‌کند که شکاف هنوز باز است.
+
+pipeline پس از کنترل Git و task و پیش از ساخت پوشهٔ evidence یا تماس با provider،
+marker را اعتبارسنجی و برای هر fingerprint دقیقاً یک attempt محلی و تغییرناپذیر را
+به‌صورت اتمیک رزرو می‌کند. تغییر task_id یا run-prefix راه دورزدن آن نیست. تلاش واقعاً
+جدید باید دست‌کم یکی از source SHA، Stage، gap، مجموعهٔ symbolها یا scenario را به‌طور
+معنادار تغییر دهد؛ در غیر این صورت فقط تصمیم صریح و ممیزی‌شدهٔ نگهداری محلی مجاز است.
+این قرارداد TTL، حذف خودکار، lease، هماهنگی remote یا آزادسازی خودکار ندارد.
 
 excerpt فقط برای وابستگی read-only است، نه فایل قابل تغییر یا context تکراری.
 تعریف کامل سطح‌بالای تابع/کلاس/ثابت، decorator و importها همراه SHA کامل فایل،
@@ -78,11 +97,14 @@ TASK_READY واقعی پیش‌شرط تماس با provider است. خطای ا
 این اهداف گیت سخت جدید نیستند. Reviewer علاوه بر زمینه، فایل کامل خروجی را دریافت
 می‌کند؛ کم‌بودن Worker input یا استفاده از replacement به‌تنهایی کافی نیست.
 
-برای تغییر کوچک فایل موجود از replacement دقیق استفاده کنید؛ فایل تازه کامل باشد.
+اگر محتوای نهایی UTF-8 یک فایل موجود حداقل ۸۱۹۲ بایت است، transport حتماً باید از
+replacement دقیق استفاده کند؛ برای فایل موجود کوچک‌تر نیز replacement مجاز است.
+فایل تازه همیشه با content کامل منتقل می‌شود.
 قالب چهارکلیدی raw change: path، original_sha256، content و replacements.
 حالت کامل content کامل + replacements خالی؛ حالت replacement مقدار content=null و
 ۱ تا ۳۲ {old,new} یکتا و غیرهم‌پوشان، مجموع حداکثر ۶۵۵۳۶ بایت UTF-8.
-Runner پیش از Reviewer bytes کامل را materialize می‌کند؛ شکل انتقال خام معیار review معنایی نیست.
+Runner پیش از Reviewer bytes کامل را materialize می‌کند؛ Reviewer و Codex همواره
+محتوای نهایی کامل را می‌بینند، پس فشرده‌سازی transport عمق review را کم نمی‌کند.
 مدل باید import/signature/enum، سناریوی منفی و پوشش نیازمندی‌ها را قبل از ارسال بررسی کند.
 نبود تعریف لازم باید با path/symbol دقیق گزارش شود، نه ادعای انجام کار یا خروجی ناقص.
 
@@ -118,6 +140,9 @@ BINDINGS_VALID یعنی اتصال دقیق task/source/head/hash و دو نشس
 متن، mode یا فایل نامرتبط را رد می‌کند، ولی تستی اجرا نمی‌کند.
 در correction، helper قرارداد parsed feedback و proposal قبلی را می‌سنجد؛ hash متن
 خام feedback را از سریال‌سازی مجدد حدس نمی‌زند. binding خام در Runner/Pipeline حفظ می‌شود.
+هر round همان proposal ردشده را همراه findings و test evidence فشرده و مقید به SHA
+به Worker تازه می‌دهد و سپس Reviewer تازه لازم است؛ context تکراری مخزن دوباره ارسال
+نمی‌شود و بخش‌های پذیرفته‌شدهٔ نامرتبط باید ثابت بمانند.
 
 رد Reviewer، Codex یا تست با چهار کلید دقیق برمی‌گردد:
 `reviewer` (gemini یا codex)، `reviewed_proposal_sha256`،
@@ -125,6 +150,9 @@ BINDINGS_VALID یعنی اتصال دقیق task/source/head/hash و دو نشس
 finding باید محل، ورودی محرک، رفتار واقعی/مورد انتظار و اصلاح لازم را روشن کند.
 Worker تازه proposal ردشده و feedback را می‌گیرد؛ سپس Reviewer تازه الزامی است.
 بخش‌های صحیح نباید بی‌دلیل بازنویسی شوند. شکست مشابه را با عبارت جدید دوباره نفرستید.
+tool-attempt یا پاسخ session بدشکلِ provider فقط از مسیر retry محدود با نشست تازه عبور
+می‌کند؛ این retry جای correction معنایی نیست. correction معنایی همچنان حداکثر دو بار
+است و رد معادل باید به rescope واقعی منجر شود.
 
 حداکثر دو اصلاح متمایز در یک واحد؛ تمام‌شدن بودجه با Git تمیز و بدون commit یعنی
 BLOCKED/RESCOPE INTERNAL_REJECTION و یک واحد کوچک‌تر/کامل‌تر جدید.
