@@ -202,3 +202,212 @@ def test_malformed_inputs_fail_closed() -> None:
     ):
         with pytest.raises(TransportPolicyError):
             validate_change_mode(bad_change, rec)
+
+
+def test_forced_full_schema_over_candidate_overlay_sources() -> None:
+    allowed_files = ["small_overlay.py", "large_overlay.py"]
+    sources = {
+        "small_overlay.py": {"sha256": SAMPLE_SHA_A, "content": "print('small overlay')"},
+        "large_overlay.py": {"sha256": SAMPLE_SHA_B, "content": "x" * 200},
+    }
+    threshold = 100
+
+    schema = build_changes_schema(
+        "worker",
+        allowed_files,
+        sources,
+        max_replacements=10,
+        threshold=threshold,
+        force_full_paths=["small_overlay.py", "large_overlay.py"],
+    )
+    branches = schema["items"]["anyOf"]
+    assert len(branches) == 2
+
+    b0 = branches[0]
+    assert b0["properties"]["path"] == {"enum": ["small_overlay.py"]}
+    assert b0["properties"]["original_sha256"] == {"enum": [SAMPLE_SHA_A]}
+    assert b0["properties"]["content"] == {"type": "string", "minLength": 1}
+    assert b0["properties"]["replacements"] == {"type": "array", "maxItems": 0}
+
+    b1 = branches[1]
+    assert b1["properties"]["path"] == {"enum": ["large_overlay.py"]}
+    assert b1["properties"]["original_sha256"] == {"enum": [SAMPLE_SHA_B]}
+    assert b1["properties"]["content"] == {"type": "string", "minLength": 1}
+    assert b1["properties"]["replacements"] == {"type": "array", "maxItems": 0}
+
+    selective_schema = build_changes_schema(
+        "worker",
+        allowed_files,
+        sources,
+        max_replacements=10,
+        threshold=threshold,
+        force_full_paths=["large_overlay.py"],
+    )
+    sel_branches = selective_schema["items"]["anyOf"]
+    assert len(sel_branches) == 3
+    assert sel_branches[0]["properties"]["path"] == {"enum": ["small_overlay.py"]}
+    assert sel_branches[0]["properties"]["content"] == {"type": "string"}
+    assert sel_branches[1]["properties"]["path"] == {"enum": ["small_overlay.py"]}
+    assert sel_branches[1]["properties"]["content"] == {"type": "null"}
+    assert sel_branches[2]["properties"]["path"] == {"enum": ["large_overlay.py"]}
+    assert sel_branches[2]["properties"]["content"] == {"type": "string", "minLength": 1}
+
+    tuple_schema = build_changes_schema(
+        "worker",
+        allowed_files,
+        sources,
+        max_replacements=10,
+        threshold=threshold,
+        force_full_paths=("large_overlay.py",),
+    )
+    assert tuple_schema == selective_schema
+
+    empty_schema = build_changes_schema(
+        "worker",
+        allowed_files,
+        sources,
+        max_replacements=10,
+        threshold=threshold,
+        force_full_paths=[],
+    )
+    default_schema = build_changes_schema(
+        "worker",
+        allowed_files,
+        sources,
+        max_replacements=10,
+        threshold=threshold,
+    )
+    assert empty_schema == default_schema
+
+
+def test_forced_full_validation_acceptance_and_rejection() -> None:
+    rec_small = {"sha256": SAMPLE_SHA_A, "content": "small content"}
+    rec_large = {"sha256": SAMPLE_SHA_B, "content": "x" * 200}
+    rec_new = {"sha256": None, "content": None}
+    threshold = 100
+
+    full_small = {"path": "s.py", "original_sha256": SAMPLE_SHA_A, "content": "new text", "replacements": []}
+    full_large = {"path": "l.py", "original_sha256": SAMPLE_SHA_B, "content": "new text", "replacements": []}
+    full_new = {"path": "n.py", "original_sha256": None, "content": "new text", "replacements": []}
+
+    repl_small = {"path": "s.py", "original_sha256": SAMPLE_SHA_A, "content": None, "replacements": [{"old": "a", "new": "b"}]}
+    repl_large = {"path": "l.py", "original_sha256": SAMPLE_SHA_B, "content": None, "replacements": [{"old": "x", "new": "y"}]}
+    repl_new = {"path": "n.py", "original_sha256": None, "content": None, "replacements": [{"old": "x", "new": "y"}]}
+
+    legacy_small = {"path": "s.py", "original_sha256": SAMPLE_SHA_A, "content": "legacy text"}
+    legacy_large = {"path": "l.py", "original_sha256": SAMPLE_SHA_B, "content": "legacy text"}
+    legacy_new = {"path": "n.py", "original_sha256": None, "content": "legacy text"}
+
+    assert validate_change_mode(full_small, rec_small, threshold=threshold, force_full=True) == "full"
+    assert validate_change_mode(full_large, rec_large, threshold=threshold, force_full=True) == "full"
+    assert validate_change_mode(full_new, rec_new, threshold=threshold, force_full=True) == "full"
+
+    empty_full = {"path": "s.py", "original_sha256": SAMPLE_SHA_A, "content": "", "replacements": []}
+    with pytest.raises(TransportPolicyError, match="force_full requires nonempty content"):
+        validate_change_mode(empty_full, rec_small, threshold=threshold, force_full=True)
+
+    with pytest.raises(TransportPolicyError, match="force_full does not permit replacement change mode"):
+        validate_change_mode(repl_small, rec_small, threshold=threshold, force_full=True)
+    with pytest.raises(TransportPolicyError, match="force_full does not permit replacement change mode"):
+        validate_change_mode(repl_large, rec_large, threshold=threshold, force_full=True)
+    with pytest.raises(TransportPolicyError, match="force_full does not permit replacement change mode"):
+        validate_change_mode(repl_new, rec_new, threshold=threshold, force_full=True)
+
+    with pytest.raises(TransportPolicyError, match="force_full does not permit legacy change mode"):
+        validate_change_mode(legacy_small, rec_small, threshold=threshold, force_full=True)
+    with pytest.raises(TransportPolicyError, match="force_full does not permit legacy change mode"):
+        validate_change_mode(legacy_large, rec_large, threshold=threshold, force_full=True)
+    with pytest.raises(TransportPolicyError, match="force_full does not permit legacy change mode"):
+        validate_change_mode(legacy_new, rec_new, threshold=threshold, force_full=True)
+
+    mismatched_sha = {"path": "s.py", "original_sha256": SAMPLE_SHA_B, "content": "new text", "replacements": []}
+    with pytest.raises(TransportPolicyError, match="change original_sha256 does not match source record"):
+        validate_change_mode(mismatched_sha, rec_small, threshold=threshold, force_full=True)
+
+
+def test_invalid_force_full_collections_and_types() -> None:
+    valid_sources = {
+        "a.py": {"sha256": SAMPLE_SHA_A, "content": "a"},
+        "b.py": {"sha256": SAMPLE_SHA_B, "content": "b"},
+    }
+    allowed = ["a.py", "b.py"]
+
+    for bad_collection in (123, True, False, "a.py", {"a.py"}, {"a.py": 1}):
+        with pytest.raises(TransportPolicyError):
+            build_changes_schema("worker", allowed, valid_sources, force_full_paths=bad_collection)  # type: ignore
+
+    for bad_entries in ([123], [""], ["a.py", 123], ("b.py", "")):
+        with pytest.raises(TransportPolicyError):
+            build_changes_schema("worker", allowed, valid_sources, force_full_paths=bad_entries)  # type: ignore
+
+    for dups in (["a.py", "a.py"], ("b.py", "a.py", "b.py")):
+        with pytest.raises(TransportPolicyError):
+            build_changes_schema("worker", allowed, valid_sources, force_full_paths=dups)
+
+    for not_subset in (["missing.py"], ["a.py", "other.py"], ("extra.py",)):
+        with pytest.raises(TransportPolicyError):
+            build_changes_schema("worker", allowed, valid_sources, force_full_paths=not_subset)
+
+    rec = valid_sources["a.py"]
+    full_change = {"path": "a.py", "original_sha256": SAMPLE_SHA_A, "content": "new", "replacements": []}
+    for bad_bool in (None, 1, 0, "True", "False", [], {}, ()):
+        with pytest.raises(TransportPolicyError):
+            validate_change_mode(full_change, rec, force_full=bad_bool)  # type: ignore
+
+
+def test_forced_full_verifier_behavior_and_validation() -> None:
+    allowed = ["a.py", "b.py"]
+    sources = {
+        "a.py": {"sha256": SAMPLE_SHA_A, "content": "a"},
+        "b.py": {"sha256": SAMPLE_SHA_B, "content": "b"},
+    }
+    expected_verifier = {
+        "type": "array",
+        "maxItems": 0,
+        "items": {"type": "object", "additionalProperties": False},
+    }
+
+    assert build_changes_schema("verifier", allowed, sources) == expected_verifier
+    assert build_changes_schema("verifier", allowed, sources, force_full_paths=None) == expected_verifier
+    assert build_changes_schema("verifier", allowed, sources, force_full_paths=["a.py"]) == expected_verifier
+    assert build_changes_schema("verifier", allowed, sources, force_full_paths=[]) == expected_verifier
+
+    with pytest.raises(TransportPolicyError):
+        build_changes_schema("verifier", allowed, sources, force_full_paths=["not_allowed.py"])
+    with pytest.raises(TransportPolicyError):
+        build_changes_schema("verifier", allowed, sources, force_full_paths=["a.py", "a.py"])
+    with pytest.raises(TransportPolicyError):
+        build_changes_schema("verifier", allowed, sources, force_full_paths={"a.py"})  # type: ignore
+
+
+def test_unchanged_default_behavior_preservation() -> None:
+    allowed = ["small.py", "large.py"]
+    sources = {
+        "small.py": {"sha256": SAMPLE_SHA_A, "content": "small"},
+        "large.py": {"sha256": SAMPLE_SHA_B, "content": "x" * 200},
+    }
+    threshold = 100
+
+    schema_default = build_changes_schema("worker", allowed, sources, threshold=threshold)
+    schema_none = build_changes_schema("worker", allowed, sources, threshold=threshold, force_full_paths=None)
+    assert schema_default == schema_none
+    assert len(schema_default["items"]["anyOf"]) == 3
+
+    full_small = {"path": "small.py", "original_sha256": SAMPLE_SHA_A, "content": "full text", "replacements": []}
+    repl_small = {"path": "small.py", "original_sha256": SAMPLE_SHA_A, "content": None, "replacements": [{"old": "s", "new": "t"}]}
+    legacy_small = {"path": "small.py", "original_sha256": SAMPLE_SHA_A, "content": "legacy text"}
+
+    assert validate_change_mode(full_small, sources["small.py"], threshold=threshold) == "full"
+    assert validate_change_mode(full_small, sources["small.py"], threshold=threshold, force_full=False) == "full"
+
+    assert validate_change_mode(repl_small, sources["small.py"], threshold=threshold) == "replacement"
+    assert validate_change_mode(repl_small, sources["small.py"], threshold=threshold, force_full=False) == "replacement"
+
+    assert validate_change_mode(legacy_small, sources["small.py"], threshold=threshold) == "legacy"
+    assert validate_change_mode(legacy_small, sources["small.py"], threshold=threshold, force_full=False) == "legacy"
+
+    full_large = {"path": "large.py", "original_sha256": SAMPLE_SHA_B, "content": "full text", "replacements": []}
+    repl_large = {"path": "large.py", "original_sha256": SAMPLE_SHA_B, "content": None, "replacements": [{"old": "x", "new": "y"}]}
+    assert validate_change_mode(repl_large, sources["large.py"], threshold=threshold, force_full=False) == "replacement"
+    with pytest.raises(TransportPolicyError):
+        validate_change_mode(full_large, sources["large.py"], threshold=threshold, force_full=False)

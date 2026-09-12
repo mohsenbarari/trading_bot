@@ -67,11 +67,14 @@ def _make_four_key_branch(
     }
 
 
-def _full_mode_branch(path: str, sha: str | None) -> dict:
+def _full_mode_branch(path: str, sha: str | None, nonempty: bool = False) -> dict:
+    content_schema: dict[str, object] = {"type": "string"}
+    if nonempty:
+        content_schema["minLength"] = 1
     return _make_four_key_branch(
         path,
         sha,
-        content_schema={"type": "string"},
+        content_schema=content_schema,
         replacements_schema={"type": "array", "maxItems": 0},
     )
 
@@ -104,6 +107,7 @@ def build_changes_schema(
     sources: object,
     max_replacements: int = 32,
     threshold: int = FULL_CONTENT_BYTE_THRESHOLD,
+    force_full_paths: object = None,
 ) -> dict:
     if role not in ("worker", "verifier"):
         raise TransportPolicyError(f"invalid role: {role!r}")
@@ -127,6 +131,19 @@ def build_changes_schema(
             raise TransportPolicyError("source keys must be strings")
         _validate_source_record(record)
 
+    forced_set: set[str] = set()
+    if force_full_paths is not None:
+        if not isinstance(force_full_paths, (list, tuple)):
+            raise TransportPolicyError("force_full_paths must be a deterministic collection (list or tuple)")
+        if any(not isinstance(p, str) or not p for p in force_full_paths):
+            raise TransportPolicyError("force_full_paths must contain nonempty strings")
+        if len(set(force_full_paths)) != len(force_full_paths):
+            raise TransportPolicyError("force_full_paths must not contain duplicate paths")
+        allowed_set = set(allowed_files)
+        if not set(force_full_paths).issubset(allowed_set):
+            raise TransportPolicyError("force_full_paths must be a subset of allowed_files")
+        forced_set = set(force_full_paths)
+
     if role == "verifier":
         return {
             "type": "array",
@@ -139,7 +156,9 @@ def build_changes_schema(
         rec = sources[path]
         kind = classify_source(rec, threshold=threshold)
         sha = rec["sha256"]
-        if kind == "new":
+        if path in forced_set:
+            branches.append(_full_mode_branch(path, sha, nonempty=True))
+        elif kind == "new":
             branches.append(_full_mode_branch(path, sha))
         elif kind == "large":
             branches.append(_replacement_mode_branch(path, sha, max_replacements))
@@ -160,9 +179,12 @@ def validate_change_mode(
     source_record: object,
     max_replacements: int = 32,
     threshold: int = FULL_CONTENT_BYTE_THRESHOLD,
+    force_full: bool = False,
 ) -> str:
     _check_positive_int(max_replacements, "max_replacements")
     _check_positive_int(threshold, "threshold")
+    if type(force_full) is not bool:
+        raise TransportPolicyError("force_full must be a boolean")
     source_kind = classify_source(source_record, threshold=threshold)
 
     if not isinstance(change, dict):
@@ -199,13 +221,19 @@ def validate_change_mode(
     if change["original_sha256"] != source_record["sha256"]:
         raise TransportPolicyError("change original_sha256 does not match source record")
 
-    if source_kind == "new":
+    if force_full:
         if mode != "full":
-            raise TransportPolicyError(f"new file does not permit {mode} change mode")
-    elif source_kind == "large":
-        if mode != "replacement":
-            raise TransportPolicyError(f"large file does not permit {mode} change mode")
-    elif source_kind == "small":
-        pass
+            raise TransportPolicyError(f"force_full does not permit {mode} change mode")
+        if not change["content"]:
+            raise TransportPolicyError("force_full requires nonempty content")
+    else:
+        if source_kind == "new":
+            if mode != "full":
+                raise TransportPolicyError(f"new file does not permit {mode} change mode")
+        elif source_kind == "large":
+            if mode != "replacement":
+                raise TransportPolicyError(f"large file does not permit {mode} change mode")
+        elif source_kind == "small":
+            pass
 
     return mode
