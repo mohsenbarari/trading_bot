@@ -39,6 +39,11 @@ except ImportError:
         validate_test_receipt,
     )
 
+try:
+    from scripts.two_site_semantic_attempts import reserve_semantic_attempt
+except ModuleNotFoundError:
+    from two_site_semantic_attempts import reserve_semantic_attempt
+
 ROOT = Path(__file__).resolve().parents[1]
 BRANCH = "refactor/two-site-architecture"
 PROTECTED_REFS = (
@@ -420,11 +425,6 @@ def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli
         raise ProposalError("timeout must be between 10 and 900 seconds")
 
     with pipeline_lock(root) as pipeline_dir:
-        evidence_dir = pipeline_dir / run_prefix
-        if evidence_dir.exists():
-            raise ProposalError(f"pipeline evidence directory already exists: {run_prefix}")
-        evidence_dir.mkdir(mode=0o700)
-
         if git(root, "branch", "--show-current") != BRANCH:
             raise ProposalError(f"pipeline requires branch {BRANCH}")
         initial_head = git(root, "rev-parse", "HEAD")
@@ -437,6 +437,15 @@ def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli
 
         state["task_id"] = task["task_id"]
         state["source_head"] = initial_head
+        evidence_dir = pipeline_dir / run_prefix
+        if os.path.lexists(evidence_dir):
+            raise ProposalError(f"pipeline evidence directory already exists: {run_prefix}")
+        semantic_attempt = reserve_semantic_attempt(
+            root, pipeline_dir, task, task["task_id"], run_prefix,
+        )
+        state["semantic_task_fingerprint"] = semantic_attempt["fingerprint"]
+
+        evidence_dir.mkdir(mode=0o700)
 
         def state_check() -> None:
             check_state(root, initial_head, initial_refs, task_candidate, task, sources)
@@ -576,6 +585,7 @@ def main() -> int:
         "reviewer_path": None, "correction_count": 0, "blockers": [],
         "pre_review_test_path": None, "pre_review_test_sha256": None,
         "pre_review_test_state": None,
+        "semantic_task_fingerprint": None,
     }
     try:
         run_pipeline(args.root, args.task, args.run_prefix, args.timeout, args.cli, state)
