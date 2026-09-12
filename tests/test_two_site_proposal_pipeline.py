@@ -2,6 +2,7 @@
 """Offline unit tests for two-site proposal pipeline orchestration."""
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 import tempfile
@@ -14,12 +15,16 @@ try:
         BRANCH, ProposalError, normalize_finding, run_pipeline,
     )
     from scripts.two_site_proposal_runner import MODEL, file_sha256, write_json
+    from scripts.two_site_semantic_attempts import MARKER
+    from scripts.two_site_semantic_task import build_identity
 except ModuleNotFoundError:
     import two_site_proposal_pipeline as pipeline  # type: ignore[no-redef]
     from two_site_proposal_pipeline import (  # type: ignore[no-redef]
         BRANCH, ProposalError, normalize_finding, run_pipeline,
     )
     from two_site_proposal_runner import MODEL, file_sha256, write_json  # type: ignore[no-redef]
+    from two_site_semantic_attempts import MARKER  # type: ignore[no-redef]
+    from two_site_semantic_task import build_identity  # type: ignore[no-redef]
 
 HEAD = "a" * 40
 
@@ -114,15 +119,60 @@ class TestPipeline(unittest.TestCase):
         self.src_file.write_text("# orig\n")
         self.task = {"task_id": "T1", "goal": "G", "context_files": ["src.py"],
                      "allowed_files": ["src.py"], "requirements": ["R1"], "test_selectors": ["test.py"]}
+        self.semantic_identity = build_identity(
+            stage_id="P1-00b",
+            gap_reference="docs/refactor/two-server/PROPOSAL_AUTOMATION.md#semantic-task-dedup",
+            scenario_key="automation_semantic_pipeline_test_prep",
+            symbol_groups=[],
+            source_manifest={"src.py": file_sha256(self.src_file)},
+        )
+        marker_package = MARKER + json.dumps({
+            "head": HEAD,
+            "gap_reference": self.semantic_identity["gap_reference"],
+            "excerpts": [],
+            "semantic_identity": self.semantic_identity,
+        })
+        self.task["goal"] += marker_package
         write_json(self.task_path, self.task)
+        self.load_task_patcher = patch.object(
+            pipeline,
+            "load_task",
+            side_effect=lambda *args, **_kwargs: (
+                copy.deepcopy(self.task),
+                {"src.py": {"sha256": file_sha256(self.src_file), "content": self.src_file.read_text()}},
+            ),
+        )
+        self.load_task_patcher.start()
+        self.reserve_record = {
+            "schema_version": 1,
+            "fingerprint": self.semantic_identity["fingerprint"],
+            "source_sha256": self.semantic_identity["source_sha256"],
+            "stage_id": self.semantic_identity["stage_id"],
+            "gap_reference": self.semantic_identity["gap_reference"],
+            "scenario_key": self.semantic_identity["scenario_key"],
+            "task_id": "T1",
+            "run_prefix": "run",
+            "state": "RESERVED",
+            "created_at": 1000.0,
+        }
+        self.reserve_semantic_patcher = patch.object(
+            pipeline,
+            "reserve_semantic_attempt",
+            return_value=self.reserve_record,
+            create=True,
+        )
+        self.reserve_semantic_patcher.start()
         self.state = {"state": "TASK_BLOCKED", "task_id": "", "source_head": "",
                       "final_worker_run_id": None, "final_reviewer_run_id": None,
                       "proposal_sha256": None, "changed_paths": [], "proposal_path": None,
                       "reviewer_path": None, "correction_count": 0, "blockers": [],
                       "pre_review_test_path": None, "pre_review_test_sha256": None,
-                      "pre_review_test_state": None}
+                      "pre_review_test_state": None,
+                      "semantic_task_fingerprint": self.semantic_identity["fingerprint"]}
 
     def tearDown(self):
+        self.reserve_semantic_patcher.stop()
+        self.load_task_patcher.stop()
         self.candidate_tests_patcher.stop()
         self.tmp_dir.cleanup()
 
@@ -152,8 +202,9 @@ class TestPipeline(unittest.TestCase):
             "pre_review_test_path": ".local/two-site-refactor/pipeline/run-happy/pre-review-tests-0.json",
             "pre_review_test_sha256": rcpt_sha,
             "pre_review_test_state": "PASSED",
+            "semantic_task_fingerprint": self.semantic_identity["fingerprint"],
         }
-        self.assertEqual(len(res), 14)
+        self.assertEqual(len(res), 15)
         self.assertEqual(res, expected)
         self.assertFalse(Path(res["proposal_path"]).is_absolute() or Path(res["reviewer_path"]).is_absolute())
         self.assertEqual(self.src_file.read_text(), "# orig\n")
