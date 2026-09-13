@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
+import re
 import stat
 import tempfile
 
@@ -100,6 +102,47 @@ def atomic_json(root: Path, path: Path, value: object, limit: int) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _call_provider_metrics(*args, **kwargs) -> dict:
+    try:
+        from scripts.two_site_provider_metrics import provider_metrics
+    except ModuleNotFoundError:
+        from two_site_provider_metrics import provider_metrics
+    return provider_metrics(*args, **kwargs)
+
+
+def _validated_task_metadata(meta: object) -> dict | None:
+    if not isinstance(meta, dict):
+        return None
+    if set(meta.keys()) != {
+        "task_id", "task_sha256", "declared_requirement_count",
+        "focused_selector_count", "gap_reference",
+    }:
+        return None
+    task_id = meta["task_id"]
+    if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", task_id):
+        return None
+    task_sha = meta["task_sha256"]
+    if not isinstance(task_sha, str) or not re.fullmatch(r"[a-f0-9]{64}", task_sha):
+        return None
+    req_count = meta["declared_requirement_count"]
+    if type(req_count) is not int or not 0 <= req_count <= 100_000:
+        return None
+    sel_count = meta["focused_selector_count"]
+    if type(sel_count) is not int or not 0 <= sel_count <= 100_000:
+        return None
+    gap_ref = meta["gap_reference"]
+    if (not isinstance(gap_ref, str) or not (1 <= len(gap_ref) <= 500)
+            or any(c in gap_ref for c in ("\n", "\r", "\0"))):
+        return None
+    return {
+        "task_id": task_id,
+        "task_sha256": task_sha,
+        "declared_requirement_count": req_count,
+        "focused_selector_count": sel_count,
+        "gap_reference": gap_ref,
+    }
+
+
 def record_cycle(root: Path, state_root: Path, run_dir: Path, meta: dict,
                  model: str, effort: str) -> dict:
     """Called under supervisor lock before pruning, on both success and failure."""
@@ -123,13 +166,44 @@ def record_cycle(root: Path, state_root: Path, run_dir: Path, meta: dict,
         if isinstance(value, str) and len(value) <= 80:
             record[key] = value
     worker_id = record.get("gemini_worker_run_id")
+    valid_worker_id = (
+        worker_id
+        if isinstance(worker_id, str) and bool(re.fullmatch(r"[A-Za-z0-9._-]{1,80}", worker_id))
+        else None
+    )
+    raw_duration = meta.get("duration_seconds")
+    cycle_duration = (
+        float(raw_duration)
+        if isinstance(raw_duration, (int, float)) and not isinstance(raw_duration, bool)
+        and 0 <= raw_duration <= 10**12 and math.isfinite(raw_duration)
+        else 0.0
+    )
+    head_before = meta.get("head_before")
+    head_before_str = head_before if isinstance(head_before, str) else ""
+
     record["declared_requirement_count"] = None
     record["focused_selector_count"] = None
     record["provider_metrics"] = {"state": "UNAVAILABLE", "first_pass": None}
-    if isinstance(worker_id, str) and all(c.isalnum() or c in "._-" for c in worker_id):
+
+    try:
+        prov = _call_provider_metrics(
+            root, None, head_before_str, valid_worker_id, cycle_duration, run_dir.name
+        )
+        if isinstance(prov, dict):
+            record["provider_metrics"] = prov
+            trusted_meta = _validated_task_metadata(prov.get("task_metadata"))
+            if trusted_meta is not None:
+                record.update(trusted_meta)
+    except (OSError, ValueError, TypeError, KeyError, OverflowError) as exc:
+        record["provider_metrics"] = {
+            "state": "UNAVAILABLE", "first_pass": None,
+            "diagnostic": type(exc).__name__,
+        }
+
+    if record["provider_metrics"].get("state") == "UNAVAILABLE" and valid_worker_id is not None:
         try:
             snapshot = unique_json(bounded_file_text(
-                root, root / ".local/two-site-refactor/proposals" / worker_id / "task.json",
+                root, root / ".local/two-site-refactor/proposals" / valid_worker_id / "task.json",
                 320_000, "metrics task snapshot"))
             task = snapshot["task"]
             if snapshot["source_head"] != meta.get("head_before"):
@@ -145,12 +219,8 @@ def record_cycle(root: Path, state_root: Path, run_dir: Path, meta: dict,
                 if isinstance(values, list) and all(isinstance(v, str) for v in values):
                     record[metric_key] = len(values)  # declarations, not accepted behavior count
             try:
-                try:
-                    from scripts.two_site_provider_metrics import provider_metrics
-                except ModuleNotFoundError:
-                    from two_site_provider_metrics import provider_metrics
-                record["provider_metrics"] = provider_metrics(
-                    root, task_id, meta.get("head_before"), worker_id, meta.get("duration_seconds"))
+                record["provider_metrics"] = _call_provider_metrics(
+                    root, task_id, meta.get("head_before"), valid_worker_id, meta.get("duration_seconds"))
             except (OSError, ValueError, TypeError, KeyError, OverflowError) as exc:
                 record["provider_metrics"] = {"state": "UNAVAILABLE", "first_pass": None,
                                               "diagnostic": type(exc).__name__}
