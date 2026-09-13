@@ -26,6 +26,8 @@ install_p1_00_network_fence()
 
 from bot.handlers.panel import show_my_profile_and_change_keyboard
 from bot.message_manager import DeleteDelay
+from bot.utils.customer_display import user_display_name
+from core.config import settings
 from core.enums import UserRole
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeDecision,
@@ -621,6 +623,588 @@ class TestPanelShowMyProfileAndChangeKeyboardCharacterization(
                 user,
                 "👤 **پنل کاربر**\n\nگزینه مورد نظر را انتخاب کنید:",
                 source_key="panel-user-main-menu",
+                parse_mode="Markdown",
+                reply_markup=sentinel_keyboard,
+                set_persistent_anchor=True,
+            ),
+            mock.call.set_anchor(sentinel_chat_id, sentinel_anchor_id),
+        ]
+        self.assertEqual(parent.mock_calls, expected_order)
+
+    @mock.patch("bot.handlers.panel.set_anchor")
+    @mock.patch(
+        "bot.handlers.panel.answer_incoming_message_via_runtime",
+        new_callable=mock.AsyncMock,
+    )
+    @mock.patch(
+        "bot.handlers.panel.build_user_panel_navigation_keyboard",
+        new_callable=mock.AsyncMock,
+    )
+    @mock.patch(
+        "bot.handlers.panel.attach_customer_management_names",
+        new_callable=mock.AsyncMock,
+    )
+    @mock.patch(
+        "bot.handlers.panel._user_panel_show_overtime_preference",
+        new_callable=mock.AsyncMock,
+    )
+    @mock.patch(
+        "bot.handlers.panel._can_use_customer_panel",
+        new_callable=mock.AsyncMock,
+    )
+    @mock.patch("bot.handlers.panel.AsyncSessionLocal")
+    @mock.patch(
+        "bot.handlers.panel.delete_previous_anchor",
+        new_callable=mock.AsyncMock,
+    )
+    @mock.patch("bot.handlers.panel.configured_telegram_delivery_runtime")
+    @mock.patch("bot.handlers.panel.is_user_global_web_locked")
+    async def test_non_customer_user_profile_menu_queue_v1(
+        self,
+        mock_is_user_global_web_locked: mock.MagicMock,
+        mock_configured_runtime: mock.MagicMock,
+        mock_delete_previous_anchor: mock.AsyncMock,
+        mock_async_session_local: mock.MagicMock,
+        mock_can_use_customer_panel: mock.AsyncMock,
+        mock_user_panel_show_overtime_preference: mock.AsyncMock,
+        mock_attach_customer_management_names: mock.AsyncMock,
+        mock_build_user_panel_navigation_keyboard: mock.AsyncMock,
+        mock_answer_incoming_message_via_runtime: mock.AsyncMock,
+        mock_set_anchor: mock.MagicMock,
+    ) -> None:
+        """QUEUE_V1 mode enriches non-customer profile and skips anchor mutations."""
+        parent = mock.MagicMock(name="parent_order")
+        parent.attach_mock(
+            mock_is_user_global_web_locked, "is_user_global_web_locked"
+        )
+        parent.attach_mock(
+            mock_configured_runtime, "configured_telegram_delivery_runtime"
+        )
+        parent.attach_mock(
+            mock_delete_previous_anchor, "delete_previous_anchor"
+        )
+        parent.attach_mock(
+            mock_async_session_local, "AsyncSessionLocal"
+        )
+        parent.attach_mock(
+            mock_can_use_customer_panel, "_can_use_customer_panel"
+        )
+        parent.attach_mock(
+            mock_user_panel_show_overtime_preference,
+            "_user_panel_show_overtime_preference",
+        )
+        parent.attach_mock(
+            mock_attach_customer_management_names,
+            "attach_customer_management_names",
+        )
+        parent.attach_mock(
+            mock_build_user_panel_navigation_keyboard,
+            "build_user_panel_navigation_keyboard",
+        )
+        parent.attach_mock(
+            mock_answer_incoming_message_via_runtime,
+            "answer_incoming_message_via_runtime",
+        )
+        parent.attach_mock(mock_set_anchor, "set_anchor")
+
+        sentinel_bot = object()
+        sentinel_chat_id = 334455
+        message = mock.MagicMock(name="queue_noncustomer_message")
+        message.bot = sentinel_bot
+        message.chat.id = sentinel_chat_id
+        state = mock.MagicMock(name="queue_noncustomer_state")
+
+        user = SimpleNamespace(
+            id=301,
+            role=UserRole.STANDARD,
+            account_name="queue_std_account",
+            full_name="Queue NonCustomer Standard User",
+            telegram_id=987123456,
+        )
+
+        sentinel_session_1 = object()
+        sentinel_session_2 = object()
+        fake_session_ctx_1 = StrictFakeAsyncSessionContext(sentinel_session_1)
+        fake_session_ctx_2 = StrictFakeAsyncSessionContext(sentinel_session_2)
+
+        sentinel_keyboard = object()
+        sentinel_anchor_id = 66501
+        sentinel_anchor_msg = mock.MagicMock(name="sentinel_anchor_msg")
+        sentinel_anchor_msg.message_id = sentinel_anchor_id
+
+        enriched_management_name = "مشتری نقره‌ای اختصاصی کیو"
+
+        async def fake_attach(session_arg: Any, users_arg: Any) -> None:
+            for u in users_arg:
+                setattr(u, "customer_management_name", enriched_management_name)
+
+        mock_attach_customer_management_names.side_effect = fake_attach
+
+        mock_is_user_global_web_locked.return_value = False
+        mock_configured_runtime.return_value = TelegramDeliveryRuntimeDecision(
+            mode=TelegramDeliveryRuntimeMode.QUEUE_V1,
+            legacy_workers_enabled=False,
+            queue_worker_enabled=True,
+        )
+        mock_async_session_local.side_effect = [
+            fake_session_ctx_1,
+            fake_session_ctx_2,
+        ]
+        mock_can_use_customer_panel.return_value = False
+        mock_user_panel_show_overtime_preference.side_effect = [False, True]
+        mock_build_user_panel_navigation_keyboard.return_value = sentinel_keyboard
+        mock_answer_incoming_message_via_runtime.return_value = sentinel_anchor_msg
+
+        self.assertIsNone(getattr(user, "customer_management_name", None))
+        self.assertEqual(user_display_name(user), "queue_std_account")
+
+        result = await show_my_profile_and_change_keyboard(message, state, user)
+
+        self.assertIsNone(result)
+
+        mock_is_user_global_web_locked.assert_called_once_with(user)
+        self.assertIs(mock_is_user_global_web_locked.call_args[0][0], user)
+        mock_configured_runtime.assert_called_once_with()
+
+        self.assertEqual(mock_async_session_local.call_count, 2)
+        self.assertEqual(fake_session_ctx_1.entered, 1)
+        self.assertEqual(fake_session_ctx_1.exited, 1)
+        self.assertEqual(fake_session_ctx_2.entered, 1)
+        self.assertEqual(fake_session_ctx_2.exited, 1)
+
+        mock_can_use_customer_panel.assert_awaited_once_with(
+            sentinel_session_1, user
+        )
+        self.assertIs(
+            mock_can_use_customer_panel.call_args[0][0], sentinel_session_1
+        )
+        self.assertIs(mock_can_use_customer_panel.call_args[0][1], user)
+
+        mock_attach_customer_management_names.assert_awaited_once_with(
+            sentinel_session_2, [user]
+        )
+        self.assertIs(
+            mock_attach_customer_management_names.call_args[0][0],
+            sentinel_session_2,
+        )
+        self.assertEqual(
+            mock_attach_customer_management_names.call_args[0][1], [user]
+        )
+        self.assertIs(
+            mock_attach_customer_management_names.call_args[0][1][0], user
+        )
+
+        self.assertEqual(
+            getattr(user, "customer_management_name", None),
+            enriched_management_name,
+        )
+        self.assertEqual(user_display_name(user), enriched_management_name)
+
+        self.assertEqual(mock_user_panel_show_overtime_preference.await_count, 2)
+        mock_user_panel_show_overtime_preference.assert_has_awaits(
+            [mock.call(user), mock.call(user)]
+        )
+        mock_build_user_panel_navigation_keyboard.assert_awaited_once_with(
+            user,
+            show_overtime_preference=True,
+        )
+        self.assertIs(
+            mock_build_user_panel_navigation_keyboard.call_args[0][0], user
+        )
+        self.assertEqual(
+            mock_build_user_panel_navigation_keyboard.call_args.kwargs,
+            {"show_overtime_preference": True},
+        )
+        self.assertNotIn(
+            "standard_actions",
+            mock_build_user_panel_navigation_keyboard.call_args.kwargs,
+        )
+        self.assertNotIn(
+            "show_support",
+            mock_build_user_panel_navigation_keyboard.call_args.kwargs,
+        )
+
+        expected_profile_link = (
+            f"https://t.me/{settings.bot_username}?start=profile_{user.id}"
+        )
+        expected_profile_text = (
+            "👤 **پروفایل شما**\n\n"
+            f"🔸 **نام کاربری:** `{enriched_management_name}`\n"
+            f"🔹 **نام تلگرام:** {user.full_name}\n"
+            f"🔹 **آیدی تلگرام:** `{user.telegram_id}`\n"
+            f"🔹 **سطح دسترسی:** {user.role.value}\n\n"
+            "🔗 **لینک پروفایل عمومی:**\n"
+            f"`{expected_profile_link}`"
+        )
+        mock_answer_incoming_message_via_runtime.assert_awaited_once_with(
+            message,
+            user,
+            expected_profile_text,
+            source_key="panel-user-profile-menu",
+            parse_mode="Markdown",
+            reply_markup=sentinel_keyboard,
+            set_persistent_anchor=True,
+        )
+        self.assertIs(
+            mock_answer_incoming_message_via_runtime.call_args[0][0], message
+        )
+        self.assertIs(
+            mock_answer_incoming_message_via_runtime.call_args[0][1], user
+        )
+        self.assertEqual(
+            mock_answer_incoming_message_via_runtime.call_args[0][2],
+            expected_profile_text,
+        )
+        self.assertEqual(
+            mock_answer_incoming_message_via_runtime.call_args.kwargs[
+                "source_key"
+            ],
+            "panel-user-profile-menu",
+        )
+        self.assertEqual(
+            mock_answer_incoming_message_via_runtime.call_args.kwargs[
+                "parse_mode"
+            ],
+            "Markdown",
+        )
+        self.assertIs(
+            mock_answer_incoming_message_via_runtime.call_args.kwargs[
+                "reply_markup"
+            ],
+            sentinel_keyboard,
+        )
+        self.assertIs(
+            mock_answer_incoming_message_via_runtime.call_args.kwargs[
+                "set_persistent_anchor"
+            ],
+            True,
+        )
+
+        mock_delete_previous_anchor.assert_not_called()
+        self.assertEqual(mock_delete_previous_anchor.await_count, 0)
+        mock_set_anchor.assert_not_called()
+
+        expected_order = [
+            mock.call.is_user_global_web_locked(user),
+            mock.call.configured_telegram_delivery_runtime(),
+            mock.call.AsyncSessionLocal(),
+            mock.call._can_use_customer_panel(sentinel_session_1, user),
+            mock.call._user_panel_show_overtime_preference(user),
+            mock.call.AsyncSessionLocal(),
+            mock.call.attach_customer_management_names(
+                sentinel_session_2, [user]
+            ),
+            mock.call._user_panel_show_overtime_preference(user),
+            mock.call.build_user_panel_navigation_keyboard(
+                user,
+                show_overtime_preference=True,
+            ),
+            mock.call.answer_incoming_message_via_runtime(
+                message,
+                user,
+                expected_profile_text,
+                source_key="panel-user-profile-menu",
+                parse_mode="Markdown",
+                reply_markup=sentinel_keyboard,
+                set_persistent_anchor=True,
+            ),
+        ]
+        self.assertEqual(parent.mock_calls, expected_order)
+
+    @mock.patch("bot.handlers.panel.set_anchor")
+    @mock.patch(
+        "bot.handlers.panel.answer_incoming_message_via_runtime",
+        new_callable=mock.AsyncMock,
+    )
+    @mock.patch(
+        "bot.handlers.panel.build_user_panel_navigation_keyboard",
+        new_callable=mock.AsyncMock,
+    )
+    @mock.patch(
+        "bot.handlers.panel.attach_customer_management_names",
+        new_callable=mock.AsyncMock,
+    )
+    @mock.patch(
+        "bot.handlers.panel._user_panel_show_overtime_preference",
+        new_callable=mock.AsyncMock,
+    )
+    @mock.patch(
+        "bot.handlers.panel._can_use_customer_panel",
+        new_callable=mock.AsyncMock,
+    )
+    @mock.patch("bot.handlers.panel.AsyncSessionLocal")
+    @mock.patch(
+        "bot.handlers.panel.delete_previous_anchor",
+        new_callable=mock.AsyncMock,
+    )
+    @mock.patch("bot.handlers.panel.configured_telegram_delivery_runtime")
+    @mock.patch("bot.handlers.panel.is_user_global_web_locked")
+    async def test_non_customer_user_profile_menu_legacy(
+        self,
+        mock_is_user_global_web_locked: mock.MagicMock,
+        mock_configured_runtime: mock.MagicMock,
+        mock_delete_previous_anchor: mock.AsyncMock,
+        mock_async_session_local: mock.MagicMock,
+        mock_can_use_customer_panel: mock.AsyncMock,
+        mock_user_panel_show_overtime_preference: mock.AsyncMock,
+        mock_attach_customer_management_names: mock.AsyncMock,
+        mock_build_user_panel_navigation_keyboard: mock.AsyncMock,
+        mock_answer_incoming_message_via_runtime: mock.AsyncMock,
+        mock_set_anchor: mock.MagicMock,
+    ) -> None:
+        """LEGACY mode deletes anchor before sessions, enriches profile, and sets anchor."""
+        parent = mock.MagicMock(name="parent_order")
+        parent.attach_mock(
+            mock_is_user_global_web_locked, "is_user_global_web_locked"
+        )
+        parent.attach_mock(
+            mock_configured_runtime, "configured_telegram_delivery_runtime"
+        )
+        parent.attach_mock(
+            mock_delete_previous_anchor, "delete_previous_anchor"
+        )
+        parent.attach_mock(
+            mock_async_session_local, "AsyncSessionLocal"
+        )
+        parent.attach_mock(
+            mock_can_use_customer_panel, "_can_use_customer_panel"
+        )
+        parent.attach_mock(
+            mock_user_panel_show_overtime_preference,
+            "_user_panel_show_overtime_preference",
+        )
+        parent.attach_mock(
+            mock_attach_customer_management_names,
+            "attach_customer_management_names",
+        )
+        parent.attach_mock(
+            mock_build_user_panel_navigation_keyboard,
+            "build_user_panel_navigation_keyboard",
+        )
+        parent.attach_mock(
+            mock_answer_incoming_message_via_runtime,
+            "answer_incoming_message_via_runtime",
+        )
+        parent.attach_mock(mock_set_anchor, "set_anchor")
+
+        sentinel_bot = object()
+        sentinel_chat_id = 889900
+        message = mock.MagicMock(name="legacy_noncustomer_message")
+        message.bot = sentinel_bot
+        message.chat.id = sentinel_chat_id
+        state = mock.MagicMock(name="legacy_noncustomer_state")
+
+        user = SimpleNamespace(
+            id=402,
+            role=UserRole.MIDDLE_MANAGER,
+            account_name="legacy_mgr_account",
+            full_name="Legacy NonCustomer Manager User",
+            telegram_id=555444333,
+        )
+
+        sentinel_session_1 = object()
+        sentinel_session_2 = object()
+        fake_session_ctx_1 = StrictFakeAsyncSessionContext(sentinel_session_1)
+        fake_session_ctx_2 = StrictFakeAsyncSessionContext(sentinel_session_2)
+
+        sentinel_keyboard = object()
+        sentinel_anchor_id = 88501
+        sentinel_anchor_msg = mock.MagicMock(name="sentinel_anchor_msg")
+        sentinel_anchor_msg.message_id = sentinel_anchor_id
+
+        enriched_management_name = "مدیر بازرگانی ارشد همکار"
+
+        async def fake_attach(session_arg: Any, users_arg: Any) -> None:
+            for u in users_arg:
+                setattr(u, "customer_management_name", enriched_management_name)
+
+        mock_attach_customer_management_names.side_effect = fake_attach
+
+        mock_is_user_global_web_locked.return_value = False
+        mock_configured_runtime.return_value = TelegramDeliveryRuntimeDecision(
+            mode=TelegramDeliveryRuntimeMode.LEGACY,
+            legacy_workers_enabled=True,
+            queue_worker_enabled=False,
+        )
+        mock_async_session_local.side_effect = [
+            fake_session_ctx_1,
+            fake_session_ctx_2,
+        ]
+        mock_can_use_customer_panel.return_value = False
+        mock_user_panel_show_overtime_preference.side_effect = [True, False]
+        mock_build_user_panel_navigation_keyboard.return_value = sentinel_keyboard
+        mock_answer_incoming_message_via_runtime.return_value = sentinel_anchor_msg
+
+        self.assertIsNone(getattr(user, "customer_management_name", None))
+        self.assertEqual(user_display_name(user), "legacy_mgr_account")
+
+        result = await show_my_profile_and_change_keyboard(message, state, user)
+
+        self.assertIsNone(result)
+
+        mock_is_user_global_web_locked.assert_called_once_with(user)
+        self.assertIs(mock_is_user_global_web_locked.call_args[0][0], user)
+        mock_configured_runtime.assert_called_once_with()
+
+        mock_delete_previous_anchor.assert_awaited_once_with(
+            sentinel_bot,
+            sentinel_chat_id,
+            delay=DeleteDelay.DEFAULT.value,
+        )
+        self.assertIs(mock_delete_previous_anchor.call_args[0][0], sentinel_bot)
+        self.assertEqual(
+            mock_delete_previous_anchor.call_args[0][1], sentinel_chat_id
+        )
+        self.assertEqual(
+            mock_delete_previous_anchor.call_args.kwargs["delay"],
+            DeleteDelay.DEFAULT.value,
+        )
+
+        self.assertEqual(mock_async_session_local.call_count, 2)
+        self.assertEqual(fake_session_ctx_1.entered, 1)
+        self.assertEqual(fake_session_ctx_1.exited, 1)
+        self.assertEqual(fake_session_ctx_2.entered, 1)
+        self.assertEqual(fake_session_ctx_2.exited, 1)
+
+        mock_can_use_customer_panel.assert_awaited_once_with(
+            sentinel_session_1, user
+        )
+        self.assertIs(
+            mock_can_use_customer_panel.call_args[0][0], sentinel_session_1
+        )
+        self.assertIs(mock_can_use_customer_panel.call_args[0][1], user)
+
+        mock_attach_customer_management_names.assert_awaited_once_with(
+            sentinel_session_2, [user]
+        )
+        self.assertIs(
+            mock_attach_customer_management_names.call_args[0][0],
+            sentinel_session_2,
+        )
+        self.assertEqual(
+            mock_attach_customer_management_names.call_args[0][1], [user]
+        )
+        self.assertIs(
+            mock_attach_customer_management_names.call_args[0][1][0], user
+        )
+
+        self.assertEqual(
+            getattr(user, "customer_management_name", None),
+            enriched_management_name,
+        )
+        self.assertEqual(user_display_name(user), enriched_management_name)
+
+        self.assertEqual(mock_user_panel_show_overtime_preference.await_count, 2)
+        mock_user_panel_show_overtime_preference.assert_has_awaits(
+            [mock.call(user), mock.call(user)]
+        )
+        mock_build_user_panel_navigation_keyboard.assert_awaited_once_with(
+            user,
+            show_overtime_preference=False,
+        )
+        self.assertIs(
+            mock_build_user_panel_navigation_keyboard.call_args[0][0], user
+        )
+        self.assertEqual(
+            mock_build_user_panel_navigation_keyboard.call_args.kwargs,
+            {"show_overtime_preference": False},
+        )
+        self.assertNotIn(
+            "standard_actions",
+            mock_build_user_panel_navigation_keyboard.call_args.kwargs,
+        )
+        self.assertNotIn(
+            "show_support",
+            mock_build_user_panel_navigation_keyboard.call_args.kwargs,
+        )
+
+        expected_profile_link = (
+            f"https://t.me/{settings.bot_username}?start=profile_{user.id}"
+        )
+        expected_profile_text = (
+            "👤 **پروفایل شما**\n\n"
+            f"🔸 **نام کاربری:** `{enriched_management_name}`\n"
+            f"🔹 **نام تلگرام:** {user.full_name}\n"
+            f"🔹 **آیدی تلگرام:** `{user.telegram_id}`\n"
+            f"🔹 **سطح دسترسی:** {user.role.value}\n\n"
+            "🔗 **لینک پروفایل عمومی:**\n"
+            f"`{expected_profile_link}`"
+        )
+        mock_answer_incoming_message_via_runtime.assert_awaited_once_with(
+            message,
+            user,
+            expected_profile_text,
+            source_key="panel-user-profile-menu",
+            parse_mode="Markdown",
+            reply_markup=sentinel_keyboard,
+            set_persistent_anchor=True,
+        )
+        self.assertIs(
+            mock_answer_incoming_message_via_runtime.call_args[0][0], message
+        )
+        self.assertIs(
+            mock_answer_incoming_message_via_runtime.call_args[0][1], user
+        )
+        self.assertEqual(
+            mock_answer_incoming_message_via_runtime.call_args[0][2],
+            expected_profile_text,
+        )
+        self.assertEqual(
+            mock_answer_incoming_message_via_runtime.call_args.kwargs[
+                "source_key"
+            ],
+            "panel-user-profile-menu",
+        )
+        self.assertEqual(
+            mock_answer_incoming_message_via_runtime.call_args.kwargs[
+                "parse_mode"
+            ],
+            "Markdown",
+        )
+        self.assertIs(
+            mock_answer_incoming_message_via_runtime.call_args.kwargs[
+                "reply_markup"
+            ],
+            sentinel_keyboard,
+        )
+        self.assertIs(
+            mock_answer_incoming_message_via_runtime.call_args.kwargs[
+                "set_persistent_anchor"
+            ],
+            True,
+        )
+
+        mock_set_anchor.assert_called_once_with(
+            sentinel_chat_id, sentinel_anchor_id
+        )
+        self.assertEqual(mock_set_anchor.call_args[0][0], sentinel_chat_id)
+        self.assertEqual(mock_set_anchor.call_args[0][1], sentinel_anchor_id)
+
+        expected_order = [
+            mock.call.is_user_global_web_locked(user),
+            mock.call.configured_telegram_delivery_runtime(),
+            mock.call.delete_previous_anchor(
+                sentinel_bot,
+                sentinel_chat_id,
+                delay=DeleteDelay.DEFAULT.value,
+            ),
+            mock.call.AsyncSessionLocal(),
+            mock.call._can_use_customer_panel(sentinel_session_1, user),
+            mock.call._user_panel_show_overtime_preference(user),
+            mock.call.AsyncSessionLocal(),
+            mock.call.attach_customer_management_names(
+                sentinel_session_2, [user]
+            ),
+            mock.call._user_panel_show_overtime_preference(user),
+            mock.call.build_user_panel_navigation_keyboard(
+                user,
+                show_overtime_preference=False,
+            ),
+            mock.call.answer_incoming_message_via_runtime(
+                message,
+                user,
+                expected_profile_text,
+                source_key="panel-user-profile-menu",
                 parse_mode="Markdown",
                 reply_markup=sentinel_keyboard,
                 set_persistent_anchor=True,
