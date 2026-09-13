@@ -191,7 +191,9 @@ if [[ "$restart_eligible" == true ]]; then
   else
     recovery_ok=true
     if [[ "$provider_probe" == true ]]; then
-      probe_tmp="$(/usr/bin/mktemp "$report_root/.provider-preflight.XXXXXX")"
+      probe_stdout_tmp="$(/usr/bin/mktemp "$report_root/.provider-preflight.stdout.XXXXXX")"
+      probe_stderr_tmp="$(/usr/bin/mktemp "$report_root/.provider-preflight.stderr.XXXXXX")"
+      /usr/bin/chmod 0600 "$probe_stdout_tmp" "$probe_stderr_tmp" 2>/dev/null || true
       probe_cli_dir="$(/usr/bin/mktemp -d "$report_root/.provider-cli.XXXXXX")"
       probe_cli="$probe_cli_dir/agy"
       cli_sha256="$(/usr/bin/sha256sum -- "$antigravity_cli" 2>/dev/null | /usr/bin/awk '{print $1}' || true)"
@@ -204,8 +206,9 @@ if [[ "$restart_eligible" == true ]]; then
             --model gemini-3.8-flash-high --effort high --sandbox --mode plan \
             --disable-slash-commands --output-format stream-json --print-timeout 2m \
             -p 'Health probe only. Do not invoke tools and do not read or write files. Reply exactly AUTOPILOT_PROVIDER_OK' \
-            >"$probe_tmp" 2>&1) \
-          && [[ "$(/usr/bin/stat -c %s -- "$probe_tmp" 2>/dev/null || printf '1048577')" -le 1048576 ]] \
+            >"$probe_stdout_tmp" 2>"$probe_stderr_tmp") \
+          && [[ "$(/usr/bin/stat -c %s -- "$probe_stdout_tmp" 2>/dev/null || printf '1048577')" -le 1048576 ]] \
+          && [[ "$(/usr/bin/stat -c %s -- "$probe_stderr_tmp" 2>/dev/null || printf '1048577')" -le 1048576 ]] \
           && /usr/bin/jq -s -e --arg root "$integration_root" '
             ([.[] | select(.event == "init")] | length) == 1 and
             ([.[] | select(.event == "result")] | length) == 1 and
@@ -223,16 +226,38 @@ if [[ "$restart_eligible" == true ]]; then
               (.step_update.tool_info? // "") == "" and
               (.step_update.subagent_info? // "") == ""
             )
-          ' "$probe_tmp" >/dev/null \
+          ' "$probe_stdout_tmp" >/dev/null \
           && [[ "$(/usr/bin/sha256sum -- "$antigravity_cli" 2>/dev/null | /usr/bin/awk '{print $1}' || true)" == "$expected_antigravity_sha256" ]]; then
-        /usr/bin/mv -f -- "$probe_tmp" "$report_root/provider-preflight.latest.log"
+        :
       else
         recovery_ok=false
-        /usr/bin/mv -f -- "$probe_tmp" "$report_root/provider-preflight.latest.log"
       fi
+      if ! /usr/bin/mv -f -- "$probe_stdout_tmp" "$report_root/provider-preflight.latest.log" 2>/dev/null; then
+        recovery_ok=false
+      fi
+      if ! /usr/bin/mv -f -- "$probe_stderr_tmp" "$report_root/provider-preflight.latest.stderr.log" 2>/dev/null; then
+        recovery_ok=false
+      fi
+      if ! /usr/bin/chmod 0600 "$report_root/provider-preflight.latest.log" 2>/dev/null; then
+        recovery_ok=false
+      fi
+      if ! /usr/bin/chmod 0600 "$report_root/provider-preflight.latest.stderr.log" 2>/dev/null; then
+        recovery_ok=false
+      fi
+      if [[ ! -f "$report_root/provider-preflight.latest.log" || -L "$report_root/provider-preflight.latest.log" ]] \
+          || [[ "$(/usr/bin/stat -c %a -- "$report_root/provider-preflight.latest.log" 2>/dev/null || printf '0')" != "600" ]] \
+          || [[ "$(/usr/bin/stat -c %s -- "$report_root/provider-preflight.latest.log" 2>/dev/null || printf '1048577')" -gt 1048576 ]]; then
+        recovery_ok=false
+      fi
+      if [[ ! -f "$report_root/provider-preflight.latest.stderr.log" || -L "$report_root/provider-preflight.latest.stderr.log" ]] \
+          || [[ "$(/usr/bin/stat -c %a -- "$report_root/provider-preflight.latest.stderr.log" 2>/dev/null || printf '0')" != "600" ]] \
+          || [[ "$(/usr/bin/stat -c %s -- "$report_root/provider-preflight.latest.stderr.log" 2>/dev/null || printf '1048577')" -gt 1048576 ]]; then
+        recovery_ok=false
+      fi
+      /usr/bin/unlink -- "$probe_stdout_tmp" 2>/dev/null || true
+      /usr/bin/unlink -- "$probe_stderr_tmp" 2>/dev/null || true
       /usr/bin/unlink -- "$probe_cli" 2>/dev/null || true
       /usr/bin/rmdir -- "$probe_cli_dir" 2>/dev/null || true
-      /usr/bin/chmod 600 "$report_root/provider-preflight.latest.log"
     fi
     if [[ "$recovery_ok" == true ]]; then
       restart_tmp="$(/usr/bin/mktemp "$report_root/.restart.XXXXXX")"
