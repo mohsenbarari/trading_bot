@@ -739,6 +739,8 @@ def run_cycle(
         raise AutopilotError("invalid or missing startup assignment scope")
     timestamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     run_dir = state_root / "runs" / f"cycle-{cycle:04d}-{timestamp}-{os.getpid()}"
+    if not RUN_ID.fullmatch(run_dir.name) or os.path.isabs(run_dir.name):
+        raise AutopilotError(f"invalid cycle run ID: {run_dir.name}")
     run_dir.mkdir(mode=0o700)
     prompt = prompt_for_cycle(root, cycle, before, recovery=recovery, continuation=continuation)
     (run_dir / "prompt.txt").write_text(prompt)
@@ -769,6 +771,7 @@ def run_cycle(
     environment["TWO_SITE_ASSIGNMENT_SCOPE_REQUIRED"] = "1"
     environment["TWO_SITE_ASSIGNMENT_ID"] = scope.assignment_id
     environment["TWO_SITE_ASSIGNMENT_SHA256"] = scope.sha256
+    environment["TWO_SITE_AUTOPILOT_RUN_ID"] = run_dir.name
     try:
         with subprocess.Popen(
             command,
