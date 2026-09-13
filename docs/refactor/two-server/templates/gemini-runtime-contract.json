@@ -1,8 +1,9 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "provider": "antigravity",
   "model": "gemini-3.8-flash-high",
   "effort": "high",
+  "worker_effort": "medium",
   "cli_version": "1.1.27",
   "cli_sha256": "93eb2118b778a4005700b54cdd7e08b896fbe665d5ff338e38e9e53da9a091ea"
 }

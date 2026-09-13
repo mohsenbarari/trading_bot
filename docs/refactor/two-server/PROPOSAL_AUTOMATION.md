@@ -7,8 +7,10 @@ Git و شواهد همان چرخه بخوانید؛ عبارت RUNNING یا ی�
 
 مدل جاری Supervisor: `gpt-5.6-sol` با `xhigh`.
 مدل Gemini از `templates/gemini-runtime-contract.json`: `gemini-3.8-flash-high`
-با `high`. Runner پیش از مصرف provider سازگاری این قرارداد و ارجاع‌هایش را می‌سنجد.
-هیچ کاهش effort، حذف review یا سبک‌کردن تست برای صرفه‌جویی مجاز نیست.
+است: Worker با `medium` و Reviewer با `high`. این تفکیک از خروجی‌های غیرقابل‌تحویل
+ناشی از reasoning بی‌حد Worker جلوگیری می‌کند، درحالی‌که بازبینی مستقل روی بالاترین
+effort باقی می‌ماند. Runner پیش از مصرف provider سازگاری قرارداد و ارجاع‌هایش را
+می‌سنجد. حذف review یا سبک‌کردن تست برای صرفه‌جویی مجاز نیست.
 
 ## سناریوی یک چرخه، بدون واسطه‌گری مالک
 

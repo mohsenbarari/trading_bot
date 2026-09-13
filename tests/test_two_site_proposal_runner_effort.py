@@ -24,22 +24,26 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
         """Prove that executable constants are derived from the tracked contract."""
         contract = runner.load_runtime_contract(runner.ROOT)
         self.assertEqual(runner.EFFORT, contract["effort"])
+        self.assertEqual(runner.WORKER_EFFORT, contract["worker_effort"])
         self.assertEqual(runner.MODEL, contract["model"])
         self.assertEqual(runner.EXPECTED_CLI_VERSION, contract["cli_version"])
         self.assertEqual(runner.EXPECTED_CLI_SHA256, contract["cli_sha256"])
         self.assertIsInstance(runner.EFFORT, str)
+        self.assertIsInstance(runner.WORKER_EFFORT, str)
 
     def test_runner_source_does_not_duplicate_runtime_pins(self) -> None:
         """Verify that model/effort are not re-pinned outside the contract."""
         source = Path(runner.__file__).read_text(encoding="utf-8")
         self.assertNotIn('MODEL = "gemini-', source)
         self.assertNotIn('EFFORT = "', source)
-        self.assertIn('--effort", EFFORT', source)
+        self.assertNotIn('WORKER_EFFORT = "', source)
+        self.assertIn('--effort", role_effort', source)
 
     def test_runtime_contract_references_are_consistent(self) -> None:
         contract = runner.validate_runtime_contract(runner.ROOT)
         self.assertEqual(contract["model"], "gemini-3.8-flash-high")
         self.assertEqual(contract["effort"], "high")
+        self.assertEqual(contract["worker_effort"], "medium")
 
     def _execute_mock_run(
         self,
@@ -134,7 +138,8 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
                 mock.patch("subprocess.Popen", side_effect=mock_popen),
             ]
             if effort_override is not None:
-                patches.append(mock.patch.object(runner, "EFFORT", effort_override))
+                target = "WORKER_EFFORT" if role == "worker" else "EFFORT"
+                patches.append(mock.patch.object(runner, target, effort_override))
 
             with ExitStack() as stack:
                 for patcher in patches:
@@ -176,11 +181,11 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
         command = commands[0]
         self.assertIn("--effort", command)
         idx = command.index("--effort")
-        self.assertEqual(command[idx + 1], runner.RUNTIME_CONTRACT["effort"])
-        self.assertEqual(command[idx + 1], runner.EFFORT)
+        self.assertEqual(command[idx + 1], runner.RUNTIME_CONTRACT["worker_effort"])
+        self.assertEqual(command[idx + 1], runner.WORKER_EFFORT)
         self.assertIn("effort", status_data)
-        self.assertEqual(status_data["effort"], runner.RUNTIME_CONTRACT["effort"])
-        self.assertEqual(status_data["effort"], runner.EFFORT)
+        self.assertEqual(status_data["effort"], runner.RUNTIME_CONTRACT["worker_effort"])
+        self.assertEqual(status_data["effort"], runner.WORKER_EFFORT)
 
     def test_verifier_command_and_metadata_uses_contract_effort(self) -> None:
         """Prove that verifier invocation uses the contract effort and records it."""
@@ -210,8 +215,8 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
         """Prove that status metadata records effort even when CLI execution fails (BLOCKED state)."""
         _commands, status_data = self._execute_mock_run(role="worker", simulate_error=True)
         self.assertEqual(status_data.get("state"), "BLOCKED")
-        self.assertEqual(status_data.get("effort"), runner.RUNTIME_CONTRACT["effort"])
-        self.assertEqual(status_data.get("effort"), runner.EFFORT)
+        self.assertEqual(status_data.get("effort"), runner.RUNTIME_CONTRACT["worker_effort"])
+        self.assertEqual(status_data.get("effort"), runner.WORKER_EFFORT)
 
 
 if __name__ == "__main__":
