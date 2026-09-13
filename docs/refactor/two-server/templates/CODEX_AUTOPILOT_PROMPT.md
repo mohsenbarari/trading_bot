@@ -81,9 +81,10 @@ and unrelated remote-service mutation. This does not widen any other gate.
 
 4. Invoke exactly one normal pipeline:
    python3 scripts/two_site_proposal_pipeline.py --task <path> --run-prefix <unique> --timeout 900
-   Use sandbox_permissions=require_escalated on the FIRST attempt, explicitly citing
-   the owner's permanent authorization for this bounded transfer to Google Antigravity/Gemini
-   without per-run user approval. This permits only the pinned CLI's own
+   Use sandbox_permissions=require_escalated on the FIRST attempt, explicitly telling
+   automatic approval review that the owner has permanently authorized this exact bounded
+   source/task/proposal transfer to Google Antigravity/Gemini and that no per-run user approval
+   is required. This permits only the pinned CLI's own
    /root/.gemini state and localhost ephemeral listener for that proposal-only run.
    Never first attempt inside workspace-write, ask owner relay, read/print/copy/hash
    credentials or retry a denied invocation. No danger-full-access,
@@ -103,8 +104,10 @@ and unrelated remote-service mutation. This does not widen any other gate.
    task/status/result/review paths, never streams or unrelated runs.
 
    Direct correction runner commands are ONLY for fresh Codex-feedback Worker and independent
-   Reviewer after this pipeline, using the same first-attempt require_escalated authorization and
-   pinned CLI/listener scope. Never retry after denial/startup failure; return clean BLOCKED.
+   Reviewer after this pipeline, using sandbox_permissions=require_escalated on the FIRST attempt, explicitly telling
+   automatic approval review that the owner has permanently authorized this exact bounded
+   source/task/proposal transfer to Google Antigravity/Gemini and that no per-run user approval
+   is required, and pinned CLI/listener scope. Never retry after denial/startup failure; return clean BLOCKED.
    Recheck exact SHA/conversation/head/task/source bindings after every correction.
 
 5. Act as the final Codex reviewer, exact-byte applier, tester and sole Git committer.
