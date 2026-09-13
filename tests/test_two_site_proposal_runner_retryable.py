@@ -10,6 +10,7 @@ try:
         ProposalError,
         RetryableProviderOutputError,
         RetryableProviderSessionError,
+        is_retryable_zero_token_stream,
         parse_stream,
     )
 except ImportError:
@@ -18,6 +19,7 @@ except ImportError:
         ProposalError,
         RetryableProviderOutputError,
         RetryableProviderSessionError,
+        is_retryable_zero_token_stream,
         parse_stream,
     )
 
@@ -229,6 +231,130 @@ class TestRetryableProviderSessionError(unittest.TestCase):
         result, env = parse_stream(raw, VALID_TASK, VALID_SOURCES, "worker")
         self.assertEqual(result["status"], "PROPOSAL_READY")
         self.assertEqual(env["conversation_id"], "session-test-id")
+
+
+def make_zero_token_stream(
+    mutator: object = None,
+    *,
+    session: str = "session-test-id",
+    result_top_cid: object = None,
+) -> str:
+    res_ev: dict[str, object] = {
+        "event": "result",
+        "result": {
+            "conversation_id": session,
+            "status": "ERROR",
+            "error": "Agent execution terminated due to error.",
+            "response": "",
+            "denied_actions": [],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        },
+    }
+    if result_top_cid is not None:
+        res_ev["conversation_id"] = result_top_cid
+    events: list[object] = [
+        {"event": "init", "conversation_id": session, "init": {"model": MODEL}},
+        res_ev,
+    ]
+    if callable(mutator):
+        res = mutator(events)
+        if res is not None:
+            events = res
+    elif isinstance(mutator, list):
+        events = mutator
+    elif isinstance(mutator, str):
+        return mutator
+    return "\n".join(e if isinstance(e, str) else json.dumps(e) for e in events) + "\n"
+
+
+class TestIsRetryableZeroTokenStream(unittest.TestCase):
+    def test_retained_cycle_59_shape_and_result_id_variants(self):
+        self.assertTrue(is_retryable_zero_token_stream(make_zero_token_stream()))
+        self.assertTrue(
+            is_retryable_zero_token_stream(
+                make_zero_token_stream(
+                    lambda ev: ev[1]["result"].update(response=None, denied_actions=None)
+                )
+            )
+        )
+        self.assertTrue(
+            is_retryable_zero_token_stream(
+                make_zero_token_stream(result_top_cid="session-test-id")
+            )
+        )
+        self.assertFalse(
+            is_retryable_zero_token_stream(
+                make_zero_token_stream(result_top_cid="mismatched-session")
+            )
+        )
+        self.assertFalse(is_retryable_zero_token_stream(None))  # type: ignore[arg-type]
+        self.assertFalse(is_retryable_zero_token_stream(""))
+        self.assertFalse(is_retryable_zero_token_stream("   \n"))
+        self.assertFalse(
+            is_retryable_zero_token_stream(
+                make_zero_token_stream(), expected_model="other-model"
+            )
+        )
+
+    def test_rejections_via_mutation_table(self):
+        mutations: list[tuple[str, object]] = [
+            ("missing_init", lambda ev: [ev[1]]),
+            ("duplicate_init", lambda ev: [ev[0], ev[0], ev[1]]),
+            ("malformed_init", lambda ev: ev[0].update(init="not-a-dict")),
+            ("missing_result", lambda ev: [ev[0]]),
+            ("duplicate_result", lambda ev: [ev[0], ev[1], ev[1]]),
+            ("malformed_result", lambda ev: ev[1].update(result="not-a-dict")),
+            ("non_dict_event", lambda ev: ["not-a-dict", ev[1]]),
+            ("malformed_step_update", lambda ev: ev.insert(1, {"event": "step_update", "step_update": "not-a-dict"})),
+            ("wrong_model", lambda ev: ev[0]["init"].update(model="gemini-other")),
+            ("missing_session", lambda ev: ev[0].pop("conversation_id")),
+            ("empty_session", lambda ev: ev[0].update(conversation_id="   ")),
+            ("non_string_session", lambda ev: ev[0].update(conversation_id=123)),
+            ("mismatched_result_envelope_session", lambda ev: ev[1]["result"].update(conversation_id="wrong-session")),
+            ("mismatched_other_event_session", lambda ev: ev.insert(1, {"event": "step_update", "conversation_id": "other"})),
+            ("malformed_ndjson", "{not-valid-json\n"),
+            ("duplicate_key_ndjson", '{"event": "init", "event": "init"}\n'),
+            ("absent_usage", lambda ev: ev[1]["result"].pop("usage")),
+            ("empty_usage", lambda ev: ev[1]["result"].update(usage={})),
+            ("non_dict_usage_int", lambda ev: ev[1]["result"].update(usage=0)),
+            ("non_dict_usage_str", lambda ev: ev[1]["result"].update(usage="none")),
+            ("non_dict_usage_list", lambda ev: ev[1]["result"].update(usage=[0])),
+            ("boolean_false_usage", lambda ev: ev[1]["result"].update(usage={"prompt_tokens": False})),
+            ("boolean_true_usage", lambda ev: ev[1]["result"].update(usage={"prompt_tokens": True})),
+            ("nonzero_usage_positive", lambda ev: ev[1]["result"].update(usage={"prompt_tokens": 1})),
+            ("nonzero_usage_negative", lambda ev: ev[1]["result"].update(usage={"prompt_tokens": -1})),
+            ("nonzero_usage_mixed", lambda ev: ev[1]["result"].update(usage={"prompt_tokens": 0, "completion_tokens": 2})),
+            ("structured_output_dict", lambda ev: ev[1]["result"].update(structured_output={"res": 1})),
+            ("structured_output_bool", lambda ev: ev[1]["result"].update(structured_output=True)),
+            ("nonempty_response", lambda ev: ev[1]["result"].update(response="unexpected text")),
+            ("non_string_response", lambda ev: ev[1]["result"].update(response={"text": "hi"})),
+            ("nonempty_denials", lambda ev: ev[1]["result"].update(denied_actions=[{"action": "bash"}])),
+            ("event_tool_name", lambda ev: ev.insert(1, {"tool_name": "run_command"})),
+            ("event_tool_info", lambda ev: ev.insert(1, {"tool_info": {"name": "run_command"}})),
+            ("event_subagent_info", lambda ev: ev.insert(1, {"subagent_info": {"id": "sub-1"}})),
+            ("event_step_type_tool", lambda ev: ev.insert(1, {"step_type": "tool"})),
+            ("event_step_type_subagent", lambda ev: ev.insert(1, {"step_type": "subagent"})),
+            ("step_update_tool_name", lambda ev: ev.insert(1, {"event": "step_update", "step_update": {"tool_name": "x"}})),
+            ("step_update_tool_info", lambda ev: ev.insert(1, {"event": "step_update", "step_update": {"tool_info": {}}})),
+            ("step_update_subagent_info", lambda ev: ev.insert(1, {"event": "step_update", "step_update": {"subagent_info": {}}})),
+            ("step_update_step_type_tool", lambda ev: ev.insert(1, {"event": "step_update", "step_update": {"step_type": "tool"}})),
+            ("step_update_step_type_subagent", lambda ev: ev.insert(1, {"event": "step_update", "step_update": {"step_type": "subagent"}})),
+            ("status_not_error", lambda ev: ev[1]["result"].update(status="SUCCESS")),
+            ("error_auth", lambda ev: ev[1]["result"].update(error="Authentication failure")),
+            ("error_quota", lambda ev: ev[1]["result"].update(error="Quota exceeded for project")),
+            ("error_rate_limit", lambda ev: ev[1]["result"].update(error="Rate limit exceeded")),
+            ("error_timeout", lambda ev: ev[1]["result"].update(error="Gateway time-out")),
+            ("error_deadline", lambda ev: ev[1]["result"].update(error="Deadline exceeded")),
+            ("error_network", lambda ev: ev[1]["result"].update(error="Network unreachable")),
+            ("error_connect", lambda ev: ev[1]["result"].update(error="Failed to connect")),
+            ("error_truncation", lambda ev: ev[1]["result"].update(error="output tokens limit exceeded")),
+            ("error_function_call", lambda ev: ev[1]["result"].update(error="improperly formatted function call")),
+            ("error_arbitrary_engine", lambda ev: ev[1]["result"].update(error="Internal server engine error")),
+        ]
+        for name, mutator in mutations:
+            with self.subTest(name=name):
+                raw = make_zero_token_stream(mutator)
+                self.assertFalse(is_retryable_zero_token_stream(raw), f"Expected false for {name}")
 
 
 if __name__ == "__main__":
