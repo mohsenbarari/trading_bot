@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "06a9c431ae7f96c4af2054708b2a1d85d80f7fe5",
+  "inspected_head": "e7197b3e50a05bcdcb8daaf99f708b8bd1717026",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -172,24 +172,68 @@
         "tests/test_p1_00b_characterization_telegram_publisher_b2b_receive_dispatch.py::TestTelegramPublisherB2BReceiveDispatchCharacterization::test_invalid_sender_bool_rejected_without_service_or_commit_or_answer",
         "tests/test_p1_00b_characterization_telegram_publisher_b2b_receive_dispatch.py::TestTelegramPublisherB2BReceiveDispatchCharacterization::test_service_error_propagates_and_aborts_commit_and_answer"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_telegram_publisher_b2b_receive_ack.py",
+      "sha256": "84c6e8b62e0bfcd3368cfe01c8d48f24d4b9bf83ce91efc5733fb322ba1dc4b7",
+      "last_commit": "726c5ed18b2199f8498c839b687e1fbc8d9020a3",
+      "seed_ids": [
+        "BOT-TG-MESSAGE-TELEGRAM-PUBLISHER-B2B-RECEIVE-ACK-L44"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_telegram_publisher_b2b_receive_ack.py::TestTelegramPublisherB2BReceiveAckCharacterization::test_router_construction_registers_receive_ack_callback",
+        "tests/test_p1_00b_characterization_telegram_publisher_b2b_receive_ack.py::TestTelegramPublisherB2BReceiveAckCharacterization::test_valid_ack_success_contract_and_observable_ordering",
+        "tests/test_p1_00b_characterization_telegram_publisher_b2b_receive_ack.py::TestTelegramPublisherB2BReceiveAckCharacterization::test_invalid_sender_bool_rejected_without_service_or_commit_or_answer",
+        "tests/test_p1_00b_characterization_telegram_publisher_b2b_receive_ack.py::TestTelegramPublisherB2BReceiveAckCharacterization::test_service_error_propagates_and_aborts_commit"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_channel_trade_numeric_success.py",
+      "sha256": "60dfc838e7caacfe9164564efc36a3432ccc5133c542446e02d9b7e1975ca0b7",
+      "last_commit": "31c6e3071942a7effa0736cf240c2caf62325b61",
+      "seed_ids": [],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_channel_trade_numeric_success.py::P100bChannelTradeNumericSuccessCharacterizationTests::test_webapp_offer_telegram_numeric_double_click_persists_once"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_channel_trade_public_success.py",
+      "sha256": "0251c3fc7c9363d9ffdeda40cbc0c769d0f67744fca48ccf977aeade86a2a2fc",
+      "last_commit": "f166f658380f6e9b8381d8c2cdbc1096969eb2c5",
+      "seed_ids": [],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_channel_trade_public_success.py::P100bChannelTradePublicSuccessCharacterizationTests::test_webapp_offer_telegram_public_identity_double_click_persists_once"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_channel_trade_telegram_offer_success.py",
+      "sha256": "45a050fa7024f115ba04ccd49822357bd7d56cc7ba3faa228cdc54c51e892826",
+      "last_commit": "e7197b3e50a05bcdcb8daaf99f708b8bd1717026",
+      "seed_ids": [],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_channel_trade_telegram_offer_success.py::P100bChannelTradeTelegramOfferSuccessCharacterizationTests::test_telegram_offer_telegram_public_identity_double_click_persists_once"
+      ]
     }
   ],
   "next_review_candidates": [
     {
       "state": "REVALIDATE_REQUIRED",
-      "seed": "BOT-TG-MESSAGE-TELEGRAM-PUBLISHER-B2B-RECEIVE-ACK-L44",
-      "symbol": "build_primary_b2b_router.receive_ack",
+      "gap": "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
       "scenarios": [
-        "valid ACK: service before commit",
-        "invalid sender: suppress service",
-        "service failure: no commit"
+        "remaining seed-handler assertions"
       ]
     },
     {
       "state": "REVALIDATE_REQUIRED",
       "gap": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
       "scenarios": [
-        "unassessed origin SUCCESS/policy/notification/side-effect retry cells"
+        "ORIGIN-INTERNAL__TELEGRAM_BOT__OUTCOME-SUCCESS",
+        "ORIGIN-WEBAPP__WEBAPP__OUTCOME-SUCCESS",
+        "ORIGIN-TELEGRAM_BOT__WEBAPP__OUTCOME-SUCCESS",
+        "ORIGIN-INTERNAL__WEBAPP__OUTCOME-SUCCESS",
+        "tier-2/admin policy snapshots",
+        "real notification-audience behavior",
+        "live-path side-effect retry"
       ]
     }
   ],
