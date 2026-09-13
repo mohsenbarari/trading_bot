@@ -108,6 +108,25 @@ CANONICAL_RESPONSE_KEYS = frozenset({
 MAX_REPLACEMENTS = 32
 MAX_REPLACEMENT_BYTES = 65536
 MAX_REVIEW_TRANSPORT_BYTES = MAX_CONTEXT
+AUTOPILOT_RUN_ID_ENV = "TWO_SITE_AUTOPILOT_RUN_ID"
+MAX_AUTOPILOT_RUN_ID_LENGTH = 64
+AUTOPILOT_RUN_ID_REGEX = re.compile(
+    r"^cycle-[0-9]{4,8}-[0-9]{8}T[0-9]{6}Z-[0-9]{1,10}\Z"
+)
+
+
+def validate_autopilot_run_id(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw.strip():
+        raise ProposalError("invalid autopilot run ID: empty or whitespace")
+    if len(raw) > MAX_AUTOPILOT_RUN_ID_LENGTH:
+        raise ProposalError("invalid autopilot run ID: exceeds length limit")
+    if not AUTOPILOT_RUN_ID_REGEX.fullmatch(raw):
+        raise ProposalError("invalid autopilot run ID: does not match canonical format")
+    if SECRET.search(raw):
+        raise ProposalError("invalid autopilot run ID: credential-like content")
+    return raw
 
 
 class ProposalError(ValueError):
@@ -1261,6 +1280,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         raise ProposalError("invalid run ID or timeout")
     if role not in {"worker", "verifier"}:
         raise ProposalError("invalid proposal role")
+    autopilot_run_id = validate_autopilot_run_id(os.environ.get(AUTOPILOT_RUN_ID_ENV))
     # Contract/document drift must be rejected before task materialization and
     # before the Gemini CLI can consume a token or create a run artifact.
     validate_runtime_contract(root)
@@ -1367,6 +1387,8 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 "retain_until": time.time() + 7 * 86400,
                 "authority": "PROPOSAL_ONLY_NOT_ACCEPTANCE",
                 "cli": initial_cli_identity, "cli_source": cli_source}
+        if autopilot_run_id is not None:
+            meta["controller_run_id"] = autopilot_run_id
         if prior_status is not None:
             meta.update(
                 input_worker_run_id=prior_status["run_id"],
@@ -1477,6 +1499,7 @@ def run_standalone(
     cli: Path | None = None,
     test_evidence: Path | None = None,
 ) -> Path:
+    validate_autopilot_run_id(os.environ.get(AUTOPILOT_RUN_ID_ENV))
     proposals_dir = root / ".local/two-site-refactor/proposals"
     attempts = (
         base_run_id,
