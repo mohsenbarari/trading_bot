@@ -87,7 +87,7 @@ GEMINI_RUNTIME_REFERENCE_PATHS = (
     Path(".agents/skills/two-site-refactor/resources/TYPED_GATEWAY.md"),
 )
 RUNTIME_CONTRACT_KEYS = frozenset({
-    "schema_version", "provider", "model", "effort", "worker_effort",
+    "schema_version", "provider", "model", "effort", "worker_model", "worker_effort",
     "cli_version", "cli_sha256",
 })
 VALID_EFFORTS = frozenset({"low", "medium", "high"})
@@ -471,15 +471,18 @@ def load_runtime_contract(root: Path) -> dict[str, str]:
     ))
     if not isinstance(contract, dict) or set(contract) != RUNTIME_CONTRACT_KEYS:
         raise ProposalError("Gemini runtime contract has unexpected keys")
-    if contract.get("schema_version") != "1.1" or contract.get("provider") != "antigravity":
+    if contract.get("schema_version") != "1.2" or contract.get("provider") != "antigravity":
         raise ProposalError("Gemini runtime contract has an unsupported schema or provider")
     model = contract.get("model")
     effort = contract.get("effort")
+    worker_model = contract.get("worker_model")
     worker_effort = contract.get("worker_effort")
     cli_version = contract.get("cli_version")
     cli_sha256 = contract.get("cli_sha256")
     if (not isinstance(model, str) or not re.fullmatch(r"gemini-[A-Za-z0-9][A-Za-z0-9._-]{1,79}", model)
             or not isinstance(effort, str) or effort not in VALID_EFFORTS
+            or not isinstance(worker_model, str)
+            or not re.fullmatch(r"gemini-[A-Za-z0-9][A-Za-z0-9._-]{1,79}", worker_model)
             or not isinstance(worker_effort, str) or worker_effort not in VALID_EFFORTS
             or not isinstance(cli_version, str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", cli_version)
             or not isinstance(cli_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", cli_sha256)):
@@ -498,11 +501,13 @@ def validate_runtime_contract(root: Path) -> dict[str, str]:
                        for path in GEMINI_RUNTIME_REFERENCE_PATHS)
     model = contract["model"]
     effort = contract["effort"]
+    worker_model = contract["worker_model"]
     worker_effort = contract["worker_effort"]
     for relative, reference_kind in references:
         text = bounded_file_text(root, root / relative, MAX_CONTEXT, f"Gemini runtime reference {relative}")
         if reference_kind == "pair":
-            if f"`{model}`" not in text or f"با `{effort}`" not in text:
+            if (f"Worker=`{worker_model}/{worker_effort}`" not in text
+                    or f"Reviewer=`{model}/{effort}`" not in text):
                 raise ProposalError(f"Gemini runtime reference drift: {relative}")
         else:
             marker = model
@@ -510,7 +515,7 @@ def validate_runtime_contract(root: Path) -> dict[str, str]:
                 raise ProposalError(f"Gemini runtime reference drift: {relative}")
             if reference_kind == "cli" and f"--model {model} --effort {effort}" not in text:
                 raise ProposalError(f"Gemini model/effort reference drift: {relative}")
-        for alternate_model in {"gemini-3.8-flash-high", "gemini-3.8-flash-medium"} - {model}:
+        for alternate_model in {"gemini-3.8-flash-high", "gemini-3.8-flash-medium"} - {model, worker_model}:
             if alternate_model in text:
                 raise ProposalError(f"stale Gemini model reference: {relative}")
         for alternate_effort in VALID_EFFORTS - {effort}:
@@ -522,8 +527,8 @@ def validate_runtime_contract(root: Path) -> dict[str, str]:
         MAX_CONTEXT,
         "Gemini role effort reference",
     )
-    if (f"Worker با `{worker_effort}`" not in automation_contract
-            or f"Reviewer با `{effort}`" not in automation_contract):
+    if (f"Worker=`{worker_model}/{worker_effort}`" not in automation_contract
+            or f"Reviewer=`{model}/{effort}`" not in automation_contract):
         raise ProposalError("Gemini role effort reference drift")
     return contract
 
@@ -534,6 +539,7 @@ def validate_runtime_contract(root: Path) -> dict[str, str]:
 RUNTIME_CONTRACT = load_runtime_contract(ROOT)
 MODEL = RUNTIME_CONTRACT["model"]
 EFFORT = RUNTIME_CONTRACT["effort"]
+WORKER_MODEL = RUNTIME_CONTRACT["worker_model"]
 WORKER_EFFORT = RUNTIME_CONTRACT["worker_effort"]
 EXPECTED_CLI_VERSION = RUNTIME_CONTRACT["cli_version"]
 EXPECTED_CLI_SHA256 = RUNTIME_CONTRACT["cli_sha256"]
@@ -1010,6 +1016,7 @@ def _parse_stream(
     sources: dict,
     role: str,
     force_full_paths: tuple[str, ...] = (),
+    expected_model: str = MODEL,
 ) -> tuple[dict, dict]:
     events = [unique_json(line) for line in raw.splitlines() if line.strip()]
     if any(not isinstance(e, dict) for e in events):
@@ -1020,7 +1027,7 @@ def _parse_stream(
             raise ProposalError("malformed CLI event envelope")
     init = [e for e in events if e.get("event") == "init"]
     terminal = [e["result"] for e in events if e.get("event") == "result"]
-    if len(init) != 1 or init[0]["init"].get("model") != MODEL or len(terminal) != 1:
+    if len(init) != 1 or init[0]["init"].get("model") != expected_model or len(terminal) != 1:
         raise ProposalError("missing unique model/session/result evidence")
     envelope = terminal[0]
     session = init[0].get("conversation_id")
@@ -1278,9 +1285,10 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         write_json(workspace / ".agents/hooks.json", DENY_HOOK)
         write_json(out / "task.json", material)
         (out / "prompt.txt").write_text(prompt)
+        role_model = WORKER_MODEL if role == "worker" else MODEL
         role_effort = WORKER_EFFORT if role == "worker" else EFFORT
         meta = {"run_id": run_id, "task_id": task["task_id"], "role": role,
-                "head": head, "model": MODEL, "effort": role_effort, "state": "RUNNING", "started_at": time.time(),
+                "head": head, "model": role_model, "effort": role_effort, "state": "RUNNING", "started_at": time.time(),
                 "retain_until": time.time() + 7 * 86400,
                 "authority": "PROPOSAL_ONLY_NOT_ACCEPTANCE",
                 "cli": initial_cli_identity, "cli_source": cli_source}
@@ -1300,7 +1308,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             meta["candidate_sources_sha256"] = candidate_sources_sha256
         write_json(out / "status.json", meta)
         active_sources = candidate_sources if candidate_sources is not None else sources
-        command = [str(disposable_cli), "--mode", "plan", "--sandbox", "--model", MODEL,
+        command = [str(disposable_cli), "--mode", "plan", "--sandbox", "--model", role_model,
                    "--effort", role_effort, "--input-format", "stream-json",
                    "--output-format", "stream-json", "--print-timeout", f"{timeout}s",
                    "--json-schema", json.dumps(schema(
@@ -1323,7 +1331,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 )
             if process.returncode:
                 raw_stream = bounded_file_text(root, out / "stream.jsonl", MAX_OUTPUT, "CLI event stream")
-                if is_retryable_zero_token_stream(raw_stream, MODEL):
+                if is_retryable_zero_token_stream(raw_stream, role_model):
                     final_cli_identity = cli_identity(disposable_cli)
                     if final_cli_identity != initial_cli_identity:
                         raise ProposalError("CLI identity changed during generation")
@@ -1334,7 +1342,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 raise ProposalError("CLI identity changed during generation")
             raw = bounded_file_text(root, out / "stream.jsonl", MAX_OUTPUT, "CLI event stream")
             result, envelope = _parse_stream(
-                raw, task, active_sources, role, force_full_paths
+                raw, task, active_sources, role, force_full_paths, role_model
             )
             if (prior_status is not None
                     and envelope["conversation_id"] == prior_status["conversation_id"]):

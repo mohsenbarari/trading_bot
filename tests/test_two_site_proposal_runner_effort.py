@@ -24,6 +24,7 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
         """Prove that executable constants are derived from the tracked contract."""
         contract = runner.load_runtime_contract(runner.ROOT)
         self.assertEqual(runner.EFFORT, contract["effort"])
+        self.assertEqual(runner.WORKER_MODEL, contract["worker_model"])
         self.assertEqual(runner.WORKER_EFFORT, contract["worker_effort"])
         self.assertEqual(runner.MODEL, contract["model"])
         self.assertEqual(runner.EXPECTED_CLI_VERSION, contract["cli_version"])
@@ -37,12 +38,14 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
         self.assertNotIn('MODEL = "gemini-', source)
         self.assertNotIn('EFFORT = "', source)
         self.assertNotIn('WORKER_EFFORT = "', source)
+        self.assertNotIn('WORKER_MODEL = "', source)
         self.assertIn('--effort", role_effort', source)
 
     def test_runtime_contract_references_are_consistent(self) -> None:
         contract = runner.validate_runtime_contract(runner.ROOT)
         self.assertEqual(contract["model"], "gemini-3.8-flash-high")
         self.assertEqual(contract["effort"], "high")
+        self.assertEqual(contract["worker_model"], "gemini-3.8-flash-medium")
         self.assertEqual(contract["worker_effort"], "medium")
 
     def _execute_mock_run(
@@ -181,6 +184,9 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
         command = commands[0]
         self.assertIn("--effort", command)
         idx = command.index("--effort")
+        model_idx = command.index("--model")
+        self.assertEqual(command[model_idx + 1], runner.RUNTIME_CONTRACT["worker_model"])
+        self.assertEqual(status_data["model"], runner.RUNTIME_CONTRACT["worker_model"])
         self.assertEqual(command[idx + 1], runner.RUNTIME_CONTRACT["worker_effort"])
         self.assertEqual(command[idx + 1], runner.WORKER_EFFORT)
         self.assertIn("effort", status_data)
@@ -194,6 +200,9 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
         command = commands[0]
         self.assertIn("--effort", command)
         idx = command.index("--effort")
+        model_idx = command.index("--model")
+        self.assertEqual(command[model_idx + 1], runner.RUNTIME_CONTRACT["model"])
+        self.assertEqual(status_data["model"], runner.RUNTIME_CONTRACT["model"])
         self.assertEqual(command[idx + 1], runner.RUNTIME_CONTRACT["effort"])
         self.assertEqual(command[idx + 1], runner.EFFORT)
         self.assertIn("effort", status_data)

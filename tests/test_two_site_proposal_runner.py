@@ -281,6 +281,7 @@ class ProposalContracts(unittest.TestCase):
         process.poll.return_value = None
 
         def capture(fake_process, _input, stdout_path, stderr_path, _timeout, **_kwargs):
+            cmd = popen.call_args.args[0] if popen.call_args else getattr(fake_process, "args", [])
             if timeout:
                 runner.terminate_process(fake_process)
                 raise subprocess.TimeoutExpired("fake-cli", 30)
@@ -297,7 +298,6 @@ class ProposalContracts(unittest.TestCase):
                 elif result is not None:
                     evs = self.events(result=result)
                 else:
-                    cmd = popen.call_args.args[0] if popen.call_args else getattr(fake_process, "args", [])
                     schema = {}
                     if "--json-schema" in cmd:
                         schema = json.loads(cmd[cmd.index("--json-schema") + 1])
@@ -353,6 +353,12 @@ class ProposalContracts(unittest.TestCase):
                         "changes": changes,
                     }
                     evs = self.events(result=derived)
+                evs = json.loads(json.dumps(evs))
+                if "--model" in cmd:
+                    invoked_model = cmd[cmd.index("--model") + 1]
+                    for event in evs:
+                        if event.get("event") == "init":
+                            event["init"]["model"] = invoked_model
                 if denied:
                     evs[1]["result"]["denied_actions"] = ["read_file"]
                 output = "\n".join(json.dumps(e) for e in evs).encode()

@@ -6,8 +6,9 @@ Gemini Worker → Gemini Reviewer مستقل → Codex review/apply/test/commit.
 Git و شواهد همان چرخه بخوانید؛ عبارت RUNNING یا یک گزارش تاریخی اثبات سلامت نیست.
 
 مدل جاری Supervisor: `gpt-5.6-sol` با `xhigh`.
-مدل Gemini از `templates/gemini-runtime-contract.json`: `gemini-3.8-flash-high`
-است: Worker با `medium` و Reviewer با `high`. این تفکیک از خروجی‌های غیرقابل‌تحویل
+مدل‌های Gemini از `templates/gemini-runtime-contract.json` می‌آیند:
+Worker=`gemini-3.8-flash-medium/medium` و Reviewer=`gemini-3.8-flash-high/high`.
+این تفکیک از خروجی‌های غیرقابل‌تحویل
 ناشی از reasoning بی‌حد Worker جلوگیری می‌کند، درحالی‌که بازبینی مستقل روی بالاترین
 effort باقی می‌ماند. Runner پیش از مصرف provider سازگاری قرارداد و ارجاع‌هایش را
 می‌سنجد. حذف review یا سبک‌کردن تست برای صرفه‌جویی مجاز نیست.
