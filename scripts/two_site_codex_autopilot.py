@@ -22,6 +22,7 @@ try:
         MAX_CONTEXT,
         GEMINI_RUNTIME_CONTRACT_REL,
         MODEL as GEMINI_MODEL,
+        WORKER_MODEL as GEMINI_WORKER_MODEL,
         ProposalError,
         bounded_file_text,
         capture_bounded_process,
@@ -39,6 +40,7 @@ except ModuleNotFoundError:  # Direct `python scripts/...` execution.
         MAX_CONTEXT,
         GEMINI_RUNTIME_CONTRACT_REL,
         MODEL as GEMINI_MODEL,
+        WORKER_MODEL as GEMINI_WORKER_MODEL,
         ProposalError,
         bounded_file_text,
         capture_bounded_process,
@@ -511,7 +513,7 @@ def _validate_gemini_chain(
             or worker_status.get("run_id") != result["gemini_worker_run_id"]
             or worker_status.get("role") != "worker"
             or worker_status.get("state") != "PROPOSAL_READY"
-            or worker_status.get("model") != GEMINI_MODEL
+            or worker_status.get("model") != GEMINI_WORKER_MODEL
             or worker_status.get("head") != source_head
             or worker_status.get("result_sha256") != proposal_sha256
             or reviewer_status.get("run_id") != result["gemini_reviewer_run_id"]

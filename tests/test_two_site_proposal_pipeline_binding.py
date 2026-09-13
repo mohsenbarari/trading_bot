@@ -5,11 +5,11 @@ import unittest
 
 try:
     from scripts.two_site_proposal_pipeline import (
-        MODEL, ProposalError, file_sha256, validate_run, write_json,
+        MODEL, WORKER_MODEL, ProposalError, file_sha256, validate_run, write_json,
     )
 except ModuleNotFoundError:
     from two_site_proposal_pipeline import (
-        MODEL, ProposalError, file_sha256, validate_run, write_json,
+        MODEL, WORKER_MODEL, ProposalError, file_sha256, validate_run, write_json,
     )
 
 HEAD = "7b3c9ce8bf402db10474faf10556a3fc48c7c151"
@@ -35,7 +35,7 @@ class TestPipelineBinding(unittest.TestCase):
         self.seen = set()
 
         self.w_st = {
-            "run_id": "w0", "role": "worker", "head": HEAD, "model": MODEL,
+            "run_id": "w0", "role": "worker", "head": HEAD, "model": WORKER_MODEL,
             "state": "PROPOSAL_READY", "conversation_id": "conv-w",
         }
         self.w_sn = {"source_head": HEAD, "task": TASK, "sources": SOURCES}

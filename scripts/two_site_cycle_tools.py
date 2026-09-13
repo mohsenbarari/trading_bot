@@ -255,7 +255,7 @@ def _prior_worker(root: Path, snapshot: dict, worker_dir: Path) -> tuple:
     if runner.bounded_file_text(root, path, runner.MAX_CONTEXT, "prior result") != snapshot["proposal"]:
         raise runner.ProposalError("prior result bytes mismatch")
     _, prior, digest = runner.load_prior_worker(root, path, snapshot["proposal"], snapshot["task"], snapshot["sources"], snapshot["source_head"])
-    if prior.get("run_id") != prior_id or prior.get("model") != runner.MODEL:
+    if prior.get("run_id") != prior_id or prior.get("model") != runner.WORKER_MODEL:
         raise runner.ProposalError("prior identity mismatch")
     feedback = snapshot.get("feedback")
     if not isinstance(feedback, dict):

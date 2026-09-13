@@ -14,7 +14,7 @@ try:
     from scripts.two_site_proposal_pipeline import (
         BRANCH, ProposalError, normalize_finding, run_pipeline,
     )
-    from scripts.two_site_proposal_runner import MODEL, file_sha256, write_json
+    from scripts.two_site_proposal_runner import MODEL, WORKER_MODEL, file_sha256, write_json
     from scripts.two_site_semantic_attempts import MARKER
     from scripts.two_site_semantic_task import build_identity
 except ModuleNotFoundError:
@@ -22,7 +22,7 @@ except ModuleNotFoundError:
     from two_site_proposal_pipeline import (  # type: ignore[no-redef]
         BRANCH, ProposalError, normalize_finding, run_pipeline,
     )
-    from two_site_proposal_runner import MODEL, file_sha256, write_json  # type: ignore[no-redef]
+    from two_site_proposal_runner import MODEL, WORKER_MODEL, file_sha256, write_json  # type: ignore[no-redef]
     from two_site_semantic_attempts import MARKER  # type: ignore[no-redef]
     from two_site_semantic_task import build_identity  # type: ignore[no-redef]
 
@@ -85,7 +85,8 @@ def make_runner(root: Path, responses: list[dict]):
             snapshot.update(resp["task_override"])
         write_json(out / "task.json", snapshot)
 
-        st = {"run_id": run_id, "role": role, "head": HEAD, "model": MODEL,
+        st = {"run_id": run_id, "role": role, "head": HEAD,
+              "model": WORKER_MODEL if role == "worker" else MODEL,
               "result_sha256": res_sha, "conversation_id": resp.get("conv_id", f"conv-{run_id}"),
               "state": st_val}
         if proposal is not None:

@@ -15,14 +15,14 @@ from typing import Any, Callable, Mapping
 
 try:
     from scripts.two_site_proposal_runner import (
-        MAX_CONTEXT, MODEL, ProposalError, RetryableProviderSessionError,
+        MAX_CONTEXT, MODEL, WORKER_MODEL, ProposalError, RetryableProviderSessionError,
         bounded_file_bytes, bounded_file_text, file_sha256, git, load_task,
         run as runner_run, serialize_json, unique_json,
         validate_correction_feedback, validate_result, write_json,
     )
 except ModuleNotFoundError:
     from two_site_proposal_runner import (  # type: ignore[no-redef]
-        MAX_CONTEXT, MODEL, ProposalError, RetryableProviderSessionError,
+        MAX_CONTEXT, MODEL, WORKER_MODEL, ProposalError, RetryableProviderSessionError,
         bounded_file_bytes, bounded_file_text, file_sha256, git, load_task,
         run as runner_run, serialize_json, unique_json,
         validate_correction_feedback, validate_result, write_json,
@@ -131,9 +131,10 @@ def validate_run(
     result = unique_json(result_text)
     validate_result(result, expected_task, expected_sources, role)
     result_sha = file_sha256(run_dir / "result.json")
+    expected_model = WORKER_MODEL if role == "worker" else MODEL
     if (
         status.get("run_id") != expected_run_id or status.get("role") != role
-        or status.get("head") != expected_head or status.get("model") != MODEL
+        or status.get("head") != expected_head or status.get("model") != expected_model
         or status.get("result_sha256") != result_sha or snapshot.get("source_head") != expected_head
         or snapshot.get("task") != expected_task or snapshot.get("sources") != expected_sources
     ):

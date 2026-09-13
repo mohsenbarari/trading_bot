@@ -84,7 +84,7 @@ class AutopilotContracts(unittest.TestCase):
         })
         proposal_runner.write_json(worker_dir / "status.json", {
             "run_id": "worker-001", "role": "worker", "state": "PROPOSAL_READY",
-            "model": proposal_runner.MODEL, "head": source_head,
+            "model": proposal_runner.WORKER_MODEL, "head": source_head,
             "conversation_id": "worker-conversation",
             "result_sha256": proposal_runner.file_sha256(worker_dir / "result.json"),
         })

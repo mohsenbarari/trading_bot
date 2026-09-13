@@ -168,7 +168,7 @@ def chain(repo):
     digest = runner.file_sha256(worker / "result.json")
     runner.write_json(worker / "task.json", snapshot)
     runner.write_json(worker / "status.json", {"run_id": "w1", "role": "worker", "head": head,
-        "model": runner.MODEL, "state": "PROPOSAL_READY", "conversation_id": "wc", "result_sha256": digest})
+        "model": runner.WORKER_MODEL, "state": "PROPOSAL_READY", "conversation_id": "wc", "result_sha256": digest})
     runner.write_json(reviewer / "result.json", {"status": "VERIFIED", "summary": "reviewed", "covered_requirements": [1], "findings": [], "changes": []})
     runner.write_json(reviewer / "task.json", {**snapshot, "proposal": (worker / "result.json").read_text()})
     runner.write_json(reviewer / "status.json", {"run_id": "r1", "role": "verifier", "head": head,
