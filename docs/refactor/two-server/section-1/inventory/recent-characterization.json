@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "e7197b3e50a05bcdcb8daaf99f708b8bd1717026",
+  "inspected_head": "58fe013c89c81679a60a29feaed86870599ee01f",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -213,6 +213,53 @@
       "test_selectors": [
         "tests/test_p1_00b_characterization_channel_trade_telegram_offer_success.py::P100bChannelTradeTelegramOfferSuccessCharacterizationTests::test_telegram_offer_telegram_public_identity_double_click_persists_once"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_channel_trade_internal_offer_success.py",
+      "sha256": "e90c93bf6f6f178f800893bdcabdd45d3c432c0c74159920eda3f6f2c9890681",
+      "last_commit": "49b02e697906c5d73cbabc961c0676f856ac18de",
+      "seed_ids": [],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_channel_trade_internal_offer_success.py::P100bChannelTradeInternalOfferSuccessCharacterizationTests::test_internal_offer_telegram_public_identity_double_click_persists_once"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_webapp_offer_webapp_trade_success.py",
+      "sha256": "c2146f9b5bc1260f9f3a2265eb511d0c259c6ee74c30798baa1694b87454658f",
+      "last_commit": "568d2a6f33ea67e9cb0db06ccd2cc5edd42ecac9",
+      "seed_ids": [],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_webapp_offer_webapp_trade_success.py::P100bWebappOfferWebappTradeSuccessCharacterizationTests::test_webapp_offer_webapp_create_trade_persists_combined_path_once"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_internal_offer_webapp_trade_success.py",
+      "sha256": "8807da3192eb96ef0e76b00ee646616e1270f19155cfbaf94b9d0c932e7f0d89",
+      "last_commit": "576015656717066bf08194af3ebdcada49758bc3",
+      "seed_ids": [],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_offer_webapp_trade_success.py::P100bInternalOfferWebappTradeSuccessCharacterizationTests::test_internal_offer_webapp_create_trade_persists_combined_path_once"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_telegram_offer_webapp_trade_success.py",
+      "sha256": "9e770ea55476a83cf8cc37ec41f7b23315030088b6564c9cdc1a676e1f3e120a",
+      "last_commit": "abcd79007dfdc9e609d6a78467628728afcfd574",
+      "seed_ids": [],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_telegram_offer_webapp_trade_success.py::P100bTelegramOfferWebappTradeSuccessCharacterizationTests::test_telegram_offer_webapp_create_trade_persists_on_foreign_home_once"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_telegram_offer_webapp_policy_snapshot.py",
+      "sha256": "ae8728c52cc4f5fdd97491a52d218edd05199421bca8619f1174def02007c0cd",
+      "last_commit": "58fe013c89c81679a60a29feaed86870599ee01f",
+      "seed_ids": [],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_telegram_offer_webapp_policy_snapshot.py::P100bTelegramOfferWebappPolicySnapshotCharacterizationTests::test_telegram_offer_webapp_tier2_customer_snapshots_relation_and_commission",
+        "tests/test_p1_00b_characterization_telegram_offer_webapp_policy_snapshot.py::P100bTelegramOfferWebappPolicySnapshotCharacterizationTests::test_telegram_offer_webapp_accountant_context_rejected_early_with_403",
+        "tests/test_p1_00b_characterization_telegram_offer_webapp_policy_snapshot.py::P100bTelegramOfferWebappPolicySnapshotCharacterizationTests::test_telegram_offer_webapp_super_admin_eligible_without_customer_relation"
+      ]
     }
   ],
   "next_review_candidates": [
@@ -227,18 +274,15 @@
       "state": "REVALIDATE_REQUIRED",
       "gap": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
       "scenarios": [
-        "ORIGIN-INTERNAL__TELEGRAM_BOT__OUTCOME-SUCCESS",
-        "ORIGIN-WEBAPP__WEBAPP__OUTCOME-SUCCESS",
-        "ORIGIN-TELEGRAM_BOT__WEBAPP__OUTCOME-SUCCESS",
-        "ORIGIN-INTERNAL__WEBAPP__OUTCOME-SUCCESS",
-        "tier-2/admin policy snapshots",
+        "Bot admin-command policy guards",
+        "remaining Telegram policy/double-click confirmation personas",
         "real notification-audience behavior",
-        "live-path side-effect retry"
+        "successful live-path side-effect retry"
       ]
     }
   ],
   "advisories": [
-    "Canonical seed counts 135/330 and 24 origin cells unchanged; file/test counts are not acceptance.",
+    "Canonical seed counts 135/330 and 24 origin cells unchanged; file/test counts are not acceptance; scenario-records.json/canonical blocker cells require separate reconciliation or acceptance work.",
     "Three pre-existing runtime-callsite fingerprint tests failed also at the clean baseline; do not reset expected hashes to hide drift."
   ]
 }
