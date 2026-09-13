@@ -123,6 +123,9 @@ def record_cycle(root: Path, state_root: Path, run_dir: Path, meta: dict,
         if isinstance(value, str) and len(value) <= 80:
             record[key] = value
     worker_id = record.get("gemini_worker_run_id")
+    record["declared_requirement_count"] = None
+    record["focused_selector_count"] = None
+    record["provider_metrics"] = {"state": "UNAVAILABLE", "first_pass": None}
     if isinstance(worker_id, str) and all(c.isalnum() or c in "._-" for c in worker_id):
         try:
             snapshot = unique_json(bounded_file_text(
@@ -136,6 +139,21 @@ def record_cycle(root: Path, state_root: Path, run_dir: Path, meta: dict,
                 raise ProposalError("metrics task ID invalid")
             record["task_id"] = task_id
             record["task_sha256"] = sha(json.dumps(task, sort_keys=True).encode())
+            for source_key, metric_key in (("requirements", "declared_requirement_count"),
+                                           ("test_selectors", "focused_selector_count")):
+                values = task.get(source_key)
+                if isinstance(values, list) and all(isinstance(v, str) for v in values):
+                    record[metric_key] = len(values)  # declarations, not accepted behavior count
+            try:
+                try:
+                    from scripts.two_site_provider_metrics import provider_metrics
+                except ModuleNotFoundError:
+                    from two_site_provider_metrics import provider_metrics
+                record["provider_metrics"] = provider_metrics(
+                    root, task_id, meta.get("head_before"), worker_id, meta.get("duration_seconds"))
+            except (OSError, ValueError, TypeError, KeyError, OverflowError) as exc:
+                record["provider_metrics"] = {"state": "UNAVAILABLE", "first_pass": None,
+                                              "diagnostic": type(exc).__name__}
             marker = "\nCANONICAL_SOURCE_EXCERPTS_JSON:\n"
             if marker in task["goal"]:
                 gap = unique_json(task["goal"].split(marker, 1)[1])["gap_reference"]

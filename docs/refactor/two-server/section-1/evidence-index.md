@@ -26,6 +26,17 @@ Refresh: executing Assignment `WA-P1-00B-FREEZE-20260904-001` (`base_sha` `40228
 
 ## Evidence handling
 
+### Recent characterization lookup — 2026-09-13
+
+مرجع محدودِ ادامهٔ کار: [recent-characterization.json](inventory/recent-characterization.json).
+این فهرست ۱۳ ماژول و ۳۹ selector اخیراً پذیرفته‌شده را با SHA فایل و آخرین commit
+مشخص می‌کند؛ تماماً `PARTIAL` است، نه پذیرش کامل seed. پیش از استفاده، SHA و assertion
+سناریوی مورد نظر دوباره بررسی شود. شمارش‌های canonical ۱۳۵/۳۳۰ و ۲۴ خانهٔ origin و
+دو blocker باز دست‌نخورده‌اند. پس از حداکثر پنج واحد رفتاری، این locator را تطبیق دهید؛
+با restart یا وقتی entries به‌روزند، تطبیق تکراری نسازید. نامزدهای بعدی فقط پیشنهاد
+برای بررسی شکاف‌اند. سه شکست fingerprint از baseline وجود دارند و مجوز بازنویسی
+خودکارِ مقدار مورد انتظار نیستند. Git commit مرز صحت این سند و locator است.
+
 - No database dump, complete environment, secret value, SSH private key, session,
   cookie, Telegram token or user-level parity record is tracked.
 - Static inventories were verified against historical inventory baseline

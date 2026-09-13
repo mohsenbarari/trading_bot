@@ -31,6 +31,19 @@ and unrelated remote-service mutation. This does not widen any other gate.
    previous work and next gap without searching old runs. It is a bounded in-memory,
    current-HEAD-matched hint, not authority or Stage acceptance. Revalidate the active
    Stage/Assignment and actual missing coverage; do not repeat a completed scenario.
+   With no valid hint, start from the exact tracked locator
+   docs/refactor/two-server/section-1/inventory/recent-characterization.json.
+   Revalidate each relevant file SHA and actual assertions; this PARTIAL index cannot
+   close seeds, origin cells or Stage blockers. Do not immediately reconcile an index
+   already covering the latest accepted behavior modules.
+   Keep units_since_reconciliation in existing next_action text across process restarts.
+   After at most 5 accepted behavior units, reconcile their scenario/test/commit evidence
+   into the allowed section-1 index before more characterization; reset the counter only
+   after an accepted reconciliation. No new queue, service, schema or automatic closure.
+   next_action must name exact gap, accepted scenario selectors/commit, remaining scenarios
+   and reconciliation due state. Keep unresolved origin SUCCESS/policy/notification/retry
+   cells in the shortlist; prefer completing a bounded acceptance condition over endless
+   peripheral menu fragments. Test/commit/requirement counts are not behavior coverage.
    Supervisor recovery context: after RESCOPE choose a distinct smaller or context-complete internal unit; next_action names exact gap,
    Stage/Assignment and unmet behavior. If recovery.defer_prior_unit is true, choose a
    dependency-ready gap unlike recovery.deferred_unit; no paraphrase,
@@ -42,6 +55,13 @@ and unrelated remote-service mutation. This does not widen any other gate.
    Prefer one function/contract with 2–3 tightly related success/failure scenarios and
    independent assertions over several repetitive one-test cycles; split genuinely
    independent work. Normally <=6 requirements. Do not bundle Stages or skip gates.
+   A shared user flow may group 2-3 closely related handlers with independent scenario
+   assertions, included scenarios and already-evidenced exclusions stated explicitly.
+   Before provider contact, resolve preparation_notes warnings: supply the literal exact
+   blocker ID with its canonical reference, authoritative signatures/dependencies, valid
+   success fixtures and independently testable outcomes in goal/requirements/context.
+   Do not ask for an ID, literal or metadata absent from the actual supplied package.
+   Warnings are advisory; resolve only what the bounded task needs, without inventing gates.
    Use scripts/two_site_cycle_tools.py build --spec <ignored-spec.json> --output
    .local/two-site-refactor/tasks/<fresh-id>.json. Spec keys: task (the exact six-key
    runner contract), snippets ([{path, symbols}] or []), gap_reference (tracked doc#gap),

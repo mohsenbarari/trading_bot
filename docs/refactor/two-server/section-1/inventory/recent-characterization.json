@@ -1,0 +1,200 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "inspected_head": "06a9c431ae7f96c4af2054708b2a1d85d80f7fe5",
+  "coverage_status": "PARTIAL",
+  "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "units_since_reconciliation": 0,
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_panel_back_to_user_panel_from_blocked.py",
+      "sha256": "6e19131a6475374bdf419a52b1cc8b2e974009b5f9e1409b6cd36a971bebc915",
+      "last_commit": "38772da8d78b243b3210d4fcabb4761a3e960b4a",
+      "seed_ids": [
+        "BOT-TG-CALLBACK-QUERY-PANEL-BACK-TO-USER-PANEL-FROM-BLOCKED-L640"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_panel_back_to_user_panel_from_blocked.py::CharacterizePanelBackToUserPanelFromBlockedTests::test_back_to_user_panel_from_blocked_unauthenticated_ack_only",
+        "tests/test_p1_00b_characterization_panel_back_to_user_panel_from_blocked.py::CharacterizePanelBackToUserPanelFromBlockedTests::test_back_to_user_panel_from_blocked_authenticated"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_panel_show_admin_panel_and_change_keyboard.py",
+      "sha256": "8a2bb726d22e52367faccf1fe80dc74ce201955e601f0245770c0cbaeeeeb72b",
+      "last_commit": "db996eb82ddac8a1db6cd8db6607351c7482a4de",
+      "seed_ids": [
+        "BOT-TG-MESSAGE-PANEL-SHOW-ADMIN-PANEL-AND-CHANGE-KEYBOARD-L294"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_panel_show_admin_panel_and_change_keyboard.py::ShowAdminPanelCharacterizationTests::test_ineligible_standard_user_returns_none_without_side_effects_or_sentinel_inspection",
+        "tests/test_p1_00b_characterization_panel_show_admin_panel_and_change_keyboard.py::ShowAdminPanelCharacterizationTests::test_eligible_super_admin_queue_v1_freezes_response_contract_and_suppresses_anchors",
+        "tests/test_p1_00b_characterization_panel_show_admin_panel_and_change_keyboard.py::ShowAdminPanelCharacterizationTests::test_eligible_middle_manager_legacy_mode_freezes_anchors_and_response_contract"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_panel_show_colleagues_list_early_returns.py",
+      "sha256": "7ca8d091a1b388eb64ed6cdc02d413677df88ddae869c00e3892a8f85e338acf",
+      "last_commit": "f0e507cb5de0563010b02dcc956d4d93d48f3ee2",
+      "seed_ids": [
+        "BOT-TG-MESSAGE-PANEL-SHOW-COLLEAGUES-LIST-L470"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_panel_show_colleagues_list_early_returns.py::CharacterizePanelShowColleaguesListEarlyReturnsTests::test_show_colleagues_list_no_user_early_returns",
+        "tests/test_p1_00b_characterization_panel_show_colleagues_list_early_returns.py::CharacterizePanelShowColleaguesListEarlyReturnsTests::test_show_colleagues_list_globally_locked_user_early_returns",
+        "tests/test_p1_00b_characterization_panel_show_colleagues_list_early_returns.py::CharacterizePanelShowColleaguesListEarlyReturnsTests::test_show_colleagues_list_policy_denied_early_returns"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_panel_show_my_profile_and_change_keyboard.py",
+      "sha256": "ea76e1bde868306fcf4d42eaaa91daf295d09fd233c2e6e344b1c5193f83bc99",
+      "last_commit": "ab632267e76e29a9350ef4a2f34ffdfdc4acde42",
+      "seed_ids": [
+        "BOT-TG-MESSAGE-PANEL-SHOW-MY-PROFILE-AND-CHANGE-KEYBOARD-L210"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_panel_show_my_profile_and_change_keyboard.py::TestPanelShowMyProfileAndChangeKeyboardCharacterization::test_locked_account_response_returns_none_and_answers_runtime",
+        "tests/test_p1_00b_characterization_panel_show_my_profile_and_change_keyboard.py::TestPanelShowMyProfileAndChangeKeyboardCharacterization::test_eligible_standard_user_customer_menu_queue_v1",
+        "tests/test_p1_00b_characterization_panel_show_my_profile_and_change_keyboard.py::TestPanelShowMyProfileAndChangeKeyboardCharacterization::test_eligible_standard_user_customer_menu_legacy",
+        "tests/test_p1_00b_characterization_panel_show_my_profile_and_change_keyboard.py::TestPanelShowMyProfileAndChangeKeyboardCharacterization::test_non_customer_user_profile_menu_queue_v1",
+        "tests/test_p1_00b_characterization_panel_show_my_profile_and_change_keyboard.py::TestPanelShowMyProfileAndChangeKeyboardCharacterization::test_non_customer_user_profile_menu_legacy"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_panel_show_recent_trades_pdf_terminal_paths.py",
+      "sha256": "b1fed1eacd2383c25115174646bf8940cda6444e3506a89d8d24b487804550ae",
+      "last_commit": "5c497cc089747188e602551ff6adf97ffafb63da",
+      "seed_ids": [
+        "BOT-TG-MESSAGE-PANEL-SHOW-RECENT-TRADES-PDF-L534"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_panel_show_recent_trades_pdf_terminal_paths.py::CharacterizePanelShowRecentTradesPdfTerminalPathsTests::test_show_recent_trades_pdf_no_user_early_returns",
+        "tests/test_p1_00b_characterization_panel_show_recent_trades_pdf_terminal_paths.py::CharacterizePanelShowRecentTradesPdfTerminalPathsTests::test_show_recent_trades_pdf_empty_history_characterization",
+        "tests/test_p1_00b_characterization_panel_show_recent_trades_pdf_terminal_paths.py::CharacterizePanelShowRecentTradesPdfTerminalPathsTests::test_show_recent_trades_pdf_document_send_error_cleanup_characterization"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_panel_show_support_contact.py",
+      "sha256": "bc2733ed9a7d55163d1e7b42fe4c153c6653bb0798e9bac884f40c6d45401b54",
+      "last_commit": "70bfbb96eaf0ac9e21662c1b1d1d9f4000ce90ea",
+      "seed_ids": [],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_panel_show_support_contact.py::CharacterizePanelShowSupportContactTests::test_show_support_contact_no_user_early_returns",
+        "tests/test_p1_00b_characterization_panel_show_support_contact.py::CharacterizePanelShowSupportContactTests::test_show_support_contact_policy_denied_early_returns",
+        "tests/test_p1_00b_characterization_panel_show_support_contact.py::CharacterizePanelShowSupportContactTests::test_show_support_contact_eligible_user_delivers_support_message"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_panel_show_user_panel_blocked_users.py",
+      "sha256": "1b9ab9cb3a0a820760bd849fb25ef587fb357fe9921841879064999d56cfd3b1",
+      "last_commit": "39ee6dfc4a4a8066f296824203f9b1fe3d1f6968",
+      "seed_ids": [
+        "BOT-TG-MESSAGE-PANEL-SHOW-USER-PANEL-BLOCKED-USERS-L597"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_panel_show_user_panel_blocked_users.py::CharacterizePanelShowUserPanelBlockedUsersTests::test_show_user_panel_blocked_users_no_user_suppressed",
+        "tests/test_p1_00b_characterization_panel_show_user_panel_blocked_users.py::CharacterizePanelShowUserPanelBlockedUsersTests::test_show_user_panel_blocked_users_linked_user_delegates_to_block_menu"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_panel_show_user_panel_customer_detail.py",
+      "sha256": "5c37399a92a945932dd0ea42610bac6f8b58ecf078dec7f1fcb03be10de35512",
+      "last_commit": "77036098b0e7c46f76fd72429809e8f82d73e127",
+      "seed_ids": [
+        "BOT-TG-CALLBACK-QUERY-PANEL-SHOW-USER-PANEL-CUSTOMER-DETAIL-L823"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_panel_show_user_panel_customer_detail.py::CharacterizePanelShowUserPanelCustomerDetailTests::test_show_user_panel_customer_detail_no_user",
+        "tests/test_p1_00b_characterization_panel_show_user_panel_customer_detail.py::CharacterizePanelShowUserPanelCustomerDetailTests::test_show_user_panel_customer_detail_linked_user_missing_relation",
+        "tests/test_p1_00b_characterization_panel_show_user_panel_customer_detail.py::CharacterizePanelShowUserPanelCustomerDetailTests::test_show_user_panel_customer_detail_found_relation"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_panel_show_user_panel_customers.py",
+      "sha256": "6779a6dc493c45f9df87b7ae81ca0a8d446ade5357740a193ddf97a3e35aa12d",
+      "last_commit": "971ffa2741f3859dc7293314a097869ff2af2b34",
+      "seed_ids": [
+        "BOT-TG-MESSAGE-PANEL-SHOW-USER-PANEL-CUSTOMERS-L789"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_panel_show_user_panel_customers.py::CharacterizePanelShowUserPanelCustomersTests::test_show_user_panel_customers_no_user_suppressed",
+        "tests/test_p1_00b_characterization_panel_show_user_panel_customers.py::CharacterizePanelShowUserPanelCustomersTests::test_show_user_panel_customers_linked_user_access_denied",
+        "tests/test_p1_00b_characterization_panel_show_user_panel_customers.py::CharacterizePanelShowUserPanelCustomersTests::test_show_user_panel_customers_access_allowed"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_panel_show_user_panel_customers_callback.py",
+      "sha256": "0df676bc6d9d3ff2c1e0e6fd5dcfdc5e34a84985a84d54e42df95a99ac6063fc",
+      "last_commit": "9c6cf6b07f156bc4c455ddbc7b2bc2724fc10d12",
+      "seed_ids": [
+        "BOT-TG-CALLBACK-QUERY-PANEL-SHOW-USER-PANEL-CUSTOMERS-CALLBACK-L805"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_panel_show_user_panel_customers_callback.py::CharacterizePanelShowUserPanelCustomersCallbackTests::test_show_user_panel_customers_callback_no_user",
+        "tests/test_p1_00b_characterization_panel_show_user_panel_customers_callback.py::CharacterizePanelShowUserPanelCustomersCallbackTests::test_show_user_panel_customers_callback_linked_user_access_denied",
+        "tests/test_p1_00b_characterization_panel_show_user_panel_customers_callback.py::CharacterizePanelShowUserPanelCustomersCallbackTests::test_show_user_panel_customers_callback_access_allowed"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_panel_simple_settings_button.py",
+      "sha256": "a135152f8023a095da4a221ead88464f8b2b7d56fa07494bfe67b267513c39dc",
+      "last_commit": "c1bcc325796cdc9872dfe1fd325c05199e901333",
+      "seed_ids": [],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_panel_simple_settings_button.py::CharacterizePanelSimpleSettingsButtonTests::test_handle_simple_settings_button_no_user_early_returns",
+        "tests/test_p1_00b_characterization_panel_simple_settings_button.py::CharacterizePanelSimpleSettingsButtonTests::test_handle_simple_settings_button_eligible_user_delivers_development_message"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_panel_user_settings_button.py",
+      "sha256": "2ac1fce16f70d1e55f8f16c0a710b2911c02c1e16496f580adca9b5121a7283f",
+      "last_commit": "4f70aa26b97345ffbd04f3edcfd36a9ac3fbae22",
+      "seed_ids": [],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_panel_user_settings_button.py::CharacterizePanelUserSettingsButtonTests::test_handle_user_settings_button_no_user_early_returns",
+        "tests/test_p1_00b_characterization_panel_user_settings_button.py::CharacterizePanelUserSettingsButtonTests::test_handle_user_settings_button_eligible_user_can_block_true",
+        "tests/test_p1_00b_characterization_panel_user_settings_button.py::CharacterizePanelUserSettingsButtonTests::test_handle_user_settings_button_eligible_user_can_block_false"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_telegram_publisher_b2b_receive_dispatch.py",
+      "sha256": "eacf4159351e6d1b7a8f400792e0f3bb7663694509221956eb655d6f6392b27d",
+      "last_commit": "06a9c431ae7f96c4af2054708b2a1d85d80f7fe5",
+      "seed_ids": [
+        "BOT-TG-MESSAGE-TELEGRAM-PUBLISHER-B2B-RECEIVE-DISPATCH-L27"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_telegram_publisher_b2b_receive_dispatch.py::TestTelegramPublisherB2BReceiveDispatchCharacterization::test_router_construction_registers_receive_dispatch_callback",
+        "tests/test_p1_00b_characterization_telegram_publisher_b2b_receive_dispatch.py::TestTelegramPublisherB2BReceiveDispatchCharacterization::test_valid_dispatch_success_contract_and_observable_ordering",
+        "tests/test_p1_00b_characterization_telegram_publisher_b2b_receive_dispatch.py::TestTelegramPublisherB2BReceiveDispatchCharacterization::test_invalid_sender_bool_rejected_without_service_or_commit_or_answer",
+        "tests/test_p1_00b_characterization_telegram_publisher_b2b_receive_dispatch.py::TestTelegramPublisherB2BReceiveDispatchCharacterization::test_service_error_propagates_and_aborts_commit_and_answer"
+      ]
+    }
+  ],
+  "next_review_candidates": [
+    {
+      "state": "REVALIDATE_REQUIRED",
+      "seed": "BOT-TG-MESSAGE-TELEGRAM-PUBLISHER-B2B-RECEIVE-ACK-L44",
+      "symbol": "build_primary_b2b_router.receive_ack",
+      "scenarios": [
+        "valid ACK: service before commit",
+        "invalid sender: suppress service",
+        "service failure: no commit"
+      ]
+    },
+    {
+      "state": "REVALIDATE_REQUIRED",
+      "gap": "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN",
+      "scenarios": [
+        "unassessed origin SUCCESS/policy/notification/side-effect retry cells"
+      ]
+    }
+  ],
+  "advisories": [
+    "Canonical seed counts 135/330 and 24 origin cells unchanged; file/test counts are not acceptance.",
+    "Three pre-existing runtime-callsite fingerprint tests failed also at the clean baseline; do not reset expected hashes to hide drift."
+  ]
+}

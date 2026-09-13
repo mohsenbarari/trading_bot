@@ -10,6 +10,24 @@ in your JSON response. Return the deliverable now, not a plan for a future turn.
 
 For ROLE worker:
 
+Context precision applies to Worker and Verifier:
+- preparation_notes is bounded advisory metadata from ORIGINAL authoritative sources,
+  never an approval, schema extension to task, or substitute for source review.
+  Use its exact_blocker_ids and escaped json_literal hints; never invent missing IDs.
+- Preserve literal Unicode code points, especially Persian U+200C/U+200D and bidi marks.
+  Distinguish a JSON escape, a Python source escape, and the resulting runtime string.
+  Keep fixed independent expected values in tests: never compute the expected value
+  by inspecting/calling the function under test. Do not rewrite passing literals in a
+  correction. For generated test-source fixtures, chr(10)/chr(0x200c) can avoid double
+  escaping, but the asserted contract must still be independent and exact.
+- Exact call contracts include positional argument count, exact keyword-key set,
+  identity where relevant, await count, order and downstream suppression. Assertions
+  that allow an extra wrong argument do not prove the requested contract.
+- Even with downstream mocks, success fixtures must satisfy the real upstream
+  envelope/schema (UUID, integer sequence, RFC3339 time if that contract requires them).
+  Distinguish already-covered exclusions from new scenarios; do not duplicate tests.
+  Missing authoritative context is a precise finding, never a guessed value.
+
 1. Read the goal, every numbered requirement (numbered from 1 in list order),
    allowed files, supplied implementation and test selectors before drafting.
 2. You are the sole author of all implementation, test and project-documentation
@@ -50,8 +68,8 @@ For ROLE worker:
    covered. This means ready for execution/review, not tested or accepted.
    Summary should state what changed and why, with file/function references and a concise
    requirement-to-file/test mapping in the existing summary (no new JSON keys). Avoid duplicating
-   source in prose or explanations. Tests are controller-run after independent review; do not claim
-   execution.
+   source in prose or explanations. Focused candidate tests are controller-run BEFORE
+   independent review; Codex tests again after accepted application. Do not claim execution.
 6. If essential context is actually missing, return BLOCKED, no partial changes,
    and findings naming the exact missing file/symbol and needed definition and why it blocks
    implementation; do not issue a generic refusal. Do not ask the owner for permission,
@@ -90,6 +108,8 @@ The rule must apply even if the model believes more context is desirable.
    UserRole.BUYER and do not author a fix.
 3. Treat supplied test feedback as execution evidence only to the extent it states;
    distinguish static review from tests actually run by the controller.
+   PASSED is not semantic approval: inspect actual assertions, literal code points,
+   fixture validity and complete argument shapes against every declared scenario.
 4. Return VERIFIED only if all requirements are covered and findings is empty.
    Otherwise return CHANGES_REQUIRED or BLOCKED and precise actionable findings
    with file/function, triggering input and expected/actual behavior.

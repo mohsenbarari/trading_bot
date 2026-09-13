@@ -85,6 +85,27 @@ class ProposalContracts(unittest.TestCase):
         result["changes"][0]["original_sha256"] = runner.sha(b"old\n")
         self.assertEqual(runner.validate_result(result, self.task, self.sources, "worker"), result)
 
+    def test_preparation_check_is_advisory_and_does_not_mutate_task(self):
+        original = deepcopy(self.task)
+        notes = runner.check(self.root, self.task_path)["preparation_notes"]
+        self.assertEqual(notes["schema_version"], 1)
+        self.assertEqual(json.loads(self.task_path.read_text()), original)
+
+    def test_preparation_injected_before_provider_and_prompt_limits(self):
+        with patch.object(runner, "git", return_value="head"), \
+             patch.object(runner, "proposal_cli_context", side_effect=RuntimeError("sentinel")) as provider, \
+             patch.object(runner, "task_preparation_notes", wraps=runner.task_preparation_notes) as notes:
+            with self.assertRaisesRegex(RuntimeError, "sentinel"):
+                runner.run(self.root, self.task_path, "worker", "notes-test", 10)
+            self.assertEqual(notes.call_args.args, (self.task, self.sources))
+            provider.assert_called_once()
+        with patch.object(runner, "git", return_value="head"), \
+             patch.object(runner, "proposal_cli_context") as provider, \
+             patch.object(runner, "task_preparation_notes", return_value={"test": "x" * (2 * runner.MAX_CONTEXT)}):
+            with self.assertRaisesRegex(runner.ProposalError, "smaller coherent unit"):
+                runner.run(self.root, self.task_path, "worker", "notes-cap", 10)
+            provider.assert_not_called()
+
     def test_incomplete_worker_results_rejected(self):
         invalid = [
             {"changes": []}, {"covered_requirements": [1]},
@@ -1432,8 +1453,11 @@ class ProposalContracts(unittest.TestCase):
         self.assertEqual(
             set(prompt_json.keys()),
             {"task", "source_head", "sources", "feedback", "prior_identity",
-             "correction_transport"},
+             "correction_transport", "preparation_notes"},
         )
+        self.assertEqual(prompt_json["preparation_notes"],
+                         runner.task_preparation_notes(self.task, self.sources))
+        self.assertNotIn("preparation_notes", task_data)
         self.assertNotIn('"canonical_proposal_sha256"', prompt_text)
 
     def test_correction_revert_complete_noop_fails_closed(self):

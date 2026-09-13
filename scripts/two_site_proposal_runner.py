@@ -738,7 +738,17 @@ def check(root: Path, task_path: Path) -> dict:
         "task_id": task["task_id"],
         "source_file_count": len(sources),
         "byte_count": len(snapshot),
+        "preparation_notes": task_preparation_notes(task, sources),
     }
+
+
+def task_preparation_notes(task: dict, sources: dict) -> dict:
+    """Advisory only; derived from the immutable task, never a proof identity."""
+    try:
+        from scripts.two_site_task_context import preparation_notes
+    except ModuleNotFoundError:
+        from two_site_task_context import preparation_notes
+    return preparation_notes(task, sources)
 
 
 def originally_new_paths(task: dict, sources: dict) -> tuple[str, ...]:
@@ -1233,6 +1243,8 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 )
                 prompt_material["pre_review_test_evidence"] = normalized_receipt
                 material["test_evidence"] = normalized_receipt
+    prompt_material = dict(prompt_material)
+    prompt_material["preparation_notes"] = task_preparation_notes(task, sources)
     prompt = bounded_file_text(
         ROOT, ROOT / "docs/refactor/two-server/templates/GEMINI_TASK_PROMPT.md",
         MAX_CONTEXT, "prompt template",
