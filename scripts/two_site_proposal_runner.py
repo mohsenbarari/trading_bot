@@ -749,16 +749,38 @@ def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
     return task, sources
 
 
+def validate_task_readiness(
+    task_or_notes: dict,
+    sources: dict | None = None,
+    notes: dict | None = None,
+) -> dict:
+    """Deterministic readiness validator for dependency context."""
+    if isinstance(sources, dict):
+        if notes is None:
+            notes = task_preparation_notes(task_or_notes, sources)
+    else:
+        notes = task_or_notes
+    dep_ctx = notes.get("dependency_context") if isinstance(notes, dict) else {}
+    if isinstance(dep_ctx, dict) and dep_ctx.get("persistence_contract_requested"):
+        missing = [p for p in dep_ctx.get("missing_full_model_paths", []) if isinstance(p, str)]
+        if missing:
+            bounded_missing = sorted(dict.fromkeys(missing))[:16]
+            raise ProposalError(f"missing model context: {', '.join(bounded_missing)}")
+    return notes
+
+
 def check(root: Path, task_path: Path) -> dict:
     root = root.resolve(strict=True)
     task, sources = load_task(root, task_path)
+    notes = task_preparation_notes(task, sources)
+    validate_task_readiness(notes)
     snapshot = json.dumps({"task": task, "sources": sources}).encode("utf-8")
     return {
         "state": "TASK_READY",
         "task_id": task["task_id"],
         "source_file_count": len(sources),
         "byte_count": len(snapshot),
-        "preparation_notes": task_preparation_notes(task, sources),
+        "preparation_notes": notes,
     }
 
 
@@ -817,8 +839,42 @@ def schema(
             role, task["allowed_files"], sources, MAX_REPLACEMENTS,
             force_full_paths=force_full_paths,
         )
+        if role == "worker":
+            notes = task_preparation_notes(task, sources)
+            out_contract = notes.get("output_contract", {}) if isinstance(notes, dict) else {}
+            if out_contract.get("test_only_task"):
+                new_tests = set(out_contract.get("new_test_files") or [
+                    p for p in task["allowed_files"]
+                    if sources.get(p, {}).get("content") is None and sources.get(p, {}).get("sha256") is None
+                ])
+                max_new_test = out_contract.get("max_new_test_file_utf8_bytes", 24000)
+                _apply_new_test_max_length(fields["changes"], new_tests, max_new_test)
     return {"type": "object", "additionalProperties": False,
             "required": list(fields), "properties": fields}
+
+
+def _apply_new_test_max_length(node: object, new_tests: set[str], max_len: int) -> None:
+    if isinstance(node, dict):
+        props = node.get("properties")
+        if isinstance(props, dict) and "content" in props and "path" in props:
+            path_schema = props.get("path")
+            matched = False
+            if isinstance(path_schema, dict):
+                const_path = path_schema.get("const")
+                enum_paths = path_schema.get("enum")
+                if const_path in new_tests:
+                    matched = True
+                elif isinstance(enum_paths, list) and any(p in new_tests for p in enum_paths):
+                    matched = True
+                elif path_schema.get("type") == "string":
+                    matched = True
+            if matched and isinstance(props["content"], dict):
+                props["content"]["maxLength"] = max_len
+        for val in node.values():
+            _apply_new_test_max_length(val, new_tests, max_len)
+    elif isinstance(node, list):
+        for item in node:
+            _apply_new_test_max_length(item, new_tests, max_len)
 
 
 def normalize_result(
@@ -937,6 +993,18 @@ def validate_result(result: dict, task: dict, sources: dict, role: str) -> dict:
         raise ProposalError("verifier cannot author changes")
     if role == "worker" and success and not result["changes"]:
         raise ProposalError("plan-only or no-op response is not implementation")
+    notes = task_preparation_notes(task, sources)
+    out_contract = notes.get("output_contract", {}) if isinstance(notes, dict) else {}
+    test_only = bool(out_contract.get("test_only_task"))
+    max_transport = out_contract.get("max_test_only_transport_bytes", 64000)
+    max_new_test = out_contract.get("max_new_test_file_utf8_bytes", 24000)
+    new_test_files = set(out_contract.get("new_test_files", []))
+
+    if role == "worker" and test_only:
+        raw_transport_bytes = len(json.dumps(result, ensure_ascii=False).encode("utf-8"))
+        if raw_transport_bytes > max_transport:
+            raise ProposalError("test-only raw transport exceeds budget")
+
     seen = set()
     for change in result["changes"]:
         if not isinstance(change, dict) or set(change) != {"path", "original_sha256", "content"}:
@@ -952,6 +1020,10 @@ def validate_result(result: dict, task: dict, sources: dict, role: str) -> dict:
             raise ProposalError("empty or unchanged file")
         if SECRET.search(change["content"]) or "\0" in change["content"]:
             raise ProposalError("unsafe generated content")
+        if role == "worker" and test_only:
+            is_new = sources[name]["sha256"] is None and sources[name]["content"] is None
+            if (is_new or name in new_test_files) and len(change["content"].encode("utf-8")) > max_new_test:
+                raise ProposalError(f"new test file content exceeds budget: {name}")
     return result
 
 
@@ -1044,6 +1116,7 @@ def _parse_stream(
                     error, re.IGNORECASE,
                 )
                 and re.search(
+                    r"MODEL_OUTPUT_TRUNCATED|"
                     r"exceed.*output[-\s]+tokens?[-\s]+limit|"
                     r"output[-\s]+tokens?[-\s]+limit.*exceed",
                     error, re.IGNORECASE | re.DOTALL,
@@ -1192,6 +1265,8 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
     # before the Gemini CLI can consume a token or create a run artifact.
     validate_runtime_contract(root)
     task, sources = load_task(root, task_path)
+    prep_notes = task_preparation_notes(task, sources)
+    validate_task_readiness(prep_notes)
     head = git(root, "rev-parse", "HEAD")
     initial_status = git(root, "status", "--porcelain=v1", "--untracked-files=all")
     material = {"task": task, "source_head": head, "sources": sources}
@@ -1265,7 +1340,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 prompt_material["pre_review_test_evidence"] = normalized_receipt
                 material["test_evidence"] = normalized_receipt
     prompt_material = dict(prompt_material)
-    prompt_material["preparation_notes"] = task_preparation_notes(task, sources)
+    prompt_material["preparation_notes"] = prep_notes
     prompt = bounded_file_text(
         ROOT, ROOT / "docs/refactor/two-server/templates/GEMINI_TASK_PROMPT.md",
         MAX_CONTEXT, "prompt template",
