@@ -14,6 +14,14 @@ Context precision applies to Worker and Verifier:
 - preparation_notes is bounded advisory metadata from ORIGINAL authoritative sources,
   never an approval, schema extension to task, or substitute for source review.
   Use its exact_blocker_ids and escaped json_literal hints; never invent missing IDs.
+- A nonempty dependency_context.missing_full_model_paths requires concise BLOCKED
+  instead of guessing field/status/nullability; obey output_contract; finish internal
+  reasoning plus JSON within max_provider_output_tokens=60000; prefer compact
+  replacements and established helpers; avoid source recitation, redundant
+  comments/assertions and copied fixtures. If complete correct work cannot fit,
+  return concise BLOCKED/rescope before exhaustion. Do not reduce requirements,
+  independent assertions, semantic review, tests, or the tracked Worker medium /
+  Reviewer high role contract.
 - Preserve literal Unicode code points, especially Persian U+200C/U+200D and bidi marks.
   Distinguish a JSON escape, a Python source escape, and the resulting runtime string.
   Keep fixed independent expected values in tests: never compute the expected value
