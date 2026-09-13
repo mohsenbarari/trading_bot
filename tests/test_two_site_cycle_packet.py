@@ -159,7 +159,7 @@ def make_proposal_chain(
             "run_id": "w1",
             "role": "worker",
             "head": head,
-            "model": runner.MODEL,
+            "model": runner.WORKER_MODEL,
             "state": "PROPOSAL_READY",
             "conversation_id": "wc",
             "result_sha256": digest,

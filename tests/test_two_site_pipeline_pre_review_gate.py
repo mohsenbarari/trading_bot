@@ -15,7 +15,7 @@ try:
     from scripts.two_site_proposal_pipeline import (
         BRANCH, ProposalError, run_pipeline,
     )
-    from scripts.two_site_proposal_runner import MODEL, file_sha256, write_json
+    from scripts.two_site_proposal_runner import MODEL, WORKER_MODEL, file_sha256, write_json
     from scripts.two_site_pre_review_receipt import (
         EXPECTED_RECEIPT_KEYS, validate_test_receipt,
     )
@@ -24,7 +24,7 @@ except ModuleNotFoundError:
     from two_site_proposal_pipeline import (  # type: ignore[no-redef]
         BRANCH, ProposalError, run_pipeline,
     )
-    from two_site_proposal_runner import MODEL, file_sha256, write_json  # type: ignore[no-redef]
+    from two_site_proposal_runner import MODEL, WORKER_MODEL, file_sha256, write_json  # type: ignore[no-redef]
     from two_site_pre_review_receipt import (  # type: ignore[no-redef]
         EXPECTED_RECEIPT_KEYS, validate_test_receipt,
     )
@@ -139,7 +139,7 @@ def make_runner(root: Path, responses: list[dict[str, Any]]):
             "run_id": run_id,
             "role": role,
             "head": HEAD,
-            "model": MODEL,
+            "model": WORKER_MODEL if role == "worker" else MODEL,
             "result_sha256": res_sha,
             "conversation_id": resp.get("conv_id", f"conv-{run_id}"),
             "state": st_val,
