@@ -530,6 +530,80 @@ ALLOWED_SHELL_SCRIPTS = frozenset({
 TRUSTED_SHELL_SCRIPTS = ALLOWED_SHELL_SCRIPTS
 
 
+def is_retryable_zero_token_stream(raw: str, expected_model: str = MODEL) -> bool:
+    if not isinstance(raw, str) or not raw.strip():
+        return False
+    try:
+        events = [unique_json(line) for line in raw.splitlines() if line.strip()]
+    except Exception:
+        return False
+    if not events or any(not isinstance(e, dict) for e in events):
+        return False
+    for event in events:
+        kind = event.get("event")
+        if kind in {"init", "result", "step_update"} and not isinstance(event.get(kind), dict):
+            return False
+    init = [e for e in events if e.get("event") == "init"]
+    terminal = [e.get("result") for e in events if e.get("event") == "result"]
+    if len(init) != 1 or len(terminal) != 1:
+        return False
+    init_payload = init[0].get("init")
+    if not isinstance(init_payload, dict) or init_payload.get("model") != expected_model:
+        return False
+    session = init[0].get("conversation_id")
+    if not isinstance(session, str) or not session.strip():
+        return False
+    envelope = terminal[0]
+    if not isinstance(envelope, dict):
+        return False
+    if envelope.get("conversation_id") != session:
+        return False
+    for event in events:
+        if "conversation_id" in event and event.get("conversation_id") != session:
+            return False
+        if (
+            "tool_name" in event
+            or "tool_info" in event
+            or "subagent_info" in event
+            or event.get("step_type") in {"tool", "subagent"}
+        ):
+            return False
+        if event.get("event") == "step_update":
+            step = event.get("step_update")
+            if isinstance(step, dict) and (
+                "tool_name" in step
+                or "tool_info" in step
+                or "subagent_info" in step
+                or step.get("step_type") in {"tool", "subagent"}
+            ):
+                return False
+    if envelope.get("status") != "ERROR":
+        return False
+    error = envelope.get("error")
+    if error != "Agent execution terminated due to error.":
+        return False
+    if re.search(
+        r"auth|quota|rate[\s_-]*limit|time[\s_-]*out|timed[\s_-]*out|deadline|network|connect",
+        error,
+        re.IGNORECASE,
+    ):
+        return False
+    response = envelope.get("response")
+    if response not in ("", None):
+        return False
+    if envelope.get("structured_output"):
+        return False
+    denied = envelope.get("denied_actions")
+    if denied not in (None, [], ()):
+        return False
+    usage = envelope.get("usage")
+    if not isinstance(usage, dict) or not usage:
+        return False
+    if not all(type(v) is int and v == 0 for v in usage.values()):
+        return False
+    return True
+
+
 def relative_file(root: Path, name: str) -> Path:
     if (not isinstance(name, str) or not name or "\\" in name or "\0" in name
             or any(part in {"", ".", ".."} for part in name.split("/"))):
@@ -1221,6 +1295,12 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                     timeout + 15,
                 )
             if process.returncode:
+                raw_stream = bounded_file_text(root, out / "stream.jsonl", MAX_OUTPUT, "CLI event stream")
+                if is_retryable_zero_token_stream(raw_stream, MODEL):
+                    final_cli_identity = cli_identity(disposable_cli)
+                    if final_cli_identity != initial_cli_identity:
+                        raise ProposalError("CLI identity changed during generation")
+                    raise RetryableProviderSessionError("CLI did not complete one successful session")
                 raise ProposalError(f"CLI failed with exit {process.returncode}; inspect run evidence")
             final_cli_identity = cli_identity(disposable_cli)
             if final_cli_identity != initial_cli_identity:
@@ -1276,6 +1356,47 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         return out
 
 
+def run_standalone(
+    root: Path,
+    task_path: Path,
+    role: str,
+    base_run_id: str,
+    timeout: int,
+    feedback: Path | None = None,
+    proposal: Path | None = None,
+    cli: Path | None = None,
+    test_evidence: Path | None = None,
+) -> Path:
+    proposals_dir = root / ".local/two-site-refactor/proposals"
+    attempts = (
+        base_run_id,
+        f"{base_run_id}-retry-1",
+        f"{base_run_id}-retry-2",
+    )
+    last_error: RetryableProviderSessionError | None = None
+    label = "reviewer" if role == "verifier" else "worker"
+    for attempt_id in attempts:
+        if (proposals_dir / attempt_id).exists():
+            raise ProposalError(f"{label} run ID already exists: {attempt_id}")
+        try:
+            return run(
+                root,
+                task_path,
+                role,
+                attempt_id,
+                timeout,
+                feedback=feedback,
+                proposal=proposal,
+                cli=cli,
+                test_evidence=test_evidence,
+            )
+        except RetryableProviderSessionError as exc:
+            last_error = exc
+    raise ProposalError(
+        f"provider session retry exhausted for {base_run_id} after 3 attempts"
+    ) from last_error
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("role", choices=("worker", "verifier", "check"))
@@ -1299,7 +1420,17 @@ def main() -> int:
             payload = check(args.root, args.task)
             print(json.dumps(payload))
             return 0
-        out = run(args.root, args.task, args.role, args.run_id, args.timeout, args.feedback, args.proposal, args.cli, test_evidence=args.test_evidence)
+        out = run_standalone(
+            args.root,
+            args.task,
+            args.role,
+            args.run_id,
+            args.timeout,
+            feedback=args.feedback,
+            proposal=args.proposal,
+            cli=args.cli,
+            test_evidence=args.test_evidence,
+        )
         meta = unique_json(bounded_file_text(
             args.root.resolve(strict=True), out / "status.json", MAX_CONTEXT, "run status"
         ))
