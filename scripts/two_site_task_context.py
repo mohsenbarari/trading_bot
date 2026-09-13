@@ -11,6 +11,73 @@ BLOCKER_REQ_RE = re.compile(
 )
 
 
+PERSISTENCE_RE = re.compile(
+    r"\b(?:database|sql|sqlite|orm|persisted[-_ ]rows?|columns?|tables?|durable[-_ ]records?)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_python_test_file(path: str) -> bool:
+    if not isinstance(path, str):
+        return False
+    parts = path.replace("\\", "/").strip().split("/")
+    if len(parts) < 2:
+        return False
+    under_test = any(p in ("tests", "test") for p in parts[:-1])
+    fn = parts[-1]
+    is_test_fn = fn.endswith(".py") and (fn.startswith("test_") or fn.endswith("_test.py"))
+    return bool(under_test and is_test_fn)
+
+
+def _has_full_content(path: str, sources) -> bool:
+    if not isinstance(sources, dict) or path not in sources:
+        return False
+    val = sources[path]
+    content = val.get("content") if isinstance(val, dict) else val
+    return content is not None
+
+
+def _extract_model_imports(text: str):
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        try:
+            lines = text.splitlines()
+            indents = [len(l) - len(l.lstrip()) for l in lines if l.strip()]
+            min_i = min(indents) if indents else 0
+            tree = ast.parse("\n".join(l[min_i:] if len(l) >= min_i else l for l in lines))
+        except Exception:
+            return []
+    except Exception:
+        return []
+    results = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if not node.module:
+                continue
+            if node.module == "models":
+                for alias in node.names:
+                    for sym in (alias.name, alias.asname):
+                        if sym and sym.isidentifier():
+                            results.append((f"models/{alias.name}.py", sym))
+            elif node.module.startswith("models."):
+                parts = node.module.split(".")
+                mod_name = parts[1]
+                for alias in node.names:
+                    for sym in (alias.name, alias.asname):
+                        if sym and sym.isidentifier():
+                            results.append((f"models/{mod_name}.py", sym))
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.startswith("models."):
+                    parts = alias.name.split(".")
+                    mod_name = parts[1]
+                    for sym in (parts[-1], alias.asname):
+                        if sym and sym.isidentifier():
+                            results.append((f"models/{mod_name}.py", sym))
+    return results
+
+
 def _is_test_path(path: str) -> bool:
     if not isinstance(path, str):
         return False
@@ -144,6 +211,88 @@ def preparation_notes(task, sources):
             start = rng.get("start", 1)
             blocks.append((epath, start if isinstance(start, int) and start > 0 else 1, text))
 
+    goal = task.get("goal") if isinstance(task, dict) else None
+    if isinstance(goal, str) and "CANONICAL_SOURCE_EXCERPTS_JSON:\n" in goal:
+        goal = goal.split("CANONICAL_SOURCE_EXCERPTS_JSON:\n", 1)[0]
+    elif isinstance(goal, str) and "CANONICAL_SOURCE_EXCERPTS_JSON:" in goal:
+        goal = goal.split("CANONICAL_SOURCE_EXCERPTS_JSON:", 1)[0]
+    reqs = task.get("requirements") if isinstance(task, dict) else None
+    req_list = reqs if isinstance(reqs, list) else ([reqs] if reqs is not None else [])
+    goal_req_texts = [t for t in [goal] + req_list if isinstance(t, str)]
+    persistence_contract_requested = any(bool(PERSISTENCE_RE.search(t)) for t in goal_req_texts)
+
+    matched_model_paths = set()
+    if persistence_contract_requested:
+        py_texts = []
+        if isinstance(sources, dict):
+            for p, item in sorted_sources:
+                if isinstance(p, str) and p.endswith(".py"):
+                    c = item.get("content") if isinstance(item, dict) else item
+                    if isinstance(c, str):
+                        py_texts.append(c)
+        for exc in raw_excerpts:
+            if isinstance(exc, dict):
+                ep = exc.get("path")
+                if isinstance(ep, str) and ep.endswith(".py"):
+                    rngs = exc.get("ranges")
+                    if isinstance(rngs, list):
+                        for rng in rngs:
+                            if isinstance(rng, dict) and isinstance(rng.get("text"), str):
+                                py_texts.append(rng["text"])
+        for txt in py_texts:
+            for canon_path, sym in _extract_model_imports(txt):
+                if any(bool(re.search(rf"\b{re.escape(sym)}\b", t)) for t in goal_req_texts):
+                    matched_model_paths.add(canon_path)
+
+    sorted_models = sorted(matched_model_paths)
+    if len(sorted_models) > 16:
+        required_full_model_paths = sorted_models[:16]
+        omitted_model_path_count = len(sorted_models) - 16
+    else:
+        required_full_model_paths = sorted_models
+        omitted_model_path_count = 0
+
+    missing_full_model_paths = [
+        p for p in required_full_model_paths if not _has_full_content(p, sources)
+    ]
+
+    dep_ctx = {
+        "persistence_contract_requested": persistence_contract_requested,
+        "required_full_model_paths": required_full_model_paths,
+        "missing_full_model_paths": missing_full_model_paths,
+        "omitted_model_path_count": omitted_model_path_count,
+    }
+
+    allowed_files = task.get("allowed_files") if isinstance(task, dict) else None
+    test_only_task = (
+        isinstance(allowed_files, list)
+        and len(allowed_files) > 0
+        and all(_is_python_test_file(p) for p in allowed_files)
+    )
+
+    new_test_candidates = set()
+    if isinstance(sources, dict):
+        new_test_candidates.update(sources.keys())
+    if isinstance(allowed_files, list):
+        new_test_candidates.update(allowed_files)
+
+    raw_new_tests = []
+    if isinstance(sources, dict):
+        for p in new_test_candidates:
+            if isinstance(p, str) and _is_python_test_file(p):
+                val = sources.get(p)
+                if isinstance(val, dict) and val.get("sha256") is None and val.get("content") is None:
+                    raw_new_tests.append(p)
+    new_test_files = sorted(set(raw_new_tests))[:16]
+
+    out_contract = {
+        "max_provider_output_tokens": 60000,
+        "max_test_only_transport_bytes": 64000,
+        "max_new_test_file_utf8_bytes": 24000,
+        "test_only_task": test_only_task,
+        "new_test_files": new_test_files,
+    }
+
     literal_hints, seen_hints, omitted_literal_count, total_bytes = [], set(), 0, 0
 
     for path, start_line, text in blocks:
@@ -195,6 +344,8 @@ def preparation_notes(task, sources):
                     "warnings": warnings,
                     "literal_hints": literal_hints + [hint],
                     "omitted_literal_count": omitted_literal_count,
+                    "dependency_context": dep_ctx,
+                    "output_contract": out_contract,
                 }
                 if len(json.dumps(cand).encode("utf-8")) <= 8192:
                     literal_hints.append(hint)
@@ -210,10 +361,21 @@ def preparation_notes(task, sources):
         "warnings": warnings,
         "literal_hints": literal_hints,
         "omitted_literal_count": omitted_literal_count,
+        "dependency_context": dep_ctx,
+        "output_contract": out_contract,
     }
     while res["literal_hints"] and len(json.dumps(res).encode("utf-8")) > 8192:
         res["literal_hints"].pop()
         res["omitted_literal_count"] += 1
+    while res["output_contract"]["new_test_files"] and len(json.dumps(res).encode("utf-8")) > 8192:
+        res["output_contract"]["new_test_files"].pop()
+    while res["dependency_context"]["required_full_model_paths"] and len(json.dumps(res).encode("utf-8")) > 8192:
+        popped = res["dependency_context"]["required_full_model_paths"].pop()
+        res["dependency_context"]["omitted_model_path_count"] += 1
+        if popped in res["dependency_context"]["missing_full_model_paths"]:
+            res["dependency_context"]["missing_full_model_paths"].remove(popped)
+    while res["dependency_context"]["missing_full_model_paths"] and len(json.dumps(res).encode("utf-8")) > 8192:
+        res["dependency_context"]["missing_full_model_paths"].pop()
     while res["exact_blocker_ids"] and len(json.dumps(res).encode("utf-8")) > 8192:
         res["exact_blocker_ids"].pop()
         _add_warning("BLOCKER_IDS_OMITTED")
