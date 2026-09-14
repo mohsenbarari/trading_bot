@@ -35,6 +35,7 @@ from models.offer_request import (
     OfferRequestWorkflow,
 )
 from models.trade import TradeStatus
+from models.user import User
 from tests.test_p1_00b_characterization_origin_interactions import (
     OriginSession,
     _make_offer,
@@ -43,6 +44,46 @@ from tests.test_p1_00b_characterization_origin_interactions import (
     _sqlite_counts,
     _sqlite_requests,
 )
+
+
+class _WebappTier2OriginSession(OriginSession):
+    def _is_sqlite_statement(self, statement) -> bool:
+        blob = str(statement).lower()
+        if "customer_relation" in blob:
+            return True
+        return super()._is_sqlite_statement(statement)
+
+    def add(self, obj):
+        if isinstance(obj, CustomerRelation):
+            self._session.add(obj)
+            return
+        super().add(obj)
+
+    async def execute(self, statement, params=None):
+        blob = str(statement).lower()
+        if "customer_relation" in blob:
+            self._drop_duplicate_graph_inserts()
+            with self._session.no_autoflush:
+                result = self._session.execute(statement)
+            try:
+                return result.unique()
+            except Exception:
+                return result
+        return await super().execute(statement, params=params)
+
+    async def scalar(self, statement, params=None):
+        blob = str(statement).lower()
+        if "customer_relation" in blob:
+            res = await self.execute(statement, params=params)
+            return res.scalar_one_or_none()
+        return await super().scalar(statement, params=params)
+
+    async def scalars(self, statement, params=None):
+        blob = str(statement).lower()
+        if "customer_relation" in blob:
+            res = await self.execute(statement, params=params)
+            return res.scalars()
+        return await super().scalars(statement, params=params)
 
 
 class P100bWebappOfferWebappTier2PolicySnapshotCharacterizationTests(unittest.IsolatedAsyncioTestCase):
@@ -118,45 +159,14 @@ class P100bWebappOfferWebappTier2PolicySnapshotCharacterizationTests(unittest.Is
 
         mock_forward = AsyncMock()
         mock_enforce_trade_limits = AsyncMock()
-        lookup_calls: list[int] = []
 
-        async def _mock_get_active_customer_relation(*args, **kwargs):
-            user_id = kwargs.get("customer_user_id", kwargs.get("customer_id", kwargs.get("user_id")))
-            if user_id is None:
-                for arg in args:
-                    if isinstance(arg, int):
-                        user_id = arg
-                        break
-            lookup_calls.append(user_id)
-            if user_id == 5:
-                return tier2_relation
-            if user_id == 9:
-                return None
-            return None
-
-        mock_get_relation = AsyncMock(side_effect=_mock_get_active_customer_relation)
-
-        base_patches = [
-            p
-            for p in _request_patches(offer.home_server)
-            if getattr(p, "target", "")
-            not in {
-                "api.routers.trades.get_active_customer_relation_for_customer",
-                "api.routers.trades.enforce_customer_trade_limits_for_trade",
-            }
-        ]
-
-        patches = base_patches + [
-            patch(
-                "api.routers.trades.get_active_customer_relation_for_customer",
-                new=mock_get_relation,
-            ),
+        patches = [
             patch(
                 "api.routers.trades.enforce_customer_trade_limits_for_trade",
                 new=mock_enforce_trade_limits,
             ),
             patch("core.trade_forwarding.forward_trade_to_home_server", new=mock_forward),
-        ]
+        ] + _request_patches(offer.home_server)[2:]
         if hasattr(trades_module, "forward_trade_to_home_server"):
             patches.append(
                 patch("api.routers.trades.forward_trade_to_home_server", new=mock_forward)
@@ -169,8 +179,44 @@ class P100bWebappOfferWebappTier2PolicySnapshotCharacterizationTests(unittest.Is
         with tempfile.TemporaryDirectory() as temp_dir:
             sqlite_path = str(Path(temp_dir) / "test_webapp_offer_webapp_tier2_snapshot.db")
             engine, Session = _sqlite_requests(sqlite_path)
+            original_indexes = set(CustomerRelation.__table__.indexes)
+            original_index_identities = {id(idx) for idx in original_indexes}
+            original_index_names = sorted(idx.name for idx in original_indexes if idx.name is not None)
+            discarded_indexes = []
+            try:
+                seen_indexes = set()
+                for idx in list(CustomerRelation.__table__.indexes):
+                    if idx.name in seen_indexes:
+                        CustomerRelation.__table__.indexes.discard(idx)
+                        discarded_indexes.append(idx)
+                    else:
+                        seen_indexes.add(idx.name)
+                CustomerRelation.__table__.create(engine, checkfirst=True)
+            finally:
+                for idx in discarded_indexes:
+                    CustomerRelation.__table__.indexes.add(idx)
+
+            self.assertEqual(CustomerRelation.__table__.indexes, original_indexes)
+            self.assertEqual(
+                {id(idx) for idx in CustomerRelation.__table__.indexes},
+                original_index_identities,
+            )
+            self.assertEqual(
+                sorted(idx.name for idx in CustomerRelation.__table__.indexes if idx.name is not None),
+                original_index_names,
+            )
             sync_session = Session()
-            origin_session = OriginSession(sync_session, offer=offer, owner=requester)
+            origin_session = _WebappTier2OriginSession(sync_session, offer=offer, owner=requester)
+
+            if sync_session.get(User, 9) is None and getattr(offer, "user", None) is not None:
+                sync_session.add(offer.user)
+                sync_session.commit()
+            if sync_session.get(User, 5) is None:
+                sync_session.add(requester)
+                sync_session.commit()
+
+            sync_session.add(tier2_relation)
+            sync_session.commit()
 
             try:
                 with ExitStack() as stack:
@@ -200,11 +246,14 @@ class P100bWebappOfferWebappTier2PolicySnapshotCharacterizationTests(unittest.Is
                         conn.row_factory = sqlite3.Row
                         trade_rows = conn.execute("SELECT * FROM trades").fetchall()
                         request_rows = conn.execute("SELECT * FROM offer_requests").fetchall()
+                        relation_rows = conn.execute("SELECT * FROM customer_relations").fetchall()
 
                     self.assertEqual(len(trade_rows), 1)
                     self.assertEqual(len(request_rows), 1)
+                    self.assertEqual(len(relation_rows), 1)
                     trade_dict = dict(trade_rows[0])
                     request_dict = dict(request_rows[0])
+                    relation_dict = dict(relation_rows[0])
 
                     self.assertIsNotNone(response)
                     self.assertIsInstance(response, dict)
@@ -262,6 +311,23 @@ class P100bWebappOfferWebappTier2PolicySnapshotCharacterizationTests(unittest.Is
                     self.assertEqual(commission_context.get("max_daily_trades"), 8)
                     self.assertEqual(commission_context.get("max_daily_commodity_volume"), 20)
 
+                    self.assertEqual(relation_dict.get("id"), 44)
+                    self.assertEqual(relation_dict.get("owner_user_id"), 9)
+                    self.assertEqual(relation_dict.get("customer_user_id"), 5)
+                    self.assertEqual(
+                        str(relation_dict.get("status")).lower(),
+                        CustomerRelationStatus.ACTIVE.value,
+                    )
+                    self.assertIsNone(relation_dict.get("deleted_at"))
+
+                    persisted_relation = sync_session.get(CustomerRelation, 44)
+                    self.assertIsNotNone(persisted_relation)
+                    self.assertEqual(persisted_relation.id, 44)
+                    self.assertEqual(persisted_relation.owner_user_id, 9)
+                    self.assertEqual(persisted_relation.customer_user_id, 5)
+                    self.assertEqual(persisted_relation.status, CustomerRelationStatus.ACTIVE)
+                    self.assertIsNone(persisted_relation.deleted_at)
+
                     mock_forward.assert_not_awaited()
                     self.assertEqual(mock_forward.await_count, 0)
 
@@ -283,12 +349,14 @@ class P100bWebappOfferWebappTier2PolicySnapshotCharacterizationTests(unittest.Is
                     self.assertIsNone(enforce_relations[9])
                     self.assertEqual(int(enforce_call.kwargs.get("quantity")), 4)
                     self.assertEqual(enforce_call.kwargs.get("timezone_name"), "Asia/Tehran")
-
-                    self.assertIn(5, lookup_calls)
-                    self.assertIn(9, lookup_calls)
             finally:
                 origin_session.close()
                 engine.dispose()
+                self.assertEqual(CustomerRelation.__table__.indexes, original_indexes)
+                self.assertEqual(
+                    {id(idx) for idx in CustomerRelation.__table__.indexes},
+                    original_index_identities,
+                )
 
 
 if __name__ == "__main__":
