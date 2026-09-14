@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "b80b9becf592c1ba137677da8390ac6aae288720",
+  "inspected_head": "c0cd3c7ba632e1225230f5b513d50c4a7b83ff8b",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
     "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
     "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
   ],
-  "units_since_reconciliation": 5,
+  "units_since_reconciliation": 0,
   "records": [
     {
       "path": "tests/test_p1_00b_characterization_panel_back_to_user_panel_from_blocked.py",
@@ -207,11 +207,14 @@
     },
     {
       "path": "tests/test_p1_00b_characterization_channel_trade_telegram_offer_success.py",
-      "sha256": "45a050fa7024f115ba04ccd49822357bd7d56cc7ba3faa228cdc54c51e892826",
-      "last_commit": "e7197b3e50a05bcdcb8daaf99f708b8bd1717026",
+      "sha256": "b7d7a8d5850ae47cdc416b650ba4e00e11bf2fb40d5a109c58acff622be32171",
+      "last_commit": "c5fc8094d728130b6fbf66fad47104527d62d350",
       "seed_ids": [],
       "test_selectors": [
-        "tests/test_p1_00b_characterization_channel_trade_telegram_offer_success.py::P100bChannelTradeTelegramOfferSuccessCharacterizationTests::test_telegram_offer_telegram_public_identity_double_click_persists_once"
+        "tests/test_p1_00b_characterization_channel_trade_telegram_offer_success.py::P100bChannelTradeTelegramOfferSuccessCharacterizationTests::test_telegram_offer_telegram_accountant_denied_before_confirmation",
+        "tests/test_p1_00b_characterization_channel_trade_telegram_offer_success.py::P100bChannelTradeTelegramOfferSuccessCharacterizationTests::test_telegram_offer_telegram_public_identity_double_click_persists_once",
+        "tests/test_p1_00b_characterization_channel_trade_telegram_offer_success.py::P100bChannelTradeTelegramOfferSuccessCharacterizationTests::test_telegram_offer_telegram_super_admin_double_click_persists_once",
+        "tests/test_p1_00b_characterization_channel_trade_telegram_offer_success.py::P100bChannelTradeTelegramOfferSuccessCharacterizationTests::test_telegram_offer_telegram_tier2_denied_before_confirmation"
       ]
     },
     {
@@ -277,6 +280,47 @@
         "tests/test_p1_00b_characterization_bot_invitation_admin_guard.py::CharacterizeBotInvitationAdminGuardTests::test_start_invitation_creation_inline_denial_for_standard_role",
         "tests/test_p1_00b_characterization_bot_invitation_admin_guard.py::CharacterizeBotInvitationAdminGuardTests::test_start_invitation_creation_message_silent_denial_for_police_role",
         "tests/test_p1_00b_characterization_bot_invitation_admin_guard.py::CharacterizeBotInvitationAdminGuardTests::test_start_invitation_creation_message_silent_denial_for_standard_role"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_channel_trade_telegram_eligible_personas.py",
+      "sha256": "6271bbe6c352c657658e4d58652f537d2938da0b31f2e8192b18459fab05b83b",
+      "last_commit": "afef2a06cf282d12c57e8ca5d477ef5da4ea82ab",
+      "seed_ids": [],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_channel_trade_telegram_eligible_personas.py::P100bTelegramEligiblePersonaCharacterizationTests::test_telegram_offer_telegram_linked_tier1_double_click_persists_once",
+        "tests/test_p1_00b_characterization_channel_trade_telegram_eligible_personas.py::P100bTelegramEligiblePersonaCharacterizationTests::test_telegram_offer_telegram_middle_manager_double_click_persists_once",
+        "tests/test_p1_00b_characterization_channel_trade_telegram_eligible_personas.py::P100bTelegramEligiblePersonaCharacterizationTests::test_telegram_offer_telegram_police_double_click_persists_once"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_bot_broadcast_middle_manager_guard.py",
+      "sha256": "5e99e9bfc7a98284f5214751cb117e25546bfe6869922baf7158bc0672afcc4a",
+      "last_commit": "e385c230012f5c8b89755e34ef63f570b4ea038d",
+      "seed_ids": [
+        "BOT-ADMIN-MESSAGE-ADMIN-BROADCAST-START-TELEGRAM-ADMIN-BROADCAST-L179",
+        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CANCEL-TELEGRAM-ADMIN-BROADCAST-L194",
+        "BOT-ADMIN-CALLBACK-QUERY-ADMIN-BROADCAST-CHOOSE-ALL-RECIPIENTS-L208"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_bot_broadcast_middle_manager_guard.py::CharacterizeBotBroadcastMiddleManagerGuardTests::test_cancel_telegram_admin_broadcast_alert_denies_bot_eligible_middle_manager",
+        "tests/test_p1_00b_characterization_bot_broadcast_middle_manager_guard.py::CharacterizeBotBroadcastMiddleManagerGuardTests::test_choose_all_recipients_alert_denies_bot_eligible_middle_manager",
+        "tests/test_p1_00b_characterization_bot_broadcast_middle_manager_guard.py::CharacterizeBotBroadcastMiddleManagerGuardTests::test_start_telegram_admin_broadcast_silently_denies_bot_eligible_middle_manager"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_block_manage_menu_list.py",
+      "sha256": "25d196df2920a88e1e367ce4ae2d16351e7ebe50b0d4d7b25f91291c4ca23533",
+      "last_commit": "c0cd3c7ba632e1225230f5b513d50c4a7b83ff8b",
+      "seed_ids": [
+        "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-SHOW-BLOCK-MENU-L223",
+        "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-SHOW-BLOCKED-LIST-L244"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_block_manage_menu_list.py::CharacterizeBlockManageMenuListTests::test_show_block_menu_authenticated_renders_menu_and_acknowledges",
+        "tests/test_p1_00b_characterization_block_manage_menu_list.py::CharacterizeBlockManageMenuListTests::test_show_block_menu_unauthenticated_ack_only",
+        "tests/test_p1_00b_characterization_block_manage_menu_list.py::CharacterizeBlockManageMenuListTests::test_show_blocked_list_authenticated_populated_list_renders_and_acknowledges",
+        "tests/test_p1_00b_characterization_block_manage_menu_list.py::CharacterizeBlockManageMenuListTests::test_show_blocked_list_unauthenticated_ack_only"
       ]
     }
   ],
