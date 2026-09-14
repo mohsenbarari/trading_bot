@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "4b5975b4a66e7595f7bca4d13d2fff7658dfb8ad",
+  "inspected_head": "d6f819a846083217ba5aa315498ac45e161f2f5b",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -722,6 +722,74 @@
         "tests/test_p1_00b_characterization_trade_create_type_cancel.py::TestTradeCreateTypeCancelCharacterization::test_handlers_unauthenticated_guard",
         "tests/test_p1_00b_characterization_trade_create_type_cancel.py::TestTradeCreateTypeCancelCharacterization::test_handle_back_to_type_authenticated_success",
         "tests/test_p1_00b_characterization_trade_create_type_cancel.py::TestTradeCreateTypeCancelCharacterization::test_handle_trade_cancel_authenticated_success"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_create_lot_selection.py",
+      "sha256": "6afdcf63b4ef2ff8292e86b11c5527b247f8077d4aebe40d092e1b9b4040ce86",
+      "last_commit": "c806198c26f1dc43bc28146a316994de98230160",
+      "seed_ids": [
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-LOT-WHOLESALE-L1001",
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-LOT-SPLIT-L1016",
+        "BOT-TRADE-MESSAGE-TRADE-CREATE-HANDLE-LOT-SIZES-INPUT-L1027"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_create_lot_selection.py::TestTradeCreateLotSelectionCharacterization::test_handle_lot_sizes_input_authenticated_valid_persian_digits",
+        "tests/test_p1_00b_characterization_trade_create_lot_selection.py::TestTradeCreateLotSelectionCharacterization::test_handle_lot_type_choice_authenticated",
+        "tests/test_p1_00b_characterization_trade_create_lot_selection.py::TestTradeCreateLotSelectionCharacterization::test_handlers_unauthenticated_guard"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_create_accept_price_flow.py",
+      "sha256": "1edccbdf90e81049adf88407f15171cb15a9458178eda1b202c0120d080fc959",
+      "last_commit": "689649b4e1ba60599b64eca537211b73e1eadc0b",
+      "seed_ids": [
+        "BOT-TRADE-CALLBACK-QUERY-TRADE-CREATE-HANDLE-ACCEPT-SUGGESTED-LOTS-L1089",
+        "BOT-TRADE-MESSAGE-TRADE-CREATE-HANDLE-PRICE-INPUT-L1118"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_create_accept_price_flow.py::TestTradeCreateAcceptPriceFlowCharacterization::test_authenticated_accept_suggested_lots_flow",
+        "tests/test_p1_00b_characterization_trade_create_accept_price_flow.py::TestTradeCreateAcceptPriceFlowCharacterization::test_authenticated_valid_persian_price_input_flow",
+        "tests/test_p1_00b_characterization_trade_create_accept_price_flow.py::TestTradeCreateAcceptPriceFlowCharacterization::test_unauthenticated_guards_combined"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_create_cancel_all_offers_bot.py",
+      "sha256": "ce40c23599f43a6cd53faf27e67d5f7e19011670bb521122629c27b8102040cf",
+      "last_commit": "6b73fd009d763fb08eefaf48be70ef1af1e4e8c3",
+      "seed_ids": [
+        "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-CANCEL-ALL-OFFERS-BOT-L2380"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_create_cancel_all_offers_bot.py::TestTradeCreateCancelAllOffersBotCharacterization::test_authenticated_empty_result",
+        "tests/test_p1_00b_characterization_trade_create_cancel_all_offers_bot.py::TestTradeCreateCancelAllOffersBotCharacterization::test_authenticated_two_local_offer_success_ordering",
+        "tests/test_p1_00b_characterization_trade_create_cancel_all_offers_bot.py::TestTradeCreateCancelAllOffersBotCharacterization::test_unauthenticated_guard"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_create_repeat_offer_button.py",
+      "sha256": "1b800b71e510ff4a3ee2d84acf7d0cb795b6c72b991ab6e357f4414a62137012",
+      "last_commit": "395a34f947e05d9cf42307d1590e44753559406c",
+      "seed_ids": [
+        "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-REPEAT-OFFER-BUTTON-L2969"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_create_repeat_offer_button.py::TestTradeCreateRepeatOfferButtonCharacterization::test_authenticated_resolved_candidate_prepared",
+        "tests/test_p1_00b_characterization_trade_create_repeat_offer_button.py::TestTradeCreateRepeatOfferButtonCharacterization::test_authenticated_stale_candidate_queue_owned",
+        "tests/test_p1_00b_characterization_trade_create_repeat_offer_button.py::TestTradeCreateRepeatOfferButtonCharacterization::test_unauthenticated_guard"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_trade_create_text_offer.py",
+      "sha256": "1dd266b8461987c38c92a807e9bd30d862bbe51f0f4b41b0886589f607d2e32a",
+      "last_commit": "d6f819a846083217ba5aa315498ac45e161f2f5b",
+      "seed_ids": [
+        "BOT-OFFER-MESSAGE-TRADE-CREATE-HANDLE-TEXT-OFFER-L3047"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_trade_create_text_offer.py::TestTradeCreateTextOfferCharacterization::test_authenticated_idle_delegation_empty_text_normalization",
+        "tests/test_p1_00b_characterization_trade_create_text_offer.py::TestTradeCreateTextOfferCharacterization::test_authenticated_non_idle_suppression",
+        "tests/test_p1_00b_characterization_trade_create_text_offer.py::TestTradeCreateTextOfferCharacterization::test_unauthenticated_guard"
       ]
     }
   ],
