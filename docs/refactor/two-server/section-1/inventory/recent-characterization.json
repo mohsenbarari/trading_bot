@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "9d29480b0ff4b2aa85d908812961e452378158e0",
+  "inspected_head": "459a3144c98af57207c01c9cc4a7132b838be5a8",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -527,6 +527,67 @@
       "test_selectors": [
         "tests/test_p1_00b_characterization_channel_trade_live_handler_paths.py::TestP100bChannelTradeLiveHandlerPaths::test_handle_channel_trade_legacy_id_local_success",
         "tests/test_p1_00b_characterization_channel_trade_live_handler_paths.py::TestP100bChannelTradeLiveHandlerPaths::test_handle_channel_trade_public_identity_local_success"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_channel_trade_live_transient_retry.py",
+      "sha256": "84104f6eff3a8b1e722e084b840d78819da5442b0c63f2f753f035e6a5ba1758",
+      "last_commit": "e03797d32681bbeaeb79872835e4386d9e14bdc5",
+      "seed_ids": [],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_channel_trade_live_transient_retry.py::TestP100bChannelTradeLiveTransientRetry::test_legacy_handler_deadlock_retry_succeeds_once",
+        "tests/test_p1_00b_characterization_channel_trade_live_transient_retry.py::TestP100bChannelTradeLiveTransientRetry::test_non_transient_failure_does_not_retry_or_emit_success_side_effects",
+        "tests/test_p1_00b_characterization_channel_trade_live_transient_retry.py::TestP100bChannelTradeLiveTransientRetry::test_transient_retry_exhaustion_stops_before_success_side_effects"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_webapp_offer_webapp_tier2_policy_snapshot.py",
+      "sha256": "d25fc4e346facc2961cfd8c2a4fdd52e4dfaa0a048da2c3ea9200a43ffddf8a1",
+      "last_commit": "78cfb28bb92de301f7fb242d5c24413d7a43d3fd",
+      "seed_ids": [],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_webapp_offer_webapp_tier2_policy_snapshot.py::P100bWebappOfferWebappTier2PolicySnapshotCharacterizationTests::test_webapp_offer_webapp_tier2_customer_snapshots_relation_and_commission"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_notification_reads.py",
+      "sha256": "709af82f81a61016ea6d72b26fafd2ef37fadd78ab6cead1f5f0b26c426a98b0",
+      "last_commit": "83327d1c47db0fa18fccd29a0cb6c340b5f7a7aa",
+      "seed_ids": [
+        "API-NOTIFY-GET-NOTIFICATIONS-GET-UNREAD-COUNT-L120",
+        "API-NOTIFY-GET-NOTIFICATIONS-GET-UNREAD-NOTIFICATIONS-L251",
+        "API-NOTIFY-GET-NOTIFICATIONS-GET-ALL-NOTIFICATIONS-L273"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_notification_reads.py::NotificationReadsCharacterizationTests::test_get_unread_count_reads_redis_key_and_converts_types",
+        "tests/test_p1_00b_characterization_notification_reads.py::NotificationReadsCharacterizationTests::test_get_unread_notifications_filters_owner_unread_order_pagination",
+        "tests/test_p1_00b_characterization_notification_reads.py::NotificationReadsCharacterizationTests::test_get_all_notifications_filters_owner_all_order_pagination"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_notification_preferences.py",
+      "sha256": "ba24364cb2f803c2e0e712ce0272cfe9e7736e29b2957e089ae1056403b38082",
+      "last_commit": "66edda072356471eb282f74fb5d38a66d22aaa24",
+      "seed_ids": [
+        "API-NOTIFY-GET-NOTIFICATIONS-GET-NOTIFICATION-PREFERENCES-L220",
+        "API-NOTIFY-PATCH-NOTIFICATIONS-UPDATE-NOTIFICATION-PREFERENCES-L233"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_notification_preferences.py::NotificationPreferencesCharacterizationTests::test_get_preferences_absent_returns_default_without_writes",
+        "tests/test_p1_00b_characterization_notification_preferences.py::NotificationPreferencesCharacterizationTests::test_get_preferences_returns_only_current_users_existing_row_without_writes",
+        "tests/test_p1_00b_characterization_notification_preferences.py::NotificationPreferencesCharacterizationTests::test_update_preferences_create_then_update_persists_owner_only"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_notification_delete_all.py",
+      "sha256": "54d8fbeb56846ef2345dea4fc05d566ae2aab9a7d001fff25f19afa0a76f20be",
+      "last_commit": "459a3144c98af57207c01c9cc4a7132b838be5a8",
+      "seed_ids": [
+        "API-NOTIFY-DELETE-NOTIFICATIONS-DELETE-ALL-NOTIFICATIONS-L343"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_notification_delete_all.py::NotificationDeleteAllCharacterizationTests::test_delete_all_notifications_populated_owner_success",
+        "tests/test_p1_00b_characterization_notification_delete_all.py::NotificationDeleteAllCharacterizationTests::test_delete_all_notifications_empty_owner_noop"
       ]
     }
   ],
