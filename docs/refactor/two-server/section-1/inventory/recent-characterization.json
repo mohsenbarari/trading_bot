@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "stage": "P1-00b",
-  "inspected_head": "c0cd3c7ba632e1225230f5b513d50c4a7b83ff8b",
+  "inspected_head": "479aa6299e1cfc9bc4eafe0a0c94de40d82e5181",
   "coverage_status": "PARTIAL",
   "remaining_validation": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
   "canonical_blockers": [
@@ -322,6 +322,76 @@
         "tests/test_p1_00b_characterization_block_manage_menu_list.py::CharacterizeBlockManageMenuListTests::test_show_blocked_list_authenticated_populated_list_renders_and_acknowledges",
         "tests/test_p1_00b_characterization_block_manage_menu_list.py::CharacterizeBlockManageMenuListTests::test_show_blocked_list_unauthenticated_ack_only"
       ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_block_manage_block_user.py",
+      "sha256": "2e9abc149e8bbc85ce01a619e6c532b1ffca5647ed9ca5b9c35c0a51614c51e9",
+      "last_commit": "be2be0823ad82ad9e59903d7450a5b1cf500dcee",
+      "seed_ids": [
+        "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-HANDLE-BLOCK-USER-L372"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_block_manage_block_user.py::CharacterizeBlockManageBlockUserTests::test_handle_block_user_unauthenticated_ack_only",
+        "tests/test_p1_00b_characterization_block_manage_block_user.py::CharacterizeBlockManageBlockUserTests::test_handle_block_user_authenticated_service_rejection",
+        "tests/test_p1_00b_characterization_block_manage_block_user.py::CharacterizeBlockManageBlockUserTests::test_handle_block_user_authenticated_success_refresh_and_menu"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_block_manage_unblock_user.py",
+      "sha256": "e91e215f597570557ef9e660bf70b957f422dc096722e54306cef35a6f3efdc6",
+      "last_commit": "be34fed494b7fea9e164e53caac68a7902897df7",
+      "seed_ids": [
+        "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-HANDLE-UNBLOCK-USER-L408"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_block_manage_unblock_user.py::CharacterizeBlockManageUnblockUserTests::test_handle_unblock_user_unauthenticated_ack_only",
+        "tests/test_p1_00b_characterization_block_manage_unblock_user.py::CharacterizeBlockManageUnblockUserTests::test_handle_unblock_user_authenticated_service_rejection",
+        "tests/test_p1_00b_characterization_block_manage_unblock_user.py::CharacterizeBlockManageUnblockUserTests::test_handle_unblock_user_authenticated_success_refreshes_populated_list",
+        "tests/test_p1_00b_characterization_block_manage_unblock_user.py::CharacterizeBlockManageUnblockUserTests::test_handle_unblock_user_authenticated_success_refreshes_empty_list_to_menu"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_block_manage_navigation.py",
+      "sha256": "6ec223c24b8a29ebf4e14036e0573689a8be2668062ad17a63a7555f4ce920d9",
+      "last_commit": "90aa71435bf48409bfa852d423d40687997e99d7",
+      "seed_ids": [
+        "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-HANDLE-BACK-L466",
+        "BOT-IDENTITY-CALLBACK-QUERY-BLOCK-MANAGE-BACK-TO-USER-PANEL-FROM-BLOCK-MENU-L489"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_block_manage_navigation.py::CharacterizeBlockManageNavigationTests::test_handle_back_unauthenticated_ack_only",
+        "tests/test_p1_00b_characterization_block_manage_navigation.py::CharacterizeBlockManageNavigationTests::test_back_to_user_panel_from_block_menu_unauthenticated_ack_only",
+        "tests/test_p1_00b_characterization_block_manage_navigation.py::CharacterizeBlockManageNavigationTests::test_handle_back_authenticated_flow",
+        "tests/test_p1_00b_characterization_block_manage_navigation.py::CharacterizeBlockManageNavigationTests::test_back_to_user_panel_from_block_menu_authenticated_flow"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_block_manage_search.py",
+      "sha256": "2f872d3555d3428232ed3e9eb265680a5feabb2519b3528ea784731614fa5020",
+      "last_commit": "c5eaf6c4ed66b9971723b5ba0c03ea20e886607f",
+      "seed_ids": [
+        "BOT-IDENTITY-MESSAGE-BLOCK-MANAGE-HANDLE-SEARCH-QUERY-L314"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_block_manage_search.py::CharacterizeBlockManageSearchTests::test_handle_search_query_unauthenticated_returns_early",
+        "tests/test_p1_00b_characterization_block_manage_search.py::CharacterizeBlockManageSearchTests::test_handle_search_query_authenticated_short_query_stripped",
+        "tests/test_p1_00b_characterization_block_manage_search.py::CharacterizeBlockManageSearchTests::test_handle_search_query_delegated_rejection_flow",
+        "tests/test_p1_00b_characterization_block_manage_search.py::CharacterizeBlockManageSearchTests::test_handle_search_query_empty_results_flow",
+        "tests/test_p1_00b_characterization_block_manage_search.py::CharacterizeBlockManageSearchTests::test_handle_search_query_populated_results_flow"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_overtime_owner_decision_guards.py",
+      "sha256": "a66d38b9e099e4460c170ecb3d171a6ebcc10b335b5fa3c210eaea8953e6fda0",
+      "last_commit": "479aa6299e1cfc9bc4eafe0a0c94de40d82e5181",
+      "seed_ids": [
+        "BOT-REQUEST-CALLBACK-QUERY-OFFER-OVERTIME-CALLBACKS-HANDLE-OVERTIME-OWNER-DECISION-L191"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_overtime_owner_decision_guards.py::OvertimeOwnerDecisionGuardsCharacterizationTests::test_unauthenticated_guard_answers_m34_without_reading_callback_data_or_downstream_work",
+        "tests/test_p1_00b_characterization_overtime_owner_decision_guards.py::OvertimeOwnerDecisionGuardsCharacterizationTests::test_malformed_callback_guard_answers_m33_without_session_or_downstream_work",
+        "tests/test_p1_00b_characterization_overtime_owner_decision_guards.py::OvertimeOwnerDecisionGuardsCharacterizationTests::test_valid_callback_invalid_ledger_variants_subtests"
+      ]
     }
   ],
   "next_review_candidates": [
@@ -329,6 +399,7 @@
       "state": "REVALIDATE_REQUIRED",
       "gap": "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
       "scenarios": [
+        "BOT-REQUEST-CALLBACK-QUERY-OFFER-OVERTIME-CALLBACKS-HANDLE-OVERTIME-OWNER-DECISION-L191 and its still-uncovered valid OVERTIME-ledger remote-home, reject, approve authorization-error, approve execution-error, and approve success branches",
         "remaining seed-handler assertions"
       ]
     },
